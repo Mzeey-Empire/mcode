@@ -129,6 +129,45 @@ describe("CodexProvider permission flow", () => {
     expect(provider.listPendingPermissions!(threadId)).toHaveLength(0);
   });
 
+  it("drains pending permissions when the fatal handler fires on the app-server", async () => {
+    const resolved: Array<{ requestId: string; decision: string }> = [];
+    provider.on("permission_resolved", (p) => resolved.push(p as never));
+
+    // Re-register session with a fake server that we can drive fatal from.
+    const sessions = (provider as unknown as {
+      sessions: Map<string, { server: unknown; lastUsedAt: number; sandboxMode: string; mapper: unknown }>;
+    }).sessions;
+    const fakeServer = new (require("events").EventEmitter)();
+    fakeServer.kill = vi.fn().mockResolvedValue(undefined);
+    fakeServer.isAlive = true;
+    sessions.set(sessionId, {
+      server: fakeServer,
+      mapper: { reset: vi.fn() },
+      lastUsedAt: Date.now(),
+      sandboxMode: "workspace-write",
+    });
+
+    // Install the fatal listener that sendMessage is responsible for wiring.
+    (provider as unknown as {
+      attachFatalDrain: (sessionId: string, server: unknown) => void;
+    }).attachFatalDrain(sessionId, fakeServer);
+
+    const p = (provider as unknown as {
+      handleApprovalRequest: (s: string, t: string, r: unknown) => Promise<unknown>;
+    }).handleApprovalRequest(sessionId, threadId, {
+      rpcId: 202,
+      method: "item/commandExecution/requestApproval",
+      params: { command: "x", cwd: "/" },
+    });
+
+    fakeServer.emit("fatal", "simulated fatal");
+
+    const response = await p;
+    expect(response).toEqual({ decision: "cancel" });
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0].decision).toBe("cancelled");
+  });
+
   it("evictIdleSessions skips sessions that have pending permissions", () => {
     // Force the session's lastUsedAt well past the idle threshold.
     const sessions = (provider as unknown as {

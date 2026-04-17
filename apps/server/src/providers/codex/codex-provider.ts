@@ -200,6 +200,12 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
     const resumeId = this.sdkSessionIds.get(sessionId);
     const attemptResume = !!(resume && resumeId);
 
+    // Only register the handler in supervised mode. The CodexAppServer
+    // ignores approvalHandler when approvalPolicy === "never" (auto-approve
+    // still runs locally), so this guard is defensive and keeps the wiring
+    // obvious in logs.
+    const supervised = approvalPolicy === "on-request";
+
     const server = new CodexAppServer({
       cliPath,
       workingDirectory: cwd,
@@ -207,6 +213,9 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
       sandbox,
       approvalPolicy,
       resumeThreadId: attemptResume ? resumeId : undefined,
+      approvalHandler: supervised
+        ? (req) => this.handleApprovalRequest(sessionId, threadId, req)
+        : undefined,
     });
 
     const mapper = new CodexEventMapper(threadId);
@@ -236,6 +245,8 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
       this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
       this.sessions.delete(sessionId);
     });
+
+    this.attachFatalDrain(sessionId, server);
 
     server.on("exit", () => {
       if (!server.isAlive) {
@@ -347,12 +358,8 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
    * emits permission_request, and returns a promise that the app-server
    * response listener awaits. Resolved by resolvePermission or by session
    * shutdown/stop (which supply "cancelled").
-   *
-   * Scoped as an internal helper; exposed without the `private` modifier only
-   * so later tasks can bind it as the CodexAppServer `approvalHandler` from
-   * within sendMessage without losing type visibility.
    */
-  handleApprovalRequest(
+  private handleApprovalRequest(
     sessionId: string,
     threadId: string,
     request: CodexApprovalRequest,
@@ -413,6 +420,17 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
       });
     }
     return out;
+  }
+
+  /**
+   * Install a fatal listener on a CodexAppServer that drains pending permissions
+   * for this session when the child process dies unexpectedly. Kept as its own
+   * method so tests can invoke it against a stub EventEmitter.
+   */
+  private attachFatalDrain(sessionId: string, server: { on: (e: string, h: (...args: unknown[]) => void) => void }): void {
+    server.on("fatal", () => {
+      this.drainPending((e) => e.sessionId === sessionId);
+    });
   }
 
   /**
