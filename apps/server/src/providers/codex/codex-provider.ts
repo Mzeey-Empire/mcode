@@ -417,10 +417,10 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
 
   /**
    * Drain all pending permissions that match a predicate, resolving each as "cancelled".
-   * Used by stopSession and shutdown (wired in later tasks) to unblock any
-   * in-flight approvals so the codex turn can tear down cleanly.
+   * Used by stopSession and shutdown to unblock any in-flight approvals so the
+   * codex turn can tear down cleanly.
    */
-  drainPending(predicate: (entry: PendingPermissionEntry) => boolean): void {
+  private drainPending(predicate: (entry: PendingPermissionEntry) => boolean): void {
     for (const [requestId, entry] of [...this.pendingPermissions]) {
       if (!predicate(entry)) continue;
       this.pendingPermissions.delete(requestId);
@@ -447,21 +447,26 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
     this.sdkSessionIds.set(sessionId, sdkSessionId);
   }
 
-  /** Kills a running session's subprocess immediately. */
+  /** Kills a running session's subprocess and cancels any pending permissions for its thread. */
   stopSession(sessionId: string): void {
     const entry = this.sessions.get(sessionId);
+    // Drain first so handler promises resolve with the cancel response BEFORE
+    // we kill(). That way the app-server sees the cancel decision, interrupts
+    // the turn cleanly, and there is no race with the process exiting.
+    this.drainPending((e) => e.sessionId === sessionId);
     if (entry) {
       void entry.server.kill();
       this.sessions.delete(sessionId);
     }
   }
 
-  /** Tears down all sessions, clears state, and stops the eviction timer. */
+  /** Tears down all sessions, drains pending permissions, and stops the eviction timer. */
   shutdown(): void {
     if (this.evictionTimer) {
       clearInterval(this.evictionTimer);
       this.evictionTimer = null;
     }
+    this.drainPending(() => true);
     for (const [, entry] of this.sessions) {
       void entry.server.kill();
     }
