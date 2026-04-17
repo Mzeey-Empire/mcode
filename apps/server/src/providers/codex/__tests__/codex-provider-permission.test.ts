@@ -128,4 +128,27 @@ describe("CodexProvider permission flow", () => {
     expect(response).toEqual({ decision: "abort" });
     expect(provider.listPendingPermissions!(threadId)).toHaveLength(0);
   });
+
+  it("evictIdleSessions skips sessions that have pending permissions", () => {
+    // Force the session's lastUsedAt well past the idle threshold.
+    const sessions = (provider as unknown as {
+      sessions: Map<string, { lastUsedAt: number; server: { kill: () => Promise<void> } }>;
+    }).sessions;
+    const existing = sessions.get(sessionId)!;
+    existing.lastUsedAt = Date.now() - 60 * 60 * 1000; // 1 hour ago
+
+    // Queue a pending permission on the same thread.
+    void (provider as unknown as {
+      handleApprovalRequest: (s: string, t: string, r: unknown) => Promise<unknown>;
+    }).handleApprovalRequest(sessionId, threadId, {
+      rpcId: 99,
+      method: "item/commandExecution/requestApproval",
+      params: { command: "x", cwd: "/" },
+    });
+
+    (provider as unknown as { evictIdleSessions: () => void }).evictIdleSessions();
+
+    // Session must NOT have been evicted while a permission is pending.
+    expect(sessions.has(sessionId)).toBe(true);
+  });
 });

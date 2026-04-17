@@ -430,10 +430,17 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
     }
   }
 
-  /** Evicts sessions that have been idle longer than IDLE_TTL_MS. */
+  /** Evicts sessions that have been idle longer than IDLE_TTL_MS. Sessions with pending permissions are spared. */
   private evictIdleSessions(): void {
     const now = Date.now();
+    // Build the set of sessionIds with at least one pending permission once
+    // rather than iterating the map per session.
+    const hasPending = new Set<string>();
+    for (const entry of this.pendingPermissions.values()) {
+      hasPending.add(entry.sessionId);
+    }
     for (const [sessionId, entry] of this.sessions) {
+      if (hasPending.has(sessionId)) continue;
       if (now - entry.lastUsedAt > IDLE_TTL_MS) {
         logger.info("Evicted idle Codex session", { sessionId });
         void entry.server.kill();
