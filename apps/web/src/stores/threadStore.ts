@@ -98,6 +98,8 @@ interface ThreadState {
   loadOlderMessages: (threadId: string) => Promise<void>;
   sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, copilotAgent?: string) => Promise<void>;
   stopAgent: (threadId: string) => Promise<void>;
+  /** Replace runningThreadIds with the authoritative server snapshot. Called on WS (re)connect. */
+  hydrateRunningThreads: (ids: string[]) => void;
   addMessage: (message: Message) => void;
   clearMessages: () => void;
   /** Returns true if an agent is actively executing on the given thread. */
@@ -590,6 +592,10 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     });
   },
 
+  hydrateRunningThreads: (ids) => {
+    set(() => ({ runningThreadIds: new Set(ids) }));
+  },
+
   /** Append a single message to the current thread's message list. */
   addMessage: (message) => {
     set((state) => {
@@ -1031,6 +1037,16 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           };
         });
       }
+      return;
+    }
+
+    if (method === "session.turnStarted") {
+      set((state) => {
+        if (state.runningThreadIds.has(threadId)) return {};
+        const next = new Set(state.runningThreadIds);
+        next.add(threadId);
+        return { runningThreadIds: next, agentStartTimes: { ...state.agentStartTimes, [threadId]: Date.now() } };
+      });
       return;
     }
 
