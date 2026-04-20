@@ -20,6 +20,7 @@ import type {
   InteractionMode,
   ProviderModelInfo,
   ProviderUsageInfo,
+  ProviderAvailability,
   PrDraft,
   CreatePrResult,
   ChecksStatus,
@@ -252,6 +253,8 @@ export interface McodeTransport {
   getProviderUsage(providerId: string): Promise<ProviderUsageInfo>;
   /** Fetches Copilot sub-agents available for the given workspace. */
   listCopilotAgents(workspaceId: string): Promise<CopilotSubagent[]>;
+  /** Fetch the current availability snapshot for all registered providers. */
+  listProviderAvailability(): Promise<ProviderAvailability[]>;
 
   // Memory pressure
   /** Notify server of window background/foreground state for memory management. */

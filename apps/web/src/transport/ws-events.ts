@@ -1,9 +1,10 @@
-import type { Settings } from "@mcode/contracts";
+import type { Settings, ProviderAvailability } from "@mcode/contracts";
 import type { PermissionRequest, PermissionDecision } from "@mcode/contracts";
 import { pushEmitter } from "./ws-transport";
 import { useThreadStore } from "@/stores/threadStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
 
 /** Unsubscribe handles for all push listeners. */
@@ -28,6 +29,7 @@ let unsubs: (() => void)[] = [];
  * - `plan.questions` -- model-proposed plan questions forwarded to threadStore wizard
  * - `permission.request` -- tool permission awaiting user decision
  * - `permission.resolved` -- a permission was settled (by user or session stop)
+ * - `providers.availability` -- server-pushed provider availability snapshot forwarded to providerAvailabilityStore
  */
 export function startPushListeners(): void {
   // Guard against double-init
@@ -249,6 +251,14 @@ export function startPushListeners(): void {
       };
       if (!requestId) return;
       useThreadStore.getState().resolvePermissionRequest(requestId, decision);
+    }),
+  );
+
+  // providers.availability: server-pushed snapshot of all provider availability records
+  unsubs.push(
+    pushEmitter.on("providers.availability", (data) => {
+      const list = data as ProviderAvailability[];
+      useProviderAvailabilityStore.getState().replace(list);
     }),
   );
 

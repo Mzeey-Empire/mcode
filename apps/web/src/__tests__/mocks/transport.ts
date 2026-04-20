@@ -132,6 +132,7 @@ export const mockTransport: McodeTransport = {
   getSettings: vi.fn().mockImplementation(() => Promise.resolve(structuredClone(getDefaultSettings()))),
   updateSettings: vi.fn().mockImplementation(() => Promise.resolve(structuredClone(getDefaultSettings()))),
   listProviderModels: vi.fn().mockResolvedValue([]),
+  listProviderAvailability: vi.fn().mockResolvedValue([]),
   setBackground: vi.fn().mockResolvedValue(undefined),
   getProviderUsage: vi.fn().mockResolvedValue({
     providerId: "claude",
