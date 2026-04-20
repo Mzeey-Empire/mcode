@@ -69,15 +69,21 @@ function rpcCall(
   params: Record<string, unknown> = {},
 ): Promise<{ id: string; result?: unknown; error?: { code: string; message: string; data?: unknown } }> {
   return new Promise((resolve, reject) => {
+    const requestId = "req-1";
     const client = new WebSocket(wsUrl(server));
     client.on("open", () => {
-      client.send(JSON.stringify({ id: "req-1", method, params }));
+      client.send(JSON.stringify({ id: requestId, method, params }));
     });
     client.on("message", (raw) => {
-      client.close();
+      // Filter by id: server-initiated pushes have no id / a different id and
+      // must not be mistaken for the RPC response we're awaiting.
       try {
-        resolve(JSON.parse(raw.toString()) as ReturnType<typeof rpcCall> extends Promise<infer T> ? T : never);
+        const msg = JSON.parse(raw.toString()) as { id?: string };
+        if (msg.id !== requestId) return;
+        client.close();
+        resolve(msg as ReturnType<typeof rpcCall> extends Promise<infer T> ? T : never);
       } catch (err) {
+        client.close();
         reject(err);
       }
     });

@@ -19,8 +19,12 @@ export interface ProviderUnavailableBannerProps {
   reason: "disabled" | "cli_missing";
   /** Called when the user clicks "Open Settings". */
   onOpenSettings: () => void;
-  /** Called when the user clicks "Branch to another provider". Only shown for reason=disabled. */
-  onBranch: () => void;
+  /**
+   * Called when the user clicks "Branch to another provider". The button only renders
+   * when both `reason === "disabled"` and `onBranch` is supplied, so callers that do
+   * not own branch mode can omit it rather than passing a no-op.
+   */
+  onBranch?: () => void;
 }
 
 /**
@@ -46,7 +50,7 @@ export function ProviderUnavailableBanner({
     >
       <span className="flex-1">{copy}</span>
       <Button size="sm" variant="outline" onClick={onOpenSettings}>Open Settings</Button>
-      {reason === "disabled" && (
+      {reason === "disabled" && onBranch && (
         <Button size="sm" variant="ghost" onClick={onBranch}>Branch to another provider</Button>
       )}
     </div>

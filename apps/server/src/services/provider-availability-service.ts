@@ -6,6 +6,7 @@ import {
   type ProviderId,
   type IProviderRegistry,
 } from "@mcode/contracts";
+import { logger } from "@mcode/shared";
 import { SettingsService } from "./settings-service.js";
 import {
   ProviderDisabledError,
@@ -168,8 +169,25 @@ export class ProviderAvailabilityService {
     if (snapshot === this.lastProviderSnapshot) return;
     this.lastProviderSnapshot = snapshot;
 
-    await this.verifyAllEnabled();
+    try {
+      await this.verifyAllEnabled();
+    } catch (err) {
+      // Log and continue — listeners still need to receive the updated availability
+      // snapshot. Per-provider CLI entries will stay at their prior cached status.
+      logger.warn("verifyAllEnabled failed during settings change", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
     const list = this.listAvailability();
-    for (const cb of this.broadcastListeners) cb(list);
+    for (const cb of this.broadcastListeners) {
+      try {
+        cb(list);
+      } catch (err) {
+        // Isolate listeners: one throwing callback must not prevent others from firing.
+        logger.warn("provider availability onChange listener threw", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
   }
 }

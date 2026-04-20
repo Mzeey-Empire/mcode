@@ -165,7 +165,13 @@ export const AgentEventSchema = lazySchema(() =>
       threadId: z.string(),
       providerId: z.enum(["claude", "codex", "gemini", "copilot", "cursor", "opencode"]),
       reason: z.enum(["disabled", "cli_missing"]),
-      /** Configured CLI path the server tried to resolve, when reason === "cli_missing". */
+      /**
+       * Configured CLI path the server tried to resolve. Only populated when
+       * `reason === "cli_missing"`; emitters must leave this undefined when
+       * `reason === "disabled"`. The shape cannot be expressed with superRefine
+       * because discriminatedUnion rejects ZodEffects wrappers — the server
+       * enforces this at emission, and consumers can rely on the invariant.
+       */
       configuredPath: z.string().optional(),
     }),
   ]),

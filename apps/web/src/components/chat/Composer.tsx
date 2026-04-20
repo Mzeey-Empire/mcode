@@ -1321,8 +1321,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
 
         {/* Provider unavailable banner — shown when the thread's active provider is
             disabled by the user or its CLI binary is missing. Branch initiation is
-            owned by ChatView (it controls branchFromMessageId), so that callback is
-            a no-op here; the user can still act via Open Settings. */}
+            owned by ChatView (it controls branchFromMessageId), so we omit onBranch
+            here and the banner renders only the "Open Settings" CTA. */}
         {providerReason && (
           <ProviderUnavailableBanner
             providerId={activeProviderId as ProviderId}
@@ -1330,7 +1330,6 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
             onOpenSettings={() =>
               window.dispatchEvent(new CustomEvent("mcode:open-settings", { detail: { section: "provider" } }))
             }
-            onBranch={() => {}}
           />
         )}
 

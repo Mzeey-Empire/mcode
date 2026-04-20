@@ -257,8 +257,9 @@ export function startPushListeners(): void {
   // providers.availability: server-pushed snapshot of all provider availability records
   unsubs.push(
     pushEmitter.on("providers.availability", (data) => {
-      const list = data as ProviderAvailability[];
-      useProviderAvailabilityStore.getState().replace(list);
+      // Reject malformed payloads rather than overwriting the store with garbage.
+      if (!Array.isArray(data)) return;
+      useProviderAvailabilityStore.getState().replace(data as ProviderAvailability[]);
     }),
   );
 

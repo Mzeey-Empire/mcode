@@ -46,11 +46,14 @@ export function ConfirmDisableDialog({
   const affectedPrDraft =
     settings.prDraft.provider !== "" && settings.prDraft.provider === providerId;
 
-  const description = [
-    `${disablingName} is currently your default provider for new threads`,
-    affectedPrDraft ? " and for PR draft generation" : "",
-    `. Disabling it will switch your default to ${replacementName}.`,
-  ].join("");
+  // Default case is only for new threads; PR-draft-only uses a different phrasing.
+  const scope =
+    affectedModel && affectedPrDraft
+      ? "your default provider for new threads and PR draft generation"
+      : affectedModel
+        ? "your default provider for new threads"
+        : "your PR draft generation provider";
+  const description = `${disablingName} is currently ${scope}. Disabling it will switch your default to ${replacementName}.`;
 
   async function handleConfirm() {
     // Batch the toggle-off and default rewrite into a single update call so the
@@ -94,8 +97,9 @@ export function ConfirmDisableDialog({
 
 /**
  * Picks the best replacement provider when `disabling` is turned off.
- * Iterates PROVIDER_CATALOG order (canonical) and returns the first provider
- * that is currently enabled and has an adapter, skipping the one being disabled.
+ * Iterates PROVIDER_CATALOG order (canonical) and returns the first provider that
+ * is enabled, has an adapter, and whose CLI is not known-missing — so we don't
+ * rewrite the default to a provider that cannot actually be used.
  * Falls back to "claude" if no other usable provider is found.
  */
 function pickReplacement(
@@ -105,7 +109,9 @@ function pickReplacement(
   for (const entry of PROVIDER_CATALOG) {
     if (entry.id === disabling) continue;
     const row = providers.find((p) => p.id === entry.id);
-    if (row?.enabled && row.hasAdapter) return entry.id;
+    if (row?.enabled && row.hasAdapter && row.cli.status !== "not_found") {
+      return entry.id;
+    }
   }
   return "claude";
 }
