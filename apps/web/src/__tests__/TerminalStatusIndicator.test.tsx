@@ -1,8 +1,17 @@
 import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { TerminalStatusIndicator } from "@/components/chat/TerminalStatusIndicator";
+
+// toggleTerminalPanel now calls getTransport() to pause/resume PTYs.
+// Provide a no-op mock so these UI-focused tests don't throw on transport access.
+vi.mock("@/transport", () => ({
+  getTransport: () => ({
+    terminalPause: vi.fn().mockResolvedValue(undefined),
+    terminalResume: vi.fn().mockResolvedValue(undefined),
+  }),
+}));
 
 describe("TerminalStatusIndicator", () => {
   beforeEach(() => {
