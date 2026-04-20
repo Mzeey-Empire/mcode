@@ -141,4 +141,27 @@ export class ProviderAvailabilityService {
     );
     await Promise.all(targets.map((entry) => this.verifyCli(entry.id)));
   }
+
+  private broadcastListeners: Array<(list: ProviderAvailability[]) => void> = [];
+  private settingsSubscribed = false;
+
+  /** Register a broadcast callback invoked whenever availability changes due to a settings update. */
+  onChange(cb: (list: ProviderAvailability[]) => void): void {
+    this.broadcastListeners.push(cb);
+    // Subscribe to SettingsService once, no matter how many onChange callers there are.
+    if (!this.settingsSubscribed) {
+      this.settingsSubscribed = true;
+      this.settings.on("change", (s) => {
+        void this.handleSettingsChange(s);
+      });
+    }
+  }
+
+  private async handleSettingsChange(
+    _next: ReturnType<SettingsService["get"]>,
+  ): Promise<void> {
+    await this.verifyAllEnabled();
+    const list = this.listAvailability();
+    for (const cb of this.broadcastListeners) cb(list);
+  }
 }

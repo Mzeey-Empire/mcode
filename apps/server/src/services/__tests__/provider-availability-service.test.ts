@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ProviderAvailabilityService } from "../provider-availability-service.js";
 import type { SettingsService } from "../settings-service.js";
-import type { IProviderRegistry, IAgentProvider } from "@mcode/contracts";
+import type { IProviderRegistry, IAgentProvider, ProviderAvailability } from "@mcode/contracts";
 import { getDefaultSettings } from "@mcode/contracts";
 import { ProviderDisabledError, ProviderCliMissingError } from "../provider-availability-errors.js";
 
@@ -181,5 +181,40 @@ describe("ProviderAvailabilityService.verifyAllEnabled", () => {
     expect(which).toHaveBeenCalledWith("claude");
     expect(which).toHaveBeenCalledWith("codex");
     expect(which).not.toHaveBeenCalledWith("copilot");
+  });
+});
+
+describe("ProviderAvailabilityService change handling", () => {
+  it("re-verifies when provider.enabled changes and calls the broadcast hook", async () => {
+    const listeners: Array<(s: ReturnType<typeof getDefaultSettings>) => void> = [];
+    const settingsStore = { current: getDefaultSettings() };
+    const settings = {
+      get: () => settingsStore.current,
+      on: (_: string, cb: (s: ReturnType<typeof getDefaultSettings>) => void) => listeners.push(cb),
+    } as unknown as SettingsService;
+
+    const broadcastSpy = vi.fn();
+    const which = vi.fn(async (bin: string) => `/usr/local/bin/${bin}`);
+    const svc = new ProviderAvailabilityService(
+      settings,
+      stubRegistry(["claude", "codex"]),
+      { which, statExecutable: vi.fn() },
+    );
+    svc.onChange(broadcastSpy);
+
+    // Flip codex off.
+    settingsStore.current = {
+      ...settingsStore.current,
+      provider: {
+        ...settingsStore.current.provider,
+        enabled: { ...settingsStore.current.provider.enabled, codex: false },
+      },
+    };
+    for (const cb of listeners) cb(settingsStore.current);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(broadcastSpy).toHaveBeenCalled();
+    const lastList = broadcastSpy.mock.calls.at(-1)![0];
+    expect(lastList.find((p: ProviderAvailability) => p.id === "codex").enabled).toBe(false);
   });
 });
