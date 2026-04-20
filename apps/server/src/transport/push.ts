@@ -4,7 +4,7 @@
  */
 
 import type { WebSocket } from "ws";
-import { WS_CHANNELS, type WsChannelName } from "@mcode/contracts";
+import { WS_CHANNELS, type WsChannelName, encodeTerminalDataFrame } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 
 const clients = new Set<WebSocket>();
@@ -87,6 +87,25 @@ export function broadcast(
   for (const ws of clients) {
     if (ws.readyState === ws.OPEN) {
       ws.send(payload);
+    }
+  }
+}
+
+/**
+ * Broadcast a PTY data chunk as a binary WebSocket frame.
+ *
+ * Uses the terminal-binary envelope so clients can decode ptyId + seq without
+ * a preceding text header. Non-PTY channels continue to use JSON `broadcast`.
+ */
+export function broadcastTerminalData(
+  ptyId: string,
+  seq: number,
+  payload: Uint8Array,
+): void {
+  const frame = encodeTerminalDataFrame(ptyId, seq, payload);
+  for (const ws of clients) {
+    if (ws.readyState === ws.OPEN) {
+      ws.send(frame, { binary: true });
     }
   }
 }
