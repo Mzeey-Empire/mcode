@@ -91,9 +91,14 @@ describe("SettingsSchema", () => {
       expect(result.success).toBe(false);
     });
 
-    it("rejects scrollback above 5000", () => {
-      const result = SettingsSchema().safeParse({ terminal: { scrollback: 5001 } });
-      expect(result.success).toBe(false);
+    it("clamps scrollback above 5000 down to 5000", () => {
+      const result = SettingsSchema().parse({ terminal: { scrollback: 5001 } });
+      expect(result.terminal.scrollback).toBe(5000);
+    });
+
+    it("clamps very large scrollback values down to 5000", () => {
+      const result = SettingsSchema().parse({ terminal: { scrollback: 100000 } });
+      expect(result.terminal.scrollback).toBe(5000);
     });
 
     it("accepts zero for unlimited scrollback", () => {

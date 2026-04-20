@@ -107,11 +107,19 @@ export const SettingsSchema = lazySchema(() =>
       .object({
         /**
          * Number of scrollback lines to retain per terminal instance.
-         * Capped at 5000 to bound per-terminal memory — xterm.js stores each
-         * cell as individual string arrays, so unbounded scrollback leaks.
+         * Values above 5000 are clamped to 5000 (rather than rejected) so that
+         * users with legacy settings from before the cap was introduced do not
+         * have their entire settings object silently reset by the server's
+         * safeParse fallback at settings-service.ts:94.
          * Zero means unlimited (not recommended for long-running sessions).
+         * Negative or non-integer values are still rejected as invalid input.
          */
-        scrollback: z.number().int().nonnegative().max(5000).default(1000),
+        scrollback: z
+          .number()
+          .int()
+          .nonnegative()
+          .transform((n) => Math.min(n, 5000))
+          .default(1000),
       })
       .default({}),
 
@@ -246,7 +254,12 @@ export const PartialSettingsSchema = lazySchema(() =>
       .optional(),
     terminal: z
       .object({
-        scrollback: z.number().int().nonnegative().max(5000).optional(),
+        scrollback: z
+          .number()
+          .int()
+          .nonnegative()
+          .transform((n) => Math.min(n, 5000))
+          .optional(),
       })
       .optional(),
     notifications: z
