@@ -705,6 +705,108 @@ test.describe("Architecture: Push events via PushEmitter", () => {
 
     expect(eventReceived).toBe(true);
   });
+
+});
+
+test.describe("Architecture: session.turnStarted → sidebar running dot", () => {
+  test.beforeEach(async ({ page }) => {
+    // Pre-seed localStorage so the workspace row is expanded on first render,
+    // avoiding a manual click that would race with loadThreads().
+    await page.addInitScript((wsId: string) => {
+      localStorage.setItem(
+        "mcode-expanded-projects",
+        JSON.stringify({ [wsId]: true }),
+      );
+    }, WORKSPACE_A.id);
+
+    // Override thread.list so the `loadThreads` call fired by ProjectTree's
+    // "load expanded workspaces on mount" effect returns our seeded thread
+    // instead of the default []. Matches the shape returned by
+    // getTransport().listThreads() (Thread[]).
+    await mockWebSocketServer(page, {
+      "thread.list": [THREAD_DIRECT],
+    });
+    await interceptZustandStores(page);
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+  });
+
+  test("session.turnStarted populates runningThreadIds for the sidebar dot", async ({
+    page,
+  }) => {
+    await setupWorkspaceState(page, {
+      workspaces: [WORKSPACE_A],
+      threads: [THREAD_DIRECT],
+      activeWorkspaceId: WORKSPACE_A.id,
+    });
+
+    const threadRow = page.locator(
+      `[data-testid="thread-item"][data-thread-id="${THREAD_DIRECT.id}"]`,
+    );
+    await expect(threadRow).toBeVisible();
+
+    // The status dot is the first rounded-full span inside the row (non-PR thread).
+    const statusDot = threadRow.locator("span.rounded-full").first();
+
+    // Before the signal fires, the dot must NOT carry the running classes.
+    // Running state maps to `bg-primary animate-pulse` per apps/web/src/lib/thread-status.ts:83.
+    await expect(statusDot).not.toHaveClass(/bg-primary/);
+    await expect(statusDot).not.toHaveClass(/animate-pulse/);
+
+    await page.screenshot({
+      path: "e2e/screenshots/running-signal-before.png",
+      fullPage: true,
+    });
+
+    // Inject session.turnStarted through the same channel the existing
+    // `agent.event push updates streaming state` test uses: handleAgentEvent
+    // on the thread store (which is what pushEmitter's `agent.event` listener
+    // invokes in production).
+    await page.evaluate(
+      ({ threadId }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const stores: any[] = (window as any).__mcodeStores ?? [];
+        const threadStore = stores.find(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (s: any) =>
+            "handleAgentEvent" in s.getState() &&
+            "runningThreadIds" in s.getState(),
+        );
+        if (!threadStore) throw new Error("[E2E] thread store not found");
+
+        threadStore.getState().handleAgentEvent(threadId, {
+          method: "session.turnStarted",
+          threadId,
+        });
+      },
+      { threadId: THREAD_DIRECT.id },
+    );
+
+    // After injection the store should flag the thread as running and the
+    // sidebar dot should flip to the primary/pulsing state.
+    await expect(statusDot).toHaveClass(/bg-primary/);
+    await expect(statusDot).toHaveClass(/animate-pulse/);
+
+    // Also confirm the store side-effect (handleAgentEvent wrote the id).
+    const isRunning = await page.evaluate(
+      ({ threadId }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const stores: any[] = (window as any).__mcodeStores ?? [];
+        const threadStore = stores.find(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (s: any) => "runningThreadIds" in s.getState(),
+        );
+        return threadStore?.getState().runningThreadIds.has(threadId) ?? false;
+      },
+      { threadId: THREAD_DIRECT.id },
+    );
+    expect(isRunning).toBe(true);
+
+    await page.screenshot({
+      path: "e2e/screenshots/running-signal-after.png",
+      fullPage: true,
+    });
+  });
 });
 
 test.describe("Architecture: Terminal panel", () => {
