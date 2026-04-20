@@ -37,6 +37,7 @@ import { WorkspaceRepo } from "./repositories/workspace-repo";
 import { CleanupWorker } from "./services/cleanup-worker";
 import { PrDraftService } from "./services/pr-draft-service";
 import { CiWatcherService } from "./services/ci-watcher";
+import { ProviderAvailabilityService } from "./services/provider-availability-service";
 import { ProviderRegistry } from "./providers/provider-registry";
 import { WebSocket } from "ws";
 import { AgentEventType } from "@mcode/contracts";
@@ -117,6 +118,7 @@ const terminalService = container.resolve(TerminalService);
 const messageRepo = container.resolve(MessageRepo);
 const threadRepo = container.resolve(ThreadRepo);
 const providerRegistry = container.resolve(ProviderRegistry);
+const providerAvailability = container.resolve(ProviderAvailabilityService);
 const toolCallRecordRepo = container.resolve(ToolCallRecordRepo);
 const turnSnapshotRepo = container.resolve(TurnSnapshotRepo);
 const snapshotService = container.resolve(SnapshotService);
@@ -161,6 +163,14 @@ terminalService.setSender((channel, data) => {
 
 // AgentService self-wires persistence and session tracking against providers
 agentService.init();
+
+// Register broadcast callback so settings changes propagate to clients
+providerAvailability.onChange((list) => {
+  broadcast("providers.availability", list);
+});
+// Run startup CLI verification and emit initial availability snapshot
+await providerAvailability.verifyAllEnabled();
+broadcast("providers.availability", providerAvailability.listAvailability());
 
 // Start background worktree cleanup worker
 cleanupWorker.start();
