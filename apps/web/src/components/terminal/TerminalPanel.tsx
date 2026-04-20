@@ -18,6 +18,7 @@ const {
   addTerminal: storeAddTerminal,
   removeTerminal: storeRemoveTerminal,
   removeAllTerminals,
+  hideTerminalPanel,
   setTerminalPanelHeight,
 } = useTerminalStore.getState();
 
@@ -89,11 +90,16 @@ export function TerminalPanel() {
     [],
   );
 
-  /** Kills and removes all terminals for the active thread. */
+  /**
+   * Kills and removes all terminals for the active thread, then collapses the
+   * panel. Leaving the empty panel open after hitting the bin was confusing —
+   * users had to toggle it shut manually (issue #303).
+   */
   const closeAllTerminals = useCallback(() => {
     if (!activeThreadId) return;
     getTransport().terminalKillByThread(activeThreadId).catch(() => {});
     removeAllTerminals(activeThreadId);
+    hideTerminalPanel(activeThreadId);
   }, [activeThreadId]);
 
   if (!panelVisible || !activeThreadId) {
