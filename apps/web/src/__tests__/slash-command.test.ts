@@ -14,9 +14,13 @@ vi.mock("@/transport", () => ({
 
 import { useSlashCommand } from "@/components/chat/useSlashCommand";
 import { getTransport } from "@/transport";
+import { useSkillsStore } from "@/stores/skillsStore";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Reset store between tests to prevent cross-test cache pollution now that
+  // useSlashCommand delegates caching to the module-scoped skillsStore.
+  useSkillsStore.getState().reset();
 });
 
 function makeAnchor() {

@@ -113,8 +113,18 @@ export { PrInfoSchema, PrDetailSchema, PrDraftSchema, CreatePrParamsSchema, Crea
 export type { PrInfo, PrDetail, PrDraft, CreatePrParams, CreatePrResult, CheckRun, ChecksStatus } from "./github.js";
 
 // Skills
-export { SkillInfoSchema } from "./skills.js";
-export type { SkillInfo } from "./skills.js";
+export {
+  SkillInfoSchema,
+  SkillKindSchema,
+  SkillSourceSchema,
+  SkillDiagnosticsSchema,
+} from "./skills.js";
+export type {
+  SkillInfo,
+  SkillKind,
+  SkillSource,
+  SkillDiagnostics,
+} from "./skills.js";
 
 // WebSocket protocol
 export {

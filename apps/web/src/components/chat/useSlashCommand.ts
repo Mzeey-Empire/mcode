@@ -1,5 +1,6 @@
-import { useState, useRef, useCallback } from "react";
-import { getTransport, type SkillInfo } from "@/transport";
+import { useState, useRef, useCallback, useEffect } from "react";
+import { useSkillsStore } from "@/stores/skillsStore";
+import type { SkillInfo } from "@/transport";
 import type { SlashCommandNamespace } from "./lexical/SlashCommandNode";
 
 /** A slash command entry shown in the popup. */
@@ -12,23 +13,40 @@ export interface Command {
 }
 
 const BUILTIN_COMMANDS: Command[] = [
-  {
-    name: "m:plan",
-    description: "Toggle plan mode",
-    namespace: "mcode",
-    action: "toggle-plan",
-  },
-  {
-    name: "compact",
-    description: "Summarise conversation history to free up context window",
-    namespace: "command",
-  },
+  { name: "m:plan", description: "Toggle plan mode", namespace: "mcode", action: "toggle-plan" },
+  { name: "compact", description: "Summarise conversation history to free up context window", namespace: "command" },
 ];
 
 /** Regex: matches `/` at start of line or after whitespace, followed by non-space chars. */
 export const SLASH_TRIGGER_RE = /(^|\s)(\/\S*)$/;
 
-const CACHE_TTL_MS = 5 * 60 * 1000;
+/** Map a SkillInfo into a Command. */
+function toCommand(s: SkillInfo): Command {
+  // `kind === "command"` overrides any namespace inference.
+  if (s.kind === "command") {
+    return { name: s.name, description: s.description || `Run /${s.name}`, namespace: "command" };
+  }
+  return {
+    name: s.name,
+    description: s.description || `Run /${s.name}`,
+    namespace: s.name.includes(":") ? "plugin" : "skill",
+  };
+}
+
+/** Sort commands: source group order, then alphabetical within group. */
+const NAMESPACE_ORDER: Record<SlashCommandNamespace, number> = {
+  mcode: 0,
+  command: 1,
+  skill: 2,
+  plugin: 3,
+};
+
+function sortCommands(cmds: Command[]): Command[] {
+  return [...cmds].sort((a, b) => {
+    const order = NAMESPACE_ORDER[a.namespace] - NAMESPACE_ORDER[b.namespace];
+    return order !== 0 ? order : a.name.localeCompare(b.name);
+  });
+}
 
 /** Options for the useSlashCommand hook. */
 interface UseSlashCommandOptions {
@@ -45,58 +63,65 @@ export interface UseSlashCommandReturn {
   allCommands: Command[];
   selectedIndex: number;
   anchorRect: DOMRect | null;
+  error: Error | null;
   onInputChange: (value: string) => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
   onSelect: (cmd: Command, replaceText: (v: string) => void) => void;
   onDismiss: () => void;
+  onRetry: () => void;
 }
 
-/** Manages slash command detection, skill loading, and popup state. */
+/** Manages slash command detection, skill loading via skillsStore, and popup state. */
 export function useSlashCommand({
   anchorRef,
   onMcodeCommand,
   cwd,
 }: UseSlashCommandOptions): UseSlashCommandReturn {
   const [isOpen, setIsOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [items, setItems] = useState<Command[]>([]);
-  const [allCommands, setAllCommands] = useState<Command[]>(BUILTIN_COMMANDS);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
-
-  // Store the last input text so onSelect can read it without a textarea ref.
   const lastInputRef = useRef("");
+  const lastFilterRef = useRef("");
 
-  // Abort controller for cancelling stale skill-loading requests
-  const abortRef = useRef<AbortController | null>(null);
+  const skills = useSkillsStore((s) => s.skills);
+  const cachedCwd = useSkillsStore((s) => s.cwd);
+  const isLoading = useSkillsStore((s) => s.isLoading);
+  const error = useSkillsStore((s) => s.error);
+  const load = useSkillsStore((s) => s.load);
 
-  // Cache: loaded skills + timestamp for TTL.
-  // Also track which cwd the cache was built for — invalidate on workspace switch.
-  const skillsCache = useRef<{ skills: SkillInfo[]; fetchedAt: number; cwd?: string } | null>(null);
+  // Build the full command list (memoize via skills identity).
+  const allCommands = useCallback(() => {
+    const commands: Command[] = [
+      ...BUILTIN_COMMANDS,
+      ...((skills ?? []).map(toCommand)),
+    ];
+    return sortCommands(commands);
+  }, [skills])();
 
-  const buildItems = useCallback((skillInfos: SkillInfo[], filter: string): Command[] => {
-    const f = filter.toLowerCase();
-    const skills: Command[] = skillInfos.map(({ name, description }) => ({
-      name,
-      description: description || `Run /${name}`,
-      namespace: (name.includes(":") ? "plugin" : "skill") as "plugin" | "skill",
-    }));
-    const all = [...BUILTIN_COMMANDS, ...skills];
-    if (!f) return all;
-    return all.filter((cmd) => cmd.name.toLowerCase().includes(f));
-  }, []);
+  const filtered = (() => {
+    const f = lastFilterRef.current.toLowerCase();
+    if (!f) return allCommands;
+    return allCommands.filter((c) => c.name.toLowerCase().includes(f));
+  })();
 
-  const loadSkills = useCallback(async (): Promise<SkillInfo[]> => {
-    const now = Date.now();
-    const cached = skillsCache.current;
-    if (cached && cached.cwd === cwd && now - cached.fetchedAt < CACHE_TTL_MS) {
-      return cached.skills;
+  // Trigger a load when the popup opens AND either (a) we have no skills,
+  // or (b) the current workspace's cwd differs from the cached cwd. The
+  // store now tracks `cwd` for both successful and failed loads, so a
+  // mismatch is the right signal — without this, switching workspaces
+  // would keep showing the previous workspace's commands forever.
+  //
+  // The `!error` gate prevents an infinite retry loop on persistent
+  // failures: when cwd is unchanged, recovery happens via `onRetry`.
+  // When cwd changes, we always load (treating it as a fresh workspace,
+  // ignoring any prior error from the old one).
+  useEffect(() => {
+    if (!isOpen || isLoading) return;
+    const cwdChanged = cachedCwd !== cwd;
+    const noSkills = skills === null;
+    if (cwdChanged || (noSkills && !error)) {
+      load(cwd).catch(() => { /* surfaced via `error` */ });
     }
-    const skills = await getTransport().listSkills(cwd);
-    skillsCache.current = { skills, fetchedAt: now, cwd };
-    setAllCommands(buildItems(skills, ""));
-    return skills;
-  }, [cwd, buildItems]);
+  }, [isOpen, skills, cachedCwd, cwd, isLoading, error, load]);
 
   const onInputChange = useCallback(
     (value: string) => {
@@ -110,64 +135,28 @@ export function useSlashCommand({
         return;
       }
 
-      // Update anchor on every change while popup is open
       const anchor = anchorRef.current;
-      if (anchor) {
-        setAnchorRect(anchor.getBoundingClientRect());
-      }
+      if (anchor) setAnchorRect(anchor.getBoundingClientRect());
 
-      // Filter text is the matched group minus the leading '/'
-      const triggerText = match[2]; // e.g. "/com"
-      const filter = triggerText.slice(1); // e.g. "com"
-
+      lastFilterRef.current = match[2].slice(1);
       setIsOpen(true);
       setSelectedIndex(0);
-
-      // Abort any previous in-flight skill load
-      abortRef.current?.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
-
-      if (!skillsCache.current) {
-        setIsLoading(true);
-        loadSkills()
-          .then((skills) => {
-            if (!controller.signal.aborted) {
-              setIsLoading(false);
-              setItems(buildItems(skills, filter));
-            }
-          })
-          .catch(() => {
-            if (!controller.signal.aborted) setIsLoading(false);
-          });
-      } else {
-        setItems(buildItems(skillsCache.current.skills, filter));
-        // Background refresh if TTL expired
-        if (Date.now() - skillsCache.current.fetchedAt >= CACHE_TTL_MS) {
-          loadSkills()
-            .then((skills) => {
-              if (!controller.signal.aborted) setItems(buildItems(skills, filter));
-            })
-            .catch(() => {
-              // Background refresh failed silently; existing cache remains
-            });
-        }
-      }
     },
-    [anchorRef, loadSkills, buildItems],
+    [anchorRef],
   );
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (!isOpen) return;
-
-      // Enter and Tab are handled by the Composer (it calls onSelect directly).
-      // The hook handles only navigation and dismiss.
       switch (e.key) {
         case "ArrowDown":
           e.preventDefault();
           e.stopPropagation();
-          setSelectedIndex((i) => Math.min(i + 1, items.length - 1));
+          // Clamp to 0 when filtered is empty; otherwise `length - 1` would
+          // be `-1`, leaking an invalid index into ARIA / keyboard handling.
+          setSelectedIndex((i) =>
+            filtered.length === 0 ? 0 : Math.min(i + 1, filtered.length - 1),
+          );
           break;
         case "ArrowUp":
           e.preventDefault();
@@ -181,7 +170,7 @@ export function useSlashCommand({
           break;
       }
     },
-    [isOpen, items],
+    [isOpen, filtered.length],
   );
 
   const onSelect = useCallback(
@@ -196,32 +185,31 @@ export function useSlashCommand({
         // position, rather than lastIndexOf which can pick the wrong occurrence
         // when the same trigger text appears multiple times before the cursor.
         const triggerStart = match.index + match[1].length;
-        const newValue =
-          value.slice(0, triggerStart) + `/${cmd.name} ` + value.slice(cursor);
-        replaceText(newValue);
+        replaceText(value.slice(0, triggerStart) + `/${cmd.name} ` + value.slice(cursor));
       }
-
-      if (cmd.action && onMcodeCommand) {
-        onMcodeCommand(cmd.action);
-      }
-
+      if (cmd.action && onMcodeCommand) onMcodeCommand(cmd.action);
       setIsOpen(false);
     },
     [onMcodeCommand],
   );
 
   const onDismiss = useCallback(() => setIsOpen(false), []);
+  const onRetry = useCallback(() => {
+    load(cwd, true).catch(() => { /* surfaced via `error` */ });
+  }, [load, cwd]);
 
   return {
     isOpen,
     isLoading,
-    items,
+    items: filtered,
     allCommands,
     selectedIndex,
     anchorRect,
+    error,
     onInputChange,
     onKeyDown,
     onSelect,
     onDismiss,
+    onRetry,
   };
 }

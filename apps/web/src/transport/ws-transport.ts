@@ -6,6 +6,7 @@ import type {
   WorktreeInfo,
   AttachmentMeta,
   SkillInfo,
+  SkillDiagnostics,
   PrInfo,
   PrDetail,
   PermissionMode,
@@ -472,6 +473,7 @@ export function createWsTransport(
 
     // Skills
     listSkills: (cwd?) => rpc<SkillInfo[]>("skill.list", { cwd }),
+    diagnoseSkills: (cwd?) => rpc<SkillDiagnostics>("skill.diagnose", { cwd }),
 
     // Terminal (PTY)
     terminalCreate: (threadId) => rpc<string>("terminal.create", { threadId }),

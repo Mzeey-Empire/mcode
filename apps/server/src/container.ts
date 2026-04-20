@@ -37,6 +37,7 @@ import { AttachmentService } from "./services/attachment-service";
 import { SnapshotService } from "./services/snapshot-service";
 import { SettingsService } from "./services/settings-service";
 import { GitWatcherService } from "./services/git-watcher-service";
+import { SkillWatcherService } from "./services/skill-watcher-service";
 import { MemoryPressureService } from "./services/memory-pressure-service";
 import { CleanupWorker } from "./services/cleanup-worker";
 import { PrDraftService } from "./services/pr-draft-service";
@@ -210,6 +211,11 @@ export function setupContainer(): typeof container {
   container.register(
     GitWatcherService,
     { useClass: GitWatcherService },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register(
+    SkillWatcherService,
+    { useClass: SkillWatcherService },
     { lifecycle: Lifecycle.Singleton },
   );
   container.register(
