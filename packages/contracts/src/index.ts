@@ -156,6 +156,8 @@ export type {
   IProviderRegistry,
 } from "./providers/interfaces.js";
 
+export * from "./providers/catalog.js";
+
 export {
   ProviderModelInfoSchema,
   ModelPolicyStateSchema,
