@@ -72,6 +72,9 @@ export class SettingsService {
   /** Whether the parent directory has already been created, to avoid redundant mkdirSync calls. */
   private dirEnsured = false;
 
+  /** In-process change listeners registered via `on("change", cb)`. */
+  private changeListeners: Array<(next: Settings) => void> = [];
+
   constructor() {
     this.filePath = join(getMcodeDir(), "settings.json");
     this.startWatching();
@@ -152,8 +155,34 @@ export class SettingsService {
     this.cache = validated;
 
     broadcast("settings.changed", validated);
+    this.emitChange(validated);
 
     return validated;
+  }
+
+  /**
+   * Subscribe to in-process settings changes. Called whenever settings are
+   * updated via `update()` or reloaded after an external file edit. Returns
+   * an unsubscribe function.
+   */
+  on(event: "change", cb: (next: Settings) => void): () => void {
+    void event;
+    this.changeListeners.push(cb);
+    return () => {
+      this.changeListeners = this.changeListeners.filter((l) => l !== cb);
+    };
+  }
+
+  private emitChange(next: Settings): void {
+    for (const cb of this.changeListeners) {
+      try {
+        cb(next);
+      } catch (err) {
+        logger.warn("SettingsService change listener threw", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
   }
 
   /** Stop watching the settings file and clean up timers. */
@@ -215,6 +244,7 @@ export class SettingsService {
           this.cache = null;
           const settings = this.get();
           broadcast("settings.changed", settings);
+          this.emitChange(settings);
 
           // If we started watching the directory and the file now exists,
           // switch to watching the file directly for more precise events.
