@@ -3,10 +3,12 @@ import { lazySchema } from "./utils/lazySchema.js";
 
 /** Whether the entry comes from a Claude `skills/` dir or a `commands/` dir. */
 export const SkillKindSchema = z.enum(["skill", "command"]);
+/** Whether the entry comes from a Claude `skills/` dir or a `commands/` dir. */
 export type SkillKind = z.infer<typeof SkillKindSchema>;
 
 /** Where the entry was discovered. Used for grouping in the picker. */
 export const SkillSourceSchema = z.enum(["user", "project", "agent", "plugin"]);
+/** Where the entry was discovered. Used for grouping in the picker. */
 export type SkillSource = z.infer<typeof SkillSourceSchema>;
 
 /** Metadata for a discovered skill or command. */
@@ -18,6 +20,7 @@ export const SkillInfoSchema = lazySchema(() =>
     source: SkillSourceSchema.default("plugin"),
   }),
 );
+/** Metadata for a discovered skill or command. */
 export type SkillInfo = z.infer<ReturnType<typeof SkillInfoSchema>>;
 
 /** Per-path diagnostics returned by `skill.diagnose`. */
@@ -35,4 +38,5 @@ export const SkillDiagnosticsSchema = lazySchema(() =>
     totalCommands: z.number(),
   }),
 );
+/** Per-path diagnostics returned by `skill.diagnose`. */
 export type SkillDiagnostics = z.infer<ReturnType<typeof SkillDiagnosticsSchema>>;
