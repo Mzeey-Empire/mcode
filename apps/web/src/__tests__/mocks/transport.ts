@@ -89,6 +89,7 @@ export const mockTransport: McodeTransport = {
   listPendingPermissions: vi.fn().mockResolvedValue([]),
   answerPlanQuestions: vi.fn().mockResolvedValue(undefined),
   getActiveAgentCount: vi.fn().mockResolvedValue(0),
+  listRunning: vi.fn().mockResolvedValue([]),
   getMessages: vi.fn().mockResolvedValue({ messages: [], hasMore: false }),
   createAndSendMessage: vi.fn(),
   updateThreadTitle: vi.fn().mockResolvedValue(true),

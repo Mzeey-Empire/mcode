@@ -437,6 +437,7 @@ export function createWsTransport(
     saveClipboardFile: (data, mimeType, fileName) =>
       rpcBinary<AttachmentMeta | null>("clipboard.saveFile", { mimeType, fileName }, data),
     getActiveAgentCount: () => rpc<number>("agent.activeCount", {}),
+    listRunning: () => rpc<string[]>("agent.listRunning", {}),
 
     // Messages
     getMessages: (threadId, limit, before?) =>
