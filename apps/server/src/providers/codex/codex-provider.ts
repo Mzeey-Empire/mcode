@@ -173,6 +173,11 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
         from: existing.sandboxMode,
         to: sandbox,
       });
+      // Drain pending permissions for this session before kill. The app-server's
+      // graceful exit path suppresses the "fatal" emit (killRequested=true), so
+      // attachFatalDrain won't fire here; cancel any open cards explicitly so
+      // the UI doesn't keep a stale amber dot on an orphaned request.
+      this.drainPending((e) => e.sessionId === sessionId);
       this.sessions.delete(sessionId);
       // Clear the stored SDK thread ID so the new session starts fresh rather than
       // resuming the old thread (which would inherit the old sandbox mode).

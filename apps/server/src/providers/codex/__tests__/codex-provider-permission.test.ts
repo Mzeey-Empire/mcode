@@ -190,4 +190,45 @@ describe("CodexProvider permission flow", () => {
     // Session must NOT have been evicted while a permission is pending.
     expect(sessions.has(sessionId)).toBe(true);
   });
+
+  it("drains pending permissions when sendMessage detects a permission mode swap", async () => {
+    const resolved: Array<{ requestId: string; decision: string }> = [];
+    provider.on("permission_resolved", (p) => resolved.push(p as never));
+
+    // Queue a pending permission on the existing workspace-write session.
+    const pendingPromise = (provider as unknown as {
+      handleApprovalRequest: (s: string, t: string, r: unknown) => Promise<unknown>;
+    }).handleApprovalRequest(sessionId, threadId, {
+      rpcId: 55,
+      method: "item/commandExecution/requestApproval",
+      params: { command: "x", cwd: "/" },
+    });
+    expect(provider.listPendingPermissions!(threadId)).toHaveLength(1);
+
+    // Point the settings stub at a bogus cliPath so checkCodexVersion fails
+    // fast and sendMessage exits before spawning a real child process. The
+    // mode-swap drain executes before the version check, which is what we
+    // want to observe.
+    (provider as unknown as {
+      settingsService: { get: () => Promise<unknown> };
+    }).settingsService = {
+      get: async () => ({ provider: { cli: { codex: "/totally/bogus/codex-path" } } }),
+    };
+
+    vi.useRealTimers();
+    await provider.sendMessage({
+      sessionId,
+      message: "hi",
+      cwd: "/",
+      model: "gpt-5",
+      resume: false,
+      permissionMode: "full",
+    });
+
+    const response = await pendingPromise;
+    expect(response).toEqual({ decision: "cancel" });
+    expect(resolved).toHaveLength(1);
+    expect(resolved[0].decision).toBe("cancelled");
+    expect(provider.listPendingPermissions!(threadId)).toHaveLength(0);
+  });
 });
