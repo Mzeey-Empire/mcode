@@ -169,34 +169,41 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
     };
   }, [ptyId]);
 
-  // Restore the terminal whenever it becomes visible again — either because
-  // the panel was toggled open or the window/tab regained focus. xterm's DOM
-  // renderer can miss repaints after long background stints, and the helper
-  // textarea sometimes loses focus so typing (spacebar especially) silently
-  // stops reaching the PTY. Fit -> refresh -> focus covers all three symptoms
-  // reported in issue #305.
+  // When the panel is toggled open (visible: false -> true) we refit and
+  // intentionally pull focus into xterm so the user can start typing
+  // immediately. Focus is deliberately NOT moved on window/tab return —
+  // doing so would steal focus from the composer whenever the user
+  // alt-tabs back, contradicting the Ctrl+J-from-composer workflow.
   useEffect(() => {
-    const restore = () => {
+    if (!visible) return;
+    const term = termRef.current;
+    if (!term) return;
+    fitAddonRef.current?.fit();
+    term.refresh(0, term.rows - 1);
+    term.focus();
+  }, [visible]);
+
+  // Repaint xterm's DOM renderer when the window/tab regains visibility.
+  // Long background stints leave the canvas half-painted; fit + refresh is
+  // idempotent and cheap, and crucially skips term.focus() so we don't
+  // yank focus out of whatever the user was typing in (issue #305).
+  useEffect(() => {
+    const repaint = () => {
       if (!visible) return;
       const term = termRef.current;
       if (!term) return;
       fitAddonRef.current?.fit();
       term.refresh(0, term.rows - 1);
-      term.focus();
     };
-
-    restore();
 
     const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        restore();
-      }
+      if (document.visibilityState === "visible") repaint();
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
-    window.addEventListener("focus", restore);
+    window.addEventListener("focus", repaint);
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
-      window.removeEventListener("focus", restore);
+      window.removeEventListener("focus", repaint);
     };
   }, [visible]);
 

@@ -13,14 +13,6 @@ import { useThreadStore } from "@/stores/threadStore";
 const BACKGROUND_IDLE_DELAY_MS = 60_000;
 
 /**
- * Historical custom event name. Kept exported so any lingering listeners can
- * be cleaned up safely, but the hook no longer dispatches it — clearing xterm
- * scrollback during background idle destroyed terminal content users expected
- * to find when returning to the app (issue #305).
- */
-export const CLEAR_TERMINAL_BUFFERS_EVENT = "mcode:clear-terminal-buffers";
-
-/**
  * Hook that manages frontend idle reclamation.
  * Mount once in the root App component.
  */

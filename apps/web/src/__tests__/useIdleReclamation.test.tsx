@@ -19,10 +19,12 @@ vi.mock("@/stores/threadStore", () => ({
   },
 }));
 
-import {
-  useIdleReclamation,
-  CLEAR_TERMINAL_BUFFERS_EVENT,
-} from "@/hooks/useIdleReclamation";
+import { useIdleReclamation } from "@/hooks/useIdleReclamation";
+
+// Inlined literal: the hook previously dispatched this event to wipe xterm
+// scrollback after 60s of blur. The symbol is gone from the module — this
+// test asserts the dispatch is gone by name, not by import.
+const LEGACY_CLEAR_EVENT = "mcode:clear-terminal-buffers";
 
 describe("useIdleReclamation (regression #305)", () => {
   beforeEach(() => {
@@ -35,13 +37,13 @@ describe("useIdleReclamation (regression #305)", () => {
   });
 
   // Previously, after 60s of background idle the hook dispatched
-  // CLEAR_TERMINAL_BUFFERS_EVENT, which wiped xterm scrollback. Users reported
+  // LEGACY_CLEAR_EVENT, which wiped xterm scrollback. Users reported
   // their terminal content vanishing after leaving the app for a minute —
   // that's the bug. Server-side idle reclamation still runs; only the
   // destructive frontend buffer wipe must be gone.
-  it("does not dispatch CLEAR_TERMINAL_BUFFERS_EVENT on background idle", () => {
+  it("does not dispatch LEGACY_CLEAR_EVENT on background idle", () => {
     const listener = vi.fn();
-    window.addEventListener(CLEAR_TERMINAL_BUFFERS_EVENT, listener);
+    window.addEventListener(LEGACY_CLEAR_EVENT, listener);
 
     renderHook(() => useIdleReclamation());
 
@@ -49,7 +51,7 @@ describe("useIdleReclamation (regression #305)", () => {
     vi.advanceTimersByTime(61_000);
 
     expect(listener).not.toHaveBeenCalled();
-    window.removeEventListener(CLEAR_TERMINAL_BUFFERS_EVENT, listener);
+    window.removeEventListener(LEGACY_CLEAR_EVENT, listener);
   });
 
   it("still notifies the server to enter background idle", () => {
