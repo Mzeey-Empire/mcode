@@ -10,7 +10,12 @@ import { ProviderAvailabilitySchema } from "../providers/availability.js";
 /** All push channel definitions keyed by channel name. */
 export const WS_CHANNELS = {
   "agent.event": AgentEventSchema(),
-  "terminal.data": z.object({ ptyId: z.string(), data: z.string() }),
+  "terminal.data": z.object({
+    ptyId: z.string(),
+    data: z.string(),
+    /** Monotonic per-PTY sequence number. Absent from legacy clients/servers. */
+    seq: z.number().int().nonnegative().optional(),
+  }),
   "terminal.exit": z.object({ ptyId: z.string(), code: z.number() }),
   "thread.status": z.object({
     threadId: z.string(),
