@@ -4,7 +4,6 @@ import type { FitAddon } from "@xterm/addon-fit";
 import { getTransport } from "@/transport";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { shouldInterceptKeyEvent } from "./terminalKeyHandler";
-import { CLEAR_TERMINAL_BUFFERS_EVENT } from "@/hooks/useIdleReclamation";
 // Static import so bundler deduplicates the stylesheet
 import "@xterm/xterm/css/xterm.css";
 
@@ -170,23 +169,36 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
     };
   }, [ptyId]);
 
-  // Re-fit when visibility changes (ResizeObserver handles the rest)
+  // Restore the terminal whenever it becomes visible again — either because
+  // the panel was toggled open or the window/tab regained focus. xterm's DOM
+  // renderer can miss repaints after long background stints, and the helper
+  // textarea sometimes loses focus so typing (spacebar especially) silently
+  // stops reaching the PTY. Fit -> refresh -> focus covers all three symptoms
+  // reported in issue #305.
   useEffect(() => {
-    if (visible && fitAddonRef.current) {
-      fitAddonRef.current.fit();
-    }
-  }, [visible]);
+    const restore = () => {
+      if (!visible) return;
+      const term = termRef.current;
+      if (!term) return;
+      fitAddonRef.current?.fit();
+      term.refresh(0, term.rows - 1);
+      term.focus();
+    };
 
-  // Clear scrollback buffer during background idle to release memory
-  useEffect(() => {
-    const handleClearBuffers = () => {
-      termRef.current?.clear();
+    restore();
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        restore();
+      }
     };
-    window.addEventListener(CLEAR_TERMINAL_BUFFERS_EVENT, handleClearBuffers);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("focus", restore);
     return () => {
-      window.removeEventListener(CLEAR_TERMINAL_BUFFERS_EVENT, handleClearBuffers);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("focus", restore);
     };
-  }, []);
+  }, [visible]);
 
   // Sync scrollback setting to live terminal without remounting
   useEffect(() => {
