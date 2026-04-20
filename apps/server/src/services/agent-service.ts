@@ -261,15 +261,26 @@ export class AgentService {
       sdkProvider.setSdkSessionId(sessionName, thread.sdk_session_id);
     }
 
+    const resolvedProvider = this.providerRegistry.resolve(effectiveProvider);
+
     this.activeSessionIds.add(threadId);
     this.memoryPressureService.markActive();
+
+    // Emit the live-session "turn started" signal before any other events so
+    // clients can populate runningThreadIds (drives sidebar + composer indicators).
+    // Cast to EventEmitter since IAgentProvider only exposes on(); all providers
+    // extend EventEmitter, matching the same pattern used for synthetic error/ended
+    // emission in the catch block below.
+    (resolvedProvider as unknown as import("events").EventEmitter).emit("event", {
+      type: AgentEventType.TurnStarted,
+      threadId,
+    } satisfies AgentEvent);
 
     // Check for branching content override (stitched handoff + user prompt)
     const providerMessage = this.providerContentOverride.get(threadId) ?? content;
     this.providerContentOverride.delete(threadId);
 
     try {
-      const resolvedProvider = this.providerRegistry.resolve(effectiveProvider);
       await resolvedProvider.sendMessage({
         sessionId: sessionName,
         message: providerMessage,
