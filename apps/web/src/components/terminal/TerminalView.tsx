@@ -4,6 +4,7 @@ import type { FitAddon } from "@xterm/addon-fit";
 import { getTransport } from "@/transport";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { shouldInterceptKeyEvent } from "./terminalKeyHandler";
+import { ClientTerminalFlowControl } from "./terminalFlowControl";
 // Static import so bundler deduplicates the stylesheet
 import "@xterm/xterm/css/xterm.css";
 
@@ -255,6 +256,15 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
 
       const transport = getTransport();
 
+      const flowSettings =
+        useSettingsStore.getState().settings.terminal.flowControl;
+      const fc = new ClientTerminalFlowControl({
+        onPause: () => transport.terminalPause(ptyId).catch(() => {}),
+        onResume: () => transport.terminalResume(ptyId).catch(() => {}),
+        highBytes: flowSettings.clientHighBytes,
+        lowBytes: flowSettings.clientLowBytes,
+      });
+
       // Right-click pastes clipboard text into the PTY (native terminal convention — no context menu).
       // term.paste() is used instead of transport.terminalWrite() so that xterm applies bracketed
       // paste mode when the shell requests it, preventing embedded newlines from auto-executing commands.
@@ -288,10 +298,11 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
           seq: number;
         };
         if (detail.ptyId !== ptyId) return;
-        // xterm accepts Uint8Array and decodes UTF-8 with stateful buffering
-        // across successive writes, so multi-byte sequences split across
-        // frames render correctly.
-        term.write(detail.payload);
+        const n = detail.payload.length;
+        fc.written(n);
+        // Use xterm's callback form so acked() fires only after the bytes
+        // are committed to the terminal buffer — not just queued.
+        term.write(detail.payload, () => fc.acked(n));
       };
       window.addEventListener("mcode:pty-data", handlePtyData);
 
