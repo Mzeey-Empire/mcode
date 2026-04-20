@@ -64,3 +64,46 @@ describe("hydrateRunningThreadsFromServer", () => {
     expect(ids.has("t-concurrent")).toBe(true);    // concurrent add preserved
   });
 });
+
+describe("hydrateRunningThreads (store action)", () => {
+  beforeEach(() => {
+    useThreadStore.setState({
+      runningThreadIds: new Set(),
+      agentStartTimes: {},
+    });
+  });
+
+  it("preserves Set reference when hydration matches current membership", () => {
+    useThreadStore.setState({ runningThreadIds: new Set(["t-1", "t-2"]) });
+    const before = useThreadStore.getState().runningThreadIds;
+
+    useThreadStore.getState().hydrateRunningThreads(["t-1", "t-2"]);
+
+    const after = useThreadStore.getState().runningThreadIds;
+    // Same Set reference (no churn) avoids re-rendering all subscribers.
+    expect(after).toBe(before);
+  });
+
+  it("preserves Set reference when hydration matches (order-insensitive)", () => {
+    useThreadStore.setState({ runningThreadIds: new Set(["t-1", "t-2"]) });
+    const before = useThreadStore.getState().runningThreadIds;
+
+    useThreadStore.getState().hydrateRunningThreads(["t-2", "t-1"]);
+
+    const after = useThreadStore.getState().runningThreadIds;
+    expect(after).toBe(before);
+  });
+
+  it("creates a new Set reference when hydration membership differs", () => {
+    useThreadStore.setState({ runningThreadIds: new Set(["t-1", "t-2"]) });
+    const before = useThreadStore.getState().runningThreadIds;
+
+    useThreadStore.getState().hydrateRunningThreads(["t-1", "t-3"]);
+
+    const after = useThreadStore.getState().runningThreadIds;
+    expect(after).not.toBe(before);
+    expect(after.has("t-1")).toBe(true);
+    expect(after.has("t-2")).toBe(false);
+    expect(after.has("t-3")).toBe(true);
+  });
+});

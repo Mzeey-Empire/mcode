@@ -593,7 +593,17 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   },
 
   hydrateRunningThreads: (ids) => {
-    set(() => ({ runningThreadIds: new Set(ids) }));
+    set((state) => {
+      const current = state.runningThreadIds;
+      // Short-circuit identical membership to preserve Set identity. Without
+      // this guard, every WS reconnect allocates a new Set and re-renders all
+      // subscribers (ChatView, Composer, ProjectTree, MessageList) even when
+      // the running set hasn't changed.
+      if (current.size === ids.length && ids.every((id) => current.has(id))) {
+        return {};
+      }
+      return { runningThreadIds: new Set(ids) };
+    });
   },
 
   /** Append a single message to the current thread's message list. */
