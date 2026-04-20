@@ -145,7 +145,7 @@ test.describe("Slash command popup", () => {
           );
           return;
         }
-        let result: unknown = null;
+        let result: unknown;
         if (method === "workspace.list") result = [WORKSPACE];
         else if (method === "thread.list") result = [THREAD];
         else if (method?.endsWith(".list") || method === "provider.listModels") result = [];
