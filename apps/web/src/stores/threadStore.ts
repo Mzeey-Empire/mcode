@@ -2,8 +2,8 @@ import { create } from "zustand";
 import type { Message, ToolCall, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
 import type { ReasoningLevel, PlanQuestion, PlanAnswer, ProviderUsageInfo, QuotaCategory } from "@mcode/contracts";
 import type { PermissionRequest, PermissionDecision } from "@mcode/contracts";
-import { PlanQuestionSchema } from "@mcode/contracts";
-import { getTransport, PERMISSION_MODES, INTERACTION_MODES } from "@/transport";
+import { PlanQuestionSchema, PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts";
+import { getTransport } from "@/transport";
 import { useWorkspaceStore } from "./workspaceStore";
 import { useQueueStore } from "./queueStore";
 import { LruCache } from "@/lib/lru-cache";
@@ -98,6 +98,8 @@ interface ThreadState {
   loadOlderMessages: (threadId: string) => Promise<void>;
   sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, copilotAgent?: string) => Promise<void>;
   stopAgent: (threadId: string) => Promise<void>;
+  /** Replace runningThreadIds with the authoritative server snapshot. Called on WS (re)connect. */
+  hydrateRunningThreads: (ids: string[]) => void;
   addMessage: (message: Message) => void;
   clearMessages: () => void;
   /** Returns true if an agent is actively executing on the given thread. */
@@ -590,6 +592,30 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     });
   },
 
+  hydrateRunningThreads: (ids) => {
+    set((state) => {
+      const current = state.runningThreadIds;
+      // Short-circuit identical membership to preserve Set identity. Without
+      // this guard, every WS reconnect allocates a new Set and re-renders all
+      // subscribers (ChatView, Composer, ProjectTree, MessageList) even when
+      // the running set hasn't changed.
+      if (current.size === ids.length && ids.every((id) => current.has(id))) {
+        return {};
+      }
+      // Seed agentStartTimes for ids that weren't previously tracked. Without
+      // this, MessageList's "running for Xs" readout shows broken output until
+      // the next server event arrives for each newly hydrated thread. Existing
+      // entries (e.g. optimistic timestamps from a user-initiated send) are
+      // preserved.
+      const now = Date.now();
+      const times = { ...state.agentStartTimes };
+      for (const id of ids) {
+        if (times[id] === undefined) times[id] = now;
+      }
+      return { runningThreadIds: new Set(ids), agentStartTimes: times };
+    });
+  },
+
   /** Append a single message to the current thread's message list. */
   addMessage: (message) => {
     set((state) => {
@@ -1031,6 +1057,19 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           };
         });
       }
+      return;
+    }
+
+    if (method === "session.turnStarted") {
+      set((state) => {
+        // Guard preserves the optimistic agentStartTimes[threadId] written by
+        // sendMessage(). For server-originated turns (headless, reconnect), this
+        // path is skipped and the timestamp is written fresh below.
+        if (state.runningThreadIds.has(threadId)) return {};
+        const next = new Set(state.runningThreadIds);
+        next.add(threadId);
+        return { runningThreadIds: next, agentStartTimes: { ...state.agentStartTimes, [threadId]: Date.now() } };
+      });
       return;
     }
 

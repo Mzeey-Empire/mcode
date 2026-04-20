@@ -127,6 +127,12 @@ export interface McodeTransport {
   /** Save a clipboard file blob to disk via the server. Returns attachment metadata. */
   saveClipboardFile(data: ArrayBuffer, mimeType: string, fileName: string): Promise<AttachmentMeta | null>;
   getActiveAgentCount(): Promise<number>;
+  /**
+   * Returns the thread IDs with live agent sessions on the server.
+   * Called on WebSocket (re)connect to reconcile runningThreadIds after the
+   * optimistic client-side set was lost (reload, new tab, reconnect).
+   */
+  listRunning(): Promise<string[]>;
 
   // Thread mutations
   updateThreadTitle(threadId: string, title: string): Promise<boolean>;
