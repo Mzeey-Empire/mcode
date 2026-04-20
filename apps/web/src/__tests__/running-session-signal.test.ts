@@ -20,7 +20,7 @@ describe("running-session signal", () => {
     expect(typeof useThreadStore.getState().agentStartTimes["t-1"]).toBe("number");
   });
 
-  it("is idempotent — repeat turnStarted does not create duplicates", () => {
+  it("is idempotent: repeat turnStarted does not create duplicates", () => {
     let now = 1000;
     vi.spyOn(Date, "now").mockImplementation(() => now++);
     const store = useThreadStore.getState();

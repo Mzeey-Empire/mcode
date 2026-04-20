@@ -63,7 +63,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
     providerStub = Object.assign(new EventEmitter(), {
       id: "claude" as ProviderId,
       supportsCompletion: false,
-      // Never resolves — we want to observe events emitted BEFORE completion.
+      // Never resolves. We want to observe events emitted BEFORE completion.
       // Snapshot capturedEvents.length synchronously on entry: this is the
       // load-bearing ordering signal. If the emit happened BEFORE the call
       // entered (correct order), this will be >= 1.
@@ -133,7 +133,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
     const workspace = workspaceRepo.create("test-ws", process.cwd());
     const thread = threadRepo.create(workspace.id, "Test Thread", "direct", "main", true, "claude");
 
-    // Kick off sendMessage without awaiting — provider.sendMessage never resolves.
+    // Kick off sendMessage without awaiting (provider.sendMessage never resolves).
     void svc.sendMessage(thread.id, "hello", "default");
 
     // Let the async prelude (attachment persist + ref capture + settings.get) settle.
@@ -149,7 +149,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
     // Load-bearing ordering assertion: the snapshot taken synchronously inside
     // the provider's sendMessage body must show the TurnStarted emit had already
     // landed on the bus BEFORE the call entered. This is the real "emit precedes
-    // call" proof — not just "emit precedes the (never-resolving) promise".
+    // call" proof, not just "emit precedes the (never-resolving) promise".
     expect(
       eventsLengthAtSendMessageEntry,
       "expected capturedEvents.length >= 1 at sendMessage entry (emit must precede call)",
@@ -163,7 +163,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
 
     expect(svc.activeThreadIds()).toContain(thread.id);
 
-    // Provider.sendMessage must have been invoked — confirms the emit happened
+    // Provider.sendMessage must have been invoked. Confirms the emit happened
     // during sendMessage flow, not via some other path.
     expect(providerStub.sendMessage).toHaveBeenCalledTimes(1);
   });

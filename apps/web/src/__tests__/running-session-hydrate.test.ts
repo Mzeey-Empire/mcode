@@ -59,7 +59,7 @@ describe("hydrateRunningThreadsFromServer", () => {
     await pending;
 
     const ids = useThreadStore.getState().runningThreadIds;
-    expect(ids.has("stale")).toBe(false);          // dropped — server doesn't report it
+    expect(ids.has("stale")).toBe(false);          // dropped (server doesn't report it)
     expect(ids.has("t-server")).toBe(true);        // server's truth
     expect(ids.has("t-concurrent")).toBe(true);    // concurrent add preserved
   });
