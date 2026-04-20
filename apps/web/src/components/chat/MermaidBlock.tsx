@@ -95,12 +95,26 @@ const MermaidBlock = memo(function MermaidBlock({ code, isStreaming }: MermaidBl
     (async () => {
       try {
         const mermaid = await ensureInitialized(mermaidTheme);
+
+        // Validate first so invalid source never reaches the renderer.
+        // mermaid.render appends a temp measurement node (#d<id>) to
+        // document.body and does NOT clean it up on throw — validating
+        // up front prevents those orphans from littering the page.
+        const parseResult = await mermaid.parse(code, { suppressErrors: true });
+        if (!parseResult) {
+          if (!cancelled) setState({ status: "error" });
+          return;
+        }
+
         const { svg } = await mermaid.render(mermaidId, code);
         if (!cancelled) {
           setState({ status: "success", svg });
         }
       } catch (err) {
         console.error("[MermaidBlock] render failed:", err);
+        // Defensive cleanup: if render threw after a successful parse,
+        // mermaid may still have left its measurement node behind.
+        document.getElementById("d" + mermaidId)?.remove();
         if (!cancelled) {
           setState({ status: "error" });
         }

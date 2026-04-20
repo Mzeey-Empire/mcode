@@ -6,6 +6,7 @@ import type {
   WorktreeInfo,
   AttachmentMeta,
   SkillInfo,
+  SkillDiagnostics,
   PrInfo,
   PrDetail,
   PermissionMode,
@@ -15,7 +16,7 @@ import type {
   ProviderModelInfo,
   CopilotSubagent,
 } from "./types";
-import type { PaginatedMessages, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus } from "@mcode/contracts";
+import type { PaginatedMessages, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus, ProviderAvailability } from "@mcode/contracts";
 import type { ReasoningLevel } from "@mcode/contracts";
 import { useSettingsStore } from "@/stores/settingsStore";
 import type { PermissionRequest } from "@mcode/contracts";
@@ -472,6 +473,7 @@ export function createWsTransport(
 
     // Skills
     listSkills: (cwd?) => rpc<SkillInfo[]>("skill.list", { cwd }),
+    diagnoseSkills: (cwd?) => rpc<SkillDiagnostics>("skill.diagnose", { cwd }),
 
     // Terminal (PTY)
     terminalCreate: (threadId) => rpc<string>("terminal.create", { threadId }),
@@ -548,6 +550,8 @@ export function createWsTransport(
     /** Fetches all available Copilot sub-agents for the given workspace (built-in + user + project). */
     listCopilotAgents: (workspaceId) =>
       rpc<CopilotSubagent[]>("provider.copilotAgents", { workspaceId }),
+    listProviderAvailability: () =>
+      rpc<ProviderAvailability[]>("providers.listAvailability", {}),
 
     // Memory pressure
     setBackground: (background) => rpc<void>("memory.setBackground", { background }),

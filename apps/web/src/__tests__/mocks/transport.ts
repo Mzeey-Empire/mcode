@@ -110,6 +110,7 @@ export const mockTransport: McodeTransport = {
   getPrByUrl: vi.fn().mockResolvedValue(null),
   checkStatus: vi.fn().mockResolvedValue({ aggregate: "no_checks", runs: [], fetchedAt: 0 }),
   listSkills: vi.fn().mockResolvedValue([] as SkillInfo[]),
+  diagnoseSkills: vi.fn().mockResolvedValue({ scanned: [], errors: [], totalSkills: 0, totalCommands: 0 }),
   terminalCreate: vi.fn().mockResolvedValue("pty-mock-1"),
   terminalWrite: vi.fn().mockResolvedValue(undefined),
   terminalResize: vi.fn().mockResolvedValue(undefined),
@@ -132,6 +133,7 @@ export const mockTransport: McodeTransport = {
   getSettings: vi.fn().mockImplementation(() => Promise.resolve(structuredClone(getDefaultSettings()))),
   updateSettings: vi.fn().mockImplementation(() => Promise.resolve(structuredClone(getDefaultSettings()))),
   listProviderModels: vi.fn().mockResolvedValue([]),
+  listProviderAvailability: vi.fn().mockResolvedValue([]),
   setBackground: vi.fn().mockResolvedValue(undefined),
   getProviderUsage: vi.fn().mockResolvedValue({
     providerId: "claude",

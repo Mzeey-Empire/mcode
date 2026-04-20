@@ -9,6 +9,7 @@ import {
   type ModelProvider,
 } from "@/lib/model-registry";
 import { getTransport } from "@/transport";
+import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import {
   ClaudeIcon,
   CodexIcon,
@@ -52,6 +53,9 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
   const [hoveredProvider, setHoveredProvider] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Read the full list once at the top level -- hooks cannot be called inside .map().
+  const availabilityList = useProviderAvailabilityStore((s) => s.providers);
 
   // Dynamically fetched model lists, keyed by provider ID.
   const [dynamicModels, setDynamicModels] = useState<Map<string, ModelProvider["models"]>>(new Map());
@@ -284,12 +288,20 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
             const provIconClass = pm?.color ?? "";
             const hasModels = p.models.length > 0;
 
+            // Derive disabled state from the availability store. An absent record is treated
+            // as enabled so newly-registered providers don't appear broken before the server
+            // has had a chance to push their availability.
+            const providerRecord = availabilityList.find((x) => x.id === p.id);
+            const providerDisabled = providerRecord ? !providerRecord.enabled : false;
+
             return (
               <div
                 key={p.id}
-                className="relative"
+                data-testid={`model-group-${p.id}`}
+                data-disabled={providerDisabled ? "true" : "false"}
+                className={cn("relative", providerDisabled && "opacity-50 pointer-events-none")}
                 onMouseEnter={() => {
-                    if (!p.comingSoon && hasModels) {
+                    if (!p.comingSoon && !providerDisabled && hasModels) {
                       setHoveredWithDelay(p.id);
                       if (p.supportsModelListing) fetchProviderModels(p.id);
                     }
@@ -297,8 +309,11 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
                 onMouseLeave={() => setHoveredWithDelay(null)}
               >
                 <button
-                  disabled={p.comingSoon}
+                  disabled={p.comingSoon || providerDisabled}
                   onClick={() => {
+                    // Guard against disabled providers in case pointer-events-none is overridden
+                    // by a theme or browser extension.
+                    if (providerDisabled) return;
                     if (hasModels && p.models.length === 1) {
                       handleSelectModel(p.models[0].id, p.id);
                     }
@@ -315,7 +330,10 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
                   {p.comingSoon && (
                     <Badge variant="secondary" size="sm">SOON</Badge>
                   )}
-                  {!p.comingSoon && hasModels && p.models.length > 1 && (
+                  {providerDisabled && (
+                    <Badge variant="outline" size="sm">Disabled</Badge>
+                  )}
+                  {!p.comingSoon && !providerDisabled && hasModels && p.models.length > 1 && (
                     <ChevronRight size={10} className="text-muted-foreground" />
                   )}
                 </button>

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "@/lib/utils";
-import { Terminal, Zap, Puzzle, Sparkles } from "lucide-react";
+import { Terminal, Zap, Puzzle, Sparkles, RefreshCw } from "lucide-react";
 import { NAMESPACE_BADGE_STYLES } from "@/lib/slash-command-styles";
 import type { Command } from "./useSlashCommand";
 
@@ -15,8 +15,10 @@ interface SlashCommandPopupProps {
   items: Command[];
   selectedIndex: number;
   anchorRect: DOMRect | null;
+  error: Error | null;
   onSelect: (cmd: Command) => void;
   onDismiss: () => void;
+  onRetry: () => void;
 }
 
 export function SlashCommandPopup({
@@ -25,8 +27,10 @@ export function SlashCommandPopup({
   items,
   selectedIndex,
   anchorRect,
+  error,
   onSelect,
   onDismiss,
+  onRetry,
 }: SlashCommandPopupProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -80,11 +84,12 @@ export function SlashCommandPopup({
   const useVirtual = items.length > VIRTUAL_THRESHOLD;
 
   return (
+    // role="listbox" is intentionally NOT on this outer wrapper: the
+    // Refresh footer button and the ErrorRow's Retry button live inside
+    // and would be invalid descendants of a listbox per WAI-ARIA. The
+    // role is moved down to the options container only.
     <div
       data-slash-popup
-      role="listbox"
-      aria-label="Slash commands"
-      aria-activedescendant={items[selectedIndex] ? `slash-cmd-${items[selectedIndex].name}` : undefined}
       style={style}
       className={cn(
         "z-50 overflow-hidden rounded-lg border border-border bg-card shadow-lg",
@@ -93,43 +98,62 @@ export function SlashCommandPopup({
     >
       {isLoading ? (
         <SkeletonRows />
+      ) : error ? (
+        <ErrorRow message={error.message} onRetry={onRetry} />
       ) : items.length === 0 ? (
         <EmptyState />
       ) : (
-        <div
-          ref={scrollRef}
-          role="presentation"
-          style={{ maxHeight, overflowY: "auto" }}
-        >
-          {useVirtual ? (
-            <div role="presentation" style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
-              {virtualizer.getVirtualItems().map((vi) => (
-                <div
-                  key={vi.key}
-                  role="presentation"
-                  style={{ position: "absolute", top: vi.start, width: "100%", height: vi.size }}
-                  data-index={vi.index}
-                >
+        <>
+          <div
+            ref={scrollRef}
+            role="listbox"
+            aria-label="Slash commands"
+            aria-activedescendant={items[selectedIndex] ? `slash-cmd-${items[selectedIndex].name}` : undefined}
+            style={{ maxHeight, overflowY: "auto" }}
+          >
+            {useVirtual ? (
+              <div role="presentation" style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
+                {virtualizer.getVirtualItems().map((vi) => (
+                  <div
+                    key={vi.key}
+                    role="presentation"
+                    style={{ position: "absolute", top: vi.start, width: "100%", height: vi.size }}
+                    data-index={vi.index}
+                  >
+                    <CommandRow
+                      cmd={items[vi.index]}
+                      selected={vi.index === selectedIndex}
+                      onSelect={onSelect}
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              items.map((cmd, i) => (
+                <div key={cmd.name} role="presentation" data-index={i}>
                   <CommandRow
-                    cmd={items[vi.index]}
-                    selected={vi.index === selectedIndex}
+                    cmd={cmd}
+                    selected={i === selectedIndex}
                     onSelect={onSelect}
                   />
                 </div>
-              ))}
-            </div>
-          ) : (
-            items.map((cmd, i) => (
-              <div key={cmd.name} role="presentation" data-index={i}>
-                <CommandRow
-                  cmd={cmd}
-                  selected={i === selectedIndex}
-                  onSelect={onSelect}
-                />
-              </div>
-            ))
-          )}
-        </div>
+              ))
+            )}
+          </div>
+          <div className="flex items-center justify-end border-t border-border px-2 py-1">
+            <button
+              type="button"
+              aria-label="Refresh commands"
+              // onMouseDown preventDefault keeps editor focus on pointer use;
+              // onClick fires on both pointer and keyboard activation (Enter/Space).
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={onRetry}
+              className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <RefreshCw size={12} />
+            </button>
+          </div>
+        </>
       )}
     </div>
   );
@@ -218,6 +242,24 @@ function EmptyState() {
     <div aria-live="polite" role="status" className="flex items-center gap-3 px-3 py-2">
       <span className="flex h-5 w-5 flex-shrink-0" /> {/* icon placeholder */}
       <span className="text-sm text-muted-foreground">No commands match</span>
+    </div>
+  );
+}
+
+function ErrorRow({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div role="alert" className="flex items-center gap-2 px-3 py-2 text-xs text-destructive">
+      <span className="flex-1 truncate">Couldn't load commands: {message}</span>
+      <button
+        type="button"
+        // Same pattern as the footer Refresh button: preventDefault on
+        // mousedown to retain editor focus, action on click for keyboard a11y.
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onRetry}
+        className="rounded px-2 py-0.5 text-foreground hover:bg-accent"
+      >
+        Retry
+      </button>
     </div>
   );
 }

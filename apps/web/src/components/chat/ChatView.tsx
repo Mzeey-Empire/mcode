@@ -13,6 +13,8 @@ import { HeaderActions } from "./HeaderActions";
 import { CliErrorBanner, isCliError } from "./CliErrorBanner";
 import { InterruptedSessionsBanner } from "./InterruptedSessionsBanner";
 import { ThreadTitleEditor } from "./ThreadTitleEditor";
+import { SidebarRevealButton } from "@/components/sidebar/SidebarRevealButton";
+import { useUiStore } from "@/stores/uiStore";
 
 /** Entry point suggestions shown in the empty state — each maps to a real Mcode capability. */
 const ENTRY_POINTS = [
@@ -78,6 +80,7 @@ export function ChatView() {
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const pendingNewThread = useWorkspaceStore((s) => s.pendingNewThread);
   const threads = useWorkspaceStore((s) => s.threads);
+  const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
   const updateThreadTitle = useWorkspaceStore((s) => s.updateThreadTitle);
   const setActiveThread = useWorkspaceStore((s) => s.setActiveThread);
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
@@ -225,8 +228,9 @@ export function ChatView() {
     return (
       <div className="flex h-full flex-col bg-background">
         {/* Header */}
-        <div className="flex h-11 items-center justify-between border-b border-border/40 px-4">
+        <div className="flex h-11 items-center justify-between border-b border-border/40 pr-4 pl-2">
           <div className="flex items-center gap-2">
+            {sidebarCollapsed && <SidebarRevealButton />}
             <span className="text-sm text-muted-foreground">New thread</span>
             {activeWorkspaceId && (
               <Badge variant="secondary">
@@ -249,14 +253,23 @@ export function ChatView() {
 
   if (!activeThread) {
     return (
-      <div className="flex h-full items-center justify-center bg-background">
-        <div className="text-center">
-          <h2 className="text-lg font-medium text-foreground">
-            Select a thread
-          </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Choose a thread from the sidebar or create a new one.
-          </p>
+      <div className="flex h-full flex-col bg-background">
+        {/* Minimal top bar — only renders the reveal button when the sidebar is
+            collapsed, so the user always has a way back to the project tree. */}
+        {sidebarCollapsed && (
+          <div className="flex h-11 items-center border-b border-border/40 pl-2">
+            <SidebarRevealButton />
+          </div>
+        )}
+        <div className="flex flex-1 items-center justify-center">
+          <div className="text-center">
+            <h2 className="text-lg font-medium text-foreground">
+              Select a thread
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Choose a thread from the sidebar or create a new one.
+            </p>
+          </div>
         </div>
       </div>
     );
@@ -268,8 +281,9 @@ export function ChatView() {
   return (
     <div className="flex h-full flex-col bg-background" data-testid="chat-view">
       {/* Header */}
-      <div className="flex h-11 items-center justify-between border-b border-border px-4">
+      <div className="flex h-11 items-center justify-between border-b border-border pr-4 pl-2">
         <div className="flex items-center gap-2">
+          {sidebarCollapsed && <SidebarRevealButton />}
           <div
             data-testid="chat-header-title"
             onDoubleClick={() => setEditingThreadId(activeThread.id)}

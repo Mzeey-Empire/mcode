@@ -48,6 +48,11 @@ describe("PrDraftService", () => {
   const mockProviderRegistry = {
     resolve: vi.fn().mockReturnValue({ complete: mockComplete, supportsCompletion: true }),
   };
+  // assertUsable throws ProviderDisabledError / ProviderCliMissingError in prod; here we
+  // default to a no-op so existing tests that don't care about availability stay green.
+  const mockProviderAvailability = {
+    assertUsable: vi.fn(),
+  };
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -72,6 +77,7 @@ describe("PrDraftService", () => {
       mockThreadRepo as any,
       mockSettingsService as any,
       mockProviderRegistry as any,
+      mockProviderAvailability as any,
     );
   });
 
