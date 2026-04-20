@@ -88,18 +88,22 @@ describe("SkillWatcherService", () => {
 
     watcher.start({ parentDir: dir, roots: [root] });
 
+    const invalidateSpy = vi.spyOn(svc, "invalidate");
+
     // Create the missing root after start() — this should be observed by
     // the parent watcher and trigger a delayed registration of `root`.
     mkdirSync(root, { recursive: true });
-    // Allow the parent fs.watch event to flush and onParentChange() to
-    // call watch(root). 150ms is well above OS event coalescing windows.
-    await new Promise((r) => setTimeout(r, 150));
+    // Let the parent-triggered debounce flush; that fires onChange once
+    // for the parent, which alone could satisfy a naive call-count assert.
+    // Clearing the spy after this isolates the next assertion to the
+    // late-registered root's own watcher.
+    await new Promise((r) => setTimeout(r, 350));
+    invalidateSpy.mockClear();
 
-    // Now a change inside the late-registered root should invalidate.
-    const invalidateSpy = vi.spyOn(svc, "invalidate");
+    // A change inside the late-registered root must invalidate exactly once.
     writeFileSync(join(root, "marker.txt"), "x");
-    await new Promise((r) => setTimeout(r, 400));
-    expect(invalidateSpy).toHaveBeenCalled();
+    await new Promise((r) => setTimeout(r, 350));
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
   });
 
   it("start() is idempotent: a second call from a clean state does not call watch() again", () => {
