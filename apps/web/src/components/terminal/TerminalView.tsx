@@ -284,11 +284,14 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
       const handlePtyData = (e: Event) => {
         const detail = (e as CustomEvent).detail as {
           ptyId: string;
-          data: string;
+          payload: Uint8Array;
+          seq: number;
         };
-        if (detail.ptyId === ptyId && typeof detail.data === "string") {
-          term.write(detail.data);
-        }
+        if (detail.ptyId !== ptyId) return;
+        // xterm accepts Uint8Array and decodes UTF-8 with stateful buffering
+        // across successive writes, so multi-byte sequences split across
+        // frames render correctly.
+        term.write(detail.payload);
       };
       window.addEventListener("mcode:pty-data", handlePtyData);
 

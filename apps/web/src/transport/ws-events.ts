@@ -56,10 +56,24 @@ export function startPushListeners(): void {
   // terminal.data: broadcast to TerminalView instances via CustomEvent
   unsubs.push(
     pushEmitter.on("terminal.data", (data) => {
-      const payload = data as { ptyId: string; data: string };
-      window.dispatchEvent(
-        new CustomEvent("mcode:pty-data", { detail: payload }),
-      );
+      // Binary path (preferred): { ptyId, seq, payload: Uint8Array }
+      // Legacy JSON fallback: { ptyId, data: string, seq?: number }
+      let detail: { ptyId: string; payload: Uint8Array; seq: number };
+      const d = data as Record<string, unknown>;
+      if (d["payload"] instanceof Uint8Array) {
+        detail = {
+          ptyId: d["ptyId"] as string,
+          seq: d["seq"] as number,
+          payload: d["payload"] as Uint8Array,
+        };
+      } else {
+        detail = {
+          ptyId: d["ptyId"] as string,
+          payload: new TextEncoder().encode(d["data"] as string),
+          seq: (d["seq"] as number | undefined) ?? 0,
+        };
+      }
+      window.dispatchEvent(new CustomEvent("mcode:pty-data", { detail }));
     }),
   );
 
