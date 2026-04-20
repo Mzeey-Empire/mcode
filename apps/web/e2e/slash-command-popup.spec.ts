@@ -1,0 +1,194 @@
+import { test, expect, type Page } from "@playwright/test";
+import { getDefaultSettings } from "@mcode/contracts";
+import { mockWebSocketServer, type RpcOverrides } from "./helpers/e2e-helpers";
+
+/**
+ * E2E coverage for the slash-command popup. Verifies the four user-visible
+ * behaviors introduced by the slash-command loading-fixes work:
+ *  - the popup renders the full mixed command list (built-ins + skills + commands)
+ *  - typing further filters the list
+ *  - a server-side error surfaces an ErrorRow with a Retry button
+ *  - a Refresh button is rendered in the popup footer
+ *
+ * Each test captures a full-page screenshot to
+ * `apps/web/e2e/screenshots/slash-command/` for visual verification.
+ */
+
+const NOW = new Date().toISOString();
+
+const WORKSPACE = {
+  id: "ws-1",
+  name: "Test Workspace",
+  path: "/test/path",
+  provider_config: {},
+  created_at: NOW,
+  updated_at: NOW,
+};
+
+const THREAD = {
+  id: "thread-1",
+  workspace_id: "ws-1",
+  title: "Slash Command Test Thread",
+  status: "paused" as const,
+  mode: "direct" as const,
+  worktree_path: null,
+  branch: "main",
+  worktree_managed: false,
+  issue_number: null,
+  pr_number: null,
+  pr_status: null,
+  sdk_session_id: null,
+  created_at: NOW,
+  updated_at: NOW,
+  model: "claude-3-5-sonnet",
+  provider: "claude",
+  deleted_at: null,
+  last_context_tokens: null,
+  context_window: null,
+  reasoning_level: null,
+  interaction_mode: null,
+  permission_mode: null,
+  parent_thread_id: null,
+  forked_from_message_id: null,
+};
+
+/** Varied skills payload covering multiple kinds and sources. */
+const FIXTURE_SKILLS = [
+  { name: "superpowers:brainstorming", description: "Generate ideas creatively", kind: "skill", source: "user" },
+  { name: "superpowers:writing-plans", description: "Plan implementations carefully", kind: "skill", source: "user" },
+  { name: "superpowers:executing-plans", description: "Execute multi-step plans", kind: "skill", source: "user" },
+  { name: "writing-clearly-and-concisely", description: "Polish prose for humans", kind: "command", source: "project" },
+  { name: "review-pr", description: "Review a pull request end-to-end", kind: "command", source: "project" },
+  { name: "hookify:hookify", description: "Configure hookify rules", kind: "skill", source: "plugin" },
+  { name: "claude-code-setup:claude-automation-recommender", description: "Recommend automations", kind: "skill", source: "plugin" },
+  { name: "tdd-workflow", description: "Follow strict TDD discipline", kind: "skill", source: "agent" },
+];
+
+/** Boot the app with one workspace + one thread, plus caller-supplied overrides. */
+async function bootApp(page: Page, extra: RpcOverrides = {}): Promise<void> {
+  await mockWebSocketServer(page, {
+    "workspace.list": [WORKSPACE],
+    "thread.list": [THREAD],
+    "message.list": [],
+    ...extra,
+  });
+}
+
+/** Activate the thread and focus the lexical editor; type prefix; await popup. */
+async function openPopup(page: Page, prefix: string): Promise<void> {
+  await page.goto("/");
+  await page.waitForLoadState("networkidle");
+  // Workspaces in the sidebar are collapsed by default; expand to reveal threads.
+  await page
+    .locator('[role="button"][aria-expanded]')
+    .filter({ hasText: "Test Workspace" })
+    .click();
+  await page.waitForSelector("[data-testid='thread-item']");
+  await page.locator("[data-testid='thread-item']").first().click();
+
+  const editor = page.locator("[contenteditable='true']").first();
+  await editor.waitFor({ state: "visible" });
+  await editor.click();
+  await page.keyboard.type(prefix);
+
+  await page.waitForSelector("[data-slash-popup]");
+}
+
+test.describe("Slash command popup", () => {
+  test("01 - popup open shows the full mixed command list", async ({ page }) => {
+    await bootApp(page, { "skill.list": FIXTURE_SKILLS });
+    await openPopup(page, "/");
+
+    const popup = page.locator("[data-slash-popup]");
+    await expect(popup).toBeVisible();
+    await expect(popup.getByText("/compact")).toBeVisible();
+    await expect(popup.getByText("/superpowers:brainstorming")).toBeVisible();
+    await expect(popup.getByText("/hookify:hookify")).toBeVisible();
+
+    await page.screenshot({
+      path: "e2e/screenshots/slash-command/01-popup-open.png",
+      fullPage: true,
+    });
+  });
+
+  test("02 - popup filters as the user keeps typing", async ({ page }) => {
+    await bootApp(page, { "skill.list": FIXTURE_SKILLS });
+    await openPopup(page, "/sup");
+
+    const popup = page.locator("[data-slash-popup]");
+    await expect(popup).toBeVisible();
+    await expect(popup.getByText("/superpowers:brainstorming")).toBeVisible();
+    await expect(popup.getByText("/superpowers:writing-plans")).toBeVisible();
+    await expect(popup.getByText("/compact")).toHaveCount(0);
+
+    await page.screenshot({
+      path: "e2e/screenshots/slash-command/02-popup-filtered.png",
+      fullPage: true,
+    });
+  });
+
+  test("03 - error response surfaces ErrorRow with Retry button", async ({ page }) => {
+    // Mirror the shared helper's defaults but force `skill.list` to return a
+    // JSON-RPC error. The shared mock helper only supports successful result
+    // overrides, so we register a self-contained route that uses
+    // `getDefaultSettings()` for bootstrap parity.
+    await page.routeWebSocket(/ws:\/\/localhost:\d{5}/, (ws) => {
+      ws.onMessage((data) => {
+        const msg = JSON.parse(data.toString()) as { id?: string | number; method?: string };
+        const method = msg.method;
+        if (method === "skill.list") {
+          ws.send(
+            JSON.stringify({
+              id: msg.id,
+              error: { code: -32000, message: "Failed to enumerate skills directory" },
+            }),
+          );
+          return;
+        }
+        let result: unknown = null;
+        if (method === "workspace.list") result = [WORKSPACE];
+        else if (method === "thread.list") result = [THREAD];
+        else if (method?.endsWith(".list") || method === "provider.listModels") result = [];
+        else if (method === "git.currentBranch") result = "main";
+        else if (method === "agent.activeCount") result = 0;
+        else if (method === "app.version") result = "0.0.1-test";
+        else if (method === "config.discover") result = {};
+        else if (method === "settings.get") result = getDefaultSettings();
+        else {
+          ws.send(
+            JSON.stringify({ id: msg.id, error: { code: -32601, message: "Method not found" } }),
+          );
+          return;
+        }
+        ws.send(JSON.stringify({ id: msg.id, result }));
+      });
+    });
+    await openPopup(page, "/");
+
+    const popup = page.locator("[data-slash-popup]");
+    await expect(popup).toBeVisible();
+    await expect(popup.locator("[role='alert']")).toBeVisible();
+    await expect(popup.getByRole("button", { name: "Retry" })).toBeVisible();
+    await expect(popup).toContainText("Couldn't load commands");
+
+    await page.screenshot({
+      path: "e2e/screenshots/slash-command/03-error-row.png",
+      fullPage: true,
+    });
+  });
+
+  test("04 - footer renders the Refresh button", async ({ page }) => {
+    await bootApp(page, { "skill.list": FIXTURE_SKILLS });
+    await openPopup(page, "/");
+
+    const popup = page.locator("[data-slash-popup]");
+    await expect(popup).toBeVisible();
+    const refresh = popup.getByRole("button", { name: "Refresh commands" });
+    await expect(refresh).toBeVisible();
+
+    await page.screenshot({
+      path: "e2e/screenshots/slash-command/04-refresh-button.png",
+      fullPage: true,
+    });
+  });
+});
