@@ -102,6 +102,22 @@ export interface WsTransportOptions {
 }
 
 /**
+ * Reconcile runningThreadIds with the server's authoritative set on (re)connect.
+ * Exported for unit testing.
+ */
+export async function hydrateRunningThreadsFromServer(
+  rpcCall: (method: string, params: unknown) => Promise<unknown>,
+): Promise<void> {
+  try {
+    const ids = (await rpcCall("agent.listRunning", {})) as string[];
+    const { useThreadStore } = await import("@/stores/threadStore");
+    useThreadStore.getState().hydrateRunningThreads(ids);
+  } catch {
+    // Best-effort; optimistic state remains if the call fails.
+  }
+}
+
+/**
  * Create a WebSocket-based transport that implements `McodeTransport`.
  *
  * Every method maps to a single JSON-RPC call matching the server's
@@ -144,6 +160,11 @@ export function createWsTransport(
       consecutiveAuthFailures = 0;
       resolveReady();
       options?.onStatusChange?.("connected");
+
+      // Reconcile runningThreadIds with the server's authoritative set.
+      // The client-side optimistic Set is lost on reload/reconnect; this
+      // restores live-session indicators for threads the server is still running.
+      hydrateRunningThreadsFromServer((method, params) => rpc(method, params as Record<string, unknown>));
 
       // On connect/reconnect, refresh CI checks for all visible PR threads (best-effort).
       // Cooldown prevents subprocess storms during rapid reconnect loops.
