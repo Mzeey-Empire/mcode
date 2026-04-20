@@ -18,6 +18,7 @@ import type {
 import type { PaginatedMessages, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus } from "@mcode/contracts";
 import type { ReasoningLevel } from "@mcode/contracts";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useThreadStore } from "@/stores/threadStore";
 import type { PermissionRequest } from "@mcode/contracts";
 
 /** Minimum reconnect delay in milliseconds. */
@@ -115,7 +116,6 @@ export async function hydrateRunningThreadsFromServer(
   rpcCall: (method: string, params: unknown) => Promise<unknown>,
 ): Promise<void> {
   try {
-    const { useThreadStore } = await import("@/stores/threadStore");
     const beforeRpc = new Set(useThreadStore.getState().runningThreadIds);
     const ids = (await rpcCall("agent.listRunning", {})) as string[];
     const current = useThreadStore.getState().runningThreadIds;
