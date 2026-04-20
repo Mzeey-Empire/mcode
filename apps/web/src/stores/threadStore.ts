@@ -602,7 +602,17 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       if (current.size === ids.length && ids.every((id) => current.has(id))) {
         return {};
       }
-      return { runningThreadIds: new Set(ids) };
+      // Seed agentStartTimes for ids that weren't previously tracked. Without
+      // this, MessageList's "running for Xs" readout shows broken output until
+      // the next server event arrives for each newly hydrated thread. Existing
+      // entries (e.g. optimistic timestamps from a user-initiated send) are
+      // preserved.
+      const now = Date.now();
+      const times = { ...state.agentStartTimes };
+      for (const id of ids) {
+        if (times[id] === undefined) times[id] = now;
+      }
+      return { runningThreadIds: new Set(ids), agentStartTimes: times };
     });
   },
 

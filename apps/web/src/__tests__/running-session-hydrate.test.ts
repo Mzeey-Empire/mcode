@@ -106,4 +106,23 @@ describe("hydrateRunningThreads (store action)", () => {
     expect(after.has("t-2")).toBe(false);
     expect(after.has("t-3")).toBe(true);
   });
+
+  it("seeds agentStartTimes for newly hydrated ids and preserves existing entries", () => {
+    useThreadStore.setState({
+      runningThreadIds: new Set(["t-1"]),
+      agentStartTimes: { "t-1": 100 },
+    });
+    vi.spyOn(Date, "now").mockReturnValue(200);
+
+    useThreadStore.getState().hydrateRunningThreads(["t-1", "t-2"]);
+
+    const times = useThreadStore.getState().agentStartTimes;
+    // Existing optimistic timestamp from a user-initiated send must not be clobbered.
+    expect(times["t-1"]).toBe(100);
+    // New id gets seeded with Date.now() so UI elapsed readouts (MessageList
+    // "running for Xs") render correctly before the next server event arrives.
+    expect(times["t-2"]).toBe(200);
+
+    vi.restoreAllMocks();
+  });
 });
