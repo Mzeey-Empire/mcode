@@ -26,6 +26,7 @@ export const AgentEventType = {
   ToolProgress: "toolProgress",
   ContextEstimate: "contextEstimate",
   QuotaUpdate: "quotaUpdate",
+  ProviderUnavailable: "providerUnavailable",
 } as const;
 
 /** Union of all valid `AgentEvent` type discriminants. */
@@ -157,6 +158,15 @@ export const AgentEventSchema = lazySchema(() =>
       serviceTier: z.enum(["standard", "priority", "batch"]).optional(),
       numTurns: z.number().int().optional(),
       durationMs: z.number().optional(),
+    }),
+    z.object({
+      /** Emitted when sendMessage is gated because the provider is disabled or its CLI is missing. */
+      type: z.literal(AgentEventType.ProviderUnavailable),
+      threadId: z.string(),
+      providerId: z.enum(["claude", "codex", "gemini", "copilot", "cursor", "opencode"]),
+      reason: z.enum(["disabled", "cli_missing"]),
+      /** Configured CLI path the server tried to resolve, when reason === "cli_missing". */
+      configuredPath: z.string().optional(),
     }),
   ]),
 );
