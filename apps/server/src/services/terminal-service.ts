@@ -12,9 +12,11 @@ import type { IPty, IDisposable } from "node-pty";
 import { v4 as uuid } from "uuid";
 import { logger } from "@mcode/shared";
 import { killProcessTree } from "./process-kill.js";
+import { TerminalFlowControl } from "./terminal-flow-control.js";
 import type { ThreadRepo } from "../repositories/thread-repo";
 import type { WorkspaceRepo } from "../repositories/workspace-repo";
 import type { GitService } from "./git-service";
+import type { SettingsService } from "./settings-service";
 
 // createRequire lets us load native CJS modules (node-pty) from both ESM
 // (dev mode via entry.mjs + tsx) and the CJS production bundle.
@@ -69,11 +71,13 @@ export class TerminalService {
   private sessions = new Map<string, PtySession>();
   private threadIndex = new Map<string, Set<string>>();
   private sender: PtySender | null = null;
+  private flowControls = new Map<string, TerminalFlowControl>();
 
   constructor(
     @inject("ThreadRepo") private readonly threadRepo: ThreadRepo,
     @inject("WorkspaceRepo") private readonly workspaceRepo: WorkspaceRepo,
     @inject("GitService") private readonly gitService: GitService,
+    @inject("SettingsService") private readonly settingsService: SettingsService,
   ) {}
 
   /** Set the sender used to stream PTY data to connected clients. */
@@ -132,10 +136,19 @@ export class TerminalService {
 
     let seq = 0;
 
+    const fcSettings = this.settingsService.get().terminal.flowControl;
+    const fc = new TerminalFlowControl({
+      // seq++ only when bytes actually leave the buffer — correct when paused
+      sink: (bytes) => this.sender?.data(id, seq++, bytes),
+      highBytes: fcSettings.serverHighBytes,
+      lowBytes: fcSettings.serverLowBytes,
+    });
+    this.flowControls.set(id, fc);
+
     const dataDisposable = pty.onData((data: string) => {
       // Re-encode to bytes so multi-byte sequences that straddle a node-pty
       // read boundary remain intact on the wire.
-      this.sender?.data(id, seq++, Buffer.from(data, "utf8"));
+      fc.push(Buffer.from(data, "utf8"));
     });
 
     const exitDisposable = pty.onExit(({ exitCode }) => {
@@ -160,6 +173,40 @@ export class TerminalService {
     ]);
 
     return id;
+  }
+
+  /**
+   * Hold a PTY under the client-request pause source. Idempotent.
+   * Throws if the PTY ID is not found.
+   */
+  pause(ptyId: string): void {
+    const fc = this.flowControls.get(ptyId);
+    if (!fc) throw new Error(`PTY not found: ${ptyId}`);
+    fc.pause("client-request");
+  }
+
+  /**
+   * Release the client-request pause source for a PTY. Idempotent.
+   * Throws if the PTY ID is not found.
+   */
+  resume(ptyId: string): void {
+    const fc = this.flowControls.get(ptyId);
+    if (!fc) throw new Error(`PTY not found: ${ptyId}`);
+    fc.release("client-request");
+  }
+
+  /**
+   * Invoked by the socket coordinator with the current worst-case
+   * ws.bufferedAmount across all connected clients.
+   */
+  onBufferedAmountTick(bufferedAmount: number): void {
+    for (const [, fc] of this.flowControls) {
+      if (bufferedAmount > fc.marks.high) {
+        fc.pause("socket-buffered");
+      } else if (bufferedAmount < fc.marks.low) {
+        fc.release("socket-buffered");
+      }
+    }
   }
 
   /** Forward keystrokes to a PTY session. */
@@ -253,5 +300,7 @@ export class TerminalService {
       }
       this.threadIndex = newIndex;
     }
+
+    this.flowControls.delete(ptyId);
   }
 }

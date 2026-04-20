@@ -444,6 +444,16 @@ async function dispatch(
     case "terminal.kill":
       await deps.terminalService.kill(params.ptyId);
       return;
+    case "terminal.pause": {
+      const { ptyId } = params as { ptyId: string };
+      deps.terminalService.pause(ptyId);
+      return;
+    }
+    case "terminal.resume": {
+      const { ptyId } = params as { ptyId: string };
+      deps.terminalService.resume(ptyId);
+      return;
+    }
     case "terminal.killByThread":
       await deps.terminalService.killByThread(params.threadId);
       return;

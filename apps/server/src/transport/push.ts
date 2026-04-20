@@ -56,6 +56,20 @@ export function clientCount(): number {
 }
 
 /**
+ * Returns the maximum ws.bufferedAmount across all currently-open clients.
+ * Used by the socket coordinator to drive server-side flow control.
+ */
+export function maxBufferedAmount(): number {
+  let max = 0;
+  for (const ws of clients) {
+    if (ws.readyState === ws.OPEN) {
+      if (ws.bufferedAmount > max) max = ws.bufferedAmount;
+    }
+  }
+  return max;
+}
+
+/**
  * Broadcast a push event to all connected WebSocket clients.
  * Validates the data against the channel's Zod schema before sending.
  */

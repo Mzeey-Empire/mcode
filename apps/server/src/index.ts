@@ -5,7 +5,7 @@
 
 import { setupContainer } from "./container";
 import { createWsServer } from "./transport/ws-server";
-import { broadcast, broadcastTerminalData, onSessionChange, sessionCount } from "./transport/push";
+import { broadcast, broadcastTerminalData, maxBufferedAmount, onSessionChange, sessionCount } from "./transport/push";
 import { PortPush } from "./transport/port-push";
 import { IpcPushServer, generateIpcPath } from "./transport/ipc-push-server";
 import { logger, getMcodeDir } from "@mcode/shared";
@@ -166,6 +166,13 @@ terminalService.setSender({
     portPush.send("terminal.data", { ptyId, data: Buffer.from(bytes).toString("utf8"), seq });
   },
 });
+
+// Poll ws.bufferedAmount every 50ms and drive server-side flow control.
+// unref() prevents this timer from keeping the process alive if everything
+// else has shut down.
+setInterval(() => {
+  terminalService.onBufferedAmountTick(maxBufferedAmount());
+}, 50).unref();
 
 // AgentService self-wires persistence and session tracking against providers
 agentService.init();
