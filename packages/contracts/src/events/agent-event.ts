@@ -11,6 +11,7 @@ import { QuotaCategorySchema } from "../providers/usage.js";
  * if (event.type === AgentEventType.ToolUse) { ... }
  */
 export const AgentEventType = {
+  TurnStarted: "turnStarted",
   Message: "message",
   ToolUse: "toolUse",
   ToolResult: "toolResult",
@@ -34,6 +35,12 @@ export type AgentEventType = typeof AgentEventType[keyof typeof AgentEventType];
 /** Discriminated union of all events emitted by an agent provider. */
 export const AgentEventSchema = lazySchema(() =>
   z.discriminatedUnion("type", [
+    z.object({
+      /** Emitted at the start of a new turn, before any other events. Mirrors TurnComplete/Ended.
+       *  Used by the client to populate `runningThreadIds` for live-session UI indicators. */
+      type: z.literal(AgentEventType.TurnStarted),
+      threadId: z.string(),
+    }),
     z.object({
       type: z.literal(AgentEventType.Message),
       threadId: z.string(),
