@@ -639,7 +639,10 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const usageInfo = useThreadStore((s) => s.usageByProvider[activeProviderId]);
   const hasLowQuota = usageInfo?.quotaCategories.some((c) => !c.isUnlimited && c.remainingPercent < 0.2) ?? false;
 
-  const availability = useProviderAvailabilityStore((s) => s.getAvailability(activeProviderId as ProviderId));
+  // For new threads (no active thread yet), fall back to the composer-selected
+  // provider so the availability banner tracks what the user is about to submit.
+  const effectiveProviderId = (activeThread?.provider ?? provider) as ProviderId;
+  const availability = useProviderAvailabilityStore((s) => s.getAvailability(effectiveProviderId));
   const providerUnusable = !!availability && (
     !availability.enabled || availability.cli.status === "not_found"
   );
@@ -1325,10 +1328,10 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
             here and the banner renders only the "Open Settings" CTA. */}
         {providerReason && (
           <ProviderUnavailableBanner
-            providerId={activeProviderId as ProviderId}
+            providerId={effectiveProviderId}
             reason={providerReason}
             onOpenSettings={() =>
-              window.dispatchEvent(new CustomEvent("mcode:open-settings", { detail: { section: "provider" } }))
+              window.dispatchEvent(new CustomEvent("mcode:open-settings", { detail: { section: "model" } }))
             }
           />
         )}

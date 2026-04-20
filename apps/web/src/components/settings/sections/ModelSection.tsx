@@ -14,7 +14,7 @@ import {
 import { SettingRow } from "../SettingRow";
 import { SegControl } from "../SegControl";
 import { SectionHeading } from "../SectionHeading";
-import type { SettingsProviderId, ReasoningLevel } from "@mcode/contracts";
+import type { ProviderAvailability, SettingsProviderId, ReasoningLevel } from "@mcode/contracts";
 import { ChevronDown } from "lucide-react";
 import {
   ClaudeIcon,
@@ -64,6 +64,40 @@ const CODEX_REASONING_LABELS: Record<string, string> = {
 };
 
 /**
+ * Builds a provider option for the Model / PR Draft pickers. A provider is only
+ * rendered as disabled once its availability row has loaded and indicates it is
+ * unusable (disabled by user, no adapter, or CLI missing). While availability is
+ * still loading, the option stays selectable to avoid falsely blanking every
+ * entry on first paint.
+ */
+function buildProviderOption(
+  p: (typeof MODEL_PROVIDERS)[number],
+  avail: ProviderAvailability | undefined,
+): { value: string; label: string; disabled: boolean; icon: ReactNode; title: string | undefined } {
+  const unavailable =
+    avail != null &&
+    (!avail.enabled || !avail.hasAdapter || avail.cli.status === "not_found");
+  const title = p.comingSoon
+    ? "Coming soon"
+    : avail == null
+      ? undefined
+      : !avail.enabled
+        ? "Not enabled"
+        : !avail.hasAdapter
+          ? "Unavailable"
+          : avail.cli.status === "not_found"
+            ? "CLI not found"
+            : undefined;
+  return {
+    value: p.id,
+    label: p.name,
+    disabled: p.comingSoon || unavailable,
+    icon: PROVIDER_ICONS[p.id],
+    title,
+  };
+}
+
+/**
  * Model settings section: provider, default model, fallback model, reasoning effort,
  * PR draft provider/model, and CLI paths.
  *
@@ -80,36 +114,24 @@ export function ModelSection() {
   const prDraftModel = useSettingsStore((s) => s.settings.prDraft.model);
   const update = useSettingsStore((s) => s.update);
   const availabilityProviders = useProviderAvailabilityStore((s) => s.providers);
+  const availabilityById = useMemo(
+    () => new Map<string, ProviderAvailability>(availabilityProviders.map((row) => [row.id, row])),
+    [availabilityProviders],
+  );
 
   const providerOptions = useMemo(
-    () => MODEL_PROVIDERS.map((p) => {
-      const avail = availabilityProviders.find((a) => a.id === p.id);
-      return {
-        value: p.id,
-        label: p.name,
-        disabled: p.comingSoon || !avail?.enabled,
-        icon: PROVIDER_ICONS[p.id],
-        title: p.comingSoon ? "Coming soon" : !avail?.enabled ? "Not enabled" : undefined,
-      };
-    }),
-    [availabilityProviders],
+    () => MODEL_PROVIDERS.map((p) => buildProviderOption(p, availabilityById.get(p.id))),
+    [availabilityById],
   );
 
   const prDraftProviderOptions = useMemo(
     () => [
       { value: "", label: "Auto" },
-      ...MODEL_PROVIDERS.filter((p) => p.supportsCompletion).map((p) => {
-        const avail = availabilityProviders.find((a) => a.id === p.id);
-        return {
-          value: p.id,
-          label: p.name,
-          disabled: p.comingSoon || !avail?.enabled,
-          icon: PROVIDER_ICONS[p.id],
-          title: p.comingSoon ? "Coming soon" : !avail?.enabled ? "Not enabled" : undefined,
-        };
-      }),
+      ...MODEL_PROVIDERS.filter((p) => p.supportsCompletion).map((p) =>
+        buildProviderOption(p, availabilityById.get(p.id)),
+      ),
     ],
-    [availabilityProviders],
+    [availabilityById],
   );
 
   const activeProvider = MODEL_PROVIDERS.find((p) => p.id === provider);
