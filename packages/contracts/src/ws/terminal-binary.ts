@@ -24,13 +24,17 @@ export interface TerminalDataFrame {
 
 const HEADER_FIXED_BYTES = 1 /* tag */ + 1 /* ptyIdLen */ + 4 /* seq */;
 
+// Stateless singletons — safe to reuse across calls, avoids per-call allocation.
+const _encoder = new TextEncoder();
+const _decoder = new TextDecoder();
+
 /** Encode a PTY data chunk into a binary frame. */
 export function encodeTerminalDataFrame(
   ptyId: string,
   seq: number,
   payload: Uint8Array,
 ): Uint8Array {
-  const ptyIdBytes = new TextEncoder().encode(ptyId);
+  const ptyIdBytes = _encoder.encode(ptyId);
   if (ptyIdBytes.length > 0xff) {
     throw new Error(`ptyId too long: ${ptyIdBytes.length} bytes`);
   }
@@ -68,7 +72,7 @@ export function decodeTerminalDataFrame(buf: Uint8Array): TerminalDataFrame {
   if (buf.length < seqEnd) {
     throw new Error("terminal.data frame truncated (ptyId/seq)");
   }
-  const ptyId = new TextDecoder().decode(buf.subarray(2, ptyIdEnd));
+  const ptyId = _decoder.decode(buf.subarray(2, ptyIdEnd));
   const seq =
     ((buf[ptyIdEnd] << 24) |
       (buf[ptyIdEnd + 1] << 16) |
