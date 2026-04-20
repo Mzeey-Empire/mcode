@@ -40,14 +40,28 @@ if (import.meta.env.DEV) {
 /**
  * Dev-only active-renderer sentinel. Exposed on
  * `window.__mcodeActiveRenderer` so Playwright can assert which renderer
- * (WebGL vs canvas) xterm is currently using. Guarded by
- * `import.meta.env.DEV` so production bundles pay zero cost.
+ * (WebGL addon vs xterm's built-in DOM renderer) is currently active.
+ * Guarded by `import.meta.env.DEV` so production bundles pay zero cost.
+ *
+ * The "canvas" addon was removed from xterm.js v6, so the fallback path
+ * now relies on xterm's built-in DOM renderer, which auto-attaches when
+ * no renderer addon is loaded.
  */
-type ActiveRendererWindow = Window & { __mcodeActiveRenderer?: "webgl" | "canvas" };
+type ActiveRendererWindow = Window & { __mcodeActiveRenderer?: "webgl" | "dom" };
 
-function setActiveRenderer(name: "webgl" | "canvas"): void {
+function setActiveRenderer(name: "webgl" | "dom"): void {
   if (!import.meta.env.DEV) return;
   (window as ActiveRendererWindow).__mcodeActiveRenderer = name;
+}
+
+/**
+ * Clears the dev-only active-renderer sentinel. Called on terminal
+ * teardown so the sentinel does not report a stale renderer name after
+ * the component unmounts.
+ */
+function clearActiveRenderer(): void {
+  if (!import.meta.env.DEV) return;
+  delete (window as ActiveRendererWindow).__mcodeActiveRenderer;
 }
 
 /**
@@ -86,56 +100,23 @@ function detectWebglSupport(): boolean {
 }
 
 /**
- * Attempts to attach the canvas renderer to `term`. Returns the addon if
- * attached, or `null` if the caller's `isDisposed` latch flipped while the
- * module was loading (in which case the freshly-constructed addon is
- * disposed before ever touching the terminal).
- */
-async function loadCanvasRenderer(
-  term: Terminal,
-  isDisposed: () => boolean,
-): Promise<IDisposable | null> {
-  const { CanvasAddon } = await import("@xterm/addon-canvas");
-  if (isDisposed()) return null;
-  const canvas = new CanvasAddon();
-  if (isDisposed()) {
-    try {
-      canvas.dispose();
-    } catch {
-      // Defensive: addon may have internal state that throws.
-    }
-    return null;
-  }
-  try {
-    term.loadAddon(canvas);
-  } catch (err) {
-    // Construction succeeded but attach failed — dispose the orphaned
-    // addon before rethrowing so the caller's catch does not leak the
-    // partially-initialised CanvasAddon.
-    try {
-      canvas.dispose();
-    } catch {
-      // Defensive: addon may have internal state that throws.
-    }
-    throw err;
-  }
-  setActiveRenderer("canvas");
-  return canvas;
-}
-
-/**
  * Attempts to load the WebGL renderer. On success, installs an
- * `onContextLoss` handler that disposes the WebGL addon and permanently
- * swaps to the canvas addon for the rest of this terminal's session
- * (no retry — context loss typically recurs under the same conditions).
- * On any failure (no GPU context, addon construction throw), falls back
- * to canvas immediately.
+ * `onContextLoss` handler that disposes the WebGL addon for the rest of
+ * this terminal's session (no retry — context loss typically recurs
+ * under the same conditions) and lets xterm's built-in DOM renderer
+ * take over. On any failure (no GPU context, addon construction throw),
+ * or if the component has unmounted, leaves the built-in DOM renderer
+ * as the active renderer.
  *
- * Because the active addon can change at runtime (WebGL → canvas swap),
- * the caller passes a ref object whose `current` this function reassigns
- * so that cleanup always disposes the addon that is actually mounted.
+ * xterm.js v6 removed the standalone canvas renderer addon, so the
+ * fallback is now the DOM renderer that xterm auto-attaches whenever no
+ * renderer addon is loaded (or when a loaded addon is disposed).
  *
- * All module-import awaits are followed by `isDisposed()` checks so a
+ * Because the active renderer can change at runtime (WebGL → DOM swap),
+ * the caller passes a ref object whose `current` this function
+ * reassigns so that cleanup always disposes the addon actually mounted.
+ *
+ * The module-import await is followed by `isDisposed()` checks so a
  * racing unmount cannot attach an addon to an already-disposed terminal
  * or leave a constructed addon leaked with no owner.
  */
@@ -161,8 +142,8 @@ async function loadRenderer(
         term.loadAddon(webgl);
       } catch (err) {
         // Construction succeeded but attach failed — dispose the orphaned
-        // addon before rethrowing so the outer catch falls through to
-        // canvas without leaking the partially-initialised WebglAddon.
+        // addon before rethrowing so the outer catch falls through to the
+        // DOM renderer without leaking the partially-initialised WebglAddon.
         try {
           webgl.dispose();
         } catch {
@@ -173,78 +154,32 @@ async function loadRenderer(
       rendererRef.current = webgl;
       setActiveRenderer("webgl");
       webgl.onContextLoss(() => {
-        // Dispose WebGL and swap to canvas. The xterm buffer is
-        // renderer-independent, so this repaints the existing output
-        // without needing a snapshot/restore dance.
+        // Dispose WebGL; xterm automatically falls back to its built-in
+        // DOM renderer when a loaded renderer addon is disposed. The
+        // xterm buffer is renderer-independent, so this repaints the
+        // existing output without needing a snapshot/restore dance.
         try {
           webgl.dispose();
         } catch {
           // Already disposed by a racing cleanup — safe to ignore.
         }
-        // Inline construction so the disposed-check can run between
-        // `new CanvasAddon()` and `term.loadAddon(canvas)`. The public
-        // `loadCanvasRenderer` helper loads the addon internally, which
-        // would be a side effect against a disposed terminal if we
-        // awaited it here.
-        import("@xterm/addon-canvas")
-          .then(({ CanvasAddon }) => {
-            const canvas = new CanvasAddon();
-            // If the component unmounted while the canvas module was
-            // loading, dispose the freshly-constructed addon without
-            // ever attaching it to the (potentially disposed) terminal.
-            if (isDisposed()) {
-              try {
-                canvas.dispose();
-              } catch {
-                // Defensive: addon may have internal state that throws
-                // even before loadAddon. Safe to ignore.
-              }
-              return;
-            }
-            try {
-              term.loadAddon(canvas);
-            } catch (err) {
-              // Attach failed after successful construction — dispose the
-              // orphaned addon before rethrowing so the outer .catch() logs
-              // without leaking the partially-initialised CanvasAddon.
-              try {
-                canvas.dispose();
-              } catch {
-                // Defensive: addon may have internal state that throws.
-              }
-              throw err;
-            }
-            rendererRef.current = canvas;
-            setActiveRenderer("canvas");
-          })
-          .catch((err) => {
-            // Canvas load failed after WebGL context loss. xterm does
-            // not auto-attach a DOM renderer when no renderer addon is
-            // loaded, so the terminal buffer will be static until
-            // unmount. Nothing else to do here — the session is
-            // effectively read-only rendering.
-            console.warn(
-              "[terminal] Canvas renderer load failed after WebGL context loss; " +
-                "xterm does not auto-attach a DOM renderer, so the terminal " +
-                "buffer is now static until unmount.",
-              err,
-            );
-          });
+        if (isDisposed()) return;
+        rendererRef.current = null;
+        setActiveRenderer("dom");
       });
       return;
     } catch (err) {
-      // WebGL addon construction failed; fall through to canvas unless
-      // we were disposed during the await (in which case fallback would
-      // leak).
+      // WebGL addon construction failed; fall through to DOM unless we
+      // were disposed during the await.
       if (isDisposed()) return;
       console.warn(
-        "[terminal] WebGL renderer init failed, falling back to canvas",
+        "[terminal] WebGL renderer init failed, falling back to DOM",
         err,
       );
     }
   }
-  const canvas = await loadCanvasRenderer(term, isDisposed);
-  if (canvas) rendererRef.current = canvas;
+  // No renderer addon attached → xterm's built-in DOM renderer is active.
+  setActiveRenderer("dom");
 }
 
 /** Props for {@link TerminalView}. */
@@ -439,6 +374,7 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
           // mid-await disposal. Either way, nothing left to release here.
         }
         rendererRef.current = null;
+        clearActiveRenderer();
         term.dispose();
         decrementLiveTerminalCount();
       };
@@ -463,7 +399,18 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
       // now-disposed terminal. No post-await work is required.
     }
 
-    init(container);
+    // init() awaits dynamic imports and may construct/attach xterm before
+    // cleanupRef is registered. If any of those steps reject, flip the
+    // disposed latch and run whatever cleanup has been wired up so no
+    // partial state (live counter increment, attached listeners) leaks.
+    void init(container).catch((err) => {
+      console.warn("[terminal] Failed to initialize terminal", err);
+      disposed = true;
+      cleanupRef.current?.();
+      cleanupRef.current = null;
+      termRef.current = null;
+      fitAddonRef.current = null;
+    });
 
     return () => {
       disposed = true;

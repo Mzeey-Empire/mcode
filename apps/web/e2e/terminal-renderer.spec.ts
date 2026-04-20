@@ -45,12 +45,14 @@ test.describe("Terminal renderer", () => {
   });
 
   /**
-   * Verifies renderer auto-detection and canvas fallback on WebGL context
-   * loss. Short-circuits gracefully when the "new terminal" button isn't
+   * Verifies renderer auto-detection and fallback to xterm's built-in DOM
+   * renderer on WebGL context loss. (xterm.js v6 removed the standalone
+   * canvas addon, so the fallback is now DOM, not canvas.)
+   * Short-circuits gracefully when the "new terminal" button isn't
    * reachable under the current thread-mock infra gap (same pattern as
    * terminal-leak.spec.ts and terminal-resize.spec.ts).
    */
-  test("auto-detects renderer and falls back to canvas on context loss", async ({ page }) => {
+  test("auto-detects renderer and falls back to DOM on context loss", async ({ page }) => {
     await page.goto("/");
     await page.waitForLoadState("networkidle");
 
@@ -70,7 +72,7 @@ test.describe("Terminal renderer", () => {
         (window as unknown as { __mcodeActiveRenderer?: string }).__mcodeActiveRenderer,
     );
     expect(detected, "__mcodeActiveRenderer must be exposed in dev builds").toMatch(
-      /^(webgl|canvas)$/,
+      /^(webgl|dom)$/,
     );
 
     if (detected === "webgl") {
@@ -91,7 +93,7 @@ test.describe("Terminal renderer", () => {
         () =>
           (window as unknown as { __mcodeActiveRenderer?: string }).__mcodeActiveRenderer,
       );
-      expect(after).toBe("canvas");
+      expect(after).toBe("dom");
     }
   });
 });

@@ -51,7 +51,6 @@ export default defineConfig({
       "@shikijs/themes/github-dark",
       "@shikijs/themes/github-light",
       "@xterm/addon-webgl",
-      "@xterm/addon-canvas",
     ],
   },
   clearScreen: false,
