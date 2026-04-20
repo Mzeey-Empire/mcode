@@ -1,5 +1,7 @@
 import { useMemo, type ReactNode } from "react";
+import { ProviderSection } from "./ProviderSection";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import { useProviderModelsStore } from "@/stores/providerModelsStore";
 import {
   MODEL_PROVIDERS,
@@ -13,7 +15,6 @@ import { SettingRow } from "../SettingRow";
 import { SegControl } from "../SegControl";
 import { SectionHeading } from "../SectionHeading";
 import type { SettingsProviderId, ReasoningLevel } from "@mcode/contracts";
-import { Input } from "@/components/ui/input";
 import { ChevronDown } from "lucide-react";
 import {
   ClaudeIcon,
@@ -46,26 +47,6 @@ const PROVIDER_ICONS: Record<string, ReactNode> = {
   gemini: <GeminiIcon size={12} />,
 };
 
-/** All provider options with icons. Coming-soon providers show a tooltip. */
-const PROVIDER_OPTIONS = MODEL_PROVIDERS.map((p) => ({
-  value: p.id,
-  label: p.name,
-  disabled: p.comingSoon,
-  icon: PROVIDER_ICONS[p.id],
-  title: p.comingSoon ? "Coming soon" : undefined,
-}));
-
-/** Provider options for PR draft: "Auto" plus providers that support one-shot completion. */
-const PR_DRAFT_PROVIDER_OPTIONS = [
-  { value: "", label: "Auto" },
-  ...MODEL_PROVIDERS.filter((p) => p.supportsCompletion).map((p) => ({
-    value: p.id,
-    label: p.name,
-    disabled: p.comingSoon,
-    icon: PROVIDER_ICONS[p.id],
-    title: p.comingSoon ? "Coming soon" : undefined,
-  })),
-];
 
 const REASONING_OPTIONS_BASE = [
   { value: "low", label: "Low" },
@@ -95,12 +76,41 @@ export function ModelSection() {
   const modelId = useSettingsStore((s) => s.settings.model.defaults.id);
   const fallbackId = useSettingsStore((s) => s.settings.model.defaults.fallbackId);
   const reasoning = useSettingsStore((s) => s.settings.model.defaults.reasoning);
-  const codexCliPath = useSettingsStore((s) => s.settings.provider.cli.codex);
-  const claudeCliPath = useSettingsStore((s) => s.settings.provider.cli.claude);
-  const copilotCliPath = useSettingsStore((s) => s.settings.provider.cli.copilot);
   const prDraftProvider = useSettingsStore((s) => s.settings.prDraft.provider);
   const prDraftModel = useSettingsStore((s) => s.settings.prDraft.model);
   const update = useSettingsStore((s) => s.update);
+  const availabilityProviders = useProviderAvailabilityStore((s) => s.providers);
+
+  const providerOptions = useMemo(
+    () => MODEL_PROVIDERS.map((p) => {
+      const avail = availabilityProviders.find((a) => a.id === p.id);
+      return {
+        value: p.id,
+        label: p.name,
+        disabled: p.comingSoon || !avail?.enabled,
+        icon: PROVIDER_ICONS[p.id],
+        title: p.comingSoon ? "Coming soon" : !avail?.enabled ? "Not enabled" : undefined,
+      };
+    }),
+    [availabilityProviders],
+  );
+
+  const prDraftProviderOptions = useMemo(
+    () => [
+      { value: "", label: "Auto" },
+      ...MODEL_PROVIDERS.filter((p) => p.supportsCompletion).map((p) => {
+        const avail = availabilityProviders.find((a) => a.id === p.id);
+        return {
+          value: p.id,
+          label: p.name,
+          disabled: p.comingSoon || !avail?.enabled,
+          icon: PROVIDER_ICONS[p.id],
+          title: p.comingSoon ? "Coming soon" : !avail?.enabled ? "Not enabled" : undefined,
+        };
+      }),
+    ],
+    [availabilityProviders],
+  );
 
   const activeProvider = MODEL_PROVIDERS.find((p) => p.id === provider);
 
@@ -225,6 +235,9 @@ export function ModelSection() {
 
   return (
     <div>
+      <ProviderSection />
+
+      <div className="mt-8">
       <SectionHeading>Model</SectionHeading>
       <div>
       <SettingRow
@@ -232,7 +245,7 @@ export function ModelSection() {
         configKey="model.defaults.provider"
         hint="AI provider for new threads."
       >
-        <SegControl options={PROVIDER_OPTIONS} value={provider} onChange={handleProviderChange} />
+        <SegControl options={providerOptions} value={provider} onChange={handleProviderChange} />
       </SettingRow>
 
       <SettingRow
@@ -342,6 +355,7 @@ export function ModelSection() {
         </SettingRow>
       )}
       </div>
+      </div>
 
       <div className="mt-8">
         <SectionHeading>PR Draft</SectionHeading>
@@ -352,7 +366,7 @@ export function ModelSection() {
             hint="AI provider for PR draft generation. Auto inherits from the default provider above."
           >
             <SegControl
-              options={PR_DRAFT_PROVIDER_OPTIONS}
+              options={prDraftProviderOptions}
               value={prDraftProvider}
               onChange={(v) => void update({ prDraft: { provider: v as SettingsProviderId | "", model: "" } })}
             />
@@ -389,47 +403,6 @@ export function ModelSection() {
         </div>
       </div>
 
-      <div className="mt-8">
-        <SectionHeading>CLI Paths</SectionHeading>
-        <div>
-          <SettingRow
-            label="Codex CLI path"
-            configKey="provider.cli.codex"
-            hint="Path to the Codex CLI binary. Leave empty to auto-discover from PATH."
-          >
-            <Input
-              value={codexCliPath}
-              onChange={(e) => void update({ provider: { cli: { codex: e.target.value } } })}
-              placeholder="codex"
-              className="h-7 w-56 text-xs"
-            />
-          </SettingRow>
-          <SettingRow
-            label="Claude CLI path"
-            configKey="provider.cli.claude"
-            hint="Path to the Claude Code CLI binary. Leave empty to auto-discover from PATH."
-          >
-            <Input
-              value={claudeCliPath}
-              onChange={(e) => void update({ provider: { cli: { claude: e.target.value } } })}
-              placeholder="claude"
-              className="h-7 w-56 text-xs"
-            />
-          </SettingRow>
-          <SettingRow
-            label="Copilot CLI path"
-            configKey="provider.cli.copilot"
-            hint="Path to the Copilot CLI binary. Leave empty to auto-discover from PATH."
-          >
-            <Input
-              value={copilotCliPath}
-              onChange={(e) => void update({ provider: { cli: { copilot: e.target.value } } })}
-              placeholder="copilot"
-              className="h-7 w-56 text-xs"
-            />
-          </SettingRow>
-        </div>
-      </div>
     </div>
   );
 }
