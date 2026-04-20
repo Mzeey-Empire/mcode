@@ -95,6 +95,23 @@ describe("SkillService", () => {
     expect(shared!.source).toBe("user");
   });
 
+  it("skips skill subdirs that lack SKILL.md", () => {
+    // Two siblings under the user skills root: one is a real skill, the
+    // other is a helper folder (e.g., shared utilities, scaffolding scripts).
+    // Without the SKILL.md guard, the helper would surface as an empty
+    // command in the popup.
+    const realDir = join(fakeHome, ".claude", "skills", "real-skill");
+    const helperDir = join(fakeHome, ".claude", "skills", "_helpers");
+    mkdirSync(realDir, { recursive: true });
+    mkdirSync(helperDir, { recursive: true });
+    writeMd(join(realDir, "SKILL.md"), { description: "A real skill" });
+    // helperDir intentionally has no SKILL.md.
+
+    const items = new SkillService().list();
+    expect(items.find((i) => i.name === "real-skill")).toBeDefined();
+    expect(items.find((i) => i.name === "_helpers")).toBeUndefined();
+  });
+
   it("returns empty diagnostics with no error when paths are missing", () => {
     const diag = new SkillService().diagnose();
     expect(diag.errors).toEqual([]);

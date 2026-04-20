@@ -6,7 +6,7 @@
  */
 
 import { injectable } from "tsyringe";
-import { readdirSync, readFileSync, type Dirent } from "fs";
+import { readdirSync, readFileSync, existsSync, type Dirent } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import { logger } from "@mcode/shared";
@@ -78,10 +78,15 @@ function scanSkillsDir(
 ): void {
   for (const entry of scanDir(ctx, dir)) {
     if (!entry.isDirectory()) continue;
+    // Only treat a subdir as a skill if it has SKILL.md. Helper folders
+    // (e.g., `_shared/`, `node_modules/`) and partially installed plugin
+    // dirs would otherwise become empty slash-command entries.
+    const skillFile = join(dir, entry.name, "SKILL.md");
+    if (!existsSync(skillFile)) continue;
     const name = prefix ? `${prefix}:${entry.name}` : entry.name;
     setIfHigherPriority(ctx.out, {
       name,
-      description: readDescription(join(dir, entry.name, "SKILL.md")),
+      description: readDescription(skillFile),
       kind: "skill",
       source,
     });
