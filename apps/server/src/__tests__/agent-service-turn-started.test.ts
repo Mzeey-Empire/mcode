@@ -44,6 +44,9 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
     sendMessage: ReturnType<typeof vi.fn>;
   };
   let capturedEvents: AgentEvent[];
+  // Snapshot of capturedEvents.length taken synchronously when the provider's
+  // sendMessage body is entered. If emit truly precedes the call, this must be >= 1.
+  let eventsLengthAtSendMessageEntry: number;
 
   beforeEach(() => {
     db = openMemoryDatabase();
@@ -56,11 +59,18 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
 
     // Capture AgentEvents emitted on the provider bus.
     capturedEvents = [];
+    eventsLengthAtSendMessageEntry = -1;
     providerStub = Object.assign(new EventEmitter(), {
       id: "claude" as ProviderId,
       supportsCompletion: false,
       // Never resolves — we want to observe events emitted BEFORE completion.
-      sendMessage: vi.fn(() => new Promise<void>(() => {})),
+      // Snapshot capturedEvents.length synchronously on entry: this is the
+      // load-bearing ordering signal. If the emit happened BEFORE the call
+      // entered (correct order), this will be >= 1.
+      sendMessage: vi.fn(() => {
+        eventsLengthAtSendMessageEntry = capturedEvents.length;
+        return new Promise<void>(() => {});
+      }),
       stopSession: vi.fn(),
       setSdkSessionId: vi.fn(),
       shutdown: vi.fn(),
@@ -129,12 +139,27 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
     // Let the async prelude (attachment persist + ref capture + settings.get) settle.
     await new Promise((r) => setTimeout(r, 10));
 
-    const turnStarted = capturedEvents.find((e) => e.type === AgentEventType.TurnStarted);
-    expect(turnStarted, "expected a turnStarted event on the provider bus").toBeDefined();
-    expect(turnStarted).toMatchObject({
+    // TurnStarted must be the FIRST event on the bus (nothing precedes it).
+    expect(capturedEvents.length, "expected at least one event on the bus").toBeGreaterThan(0);
+    expect(capturedEvents[0]).toMatchObject({
       type: AgentEventType.TurnStarted,
       threadId: thread.id,
     });
+
+    // Load-bearing ordering assertion: the snapshot taken synchronously inside
+    // the provider's sendMessage body must show the TurnStarted emit had already
+    // landed on the bus BEFORE the call entered. This is the real "emit precedes
+    // call" proof — not just "emit precedes the (never-resolving) promise".
+    expect(
+      eventsLengthAtSendMessageEntry,
+      "expected capturedEvents.length >= 1 at sendMessage entry (emit must precede call)",
+    ).toBeGreaterThanOrEqual(1);
+
+    // Guard against accidental double-emission on resume/retry paths.
+    const turnStartedCount = capturedEvents.filter(
+      (e) => e.type === AgentEventType.TurnStarted,
+    ).length;
+    expect(turnStartedCount, "turnStarted must be emitted exactly once").toBe(1);
 
     expect(svc.activeThreadIds()).toContain(thread.id);
 
