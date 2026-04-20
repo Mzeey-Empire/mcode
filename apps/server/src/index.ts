@@ -307,6 +307,7 @@ const { httpServer, wss } = createWsServer({
   memoryPressureService,
   taskRepo,
   providerRegistry,
+  providerAvailability,
   prDraftService,
   ciWatcherService,
   threadRepo,
