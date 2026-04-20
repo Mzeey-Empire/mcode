@@ -216,6 +216,10 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({}),
     result: z.number(),
   },
+  "agent.listRunning": {
+    params: z.object({}),
+    result: z.array(z.string()),
+  },
   "agent.answerQuestions": {
     params: z.object({
       threadId: z.string(),
