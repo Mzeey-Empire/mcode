@@ -86,12 +86,26 @@ function detectWebglSupport(): boolean {
 }
 
 /**
- * Loads the canvas renderer addon and registers the renderer name.
- * Returns the addon instance so the caller can track it for cleanup.
+ * Attempts to attach the canvas renderer to `term`. Returns the addon if
+ * attached, or `null` if the caller's `isDisposed` latch flipped while the
+ * module was loading (in which case the freshly-constructed addon is
+ * disposed before ever touching the terminal).
  */
-async function loadCanvasRenderer(term: Terminal): Promise<IDisposable> {
+async function loadCanvasRenderer(
+  term: Terminal,
+  isDisposed: () => boolean,
+): Promise<IDisposable | null> {
   const { CanvasAddon } = await import("@xterm/addon-canvas");
+  if (isDisposed()) return null;
   const canvas = new CanvasAddon();
+  if (isDisposed()) {
+    try {
+      canvas.dispose();
+    } catch {
+      // Defensive: addon may have internal state that throws.
+    }
+    return null;
+  }
   term.loadAddon(canvas);
   setActiveRenderer("canvas");
   return canvas;
@@ -108,6 +122,10 @@ async function loadCanvasRenderer(term: Terminal): Promise<IDisposable> {
  * Because the active addon can change at runtime (WebGL → canvas swap),
  * the caller passes a ref object whose `current` this function reassigns
  * so that cleanup always disposes the addon that is actually mounted.
+ *
+ * All module-import awaits are followed by `isDisposed()` checks so a
+ * racing unmount cannot attach an addon to an already-disposed terminal
+ * or leave a constructed addon leaked with no owner.
  */
 async function loadRenderer(
   term: Terminal,
@@ -117,7 +135,16 @@ async function loadRenderer(
   if (detectWebglSupport()) {
     try {
       const { WebglAddon } = await import("@xterm/addon-webgl");
+      if (isDisposed()) return;
       const webgl = new WebglAddon();
+      if (isDisposed()) {
+        try {
+          webgl.dispose();
+        } catch {
+          // Defensive: addon may have internal state that throws.
+        }
+        return;
+      }
       try {
         term.loadAddon(webgl);
       } catch (err) {
@@ -182,14 +209,18 @@ async function loadRenderer(
       });
       return;
     } catch (err) {
-      // WebGL addon construction failed; fall through to canvas.
+      // WebGL addon construction failed; fall through to canvas unless
+      // we were disposed during the await (in which case fallback would
+      // leak).
+      if (isDisposed()) return;
       console.warn(
         "[terminal] WebGL renderer init failed, falling back to canvas",
         err,
       );
     }
   }
-  rendererRef.current = await loadCanvasRenderer(term);
+  const canvas = await loadCanvasRenderer(term, isDisposed);
+  if (canvas) rendererRef.current = canvas;
 }
 
 /** Props for {@link TerminalView}. */
@@ -261,23 +292,6 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
 
       fitAddon.fit();
 
-      await loadRenderer(term, rendererRef, () => disposed);
-      if (disposed) {
-        // Unmount races with the loadRenderer await — `cleanupRef.current`
-        // is still null at this point, so the effect teardown could not
-        // release anything. Dispose the already-constructed resources and
-        // decrement the counter here to keep the leak-counter invariant.
-        try {
-          rendererRef.current?.dispose();
-        } catch {
-          // Race with context-loss swap — safe to ignore.
-        }
-        rendererRef.current = null;
-        term.dispose();
-        decrementLiveTerminalCount();
-        return;
-      }
-
       termRef.current = term;
       fitAddonRef.current = fitAddon;
 
@@ -304,7 +318,11 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
         transport.terminalWrite(ptyId, data).catch(() => {});
       });
 
-      // Listen for PTY output via push channel (CustomEvent dispatched by ws-events)
+      // Listen for PTY output via push channel (CustomEvent dispatched by ws-events).
+      // Attached BEFORE awaiting the renderer so initial PTY output that arrives
+      // during renderer initialization is buffered into the xterm write queue
+      // (term.write is renderer-independent) and painted as soon as a renderer
+      // is attached — never dropped.
       const handlePtyData = (e: Event) => {
         const detail = (e as CustomEvent).detail as {
           ptyId: string;
@@ -316,7 +334,8 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
       };
       window.addEventListener("mcode:pty-data", handlePtyData);
 
-      // Listen for PTY exit via push channel
+      // Listen for PTY exit via push channel (attached pre-renderer for the
+      // same reason as pty-data: an early exit should not be silently lost).
       const handlePtyExit = (e: Event) => {
         const detail = (e as CustomEvent).detail as {
           ptyId: string;
@@ -384,16 +403,20 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
         try {
           rendererRef.current?.dispose();
         } catch {
-          // Renderer may already be disposed by a racing context-loss swap.
+          // Renderer may already be disposed by a racing context-loss swap,
+          // or the renderer never attached because loadRenderer aborted on a
+          // mid-await disposal. Either way, nothing left to release here.
         }
         rendererRef.current = null;
         term.dispose();
         decrementLiveTerminalCount();
       };
 
-      // Set cleanupRef BEFORE the disposed check so the effect's
-      // synchronous teardown can always reach it, even if it races
-      // with this async init completing.
+      // Register cleanup BEFORE awaiting the renderer so a mid-await unmount
+      // can reach it via React's teardown path, and so PTY events delivered
+      // during the await are handled by listeners that already have a known
+      // disposal pathway. term.write() queues into the xterm buffer even
+      // before a renderer is attached, so no initial output is lost.
       cleanupRef.current = cleanup;
 
       if (disposed) {
@@ -401,6 +424,12 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
         cleanupRef.current = null;
         return;
       }
+
+      await loadRenderer(term, rendererRef, () => disposed);
+      // If `disposed` flipped during the await, React's effect teardown
+      // already invoked cleanupRef.current, and loadRenderer's own
+      // isDisposed() guards ensured no renderer addon was attached to the
+      // now-disposed terminal. No post-await work is required.
     }
 
     init(container);
