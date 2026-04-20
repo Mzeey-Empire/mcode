@@ -84,6 +84,7 @@ export function useSlashCommand({
   const lastFilterRef = useRef("");
 
   const skills = useSkillsStore((s) => s.skills);
+  const cachedCwd = useSkillsStore((s) => s.cwd);
   const isLoading = useSkillsStore((s) => s.isLoading);
   const error = useSkillsStore((s) => s.error);
   const load = useSkillsStore((s) => s.load);
@@ -103,15 +104,24 @@ export function useSlashCommand({
     return allCommands.filter((c) => c.name.toLowerCase().includes(f));
   })();
 
-  // Trigger an initial load when the popup first opens.
-  // The `!error` gate is critical: without it, a failed load resets
-  // `isLoading` to false, which would re-trigger this effect immediately
-  // and create an infinite retry loop. Recovery happens via `onRetry`.
+  // Trigger a load when the popup opens AND either (a) we have no skills,
+  // or (b) the current workspace's cwd differs from the cached cwd. The
+  // store now tracks `cwd` for both successful and failed loads, so a
+  // mismatch is the right signal — without this, switching workspaces
+  // would keep showing the previous workspace's commands forever.
+  //
+  // The `!error` gate prevents an infinite retry loop on persistent
+  // failures: when cwd is unchanged, recovery happens via `onRetry`.
+  // When cwd changes, we always load (treating it as a fresh workspace,
+  // ignoring any prior error from the old one).
   useEffect(() => {
-    if (isOpen && skills === null && !isLoading && !error) {
+    if (!isOpen || isLoading) return;
+    const cwdChanged = cachedCwd !== cwd;
+    const noSkills = skills === null;
+    if (cwdChanged || (noSkills && !error)) {
       load(cwd).catch(() => { /* surfaced via `error` */ });
     }
-  }, [isOpen, skills, isLoading, error, load, cwd]);
+  }, [isOpen, skills, cachedCwd, cwd, isLoading, error, load]);
 
   const onInputChange = useCallback(
     (value: string) => {
@@ -142,7 +152,11 @@ export function useSlashCommand({
         case "ArrowDown":
           e.preventDefault();
           e.stopPropagation();
-          setSelectedIndex((i) => Math.min(i + 1, filtered.length - 1));
+          // Clamp to 0 when filtered is empty; otherwise `length - 1` would
+          // be `-1`, leaking an invalid index into ARIA / keyboard handling.
+          setSelectedIndex((i) =>
+            filtered.length === 0 ? 0 : Math.min(i + 1, filtered.length - 1),
+          );
           break;
         case "ArrowUp":
           e.preventDefault();
