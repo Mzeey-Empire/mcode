@@ -3,7 +3,7 @@
   { "key": "mod+n", "command": "thread.new", "when": "!inputFocused" },
   { "key": "mod+shift+n", "command": "workspace.new", "when": "!inputFocused" },
   { "key": "mod+\\", "command": "sidebar.toggle", "when": "!inputFocused" },
-  { "key": "mod+j", "command": "terminal.toggle", "when": "!inputFocused" },
+  { "key": "mod+j", "command": "terminal.toggle" },
   { "key": "mod+,", "command": "settings.open", "when": "!inputFocused" },
   { "key": "mod+shift+?", "command": "shortcuts.help", "when": "!inputFocused" },
   { "key": "mod+o", "command": "explorer.open", "when": "!inputFocused" },

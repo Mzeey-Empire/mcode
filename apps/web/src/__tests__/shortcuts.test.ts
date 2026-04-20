@@ -78,3 +78,53 @@ describe("shortcuts integration", () => {
     expect(getKeybindings().length).toBe(1);
   });
 });
+
+// Regression guard for issue #304: terminal.toggle must fire even when an
+// input is focused. Users invoke Ctrl/Cmd+J from the composer to toggle the
+// terminal; the previous `when: !inputFocused` gate broke that workflow.
+describe("terminal.toggle keybinding (regression #304)", () => {
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    clearKeybindings();
+    clearCommands();
+    resetContext();
+  });
+
+  afterEach(() => {
+    cleanup?.();
+  });
+
+  it("default keybindings bind terminal.toggle to mod+j without a when clause", async () => {
+    const defaults = (await import("@/config/default-keybindings.json")).default as Array<{
+      key: string;
+      command: string;
+      when?: string;
+    }>;
+    const terminalToggle = defaults.find((b) => b.command === "terminal.toggle");
+    expect(terminalToggle).toBeDefined();
+    expect(terminalToggle!.key).toBe("mod+j");
+    expect(terminalToggle!.when).toBeUndefined();
+  });
+
+  it("fires terminal.toggle even when a text input is focused", () => {
+    const handler = vi.fn();
+    registerCommand({
+      id: "terminal.toggle",
+      title: "Toggle Terminal",
+      category: "Terminal",
+      handler,
+    });
+    loadKeybindings([{ key: "mod+j", command: "terminal.toggle" }]);
+    cleanup = initShortcuts();
+
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+
+    document.dispatchEvent(createKeyEvent({ key: "j", ctrlKey: true }));
+    expect(handler).toHaveBeenCalled();
+
+    document.body.removeChild(input);
+  });
+});
