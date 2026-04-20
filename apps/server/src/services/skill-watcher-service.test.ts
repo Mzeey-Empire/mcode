@@ -78,6 +78,30 @@ describe("SkillWatcherService", () => {
     expect((watcher as unknown as { watchers: unknown[] }).watchers.length).toBe(1);
   });
 
+  it("auto-registers a root that is created after start()", async () => {
+    // Simulates a fresh-install scenario: ~/.claude exists but the
+    // skills/commands/plugins child dirs don't yet. Without parent-dir
+    // watching, those roots would never be picked up until a process
+    // restart.
+    const root = join(dir, "skills");
+    // dir (parent) exists; root does not.
+
+    watcher.start({ parentDir: dir, roots: [root] });
+
+    // Create the missing root after start() — this should be observed by
+    // the parent watcher and trigger a delayed registration of `root`.
+    mkdirSync(root, { recursive: true });
+    // Allow the parent fs.watch event to flush and onParentChange() to
+    // call watch(root). 150ms is well above OS event coalescing windows.
+    await new Promise((r) => setTimeout(r, 150));
+
+    // Now a change inside the late-registered root should invalidate.
+    const invalidateSpy = vi.spyOn(svc, "invalidate");
+    writeFileSync(join(root, "marker.txt"), "x");
+    await new Promise((r) => setTimeout(r, 400));
+    expect(invalidateSpy).toHaveBeenCalled();
+  });
+
   it("start() is idempotent: a second call from a clean state does not call watch() again", () => {
     // Spy on watch() so the assertion is independent of which `~/.claude/*`
     // subdirs happen to exist on the host (CI typically has none, in which

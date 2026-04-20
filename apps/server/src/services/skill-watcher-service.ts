@@ -23,6 +23,9 @@ export class SkillWatcherService {
   // paths that add overlapping roots) don't register duplicate FSWatchers
   // and fire the debounce timer twice per change.
   private readonly watchedDirs = new Set<string>();
+  // Roots we want watched. Stored on the instance so the parent-dir watch
+  // can re-attempt registration when one of them is created post-startup.
+  private dynamicRoots: string[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
   // Tracks whether start() has run, separately from watcher count: a fresh
   // install with no `~/.claude/{skills,commands,plugins}` directories would
@@ -36,8 +39,14 @@ export class SkillWatcherService {
   /**
    * Begin watching the standard Claude plugin and skill roots.
    * Idempotent: subsequent calls are no-ops until `stopAll()` resets state.
+   *
+   * Also watches the parent `~/.claude` dir so a root that doesn't exist
+   * at startup (fresh install) gets registered automatically when created.
+   *
+   * @param overrides Optional path overrides for testing. Production callers
+   *   should call `start()` with no arguments.
    */
-  start(): void {
+  start(overrides?: { parentDir?: string; roots?: string[] }): void {
     if (this.started) {
       logger.debug("SkillWatcherService: start() ignored, already started", {
         watcherCount: this.watchers.length,
@@ -46,12 +55,53 @@ export class SkillWatcherService {
     }
     this.started = true;
     const home = homedir();
-    const roots = [
-      join(home, ".claude", "skills"),
-      join(home, ".claude", "commands"),
-      join(home, ".claude", "plugins"),
+    const claudeDir = overrides?.parentDir ?? join(home, ".claude");
+    const roots = overrides?.roots ?? [
+      join(claudeDir, "skills"),
+      join(claudeDir, "commands"),
+      join(claudeDir, "plugins"),
     ];
+    this.dynamicRoots = roots;
+    this.watchParent(claudeDir);
     for (const root of roots) this.watch(root);
+  }
+
+  /**
+   * Watch the parent dir non-recursively so creation of any of `dynamicRoots`
+   * post-startup triggers a (re-)registration. Recursive watching here would
+   * fire on every plugin file write — far too noisy. Non-recursive sees only
+   * direct children of the parent, which is exactly the granularity we need.
+   */
+  private watchParent(parentDir: string): void {
+    if (!existsSync(parentDir)) {
+      logger.debug("SkillWatcherService: parent dir missing, dynamic-root detection disabled", {
+        parentDir,
+      });
+      return;
+    }
+    if (this.watchedDirs.has(parentDir)) return;
+    try {
+      const w = watch(parentDir, () => this.onParentChange(parentDir));
+      this.attachErrorHandler(w, parentDir);
+      this.watchers.push(w);
+      this.watchedDirs.add(parentDir);
+    } catch (err) {
+      const message = (err as Error).message;
+      logger.debug("SkillWatcherService: parent watch failed", { parentDir, message });
+    }
+  }
+
+  /**
+   * Re-attempt registration of any dynamic root that's not currently watched
+   * (it may have just been created), then trigger the normal debounced
+   * invalidate. `watch()` is dedup'd and skips missing dirs, so this is safe
+   * to invoke on every parent-dir event.
+   */
+  private onParentChange(parentDir: string): void {
+    for (const root of this.dynamicRoots) {
+      if (!this.watchedDirs.has(root)) this.watch(root);
+    }
+    this.onChange(parentDir);
   }
 
   /** Begin watching one directory. No-op when the path is missing or already watched. */
@@ -99,6 +149,7 @@ export class SkillWatcherService {
     }
     this.watchers.length = 0;
     this.watchedDirs.clear();
+    this.dynamicRoots = [];
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
