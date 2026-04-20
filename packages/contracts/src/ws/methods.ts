@@ -339,6 +339,14 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({ ptyId: z.string() }),
     result: z.void(),
   },
+  "terminal.pause": {
+    params: z.object({ ptyId: z.string() }),
+    result: z.void(),
+  },
+  "terminal.resume": {
+    params: z.object({ ptyId: z.string() }),
+    result: z.void(),
+  },
   "terminal.killByThread": {
     params: z.object({ threadId: z.string() }),
     result: z.void(),

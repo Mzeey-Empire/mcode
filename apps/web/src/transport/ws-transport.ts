@@ -551,6 +551,8 @@ export function createWsTransport(
     terminalResize: (ptyId, cols, rows) =>
       rpc<void>("terminal.resize", { ptyId, cols, rows }),
     terminalKill: (ptyId) => rpc<void>("terminal.kill", { ptyId }),
+    terminalPause: (ptyId) => rpc<void>("terminal.pause", { ptyId }),
+    terminalResume: (ptyId) => rpc<void>("terminal.resume", { ptyId }),
     terminalKillByThread: (threadId) =>
       rpc<void>("terminal.killByThread", { threadId }),
 
