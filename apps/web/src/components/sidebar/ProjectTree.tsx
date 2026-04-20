@@ -468,7 +468,11 @@ export function ProjectTree() {
             {
               label: "Copy Path",
               onClick: () => {
-                navigator.clipboard.writeText(contextMenu.workspacePath);
+                // Prefer the worktree path when the thread lives in one,
+                // so the copied path matches the thread's actual checkout.
+                navigator.clipboard.writeText(
+                  contextMenu.worktreePath ?? contextMenu.workspacePath,
+                );
               },
             },
             {
