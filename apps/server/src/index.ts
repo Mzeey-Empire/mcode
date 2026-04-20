@@ -5,7 +5,7 @@
 
 import { setupContainer } from "./container";
 import { createWsServer } from "./transport/ws-server";
-import { broadcast, onSessionChange, sessionCount } from "./transport/push";
+import { broadcast, broadcastTerminalData, onSessionChange, sessionCount } from "./transport/push";
 import { PortPush } from "./transport/port-push";
 import { IpcPushServer, generateIpcPath } from "./transport/ipc-push-server";
 import { logger, getMcodeDir } from "@mcode/shared";
@@ -153,14 +153,18 @@ const ciWatcherService = new CiWatcherService(githubService, (channel, data) => 
 });
 
 // Wire up PTY sender to broadcast push events
-terminalService.setSender((channel, data) => {
-  if (channel === "terminal.data") {
-    broadcast("terminal.data", data);
-    portPush.send("terminal.data", data);
-  } else if (channel === "terminal.exit") {
-    broadcast("terminal.exit", data);
-    portPush.send("terminal.exit", data);
-  }
+terminalService.setSender({
+  json: (channel, data) => {
+    broadcast(channel as Parameters<typeof broadcast>[0], data as Parameters<typeof broadcast>[1]);
+    portPush.send(channel, data);
+  },
+  data: (ptyId, seq, bytes) => {
+    broadcastTerminalData(ptyId, seq, bytes);
+    // portPush uses JSON serialization over a socket, so re-encode bytes to a
+    // UTF-8 string for the IPC path. This only runs in Electron mode where a
+    // port is attached, so the performance cost is negligible.
+    portPush.send("terminal.data", { ptyId, data: Buffer.from(bytes).toString("utf8"), seq });
+  },
 });
 
 // AgentService self-wires persistence and session tracking against providers

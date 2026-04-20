@@ -47,11 +47,13 @@ interface PtySession {
   readonly exitDisposable: IDisposable;
 }
 
-/** Callback for sending PTY data and exit events to connected clients. */
-type PtySender = (
-  channel: string,
-  data: Record<string, unknown>,
-) => void;
+/** Callbacks for streaming PTY output and exit events to connected clients. */
+export interface PtySender {
+  /** Send a JSON push event (used for terminal.exit and any future JSON events). */
+  json: (channel: string, data: Record<string, unknown>) => void;
+  /** Send a PTY data chunk as a binary frame (tag 0x01 envelope). */
+  data: (ptyId: string, seq: number, bytes: Uint8Array) => void;
+}
 
 /** Determine the default shell for the current platform. */
 function defaultShell(): string {
@@ -74,9 +76,9 @@ export class TerminalService {
     @inject("GitService") private readonly gitService: GitService,
   ) {}
 
-  /** Set the sender function used to stream PTY data to connected clients. */
-  setSender(fn: PtySender): void {
-    this.sender = fn;
+  /** Set the sender used to stream PTY data to connected clients. */
+  setSender(sender: PtySender): void {
+    this.sender = sender;
   }
 
   /**
@@ -128,12 +130,16 @@ export class TerminalService {
       cwd,
     });
 
+    let seq = 0;
+
     const dataDisposable = pty.onData((data: string) => {
-      this.sender?.("terminal.data", { ptyId: id, data });
+      // Re-encode to bytes so multi-byte sequences that straddle a node-pty
+      // read boundary remain intact on the wire.
+      this.sender?.data(id, seq++, Buffer.from(data, "utf8"));
     });
 
     const exitDisposable = pty.onExit(({ exitCode }) => {
-      this.sender?.("terminal.exit", { ptyId: id, code: exitCode });
+      this.sender?.json("terminal.exit", { ptyId: id, code: exitCode });
       this.removePty(id);
     });
 
