@@ -57,13 +57,10 @@ test.describe("Terminal renderer", () => {
     await page.keyboard.press("Control+J");
     const newTerminalButton = page.getByRole("button", { name: /new terminal/i });
     const buttonAvailable = await newTerminalButton.isVisible().catch(() => false);
-    if (!buttonAvailable) {
-      test.info().annotations.push({
-        type: "skip-reason",
-        description: "Active-thread mock infra not yet available; see terminal-leak.spec.ts",
-      });
-      return;
-    }
+    test.skip(
+      !buttonAvailable,
+      "new-terminal button unavailable in current mock infra (pre-existing)",
+    );
 
     await newTerminalButton.click();
     await page.waitForTimeout(400);

@@ -118,7 +118,19 @@ async function loadRenderer(
     try {
       const { WebglAddon } = await import("@xterm/addon-webgl");
       const webgl = new WebglAddon();
-      term.loadAddon(webgl);
+      try {
+        term.loadAddon(webgl);
+      } catch (err) {
+        // Construction succeeded but attach failed — dispose the orphaned
+        // addon before rethrowing so the outer catch falls through to
+        // canvas without leaking the partially-initialised WebglAddon.
+        try {
+          webgl.dispose();
+        } catch {
+          // Defensive: addon may have internal state that throws.
+        }
+        throw err;
+      }
       rendererRef.current = webgl;
       setActiveRenderer("webgl");
       webgl.onContextLoss(() => {
@@ -250,7 +262,21 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
       fitAddon.fit();
 
       await loadRenderer(term, rendererRef, () => disposed);
-      if (disposed) return;
+      if (disposed) {
+        // Unmount races with the loadRenderer await — `cleanupRef.current`
+        // is still null at this point, so the effect teardown could not
+        // release anything. Dispose the already-constructed resources and
+        // decrement the counter here to keep the leak-counter invariant.
+        try {
+          rendererRef.current?.dispose();
+        } catch {
+          // Race with context-loss swap — safe to ignore.
+        }
+        rendererRef.current = null;
+        term.dispose();
+        decrementLiveTerminalCount();
+        return;
+      }
 
       termRef.current = term;
       fitAddonRef.current = fitAddon;
