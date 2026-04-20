@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type { Terminal } from "@xterm/xterm";
+import type { Terminal, IDisposable } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import { getTransport } from "@/transport";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -37,6 +37,96 @@ if (import.meta.env.DEV) {
   }
 }
 
+/**
+ * Dev-only active-renderer sentinel. Exposed on
+ * `window.__mcodeActiveRenderer` so Playwright can assert which renderer
+ * (WebGL vs canvas) xterm is currently using. Guarded by
+ * `import.meta.env.DEV` so production bundles pay zero cost.
+ */
+type ActiveRendererWindow = Window & { __mcodeActiveRenderer?: "webgl" | "canvas" };
+
+function setActiveRenderer(name: "webgl" | "canvas"): void {
+  if (!import.meta.env.DEV) return;
+  (window as ActiveRendererWindow).__mcodeActiveRenderer = name;
+}
+
+/**
+ * Returns true if the browser can create a WebGL context. Uses a throwaway
+ * canvas so it does not mutate the terminal's own canvas during detection.
+ */
+function detectWebglSupport(): boolean {
+  try {
+    const c = document.createElement("canvas");
+    const ctx = c.getContext("webgl2") ?? c.getContext("webgl");
+    return ctx !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Loads the canvas renderer addon and registers the renderer name.
+ * Returns the addon instance so the caller can track it for cleanup.
+ */
+async function loadCanvasRenderer(term: Terminal): Promise<IDisposable> {
+  const { CanvasAddon } = await import("@xterm/addon-canvas");
+  const canvas = new CanvasAddon();
+  term.loadAddon(canvas);
+  setActiveRenderer("canvas");
+  return canvas;
+}
+
+/**
+ * Attempts to load the WebGL renderer. On success, installs an
+ * `onContextLoss` handler that disposes the WebGL addon and permanently
+ * swaps to the canvas addon for the rest of this terminal's session
+ * (no retry — context loss typically recurs under the same conditions).
+ * On any failure (no GPU context, addon construction throw), falls back
+ * to canvas immediately.
+ *
+ * Because the active addon can change at runtime (WebGL → canvas swap),
+ * the caller passes a ref object whose `current` this function reassigns
+ * so that cleanup always disposes the addon that is actually mounted.
+ */
+async function loadRenderer(
+  term: Terminal,
+  rendererRef: { current: IDisposable | null },
+): Promise<void> {
+  if (detectWebglSupport()) {
+    try {
+      const { WebglAddon } = await import("@xterm/addon-webgl");
+      const webgl = new WebglAddon();
+      term.loadAddon(webgl);
+      rendererRef.current = webgl;
+      setActiveRenderer("webgl");
+      webgl.onContextLoss(() => {
+        // Dispose WebGL and swap to canvas. The xterm buffer is
+        // renderer-independent, so this repaints the existing output
+        // without needing a snapshot/restore dance.
+        try {
+          webgl.dispose();
+        } catch {
+          // Already disposed by a racing cleanup — safe to ignore.
+        }
+        loadCanvasRenderer(term)
+          .then((canvas) => {
+            rendererRef.current = canvas;
+          })
+          .catch(() => {
+            // Canvas load failed — fall back to the default DOM renderer
+            // that xterm uses when no addon is attached.
+            rendererRef.current = null;
+            setActiveRenderer("canvas");
+          });
+      });
+      return;
+    } catch {
+      // WebGL addon construction failed; fall through to canvas.
+    }
+  }
+  rendererRef.current = await loadCanvasRenderer(term);
+}
+
 /** Props for {@link TerminalView}. */
 interface TerminalViewProps {
   /** The PTY session ID this view is bound to. */
@@ -52,6 +142,7 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
   const fitAddonRef = useRef<FitAddon | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
   const flushResizeRpcRef = useRef<(() => void) | null>(null);
+  const rendererRef = useRef<IDisposable | null>(null);
 
   const scrollback = useSettingsStore((s) => s.settings.terminal.scrollback);
   const scrollbackRef = useRef(scrollback);
@@ -104,6 +195,9 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
       });
 
       fitAddon.fit();
+
+      await loadRenderer(term, rendererRef);
+      if (disposed) return;
 
       termRef.current = term;
       fitAddonRef.current = fitAddon;
@@ -208,6 +302,12 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
         window.removeEventListener("mcode:pty-data", handlePtyData);
         window.removeEventListener("mcode:pty-exit", handlePtyExit);
         observer.disconnect();
+        try {
+          rendererRef.current?.dispose();
+        } catch {
+          // Renderer may already be disposed by a racing context-loss swap.
+        }
+        rendererRef.current = null;
         term.dispose();
         decrementLiveTerminalCount();
       };
