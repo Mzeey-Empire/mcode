@@ -97,7 +97,18 @@ export function TerminalPanel() {
    */
   const closeAllTerminals = useCallback(() => {
     if (!activeThreadId) return;
-    getTransport().terminalKillByThread(activeThreadId).catch(() => {});
+    // Optimistically collapse the UI so the bin button feels instant; log
+    // kill failures (rather than swallowing) so leaked PTYs surface in the
+    // console for diagnosis.
+    getTransport()
+      .terminalKillByThread(activeThreadId)
+      .catch((err) => {
+        console.error(
+          "Failed to kill terminals for thread",
+          activeThreadId,
+          err,
+        );
+      });
     removeAllTerminals(activeThreadId);
     hideTerminalPanel(activeThreadId);
   }, [activeThreadId]);
