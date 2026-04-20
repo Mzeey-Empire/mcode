@@ -55,6 +55,29 @@ describe("SkillWatcherService", () => {
     expect(() => watcher.watch(join(dir, "does-not-exist"))).not.toThrow();
   });
 
+  it("watch() dedupes by directory path: a second call for the same dir is a no-op", async () => {
+    mkdirSync(join(dir, "skills"), { recursive: true });
+    const target = join(dir, "skills");
+    const invalidateSpy = vi.spyOn(svc, "invalidate");
+
+    watcher.watch(target);
+    watcher.watch(target);
+
+    // Trigger one fs change. With dedup the debounced invalidate fires once;
+    // without dedup, two FSWatchers would each schedule the timer (the second
+    // resets it), and the eventual single timer fire would still call
+    // invalidate once — so call count alone is insufficient. The real
+    // assertion is that we never registered a second underlying watcher.
+    writeFileSync(join(target, "marker.txt"), "x");
+    await new Promise((r) => setTimeout(r, 350));
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+
+    // stopAll() must close every registered watcher; if dedup leaked a second
+    // watcher into the array, this assertion would still pass but the dir
+    // would remain watched after stopAll(). Verify via internal state.
+    expect((watcher as unknown as { watchers: unknown[] }).watchers.length).toBe(1);
+  });
+
   it("start() is idempotent: a second call from a clean state does not call watch() again", () => {
     // Spy on watch() so the assertion is independent of which `~/.claude/*`
     // subdirs happen to exist on the host (CI typically has none, in which

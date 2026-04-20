@@ -18,6 +18,11 @@ const DEBOUNCE_MS = 200;
 @injectable()
 export class SkillWatcherService {
   private readonly watchers: FSWatcher[] = [];
+  // Tracks which dirs already have a live watcher so repeated `watch(dir)`
+  // calls (e.g. start() running twice across a stopAll(), or future code
+  // paths that add overlapping roots) don't register duplicate FSWatchers
+  // and fire the debounce timer twice per change.
+  private readonly watchedDirs = new Set<string>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   // Tracks whether start() has run, separately from watcher count: a fresh
   // install with no `~/.claude/{skills,commands,plugins}` directories would
@@ -49,16 +54,21 @@ export class SkillWatcherService {
     for (const root of roots) this.watch(root);
   }
 
-  /** Begin watching one directory. No-op when the path is missing. */
+  /** Begin watching one directory. No-op when the path is missing or already watched. */
   watch(dir: string): void {
     if (!existsSync(dir)) {
       logger.debug("SkillWatcherService: skip missing dir", { dir });
+      return;
+    }
+    if (this.watchedDirs.has(dir)) {
+      logger.debug("SkillWatcherService: skip already-watched dir", { dir });
       return;
     }
     try {
       const w = watch(dir, { recursive: true }, () => this.onChange(dir));
       this.attachErrorHandler(w, dir);
       this.watchers.push(w);
+      this.watchedDirs.add(dir);
     } catch (err) {
       // Some platforms (BSD, network FS) reject recursive — fall back.
       const outerMessage = (err as Error).message;
@@ -70,6 +80,7 @@ export class SkillWatcherService {
         const w = watch(dir, () => this.onChange(dir));
         this.attachErrorHandler(w, dir);
         this.watchers.push(w);
+        this.watchedDirs.add(dir);
       } catch (innerErr) {
         const message = (innerErr as Error).message;
         logger.warn("SkillWatcherService: watch failed", { dir, message });
@@ -87,6 +98,7 @@ export class SkillWatcherService {
       }
     }
     this.watchers.length = 0;
+    this.watchedDirs.clear();
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -111,6 +123,10 @@ export class SkillWatcherService {
       }
       const idx = this.watchers.indexOf(w);
       if (idx !== -1) this.watchers.splice(idx, 1);
+      // Drop the dir from the dedup set too — otherwise a subsequent
+      // watch() for the same path would silently no-op even though the
+      // previous watcher is dead.
+      this.watchedDirs.delete(dir);
     });
   }
 
