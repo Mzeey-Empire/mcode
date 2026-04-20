@@ -1,15 +1,36 @@
 import { inject, injectable } from "tsyringe";
 import {
   PROVIDER_CATALOG,
+  getCatalogEntry,
   type ProviderAvailability,
   type ProviderId,
   type IProviderRegistry,
 } from "@mcode/contracts";
 import { SettingsService } from "./settings-service.js";
+import whichModule from "which";
+import { promises as fsp, constants as fsConst } from "node:fs";
 
 type CliRuntime = {
   status: "found" | "not_found" | "unchecked";
   resolvedPath: string | null;
+};
+
+/** Thin shim over `which` + fs so tests can inject stubs. */
+export interface CliResolver {
+  which(binary: string): Promise<string>;
+  statExecutable(path: string): Promise<boolean>;
+}
+
+const defaultResolver: CliResolver = {
+  which: (binary) => whichModule(binary),
+  statExecutable: async (path) => {
+    try {
+      await fsp.access(path, fsConst.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  },
 };
 
 /**
@@ -23,6 +44,7 @@ export class ProviderAvailabilityService {
   constructor(
     @inject(SettingsService) private readonly settings: SettingsService,
     @inject("IProviderRegistry") private readonly registry: IProviderRegistry,
+    private readonly resolver: CliResolver = defaultResolver,
   ) {}
 
   /** Build the full availability list from catalog + settings + cached CLI state. */
@@ -52,5 +74,36 @@ export class ProviderAvailabilityService {
         },
       };
     });
+  }
+
+  /**
+   * Resolve and validate the CLI binary for the given provider.
+   * When `settings.provider.cli[id]` is set, checks that exact path for execute
+   * permissions; otherwise falls back to PATH lookup via `which`.
+   * Caches the result for subsequent `listAvailability` calls.
+   */
+  async verifyCli(id: ProviderId): Promise<CliRuntime> {
+    const s = this.settings.get();
+    const configured =
+      id === "codex" || id === "claude" || id === "copilot"
+        ? s.provider.cli[id]
+        : "";
+
+    let result: CliRuntime;
+    if (configured) {
+      const ok = await this.resolver.statExecutable(configured);
+      result = ok
+        ? { status: "found", resolvedPath: configured }
+        : { status: "not_found", resolvedPath: null };
+    } else {
+      try {
+        const resolved = await this.resolver.which(getCatalogEntry(id).cliBinary);
+        result = { status: "found", resolvedPath: resolved };
+      } catch {
+        result = { status: "not_found", resolvedPath: null };
+      }
+    }
+    this.cliCache.set(id, result);
+    return result;
   }
 }

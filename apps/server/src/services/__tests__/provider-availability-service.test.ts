@@ -61,3 +61,60 @@ describe("ProviderAvailabilityService.listAvailability", () => {
     }
   });
 });
+
+describe("ProviderAvailabilityService.verifyCli", () => {
+  it("reports 'found' when which resolves the binary", async () => {
+    const svc = new ProviderAvailabilityService(
+      stubSettings(),
+      stubRegistry(["claude"]),
+      {
+        which: vi.fn(async () => "/usr/local/bin/claude"),
+        statExecutable: vi.fn(async () => true),
+      },
+    );
+    const result = await svc.verifyCli("claude");
+    expect(result).toEqual({ status: "found", resolvedPath: "/usr/local/bin/claude" });
+  });
+
+  it("reports 'not_found' when which throws", async () => {
+    const svc = new ProviderAvailabilityService(
+      stubSettings(),
+      stubRegistry(["claude"]),
+      {
+        which: vi.fn(async () => { throw new Error("not on PATH"); }),
+        statExecutable: vi.fn(async () => false),
+      },
+    );
+    const result = await svc.verifyCli("claude");
+    expect(result.status).toBe("not_found");
+    expect(result.resolvedPath).toBeNull();
+  });
+
+  it("prefers a configured path over PATH lookup and validates it with statExecutable", async () => {
+    const s = getDefaultSettings();
+    s.provider.cli.codex = "/custom/codex";
+    const stat = vi.fn(async () => true);
+    const which = vi.fn();
+    const svc = new ProviderAvailabilityService(
+      { get: () => s, on: () => {} } as unknown as SettingsService,
+      stubRegistry(["codex"]),
+      { which, statExecutable: stat },
+    );
+    const result = await svc.verifyCli("codex");
+    expect(which).not.toHaveBeenCalled();
+    expect(stat).toHaveBeenCalledWith("/custom/codex");
+    expect(result).toEqual({ status: "found", resolvedPath: "/custom/codex" });
+  });
+
+  it("caches result and reflects it in listAvailability", async () => {
+    const svc = new ProviderAvailabilityService(
+      stubSettings(),
+      stubRegistry(["claude"]),
+      { which: vi.fn(async () => "/usr/local/bin/claude"), statExecutable: vi.fn() },
+    );
+    await svc.verifyCli("claude");
+    const row = svc.listAvailability().find((p) => p.id === "claude")!;
+    expect(row.cli.status).toBe("found");
+    expect(row.cli.resolvedPath).toBe("/usr/local/bin/claude");
+  });
+});
