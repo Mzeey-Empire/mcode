@@ -191,11 +191,18 @@ export class SkillService {
     return result.diag;
   }
 
-  /** Clear the in-memory cache and notify subscribers. */
+  /** Clear the in-memory cache and notify subscribers. Subscriber errors are isolated. */
   invalidate(): void {
     this.cache = null;
     this.cachedCwd = undefined;
-    for (const cb of this.subscribers) cb();
+    for (const cb of this.subscribers) {
+      try {
+        cb();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.debug("SkillService: subscriber threw", { message });
+      }
+    }
   }
 
   /** Register a callback fired whenever the cache is invalidated. Returns an unsubscribe. */

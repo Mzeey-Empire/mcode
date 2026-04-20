@@ -100,4 +100,36 @@ describe("SkillService", () => {
     expect(diag.errors).toEqual([]);
     expect(diag.scanned.every((s) => s.existed === false || s.entries >= 0)).toBe(true);
   });
+
+  it("invokes subscribers on invalidate() and stops after unsubscribe", () => {
+    const svc = new SkillService();
+    let calls = 0;
+    const unsub = svc.subscribe(() => {
+      calls++;
+    });
+
+    svc.invalidate();
+    expect(calls).toBe(1);
+
+    svc.invalidate();
+    expect(calls).toBe(2);
+
+    unsub();
+    svc.invalidate();
+    expect(calls).toBe(2); // unchanged after unsubscribe
+  });
+
+  it("isolates subscriber errors so later subscribers still fire", () => {
+    const svc = new SkillService();
+    let secondFired = false;
+    svc.subscribe(() => {
+      throw new Error("first subscriber boom");
+    });
+    svc.subscribe(() => {
+      secondFired = true;
+    });
+
+    expect(() => svc.invalidate()).not.toThrow();
+    expect(secondFired).toBe(true);
+  });
 });
