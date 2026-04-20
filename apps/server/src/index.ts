@@ -170,9 +170,19 @@ agentService.init();
 providerAvailability.onChange((list) => {
   broadcast("providers.availability", list);
 });
-// Run startup CLI verification and emit initial availability snapshot
-await providerAvailability.verifyAllEnabled();
-broadcast("providers.availability", providerAvailability.listAvailability());
+// Run startup CLI verification and emit initial availability snapshot.
+// Wrapped in .then() rather than top-level await: the desktop bundle emits
+// CJS via esbuild, which does not support top-level await. Fire-and-forget
+// is safe here — onChange broadcasts during verify, and the final snapshot
+// is broadcast after verifyAllEnabled resolves.
+providerAvailability
+  .verifyAllEnabled()
+  .then(() => {
+    broadcast("providers.availability", providerAvailability.listAvailability());
+  })
+  .catch((err: unknown) => {
+    logger.error("Provider availability startup verification failed", err);
+  });
 
 // Start background worktree cleanup worker
 cleanupWorker.start();
