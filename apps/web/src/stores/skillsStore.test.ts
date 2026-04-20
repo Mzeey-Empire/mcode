@@ -50,6 +50,47 @@ describe("skillsStore", () => {
     expect(useSkillsStore.getState().skills).toEqual(FAKE_SKILLS);
   });
 
+  it("does not single-flight loads for different cwds", async () => {
+    // Two concurrent loads with different cwds must NOT share a promise:
+    // workspace B would receive workspace A's data otherwise.
+    const p1 = useSkillsStore.getState().load("/foo");
+    const p2 = useSkillsStore.getState().load("/bar");
+    expect(p1).not.toBe(p2);
+    await Promise.all([p1, p2]);
+  });
+
+  it("invalidate() fences a load() that's still in flight", async () => {
+    // Slow the next mock response so we can race invalidate() against it.
+    let resolveListSkills!: (v: typeof FAKE_SKILLS) => void;
+    listSkillsMock.mockImplementationOnce(
+      () => new Promise((res) => { resolveListSkills = res; }),
+    );
+
+    const loadPromise = useSkillsStore.getState().load("/foo");
+    // While load is in flight, an external watcher fires invalidate().
+    useSkillsStore.getState().invalidate();
+    // Now resolve the in-flight fetch with data — it must NOT rehydrate
+    // the store, because invalidate() bumped the load epoch.
+    resolveListSkills(FAKE_SKILLS);
+    await loadPromise;
+
+    // Store stays cleared: the late resolution was dropped.
+    expect(useSkillsStore.getState().skills).toBeNull();
+    expect(useSkillsStore.getState().cwd).toBeUndefined();
+  });
+
+  it("tracks cwd on failure so the consumer can detect cwd changes", async () => {
+    listSkillsMock.mockImplementationOnce(async () => {
+      throw new Error("boom");
+    });
+    await expect(useSkillsStore.getState().load("/foo")).rejects.toThrow("boom");
+    // cwd must reflect the *attempted* path even though no skills loaded.
+    // Without this, useSlashCommand cannot distinguish "retry same cwd"
+    // (don't auto-loop) from "user switched workspace" (must reload).
+    expect(useSkillsStore.getState().cwd).toBe("/foo");
+    expect(useSkillsStore.getState().error?.message).toBe("boom");
+  });
+
   it("retries once after WebSocket disconnect", async () => {
     const calls: number[] = [];
     vi.doMock("@/transport", () => ({

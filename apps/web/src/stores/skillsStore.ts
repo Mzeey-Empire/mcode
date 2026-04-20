@@ -13,14 +13,24 @@ import { getTransport, type SkillInfo } from "@/transport";
 interface SkillsState {
   /** Fetched skill list, or null if not yet loaded or invalidated. */
   skills: SkillInfo[] | null;
-  /** The cwd used for the last successful fetch. */
+  /** The cwd associated with the last load attempt (success OR failure). */
   cwd: string | undefined;
   /** Whether a fetch is currently in-flight. */
   isLoading: boolean;
   /** Error from the last failed fetch, if any. */
   error: Error | null;
-  /** The in-flight promise, used to enforce single-flight semantics. */
+  /** The in-flight promise. Single-flight only deduplicates same-cwd callers. */
   inflight: Promise<SkillInfo[]> | null;
+  /** The cwd of the in-flight promise; used to scope single-flight by cwd. */
+  inflightCwd: string | undefined;
+  /**
+   * Monotonic counter bumped by each new load() call AND by invalidate()/
+   * reset(). The async closure captures the value it incremented to and
+   * checks `get().loadEpoch === myEpoch` before any set(); a mismatch means
+   * a newer load or an invalidate raced ahead, so the stale resolution is
+   * dropped instead of rehydrating the store.
+   */
+  loadEpoch: number;
 
   /**
    * Load skills for the given cwd.
@@ -58,6 +68,8 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   isLoading: false,
   error: null,
   inflight: null,
+  inflightCwd: undefined,
+  loadEpoch: 0,
 
   // Non-async so the return value IS the cached/in-flight promise directly,
   // enabling identity equality (p1 === p2) for single-flight callers.
@@ -74,11 +86,13 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       return Promise.resolve(state.skills);
     }
 
-    // Single-flight: return existing in-flight promise for any concurrent caller
-    if (state.inflight) return state.inflight;
+    // Single-flight ONLY for the same cwd. A different-cwd request must
+    // not piggyback on an in-flight load for workspace A or it would
+    // receive A's data while expecting B's.
+    if (state.inflight && state.inflightCwd === cwd) return state.inflight;
 
     // Create and register the in-flight promise atomically so a second
-    // synchronous caller sees it immediately via get().inflight.
+    // synchronous caller (same cwd) sees it immediately via get().inflight.
     let resolveInflight!: (skills: SkillInfo[]) => void;
     let rejectInflight!: (err: unknown) => void;
     const promise = new Promise<SkillInfo[]>((res, rej) => {
@@ -86,7 +100,14 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       rejectInflight = rej;
     });
 
-    set({ isLoading: true, error: null, inflight: promise });
+    const myEpoch = state.loadEpoch + 1;
+    set({
+      isLoading: true,
+      error: null,
+      inflight: promise,
+      inflightCwd: cwd,
+      loadEpoch: myEpoch,
+    });
 
     // Kick off the actual fetch outside the synchronous set() block.
     (async () => {
@@ -111,13 +132,23 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
             throw err;
           }
         }
-        lastFetchedAt = Date.now();
-        set({ skills, cwd, isLoading: false, inflight: null, error: null });
+        // Fence: skip set() if invalidate(), reset(), or a newer load()
+        // bumped the epoch while we were awaiting. Still resolve the promise
+        // so callers don't hang — they'll get the data they asked for, just
+        // without polluting the now-fresher store state.
+        if (get().loadEpoch === myEpoch) {
+          lastFetchedAt = Date.now();
+          set({ skills, cwd, isLoading: false, inflight: null, inflightCwd: undefined, error: null });
+        }
         resolveInflight(skills);
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
         console.warn("[skillsStore] load failed after retry", error);
-        set({ isLoading: false, inflight: null, error });
+        // Track the attempted cwd even on failure so the consumer hook can
+        // detect a cwd change vs. a same-cwd retry and handle each correctly.
+        if (get().loadEpoch === myEpoch) {
+          set({ cwd, isLoading: false, inflight: null, inflightCwd: undefined, error });
+        }
         rejectInflight(error);
       }
     })();
@@ -126,12 +157,31 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
   },
 
   invalidate() {
-    set({ skills: null, cwd: undefined, error: null });
+    // Bumping loadEpoch fences any in-flight load() so its eventual set()
+    // is dropped instead of rehydrating the store with pre-invalidation data.
+    const state = get();
+    set({
+      skills: null,
+      cwd: undefined,
+      error: null,
+      inflight: null,
+      inflightCwd: undefined,
+      loadEpoch: state.loadEpoch + 1,
+    });
     lastFetchedAt = 0;
   },
 
   reset() {
-    set({ skills: null, cwd: undefined, isLoading: false, error: null, inflight: null });
+    const state = get();
+    set({
+      skills: null,
+      cwd: undefined,
+      isLoading: false,
+      error: null,
+      inflight: null,
+      inflightCwd: undefined,
+      loadEpoch: state.loadEpoch + 1,
+    });
     lastFetchedAt = 0;
   },
 }));
