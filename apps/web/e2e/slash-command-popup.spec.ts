@@ -132,7 +132,9 @@ test.describe("Slash command popup", () => {
     // JSON-RPC error. The shared mock helper only supports successful result
     // overrides, so we register a self-contained route that uses
     // `getDefaultSettings()` for bootstrap parity.
-    await page.routeWebSocket(/ws:\/\/localhost:\d{5}/, (ws) => {
+    // Match any host:port (localhost, 127.0.0.1, custom ports) so this test
+    // doesn't break if the dev server's launch shape changes.
+    await page.routeWebSocket(/ws:\/\/[^/]+/, (ws) => {
       ws.onMessage((data) => {
         const msg = JSON.parse(data.toString()) as { id?: string | number; method?: string };
         const method = msg.method;
