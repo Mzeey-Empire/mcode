@@ -51,6 +51,7 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
+  const flushResizeRpcRef = useRef<(() => void) | null>(null);
 
   const scrollback = useSettingsStore((s) => s.settings.terminal.scrollback);
   const scrollbackRef = useRef(scrollback);
@@ -156,19 +157,52 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
       };
       window.addEventListener("mcode:pty-exit", handlePtyExit);
 
-      // Auto-fit on resize
+      // Resize handling:
+      //
+      // ResizeObserver can fire every animation frame during drag. Two distinct
+      // concerns, two strategies:
+      //   - Local fitAddon.fit() is cheap and keeps the terminal visibly aligned
+      //     during drag → coalesce to one call per animation frame via rAF.
+      //   - The terminal.resize RPC is expensive (WS → node-pty → shell repaint)
+      //     → debounce to a single trailing call 100 ms after the last change.
+      //
+      // Skip RPCs where the character grid (cols, rows) has not changed — drags
+      // that move by less than one cell of pixels otherwise send no-op resizes.
+      let rafId: number | null = null;
+      let rpcTimer: ReturnType<typeof setTimeout> | null = null;
+      let lastSentCols = -1;
+      let lastSentRows = -1;
+
+      const flushResizeRpc = () => {
+        rpcTimer = null;
+        if (disposed) return;
+        const dims = fitAddonRef.current?.proposeDimensions();
+        if (!dims || dims.cols <= 0 || dims.rows <= 0) return;
+        if (dims.cols === lastSentCols && dims.rows === lastSentRows) return;
+        lastSentCols = dims.cols;
+        lastSentRows = dims.rows;
+        transport.terminalResize(ptyId, dims.cols, dims.rows).catch(() => {});
+      };
+      flushResizeRpcRef.current = flushResizeRpc;
+
       const observer = new ResizeObserver(() => {
-        if (!disposed && fitAddonRef.current) {
-          fitAddonRef.current.fit();
-          const dims = fitAddonRef.current.proposeDimensions();
-          if (dims && dims.cols > 0 && dims.rows > 0) {
-            transport.terminalResize(ptyId, dims.cols, dims.rows).catch(() => {});
-          }
+        if (disposed || !fitAddonRef.current) return;
+        if (rafId === null) {
+          rafId = requestAnimationFrame(() => {
+            rafId = null;
+            if (disposed) return;
+            fitAddonRef.current?.fit();
+          });
         }
+        if (rpcTimer !== null) clearTimeout(rpcTimer);
+        rpcTimer = setTimeout(flushResizeRpc, 100);
       });
       observer.observe(el);
 
       const cleanup = () => {
+        if (rafId !== null) cancelAnimationFrame(rafId);
+        if (rpcTimer !== null) clearTimeout(rpcTimer);
+        flushResizeRpcRef.current = null;
         dataDisposable.dispose();
         el.removeEventListener("contextmenu", handleContextMenu);
         window.removeEventListener("mcode:pty-data", handlePtyData);
@@ -201,10 +235,13 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
     };
   }, [ptyId]);
 
-  // Re-fit when visibility changes (ResizeObserver handles the rest)
+  // Re-fit when visibility changes (ResizeObserver handles the rest).
+  // Flush any pending debounced resize RPC so the PTY learns the new dims
+  // without waiting for the 100 ms debounce tail.
   useEffect(() => {
     if (visible && fitAddonRef.current) {
       fitAddonRef.current.fit();
+      flushResizeRpcRef.current?.();
     }
   }, [visible]);
 
