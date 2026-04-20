@@ -114,4 +114,41 @@ describe("MermaidBlock", () => {
       expect(writeText).toHaveBeenCalledWith("graph TD; A-->B;");
     });
   });
+
+  it("skips render and shows error banner when parse reports invalid source", async () => {
+    // parse returns false when suppressErrors is passed and source is invalid
+    mockParse.mockResolvedValue(false);
+
+    render(<MermaidBlock code="not valid mermaid" isStreaming={false} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/diagram could not be rendered/i)).toBeInTheDocument();
+    });
+
+    expect(mockRender).not.toHaveBeenCalled();
+    // No orphan nodes appended to document.body by MermaidBlock.
+    expect(document.body.querySelector("[id^='mermaid-']")).toBeNull();
+    expect(document.body.querySelector("[id^='dmermaid-']")).toBeNull();
+  });
+
+  it("removes orphan measurement node when render throws after a successful parse", async () => {
+    mockParse.mockResolvedValue({ diagramType: "graph" });
+    mockRender.mockImplementation(async (id: string) => {
+      // Simulate mermaid's internal measurement node left on <body> after a render-time failure.
+      const orphan = document.createElement("div");
+      orphan.id = "d" + id;
+      orphan.setAttribute("data-testid", "mermaid-orphan");
+      document.body.appendChild(orphan);
+      throw new Error("Render exploded");
+    });
+
+    render(<MermaidBlock code="graph TD; A-->B;" isStreaming={false} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/diagram could not be rendered/i)).toBeInTheDocument();
+    });
+
+    // Orphan must be gone after the error is handled.
+    expect(document.body.querySelector("[data-testid='mermaid-orphan']")).toBeNull();
+  });
 });
