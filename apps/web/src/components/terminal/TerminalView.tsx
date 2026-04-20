@@ -51,17 +51,38 @@ function setActiveRenderer(name: "webgl" | "canvas"): void {
 }
 
 /**
+ * Cached WebGL support result. Memoized at module scope so the probe
+ * context is created at most once per session — browsers cap concurrent
+ * GL contexts (~8–16) and repeated mounts would otherwise evict the
+ * terminal's real WebGL context.
+ */
+let cachedWebglSupport: boolean | null = null;
+
+/**
  * Returns true if the browser can create a WebGL context. Uses a throwaway
  * canvas so it does not mutate the terminal's own canvas during detection.
+ * Result is memoized; the probe context is released immediately via
+ * WEBGL_lose_context so it does not count against the browser's
+ * concurrent-context cap.
  */
 function detectWebglSupport(): boolean {
+  if (cachedWebglSupport !== null) return cachedWebglSupport;
   try {
     const c = document.createElement("canvas");
     const ctx = c.getContext("webgl2") ?? c.getContext("webgl");
-    return ctx !== null;
+    if (ctx) {
+      // Release the probe context immediately so it doesn't count against
+      // the browser's concurrent-GL-context cap.
+      const lose = (ctx as WebGLRenderingContext).getExtension(
+        "WEBGL_lose_context",
+      );
+      lose?.loseContext();
+    }
+    cachedWebglSupport = ctx !== null;
   } catch {
-    return false;
+    cachedWebglSupport = false;
   }
+  return cachedWebglSupport;
 }
 
 /**
@@ -91,6 +112,7 @@ async function loadCanvasRenderer(term: Terminal): Promise<IDisposable> {
 async function loadRenderer(
   term: Terminal,
   rendererRef: { current: IDisposable | null },
+  isDisposed: () => boolean,
 ): Promise<void> {
   if (detectWebglSupport()) {
     try {
@@ -110,18 +132,40 @@ async function loadRenderer(
         }
         loadCanvasRenderer(term)
           .then((canvas) => {
+            // If the component unmounted while the canvas addon was
+            // loading, dispose the freshly-loaded addon instead of
+            // resurrecting rendererRef on a dead component.
+            if (isDisposed()) {
+              try {
+                canvas.dispose();
+              } catch {
+                // Already disposed — safe to ignore.
+              }
+              return;
+            }
             rendererRef.current = canvas;
           })
-          .catch(() => {
-            // Canvas load failed — fall back to the default DOM renderer
-            // that xterm uses when no addon is attached.
+          .catch((err) => {
+            // Canvas load failed after WebGL context loss. xterm does
+            // not auto-attach a DOM renderer when no renderer addon is
+            // loaded, so the terminal buffer will be static until
+            // unmount. Nothing else to do here — the session is
+            // effectively read-only rendering.
+            console.warn(
+              "[terminal] Canvas renderer load failed after WebGL context loss; terminal will render via xterm default",
+              err,
+            );
             rendererRef.current = null;
             setActiveRenderer("canvas");
           });
       });
       return;
-    } catch {
+    } catch (err) {
       // WebGL addon construction failed; fall through to canvas.
+      console.warn(
+        "[terminal] WebGL renderer init failed, falling back to canvas",
+        err,
+      );
     }
   }
   rendererRef.current = await loadCanvasRenderer(term);
@@ -196,7 +240,7 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
 
       fitAddon.fit();
 
-      await loadRenderer(term, rendererRef);
+      await loadRenderer(term, rendererRef, () => disposed);
       if (disposed) return;
 
       termRef.current = term;
