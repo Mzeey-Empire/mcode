@@ -7,6 +7,10 @@ import {
   type IProviderRegistry,
 } from "@mcode/contracts";
 import { SettingsService } from "./settings-service.js";
+import {
+  ProviderDisabledError,
+  ProviderCliMissingError,
+} from "./provider-availability-errors.js";
 import whichModule from "which";
 import { promises as fsp, constants as fsConst } from "node:fs";
 
@@ -105,5 +109,36 @@ export class ProviderAvailabilityService {
     }
     this.cliCache.set(id, result);
     return result;
+  }
+
+  /**
+   * Throw a typed error if the provider is unusable. Returns normally otherwise.
+   * CLI `unchecked` state is treated as "probably ok" — the first send will
+   * re-verify and surface the real error if the binary is missing.
+   */
+  assertUsable(id: ProviderId): void {
+    const s = this.settings.get();
+    const entry = getCatalogEntry(id);
+    if (entry.comingSoon || !s.provider.enabled[id]) {
+      throw new ProviderDisabledError(id);
+    }
+    const cached = this.cliCache.get(id);
+    if (cached?.status === "not_found") {
+      const configuredPath =
+        id === "codex" || id === "claude" || id === "copilot"
+          ? s.provider.cli[id]
+          : "";
+      throw new ProviderCliMissingError(id, configuredPath);
+    }
+  }
+
+  /** Run verification for every provider whose enabled flag is true and that has an adapter. */
+  async verifyAllEnabled(): Promise<void> {
+    const s = this.settings.get();
+    const registered = new Set(this.registry.resolveAll().map((p) => p.id));
+    const targets = PROVIDER_CATALOG.filter(
+      (entry) => s.provider.enabled[entry.id] && registered.has(entry.id),
+    );
+    await Promise.all(targets.map((entry) => this.verifyCli(entry.id)));
   }
 }

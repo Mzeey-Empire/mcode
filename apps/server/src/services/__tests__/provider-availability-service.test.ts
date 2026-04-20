@@ -4,6 +4,7 @@ import { ProviderAvailabilityService } from "../provider-availability-service.js
 import type { SettingsService } from "../settings-service.js";
 import type { IProviderRegistry, IAgentProvider } from "@mcode/contracts";
 import { getDefaultSettings } from "@mcode/contracts";
+import { ProviderDisabledError, ProviderCliMissingError } from "../provider-availability-errors.js";
 
 function stubSettings(overrides: Partial<ReturnType<typeof getDefaultSettings>> = {}): SettingsService {
   const settings = { ...getDefaultSettings(), ...overrides };
@@ -116,5 +117,69 @@ describe("ProviderAvailabilityService.verifyCli", () => {
     const row = svc.listAvailability().find((p) => p.id === "claude")!;
     expect(row.cli.status).toBe("found");
     expect(row.cli.resolvedPath).toBe("/usr/local/bin/claude");
+  });
+});
+
+describe("ProviderAvailabilityService.assertUsable", () => {
+  it("throws ProviderDisabledError when the toggle is off", async () => {
+    const s = getDefaultSettings();
+    s.provider.enabled.codex = false;
+    const svc = new ProviderAvailabilityService(
+      { get: () => s, on: () => {} } as unknown as SettingsService,
+      stubRegistry(["claude", "codex"]),
+    );
+    expect(() => svc.assertUsable("codex")).toThrow(ProviderDisabledError);
+  });
+
+  it("throws ProviderDisabledError for coming-soon providers regardless of settings", () => {
+    const s = getDefaultSettings();
+    s.provider.enabled.gemini = true;
+    const svc = new ProviderAvailabilityService(
+      { get: () => s, on: () => {} } as unknown as SettingsService,
+      stubRegistry([]),
+    );
+    expect(() => svc.assertUsable("gemini")).toThrow(ProviderDisabledError);
+  });
+
+  it("throws ProviderCliMissingError when enabled but CLI not_found", async () => {
+    const svc = new ProviderAvailabilityService(
+      stubSettings(),
+      stubRegistry(["claude"]),
+      { which: vi.fn(async () => { throw new Error("nope"); }), statExecutable: vi.fn() },
+    );
+    await svc.verifyCli("claude");
+    expect(() => svc.assertUsable("claude")).toThrow(ProviderCliMissingError);
+  });
+
+  it("does not throw when enabled and CLI found", async () => {
+    const svc = new ProviderAvailabilityService(
+      stubSettings(),
+      stubRegistry(["claude"]),
+      { which: vi.fn(async () => "/usr/local/bin/claude"), statExecutable: vi.fn() },
+    );
+    await svc.verifyCli("claude");
+    expect(() => svc.assertUsable("claude")).not.toThrow();
+  });
+
+  it("does not throw when enabled + adapter present but CLI unchecked (startup race)", () => {
+    const svc = new ProviderAvailabilityService(stubSettings(), stubRegistry(["claude"]));
+    expect(() => svc.assertUsable("claude")).not.toThrow();
+  });
+});
+
+describe("ProviderAvailabilityService.verifyAllEnabled", () => {
+  it("verifies only providers with enabled=true and hasAdapter=true", async () => {
+    const s = getDefaultSettings();
+    s.provider.enabled.copilot = false;
+    const which = vi.fn(async (bin: string) => `/usr/local/bin/${bin}`);
+    const svc = new ProviderAvailabilityService(
+      { get: () => s, on: () => {} } as unknown as SettingsService,
+      stubRegistry(["claude", "codex", "copilot"]),
+      { which, statExecutable: vi.fn() },
+    );
+    await svc.verifyAllEnabled();
+    expect(which).toHaveBeenCalledWith("claude");
+    expect(which).toHaveBeenCalledWith("codex");
+    expect(which).not.toHaveBeenCalledWith("copilot");
   });
 });
