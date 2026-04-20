@@ -64,4 +64,29 @@ describe("shouldInterceptKeyEvent", () => {
       expect(shouldInterceptKeyEvent(event, false)).toBe(false);
     });
   });
+
+  // Regression guard for issue #316: after backgrounding the app, users reported
+  // the spacebar no longer reaching the shell. Any key interception on " " would
+  // break normal typing — this test pins the behaviour.
+  describe("space key (regression #316)", () => {
+    it("does not intercept plain space", () => {
+      const event = makeEvent({ key: " " });
+      expect(shouldInterceptKeyEvent(event, false)).toBe(false);
+    });
+
+    it("does not intercept space with a selection present", () => {
+      const event = makeEvent({ key: " " });
+      expect(shouldInterceptKeyEvent(event, true)).toBe(false);
+    });
+
+    it("does not intercept Ctrl+Space", () => {
+      const event = makeEvent({ key: " ", ctrlKey: true });
+      expect(shouldInterceptKeyEvent(event, false)).toBe(false);
+    });
+
+    it("does not intercept Shift+Space", () => {
+      const event = makeEvent({ key: " ", shiftKey: true });
+      expect(shouldInterceptKeyEvent(event, false)).toBe(false);
+    });
+  });
 });

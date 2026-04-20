@@ -6,6 +6,7 @@ import type {
   WorktreeInfo,
   AttachmentMeta,
   SkillInfo,
+  SkillDiagnostics,
   PrInfo,
   PrDetail,
   PermissionMode,
@@ -15,9 +16,10 @@ import type {
   ProviderModelInfo,
   CopilotSubagent,
 } from "./types";
-import type { PaginatedMessages, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus } from "@mcode/contracts";
+import type { PaginatedMessages, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus, ProviderAvailability } from "@mcode/contracts";
 import type { ReasoningLevel } from "@mcode/contracts";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useThreadStore } from "@/stores/threadStore";
 import type { PermissionRequest } from "@mcode/contracts";
 
 /** Minimum reconnect delay in milliseconds. */
@@ -102,6 +104,32 @@ export interface WsTransportOptions {
 }
 
 /**
+ * Reconcile runningThreadIds with the server's authoritative set on (re)connect.
+ *
+ * Race-safe: captures the optimistic runningThreadIds before the RPC and
+ * preserves any threadIds added concurrently (e.g., by a session.turnStarted
+ * push that arrives while the RPC is in flight). Stale threadIds from before
+ * the RPC are dropped; the server's list is the source of truth for those.
+ *
+ * Exported for unit testing.
+ */
+export async function hydrateRunningThreadsFromServer(
+  rpcCall: (method: string, params: unknown) => Promise<unknown>,
+): Promise<void> {
+  try {
+    const beforeRpc = new Set(useThreadStore.getState().runningThreadIds);
+    const ids = (await rpcCall("agent.listRunning", {})) as string[];
+    const current = useThreadStore.getState().runningThreadIds;
+    // Preserve threadIds added concurrently while the RPC was in flight
+    // (e.g., session.turnStarted push during the round-trip).
+    const concurrentAdds = [...current].filter((id) => !beforeRpc.has(id));
+    useThreadStore.getState().hydrateRunningThreads([...ids, ...concurrentAdds]);
+  } catch {
+    // Best-effort; optimistic state remains if the call fails.
+  }
+}
+
+/**
  * Create a WebSocket-based transport that implements `McodeTransport`.
  *
  * Every method maps to a single JSON-RPC call matching the server's
@@ -144,6 +172,24 @@ export function createWsTransport(
       consecutiveAuthFailures = 0;
       resolveReady();
       options?.onStatusChange?.("connected");
+
+      // Reconcile runningThreadIds with the server's authoritative set.
+      // The client-side optimistic Set is lost on reload/reconnect; this
+      // restores live-session indicators for threads the server is still running.
+      const hydration = hydrateRunningThreadsFromServer((method, params) => rpc(method, params as Record<string, unknown>));
+
+      // Expose a sentinel in dev/test builds so Playwright can synchronize on
+      // hydration completion before injecting agent events. Without this, tests
+      // that call handleAgentEvent too early see their optimistic threadIds
+      // classified as "pre-hydration" state and wiped by the server's response.
+      if (import.meta.env.DEV && typeof window !== "undefined") {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as any).__mcodeHydrationComplete = false;
+        hydration.finally(() => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (window as any).__mcodeHydrationComplete = true;
+        });
+      }
 
       // On connect/reconnect, refresh CI checks for all visible PR threads (best-effort).
       // Cooldown prevents subprocess storms during rapid reconnect loops.
@@ -437,6 +483,7 @@ export function createWsTransport(
     saveClipboardFile: (data, mimeType, fileName) =>
       rpcBinary<AttachmentMeta | null>("clipboard.saveFile", { mimeType, fileName }, data),
     getActiveAgentCount: () => rpc<number>("agent.activeCount", {}),
+    listRunning: () => rpc<string[]>("agent.listRunning", {}),
 
     // Messages
     getMessages: (threadId, limit, before?) =>
@@ -472,6 +519,7 @@ export function createWsTransport(
 
     // Skills
     listSkills: (cwd?) => rpc<SkillInfo[]>("skill.list", { cwd }),
+    diagnoseSkills: (cwd?) => rpc<SkillDiagnostics>("skill.diagnose", { cwd }),
 
     // Terminal (PTY)
     terminalCreate: (threadId) => rpc<string>("terminal.create", { threadId }),
@@ -548,6 +596,8 @@ export function createWsTransport(
     /** Fetches all available Copilot sub-agents for the given workspace (built-in + user + project). */
     listCopilotAgents: (workspaceId) =>
       rpc<CopilotSubagent[]>("provider.copilotAgents", { workspaceId }),
+    listProviderAvailability: () =>
+      rpc<ProviderAvailability[]>("providers.listAvailability", {}),
 
     // Memory pressure
     setBackground: (background) => rpc<void>("memory.setBackground", { background }),

@@ -32,11 +32,13 @@ import { TaskRepo } from "./repositories/task-repo";
 import { SnapshotService } from "./services/snapshot-service";
 import { SettingsService } from "./services/settings-service";
 import { GitWatcherService } from "./services/git-watcher-service";
+import { SkillWatcherService } from "./services/skill-watcher-service";
 import { MemoryPressureService } from "./services/memory-pressure-service";
 import { WorkspaceRepo } from "./repositories/workspace-repo";
 import { CleanupWorker } from "./services/cleanup-worker";
 import { PrDraftService } from "./services/pr-draft-service";
 import { CiWatcherService } from "./services/ci-watcher";
+import { ProviderAvailabilityService } from "./services/provider-availability-service";
 import { ProviderRegistry } from "./providers/provider-registry";
 import { WebSocket } from "ws";
 import { AgentEventType } from "@mcode/contracts";
@@ -117,11 +119,13 @@ const terminalService = container.resolve(TerminalService);
 const messageRepo = container.resolve(MessageRepo);
 const threadRepo = container.resolve(ThreadRepo);
 const providerRegistry = container.resolve(ProviderRegistry);
+const providerAvailability = container.resolve(ProviderAvailabilityService);
 const toolCallRecordRepo = container.resolve(ToolCallRecordRepo);
 const turnSnapshotRepo = container.resolve(TurnSnapshotRepo);
 const snapshotService = container.resolve(SnapshotService);
 const settingsService = container.resolve(SettingsService);
 const gitWatcherService = container.resolve(GitWatcherService);
+const skillWatcherService = container.resolve(SkillWatcherService);
 const memoryPressureService = container.resolve(MemoryPressureService);
 const taskRepo = container.resolve(TaskRepo);
 const workspaceRepo = container.resolve(WorkspaceRepo); // Used only for startup watcher initialization
@@ -162,6 +166,24 @@ terminalService.setSender((channel, data) => {
 // AgentService self-wires persistence and session tracking against providers
 agentService.init();
 
+// Register broadcast callback so settings changes propagate to clients
+providerAvailability.onChange((list) => {
+  broadcast("providers.availability", list);
+});
+// Run startup CLI verification and emit initial availability snapshot.
+// Wrapped in .then() rather than top-level await: the desktop bundle emits
+// CJS via esbuild, which does not support top-level await. Fire-and-forget
+// is safe here — onChange broadcasts during verify, and the final snapshot
+// is broadcast after verifyAllEnabled resolves.
+providerAvailability
+  .verifyAllEnabled()
+  .then(() => {
+    broadcast("providers.availability", providerAvailability.listAvailability());
+  })
+  .catch((err: unknown) => {
+    logger.error("Provider availability startup verification failed", err);
+  });
+
 // Start background worktree cleanup worker
 cleanupWorker.start();
 
@@ -178,6 +200,10 @@ const allWorkspaces = workspaceRepo.listAll();
 for (const ws of allWorkspaces) {
   gitWatcherService.watchWorkspace(ws.id, ws.path);
 }
+
+// Begin watching the user's Claude skills/commands/plugins directories so the
+// skill registry stays current without a server restart.
+skillWatcherService.start();
 
 // Seed CI check watcher with all threads that have open PRs
 {
@@ -297,6 +323,7 @@ const { httpServer, wss } = createWsServer({
   memoryPressureService,
   taskRepo,
   providerRegistry,
+  providerAvailability,
   prDraftService,
   ciWatcherService,
   threadRepo,
@@ -429,6 +456,9 @@ async function shutdown(): Promise<void> {
 
   // 7. Dispose all git HEAD file watchers
   gitWatcherService.dispose();
+
+  // 7a. Stop all skill / plugin directory watchers
+  skillWatcherService.stopAll();
 
   // 8. Dispose memory pressure timers
   memoryPressureService.dispose();

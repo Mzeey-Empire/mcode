@@ -8,7 +8,7 @@ import { ToolCallRecordSchema } from "../models/tool-call-record.js";
 import { GitBranchSchema, WorktreeSchema } from "../git.js";
 import { GitCommitSchema } from "../models/git-commit.js";
 import { PrInfoSchema, PrDetailSchema, PrDraftSchema, CreatePrResultSchema, ChecksStatusSchema } from "../github.js";
-import { SkillInfoSchema } from "../skills.js";
+import { SkillInfoSchema, SkillDiagnosticsSchema } from "../skills.js";
 import { TurnSnapshotSchema } from "../models/turn-snapshot.js";
 import { PlanAnswerSchema } from "../models/plan-questions.js";
 import { DiffStatsSchema } from "../models/diff-stats.js";
@@ -21,6 +21,7 @@ import {
 import { lazySchema } from "../utils/lazySchema.js";
 import { ProviderModelInfoSchema } from "../providers/models.js";
 import { ProviderUsageInfoSchema } from "../providers/usage.js";
+import { ProviderAvailabilitySchema } from "../providers/availability.js";
 import { CopilotSubagentSchema, CopilotAgentNameSchema } from "../providers/copilot-agent.js";
 import { PermissionDecisionSchema, PermissionRequestSchema } from "../models/permission.js";
 
@@ -216,6 +217,10 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({}),
     result: z.number(),
   },
+  "agent.listRunning": {
+    params: z.object({}),
+    result: z.array(z.string()),
+  },
   "agent.answerQuestions": {
     params: z.object({
       threadId: z.string(),
@@ -308,7 +313,11 @@ export const WS_METHODS = lazySchema(() => ({
   },
   "skill.list": {
     params: z.object({ cwd: z.string().optional() }),
-    result: z.array(SkillInfoSchema),
+    result: z.array(SkillInfoSchema()),
+  },
+  "skill.diagnose": {
+    params: z.object({ cwd: z.string().optional() }),
+    result: SkillDiagnosticsSchema(),
   },
   "terminal.create": {
     params: z.object({ threadId: z.string() }),
@@ -432,6 +441,10 @@ export const WS_METHODS = lazySchema(() => ({
       workspaceId: z.string(),
     }),
     result: z.array(CopilotSubagentSchema()),
+  },
+  "providers.listAvailability": {
+    params: z.object({}),
+    result: z.array(ProviderAvailabilitySchema()),
   },
 } as const));
 

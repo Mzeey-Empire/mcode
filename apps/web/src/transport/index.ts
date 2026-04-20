@@ -5,6 +5,7 @@ import { useConnectionStore } from "@/stores/connectionStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { scanPortRange, AUTH_TOKEN_STORAGE_KEY } from "./scan-port-range";
 import { useProviderModelsStore } from "@/stores/providerModelsStore";
+import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 
 /** Re-exported transport and domain types for use across the web app. */
 export type { McodeTransport, Workspace, Thread, Message, ToolCall, GitBranch, WorktreeInfo, PermissionMode, InteractionMode, AttachmentMeta, StoredAttachment, SkillInfo, PrInfo, PrDetail, ToolCallRecord, Settings, PartialSettings, PlanAnswer } from "./types";
@@ -69,6 +70,7 @@ export async function initTransport(): Promise<McodeTransport> {
         if (status === "connected") {
           void useSettingsStore.getState().fetch();
           void useProviderModelsStore.getState().initialize();
+          void useProviderAvailabilityStore.getState().fetch();
         }
       },
       discoverServerUrl: async () => {

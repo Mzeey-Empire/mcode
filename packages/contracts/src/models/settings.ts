@@ -105,8 +105,21 @@ export const SettingsSchema = lazySchema(() =>
     /** Terminal emulator settings. */
     terminal: z
       .object({
-        /** Number of scrollback lines to retain. */
-        scrollback: z.number().int().nonnegative().default(250),
+        /**
+         * Number of scrollback lines to retain per terminal instance.
+         * Values above 5000 are clamped to 5000 (rather than rejected) so that
+         * users with legacy settings from before the cap was introduced do not
+         * have their entire settings object silently reset by the server's
+         * safeParse fallback at settings-service.ts:94.
+         * Zero means unlimited (not recommended for long-running sessions).
+         * Negative or non-integer values are still rejected as invalid input.
+         */
+        scrollback: z
+          .number()
+          .int()
+          .nonnegative()
+          .transform((n) => Math.min(n, 5000))
+          .default(1000),
       })
       .default({}),
 
@@ -149,6 +162,17 @@ export const SettingsSchema = lazySchema(() =>
     /** Provider-specific configuration. */
     provider: z
       .object({
+        /** Per-provider enable flag. Disabled providers cannot start new sessions. */
+        enabled: z
+          .object({
+            claude: z.boolean().default(true),
+            codex: z.boolean().default(true),
+            copilot: z.boolean().default(true),
+            gemini: z.boolean().default(false),
+            cursor: z.boolean().default(false),
+            opencode: z.boolean().default(false),
+          })
+          .default({}),
         /** CLI binary paths. Empty string means auto-discover from PATH. */
         cli: z
           .object({
@@ -241,7 +265,12 @@ export const PartialSettingsSchema = lazySchema(() =>
       .optional(),
     terminal: z
       .object({
-        scrollback: z.number().int().nonnegative().optional(),
+        scrollback: z
+          .number()
+          .int()
+          .nonnegative()
+          .transform((n) => Math.min(n, 5000))
+          .optional(),
       })
       .optional(),
     notifications: z
@@ -270,6 +299,16 @@ export const PartialSettingsSchema = lazySchema(() =>
       .optional(),
     provider: z
       .object({
+        enabled: z
+          .object({
+            claude: z.boolean().optional(),
+            codex: z.boolean().optional(),
+            copilot: z.boolean().optional(),
+            gemini: z.boolean().optional(),
+            cursor: z.boolean().optional(),
+            opencode: z.boolean().optional(),
+          })
+          .optional(),
         cli: z
           .object({
             codex: z.string().optional(),

@@ -9,6 +9,7 @@ import type {
   PrInfo,
   PrDetail,
   SkillInfo,
+  SkillDiagnostics,
   PermissionMode,
   ReasoningLevel,
   ToolCallRecord,
@@ -20,6 +21,7 @@ import type {
   InteractionMode,
   ProviderModelInfo,
   ProviderUsageInfo,
+  ProviderAvailability,
   PrDraft,
   CreatePrResult,
   ChecksStatus,
@@ -40,6 +42,7 @@ export type {
   PrInfo,
   PrDetail,
   SkillInfo,
+  SkillDiagnostics,
   PermissionMode,
   InteractionMode,
   Settings,
@@ -124,6 +127,12 @@ export interface McodeTransport {
   /** Save a clipboard file blob to disk via the server. Returns attachment metadata. */
   saveClipboardFile(data: ArrayBuffer, mimeType: string, fileName: string): Promise<AttachmentMeta | null>;
   getActiveAgentCount(): Promise<number>;
+  /**
+   * Returns the thread IDs with live agent sessions on the server.
+   * Called on WebSocket (re)connect to reconcile runningThreadIds after the
+   * optimistic client-side set was lost (reload, new tab, reconnect).
+   */
+  listRunning(): Promise<string[]>;
 
   // Thread mutations
   updateThreadTitle(threadId: string, title: string): Promise<boolean>;
@@ -182,6 +191,8 @@ export interface McodeTransport {
 
   // Skills
   listSkills(cwd?: string): Promise<SkillInfo[]>;
+  /** Run a filesystem scan across all skill search paths and return per-path diagnostics. */
+  diagnoseSkills(cwd?: string): Promise<SkillDiagnostics>;
 
   // Terminal (PTY)
   /** Create a new PTY attached to a thread's working directory. Returns the pty ID. */
@@ -252,6 +263,8 @@ export interface McodeTransport {
   getProviderUsage(providerId: string): Promise<ProviderUsageInfo>;
   /** Fetches Copilot sub-agents available for the given workspace. */
   listCopilotAgents(workspaceId: string): Promise<CopilotSubagent[]>;
+  /** Fetch the current availability snapshot for all registered providers. */
+  listProviderAvailability(): Promise<ProviderAvailability[]>;
 
   // Memory pressure
   /** Notify server of window background/foreground state for memory management. */

@@ -371,6 +371,7 @@ All params and results are defined as Zod schemas in `packages/contracts/src/ws/
 | `agent.createAndSend` | Create a thread and send a message in one call |
 | `agent.stop` | Stop an active agent session |
 | `agent.activeCount` | Get the number of active agent sessions |
+| `agent.listRunning` | List thread IDs with live agent sessions. Called on WS (re)connect to hydrate `runningThreadIds`. |
 | `message.list` | Load messages for a thread |
 | `file.list` | List files in a workspace (uses `git ls-files`) |
 | `file.read` | Read a file by relative path |
@@ -399,6 +400,8 @@ Push events are broadcast to all connected WebSocket clients. The server validat
 | `files.changed` | `{ workspaceId, threadId? }` | File list invalidated (after agent turns) |
 | `skills.changed` | `{}` | Skill list invalidated |
 
+**Note:** `thread.status` reports persistent DB states (`active` / `completed` / `errored`). Live-session state (agent is running right now) is conveyed via the `turnStarted` / `turnComplete` / `ended` AgentEvents and the `agent.listRunning` RPC, not via this channel.
+
 ### 6.4 Authentication
 
 The server accepts a token via the WebSocket URL query parameter. The desktop shell generates a random UUID token on each launch and passes it to both the server (via env) and the renderer (via the `desktopBridge.getServerUrl()` IPC call).
@@ -418,6 +421,7 @@ Events emitted by agent providers and broadcast on the `agent.event` push channe
 | `message` | `threadId, content, tokens` | Complete assistant message |
 | `toolUse` | `threadId, toolCallId, toolName, toolInput` | Tool invocation |
 | `toolResult` | `threadId, toolCallId, output, isError` | Tool output |
+| `turnStarted` | `threadId` | Emitted at the start of a new turn before any other events. Mirrors `turnComplete` and `ended`. |
 | `turnComplete` | `threadId, reason, costUsd, tokensIn, tokensOut` | Turn finished with cost and token counts |
 | `error` | `threadId, error` | Agent error |
 | `ended` | `threadId` | Session fully terminated |

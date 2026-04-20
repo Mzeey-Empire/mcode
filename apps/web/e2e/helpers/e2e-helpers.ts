@@ -14,6 +14,12 @@ export type RpcOverrides = Record<string, unknown>;
 export interface WsController {
   /** Send a JSON-RPC notification (no `id`) to the connected client. */
   sendNotification(method: string, params?: unknown): Promise<void>;
+  /**
+   * Send a server-initiated push event using the transport's
+   * `{ type: "push", channel, data }` wire shape so that `pushEmitter`
+   * listeners in ws-events.ts receive the event correctly.
+   */
+  sendPush(channel: string, data: unknown): Promise<void>;
 }
 
 /**
@@ -61,6 +67,7 @@ export async function mockWebSocketServer(
       if (method?.endsWith(".list") || method === "provider.listModels") result = [];
       else if (method === "git.currentBranch") result = "main";
       else if (method === "agent.activeCount") result = 0;
+      else if (method === "agent.listRunning") result = [];
       else if (method === "app.version") result = "0.0.1-test";
       else if (method === "config.discover") result = {};
       // Return canonical settings defaults so App can bootstrap correctly.
@@ -83,6 +90,10 @@ export async function mockWebSocketServer(
     async sendNotification(method: string, params?: unknown): Promise<void> {
       const ws = await wsReady;
       ws.send(JSON.stringify({ jsonrpc: "2.0", method, params }));
+    },
+    async sendPush(channel: string, data: unknown): Promise<void> {
+      const ws = await wsReady;
+      ws.send(JSON.stringify({ type: "push", channel, data }));
     },
   };
 }

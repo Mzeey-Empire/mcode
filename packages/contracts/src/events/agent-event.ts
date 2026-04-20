@@ -11,6 +11,7 @@ import { QuotaCategorySchema } from "../providers/usage.js";
  * if (event.type === AgentEventType.ToolUse) { ... }
  */
 export const AgentEventType = {
+  TurnStarted: "turnStarted",
   Message: "message",
   ToolUse: "toolUse",
   ToolResult: "toolResult",
@@ -26,6 +27,7 @@ export const AgentEventType = {
   ToolProgress: "toolProgress",
   ContextEstimate: "contextEstimate",
   QuotaUpdate: "quotaUpdate",
+  ProviderUnavailable: "providerUnavailable",
 } as const;
 
 /** Union of all valid `AgentEvent` type discriminants. */
@@ -34,6 +36,12 @@ export type AgentEventType = typeof AgentEventType[keyof typeof AgentEventType];
 /** Discriminated union of all events emitted by an agent provider. */
 export const AgentEventSchema = lazySchema(() =>
   z.discriminatedUnion("type", [
+    z.object({
+      /** Emitted at the start of a new turn, before any other events. Mirrors TurnComplete/Ended.
+       *  Used by the client to populate `runningThreadIds` for live-session UI indicators. */
+      type: z.literal(AgentEventType.TurnStarted),
+      threadId: z.string(),
+    }),
     z.object({
       type: z.literal(AgentEventType.Message),
       threadId: z.string(),
@@ -157,6 +165,21 @@ export const AgentEventSchema = lazySchema(() =>
       serviceTier: z.enum(["standard", "priority", "batch"]).optional(),
       numTurns: z.number().int().optional(),
       durationMs: z.number().optional(),
+    }),
+    z.object({
+      /** Emitted when sendMessage is gated because the provider is disabled or its CLI is missing. */
+      type: z.literal(AgentEventType.ProviderUnavailable),
+      threadId: z.string(),
+      providerId: z.enum(["claude", "codex", "gemini", "copilot", "cursor", "opencode"]),
+      reason: z.enum(["disabled", "cli_missing"]),
+      /**
+       * Configured CLI path the server tried to resolve. Only populated when
+       * `reason === "cli_missing"`; emitters must leave this undefined when
+       * `reason === "disabled"`. The shape cannot be expressed with superRefine
+       * because discriminatedUnion rejects ZodEffects wrappers — the server
+       * enforces this at emission, and consumers can rely on the invariant.
+       */
+      configuredPath: z.string().optional(),
     }),
   ]),
 );

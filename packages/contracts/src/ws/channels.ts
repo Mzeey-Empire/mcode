@@ -5,6 +5,7 @@ import { SettingsSchema } from "../models/settings.js";
 import { PlanQuestionSchema } from "../models/plan-questions.js";
 import { ChecksStatusSchema } from "../github.js";
 import { PermissionRequestSchema, PermissionDecisionSchema } from "../models/permission.js";
+import { ProviderAvailabilitySchema } from "../providers/availability.js";
 
 /** All push channel definitions keyed by channel name. */
 export const WS_CHANNELS = {
@@ -30,6 +31,8 @@ export const WS_CHANNELS = {
   }),
   "settings.changed": SettingsSchema(),
   "skills.changed": z.object({}),
+  /** Full-list broadcast of provider availability. Replaces the client cache. */
+  "providers.availability": z.array(ProviderAvailabilitySchema()),
   "branch.changed": z.object({ workspaceId: z.string(), branch: z.string() }),
   "turn.persisted": z.object({
     threadId: z.string(),

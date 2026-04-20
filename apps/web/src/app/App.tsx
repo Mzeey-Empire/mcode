@@ -218,7 +218,10 @@ export function App() {
       <div className="flex h-screen flex-col overflow-hidden bg-page text-foreground">
         <ConnectionBanner />
         <div className="flex flex-1 gap-1.5 overflow-hidden p-1.5">
-          {!sidebarCollapsed && (
+          {/* Settings view force-expands the sidebar so the settings nav is reachable.
+              When the sidebar is hidden, the chat panel claims the full width and the
+              reveal button lives inline in the chat header (see ChatView). */}
+          {(!sidebarCollapsed || settingsOpen) && (
             <div className="flex shrink-0 overflow-hidden rounded-lg shadow-sm">
               <Sidebar
                 settingsOpen={settingsOpen}

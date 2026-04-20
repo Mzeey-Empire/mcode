@@ -1,11 +1,11 @@
 import { ProjectTree } from "./ProjectTree";
-import { PanelLeftClose, PanelLeft, Settings, ArrowLeft, ExternalLink, Braces } from "lucide-react";
-import { useState } from "react";
-import { cn } from "@/lib/utils";
+import { Settings, ArrowLeft, ExternalLink, Braces } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SettingsNav } from "@/components/settings/SettingsNav";
 import type { SettingsSection } from "@/components/settings/settings-nav";
 import { SidebarUsagePanel } from "./SidebarUsagePanel";
+import { PanelCollapseIcon } from "./SidebarRevealButton";
+import { useUiStore } from "@/stores/uiStore";
 
 /** True when running inside the Electron shell. */
 const IS_DESKTOP = typeof window !== "undefined" && !!window.desktopBridge;
@@ -31,11 +31,7 @@ export function Sidebar({
   onOpenSettings,
   onCloseSettings,
 }: SidebarProps) {
-  const [collapsed, setCollapsed] = useState(false);
-
-  // Force-expand sidebar when settings is open
-  const isCollapsed = collapsed && !settingsOpen;
-
+  const toggleSidebar = useUiStore((s) => s.toggleSidebar);
 
   const handleEditJson = () => {
     if (window.desktopBridge) {
@@ -44,17 +40,10 @@ export function Sidebar({
   };
 
   return (
-    <div
-      className={cn(
-        "flex h-full flex-col bg-sidebar transition-[width] duration-200",
-        // Clamp expanded width on narrow viewports so the sidebar can't dominate the layout.
-        // Above md (>=768px), the cap is removed and the full w-72 applies.
-        isCollapsed ? "w-12" : "w-72 max-w-[55vw] md:max-w-none",
-      )}
-    >
+    <div className="flex h-full w-72 max-w-[55vw] flex-col bg-sidebar md:max-w-none">
       {/* Header */}
       <div className="flex h-11 items-center justify-between border-b border-border/40 px-3">
-        {settingsOpen && !isCollapsed ? (
+        {settingsOpen ? (
           <div className="flex items-center gap-2">
             <Button
               variant="ghost"
@@ -69,61 +58,55 @@ export function Sidebar({
           </div>
         ) : (
           <>
-            {!isCollapsed && (
-              <span className="text-sm font-semibold tracking-tight text-foreground">Mcode</span>
-            )}
+            <span className="text-sm font-semibold tracking-tight text-foreground">Mcode</span>
             <Button
               variant="ghost"
               size="icon-sm"
-              onClick={() => setCollapsed(!collapsed)}
-              aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              onClick={toggleSidebar}
+              aria-label="Collapse sidebar"
               className="text-muted-foreground"
             >
-              {isCollapsed ? <PanelLeft size={16} /> : <PanelLeftClose size={16} />}
+              <PanelCollapseIcon className="transition-transform duration-200 group-hover/button:-translate-x-px" />
             </Button>
           </>
         )}
       </div>
 
       {/* Body */}
-      {!isCollapsed && (
-        <div className="flex-1 overflow-y-auto">
-          {settingsOpen && settingsSection && onSettingsSection ? (
-            <SettingsNav section={settingsSection} onSection={onSettingsSection} />
-          ) : (
-            <ProjectTree />
-          )}
-        </div>
-      )}
+      <div className="flex-1 overflow-y-auto">
+        {settingsOpen && settingsSection && onSettingsSection ? (
+          <SettingsNav section={settingsSection} onSection={onSettingsSection} />
+        ) : (
+          <ProjectTree />
+        )}
+      </div>
 
       {/* Footer */}
-      {!isCollapsed && (
-        <div className="border-t border-border/40 p-3 space-y-1">
-          {!settingsOpen && <SidebarUsagePanel />}
-          {settingsOpen ? (
-            IS_DESKTOP && (
-              <Button
-                variant="ghost"
-                className="flex w-full items-center gap-2 rounded p-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                onClick={handleEditJson}
-              >
-                <Braces size={14} />
-                Edit settings.json
-                <ExternalLink size={11} />
-              </Button>
-            )
-          ) : (
+      <div className="border-t border-border/40 p-3 space-y-1">
+        {!settingsOpen && <SidebarUsagePanel />}
+        {settingsOpen ? (
+          IS_DESKTOP && (
             <Button
               variant="ghost"
               className="flex w-full items-center gap-2 rounded p-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-              onClick={onOpenSettings}
+              onClick={handleEditJson}
             >
-              <Settings size={16} />
-              Settings
+              <Braces size={14} />
+              Edit settings.json
+              <ExternalLink size={11} />
             </Button>
-          )}
-        </div>
-      )}
+          )
+        ) : (
+          <Button
+            variant="ghost"
+            className="flex w-full items-center gap-2 rounded p-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+            onClick={onOpenSettings}
+          >
+            <Settings size={16} />
+            Settings
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
