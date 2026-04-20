@@ -1721,8 +1721,10 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         items={slashCommand.items}
         selectedIndex={slashCommand.selectedIndex}
         anchorRect={slashCommand.anchorRect}
+        error={slashCommand.error}
         onSelect={handleSlashSelect}
         onDismiss={slashCommand.onDismiss}
+        onRetry={slashCommand.onRetry}
       />
     </div>
   );

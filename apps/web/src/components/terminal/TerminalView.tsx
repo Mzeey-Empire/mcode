@@ -4,7 +4,6 @@ import type { FitAddon } from "@xterm/addon-fit";
 import { getTransport } from "@/transport";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { shouldInterceptKeyEvent } from "./terminalKeyHandler";
-import { CLEAR_TERMINAL_BUFFERS_EVENT } from "@/hooks/useIdleReclamation";
 // Static import so bundler deduplicates the stylesheet
 import "@xterm/xterm/css/xterm.css";
 
@@ -170,23 +169,43 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
     };
   }, [ptyId]);
 
-  // Re-fit when visibility changes (ResizeObserver handles the rest)
+  // When the panel is toggled open (visible: false -> true) we refit and
+  // intentionally pull focus into xterm so the user can start typing
+  // immediately. Focus is deliberately NOT moved on window/tab return —
+  // doing so would steal focus from the composer whenever the user
+  // alt-tabs back, contradicting the Ctrl+J-from-composer workflow.
   useEffect(() => {
-    if (visible && fitAddonRef.current) {
-      fitAddonRef.current.fit();
-    }
+    if (!visible) return;
+    const term = termRef.current;
+    if (!term) return;
+    fitAddonRef.current?.fit();
+    term.refresh(0, term.rows - 1);
+    term.focus();
   }, [visible]);
 
-  // Clear scrollback buffer during background idle to release memory
+  // Repaint xterm's DOM renderer when the window/tab regains visibility.
+  // Long background stints leave the canvas half-painted; fit + refresh is
+  // idempotent and cheap, and crucially skips term.focus() so we don't
+  // yank focus out of whatever the user was typing in (issue #305).
   useEffect(() => {
-    const handleClearBuffers = () => {
-      termRef.current?.clear();
+    const repaint = () => {
+      if (!visible) return;
+      const term = termRef.current;
+      if (!term) return;
+      fitAddonRef.current?.fit();
+      term.refresh(0, term.rows - 1);
     };
-    window.addEventListener(CLEAR_TERMINAL_BUFFERS_EVENT, handleClearBuffers);
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") repaint();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("focus", repaint);
     return () => {
-      window.removeEventListener(CLEAR_TERMINAL_BUFFERS_EVENT, handleClearBuffers);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("focus", repaint);
     };
-  }, []);
+  }, [visible]);
 
   // Sync scrollback setting to live terminal without remounting
   useEffect(() => {

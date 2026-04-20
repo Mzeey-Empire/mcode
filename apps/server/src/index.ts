@@ -32,6 +32,7 @@ import { TaskRepo } from "./repositories/task-repo";
 import { SnapshotService } from "./services/snapshot-service";
 import { SettingsService } from "./services/settings-service";
 import { GitWatcherService } from "./services/git-watcher-service";
+import { SkillWatcherService } from "./services/skill-watcher-service";
 import { MemoryPressureService } from "./services/memory-pressure-service";
 import { WorkspaceRepo } from "./repositories/workspace-repo";
 import { CleanupWorker } from "./services/cleanup-worker";
@@ -124,6 +125,7 @@ const turnSnapshotRepo = container.resolve(TurnSnapshotRepo);
 const snapshotService = container.resolve(SnapshotService);
 const settingsService = container.resolve(SettingsService);
 const gitWatcherService = container.resolve(GitWatcherService);
+const skillWatcherService = container.resolve(SkillWatcherService);
 const memoryPressureService = container.resolve(MemoryPressureService);
 const taskRepo = container.resolve(TaskRepo);
 const workspaceRepo = container.resolve(WorkspaceRepo); // Used only for startup watcher initialization
@@ -188,6 +190,10 @@ const allWorkspaces = workspaceRepo.listAll();
 for (const ws of allWorkspaces) {
   gitWatcherService.watchWorkspace(ws.id, ws.path);
 }
+
+// Begin watching the user's Claude skills/commands/plugins directories so the
+// skill registry stays current without a server restart.
+skillWatcherService.start();
 
 // Seed CI check watcher with all threads that have open PRs
 {
@@ -440,6 +446,9 @@ async function shutdown(): Promise<void> {
 
   // 7. Dispose all git HEAD file watchers
   gitWatcherService.dispose();
+
+  // 7a. Stop all skill / plugin directory watchers
+  skillWatcherService.stopAll();
 
   // 8. Dispose memory pressure timers
   memoryPressureService.dispose();

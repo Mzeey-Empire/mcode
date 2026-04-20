@@ -423,6 +423,8 @@ async function dispatch(
     // Skills
     case "skill.list":
       return deps.skillService.list(params.cwd);
+    case "skill.diagnose":
+      return deps.skillService.diagnose(params.cwd);
 
     // Terminal
     case "terminal.create":

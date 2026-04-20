@@ -67,8 +67,10 @@ function renderPopup(selectedIndex: number) {
       items={COMMANDS}
       selectedIndex={selectedIndex}
       anchorRect={makeAnchorRect()}
+      error={null}
       onSelect={() => {}}
       onDismiss={() => {}}
+      onRetry={() => {}}
     />,
   );
 }
