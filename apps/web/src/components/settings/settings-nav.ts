@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import { ModelSection } from "./sections/ModelSection";
 import { AgentSection } from "./sections/AgentSection";
+import { ProviderSection } from "./sections/ProviderSection";
 import { WorktreeSection } from "./sections/WorktreeSection";
 import { AppearanceSection } from "./sections/AppearanceSection";
 import { NotificationsSection } from "./sections/NotificationsSection";
@@ -10,6 +11,7 @@ import { KeyboardShortcutsSection } from "./sections/KeyboardShortcutsSection";
 
 export type SettingsSection =
   | "model"
+  | "provider"
   | "agent"
   | "worktree"
   | "appearance"
@@ -29,6 +31,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "AI",
     items: [
       { id: "model", label: "Model" },
+      { id: "provider", label: "Provider" },
       { id: "agent", label: "Agent" },
       { id: "worktree", label: "Worktrees" },
     ],
@@ -51,6 +54,7 @@ export const NAV_GROUPS: NavGroup[] = [
 /** Maps each settings section to its component. */
 export const SECTION_MAP: Record<SettingsSection, ComponentType> = {
   model: ModelSection,
+  provider: ProviderSection,
   agent: AgentSection,
   worktree: WorktreeSection,
   appearance: AppearanceSection,

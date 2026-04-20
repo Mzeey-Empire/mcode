@@ -1328,7 +1328,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
             providerId={activeProviderId as ProviderId}
             reason={providerReason}
             onOpenSettings={() =>
-              window.dispatchEvent(new CustomEvent("mcode:open-settings", { detail: { section: "model" } }))
+              window.dispatchEvent(new CustomEvent("mcode:open-settings", { detail: { section: "provider" } }))
             }
             onBranch={() => {}}
           />
