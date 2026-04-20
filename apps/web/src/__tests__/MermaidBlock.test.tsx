@@ -4,10 +4,12 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 // Mock mermaid
 const mockRender = vi.fn();
 const mockInitialize = vi.fn();
+const mockParse = vi.fn();
 vi.mock("mermaid", () => ({
   default: {
     initialize: (...args: unknown[]) => mockInitialize(...args),
     render: (...args: unknown[]) => mockRender(...args),
+    parse: (...args: unknown[]) => mockParse(...args),
   },
 }));
 
@@ -25,6 +27,7 @@ describe("MermaidBlock", () => {
     vi.clearAllMocks();
     __resetForTesting();
     mockRender.mockResolvedValue({ svg: '<svg class="mermaid">diagram</svg>' });
+    mockParse.mockResolvedValue({ diagramType: "graph" });
   });
 
   it("renders raw code when streaming", () => {
