@@ -5,7 +5,7 @@
  * Mirrors the debounce + fs.watch pattern of `GitWatcherService`.
  */
 
-import { injectable } from "tsyringe";
+import { inject, injectable } from "tsyringe";
 import { watch, existsSync, type FSWatcher } from "fs";
 import { join } from "path";
 import { homedir } from "os";
@@ -20,7 +20,9 @@ export class SkillWatcherService {
   private readonly watchers: FSWatcher[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private readonly skills: SkillService) {}
+  constructor(
+    @inject(SkillService) private readonly skills: SkillService,
+  ) {}
 
   /**
    * Begin watching the standard Claude plugin and skill roots.
