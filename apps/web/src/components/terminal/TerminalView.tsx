@@ -130,20 +130,29 @@ async function loadRenderer(
         } catch {
           // Already disposed by a racing cleanup — safe to ignore.
         }
-        loadCanvasRenderer(term)
-          .then((canvas) => {
-            // If the component unmounted while the canvas addon was
-            // loading, dispose the freshly-loaded addon instead of
-            // resurrecting rendererRef on a dead component.
+        // Inline construction so the disposed-check can run between
+        // `new CanvasAddon()` and `term.loadAddon(canvas)`. The public
+        // `loadCanvasRenderer` helper loads the addon internally, which
+        // would be a side effect against a disposed terminal if we
+        // awaited it here.
+        import("@xterm/addon-canvas")
+          .then(({ CanvasAddon }) => {
+            const canvas = new CanvasAddon();
+            // If the component unmounted while the canvas module was
+            // loading, dispose the freshly-constructed addon without
+            // ever attaching it to the (potentially disposed) terminal.
             if (isDisposed()) {
               try {
                 canvas.dispose();
               } catch {
-                // Already disposed — safe to ignore.
+                // Defensive: addon may have internal state that throws
+                // even before loadAddon. Safe to ignore.
               }
               return;
             }
+            term.loadAddon(canvas);
             rendererRef.current = canvas;
+            setActiveRenderer("canvas");
           })
           .catch((err) => {
             // Canvas load failed after WebGL context loss. xterm does
@@ -152,11 +161,11 @@ async function loadRenderer(
             // unmount. Nothing else to do here — the session is
             // effectively read-only rendering.
             console.warn(
-              "[terminal] Canvas renderer load failed after WebGL context loss; terminal will render via xterm default",
+              "[terminal] Canvas renderer load failed after WebGL context loss; " +
+                "xterm does not auto-attach a DOM renderer, so the terminal " +
+                "buffer is now static until unmount.",
               err,
             );
-            rendererRef.current = null;
-            setActiveRenderer("canvas");
           });
       });
       return;
