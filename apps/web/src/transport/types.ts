@@ -9,6 +9,7 @@ import type {
   PrInfo,
   PrDetail,
   SkillInfo,
+  SkillDiagnostics,
   PermissionMode,
   ReasoningLevel,
   ToolCallRecord,
@@ -40,6 +41,7 @@ export type {
   PrInfo,
   PrDetail,
   SkillInfo,
+  SkillDiagnostics,
   PermissionMode,
   InteractionMode,
   Settings,
@@ -182,6 +184,8 @@ export interface McodeTransport {
 
   // Skills
   listSkills(cwd?: string): Promise<SkillInfo[]>;
+  /** Run a filesystem scan across all skill search paths and return per-path diagnostics. */
+  diagnoseSkills(cwd?: string): Promise<SkillDiagnostics>;
 
   // Terminal (PTY)
   /** Create a new PTY attached to a thread's working directory. Returns the pty ID. */
