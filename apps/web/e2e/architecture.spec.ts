@@ -729,6 +729,16 @@ test.describe("Architecture: session.turnStarted → sidebar running dot", () =>
     await interceptZustandStores(page);
     await page.goto("/");
     await page.waitForLoadState("networkidle");
+
+    // Wait until the WS transport's initial hydration (agent.listRunning RPC)
+    // has resolved. Without this, a session.turnStarted injection below races
+    // hydrateRunningThreadsFromServer: the injected id gets captured in
+    // `beforeRpc`, is not classified as a concurrent add, and the server's
+    // empty [] response overwrites it.
+    await page.waitForFunction(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => (window as any).__mcodeHydrationComplete === true,
+    );
   });
 
   test("session.turnStarted populates runningThreadIds for the sidebar dot", async ({

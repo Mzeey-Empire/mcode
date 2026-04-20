@@ -175,7 +175,20 @@ export function createWsTransport(
       // Reconcile runningThreadIds with the server's authoritative set.
       // The client-side optimistic Set is lost on reload/reconnect; this
       // restores live-session indicators for threads the server is still running.
-      hydrateRunningThreadsFromServer((method, params) => rpc(method, params as Record<string, unknown>));
+      const hydration = hydrateRunningThreadsFromServer((method, params) => rpc(method, params as Record<string, unknown>));
+
+      // Expose a sentinel in dev/test builds so Playwright can synchronize on
+      // hydration completion before injecting agent events. Without this, tests
+      // that call handleAgentEvent too early see their optimistic threadIds
+      // classified as "pre-hydration" state and wiped by the server's response.
+      if (import.meta.env.DEV && typeof window !== "undefined") {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as any).__mcodeHydrationComplete = false;
+        hydration.finally(() => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (window as any).__mcodeHydrationComplete = true;
+        });
+      }
 
       // On connect/reconnect, refresh CI checks for all visible PR threads (best-effort).
       // Cooldown prevents subprocess storms during rapid reconnect loops.
