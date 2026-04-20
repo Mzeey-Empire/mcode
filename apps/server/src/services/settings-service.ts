@@ -124,6 +124,14 @@ export class SettingsService {
     // Validate and strip unknown keys before writing to disk
     const validated = SettingsSchema().parse(merged);
 
+    // Refuse updates that would disable every provider, which would render the app
+    // unusable (every sendMessage would throw ProviderDisabledError). The UI enforces
+    // this too, but a direct RPC call would otherwise bypass it.
+    const anyEnabled = Object.values(validated.provider.enabled).some(Boolean);
+    if (!anyEnabled) {
+      throw new Error("At least one provider must remain enabled");
+    }
+
     // Ensure parent directory exists (only on first write)
     if (!this.dirEnsured) {
       mkdirSync(dirname(this.filePath), { recursive: true });

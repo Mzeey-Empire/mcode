@@ -19,6 +19,14 @@ type CliRuntime = {
   resolvedPath: string | null;
 };
 
+/** Provider IDs whose CLI path is user-configurable via `settings.provider.cli`. */
+type CliProvider = "codex" | "claude" | "copilot";
+
+/** Narrows a ProviderId to those that carry a configurable CLI path setting. */
+function hasCliPath(id: ProviderId): id is CliProvider {
+  return id === "codex" || id === "claude" || id === "copilot";
+}
+
 /** Thin shim over `which` + fs so tests can inject stubs. */
 export interface CliResolver {
   which(binary: string): Promise<string>;
@@ -61,10 +69,7 @@ export class ProviderAvailabilityService {
         status: "unchecked",
         resolvedPath: null,
       };
-      const configuredPath =
-        entry.id === "codex" || entry.id === "claude" || entry.id === "copilot"
-          ? s.provider.cli[entry.id]
-          : "";
+      const configuredPath = hasCliPath(entry.id) ? s.provider.cli[entry.id] : "";
       return {
         id: entry.id,
         enabled: s.provider.enabled[entry.id],
@@ -88,10 +93,7 @@ export class ProviderAvailabilityService {
    */
   async verifyCli(id: ProviderId): Promise<CliRuntime> {
     const s = this.settings.get();
-    const configured =
-      id === "codex" || id === "claude" || id === "copilot"
-        ? s.provider.cli[id]
-        : "";
+    const configured = hasCliPath(id) ? s.provider.cli[id] : "";
 
     let result: CliRuntime;
     if (configured) {
@@ -124,10 +126,7 @@ export class ProviderAvailabilityService {
     }
     const cached = this.cliCache.get(id);
     if (cached?.status === "not_found") {
-      const configuredPath =
-        id === "codex" || id === "claude" || id === "copilot"
-          ? s.provider.cli[id]
-          : "";
+      const configuredPath = hasCliPath(id) ? s.provider.cli[id] : "";
       throw new ProviderCliMissingError(id, configuredPath);
     }
   }
@@ -144,6 +143,8 @@ export class ProviderAvailabilityService {
 
   private broadcastListeners: Array<(list: ProviderAvailability[]) => void> = [];
   private settingsSubscribed = false;
+  /** Snapshot of `settings.provider` from the last broadcast — used to skip no-op re-verifies. */
+  private lastProviderSnapshot: string | null = null;
 
   /** Register a broadcast callback invoked whenever availability changes due to a settings update. */
   onChange(cb: (list: ProviderAvailability[]) => void): void {
@@ -151,6 +152,7 @@ export class ProviderAvailabilityService {
     // Subscribe to SettingsService once, no matter how many onChange callers there are.
     if (!this.settingsSubscribed) {
       this.settingsSubscribed = true;
+      this.lastProviderSnapshot = JSON.stringify(this.settings.get().provider);
       this.settings.on("change", (s) => {
         void this.handleSettingsChange(s);
       });
@@ -158,8 +160,14 @@ export class ProviderAvailabilityService {
   }
 
   private async handleSettingsChange(
-    _next: ReturnType<SettingsService["get"]>,
+    next: ReturnType<SettingsService["get"]>,
   ): Promise<void> {
+    // Settings emits on every update — skip when the provider slice didn't change
+    // to avoid respawning `which`/`fs.access` probes on unrelated edits (theme, terminal, etc.).
+    const snapshot = JSON.stringify(next.provider);
+    if (snapshot === this.lastProviderSnapshot) return;
+    this.lastProviderSnapshot = snapshot;
+
     await this.verifyAllEnabled();
     const list = this.listAvailability();
     for (const cb of this.broadcastListeners) cb(list);

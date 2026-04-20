@@ -831,7 +831,13 @@ function VirtualizedThreadList({
         const unusable = providerRow
           ? !providerRow.enabled || providerRow.cli.status === "not_found"
           : false;
-        const unusableReason = !providerRow?.enabled ? "Provider disabled" : "CLI not found";
+        // Only compute a reason when the thread is actually unusable. A missing
+        // providerRow means availability hasn't arrived yet — don't label those as "disabled".
+        const unusableReason = !providerRow
+          ? ""
+          : !providerRow.enabled
+            ? "Provider disabled"
+            : "CLI not found";
         return (
           <div
             key={thread.id}

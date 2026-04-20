@@ -298,8 +298,9 @@ test.describe("provider toggle", () => {
 
     const controller = await mockWebSocketServer(page, {
       "providers.listAvailability": initialAvailability,
-      // Return empty list for messages so loadMessages resolves immediately.
-      "thread.listMessages": { items: [], cursor: null },
+      // Return empty list so loadMessages resolves immediately. Shape must match
+      // PaginatedMessagesSchema: { messages, hasMore }.
+      "message.list": { messages: [], hasMore: false },
     });
 
     await interceptZustandStores(page);
