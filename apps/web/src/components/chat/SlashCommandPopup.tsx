@@ -84,11 +84,12 @@ export function SlashCommandPopup({
   const useVirtual = items.length > VIRTUAL_THRESHOLD;
 
   return (
+    // role="listbox" is intentionally NOT on this outer wrapper: the
+    // Refresh footer button and the ErrorRow's Retry button live inside
+    // and would be invalid descendants of a listbox per WAI-ARIA. The
+    // role is moved down to the options container only.
     <div
       data-slash-popup
-      role="listbox"
-      aria-label="Slash commands"
-      aria-activedescendant={items[selectedIndex] ? `slash-cmd-${items[selectedIndex].name}` : undefined}
       style={style}
       className={cn(
         "z-50 overflow-hidden rounded-lg border border-border bg-card shadow-lg",
@@ -105,7 +106,9 @@ export function SlashCommandPopup({
         <>
           <div
             ref={scrollRef}
-            role="presentation"
+            role="listbox"
+            aria-label="Slash commands"
+            aria-activedescendant={items[selectedIndex] ? `slash-cmd-${items[selectedIndex].name}` : undefined}
             style={{ maxHeight, overflowY: "auto" }}
           >
             {useVirtual ? (
