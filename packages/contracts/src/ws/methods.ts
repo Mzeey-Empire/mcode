@@ -308,7 +308,7 @@ export const WS_METHODS = lazySchema(() => ({
   },
   "skill.list": {
     params: z.object({ cwd: z.string().optional() }),
-    result: z.array(SkillInfoSchema),
+    result: z.array(SkillInfoSchema()),
   },
   "terminal.create": {
     params: z.object({ threadId: z.string() }),
