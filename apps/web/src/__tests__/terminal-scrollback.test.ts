@@ -42,9 +42,9 @@ describe("Terminal scrollback from settings", () => {
     });
   });
 
-  it("default settings use 250 scrollback", () => {
+  it("default settings use 1000 scrollback", () => {
     const settings = useSettingsStore.getState().settings;
-    expect(settings.terminal.scrollback).toBe(250);
+    expect(settings.terminal.scrollback).toBe(1000);
   });
 
   it("settings store accepts custom scrollback value", () => {

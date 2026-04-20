@@ -8,6 +8,35 @@ import { CLEAR_TERMINAL_BUFFERS_EVENT } from "@/hooks/useIdleReclamation";
 // Static import so bundler deduplicates the stylesheet
 import "@xterm/xterm/css/xterm.css";
 
+/**
+ * Dev-only live-terminal counter. Exposed on `window.__mcodeLiveTerminals`
+ * so Playwright can assert that every terminal is disposed after close/
+ * thread-switch. Guarded by `import.meta.env.DEV` so production bundles
+ * pay zero cost.
+ */
+type LiveTerminalWindow = Window & { __mcodeLiveTerminals?: number };
+
+function incrementLiveTerminalCount(): void {
+  if (!import.meta.env.DEV) return;
+  const w = window as LiveTerminalWindow;
+  w.__mcodeLiveTerminals = (w.__mcodeLiveTerminals ?? 0) + 1;
+}
+
+function decrementLiveTerminalCount(): void {
+  if (!import.meta.env.DEV) return;
+  const w = window as LiveTerminalWindow;
+  w.__mcodeLiveTerminals = Math.max(0, (w.__mcodeLiveTerminals ?? 1) - 1);
+}
+
+// Ensures the counter starts at 0 on module load in dev so the first
+// Playwright assertion has a stable baseline.
+if (import.meta.env.DEV) {
+  const w = window as LiveTerminalWindow;
+  if (typeof w.__mcodeLiveTerminals !== "number") {
+    w.__mcodeLiveTerminals = 0;
+  }
+}
+
 /** Props for {@link TerminalView}. */
 interface TerminalViewProps {
   /** The PTY session ID this view is bound to. */
@@ -57,6 +86,7 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
       const fitAddon = new XFitAddon();
       term.loadAddon(fitAddon);
       term.open(el);
+      incrementLiveTerminalCount();
 
       // Intercept Ctrl/Cmd+C when text is selected — copy to clipboard instead of sending SIGINT.
       // Returning false prevents xterm from forwarding the raw \x03 byte to the PTY.
@@ -145,6 +175,7 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
         window.removeEventListener("mcode:pty-exit", handlePtyExit);
         observer.disconnect();
         term.dispose();
+        decrementLiveTerminalCount();
       };
 
       // Set cleanupRef BEFORE the disposed check so the effect's

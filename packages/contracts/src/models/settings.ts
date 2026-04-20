@@ -105,8 +105,13 @@ export const SettingsSchema = lazySchema(() =>
     /** Terminal emulator settings. */
     terminal: z
       .object({
-        /** Number of scrollback lines to retain. */
-        scrollback: z.number().int().nonnegative().default(250),
+        /**
+         * Number of scrollback lines to retain per terminal instance.
+         * Capped at 5000 to bound per-terminal memory — xterm.js stores each
+         * cell as individual string arrays, so unbounded scrollback leaks.
+         * Zero means unlimited (not recommended for long-running sessions).
+         */
+        scrollback: z.number().int().nonnegative().max(5000).default(1000),
       })
       .default({}),
 
@@ -241,7 +246,7 @@ export const PartialSettingsSchema = lazySchema(() =>
       .optional(),
     terminal: z
       .object({
-        scrollback: z.number().int().nonnegative().optional(),
+        scrollback: z.number().int().nonnegative().max(5000).optional(),
       })
       .optional(),
     notifications: z
