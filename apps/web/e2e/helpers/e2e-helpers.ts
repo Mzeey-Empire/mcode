@@ -61,6 +61,7 @@ export async function mockWebSocketServer(
       if (method?.endsWith(".list") || method === "provider.listModels") result = [];
       else if (method === "git.currentBranch") result = "main";
       else if (method === "agent.activeCount") result = 0;
+      else if (method === "agent.listRunning") result = [];
       else if (method === "app.version") result = "0.0.1-test";
       else if (method === "config.discover") result = {};
       // Return canonical settings defaults so App can bootstrap correctly.
