@@ -141,10 +141,10 @@ export function SlashCommandPopup({
             <button
               type="button"
               aria-label="Refresh commands"
-              onMouseDown={(e) => {
-                e.preventDefault();
-                onRetry();
-              }}
+              // onMouseDown preventDefault keeps editor focus on pointer use;
+              // onClick fires on both pointer and keyboard activation (Enter/Space).
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={onRetry}
               className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
             >
               <RefreshCw size={12} />
@@ -249,10 +249,10 @@ function ErrorRow({ message, onRetry }: { message: string; onRetry: () => void }
       <span className="flex-1 truncate">Couldn't load commands: {message}</span>
       <button
         type="button"
-        onMouseDown={(e) => {
-          e.preventDefault();
-          onRetry();
-        }}
+        // Same pattern as the footer Refresh button: preventDefault on
+        // mousedown to retain editor focus, action on click for keyboard a11y.
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onRetry}
         className="rounded px-2 py-0.5 text-foreground hover:bg-accent"
       >
         Retry

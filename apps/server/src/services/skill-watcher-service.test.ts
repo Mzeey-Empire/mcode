@@ -55,29 +55,19 @@ describe("SkillWatcherService", () => {
     expect(() => watcher.watch(join(dir, "does-not-exist"))).not.toThrow();
   });
 
-  it("start() is idempotent: a second call does not register duplicate watchers", async () => {
-    mkdirSync(join(dir, "skills"), { recursive: true });
-    const invalidateSpy = vi.spyOn(svc, "invalidate");
-
-    // Seed one watcher manually so start()'s idempotency guard
-    // (`watchers.length > 0` short-circuit) trips on both subsequent calls.
-    // Without the guard, each start() call would push additional FSWatcher
-    // instances rooted at ~/.claude paths, polluting global fs handles.
-    watcher.watch(dir);
-    const countAfterSeed = (watcher as unknown as { watchers: unknown[] }).watchers.length;
+  it("start() is idempotent: a second call from a clean state does not register duplicate watchers", () => {
+    // Spy on the per-root watch() call rather than asserting on a snapshot
+    // of watchers.length: this proves the FIRST start() actually ran (its
+    // calls are observable on the spy) and the second start() short-circuited.
+    // Pre-seeding watch(dir) would make both calls hit the fast-path and
+    // leave the regression undetected.
+    const watchSpy = vi.spyOn(watcher, "watch");
 
     watcher.start();
+    const firstCallCount = watchSpy.mock.calls.length;
+    expect(firstCallCount).toBeGreaterThan(0);
+
     watcher.start();
-
-    const countAfterStarts = (watcher as unknown as { watchers: unknown[] }).watchers.length;
-    expect(countAfterStarts).toBe(countAfterSeed);
-
-    // A single fs change must still result in exactly one invalidation
-    // (regression guard: duplicate watchers would still collapse under the
-    // shared debounce timer, but the watcher-count assertion above catches
-    // the leak directly).
-    writeFileSync(join(dir, "skills", "marker.txt"), "x");
-    await new Promise((r) => setTimeout(r, 350));
-    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(watchSpy.mock.calls.length).toBe(firstCallCount);
   });
 });

@@ -124,6 +124,10 @@ function scanPluginVersionDir(
   }
 }
 
+/** Numeric collator orders `2.1.0` before `10.0.0` instead of lexically.
+ *  Avoids pulling in the `semver` dep just for plugin-cache version selection. */
+const VERSION_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
 /** Walk plugin cache: cache/<marketplace>/<plugin>/<version>/. */
 function scanPluginCacheDir(ctx: ScanContext, cacheDir: string): void {
   for (const mp of scanDir(ctx, cacheDir)) {
@@ -135,7 +139,7 @@ function scanPluginCacheDir(ctx: ScanContext, cacheDir: string): void {
       const versions = scanDir(ctx, pluginDir)
         .filter((e) => e.isDirectory())
         .map((e) => e.name)
-        .sort();
+        .sort(VERSION_COLLATOR.compare);
       if (versions.length === 0) continue;
       scanPluginVersionDir(ctx, join(pluginDir, versions[versions.length - 1]), plugin.name);
     }

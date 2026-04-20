@@ -5,14 +5,20 @@ const FAKE_SKILLS = [
   { name: "a", description: "A", kind: "skill" as const, source: "user" as const },
 ];
 
+// Hoist the mock so the invalidate-then-reload test can assert call counts.
+// Without a stable reference, every getTransport() call would return a fresh
+// vi.fn() and the second load() would never be observable.
+const listSkillsMock = vi.fn(async () => FAKE_SKILLS);
+
 vi.mock("@/transport", () => ({
   getTransport: () => ({
-    listSkills: vi.fn(async () => FAKE_SKILLS),
+    listSkills: listSkillsMock,
   }),
 }));
 
 describe("skillsStore", () => {
   beforeEach(() => {
+    listSkillsMock.mockClear();
     useSkillsStore.getState().reset();
   });
 
@@ -33,6 +39,15 @@ describe("skillsStore", () => {
     await useSkillsStore.getState().load("/foo");
     useSkillsStore.getState().invalidate();
     expect(useSkillsStore.getState().skills).toBeNull();
+
+    // The visible-state assertion above is necessary but not sufficient: if
+    // invalidate() left the module-scoped TTL or in-flight reference behind,
+    // the next load() could short-circuit to the stale promise without ever
+    // hitting transport. Calling load() again and asserting two transport
+    // hits is what actually proves the cache was cleared.
+    await useSkillsStore.getState().load("/foo");
+    expect(listSkillsMock).toHaveBeenCalledTimes(2);
+    expect(useSkillsStore.getState().skills).toEqual(FAKE_SKILLS);
   });
 
   it("retries once after WebSocket disconnect", async () => {
