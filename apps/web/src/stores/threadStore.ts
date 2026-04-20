@@ -1042,6 +1042,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
 
     if (method === "session.turnStarted") {
       set((state) => {
+        // Guard preserves the optimistic agentStartTimes[threadId] written by
+        // sendMessage(). For server-originated turns (headless, reconnect), this
+        // path is skipped and the timestamp is written fresh below.
         if (state.runningThreadIds.has(threadId)) return {};
         const next = new Set(state.runningThreadIds);
         next.add(threadId);
