@@ -19,6 +19,10 @@ const DEBOUNCE_MS = 200;
 export class SkillWatcherService {
   private readonly watchers: FSWatcher[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
+  // Tracks whether start() has run, separately from watcher count: a fresh
+  // install with no `~/.claude/{skills,commands,plugins}` directories would
+  // otherwise leave `watchers.length === 0`, defeating the idempotency guard.
+  private started = false;
 
   constructor(
     @inject(SkillService) private readonly skills: SkillService,
@@ -26,16 +30,16 @@ export class SkillWatcherService {
 
   /**
    * Begin watching the standard Claude plugin and skill roots.
-   * Idempotent: if any watchers are already registered, this is a no-op.
-   * Call `stopAll()` first if you need to re-bootstrap.
+   * Idempotent: subsequent calls are no-ops until `stopAll()` resets state.
    */
   start(): void {
-    if (this.watchers.length > 0) {
-      logger.debug("SkillWatcherService: start() ignored, watchers active", {
-        count: this.watchers.length,
+    if (this.started) {
+      logger.debug("SkillWatcherService: start() ignored, already started", {
+        watcherCount: this.watchers.length,
       });
       return;
     }
+    this.started = true;
     const home = homedir();
     const roots = [
       join(home, ".claude", "skills"),
@@ -87,6 +91,7 @@ export class SkillWatcherService {
       clearTimeout(this.timer);
       this.timer = null;
     }
+    this.started = false;
   }
 
   /**

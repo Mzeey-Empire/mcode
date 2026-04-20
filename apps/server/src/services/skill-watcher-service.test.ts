@@ -55,12 +55,12 @@ describe("SkillWatcherService", () => {
     expect(() => watcher.watch(join(dir, "does-not-exist"))).not.toThrow();
   });
 
-  it("start() is idempotent: a second call from a clean state does not register duplicate watchers", () => {
-    // Spy on the per-root watch() call rather than asserting on a snapshot
-    // of watchers.length: this proves the FIRST start() actually ran (its
-    // calls are observable on the spy) and the second start() short-circuited.
-    // Pre-seeding watch(dir) would make both calls hit the fast-path and
-    // leave the regression undetected.
+  it("start() is idempotent: a second call from a clean state does not call watch() again", () => {
+    // Spy on watch() so the assertion is independent of which `~/.claude/*`
+    // subdirs happen to exist on the host (CI typically has none, in which
+    // case watch() short-circuits and never pushes to `watchers`). Counting
+    // watch() invocations directly proves the `started` guard, not the
+    // downstream watcher-registration side effect.
     const watchSpy = vi.spyOn(watcher, "watch");
 
     watcher.start();
