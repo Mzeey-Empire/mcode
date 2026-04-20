@@ -37,6 +37,11 @@ import { broadcast } from "../transport/push";
 // not at AgentService construction time.
 import { ThreadService } from "./thread-service";
 import { SettingsService } from "./settings-service.js";
+import { ProviderAvailabilityService } from "./provider-availability-service.js";
+import {
+  ProviderDisabledError,
+  ProviderCliMissingError,
+} from "./provider-availability-errors.js";
 import { PlanQuestionParser } from "./plan-question-parser.js";
 import { buildHandoffContent, buildConversationReplay, replayBudgetChars, resolveForkSnapshot } from "./handoff-builder.js";
 import { PlanQuestionSchema } from "@mcode/contracts";
@@ -120,6 +125,8 @@ export class AgentService {
     private readonly memoryPressureService: MemoryPressureService,
     @inject(TaskRepo) private readonly taskRepo: TaskRepo,
     @inject(SettingsService) private readonly settingsService: SettingsService,
+    @inject(ProviderAvailabilityService)
+    private readonly availability: ProviderAvailabilityService,
   ) {}
 
   /**
@@ -148,6 +155,25 @@ export class AgentService {
     // Fall back to the thread's persisted Copilot agent when the caller doesn't supply one.
     // Converts null (DB "cleared") to undefined (provider ignores it) so the SDK defaults.
     const effectiveCopilotAgent = copilotAgent ?? (thread.copilot_agent ?? undefined);
+
+    // Gate: reject disabled or CLI-missing providers before any side effects
+    // (message persistence, status changes) so the thread stays in a clean state.
+    try {
+      this.availability.assertUsable(effectiveProvider);
+    } catch (err) {
+      if (err instanceof ProviderDisabledError || err instanceof ProviderCliMissingError) {
+        broadcast("agent.event", {
+          type: "providerUnavailable",
+          threadId,
+          providerId: effectiveProvider,
+          reason: err instanceof ProviderDisabledError ? "disabled" : "cli_missing",
+          configuredPath: err instanceof ProviderCliMissingError ? err.configuredPath : undefined,
+        });
+        return;
+      }
+      throw err;
+    }
+
     if (thread.status === "deleted" || thread.deleted_at != null) {
       throw new Error(`Cannot send message to deleted thread: ${threadId}`);
     }
