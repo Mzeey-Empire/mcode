@@ -34,4 +34,25 @@ describe("skillsStore", () => {
     useSkillsStore.getState().invalidate();
     expect(useSkillsStore.getState().skills).toBeNull();
   });
+
+  it("retries once after WebSocket disconnect", async () => {
+    const calls: number[] = [];
+    vi.doMock("@/transport", () => ({
+      getTransport: () => ({
+        listSkills: vi.fn(async () => {
+          calls.push(Date.now());
+          if (calls.length === 1) throw new Error("WebSocket disconnected");
+          return FAKE_SKILLS;
+        }),
+        waitForConnection: async () => undefined,
+      }),
+    }));
+
+    vi.resetModules();
+    const { useSkillsStore: store } = await import("./skillsStore");
+    store.getState().reset();
+    const result = await store.getState().load("/foo");
+    expect(result).toEqual(FAKE_SKILLS);
+    expect(calls.length).toBe(2);
+  });
 });

@@ -90,14 +90,33 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
 
     // Kick off the actual fetch outside the synchronous set() block.
     (async () => {
+      const transport = getTransport();
+      const attempt = () => transport.listSkills(cwd);
       try {
-        const skills = await getTransport().listSkills(cwd);
+        let skills: SkillInfo[];
+        try {
+          skills = await attempt();
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          // Retry once if the WebSocket was momentarily disconnected. The
+          // transport may expose waitForConnection; use it if available so
+          // the retry doesn't fire before the socket is back up.
+          if (message.includes("disconnected") || message.includes("not initialized")) {
+            const t = transport as unknown as { waitForConnection?: (ms: number) => Promise<void> };
+            if (t.waitForConnection) {
+              await t.waitForConnection(5000).catch(() => undefined);
+            }
+            skills = await attempt();
+          } else {
+            throw err;
+          }
+        }
         lastFetchedAt = Date.now();
         set({ skills, cwd, isLoading: false, inflight: null, error: null });
         resolveInflight(skills);
       } catch (err) {
         const error = err instanceof Error ? err : new Error(String(err));
-        console.warn("[skillsStore] load failed", error);
+        console.warn("[skillsStore] load failed after retry", error);
         set({ isLoading: false, inflight: null, error });
         rejectInflight(error);
       }
