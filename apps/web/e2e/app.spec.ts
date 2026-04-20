@@ -113,27 +113,19 @@ test.describe("Sidebar", () => {
     // Brand name is visible when sidebar is expanded
     await expect(page.locator("text=Mcode")).toBeVisible();
 
-    // Click the collapse/expand icon button (PanelLeftClose icon)
-    const toggleBtn = page.locator(
-      "button:has(svg)",
-      { hasText: "" }
-    ).first();
+    // Collapse the sidebar — the button lives in the sidebar header and is
+    // identified by its aria-label so the test survives class-name churn.
+    await page.getByRole("button", { name: "Collapse sidebar" }).click();
 
-    // Find the collapse button by locating the header area button that is NOT the settings trigger
-    // The sidebar header has exactly one button (the collapse toggle)
-    const sidebarHeader = page.locator(".border-b.border-border.p-3").first();
-    const collapseBtn = sidebarHeader.locator("button");
-    await collapseBtn.click();
-
-    // After collapse, brand name should disappear (sidebar collapses to w-12)
+    // The sidebar unmounts entirely on collapse so the chat panel can claim
+    // the full viewport width. Brand name and project tree should be gone.
     await expect(page.locator("text=Mcode")).not.toBeVisible();
     await expect(page.locator("text=Projects")).not.toBeVisible();
 
-    // Click again to expand
-    await collapseBtn.click();
+    // The reveal control now lives inline in the chat header. Click it to
+    // bring the sidebar back.
+    await page.getByRole("button", { name: "Expand sidebar" }).click();
     await expect(page.locator("text=Mcode")).toBeVisible();
-
-    void toggleBtn; // suppress unused variable warning
   });
 });
 
