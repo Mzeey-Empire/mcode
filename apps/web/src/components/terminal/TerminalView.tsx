@@ -106,7 +106,19 @@ async function loadCanvasRenderer(
     }
     return null;
   }
-  term.loadAddon(canvas);
+  try {
+    term.loadAddon(canvas);
+  } catch (err) {
+    // Construction succeeded but attach failed — dispose the orphaned
+    // addon before rethrowing so the caller's catch does not leak the
+    // partially-initialised CanvasAddon.
+    try {
+      canvas.dispose();
+    } catch {
+      // Defensive: addon may have internal state that throws.
+    }
+    throw err;
+  }
   setActiveRenderer("canvas");
   return canvas;
 }
@@ -189,7 +201,19 @@ async function loadRenderer(
               }
               return;
             }
-            term.loadAddon(canvas);
+            try {
+              term.loadAddon(canvas);
+            } catch (err) {
+              // Attach failed after successful construction — dispose the
+              // orphaned addon before rethrowing so the outer .catch() logs
+              // without leaking the partially-initialised CanvasAddon.
+              try {
+                canvas.dispose();
+              } catch {
+                // Defensive: addon may have internal state that throws.
+              }
+              throw err;
+            }
             rendererRef.current = canvas;
             setActiveRenderer("canvas");
           })
@@ -366,7 +390,14 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
       let lastSentRows = -1;
 
       const flushResizeRpc = () => {
-        rpcTimer = null;
+        // Clear any pending timeout so a manual flush (e.g. from the
+        // visibility effect) supersedes the scheduled trailing call
+        // instead of racing with it. Without this, a later timer fire
+        // could double-send the resize RPC or send stale dimensions.
+        if (rpcTimer !== null) {
+          clearTimeout(rpcTimer);
+          rpcTimer = null;
+        }
         if (disposed) return;
         const dims = fitAddonRef.current?.proposeDimensions();
         if (!dims || dims.cols <= 0 || dims.rows <= 0) return;
