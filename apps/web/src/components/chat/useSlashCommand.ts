@@ -104,12 +104,14 @@ export function useSlashCommand({
   })();
 
   // Trigger an initial load when the popup first opens.
-  // Retries once on transport failure (handled inside the store after Task 8).
+  // The `!error` gate is critical: without it, a failed load resets
+  // `isLoading` to false, which would re-trigger this effect immediately
+  // and create an infinite retry loop. Recovery happens via `onRetry`.
   useEffect(() => {
-    if (isOpen && skills === null && !isLoading) {
+    if (isOpen && skills === null && !isLoading && !error) {
       load(cwd).catch(() => { /* surfaced via `error` */ });
     }
-  }, [isOpen, skills, isLoading, load, cwd]);
+  }, [isOpen, skills, isLoading, error, load, cwd]);
 
   const onInputChange = useCallback(
     (value: string) => {
