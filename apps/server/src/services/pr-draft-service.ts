@@ -13,6 +13,7 @@ import type { MessageRepo } from "../repositories/message-repo.js";
 import type { WorkspaceRepo } from "../repositories/workspace-repo.js";
 import type { ThreadRepo } from "../repositories/thread-repo.js";
 import { SettingsService } from "./settings-service.js";
+import { ProviderAvailabilityService } from "./provider-availability-service.js";
 import { isCompletionCapable } from "@mcode/contracts";
 import type { IProviderRegistry, ProviderId, PrDraft } from "@mcode/contracts";
 import { parseCompletionDraft } from "./pr-draft-parser.js";
@@ -50,6 +51,7 @@ export class PrDraftService {
     @inject("ThreadRepo") private readonly threadRepo: ThreadRepo,
     @inject(SettingsService) private readonly settingsService: SettingsService,
     @inject("IProviderRegistry") private readonly providerRegistry: IProviderRegistry,
+    @inject(ProviderAvailabilityService) private readonly availability: ProviderAvailabilityService,
   ) {}
 
   /**
@@ -108,6 +110,7 @@ export class PrDraftService {
     const configuredProvider = settings.prDraft.provider as ProviderId | "";
     const defaultProvider = settings.model.defaults.provider as ProviderId;
     const resolvedProvider = configuredProvider || defaultProvider;
+    this.availability.assertUsable(resolvedProvider);
     const resolvedAgent = this.providerRegistry.resolve(resolvedProvider);
 
     let provider: ProviderId;
@@ -149,6 +152,7 @@ export class PrDraftService {
 
     const aiContext = { commitLog, diffStat, conversationSummary, repoTemplate, headBranch, baseBranch, repoPath };
 
+    this.availability.assertUsable(provider);
     try {
       return await this.generateWithAI({ ...aiContext, provider, model });
     } catch (error) {

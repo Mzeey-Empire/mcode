@@ -3,6 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useShallow } from "zustand/shallow";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useThreadStore } from "@/stores/threadStore";
+import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import { Plus, Trash2, ChevronRight, ChevronDown, GitBranch, Loader2, AlertTriangle, FolderPlus } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { getPrVisual } from "@/lib/pr-status";
@@ -760,6 +761,9 @@ function VirtualizedThreadList({
   const worktrees = useWorkspaceStore((s) => s.worktrees);
   const worktreesLoadedFor = useWorkspaceStore((s) => s.worktreesLoadedForWorkspace);
   const checksById = useWorkspaceStore(useShallow((s) => s.checksById));
+  // Subscribe once at the list level so we can derive unusable state per-thread
+  // inside the map without violating Rules of Hooks.
+  const availableProviders = useProviderAvailabilityStore((s) => s.providers);
   const validWorktreePaths = useMemo(() => {
     const set = new Set<string>();
     for (const wt of worktrees) {
@@ -825,6 +829,19 @@ function VirtualizedThreadList({
         const isStaleWorktree = worktreesLoadedFor === thread.workspace_id
           && thread.mode === "worktree" && !!thread.worktree_path
           && !validWorktreePaths.has(thread.worktree_path.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase());
+        // Unusable when the provider is disabled or its CLI binary is missing.
+        // "unchecked" is not treated as unusable — the server may not have verified yet.
+        const providerRow = availableProviders.find((p) => p.id === thread.provider);
+        const unusable = providerRow
+          ? !providerRow.enabled || providerRow.cli.status === "not_found"
+          : false;
+        // Only compute a reason when the thread is actually unusable. A missing
+        // providerRow means availability hasn't arrived yet — don't label those as "disabled".
+        const unusableReason = !providerRow
+          ? ""
+          : !providerRow.enabled
+            ? "Provider disabled"
+            : "CLI not found";
         return (
           <div
             key={thread.id}
@@ -933,6 +950,20 @@ function VirtualizedThreadList({
                     )}
                     {thread.title}
                   </span>
+                )}
+                {!isEditing && unusable && (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span
+                          data-testid={`sidebar-unusable-${thread.id}`}
+                          className="ml-1 shrink-0 inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/60"
+                          aria-label={unusableReason}
+                        />
+                      }
+                    />
+                    <TooltipContent side="right" className="text-xs">{unusableReason}</TooltipContent>
+                  </Tooltip>
                 )}
                 {!isEditing && thread.pr_number != null && checksById[thread.id] && (
                   <CiChip checks={checksById[thread.id]} />

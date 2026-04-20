@@ -38,6 +38,7 @@ import { WorkspaceRepo } from "./repositories/workspace-repo";
 import { CleanupWorker } from "./services/cleanup-worker";
 import { PrDraftService } from "./services/pr-draft-service";
 import { CiWatcherService } from "./services/ci-watcher";
+import { ProviderAvailabilityService } from "./services/provider-availability-service";
 import { ProviderRegistry } from "./providers/provider-registry";
 import { WebSocket } from "ws";
 import { AgentEventType } from "@mcode/contracts";
@@ -118,6 +119,7 @@ const terminalService = container.resolve(TerminalService);
 const messageRepo = container.resolve(MessageRepo);
 const threadRepo = container.resolve(ThreadRepo);
 const providerRegistry = container.resolve(ProviderRegistry);
+const providerAvailability = container.resolve(ProviderAvailabilityService);
 const toolCallRecordRepo = container.resolve(ToolCallRecordRepo);
 const turnSnapshotRepo = container.resolve(TurnSnapshotRepo);
 const snapshotService = container.resolve(SnapshotService);
@@ -163,6 +165,24 @@ terminalService.setSender((channel, data) => {
 
 // AgentService self-wires persistence and session tracking against providers
 agentService.init();
+
+// Register broadcast callback so settings changes propagate to clients
+providerAvailability.onChange((list) => {
+  broadcast("providers.availability", list);
+});
+// Run startup CLI verification and emit initial availability snapshot.
+// Wrapped in .then() rather than top-level await: the desktop bundle emits
+// CJS via esbuild, which does not support top-level await. Fire-and-forget
+// is safe here — onChange broadcasts during verify, and the final snapshot
+// is broadcast after verifyAllEnabled resolves.
+providerAvailability
+  .verifyAllEnabled()
+  .then(() => {
+    broadcast("providers.availability", providerAvailability.listAvailability());
+  })
+  .catch((err: unknown) => {
+    logger.error("Provider availability startup verification failed", err);
+  });
 
 // Start background worktree cleanup worker
 cleanupWorker.start();
@@ -303,6 +323,7 @@ const { httpServer, wss } = createWsServer({
   memoryPressureService,
   taskRepo,
   providerRegistry,
+  providerAvailability,
   prDraftService,
   ciWatcherService,
   threadRepo,

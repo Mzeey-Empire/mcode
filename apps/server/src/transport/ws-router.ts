@@ -43,6 +43,11 @@ import type { CiWatcherService } from "../services/ci-watcher";
 import type { ThreadRepo } from "../repositories/thread-repo";
 import type { WorkspaceRepo } from "../repositories/workspace-repo";
 import { broadcast } from "./push";
+import {
+  ProviderCliMissingError,
+  isProviderAvailabilityError,
+} from "../services/provider-availability-errors.js";
+import type { ProviderAvailabilityService } from "../services/provider-availability-service.js";
 
 /** Service dependencies for the router. */
 export interface RouterDeps {
@@ -67,6 +72,8 @@ export interface RouterDeps {
   taskRepo: TaskRepo;
   /** Registry of AI provider adapters for model discovery. */
   providerRegistry: IProviderRegistry;
+  /** Tracks per-provider enabled flag and CLI verification state. */
+  providerAvailability: ProviderAvailabilityService;
   /** Generates AI-powered PR draft titles and bodies. */
   prDraftService: PrDraftService;
   /** CI check watcher for adaptive polling and manual refresh. */
@@ -148,16 +155,23 @@ export async function routeMessage(
 
     return { id: request.id, result };
   } catch (err) {
-    const message =
-      err instanceof Error ? err.message : String(err);
-    logger.error("RPC handler error", {
-      method: request.method,
-      error: message,
-    });
-    return {
-      id: request.id,
-      error: { code: "INTERNAL_ERROR", message },
-    };
+    const message = err instanceof Error ? err.message : String(err);
+    if (isProviderAvailabilityError(err)) {
+      logger.info("Provider unavailable in RPC", { method: request.method, providerId: err.providerId, code: err.code });
+      return {
+        id: request.id,
+        error: {
+          code: err.code,
+          message,
+          data:
+            err instanceof ProviderCliMissingError
+              ? { providerId: err.providerId, configuredPath: err.configuredPath, resolvedPath: null }
+              : { providerId: err.providerId },
+        },
+      };
+    }
+    logger.error("RPC handler error", { method: request.method, error: message });
+    return { id: request.id, error: { code: "INTERNAL_ERROR", message } };
   }
 }
 
@@ -533,6 +547,7 @@ async function dispatch(
 
     // Provider
     case "provider.listModels": {
+      deps.providerAvailability.assertUsable(params.providerId);
       const provider = deps.providerRegistry.resolve(params.providerId);
       if (!provider.listModels) {
         throw new Error(`Provider "${params.providerId}" does not support model listing`);
@@ -540,11 +555,15 @@ async function dispatch(
       return provider.listModels();
     }
     case "provider.getUsage": {
+      deps.providerAvailability.assertUsable(params.providerId);
       const provider = deps.providerRegistry.resolve(params.providerId);
       if (!provider.getUsage) {
         return { providerId: provider.id, quotaCategories: [] } satisfies ProviderUsageInfo;
       }
       return provider.getUsage();
+    }
+    case "providers.listAvailability": {
+      return deps.providerAvailability.listAvailability();
     }
     case "provider.copilotAgents": {
       const workspace = deps.workspaceService.findById(params.workspaceId);

@@ -21,6 +21,7 @@ import {
 import { lazySchema } from "../utils/lazySchema.js";
 import { ProviderModelInfoSchema } from "../providers/models.js";
 import { ProviderUsageInfoSchema } from "../providers/usage.js";
+import { ProviderAvailabilitySchema } from "../providers/availability.js";
 import { CopilotSubagentSchema, CopilotAgentNameSchema } from "../providers/copilot-agent.js";
 import { PermissionDecisionSchema, PermissionRequestSchema } from "../models/permission.js";
 
@@ -436,6 +437,10 @@ export const WS_METHODS = lazySchema(() => ({
       workspaceId: z.string(),
     }),
     result: z.array(CopilotSubagentSchema()),
+  },
+  "providers.listAvailability": {
+    params: z.object({}),
+    result: z.array(ProviderAvailabilitySchema()),
   },
 } as const));
 

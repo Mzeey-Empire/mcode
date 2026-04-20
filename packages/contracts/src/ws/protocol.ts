@@ -17,6 +17,8 @@ export const WebSocketResponseSchema = z.object({
     .object({
       code: z.string(),
       message: z.string(),
+      /** Optional structured payload for typed errors (e.g. provider availability errors). */
+      data: z.record(z.unknown()).optional(),
     })
     .optional(),
 });

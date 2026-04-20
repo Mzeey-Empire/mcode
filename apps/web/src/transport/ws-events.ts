@@ -1,9 +1,10 @@
-import type { Settings } from "@mcode/contracts";
+import type { Settings, ProviderAvailability } from "@mcode/contracts";
 import type { PermissionRequest, PermissionDecision } from "@mcode/contracts";
 import { pushEmitter } from "./ws-transport";
 import { useThreadStore } from "@/stores/threadStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import { useSkillsStore } from "@/stores/skillsStore";
 import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
 
@@ -29,6 +30,7 @@ let unsubs: (() => void)[] = [];
  * - `plan.questions` -- model-proposed plan questions forwarded to threadStore wizard
  * - `permission.request` -- tool permission awaiting user decision
  * - `permission.resolved` -- a permission was settled (by user or session stop)
+ * - `providers.availability` -- server-pushed provider availability snapshot forwarded to providerAvailabilityStore
  */
 export function startPushListeners(): void {
   // Guard against double-init
@@ -250,6 +252,15 @@ export function startPushListeners(): void {
       };
       if (!requestId) return;
       useThreadStore.getState().resolvePermissionRequest(requestId, decision);
+    }),
+  );
+
+  // providers.availability: server-pushed snapshot of all provider availability records
+  unsubs.push(
+    pushEmitter.on("providers.availability", (data) => {
+      // Reject malformed payloads rather than overwriting the store with garbage.
+      if (!Array.isArray(data)) return;
+      useProviderAvailabilityStore.getState().replace(data as ProviderAvailability[]);
     }),
   );
 

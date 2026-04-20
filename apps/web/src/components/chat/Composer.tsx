@@ -59,9 +59,12 @@ import {
   MAX_ATTACHMENTS,
 } from "@mcode/contracts";
 import type { ReasoningLevel } from "@mcode/contracts";
+import type { ProviderId } from "@mcode/contracts";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import { useElementWidth } from "@/hooks/useElementWidth";
+import { ProviderUnavailableBanner } from "./ProviderUnavailableBanner";
 
 /** ReasoningLevel values as a Set for O(1) membership checks in the Codex level filter. */
 const VALID_REASONING_LEVELS_SET = new Set<string>(["low", "medium", "high", "xhigh", "max"]);
@@ -635,6 +638,17 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const activeProviderId = activeThread?.provider ?? "claude";
   const usageInfo = useThreadStore((s) => s.usageByProvider[activeProviderId]);
   const hasLowQuota = usageInfo?.quotaCategories.some((c) => !c.isUnlimited && c.remainingPercent < 0.2) ?? false;
+
+  // For new threads (no active thread yet), fall back to the composer-selected
+  // provider so the availability banner tracks what the user is about to submit.
+  const effectiveProviderId = (activeThread?.provider ?? provider) as ProviderId;
+  const availability = useProviderAvailabilityStore((s) => s.getAvailability(effectiveProviderId));
+  const providerUnusable = !!availability && (
+    !availability.enabled || availability.cli.status === "not_found"
+  );
+  const providerReason: "disabled" | "cli_missing" | null = providerUnusable
+    ? (!availability!.enabled ? "disabled" : "cli_missing")
+    : null;
 
   const branches = useWorkspaceStore((s) => s.branches);
   const branchesLoading = useWorkspaceStore((s) => s.branchesLoading);
@@ -1308,6 +1322,20 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
           />
         )}
 
+        {/* Provider unavailable banner — shown when the thread's active provider is
+            disabled by the user or its CLI binary is missing. Branch initiation is
+            owned by ChatView (it controls branchFromMessageId), so we omit onBranch
+            here and the banner renders only the "Open Settings" CTA. */}
+        {providerReason && (
+          <ProviderUnavailableBanner
+            providerId={effectiveProviderId}
+            reason={providerReason}
+            onOpenSettings={() =>
+              window.dispatchEvent(new CustomEvent("mcode:open-settings", { detail: { section: "model" } }))
+            }
+          />
+        )}
+
         {/* Lexical editor with file tag popup */}
         <div className="relative" ref={editorContainerRef} onPaste={handlePaste}>
           <ComposerEditor
@@ -1320,7 +1348,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
             onSlashDismiss={slashCommand.onDismiss}
             isSlashPopupOpen={slashCommand.isOpen}
             editorRef={editorRef}
-            disabled={planPending || isStaleWorktree}
+            disabled={planPending || isStaleWorktree || !!providerReason}
             isPopupOpen={isAnyPopupOpen}
             onPopupKeyDown={handlePopupKeyDown}
             placeholder={isStaleWorktree ? "Worktree directory no longer exists. This thread is read-only." : planPending ? "Answer the planning questions above" : branchFromMessageId ? "What should the branch work on?" : isAgentRunning ? "Queue a follow-up..." : "Message Mcode..."}
@@ -1546,6 +1574,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
                     : handleSend
             }
             disabled={
+              !!providerReason ||
               isStaleWorktree ||
               planPending ||
               preparingWorktree ||

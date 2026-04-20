@@ -41,6 +41,7 @@ import { SkillWatcherService } from "./services/skill-watcher-service";
 import { MemoryPressureService } from "./services/memory-pressure-service";
 import { CleanupWorker } from "./services/cleanup-worker";
 import { PrDraftService } from "./services/pr-draft-service";
+import { ProviderAvailabilityService } from "./services/provider-availability-service";
 
 /** Initialize the DI container with all server dependencies. */
 export function setupContainer(): typeof container {
@@ -236,6 +237,11 @@ export function setupContainer(): typeof container {
   container.register("PrDraftService", {
     useFactory: (c) => c.resolve(PrDraftService),
   });
+  container.register(
+    ProviderAvailabilityService,
+    { useClass: ProviderAvailabilityService },
+    { lifecycle: Lifecycle.Singleton },
+  );
 
   return container;
 }

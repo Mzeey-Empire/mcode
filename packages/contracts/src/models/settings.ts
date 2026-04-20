@@ -149,6 +149,17 @@ export const SettingsSchema = lazySchema(() =>
     /** Provider-specific configuration. */
     provider: z
       .object({
+        /** Per-provider enable flag. Disabled providers cannot start new sessions. */
+        enabled: z
+          .object({
+            claude: z.boolean().default(true),
+            codex: z.boolean().default(true),
+            copilot: z.boolean().default(true),
+            gemini: z.boolean().default(false),
+            cursor: z.boolean().default(false),
+            opencode: z.boolean().default(false),
+          })
+          .default({}),
         /** CLI binary paths. Empty string means auto-discover from PATH. */
         cli: z
           .object({
@@ -270,6 +281,16 @@ export const PartialSettingsSchema = lazySchema(() =>
       .optional(),
     provider: z
       .object({
+        enabled: z
+          .object({
+            claude: z.boolean().optional(),
+            codex: z.boolean().optional(),
+            copilot: z.boolean().optional(),
+            gemini: z.boolean().optional(),
+            cursor: z.boolean().optional(),
+            opencode: z.boolean().optional(),
+          })
+          .optional(),
         cli: z
           .object({
             codex: z.string().optional(),
