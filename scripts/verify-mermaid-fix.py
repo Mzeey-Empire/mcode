@@ -100,10 +100,19 @@ INVALID_CODE = "this is not valid mermaid DSL"
 
 
 def wait_for_mermaid(page):
+    """Block until the mermaid ESM module has finished loading on the page."""
     page.wait_for_function("window._mermaidReady === true", timeout=30_000)
 
 
 def run():
+    """
+    Execute the before/after screenshot comparison.
+
+    Launches a headless Chromium browser, runs the mermaid render harness
+    twice (once without the parse-first fix, once with), asserts that the
+    orphan node is present in the first run and absent in the second, and
+    saves screenshots to apps/web/e2e/screenshots/.
+    """
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 900, "height": 500})
