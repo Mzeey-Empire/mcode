@@ -4,6 +4,7 @@ import { pushEmitter } from "./ws-transport";
 import { useThreadStore } from "@/stores/threadStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useSkillsStore } from "@/stores/skillsStore";
 import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
 
 /** Unsubscribe handles for all push listeners. */
@@ -21,7 +22,7 @@ let unsubs: (() => void)[] = [];
  * - `thread.prLinked` -- PR detected for a thread, updates pr_number/pr_status
  * - `thread.checksUpdated` -- CI check status polled for a thread's PR, updates checksById
  * - `files.changed` -- invalidates the file autocomplete cache
- * - `skills.changed` -- reserved for future skill cache invalidation
+ * - `skills.changed` -- invalidates the skill cache; popup re-fetches on next open
  * - `turn.persisted` -- tool call persistence confirmation forwarded to threadStore
  * - `settings.changed` -- server-pushed settings updates forwarded to settingsStore
  * - `branch.changed` -- refreshes branch list and updates current branch if not manually overridden
@@ -140,10 +141,10 @@ export function startPushListeners(): void {
     }),
   );
 
-  // skills.changed: reserved for future skill cache invalidation
+  // skills.changed: invalidate skill cache so the popup re-fetches on next open
   unsubs.push(
     pushEmitter.on("skills.changed", () => {
-      // No-op for now; will invalidate skill cache when implemented.
+      useSkillsStore.getState().invalidate();
     }),
   );
 
