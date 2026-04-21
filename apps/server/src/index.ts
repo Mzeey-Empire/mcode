@@ -5,7 +5,7 @@
 
 import { setupContainer } from "./container";
 import { createWsServer } from "./transport/ws-server";
-import { broadcast, onSessionChange, sessionCount } from "./transport/push";
+import { broadcast, broadcastTerminalData, maxBufferedAmount, onSessionChange, sessionCount } from "./transport/push";
 import { PortPush } from "./transport/port-push";
 import { IpcPushServer, generateIpcPath } from "./transport/ipc-push-server";
 import { logger, getMcodeDir } from "@mcode/shared";
@@ -153,15 +153,27 @@ const ciWatcherService = new CiWatcherService(githubService, (channel, data) => 
 });
 
 // Wire up PTY sender to broadcast push events
-terminalService.setSender((channel, data) => {
-  if (channel === "terminal.data") {
-    broadcast("terminal.data", data);
-    portPush.send("terminal.data", data);
-  } else if (channel === "terminal.exit") {
-    broadcast("terminal.exit", data);
-    portPush.send("terminal.exit", data);
-  }
+terminalService.setSender({
+  json: (channel, data) => {
+    broadcast(channel as Parameters<typeof broadcast>[0], data as Parameters<typeof broadcast>[1]);
+    portPush.send(channel, data);
+  },
+  data: (ptyId, seq, bytes) => {
+    broadcastTerminalData(ptyId, seq, bytes);
+    // The IPC socket adapter (ipc-push-server.ts) serializes via JSON.stringify,
+    // so a Uint8Array would arrive as {"0":72,"1":101,...} on the client. Converting
+    // to a plain number[] survives the JSON round-trip; the client reconstructs it
+    // with new Uint8Array(arr).
+    portPush.send("terminal.data", { ptyId, payload: Array.from(bytes), seq });
+  },
 });
+
+// Poll ws.bufferedAmount every 50ms and drive server-side flow control.
+// unref() prevents this timer from keeping the process alive if everything
+// else has shut down.
+setInterval(() => {
+  terminalService.onBufferedAmountTick(maxBufferedAmount());
+}, 50).unref();
 
 // AgentService self-wires persistence and session tracking against providers
 agentService.init();

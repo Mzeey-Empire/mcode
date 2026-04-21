@@ -203,6 +203,10 @@ export interface McodeTransport {
   terminalResize(ptyId: string, cols: number, rows: number): Promise<void>;
   /** Kill a single PTY by ID. */
   terminalKill(ptyId: string): Promise<void>;
+  /** Request the server to stop draining a PTY. Idempotent. */
+  terminalPause(ptyId: string): Promise<void>;
+  /** Request the server to resume a paused PTY. Idempotent. */
+  terminalResume(ptyId: string): Promise<void>;
   /** Kill all PTYs attached to a thread. */
   terminalKillByThread(threadId: string): Promise<void>;
 

@@ -116,6 +116,8 @@ export const mockTransport: McodeTransport = {
   terminalWrite: vi.fn().mockResolvedValue(undefined),
   terminalResize: vi.fn().mockResolvedValue(undefined),
   terminalKill: vi.fn().mockResolvedValue(undefined),
+  terminalPause: vi.fn().mockResolvedValue(undefined),
+  terminalResume: vi.fn().mockResolvedValue(undefined),
   terminalKillByThread: vi.fn().mockResolvedValue(undefined),
   listToolCallRecords: vi.fn().mockResolvedValue([]),
   listToolCallRecordsByParent: vi.fn().mockResolvedValue([]),

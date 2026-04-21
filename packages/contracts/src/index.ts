@@ -151,6 +151,13 @@ export type { WsMethodName } from "./ws/methods.js";
 export { WS_CHANNELS } from "./ws/channels.js";
 export type { WsChannelName } from "./ws/channels.js";
 
+export {
+  TERMINAL_DATA_TAG,
+  encodeTerminalDataFrame,
+  decodeTerminalDataFrame,
+} from "./ws/terminal-binary.js";
+export type { TerminalDataFrame } from "./ws/terminal-binary.js";
+
 // Utilities
 export { lazySchema } from "./utils/lazySchema.js";
 

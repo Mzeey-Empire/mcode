@@ -11,6 +11,9 @@ import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
 /** Unsubscribe handles for all push listeners. */
 let unsubs: (() => void)[] = [];
 
+/** Encoder reused across all legacy JSON terminal.data frames. */
+const _legacyEncoder = new TextEncoder();
+
 /**
  * Wire up push channel listeners that forward server events to the
  * appropriate Zustand stores. Call once at app startup.
@@ -56,10 +59,44 @@ export function startPushListeners(): void {
   // terminal.data: broadcast to TerminalView instances via CustomEvent
   unsubs.push(
     pushEmitter.on("terminal.data", (data) => {
-      const payload = data as { ptyId: string; data: string };
-      window.dispatchEvent(
-        new CustomEvent("mcode:pty-data", { detail: payload }),
-      );
+      // Binary path (preferred): { ptyId, seq, payload: Uint8Array }
+      // Legacy JSON fallback: { ptyId, data: string, seq?: number }
+      let detail: { ptyId: string; payload: Uint8Array; seq: number };
+      const d = data as Record<string, unknown>;
+      if (d["payload"] instanceof Uint8Array) {
+        detail = {
+          ptyId: d["ptyId"] as string,
+          seq: d["seq"] as number,
+          payload: d["payload"] as Uint8Array,
+        };
+      } else if (Array.isArray(d["payload"])) {
+        // IPC path (current): the socket adapter serializes via JSON.stringify;
+        // the server converts to number[] so it survives the round-trip.
+        detail = {
+          ptyId: d["ptyId"] as string,
+          seq: d["seq"] as number,
+          payload: new Uint8Array(d["payload"] as number[]),
+        };
+      } else if (d["payload"] && typeof d["payload"] === "object") {
+        // IPC fallback for older servers that sent a raw Uint8Array through
+        // JSON.stringify — it arrives as an indexed object {"0":72,"1":101,...}.
+        // Object.values gives us the bytes in ascending-key order.
+        detail = {
+          ptyId: d["ptyId"] as string,
+          seq: d["seq"] as number,
+          payload: new Uint8Array(Object.values(d["payload"] as Record<string, number>)),
+        };
+      } else {
+        // Legacy JSON fallback: older servers send { ptyId, data: string, seq? }.
+        // Guard: skip malformed frames where data is not a string.
+        if (typeof d["data"] !== "string") return;
+        detail = {
+          ptyId: d["ptyId"] as string,
+          payload: _legacyEncoder.encode(d["data"]),
+          seq: (d["seq"] as number | undefined) ?? 0,
+        };
+      }
+      window.dispatchEvent(new CustomEvent("mcode:pty-data", { detail }));
     }),
   );
 

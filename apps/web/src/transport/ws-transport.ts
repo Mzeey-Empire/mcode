@@ -18,6 +18,10 @@ import type {
 } from "./types";
 import type { PaginatedMessages, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus, ProviderAvailability } from "@mcode/contracts";
 import type { ReasoningLevel } from "@mcode/contracts";
+import {
+  TERMINAL_DATA_TAG,
+  decodeTerminalDataFrame,
+} from "@mcode/contracts";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThreadStore } from "@/stores/threadStore";
 import type { PermissionRequest } from "@mcode/contracts";
@@ -166,6 +170,7 @@ export function createWsTransport(
   function connect(targetUrl?: string) {
     resetReady();
     ws = new WebSocket(targetUrl ?? url);
+    ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
       reconnectDelay = MIN_RECONNECT_MS;
@@ -238,6 +243,25 @@ export function createWsTransport(
     };
 
     ws.onmessage = (event) => {
+      // Binary frame: only terminal.data uses binary frames. The tag byte
+      // identifies the frame type so future binary channels can coexist.
+      if (event.data instanceof ArrayBuffer) {
+        const view = new Uint8Array(event.data);
+        if (view[0] === TERMINAL_DATA_TAG) {
+          try {
+            const decoded = decodeTerminalDataFrame(view);
+            if (!suppressedPushChannels.has("terminal.data")) {
+              pushEmitter.emit("terminal.data", decoded);
+            }
+          } catch (err) {
+            console.warn("[ws] failed to decode terminal.data frame", err);
+          }
+        } else {
+          console.warn("[ws] unknown binary tag 0x" + view[0]?.toString(16));
+        }
+        return;
+      }
+
       let msg: Record<string, unknown>;
       try {
         msg = JSON.parse(event.data as string);
@@ -527,6 +551,8 @@ export function createWsTransport(
     terminalResize: (ptyId, cols, rows) =>
       rpc<void>("terminal.resize", { ptyId, cols, rows }),
     terminalKill: (ptyId) => rpc<void>("terminal.kill", { ptyId }),
+    terminalPause: (ptyId) => rpc<void>("terminal.pause", { ptyId }),
+    terminalResume: (ptyId) => rpc<void>("terminal.resume", { ptyId }),
     terminalKillByThread: (threadId) =>
       rpc<void>("terminal.killByThread", { threadId }),
 

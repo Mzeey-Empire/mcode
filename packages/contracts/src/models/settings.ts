@@ -120,6 +120,30 @@ export const SettingsSchema = lazySchema(() =>
           .nonnegative()
           .transform((n) => Math.min(n, 5000))
           .default(1000),
+        /** Flow control settings for PTY backpressure handling. */
+        flowControl: z
+          .object({
+            /** Server-side high-water mark in bytes. Pause PTY drain when ws.bufferedAmount exceeds this. */
+            serverHighBytes: z.number().int().positive(),
+            /** Server-side low-water mark in bytes. Resume PTY drain when ws.bufferedAmount drops below this. */
+            serverLowBytes: z.number().int().positive(),
+            /** Client-side high-water mark in bytes. Send terminal.pause when xterm write backlog exceeds this. */
+            clientHighBytes: z.number().int().positive(),
+            /** Client-side low-water mark in bytes. Send terminal.resume when xterm write backlog drops below this. */
+            clientLowBytes: z.number().int().positive(),
+          })
+          .refine((v) => v.serverLowBytes < v.serverHighBytes, {
+            message: "serverLowBytes must be less than serverHighBytes",
+          })
+          .refine((v) => v.clientLowBytes < v.clientHighBytes, {
+            message: "clientLowBytes must be less than clientHighBytes",
+          })
+          .default({
+            serverHighBytes: 1_048_576,
+            serverLowBytes: 262_144,
+            clientHighBytes: 262_144,
+            clientLowBytes: 65_536,
+          }),
       })
       .default({}),
 
@@ -270,6 +294,14 @@ export const PartialSettingsSchema = lazySchema(() =>
           .int()
           .nonnegative()
           .transform((n) => Math.min(n, 5000))
+          .optional(),
+        flowControl: z
+          .object({
+            serverHighBytes: z.number().int().positive().optional(),
+            serverLowBytes: z.number().int().positive().optional(),
+            clientHighBytes: z.number().int().positive().optional(),
+            clientLowBytes: z.number().int().positive().optional(),
+          })
           .optional(),
       })
       .optional(),

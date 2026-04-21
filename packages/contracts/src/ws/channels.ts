@@ -6,11 +6,26 @@ import { PlanQuestionSchema } from "../models/plan-questions.js";
 import { ChecksStatusSchema } from "../github.js";
 import { PermissionRequestSchema, PermissionDecisionSchema } from "../models/permission.js";
 import { ProviderAvailabilitySchema } from "../providers/availability.js";
+import { lazySchema } from "../utils/lazySchema.js";
 
 /** All push channel definitions keyed by channel name. */
 export const WS_CHANNELS = {
   "agent.event": AgentEventSchema(),
-  "terminal.data": z.object({ ptyId: z.string(), data: z.string() }),
+  /**
+   * @deprecated Legacy JSON format retained for backward compatibility.
+   * Current servers send PTY output exclusively as binary WebSocket frames
+   * using the `encodeTerminalDataFrame` envelope (tag 0x01); `broadcast()`
+   * is never called for this channel. This schema only applies when a
+   * client connects to an older server that still sends JSON terminal.data.
+   */
+  "terminal.data": lazySchema(() =>
+    z.object({
+      ptyId: z.string(),
+      data: z.string(),
+      /** Monotonic per-PTY sequence number. Absent from legacy clients/servers. */
+      seq: z.number().int().nonnegative().optional(),
+    }),
+  )(),
   "terminal.exit": z.object({ ptyId: z.string(), code: z.number() }),
   "thread.status": z.object({
     threadId: z.string(),

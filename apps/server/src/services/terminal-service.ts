@@ -12,9 +12,11 @@ import type { IPty, IDisposable } from "node-pty";
 import { v4 as uuid } from "uuid";
 import { logger } from "@mcode/shared";
 import { killProcessTree } from "./process-kill.js";
+import { TerminalFlowControl } from "./terminal-flow-control.js";
 import type { ThreadRepo } from "../repositories/thread-repo";
 import type { WorkspaceRepo } from "../repositories/workspace-repo";
 import type { GitService } from "./git-service";
+import type { SettingsService } from "./settings-service";
 
 // createRequire lets us load native CJS modules (node-pty) from both ESM
 // (dev mode via entry.mjs + tsx) and the CJS production bundle.
@@ -47,11 +49,13 @@ interface PtySession {
   readonly exitDisposable: IDisposable;
 }
 
-/** Callback for sending PTY data and exit events to connected clients. */
-type PtySender = (
-  channel: string,
-  data: Record<string, unknown>,
-) => void;
+/** Callbacks for streaming PTY output and exit events to connected clients. */
+export interface PtySender {
+  /** Send a JSON push event (used for terminal.exit and any future JSON events). */
+  json: (channel: string, data: Record<string, unknown>) => void;
+  /** Send a PTY data chunk as a binary frame (tag 0x01 envelope). */
+  data: (ptyId: string, seq: number, bytes: Uint8Array) => void;
+}
 
 /** Determine the default shell for the current platform. */
 function defaultShell(): string {
@@ -67,16 +71,18 @@ export class TerminalService {
   private sessions = new Map<string, PtySession>();
   private threadIndex = new Map<string, Set<string>>();
   private sender: PtySender | null = null;
+  private flowControls = new Map<string, TerminalFlowControl>();
 
   constructor(
     @inject("ThreadRepo") private readonly threadRepo: ThreadRepo,
     @inject("WorkspaceRepo") private readonly workspaceRepo: WorkspaceRepo,
     @inject("GitService") private readonly gitService: GitService,
+    @inject("SettingsService") private readonly settingsService: SettingsService,
   ) {}
 
-  /** Set the sender function used to stream PTY data to connected clients. */
-  setSender(fn: PtySender): void {
-    this.sender = fn;
+  /** Set the sender used to stream PTY data to connected clients. */
+  setSender(sender: PtySender): void {
+    this.sender = sender;
   }
 
   /**
@@ -128,12 +134,31 @@ export class TerminalService {
       cwd,
     });
 
+    let seq = 0;
+
+    const fcSettings = this.settingsService.get().terminal.flowControl;
+    const fc = new TerminalFlowControl({
+      sink: (s, bytes) => this.sender?.data(id, s, bytes),
+      highBytes: fcSettings.serverHighBytes,
+      lowBytes: fcSettings.serverLowBytes,
+    });
+    // Hold the PTY until the client-side TerminalView has mounted and attached
+    // its mcode:pty-data listener. Without this, the shell can emit its first
+    // prompt before the view exists, leaving a newly-opened terminal blank
+    // until some later output happens to arrive.
+    fc.pause("client-request");
+    this.flowControls.set(id, fc);
+
     const dataDisposable = pty.onData((data: string) => {
-      this.sender?.("terminal.data", { ptyId: id, data });
+      // Re-encode to bytes so multi-byte sequences that straddle a node-pty
+      // read boundary remain intact on the wire. Seq is assigned here, before
+      // the ring-buffer decides whether to buffer or drop the chunk, so
+      // evicted bytes leave a gap in the client's seq stream.
+      fc.push(seq++, Buffer.from(data, "utf8"));
     });
 
     const exitDisposable = pty.onExit(({ exitCode }) => {
-      this.sender?.("terminal.exit", { ptyId: id, code: exitCode });
+      this.sender?.json("terminal.exit", { ptyId: id, code: exitCode });
       this.removePty(id);
     });
 
@@ -154,6 +179,40 @@ export class TerminalService {
     ]);
 
     return id;
+  }
+
+  /**
+   * Hold a PTY under the client-request pause source. Idempotent.
+   * Throws if the PTY ID is not found.
+   */
+  pause(ptyId: string): void {
+    const fc = this.flowControls.get(ptyId);
+    if (!fc) throw new Error(`PTY not found: ${ptyId}`);
+    fc.pause("client-request");
+  }
+
+  /**
+   * Release the client-request pause source for a PTY. Idempotent.
+   * Throws if the PTY ID is not found.
+   */
+  resume(ptyId: string): void {
+    const fc = this.flowControls.get(ptyId);
+    if (!fc) throw new Error(`PTY not found: ${ptyId}`);
+    fc.release("client-request");
+  }
+
+  /**
+   * Invoked by the socket coordinator with the current worst-case
+   * ws.bufferedAmount across all connected clients.
+   */
+  onBufferedAmountTick(bufferedAmount: number): void {
+    for (const [, fc] of this.flowControls) {
+      if (bufferedAmount > fc.marks.high) {
+        fc.pause("socket-buffered");
+      } else if (bufferedAmount < fc.marks.low) {
+        fc.release("socket-buffered");
+      }
+    }
   }
 
   /** Forward keystrokes to a PTY session. */
@@ -247,5 +306,7 @@ export class TerminalService {
       }
       this.threadIndex = newIndex;
     }
+
+    this.flowControls.delete(ptyId);
   }
 }

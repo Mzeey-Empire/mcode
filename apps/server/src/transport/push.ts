@@ -4,7 +4,7 @@
  */
 
 import type { WebSocket } from "ws";
-import { WS_CHANNELS, type WsChannelName } from "@mcode/contracts";
+import { WS_CHANNELS, type WsChannelName, encodeTerminalDataFrame } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 
 const clients = new Set<WebSocket>();
@@ -56,6 +56,20 @@ export function clientCount(): number {
 }
 
 /**
+ * Returns the maximum ws.bufferedAmount across all currently-open clients.
+ * Used by the socket coordinator to drive server-side flow control.
+ */
+export function maxBufferedAmount(): number {
+  let max = 0;
+  for (const ws of clients) {
+    if (ws.readyState === ws.OPEN) {
+      if (ws.bufferedAmount > max) max = ws.bufferedAmount;
+    }
+  }
+  return max;
+}
+
+/**
  * Broadcast a push event to all connected WebSocket clients.
  * Validates the data against the channel's Zod schema before sending.
  */
@@ -87,6 +101,33 @@ export function broadcast(
   for (const ws of clients) {
     if (ws.readyState === ws.OPEN) {
       ws.send(payload);
+    }
+  }
+}
+
+/**
+ * Broadcast a PTY data chunk as a binary WebSocket frame.
+ *
+ * Uses the terminal-binary envelope so clients can decode ptyId + seq without
+ * a preceding text header. Non-PTY channels continue to use JSON `broadcast`.
+ */
+export function broadcastTerminalData(
+  ptyId: string,
+  seq: number,
+  payload: Uint8Array,
+): void {
+  const frame = encodeTerminalDataFrame(ptyId, seq, payload);
+  for (const ws of clients) {
+    if (ws.readyState === ws.OPEN) {
+      try {
+        ws.send(frame, { binary: true });
+      } catch (err) {
+        // One bad socket must not interrupt delivery to the remaining clients.
+        // Log and continue — the client will reconnect and re-request state.
+        logger.warn("broadcastTerminalData: ws.send failed for a client", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   }
 }

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { getTransport } from "@/transport";
 
 /** A single PTY-backed terminal instance displayed in the terminal panel. */
 export interface TerminalInstance {
@@ -39,6 +40,27 @@ interface TerminalState {
   toggleSplit: () => void;
 }
 
+/**
+ * Pause or resume every PTY bound to a thread.
+ * Fire-and-forget: the server treats pause/resume as idempotent, so
+ * reconnect races are benign. Only acts when the thread has terminals.
+ */
+function setPtyPaused(
+  state: Pick<TerminalState, "terminals">,
+  threadId: string,
+  paused: boolean,
+): void {
+  const ptys = state.terminals[threadId];
+  if (!ptys || ptys.length === 0) return;
+  const transport = getTransport();
+  for (const t of ptys) {
+    const call = paused ? transport.terminalPause(t.id) : transport.terminalResume(t.id);
+    call.catch(() => {
+      // Best-effort. The next visibility toggle will reconcile state.
+    });
+  }
+}
+
 function generateLabel(existing: readonly TerminalInstance[]): string {
   const numbers = existing.map((t) => {
     const match = t.label.match(/^Terminal (\d+)$/);
@@ -60,10 +82,12 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   toggleTerminalPanel: (threadId) =>
     set((state) => {
       const current = state.terminalPanelByThread[threadId] ?? TERMINAL_PANEL_DEFAULTS;
+      const nextVisible = !current.visible;
+      setPtyPaused(state, threadId, !nextVisible); // pause when hiding, resume when showing
       return {
         terminalPanelByThread: {
           ...state.terminalPanelByThread,
-          [threadId]: { ...current, visible: !current.visible },
+          [threadId]: { ...current, visible: nextVisible },
         },
       };
     }),
@@ -71,6 +95,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   showTerminalPanel: (threadId) =>
     set((state) => {
       const current = state.terminalPanelByThread[threadId] ?? TERMINAL_PANEL_DEFAULTS;
+      if (!current.visible) setPtyPaused(state, threadId, false);
       return {
         terminalPanelByThread: {
           ...state.terminalPanelByThread,
@@ -82,6 +107,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   hideTerminalPanel: (threadId) =>
     set((state) => {
       const current = state.terminalPanelByThread[threadId] ?? TERMINAL_PANEL_DEFAULTS;
+      if (current.visible) setPtyPaused(state, threadId, true);
       return {
         terminalPanelByThread: {
           ...state.terminalPanelByThread,

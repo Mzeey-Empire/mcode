@@ -209,6 +209,9 @@ export function setupContainer(): typeof container {
     { useClass: SettingsService },
     { lifecycle: Lifecycle.Singleton },
   );
+  container.register("SettingsService", {
+    useFactory: (c) => c.resolve(SettingsService),
+  });
   container.register(
     GitWatcherService,
     { useClass: GitWatcherService },

@@ -4,6 +4,7 @@ import type { FitAddon } from "@xterm/addon-fit";
 import { getTransport } from "@/transport";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { shouldInterceptKeyEvent } from "./terminalKeyHandler";
+import { ClientTerminalFlowControl } from "./terminalFlowControl";
 // Static import so bundler deduplicates the stylesheet
 import "@xterm/xterm/css/xterm.css";
 
@@ -198,6 +199,9 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
   const flushResizeRpcRef = useRef<(() => void) | null>(null);
   const rendererRef = useRef<IDisposable | null>(null);
 
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+
   const scrollback = useSettingsStore((s) => s.settings.terminal.scrollback);
   const scrollbackRef = useRef(scrollback);
   scrollbackRef.current = scrollback;
@@ -255,6 +259,15 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
 
       const transport = getTransport();
 
+      const flowSettings =
+        useSettingsStore.getState().settings.terminal.flowControl;
+      const fc = new ClientTerminalFlowControl({
+        onPause: () => transport.terminalPause(ptyId).catch(() => {}),
+        onResume: () => transport.terminalResume(ptyId).catch(() => {}),
+        highBytes: flowSettings.clientHighBytes,
+        lowBytes: flowSettings.clientLowBytes,
+      });
+
       // Right-click pastes clipboard text into the PTY (native terminal convention — no context menu).
       // term.paste() is used instead of transport.terminalWrite() so that xterm applies bracketed
       // paste mode when the shell requests it, preventing embedded newlines from auto-executing commands.
@@ -284,11 +297,15 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
       const handlePtyData = (e: Event) => {
         const detail = (e as CustomEvent).detail as {
           ptyId: string;
-          data: string;
+          payload: Uint8Array;
+          seq: number;
         };
-        if (detail.ptyId === ptyId && typeof detail.data === "string") {
-          term.write(detail.data);
-        }
+        if (detail.ptyId !== ptyId) return;
+        const n = detail.payload.length;
+        fc.written(n);
+        // Use xterm's callback form so acked() fires only after the bytes
+        // are committed to the terminal buffer — not just queued.
+        term.write(detail.payload, () => fc.acked(n));
       };
       window.addEventListener("mcode:pty-data", handlePtyData);
 
@@ -389,6 +406,15 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
         cleanup();
         cleanupRef.current = null;
         return;
+      }
+
+      // New PTYs are created paused server-side so their initial shell prompt
+      // is buffered until this view is ready to consume it. Resume only after
+      // the PTY listeners above are attached; term.write queues bytes even
+      // before the renderer addon finishes loading. Guard with the current
+      // visibility state so a late init doesn't race with pause-on-hide.
+      if (visibleRef.current) {
+        transport.terminalResume(ptyId).catch(() => {});
       }
 
       await loadRenderer(term, rendererRef, () => disposed);
