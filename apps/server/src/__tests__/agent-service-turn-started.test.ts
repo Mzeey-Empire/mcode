@@ -23,6 +23,7 @@ import type { SnapshotService } from "../services/snapshot-service";
 import type { MemoryPressureService } from "../services/memory-pressure-service";
 import type { ThreadService } from "../services/thread-service";
 import type { SettingsService } from "../services/settings-service";
+import type { ProviderAvailabilityService } from "../services/provider-availability-service";
 
 /**
  * Test harness for AgentService.sendMessage "turn started" emission.
@@ -112,6 +113,12 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
     // ThreadService is lazy-resolved via tsyringe's delay(), so a shallow stub is fine.
     const threadServiceStub = {} as unknown as ThreadService;
 
+    // Availability gate is a no-op stub — turn-started emission is orthogonal to
+    // provider enable/disable checks.
+    const availabilityStub = {
+      assertUsable: vi.fn(),
+    } as unknown as ProviderAvailabilityService;
+
     svc = new AgentService(
       threadRepo,
       workspaceRepo,
@@ -126,6 +133,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
       memoryPressureServiceStub,
       taskRepo,
       settingsServiceStub,
+      availabilityStub,
     );
   });
 
