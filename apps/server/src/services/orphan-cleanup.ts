@@ -8,6 +8,7 @@
 
 import { existsSync, readFileSync } from "fs";
 import { execSync } from "child_process";
+import type { PtyPidRegistry } from "./pty-pid-registry.js";
 
 /** Subset of the lock file contents we care about for orphan detection. */
 interface LockFile {
@@ -79,6 +80,80 @@ export interface OrphanCleanupDeps {
   currentPid?: number;
   /** Current platform string. Defaults to process.platform. */
   platform?: NodeJS.Platform;
+}
+
+/** Injectable dependencies for {@link reapOrphanedPtys}. */
+export interface ReapOrphanedPtysDeps {
+  processKill?: (pid: number, signal: number | string) => void;
+  execSync?: (cmd: string, opts?: { stdio?: "ignore"; timeout?: number }) => Buffer | string;
+  getProcessName?: (pid: number) => string | null;
+}
+
+/**
+ * Reap any PTY processes left alive from a previous server crash.
+ *
+ * Reads the PID registry file written by the previous server run, then for
+ * each entry checks whether the process is still alive and whether the image
+ * name still matches the recorded shell binary (PID reuse guard). Matching
+ * processes are killed immediately — these are orphaned shells, not a graceful
+ * shutdown scenario.
+ */
+export function reapOrphanedPtys(
+  registry: PtyPidRegistry,
+  logger: MinLogger,
+  deps: ReapOrphanedPtysDeps = {},
+): void {
+  const {
+    processKill = (pid, signal) => process.kill(pid, signal as never),
+    execSync: execSyncFn = (cmd, opts) => execSync(cmd, opts),
+    getProcessName = defaultGetProcessName,
+  } = deps;
+
+  const stale = registry.loadStale();
+  if (stale.length === 0) return;
+
+  for (const entry of stale) {
+    try {
+      processKill(entry.pid, 0);
+    } catch {
+      continue; // Already dead
+    }
+
+    const currentName = getProcessName(entry.pid);
+    if (currentName !== null) {
+      const basename = currentName.toLowerCase().split(/[\\/]/).pop() ?? "";
+      const recorded = entry.imageName.toLowerCase().split(/[\\/]/).pop() ?? "";
+      if (basename !== recorded) {
+        logger.warn("Orphaned PTY PID belongs to a different process; skipping kill", {
+          ptyId: entry.ptyId,
+          pid: entry.pid,
+          recordedName: entry.imageName,
+          currentName,
+        });
+        continue;
+      }
+    }
+
+    logger.warn("Reaping orphaned PTY process from previous crash", {
+      ptyId: entry.ptyId,
+      pid: entry.pid,
+      imageName: entry.imageName,
+    });
+
+    try {
+      if (process.platform === "win32") {
+        try {
+          execSyncFn(`taskkill /T /F /PID ${entry.pid}`, { stdio: "ignore", timeout: 5000 });
+        } catch { /* may already be gone */ }
+      } else {
+        try {
+          processKill(-entry.pid, "SIGKILL");
+        } catch {
+          try { processKill(entry.pid, "SIGKILL"); } catch { /* already gone */ }
+        }
+      }
+    } catch { /* process exited between probe and kill */ }
+  }
 }
 
 /**
