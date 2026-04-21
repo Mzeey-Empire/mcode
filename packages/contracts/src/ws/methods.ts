@@ -351,6 +351,37 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({ threadId: z.string() }),
     result: z.void(),
   },
+  /**
+   * Reattach to a PTY after a WebSocket reconnect.
+   * The server replays buffered chunks (as binary frames) with seq > lastSeq,
+   * then returns a flag indicating whether the replay window was exceeded.
+   */
+  "terminal.reattach": {
+    params: z.object({
+      ptyId: z.string(),
+      /** Last sequence number the client received before the disconnect. */
+      lastSeq: z.number().int().nonnegative(),
+    }),
+    result: z.object({
+      /** True when eviction means the client may have missed output. */
+      gapped: z.boolean(),
+    }),
+  },
+  /** List all active PTY sessions on the server. Used during reconnect. */
+  "terminal.listActive": {
+    params: z.object({}),
+    result: z.array(
+      z.object({ ptyId: z.string(), threadId: z.string() }),
+    ),
+  },
+  /**
+   * Check whether a PTY has non-shell child processes currently running.
+   * Used by the optional kill confirmation feature.
+   */
+  "terminal.hasChildren": {
+    params: z.object({ ptyId: z.string() }),
+    result: z.object({ hasChildren: z.boolean() }),
+  },
   "app.version": {
     params: z.object({}),
     result: z.string(),

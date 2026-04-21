@@ -11,8 +11,10 @@ import { existsSync, statSync } from "fs";
 import type { IPty, IDisposable } from "node-pty";
 import { v4 as uuid } from "uuid";
 import { logger } from "@mcode/shared";
-import { killProcessTree } from "./process-kill.js";
+import { killProcessTree, gracefulKillProcessTree, listDirectChildren } from "./process-kill.js";
 import { TerminalFlowControl } from "./terminal-flow-control.js";
+import { TerminalReplayBuffer, REPLAY_BUFFER_DEFAULT_CAP_BYTES } from "./terminal-replay-buffer.js";
+import type { PtyPidRegistry } from "./pty-pid-registry.js";
 import type { ThreadRepo } from "../repositories/thread-repo";
 import type { WorkspaceRepo } from "../repositories/workspace-repo";
 import type { GitService } from "./git-service";
@@ -65,6 +67,15 @@ function defaultShell(): string {
   return process.env["SHELL"] ?? "/bin/bash";
 }
 
+/**
+ * Shell process basenames that are excluded when checking whether a terminal
+ * has non-shell child processes. The comparison is case-insensitive.
+ */
+const SHELL_BASENAMES = new Set([
+  "bash", "zsh", "sh", "fish", "ksh", "dash",
+  "powershell.exe", "cmd.exe", "pwsh.exe", "pwsh", "powershell",
+]);
+
 /** Manages PTY sessions for the integrated terminal. */
 @injectable()
 export class TerminalService {
@@ -72,12 +83,16 @@ export class TerminalService {
   private threadIndex = new Map<string, Set<string>>();
   private sender: PtySender | null = null;
   private flowControls = new Map<string, TerminalFlowControl>();
+  private replayBuffers = new Map<string, TerminalReplayBuffer>();
+  /** When true, app-quit destroyPty uses graceful signal ladder instead of force-kill. */
+  private useGracefulKill = false;
 
   constructor(
     @inject("ThreadRepo") private readonly threadRepo: ThreadRepo,
     @inject("WorkspaceRepo") private readonly workspaceRepo: WorkspaceRepo,
     @inject("GitService") private readonly gitService: GitService,
     @inject("SettingsService") private readonly settingsService: SettingsService,
+    @inject("PtyPidRegistry") private readonly pidRegistry: PtyPidRegistry,
   ) {}
 
   /** Set the sender used to stream PTY data to connected clients. */
@@ -149,12 +164,22 @@ export class TerminalService {
     fc.pause("client-request");
     this.flowControls.set(id, fc);
 
+    const replayBuffer = new TerminalReplayBuffer(REPLAY_BUFFER_DEFAULT_CAP_BYTES);
+    this.replayBuffers.set(id, replayBuffer);
+
+    this.pidRegistry.register(id, pty.pid, shell);
+
     const dataDisposable = pty.onData((data: string) => {
       // Re-encode to bytes so multi-byte sequences that straddle a node-pty
       // read boundary remain intact on the wire. Seq is assigned here, before
       // the ring-buffer decides whether to buffer or drop the chunk, so
       // evicted bytes leave a gap in the client's seq stream.
-      fc.push(seq++, Buffer.from(data, "utf8"));
+      const bytes = Buffer.from(data, "utf8");
+      const currentSeq = seq++;
+      // Record in replay buffer before flow control so replayed data matches
+      // what was actually transmitted (replay buffer is not affected by pauses).
+      replayBuffer.record(currentSeq, bytes);
+      fc.push(currentSeq, bytes);
     });
 
     const exitDisposable = pty.onExit(({ exitCode }) => {
@@ -249,6 +274,71 @@ export class TerminalService {
   /** Kill all PTY sessions across all threads. */
   async shutdown(): Promise<void> {
     await Promise.all([...this.sessions.keys()].map((ptyId) => this.kill(ptyId)));
+    this.pidRegistry.clear();
+  }
+
+  /**
+   * Enable or disable graceful signal ladder (SIGHUP → SIGTERM → SIGKILL) for
+   * the next destroyPty calls. Call with `true` just before app-quit shutdown.
+   * User-initiated kills remain force-immediate regardless of this flag.
+   */
+  setGracefulKill(enabled: boolean): void {
+    this.useGracefulKill = enabled;
+  }
+
+  /**
+   * Replay buffered PTY output to a reconnecting client.
+   * Sends chunks with seq > lastSeq as binary frames through the normal sender
+   * path, then returns whether the replay window was exceeded.
+   *
+   * @param ptyId - The PTY session to replay.
+   * @param lastSeq - Last seq number the client received before the disconnect.
+   */
+  reattach(ptyId: string, lastSeq: number): { gapped: boolean } {
+    const replayBuffer = this.replayBuffers.get(ptyId);
+    if (!replayBuffer) throw new Error(`PTY not found: ${ptyId}`);
+
+    const { chunks, gapped } = replayBuffer.replay(lastSeq);
+    for (const { seq, bytes } of chunks) {
+      this.sender?.data(ptyId, seq, bytes);
+    }
+    return { gapped };
+  }
+
+  /**
+   * Returns all currently active PTY sessions.
+   * Used by reconnecting clients to discover which PTYs to reattach.
+   */
+  listActiveSessions(): Array<{ ptyId: string; threadId: string }> {
+    return [...this.sessions.entries()].map(([ptyId, session]) => ({
+      ptyId,
+      threadId: session.threadId,
+    }));
+  }
+
+  /**
+   * Returns whether a PTY has non-shell child processes running.
+   * Used by the optional kill confirmation feature (#315).
+   *
+   * @param ptyId - The PTY session to inspect.
+   */
+  async hasChildren(ptyId: string): Promise<{ hasChildren: boolean }> {
+    const session = this.sessions.get(ptyId);
+    if (!session) throw new Error(`PTY not found: ${ptyId}`);
+
+    let children: Array<{ name: string; pid: number }>;
+    try {
+      children = await listDirectChildren(session.pty.pid);
+    } catch {
+      return { hasChildren: false };
+    }
+
+    const nonShellChildren = children.filter((child) => {
+      const basename = child.name.toLowerCase().split(/[\\/]/).pop() ?? child.name.toLowerCase();
+      return !SHELL_BASENAMES.has(basename);
+    });
+
+    return { hasChildren: nonShellChildren.length > 0 };
   }
 
   private async destroyPty(session: PtySession): Promise<void> {
@@ -283,7 +373,11 @@ export class TerminalService {
     // Kill any grandchildren (git, npm, etc.) that were not attached to the
     // console and therefore missed by node-pty's process list enumeration.
     // Best-effort: the shell may already be dead at this point.
-    await killProcessTree(session.pty.pid);
+    if (this.useGracefulKill) {
+      await gracefulKillProcessTree(session.pty.pid);
+    } else {
+      await killProcessTree(session.pty.pid);
+    }
   }
 
   private removePty(ptyId: string): void {
@@ -308,5 +402,7 @@ export class TerminalService {
     }
 
     this.flowControls.delete(ptyId);
+    this.replayBuffers.delete(ptyId);
+    this.pidRegistry.deregister(ptyId);
   }
 }
