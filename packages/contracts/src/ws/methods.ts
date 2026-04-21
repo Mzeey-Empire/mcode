@@ -312,7 +312,10 @@ export const WS_METHODS = lazySchema(() => ({
     result: z.record(z.unknown()),
   },
   "skill.list": {
-    params: z.object({ cwd: z.string().optional() }),
+    params: z.object({
+      cwd: z.string().optional(),
+      providerId: z.string().optional(),
+    }),
     result: z.array(SkillInfoSchema()),
   },
   "skill.diagnose": {
