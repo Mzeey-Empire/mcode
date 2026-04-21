@@ -36,6 +36,8 @@ const transport = {
   terminalWrite: vi.fn(() => Promise.resolve()),
   terminalResize: vi.fn(() => Promise.resolve()),
   terminalResume: vi.fn(() => Promise.resolve()),
+  ptySetLastSeq: vi.fn(),
+  ptyDeleteLastSeq: vi.fn(),
 };
 
 vi.mock("@xterm/xterm", () => {
