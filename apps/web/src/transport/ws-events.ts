@@ -53,6 +53,9 @@ export function startPushListeners(): void {
     }),
   );
 
+// Module-level singleton reused across all legacy JSON terminal.data frames.
+const _legacyEncoder = new TextEncoder();
+
   // terminal.data: broadcast to TerminalView instances via CustomEvent
   unsubs.push(
     pushEmitter.on("terminal.data", (data) => {
@@ -67,9 +70,11 @@ export function startPushListeners(): void {
           payload: d["payload"] as Uint8Array,
         };
       } else {
+        // Guard: skip malformed frames where data is not a string.
+        if (typeof d["data"] !== "string") return;
         detail = {
           ptyId: d["ptyId"] as string,
-          payload: new TextEncoder().encode(d["data"] as string),
+          payload: _legacyEncoder.encode(d["data"]),
           seq: (d["seq"] as number | undefined) ?? 0,
         };
       }

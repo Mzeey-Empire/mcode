@@ -39,6 +39,13 @@ export class TerminalFlowControl {
   private readonly pauseReasons = new Set<PauseSource>();
   /** Buffered (seq, bytes) pairs queued while paused. */
   private buffer: Array<{ seq: number; bytes: Uint8Array }> = [];
+  /**
+   * Index of the oldest unconsumed entry in `buffer`.
+   * Advancing this instead of calling `Array.shift()` keeps eviction and
+   * drain at O(1) per chunk. The array is replaced with a fresh slice on
+   * each full drain, reclaiming memory from the evicted head entries.
+   */
+  private head = 0;
   private bufferedBytes = 0;
   /** Running count of bytes dropped because the ring was full. */
   public droppedBytes = 0;
@@ -107,19 +114,23 @@ export class TerminalFlowControl {
     }
     this.buffer.push({ seq, bytes: chunk });
     this.bufferedBytes += chunk.length;
-    // Evict oldest chunks until we're within the cap.
-    while (this.bufferedBytes > this.bufferCap && this.buffer.length > 0) {
-      const dropped = this.buffer.shift()!;
+    // Evict oldest chunks until we're within the cap.  Advancing `head` is
+    // O(1) vs Array.shift() which is O(n) because it reindexes every entry.
+    while (this.bufferedBytes > this.bufferCap && this.head < this.buffer.length) {
+      const dropped = this.buffer[this.head++]!;
       this.bufferedBytes -= dropped.bytes.length;
       this.droppedBytes += dropped.bytes.length;
     }
   }
 
   private _drain(): void {
-    while (this.buffer.length > 0) {
-      const item = this.buffer.shift()!;
+    while (this.head < this.buffer.length) {
+      const item = this.buffer[this.head++]!;
       this.bufferedBytes -= item.bytes.length;
       this.sink(item.seq, item.bytes);
     }
+    // Reset to reclaim memory from both evicted and drained entries.
+    this.buffer = [];
+    this.head = 0;
   }
 }

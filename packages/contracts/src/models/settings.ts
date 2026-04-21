@@ -132,6 +132,12 @@ export const SettingsSchema = lazySchema(() =>
             /** Client-side low-water mark in bytes. Send terminal.resume when xterm write backlog drops below this. */
             clientLowBytes: z.number().int().positive(),
           })
+          .refine((v) => v.serverLowBytes < v.serverHighBytes, {
+            message: "serverLowBytes must be less than serverHighBytes",
+          })
+          .refine((v) => v.clientLowBytes < v.clientHighBytes, {
+            message: "clientLowBytes must be less than clientHighBytes",
+          })
           .default({
             serverHighBytes: 1_048_576,
             serverLowBytes: 262_144,

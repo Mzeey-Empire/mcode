@@ -119,7 +119,15 @@ export function broadcastTerminalData(
   const frame = encodeTerminalDataFrame(ptyId, seq, payload);
   for (const ws of clients) {
     if (ws.readyState === ws.OPEN) {
-      ws.send(frame, { binary: true });
+      try {
+        ws.send(frame, { binary: true });
+      } catch (err) {
+        // One bad socket must not interrupt delivery to the remaining clients.
+        // Log and continue — the client will reconnect and re-request state.
+        logger.warn("broadcastTerminalData: ws.send failed for a client", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   }
 }
