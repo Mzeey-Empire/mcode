@@ -16,8 +16,12 @@ export type PauseSource = "client-request" | "socket-buffered";
 
 /** Options for constructing a {@link TerminalFlowControl} instance. */
 export interface TerminalFlowControlOptions {
-  /** Called with each chunk when the channel is open. */
-  sink: (chunk: Uint8Array) => void;
+  /**
+   * Called with each chunk when the channel is open.
+   * Receives the monotonic per-PTY sequence number assigned at push time so
+   * the caller can detect gaps caused by ring-buffer eviction.
+   */
+  sink: (seq: number, chunk: Uint8Array) => void;
   /** High-water mark used by the socket-level coordinator. */
   highBytes: number;
   /** Low-water mark used by the socket-level coordinator. */
@@ -28,12 +32,13 @@ export interface TerminalFlowControlOptions {
 
 /** Per-PTY backpressure buffer with multi-source pause semantics. */
 export class TerminalFlowControl {
-  private readonly sink: (chunk: Uint8Array) => void;
+  private readonly sink: (seq: number, chunk: Uint8Array) => void;
   private readonly highBytes: number;
   private readonly lowBytes: number;
   private readonly bufferCap: number;
   private readonly pauseReasons = new Set<PauseSource>();
-  private buffer: Uint8Array[] = [];
+  /** Buffered (seq, bytes) pairs queued while paused. */
+  private buffer: Array<{ seq: number; bytes: Uint8Array }> = [];
   private bufferedBytes = 0;
   /** Running count of bytes dropped because the ring was full. */
   public droppedBytes = 0;
@@ -85,27 +90,36 @@ export class TerminalFlowControl {
     }
   }
 
-  /** Push a chunk. Forwards to sink when open; buffers when paused. */
-  push(chunk: Uint8Array): void {
+  /**
+   * Push a chunk with its pre-assigned sequence number.
+   *
+   * Seq is assigned by the caller at PTY data arrival time — before any
+   * buffering or eviction decision. This ensures that if a chunk is later
+   * evicted from the ring, the gap is visible on the wire (the seq
+   * counter advances past the evicted seq numbers).
+   *
+   * Forwards directly to sink when open; queues when paused.
+   */
+  push(seq: number, chunk: Uint8Array): void {
     if (!this.paused) {
-      this.sink(chunk);
+      this.sink(seq, chunk);
       return;
     }
-    this.buffer.push(chunk);
+    this.buffer.push({ seq, bytes: chunk });
     this.bufferedBytes += chunk.length;
     // Evict oldest chunks until we're within the cap.
     while (this.bufferedBytes > this.bufferCap && this.buffer.length > 0) {
       const dropped = this.buffer.shift()!;
-      this.bufferedBytes -= dropped.length;
-      this.droppedBytes += dropped.length;
+      this.bufferedBytes -= dropped.bytes.length;
+      this.droppedBytes += dropped.bytes.length;
     }
   }
 
   private _drain(): void {
     while (this.buffer.length > 0) {
-      const chunk = this.buffer.shift()!;
-      this.bufferedBytes -= chunk.length;
-      this.sink(chunk);
+      const item = this.buffer.shift()!;
+      this.bufferedBytes -= item.bytes.length;
+      this.sink(item.seq, item.bytes);
     }
   }
 }

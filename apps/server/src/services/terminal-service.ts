@@ -138,8 +138,7 @@ export class TerminalService {
 
     const fcSettings = this.settingsService.get().terminal.flowControl;
     const fc = new TerminalFlowControl({
-      // seq++ only when bytes actually leave the buffer — correct when paused
-      sink: (bytes) => this.sender?.data(id, seq++, bytes),
+      sink: (s, bytes) => this.sender?.data(id, s, bytes),
       highBytes: fcSettings.serverHighBytes,
       lowBytes: fcSettings.serverLowBytes,
     });
@@ -147,8 +146,10 @@ export class TerminalService {
 
     const dataDisposable = pty.onData((data: string) => {
       // Re-encode to bytes so multi-byte sequences that straddle a node-pty
-      // read boundary remain intact on the wire.
-      fc.push(Buffer.from(data, "utf8"));
+      // read boundary remain intact on the wire. Seq is assigned here, before
+      // the ring-buffer decides whether to buffer or drop the chunk, so
+      // evicted bytes leave a gap in the client's seq stream.
+      fc.push(seq++, Buffer.from(data, "utf8"));
     });
 
     const exitDisposable = pty.onExit(({ exitCode }) => {
