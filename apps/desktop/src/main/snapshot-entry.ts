@@ -11,7 +11,7 @@
  * - Only pure JavaScript that runs in a bare V8 context
  */
 
-import { SettingsSchema, getExtension } from "@mcode/contracts";
+import { SettingsSchema, getExtension } from "@mcode/contracts/snapshot";
 
 const snapshot = Object.freeze({
   contracts: Object.freeze({ SettingsSchema, getExtension }),
