@@ -62,15 +62,18 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
   const dynamicModelsRef = useRef<Map<string, ModelProvider["models"]>>(new Map());
   const [loadingProviders, setLoadingProviders] = useState<Set<string>>(new Set());
   const fetchingRef = useRef<Set<string>>(new Set());
-  // Tracks providers whose fetch failed; prevents repeated retries on every hover.
-  const fetchFailedRef = useRef<Set<string>>(new Set());
+  /** Timestamps of the last failed fetch per provider, used to enforce a retry cooldown. */
+  const fetchFailedAtRef = useRef<Map<string, number>>(new Map());
+  /** How long to wait before retrying a provider after a failed fetch. */
+  const FETCH_RETRY_COOLDOWN_MS = 30_000;
 
-  /** Fetches live models for a provider and caches the result. No-ops on repeat calls or after a failure. */
+  /** Fetches live models for a provider and caches the result. No-ops while a fetch is in-flight, the cache is populated, or within the retry cooldown after a failure. */
   const fetchProviderModels = useCallback(async (providerId: string) => {
+    const lastFailedAt = fetchFailedAtRef.current.get(providerId);
     if (
       fetchingRef.current.has(providerId) ||
       dynamicModelsRef.current.has(providerId) ||
-      fetchFailedRef.current.has(providerId)
+      (lastFailedAt !== undefined && Date.now() - lastFailedAt < FETCH_RETRY_COOLDOWN_MS)
     ) return;
     fetchingRef.current.add(providerId);
     setLoadingProviders((prev) => new Set(prev).add(providerId));
@@ -83,13 +86,13 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
         group: m.group,
         multiplier: m.multiplier,
       }));
-      // Reuse the same Map instance for both the ref and state to avoid a double-copy.
       const updated = new Map(dynamicModelsRef.current).set(providerId, mapped);
       dynamicModelsRef.current = updated;
       setDynamicModels(updated);
     } catch {
-      // Mark as failed so repeated hovers don't spam the server while Copilot is unavailable.
-      fetchFailedRef.current.add(providerId);
+      // Record failure time so retries are throttled — leave the cache unpopulated
+      // so a subsequent hover after the cooldown triggers a fresh attempt.
+      fetchFailedAtRef.current.set(providerId, Date.now());
     } finally {
       fetchingRef.current.delete(providerId);
       setLoadingProviders((prev) => {

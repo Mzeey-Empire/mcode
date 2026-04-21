@@ -47,8 +47,10 @@ const defaultResolver: CliResolver = {
 };
 
 /**
- * Tracks per-provider enabled flag + CLI verification state. Call sites use
- * `assertUsable` before resolving a provider from the registry.
+ * Tracks per-provider enabled flag + CLI verification state.
+ * Use `assertEnabled` before read-only discovery calls (e.g. `listModels`) —
+ * it checks the enabled flag and `comingSoon` without requiring a CLI binary.
+ * Use `assertUsable` before send/execution calls that require the CLI binary.
  */
 @injectable()
 export class ProviderAvailabilityService {
@@ -115,19 +117,27 @@ export class ProviderAvailabilityService {
   }
 
   /**
+   * Throw if the provider is disabled or coming-soon. Does NOT check CLI
+   * binary status, so read-only discovery calls (e.g. listModels) work even
+   * when the CLI is missing - SDK-based providers don't need the binary.
+   */
+  assertEnabled(id: ProviderId): void {
+    const entry = getCatalogEntry(id);
+    if (entry.comingSoon || !this.settings.get().provider.enabled[id]) {
+      throw new ProviderDisabledError(id);
+    }
+  }
+
+  /**
    * Throw a typed error if the provider is unusable. Returns normally otherwise.
    * CLI `unchecked` state is treated as "probably ok" — the first send will
    * re-verify and surface the real error if the binary is missing.
    */
   assertUsable(id: ProviderId): void {
-    const s = this.settings.get();
-    const entry = getCatalogEntry(id);
-    if (entry.comingSoon || !s.provider.enabled[id]) {
-      throw new ProviderDisabledError(id);
-    }
+    this.assertEnabled(id);
     const cached = this.cliCache.get(id);
     if (cached?.status === "not_found") {
-      const configuredPath = hasCliPath(id) ? s.provider.cli[id] : "";
+      const configuredPath = hasCliPath(id) ? this.settings.get().provider.cli[id] : "";
       throw new ProviderCliMissingError(id, configuredPath);
     }
   }
