@@ -108,7 +108,23 @@ export function App() {
         category: "View",
         handler: () => {
           const tid = useWorkspaceStore.getState().activeThreadId;
-          if (tid) useTerminalStore.getState().toggleTerminalPanel(tid);
+          if (!tid) return;
+          const store = useTerminalStore.getState();
+          const panel = store.terminalPanelByThread[tid];
+          const isCurrentlyVisible = panel?.visible ?? false;
+          store.toggleTerminalPanel(tid);
+          // Auto-create a terminal when opening a panel that has none.
+          if (!isCurrentlyVisible) {
+            const terminals = store.terminals[tid];
+            if (!terminals || terminals.length === 0) {
+              import("@/transport").then(({ getTransport }) => {
+                getTransport()
+                  .terminalCreate(tid)
+                  .then((ptyId) => useTerminalStore.getState().addTerminal(tid, ptyId))
+                  .catch(() => {});
+              });
+            }
+          }
         },
       }),
       registerCommand({
