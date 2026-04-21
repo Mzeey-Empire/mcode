@@ -7,7 +7,7 @@
 
 import { inject, injectable } from "tsyringe";
 import { watch, existsSync, type FSWatcher } from "fs";
-import { join, dirname } from "path";
+import { join } from "path";
 import { homedir } from "os";
 import { logger } from "@mcode/shared";
 import { broadcast } from "../transport/push";
@@ -86,41 +86,12 @@ export class SkillWatcherService {
    * post-startup triggers a (re-)registration. Recursive watching here would
    * fire on every plugin file write — far too noisy. Non-recursive sees only
    * direct children of the parent, which is exactly the granularity we need.
-   *
-   * When the parent dir doesn't exist yet (e.g. `~/.codex` on a fresh install),
-   * we watch the grandparent (i.e. `~`) instead. `~` always exists, so when the
-   * provider installs and creates `~/.codex`, the grandparent watcher fires and
-   * bootstraps the real parent watch plus any child roots.
    */
   private watchParent(parentDir: string): void {
     if (!existsSync(parentDir)) {
-      const grandparent = dirname(parentDir);
-      if (!existsSync(grandparent) || this.watchedDirs.has(grandparent)) return;
-      try {
-        const w = watch(grandparent, () => {
-          if (existsSync(parentDir) && !this.watchedDirs.has(parentDir)) {
-            this.watchParent(parentDir);
-            for (const root of this.dynamicRoots) {
-              if (!this.watchedDirs.has(root)) this.watch(root);
-            }
-            this.onChange(parentDir);
-          }
-        });
-        this.attachErrorHandler(w, grandparent);
-        this.watchers.push(w);
-        this.watchedDirs.add(grandparent);
-        logger.debug("SkillWatcherService: parent dir missing, watching grandparent for late creation", {
-          parentDir,
-          grandparent,
-        });
-      } catch (err) {
-        const message = (err as Error).message;
-        logger.debug("SkillWatcherService: grandparent watch failed, late detection disabled", {
-          parentDir,
-          grandparent,
-          message,
-        });
-      }
+      logger.debug("SkillWatcherService: parent dir missing, dynamic-root detection disabled", {
+        parentDir,
+      });
       return;
     }
     if (this.watchedDirs.has(parentDir)) return;

@@ -118,13 +118,14 @@ describe("SkillWatcherService", () => {
   });
 
   it("auto-registers roots from multiple parent directories", async () => {
-    // Simulate ~/.codex/ being created after start()
+    // Simulate two provider parent dirs existing at startup (e.g. ~/.claude and ~/.codex)
     const claudeParent = join(dir, ".claude");
     const codexParent = join(dir, ".codex");
     mkdirSync(claudeParent, { recursive: true });
-    // codexParent does NOT exist at start time
+    mkdirSync(codexParent, { recursive: true });
 
     const codexRoot = join(codexParent, "skills");
+    // codexRoot does NOT exist at start time
 
     watcher.start({
       parentDirs: [claudeParent, codexParent],
@@ -133,12 +134,13 @@ describe("SkillWatcherService", () => {
 
     const invalidateSpy = vi.spyOn(svc, "invalidate");
 
-    // Create the codex parent (and its skills subdir) after start
+    // Create the missing codex root after start() — the codexParent watcher
+    // should detect this and auto-register codexRoot.
     mkdirSync(codexRoot, { recursive: true });
     await new Promise((r) => setTimeout(r, 350));
     invalidateSpy.mockClear();
 
-    // A change inside the late-registered codex root should invalidate
+    // A change inside the late-registered codex root must invalidate
     writeFileSync(join(codexRoot, "marker.txt"), "x");
     await new Promise((r) => setTimeout(r, 350));
     expect(invalidateSpy).toHaveBeenCalledTimes(1);
