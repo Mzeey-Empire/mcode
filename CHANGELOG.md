@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.6.0](https://github.com/Mzeey-Emipre/mcode/compare/mcode-v0.5.0...mcode-v0.6.0) (2026-04-21)
+
+
+### Features
+
+* **codex:** supervised permission mode ([#326](https://github.com/Mzeey-Emipre/mcode/issues/326)) ([dda1a03](https://github.com/Mzeey-Emipre/mcode/commit/dda1a031d5708a71ff5b2de0b9c563018ce28dfa))
+* per-provider enable/disable with CLI verification ([#322](https://github.com/Mzeey-Emipre/mcode/issues/322)) ([dce716d](https://github.com/Mzeey-Emipre/mcode/commit/dce716d1b94772143660dc9fe17792da62087a85))
+* **sidebar:** differentiate action-required threads with hollow amber ring ([#299](https://github.com/Mzeey-Emipre/mcode/issues/299)) ([5cd12a2](https://github.com/Mzeey-Emipre/mcode/commit/5cd12a2a4104f35035977e3a75602de50bbaa91e))
+* **sidebar:** reclaim full chat width when collapsed ([#301](https://github.com/Mzeey-Emipre/mcode/issues/301)) ([a04113c](https://github.com/Mzeey-Emipre/mcode/commit/a04113c3c9cda18d9f34d63d11fd10f2ffc736e0))
+* **terminal:** stability pass — scrollback cap, debounced resize, WebGL renderer ([#320](https://github.com/Mzeey-Emipre/mcode/issues/320)) ([cb6c12b](https://github.com/Mzeey-Emipre/mcode/commit/cb6c12b528fd25bae235b0e5b9e2ef9a71d1ca57))
+* **terminal:** Stream C — binary frames, flow control, pause on hide ([#310](https://github.com/Mzeey-Emipre/mcode/issues/310) [#309](https://github.com/Mzeey-Emipre/mcode/issues/309) [#312](https://github.com/Mzeey-Emipre/mcode/issues/312)) ([#325](https://github.com/Mzeey-Emipre/mcode/issues/325)) ([dab22a1](https://github.com/Mzeey-Emipre/mcode/commit/dab22a1c0bd5e87804883c60d60f19ea2c60ff66))
+* **terminal:** Streams D & E - session replay, PTY lifecycle hardening, kill confirmation ([#329](https://github.com/Mzeey-Emipre/mcode/issues/329)) ([6ec469e](https://github.com/Mzeey-Emipre/mcode/commit/6ec469efdd0853d9e0430ccad804bade45c16974))
+* **ui:** redesign SidebarUsagePanel for clarity and theme cohesion ([#297](https://github.com/Mzeey-Emipre/mcode/issues/297)) ([dedb13e](https://github.com/Mzeey-Emipre/mcode/commit/dedb13e35e4b029ac91645900705fa71aceda109))
+
+
+### Bug Fixes
+
+* apply permission mode toggle to existing Claude threads ([#300](https://github.com/Mzeey-Emipre/mcode/issues/300)) ([c9a9404](https://github.com/Mzeey-Emipre/mcode/commit/c9a9404b1bcee79d140e61e05ddd5dae94d1f4a1))
+* **chat:** prevent invalid mermaid from leaving error diagram at page bottom ([#324](https://github.com/Mzeey-Emipre/mcode/issues/324)) ([4a1eebe](https://github.com/Mzeey-Emipre/mcode/commit/4a1eebe4fc61b2f39f9fb0a5279e25f31ceda2a0))
+* **ci:** surface GitHub Actions status in the new UI ([#298](https://github.com/Mzeey-Emipre/mcode/issues/298)) ([2d7e0e6](https://github.com/Mzeey-Emipre/mcode/commit/2d7e0e65cf816bfa4a30fe965ea958d4b404d1f0))
+* **copilot:** restore dynamic model listing ([#327](https://github.com/Mzeey-Emipre/mcode/issues/327)) ([35a0af4](https://github.com/Mzeey-Emipre/mcode/commit/35a0af4ecb18b0aecc0f3976aa1b62d7c78976de))
+* resilient auth recovery and orphan cleanup for long-running tasks ([#282](https://github.com/Mzeey-Emipre/mcode/issues/282)) ([1dd16f9](https://github.com/Mzeey-Emipre/mcode/commit/1dd16f94861d7e431b2bbc3ff598680bb4d41fed))
+* resolve four idle-session issues from PR [#282](https://github.com/Mzeey-Emipre/mcode/issues/282) follow-up ([#296](https://github.com/Mzeey-Emipre/mcode/issues/296)) ([6468235](https://github.com/Mzeey-Emipre/mcode/commit/64682356b73f596f165e429e5153002e5a7e35c7))
+* **sidebar:** copy thread's worktree path, not project path ([#317](https://github.com/Mzeey-Emipre/mcode/issues/317)) ([7e7164b](https://github.com/Mzeey-Emipre/mcode/commit/7e7164b28e789acd91cc7194deb20adb8d83608a))
+* **sidebar:** reflect running state for non-user-initiated sessions ([#321](https://github.com/Mzeey-Emipre/mcode/issues/321)) ([71c3c0b](https://github.com/Mzeey-Emipre/mcode/commit/71c3c0bafa617e50323922df6a14031f39e4f30c))
+* **slash-commands:** comprehensive fix for intermittent loading failures ([#319](https://github.com/Mzeey-Emipre/mcode/issues/319)) ([197e423](https://github.com/Mzeey-Emipre/mcode/commit/197e4234b5d92480c267fc0cde884c7969c5b1d9))
+* **terminal:** four stability fixes for the embedded terminal ([#318](https://github.com/Mzeey-Emipre/mcode/issues/318)) ([203b764](https://github.com/Mzeey-Emipre/mcode/commit/203b764cff427ade3697275c9bdbfad02ca13039))
+
 ## [0.5.0](https://github.com/Mzeey-Emipre/mcode/compare/mcode-v0.4.0...mcode-v0.5.0) (2026-04-17)
 
 
