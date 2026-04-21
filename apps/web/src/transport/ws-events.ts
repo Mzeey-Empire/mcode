@@ -70,12 +70,21 @@ export function startPushListeners(): void {
           payload: d["payload"] as Uint8Array,
         };
       } else if (Array.isArray(d["payload"])) {
-        // IPC path: the socket adapter serializes via JSON.stringify, so Uint8Array
-        // arrives as a plain number[]. Reconstruct it here.
+        // IPC path (current): the socket adapter serializes via JSON.stringify;
+        // the server converts to number[] so it survives the round-trip.
         detail = {
           ptyId: d["ptyId"] as string,
           seq: d["seq"] as number,
           payload: new Uint8Array(d["payload"] as number[]),
+        };
+      } else if (d["payload"] && typeof d["payload"] === "object") {
+        // IPC fallback for older servers that sent a raw Uint8Array through
+        // JSON.stringify — it arrives as an indexed object {"0":72,"1":101,...}.
+        // Object.values gives us the bytes in ascending-key order.
+        detail = {
+          ptyId: d["ptyId"] as string,
+          seq: d["seq"] as number,
+          payload: new Uint8Array(Object.values(d["payload"] as Record<string, number>)),
         };
       } else {
         // Legacy JSON fallback: older servers send { ptyId, data: string, seq? }.
