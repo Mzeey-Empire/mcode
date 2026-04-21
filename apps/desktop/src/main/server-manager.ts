@@ -9,7 +9,7 @@
 
 import { app } from "electron";
 import { spawn, type ChildProcess } from "child_process";
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
+import { createWriteStream, existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { readFile } from "fs/promises";
 import { createServer, type AddressInfo } from "net";
 import { resolve, join, dirname } from "path";
@@ -64,6 +64,17 @@ const PORT_MAX = app.isPackaged ? 19800 : isDev ? 19600 : 19700;
 
 /** Interval (ms) between health-check polls during startup. */
 const HEALTH_POLL_INTERVAL = 200;
+
+/**
+ * Maximum time (ms) to wait for the server's /health endpoint.
+ * Cold starts include DB migrations, workspace enumeration, git watcher init,
+ * and IPC socket binding - all before httpServer.listen() runs. 30 seconds
+ * accommodates slow disks and large workspace counts.
+ */
+const STARTUP_TIMEOUT_MS = 30_000;
+
+/** Server stderr log file path. Rotated on each spawn to keep size bounded. */
+const SERVER_LOG_PATH = join(getMcodeDir(), "server-stderr.log");
 
 /** Default V8 max old space size in MB. Tuned for the < 100MB idle target. */
 const DEFAULT_HEAP_MB = 96;
@@ -329,24 +340,36 @@ export class ServerManager {
         : ["--import", "tsx", entry];
       const args = [...v8Flags, ...entryArgs];
 
+      // In production, route stderr to a log file so crashes are diagnosable.
+      // Dev mode inherits stdio for immediate console visibility.
+      const stderrStream = isDev
+        ? undefined
+        : createWriteStream(SERVER_LOG_PATH, { flags: "w" });
+
       const child = spawn(process.execPath, args, {
         cwd,
         env,
         detached: true,
-        stdio: isDev ? "inherit" : "ignore",
+        stdio: isDev ? "inherit" : ["ignore", "ignore", stderrStream ? "pipe" : "ignore"],
       });
       child.unref();
       this.serverProcess = child;
 
+      // Pipe stderr to the log file when running packaged
+      if (!isDev && stderrStream && child.stderr) {
+        child.stderr.pipe(stderrStream);
+      }
+
       child.on("exit", (code) => {
         console.error(`Server process exited with code ${code}`);
+        stderrStream?.end();
         if (this.serverProcess === child) {
           this.serverProcess = null;
           this.onUnexpectedExit?.(code);
         }
       });
 
-      await this.waitForReady(10_000);
+      await this.waitForReady(STARTUP_TIMEOUT_MS);
 
       // Read auth token from lock file (server writes it on startup).
       // Retry briefly in case the lock file write races the health endpoint.
@@ -458,13 +481,23 @@ export class ServerManager {
   }
 
   /**
-   * Poll the server's /health endpoint until it responds 200
-   * or the timeout expires.
+   * Poll the server's /health endpoint until it responds 200,
+   * the timeout expires, or the child process exits early.
    */
   private async waitForReady(timeoutMs: number): Promise<void> {
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
+      // Fail fast if the server process already exited (crash, missing native
+      // module, etc.) instead of polling for the full timeout duration.
+      if (!this.serverProcess) {
+        const logExcerpt = this.readServerLogTail();
+        throw new Error(
+          "Server process exited before becoming ready." +
+            (logExcerpt ? `\n\nServer log:\n${logExcerpt}` : "\nNo server log available."),
+        );
+      }
+
       try {
         const res = await fetch(`http://localhost:${this._port}/health`);
         if (res.ok) return;
@@ -474,8 +507,22 @@ export class ServerManager {
       await new Promise((r) => setTimeout(r, HEALTH_POLL_INTERVAL));
     }
 
+    const logExcerpt = this.readServerLogTail();
     throw new Error(
-      `Server did not become ready within ${timeoutMs}ms on port ${this._port}`,
+      `Server did not become ready within ${timeoutMs / 1000}s on port ${this._port}.` +
+        (logExcerpt ? `\n\nServer log:\n${logExcerpt}` : ""),
     );
+  }
+
+  /** Read the last ~40 lines of the server stderr log for diagnostics. */
+  private readServerLogTail(): string {
+    try {
+      if (!existsSync(SERVER_LOG_PATH)) return "";
+      const content = readFileSync(SERVER_LOG_PATH, "utf-8");
+      const lines = content.split("\n");
+      return lines.slice(-40).join("\n").trim();
+    } catch {
+      return "";
+    }
   }
 }
