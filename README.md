@@ -46,7 +46,7 @@ bun run dev:desktop
 - TypeScript
 - React 19
 - SQLite
-- Claude Agent SDK / Codex CLI / Copilot SDK
+- Claude Code CLI / Claude Agent SDK (provider adapters for Codex, Copilot)
 - shadcn/ui
 - Tailwind CSS 4
 - Zustand
