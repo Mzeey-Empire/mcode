@@ -291,9 +291,22 @@ describe("buildConversationReplay", () => {
 });
 
 describe("replayBudgetChars", () => {
-  it("returns 120000 for claude models", () => {
-    expect(replayBudgetChars("claude-sonnet-4-6")).toBe(120_000);
-    expect(replayBudgetChars("claude-opus-4-6")).toBe(120_000);
+  // 15% of context window, at ~4 chars/token.
+  // Opus 4.7 / Opus 4.6 / Sonnet 4.6 all have 1M context → 600_000 chars.
+  // Haiku 4.5 has 200K context → 120_000 chars.
+  it("returns 600000 for 1M-context Claude models", () => {
+    expect(replayBudgetChars("claude-opus-4-7")).toBe(600_000);
+    expect(replayBudgetChars("claude-opus-4-6")).toBe(600_000);
+    expect(replayBudgetChars("claude-sonnet-4-6")).toBe(600_000);
+  });
+
+  it("returns 120000 for Claude Haiku 4.5 (200K context)", () => {
+    expect(replayBudgetChars("claude-haiku-4-5")).toBe(120_000);
+  });
+
+  it("matches dated SDK variants", () => {
+    expect(replayBudgetChars("claude-haiku-4-5-20251001")).toBe(120_000);
+    expect(replayBudgetChars("claude-sonnet-4-6-20260101")).toBe(600_000);
   });
 
   it("returns 100000 for unknown models", () => {

@@ -9,6 +9,7 @@ import type { Thread, Message, TurnSnapshot, HandoffMetadata } from "@mcode/cont
 import { HANDOFF_MARKER } from "@mcode/contracts";
 export { HANDOFF_MARKER, parseHandoffJson } from "@mcode/contracts";
 export type { HandoffMetadata } from "@mcode/contracts";
+import { getModelContextWindow } from "@mcode/shared/model-context";
 
 /** Input for building handoff content. */
 export interface HandoffInput {
@@ -24,13 +25,16 @@ const MAX_ASSISTANT_TEXT = 2000;
 
 /**
  * Rough char budget for the conversation replay injected into the provider.
- * Uses 15% of the model's known context window at ~4 chars/token,
- * leaving headroom for the new conversation.
+ * Uses 15% of the model's known context window at ~4 chars/token, leaving
+ * headroom for the new conversation. Falls back to a conservative 100K chars
+ * (~25K tokens) when the model is unknown.
  */
 export function replayBudgetChars(modelId: string): number {
-  // Claude models: 200K token context window
-  if (modelId.startsWith("claude")) return 120_000; // 200_000 * 0.15 * 4
-  // Conservative default for other models (~100K chars / ~25K tokens)
+  const contextWindow = getModelContextWindow(modelId);
+  if (contextWindow !== undefined) {
+    // 15% of the context window, at ~4 chars/token.
+    return Math.floor(contextWindow * 0.15 * 4);
+  }
   return 100_000;
 }
 
