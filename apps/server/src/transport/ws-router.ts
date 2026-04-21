@@ -457,6 +457,12 @@ async function dispatch(
     case "terminal.killByThread":
       await deps.terminalService.killByThread(params.threadId);
       return;
+    case "terminal.reattach":
+      return deps.terminalService.reattach(params.ptyId, params.lastSeq);
+    case "terminal.listActive":
+      return deps.terminalService.listActiveSessions();
+    case "terminal.hasChildren":
+      return deps.terminalService.hasChildren(params.ptyId);
 
     // Tool Call Records
     case "toolCallRecord.list":

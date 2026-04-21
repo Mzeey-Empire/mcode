@@ -8,6 +8,7 @@
 
 import { existsSync, readFileSync } from "fs";
 import { execSync } from "child_process";
+import type { PtyPidRegistry } from "./pty-pid-registry.js";
 
 /** Subset of the lock file contents we care about for orphan detection. */
 interface LockFile {
@@ -79,6 +80,138 @@ export interface OrphanCleanupDeps {
   currentPid?: number;
   /** Current platform string. Defaults to process.platform. */
   platform?: NodeJS.Platform;
+}
+
+/** Injectable dependencies for {@link reapOrphanedPtys}. */
+export interface ReapOrphanedPtysDeps {
+  processKill?: (pid: number, signal: number | string) => void;
+  execSync?: (cmd: string, opts?: { stdio?: "ignore"; timeout?: number }) => Buffer | string;
+  getProcessName?: (pid: number) => string | null;
+  /** Current platform string. Defaults to process.platform. */
+  platform?: NodeJS.Platform;
+}
+
+/**
+ * Reap any PTY processes left alive from a previous server crash.
+ *
+ * Reads the PID registry file written by the previous server run, then for
+ * each entry checks whether the process is still alive and whether the image
+ * name still matches the recorded shell binary (PID reuse guard). Matching
+ * processes are killed immediately — these are orphaned shells, not a graceful
+ * shutdown scenario.
+ */
+export function reapOrphanedPtys(
+  registry: PtyPidRegistry,
+  logger: MinLogger,
+  deps: ReapOrphanedPtysDeps = {},
+): void {
+  const {
+    processKill = (pid, signal) => process.kill(pid, signal as never),
+    execSync: execSyncFn = (cmd, opts) => execSync(cmd, opts),
+    getProcessName = defaultGetProcessName,
+    platform = process.platform,
+  } = deps;
+
+  const stale = registry.loadStale();
+  if (stale.length === 0) return;
+
+  for (const entry of stale) {
+    try {
+      processKill(entry.pid, 0);
+    } catch {
+      continue; // Already dead
+    }
+
+    // Guard against the catastrophic kill(-1, SIGKILL) path: on Unix,
+    // -entry.pid with pid=1 would signal every process the user can reach.
+    if (entry.pid <= 1) {
+      logger.warn("Skipping orphaned PTY with unsafe PID", { ptyId: entry.ptyId, pid: entry.pid });
+      continue;
+    }
+
+    const currentName = getProcessName(entry.pid);
+    if (currentName === null) {
+      // Cannot verify identity (e.g. no /proc on this platform). Skip to avoid
+      // killing an unrelated process that reused the PID.
+      logger.warn("Cannot verify orphaned PTY process identity; skipping kill", {
+        ptyId: entry.ptyId,
+        pid: entry.pid,
+      });
+      continue;
+    }
+    const basename = currentName.toLowerCase().split(/[\\/]/).pop() ?? "";
+    const recorded = entry.imageName.toLowerCase().split(/[\\/]/).pop() ?? "";
+    if (basename !== recorded) {
+      logger.warn("Orphaned PTY PID belongs to a different process; skipping kill", {
+        ptyId: entry.ptyId,
+        pid: entry.pid,
+        recordedName: entry.imageName,
+        currentName,
+      });
+      continue;
+    }
+
+    logger.debug("Reaping orphaned PTY process from previous crash", {
+      ptyId: entry.ptyId,
+      pid: entry.pid,
+      imageName: entry.imageName,
+    });
+
+    let killSucceeded = false;
+    if (platform === "win32") {
+      try {
+        execSyncFn(`taskkill /T /F /PID ${entry.pid}`, { stdio: "ignore", timeout: 5000 });
+        killSucceeded = true;
+      } catch (killErr) {
+        const e = killErr as NodeJS.ErrnoException & { code?: string | number; stderr?: string };
+        const alreadyGone =
+          (typeof e.code === "number" && e.code === 128) ||
+          (typeof e.stderr === "string" && /not found/i.test(e.stderr));
+        if (alreadyGone) {
+          killSucceeded = true;
+        } else {
+          logger.warn("Failed to kill orphaned PTY process tree", {
+            ptyId: entry.ptyId,
+            pid: entry.pid,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+    } else {
+      try {
+        processKill(-entry.pid, "SIGKILL");
+        killSucceeded = true;
+      } catch (groupErr) {
+        if ((groupErr as NodeJS.ErrnoException)?.code === "ESRCH") {
+          killSucceeded = true;
+        } else {
+          // Group kill failed (e.g. EPERM) — fall through to direct kill.
+          try {
+            processKill(entry.pid, "SIGKILL");
+            killSucceeded = true;
+          } catch (directErr) {
+            if ((directErr as NodeJS.ErrnoException)?.code === "ESRCH") {
+              killSucceeded = true;
+            } else {
+              logger.warn("Failed to kill orphaned PTY process", {
+                ptyId: entry.ptyId,
+                pid: entry.pid,
+                error: directErr instanceof Error ? directErr.message : String(directErr),
+              });
+            }
+          }
+        }
+      }
+    }
+
+    if (killSucceeded) {
+      logger.warn("Reaped orphaned PTY process from previous crash", {
+        ptyId: entry.ptyId,
+        pid: entry.pid,
+        imageName: entry.imageName,
+      });
+    }
+  }
 }
 
 /**

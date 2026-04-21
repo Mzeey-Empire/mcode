@@ -42,9 +42,15 @@ import { MemoryPressureService } from "./services/memory-pressure-service";
 import { CleanupWorker } from "./services/cleanup-worker";
 import { PrDraftService } from "./services/pr-draft-service";
 import { ProviderAvailabilityService } from "./services/provider-availability-service";
+import { PtyPidRegistry } from "./services/pty-pid-registry";
 
 /** Initialize the DI container with all server dependencies. */
-export function setupContainer(): typeof container {
+export function setupContainer(mcodeDir: string): typeof container {
+  // PtyPidRegistry — registered before TerminalService because it is injected into it
+  container.register("PtyPidRegistry", {
+    useValue: new PtyPidRegistry(mcodeDir),
+  });
+
   // Database
   const db = openDatabase();
   container.register("Database", { useValue: db });

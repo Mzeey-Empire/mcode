@@ -12,7 +12,8 @@ import { logger, getMcodeDir } from "@mcode/shared";
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
-import { killOrphanedServer } from "./services/orphan-cleanup";
+import { killOrphanedServer, reapOrphanedPtys } from "./services/orphan-cleanup";
+import { PtyPidRegistry } from "./services/pty-pid-registry";
 
 // Services
 import { WorkspaceService } from "./services/workspace-service";
@@ -103,8 +104,8 @@ if (existsSync(SHUTDOWN_MARKER_PATH)) {
   );
 }
 
-// Initialize DI container
-const container = setupContainer();
+// Initialize DI container (PtyPidRegistry needs the data dir path at construction time)
+const container = setupContainer(getMcodeDir());
 
 // Resolve services
 const workspaceService = container.resolve(WorkspaceService);
@@ -414,6 +415,11 @@ function startServerAndSubscribe(): void {
 // before the new server accepts work.
 killOrphanedServer({ lockFilePath: LOCK_FILE_PATH, logger });
 
+// Reap any PTY processes left alive from a previous crash. Runs after
+// killOrphanedServer so the server process tree is clean before we inspect PTY PIDs.
+const pidRegistry = container.resolve<PtyPidRegistry>("PtyPidRegistry");
+reapOrphanedPtys(pidRegistry, logger);
+
 ipcServer.listen(ipcPath).then(() => {
   startServerAndSubscribe();
 }).catch((err) => {
@@ -463,7 +469,8 @@ async function shutdown(): Promise<void> {
   // 5. Dispose settings file watcher
   settingsService.dispose();
 
-  // 6. Shutdown terminal service
+  // 6. Shutdown terminal service — enable graceful signal ladder for this path only
+  terminalService.setGracefulKill(true);
   await terminalService.shutdown();
 
   // 7. Dispose all git HEAD file watchers

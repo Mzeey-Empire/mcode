@@ -120,6 +120,18 @@ export const SettingsSchema = lazySchema(() =>
           .nonnegative()
           .transform((n) => Math.min(n, 5000))
           .default(1000),
+        /**
+         * When to prompt for confirmation before killing a terminal with
+         * running child processes.
+         *
+         * - "never"  — kill immediately, no prompt (default, preserves prior behaviour)
+         * - "panel"  — prompt when the bin button is clicked in the terminal panel
+         * - "always" — prompt in all kill paths
+         * - "editor" — reserved for future use; currently behaves like "panel"
+         */
+        confirmOnKill: z
+          .enum(["never", "editor", "panel", "always"])
+          .default("never"),
         /** Flow control settings for PTY backpressure handling. */
         flowControl: z
           .object({
@@ -295,6 +307,7 @@ export const PartialSettingsSchema = lazySchema(() =>
           .nonnegative()
           .transform((n) => Math.min(n, 5000))
           .optional(),
+        confirmOnKill: z.enum(["never", "editor", "panel", "always"]).optional(),
         flowControl: z
           .object({
             serverHighBytes: z.number().int().positive().optional(),

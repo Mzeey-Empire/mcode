@@ -209,6 +209,20 @@ export interface McodeTransport {
   terminalResume(ptyId: string): Promise<void>;
   /** Kill all PTYs attached to a thread. */
   terminalKillByThread(threadId: string): Promise<void>;
+  /**
+   * Reattach to a PTY after a WebSocket reconnect.
+   * The server replays any buffered output with seq > lastSeq as binary frames
+   * before returning. Returns gapped=true when eviction means output was lost.
+   */
+  terminalReattach(ptyId: string, lastSeq: number): Promise<{ gapped: boolean }>;
+  /** List all active PTY sessions on the server. Used during reconnect. */
+  terminalListActive(): Promise<Array<{ ptyId: string; threadId: string }>>;
+  /** Check whether a PTY has non-shell child processes running. */
+  terminalHasChildren(ptyId: string): Promise<{ hasChildren: boolean }>;
+  /** Track the last seq number received for a PTY, used during reconnect reattach. */
+  ptySetLastSeq(ptyId: string, seq: number): void;
+  /** Remove the last-seq tracking entry for a PTY. Call on component unmount. */
+  ptyDeleteLastSeq(ptyId: string): void;
 
   // Tool call records
   /** Fetch persisted tool call records for a message. */

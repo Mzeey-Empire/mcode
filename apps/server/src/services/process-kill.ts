@@ -121,11 +121,128 @@ export async function killDescendantsByName(
   await Promise.all(pids.map((pid) => killProcessTree(pid)));
 }
 
+// 2 s grace period between each signal ladder step
+const GRACEFUL_KILL_STEP_MS = 2_000;
+
+/** Injectable dependencies for gracefulKillProcessTree (for testability). */
+export interface GracefulKillDeps {
+  processKill?: (pid: number, signal: string | number) => void;
+  execFile?: (
+    cmd: string,
+    args: string[],
+    opts: { timeout?: number },
+  ) => Promise<{ stdout: string; stderr: string }>;
+  platform?: NodeJS.Platform;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * Graceful shutdown ladder for PTY process trees (app-quit path only).
+ * Sends SIGHUP, waits 2s, sends SIGTERM, waits 2s, sends SIGKILL.
+ * On Windows: taskkill without /F, wait 2s, taskkill with /F.
+ * Short-circuits at each step if the process has already exited.
+ * Never throws.
+ */
+export async function gracefulKillProcessTree(
+  pid: number,
+  deps?: GracefulKillDeps,
+): Promise<void> {
+  const kill = deps?.processKill ?? ((p: number, sig: string | number) => process.kill(p, sig as NodeJS.Signals));
+  const ef = deps?.execFile ?? execFile;
+  const platform = deps?.platform ?? process.platform;
+  const sleep =
+    deps?.sleep ??
+    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+
+  try {
+    if (platform === "win32") {
+      // Windows path: taskkill without /F first (graceful), then with /F (force)
+      try {
+        await ef("taskkill", ["/T", "/PID", String(pid)], {
+          timeout: TASKKILL_TIMEOUT_MS,
+        });
+        // Process terminated gracefully
+        return;
+      } catch {
+        // Process still alive — fall through to forced kill
+      }
+
+      await sleep(GRACEFUL_KILL_STEP_MS);
+
+      try {
+        await ef("taskkill", ["/T", "/F", "/PID", String(pid)], {
+          timeout: TASKKILL_TIMEOUT_MS,
+        });
+      } catch {
+        // Swallow — process may already be gone
+      }
+    } else {
+      // Unix path
+      if (pid <= 0) return;
+
+      // Step 1: SIGHUP
+      try {
+        kill(-pid, "SIGHUP");
+      } catch (err) {
+        if (isEsrch(err)) return;
+        // Unexpected error (e.g. EPERM) — log and abort the ladder rather than
+        // silently skipping so the caller's outer catch surfaces it.
+        throw err;
+      }
+
+      await sleep(GRACEFUL_KILL_STEP_MS);
+
+      // Liveness probe after SIGHUP
+      try {
+        kill(pid, 0);
+      } catch (err) {
+        if (isEsrch(err)) return;
+        return;
+      }
+
+      // Step 2: SIGTERM
+      try {
+        kill(-pid, "SIGTERM");
+      } catch (err) {
+        if (isEsrch(err)) return;
+        return;
+      }
+
+      await sleep(GRACEFUL_KILL_STEP_MS);
+
+      // Liveness probe after SIGTERM
+      try {
+        kill(pid, 0);
+      } catch (err) {
+        if (isEsrch(err)) return;
+        return;
+      }
+
+      // Step 3: SIGKILL
+      try {
+        kill(-pid, "SIGKILL");
+      } catch {
+        // Swallow — process may already be gone
+      }
+    }
+  } catch (err) {
+    logger.warn("gracefulKillProcessTree: unexpected error", {
+      pid,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/** Returns true when the error code indicates the process no longer exists. */
+function isEsrch(err: unknown): boolean {
+  return (err as NodeJS.ErrnoException)?.code === "ESRCH";
+}
+
 /**
  * List direct child processes of a given PID.
  * Returns name and PID for each child.
  */
-async function listDirectChildren(
+export async function listDirectChildren(
   pid: number,
 ): Promise<Array<{ name: string; pid: number }>> {
   if (process.platform === "win32") {

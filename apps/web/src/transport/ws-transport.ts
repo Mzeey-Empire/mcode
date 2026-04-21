@@ -91,6 +91,13 @@ export const pushEmitter = new PushEmitter();
  */
 export const suppressedPushChannels = new Set<string>();
 
+/**
+ * Last seq number seen per ptyId.
+ * Updated by TerminalView on each received PTY data frame and read by the
+ * reconnect handler to call terminal.reattach with the correct lastSeq.
+ */
+export const ptyLastSeqMap = new Map<string, number>();
+
 interface PendingCall {
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
@@ -195,6 +202,44 @@ export function createWsTransport(
           (window as any).__mcodeHydrationComplete = true;
         });
       }
+
+      // Reattach active terminals after reconnect.
+      // Deferred import avoids a circular dependency at module evaluation time.
+      import("@/stores/terminalStore").then(async ({ useTerminalStore }) => {
+        try {
+          const activePtys = await rpc<Array<{ ptyId: string; threadId: string }>>(
+            "terminal.listActive",
+            {},
+          );
+          if (activePtys.length === 0) return;
+
+          const clientPtyIds = new Set(
+            Object.values(useTerminalStore.getState().terminals)
+              .flat()
+              .map((t) => t.id),
+          );
+
+          await Promise.allSettled(
+            activePtys
+              .filter((p) => clientPtyIds.has(p.ptyId))
+              .map(async (p) => {
+                // -1 means "I have seen nothing" — server replays everything including seq=0.
+                const lastSeq = ptyLastSeqMap.get(p.ptyId) ?? -1;
+                const { gapped } = await rpc<{ gapped: boolean }>(
+                  "terminal.reattach",
+                  { ptyId: p.ptyId, lastSeq },
+                );
+                if (gapped) {
+                  window.dispatchEvent(
+                    new CustomEvent("mcode:pty-reconnect-gap", { detail: { ptyId: p.ptyId } }),
+                  );
+                }
+              }),
+          );
+        } catch {
+          // Best-effort; terminal output from the gap window is already lost.
+        }
+      });
 
       // On connect/reconnect, refresh CI checks for all visible PR threads (best-effort).
       // Cooldown prevents subprocess storms during rapid reconnect loops.
@@ -555,6 +600,14 @@ export function createWsTransport(
     terminalResume: (ptyId) => rpc<void>("terminal.resume", { ptyId }),
     terminalKillByThread: (threadId) =>
       rpc<void>("terminal.killByThread", { threadId }),
+    terminalReattach: (ptyId, lastSeq) =>
+      rpc<{ gapped: boolean }>("terminal.reattach", { ptyId, lastSeq }),
+    terminalListActive: () =>
+      rpc<Array<{ ptyId: string; threadId: string }>>("terminal.listActive", {}),
+    terminalHasChildren: (ptyId) =>
+      rpc<{ hasChildren: boolean }>("terminal.hasChildren", { ptyId }),
+    ptySetLastSeq: (ptyId, seq) => { ptyLastSeqMap.set(ptyId, seq); },
+    ptyDeleteLastSeq: (ptyId) => { ptyLastSeqMap.delete(ptyId); },
 
     // Tool call records
     listToolCallRecords: (messageId) =>

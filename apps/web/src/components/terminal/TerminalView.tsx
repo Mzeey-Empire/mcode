@@ -301,6 +301,9 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
           seq: number;
         };
         if (detail.ptyId !== ptyId) return;
+        // Track last-seen seq so the reconnect handler can call terminal.reattach
+        // with the correct lastSeq, minimising replayed output on reconnect.
+        transport.ptySetLastSeq(ptyId, detail.seq);
         const n = detail.payload.length;
         fc.written(n);
         // Use xterm's callback form so acked() fires only after the bytes
@@ -308,6 +311,15 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
         term.write(detail.payload, () => fc.acked(n));
       };
       window.addEventListener("mcode:pty-data", handlePtyData);
+
+      // Show a reconnect banner when the server signals that the replay window
+      // was exceeded and some output may have been missed.
+      const handleReconnectGap = (e: Event) => {
+        const detail = (e as CustomEvent).detail as { ptyId: string };
+        if (detail.ptyId !== ptyId) return;
+        term.write("\r\n\x1b[90m[Reconnected - some output may be missing]\x1b[0m\r\n");
+      };
+      window.addEventListener("mcode:pty-reconnect-gap", handleReconnectGap);
 
       // Listen for PTY exit via push channel (attached pre-renderer for the
       // same reason as pty-data: an early exit should not be silently lost).
@@ -380,7 +392,9 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
         dataDisposable.dispose();
         el.removeEventListener("contextmenu", handleContextMenu);
         window.removeEventListener("mcode:pty-data", handlePtyData);
+        window.removeEventListener("mcode:pty-reconnect-gap", handleReconnectGap);
         window.removeEventListener("mcode:pty-exit", handlePtyExit);
+        transport.ptyDeleteLastSeq(ptyId);
         observer.disconnect();
         try {
           rendererRef.current?.dispose();
