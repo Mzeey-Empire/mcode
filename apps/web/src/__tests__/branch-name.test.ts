@@ -230,4 +230,12 @@ describe("resolveBranchName", () => {
       autoPreview: "mcode-abc123",
     })).toBe("mcode-abc123");
   });
+
+  it("returns autoPreview in ai mode", () => {
+    expect(resolveBranchName({
+      namingMode: "ai",
+      customName: "ignored",
+      autoPreview: "mcode-abc123",
+    })).toBe("mcode-abc123");
+  });
 });
