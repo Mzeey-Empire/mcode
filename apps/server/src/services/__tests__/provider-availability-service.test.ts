@@ -120,6 +120,43 @@ describe("ProviderAvailabilityService.verifyCli", () => {
   });
 });
 
+describe("ProviderAvailabilityService.assertEnabled", () => {
+  it("throws ProviderDisabledError when the toggle is off (regardless of CLI state)", () => {
+    const s = getDefaultSettings();
+    s.provider.enabled.codex = false;
+    const svc = new ProviderAvailabilityService(
+      { get: () => s, on: () => {} } as unknown as SettingsService,
+      stubRegistry(["claude", "codex"]),
+    );
+    expect(() => svc.assertEnabled("codex")).toThrow(ProviderDisabledError);
+  });
+
+  it("throws ProviderDisabledError for coming-soon providers (regardless of CLI state)", () => {
+    const s = getDefaultSettings();
+    s.provider.enabled.gemini = true;
+    const svc = new ProviderAvailabilityService(
+      { get: () => s, on: () => {} } as unknown as SettingsService,
+      stubRegistry([]),
+    );
+    expect(() => svc.assertEnabled("gemini")).toThrow(ProviderDisabledError);
+  });
+
+  it("does not throw when enabled but CLI not_found (SDK-based providers need no CLI binary)", async () => {
+    const svc = new ProviderAvailabilityService(
+      stubSettings(),
+      stubRegistry(["copilot"]),
+      { which: vi.fn(async () => { throw new Error("nope"); }), statExecutable: vi.fn() },
+    );
+    await svc.verifyCli("copilot");
+    expect(() => svc.assertEnabled("copilot")).not.toThrow();
+  });
+
+  it("does not throw when enabled and CLI unchecked", () => {
+    const svc = new ProviderAvailabilityService(stubSettings(), stubRegistry(["copilot"]));
+    expect(() => svc.assertEnabled("copilot")).not.toThrow();
+  });
+});
+
 describe("ProviderAvailabilityService.assertUsable", () => {
   it("throws ProviderDisabledError when the toggle is off", async () => {
     const s = getDefaultSettings();

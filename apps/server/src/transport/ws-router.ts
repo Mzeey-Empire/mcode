@@ -559,7 +559,7 @@ async function dispatch(
 
     // Provider
     case "provider.listModels": {
-      deps.providerAvailability.assertUsable(params.providerId);
+      deps.providerAvailability.assertEnabled(params.providerId);
       const provider = deps.providerRegistry.resolve(params.providerId);
       if (!provider.listModels) {
         throw new Error(`Provider "${params.providerId}" does not support model listing`);
