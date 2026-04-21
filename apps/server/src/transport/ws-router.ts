@@ -205,8 +205,15 @@ async function dispatch(
     }
 
     // Thread
-    case "thread.list":
+    case "thread.list": {
+      deps.workspaceService.touch(params.workspaceId);
+      // Re-detect git status for non-git workspaces (catches `git init` within a session)
+      const ws = deps.workspaceService.findById(params.workspaceId);
+      if (ws && !ws.is_git_repo) {
+        deps.gitWatcherService.retryWatch(ws.id, ws.path);
+      }
       return deps.threadService.list(params.workspaceId);
+    }
     case "thread.create":
       return deps.threadService.create(
         params.workspaceId,
@@ -237,6 +244,8 @@ async function dispatch(
       deps.threadService.markViewed(params.threadId);
       return;
     case "thread.syncPrs": {
+      const ws = deps.workspaceService.findById(params.workspaceId);
+      if (!ws?.is_git_repo) return [];
       const threads = deps.threadService.list(params.workspaceId);
       /** Returns true if the thread has no linked PR, missing status, or a non-terminal PR state. */
       const needsPrCheck = (t: { pr_number: number | null; pr_status: string | null }) => {
@@ -275,22 +284,37 @@ async function dispatch(
     }
 
     // Git
-    case "git.listBranches":
+    case "git.listBranches": {
+      const ws = deps.workspaceService.findById(params.workspaceId);
+      if (!ws?.is_git_repo) return [];
       return deps.gitService.listBranches(params.workspaceId);
-    case "git.currentBranch":
+    }
+    case "git.currentBranch": {
+      const ws = deps.workspaceService.findById(params.workspaceId);
+      if (!ws?.is_git_repo) return null;
       return deps.gitService.getCurrentBranch(params.workspaceId);
-    case "git.checkout":
+    }
+    case "git.checkout": {
+      const ws = deps.workspaceService.findById(params.workspaceId);
+      if (!ws?.is_git_repo) return;
       deps.gitService.checkout(params.workspaceId, params.branch);
       return;
-    case "git.listWorktrees":
+    }
+    case "git.listWorktrees": {
+      const ws = deps.workspaceService.findById(params.workspaceId);
+      if (!ws?.is_git_repo) return [];
       return deps.gitService.listWorktrees(params.workspaceId);
-    case "git.fetchBranch":
+    }
+    case "git.fetchBranch": {
+      const ws = deps.workspaceService.findById(params.workspaceId);
+      if (!ws?.is_git_repo) return;
       deps.gitService.fetchBranch(
         params.workspaceId,
         params.branch,
         params.prNumber,
       );
       return;
+    }
     case "git.log": {
       let repoPath: string | undefined;
       if (params.threadId) {
