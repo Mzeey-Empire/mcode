@@ -7,11 +7,11 @@
 
 import { inject, injectable } from "tsyringe";
 import { watch, existsSync, type FSWatcher } from "fs";
-import { join } from "path";
+import { join, dirname } from "path";
 import { homedir } from "os";
 import { logger } from "@mcode/shared";
 import { broadcast } from "../transport/push";
-import { SkillService } from "./skill-service";
+import { SkillService, copilotUserAgentsDir } from "./skill-service";
 
 const DEBOUNCE_MS = 200;
 
@@ -37,16 +37,17 @@ export class SkillWatcherService {
   ) {}
 
   /**
-   * Begin watching the standard Claude plugin and skill roots.
+   * Begin watching skill and plugin roots across all supported providers.
    * Idempotent: subsequent calls are no-ops until `stopAll()` resets state.
    *
-   * Also watches the parent `~/.claude` dir so a root that doesn't exist
-   * at startup (fresh install) gets registered automatically when created.
+   * Also watches each provider's parent dir (e.g. `~/.claude`, `~/.codex`,
+   * `~/.agents`) so roots that don't exist at startup get registered
+   * automatically when the directory is created later.
    *
    * @param overrides Optional path overrides for testing. Production callers
    *   should call `start()` with no arguments.
    */
-  start(overrides?: { parentDir?: string; roots?: string[] }): void {
+  start(overrides?: { parentDirs?: string[]; roots?: string[] }): void {
     if (this.started) {
       logger.debug("SkillWatcherService: start() ignored, already started", {
         watcherCount: this.watchers.length,
@@ -55,14 +56,28 @@ export class SkillWatcherService {
     }
     this.started = true;
     const home = homedir();
-    const claudeDir = overrides?.parentDir ?? join(home, ".claude");
+    const claudeDir = join(home, ".claude");
+    const codexDir = join(home, ".codex");
+    const agentsDir = join(home, ".agents");
+
+    const parentDirs = overrides?.parentDirs ?? [claudeDir, codexDir, agentsDir];
     const roots = overrides?.roots ?? [
+      // Claude roots
       join(claudeDir, "skills"),
       join(claudeDir, "commands"),
       join(claudeDir, "plugins"),
+      // Codex roots
+      join(codexDir, "skills"),
+      join(codexDir, "commands"),
+      // Cross-provider roots
+      join(agentsDir, "skills"),
+      join(agentsDir, "commands"),
+      // Copilot user-level agents
+      copilotUserAgentsDir(),
     ];
+
     this.dynamicRoots = roots;
-    this.watchParent(claudeDir);
+    for (const parentDir of parentDirs) this.watchParent(parentDir);
     for (const root of roots) this.watch(root);
   }
 
@@ -71,12 +86,41 @@ export class SkillWatcherService {
    * post-startup triggers a (re-)registration. Recursive watching here would
    * fire on every plugin file write — far too noisy. Non-recursive sees only
    * direct children of the parent, which is exactly the granularity we need.
+   *
+   * When the parent dir doesn't exist yet (e.g. `~/.codex` on a fresh install),
+   * we watch the grandparent (i.e. `~`) instead. `~` always exists, so when the
+   * provider installs and creates `~/.codex`, the grandparent watcher fires and
+   * bootstraps the real parent watch plus any child roots.
    */
   private watchParent(parentDir: string): void {
     if (!existsSync(parentDir)) {
-      logger.debug("SkillWatcherService: parent dir missing, dynamic-root detection disabled", {
-        parentDir,
-      });
+      const grandparent = dirname(parentDir);
+      if (!existsSync(grandparent) || this.watchedDirs.has(grandparent)) return;
+      try {
+        const w = watch(grandparent, () => {
+          if (existsSync(parentDir) && !this.watchedDirs.has(parentDir)) {
+            this.watchParent(parentDir);
+            for (const root of this.dynamicRoots) {
+              if (!this.watchedDirs.has(root)) this.watch(root);
+            }
+            this.onChange(parentDir);
+          }
+        });
+        this.attachErrorHandler(w, grandparent);
+        this.watchers.push(w);
+        this.watchedDirs.add(grandparent);
+        logger.debug("SkillWatcherService: parent dir missing, watching grandparent for late creation", {
+          parentDir,
+          grandparent,
+        });
+      } catch (err) {
+        const message = (err as Error).message;
+        logger.debug("SkillWatcherService: grandparent watch failed, late detection disabled", {
+          parentDir,
+          grandparent,
+          message,
+        });
+      }
       return;
     }
     if (this.watchedDirs.has(parentDir)) return;
