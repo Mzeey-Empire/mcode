@@ -73,3 +73,6 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run --cwd apps/web build
       - run: bun run --cwd apps/desktop build
+
+      - name: Generate V8 snapshot
+        run: bun apps/desktop/scripts/generate-snapshot.mjs

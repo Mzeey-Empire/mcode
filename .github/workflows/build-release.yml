@@ -50,6 +50,9 @@ jobs:
       - name: Package with electron-builder
         run: node apps/desktop/scripts/ci-package.mjs
 
+      - name: Smoke test packaged server
+        run: node apps/desktop/scripts/smoke-test.mjs
+
       - name: Collect release artifacts
         if: github.event.release.tag_name || inputs.tag
         id: artifacts
