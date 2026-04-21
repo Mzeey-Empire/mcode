@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./model-effort": "./src/model-effort/index.ts"
+    "./model-effort": "./src/model-effort/index.ts",
+    "./model-context": "./src/model-context/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
