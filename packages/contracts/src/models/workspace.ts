@@ -6,6 +6,7 @@ export const WorkspaceSchema = z.object({
   name: z.string(),
   path: z.string(),
   provider_config: z.record(z.unknown()),
+  is_git_repo: z.boolean(),
   created_at: z.string(),
   updated_at: z.string(),
 });
