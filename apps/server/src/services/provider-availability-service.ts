@@ -34,7 +34,7 @@ export interface CliResolver {
   statExecutable(path: string): Promise<boolean>;
 }
 
-const defaultResolver: CliResolver = {
+export const defaultResolver: CliResolver = {
   which: (binary) => whichModule(binary),
   statExecutable: async (path) => {
     try {
@@ -59,7 +59,7 @@ export class ProviderAvailabilityService {
   constructor(
     @inject(SettingsService) private readonly settings: SettingsService,
     @inject("IProviderRegistry") private readonly registry: IProviderRegistry,
-    private readonly resolver: CliResolver = defaultResolver,
+    @inject("CliResolver") private readonly resolver: CliResolver = defaultResolver,
   ) {}
 
   /** Build the full availability list from catalog + settings + cached CLI state. */

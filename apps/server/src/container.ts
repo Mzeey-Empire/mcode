@@ -41,7 +41,10 @@ import { SkillWatcherService } from "./services/skill-watcher-service";
 import { MemoryPressureService } from "./services/memory-pressure-service";
 import { CleanupWorker } from "./services/cleanup-worker";
 import { PrDraftService } from "./services/pr-draft-service";
-import { ProviderAvailabilityService } from "./services/provider-availability-service";
+import {
+  ProviderAvailabilityService,
+  defaultResolver,
+} from "./services/provider-availability-service";
 import { PtyPidRegistry } from "./services/pty-pid-registry";
 
 /** Initialize the DI container with all server dependencies. */
@@ -246,6 +249,7 @@ export function setupContainer(mcodeDir: string): typeof container {
   container.register("PrDraftService", {
     useFactory: (c) => c.resolve(PrDraftService),
   });
+  container.register("CliResolver", { useValue: defaultResolver });
   container.register(
     ProviderAvailabilityService,
     { useClass: ProviderAvailabilityService },
