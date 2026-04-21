@@ -149,4 +149,127 @@ describe("SkillService", () => {
     expect(() => svc.invalidate()).not.toThrow();
     expect(secondFired).toBe(true);
   });
+
+  describe("provider-scoped scanning", () => {
+    it("tags skills from ~/.claude/skills with providers=['claude']", () => {
+      const skillDir = join(fakeHome, ".claude", "skills", "my-skill");
+      mkdirSync(skillDir, { recursive: true });
+      writeMd(join(skillDir, "SKILL.md"), { description: "Claude skill" });
+
+      const items = new SkillService().list(undefined, "claude");
+
+      const skill = items.find((i) => i.name === "my-skill");
+      expect(skill).toBeDefined();
+      expect(skill!.providers).toEqual(["claude"]);
+    });
+
+    it("tags skills from ~/.codex/skills with providers=['codex']", () => {
+      const skillDir = join(fakeHome, ".codex", "skills", "codex-skill");
+      mkdirSync(skillDir, { recursive: true });
+      writeMd(join(skillDir, "SKILL.md"), { description: "Codex skill" });
+
+      const items = new SkillService().list(undefined, "codex");
+
+      const skill = items.find((i) => i.name === "codex-skill");
+      expect(skill).toBeDefined();
+      expect(skill!.providers).toEqual(["codex"]);
+    });
+
+    it("tags skills from ~/.agents/skills with providers=['codex','copilot']", () => {
+      const skillDir = join(fakeHome, ".agents", "skills", "shared-skill");
+      mkdirSync(skillDir, { recursive: true });
+      writeMd(join(skillDir, "SKILL.md"), { description: "Shared skill" });
+
+      const svc = new SkillService();
+
+      const codexItems = svc.list(undefined, "codex");
+      expect(codexItems.find((i) => i.name === "shared-skill")).toBeDefined();
+
+      svc.invalidate();
+      const copilotItems = svc.list(undefined, "copilot");
+      expect(copilotItems.find((i) => i.name === "shared-skill")).toBeDefined();
+
+      svc.invalidate();
+      const claudeItems = svc.list(undefined, "claude");
+      expect(claudeItems.find((i) => i.name === "shared-skill")).toBeUndefined();
+    });
+
+    it("filters by providerId and returns only matching skills", () => {
+      const claudeSkillDir = join(fakeHome, ".claude", "skills", "claude-only");
+      mkdirSync(claudeSkillDir, { recursive: true });
+      writeMd(join(claudeSkillDir, "SKILL.md"), { description: "Claude only" });
+
+      const codexSkillDir = join(fakeHome, ".codex", "skills", "codex-only");
+      mkdirSync(codexSkillDir, { recursive: true });
+      writeMd(join(codexSkillDir, "SKILL.md"), { description: "Codex only" });
+
+      const svc = new SkillService();
+
+      const claudeItems = svc.list(undefined, "claude");
+      expect(claudeItems.find((i) => i.name === "claude-only")).toBeDefined();
+      expect(claudeItems.find((i) => i.name === "codex-only")).toBeUndefined();
+
+      svc.invalidate();
+      const codexItems = svc.list(undefined, "codex");
+      expect(codexItems.find((i) => i.name === "codex-only")).toBeDefined();
+      expect(codexItems.find((i) => i.name === "claude-only")).toBeUndefined();
+    });
+
+    it("returns all skills when no providerId is given", () => {
+      const claudeSkillDir = join(fakeHome, ".claude", "skills", "claude-skill");
+      mkdirSync(claudeSkillDir, { recursive: true });
+      writeMd(join(claudeSkillDir, "SKILL.md"), { description: "Claude" });
+
+      const codexSkillDir = join(fakeHome, ".codex", "skills", "codex-skill");
+      mkdirSync(codexSkillDir, { recursive: true });
+      writeMd(join(codexSkillDir, "SKILL.md"), { description: "Codex" });
+
+      const items = new SkillService().list();
+
+      expect(items.find((i) => i.name === "claude-skill")).toBeDefined();
+      expect(items.find((i) => i.name === "codex-skill")).toBeDefined();
+      expect(items.every((i) => Array.isArray(i.providers))).toBe(true);
+    });
+
+    it("deduplicates by name within same provider using source priority", () => {
+      const cwd = tmp();
+      try {
+        const userSkillDir = join(fakeHome, ".claude", "skills", "shared");
+        mkdirSync(userSkillDir, { recursive: true });
+        writeMd(join(userSkillDir, "SKILL.md"), { description: "User wins" });
+
+        const projectSkillDir = join(cwd, ".claude", "skills", "shared");
+        mkdirSync(projectSkillDir, { recursive: true });
+        writeMd(join(projectSkillDir, "SKILL.md"), { description: "Project loses" });
+
+        const items = new SkillService().list(cwd, "claude");
+        const shared = items.find((i) => i.name === "shared");
+        expect(shared!.description).toBe("User wins");
+        expect(shared!.source).toBe("user");
+      } finally {
+        rmSync(cwd, { recursive: true, force: true });
+      }
+    });
+
+    it("allows same name across different providers", () => {
+      const claudeSkillDir = join(fakeHome, ".claude", "skills", "deploy");
+      mkdirSync(claudeSkillDir, { recursive: true });
+      writeMd(join(claudeSkillDir, "SKILL.md"), { description: "Claude deploy" });
+
+      const codexSkillDir = join(fakeHome, ".codex", "skills", "deploy");
+      mkdirSync(codexSkillDir, { recursive: true });
+      writeMd(join(codexSkillDir, "SKILL.md"), { description: "Codex deploy" });
+
+      const svc = new SkillService();
+
+      const claudeItems = svc.list(undefined, "claude");
+      const claudeDeploy = claudeItems.find((i) => i.name === "deploy");
+      expect(claudeDeploy!.description).toBe("Claude deploy");
+
+      svc.invalidate();
+      const codexItems = svc.list(undefined, "codex");
+      const codexDeploy = codexItems.find((i) => i.name === "deploy");
+      expect(codexDeploy!.description).toBe("Codex deploy");
+    });
+  });
 });

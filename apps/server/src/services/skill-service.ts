@@ -2,13 +2,14 @@
  * Skill and command scanning service.
  * Walks user, project, agent, and plugin directories looking for both
  * `skills/` (each subdirectory is a skill) and `commands/` (each .md file
- * is a command). Mirrors Claude Code's native discovery.
+ * is a command). Mirrors Claude Code's native discovery, extended to cover
+ * Codex and Copilot provider directories.
  */
 
 import { injectable } from "tsyringe";
 import { readdirSync, readFileSync, existsSync, type Dirent } from "fs";
 import { join } from "path";
-import { homedir } from "os";
+import { homedir, platform } from "os";
 import { logger } from "@mcode/shared";
 import type { SkillInfo, SkillSource, SkillDiagnostics } from "@mcode/contracts";
 
@@ -16,7 +17,7 @@ const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
 const DESC_RE = /^description:\s*(?:"([^"]*)"|'([^']*)'|(.*))$/m;
 
 interface ScanContext {
-  out: Map<string, SkillInfo>;
+  out: SkillInfo[];
   diag: SkillDiagnostics;
 }
 
@@ -61,20 +62,13 @@ function scanDir(ctx: ScanContext, dir: string): Dirent[] {
   }
 }
 
-/** Set entry only if absent OR the new source has higher priority than the existing one. */
-function setIfHigherPriority(out: Map<string, SkillInfo>, info: SkillInfo): void {
-  const existing = out.get(info.name);
-  if (!existing || SOURCE_PRIORITY[info.source] < SOURCE_PRIORITY[existing.source]) {
-    out.set(info.name, info);
-  }
-}
-
 /** Walk a flat skills directory: each subdir with `SKILL.md` is a skill. */
 function scanSkillsDir(
   ctx: ScanContext,
   dir: string,
   prefix: string,
   source: SkillSource,
+  providers: string[],
 ): void {
   for (const entry of scanDir(ctx, dir)) {
     if (!entry.isDirectory()) continue;
@@ -84,11 +78,12 @@ function scanSkillsDir(
     const skillFile = join(dir, entry.name, "SKILL.md");
     if (!existsSync(skillFile)) continue;
     const name = prefix ? `${prefix}:${entry.name}` : entry.name;
-    setIfHigherPriority(ctx.out, {
+    ctx.out.push({
       name,
       description: readDescription(skillFile),
       kind: "skill",
       source,
+      providers,
     });
     ctx.diag.totalSkills++;
   }
@@ -100,16 +95,18 @@ function scanCommandsDir(
   dir: string,
   prefix: string,
   source: SkillSource,
+  providers: string[],
 ): void {
   for (const entry of scanDir(ctx, dir)) {
     if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
     const baseName = entry.name.slice(0, -3);
     const name = prefix ? `${prefix}:${baseName}` : baseName;
-    setIfHigherPriority(ctx.out, {
+    ctx.out.push({
       name,
       description: readDescription(join(dir, entry.name)),
       kind: "command",
       source,
+      providers,
     });
     ctx.diag.totalCommands++;
   }
@@ -120,12 +117,13 @@ function scanPluginVersionDir(
   ctx: ScanContext,
   versionDir: string,
   pluginName: string,
+  providers: string[],
 ): void {
   // Both bare and `.claude`-prefixed shapes are observed in the wild.
   for (const sub of ["", ".claude"]) {
     const base = sub ? join(versionDir, sub) : versionDir;
-    scanSkillsDir(ctx, join(base, "skills"), pluginName, "plugin");
-    scanCommandsDir(ctx, join(base, "commands"), pluginName, "plugin");
+    scanSkillsDir(ctx, join(base, "skills"), pluginName, "plugin", providers);
+    scanCommandsDir(ctx, join(base, "commands"), pluginName, "plugin", providers);
   }
 }
 
@@ -134,7 +132,7 @@ function scanPluginVersionDir(
 const VERSION_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 /** Walk plugin cache: cache/<marketplace>/<plugin>/<version>/. */
-function scanPluginCacheDir(ctx: ScanContext, cacheDir: string): void {
+function scanPluginCacheDir(ctx: ScanContext, cacheDir: string, providers: string[]): void {
   for (const mp of scanDir(ctx, cacheDir)) {
     if (!mp.isDirectory()) continue;
     const mpDir = join(cacheDir, mp.name);
@@ -146,13 +144,13 @@ function scanPluginCacheDir(ctx: ScanContext, cacheDir: string): void {
         .map((e) => e.name)
         .sort(VERSION_COLLATOR.compare);
       if (versions.length === 0) continue;
-      scanPluginVersionDir(ctx, join(pluginDir, versions[versions.length - 1]), plugin.name);
+      scanPluginVersionDir(ctx, join(pluginDir, versions[versions.length - 1]), plugin.name, providers);
     }
   }
 }
 
 /** Walk plugin marketplaces: marketplaces/<marketplace>/<plugin>/. */
-function scanPluginMarketplaceDir(ctx: ScanContext, marketplacesDir: string): void {
+function scanPluginMarketplaceDir(ctx: ScanContext, marketplacesDir: string, providers: string[]): void {
   for (const mp of scanDir(ctx, marketplacesDir)) {
     if (!mp.isDirectory()) continue;
     const mpDir = join(marketplacesDir, mp.name);
@@ -160,9 +158,79 @@ function scanPluginMarketplaceDir(ctx: ScanContext, marketplacesDir: string): vo
       if (!plugin.isDirectory()) continue;
       const pluginDir = join(mpDir, plugin.name);
       // Marketplaces are unversioned — treat the plugin dir itself as the version dir.
-      scanPluginVersionDir(ctx, pluginDir, plugin.name);
+      scanPluginVersionDir(ctx, pluginDir, plugin.name, providers);
     }
   }
+}
+
+/**
+ * Resolve the Copilot user-level agents directory.
+ * On Windows: %APPDATA%\GitHub Copilot\agents.
+ * On macOS/Linux: ~/.config/github-copilot/agents.
+ */
+function copilotUserAgentsDir(): string {
+  if (platform() === "win32") {
+    const appData =
+      process.env["APPDATA"] ?? join(homedir(), "AppData", "Roaming");
+    return join(appData, "GitHub Copilot", "agents");
+  }
+  return join(homedir(), ".config", "github-copilot", "agents");
+}
+
+/** Drives a single directory scan: which path, what source, which providers, and whether to scan for skills, commands, or both. */
+interface ScanRoot {
+  path: string;
+  source: SkillSource;
+  providers: string[];
+  /** "skills" scans for subdirs with SKILL.md, "commands" scans for *.md files, "both" does both. */
+  kind: "skills" | "commands" | "both";
+}
+
+/** Build the ordered list of directories to scan for skills and commands. */
+function buildScanRoots(home: string, cwd?: string): ScanRoot[] {
+  const claudeDir = join(home, ".claude");
+  const codexDir = join(home, ".codex");
+  const agentsDir = join(home, ".agents");
+
+  const roots: ScanRoot[] = [
+    // Claude ecosystem
+    { path: join(claudeDir, "skills"), source: "user", providers: ["claude"], kind: "skills" },
+    { path: join(claudeDir, "commands"), source: "user", providers: ["claude"], kind: "commands" },
+    { path: join(claudeDir, ".agents", "skills"), source: "agent", providers: ["claude"], kind: "skills" },
+
+    // Codex ecosystem
+    { path: join(codexDir, "skills"), source: "user", providers: ["codex"], kind: "skills" },
+    { path: join(codexDir, "commands"), source: "user", providers: ["codex"], kind: "commands" },
+
+    // Cross-provider (.agents at home root — visible to Codex and Copilot but not Claude)
+    { path: join(agentsDir, "skills"), source: "agent", providers: ["codex", "copilot"], kind: "skills" },
+    { path: join(agentsDir, "commands"), source: "agent", providers: ["codex", "copilot"], kind: "commands" },
+
+    // Copilot user-level agents
+    { path: copilotUserAgentsDir(), source: "user", providers: ["copilot"], kind: "both" },
+  ];
+
+  if (cwd) {
+    roots.push(
+      // Claude project-level
+      { path: join(cwd, ".claude", "skills"), source: "project", providers: ["claude"], kind: "skills" },
+      { path: join(cwd, ".claude", "commands"), source: "project", providers: ["claude"], kind: "commands" },
+
+      // Codex project-level
+      { path: join(cwd, ".codex", "skills"), source: "project", providers: ["codex"], kind: "skills" },
+      { path: join(cwd, ".codex", "commands"), source: "project", providers: ["codex"], kind: "commands" },
+
+      // Cross-provider project-level
+      { path: join(cwd, ".agents", "skills"), source: "project", providers: ["codex", "copilot"], kind: "skills" },
+      { path: join(cwd, ".agents", "commands"), source: "project", providers: ["codex", "copilot"], kind: "commands" },
+
+      // Copilot project-level agents
+      { path: join(cwd, ".github", "agents"), source: "project", providers: ["copilot"], kind: "both" },
+      { path: join(cwd, ".copilot", "agents"), source: "project", providers: ["copilot"], kind: "both" },
+    );
+  }
+
+  return roots;
 }
 
 /** Discovers skills and commands across user, project, agent, and plugin sources. */
@@ -174,25 +242,22 @@ export class SkillService {
   private subscribers = new Set<() => void>();
 
   /**
-   * List every skill and command discoverable from disk.
-   * Sources, in priority order (higher overrides lower for duplicate names):
-   * 1. `~/.claude/skills/` (user)
-   * 2. `~/.claude/commands/` (user)
-   * 3. `<cwd>/.claude/skills/` (project)
-   * 4. `<cwd>/.claude/commands/` (project)
-   * 5. `~/.claude/.agents/skills/` (agent)
-   * 6. `~/.claude/plugins/cache/...` (plugin)
-   * 7. `~/.claude/plugins/marketplaces/...` (plugin)
+   * List discoverable skills and commands from disk.
+   * When `providerId` is given, only entries whose `providers` array includes
+   * that id are returned. Deduplication by name (higher-priority source wins)
+   * is applied per filtered set, so the same name can coexist across providers.
    */
-  list(cwd?: string): SkillInfo[] {
-    if (this.cache && this.cachedCwd === cwd) return this.cache;
+  list(cwd?: string, providerId?: string): SkillInfo[] {
+    if (this.cache && this.cachedCwd === cwd) {
+      return this.filterAndDedup(this.cache, providerId);
+    }
     const result = this.scan(cwd);
     this.cache = result.items;
     this.cachedCwd = cwd;
-    return result.items;
+    return this.filterAndDedup(result.items, providerId);
   }
 
-  /** Force a full rescan and return per-path diagnostics. */
+  /** Force a full rescan and return per-path diagnostics. Provider-agnostic. */
   diagnose(cwd?: string): SkillDiagnostics {
     const result = this.scan(cwd);
     this.cache = result.items;
@@ -222,26 +287,49 @@ export class SkillService {
     };
   }
 
+  /**
+   * Filter entries by provider, then deduplicate by name within the filtered
+   * set using source priority (user > project > agent > plugin).
+   * Deduplication is intentionally scoped to the filtered set so that a skill
+   * named "deploy" can independently exist for both claude and codex.
+   */
+  private filterAndDedup(items: SkillInfo[], providerId?: string): SkillInfo[] {
+    const filtered = providerId
+      ? items.filter((s) => s.providers.includes(providerId))
+      : items;
+
+    const seen = new Map<string, SkillInfo>();
+    for (const item of filtered) {
+      const existing = seen.get(item.name);
+      if (!existing || SOURCE_PRIORITY[item.source] < SOURCE_PRIORITY[existing.source]) {
+        seen.set(item.name, item);
+      }
+    }
+    return Array.from(seen.values());
+  }
+
   private scan(cwd?: string): { items: SkillInfo[]; diag: SkillDiagnostics } {
     const home = homedir();
     const claudeDir = join(home, ".claude");
     const ctx: ScanContext = {
-      out: new Map(),
+      out: [],
       diag: { scanned: [], errors: [], totalSkills: 0, totalCommands: 0 },
     };
 
-    scanSkillsDir(ctx, join(claudeDir, "skills"), "", "user");
-    scanCommandsDir(ctx, join(claudeDir, "commands"), "", "user");
-
-    if (cwd) {
-      scanSkillsDir(ctx, join(cwd, ".claude", "skills"), "", "project");
-      scanCommandsDir(ctx, join(cwd, ".claude", "commands"), "", "project");
+    const roots = buildScanRoots(home, cwd);
+    for (const root of roots) {
+      if (root.kind === "skills" || root.kind === "both") {
+        scanSkillsDir(ctx, root.path, "", root.source, root.providers);
+      }
+      if (root.kind === "commands" || root.kind === "both") {
+        scanCommandsDir(ctx, root.path, "", root.source, root.providers);
+      }
     }
 
-    scanSkillsDir(ctx, join(claudeDir, ".agents", "skills"), "", "agent");
-    scanPluginCacheDir(ctx, join(claudeDir, "plugins", "cache"));
-    scanPluginMarketplaceDir(ctx, join(claudeDir, "plugins", "marketplaces"));
+    // Plugins remain Claude-scoped
+    scanPluginCacheDir(ctx, join(claudeDir, "plugins", "cache"), ["claude"]);
+    scanPluginMarketplaceDir(ctx, join(claudeDir, "plugins", "marketplaces"), ["claude"]);
 
-    return { items: Array.from(ctx.out.values()), diag: ctx.diag };
+    return { items: ctx.out, diag: ctx.diag };
   }
 }
