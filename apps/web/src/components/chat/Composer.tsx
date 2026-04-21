@@ -21,8 +21,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 import { getDefaultModelId, getDefaultReasoningLevel, getDefaultProviderId, findModelById, isMaxEffortModel, isXhighEffortModel, supportsEffortParameter, resolveThreadModelId, normalizeReasoningLevelForModel, getCodexReasoningLevels } from "@/lib/model-registry";
 import { ModelSelector } from "./ModelSelector";
-import { ModeSelector } from "./ModeSelector";
-import type { ComposerMode } from "./ModeSelector";
+import { ModeSelector, ALL_MODE_OPTIONS } from "./ModeSelector";
+import type { ComposerMode, ModeOption } from "./ModeSelector";
 import { BranchPicker } from "./BranchPicker";
 import { NamingModeSelector } from "./NamingModeSelector";
 import type { NamingMode } from "@mcode/contracts";
@@ -571,8 +571,10 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       setBranchWorktreePath(activeThread?.worktree_path ?? "");
       setBranchNamingMode("auto");
       setBranchCustomName("");
-      loadBranches(workspaceId);
-      loadWorktrees(workspaceId);
+      if (isGitRepo) {
+        loadBranches(workspaceId);
+        loadWorktrees(workspaceId);
+      }
     }
   }, [branchFromMessageId]);
 
@@ -658,6 +660,16 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const setNewThreadMode = useWorkspaceStore((s) => s.setNewThreadMode);
   const setNewThreadBranch = useWorkspaceStore((s) => s.setNewThreadBranch);
 
+  const activeWorkspace = useWorkspaceStore((s) =>
+    s.workspaces.find((w) => w.id === s.activeWorkspaceId),
+  );
+  const isGitRepo = activeWorkspace?.is_git_repo ?? true;
+
+  const modeOptions = useMemo<ModeOption[]>(
+    () => isGitRepo ? ALL_MODE_OPTIONS : ALL_MODE_OPTIONS.filter((o) => o.value === "direct"),
+    [isGitRepo],
+  );
+
   const slashCommand = useSlashCommand({
     anchorRef: editorContainerRef,
     cwd: workspacePath,
@@ -724,12 +736,20 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     setNewThreadMode(mode);
   }, [activeThread?.mode, setNewThreadMode]);
 
+  // Force direct mode for non-git workspaces — worktree modes are not available without git
+  useEffect(() => {
+    if (!isGitRepo && composerMode !== "direct") {
+      setComposerModeLocal("direct");
+      setNewThreadMode("direct");
+    }
+  }, [isGitRepo, composerMode, setNewThreadMode]);
+
   // Load branches when entering new thread mode (always refresh to pick up live changes)
   useEffect(() => {
-    if (isNewThread && workspaceId) {
+    if (isNewThread && workspaceId && isGitRepo) {
       loadBranches(workspaceId);
     }
-  }, [isNewThread, workspaceId, loadBranches]);
+  }, [isNewThread, workspaceId, isGitRepo, loadBranches]);
 
   // Auto-select current branch if none selected
   useEffect(() => {
@@ -752,7 +772,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       clearTimeout(prDetectTimeoutRef.current);
     }
 
-    if (prDismissed || !isNewThread) {
+    if (prDismissed || !isNewThread || !isGitRepo) {
       return;
     }
 
@@ -1107,9 +1127,9 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     }
 
     // Checkout confirmation for local mode when a different branch is selected
-    if (isNewThread && newThreadMode === "direct" && newThreadBranch && workspaceId) {
+    if (isNewThread && isGitRepo && newThreadMode === "direct" && newThreadBranch && workspaceId) {
       const currentBranch = await useWorkspaceStore.getState().getCurrentBranch(workspaceId);
-      if (newThreadBranch !== currentBranch) {
+      if (currentBranch && newThreadBranch !== currentBranch) {
         const confirmed = window.confirm(
           `You're on "${currentBranch}" but selected "${newThreadBranch}". Switch to "${newThreadBranch}"? This will checkout the branch.`,
         );
@@ -1626,6 +1646,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
           mode={branchFromMessageId ? branchExecMode : composerMode}
           onModeChange={branchFromMessageId ? setBranchExecMode : setComposerMode}
           locked={!isNewThread && !branchFromMessageId}
+          options={modeOptions}
         />
         <div className="flex items-center gap-3">
           <AgentStatusBar />
@@ -1633,6 +1654,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         </div>
         <div className="ml-auto flex items-center gap-1">
           {isNewThread ? (
+            !isGitRepo ? null :
             composerMode === "direct" ? (
               <BranchPicker
                 branches={branches}
@@ -1672,6 +1694,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
             ) : null
           ) : branchFromMessageId ? (
             // Branch mode: show execution controls for the child thread
+            !isGitRepo ? null :
             branchExecMode === "direct" ? (
               <BranchPicker
                 branches={branches}
@@ -1705,7 +1728,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
                 loading={worktreesLoading}
               /></Suspense>
             )
-          ) : activeThread?.branch ? (
+          ) : activeThread?.branch && isGitRepo ? (
             <BranchPicker
               branches={[]}
               selectedBranch={activeThread.branch}
