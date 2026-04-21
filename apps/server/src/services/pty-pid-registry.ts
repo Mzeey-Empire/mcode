@@ -76,9 +76,22 @@ export class PtyPidRegistry {
   loadStale(): PtyPidEntry[] {
     try {
       const raw = fs.readFileSync(this.filePath, "utf-8");
-      const parsed = JSON.parse(raw) as PtyPidEntry[];
+      const parsed: unknown = JSON.parse(raw);
       fs.unlinkSync(this.filePath);
-      return parsed;
+      if (!Array.isArray(parsed)) return [];
+      // Runtime shape guard: drop malformed entries rather than crashing the
+      // reaper or passing garbage PIDs to process.kill.
+      return parsed.filter(
+        (e): e is PtyPidEntry =>
+          e !== null &&
+          typeof e === "object" &&
+          typeof e.pid === "number" &&
+          Number.isInteger(e.pid) &&
+          e.pid > 0 &&
+          typeof e.ptyId === "string" &&
+          typeof e.imageName === "string" &&
+          typeof e.spawnedAt === "string",
+      );
     } catch {
       return [];
     }

@@ -185,7 +185,9 @@ export async function gracefulKillProcessTree(
         kill(-pid, "SIGHUP");
       } catch (err) {
         if (isEsrch(err)) return;
-        return;
+        // Unexpected error (e.g. EPERM) — log and abort the ladder rather than
+        // silently skipping so the caller's outer catch surfaces it.
+        throw err;
       }
 
       await sleep(GRACEFUL_KILL_STEP_MS);

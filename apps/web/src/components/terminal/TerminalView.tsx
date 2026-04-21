@@ -395,6 +395,7 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
         window.removeEventListener("mcode:pty-data", handlePtyData);
         window.removeEventListener("mcode:pty-reconnect-gap", handleReconnectGap);
         window.removeEventListener("mcode:pty-exit", handlePtyExit);
+        ptyLastSeqMap.delete(ptyId);
         observer.disconnect();
         try {
           rendererRef.current?.dispose();

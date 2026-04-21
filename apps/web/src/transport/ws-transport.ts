@@ -223,7 +223,8 @@ export function createWsTransport(
             activePtys
               .filter((p) => clientPtyIds.has(p.ptyId))
               .map(async (p) => {
-                const lastSeq = ptyLastSeqMap.get(p.ptyId) ?? 0;
+                // -1 means "I have seen nothing" — server replays everything including seq=0.
+                const lastSeq = ptyLastSeqMap.get(p.ptyId) ?? -1;
                 const { gapped } = await rpc<{ gapped: boolean }>(
                   "terminal.reattach",
                   { ptyId: p.ptyId, lastSeq },

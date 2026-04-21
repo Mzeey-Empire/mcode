@@ -87,6 +87,8 @@ export interface ReapOrphanedPtysDeps {
   processKill?: (pid: number, signal: number | string) => void;
   execSync?: (cmd: string, opts?: { stdio?: "ignore"; timeout?: number }) => Buffer | string;
   getProcessName?: (pid: number) => string | null;
+  /** Current platform string. Defaults to process.platform. */
+  platform?: NodeJS.Platform;
 }
 
 /**
@@ -107,6 +109,7 @@ export function reapOrphanedPtys(
     processKill = (pid, signal) => process.kill(pid, signal as never),
     execSync: execSyncFn = (cmd, opts) => execSync(cmd, opts),
     getProcessName = defaultGetProcessName,
+    platform = process.platform,
   } = deps;
 
   const stale = registry.loadStale();
@@ -120,28 +123,35 @@ export function reapOrphanedPtys(
     }
 
     const currentName = getProcessName(entry.pid);
-    if (currentName !== null) {
-      const basename = currentName.toLowerCase().split(/[\\/]/).pop() ?? "";
-      const recorded = entry.imageName.toLowerCase().split(/[\\/]/).pop() ?? "";
-      if (basename !== recorded) {
-        logger.warn("Orphaned PTY PID belongs to a different process; skipping kill", {
-          ptyId: entry.ptyId,
-          pid: entry.pid,
-          recordedName: entry.imageName,
-          currentName,
-        });
-        continue;
-      }
+    if (currentName === null) {
+      // Cannot verify identity (e.g. no /proc on this platform). Skip to avoid
+      // killing an unrelated process that reused the PID.
+      logger.warn("Cannot verify orphaned PTY process identity; skipping kill", {
+        ptyId: entry.ptyId,
+        pid: entry.pid,
+      });
+      continue;
+    }
+    const basename = currentName.toLowerCase().split(/[\\/]/).pop() ?? "";
+    const recorded = entry.imageName.toLowerCase().split(/[\\/]/).pop() ?? "";
+    if (basename !== recorded) {
+      logger.warn("Orphaned PTY PID belongs to a different process; skipping kill", {
+        ptyId: entry.ptyId,
+        pid: entry.pid,
+        recordedName: entry.imageName,
+        currentName,
+      });
+      continue;
     }
 
-    logger.warn("Reaping orphaned PTY process from previous crash", {
+    logger.warn("Reaped orphaned PTY process from previous crash", {
       ptyId: entry.ptyId,
       pid: entry.pid,
       imageName: entry.imageName,
     });
 
     try {
-      if (process.platform === "win32") {
+      if (platform === "win32") {
         try {
           execSyncFn(`taskkill /T /F /PID ${entry.pid}`, { stdio: "ignore", timeout: 5000 });
         } catch { /* may already be gone */ }

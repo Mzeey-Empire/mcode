@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { TerminalSquare } from "lucide-react";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useTerminalStore, TERMINAL_PANEL_DEFAULTS, type TerminalInstance } from "@/stores/terminalStore";
@@ -47,6 +47,13 @@ export function TerminalPanel() {
   // Pending kill state for the confirmation dialog.
   // `pendingKill` holds the action to run if the user confirms.
   const [pendingKill, setPendingKill] = useState<(() => void) | null>(null);
+
+  // Dismiss any pending kill confirmation when the user switches threads.
+  // Without this, the callback would be orphaned: the panel returns null for
+  // the old thread, leaving a stale closure that could fire on the next open.
+  useEffect(() => {
+    setPendingKill(null);
+  }, [activeThreadId]);
 
   /** Handles drag-to-resize from the top edge of the panel. */
   const onDragStart = useCallback(
@@ -155,8 +162,10 @@ export function TerminalPanel() {
       doCloseAllTerminals();
       return;
     }
-    // Check the active terminal (if any) for child processes as a proxy for
-    // the whole panel — checking every PTY in parallel would be excessive.
+    // Check the active terminal as a proxy for the whole panel.
+    // Known limitation: a background terminal with running children will not
+    // trigger the dialog if the active terminal happens to be idle. Checking
+    // every PTY in parallel was deemed excessive for this UX path.
     const targetId = activeTerminalId ?? terminals[0]?.id;
     if (!targetId) {
       doCloseAllTerminals();

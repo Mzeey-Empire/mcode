@@ -359,8 +359,11 @@ export const WS_METHODS = lazySchema(() => ({
   "terminal.reattach": {
     params: z.object({
       ptyId: z.string(),
-      /** Last sequence number the client received before the disconnect. */
-      lastSeq: z.number().int().nonnegative(),
+      /**
+       * Last sequence number the client received before the disconnect.
+       * Pass -1 when the client has seen no output (replay everything).
+       */
+      lastSeq: z.number().int().min(-1),
     }),
     result: z.object({
       /** True when eviction means the client may have missed output. */
