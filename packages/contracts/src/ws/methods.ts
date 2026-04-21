@@ -157,7 +157,7 @@ export const WS_METHODS = lazySchema(() => ({
   },
   "git.currentBranch": {
     params: z.object({ workspaceId: z.string() }),
-    result: z.string(),
+    result: z.string().nullable(),
   },
   "git.checkout": {
     params: z.object({ workspaceId: z.string(), branch: z.string() }),

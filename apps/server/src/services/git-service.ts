@@ -153,8 +153,8 @@ export class GitService {
     return listBranchesForPath(workspace.path);
   }
 
-  /** Get the current branch name for a workspace. */
-  getCurrentBranch(workspaceId: string): string {
+  /** Get the current branch name for a workspace. Returns null for non-git workspaces. */
+  getCurrentBranch(workspaceId: string): string | null {
     const workspace = this.requireWorkspace(workspaceId);
     return getCurrentBranchForPath(workspace.path);
   }
@@ -164,7 +164,7 @@ export class GitService {
    * Use this instead of getCurrentBranch when you already have the resolved path
    * (e.g. a worktree directory that may differ from the workspace root).
    */
-  getCurrentBranchAt(repoPath: string): string {
+  getCurrentBranchAt(repoPath: string): string | null {
     return getCurrentBranchForPath(repoPath);
   }
 
@@ -421,7 +421,13 @@ export class GitService {
       args.push(branch);
     }
 
-    const { stdout } = await execFile("git", args, { timeout: 10_000 });
+    let stdout: string;
+    try {
+      const result = await execFile("git", args, { timeout: 10_000 });
+      stdout = result.stdout;
+    } catch {
+      return [];
+    }
 
     const commits: GitCommit[] = [];
     // Each block starts with MCODE_SEP; split on that separator
@@ -603,17 +609,22 @@ export class GitService {
 
 /** List all branches (local, remote, worktree-attached) for a repository path. */
 function listBranchesForPath(repoPath: string): GitBranch[] {
-  const output = execFileSync(
-    "git",
-    [
-      "-C",
-      repoPath,
-      "branch",
-      "-a",
-      "--format=%(refname)|||%(refname:short)|||%(objectname:short)|||%(HEAD)|||%(worktreepath)",
-    ],
-    { stdio: "pipe", encoding: "utf-8" },
-  );
+  let output: string;
+  try {
+    output = execFileSync(
+      "git",
+      [
+        "-C",
+        repoPath,
+        "branch",
+        "-a",
+        "--format=%(refname)|||%(refname:short)|||%(objectname:short)|||%(HEAD)|||%(worktreepath)",
+      ],
+      { stdio: "pipe", encoding: "utf-8" },
+    );
+  } catch {
+    return [];
+  }
 
   const branches: GitBranch[] = [];
 
@@ -656,17 +667,17 @@ function listBranchesForPath(repoPath: string): GitBranch[] {
   });
 }
 
-/** Get the current branch name for a repository path. */
-export function getCurrentBranchForPath(repoPath: string): string {
+/** Get the current branch name for a repository path. Returns null for non-git paths. */
+export function getCurrentBranchForPath(repoPath: string): string | null {
   try {
     const output = execFileSync(
       "git",
       ["-C", repoPath, "rev-parse", "--abbrev-ref", "HEAD"],
       { stdio: "pipe", encoding: "utf-8" },
     );
-    return output.trim() || "main";
+    return output.trim() || null;
   } catch {
-    return "main";
+    return null;
   }
 }
 
