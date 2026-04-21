@@ -1,18 +1,30 @@
 # Mcode
 
-AI agent orchestration desktop app. Manage multiple Claude coding sessions across projects with config inheritance and git worktree isolation.
+AI agent orchestration desktop app. Run coding sessions across multiple providers and projects with git worktree isolation.
 
 ## Features
 
-- Multiple concurrent Claude agent sessions
-- Full config inheritance from your Claude Code setup (`~/.claude/`, project `.claude/`)
-- Git worktree isolation per thread
-- Live streaming agent output with tool call rendering
-- Keyboard-driven UX
+- **Multi-provider** - Claude, Codex, and GitHub Copilot. Enable or disable each provider in settings.
+- **CLI path configuration** - Point each provider to a custom CLI binary path, or let Mcode find it on your system PATH.
+- **Concurrent sessions** - Run multiple agent sessions in parallel across different projects.
+- **Config inheritance** - Picks up your existing provider config (`~/.claude/`, project `.claude/`, etc.).
+- **Worktree isolation** - Each thread gets its own git worktree so agents don't step on each other.
+- **Live streaming** - Agent output and tool calls stream in real time.
+- **Keyboard-driven UX**
 
 ## Quick Start
 
-**Prerequisites:** [Bun](https://bun.sh/), [Git](https://git-scm.com/), [Claude Code CLI](https://claude.ai/download) on PATH
+**Prerequisites:** [Bun](https://bun.sh/), [Git](https://git-scm.com/)
+
+You also need at least one supported provider CLI installed:
+
+| Provider | Install | Min version |
+|----------|---------|-------------|
+| [Claude Code](https://claude.ai/download) | `npm i -g @anthropic-ai/claude-code` | — |
+| [Codex](https://github.com/openai/codex) | `npm i -g @openai/codex` | 0.37.0 |
+| [GitHub Copilot](https://github.com/github/copilot) | `npm i -g @github/copilot` | — |
+
+Provider CLIs do not need to be on your system PATH. You can set a custom binary path per provider in **Settings > Providers**.
 
 ```bash
 git clone https://github.com/Mzeey-Emipre/mcode.git
@@ -25,6 +37,8 @@ bun run dev:desktop
 ## Documentation
 
 - **[Architecture](ARCHITECTURE.md)** - System design, data model, IPC flow, and diagrams
+- **[Provider architecture](docs/guides/provider-architecture.md)** - How providers are wired up
+- **[Settings reference](docs/settings/reference.md)** - All configurable settings
 
 ## Tech Stack
 
@@ -32,7 +46,7 @@ bun run dev:desktop
 - TypeScript
 - React 19
 - SQLite
-- Claude Agent SDK
+- Claude Agent SDK / Codex CLI / Copilot SDK
 - shadcn/ui
 - Tailwind CSS 4
 - Zustand
