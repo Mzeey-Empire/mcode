@@ -199,6 +199,9 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
   const flushResizeRpcRef = useRef<(() => void) | null>(null);
   const rendererRef = useRef<IDisposable | null>(null);
 
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+
   const scrollback = useSettingsStore((s) => s.settings.terminal.scrollback);
   const scrollbackRef = useRef(scrollback);
   scrollbackRef.current = scrollback;
@@ -408,8 +411,11 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
       // New PTYs are created paused server-side so their initial shell prompt
       // is buffered until this view is ready to consume it. Resume only after
       // the PTY listeners above are attached; term.write queues bytes even
-      // before the renderer addon finishes loading.
-      transport.terminalResume(ptyId).catch(() => {});
+      // before the renderer addon finishes loading. Guard with the current
+      // visibility state so a late init doesn't race with pause-on-hide.
+      if (visibleRef.current) {
+        transport.terminalResume(ptyId).catch(() => {});
+      }
 
       await loadRenderer(term, rendererRef, () => disposed);
       // If `disposed` flipped during the await, React's effect teardown

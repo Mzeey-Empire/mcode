@@ -114,4 +114,16 @@ describe("TerminalView focus behaviour (regression)", () => {
 
     expect(transport.terminalResume).toHaveBeenCalledWith("pty-1");
   });
+
+  it("does NOT resume when mounted hidden", async () => {
+    await act(async () => {
+      render(<TerminalView ptyId="pty-1" visible={false} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(transport.terminalResume).not.toHaveBeenCalled();
+  });
 });

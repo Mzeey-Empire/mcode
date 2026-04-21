@@ -121,6 +121,12 @@ export class TerminalFlowControl {
       this.bufferedBytes -= dropped.bytes.length;
       this.droppedBytes += dropped.bytes.length;
     }
+    // Compact the backing array so evicted slots don't retain memory
+    // indefinitely during long pauses.
+    if (this.head > 1024 && this.head * 2 >= this.buffer.length) {
+      this.buffer = this.buffer.slice(this.head);
+      this.head = 0;
+    }
   }
 
   private _drain(): void {
