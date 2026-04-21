@@ -105,20 +105,31 @@ interface WorkspaceState {
   regenerateAutoPreview: () => void;
 
   // Branch-from-chat state (mirrors new-thread naming fields)
+  /** Execution mode chosen for the branched thread (direct, new worktree, existing worktree). */
   branchExecMode: "direct" | "worktree" | "existing-worktree";
+  /** Base branch selected in the branch-from-chat branch picker. */
   branchTargetBranch: string;
+  /** Path of the existing worktree to attach to when branchExecMode is "existing-worktree". */
   branchWorktreePath: string;
+  /** Naming mode for the branch-from-chat worktree branch (auto or custom). */
   branchNamingMode: NamingMode;
+  /** Custom branch name entered by the user in branch-from-chat mode. */
   branchCustomName: string;
+  /** Auto-generated preview branch name for branch-from-chat mode. Independent of autoPreviewBranch. */
   branchAutoPreview: string;
 
   // Branch-from-chat actions
   /** Initialize branch-mode state from the parent thread and user settings. */
   initBranchMode: (parentThread: Thread | undefined) => void;
+  /** Set the execution mode for the branched thread. */
   setBranchExecMode: (mode: "direct" | "worktree" | "existing-worktree") => void;
+  /** Set the base branch for the branched thread. */
   setBranchTargetBranch: (branch: string) => void;
+  /** Set the existing worktree path for the branched thread. */
   setBranchWorktreePath: (path: string) => void;
+  /** Set the naming mode for the branch-from-chat worktree branch. */
   setBranchNamingMode: (mode: NamingMode) => void;
+  /** Set and sanitize the custom branch name for the branch-from-chat flow. */
   setBranchCustomName: (name: string) => void;
 
   loadOpenPrs: (workspaceId: string) => Promise<void>;
