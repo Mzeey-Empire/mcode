@@ -160,10 +160,11 @@ terminalService.setSender({
   },
   data: (ptyId, seq, bytes) => {
     broadcastTerminalData(ptyId, seq, bytes);
-    // portPush uses JSON serialization over a socket, so re-encode bytes to a
-    // UTF-8 string for the IPC path. This only runs in Electron mode where a
-    // port is attached, so the performance cost is negligible.
-    portPush.send("terminal.data", { ptyId, data: Buffer.from(bytes).toString("utf8"), seq });
+    // PortPush uses MessagePort.postMessage (structured clone), which
+    // transfers Uint8Array losslessly without any UTF-8 re-encoding.
+    // The web-side ws-events.ts handler checks `payload instanceof Uint8Array`
+    // and routes this correctly.
+    portPush.send("terminal.data", { ptyId, payload: bytes, seq });
   },
 });
 
