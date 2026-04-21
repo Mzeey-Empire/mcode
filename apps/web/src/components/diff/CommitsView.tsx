@@ -8,6 +8,9 @@ import { CommitEntry } from "./CommitEntry";
 export function CommitsView() {
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const activeWorkspace = useWorkspaceStore((s) =>
+    s.workspaces.find((w) => w.id === s.activeWorkspaceId),
+  );
   const threadBranch = useWorkspaceStore((s) => {
     const thread = s.threads.find((t) => t.id === activeThreadId);
     return thread?.branch ?? undefined;
@@ -20,6 +23,16 @@ export function CommitsView() {
   );
   const setCommits = useDiffStore((s) => s.setCommits);
   const setCommitsLoading = useDiffStore((s) => s.setCommitsLoading);
+
+  // Defense-in-depth: DiffToolbar already hides the "Commits" tab for non-worktree threads.
+  // This prevents a crash if the component is somehow rendered for a non-git workspace.
+  if (!activeWorkspace?.is_git_repo) {
+    return (
+      <div className="flex h-full items-center justify-center text-xs text-muted-foreground/50">
+        No git history
+      </div>
+    );
+  }
 
   useEffect(() => {
     if (!activeThreadId || !activeWorkspaceId || !threadBranch) return;
