@@ -34,6 +34,7 @@ const _legacyEncoder = new TextEncoder();
  * - `permission.request` -- tool permission awaiting user decision
  * - `permission.resolved` -- a permission was settled (by user or session stop)
  * - `providers.availability` -- server-pushed provider availability snapshot forwarded to providerAvailabilityStore
+ * - `workspace.gitStatusChanged` -- workspace git status changed (e.g. non-git folder became a repo), updates is_git_repo flag
  */
 export function startPushListeners(): void {
   // Guard against double-init
@@ -245,16 +246,30 @@ export function startPushListeners(): void {
   // branch.changed: refresh branch list and update current branch if not manually overridden
   unsubs.push(
     pushEmitter.on("branch.changed", (data) => {
-      const { workspaceId, branch } = data as { workspaceId: string; branch: string };
+      const { workspaceId, branch } = data as { workspaceId: string; branch: string | null };
       import("@/stores/workspaceStore").then(({ useWorkspaceStore }) => {
         const state = useWorkspaceStore.getState();
         // Only refresh if this event is for the active workspace
         if (state.activeWorkspaceId === workspaceId) {
           state.loadBranches(workspaceId);
-          if (!state.branchManuallySelected) {
+          if (!state.branchManuallySelected && branch) {
             state.setNewThreadBranch(branch);
           }
         }
+      });
+    }),
+  );
+
+  // workspace.gitStatusChanged: update is_git_repo flag when a non-git workspace becomes a git repo
+  unsubs.push(
+    pushEmitter.on("workspace.gitStatusChanged", (data) => {
+      const { workspaceId, isGitRepo } = data as { workspaceId: string; isGitRepo: boolean };
+      import("@/stores/workspaceStore").then(({ useWorkspaceStore }) => {
+        useWorkspaceStore.setState((state) => ({
+          workspaces: state.workspaces.map((w) =>
+            w.id === workspaceId ? { ...w, is_git_repo: isGitRepo } : w,
+          ),
+        }));
       });
     }),
   );
