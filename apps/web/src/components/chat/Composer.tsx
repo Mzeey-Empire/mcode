@@ -1642,12 +1642,18 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
 
       {/* Status bar - below the container */}
       <div className="flex items-center justify-between px-1 pt-1.5">
-        <ModeSelector
-          mode={branchFromMessageId ? branchExecMode : composerMode}
-          onModeChange={branchFromMessageId ? setBranchExecMode : setComposerMode}
-          locked={!isNewThread && !branchFromMessageId}
-          options={modeOptions}
-        />
+        {!isGitRepo && isNewThread ? (
+          <span className="flex h-6 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground/40">
+            No git repo
+          </span>
+        ) : (
+          <ModeSelector
+            mode={branchFromMessageId ? branchExecMode : composerMode}
+            onModeChange={branchFromMessageId ? setBranchExecMode : setComposerMode}
+            locked={!isNewThread && !branchFromMessageId}
+            options={modeOptions}
+          />
+        )}
         <div className="flex items-center gap-3">
           <AgentStatusBar />
           <TerminalStatusIndicator />
