@@ -10,6 +10,13 @@ import { ProviderAvailabilitySchema } from "../providers/availability.js";
 /** All push channel definitions keyed by channel name. */
 export const WS_CHANNELS = {
   "agent.event": AgentEventSchema(),
+  /**
+   * @deprecated Legacy JSON format retained for backward compatibility.
+   * Current servers send PTY output exclusively as binary WebSocket frames
+   * using the `encodeTerminalDataFrame` envelope (tag 0x01); `broadcast()`
+   * is never called for this channel. This schema only applies when a
+   * client connects to an older server that still sends JSON terminal.data.
+   */
   "terminal.data": z.object({
     ptyId: z.string(),
     data: z.string(),
