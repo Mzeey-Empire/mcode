@@ -11,6 +11,7 @@
 
 import { injectable, inject } from "tsyringe";
 import { EventEmitter } from "events";
+import { randomUUID } from "crypto";
 import { logger } from "@mcode/shared";
 import { SettingsService } from "../../services/settings-service.js";
 import type {
@@ -19,11 +20,18 @@ import type {
   ReasoningLevel,
   AgentEvent,
   AttachmentMeta,
+  PermissionDecision,
+  PermissionRequest,
 } from "@mcode/contracts";
 import { AgentEventType } from "@mcode/contracts";
 import { checkCodexVersion, meetsMinVersion } from "./codex-version.js";
 import { CodexAppServer } from "./codex-app-server.js";
+import type { CodexApprovalRequest } from "./codex-app-server.js";
 import { CodexEventMapper } from "./codex-event-mapper.js";
+import {
+  mapDecisionToCodexResponse,
+  synthesizeCodexPermissionRequest,
+} from "./codex-permission-mapper.js";
 import type { TurnInputPart, CodexNotification } from "./codex-types.js";
 
 /** Idle TTL before a session is evicted (10 minutes). */
@@ -39,6 +47,18 @@ interface SessionEntry {
   lastUsedAt: number;
   /** Sandbox mode used when this session was started; used to detect permission mode changes. */
   sandboxMode: string;
+}
+
+/** One pending codex approval bridged into the Phase 1 permission flow. */
+interface PendingPermissionEntry {
+  sessionId: string;
+  threadId: string;
+  toolName: string;
+  input: unknown;
+  title?: string;
+  method: string;
+  params: Record<string, unknown>;
+  resolve: (response: unknown) => void;
 }
 
 /**
@@ -87,6 +107,8 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
   private sessions = new Map<string, SessionEntry>();
   private sdkSessionIds = new Map<string, string>();
   private evictionTimer: ReturnType<typeof setInterval> | null = null;
+  /** Pending host-side permission approvals keyed by requestId. */
+  private pendingPermissions = new Map<string, PendingPermissionEntry>();
 
   constructor(
     @inject(SettingsService) private readonly settingsService: SettingsService,
@@ -151,6 +173,11 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
         from: existing.sandboxMode,
         to: sandbox,
       });
+      // Drain pending permissions for this session before kill. The app-server's
+      // graceful exit path suppresses the "fatal" emit (killRequested=true), so
+      // attachFatalDrain won't fire here; cancel any open cards explicitly so
+      // the UI doesn't keep a stale amber dot on an orphaned request.
+      this.drainPending((e) => e.sessionId === sessionId);
       this.sessions.delete(sessionId);
       // Clear the stored SDK thread ID so the new session starts fresh rather than
       // resuming the old thread (which would inherit the old sandbox mode).
@@ -178,6 +205,12 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
     const resumeId = this.sdkSessionIds.get(sessionId);
     const attemptResume = !!(resume && resumeId);
 
+    // Only register the handler in supervised mode. The CodexAppServer
+    // ignores approvalHandler when approvalPolicy === "never" (auto-approve
+    // still runs locally), so this guard is defensive and keeps the wiring
+    // obvious in logs.
+    const supervised = approvalPolicy === "on-request";
+
     const server = new CodexAppServer({
       cliPath,
       workingDirectory: cwd,
@@ -185,6 +218,9 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
       sandbox,
       approvalPolicy,
       resumeThreadId: attemptResume ? resumeId : undefined,
+      approvalHandler: supervised
+        ? (req) => this.handleApprovalRequest(sessionId, threadId, req)
+        : undefined,
     });
 
     const mapper = new CodexEventMapper(threadId);
@@ -214,6 +250,8 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
       this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
       this.sessions.delete(sessionId);
     });
+
+    this.attachFatalDrain(sessionId, server);
 
     server.on("exit", () => {
       if (!server.isAlive) {
@@ -319,10 +357,113 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
     }
   }
 
-  /** Evicts sessions that have been idle longer than IDLE_TTL_MS. */
+  /**
+   * Bridges a codex app-server serverRequest into the Phase 1 permission flow.
+   * Allocates a requestId, synthesises a PermissionRequest for the card UI,
+   * emits permission_request, and returns a promise that the app-server
+   * response listener awaits. Resolved by resolvePermission or by session
+   * shutdown/stop (which supply "cancelled").
+   */
+  private handleApprovalRequest(
+    sessionId: string,
+    threadId: string,
+    request: CodexApprovalRequest,
+  ): Promise<unknown> {
+    const requestId = randomUUID();
+    const synthesized = synthesizeCodexPermissionRequest({
+      threadId,
+      requestId,
+      method: request.method,
+      params: request.params,
+    });
+
+    return new Promise<unknown>((resolve) => {
+      this.pendingPermissions.set(requestId, {
+        sessionId,
+        threadId,
+        toolName: synthesized.toolName,
+        input: synthesized.input,
+        title: synthesized.title,
+        method: request.method,
+        params: request.params,
+        resolve,
+      });
+      this.emit("permission_request", synthesized satisfies PermissionRequest);
+    });
+  }
+
+  /**
+   * Resolve a pending permission request. Mirrors ClaudeProvider.resolvePermission.
+   * Returns true if requestId was found. On resolve, the codex app-server unblocks.
+   */
+  resolvePermission(requestId: string, decision: PermissionDecision): boolean {
+    const entry = this.pendingPermissions.get(requestId);
+    if (!entry) return false;
+    this.pendingPermissions.delete(requestId);
+
+    // Reset idle timer on the owning session so user attention counts as activity.
+    const session = this.sessions.get(entry.sessionId);
+    if (session) session.lastUsedAt = Date.now();
+
+    const response = mapDecisionToCodexResponse(entry.method, decision, entry.params);
+    entry.resolve(response);
+    this.emit("permission_resolved", { requestId, decision });
+    return true;
+  }
+
+  /** List pending permissions for a given thread. */
+  listPendingPermissions(threadId: string): PermissionRequest[] {
+    const out: PermissionRequest[] = [];
+    for (const [requestId, entry] of this.pendingPermissions) {
+      if (entry.threadId !== threadId) continue;
+      out.push({
+        requestId,
+        threadId: entry.threadId,
+        toolName: entry.toolName,
+        input: entry.input,
+        title: entry.title,
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Install a fatal listener on a CodexAppServer that drains pending permissions
+   * for this session when the child process dies unexpectedly. Kept as its own
+   * method so tests can invoke it against a stub EventEmitter.
+   */
+  private attachFatalDrain(sessionId: string, server: { on: (e: string, h: (...args: unknown[]) => void) => void }): void {
+    server.on("fatal", () => {
+      this.drainPending((e) => e.sessionId === sessionId);
+    });
+  }
+
+  /**
+   * Drain all pending permissions that match a predicate, resolving each as "cancelled".
+   * Used by stopSession and shutdown to unblock any in-flight approvals so the
+   * codex turn can tear down cleanly.
+   */
+  private drainPending(predicate: (entry: PendingPermissionEntry) => boolean): void {
+    for (const [requestId, entry] of [...this.pendingPermissions]) {
+      if (!predicate(entry)) continue;
+      this.pendingPermissions.delete(requestId);
+      const response = mapDecisionToCodexResponse(entry.method, "cancelled", entry.params);
+      entry.resolve(response);
+      this.emit("permission_resolved", { requestId, decision: "cancelled" as const });
+    }
+  }
+
+  /** Evicts sessions that have been idle longer than IDLE_TTL_MS. Sessions with pending permissions are spared. */
   private evictIdleSessions(): void {
     const now = Date.now();
+    // Build the set of sessionIds with at least one pending permission once
+    // rather than iterating the map per session.
+    const hasPending = new Set<string>();
+    for (const entry of this.pendingPermissions.values()) {
+      hasPending.add(entry.sessionId);
+    }
     for (const [sessionId, entry] of this.sessions) {
+      if (hasPending.has(sessionId)) continue;
       if (now - entry.lastUsedAt > IDLE_TTL_MS) {
         logger.info("Evicted idle Codex session", { sessionId });
         void entry.server.kill();
@@ -336,21 +477,26 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
     this.sdkSessionIds.set(sessionId, sdkSessionId);
   }
 
-  /** Kills a running session's subprocess immediately. */
+  /** Kills a running session's subprocess and cancels any pending permissions for its thread. */
   stopSession(sessionId: string): void {
     const entry = this.sessions.get(sessionId);
+    // Drain first so handler promises resolve with the cancel response BEFORE
+    // we kill(). That way the app-server sees the cancel decision, interrupts
+    // the turn cleanly, and there is no race with the process exiting.
+    this.drainPending((e) => e.sessionId === sessionId);
     if (entry) {
       void entry.server.kill();
       this.sessions.delete(sessionId);
     }
   }
 
-  /** Tears down all sessions, clears state, and stops the eviction timer. */
+  /** Tears down all sessions, drains pending permissions, and stops the eviction timer. */
   shutdown(): void {
     if (this.evictionTimer) {
       clearInterval(this.evictionTimer);
       this.evictionTimer = null;
     }
+    this.drainPending(() => true);
     for (const [, entry] of this.sessions) {
       void entry.server.kill();
     }

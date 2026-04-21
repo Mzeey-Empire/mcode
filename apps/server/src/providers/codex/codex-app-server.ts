@@ -12,6 +12,7 @@ import { createInterface } from "readline";
 import { EventEmitter } from "events";
 import { logger } from "@mcode/shared";
 import { CodexRpcClient } from "./codex-rpc-client.js";
+import { mapDecisionToCodexResponse } from "./codex-permission-mapper.js";
 import type {
   ThreadStartParams,
   ThreadStartResult,
@@ -21,6 +22,23 @@ import type {
   SandboxMode,
   AskForApproval,
 } from "./codex-types.js";
+
+/** Incoming approval request from the codex app-server, passed to approvalHandler. */
+export interface CodexApprovalRequest {
+  /** JSON-RPC id to use in the eventual sendResponse call. */
+  rpcId: number;
+  /** Method name, e.g. "item/commandExecution/requestApproval". */
+  method: string;
+  /** Opaque params payload forwarded from the server. */
+  params: Record<string, unknown>;
+}
+
+/**
+ * Handler invoked for each server-initiated approval request in supervised mode.
+ * Returning a resolved value sends that value back as the RPC response.
+ * Throwing routes to the shared mapper with decision="deny" so the turn unblocks.
+ */
+export type CodexApprovalHandler = (request: CodexApprovalRequest) => Promise<unknown>;
 
 /** Options passed to the CodexAppServer constructor. */
 export interface CodexAppServerOptions {
@@ -39,6 +57,74 @@ export interface CodexAppServerOptions {
    * to `thread/start`.
    */
   resumeThreadId?: string;
+  /**
+   * Optional hook invoked when the codex app-server issues a server-initiated
+   * approval RPC. Replaces the default auto-deny fallback in supervised mode.
+   * Ignored when approvalPolicy === "never" (full-access still auto-approves).
+   */
+  approvalHandler?: CodexApprovalHandler;
+}
+
+/**
+ * Pure routing logic for a single codex serverRequest. Exported for unit
+ * testing so we can assert the full decision table without spawning a child
+ * process. The live code in CodexAppServer simply wraps this with the
+ * real sendResponse.
+ */
+export async function routeCodexServerRequest(args: {
+  msg: { id?: number; method?: string; params?: Record<string, unknown> };
+  approvalPolicy: AskForApproval | undefined;
+  approvalHandler: CodexApprovalHandler | undefined;
+  sendResponse: (id: number, result: unknown) => void;
+}): Promise<void> {
+  const { msg, approvalPolicy, approvalHandler, sendResponse } = args;
+  if (typeof msg.id !== "number") return;
+
+  const method = msg.method ?? "";
+  const params = msg.params ?? {};
+  const autoApprove = approvalPolicy === "never";
+
+  if (autoApprove) {
+    logger.info("Codex serverRequest auto-approved", { id: msg.id, method });
+    if (method === "item/permissions/requestApproval") {
+      sendResponse(msg.id, {
+        permissions: {
+          fileSystem: { read: [], write: [] },
+          network: { enabled: true },
+        },
+        scope: "session",
+      });
+    } else if (method === "applyPatchApproval" || method === "execCommandApproval") {
+      sendResponse(msg.id, { decision: "approved_for_session" });
+    } else {
+      sendResponse(msg.id, { decision: "acceptForSession" });
+    }
+    return;
+  }
+
+  if (approvalHandler) {
+    try {
+      const result = await approvalHandler({ rpcId: msg.id, method, params });
+      sendResponse(msg.id, result);
+    } catch (err) {
+      logger.error("Codex approvalHandler rejected; sending safe-deny", {
+        id: msg.id,
+        method,
+        error: String(err),
+      });
+      sendResponse(msg.id, mapDecisionToCodexResponse(method, "deny", params));
+    }
+    return;
+  }
+
+  // No handler in supervised mode: route through the shared mapper with
+  // decision="deny" so legacy methods get "denied", v2 methods get "decline",
+  // and permissions requests get an empty-permissions turn-scoped response.
+  logger.info("Codex serverRequest denied (no approvalHandler and policy is not auto-approve)", {
+    id: msg.id,
+    method,
+  });
+  sendResponse(msg.id, mapDecisionToCodexResponse(method, "deny", params));
 }
 
 /**
@@ -203,70 +289,18 @@ export class CodexAppServer extends EventEmitter {
       this.emit("notification", notification);
     });
 
-    // Handle server-initiated approval requests. Without a response the codex
-    // process blocks forever, causing the session to appear stale.
-    //
-    // Only auto-approve when approvalPolicy === "never" (full-access mode).
-    // For all other policies mcode has no interactive approval UI, so we deny
-    // the request to avoid silently granting permissions the user didn't intend.
-    //
-    // Each approval type uses different enum values in its `decision` field:
-    //   - item/commandExecution/requestApproval → "acceptForSession" / "deny"
-    //   - item/fileChange/requestApproval       → "acceptForSession" / "deny"
-    //   - item/permissions/requestApproval       → { permissions: {...}, scope: "session" }
-    //   - applyPatchApproval (deprecated)        → "approved_for_session" / "denied"
-    //   - execCommandApproval (deprecated)       → "approved_for_session" / "denied"
-    //
-    // Source: codex-rs/app-server-protocol/schema/json/*ApprovalResponse.json
+    // Handle server-initiated approval requests via the shared router. Without
+    // a response the codex process blocks forever, causing the session to
+    // appear stale. The router implements the full decision table (auto-approve
+    // for policy="never", handler-driven supervised mode, silent-deny fallback).
     this.rpc.on("serverRequest", (msg: unknown) => {
       const request = msg as { id?: number; method?: string; params?: Record<string, unknown> };
-      if (typeof request.id !== "number") return;
-
-      const method = request.method ?? "";
-      const autoApprove = this.options.approvalPolicy === "never";
-
-      if (!autoApprove) {
-        logger.info("Codex serverRequest denied (approvalPolicy is not auto-approve)", {
-          id: request.id,
-          method,
-        });
-        // Deprecated approval types use "denied"; v2 types use "deny".
-        if (method === "applyPatchApproval" || method === "execCommandApproval") {
-          this.rpc.sendResponse(request.id, { decision: "denied" });
-        } else {
-          this.rpc.sendResponse(request.id, { decision: "deny" });
-        }
-        return;
-      }
-
-      logger.info("Codex serverRequest auto-approved", {
-        id: request.id,
-        method,
+      void routeCodexServerRequest({
+        msg: request,
+        approvalPolicy: this.options.approvalPolicy,
+        approvalHandler: this.options.approvalHandler,
+        sendResponse: (id, result) => this.rpc.sendResponse(id, result),
       });
-
-      let result: unknown;
-
-      if (method === "item/permissions/requestApproval") {
-        // Grant full filesystem + network for the session.
-        result = {
-          permissions: {
-            fileSystem: { read: [], write: [] },
-            network: { enabled: true },
-          },
-          scope: "session",
-        };
-      } else if (
-        method === "applyPatchApproval"
-        || method === "execCommandApproval"
-      ) {
-        // Deprecated approval types use "approved_for_session".
-        result = { decision: "approved_for_session" };
-      } else {
-        // New v2 approval types (commandExecution, fileChange) use "acceptForSession".
-        result = { decision: "acceptForSession" };
-      }
-
-      this.rpc.sendResponse(request.id, result);
     });
 
     this.wireStderr();
