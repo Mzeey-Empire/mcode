@@ -45,10 +45,10 @@ function findUnpackedServer() {
       electron: resolve(releaseDir, "win-unpacked/Mcode.exe"),
       sqlite: resolve(releaseDir, "win-unpacked/resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release"),
     },
-    // Linux
+    // Linux (electron-builder uses productName as binary name)
     {
       server: resolve(releaseDir, "linux-unpacked/resources/app.asar.unpacked/dist/server/server.cjs"),
-      electron: resolve(releaseDir, "linux-unpacked/mcode"),
+      electron: resolve(releaseDir, "linux-unpacked/Mcode"),
       sqlite: resolve(releaseDir, "linux-unpacked/resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release"),
     },
     // macOS Intel
