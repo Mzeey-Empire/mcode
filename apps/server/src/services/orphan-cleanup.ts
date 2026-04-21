@@ -122,6 +122,13 @@ export function reapOrphanedPtys(
       continue; // Already dead
     }
 
+    // Guard against the catastrophic kill(-1, SIGKILL) path: on Unix,
+    // -entry.pid with pid=1 would signal every process the user can reach.
+    if (entry.pid <= 1) {
+      logger.warn("Skipping orphaned PTY with unsafe PID", { ptyId: entry.ptyId, pid: entry.pid });
+      continue;
+    }
+
     const currentName = getProcessName(entry.pid);
     if (currentName === null) {
       // Cannot verify identity (e.g. no /proc on this platform). Skip to avoid
@@ -144,7 +151,7 @@ export function reapOrphanedPtys(
       continue;
     }
 
-    logger.warn("Reaped orphaned PTY process from previous crash", {
+    logger.warn("Reaping orphaned PTY process from previous crash", {
       ptyId: entry.ptyId,
       pid: entry.pid,
       imageName: entry.imageName,
@@ -162,7 +169,13 @@ export function reapOrphanedPtys(
           try { processKill(entry.pid, "SIGKILL"); } catch { /* already gone */ }
         }
       }
-    } catch { /* process exited between probe and kill */ }
+    } catch (err) {
+      logger.warn("Failed to reap orphaned PTY process", {
+        ptyId: entry.ptyId,
+        pid: entry.pid,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 }
 

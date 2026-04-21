@@ -107,7 +107,7 @@ describe("PtyPidRegistry", () => {
     expect(result).toEqual([]);
   });
 
-  it("concurrent register calls produce valid JSON", () => {
+  it("multiple register calls produce valid JSON", () => {
     registry.register("pty-1", 1000, "bash");
     registry.register("pty-2", 1001, "sh");
     registry.register("pty-3", 1002, "zsh");

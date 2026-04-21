@@ -21,6 +21,13 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ToastContainer } from "@/components/Toast";
 import type { SettingsSection } from "@/components/settings/settings-nav";
 
+/**
+ * Tracks threads for which a PTY creation RPC is already in flight.
+ * Prevents duplicate terminals when Ctrl+J is pressed rapidly or when
+ * the toggle fires twice before the first creation resolves.
+ */
+const terminalCreationInFlight = new Set<string>();
+
 /** Root application component. Initializes WS transport and push listeners. */
 export function App() {
   const theme = useSettingsStore((s) => s.settings.appearance.theme);
@@ -114,14 +121,35 @@ export function App() {
           const isCurrentlyVisible = panel?.visible ?? false;
           store.toggleTerminalPanel(tid);
           // Auto-create a terminal when opening a panel that has none.
-          if (!isCurrentlyVisible) {
+          if (!isCurrentlyVisible && !terminalCreationInFlight.has(tid)) {
             const terminals = store.terminals[tid];
             if (!terminals || terminals.length === 0) {
+              terminalCreationInFlight.add(tid);
               import("@/transport").then(({ getTransport }) => {
-                getTransport()
+                const transport = getTransport();
+                transport
                   .terminalCreate(tid)
-                  .then((ptyId) => useTerminalStore.getState().addTerminal(tid, ptyId))
-                  .catch(() => {});
+                  .then((ptyId) => {
+                    terminalCreationInFlight.delete(tid);
+                    const currentStore = useTerminalStore.getState();
+                    const currentPanel = currentStore.terminalPanelByThread[tid];
+                    // Panel was closed while creation was in flight — dispose the orphaned PTY.
+                    if (!currentPanel?.visible) {
+                      transport.terminalKill(ptyId).catch(() => {});
+                      return;
+                    }
+                    // Another terminal may have been created (e.g. user clicked "New terminal")
+                    // while the RPC was in flight — avoid duplicates.
+                    const currentTerminals = currentStore.terminals[tid];
+                    if (!currentTerminals || currentTerminals.length === 0) {
+                      currentStore.addTerminal(tid, ptyId);
+                    } else {
+                      transport.terminalKill(ptyId).catch(() => {});
+                    }
+                  })
+                  .catch(() => {
+                    terminalCreationInFlight.delete(tid);
+                  });
               });
             }
           }

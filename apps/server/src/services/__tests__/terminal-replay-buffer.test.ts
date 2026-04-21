@@ -103,7 +103,10 @@ describe("TerminalReplayBuffer", () => {
     const result = buf.replay(-1);
     expect(result.gapped).toBe(false);
     expect(result.chunks.length).toBe(2000);
-    // Backing array must not have grown to > 2× active size (compaction working).
+    // Compaction fires when head > 1024 AND head * 2 >= buffer.length, so the
+    // ghost-head prefix is at most half the backing array at compaction time.
+    // Upper bound 2000 * 2 is conservative: covers the worst-case half-prefix
+    // that exists just before the next compaction would trigger.
     expect(buf.bufferLength).toBeLessThanOrEqual(2000 * 2);
   });
 

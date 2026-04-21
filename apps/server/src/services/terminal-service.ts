@@ -299,8 +299,12 @@ export class TerminalService {
     if (!replayBuffer) throw new Error(`PTY not found: ${ptyId}`);
 
     const { chunks, gapped } = replayBuffer.replay(lastSeq);
-    for (const { seq, bytes } of chunks) {
-      this.sender?.data(ptyId, seq, bytes);
+    // Capture sender once to avoid repeated null checks inside the loop.
+    const sender = this.sender;
+    if (sender) {
+      for (const { seq, bytes } of chunks) {
+        sender.data(ptyId, seq, bytes);
+      }
     }
     return { gapped };
   }
