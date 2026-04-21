@@ -12,6 +12,7 @@
  * the kernel buffer is insufficient.
  */
 
+/** Identifies why PTY output is currently paused. */
 export type PauseSource = "client-request" | "socket-buffered";
 
 /** Options for constructing a {@link TerminalFlowControl} instance. */
