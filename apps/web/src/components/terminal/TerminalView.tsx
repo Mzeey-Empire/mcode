@@ -2,7 +2,6 @@ import { useEffect, useRef } from "react";
 import type { Terminal, IDisposable } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import { getTransport } from "@/transport";
-import { ptyLastSeqMap } from "@/transport/ws-transport";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { shouldInterceptKeyEvent } from "./terminalKeyHandler";
 import { ClientTerminalFlowControl } from "./terminalFlowControl";
@@ -304,7 +303,7 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
         if (detail.ptyId !== ptyId) return;
         // Track last-seen seq so the reconnect handler can call terminal.reattach
         // with the correct lastSeq, minimising replayed output on reconnect.
-        ptyLastSeqMap.set(ptyId, detail.seq);
+        transport.ptySetLastSeq(ptyId, detail.seq);
         const n = detail.payload.length;
         fc.written(n);
         // Use xterm's callback form so acked() fires only after the bytes
@@ -395,7 +394,7 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
         window.removeEventListener("mcode:pty-data", handlePtyData);
         window.removeEventListener("mcode:pty-reconnect-gap", handleReconnectGap);
         window.removeEventListener("mcode:pty-exit", handlePtyExit);
-        ptyLastSeqMap.delete(ptyId);
+        transport.ptyDeleteLastSeq(ptyId);
         observer.disconnect();
         try {
           rendererRef.current?.dispose();

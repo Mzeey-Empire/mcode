@@ -122,6 +122,8 @@ export const mockTransport: McodeTransport = {
   terminalReattach: vi.fn().mockResolvedValue({ gapped: false }),
   terminalListActive: vi.fn().mockResolvedValue([]),
   terminalHasChildren: vi.fn().mockResolvedValue({ hasChildren: false }),
+  ptySetLastSeq: vi.fn(),
+  ptyDeleteLastSeq: vi.fn(),
   listToolCallRecords: vi.fn().mockResolvedValue([]),
   listToolCallRecordsByParent: vi.fn().mockResolvedValue([]),
   getThreadTasks: vi.fn().mockResolvedValue(null),

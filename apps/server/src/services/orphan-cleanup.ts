@@ -151,29 +151,64 @@ export function reapOrphanedPtys(
       continue;
     }
 
-    logger.warn("Reaping orphaned PTY process from previous crash", {
+    logger.debug("Reaping orphaned PTY process from previous crash", {
       ptyId: entry.ptyId,
       pid: entry.pid,
       imageName: entry.imageName,
     });
 
-    try {
-      if (platform === "win32") {
-        try {
-          execSyncFn(`taskkill /T /F /PID ${entry.pid}`, { stdio: "ignore", timeout: 5000 });
-        } catch { /* may already be gone */ }
-      } else {
-        try {
-          processKill(-entry.pid, "SIGKILL");
-        } catch {
-          try { processKill(entry.pid, "SIGKILL"); } catch { /* already gone */ }
+    let killSucceeded = false;
+    if (platform === "win32") {
+      try {
+        execSyncFn(`taskkill /T /F /PID ${entry.pid}`, { stdio: "ignore", timeout: 5000 });
+        killSucceeded = true;
+      } catch (killErr) {
+        const e = killErr as NodeJS.ErrnoException & { code?: string | number; stderr?: string };
+        const alreadyGone =
+          (typeof e.code === "number" && e.code === 128) ||
+          (typeof e.stderr === "string" && /not found/i.test(e.stderr));
+        if (alreadyGone) {
+          killSucceeded = true;
+        } else {
+          logger.warn("Failed to kill orphaned PTY process tree", {
+            ptyId: entry.ptyId,
+            pid: entry.pid,
+            error: e instanceof Error ? e.message : String(e),
+          });
         }
       }
-    } catch (err) {
-      logger.warn("Failed to reap orphaned PTY process", {
+    } else {
+      try {
+        processKill(-entry.pid, "SIGKILL");
+        killSucceeded = true;
+      } catch (groupErr) {
+        if ((groupErr as NodeJS.ErrnoException)?.code === "ESRCH") {
+          killSucceeded = true;
+        } else {
+          // Group kill failed (e.g. EPERM) — fall through to direct kill.
+          try {
+            processKill(entry.pid, "SIGKILL");
+            killSucceeded = true;
+          } catch (directErr) {
+            if ((directErr as NodeJS.ErrnoException)?.code === "ESRCH") {
+              killSucceeded = true;
+            } else {
+              logger.warn("Failed to kill orphaned PTY process", {
+                ptyId: entry.ptyId,
+                pid: entry.pid,
+                error: directErr instanceof Error ? directErr.message : String(directErr),
+              });
+            }
+          }
+        }
+      }
+    }
+
+    if (killSucceeded) {
+      logger.warn("Reaped orphaned PTY process from previous crash", {
         ptyId: entry.ptyId,
         pid: entry.pid,
-        error: err instanceof Error ? err.message : String(err),
+        imageName: entry.imageName,
       });
     }
   }

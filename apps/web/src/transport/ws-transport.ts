@@ -606,6 +606,8 @@ export function createWsTransport(
       rpc<Array<{ ptyId: string; threadId: string }>>("terminal.listActive", {}),
     terminalHasChildren: (ptyId) =>
       rpc<{ hasChildren: boolean }>("terminal.hasChildren", { ptyId }),
+    ptySetLastSeq: (ptyId, seq) => { ptyLastSeqMap.set(ptyId, seq); },
+    ptyDeleteLastSeq: (ptyId) => { ptyLastSeqMap.delete(ptyId); },
 
     // Tool call records
     listToolCallRecords: (messageId) =>
