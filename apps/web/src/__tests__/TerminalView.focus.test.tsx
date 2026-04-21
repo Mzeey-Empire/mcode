@@ -32,6 +32,12 @@ const term = {
   rows: 24,
 };
 
+const transport = {
+  terminalWrite: vi.fn(() => Promise.resolve()),
+  terminalResize: vi.fn(() => Promise.resolve()),
+  terminalResume: vi.fn(() => Promise.resolve()),
+};
+
 vi.mock("@xterm/xterm", () => {
   class Terminal {
     constructor() {
@@ -53,10 +59,7 @@ vi.mock("@/transport", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/transport")>();
   return {
     ...actual,
-    getTransport: () => ({
-      terminalWrite: vi.fn(() => Promise.resolve()),
-      terminalResize: vi.fn(() => Promise.resolve()),
-    }),
+    getTransport: () => transport,
   };
 });
 
@@ -66,6 +69,7 @@ describe("TerminalView focus behaviour (regression)", () => {
   beforeEach(() => {
     term.focus.mockClear();
     term.refresh.mockClear();
+    transport.terminalResume.mockClear();
   });
 
   // Regression guard: term.focus() must NOT fire when the window/tab
@@ -97,5 +101,17 @@ describe("TerminalView focus behaviour (regression)", () => {
     expect(term.focus.mock.calls.length).toBe(focusCallsBefore);
     // Repaint still happens so half-painted output recovers.
     expect(term.refresh).toHaveBeenCalled();
+  });
+
+  it("resumes a newly-created PTY after the view mounts", async () => {
+    await act(async () => {
+      render(<TerminalView ptyId="pty-1" visible={true} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(transport.terminalResume).toHaveBeenCalledWith("pty-1");
   });
 });

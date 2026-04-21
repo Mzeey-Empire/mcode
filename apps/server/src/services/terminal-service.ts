@@ -142,6 +142,11 @@ export class TerminalService {
       highBytes: fcSettings.serverHighBytes,
       lowBytes: fcSettings.serverLowBytes,
     });
+    // Hold the PTY until the client-side TerminalView has mounted and attached
+    // its mcode:pty-data listener. Without this, the shell can emit its first
+    // prompt before the view exists, leaving a newly-opened terminal blank
+    // until some later output happens to arrive.
+    fc.pause("client-request");
     this.flowControls.set(id, fc);
 
     const dataDisposable = pty.onData((data: string) => {

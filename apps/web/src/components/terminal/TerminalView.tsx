@@ -405,6 +405,12 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
         return;
       }
 
+      // New PTYs are created paused server-side so their initial shell prompt
+      // is buffered until this view is ready to consume it. Resume only after
+      // the PTY listeners above are attached; term.write queues bytes even
+      // before the renderer addon finishes loading.
+      transport.terminalResume(ptyId).catch(() => {});
+
       await loadRenderer(term, rendererRef, () => disposed);
       // If `disposed` flipped during the await, React's effect teardown
       // already invoked cleanupRef.current, and loadRenderer's own
