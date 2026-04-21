@@ -133,14 +133,16 @@ describe("providers.listAvailability RPC", () => {
   });
 
   it("returns PROVIDER_DISABLED when calling listModels on a disabled provider", async () => {
-    // Stub assertUsable to throw ProviderDisabledError for "codex".
-    // This simulates settings.provider.enabled.codex = false without needing
-    // a real SettingsService or disk I/O.
+    // Stub assertEnabled to throw ProviderDisabledError for "codex".
+    // listModels uses assertEnabled (not assertUsable) so it works for SDK-based
+    // providers that don't require a CLI binary. This simulates
+    // settings.provider.enabled.codex = false without needing a real SettingsService.
     const deps = makeMinimalDeps({
       providerAvailability: {
-        assertUsable: (id: string) => {
+        assertEnabled: (id: string) => {
           if (id === "codex") throw new ProviderDisabledError("codex");
         },
+        assertUsable: () => {},
         listAvailability: () => [],
       } as unknown as RouterDeps["providerAvailability"],
     });
