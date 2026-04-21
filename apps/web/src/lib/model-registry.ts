@@ -1,5 +1,6 @@
 import { useSettingsStore } from "@/stores/settingsStore";
 import type { ReasoningLevel } from "@mcode/contracts";
+import { MODEL_CONTEXT_WINDOWS } from "@mcode/shared/model-context";
 
 // Import from the subpath, NOT the barrel. The barrel re-exports
 // winston-bound logging at the top of index.ts, which throws
@@ -57,10 +58,14 @@ export const MODEL_PROVIDERS: readonly ModelProvider[] = [
     comingSoon: false,
     supportsCompletion: true,
     models: [
-      { id: "claude-opus-4-7", label: "Claude Opus 4.7", providerId: "claude" },
-      { id: "claude-opus-4-6", label: "Claude Opus 4.6", providerId: "claude" },
-      { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", providerId: "claude" },
-      { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", providerId: "claude" },
+      { id: "claude-opus-4-7", label: "Claude Opus 4.7", providerId: "claude",
+        contextWindow: MODEL_CONTEXT_WINDOWS["claude-opus-4-7"] },
+      { id: "claude-opus-4-6", label: "Claude Opus 4.6", providerId: "claude",
+        contextWindow: MODEL_CONTEXT_WINDOWS["claude-opus-4-6"] },
+      { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", providerId: "claude",
+        contextWindow: MODEL_CONTEXT_WINDOWS["claude-sonnet-4-6"] },
+      { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", providerId: "claude",
+        contextWindow: MODEL_CONTEXT_WINDOWS["claude-haiku-4-5"] },
     ],
   },
   {
