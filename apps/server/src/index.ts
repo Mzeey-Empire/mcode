@@ -160,11 +160,11 @@ terminalService.setSender({
   },
   data: (ptyId, seq, bytes) => {
     broadcastTerminalData(ptyId, seq, bytes);
-    // PortPush uses MessagePort.postMessage (structured clone), which
-    // transfers Uint8Array losslessly without any UTF-8 re-encoding.
-    // The web-side ws-events.ts handler checks `payload instanceof Uint8Array`
-    // and routes this correctly.
-    portPush.send("terminal.data", { ptyId, payload: bytes, seq });
+    // The IPC socket adapter (ipc-push-server.ts) serializes via JSON.stringify,
+    // so a Uint8Array would arrive as {"0":72,"1":101,...} on the client. Converting
+    // to a plain number[] survives the JSON round-trip; the client reconstructs it
+    // with new Uint8Array(arr).
+    portPush.send("terminal.data", { ptyId, payload: Array.from(bytes), seq });
   },
 });
 

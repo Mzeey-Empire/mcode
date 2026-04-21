@@ -11,6 +11,9 @@ import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
 /** Unsubscribe handles for all push listeners. */
 let unsubs: (() => void)[] = [];
 
+/** Encoder reused across all legacy JSON terminal.data frames. */
+const _legacyEncoder = new TextEncoder();
+
 /**
  * Wire up push channel listeners that forward server events to the
  * appropriate Zustand stores. Call once at app startup.
@@ -53,9 +56,6 @@ export function startPushListeners(): void {
     }),
   );
 
-// Module-level singleton reused across all legacy JSON terminal.data frames.
-const _legacyEncoder = new TextEncoder();
-
   // terminal.data: broadcast to TerminalView instances via CustomEvent
   unsubs.push(
     pushEmitter.on("terminal.data", (data) => {
@@ -69,7 +69,16 @@ const _legacyEncoder = new TextEncoder();
           seq: d["seq"] as number,
           payload: d["payload"] as Uint8Array,
         };
+      } else if (Array.isArray(d["payload"])) {
+        // IPC path: the socket adapter serializes via JSON.stringify, so Uint8Array
+        // arrives as a plain number[]. Reconstruct it here.
+        detail = {
+          ptyId: d["ptyId"] as string,
+          seq: d["seq"] as number,
+          payload: new Uint8Array(d["payload"] as number[]),
+        };
       } else {
+        // Legacy JSON fallback: older servers send { ptyId, data: string, seq? }.
         // Guard: skip malformed frames where data is not a string.
         if (typeof d["data"] !== "string") return;
         detail = {
