@@ -19,14 +19,17 @@ function writeMd(path: string, frontmatter: Record<string, string>, body = "") {
 describe("SkillService", () => {
   let originalHome: string | undefined;
   let originalUserProfile: string | undefined;
+  let originalAppData: string | undefined;
   let fakeHome: string;
 
   beforeEach(() => {
     fakeHome = tmp();
     originalHome = process.env.HOME;
     originalUserProfile = process.env.USERPROFILE;
+    originalAppData = process.env.APPDATA;
     process.env.HOME = fakeHome;
     process.env.USERPROFILE = fakeHome; // Windows
+    process.env.APPDATA = join(fakeHome, "AppData", "Roaming"); // Windows Copilot path
   });
 
   afterEach(() => {
@@ -34,6 +37,8 @@ describe("SkillService", () => {
     else delete process.env.HOME;
     if (originalUserProfile !== undefined) process.env.USERPROFILE = originalUserProfile;
     else delete process.env.USERPROFILE;
+    if (originalAppData !== undefined) process.env.APPDATA = originalAppData;
+    else delete process.env.APPDATA;
     rmSync(fakeHome, { recursive: true, force: true });
   });
 
@@ -270,6 +275,19 @@ describe("SkillService", () => {
       const codexItems = svc.list(undefined, "codex");
       const codexDeploy = codexItems.find((i) => i.name === "deploy");
       expect(codexDeploy!.description).toBe("Codex deploy");
+    });
+
+    it("tags commands from ~/.codex/commands with providers=['codex']", () => {
+      const cmdDir = join(fakeHome, ".codex", "commands");
+      mkdirSync(cmdDir, { recursive: true });
+      writeMd(join(cmdDir, "deploy.md"), { description: "Codex deploy command" });
+
+      const items = new SkillService().list(undefined, "codex");
+
+      const cmd = items.find((i) => i.name === "deploy");
+      expect(cmd).toBeDefined();
+      expect(cmd!.kind).toBe("command");
+      expect(cmd!.providers).toEqual(["codex"]);
     });
   });
 });

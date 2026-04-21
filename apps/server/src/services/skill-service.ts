@@ -168,7 +168,7 @@ function scanPluginMarketplaceDir(ctx: ScanContext, marketplacesDir: string, pro
  * On Windows: %APPDATA%\GitHub Copilot\agents.
  * On macOS/Linux: ~/.config/github-copilot/agents.
  */
-function copilotUserAgentsDir(): string {
+export function copilotUserAgentsDir(): string {
   if (platform() === "win32") {
     const appData =
       process.env["APPDATA"] ?? join(homedir(), "AppData", "Roaming");
