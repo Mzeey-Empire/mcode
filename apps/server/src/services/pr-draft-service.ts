@@ -78,8 +78,8 @@ export class PrDraftService {
       thread.worktree_path,
     );
     const headBranch = this.gitService.getCurrentBranchAt(repoPath);
-    if (headBranch === "HEAD") {
-      throw new Error("Cannot generate PR draft: repository is in detached HEAD state");
+    if (!headBranch || headBranch === "HEAD") {
+      throw new Error("Cannot generate PR draft: repository is in detached HEAD state or not a git repo");
     }
 
     const [commits, diffStat, messagesResult, settings] = await Promise.all([

@@ -551,6 +551,12 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     prevThreadIdRef.current = threadId;
   }, [threadId, saveDraft, getDraft]);
 
+  // Selectors needed by the branch-mode effect below — must be declared before the effect
+  // to avoid temporal dead zone errors in the dependency array.
+  const loadBranches = useWorkspaceStore((s) => s.loadBranches);
+  const loadWorktrees = useWorkspaceStore((s) => s.loadWorktrees);
+  const initBranchMode = useWorkspaceStore((s) => s.initBranchMode);
+
   // Reset branch-specific exec state and load branch/worktree data when branch mode activates.
   // loadBranches/loadWorktrees are safe to call unconditionally — the server
   // returns empty results for non-git workspaces via ws-router guards.
@@ -643,7 +649,6 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const branchesLoading = useWorkspaceStore((s) => s.branchesLoading);
   const newThreadMode = useWorkspaceStore((s) => s.newThreadMode);
   const newThreadBranch = useWorkspaceStore((s) => s.newThreadBranch);
-  const loadBranches = useWorkspaceStore((s) => s.loadBranches);
   const setNewThreadMode = useWorkspaceStore((s) => s.setNewThreadMode);
   const setNewThreadBranch = useWorkspaceStore((s) => s.setNewThreadBranch);
 
@@ -678,7 +683,6 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const customBranchName = useWorkspaceStore((s) => s.customBranchName);
   const autoPreviewBranch = useWorkspaceStore((s) => s.autoPreviewBranch);
   const selectedWorktree = useWorkspaceStore((s) => s.selectedWorktree);
-  const loadWorktrees = useWorkspaceStore((s) => s.loadWorktrees);
   const setNamingMode = useWorkspaceStore((s) => s.setNamingMode);
   const setCustomBranchName = useWorkspaceStore((s) => s.setCustomBranchName);
   const setSelectedWorktree = useWorkspaceStore((s) => s.setSelectedWorktree);
@@ -688,7 +692,6 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const branchNamingMode = useWorkspaceStore((s) => s.branchNamingMode);
   const branchCustomName = useWorkspaceStore((s) => s.branchCustomName);
   const branchAutoPreview = useWorkspaceStore((s) => s.branchAutoPreview);
-  const initBranchMode = useWorkspaceStore((s) => s.initBranchMode);
   const setBranchExecMode = useWorkspaceStore((s) => s.setBranchExecMode);
   const setBranchTargetBranch = useWorkspaceStore((s) => s.setBranchTargetBranch);
   const setBranchWorktreePath = useWorkspaceStore((s) => s.setBranchWorktreePath);
