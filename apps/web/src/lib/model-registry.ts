@@ -57,6 +57,7 @@ export const MODEL_PROVIDERS: readonly ModelProvider[] = [
     name: "Claude",
     comingSoon: false,
     supportsCompletion: true,
+    supportsModelListing: true,
     models: [
       { id: "claude-opus-4-7", label: "Claude Opus 4.7", providerId: "claude",
         contextWindow: MODEL_CONTEXT_WINDOWS["claude-opus-4-7"] },
