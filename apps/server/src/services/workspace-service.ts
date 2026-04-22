@@ -4,6 +4,8 @@
  */
 
 import { execFileSync } from "child_process";
+import { existsSync } from "fs";
+import { join } from "path";
 import { injectable, inject } from "tsyringe";
 import type { Workspace } from "@mcode/contracts";
 import { WorkspaceRepo } from "../repositories/workspace-repo";
@@ -65,6 +67,11 @@ export class WorkspaceService {
       });
       return true;
     } catch {
+      // Fall back to filesystem check when git is unavailable or fails to run
+      // (e.g. git not in PATH in the server process on some platforms).
+      if (existsSync(join(path, ".git"))) {
+        return true;
+      }
       logger.info("WorkspaceService: path is not a git repo", { path });
       return false;
     }
