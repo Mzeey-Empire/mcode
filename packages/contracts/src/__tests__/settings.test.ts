@@ -110,4 +110,26 @@ describe("SettingsSchema", () => {
       expect(getDefaultSettings().terminal.scrollback).toBe(1000);
     });
   });
+
+  describe("model.defaults.contextWindow", () => {
+    it("accepts contextWindow as a number", () => {
+      const result = SettingsSchema().parse({
+        model: { defaults: { contextWindow: 1_000_000 } },
+      });
+      expect(result.model.defaults.contextWindow).toBe(1_000_000);
+    });
+
+    it("defaults contextWindow to undefined when omitted", () => {
+      const result = SettingsSchema().parse({});
+      expect(result.model.defaults.contextWindow).toBeUndefined();
+    });
+
+    it("rejects non-number contextWindow", () => {
+      expect(() =>
+        SettingsSchema().parse({
+          model: { defaults: { contextWindow: "1M" } },
+        }),
+      ).toThrow();
+    });
+  });
 });

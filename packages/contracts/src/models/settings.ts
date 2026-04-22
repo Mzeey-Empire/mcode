@@ -97,6 +97,8 @@ export const SettingsSchema = lazySchema(() =>
             reasoning: ReasoningLevelSchema.default("high"),
             /** Fallback model when the primary is unavailable. Empty string disables fallback. */
             fallbackId: z.string().trim().default("claude-sonnet-4-6"),
+            /** User override for the default model's context window (tokens). Overrides API and SDK values when set. */
+            contextWindow: z.number().int().positive().optional(),
           })
           .default({}),
       })
@@ -295,6 +297,7 @@ export const PartialSettingsSchema = lazySchema(() =>
             id: z.string().optional(),
             reasoning: ReasoningLevelSchema.optional(),
             fallbackId: z.string().trim().optional(),
+            contextWindow: z.number().int().positive().optional(),
           })
           .optional(),
       })
