@@ -10,14 +10,16 @@ import {
 /**
  * E2E verification for the branch-from-chat naming fix (issue #339).
  *
- * Tests three specific behaviors that were broken before the fix:
- * 1. branchNamingMode initializes from settings.worktree.naming.mode (was hardcoded "auto")
- * 2. branchAutoPreview is independent from autoPreviewBranch (was shared)
- * 3. resolveBranchName is used at submit time (strips trailing -/.//)
+ * Tests four behaviors that were broken before the fix:
+ * 1. branchNamingMode initializes from settings.worktree.naming.mode
+ * 2. branchNamingMode defaults to "auto" when settings mode is "auto"
+ * 3. branchAutoPreview is independent from autoPreviewBranch
+ * 4. initBranchMode defaults to "existing-worktree" for worktree parent threads
  *
  * Strategy: Use interceptZustandStores to read store state directly, bypassing
  * the need to submit real forms or hit a live server. The store state reflects
- * what initBranchMode set, which is exactly what the bug was about.
+ * what initBranchMode sets, which is the target of this regression suite.
+ * Note: resolveBranchName submit-time behavior is covered by unit tests.
  */
 
 // ─── Test data ────────────────────────────────────────────────────────────────
