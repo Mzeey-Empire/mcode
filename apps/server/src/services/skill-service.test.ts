@@ -335,8 +335,9 @@ describe("SkillService", () => {
       expect(copilotItems.find((i) => i.name === "myplugin:codex-task")).toBeUndefined();
     });
 
-    it("marketplace plugin with .agents subdir: copilot sees it, claude does not", () => {
-      // Multi-provider marketplace layout: impeccable/.agents/skills/impeccable/SKILL.md
+    it("marketplace plugin: .agents/skills/ produces <marketplace-name>:* prefix for codex+copilot", () => {
+      // The marketplace dir IS the plugin version root. Skills under .agents/ should be
+      // named "impeccable:impeccable" (marketplace name as prefix), not ".agents:impeccable".
       const skillDir = join(
         fakeHome, ".claude", "plugins", "marketplaces", "impeccable",
         ".agents", "skills", "impeccable",
@@ -346,30 +347,59 @@ describe("SkillService", () => {
 
       const svc = new SkillService();
 
+      // Codex and Copilot see it under the correct marketplace name prefix.
       const copilotItems = svc.list(undefined, "copilot");
-      expect(copilotItems.find((i) => i.name === ".agents:impeccable")).toBeDefined();
+      expect(copilotItems.find((i) => i.name === "impeccable:impeccable")).toBeDefined();
+      expect(copilotItems.find((i) => i.name === ".agents:impeccable")).toBeUndefined();
 
       svc.invalidate();
+      const codexItems = svc.list(undefined, "codex");
+      expect(codexItems.find((i) => i.name === "impeccable:impeccable")).toBeDefined();
+
+      // Claude does NOT see it (tagged codex+copilot only via .agents/).
+      svc.invalidate();
       const claudeItems = svc.list(undefined, "claude");
-      expect(claudeItems.find((i) => i.name === ".agents:impeccable")).toBeUndefined();
+      expect(claudeItems.find((i) => i.name === "impeccable:impeccable")).toBeUndefined();
     });
 
-    it("marketplace plugin with unknown .xxx subdir is invisible to all mcode providers", () => {
-      // .kiro is not a known mcode provider — derived provider ["kiro"] matches nothing.
+    it("marketplace plugin: .claude/skills/ produces <marketplace-name>:* prefix for claude only", () => {
       const skillDir = join(
         fakeHome, ".claude", "plugins", "marketplaces", "impeccable",
-        ".kiro", "skills", "impeccable",
+        ".claude", "skills", "audit",
       );
       mkdirSync(skillDir, { recursive: true });
-      writeMd(join(skillDir, "SKILL.md"), { description: "Kiro skill" });
+      writeMd(join(skillDir, "SKILL.md"), { description: "Claude-only marketplace skill" });
 
       const svc = new SkillService();
 
-      for (const pid of ["claude", "codex", "copilot", "cursor", "gemini", "opencode"]) {
-        svc.invalidate();
-        const items = svc.list(undefined, pid);
-        expect(items.find((i) => i.name === ".kiro:impeccable")).toBeUndefined();
-      }
+      const claudeItems = svc.list(undefined, "claude");
+      expect(claudeItems.find((i) => i.name === "impeccable:audit")).toBeDefined();
+      // No .claude:audit prefix — the marketplace dir IS the version root.
+      expect(claudeItems.find((i) => i.name === ".claude:audit")).toBeUndefined();
+
+      svc.invalidate();
+      const codexItems = svc.list(undefined, "codex");
+      expect(codexItems.find((i) => i.name === "impeccable:audit")).toBeUndefined();
+    });
+
+    it("marketplace plugin: cache and marketplace produce same skill names (dedup collapses them)", () => {
+      // Cache and marketplace both produce "impeccable:adapt" — dedup should keep one.
+      const cacheSkillDir = join(
+        fakeHome, ".claude", "plugins", "cache", "mp", "impeccable", "2.1.1",
+        ".claude", "skills", "adapt",
+      );
+      const marketplaceSkillDir = join(
+        fakeHome, ".claude", "plugins", "marketplaces", "impeccable",
+        ".claude", "skills", "adapt",
+      );
+      mkdirSync(cacheSkillDir, { recursive: true });
+      mkdirSync(marketplaceSkillDir, { recursive: true });
+      writeMd(join(cacheSkillDir, "SKILL.md"), { description: "Cache version" });
+      writeMd(join(marketplaceSkillDir, "SKILL.md"), { description: "Marketplace version" });
+
+      const items = new SkillService().list(undefined, "claude");
+      const matches = items.filter((i) => i.name === "impeccable:adapt");
+      expect(matches).toHaveLength(1);
     });
   });
 });

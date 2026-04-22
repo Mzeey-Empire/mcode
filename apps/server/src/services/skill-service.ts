@@ -171,25 +171,22 @@ function scanPluginCacheDir(ctx: ScanContext, cacheDir: string, providers: strin
   }
 }
 
-/** Walk plugin marketplaces: marketplaces/<marketplace>/<plugin>/. */
+/**
+ * Walk plugin marketplaces: each marketplace directory IS the plugin version root.
+ *
+ * Marketplace installs are git-checkout style repos where the marketplace dir itself
+ * contains the plugin content (skills/, commands/, .agents/, .claude/, etc.).
+ * They do NOT follow a <marketplace>/<plugin>/<version>/ nesting — the marketplace
+ * name IS the plugin name, and the directory IS the version dir. Treating subdirs
+ * as separate "plugins" would produce wrong prefixes (e.g. ".agents:adapt" instead
+ * of "impeccable:adapt") and duplicate entries alongside the cache scan.
+ */
 function scanPluginMarketplaceDir(ctx: ScanContext, marketplacesDir: string, providers: string[]): void {
   for (const mp of scanDir(ctx, marketplacesDir)) {
     if (!mp.isDirectory()) continue;
     const mpDir = join(marketplacesDir, mp.name);
-    for (const plugin of scanDir(ctx, mpDir)) {
-      if (!plugin.isDirectory()) continue;
-      const pluginDir = join(mpDir, plugin.name);
-      // Some marketplace plugins use a multi-provider layout where subdirectories
-      // are named after provider roots (`.agents`, `.claude`, `.codex`, etc.) rather
-      // than being conventional plugin dirs. Map known names to their scoped providers;
-      // for unknown `.xxx` dirs derive the provider from the dir name so they remain
-      // invisible to all mcode-managed providers.
-      const effectiveProviders =
-        PROVIDER_SUBDIR_PROVIDERS[plugin.name] ??
-        (plugin.name.startsWith(".") ? [plugin.name.slice(1)] : providers);
-      // Marketplaces are unversioned — treat the plugin dir itself as the version dir.
-      scanPluginVersionDir(ctx, pluginDir, plugin.name, effectiveProviders);
-    }
+    // Use the marketplace name as the plugin prefix; the dir itself is the version dir.
+    scanPluginVersionDir(ctx, mpDir, mp.name, providers);
   }
 }
 
