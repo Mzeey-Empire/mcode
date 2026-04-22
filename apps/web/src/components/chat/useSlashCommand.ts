@@ -53,6 +53,7 @@ interface UseSlashCommandOptions {
   anchorRef: React.RefObject<HTMLElement | null>;
   onMcodeCommand?: (action: string) => void;
   cwd?: string;
+  /** Provider ID used to scope skill loading and filter built-in commands (e.g., hides /m:plan for "copilot"). */
   providerId?: string;
 }
 

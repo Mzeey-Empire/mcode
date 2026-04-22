@@ -179,8 +179,10 @@ function scanPluginMarketplaceDir(ctx: ScanContext, marketplacesDir: string, pro
 
 /**
  * Resolve the Copilot user-level agents directory.
- * On Windows: %APPDATA%\GitHub Copilot\agents.
- * On macOS/Linux: ~/.config/github-copilot/agents.
+ *
+ * @returns The platform-specific path to Copilot's user-level agents directory.
+ *   - Windows: `%APPDATA%\GitHub Copilot\agents`
+ *   - macOS/Linux: `~/.config/github-copilot/agents`
  */
 export function copilotUserAgentsDir(): string {
   if (platform() === "win32") {

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useSkillsStore } from "./skillsStore";
 
 const FAKE_SKILLS = [
-  { name: "a", description: "A", kind: "skill" as const, source: "user" as const },
+  { name: "a", description: "A", kind: "skill" as const, source: "user" as const, providers: ["claude"] },
 ];
 
 // Hoist the mock so the invalidate-then-reload test can assert call counts.

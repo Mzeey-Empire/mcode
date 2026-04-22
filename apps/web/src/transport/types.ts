@@ -190,6 +190,7 @@ export interface McodeTransport {
   checkStatus(threadId: string): Promise<ChecksStatus>;
 
   // Skills
+  /** List discoverable skills and commands, optionally scoped to a workspace path and provider. */
   listSkills(cwd?: string, providerId?: string): Promise<SkillInfo[]>;
   /** Run a filesystem scan across all skill search paths and return per-path diagnostics. */
   diagnoseSkills(cwd?: string): Promise<SkillDiagnostics>;
