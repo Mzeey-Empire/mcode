@@ -131,5 +131,13 @@ describe("SettingsSchema", () => {
         }),
       ).toThrow();
     });
+
+    it("rejects contextWindow above 2_000_000", () => {
+      expect(() =>
+        SettingsSchema().parse({
+          model: { defaults: { contextWindow: 3_000_000 } },
+        }),
+      ).toThrow();
+    });
   });
 });
