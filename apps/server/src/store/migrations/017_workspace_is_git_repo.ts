@@ -8,12 +8,14 @@ import type Database from "better-sqlite3";
 
 export const description = "Add is_git_repo column to workspaces";
 
+/** Apply migration: add is_git_repo column to workspaces table. */
 export function up(db: Database.Database): void {
   db.prepare(
     "ALTER TABLE workspaces ADD COLUMN is_git_repo INTEGER NOT NULL DEFAULT 1",
   ).run();
 }
 
+/** Revert migration: remove is_git_repo column from workspaces table. */
 export function down(db: Database.Database): void {
   db.prepare(
     "ALTER TABLE workspaces DROP COLUMN is_git_repo",

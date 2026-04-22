@@ -244,8 +244,8 @@ async function dispatch(
       deps.threadService.markViewed(params.threadId);
       return;
     case "thread.syncPrs": {
-      const ws = deps.workspaceService.findById(params.workspaceId);
-      if (!ws?.is_git_repo) return [];
+      const syncWs = deps.workspaceService.findById(params.workspaceId);
+      if (!syncWs?.is_git_repo) return [];
       const threads = deps.threadService.list(params.workspaceId);
       /** Returns true if the thread has no linked PR, missing status, or a non-terminal PR state. */
       const needsPrCheck = (t: { pr_number: number | null; pr_status: string | null }) => {

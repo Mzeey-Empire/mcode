@@ -576,7 +576,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         loadWorktrees(workspaceId);
       }
     }
-  }, [branchFromMessageId]);
+  }, [branchFromMessageId, isGitRepo, workspaceId, loadBranches, loadWorktrees]);
 
   // Consume pending prefill set by empty-state prompt chips
   useEffect(() => {

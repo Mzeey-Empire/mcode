@@ -39,6 +39,10 @@ interface ModeSelectorProps {
 
 /** Dropdown for choosing how a new thread runs (local, new worktree, existing worktree). */
 export function ModeSelector({ mode, onModeChange, locked, options = ALL_MODE_OPTIONS }: ModeSelectorProps) {
+  if (options.length === 0) {
+    return null;
+  }
+
   const selected = options.find((o) => o.value === mode) ?? options[0];
   const Icon = selected.icon;
 
