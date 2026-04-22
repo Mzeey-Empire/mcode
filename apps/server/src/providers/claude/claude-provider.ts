@@ -17,11 +17,13 @@ import type {
   ReasoningLevel,
   AgentEvent,
   AttachmentMeta,
+  ProviderModelInfo,
   ProviderUsageInfo,
   PermissionDecision,
   PermissionRequest,
 } from "@mcode/contracts";
 import { buildReasoningOptions } from "./build-reasoning-options.js";
+import { listClaudeModels } from "./list-models.js";
 
 /** Idle TTL before a session is evicted (10 minutes). */
 const IDLE_TTL_MS = 10 * 60 * 1000;
@@ -1321,6 +1323,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       numTurns: this.lastNumTurns,
       durationMs: this.lastDurationMs,
     };
+  }
+
+  /** Fetch available Claude models from the Anthropic REST API. */
+  async listModels(): Promise<ProviderModelInfo[]> {
+    return listClaudeModels();
   }
 
   /** Resolves a pending permission request by ID. Deletes the entry before calling resolve to prevent re-entrant calls. Returns false if the requestId is unknown. */

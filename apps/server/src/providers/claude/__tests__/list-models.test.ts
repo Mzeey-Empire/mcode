@@ -104,4 +104,10 @@ describe("listClaudeModels", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     dateSpy.mockRestore();
   });
+
+  it("coalesces concurrent cache-miss requests into a single fetch", async () => {
+    const [a, b] = await Promise.all([listClaudeModels(), listClaudeModels()]);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(a).toBe(b); // same array reference from the shared promise
+  });
 });
