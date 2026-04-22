@@ -558,6 +558,9 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       loadBranches(workspaceId);
       loadWorktrees(workspaceId);
     }
+  // activeThread is intentionally read at call time, not as a dependency.
+  // Branch mode only activates via a user gesture on a fully-loaded thread,
+  // so activeThread is always current when branchFromMessageId is set.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchFromMessageId]);
 

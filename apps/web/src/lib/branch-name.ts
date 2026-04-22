@@ -78,8 +78,10 @@ export function generateFallbackBranchName(): string {
   return `thread-${Date.now().toString(36)}`;
 }
 
-/** Resolve the final branch name from naming mode, custom input, and auto preview.
- *  Used at submission time by both new-worktree and branch-from-chat flows. */
+/**
+ * Resolve the final branch name from naming mode, custom input, and auto preview.
+ * Used at submission time by both new-worktree and branch-from-chat flows.
+ */
 export function resolveBranchName(opts: {
   namingMode: NamingMode;
   customName: string;

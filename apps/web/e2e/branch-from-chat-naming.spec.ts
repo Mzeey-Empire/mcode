@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import type { Thread } from "@mcode/contracts";
 import { getDefaultSettings } from "@mcode/contracts";
 import {
@@ -66,6 +67,7 @@ const FAKE_THREAD_WORKTREE: Thread = {
   mode: "worktree" as const,
   branch: "feat/parent-branch",
   worktree_path: "/tmp/branch-test/.worktrees/feat-parent-branch",
+  worktree_managed: true,
 };
 
 const FAKE_MESSAGE = {
@@ -82,21 +84,41 @@ const FAKE_MESSAGE = {
   attachments: null,
 };
 
+/**
+ * Inject store-finder helpers into the page so evaluate/waitForFunction calls
+ * share a single predicate definition instead of duplicating it.
+ *
+ * Must be called before page.goto() so addInitScript registers before load.
+ */
+async function injectStoreHelpers(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__findWorkspaceStore = () =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ((window as any).__mcodeStores ?? []).find((s: any) => {
+        const st = s.getState();
+        return "activeThreadId" in st && "threads" in st && "workspaces" in st;
+      });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__findThreadStore = () =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ((window as any).__mcodeStores ?? []).find(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (s: any) => "messages" in s.getState() && "loadMessages" in s.getState()
+      );
+  });
+}
+
 /** Activate a thread, wait for messages to load, then inject messages. */
 async function activateThreadAndInjectMessages(
-  page: import("@playwright/test").Page,
+  page: Page,
   thread: Thread,
   messages: typeof FAKE_MESSAGE[]
 ): Promise<void> {
   await page.evaluate(
     ({ workspace, thread, threadId }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const stores: any[] = (window as any).__mcodeStores ?? [];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const wsStore = stores.find((s: any) => {
-        const st = s.getState();
-        return "activeThreadId" in st && "threads" in st && "workspaces" in st;
-      });
+      const wsStore = (window as any).__findWorkspaceStore?.();
       if (!wsStore) { console.error("[E2E] workspace store not found"); return; }
       wsStore.setState({
         workspaces: [workspace],
@@ -112,9 +134,7 @@ async function activateThreadAndInjectMessages(
   await page.waitForFunction(
     () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const stores: any[] = (window as any).__mcodeStores ?? [];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ts = stores.find((s: any) => "messages" in s.getState() && "loadMessages" in s.getState());
+      const ts = (window as any).__findThreadStore?.();
       return ts && ts.getState().loading === false && ts.getState().currentThreadId !== null;
     },
     { timeout: 5000 }
@@ -124,9 +144,7 @@ async function activateThreadAndInjectMessages(
   await page.evaluate(
     ({ messages }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const stores: any[] = (window as any).__mcodeStores ?? [];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ts = stores.find((s: any) => "messages" in s.getState() && "loadMessages" in s.getState());
+      const ts = (window as any).__findThreadStore?.();
       if (!ts) { console.error("[E2E] thread store not found"); return; }
       ts.setState({ messages, loading: false, error: null });
     },
@@ -135,15 +153,10 @@ async function activateThreadAndInjectMessages(
 }
 
 /** Read the workspaceStore state from the injected registry. */
-async function getWorkspaceStoreState(page: import("@playwright/test").Page): Promise<Record<string, unknown>> {
+async function getWorkspaceStoreState(page: Page): Promise<Record<string, unknown>> {
   return page.evaluate(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const stores: any[] = (window as any).__mcodeStores ?? [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const wsStore = stores.find((s: any) => {
-      const st = s.getState();
-      return "activeThreadId" in st && "threads" in st && "workspaces" in st;
-    });
+    const wsStore = (window as any).__findWorkspaceStore?.();
     if (!wsStore) return {};
     const st = wsStore.getState();
     return {
@@ -171,6 +184,7 @@ test.describe("Branch-from-chat naming fix (#339)", () => {
 
     await mockWebSocketServer(page, { "settings.get": customSettings });
     await interceptZustandStores(page);
+    await injectStoreHelpers(page);
     await page.goto("/");
     await page.waitForLoadState("networkidle");
 
@@ -228,6 +242,7 @@ test.describe("Branch-from-chat naming fix (#339)", () => {
     // Default settings have mode: "auto"
     await mockWebSocketServer(page);
     await interceptZustandStores(page);
+    await injectStoreHelpers(page);
     await page.goto("/");
     await page.waitForLoadState("networkidle");
 
@@ -264,6 +279,7 @@ test.describe("Branch-from-chat naming fix (#339)", () => {
   test("branchAutoPreview is independent from autoPreviewBranch", async ({ page }) => {
     await mockWebSocketServer(page);
     await interceptZustandStores(page);
+    await injectStoreHelpers(page);
     await page.goto("/");
     await page.waitForLoadState("networkidle");
 
@@ -311,6 +327,7 @@ test.describe("Branch-from-chat naming fix (#339)", () => {
   test("initBranchMode defaults to existing-worktree when parent thread is in worktree mode", async ({ page }) => {
     await mockWebSocketServer(page);
     await interceptZustandStores(page);
+    await injectStoreHelpers(page);
     await page.goto("/");
     await page.waitForLoadState("networkidle");
 
@@ -330,16 +347,8 @@ test.describe("Branch-from-chat naming fix (#339)", () => {
     // Wait for the useEffect([branchFromMessageId]) to fire and initBranchMode to complete.
     // The effect runs after the React render cycle, so poll until the store reflects it.
     await page.waitForFunction(
-      () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const stores: any[] = (window as any).__mcodeStores ?? [];
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const wsStore = stores.find((s: any) => {
-          const st = s.getState();
-          return "activeThreadId" in st && "threads" in st && "workspaces" in st;
-        });
-        return wsStore && wsStore.getState().branchExecMode === "existing-worktree";
-      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => (window as any).__findWorkspaceStore?.()?.getState().branchExecMode === "existing-worktree",
       { timeout: 3000 }
     );
 

@@ -166,6 +166,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   openPrsLoading: false,
   fetchingBranch: null,
   branchManuallySelected: false,
+  // Branch-from-chat fields — safe defaults; always reset by initBranchMode before use.
   branchExecMode: "direct" as const,
   branchTargetBranch: "",
   branchWorktreePath: "",
@@ -580,6 +581,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       branchExecMode: defaultExecMode,
       branchTargetBranch: parentThread?.branch ?? "",
       branchWorktreePath: parentThread?.worktree_path ?? "",
+      // Intentional snapshot: reads the current setting at activation time.
+      // If settings load after the user opens branch mode, they'll see "auto"
+      // until the next activation — acceptable given the narrow timing window.
       branchNamingMode: useSettingsStore.getState().settings.worktree.naming.mode,
       branchCustomName: "",
       branchAutoPreview: generateBranchId(),
