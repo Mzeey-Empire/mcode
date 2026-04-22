@@ -18,6 +18,7 @@ Per-setting reference for Mcode's `settings.json`. For schema conventions and st
 | `model.defaults.id` | string | `"claude-opus-4-7"` | - | - | Default model identifier for new installs. Existing users keep their stored value. |
 | `model.defaults.reasoning` | enum | `"high"` | `"low"` \| `"medium"` \| `"high"` \| `"xhigh"` \| `"max"` | - | Default reasoning effort level. Tiers in ascending order: `low < medium < high < xhigh < max`. `"xhigh"` requires Opus 4.7 for Claude (also valid for Codex models). `"max"` requires Opus 4.7, Opus 4.6, or Sonnet 4.6; it normalizes to `"high"` at runtime on other Claude models. Haiku 4.5 ignores this setting entirely -- the effort parameter is not sent for that model. |
 | `model.defaults.fallbackId` | string | `"claude-sonnet-4-6"` | - | - | Fallback model when the primary is unavailable. Set to `""` to disable fallback. |
+| `model.defaults.contextWindow` | integer | - | > 0, ≤ 2,000,000 | - | Override the context window (tokens) for the default model. When set, takes priority over API-fetched and SDK-reported values. Useful when the SDK reports stale data (e.g. 200K instead of 1M). Omit to use the automatically detected value. Claude only. |
 | `terminal.scrollback` | integer | `250` | >= 0 | - | Number of scrollback lines to retain |
 | `notifications.enabled` | boolean | `true` | - | - | Whether desktop notifications are enabled |
 | `worktree.naming.mode` | enum | `"auto"` | `"auto"` \| `"custom"` \| `"ai"` | - | Naming strategy for new worktree branches |

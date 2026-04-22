@@ -128,7 +128,8 @@ When adding a new setting, ask these questions in order:
       "provider": "claude",            // "claude" | "codex" | "gemini" | "copilot"
       "id": "claude-sonnet-4-6",
       "reasoning": "high",             // "low" | "medium" | "high"
-      "fallbackId": "claude-sonnet-4-6" // "" disables fallback
+      "fallbackId": "claude-sonnet-4-6", // "" disables fallback
+      "contextWindow": null             // number or null; overrides API/SDK value
     }
   },
   "terminal": {
