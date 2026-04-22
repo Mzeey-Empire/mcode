@@ -112,3 +112,36 @@ describe("skillsStore", () => {
     expect(calls.length).toBe(2);
   });
 });
+
+describe("provider-scoped caching", () => {
+  beforeEach(() => {
+    listSkillsMock.mockClear();
+    useSkillsStore.getState().reset();
+  });
+
+  it("re-fetches when providerId changes", async () => {
+    await useSkillsStore.getState().load("/foo", "claude");
+    listSkillsMock.mockClear();
+    await useSkillsStore.getState().load("/foo", "codex");
+    expect(listSkillsMock).toHaveBeenCalledTimes(1); // cache miss — different provider
+  });
+
+  it("returns cached data when cwd and providerId both match", async () => {
+    await useSkillsStore.getState().load("/foo", "claude");
+    listSkillsMock.mockClear();
+    await useSkillsStore.getState().load("/foo", "claude");
+    expect(listSkillsMock).not.toHaveBeenCalled(); // cache hit
+  });
+
+  it("passes providerId through to RPC call", async () => {
+    await useSkillsStore.getState().load("/foo", "codex");
+    expect(listSkillsMock).toHaveBeenCalledWith("/foo", "codex");
+  });
+
+  it("scopes single-flight by cwd + providerId", async () => {
+    const p1 = useSkillsStore.getState().load("/foo", "claude");
+    const p2 = useSkillsStore.getState().load("/foo", "codex");
+    expect(p1).not.toBe(p2); // different providers = different in-flight promises
+    await Promise.all([p1, p2]);
+  });
+});

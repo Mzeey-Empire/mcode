@@ -195,7 +195,7 @@ export function useSlashCommand({
 
   const onDismiss = useCallback(() => setIsOpen(false), []);
   const onRetry = useCallback(() => {
-    load(cwd, true).catch(() => { /* surfaced via `error` */ });
+    load(cwd, undefined, true).catch(() => { /* surfaced via `error` */ });
   }, [load, cwd]);
 
   return {
