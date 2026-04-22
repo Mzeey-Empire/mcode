@@ -25,7 +25,6 @@ import { ModeSelector, ALL_MODE_OPTIONS } from "./ModeSelector";
 import type { ComposerMode, ModeOption } from "./ModeSelector";
 import { BranchPicker } from "./BranchPicker";
 import { NamingModeSelector } from "./NamingModeSelector";
-import type { NamingMode } from "@mcode/contracts";
 import { BranchNameInput } from "./BranchNameInput";
 const LazyWorktreePicker = lazy(() => import("./WorktreePicker"));
 import { CopilotAgentSelector } from "./CopilotAgentSelector";
@@ -40,6 +39,7 @@ import { TerminalStatusIndicator } from "./TerminalStatusIndicator";
 import { useTaskStore } from "@/stores/taskStore";
 import { useDiffStore } from "@/stores/diffStore";
 import { extractFileRefs, buildInjectedMessage } from "@/lib/file-tags";
+import { resolveBranchName } from "@/lib/branch-name";
 import { useSlashCommand } from "./useSlashCommand";
 import type { Command } from "./useSlashCommand";
 import { SlashCommandPopup } from "./SlashCommandPopup";
@@ -374,13 +374,6 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const [access, setAccess] = useState<AccessMode>(PERMISSION_MODES.FULL);
   const [showReasoningPicker, setShowReasoningPicker] = useState(false);
   const [composerMode, setComposerModeLocal] = useState<ComposerMode>("direct");
-  // Separate exec mode/branch state used only while in branch mode so the
-  // main new-thread mode state is not disturbed.
-  const [branchExecMode, setBranchExecMode] = useState<ComposerMode>("direct");
-  const [branchTargetBranch, setBranchTargetBranch] = useState("");
-  const [branchWorktreePath, setBranchWorktreePath] = useState("");
-  const [branchNamingMode, setBranchNamingMode] = useState<NamingMode>("auto");
-  const [branchCustomName, setBranchCustomName] = useState("");
   const [preparingWorktree, setPreparingWorktree] = useState(false);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -563,20 +556,14 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   // returns empty results for non-git workspaces via ws-router guards.
   useEffect(() => {
     if (branchFromMessageId && workspaceId) {
-      // Default to the same execution mode as the parent thread so the child
-      // stays in the same context by default (worktree → existing-worktree, local → direct).
-      const defaultExecMode: ComposerMode =
-        activeThread?.mode === "worktree" ? "existing-worktree" : "direct";
-      setBranchExecMode(defaultExecMode);
-      setBranchTargetBranch(activeThread?.branch ?? "");
-      // Pre-select the parent's worktree so the user doesn't have to pick it manually.
-      setBranchWorktreePath(activeThread?.worktree_path ?? "");
-      setBranchNamingMode("auto");
-      setBranchCustomName("");
+      initBranchMode(activeThread);
       loadBranches(workspaceId);
       loadWorktrees(workspaceId);
     }
-  }, [branchFromMessageId, workspaceId, loadBranches, loadWorktrees]);
+  // activeThread is intentionally read at call time, not as a dependency.
+  // Branch mode only activates via a user gesture on a fully-loaded thread,
+  // so activeThread is always current when branchFromMessageId is set.
+  }, [branchFromMessageId, workspaceId, loadBranches, loadWorktrees, initBranchMode]);
 
   // Consume pending prefill set by empty-state prompt chips
   useEffect(() => {
@@ -695,6 +682,18 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const setNamingMode = useWorkspaceStore((s) => s.setNamingMode);
   const setCustomBranchName = useWorkspaceStore((s) => s.setCustomBranchName);
   const setSelectedWorktree = useWorkspaceStore((s) => s.setSelectedWorktree);
+  const branchExecMode = useWorkspaceStore((s) => s.branchExecMode);
+  const branchTargetBranch = useWorkspaceStore((s) => s.branchTargetBranch);
+  const branchWorktreePath = useWorkspaceStore((s) => s.branchWorktreePath);
+  const branchNamingMode = useWorkspaceStore((s) => s.branchNamingMode);
+  const branchCustomName = useWorkspaceStore((s) => s.branchCustomName);
+  const branchAutoPreview = useWorkspaceStore((s) => s.branchAutoPreview);
+  const initBranchMode = useWorkspaceStore((s) => s.initBranchMode);
+  const setBranchExecMode = useWorkspaceStore((s) => s.setBranchExecMode);
+  const setBranchTargetBranch = useWorkspaceStore((s) => s.setBranchTargetBranch);
+  const setBranchWorktreePath = useWorkspaceStore((s) => s.setBranchWorktreePath);
+  const setBranchNamingMode = useWorkspaceStore((s) => s.setBranchNamingMode);
+  const setBranchCustomName = useWorkspaceStore((s) => s.setBranchCustomName);
   const openPrs = useWorkspaceStore((s) => s.openPrs);
   const openPrsLoading = useWorkspaceStore((s) => s.openPrsLoading);
   const fetchingBranch = useWorkspaceStore((s) => s.fetchingBranch);
@@ -1169,9 +1168,11 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
 
       if (branchExecMode === "worktree") {
         branchMode = "worktree";
-        branchBranch = branchNamingMode === "custom" && branchCustomName.trim()
-          ? branchCustomName.trim()
-          : autoPreviewBranch;
+        branchBranch = resolveBranchName({
+          namingMode: branchNamingMode,
+          customName: branchCustomName,
+          autoPreview: branchAutoPreview,
+        });
       } else if (branchExecMode === "existing-worktree") {
         branchMode = "existing-worktree";
         branchWorktree = branchWorktreePath;
@@ -1211,7 +1212,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     }
 
     editorRef.current?.focus();
-  }, [input, attachments, isAgentRunning, isNewThread, newThreadMode, newThreadBranch, workspaceId, threadId, sendMessage, modelId, provider, reasoning, mode, access, copilotAgent, namingMode, customBranchName, selectedWorktree, injectFileContent, collectAndClearAttachments, clearDraftFromStore, preparingWorktree, branchFromMessageId, branchExecMode, branchTargetBranch, branchNamingMode, branchCustomName, branchWorktreePath, activeThread, branchThread, autoPreviewBranch, onBranchModeExit]);
+  }, [input, attachments, isAgentRunning, isNewThread, newThreadMode, newThreadBranch, workspaceId, threadId, sendMessage, modelId, provider, reasoning, mode, access, copilotAgent, namingMode, customBranchName, selectedWorktree, injectFileContent, collectAndClearAttachments, clearDraftFromStore, preparingWorktree, branchFromMessageId, branchExecMode, branchTargetBranch, branchNamingMode, branchCustomName, branchWorktreePath, activeThread, branchThread, branchAutoPreview, onBranchModeExit]);
 
   const handleEditorChange = useCallback((text: string) => {
     setInput(text);
@@ -1721,7 +1722,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
                 <NamingModeSelector mode={branchNamingMode} onModeChange={setBranchNamingMode} />
                 <BranchNameInput
                   namingMode={branchNamingMode}
-                  autoPreview={autoPreviewBranch}
+                  autoPreview={branchAutoPreview}
                   customValue={branchCustomName}
                   onCustomChange={setBranchCustomName}
                 />

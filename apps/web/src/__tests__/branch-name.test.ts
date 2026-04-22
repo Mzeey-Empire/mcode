@@ -6,6 +6,7 @@ import {
   finalizeCustomBranchName,
   generateBranchNameFromMessage,
   generateFallbackBranchName,
+  resolveBranchName,
 } from "../lib/branch-name";
 
 describe("sanitizeBranchName", () => {
@@ -174,5 +175,67 @@ describe("finalizeCustomBranchName", () => {
 describe("generateFallbackBranchName", () => {
   it("returns a thread-prefixed name", () => {
     expect(generateFallbackBranchName()).toMatch(/^thread-[a-z0-9]+$/);
+  });
+});
+
+describe("resolveBranchName", () => {
+  it("returns autoPreview in auto mode", () => {
+    expect(resolveBranchName({
+      namingMode: "auto",
+      customName: "ignored",
+      autoPreview: "mcode-abc123",
+    })).toBe("mcode-abc123");
+  });
+
+  it("returns cleaned custom name in custom mode", () => {
+    expect(resolveBranchName({
+      namingMode: "custom",
+      customName: "feat/my-branch",
+      autoPreview: "mcode-abc123",
+    })).toBe("feat/my-branch");
+  });
+
+  it("strips trailing hyphens, dots, and slashes from custom name", () => {
+    expect(resolveBranchName({
+      namingMode: "custom",
+      customName: "feat/bar-",
+      autoPreview: "mcode-abc123",
+    })).toBe("feat/bar");
+
+    expect(resolveBranchName({
+      namingMode: "custom",
+      customName: "feat.",
+      autoPreview: "mcode-abc123",
+    })).toBe("feat");
+
+    expect(resolveBranchName({
+      namingMode: "custom",
+      customName: "feat/",
+      autoPreview: "mcode-abc123",
+    })).toBe("feat");
+  });
+
+  it("falls back to autoPreview when custom name is empty", () => {
+    expect(resolveBranchName({
+      namingMode: "custom",
+      customName: "",
+      autoPreview: "mcode-abc123",
+    })).toBe("mcode-abc123");
+  });
+
+  it("falls back to autoPreview when custom name is only trailing chars", () => {
+    expect(resolveBranchName({
+      namingMode: "custom",
+      customName: "---",
+      autoPreview: "mcode-abc123",
+    })).toBe("mcode-abc123");
+  });
+
+  it("returns autoPreview in ai mode", () => {
+    expect(resolveBranchName({
+      namingMode: "ai",
+      customName: "ignored",
+      autoPreview: "mcode-abc123",
+    })).toBe("mcode-abc123");
   });
 });
