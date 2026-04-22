@@ -15,21 +15,35 @@ import {
  */
 export type ComposerMode = "direct" | "worktree" | "existing-worktree";
 
-interface ModeSelectorProps {
-  mode: ComposerMode;
-  onModeChange: (mode: ComposerMode) => void;
-  locked: boolean;
+/** Configuration for a single mode option in the dropdown. */
+export interface ModeOption {
+  value: ComposerMode;
+  label: string;
+  icon: typeof FolderOpen;
 }
 
-const MODE_OPTIONS: Array<{ value: ComposerMode; label: string; icon: typeof FolderOpen }> = [
+/** All available mode options. Consumers can filter this list before passing to ModeSelector. */
+export const ALL_MODE_OPTIONS: ModeOption[] = [
   { value: "direct", label: "Local", icon: FolderOpen },
   { value: "worktree", label: "New worktree", icon: GitBranch },
   { value: "existing-worktree", label: "Existing worktree", icon: GitFork },
 ];
 
+interface ModeSelectorProps {
+  mode: ComposerMode;
+  onModeChange: (mode: ComposerMode) => void;
+  locked: boolean;
+  /** Subset of modes to show. Defaults to ALL_MODE_OPTIONS. */
+  options?: ModeOption[];
+}
+
 /** Dropdown for choosing how a new thread runs (local, new worktree, existing worktree). */
-export function ModeSelector({ mode, onModeChange, locked }: ModeSelectorProps) {
-  const selected = MODE_OPTIONS.find((o) => o.value === mode) ?? MODE_OPTIONS[0];
+export function ModeSelector({ mode, onModeChange, locked, options = ALL_MODE_OPTIONS }: ModeSelectorProps) {
+  if (options.length === 0) {
+    return null;
+  }
+
+  const selected = options.find((o) => o.value === mode) ?? options[0];
   const Icon = selected.icon;
 
   if (locked) {
@@ -54,7 +68,7 @@ export function ModeSelector({ mode, onModeChange, locked }: ModeSelectorProps) 
       </DropdownMenuTrigger>
 
       <DropdownMenuContent align="start" sideOffset={4} className="min-w-[160px]">
-        {MODE_OPTIONS.map((option) => {
+        {options.map((option) => {
           const OptionIcon = option.icon;
           return (
             <DropdownMenuItem

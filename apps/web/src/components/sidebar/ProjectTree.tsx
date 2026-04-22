@@ -4,7 +4,7 @@ import { useShallow } from "zustand/shallow";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
-import { Plus, Trash2, ChevronRight, ChevronDown, GitBranch, Loader2, AlertTriangle, FolderPlus } from "lucide-react";
+import { Plus, Trash2, ChevronRight, ChevronDown, GitBranch, GitBranchMinus, Loader2, AlertTriangle, FolderPlus } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { getPrVisual } from "@/lib/pr-status";
 import { cn } from "@/lib/utils";
@@ -1081,6 +1081,23 @@ function ProjectNode({
         )}
 
         <span className="truncate font-medium tracking-tight">{workspace.name}</span>
+
+        {!workspace.is_git_repo && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <GitBranchMinus
+                  size={10}
+                  className="shrink-0 text-muted-foreground/35"
+                  aria-label="Not a git repository"
+                />
+              }
+            />
+            <TooltipContent side="right" className="text-xs">
+              Not a git repository
+            </TooltipContent>
+          </Tooltip>
+        )}
 
         {parentDir && (
           <span

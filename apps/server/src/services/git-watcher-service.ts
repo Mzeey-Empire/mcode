@@ -4,13 +4,14 @@
  * `branch.changed` push event when the active branch switches.
  */
 
-import { injectable } from "tsyringe";
+import { injectable, inject } from "tsyringe";
 import { watch, existsSync, type FSWatcher } from "fs";
 import { execFileSync } from "child_process";
 import { join, dirname, basename } from "path";
 import { logger } from "@mcode/shared";
 import { broadcast } from "../transport/push";
 import { getCurrentBranchForPath } from "./git-service";
+import { WorkspaceRepo } from "../repositories/workspace-repo";
 
 /** Debounce delay in milliseconds to batch rapid HEAD file writes (e.g., during rebase). */
 const DEBOUNCE_MS = 200;
@@ -30,6 +31,10 @@ interface WatcherEntry {
 @injectable()
 export class GitWatcherService {
   private readonly watchers = new Map<string, WatcherEntry>();
+
+  constructor(
+    @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
+  ) {}
 
   /**
    * Resolve the absolute path to the HEAD file for the given workspace path.
@@ -132,6 +137,33 @@ export class GitWatcherService {
 
     this.watchers.set(workspaceId, { watcher: fsWatcher, timer: null });
     logger.info("GitWatcherService: watching HEAD", { workspaceId, headDir, headName });
+  }
+
+  /**
+   * Attempt to start watching a workspace that was previously detected as non-git.
+   * Called on thread.list to catch `git init` within a session.
+   * Returns true if the workspace is now a git repo and the watcher was started.
+   */
+  retryWatch(workspaceId: string, workspacePath: string): boolean {
+    if (this.watchers.has(workspaceId)) return true;
+
+    const headFile = this.resolveHeadFile(workspacePath);
+    if (!headFile) return false;
+
+    // The folder is now a git repo — update the DB, start watching, notify clients.
+    this.workspaceRepo.setIsGitRepo(workspaceId, true);
+    this.watchWorkspace(workspaceId, workspacePath);
+
+    logger.info("GitWatcherService: non-git workspace became a git repo", {
+      workspaceId,
+    });
+
+    broadcast("workspace.gitStatusChanged", {
+      workspaceId,
+      isGitRepo: true,
+    });
+
+    return true;
   }
 
   /**

@@ -90,7 +90,7 @@ interface WorkspaceState {
 
   // Branch actions
   loadBranches: (workspaceId: string) => Promise<void>;
-  getCurrentBranch: (workspaceId: string) => Promise<string>;
+  getCurrentBranch: (workspaceId: string) => Promise<string | null>;
   checkoutBranch: (workspaceId: string, branch: string) => Promise<void>;
   setNewThreadMode: (mode: "direct" | "worktree" | "existing-worktree") => void;
   setNewThreadBranch: (branch: string) => void;

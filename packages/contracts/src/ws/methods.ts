@@ -91,11 +91,11 @@ export const CreateAndSendSchema = lazySchema(() =>
 export const WS_METHODS = lazySchema(() => ({
   "workspace.list": {
     params: z.object({}),
-    result: z.array(WorkspaceSchema),
+    result: z.array(WorkspaceSchema()),
   },
   "workspace.create": {
     params: z.object({ name: z.string(), path: z.string() }),
-    result: WorkspaceSchema,
+    result: WorkspaceSchema(),
   },
   "workspace.delete": {
     params: z.object({ id: z.string() }),
@@ -157,7 +157,7 @@ export const WS_METHODS = lazySchema(() => ({
   },
   "git.currentBranch": {
     params: z.object({ workspaceId: z.string() }),
-    result: z.string(),
+    result: z.string().nullable(),
   },
   "git.checkout": {
     params: z.object({ workspaceId: z.string(), branch: z.string() }),

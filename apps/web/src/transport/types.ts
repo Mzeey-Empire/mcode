@@ -89,7 +89,7 @@ export interface McodeTransport {
 
   // Git branch commands
   listBranches(workspaceId: string): Promise<GitBranch[]>;
-  getCurrentBranch(workspaceId: string): Promise<string>;
+  getCurrentBranch(workspaceId: string): Promise<string | null>;
   checkoutBranch(workspaceId: string, branch: string): Promise<void>;
   listWorktrees(workspaceId: string): Promise<WorktreeInfo[]>;
 

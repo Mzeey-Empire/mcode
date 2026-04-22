@@ -48,7 +48,12 @@ export const WS_CHANNELS = {
   "skills.changed": z.object({}),
   /** Full-list broadcast of provider availability. Replaces the client cache. */
   "providers.availability": z.array(ProviderAvailabilitySchema()),
-  "branch.changed": z.object({ workspaceId: z.string(), branch: z.string() }),
+  "branch.changed": lazySchema(() =>
+    z.object({ workspaceId: z.string(), branch: z.string().nullable() }),
+  )(),
+  "workspace.gitStatusChanged": lazySchema(() =>
+    z.object({ workspaceId: z.string(), isGitRepo: z.boolean() }),
+  )(),
   "turn.persisted": z.object({
     threadId: z.string(),
     messageId: z.string(),

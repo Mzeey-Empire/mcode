@@ -16,6 +16,7 @@ export function createMockWorkspace(
     name: "test-project",
     path: "/tmp/test-project",
     provider_config: {},
+    is_git_repo: true,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     ...overrides,

@@ -208,10 +208,15 @@ if (removed > 0) {
 }
 
 // Initialize HEAD file watchers for all existing workspaces so branch changes
-// are detected after a server restart.
+// are detected after a server restart. Also correct any stale is_git_repo = false
+// values (can occur when git was unavailable at workspace creation time).
 const allWorkspaces = workspaceRepo.listAll();
 for (const ws of allWorkspaces) {
   gitWatcherService.watchWorkspace(ws.id, ws.path);
+  if (!ws.is_git_repo && existsSync(join(ws.path, ".git"))) {
+    workspaceRepo.setIsGitRepo(ws.id, true);
+    logger.info("Corrected stale is_git_repo=false at startup", { workspaceId: ws.id, path: ws.path });
+  }
 }
 
 // Begin watching the user's Claude skills/commands/plugins directories so the
