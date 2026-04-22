@@ -11,6 +11,8 @@ import { useTaskStore, coerceTaskStatus } from "./taskStore";
 import type { TaskItem } from "./taskStore";
 import { useToastStore } from "./toastStore";
 import { findModelById, getContextWindow } from "@/lib/model-registry";
+import { resolveContextWindow } from "../lib/resolve-context-window";
+import { useSettingsStore } from "./settingsStore";
 
 /** A permission request with its current resolution state. */
 interface StoredPermission extends PermissionRequest {
@@ -1435,9 +1437,17 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         const modelId = fallback?.actualModel
           ?? useWorkspaceStore.getState().threads.find((t) => t.id === threadId)?.model
           ?? "claude-sonnet-4-6";
-        // Prefer SDK value, fall back to static registry, then preserve last known value.
+        // Preference chain: user settings override (default model only) > registry > SDK > previously stored.
         // Uses get() (not state) because this runs outside the set() callback.
-        const contextWindow = sdkContextWindow ?? getContextWindow(modelId) ?? get().contextByThread[threadId]?.contextWindow;
+        const settingsDefaults = useSettingsStore.getState().settings.model.defaults;
+        const contextWindow = resolveContextWindow({
+          sdkContextWindow,
+          modelId,
+          defaultModelId: settingsDefaults.id,
+          settingsContextWindow: settingsDefaults.contextWindow,
+          registryContextWindow: getContextWindow(modelId),
+          previousContextWindow: get().contextByThread[threadId]?.contextWindow,
+        });
         set((state) => ({
           contextByThread: {
             ...state.contextByThread,
