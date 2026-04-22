@@ -50,7 +50,11 @@ export function resetModelCache(): void {
 async function fetchModels(): Promise<ProviderModelInfo[]> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY environment variable is not set");
+    // The Claude Agent SDK uses its own auth mechanism, so this env var
+    // is often absent. Return empty and let the static registry provide
+    // model data instead of surfacing an error to the user.
+    logger.debug("ANTHROPIC_API_KEY not set, skipping models API fetch");
+    return [];
   }
 
   // limit=100 covers all current Claude models without pagination.

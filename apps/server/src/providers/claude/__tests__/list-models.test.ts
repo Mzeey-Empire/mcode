@@ -77,9 +77,11 @@ describe("listClaudeModels", () => {
     );
   });
 
-  it("throws when ANTHROPIC_API_KEY is missing", async () => {
+  it("returns empty array when ANTHROPIC_API_KEY is missing", async () => {
     delete process.env.ANTHROPIC_API_KEY;
-    await expect(listClaudeModels()).rejects.toThrow("ANTHROPIC_API_KEY");
+    const result = await listClaudeModels();
+    expect(result).toEqual([]);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("throws on non-OK response", async () => {
