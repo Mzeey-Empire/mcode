@@ -289,5 +289,87 @@ describe("SkillService", () => {
       expect(cmd!.kind).toBe("command");
       expect(cmd!.providers).toEqual(["codex"]);
     });
+
+    it("tags plugin skills from <version>/.agents/skills with providers=['codex','copilot']", () => {
+      // A plugin that ships cross-provider skills under .agents/.
+      const skillDir = join(
+        fakeHome, ".claude", "plugins", "cache", "mp", "impeccable", "2.1.1",
+        ".agents", "skills", "impeccable",
+      );
+      mkdirSync(skillDir, { recursive: true });
+      writeMd(join(skillDir, "SKILL.md"), { description: "Cross-provider skill" });
+
+      const svc = new SkillService();
+
+      const copilotItems = svc.list(undefined, "copilot");
+      expect(copilotItems.find((i) => i.name === "impeccable:impeccable")).toBeDefined();
+
+      svc.invalidate();
+      const codexItems = svc.list(undefined, "codex");
+      expect(codexItems.find((i) => i.name === "impeccable:impeccable")).toBeDefined();
+
+      svc.invalidate();
+      const claudeItems = svc.list(undefined, "claude");
+      expect(claudeItems.find((i) => i.name === "impeccable:impeccable")).toBeUndefined();
+    });
+
+    it("tags plugin skills from <version>/.codex/skills with providers=['codex'] only", () => {
+      const skillDir = join(
+        fakeHome, ".claude", "plugins", "cache", "mp", "myplugin", "1.0.0",
+        ".codex", "skills", "codex-task",
+      );
+      mkdirSync(skillDir, { recursive: true });
+      writeMd(join(skillDir, "SKILL.md"), { description: "Codex-only plugin skill" });
+
+      const svc = new SkillService();
+
+      const codexItems = svc.list(undefined, "codex");
+      expect(codexItems.find((i) => i.name === "myplugin:codex-task")).toBeDefined();
+
+      svc.invalidate();
+      const claudeItems = svc.list(undefined, "claude");
+      expect(claudeItems.find((i) => i.name === "myplugin:codex-task")).toBeUndefined();
+
+      svc.invalidate();
+      const copilotItems = svc.list(undefined, "copilot");
+      expect(copilotItems.find((i) => i.name === "myplugin:codex-task")).toBeUndefined();
+    });
+
+    it("marketplace plugin with .agents subdir: copilot sees it, claude does not", () => {
+      // Multi-provider marketplace layout: impeccable/.agents/skills/impeccable/SKILL.md
+      const skillDir = join(
+        fakeHome, ".claude", "plugins", "marketplaces", "impeccable",
+        ".agents", "skills", "impeccable",
+      );
+      mkdirSync(skillDir, { recursive: true });
+      writeMd(join(skillDir, "SKILL.md"), { description: "Cross-provider marketplace skill" });
+
+      const svc = new SkillService();
+
+      const copilotItems = svc.list(undefined, "copilot");
+      expect(copilotItems.find((i) => i.name === ".agents:impeccable")).toBeDefined();
+
+      svc.invalidate();
+      const claudeItems = svc.list(undefined, "claude");
+      expect(claudeItems.find((i) => i.name === ".agents:impeccable")).toBeUndefined();
+    });
+
+    it("marketplace plugin with unknown .xxx subdir is invisible to all mcode providers", () => {
+      // .kiro is not a known mcode provider — derived provider ["kiro"] matches nothing.
+      const skillDir = join(
+        fakeHome, ".claude", "plugins", "marketplaces", "impeccable",
+        ".kiro", "skills", "impeccable",
+      );
+      mkdirSync(skillDir, { recursive: true });
+      writeMd(join(skillDir, "SKILL.md"), { description: "Kiro skill" });
+
+      const svc = new SkillService();
+
+      for (const pid of ["claude", "codex", "copilot", "cursor", "gemini", "opencode"]) {
+        svc.invalidate();
+        const items = svc.list(undefined, pid);
+        expect(items.find((i) => i.name === ".kiro:impeccable")).toBeUndefined();
+      }
+    });
   });
 });

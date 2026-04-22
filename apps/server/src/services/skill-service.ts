@@ -119,13 +119,35 @@ function scanPluginVersionDir(
   pluginName: string,
   providers: string[],
 ): void {
-  // Both bare and `.claude`-prefixed shapes are observed in the wild.
-  for (const sub of ["", ".claude"]) {
-    const base = sub ? join(versionDir, sub) : versionDir;
-    scanSkillsDir(ctx, join(base, "skills"), pluginName, "plugin", providers);
-    scanCommandsDir(ctx, join(base, "commands"), pluginName, "plugin", providers);
+  // Root-level skills/commands inherit the plugin's default providers.
+  scanSkillsDir(ctx, join(versionDir, "skills"), pluginName, "plugin", providers);
+  scanCommandsDir(ctx, join(versionDir, "commands"), pluginName, "plugin", providers);
+
+  // Provider-specific subdirs each carry their own scoped providers so that,
+  // for example, `.agents/skills/` is visible to Codex + Copilot but not Claude.
+  for (const [sub, subProviders] of Object.entries(PROVIDER_SUBDIR_PROVIDERS)) {
+    const base = join(versionDir, sub);
+    scanSkillsDir(ctx, join(base, "skills"), pluginName, "plugin", subProviders);
+    scanCommandsDir(ctx, join(base, "commands"), pluginName, "plugin", subProviders);
   }
 }
+
+/**
+ * Maps known provider-specific plugin subdirectories to the providers that should see them.
+ * Root-level plugin skills/commands retain whatever providers the parent scan root carries.
+ * Entries like `.agents` are cross-provider (Codex + Copilot); `.claude` and `.claude-plugin`
+ * are Claude-only; the rest are single-provider.
+ */
+const PROVIDER_SUBDIR_PROVIDERS: Record<string, string[]> = {
+  ".agents":        ["codex", "copilot"],
+  ".claude":        ["claude"],
+  ".claude-plugin": ["claude"],
+  ".codex":         ["codex"],
+  ".cursor":        ["cursor"],
+  ".gemini":        ["gemini"],
+  ".github":        ["copilot"],
+  ".opencode":      ["opencode"],
+};
 
 /** Numeric collator orders `2.1.0` before `10.0.0` instead of lexically.
  *  Avoids pulling in the `semver` dep just for plugin-cache version selection. */
@@ -157,8 +179,16 @@ function scanPluginMarketplaceDir(ctx: ScanContext, marketplacesDir: string, pro
     for (const plugin of scanDir(ctx, mpDir)) {
       if (!plugin.isDirectory()) continue;
       const pluginDir = join(mpDir, plugin.name);
+      // Some marketplace plugins use a multi-provider layout where subdirectories
+      // are named after provider roots (`.agents`, `.claude`, `.codex`, etc.) rather
+      // than being conventional plugin dirs. Map known names to their scoped providers;
+      // for unknown `.xxx` dirs derive the provider from the dir name so they remain
+      // invisible to all mcode-managed providers.
+      const effectiveProviders =
+        PROVIDER_SUBDIR_PROVIDERS[plugin.name] ??
+        (plugin.name.startsWith(".") ? [plugin.name.slice(1)] : providers);
       // Marketplaces are unversioned — treat the plugin dir itself as the version dir.
-      scanPluginVersionDir(ctx, pluginDir, plugin.name, providers);
+      scanPluginVersionDir(ctx, pluginDir, plugin.name, effectiveProviders);
     }
   }
 }
