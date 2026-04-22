@@ -424,7 +424,7 @@ async function dispatch(
 
     // Skills
     case "skill.list":
-      return deps.skillService.list(params.cwd);
+      return deps.skillService.list(params.cwd, params.providerId);
     case "skill.diagnose":
       return deps.skillService.diagnose(params.cwd);
 
