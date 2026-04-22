@@ -559,6 +559,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   }, [threadId, saveDraft, getDraft]);
 
   // Reset branch-specific exec state and load branch/worktree data when branch mode activates.
+  // loadBranches/loadWorktrees are safe to call unconditionally — the server
+  // returns empty results for non-git workspaces via ws-router guards.
   useEffect(() => {
     if (branchFromMessageId && workspaceId) {
       // Default to the same execution mode as the parent thread so the child
@@ -571,12 +573,10 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       setBranchWorktreePath(activeThread?.worktree_path ?? "");
       setBranchNamingMode("auto");
       setBranchCustomName("");
-      if (isGitRepo) {
-        loadBranches(workspaceId);
-        loadWorktrees(workspaceId);
-      }
+      loadBranches(workspaceId);
+      loadWorktrees(workspaceId);
     }
-  }, [branchFromMessageId, isGitRepo, workspaceId, loadBranches, loadWorktrees]);
+  }, [branchFromMessageId, workspaceId, loadBranches, loadWorktrees]);
 
   // Consume pending prefill set by empty-state prompt chips
   useEffect(() => {
