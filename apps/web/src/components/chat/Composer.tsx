@@ -1643,8 +1643,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       {/* Status bar - below the container */}
       <div className="flex items-center justify-between px-1 pt-1.5">
         {!isGitRepo && isNewThread ? (
-          <span className="flex h-6 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground/40">
-            No git repo
+          <span className="flex h-6 items-center rounded-md px-1.5 py-0.5 text-[10px] text-muted-foreground/40">
+            Not a git repo
           </span>
         ) : (
           <ModeSelector
