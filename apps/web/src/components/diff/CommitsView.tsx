@@ -26,15 +26,9 @@ export function CommitsView() {
 
   // Defense-in-depth: DiffToolbar already hides the "Commits" tab for non-worktree threads.
   // This prevents a crash if the component is somehow rendered for a non-git workspace.
-  if (!activeWorkspace?.is_git_repo) {
-    return (
-      <div className="flex h-full items-center justify-center text-xs text-muted-foreground/50">
-        No git history
-      </div>
-    );
-  }
-
+  // The guard lives inside the effect so all hooks are called unconditionally (Rules of Hooks).
   useEffect(() => {
+    if (!activeWorkspace?.is_git_repo) return;
     if (!activeThreadId || !activeWorkspaceId || !threadBranch) return;
     if (commits !== undefined) return;
 
@@ -60,7 +54,15 @@ export function CommitsView() {
     return () => {
       cancelled = true;
     };
-  }, [activeThreadId, activeWorkspaceId, threadBranch, commits, setCommits, setCommitsLoading]);
+  }, [activeWorkspace?.is_git_repo, activeThreadId, activeWorkspaceId, threadBranch, commits, setCommits, setCommitsLoading]);
+
+  if (!activeWorkspace?.is_git_repo) {
+    return (
+      <div className="flex h-full items-center justify-center text-xs text-muted-foreground/50">
+        No git history
+      </div>
+    );
+  }
 
   if (commitsLoading) {
     return (

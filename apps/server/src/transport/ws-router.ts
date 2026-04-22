@@ -316,20 +316,28 @@ async function dispatch(
       return;
     }
     case "git.log": {
+      const ws = deps.workspaceService.findById(params.workspaceId);
+      if (!ws?.is_git_repo) return [];
       let repoPath: string | undefined;
       if (params.threadId) {
         const t = deps.threadRepo.findById(params.threadId);
-        const ws = t ? deps.workspaceRepo.findById(t.workspace_id) : null;
-        if (t && ws) {
-          repoPath = deps.gitService.resolveWorkingDir(ws.path, t.mode, t.worktree_path);
+        const wsForThread = t ? deps.workspaceRepo.findById(t.workspace_id) : null;
+        if (t && wsForThread) {
+          repoPath = deps.gitService.resolveWorkingDir(wsForThread.path, t.mode, t.worktree_path);
         }
       }
       return deps.gitService.log(params.workspaceId, params.branch, params.limit, params.baseBranch, repoPath);
     }
-    case "git.commitDiff":
+    case "git.commitDiff": {
+      const ws = deps.workspaceService.findById(params.workspaceId);
+      if (!ws?.is_git_repo) return "";
       return deps.gitService.commitDiff(params.workspaceId, params.sha, params.filePath, params.maxLines);
-    case "git.commitFiles":
+    }
+    case "git.commitFiles": {
+      const ws = deps.workspaceService.findById(params.workspaceId);
+      if (!ws?.is_git_repo) return [];
       return deps.gitService.commitFiles(params.workspaceId, params.sha);
+    }
 
     // Agent
     case "agent.send":
@@ -626,6 +634,7 @@ async function dispatch(
     case "git.push": {
       const workspace = deps.workspaceService.findById(params.workspaceId);
       if (!workspace) throw new Error(`Workspace ${params.workspaceId} not found`);
+      if (!workspace.is_git_repo) return;
       await deps.gitService.push(workspace.path, params.branch);
       // Fresh CI runs appear 3-15s after push. Schedule bumps so the UI surfaces
       // "pending" without waiting a full passive poll cycle.
