@@ -290,8 +290,10 @@ describe("SkillService", () => {
       expect(cmd!.providers).toEqual(["codex"]);
     });
 
-    it("tags plugin skills from <version>/.agents/skills with providers=['codex','copilot']", () => {
-      // A plugin that ships cross-provider skills under .agents/.
+    it("plugin .agents/skills/ is NOT exposed to non-Claude providers", () => {
+      // Plugins live under ~/.claude/plugins/ — Claude's own infrastructure.
+      // Even if a plugin ships .agents/ subdirs, those don't grant cross-provider access.
+      // A user who installed impeccable as a Claude plugin should not see it in Codex/Copilot.
       const skillDir = join(
         fakeHome, ".claude", "plugins", "cache", "mp", "impeccable", "2.1.1",
         ".agents", "skills", "impeccable",
@@ -301,65 +303,51 @@ describe("SkillService", () => {
 
       const svc = new SkillService();
 
+      // Non-Claude providers must not see skills from Claude's plugin cache.
       const copilotItems = svc.list(undefined, "copilot");
-      expect(copilotItems.find((i) => i.name === "impeccable:impeccable")).toBeDefined();
+      expect(copilotItems.find((i) => i.name === "impeccable:impeccable")).toBeUndefined();
 
       svc.invalidate();
       const codexItems = svc.list(undefined, "codex");
-      expect(codexItems.find((i) => i.name === "impeccable:impeccable")).toBeDefined();
-
-      svc.invalidate();
-      const claudeItems = svc.list(undefined, "claude");
-      expect(claudeItems.find((i) => i.name === "impeccable:impeccable")).toBeUndefined();
+      expect(codexItems.find((i) => i.name === "impeccable:impeccable")).toBeUndefined();
     });
 
-    it("tags plugin skills from <version>/.codex/skills with providers=['codex'] only", () => {
+    it("plugin .codex/skills/ is NOT exposed to Codex", () => {
+      // Same rule — .codex/ subdir in a Claude plugin does not make it available to Codex.
       const skillDir = join(
         fakeHome, ".claude", "plugins", "cache", "mp", "myplugin", "1.0.0",
         ".codex", "skills", "codex-task",
       );
       mkdirSync(skillDir, { recursive: true });
-      writeMd(join(skillDir, "SKILL.md"), { description: "Codex-only plugin skill" });
+      writeMd(join(skillDir, "SKILL.md"), { description: "Codex subdir skill" });
 
       const svc = new SkillService();
 
       const codexItems = svc.list(undefined, "codex");
-      expect(codexItems.find((i) => i.name === "myplugin:codex-task")).toBeDefined();
-
-      svc.invalidate();
-      const claudeItems = svc.list(undefined, "claude");
-      expect(claudeItems.find((i) => i.name === "myplugin:codex-task")).toBeUndefined();
-
-      svc.invalidate();
-      const copilotItems = svc.list(undefined, "copilot");
-      expect(copilotItems.find((i) => i.name === "myplugin:codex-task")).toBeUndefined();
+      expect(codexItems.find((i) => i.name === "myplugin:codex-task")).toBeUndefined();
     });
 
-    it("marketplace plugin: .agents/skills/ produces <marketplace-name>:* prefix for codex+copilot", () => {
-      // The marketplace dir IS the plugin version root. Skills under .agents/ should be
-      // named "impeccable:impeccable" (marketplace name as prefix), not ".agents:impeccable".
+    it("marketplace plugin: .agents/skills/ is not exposed to non-Claude providers", () => {
+      // Marketplace plugins are part of Claude's plugin infrastructure — same rule as
+      // the cache. Skills under .agents/ don't grant cross-provider access. The skill
+      // name uses the marketplace name as prefix (not ".agents:"), but it's Claude-only.
       const skillDir = join(
         fakeHome, ".claude", "plugins", "marketplaces", "impeccable",
         ".agents", "skills", "impeccable",
       );
       mkdirSync(skillDir, { recursive: true });
-      writeMd(join(skillDir, "SKILL.md"), { description: "Cross-provider marketplace skill" });
+      writeMd(join(skillDir, "SKILL.md"), { description: "Marketplace skill" });
 
       const svc = new SkillService();
 
-      // Codex and Copilot see it under the correct marketplace name prefix.
+      // Non-Claude providers must not see it.
       const copilotItems = svc.list(undefined, "copilot");
-      expect(copilotItems.find((i) => i.name === "impeccable:impeccable")).toBeDefined();
+      expect(copilotItems.find((i) => i.name === "impeccable:impeccable")).toBeUndefined();
       expect(copilotItems.find((i) => i.name === ".agents:impeccable")).toBeUndefined();
 
       svc.invalidate();
       const codexItems = svc.list(undefined, "codex");
-      expect(codexItems.find((i) => i.name === "impeccable:impeccable")).toBeDefined();
-
-      // Claude does NOT see it (tagged codex+copilot only via .agents/).
-      svc.invalidate();
-      const claudeItems = svc.list(undefined, "claude");
-      expect(claudeItems.find((i) => i.name === "impeccable:impeccable")).toBeUndefined();
+      expect(codexItems.find((i) => i.name === "impeccable:impeccable")).toBeUndefined();
     });
 
     it("marketplace plugin: .claude/skills/ produces <marketplace-name>:* prefix for claude only", () => {

@@ -112,42 +112,29 @@ function scanCommandsDir(
   }
 }
 
-/** Scan every known surface inside one plugin version directory. */
+/**
+ * Scan every known surface inside one plugin version directory.
+ * Plugins live under `~/.claude/plugins/` — Claude's own infrastructure — so they
+ * are always tagged with whatever `providers` the caller passes (always `["claude"]`).
+ * Provider-specific subdirs authored by the plugin (`.agents/`, `.codex/`, etc.) are
+ * intentionally ignored here: a plugin installed through Claude's system does not
+ * automatically become available to other providers. Cross-provider access requires
+ * the user to place skills in the provider-specific user directories (`~/.codex/`,
+ * `~/.agents/`, etc.) explicitly.
+ */
 function scanPluginVersionDir(
   ctx: ScanContext,
   versionDir: string,
   pluginName: string,
   providers: string[],
 ): void {
-  // Root-level skills/commands inherit the plugin's default providers.
-  scanSkillsDir(ctx, join(versionDir, "skills"), pluginName, "plugin", providers);
-  scanCommandsDir(ctx, join(versionDir, "commands"), pluginName, "plugin", providers);
-
-  // Provider-specific subdirs each carry their own scoped providers so that,
-  // for example, `.agents/skills/` is visible to Codex + Copilot but not Claude.
-  for (const [sub, subProviders] of Object.entries(PROVIDER_SUBDIR_PROVIDERS)) {
-    const base = join(versionDir, sub);
-    scanSkillsDir(ctx, join(base, "skills"), pluginName, "plugin", subProviders);
-    scanCommandsDir(ctx, join(base, "commands"), pluginName, "plugin", subProviders);
+  // Both bare and `.claude`-prefixed shapes are observed in the wild.
+  for (const sub of ["", ".claude"]) {
+    const base = sub ? join(versionDir, sub) : versionDir;
+    scanSkillsDir(ctx, join(base, "skills"), pluginName, "plugin", providers);
+    scanCommandsDir(ctx, join(base, "commands"), pluginName, "plugin", providers);
   }
 }
-
-/**
- * Maps known provider-specific plugin subdirectories to the providers that should see them.
- * Root-level plugin skills/commands retain whatever providers the parent scan root carries.
- * Entries like `.agents` are cross-provider (Codex + Copilot); `.claude` and `.claude-plugin`
- * are Claude-only; the rest are single-provider.
- */
-const PROVIDER_SUBDIR_PROVIDERS: Record<string, string[]> = {
-  ".agents":        ["codex", "copilot"],
-  ".claude":        ["claude"],
-  ".claude-plugin": ["claude"],
-  ".codex":         ["codex"],
-  ".cursor":        ["cursor"],
-  ".gemini":        ["gemini"],
-  ".github":        ["copilot"],
-  ".opencode":      ["opencode"],
-};
 
 /** Numeric collator orders `2.1.0` before `10.0.0` instead of lexically.
  *  Avoids pulling in the `semver` dep just for plugin-cache version selection. */
