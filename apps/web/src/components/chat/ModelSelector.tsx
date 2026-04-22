@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, type ComponentType } from "react";
 import { ChevronDown, ChevronRight, Lock, Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatContextWindow } from "./format-context-window";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -195,28 +196,36 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
     m: ModelProvider["models"][0],
     providerId: string,
     isSelected: (id: string) => boolean
-  ) => (
-    <button
-      key={m.id}
-      onClick={() => handleSelectModel(m.id, providerId)}
-      className={cn(
-        "flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs",
-        isSelected(m.id)
-          ? "bg-accent text-foreground"
-          : "text-popover-foreground hover:bg-accent/50 hover:text-foreground"
-      )}
-    >
-      <span className="flex-1 text-left">{m.label}</span>
-      {m.multiplier != null && (
-        <span className="text-[10px] text-muted-foreground/60 tabular-nums">
-          {m.multiplier}x
-        </span>
-      )}
-      {isSelected(m.id) && (
-        <Check size={10} className="shrink-0 text-foreground" />
-      )}
-    </button>
-  );
+  ) => {
+    const ctxLabel = formatContextWindow(m.contextWindow);
+    return (
+      <button
+        key={m.id}
+        onClick={() => handleSelectModel(m.id, providerId)}
+        className={cn(
+          "flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs",
+          isSelected(m.id)
+            ? "bg-accent text-foreground"
+            : "text-popover-foreground hover:bg-accent/50 hover:text-foreground"
+        )}
+      >
+        <span className="flex-1 text-left">{m.label}</span>
+        {ctxLabel && (
+          <span className="text-[10px] text-muted-foreground/60 tabular-nums">
+            {ctxLabel}
+          </span>
+        )}
+        {m.multiplier != null && (
+          <span className="text-[10px] text-muted-foreground/60 tabular-nums">
+            {m.multiplier}x
+          </span>
+        )}
+        {isSelected(m.id) && (
+          <Check size={10} className="shrink-0 text-foreground" />
+        )}
+      </button>
+    );
+  };
 
   const renderGroupedModels = (
     models: ModelProvider["models"],
