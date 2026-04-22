@@ -60,6 +60,7 @@ const FAKE_THREAD: Thread = {
   permission_mode: null,
   parent_thread_id: null,
   forked_from_message_id: null,
+  copilot_agent: null,
 };
 
 const FAKE_THREAD_WORKTREE: Thread = {
