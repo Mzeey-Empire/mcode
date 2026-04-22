@@ -190,7 +190,7 @@ export interface McodeTransport {
   checkStatus(threadId: string): Promise<ChecksStatus>;
 
   // Skills
-  listSkills(cwd?: string): Promise<SkillInfo[]>;
+  listSkills(cwd?: string, providerId?: string): Promise<SkillInfo[]>;
   /** Run a filesystem scan across all skill search paths and return per-path diagnostics. */
   diagnoseSkills(cwd?: string): Promise<SkillDiagnostics>;
 
