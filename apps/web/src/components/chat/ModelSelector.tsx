@@ -84,6 +84,7 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
         label: m.name,
         providerId,
         group: m.group,
+        contextWindow: m.contextWindow,
         multiplier: m.multiplier,
       }));
       const updated = new Map(dynamicModelsRef.current).set(providerId, mapped);
