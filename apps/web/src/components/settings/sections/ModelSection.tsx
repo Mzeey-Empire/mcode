@@ -10,6 +10,7 @@ import {
   supportsEffortParameter,
   normalizeReasoningLevelForModel,
   getCodexReasoningLevels,
+  getContextWindow,
 } from "@/lib/model-registry";
 import { SettingRow } from "../SettingRow";
 import { SegControl } from "../SegControl";
@@ -110,6 +111,9 @@ export function ModelSection() {
   const modelId = useSettingsStore((s) => s.settings.model.defaults.id);
   const fallbackId = useSettingsStore((s) => s.settings.model.defaults.fallbackId);
   const reasoning = useSettingsStore((s) => s.settings.model.defaults.reasoning);
+  const contextWindowOverride = useSettingsStore(
+    (s) => s.settings.model.defaults.contextWindow,
+  );
   const prDraftProvider = useSettingsStore((s) => s.settings.prDraft.provider);
   const prDraftModel = useSettingsStore((s) => s.settings.prDraft.model);
   const update = useSettingsStore((s) => s.update);
@@ -373,6 +377,39 @@ export function ModelSection() {
             onChange={(v) =>
               update({ model: { defaults: { reasoning: v as ReasoningLevel } } })
             }
+          />
+        </SettingRow>
+      )}
+
+      {provider === "claude" && (
+        <SettingRow
+          label="Context window"
+          configKey="model.defaults.contextWindow"
+          hint="Override the context window (tokens) for the default model. Leave empty to use the API or static value."
+        >
+          <input
+            type="number"
+            min={1}
+            max={2_000_000}
+            step={1000}
+            placeholder={String(getContextWindow(modelId) ?? "")}
+            value={contextWindowOverride ?? ""}
+            onChange={(e) => {
+              const raw = e.target.value.trim();
+              if (raw === "") {
+                void update({ model: { defaults: { contextWindow: undefined } } });
+                return;
+              }
+              const coerced = Math.round(Number(raw));
+              void update({
+                model: {
+                  defaults: {
+                    contextWindow: coerced > 0 ? coerced : undefined,
+                  },
+                },
+              });
+            }}
+            className="h-7 w-36 rounded-[min(var(--radius-md),12px)] border border-input bg-background px-2 py-0.5 text-xs text-foreground tabular-nums placeholder:text-muted-foreground/50 focus-visible:border-ring focus-visible:outline-none"
           />
         </SettingRow>
       )}
