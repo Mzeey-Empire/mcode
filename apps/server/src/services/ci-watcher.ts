@@ -6,6 +6,7 @@ import type { ChecksStatus } from "@mcode/contracts";
 export interface WatchEntry {
   threadId: string;
   prNumber: number;
+  branch: string;
   repoPath: string;
   cache: ChecksStatus | null;
 }
@@ -49,15 +50,15 @@ export class CiWatcherService {
    * Pass `skipInitialFetch: true` when the caller will fetch and broadcast the result itself,
    * to avoid spawning a redundant concurrent subprocess.
    */
-  watch(threadId: string, prNumber: number, repoPath: string, opts?: { skipInitialFetch?: boolean }): void {
+  watch(threadId: string, prNumber: number, branch: string, repoPath: string, opts?: { skipInitialFetch?: boolean }): void {
     if (this.active.has(threadId) || this.passive.has(threadId)) return;
-    this.passive.set(threadId, { threadId, prNumber, repoPath, cache: null });
+    this.passive.set(threadId, { threadId, prNumber, branch, repoPath, cache: null });
     this.startPassiveTimer();
 
     if (opts?.skipInitialFetch) return;
 
     // Fetch immediately so the client gets data without waiting for the passive tick.
-    this.githubService.getCheckRuns(prNumber, repoPath).then((checks) => {
+    this.githubService.getCheckRuns(branch, repoPath).then((checks) => {
       const entry = this.passive.get(threadId) ?? this.active.get(threadId);
       if (!entry) return; // unwatched during fetch
       entry.cache = checks;
@@ -131,7 +132,7 @@ export class CiWatcherService {
     const entry = this.active.get(threadId) ?? this.passive.get(threadId);
     if (!entry) return;
     try {
-      const checks = await this.githubService.getCheckRuns(entry.prNumber, entry.repoPath);
+      const checks = await this.githubService.getCheckRuns(entry.branch, entry.repoPath);
       this.refresh(threadId, checks);
     } catch (err) {
       logger.debug("CiWatcher bump failed", { threadId, error: String(err) });
@@ -191,11 +192,11 @@ export class CiWatcherService {
       // Insert placeholder synchronously so concurrent watch() calls see this threadId
       // and skip re-insertion during the async fetch window.
       if (!this.active.has(t.id) && !this.passive.has(t.id)) {
-        this.passive.set(t.id, { threadId: t.id, prNumber: t.pr_number, repoPath, cache: null });
+        this.passive.set(t.id, { threadId: t.id, prNumber: t.pr_number, branch: t.branch, repoPath, cache: null });
       }
 
       try {
-        const checks = await this.githubService.getCheckRuns(t.pr_number, repoPath);
+        const checks = await this.githubService.getCheckRuns(t.branch, repoPath);
         const entry = this.passive.get(t.id) ?? this.active.get(t.id);
         if (!entry) return; // was unwatched during fetch
         entry.cache = checks;
@@ -271,7 +272,7 @@ export class CiWatcherService {
     const entries = [...set.values()];
     const results = await Promise.allSettled(
       entries.map(async (entry) => {
-        const checks = await this.githubService.getCheckRuns(entry.prNumber, entry.repoPath);
+        const checks = await this.githubService.getCheckRuns(entry.branch, entry.repoPath);
         return { entry, checks };
       }),
     );

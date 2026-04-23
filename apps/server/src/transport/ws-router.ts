@@ -273,7 +273,7 @@ async function dispatch(
             const prState = pr.state.toLowerCase();
             if (prState !== "merged" && prState !== "closed") {
               if (numberChanged) deps.ciWatcherService.unwatch(t.id);
-              deps.ciWatcherService.watch(t.id, pr.number, workspace.path);
+              deps.ciWatcherService.watch(t.id, pr.number, t.branch, workspace.path);
             } else {
               deps.ciWatcherService.unwatch(t.id);
             }
@@ -434,10 +434,10 @@ async function dispatch(
           if (workspace) {
             if (isTerminal) {
               // Terminal PR: one-shot fetch without registering in the watcher — no need to poll.
-              return deps.githubService.getCheckRuns(thread.pr_number, workspace.path);
+              return deps.githubService.getCheckRuns(thread.branch, workspace.path);
             }
             // skipInitialFetch: checkStatus will fetch and broadcast below, no need for a second subprocess.
-            deps.ciWatcherService.watch(params.threadId, thread.pr_number, workspace.path, { skipInitialFetch: true });
+            deps.ciWatcherService.watch(params.threadId, thread.pr_number, thread.branch, workspace.path, { skipInitialFetch: true });
             entry = deps.ciWatcherService.getEntry(params.threadId);
           }
         }
@@ -445,7 +445,7 @@ async function dispatch(
       if (!entry) {
         return { aggregate: "no_checks" as const, runs: [], fetchedAt: Date.now() };
       }
-      const checks = await deps.githubService.getCheckRuns(entry.prNumber, entry.repoPath);
+      const checks = await deps.githubService.getCheckRuns(entry.branch, entry.repoPath);
       deps.ciWatcherService.refresh(params.threadId, checks);
       return checks;
     }
@@ -707,7 +707,7 @@ async function dispatch(
 
       // Replace any stale watcher (e.g. previous PR on this thread) before registering the new one.
       deps.ciWatcherService.unwatch(params.threadId);
-      deps.ciWatcherService.watch(params.threadId, result.number, repoPath);
+      deps.ciWatcherService.watch(params.threadId, result.number, branch, repoPath);
       // PR creation implicitly pushes, so schedule the same post-push bump burst.
       deps.ciWatcherService.scheduleBumpAfterPush(params.threadId);
 
