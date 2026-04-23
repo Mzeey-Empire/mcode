@@ -1070,6 +1070,13 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         next.add(threadId);
         return { runningThreadIds: next, agentStartTimes: { ...state.agentStartTimes, [threadId]: Date.now() } };
       });
+      // Clear interrupted status so the resume banner no longer lists this
+      // thread while the agent processes the continuation message.
+      useWorkspaceStore.setState((ws) => ({
+        threads: ws.threads.map((t) =>
+          t.id === threadId && t.status === "interrupted" ? { ...t, status: "active" as const } : t,
+        ),
+      }));
       return;
     }
 
