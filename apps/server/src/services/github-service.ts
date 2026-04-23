@@ -302,7 +302,7 @@ export class GithubService {
             return;
           }
 
-          const runs = items.map((item) => {
+          const rawRuns = items.map((item) => {
             // M1: Missing status defaults to in_progress (not completed) to avoid false-green aggregate.
             const status = (item.status ?? "in_progress") as CheckRun["status"];
             // H1: Unknown conclusion values are mapped conservatively to failure.
@@ -324,6 +324,22 @@ export class GithubService {
               startedAt: item.startedAt ?? null,
             };
           });
+
+          // D1: Deduplicate runs with the same name, keeping the most recently started one.
+          // GitHub returns check runs from every check suite on a commit, so re-runs or
+          // workflows triggered by multiple events produce duplicate entries (e.g., a passing
+          // run from suite A alongside a failing run from the newly-triggered suite B).
+          // Without dedup the aggregate can be stale and the list shows ghost duplicates.
+          const dedupMap = new Map<string, CheckRun>();
+          for (const run of rawRuns) {
+            const existing = dedupMap.get(run.name);
+            const existingTs = existing?.startedAt ?? "";
+            const runTs = run.startedAt ?? "";
+            if (!existing || runTs >= existingTs) {
+              dedupMap.set(run.name, run);
+            }
+          }
+          const runs = [...dedupMap.values()];
 
           let aggregate: "passing" | "failing" | "pending" | "no_checks";
           if (runs.some((r) => r.conclusion === "failure" || r.conclusion === "timed_out")) {

@@ -271,6 +271,48 @@ describe("GithubService.getCheckRuns", () => {
     expect(result.aggregate).toBe("passing");
   });
 
+  // D1: Duplicate check run names (re-run or multi-suite) — keep most recent per name
+  it("deduplicates check runs with the same name, keeping the most recently started run", async () => {
+    // Simulates a re-triggered validate-pr: old passing run (earlier startedAt) and
+    // new failing run (later startedAt) both returned by the GitHub API.
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: CallbackFn) => {
+        cb(null, JSON.stringify([
+          { name: "validate-pr", status: "completed", conclusion: "success",  startedAt: "2026-04-23T10:00:00Z", completedAt: "2026-04-23T10:00:04Z" },
+          { name: "validate-pr", status: "completed", conclusion: "failure",  startedAt: "2026-04-23T10:00:05Z", completedAt: "2026-04-23T10:00:10Z" },
+          { name: "build",       status: "completed", conclusion: "success",  startedAt: "2026-04-23T10:00:00Z", completedAt: "2026-04-23T10:00:23Z" },
+        ]), "");
+      },
+    );
+
+    const result = await ghService.getCheckRuns("main", "/repo");
+
+    // Only the newest validate-pr (failure) is kept; the old passing duplicate is dropped.
+    expect(result.runs).toHaveLength(2);
+    const validatePr = result.runs.find((r) => r.name === "validate-pr");
+    expect(validatePr?.conclusion).toBe("failure");
+    // Aggregate reflects the deduped set — the failure is present, so failing.
+    expect(result.aggregate).toBe("failing");
+  });
+
+  it("keeps the passing run when it started after an earlier failing run for the same check", async () => {
+    // Re-run succeeded: old failing (earlier) + new passing (later) — keep the passing one.
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: CallbackFn) => {
+        cb(null, JSON.stringify([
+          { name: "validate-pr", status: "completed", conclusion: "failure", startedAt: "2026-04-23T10:00:00Z", completedAt: "2026-04-23T10:00:05Z" },
+          { name: "validate-pr", status: "completed", conclusion: "success", startedAt: "2026-04-23T10:00:10Z", completedAt: "2026-04-23T10:00:14Z" },
+        ]), "");
+      },
+    );
+
+    const result = await ghService.getCheckRuns("main", "/repo");
+
+    expect(result.runs).toHaveLength(1);
+    expect(result.runs[0].conclusion).toBe("success");
+    expect(result.aggregate).toBe("passing");
+  });
+
   // M6: In-flight deduplication for identical branch+repo pairs
   it("deduplicates concurrent getCheckRuns for same branch+repo", async () => {
     let execFileCallCount = 0;
