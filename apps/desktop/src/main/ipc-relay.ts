@@ -8,10 +8,15 @@
 
 import { connect as netConnect } from "net";
 
+/** Maximum permitted frame body size (8 MiB). Frames larger than this indicate
+ *  a corrupt or malicious length prefix; the socket is destroyed immediately. */
+const MAX_FRAME_SIZE = 8 * 1024 * 1024;
+
 /** Minimal subset of BrowserWindow required by the relay. */
 interface RelayWindow {
   isDestroyed(): boolean;
   webContents: {
+    isDestroyed(): boolean;
     send(channel: string, ...args: unknown[]): void;
   };
 }
@@ -44,6 +49,10 @@ export function startIpcRelay(ipcPath: string, window: RelayWindow): () => void 
 
     while (buffer.length >= 4) {
       const frameLen = buffer.readUInt32BE(0);
+      if (frameLen > MAX_FRAME_SIZE) {
+        socket.destroy();
+        return;
+      }
       if (buffer.length < 4 + frameLen) break;
 
       const json = buffer.subarray(4, 4 + frameLen).toString("utf-8");
@@ -51,7 +60,7 @@ export function startIpcRelay(ipcPath: string, window: RelayWindow): () => void 
 
       try {
         const data = JSON.parse(json) as unknown;
-        if (!window.isDestroyed()) {
+        if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
           window.webContents.send("ipc-push-message", data);
         }
       } catch { /* malformed frame - skip */ }
@@ -66,7 +75,7 @@ export function startIpcRelay(ipcPath: string, window: RelayWindow): () => void 
 
   socket.on("error", () => socket.destroy());
   socket.on("close", () => {
-    if (!window.isDestroyed()) {
+    if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
       window.webContents.send("ipc-push-disconnect");
     }
   });
