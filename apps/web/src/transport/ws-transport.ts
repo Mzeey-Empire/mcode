@@ -38,8 +38,8 @@ let lastCheckStatusFetchAt = 0;
 /** Minimum interval between reconnect-triggered checkStatus fetches to avoid subprocess storms. */
 const CHECK_STATUS_RECONNECT_COOLDOWN_MS = 30_000;
 
-/** Timestamp of the last thread-list refresh triggered on WS reconnect. */
-let lastLoadThreadsAt = 0;
+/** Last thread-list refresh timestamp per workspace, triggered on WS reconnect. */
+const lastLoadThreadsAtByWorkspace = new Map<string, number>();
 /** Minimum interval between reconnect-triggered thread-list fetches to avoid rapid-reconnect storms. */
 const LOAD_THREADS_RECONNECT_COOLDOWN_MS = 5_000;
 
@@ -215,15 +215,14 @@ export function createWsTransport(
       // (e.g. flaky networks, server restarts causing multiple reconnect attempts).
       // Deferred import avoids a circular dependency at module evaluation time.
       const nowForThreads = Date.now();
-      if (nowForThreads - lastLoadThreadsAt > LOAD_THREADS_RECONNECT_COOLDOWN_MS) {
-        lastLoadThreadsAt = nowForThreads;
-        import("@/stores/workspaceStore").then(({ useWorkspaceStore }) => {
-          const { activeWorkspaceId, loadThreads } = useWorkspaceStore.getState();
-          if (activeWorkspaceId) {
-            loadThreads(activeWorkspaceId).catch(() => {});
-          }
-        });
-      }
+      import("@/stores/workspaceStore").then(({ useWorkspaceStore }) => {
+        const { activeWorkspaceId, loadThreads } = useWorkspaceStore.getState();
+        if (!activeWorkspaceId) return;
+        const last = lastLoadThreadsAtByWorkspace.get(activeWorkspaceId) ?? 0;
+        if (nowForThreads - last <= LOAD_THREADS_RECONNECT_COOLDOWN_MS) return;
+        lastLoadThreadsAtByWorkspace.set(activeWorkspaceId, nowForThreads);
+        loadThreads(activeWorkspaceId).catch(() => {});
+      });
 
       // Reattach active terminals after reconnect.
       // Deferred import avoids a circular dependency at module evaluation time.

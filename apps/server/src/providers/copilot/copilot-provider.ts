@@ -779,8 +779,8 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
             totalInputTokens = inputTokens;
             // Accumulate output tokens (each call generates new output)
             totalOutputTokens += outputTokens;
-            totalCacheRead = cacheReadTokens;
-            totalCacheWrite = cacheWriteTokens;
+            totalCacheRead += cacheReadTokens;
+            totalCacheWrite += cacheWriteTokens;
             if (cost !== undefined) totalCost = (totalCost ?? 0) + cost;
 
             // Quota updates are safe to emit immediately (they only update

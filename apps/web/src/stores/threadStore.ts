@@ -1072,11 +1072,15 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       });
       // Clear interrupted status so the resume banner no longer lists this
       // thread while the agent processes the continuation message.
-      useWorkspaceStore.setState((ws) => ({
-        threads: ws.threads.map((t) =>
-          t.id === threadId && t.status === "interrupted" ? { ...t, status: "active" as const } : t,
-        ),
-      }));
+      useWorkspaceStore.setState((ws) => {
+        const idx = ws.threads.findIndex(
+          (t) => t.id === threadId && t.status === "interrupted",
+        );
+        if (idx < 0) return ws;
+        const threads = [...ws.threads];
+        threads[idx] = { ...threads[idx], status: "active" as const };
+        return { threads };
+      });
       return;
     }
 
