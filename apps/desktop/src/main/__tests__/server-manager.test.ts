@@ -67,7 +67,7 @@ vi.mock("fs", () => ({
   writeFileSync: vi.fn(),
   // createWriteStream is used in non-dev mode to route stderr to a log file.
   // Return a minimal writable-stream stub so callers like child.stderr.pipe() work.
-  createWriteStream: vi.fn(() => ({ write: vi.fn(), end: vi.fn() })),
+  createWriteStream: vi.fn(() => ({ write: vi.fn(), end: vi.fn(), destroy: vi.fn() })),
 }));
 
 vi.mock("fs/promises", () => ({
@@ -115,7 +115,7 @@ const originalFetch = globalThis.fetch;
 
 import { ServerManager } from "../server-manager.js";
 import { spawn } from "child_process";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, createWriteStream } from "fs";
 import { readFile } from "fs/promises";
 
 // ---------------------------------------------------------------------------
@@ -410,6 +410,30 @@ describe("ServerManager", () => {
     );
 
     killSpy.mockRestore();
+  });
+
+  // -----------------------------------------------------------------------
+  // Reuse existing server from lock file
+  // -----------------------------------------------------------------------
+
+  // -----------------------------------------------------------------------
+  // stderrStream cleanup on spawn failure
+  // -----------------------------------------------------------------------
+
+  it("destroys stderrStream when spawn throws in non-dev mode", async () => {
+    // Capture the stream instance created by createWriteStream so we can
+    // assert that destroy() was called on it after spawn fails.
+    const mockStream = { write: vi.fn(), end: vi.fn(), destroy: vi.fn() };
+    vi.mocked(createWriteStream).mockReturnValueOnce(mockStream as never);
+
+    // Make spawn throw synchronously - simulates a missing executable or
+    // other OS-level failure before any child process is created.
+    vi.mocked(spawn).mockImplementationOnce(() => {
+      throw new Error("spawn ENOENT");
+    });
+
+    await expect(manager.start()).rejects.toThrow("spawn ENOENT");
+    expect(mockStream.destroy).toHaveBeenCalledOnce();
   });
 
   // -----------------------------------------------------------------------
