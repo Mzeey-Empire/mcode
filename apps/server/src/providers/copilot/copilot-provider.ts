@@ -9,7 +9,9 @@
  */
 
 import { execFile } from "child_process";
-import { dirname } from "path";
+import { existsSync, readFileSync } from "fs";
+import { homedir } from "os";
+import { dirname, join } from "path";
 import { promisify } from "util";
 
 import { injectable, inject } from "tsyringe";
@@ -34,6 +36,27 @@ import { AgentEventType } from "@mcode/contracts";
 
 /** Promisified execFile used to retrieve the gh auth token. */
 const execFileAsync = promisify(execFile);
+
+/**
+ * Reads user-level Copilot instructions from `~/.copilot/copilot-instructions.md`.
+ * Returns `undefined` if the file does not exist or cannot be read.
+ */
+function readUserInstructions(): string | undefined {
+  try {
+    return readFileSync(join(homedir(), ".copilot", "copilot-instructions.md"), "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Returns user-level Copilot skill directories to pass to the SDK session.
+ * Currently resolves `~/.copilot/skills` if it exists.
+ */
+function userSkillDirectories(): string[] {
+  const dir = join(homedir(), ".copilot", "skills");
+  return existsSync(dir) ? [dir] : [];
+}
 
 /** Maps raw Copilot quota snapshot keys to human-readable labels. */
 const QUOTA_LABELS: Record<string, string> = {
@@ -150,10 +173,15 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
       throw new Error("Copilot client not available");
     }
 
+    const userInstructions = readUserInstructions();
+    const skillDirs = userSkillDirectories();
     const session = await client.createSession({
       onPermissionRequest: approveAll,
       model: model || undefined,
       workingDirectory: cwd,
+      enableConfigDiscovery: true,
+      ...(skillDirs.length > 0 && { skillDirectories: skillDirs }),
+      ...(userInstructions && { systemMessage: { content: userInstructions } }),
     });
 
     const unsubscribers: Array<() => void> = [];
@@ -538,14 +566,21 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
     // unconditionally because the Copilot SDK does not expose per-action gating.
     // Until the SDK adds granular permission control, all tool actions are
     // approved automatically regardless of the thread's permissionMode setting.
+    const userInstructions = readUserInstructions();
+    const skillDirs = userSkillDirectories();
+    const sessionBase = {
+      onPermissionRequest: approveAll,
+      model: model || undefined,
+      workingDirectory: cwd,
+      enableConfigDiscovery: true,
+      ...(customAgents.length > 0 && { customAgents }),
+      ...(skillDirs.length > 0 && { skillDirectories: skillDirs }),
+      ...(userInstructions && { systemMessage: { content: userInstructions } }),
+    };
+
     if (resume && sdkSessionId) {
       try {
-        session = await client.resumeSession(sdkSessionId, {
-          onPermissionRequest: approveAll,
-          model: model || undefined,
-          workingDirectory: cwd,
-          ...(customAgents.length > 0 && { customAgents }),
-        });
+        session = await client.resumeSession(sdkSessionId, sessionBase);
         logger.info("Resumed Copilot session", { sessionId, sdkSessionId });
       } catch (err) {
         logger.warn("CopilotProvider: resume failed, starting fresh session", {
@@ -553,20 +588,10 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
           error: err instanceof Error ? err.message : String(err),
         });
         this.sdkSessionIds.delete(sessionId);
-        session = await client.createSession({
-          onPermissionRequest: approveAll,
-          model: model || undefined,
-          workingDirectory: cwd,
-          ...(customAgents.length > 0 && { customAgents }),
-        });
+        session = await client.createSession(sessionBase);
       }
     } else {
-      session = await client.createSession({
-        onPermissionRequest: approveAll,
-        model: model || undefined,
-        workingDirectory: cwd,
-        ...(customAgents.length > 0 && { customAgents }),
-      });
+      session = await client.createSession(sessionBase);
     }
 
     // Route to the appropriate Copilot SDK API based on the selected sub-agent.
