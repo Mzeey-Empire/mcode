@@ -180,7 +180,7 @@ describe("SkillService", () => {
       expect(skill!.providers).toEqual(["codex"]);
     });
 
-    it("tags skills from ~/.agents/skills with providers=['codex','copilot']", () => {
+    it("tags skills from ~/.agents/skills with providers=['codex'] only", () => {
       const skillDir = join(fakeHome, ".agents", "skills", "shared-skill");
       mkdirSync(skillDir, { recursive: true });
       writeMd(join(skillDir, "SKILL.md"), { description: "Shared skill" });
@@ -192,7 +192,7 @@ describe("SkillService", () => {
 
       svc.invalidate();
       const copilotItems = svc.list(undefined, "copilot");
-      expect(copilotItems.find((i) => i.name === "shared-skill")).toBeDefined();
+      expect(copilotItems.find((i) => i.name === "shared-skill")).toBeUndefined();
 
       svc.invalidate();
       const claudeItems = svc.list(undefined, "claude");

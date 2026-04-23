@@ -206,6 +206,7 @@ interface ScanRoot {
 function buildScanRoots(home: string, cwd?: string): ScanRoot[] {
   const claudeDir = join(home, ".claude");
   const codexDir = join(home, ".codex");
+  const copilotDir = join(home, ".copilot");
   const agentsDir = join(home, ".agents");
 
   const roots: ScanRoot[] = [
@@ -218,11 +219,15 @@ function buildScanRoots(home: string, cwd?: string): ScanRoot[] {
     { path: join(codexDir, "skills"), source: "user", providers: ["codex"], kind: "skills" },
     { path: join(codexDir, "commands"), source: "user", providers: ["codex"], kind: "commands" },
 
-    // Cross-provider (.agents at home root — visible to Codex and Copilot but not Claude)
-    { path: join(agentsDir, "skills"), source: "agent", providers: ["codex", "copilot"], kind: "skills" },
-    { path: join(agentsDir, "commands"), source: "agent", providers: ["codex", "copilot"], kind: "commands" },
+    // Copilot ecosystem
+    { path: join(copilotDir, "skills"), source: "user", providers: ["copilot"], kind: "skills" },
+    { path: join(copilotDir, "commands"), source: "user", providers: ["copilot"], kind: "commands" },
 
-    // Copilot user-level agents
+    // Cross-provider (.agents at home root — visible to Codex but not Claude or Copilot)
+    { path: join(agentsDir, "skills"), source: "agent", providers: ["codex"], kind: "skills" },
+    { path: join(agentsDir, "commands"), source: "agent", providers: ["codex"], kind: "commands" },
+
+    // Copilot user-level agents (OS-native config path)
     { path: copilotUserAgentsDir(), source: "user", providers: ["copilot"], kind: "both" },
   ];
 
@@ -237,8 +242,8 @@ function buildScanRoots(home: string, cwd?: string): ScanRoot[] {
       { path: join(cwd, ".codex", "commands"), source: "project", providers: ["codex"], kind: "commands" },
 
       // Cross-provider project-level
-      { path: join(cwd, ".agents", "skills"), source: "project", providers: ["codex", "copilot"], kind: "skills" },
-      { path: join(cwd, ".agents", "commands"), source: "project", providers: ["codex", "copilot"], kind: "commands" },
+      { path: join(cwd, ".agents", "skills"), source: "project", providers: ["codex"], kind: "skills" },
+      { path: join(cwd, ".agents", "commands"), source: "project", providers: ["codex"], kind: "commands" },
 
       // Copilot project-level agents
       { path: join(cwd, ".github", "agents"), source: "project", providers: ["copilot"], kind: "both" },
