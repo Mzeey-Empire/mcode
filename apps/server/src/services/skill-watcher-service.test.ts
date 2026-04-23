@@ -86,7 +86,7 @@ describe("SkillWatcherService", () => {
     const root = join(dir, "skills");
     // dir (parent) exists; root does not.
 
-    watcher.start({ parentDir: dir, roots: [root] });
+    watcher.start({ parentDirs: [dir], roots: [root] });
 
     const invalidateSpy = vi.spyOn(svc, "invalidate");
 
@@ -102,6 +102,46 @@ describe("SkillWatcherService", () => {
 
     // A change inside the late-registered root must invalidate exactly once.
     writeFileSync(join(root, "marker.txt"), "x");
+    await new Promise((r) => setTimeout(r, 350));
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("watches codex and agents roots in addition to claude roots", () => {
+    const watchSpy = vi.spyOn(watcher, "watch");
+
+    watcher.start();
+    const watchedPaths = watchSpy.mock.calls.map((call) => call[0] as string);
+
+    // Should watch all the new provider roots
+    expect(watchedPaths.some((p) => p.includes(".codex"))).toBe(true);
+    expect(watchedPaths.some((p) => p.includes(".agents"))).toBe(true);
+  });
+
+  it("auto-registers roots from multiple parent directories", async () => {
+    // Simulate two provider parent dirs existing at startup (e.g. ~/.claude and ~/.codex)
+    const claudeParent = join(dir, ".claude");
+    const codexParent = join(dir, ".codex");
+    mkdirSync(claudeParent, { recursive: true });
+    mkdirSync(codexParent, { recursive: true });
+
+    const codexRoot = join(codexParent, "skills");
+    // codexRoot does NOT exist at start time
+
+    watcher.start({
+      parentDirs: [claudeParent, codexParent],
+      roots: [join(claudeParent, "skills"), codexRoot],
+    });
+
+    const invalidateSpy = vi.spyOn(svc, "invalidate");
+
+    // Create the missing codex root after start() — the codexParent watcher
+    // should detect this and auto-register codexRoot.
+    mkdirSync(codexRoot, { recursive: true });
+    await new Promise((r) => setTimeout(r, 350));
+    invalidateSpy.mockClear();
+
+    // A change inside the late-registered codex root must invalidate
+    writeFileSync(join(codexRoot, "marker.txt"), "x");
     await new Promise((r) => setTimeout(r, 350));
     expect(invalidateSpy).toHaveBeenCalledTimes(1);
   });

@@ -289,7 +289,77 @@ describe("cwd passthrough", () => {
     await act(async () => { result.current.onInputChange("/"); });
     await act(async () => {});
 
-    expect(mockListSkills).toHaveBeenCalledWith("/my/project");
+    expect(mockListSkills).toHaveBeenCalledWith("/my/project", undefined);
+  });
+});
+
+describe("provider-scoped commands", () => {
+  it("passes providerId through to store load", async () => {
+    const mockListSkills = vi.fn().mockResolvedValue([]);
+    vi.mocked(getTransport).mockReturnValue({ listSkills: mockListSkills } as never);
+
+    const ref = makeAnchor();
+    const { result } = renderHook(() =>
+      useSlashCommand({ anchorRef: ref, cwd: "/my/project", providerId: "codex" })
+    );
+
+    await act(async () => { result.current.onInputChange("/"); });
+    await act(async () => {});
+
+    expect(mockListSkills).toHaveBeenCalledWith("/my/project", "codex");
+  });
+
+  it("hides /m:plan for copilot provider", async () => {
+    const ref = makeAnchor();
+    const { result } = renderHook(() =>
+      useSlashCommand({ anchorRef: ref, providerId: "copilot" })
+    );
+
+    await act(async () => { result.current.onInputChange("/"); });
+    await act(async () => {});
+
+    const names = result.current.allCommands.map((c) => c.name);
+    expect(names).not.toContain("m:plan");
+    expect(names).toContain("compact");
+  });
+
+  it("shows /m:plan for claude provider", async () => {
+    const ref = makeAnchor();
+    const { result } = renderHook(() =>
+      useSlashCommand({ anchorRef: ref, providerId: "claude" })
+    );
+
+    await act(async () => { result.current.onInputChange("/"); });
+    await act(async () => {});
+
+    const names = result.current.allCommands.map((c) => c.name);
+    expect(names).toContain("m:plan");
+  });
+
+  it("shows /m:plan when no provider is specified", async () => {
+    const ref = makeAnchor();
+    const { result } = renderHook(() =>
+      useSlashCommand({ anchorRef: ref })
+    );
+
+    await act(async () => { result.current.onInputChange("/"); });
+    await act(async () => {});
+
+    const names = result.current.allCommands.map((c) => c.name);
+    expect(names).toContain("m:plan");
+  });
+
+  it("always shows /compact regardless of provider", async () => {
+    const ref = makeAnchor();
+    const { result } = renderHook(() =>
+      useSlashCommand({ anchorRef: ref, providerId: "copilot" })
+    );
+
+    await act(async () => { result.current.onInputChange("/"); });
+    await act(async () => {});
+
+    const names = result.current.allCommands.map((c) => c.name);
+    expect(names).toContain("compact");
   });
 });
 

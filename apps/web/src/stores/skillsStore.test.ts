@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useSkillsStore } from "./skillsStore";
 
 const FAKE_SKILLS = [
-  { name: "a", description: "A", kind: "skill" as const, source: "user" as const },
+  { name: "a", description: "A", kind: "skill" as const, source: "user" as const, providers: ["claude"] },
 ];
 
 // Hoist the mock so the invalidate-then-reload test can assert call counts.
@@ -110,5 +110,38 @@ describe("skillsStore", () => {
     const result = await store.getState().load("/foo");
     expect(result).toEqual(FAKE_SKILLS);
     expect(calls.length).toBe(2);
+  });
+});
+
+describe("provider-scoped caching", () => {
+  beforeEach(() => {
+    listSkillsMock.mockClear();
+    useSkillsStore.getState().reset();
+  });
+
+  it("re-fetches when providerId changes", async () => {
+    await useSkillsStore.getState().load("/foo", "claude");
+    listSkillsMock.mockClear();
+    await useSkillsStore.getState().load("/foo", "codex");
+    expect(listSkillsMock).toHaveBeenCalledTimes(1); // cache miss — different provider
+  });
+
+  it("returns cached data when cwd and providerId both match", async () => {
+    await useSkillsStore.getState().load("/foo", "claude");
+    listSkillsMock.mockClear();
+    await useSkillsStore.getState().load("/foo", "claude");
+    expect(listSkillsMock).not.toHaveBeenCalled(); // cache hit
+  });
+
+  it("passes providerId through to RPC call", async () => {
+    await useSkillsStore.getState().load("/foo", "codex");
+    expect(listSkillsMock).toHaveBeenCalledWith("/foo", "codex");
+  });
+
+  it("scopes single-flight by cwd + providerId", async () => {
+    const p1 = useSkillsStore.getState().load("/foo", "claude");
+    const p2 = useSkillsStore.getState().load("/foo", "codex");
+    expect(p1).not.toBe(p2); // different providers = different in-flight promises
+    await Promise.all([p1, p2]);
   });
 });

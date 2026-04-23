@@ -587,7 +587,7 @@ export function createWsTransport(
       rpc<ChecksStatus>("github.checkStatus", { threadId }),
 
     // Skills
-    listSkills: (cwd?) => rpc<SkillInfo[]>("skill.list", { cwd }),
+    listSkills: (cwd?, providerId?) => rpc<SkillInfo[]>("skill.list", { cwd, providerId }),
     diagnoseSkills: (cwd?) => rpc<SkillDiagnostics>("skill.diagnose", { cwd }),
 
     // Terminal (PTY)

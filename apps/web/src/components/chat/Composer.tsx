@@ -665,6 +665,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const slashCommand = useSlashCommand({
     anchorRef: editorContainerRef,
     cwd: workspacePath,
+    providerId: effectiveProviderId,
     onMcodeCommand: (action) => {
       if (action === "toggle-plan") {
         const next =

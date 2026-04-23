@@ -65,6 +65,9 @@ vi.mock("fs", () => ({
   }),
   unlinkSync: vi.fn(),
   writeFileSync: vi.fn(),
+  // createWriteStream is used in non-dev mode to route stderr to a log file.
+  // Return a minimal writable-stream stub so callers like child.stderr.pipe() work.
+  createWriteStream: vi.fn(() => ({ write: vi.fn(), end: vi.fn() })),
 }));
 
 vi.mock("fs/promises", () => ({
@@ -165,10 +168,10 @@ describe("ServerManager", () => {
     const spawnCall = vi.mocked(spawn).mock.calls[0];
     // First arg is process.execPath
     expect(spawnCall[0]).toBe(process.execPath);
-    // Options include detached: true and stdio: "ignore"
+    // Options include detached: true; in non-dev mode stderr is piped to a log file
     const opts = spawnCall[2] as Record<string, unknown>;
     expect(opts.detached).toBe(true);
-    expect(opts.stdio).toBe("ignore");
+    expect(opts.stdio).toEqual(["ignore", "ignore", "pipe"]);
     expect(result.port).toBe(19600);
     expect(result.authToken).toBe("test-auth-token");
   });

@@ -15,14 +15,18 @@ interface SkillsState {
   skills: SkillInfo[] | null;
   /** The cwd associated with the last load attempt (success OR failure). */
   cwd: string | undefined;
+  /** The providerId associated with the last load attempt. */
+  providerId: string | undefined;
   /** Whether a fetch is currently in-flight. */
   isLoading: boolean;
   /** Error from the last failed fetch, if any. */
   error: Error | null;
-  /** The in-flight promise. Single-flight only deduplicates same-cwd callers. */
+  /** The in-flight promise. Single-flight only deduplicates same-cwd+providerId callers. */
   inflight: Promise<SkillInfo[]> | null;
   /** The cwd of the in-flight promise; used to scope single-flight by cwd. */
   inflightCwd: string | undefined;
+  /** The providerId of the in-flight promise; scopes single-flight to cwd + providerId. */
+  inflightProviderId: string | undefined;
   /**
    * Monotonic counter bumped by each new load() call AND by invalidate()/
    * reset(). The async closure captures the value it incremented to and
@@ -33,13 +37,14 @@ interface SkillsState {
   loadEpoch: number;
 
   /**
-   * Load skills for the given cwd.
+   * Load skills for the given cwd and providerId.
    *
-   * Returns cached data if still fresh (within TTL) and cwd matches.
-   * Concurrent calls with any cwd while a request is in-flight all
-   * receive the same promise.
+   * Returns cached data if still fresh (within TTL) and both cwd and
+   * providerId match. Concurrent calls with the same (cwd, providerId)
+   * while a request is in-flight all receive the same promise. Different
+   * providerId values get separate in-flight promises.
    */
-  load(cwd?: string, force?: boolean): Promise<SkillInfo[]>;
+  load(cwd?: string, providerId?: string, force?: boolean): Promise<SkillInfo[]>;
 
   /**
    * Invalidate the cached skills so the next `load()` re-fetches from
@@ -65,34 +70,42 @@ let lastFetchedAt = 0;
 export const useSkillsStore = create<SkillsState>((set, get) => ({
   skills: null,
   cwd: undefined,
+  providerId: undefined,
   isLoading: false,
   error: null,
   inflight: null,
   inflightCwd: undefined,
+  inflightProviderId: undefined,
   loadEpoch: 0,
 
   // Non-async so the return value IS the cached/in-flight promise directly,
   // enabling identity equality (p1 === p2) for single-flight callers.
-  load(cwd, force = false): Promise<SkillInfo[]> {
+  load(cwd, providerId, force = false): Promise<SkillInfo[]> {
     const state = get();
 
-    // Return cache if fresh and same cwd
+    // Return cache if fresh, same cwd, AND same providerId
     if (
       !force &&
       state.skills &&
       state.cwd === cwd &&
+      state.providerId === providerId &&
       Date.now() - lastFetchedAt < CACHE_TTL_MS
     ) {
       return Promise.resolve(state.skills);
     }
 
-    // Single-flight ONLY for the same cwd. A different-cwd request must
-    // not piggyback on an in-flight load for workspace A or it would
-    // receive A's data while expecting B's.
-    if (state.inflight && state.inflightCwd === cwd) return state.inflight;
+    // Single-flight scoped to cwd + providerId. A different-providerId request
+    // must not piggyback on an in-flight load or it would receive the wrong data.
+    if (
+      state.inflight &&
+      state.inflightCwd === cwd &&
+      state.inflightProviderId === providerId
+    ) {
+      return state.inflight;
+    }
 
     // Create and register the in-flight promise atomically so a second
-    // synchronous caller (same cwd) sees it immediately via get().inflight.
+    // synchronous caller (same cwd + providerId) sees it immediately via get().inflight.
     let resolveInflight!: (skills: SkillInfo[]) => void;
     let rejectInflight!: (err: unknown) => void;
     const promise = new Promise<SkillInfo[]>((res, rej) => {
@@ -106,13 +119,14 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
       error: null,
       inflight: promise,
       inflightCwd: cwd,
+      inflightProviderId: providerId,
       loadEpoch: myEpoch,
     });
 
     // Kick off the actual fetch outside the synchronous set() block.
     (async () => {
       const transport = getTransport();
-      const attempt = () => transport.listSkills(cwd);
+      const attempt = () => transport.listSkills(cwd, providerId);
       try {
         let skills: SkillInfo[];
         try {
@@ -138,7 +152,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
         // without polluting the now-fresher store state.
         if (get().loadEpoch === myEpoch) {
           lastFetchedAt = Date.now();
-          set({ skills, cwd, isLoading: false, inflight: null, inflightCwd: undefined, error: null });
+          set({ skills, cwd, providerId, isLoading: false, inflight: null, inflightCwd: undefined, inflightProviderId: undefined, error: null });
         }
         resolveInflight(skills);
       } catch (err) {
@@ -147,7 +161,7 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
         // Track the attempted cwd even on failure so the consumer hook can
         // detect a cwd change vs. a same-cwd retry and handle each correctly.
         if (get().loadEpoch === myEpoch) {
-          set({ cwd, isLoading: false, inflight: null, inflightCwd: undefined, error });
+          set({ cwd, providerId, isLoading: false, inflight: null, inflightCwd: undefined, inflightProviderId: undefined, error });
         }
         rejectInflight(error);
       }
@@ -163,9 +177,11 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     set({
       skills: null,
       cwd: undefined,
+      providerId: undefined,
       error: null,
       inflight: null,
       inflightCwd: undefined,
+      inflightProviderId: undefined,
       loadEpoch: state.loadEpoch + 1,
     });
     lastFetchedAt = 0;
@@ -176,10 +192,12 @@ export const useSkillsStore = create<SkillsState>((set, get) => ({
     set({
       skills: null,
       cwd: undefined,
+      providerId: undefined,
       isLoading: false,
       error: null,
       inflight: null,
       inflightCwd: undefined,
+      inflightProviderId: undefined,
       loadEpoch: state.loadEpoch + 1,
     });
     lastFetchedAt = 0;

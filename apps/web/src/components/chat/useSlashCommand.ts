@@ -53,6 +53,8 @@ interface UseSlashCommandOptions {
   anchorRef: React.RefObject<HTMLElement | null>;
   onMcodeCommand?: (action: string) => void;
   cwd?: string;
+  /** Provider ID used to scope skill loading and filter built-in commands (e.g., hides /m:plan for "copilot"). */
+  providerId?: string;
 }
 
 /** Return value of the useSlashCommand hook. */
@@ -76,6 +78,7 @@ export function useSlashCommand({
   anchorRef,
   onMcodeCommand,
   cwd,
+  providerId,
 }: UseSlashCommandOptions): UseSlashCommandReturn {
   const [isOpen, setIsOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -85,18 +88,27 @@ export function useSlashCommand({
 
   const skills = useSkillsStore((s) => s.skills);
   const cachedCwd = useSkillsStore((s) => s.cwd);
+  const cachedProviderId = useSkillsStore((s) => s.providerId);
   const isLoading = useSkillsStore((s) => s.isLoading);
   const error = useSkillsStore((s) => s.error);
   const load = useSkillsStore((s) => s.load);
 
-  // Build the full command list (memoize via skills identity).
+  // Build the full command list (memoize via skills identity and providerId).
+  // The filter is inside the callback so `providerId` (a stable string) is the
+  // dep — if we filtered outside and put the resulting array in deps, every
+  // render would produce a new reference and break memoization.
   const allCommands = useCallback(() => {
+    const builtins = BUILTIN_COMMANDS.filter((cmd) => {
+      // /m:plan is hidden for copilot (uses its own dynamic modes instead)
+      if (cmd.name === "m:plan" && providerId === "copilot") return false;
+      return true;
+    });
     const commands: Command[] = [
-      ...BUILTIN_COMMANDS,
+      ...builtins,
       ...((skills ?? []).map(toCommand)),
     ];
     return sortCommands(commands);
-  }, [skills])();
+  }, [skills, providerId])();
 
   const filtered = (() => {
     const f = lastFilterRef.current.toLowerCase();
@@ -117,11 +129,12 @@ export function useSlashCommand({
   useEffect(() => {
     if (!isOpen || isLoading) return;
     const cwdChanged = cachedCwd !== cwd;
+    const providerChanged = cachedProviderId !== providerId;
     const noSkills = skills === null;
-    if (cwdChanged || (noSkills && !error)) {
-      load(cwd).catch(() => { /* surfaced via `error` */ });
+    if (cwdChanged || providerChanged || (noSkills && !error)) {
+      load(cwd, providerId).catch(() => { /* surfaced via `error` */ });
     }
-  }, [isOpen, skills, cachedCwd, cwd, isLoading, error, load]);
+  }, [isOpen, skills, cachedCwd, cachedProviderId, cwd, providerId, isLoading, error, load]);
 
   const onInputChange = useCallback(
     (value: string) => {
@@ -195,8 +208,8 @@ export function useSlashCommand({
 
   const onDismiss = useCallback(() => setIsOpen(false), []);
   const onRetry = useCallback(() => {
-    load(cwd, true).catch(() => { /* surfaced via `error` */ });
-  }, [load, cwd]);
+    load(cwd, providerId, true).catch(() => { /* surfaced via `error` */ });
+  }, [load, cwd, providerId]);
 
   return {
     isOpen,
