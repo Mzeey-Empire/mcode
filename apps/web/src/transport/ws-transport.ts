@@ -203,6 +203,19 @@ export function createWsTransport(
         });
       }
 
+      // Re-fetch the thread list after reconnect so thread statuses are not
+      // stale. A server restart marks active threads "interrupted" in the DB
+      // but the client still holds the pre-restart status in memory. Without
+      // this refresh, the sidebar continues to show idle state instead of the
+      // amber pulsing interrupted indicator introduced for this fix.
+      // Deferred import avoids a circular dependency at module evaluation time.
+      import("@/stores/workspaceStore").then(({ useWorkspaceStore }) => {
+        const { activeWorkspaceId, loadThreads } = useWorkspaceStore.getState();
+        if (activeWorkspaceId) {
+          loadThreads(activeWorkspaceId).catch(() => {});
+        }
+      });
+
       // Reattach active terminals after reconnect.
       // Deferred import avoids a circular dependency at module evaluation time.
       import("@/stores/terminalStore").then(async ({ useTerminalStore }) => {
