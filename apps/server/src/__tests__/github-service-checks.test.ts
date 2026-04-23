@@ -271,6 +271,85 @@ describe("GithubService.getCheckRuns", () => {
     expect(result.aggregate).toBe("passing");
   });
 
+  // D1: Duplicate check run names (re-run or multi-suite) — keep most recent per (name, appId)
+  it("deduplicates check runs with the same name and appId, keeping the most recently started run", async () => {
+    // Simulates a re-triggered validate-pr: old passing run (earlier startedAt) and
+    // new failing run (later startedAt) both returned by the GitHub API.
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: CallbackFn) => {
+        cb(null, JSON.stringify([
+          { name: "validate-pr", status: "completed", conclusion: "success",  startedAt: "2026-04-23T10:00:00Z", completedAt: "2026-04-23T10:00:04Z", appId: 15368 },
+          { name: "validate-pr", status: "completed", conclusion: "failure",  startedAt: "2026-04-23T10:00:05Z", completedAt: "2026-04-23T10:00:10Z", appId: 15368 },
+          { name: "build",       status: "completed", conclusion: "success",  startedAt: "2026-04-23T10:00:00Z", completedAt: "2026-04-23T10:00:23Z", appId: 15368 },
+        ]), "");
+      },
+    );
+
+    const result = await ghService.getCheckRuns("main", "/repo");
+
+    // Only the newest validate-pr (failure) is kept; the old passing duplicate is dropped.
+    expect(result.runs).toHaveLength(2);
+    const validatePr = result.runs.find((r) => r.name === "validate-pr");
+    expect(validatePr?.conclusion).toBe("failure");
+    // Aggregate reflects the deduped set — the failure is present, so failing.
+    expect(result.aggregate).toBe("failing");
+  });
+
+  it("keeps the passing run when it started after an earlier failing run for the same check", async () => {
+    // Re-run succeeded: old failing (earlier) + new passing (later) — keep the passing one.
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: CallbackFn) => {
+        cb(null, JSON.stringify([
+          { name: "validate-pr", status: "completed", conclusion: "failure", startedAt: "2026-04-23T10:00:00Z", completedAt: "2026-04-23T10:00:05Z", appId: 15368 },
+          { name: "validate-pr", status: "completed", conclusion: "success", startedAt: "2026-04-23T10:00:10Z", completedAt: "2026-04-23T10:00:14Z", appId: 15368 },
+        ]), "");
+      },
+    );
+
+    const result = await ghService.getCheckRuns("main", "/repo");
+
+    expect(result.runs).toHaveLength(1);
+    expect(result.runs[0].conclusion).toBe("success");
+    expect(result.aggregate).toBe("passing");
+  });
+
+  // D1: Different apps, same name — must NOT be collapsed (e.g. GH Actions + Greptile)
+  it("does not deduplicate same-named runs from different apps", async () => {
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: CallbackFn) => {
+        cb(null, JSON.stringify([
+          { name: "validate-pr", status: "completed", conclusion: "success", startedAt: "2026-04-23T10:00:10Z", completedAt: "2026-04-23T10:00:14Z", appId: 15368 },
+          { name: "validate-pr", status: "completed", conclusion: "failure", startedAt: "2026-04-23T10:00:08Z", completedAt: "2026-04-23T10:00:12Z", appId: 99999 },
+        ]), "");
+      },
+    );
+
+    const result = await ghService.getCheckRuns("main", "/repo");
+
+    // Both are kept — they belong to different apps and must not be collapsed.
+    expect(result.runs).toHaveLength(2);
+    expect(result.aggregate).toBe("failing");
+  });
+
+  // D1: null startedAt — a run with a known timestamp beats a null-startedAt duplicate
+  it("keeps the run with a known startedAt over a null-startedAt duplicate", async () => {
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: CallbackFn) => {
+        cb(null, JSON.stringify([
+          { name: "build", status: "in_progress", conclusion: null, startedAt: null, completedAt: null, appId: 15368 },
+          { name: "build", status: "completed", conclusion: "success", startedAt: "2026-04-23T10:00:05Z", completedAt: "2026-04-23T10:00:10Z", appId: 15368 },
+        ]), "");
+      },
+    );
+
+    const result = await ghService.getCheckRuns("main", "/repo");
+
+    expect(result.runs).toHaveLength(1);
+    expect(result.runs[0].startedAt).toBe("2026-04-23T10:00:05Z");
+    // The completed success run wins; in_progress null-timestamp run is dropped.
+    expect(result.aggregate).toBe("passing");
+  });
+
   // M6: In-flight deduplication for identical branch+repo pairs
   it("deduplicates concurrent getCheckRuns for same branch+repo", async () => {
     let execFileCallCount = 0;
