@@ -9,7 +9,16 @@ import { execFile } from "child_process";
 import type { PrInfo, PrDetail, ChecksStatus, CheckRun } from "@mcode/contracts";
 import { WorkspaceRepo } from "../repositories/workspace-repo";
 
-/** Handles GitHub PR lookups and listing via the gh CLI. */
+/**
+ * Handles GitHub PR lookups and listing via the `gh` CLI.
+ *
+ * Rate-limit strategy:
+ * - `getCheckRuns` uses `gh api --cache 5s` so ETag conditional requests are sent on every poll;
+ *   GitHub 304 Not Modified responses do not count against the 5,000 req/hr limit.
+ * - Concurrent `getCheckRuns` calls for the same branch+repo are deduplicated via `checkRunsInflight`.
+ * - `resolveRepoSlug` results are cached per path with a 30-minute TTL.
+ * - A semaphore (`maxConcurrent = 3`) caps the number of live `gh` subprocesses at any time.
+ */
 @injectable()
 export class GithubService {
   /** Slug cache TTL in milliseconds (30 minutes). Evicted on expiry to handle repo renames. */
@@ -252,86 +261,91 @@ export class GithubService {
       action_required: "failure", // blocks merge like a failure
     };
 
-    const promise = new Promise<ChecksStatus>((resolve) => {
-      execFile(
-        "gh",
-        [
-          "api",
-          `repos/${slug}/commits/${encodeURIComponent(branch)}/check-runs`,
-          "--cache", "5s",
-          "-H", "Accept: application/vnd.github+json",
-          "--jq", ".check_runs | map({name: .name, status: .status, conclusion: .conclusion, startedAt: .started_at, completedAt: .completed_at})",
-        ],
-        { cwd: repoPath, encoding: "utf-8", timeout: 15_000, maxBuffer: 2 * 1024 * 1024 },
-        (error, stdout) => {
-          releaseOnce();
-          this.checkRunsInflight.delete(inflightKey);
-          const now = Date.now();
-          if (error || !stdout) {
-            resolve({ aggregate: "no_checks", runs: [], fetchedAt: now });
+    // Capture resolve externally so the inflight map can be set BEFORE execFile is called,
+    // preventing a race where a synchronous mock callback fires inside the Promise constructor
+    // and sees the map entry missing.
+    let resolvePromise!: (value: ChecksStatus) => void;
+    const promise = new Promise<ChecksStatus>((res) => { resolvePromise = res; });
+
+    // Register before spawning - any concurrent caller arriving now will reuse this promise.
+    this.checkRunsInflight.set(inflightKey, promise);
+
+    execFile(
+      "gh",
+      [
+        "api",
+        `repos/${slug}/commits/${encodeURIComponent(branch)}/check-runs`,
+        "--cache", "5s",
+        "-H", "Accept: application/vnd.github+json",
+        "--jq", ".check_runs | map({name: .name, status: .status, conclusion: .conclusion, startedAt: .started_at, completedAt: .completed_at})",
+      ],
+      { cwd: repoPath, encoding: "utf-8", timeout: 15_000, maxBuffer: 2 * 1024 * 1024 },
+      (error, stdout) => {
+        releaseOnce();
+        this.checkRunsInflight.delete(inflightKey);
+        const now = Date.now();
+        if (error || !stdout) {
+          resolvePromise({ aggregate: "no_checks", runs: [], fetchedAt: now });
+          return;
+        }
+        try {
+          const items = JSON.parse(stdout) as Array<{
+            name?: string;
+            status?: string;
+            conclusion?: string | null;
+            startedAt?: string | null;
+            completedAt?: string | null;
+          }>;
+
+          if (items.length === 0) {
+            resolvePromise({ aggregate: "no_checks", runs: [], fetchedAt: now });
             return;
           }
-          try {
-            const items = JSON.parse(stdout) as Array<{
-              name?: string;
-              status?: string;
-              conclusion?: string | null;
-              startedAt?: string | null;
-              completedAt?: string | null;
-            }>;
 
-            if (items.length === 0) {
-              resolve({ aggregate: "no_checks", runs: [], fetchedAt: now });
-              return;
+          const runs = items.map((item) => {
+            // M1: Missing status defaults to in_progress (not completed) to avoid false-green aggregate.
+            const status = (item.status ?? "in_progress") as CheckRun["status"];
+            // H1: Unknown conclusion values are mapped conservatively to failure.
+            const rawConclusion = item.conclusion ?? null;
+            const conclusion: CheckRun["conclusion"] = rawConclusion === null
+              ? null
+              : (conclusionMap[rawConclusion] ?? "failure");
+
+            let durationMs: number | null = null;
+            if (status === "completed" && item.startedAt && item.completedAt) {
+              durationMs = new Date(item.completedAt).getTime() - new Date(item.startedAt).getTime();
             }
 
-            const runs = items.map((item) => {
-              // M1: Missing status defaults to in_progress (not completed) to avoid false-green aggregate.
-              const status = (item.status ?? "in_progress") as CheckRun["status"];
-              // H1: Unknown conclusion values are mapped conservatively to failure.
-              const rawConclusion = item.conclusion ?? null;
-              const conclusion: CheckRun["conclusion"] = rawConclusion === null
-                ? null
-                : (conclusionMap[rawConclusion] ?? "failure");
+            return {
+              name: item.name ?? "unknown",
+              status,
+              conclusion,
+              durationMs,
+              startedAt: item.startedAt ?? null,
+            };
+          });
 
-              let durationMs: number | null = null;
-              if (status === "completed" && item.startedAt && item.completedAt) {
-                durationMs = new Date(item.completedAt).getTime() - new Date(item.startedAt).getTime();
-              }
-
-              return {
-                name: item.name ?? "unknown",
-                status,
-                conclusion,
-                durationMs,
-                startedAt: item.startedAt ?? null,
-              };
-            });
-
-            let aggregate: "passing" | "failing" | "pending" | "no_checks";
-            if (runs.some((r) => r.conclusion === "failure" || r.conclusion === "timed_out")) {
-              aggregate = "failing";
-            } else if (runs.some((r) => r.status !== "completed")) {
-              aggregate = "pending";
-            } else {
-              aggregate = "passing";
-            }
-
-            // If all runs completed but none succeeded (all skipped/cancelled/neutral),
-            // treat as no_checks to avoid a misleading green badge.
-            if (aggregate === "passing" && !runs.some((r) => r.conclusion === "success")) {
-              aggregate = "no_checks";
-            }
-
-            resolve({ aggregate, runs, fetchedAt: now });
-          } catch {
-            resolve({ aggregate: "no_checks", runs: [], fetchedAt: now });
+          let aggregate: "passing" | "failing" | "pending" | "no_checks";
+          if (runs.some((r) => r.conclusion === "failure" || r.conclusion === "timed_out")) {
+            aggregate = "failing";
+          } else if (runs.some((r) => r.status !== "completed")) {
+            aggregate = "pending";
+          } else {
+            aggregate = "passing";
           }
-        },
-      );
-    });
 
-    this.checkRunsInflight.set(inflightKey, promise);
+          // If all runs completed but none succeeded (all skipped/cancelled/neutral),
+          // treat as no_checks to avoid a misleading green badge.
+          if (aggregate === "passing" && !runs.some((r) => r.conclusion === "success")) {
+            aggregate = "no_checks";
+          }
+
+          resolvePromise({ aggregate, runs, fetchedAt: now });
+        } catch {
+          resolvePromise({ aggregate: "no_checks", runs: [], fetchedAt: now });
+        }
+      },
+    );
 
     try {
       return await promise;

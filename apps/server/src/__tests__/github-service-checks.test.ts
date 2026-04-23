@@ -159,12 +159,15 @@ describe("GithubService.getCheckRuns", () => {
   it("limits concurrent gh subprocesses to 3", async () => {
     let activeCount = 0;
     let peakActive = 0;
+    const resolvers: Array<() => void> = [];
 
     mockExecFile.mockImplementation(
       (_cmd: string, _args: string[], _opts: unknown, cb: CallbackFn) => {
         activeCount++;
         peakActive = Math.max(peakActive, activeCount);
-        setImmediate(() => {
+        // Push a resolver instead of using setImmediate so the test controls exactly when each
+        // subprocess "completes". This removes timing non-determinism from the assertion.
+        resolvers.push(() => {
           activeCount--;
           cb(null, JSON.stringify([
             { name: "build", status: "completed", conclusion: "success", startedAt: "2026-04-14T10:00:00Z", completedAt: "2026-04-14T10:00:23Z" },
@@ -173,12 +176,25 @@ describe("GithubService.getCheckRuns", () => {
       },
     );
 
-    // 5 concurrent calls - only 3 should run at once
-    await Promise.all(
-      Array.from({ length: 5 }, () => ghService.getCheckRuns("main", "/repo")),
-    );
+    // Start 5 concurrent calls with distinct branches so the in-flight dedup does not
+    // collapse them - each needs its own execFile slot to exercise the gate properly.
+    const promises = Array.from({ length: 5 }, (_, i) => ghService.getCheckRuns(`branch-${i}`, "/repo"));
 
-    expect(peakActive).toBeLessThanOrEqual(3);
+    // Drain the microtask queue until the gate is saturated (3 execFile calls in-flight).
+    while (resolvers.length < 3) {
+      await Promise.resolve();
+    }
+    expect(peakActive).toBe(3);
+
+    // Complete each in-flight call one at a time; each release lets a queued call start.
+    while (resolvers.length > 0) {
+      resolvers.shift()!();
+      await Promise.resolve(); // allow the next queued caller to acquire the slot
+    }
+
+    await Promise.all(promises);
+    // Peak never exceeded the gate limit throughout the entire run.
+    expect(peakActive).toBe(3);
   });
 
   // C1: Empty branch guard
