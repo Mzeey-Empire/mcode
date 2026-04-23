@@ -37,12 +37,12 @@ describe("CiWatcherService", () => {
   });
 
   it("watch() adds entry and starts passive timer", () => {
-    watcher.watch("t1", 42, "/repo");
+    watcher.watch("t1", 42, "main", "/repo");
     expect(watcher.isWatching("t1")).toBe(true);
   });
 
   it("unwatch() removes entry", () => {
-    watcher.watch("t1", 42, "/repo");
+    watcher.watch("t1", 42, "main", "/repo");
     watcher.unwatch("t1");
     expect(watcher.isWatching("t1")).toBe(false);
   });
@@ -51,7 +51,7 @@ describe("CiWatcherService", () => {
     const pending = makeChecks("pending");
     mockGithubService.getCheckRuns.mockResolvedValue(pending);
     // skipInitialFetch so the assertion exercises the scheduled passive tick, not the eager fetch.
-    watcher.watch("t1", 42, "/repo", { skipInitialFetch: true });
+    watcher.watch("t1", 42, "main", "/repo", { skipInitialFetch: true });
 
     await vi.advanceTimersByTimeAsync(30_000);
 
@@ -64,7 +64,7 @@ describe("CiWatcherService", () => {
   it("does NOT broadcast when state is unchanged", async () => {
     const passing = makeChecks("passing");
     mockGithubService.getCheckRuns.mockResolvedValue(passing);
-    watcher.watch("t1", 42, "/repo", { skipInitialFetch: true });
+    watcher.watch("t1", 42, "main", "/repo", { skipInitialFetch: true });
 
     await vi.advanceTimersByTimeAsync(30_000);
     mockBroadcast.mockClear();
@@ -77,17 +77,17 @@ describe("CiWatcherService", () => {
   it("promotes to active set when checks are pending", async () => {
     const pending = makeChecks("pending");
     mockGithubService.getCheckRuns.mockResolvedValue(pending);
-    watcher.watch("t1", 42, "/repo", { skipInitialFetch: true });
+    watcher.watch("t1", 42, "main", "/repo", { skipInitialFetch: true });
 
     // Passive tick promotes to active when aggregate is pending.
     await vi.advanceTimersByTimeAsync(30_000);
 
-    // Active set ticks at 10s
+    // Active set ticks at 15s
     mockBroadcast.mockClear();
     const passing = makeChecks("passing");
     mockGithubService.getCheckRuns.mockResolvedValue(passing);
 
-    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(15_000);
     expect(mockBroadcast).toHaveBeenCalledWith("thread.checksUpdated", {
       threadId: "t1",
       checks: passing,
@@ -96,7 +96,7 @@ describe("CiWatcherService", () => {
 
   it("refresh() does not broadcast when state is unchanged", () => {
     const passing = makeChecks("passing");
-    watcher.watch("t1", 42, "/repo", { skipInitialFetch: true });
+    watcher.watch("t1", 42, "main", "/repo", { skipInitialFetch: true });
     // First call: cache is null → always broadcasts.
     watcher.refresh("t1", passing);
     mockBroadcast.mockClear();
@@ -106,7 +106,7 @@ describe("CiWatcherService", () => {
   });
 
   it("refresh() broadcasts when aggregate changes", () => {
-    watcher.watch("t1", 42, "/repo", { skipInitialFetch: true });
+    watcher.watch("t1", 42, "main", "/repo", { skipInitialFetch: true });
     watcher.refresh("t1", makeChecks("passing"));
     mockBroadcast.mockClear();
     const failing = makeChecks("failing");
@@ -120,7 +120,7 @@ describe("CiWatcherService", () => {
   it("getEntry returns cached status", async () => {
     const passing = makeChecks("passing");
     mockGithubService.getCheckRuns.mockResolvedValue(passing);
-    watcher.watch("t1", 42, "/repo", { skipInitialFetch: true });
+    watcher.watch("t1", 42, "main", "/repo", { skipInitialFetch: true });
 
     await vi.advanceTimersByTimeAsync(30_000);
 

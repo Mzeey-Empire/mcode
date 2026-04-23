@@ -6,6 +6,7 @@ import type { ChecksStatus } from "@mcode/contracts";
 export interface WatchEntry {
   threadId: string;
   prNumber: number;
+  branch: string;
   repoPath: string;
   cache: ChecksStatus | null;
 }
@@ -13,20 +14,20 @@ export interface WatchEntry {
 /** Broadcast function signature matching the server push system. */
 type BroadcastFn = (channel: string, data: unknown) => void;
 
-// 10s for in-progress checks: responsive enough to catch completion within a PR review window.
-// Worst case: 5 active threads × 6 calls/min = 30 calls/min, well within GitHub's 5000/hr limit.
-const ACTIVE_INTERVAL_MS = 10_000;
-// 15s for terminal checks: catches externally-triggered CI runs (push from terminal / another
+// 15s for in-progress checks: responsive enough to catch completion within a PR review window.
+// Worst case: 5 active threads × 4 calls/min = 20 calls/min, well within GitHub's 5000/hr limit.
+const ACTIVE_INTERVAL_MS = 15_000;
+// 20s for terminal checks: catches externally-triggered CI runs (push from terminal / another
 // machine) within the window where they'd be most noticeable to the user.
-// Worst case: 5 passive threads × 4 calls/min = 20 calls/min, well within GitHub's 5000/hr limit.
-const PASSIVE_INTERVAL_MS = 15_000;
+// Worst case: 5 passive threads × 3 calls/min = 15 calls/min, well within GitHub's 5000/hr limit.
+const PASSIVE_INTERVAL_MS = 20_000;
 // When the user just pushed, GitHub Actions take a few seconds to register the new run.
 // Bump the cache on this curve so "pending" appears within ~3s of push completion.
 const POST_PUSH_BUMP_DELAYS_MS = [3_000, 8_000, 20_000];
 
 /**
  * Server-side CI check watcher with adaptive dual-interval polling.
- * Threads with in-progress checks poll at 10s; terminal checks poll at 15s.
+ * Threads with in-progress checks poll at 15s; terminal checks poll at 20s.
  * Broadcasts `thread.checksUpdated` only when state changes.
  */
 export class CiWatcherService {
@@ -49,15 +50,15 @@ export class CiWatcherService {
    * Pass `skipInitialFetch: true` when the caller will fetch and broadcast the result itself,
    * to avoid spawning a redundant concurrent subprocess.
    */
-  watch(threadId: string, prNumber: number, repoPath: string, opts?: { skipInitialFetch?: boolean }): void {
+  watch(threadId: string, prNumber: number, branch: string, repoPath: string, opts?: { skipInitialFetch?: boolean }): void {
     if (this.active.has(threadId) || this.passive.has(threadId)) return;
-    this.passive.set(threadId, { threadId, prNumber, repoPath, cache: null });
+    this.passive.set(threadId, { threadId, prNumber, branch, repoPath, cache: null });
     this.startPassiveTimer();
 
     if (opts?.skipInitialFetch) return;
 
     // Fetch immediately so the client gets data without waiting for the passive tick.
-    this.githubService.getCheckRuns(prNumber, repoPath).then((checks) => {
+    this.githubService.getCheckRuns(branch, repoPath).then((checks) => {
       const entry = this.passive.get(threadId) ?? this.active.get(threadId);
       if (!entry) return; // unwatched during fetch
       entry.cache = checks;
@@ -131,7 +132,7 @@ export class CiWatcherService {
     const entry = this.active.get(threadId) ?? this.passive.get(threadId);
     if (!entry) return;
     try {
-      const checks = await this.githubService.getCheckRuns(entry.prNumber, entry.repoPath);
+      const checks = await this.githubService.getCheckRuns(entry.branch, entry.repoPath);
       this.refresh(threadId, checks);
     } catch (err) {
       logger.debug("CiWatcher bump failed", { threadId, error: String(err) });
@@ -191,11 +192,11 @@ export class CiWatcherService {
       // Insert placeholder synchronously so concurrent watch() calls see this threadId
       // and skip re-insertion during the async fetch window.
       if (!this.active.has(t.id) && !this.passive.has(t.id)) {
-        this.passive.set(t.id, { threadId: t.id, prNumber: t.pr_number, repoPath, cache: null });
+        this.passive.set(t.id, { threadId: t.id, prNumber: t.pr_number, branch: t.branch, repoPath, cache: null });
       }
 
       try {
-        const checks = await this.githubService.getCheckRuns(t.pr_number, repoPath);
+        const checks = await this.githubService.getCheckRuns(t.branch, repoPath);
         const entry = this.passive.get(t.id) ?? this.active.get(t.id);
         if (!entry) return; // was unwatched during fetch
         entry.cache = checks;
@@ -271,7 +272,7 @@ export class CiWatcherService {
     const entries = [...set.values()];
     const results = await Promise.allSettled(
       entries.map(async (entry) => {
-        const checks = await this.githubService.getCheckRuns(entry.prNumber, entry.repoPath);
+        const checks = await this.githubService.getCheckRuns(entry.branch, entry.repoPath);
         return { entry, checks };
       }),
     );

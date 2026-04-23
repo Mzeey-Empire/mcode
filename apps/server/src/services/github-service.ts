@@ -9,12 +9,58 @@ import { execFile } from "child_process";
 import type { PrInfo, PrDetail, ChecksStatus, CheckRun } from "@mcode/contracts";
 import { WorkspaceRepo } from "../repositories/workspace-repo";
 
-/** Handles GitHub PR lookups and listing via the gh CLI. */
+/**
+ * Handles GitHub PR lookups and listing via the `gh` CLI.
+ *
+ * Rate-limit strategy:
+ * - `getCheckRuns` uses `gh api --cache 5s` so ETag conditional requests are sent on every poll;
+ *   GitHub 304 Not Modified responses do not count against the 5,000 req/hr limit.
+ * - Concurrent `getCheckRuns` calls for the same branch+repo are deduplicated via `checkRunsInflight`.
+ * - `resolveRepoSlug` results are cached per path with a 30-minute TTL.
+ * - A semaphore (`maxConcurrent = 3`) caps the number of live `gh` subprocesses at any time.
+ */
 @injectable()
 export class GithubService {
+  /** Slug cache TTL in milliseconds (30 minutes). Evicted on expiry to handle repo renames. */
+  private static readonly SLUG_TTL_MS = 30 * 60 * 1000;
+  private readonly slugCache = new Map<string, { promise: Promise<string>; expiresAt: number }>();
+
+  /** In-flight deduplication map for getCheckRuns to avoid redundant concurrent fetches. */
+  private readonly checkRunsInflight = new Map<string, Promise<ChecksStatus>>();
+
+  /** Maximum number of gh subprocesses that may run concurrently. */
+  private readonly maxConcurrent = 3;
+  private activeCount = 0;
+  private readonly waitQueue: Array<() => void> = [];
+
   constructor(
     @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
   ) {}
+
+  /**
+   * Acquire a slot in the concurrency gate.
+   * Resolves immediately when a slot is free, otherwise queues until one is released.
+   */
+  private acquire(): Promise<void> {
+    if (this.activeCount < this.maxConcurrent) {
+      this.activeCount++;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => this.waitQueue.push(resolve));
+  }
+
+  /**
+   * Release a concurrency slot.
+   * Wakes the next queued waiter if one exists, otherwise decrements the active count.
+   */
+  private release(): void {
+    const next = this.waitQueue.shift();
+    if (next) {
+      next();
+    } else {
+      this.activeCount--;
+    }
+  }
 
   /** Look up the PR associated with a branch in the given working directory. */
   getBranchPr(branch: string, cwd: string): Promise<PrInfo | null> {
@@ -161,94 +207,191 @@ export class GithubService {
   }
 
   /**
-   * Fetch CI check runs for a PR. Uses `gh pr checks` for simplicity.
+   * Fetch CI check runs for a branch via the GitHub REST API.
+   * Uses `gh api --cache 5s` so ETag conditional requests are sent automatically -
+   * 304 Not Modified responses do not count against the 5,000/hr rate limit.
    * Returns aggregate status and individual check details.
+   *
+   * Guards:
+   * - Empty branch returns no_checks immediately without a network call (avoids malformed URL).
+   * - Concurrent calls for the same branch+repo are deduplicated (single in-flight request).
+   * - Unknown conclusion values are treated conservatively as failure.
    */
-  getCheckRuns(prNumber: number, repoPath: string): Promise<ChecksStatus> {
-    return new Promise((resolve) => {
-      execFile(
-        "gh",
-        ["pr", "checks", String(prNumber), "--json", "name,state,startedAt,completedAt"],
-        { cwd: repoPath, encoding: "utf-8", timeout: 15_000 },
-        (error, stdout) => {
-          const now = Date.now();
-          if (error || !stdout) {
-            resolve({ aggregate: "no_checks", runs: [], fetchedAt: now });
+  async getCheckRuns(branch: string, repoPath: string): Promise<ChecksStatus> {
+    // C1: Empty branch would produce a malformed API URL - short-circuit immediately.
+    if (!branch) {
+      return { aggregate: "no_checks", runs: [], fetchedAt: Date.now() };
+    }
+
+    const inflightKey = `${repoPath}\0${branch}`;
+
+    // M6: Return an existing in-flight promise if one exists for this branch+repo pair.
+    const inflight = this.checkRunsInflight.get(inflightKey);
+    if (inflight) return inflight;
+
+    const slug = await this.resolveRepoSlug(repoPath);
+
+    // Check again after async slug resolution - another caller may have already started the fetch.
+    const inflight2 = this.checkRunsInflight.get(inflightKey);
+    if (inflight2) return inflight2;
+
+    await this.acquire();
+
+    // Check once more after acquiring the semaphore slot.
+    const inflight3 = this.checkRunsInflight.get(inflightKey);
+    if (inflight3) { this.release(); return inflight3; }
+
+    let released = false;
+    /** Releases the concurrency slot at most once, guarding against double-release. */
+    const releaseOnce = (): void => {
+      if (!released) {
+        released = true;
+        this.release();
+      }
+    };
+
+    /** Explicit conclusion mapping - unknown values default to failure (conservative). */
+    const conclusionMap: Record<string, CheckRun["conclusion"]> = {
+      success: "success",
+      failure: "failure",
+      cancelled: "cancelled",
+      skipped: "skipped",
+      timed_out: "timed_out",
+      neutral: "neutral",
+      action_required: "failure", // blocks merge like a failure
+    };
+
+    // Capture resolve externally so the inflight map can be set BEFORE execFile is called,
+    // preventing a race where a synchronous mock callback fires inside the Promise constructor
+    // and sees the map entry missing.
+    let resolvePromise!: (value: ChecksStatus) => void;
+    const promise = new Promise<ChecksStatus>((res) => { resolvePromise = res; });
+
+    // Register before spawning - any concurrent caller arriving now will reuse this promise.
+    this.checkRunsInflight.set(inflightKey, promise);
+
+    execFile(
+      "gh",
+      [
+        "api",
+        `repos/${slug}/commits/${encodeURIComponent(branch)}/check-runs`,
+        "--cache", "5s",
+        "-H", "Accept: application/vnd.github+json",
+        "--jq", ".check_runs | map({name: .name, status: .status, conclusion: .conclusion, startedAt: .started_at, completedAt: .completed_at})",
+      ],
+      { cwd: repoPath, encoding: "utf-8", timeout: 15_000, maxBuffer: 2 * 1024 * 1024 },
+      (error, stdout) => {
+        releaseOnce();
+        this.checkRunsInflight.delete(inflightKey);
+        const now = Date.now();
+        if (error || !stdout) {
+          resolvePromise({ aggregate: "no_checks", runs: [], fetchedAt: now });
+          return;
+        }
+        try {
+          const items = JSON.parse(stdout) as Array<{
+            name?: string;
+            status?: string;
+            conclusion?: string | null;
+            startedAt?: string | null;
+            completedAt?: string | null;
+          }>;
+
+          if (items.length === 0) {
+            resolvePromise({ aggregate: "no_checks", runs: [], fetchedAt: now });
             return;
           }
-          try {
-            const items = JSON.parse(stdout) as Array<{
-              name?: string;
-              state?: string;
-              startedAt?: string | null;
-              completedAt?: string | null;
-            }>;
 
-            if (items.length === 0) {
-              resolve({ aggregate: "no_checks", runs: [], fetchedAt: now });
-              return;
+          const runs = items.map((item) => {
+            // M1: Missing status defaults to in_progress (not completed) to avoid false-green aggregate.
+            const status = (item.status ?? "in_progress") as CheckRun["status"];
+            // H1: Unknown conclusion values are mapped conservatively to failure.
+            const rawConclusion = item.conclusion ?? null;
+            const conclusion: CheckRun["conclusion"] = rawConclusion === null
+              ? null
+              : (conclusionMap[rawConclusion] ?? "failure");
+
+            let durationMs: number | null = null;
+            if (status === "completed" && item.startedAt && item.completedAt) {
+              durationMs = new Date(item.completedAt).getTime() - new Date(item.startedAt).getTime();
             }
 
-            const runs = items.map((item) => {
-              const ghState = (item.state ?? "").toUpperCase();
-              const completed = ghState === "SUCCESS" || ghState === "FAILURE"
-                || ghState === "CANCELLED" || ghState === "SKIPPED"
-                || ghState === "TIMED_OUT" || ghState === "NEUTRAL"
-                || ghState === "ACTION_REQUIRED" || ghState === "STALE";
+            return {
+              name: item.name ?? "unknown",
+              status,
+              conclusion,
+              durationMs,
+              startedAt: item.startedAt ?? null,
+            };
+          });
 
-              const status = completed ? "completed" as const
-                : ghState === "QUEUED" ? "queued" as const
-                : "in_progress" as const;
-
-              // ACTION_REQUIRED blocks merge like a failure; STALE is abandoned (terminal like cancelled).
-              const conclusionMap: Record<string, CheckRun["conclusion"]> = {
-                SUCCESS: "success",
-                FAILURE: "failure",
-                CANCELLED: "cancelled",
-                SKIPPED: "skipped",
-                TIMED_OUT: "timed_out",
-                NEUTRAL: "neutral",
-                ACTION_REQUIRED: "failure",
-                STALE: "cancelled",
-              };
-              const conclusion = completed ? (conclusionMap[ghState] ?? "cancelled") : null;
-
-              let durationMs: number | null = null;
-              if (completed && item.startedAt && item.completedAt) {
-                durationMs = new Date(item.completedAt).getTime() - new Date(item.startedAt).getTime();
-              }
-
-              return {
-                name: item.name ?? "unknown",
-                status,
-                conclusion,
-                durationMs,
-                startedAt: item.startedAt ?? null,
-              };
-            });
-
-            let aggregate: "passing" | "failing" | "pending" | "no_checks";
-            if (runs.some((r) => r.conclusion === "failure" || r.conclusion === "timed_out")) {
-              aggregate = "failing";
-            } else if (runs.some((r) => r.status !== "completed")) {
-              aggregate = "pending";
-            } else {
-              aggregate = "passing";
-            }
-
-            // If all runs completed but none succeeded (all skipped/cancelled/neutral),
-            // treat as no_checks to avoid a misleading green badge.
-            if (aggregate === "passing" && !runs.some((r) => r.conclusion === "success")) {
-              aggregate = "no_checks";
-            }
-
-            resolve({ aggregate, runs, fetchedAt: now });
-          } catch {
-            resolve({ aggregate: "no_checks", runs: [], fetchedAt: now });
+          let aggregate: "passing" | "failing" | "pending" | "no_checks";
+          if (runs.some((r) => r.conclusion === "failure" || r.conclusion === "timed_out")) {
+            aggregate = "failing";
+          } else if (runs.some((r) => r.status !== "completed")) {
+            aggregate = "pending";
+          } else {
+            aggregate = "passing";
           }
+
+          // If all runs completed but none succeeded (all skipped/cancelled/neutral),
+          // treat as no_checks to avoid a misleading green badge.
+          if (aggregate === "passing" && !runs.some((r) => r.conclusion === "success")) {
+            aggregate = "no_checks";
+          }
+
+          resolvePromise({ aggregate, runs, fetchedAt: now });
+        } catch {
+          resolvePromise({ aggregate: "no_checks", runs: [], fetchedAt: now });
+        }
+      },
+    );
+
+    try {
+      return await promise;
+    } finally {
+      // M3: Guard covers the synchronous-throw path; the callback path already called releaseOnce().
+      releaseOnce();
+      this.checkRunsInflight.delete(inflightKey);
+    }
+  }
+
+  /**
+   * Resolve the GitHub owner/repo slug for a local repository path.
+   * Results are cached for 30 minutes (SLUG_TTL_MS) to handle repo renames gracefully.
+   * Validates the returned value matches `owner/repo` format before caching.
+   */
+  resolveRepoSlug(repoPath: string): Promise<string> {
+    const cached = this.slugCache.get(repoPath);
+    // H2: Honour TTL - evict expired entries so renamed repos get fresh slugs.
+    if (cached && Date.now() < cached.expiresAt) return cached.promise;
+    if (cached) this.slugCache.delete(repoPath);
+
+    const pending = new Promise<string>((resolve, reject) => {
+      execFile(
+        "gh",
+        ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+        { cwd: repoPath, encoding: "utf-8", timeout: 10_000 },
+        (error, stdout) => {
+          if (error || !stdout.trim()) {
+            this.slugCache.delete(repoPath); // evict so next call can retry
+            reject(error ?? new Error("Failed to resolve repo slug"));
+            return;
+          }
+          const trimmed = stdout.trim();
+          // M2: Validate slug format before using it in API URLs.
+          if (!/^[^/]+\/[^/]+$/.test(trimmed)) {
+            this.slugCache.delete(repoPath);
+            reject(new Error(`Unexpected slug format: ${trimmed}`));
+            return;
+          }
+          resolve(trimmed);
         },
       );
     });
+
+    this.slugCache.set(repoPath, { promise: pending, expiresAt: Date.now() + GithubService.SLUG_TTL_MS });
+    return pending;
   }
 
   /** Look up a PR by its GitHub URL. */

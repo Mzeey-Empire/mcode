@@ -298,7 +298,7 @@ for (const provider of providerRegistry.resolveAll()) {
             // Start CI watching if PR is open/active; stop watching if it became terminal.
             const prState = pr.state.toLowerCase();
             if (prState !== "merged" && prState !== "closed") {
-              ciWatcherService.watch(thread.id, pr.number, workspace.path);
+              ciWatcherService.watch(thread.id, pr.number, thread.branch, workspace.path);
             } else {
               ciWatcherService.unwatch(thread.id);
             }
