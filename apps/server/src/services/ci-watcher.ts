@@ -14,20 +14,20 @@ export interface WatchEntry {
 /** Broadcast function signature matching the server push system. */
 type BroadcastFn = (channel: string, data: unknown) => void;
 
-// 10s for in-progress checks: responsive enough to catch completion within a PR review window.
-// Worst case: 5 active threads × 6 calls/min = 30 calls/min, well within GitHub's 5000/hr limit.
-const ACTIVE_INTERVAL_MS = 10_000;
-// 15s for terminal checks: catches externally-triggered CI runs (push from terminal / another
+// 15s for in-progress checks: responsive enough to catch completion within a PR review window.
+// Worst case: 5 active threads × 4 calls/min = 20 calls/min, well within GitHub's 5000/hr limit.
+const ACTIVE_INTERVAL_MS = 15_000;
+// 20s for terminal checks: catches externally-triggered CI runs (push from terminal / another
 // machine) within the window where they'd be most noticeable to the user.
-// Worst case: 5 passive threads × 4 calls/min = 20 calls/min, well within GitHub's 5000/hr limit.
-const PASSIVE_INTERVAL_MS = 15_000;
+// Worst case: 5 passive threads × 3 calls/min = 15 calls/min, well within GitHub's 5000/hr limit.
+const PASSIVE_INTERVAL_MS = 20_000;
 // When the user just pushed, GitHub Actions take a few seconds to register the new run.
 // Bump the cache on this curve so "pending" appears within ~3s of push completion.
 const POST_PUSH_BUMP_DELAYS_MS = [3_000, 8_000, 20_000];
 
 /**
  * Server-side CI check watcher with adaptive dual-interval polling.
- * Threads with in-progress checks poll at 10s; terminal checks poll at 15s.
+ * Threads with in-progress checks poll at 15s; terminal checks poll at 20s.
  * Broadcasts `thread.checksUpdated` only when state changes.
  */
 export class CiWatcherService {
