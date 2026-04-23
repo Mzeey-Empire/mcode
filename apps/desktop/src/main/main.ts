@@ -20,7 +20,6 @@ import {
 import { execFileSync, spawn, type ChildProcess } from "child_process";
 import { existsSync, createReadStream } from "fs";
 import { mkdir, writeFile } from "fs/promises";
-import { connect as netConnect } from "net";
 import { isAbsolute, join } from "path";
 import { randomUUID } from "crypto";
 import { Readable } from "stream";
@@ -30,6 +29,7 @@ import { getExtension as bundledGetExtension } from "@mcode/contracts";
 /** Use snapshot-provided module when available (V8 snapshot skips re-init). */
 const getExtension = globalThis.__v8Snapshot?.contracts?.getExtension ?? bundledGetExtension;
 import { ServerManager } from "./server-manager.js";
+import { startIpcRelay } from "./ipc-relay.js";
 import { initAutoUpdater } from "./auto-updater.js";
 import { setupSpellcheck } from "./spellcheck.js";
 
@@ -223,62 +223,6 @@ function openIfAllowed(url: string): void {
   } catch {
     // Invalid URL, ignore
   }
-}
-
-// ---------------------------------------------------------------------------
-// IPC push relay (main process → renderer via webContents.send)
-// ---------------------------------------------------------------------------
-
-/**
- * Connect to the server's IPC push endpoint and forward parsed frames
- * to the renderer via webContents.send("ipc-push-message", data).
- * The main process owns the net.Socket because the preload runs in a
- * sandbox that doesn't have access to the Node.js `net` module.
- */
-function startIpcRelay(ipcPath: string, window: BrowserWindow): void {
-  if (!ipcPath) return;
-
-  const socket = netConnect(ipcPath);
-  const chunks: Buffer[] = [];
-  let totalLen = 0;
-
-  socket.on("data", (chunk: Buffer) => {
-    chunks.push(chunk);
-    totalLen += chunk.length;
-
-    // Only concat when we have enough data for at least one frame header
-    let buffer = chunks.length === 1 ? chunks[0] : Buffer.concat(chunks, totalLen);
-    chunks.length = 0;
-    totalLen = 0;
-
-    while (buffer.length >= 4) {
-      const frameLen = buffer.readUInt32BE(0);
-      if (buffer.length < 4 + frameLen) break;
-
-      const json = buffer.subarray(4, 4 + frameLen).toString("utf-8");
-      buffer = buffer.subarray(4 + frameLen);
-
-      try {
-        const data = JSON.parse(json);
-        if (!window.isDestroyed()) {
-          window.webContents.send("ipc-push-message", data);
-        }
-      } catch { /* malformed frame, skip */ }
-    }
-
-    // Retain leftover bytes for the next data event
-    if (buffer.length > 0) {
-      chunks.push(buffer);
-      totalLen = buffer.length;
-    }
-  });
-
-  socket.on("error", () => socket.destroy());
-  socket.on("close", () => {
-    if (!window.isDestroyed()) {
-      window.webContents.send("ipc-push-disconnect");
-    }
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -693,9 +637,11 @@ app.whenReady().then(async () => {
     // Enable spellchecker and attach per-window context-menu handler.
     setupSpellcheck(mainWindow!);
 
-    // Start IPC push relay (main process → renderer via webContents.send)
+    // Start IPC push relay (main process → renderer via webContents.send).
+    // Destroy the socket when the window closes to prevent named-pipe handle leaks.
     if (mainWindow && serverManager.ipcPath) {
-      startIpcRelay(serverManager.ipcPath, mainWindow);
+      const cleanupRelay = startIpcRelay(serverManager.ipcPath, mainWindow);
+      mainWindow.once("closed", cleanupRelay);
     }
 
     // Set up close handler
@@ -708,7 +654,8 @@ app.whenReady().then(async () => {
         setupSpellcheck(mainWindow!);
         setupCloseHandler();
         if (mainWindow && serverManager.ipcPath) {
-          startIpcRelay(serverManager.ipcPath, mainWindow);
+          const cleanupRelay = startIpcRelay(serverManager.ipcPath, mainWindow);
+          mainWindow.once("closed", cleanupRelay);
         }
       }
     });

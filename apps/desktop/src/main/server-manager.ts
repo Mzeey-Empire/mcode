@@ -346,12 +346,18 @@ export class ServerManager {
         ? undefined
         : createWriteStream(SERVER_LOG_PATH, { flags: "w" });
 
-      const child = spawn(process.execPath, args, {
-        cwd,
-        env,
-        detached: true,
-        stdio: isDev ? "inherit" : ["ignore", "ignore", stderrStream ? "pipe" : "ignore"],
-      });
+      let child;
+      try {
+        child = spawn(process.execPath, args, {
+          cwd,
+          env,
+          detached: true,
+          stdio: isDev ? "inherit" : ["ignore", "ignore", stderrStream ? "pipe" : "ignore"],
+        });
+      } catch (err) {
+        stderrStream?.destroy();
+        throw err;
+      }
       child.unref();
       this.serverProcess = child;
 
