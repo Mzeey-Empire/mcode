@@ -153,7 +153,7 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
   private modelCache: ProviderModelInfo[] | null = null;
   private modelCacheTimestamp = 0;
   /** Avoid hammering the Copilot SDK on every call - results are stable within a session. */
-  private static readonly MODEL_CACHE_TTL_MS = 10 * 60 * 1000;
+  private static readonly MODEL_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
   constructor(
     @inject(SettingsService) private readonly settingsService: SettingsService,
@@ -659,13 +659,23 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
           }),
         );
 
-        // assistant.message - final complete assistant response
+        // assistant.message - final complete assistant response.
+        // Phased-output models (e.g. o3, o4-mini, Claude extended thinking) emit
+        // one assistant.message per phase. The "thinking" phase carries internal
+        // reasoning that must not be saved or shown in the chat. Only the response
+        // phase (or messages without an explicit phase) contain user-facing content.
+        // Separate assistant.reasoning / assistant.reasoning_delta events carry
+        // extended thinking for streaming; those have no handler registered here
+        // and are therefore silently ignored.
         unsubscribers.push(
           session.on("assistant.message", (event) => {
+            if (event.data.phase === "thinking") return;
+            const content = event.data.content;
+            if (!content) return;
             this.emit("event", {
               type: "message",
               threadId,
-              content: event.data.content,
+              content,
               tokens: event.data.outputTokens ?? null,
             } satisfies AgentEvent);
           }),

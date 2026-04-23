@@ -450,6 +450,113 @@ describe("CopilotProvider.complete()", () => {
 });
 
 // ---------------------------------------------------------------------------
+// assistant.message phase filtering - thinking content must not reach the UI
+// ---------------------------------------------------------------------------
+
+describe("CopilotProvider assistant.message phase filtering", () => {
+  /** Fires events via a fresh mock session and captures all emitted AgentEvents. */
+  async function runWithSession(
+    eventSequence: Array<{ name: string; data?: unknown }>,
+  ): Promise<{ events: AgentEvent[] }> {
+    vi.clearAllMocks();
+    mockClient.getState.mockReturnValue("connected");
+    mockClient.start.mockResolvedValue(undefined);
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: object, cb: (err: Error | null, result?: { stdout: string }) => void) => {
+        cb(null, { stdout: "gho_faketoken\n" });
+      },
+    );
+
+    const mockSession = makeMockSession();
+    mockClient.createSession.mockResolvedValue(mockSession);
+    mockSession.send.mockImplementation(async () => {
+      for (const evt of eventSequence) {
+        mockSession.fire(evt.name, evt.data);
+      }
+      mockSession.fire("session.idle");
+    });
+
+    const provider = new CopilotProvider(makeSettingsService() as any);
+    const events: AgentEvent[] = [];
+    provider.on("event", (e: AgentEvent) => events.push(e));
+
+    await provider.sendMessage({
+      sessionId: "mcode-phase-test",
+      message: "hello",
+      cwd: "/tmp",
+      model: "gpt-4o",
+      resume: false,
+      permissionMode: "auto",
+    });
+
+    return { events };
+  }
+
+  it("emits a message event for a normal (no phase) assistant.message", async () => {
+    const { events } = await runWithSession([
+      { name: "assistant.message", data: { content: "Hello, world!", outputTokens: 5 } },
+    ]);
+
+    const msgEvts = events.filter((e) => e.type === "message");
+    expect(msgEvts).toHaveLength(1);
+    expect(msgEvts[0]?.type === "message" && msgEvts[0].content).toBe("Hello, world!");
+  });
+
+  it("emits a message event for a response-phase assistant.message", async () => {
+    const { events } = await runWithSession([
+      { name: "assistant.message", data: { content: "Final answer.", outputTokens: 10, phase: "response" } },
+    ]);
+
+    const msgEvts = events.filter((e) => e.type === "message");
+    expect(msgEvts).toHaveLength(1);
+    expect(msgEvts[0]?.type === "message" && msgEvts[0].content).toBe("Final answer.");
+  });
+
+  it("does NOT emit a message event for a thinking-phase assistant.message", async () => {
+    const { events } = await runWithSession([
+      { name: "assistant.message", data: { content: "I am reasoning internally...", outputTokens: 20, phase: "thinking" } },
+    ]);
+
+    const msgEvts = events.filter((e) => e.type === "message");
+    expect(msgEvts).toHaveLength(0);
+  });
+
+  it("only emits the response-phase message when both phases fire in the same turn", async () => {
+    const { events } = await runWithSession([
+      { name: "assistant.message", data: { content: "Internal thoughts here.", outputTokens: 15, phase: "thinking" } },
+      { name: "assistant.message", data: { content: "Here is my answer.", outputTokens: 8, phase: "response" } },
+    ]);
+
+    const msgEvts = events.filter((e) => e.type === "message");
+    expect(msgEvts).toHaveLength(1);
+    expect(msgEvts[0]?.type === "message" && msgEvts[0].content).toBe("Here is my answer.");
+  });
+
+  it("does NOT emit a message event when content is empty", async () => {
+    const { events } = await runWithSession([
+      { name: "assistant.message", data: { content: "", outputTokens: 0 } },
+    ]);
+
+    const msgEvts = events.filter((e) => e.type === "message");
+    expect(msgEvts).toHaveLength(0);
+  });
+
+  it("does NOT emit textDelta events for assistant.reasoning_delta (no handler registered)", async () => {
+    const { events } = await runWithSession([
+      { name: "assistant.reasoning_delta", data: { reasoningId: "r-1", deltaContent: "thinking chunk" } },
+      { name: "assistant.message", data: { content: "Actual response.", outputTokens: 5 } },
+    ]);
+
+    const deltaEvts = events.filter((e) => e.type === "textDelta");
+    // No textDelta from reasoning events - only from assistant.message_delta
+    expect(deltaEvts).toHaveLength(0);
+    // Response message is still emitted
+    const msgEvts = events.filter((e) => e.type === "message");
+    expect(msgEvts).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // listModels() - TTL cache
 // ---------------------------------------------------------------------------
 
