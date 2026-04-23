@@ -12,6 +12,8 @@ import { WorkspaceRepo } from "../repositories/workspace-repo";
 /** Handles GitHub PR lookups and listing via the gh CLI. */
 @injectable()
 export class GithubService {
+  private readonly slugCache = new Map<string, string>();
+
   constructor(
     @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
   ) {}
@@ -246,6 +248,29 @@ export class GithubService {
           } catch {
             resolve({ aggregate: "no_checks", runs: [], fetchedAt: now });
           }
+        },
+      );
+    });
+  }
+
+  /** Resolve the GitHub owner/repo slug for a local repository path. Cached per path. */
+  resolveRepoSlug(repoPath: string): Promise<string> {
+    const cached = this.slugCache.get(repoPath);
+    if (cached) return Promise.resolve(cached);
+
+    return new Promise((resolve, reject) => {
+      execFile(
+        "gh",
+        ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+        { cwd: repoPath, encoding: "utf-8", timeout: 10_000 },
+        (error, stdout) => {
+          if (error || !stdout.trim()) {
+            reject(error ?? new Error("Failed to resolve repo slug"));
+            return;
+          }
+          const slug = stdout.trim();
+          this.slugCache.set(repoPath, slug);
+          resolve(slug);
         },
       );
     });

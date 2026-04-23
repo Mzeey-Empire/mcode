@@ -153,3 +153,41 @@ describe("GithubService.getCheckRuns", () => {
     expect(result.runs).toHaveLength(0);
   });
 });
+
+type CallbackFn = (error: Error | null, stdout: string, stderr: string) => void;
+
+describe("GithubService.resolveRepoSlug", () => {
+  let ghService: GithubService;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    ghService = new GithubService({} as WorkspaceRepo);
+  });
+
+  it("returns owner/repo from gh repo view", async () => {
+    mockExecFile.mockImplementationOnce((_cmd: string, args: string[], _opts: unknown, cb: CallbackFn) => {
+      expect(args).toContain("repo");
+      expect(args).toContain("view");
+      cb(null, "owner/my-repo\n", "");
+    });
+    const slug = await ghService.resolveRepoSlug("/some/repo");
+    expect(slug).toBe("owner/my-repo");
+  });
+
+  it("caches the slug per repoPath", async () => {
+    mockExecFile.mockImplementationOnce((_cmd: string, _args: string[], _opts: unknown, cb: CallbackFn) => {
+      cb(null, "owner/cached-repo\n", "");
+    });
+    await ghService.resolveRepoSlug("/cached");
+    const slug = await ghService.resolveRepoSlug("/cached");
+    expect(slug).toBe("owner/cached-repo");
+    expect(mockExecFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws when gh repo view fails", async () => {
+    mockExecFile.mockImplementationOnce((_cmd: string, _args: string[], _opts: unknown, cb: CallbackFn) => {
+      cb(new Error("not a git repo"), "", "");
+    });
+    await expect(ghService.resolveRepoSlug("/bad")).rejects.toThrow();
+  });
+});
