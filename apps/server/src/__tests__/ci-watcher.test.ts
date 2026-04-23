@@ -82,12 +82,12 @@ describe("CiWatcherService", () => {
     // Passive tick promotes to active when aggregate is pending.
     await vi.advanceTimersByTimeAsync(30_000);
 
-    // Active set ticks at 10s
+    // Active set ticks at 15s
     mockBroadcast.mockClear();
     const passing = makeChecks("passing");
     mockGithubService.getCheckRuns.mockResolvedValue(passing);
 
-    await vi.advanceTimersByTimeAsync(10_000);
+    await vi.advanceTimersByTimeAsync(15_000);
     expect(mockBroadcast).toHaveBeenCalledWith("thread.checksUpdated", {
       threadId: "t1",
       checks: passing,
