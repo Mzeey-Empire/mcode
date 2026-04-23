@@ -38,6 +38,11 @@ let lastCheckStatusFetchAt = 0;
 /** Minimum interval between reconnect-triggered checkStatus fetches to avoid subprocess storms. */
 const CHECK_STATUS_RECONNECT_COOLDOWN_MS = 30_000;
 
+/** Last thread-list refresh timestamp per workspace, triggered on WS reconnect. */
+const lastLoadThreadsAtByWorkspace = new Map<string, number>();
+/** Minimum interval between reconnect-triggered thread-list fetches to avoid rapid-reconnect storms. */
+const LOAD_THREADS_RECONNECT_COOLDOWN_MS = 5_000;
+
 type Listener = (data: unknown) => void;
 
 /**
@@ -202,6 +207,22 @@ export function createWsTransport(
           (window as any).__mcodeHydrationComplete = true;
         });
       }
+
+      // Re-fetch the thread list after reconnect so thread statuses are not
+      // stale. A server restart marks active threads "interrupted" in the DB
+      // but the client still holds the pre-restart status in memory.
+      // Throttled to avoid hammering the API during rapid reconnect cycles
+      // (e.g. flaky networks, server restarts causing multiple reconnect attempts).
+      // Deferred import avoids a circular dependency at module evaluation time.
+      const nowForThreads = Date.now();
+      import("@/stores/workspaceStore").then(({ useWorkspaceStore }) => {
+        const { activeWorkspaceId, loadThreads } = useWorkspaceStore.getState();
+        if (!activeWorkspaceId) return;
+        const last = lastLoadThreadsAtByWorkspace.get(activeWorkspaceId) ?? 0;
+        if (nowForThreads - last <= LOAD_THREADS_RECONNECT_COOLDOWN_MS) return;
+        lastLoadThreadsAtByWorkspace.set(activeWorkspaceId, nowForThreads);
+        loadThreads(activeWorkspaceId).catch(() => {});
+      });
 
       // Reattach active terminals after reconnect.
       // Deferred import avoids a circular dependency at module evaluation time.

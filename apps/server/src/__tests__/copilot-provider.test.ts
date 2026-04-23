@@ -236,59 +236,60 @@ describe("CopilotProvider bootstrap", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Shared helper for event-sequence tests
+// ---------------------------------------------------------------------------
+
+/**
+ * Run sendMessage with a fresh mock session that fires the given events
+ * in sequence after send() resolves, then fires session.idle to end the turn.
+ * Fully resets mock state on each call for isolation.
+ */
+async function runWithMockSession(
+  eventSequence: Array<{ name: string; data?: unknown }>,
+  sessionId = "mcode-shared-test",
+): Promise<{ events: AgentEvent[] }> {
+  vi.clearAllMocks();
+  mockClient.getState.mockReturnValue("connected");
+  mockClient.start.mockResolvedValue(undefined);
+  mockExecFile.mockImplementation(
+    (_cmd: string, _args: string[], _opts: object, cb: (err: Error | null, result?: { stdout: string }) => void) => {
+      cb(null, { stdout: "gho_faketoken\n" });
+    },
+  );
+
+  const mockSession = makeMockSession();
+  mockClient.createSession.mockResolvedValue(mockSession);
+  mockSession.send.mockImplementation(async () => {
+    for (const evt of eventSequence) {
+      mockSession.fire(evt.name, evt.data);
+    }
+    mockSession.fire("session.idle");
+  });
+
+  const provider = new CopilotProvider(makeSettingsService() as any);
+  const events: AgentEvent[] = [];
+  provider.on("event", (e: AgentEvent) => events.push(e));
+
+  await provider.sendMessage({
+    sessionId,
+    message: "hello",
+    cwd: "/tmp",
+    model: "gpt-4o",
+    resume: false,
+    permissionMode: "auto",
+  });
+
+  return { events };
+}
+
+// ---------------------------------------------------------------------------
 // session.usage_info → ContextEstimate
 // ---------------------------------------------------------------------------
 
 describe("CopilotProvider session.usage_info", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockClient.getState.mockReturnValue("connected");
-    mockClient.start.mockResolvedValue(undefined);
-    mockExecFile.mockImplementation(
-      (_cmd: string, _args: string[], _opts: object, cb: (err: Error | null, result?: { stdout: string }) => void) => {
-        cb(null, { stdout: "gho_faketoken\n" });
-      },
-    );
-  });
-
-  /**
-   * Helper: run sendMessage with a mock session that fires the given events
-   * in sequence after send() resolves, then fires session.idle to end the turn.
-   */
-  async function runWithSession(
-    eventSequence: Array<{ name: string; data?: unknown }>,
-  ): Promise<{ events: AgentEvent[] }> {
-    const mockSession = makeMockSession();
-
-    mockClient.getState.mockReturnValue("connected");
-    mockClient.createSession.mockResolvedValue(mockSession);
-
-    // After send() is called, fire the event sequence then resolve idle.
-    mockSession.send.mockImplementation(async () => {
-      for (const evt of eventSequence) {
-        mockSession.fire(evt.name, evt.data);
-      }
-      mockSession.fire("session.idle");
-    });
-
-    const provider = new CopilotProvider(makeSettingsService() as any);
-    const events: AgentEvent[] = [];
-    provider.on("event", (e: AgentEvent) => events.push(e));
-
-    await provider.sendMessage({
-      sessionId: "mcode-ctx-test",
-      message: "hello",
-      cwd: "/tmp",
-      model: "gpt-4o",
-      resume: false,
-      permissionMode: "auto",
-    });
-
-    return { events };
-  }
 
   it("emits a contextEstimate event when session.usage_info fires", async () => {
-    const { events } = await runWithSession([
+    const { events } = await runWithMockSession([
       {
         name: "session.usage_info",
         data: {
@@ -307,7 +308,7 @@ describe("CopilotProvider session.usage_info", () => {
   });
 
   it("populates contextWindow on turnComplete using the cached tokenLimit", async () => {
-    const { events } = await runWithSession([
+    const { events } = await runWithMockSession([
       {
         name: "session.usage_info",
         data: { tokenLimit: 128000, currentTokens: 5000 },
@@ -324,7 +325,7 @@ describe("CopilotProvider session.usage_info", () => {
   });
 
   it("leaves contextWindow undefined on turnComplete when no usage_info fired", async () => {
-    const { events } = await runWithSession([
+    const { events } = await runWithMockSession([
       {
         name: "assistant.usage",
         data: { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 0 },
@@ -337,7 +338,7 @@ describe("CopilotProvider session.usage_info", () => {
   });
 
   it("does not emit contextEstimate when session.usage_info is not fired", async () => {
-    const { events } = await runWithSession([
+    const { events } = await runWithMockSession([
       {
         name: "assistant.message",
         data: { content: "hello", outputTokens: 10 },
@@ -345,6 +346,35 @@ describe("CopilotProvider session.usage_info", () => {
     ]);
 
     expect(events.find((e) => e.type === "contextEstimate")).toBeUndefined();
+  });
+
+  it("emits exactly one turnComplete per turn even with multiple assistant.usage events", async () => {
+    const { events } = await runWithMockSession([
+      // First model call: agent decides to use a tool
+      { name: "assistant.usage", data: { inputTokens: 3000, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 } },
+      // Tool executes, results sent back, second model call
+      { name: "assistant.usage", data: { inputTokens: 5000, outputTokens: 200, cacheReadTokens: 100, cacheWriteTokens: 0 } },
+      // Third model call: agent produces final response
+      { name: "assistant.usage", data: { inputTokens: 7000, outputTokens: 150, cacheReadTokens: 200, cacheWriteTokens: 0 } },
+    ]);
+
+    const turnEvts = events.filter((e) => e.type === "turnComplete");
+    expect(turnEvts).toHaveLength(1);
+
+    // tokensIn uses the latest value (context grows)
+    const tc = turnEvts[0]!;
+    expect(tc.type === "turnComplete" && tc.tokensIn).toBe(7000);
+    // tokensOut accumulates across all calls
+    expect(tc.type === "turnComplete" && tc.tokensOut).toBe(450);
+  });
+
+  it("emits exactly one turnComplete when only one assistant.usage fires", async () => {
+    const { events } = await runWithMockSession([
+      { name: "assistant.usage", data: { inputTokens: 5000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 } },
+    ]);
+
+    // One usage event → still exactly one turnComplete (on session.idle, not on usage)
+    expect(events.filter((e) => e.type === "turnComplete")).toHaveLength(1);
   });
 });
 
@@ -446,6 +476,75 @@ describe("CopilotProvider.complete()", () => {
       "network error",
     );
     expect(mockSession.disconnect).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// assistant.message phase filtering - thinking content must not reach the UI
+// ---------------------------------------------------------------------------
+
+describe("CopilotProvider assistant.message phase filtering", () => {
+  it("emits a message event for a normal (no phase) assistant.message", async () => {
+    const { events } = await runWithMockSession([
+      { name: "assistant.message", data: { content: "Hello, world!", outputTokens: 5 } },
+    ]);
+
+    const msgEvts = events.filter((e) => e.type === "message");
+    expect(msgEvts).toHaveLength(1);
+    expect(msgEvts[0]?.type === "message" && msgEvts[0].content).toBe("Hello, world!");
+  });
+
+  it("emits a message event for a response-phase assistant.message", async () => {
+    const { events } = await runWithMockSession([
+      { name: "assistant.message", data: { content: "Final answer.", outputTokens: 10, phase: "response" } },
+    ]);
+
+    const msgEvts = events.filter((e) => e.type === "message");
+    expect(msgEvts).toHaveLength(1);
+    expect(msgEvts[0]?.type === "message" && msgEvts[0].content).toBe("Final answer.");
+  });
+
+  it("does NOT emit a message event for a thinking-phase assistant.message", async () => {
+    const { events } = await runWithMockSession([
+      { name: "assistant.message", data: { content: "I am reasoning internally...", outputTokens: 20, phase: "thinking" } },
+    ]);
+
+    const msgEvts = events.filter((e) => e.type === "message");
+    expect(msgEvts).toHaveLength(0);
+  });
+
+  it("only emits the response-phase message when both phases fire in the same turn", async () => {
+    const { events } = await runWithMockSession([
+      { name: "assistant.message", data: { content: "Internal thoughts here.", outputTokens: 15, phase: "thinking" } },
+      { name: "assistant.message", data: { content: "Here is my answer.", outputTokens: 8, phase: "response" } },
+    ]);
+
+    const msgEvts = events.filter((e) => e.type === "message");
+    expect(msgEvts).toHaveLength(1);
+    expect(msgEvts[0]?.type === "message" && msgEvts[0].content).toBe("Here is my answer.");
+  });
+
+  it("does NOT emit a message event when content is empty", async () => {
+    const { events } = await runWithMockSession([
+      { name: "assistant.message", data: { content: "", outputTokens: 0 } },
+    ]);
+
+    const msgEvts = events.filter((e) => e.type === "message");
+    expect(msgEvts).toHaveLength(0);
+  });
+
+  it("does NOT emit textDelta events for assistant.reasoning_delta (no handler registered)", async () => {
+    const { events } = await runWithMockSession([
+      { name: "assistant.reasoning_delta", data: { reasoningId: "r-1", deltaContent: "thinking chunk" } },
+      { name: "assistant.message", data: { content: "Actual response.", outputTokens: 5 } },
+    ]);
+
+    const deltaEvts = events.filter((e) => e.type === "textDelta");
+    // No textDelta from reasoning events - only from assistant.message_delta
+    expect(deltaEvts).toHaveLength(0);
+    // Response message is still emitted
+    const msgEvts = events.filter((e) => e.type === "message");
+    expect(msgEvts).toHaveLength(1);
   });
 });
 

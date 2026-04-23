@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { createMockThread } from "./mocks/transport";
 
 describe("running-session signal", () => {
   beforeEach(() => {
@@ -54,5 +56,42 @@ describe("running-session signal", () => {
     expect(ids.has("stale")).toBe(false);
     expect(ids.has("t-1")).toBe(true);
     expect(ids.has("t-2")).toBe(true);
+  });
+});
+
+describe("session.turnStarted clears interrupted status", () => {
+  beforeEach(() => {
+    useThreadStore.setState({ runningThreadIds: new Set(), currentThreadId: null, messages: [] });
+    useWorkspaceStore.setState({
+      threads: [createMockThread({ id: "t-1", status: "interrupted" })],
+      activeThreadId: "t-1",
+    });
+  });
+
+  it("updates workspace store thread status from interrupted to active on turnStarted", () => {
+    useThreadStore.getState().handleAgentEvent("t-1", {
+      method: "session.turnStarted",
+      type: "turnStarted",
+      threadId: "t-1",
+    });
+
+    const thread = useWorkspaceStore.getState().threads.find((t) => t.id === "t-1");
+    expect(thread?.status).toBe("active");
+  });
+
+  it("does not change status for non-interrupted threads on turnStarted", () => {
+    useWorkspaceStore.setState({
+      threads: [createMockThread({ id: "t-1", status: "active" })],
+      activeThreadId: "t-1",
+    });
+
+    useThreadStore.getState().handleAgentEvent("t-1", {
+      method: "session.turnStarted",
+      type: "turnStarted",
+      threadId: "t-1",
+    });
+
+    const thread = useWorkspaceStore.getState().threads.find((t) => t.id === "t-1");
+    expect(thread?.status).toBe("active");
   });
 });

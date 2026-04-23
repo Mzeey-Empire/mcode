@@ -101,6 +101,13 @@ export function getStatusDisplay(
         dotClass: "bg-[var(--diff-add-strong)]/80",
         shape: "solid",
       };
+    case "interrupted":
+      return {
+        label: "",
+        color: "text-amber-500/90",
+        dotClass: "bg-amber-500/85 animate-pulse",
+        shape: "solid",
+      };
     default:
       // No agent running, not completed, not errored = idle / ready for input
       return {

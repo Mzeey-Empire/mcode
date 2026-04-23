@@ -94,6 +94,19 @@ describe("getStatusDisplay", () => {
     const result = getStatusDisplay(makeThread({ status: "active" }), false);
     expect(result.shape).toBe("solid");
   });
+
+  it("interrupted status returns amber dot with pulse", () => {
+    const result = getStatusDisplay(makeThread({ status: "interrupted" }), false);
+    expect(result.dotClass).toContain("amber");
+    expect(result.dotClass).toContain("animate-pulse");
+    expect(result.shape).toBe("solid");
+  });
+
+  it("interrupted thread shows running indicator when agent is live (resume in progress)", () => {
+    const result = getStatusDisplay(makeThread({ status: "interrupted" }), true);
+    expect(result.dotClass).toContain("bg-primary");
+    expect(result.dotClass).toContain("animate-pulse");
+  });
 });
 
 describe("getNotificationDot", () => {
