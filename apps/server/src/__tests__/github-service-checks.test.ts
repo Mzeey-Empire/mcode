@@ -190,4 +190,19 @@ describe("GithubService.resolveRepoSlug", () => {
     });
     await expect(ghService.resolveRepoSlug("/bad")).rejects.toThrow();
   });
+
+  it("deduplicates concurrent calls for the same path", async () => {
+    let callCount = 0;
+    mockExecFile.mockImplementation((_cmd: string, _args: string[], _opts: unknown, cb: CallbackFn) => {
+      callCount++;
+      setImmediate(() => cb(null, "owner/dedup-repo\n", ""));
+    });
+    const [slug1, slug2] = await Promise.all([
+      ghService.resolveRepoSlug("/dedup"),
+      ghService.resolveRepoSlug("/dedup"),
+    ]);
+    expect(slug1).toBe("owner/dedup-repo");
+    expect(slug2).toBe("owner/dedup-repo");
+    expect(callCount).toBe(1);
+  });
 });

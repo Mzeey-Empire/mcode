@@ -12,7 +12,7 @@ import { WorkspaceRepo } from "../repositories/workspace-repo";
 /** Handles GitHub PR lookups and listing via the gh CLI. */
 @injectable()
 export class GithubService {
-  private readonly slugCache = new Map<string, string>();
+  private readonly slugCache = new Map<string, Promise<string>>();
 
   constructor(
     @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
@@ -256,24 +256,26 @@ export class GithubService {
   /** Resolve the GitHub owner/repo slug for a local repository path. Cached per path. */
   resolveRepoSlug(repoPath: string): Promise<string> {
     const cached = this.slugCache.get(repoPath);
-    if (cached) return Promise.resolve(cached);
+    if (cached) return cached;
 
-    return new Promise((resolve, reject) => {
+    const pending = new Promise<string>((resolve, reject) => {
       execFile(
         "gh",
         ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
         { cwd: repoPath, encoding: "utf-8", timeout: 10_000 },
         (error, stdout) => {
           if (error || !stdout.trim()) {
+            this.slugCache.delete(repoPath); // evict so next call can retry
             reject(error ?? new Error("Failed to resolve repo slug"));
             return;
           }
-          const slug = stdout.trim();
-          this.slugCache.set(repoPath, slug);
-          resolve(slug);
+          resolve(stdout.trim());
         },
       );
     });
+
+    this.slugCache.set(repoPath, pending);
+    return pending;
   }
 
   /** Look up a PR by its GitHub URL. */
