@@ -313,6 +313,25 @@ describe("GithubService.getCheckRuns", () => {
     expect(result.aggregate).toBe("passing");
   });
 
+  // D1: null startedAt — a run with a known timestamp beats a null-startedAt duplicate
+  it("keeps the run with a known startedAt over a null-startedAt duplicate", async () => {
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: CallbackFn) => {
+        cb(null, JSON.stringify([
+          { name: "build", status: "in_progress", conclusion: null, startedAt: null, completedAt: null },
+          { name: "build", status: "completed", conclusion: "success", startedAt: "2026-04-23T10:00:05Z", completedAt: "2026-04-23T10:00:10Z" },
+        ]), "");
+      },
+    );
+
+    const result = await ghService.getCheckRuns("main", "/repo");
+
+    expect(result.runs).toHaveLength(1);
+    expect(result.runs[0].startedAt).toBe("2026-04-23T10:00:05Z");
+    // The completed success run wins; in_progress null-timestamp run is dropped.
+    expect(result.aggregate).toBe("passing");
+  });
+
   // M6: In-flight deduplication for identical branch+repo pairs
   it("deduplicates concurrent getCheckRuns for same branch+repo", async () => {
     let execFileCallCount = 0;

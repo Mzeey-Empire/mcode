@@ -330,12 +330,17 @@ export class GithubService {
           // workflows triggered by multiple events produce duplicate entries (e.g., a passing
           // run from suite A alongside a failing run from the newly-triggered suite B).
           // Without dedup the aggregate can be stale and the list shows ghost duplicates.
+          // Tie-breaking: null startedAt maps to "" which is lexicographically less than any
+          // ISO string, so a run with a known timestamp always wins over one without. When
+          // two runs share the same timestamp (or both are null), the first in API response
+          // order is kept — GitHub does not guarantee ordering between suite siblings, so
+          // either choice is equivalent.
           const dedupMap = new Map<string, CheckRun>();
           for (const run of rawRuns) {
             const existing = dedupMap.get(run.name);
             const existingTs = existing?.startedAt ?? "";
             const runTs = run.startedAt ?? "";
-            if (!existing || runTs >= existingTs) {
+            if (!existing || runTs > existingTs) {
               dedupMap.set(run.name, run);
             }
           }
