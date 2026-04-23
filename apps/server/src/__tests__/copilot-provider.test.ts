@@ -346,6 +346,35 @@ describe("CopilotProvider session.usage_info", () => {
 
     expect(events.find((e) => e.type === "contextEstimate")).toBeUndefined();
   });
+
+  it("emits exactly one turnComplete per turn even with multiple assistant.usage events", async () => {
+    const { events } = await runWithSession([
+      // First model call: agent decides to use a tool
+      { name: "assistant.usage", data: { inputTokens: 3000, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 } },
+      // Tool executes, results sent back, second model call
+      { name: "assistant.usage", data: { inputTokens: 5000, outputTokens: 200, cacheReadTokens: 100, cacheWriteTokens: 0 } },
+      // Third model call: agent produces final response
+      { name: "assistant.usage", data: { inputTokens: 7000, outputTokens: 150, cacheReadTokens: 200, cacheWriteTokens: 0 } },
+    ]);
+
+    const turnEvts = events.filter((e) => e.type === "turnComplete");
+    expect(turnEvts).toHaveLength(1);
+
+    // tokensIn uses the latest value (context grows)
+    const tc = turnEvts[0]!;
+    expect(tc.type === "turnComplete" && tc.tokensIn).toBe(7000);
+    // tokensOut accumulates across all calls
+    expect(tc.type === "turnComplete" && tc.tokensOut).toBe(450);
+  });
+
+  it("emits exactly one turnComplete when only one assistant.usage fires", async () => {
+    const { events } = await runWithSession([
+      { name: "assistant.usage", data: { inputTokens: 5000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 } },
+    ]);
+
+    // One usage event → still exactly one turnComplete (on session.idle, not on usage)
+    expect(events.filter((e) => e.type === "turnComplete")).toHaveLength(1);
+  });
 });
 
 // ---------------------------------------------------------------------------

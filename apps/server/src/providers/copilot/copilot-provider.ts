@@ -641,6 +641,16 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
     // Track per-tool start times to derive elapsedSeconds for toolProgress events.
     const toolStartTimes = new Map<string, number>();
 
+    // Accumulate usage data across assistant.usage events for the final TurnComplete.
+    // Copilot SDK fires assistant.usage after each model call in an agentic loop,
+    // but TurnComplete must fire only once (on session.idle) to prevent premature
+    // removal from runningThreadIds in the frontend.
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let totalCacheRead = 0;
+    let totalCacheWrite = 0;
+    let totalCost: number | undefined;
+
     const unsubscribers: Array<() => void> = [];
 
     try {
@@ -752,7 +762,9 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
           }),
         );
 
-        // assistant.usage - token counts after a model call
+        // assistant.usage - accumulate token counts across model calls.
+        // TurnComplete is deferred to session.idle so the frontend keeps the
+        // thread in runningThreadIds for the entire agentic turn.
         unsubscribers.push(
           session.on("assistant.usage", (event) => {
             const {
@@ -763,24 +775,16 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
               cost,
               quotaSnapshots,
             } = event.data;
-            const contextWindow = this.contextWindowBySession.get(sessionId);
+            // Use latest inputTokens (context grows across calls in a turn)
+            totalInputTokens = inputTokens;
+            // Accumulate output tokens (each call generates new output)
+            totalOutputTokens += outputTokens;
+            totalCacheRead = cacheReadTokens;
+            totalCacheWrite = cacheWriteTokens;
+            if (cost !== undefined) totalCost = (totalCost ?? 0) + cost;
 
-            this.emit("event", {
-              type: AgentEventType.TurnComplete,
-              threadId,
-              reason: "end_turn",
-              costUsd: null,
-              tokensIn: inputTokens,
-              tokensOut: outputTokens,
-              contextWindow,
-              totalProcessedTokens: inputTokens + cacheReadTokens + cacheWriteTokens + outputTokens,
-              cacheReadTokens,
-              cacheWriteTokens,
-              costMultiplier: cost,
-              providerId: "copilot",
-            } satisfies AgentEvent);
-
-            // Emit quota update if snapshots are present
+            // Quota updates are safe to emit immediately (they only update
+            // usage display, not running state).
             if (quotaSnapshots && typeof quotaSnapshots === "object") {
               this.emit("event", {
                 type: AgentEventType.QuotaUpdate,
@@ -837,9 +841,27 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
           }),
         );
 
-        // session.idle - turn is complete; resolve and clean up handlers
+        // session.idle - turn is truly complete; emit TurnComplete with
+        // accumulated usage data and resolve. This is the single point where
+        // the frontend learns the turn ended, preventing premature removal
+        // from runningThreadIds during multi-step agentic turns.
         unsubscribers.push(
           session.on("session.idle", () => {
+            const contextWindow = this.contextWindowBySession.get(sessionId);
+            this.emit("event", {
+              type: AgentEventType.TurnComplete,
+              threadId,
+              reason: "end_turn",
+              costUsd: null,
+              tokensIn: totalInputTokens,
+              tokensOut: totalOutputTokens,
+              contextWindow,
+              totalProcessedTokens: totalInputTokens + totalCacheRead + totalCacheWrite + totalOutputTokens,
+              cacheReadTokens: totalCacheRead,
+              cacheWriteTokens: totalCacheWrite,
+              costMultiplier: totalCost,
+              providerId: "copilot",
+            } satisfies AgentEvent);
             resolve();
           }),
         );

@@ -38,6 +38,11 @@ let lastCheckStatusFetchAt = 0;
 /** Minimum interval between reconnect-triggered checkStatus fetches to avoid subprocess storms. */
 const CHECK_STATUS_RECONNECT_COOLDOWN_MS = 30_000;
 
+/** Timestamp of the last thread-list refresh triggered on WS reconnect. */
+let lastLoadThreadsAt = 0;
+/** Minimum interval between reconnect-triggered thread-list fetches to avoid rapid-reconnect storms. */
+const LOAD_THREADS_RECONNECT_COOLDOWN_MS = 5_000;
+
 type Listener = (data: unknown) => void;
 
 /**
@@ -205,16 +210,20 @@ export function createWsTransport(
 
       // Re-fetch the thread list after reconnect so thread statuses are not
       // stale. A server restart marks active threads "interrupted" in the DB
-      // but the client still holds the pre-restart status in memory. Without
-      // this refresh, the sidebar continues to show idle state instead of the
-      // amber pulsing interrupted indicator introduced for this fix.
+      // but the client still holds the pre-restart status in memory.
+      // Throttled to avoid hammering the API during rapid reconnect cycles
+      // (e.g. flaky networks, server restarts causing multiple reconnect attempts).
       // Deferred import avoids a circular dependency at module evaluation time.
-      import("@/stores/workspaceStore").then(({ useWorkspaceStore }) => {
-        const { activeWorkspaceId, loadThreads } = useWorkspaceStore.getState();
-        if (activeWorkspaceId) {
-          loadThreads(activeWorkspaceId).catch(() => {});
-        }
-      });
+      const nowForThreads = Date.now();
+      if (nowForThreads - lastLoadThreadsAt > LOAD_THREADS_RECONNECT_COOLDOWN_MS) {
+        lastLoadThreadsAt = nowForThreads;
+        import("@/stores/workspaceStore").then(({ useWorkspaceStore }) => {
+          const { activeWorkspaceId, loadThreads } = useWorkspaceStore.getState();
+          if (activeWorkspaceId) {
+            loadThreads(activeWorkspaceId).catch(() => {});
+          }
+        });
+      }
 
       // Reattach active terminals after reconnect.
       // Deferred import avoids a circular dependency at module evaluation time.
