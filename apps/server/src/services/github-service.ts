@@ -163,14 +163,23 @@ export class GithubService {
   }
 
   /**
-   * Fetch CI check runs for a PR. Uses `gh pr checks` for simplicity.
+   * Fetch CI check runs for a branch via the GitHub REST API.
+   * Uses `gh api --cache 5s` so ETag conditional requests are sent automatically -
+   * 304 Not Modified responses do not count against the 5,000/hr rate limit.
    * Returns aggregate status and individual check details.
    */
-  getCheckRuns(prNumber: number, repoPath: string): Promise<ChecksStatus> {
+  async getCheckRuns(branch: string, repoPath: string): Promise<ChecksStatus> {
+    const slug = await this.resolveRepoSlug(repoPath);
     return new Promise((resolve) => {
       execFile(
         "gh",
-        ["pr", "checks", String(prNumber), "--json", "name,state,startedAt,completedAt"],
+        [
+          "api",
+          `repos/${slug}/commits/${encodeURIComponent(branch)}/check-runs`,
+          "--cache", "5s",
+          "-H", "Accept: application/vnd.github+json",
+          "--jq", ".check_runs | map({name: .name, status: .status, conclusion: .conclusion, startedAt: .started_at, completedAt: .completed_at})",
+        ],
         { cwd: repoPath, encoding: "utf-8", timeout: 15_000 },
         (error, stdout) => {
           const now = Date.now();
@@ -181,7 +190,8 @@ export class GithubService {
           try {
             const items = JSON.parse(stdout) as Array<{
               name?: string;
-              state?: string;
+              status?: string;
+              conclusion?: string | null;
               startedAt?: string | null;
               completedAt?: string | null;
             }>;
@@ -192,31 +202,15 @@ export class GithubService {
             }
 
             const runs = items.map((item) => {
-              const ghState = (item.state ?? "").toUpperCase();
-              const completed = ghState === "SUCCESS" || ghState === "FAILURE"
-                || ghState === "CANCELLED" || ghState === "SKIPPED"
-                || ghState === "TIMED_OUT" || ghState === "NEUTRAL"
-                || ghState === "ACTION_REQUIRED" || ghState === "STALE";
-
-              const status = completed ? "completed" as const
-                : ghState === "QUEUED" ? "queued" as const
-                : "in_progress" as const;
-
-              // ACTION_REQUIRED blocks merge like a failure; STALE is abandoned (terminal like cancelled).
-              const conclusionMap: Record<string, CheckRun["conclusion"]> = {
-                SUCCESS: "success",
-                FAILURE: "failure",
-                CANCELLED: "cancelled",
-                SKIPPED: "skipped",
-                TIMED_OUT: "timed_out",
-                NEUTRAL: "neutral",
-                ACTION_REQUIRED: "failure",
-                STALE: "cancelled",
-              };
-              const conclusion = completed ? (conclusionMap[ghState] ?? "cancelled") : null;
+              const status = (item.status ?? "completed") as CheckRun["status"];
+              // action_required blocks merge like a failure; map it accordingly.
+              const rawConclusion = item.conclusion ?? null;
+              const conclusion: CheckRun["conclusion"] = rawConclusion === "action_required"
+                ? "failure"
+                : rawConclusion as CheckRun["conclusion"];
 
               let durationMs: number | null = null;
-              if (completed && item.startedAt && item.completedAt) {
+              if (status === "completed" && item.startedAt && item.completedAt) {
                 durationMs = new Date(item.completedAt).getTime() - new Date(item.startedAt).getTime();
               }
 

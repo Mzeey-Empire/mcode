@@ -23,19 +23,20 @@ describe("GithubService.getCheckRuns", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ghService = new GithubService({} as WorkspaceRepo);
+    vi.spyOn(ghService, "resolveRepoSlug").mockResolvedValue("owner/test-repo");
   });
 
   it("returns passing status when all checks succeed", async () => {
     mockExecFile.mockImplementation(
       (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
         cb(null, JSON.stringify([
-          { name: "build", state: "SUCCESS", startedAt: "2026-04-14T10:00:00Z", completedAt: "2026-04-14T10:00:23Z" },
-          { name: "lint", state: "SUCCESS", startedAt: "2026-04-14T10:00:00Z", completedAt: "2026-04-14T10:00:08Z" },
+          { name: "build", status: "completed", conclusion: "success", startedAt: "2026-04-14T10:00:00Z", completedAt: "2026-04-14T10:00:23Z" },
+          { name: "lint", status: "completed", conclusion: "success", startedAt: "2026-04-14T10:00:00Z", completedAt: "2026-04-14T10:00:08Z" },
         ]));
       },
     );
 
-    const result = await ghService.getCheckRuns(42, "/repo");
+    const result = await ghService.getCheckRuns("main", "/repo");
 
     expect(result.aggregate).toBe("passing");
     expect(result.runs).toHaveLength(2);
@@ -48,13 +49,13 @@ describe("GithubService.getCheckRuns", () => {
     mockExecFile.mockImplementation(
       (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
         cb(null, JSON.stringify([
-          { name: "build", state: "SUCCESS", startedAt: "2026-04-14T10:00:00Z", completedAt: "2026-04-14T10:00:23Z" },
-          { name: "test", state: "FAILURE", startedAt: "2026-04-14T10:00:00Z", completedAt: "2026-04-14T10:00:45Z" },
+          { name: "build", status: "completed", conclusion: "success", startedAt: "2026-04-14T10:00:00Z", completedAt: "2026-04-14T10:00:23Z" },
+          { name: "test", status: "completed", conclusion: "failure", startedAt: "2026-04-14T10:00:00Z", completedAt: "2026-04-14T10:00:45Z" },
         ]));
       },
     );
 
-    const result = await ghService.getCheckRuns(42, "/repo");
+    const result = await ghService.getCheckRuns("main", "/repo");
 
     expect(result.aggregate).toBe("failing");
     expect(result.runs[1].conclusion).toBe("failure");
@@ -64,13 +65,13 @@ describe("GithubService.getCheckRuns", () => {
     mockExecFile.mockImplementation(
       (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
         cb(null, JSON.stringify([
-          { name: "build", state: "SUCCESS", startedAt: "2026-04-14T10:00:00Z", completedAt: "2026-04-14T10:00:23Z" },
-          { name: "test", state: "PENDING", startedAt: "2026-04-14T10:00:00Z", completedAt: null },
+          { name: "build", status: "completed", conclusion: "success", startedAt: "2026-04-14T10:00:00Z", completedAt: "2026-04-14T10:00:23Z" },
+          { name: "test", status: "in_progress", conclusion: null, startedAt: "2026-04-14T10:00:00Z", completedAt: null },
         ]));
       },
     );
 
-    const result = await ghService.getCheckRuns(42, "/repo");
+    const result = await ghService.getCheckRuns("main", "/repo");
 
     expect(result.aggregate).toBe("pending");
     expect(result.runs[1].status).toBe("in_progress");
@@ -81,12 +82,12 @@ describe("GithubService.getCheckRuns", () => {
     mockExecFile.mockImplementation(
       (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
         cb(null, JSON.stringify([
-          { name: "deploy", state: "QUEUED", startedAt: null, completedAt: null },
+          { name: "deploy", status: "queued", conclusion: null, startedAt: null, completedAt: null },
         ]));
       },
     );
 
-    const result = await ghService.getCheckRuns(42, "/repo");
+    const result = await ghService.getCheckRuns("main", "/repo");
 
     expect(result.aggregate).toBe("pending");
     expect(result.runs[0].status).toBe("queued");
@@ -101,39 +102,39 @@ describe("GithubService.getCheckRuns", () => {
       },
     );
 
-    const result = await ghService.getCheckRuns(42, "/repo");
+    const result = await ghService.getCheckRuns("main", "/repo");
 
     expect(result.aggregate).toBe("no_checks");
     expect(result.runs).toHaveLength(0);
   });
 
-  it("maps ACTION_REQUIRED state to failing aggregate and failure conclusion", async () => {
+  it("maps action_required conclusion to failing aggregate and failure conclusion", async () => {
     mockExecFile.mockImplementation(
       (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
         cb(null, JSON.stringify([
-          { name: "security-check", state: "ACTION_REQUIRED", startedAt: "2026-04-14T10:00:00Z", completedAt: "2026-04-14T10:00:10Z" },
+          { name: "security-check", status: "completed", conclusion: "action_required", startedAt: "2026-04-14T10:00:00Z", completedAt: "2026-04-14T10:00:10Z" },
         ]));
       },
     );
 
-    const result = await ghService.getCheckRuns(42, "/repo");
+    const result = await ghService.getCheckRuns("main", "/repo");
 
     expect(result.aggregate).toBe("failing");
     expect(result.runs[0].conclusion).toBe("failure");
     expect(result.runs[0].status).toBe("completed");
   });
 
-  it("maps STALE state to cancelled conclusion without affecting passing aggregate", async () => {
+  it("maps cancelled conclusion without affecting passing aggregate", async () => {
     mockExecFile.mockImplementation(
       (_cmd: string, _args: string[], _opts: unknown, cb: Function) => {
         cb(null, JSON.stringify([
-          { name: "build", state: "SUCCESS", startedAt: "2026-04-14T10:00:00Z", completedAt: "2026-04-14T10:00:23Z" },
-          { name: "old-check", state: "STALE", startedAt: "2026-04-14T10:00:00Z", completedAt: "2026-04-14T10:00:05Z" },
+          { name: "build", status: "completed", conclusion: "success", startedAt: "2026-04-14T10:00:00Z", completedAt: "2026-04-14T10:00:23Z" },
+          { name: "old-check", status: "completed", conclusion: "cancelled", startedAt: "2026-04-14T10:00:00Z", completedAt: "2026-04-14T10:00:05Z" },
         ]));
       },
     );
 
-    const result = await ghService.getCheckRuns(42, "/repo");
+    const result = await ghService.getCheckRuns("main", "/repo");
 
     expect(result.aggregate).toBe("passing");
     expect(result.runs[1].conclusion).toBe("cancelled");
@@ -147,7 +148,7 @@ describe("GithubService.getCheckRuns", () => {
       },
     );
 
-    const result = await ghService.getCheckRuns(42, "/repo");
+    const result = await ghService.getCheckRuns("main", "/repo");
 
     expect(result.aggregate).toBe("no_checks");
     expect(result.runs).toHaveLength(0);
