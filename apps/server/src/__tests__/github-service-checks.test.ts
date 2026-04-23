@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { WorkspaceRepo } from "../repositories/workspace-repo";
 
 const { mockExecFile } = vi.hoisted(() => ({
@@ -180,6 +180,105 @@ describe("GithubService.getCheckRuns", () => {
 
     expect(peakActive).toBeLessThanOrEqual(3);
   });
+
+  // C1: Empty branch guard
+  it("resolves to no_checks when branch is empty string", async () => {
+    const result = await ghService.getCheckRuns("", "/repo");
+
+    expect(result.aggregate).toBe("no_checks");
+    expect(result.runs).toHaveLength(0);
+    expect(mockExecFile).not.toHaveBeenCalled();
+  });
+
+  // H1: Unknown conclusion treated conservatively as failure
+  it("treats unknown conclusion as failure to be conservative", async () => {
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: CallbackFn) => {
+        cb(null, JSON.stringify([
+          { name: "ci", status: "completed", conclusion: "startup_failure", startedAt: "2026-04-14T10:00:00Z", completedAt: "2026-04-14T10:00:05Z" },
+        ]), "");
+      },
+    );
+
+    const result = await ghService.getCheckRuns("main", "/repo");
+
+    expect(result.aggregate).toBe("failing");
+    expect(result.runs[0].conclusion).toBe("failure");
+  });
+
+  // M1: Missing status defaults to in_progress
+  it("treats missing status as in_progress to avoid false passing aggregate", async () => {
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: CallbackFn) => {
+        cb(null, JSON.stringify([
+          { name: "ci", conclusion: null, startedAt: null, completedAt: null },
+        ]), "");
+      },
+    );
+
+    const result = await ghService.getCheckRuns("main", "/repo");
+
+    expect(result.runs[0].status).toBe("in_progress");
+    expect(result.aggregate).toBe("pending");
+  });
+
+  // M3: Concurrency gate not stuck after failure
+  it("releases concurrency slot even after a failed getCheckRuns call", async () => {
+    // First 3 calls fail (simulating errors)
+    let callCount = 0;
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: CallbackFn) => {
+        callCount++;
+        setImmediate(() => {
+          cb(new Error("gh error"), "", "");
+        });
+      },
+    );
+
+    // Fire 3 failing calls
+    await Promise.all([
+      ghService.getCheckRuns("main", "/repo"),
+      ghService.getCheckRuns("main", "/repo2"),
+      ghService.getCheckRuns("main", "/repo3"),
+    ]);
+
+    // 4th call should succeed - gate not stuck
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: CallbackFn) => {
+        cb(null, JSON.stringify([
+          { name: "build", status: "completed", conclusion: "success", startedAt: "2026-04-14T10:00:00Z", completedAt: "2026-04-14T10:00:23Z" },
+        ]), "");
+      },
+    );
+
+    const result = await ghService.getCheckRuns("main", "/repo4");
+    expect(result.aggregate).toBe("passing");
+  });
+
+  // M6: In-flight deduplication for identical branch+repo pairs
+  it("deduplicates concurrent getCheckRuns for same branch+repo", async () => {
+    let execFileCallCount = 0;
+
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: CallbackFn) => {
+        execFileCallCount++;
+        setImmediate(() => {
+          cb(null, JSON.stringify([
+            { name: "build", status: "completed", conclusion: "success", startedAt: "2026-04-14T10:00:00Z", completedAt: "2026-04-14T10:00:23Z" },
+          ]), "");
+        });
+      },
+    );
+
+    const [result1, result2] = await Promise.all([
+      ghService.getCheckRuns("main", "/repo"),
+      ghService.getCheckRuns("main", "/repo"),
+    ]);
+
+    expect(execFileCallCount).toBe(1);
+    expect(result1.aggregate).toBe("passing");
+    expect(result2.aggregate).toBe("passing");
+  });
 });
 
 describe("GithubService.resolveRepoSlug", () => {
@@ -230,5 +329,35 @@ describe("GithubService.resolveRepoSlug", () => {
     expect(slug1).toBe("owner/dedup-repo");
     expect(slug2).toBe("owner/dedup-repo");
     expect(callCount).toBe(1);
+  });
+
+  // H2: Slug cache TTL - re-fetches after expiry
+  it("re-fetches slug after TTL expires", async () => {
+    vi.useFakeTimers();
+
+    mockExecFile.mockImplementation((_cmd: string, _args: string[], _opts: unknown, cb: CallbackFn) => {
+      cb(null, "owner/ttl-repo\n", "");
+    });
+
+    // First call populates cache
+    await ghService.resolveRepoSlug("/ttl-repo");
+    expect(mockExecFile).toHaveBeenCalledTimes(1);
+
+    // Advance past 30-minute TTL
+    vi.advanceTimersByTime(31 * 60 * 1000);
+
+    // Second call after TTL should re-fetch
+    await ghService.resolveRepoSlug("/ttl-repo");
+    expect(mockExecFile).toHaveBeenCalledTimes(2);
+
+    vi.useRealTimers();
+  });
+
+  // M2: Malformed slug rejected
+  it("throws when gh repo view returns malformed output", async () => {
+    mockExecFile.mockImplementationOnce((_cmd: string, _args: string[], _opts: unknown, cb: CallbackFn) => {
+      cb(null, "not-a-slug\n", "");
+    });
+    await expect(ghService.resolveRepoSlug("/malformed")).rejects.toThrow("Unexpected slug format");
   });
 });

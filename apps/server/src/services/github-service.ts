@@ -12,7 +12,12 @@ import { WorkspaceRepo } from "../repositories/workspace-repo";
 /** Handles GitHub PR lookups and listing via the gh CLI. */
 @injectable()
 export class GithubService {
-  private readonly slugCache = new Map<string, Promise<string>>();
+  /** Slug cache TTL in milliseconds (30 minutes). Evicted on expiry to handle repo renames. */
+  private static readonly SLUG_TTL_MS = 30 * 60 * 1000;
+  private readonly slugCache = new Map<string, { promise: Promise<string>; expiresAt: number }>();
+
+  /** In-flight deduplication map for getCheckRuns to avoid redundant concurrent fetches. */
+  private readonly checkRunsInflight = new Map<string, Promise<ChecksStatus>>();
 
   /** Maximum number of gh subprocesses that may run concurrently. */
   private readonly maxConcurrent = 3;
@@ -197,11 +202,57 @@ export class GithubService {
    * Uses `gh api --cache 5s` so ETag conditional requests are sent automatically -
    * 304 Not Modified responses do not count against the 5,000/hr rate limit.
    * Returns aggregate status and individual check details.
+   *
+   * Guards:
+   * - Empty branch returns no_checks immediately without a network call (avoids malformed URL).
+   * - Concurrent calls for the same branch+repo are deduplicated (single in-flight request).
+   * - Unknown conclusion values are treated conservatively as failure.
    */
   async getCheckRuns(branch: string, repoPath: string): Promise<ChecksStatus> {
+    // C1: Empty branch would produce a malformed API URL - short-circuit immediately.
+    if (!branch) {
+      return { aggregate: "no_checks", runs: [], fetchedAt: Date.now() };
+    }
+
+    const inflightKey = `${repoPath}\0${branch}`;
+
+    // M6: Return an existing in-flight promise if one exists for this branch+repo pair.
+    const inflight = this.checkRunsInflight.get(inflightKey);
+    if (inflight) return inflight;
+
     const slug = await this.resolveRepoSlug(repoPath);
+
+    // Check again after async slug resolution - another caller may have already started the fetch.
+    const inflight2 = this.checkRunsInflight.get(inflightKey);
+    if (inflight2) return inflight2;
+
     await this.acquire();
-    return new Promise((resolve) => {
+
+    // Check once more after acquiring the semaphore slot.
+    const inflight3 = this.checkRunsInflight.get(inflightKey);
+    if (inflight3) { this.release(); return inflight3; }
+
+    let released = false;
+    /** Releases the concurrency slot at most once, guarding against double-release. */
+    const releaseOnce = (): void => {
+      if (!released) {
+        released = true;
+        this.release();
+      }
+    };
+
+    /** Explicit conclusion mapping - unknown values default to failure (conservative). */
+    const conclusionMap: Record<string, CheckRun["conclusion"]> = {
+      success: "success",
+      failure: "failure",
+      cancelled: "cancelled",
+      skipped: "skipped",
+      timed_out: "timed_out",
+      neutral: "neutral",
+      action_required: "failure", // blocks merge like a failure
+    };
+
+    const promise = new Promise<ChecksStatus>((resolve) => {
       execFile(
         "gh",
         [
@@ -211,9 +262,10 @@ export class GithubService {
           "-H", "Accept: application/vnd.github+json",
           "--jq", ".check_runs | map({name: .name, status: .status, conclusion: .conclusion, startedAt: .started_at, completedAt: .completed_at})",
         ],
-        { cwd: repoPath, encoding: "utf-8", timeout: 15_000 },
+        { cwd: repoPath, encoding: "utf-8", timeout: 15_000, maxBuffer: 2 * 1024 * 1024 },
         (error, stdout) => {
-          this.release();
+          releaseOnce();
+          this.checkRunsInflight.delete(inflightKey);
           const now = Date.now();
           if (error || !stdout) {
             resolve({ aggregate: "no_checks", runs: [], fetchedAt: now });
@@ -234,12 +286,13 @@ export class GithubService {
             }
 
             const runs = items.map((item) => {
-              const status = (item.status ?? "completed") as CheckRun["status"];
-              // action_required blocks merge like a failure; map it accordingly.
+              // M1: Missing status defaults to in_progress (not completed) to avoid false-green aggregate.
+              const status = (item.status ?? "in_progress") as CheckRun["status"];
+              // H1: Unknown conclusion values are mapped conservatively to failure.
               const rawConclusion = item.conclusion ?? null;
-              const conclusion: CheckRun["conclusion"] = rawConclusion === "action_required"
-                ? "failure"
-                : rawConclusion as CheckRun["conclusion"];
+              const conclusion: CheckRun["conclusion"] = rawConclusion === null
+                ? null
+                : (conclusionMap[rawConclusion] ?? "failure");
 
               let durationMs: number | null = null;
               if (status === "completed" && item.startedAt && item.completedAt) {
@@ -277,12 +330,28 @@ export class GithubService {
         },
       );
     });
+
+    this.checkRunsInflight.set(inflightKey, promise);
+
+    try {
+      return await promise;
+    } finally {
+      // M3: Guard covers the synchronous-throw path; the callback path already called releaseOnce().
+      releaseOnce();
+      this.checkRunsInflight.delete(inflightKey);
+    }
   }
 
-  /** Resolve the GitHub owner/repo slug for a local repository path. Cached per path. */
+  /**
+   * Resolve the GitHub owner/repo slug for a local repository path.
+   * Results are cached for 30 minutes (SLUG_TTL_MS) to handle repo renames gracefully.
+   * Validates the returned value matches `owner/repo` format before caching.
+   */
   resolveRepoSlug(repoPath: string): Promise<string> {
     const cached = this.slugCache.get(repoPath);
-    if (cached) return cached;
+    // H2: Honour TTL - evict expired entries so renamed repos get fresh slugs.
+    if (cached && Date.now() < cached.expiresAt) return cached.promise;
+    if (cached) this.slugCache.delete(repoPath);
 
     const pending = new Promise<string>((resolve, reject) => {
       execFile(
@@ -295,12 +364,19 @@ export class GithubService {
             reject(error ?? new Error("Failed to resolve repo slug"));
             return;
           }
-          resolve(stdout.trim());
+          const trimmed = stdout.trim();
+          // M2: Validate slug format before using it in API URLs.
+          if (!/^[^/]+\/[^/]+$/.test(trimmed)) {
+            this.slugCache.delete(repoPath);
+            reject(new Error(`Unexpected slug format: ${trimmed}`));
+            return;
+          }
+          resolve(trimmed);
         },
       );
     });
 
-    this.slugCache.set(repoPath, pending);
+    this.slugCache.set(repoPath, { promise: pending, expiresAt: Date.now() + GithubService.SLUG_TTL_MS });
     return pending;
   }
 
