@@ -277,7 +277,7 @@ export class GithubService {
         `repos/${slug}/commits/${encodeURIComponent(branch)}/check-runs`,
         "--cache", "5s",
         "-H", "Accept: application/vnd.github+json",
-        "--jq", ".check_runs | map({name: .name, status: .status, conclusion: .conclusion, startedAt: .started_at, completedAt: .completed_at})",
+        "--jq", ".check_runs | map({name: .name, status: .status, conclusion: .conclusion, startedAt: .started_at, completedAt: .completed_at, appId: .app.id})",
       ],
       { cwd: repoPath, encoding: "utf-8", timeout: 15_000, maxBuffer: 2 * 1024 * 1024 },
       (error, stdout) => {
@@ -295,6 +295,7 @@ export class GithubService {
             conclusion?: string | null;
             startedAt?: string | null;
             completedAt?: string | null;
+            appId?: number | null;
           }>;
 
           if (items.length === 0) {
@@ -322,29 +323,38 @@ export class GithubService {
               conclusion,
               durationMs,
               startedAt: item.startedAt ?? null,
+              // appId is used only for dedup scoping — it is stripped before the result is returned.
+              appId: typeof item.appId === "number" ? item.appId : 0,
             };
           });
 
-          // D1: Deduplicate runs with the same name, keeping the most recently started one.
+          // D1: Deduplicate runs with the same (name, appId), keeping the most recently started one.
           // GitHub returns check runs from every check suite on a commit, so re-runs or
           // workflows triggered by multiple events produce duplicate entries (e.g., a passing
           // run from suite A alongside a failing run from the newly-triggered suite B).
           // Without dedup the aggregate can be stale and the list shows ghost duplicates.
+          //
+          // The dedup key includes appId so that two different GitHub Apps that both create a
+          // check named "validate-pr" (e.g., GitHub Actions + Greptile) are NOT collapsed —
+          // only runs from the same app are candidates for deduplication.
+          //
           // Tie-breaking: null startedAt maps to "" which is lexicographically less than any
           // ISO string, so a run with a known timestamp always wins over one without. When
           // two runs share the same timestamp (or both are null), the first in API response
           // order is kept — GitHub does not guarantee ordering between suite siblings, so
           // either choice is equivalent.
-          const dedupMap = new Map<string, CheckRun>();
+          const dedupMap = new Map<string, typeof rawRuns[0]>();
           for (const run of rawRuns) {
-            const existing = dedupMap.get(run.name);
+            const key = `${run.name}\0${run.appId}`;
+            const existing = dedupMap.get(key);
             const existingTs = existing?.startedAt ?? "";
             const runTs = run.startedAt ?? "";
             if (!existing || runTs > existingTs) {
-              dedupMap.set(run.name, run);
+              dedupMap.set(key, run);
             }
           }
-          const runs = [...dedupMap.values()];
+          // Strip the internal appId field before passing runs to the caller.
+          const runs: CheckRun[] = [...dedupMap.values()].map(({ appId: _appId, ...run }) => run);
 
           let aggregate: "passing" | "failing" | "pending" | "no_checks";
           if (runs.some((r) => r.conclusion === "failure" || r.conclusion === "timed_out")) {
