@@ -14,9 +14,39 @@ import { WorkspaceRepo } from "../repositories/workspace-repo";
 export class GithubService {
   private readonly slugCache = new Map<string, Promise<string>>();
 
+  /** Maximum number of gh subprocesses that may run concurrently. */
+  private readonly maxConcurrent = 3;
+  private activeCount = 0;
+  private readonly waitQueue: Array<() => void> = [];
+
   constructor(
     @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
   ) {}
+
+  /**
+   * Acquire a slot in the concurrency gate.
+   * Resolves immediately when a slot is free, otherwise queues until one is released.
+   */
+  private acquire(): Promise<void> {
+    if (this.activeCount < this.maxConcurrent) {
+      this.activeCount++;
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => this.waitQueue.push(resolve));
+  }
+
+  /**
+   * Release a concurrency slot.
+   * Wakes the next queued waiter if one exists, otherwise decrements the active count.
+   */
+  private release(): void {
+    const next = this.waitQueue.shift();
+    if (next) {
+      next();
+    } else {
+      this.activeCount--;
+    }
+  }
 
   /** Look up the PR associated with a branch in the given working directory. */
   getBranchPr(branch: string, cwd: string): Promise<PrInfo | null> {
@@ -170,6 +200,7 @@ export class GithubService {
    */
   async getCheckRuns(branch: string, repoPath: string): Promise<ChecksStatus> {
     const slug = await this.resolveRepoSlug(repoPath);
+    await this.acquire();
     return new Promise((resolve) => {
       execFile(
         "gh",
@@ -182,6 +213,7 @@ export class GithubService {
         ],
         { cwd: repoPath, encoding: "utf-8", timeout: 15_000 },
         (error, stdout) => {
+          this.release();
           const now = Date.now();
           if (error || !stdout) {
             resolve({ aggregate: "no_checks", runs: [], fetchedAt: now });

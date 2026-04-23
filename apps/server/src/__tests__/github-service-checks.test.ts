@@ -17,6 +17,8 @@ vi.mock("@mcode/shared", () => ({
 
 import { GithubService } from "../services/github-service";
 
+type CallbackFn = (error: Error | null, stdout: string, stderr: string) => void;
+
 describe("GithubService.getCheckRuns", () => {
   let ghService: GithubService;
 
@@ -153,9 +155,32 @@ describe("GithubService.getCheckRuns", () => {
     expect(result.aggregate).toBe("no_checks");
     expect(result.runs).toHaveLength(0);
   });
-});
 
-type CallbackFn = (error: Error | null, stdout: string, stderr: string) => void;
+  it("limits concurrent gh subprocesses to 3", async () => {
+    let activeCount = 0;
+    let peakActive = 0;
+
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb: CallbackFn) => {
+        activeCount++;
+        peakActive = Math.max(peakActive, activeCount);
+        setImmediate(() => {
+          activeCount--;
+          cb(null, JSON.stringify([
+            { name: "build", status: "completed", conclusion: "success", startedAt: "2026-04-14T10:00:00Z", completedAt: "2026-04-14T10:00:23Z" },
+          ]), "");
+        });
+      },
+    );
+
+    // 5 concurrent calls - only 3 should run at once
+    await Promise.all(
+      Array.from({ length: 5 }, () => ghService.getCheckRuns("main", "/repo")),
+    );
+
+    expect(peakActive).toBeLessThanOrEqual(3);
+  });
+});
 
 describe("GithubService.resolveRepoSlug", () => {
   let ghService: GithubService;
