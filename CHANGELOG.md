@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.7.0](https://github.com/Mzeey-Emipre/mcode/compare/mcode-v0.6.0...mcode-v0.7.0) (2026-04-24)
+
+
+### Features
+
+* provider-scoped slash commands with multi-directory scanning ([#359](https://github.com/Mzeey-Emipre/mcode/issues/359)) ([0b2a07f](https://github.com/Mzeey-Emipre/mcode/commit/0b2a07ff5a4c3fb9cabe76c3927bdf1801d6bfc1))
+* support non-git folders with graceful feature degradation ([#358](https://github.com/Mzeey-Emipre/mcode/issues/358)) ([961161e](https://github.com/Mzeey-Emipre/mcode/commit/961161e10e173c0d0e568150ecd84994eae8136a))
+
+
+### Bug Fixes
+
+* branch-from-chat reads naming settings and sanitizes on submit ([#357](https://github.com/Mzeey-Emipre/mcode/issues/357)) ([8c0e972](https://github.com/Mzeey-Emipre/mcode/commit/8c0e9722e00be83e719dc50a71dac58811a43f76))
+* **build:** correct Linux binary name in smoke test ([#355](https://github.com/Mzeey-Emipre/mcode/issues/355)) ([8ec511c](https://github.com/Mzeey-Emipre/mcode/commit/8ec511c3460e3f34e2924ad7828a909a6b316edd))
+* **build:** resolve release build failures ([#353](https://github.com/Mzeey-Emipre/mcode/issues/353)) ([847f1ec](https://github.com/Mzeey-Emipre/mcode/commit/847f1ec6f5dbed5684488120a7d99ba223b7d1d6))
+* **build:** resolve tsyringe DI crash and Linux smoke test binary path ([847f1ec](https://github.com/Mzeey-Emipre/mcode/commit/847f1ec6f5dbed5684488120a7d99ba223b7d1d6))
+* **build:** snapshot-safe subpath import for V8 snapshot entry ([#343](https://github.com/Mzeey-Emipre/mcode/issues/343)) ([c8804f5](https://github.com/Mzeey-Emipre/mcode/commit/c8804f5e3c3eb0614786a3984165ec069cedfca3))
+* **build:** use snapshot-safe subpath import for V8 snapshot entry ([c8804f5](https://github.com/Mzeey-Emipre/mcode/commit/c8804f5e3c3eb0614786a3984165ec069cedfca3))
+* close IPC relay socket and stderr stream on teardown ([#365](https://github.com/Mzeey-Emipre/mcode/issues/365)) ([d86ea30](https://github.com/Mzeey-Emipre/mcode/commit/d86ea30c8bd31d6336fde48d6c1433fefe3f04ad))
+* **copilot:** preserve running state during agentic tool-use loops ([#363](https://github.com/Mzeey-Emipre/mcode/issues/363)) ([4920b3b](https://github.com/Mzeey-Emipre/mcode/commit/4920b3b8224e505c63278fab595c2240843c5e91))
+* deduplicate check runs to show only latest per workflow ([#364](https://github.com/Mzeey-Emipre/mcode/issues/364)) ([ce8b55a](https://github.com/Mzeey-Emipre/mcode/commit/ce8b55ad9d65879f10a34bfbfb36cbf6ba819e0f))
+* **desktop:** harden server startup reliability ([#344](https://github.com/Mzeey-Emipre/mcode/issues/344)) ([3fe2072](https://github.com/Mzeey-Emipre/mcode/commit/3fe2072fbac2cab37a8c51eaec0d501b2cbfaf6c))
+* inject user-level Copilot instructions, skills, and commands ([#362](https://github.com/Mzeey-Emipre/mcode/issues/362)) ([6b0ab58](https://github.com/Mzeey-Emipre/mcode/commit/6b0ab585d15c4790ee81b943e75599a3c31a3647))
+* reduce GitHub API rate limit exposure in CI watcher ([#361](https://github.com/Mzeey-Emipre/mcode/issues/361)) ([cb2a0c9](https://github.com/Mzeey-Emipre/mcode/commit/cb2a0c97e85b295e393e75ba4d10541f9080ceda))
+
 ## [0.6.0](https://github.com/Mzeey-Emipre/mcode/compare/mcode-v0.5.0...mcode-v0.6.0) (2026-04-21)
 
 
