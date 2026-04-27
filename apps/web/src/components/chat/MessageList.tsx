@@ -401,9 +401,14 @@ export function MessageList({ onBranch }: MessageListProps) {
     if (target == null) return;
     const el = containerRef.current;
     if (!el) return;
+    // Only restore if items are actually loaded. On cache misses, this prevents
+    // restoring before items have arrived, which would cause the wrong scroll position
+    // to be briefly visible. When items load, items.length will change and trigger
+    // another effect pass where loading is false.
+    if (loading) return;
     el.scrollTop = target;
     pendingScrollRestoreRef.current = null;
-  }, [activeThreadId, items.length]);
+  }, [activeThreadId, items.length, loading]);
 
   // Discrete events (new message, tool call) -> scroll if at bottom, else highlight button
   useEffect(() => {
