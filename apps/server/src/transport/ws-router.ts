@@ -239,6 +239,8 @@ async function dispatch(
         interaction_mode: params.interactionMode,
         permission_mode: params.permissionMode,
         copilot_agent: params.copilotAgent,
+        context_window_mode: params.contextWindow,
+        thinking: params.thinking,
       });
     case "thread.markViewed":
       deps.threadService.markViewed(params.threadId);
@@ -353,6 +355,8 @@ async function dispatch(
         params.maxBudgetUsd,
         params.maxTurns,
         params.copilotAgent,
+        params.contextWindow,
+        params.thinking,
       );
       return;
     case "agent.createAndSend":
@@ -373,6 +377,8 @@ async function dispatch(
         params.maxBudgetUsd,
         params.maxTurns,
         params.copilotAgent,
+        params.contextWindow,
+        params.thinking,
       );
     case "agent.stop":
       await deps.agentService.stopSession(params.threadId);
@@ -387,6 +393,8 @@ async function dispatch(
         params.answers,
         params.permissionMode ?? "default",
         params.reasoningLevel,
+        params.contextWindow,
+        params.thinking,
       );
       return;
 

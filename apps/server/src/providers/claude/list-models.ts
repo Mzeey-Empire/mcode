@@ -33,7 +33,12 @@ let cachedModels: ProviderModelInfo[] | null = null;
 let cacheTimestamp = 0;
 let inflight: Promise<ProviderModelInfo[]> | null = null;
 
-/** Reset the in-memory cache. Exposed for testing. */
+/**
+ * Resets the in-memory model cache and any inflight request.
+ *
+ * Exposed for testing to ensure a clean state between test runs. Not intended
+ * for production use; the TTL-based expiry handles normal cache invalidation.
+ */
 export function resetModelCache(): void {
   cachedModels = null;
   cacheTimestamp = 0;
@@ -61,6 +66,7 @@ async function fetchModels(): Promise<ProviderModelInfo[]> {
   // Anthropic has far fewer than 100 Claude models at present, so we
   // intentionally do not follow has_more / last_id pagination.
   const res = await fetch("https://api.anthropic.com/v1/models?limit=100", {
+    signal: AbortSignal.timeout(10_000),
     headers: {
       "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",

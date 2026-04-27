@@ -25,12 +25,15 @@ const MAX_ASSISTANT_TEXT = 2000;
 
 /**
  * Rough char budget for the conversation replay injected into the provider.
- * Uses 15% of the model's known context window at ~4 chars/token, leaving
- * headroom for the new conversation. Falls back to a conservative 100K chars
- * (~25K tokens) when the model is unknown.
+ * Uses 15% of the model's *maximum* context window at ~4 chars/token, leaving
+ * headroom for the new conversation. We pass `"1m"` here so 1M-capable models
+ * get the larger budget — the per-thread context window is selected at send
+ * time and may differ, but the replay should fit either tier comfortably.
+ * Falls back to a conservative 100K chars (~25K tokens) when the model is
+ * unknown.
  */
 export function replayBudgetChars(modelId: string): number {
-  const contextWindow = getModelContextWindow(modelId);
+  const contextWindow = getModelContextWindow(modelId, "1m");
   if (contextWindow !== undefined) {
     // 15% of the context window, at ~4 chars/token.
     return Math.floor(contextWindow * 0.15 * 4);

@@ -15,6 +15,7 @@ import type {
   IAgentProvider,
   ProviderId,
   ReasoningLevel,
+  ContextWindowMode,
   AgentEvent,
   AttachmentMeta,
   ProviderModelInfo,
@@ -24,6 +25,7 @@ import type {
 } from "@mcode/contracts";
 import { buildReasoningOptions } from "./build-reasoning-options.js";
 import { listClaudeModels } from "./list-models.js";
+import { applyUltrathinkPrefix, resolveSdkModelSlug } from "./resolve-slug.js";
 
 /** Idle TTL before a session is evicted (10 minutes). */
 const IDLE_TTL_MS = 10 * 60 * 1000;
@@ -44,6 +46,13 @@ interface SessionEntry {
    * fixed at spawn in the Claude Agent SDK CLI.
    */
   permissionMode: string;
+  /**
+   * Context window mode the SDK subprocess was spawned with. The 1M window is
+   * encoded into the model slug (`<id>[1m]`), so changing this between turns
+   * requires a fresh subprocess — the same teardown-and-respawn pattern used
+   * for permissionMode.
+   */
+  contextWindowMode: ContextWindowMode | undefined;
   lastUsedAt: number;
   /** When true, the finally block in startStreamLoop should not emit an "ended" event. */
   suppressEnded?: boolean;
@@ -212,6 +221,8 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     permissionMode: string;
     attachments?: AttachmentMeta[];
     reasoningLevel?: ReasoningLevel;
+    contextWindowMode?: ContextWindowMode;
+    thinking?: boolean;
     maxBudgetUsd?: number;
     maxTurns?: number;
   }): Promise<void> {
@@ -312,6 +323,8 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     permissionMode: string;
     attachments?: AttachmentMeta[];
     reasoningLevel?: ReasoningLevel;
+    contextWindowMode?: ContextWindowMode;
+    thinking?: boolean;
     maxBudgetUsd?: number;
     maxTurns?: number;
   }): Promise<void> {
@@ -325,6 +338,8 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       permissionMode,
       attachments,
       reasoningLevel,
+      contextWindowMode,
+      thinking,
     } = params;
 
     if (!this.evictionTimer) {
@@ -345,11 +360,19 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     const tid = uuid;
     const resolvedCwd = cwd || process.cwd();
     const resolvedModel = model || "claude-sonnet-4-6";
+    // The "[1m]" suffix is appended only when the user opted into the 1M context
+    // window AND the model supports it. The SDK translates it into the
+    // `context-1m-2025-08-07` beta header.
+    const sdkModelSlug = resolveSdkModelSlug(resolvedModel, contextWindowMode);
+
+    // Ultrathink prepends "Ultrathink:\n" to the user prompt for models that
+    // support it. The matching `effort: "max"` is emitted by buildReasoningOptions.
+    const finalMessage = applyUltrathinkPrefix(message, reasoningLevel, resolvedModel);
 
     const prompt =
       attachments && attachments.length > 0
-        ? await this.buildMultimodalMessage(message, attachments, sessionId)
-        : toUserMessage(message, sessionId);
+        ? await this.buildMultimodalMessage(finalMessage, attachments, sessionId)
+        : toUserMessage(finalMessage, sessionId);
 
     if (existing) {
       // Permission mode is fixed at SDK subprocess spawn. setPermissionMode()
@@ -370,15 +393,35 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
         return this.doSendMessage(params);
       }
 
+      // Context window mode is part of the model slug at spawn time, so the SDK
+      // subprocess must be torn down and respawned when the user toggles 200k/1M.
+      // setModel() can change the model ID but cannot toggle the [1m] suffix beta
+      // header, which is only attached at session creation.
+      if (existing.contextWindowMode !== contextWindowMode) {
+        logger.info("contextWindowMode changed, recreating session", {
+          sessionId,
+          from: existing.contextWindowMode,
+          to: contextWindowMode,
+        });
+        existing.suppressEnded = true;
+        existing.closeQueue();
+        existing.query.close();
+        this.sessions.delete(sessionId);
+        return this.doSendMessage(params);
+      }
+
       existing.lastUsedAt = Date.now();
 
       if (existing.model !== resolvedModel) {
         logger.info("Model changed, calling setModel()", {
           sessionId,
-          model: resolvedModel,
+          model: sdkModelSlug,
         });
         try {
-          await existing.query.setModel(resolvedModel);
+          // Always pass the slug (with optional [1m] suffix) to the SDK; the
+          // entry stores the bare model ID so fallback detection compares
+          // against the base name the SDK reports in modelUsage.
+          await existing.query.setModel(sdkModelSlug);
           existing.model = resolvedModel;
         } catch (err) {
           logger.error(
@@ -444,7 +487,10 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
 
     const baseOptions = {
       cwd: resolvedCwd,
-      model: resolvedModel,
+      // sdkModelSlug appends "[1m]" when the user opted into the 1M context window
+      // and the model supports it. Plain `resolvedModel` is preserved on the
+      // session entry as well so the existing-session branch can detect changes.
+      model: sdkModelSlug,
       settingSources: [
         "user" as const,
         "project" as const,
@@ -546,7 +592,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
           };
         }
       }) satisfies CanUseTool,
-      ...buildReasoningOptions(reasoningLevel, resolvedModel),
+      ...buildReasoningOptions(reasoningLevel, resolvedModel, thinking),
       ...(fallbackModel && { fallbackModel }),
       includePartialMessages: true,
       // Guardrails are fixed at session creation. If the user changes the
@@ -592,8 +638,12 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       query: q,
       pushMessage: queue.push,
       closeQueue: queue.close,
+      // Store the bare model ID; the [1m] suffix is only attached at the SDK
+      // boundary so detectFallbackModel can compare against the dated snapshot
+      // IDs the SDK reports in modelUsage.
       model: resolvedModel,
       permissionMode,
+      contextWindowMode,
       lastUsedAt: Date.now(),
       pendingToolUses: new Set<string>(),
     };
@@ -645,6 +695,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
           closeQueue: freshQueue.close,
           model: resolvedModel,
           permissionMode,
+          contextWindowMode,
           lastUsedAt: Date.now(),
           pendingToolUses: new Set<string>(),
         };

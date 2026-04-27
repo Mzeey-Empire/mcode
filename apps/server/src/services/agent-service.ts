@@ -14,6 +14,7 @@ import type {
   Thread,
   AttachmentMeta,
   ReasoningLevel,
+  ContextWindowMode,
   IProviderRegistry,
   AgentEvent,
   ProviderId,
@@ -146,6 +147,8 @@ export class AgentService {
     maxBudgetUsd?: number,
     maxTurns?: number,
     copilotAgent?: string,
+    contextWindowMode?: ContextWindowMode,
+    thinking?: boolean,
   ): Promise<void> {
     const thread = this.threadRepo.findById(threadId);
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
@@ -263,6 +266,16 @@ export class AgentService {
     // A value of 0 means "disabled" — do not pass to provider.
     const effectiveBudget = maxBudgetUsd ?? settings.agent.guardrails.maxBudgetUsd;
     const effectiveTurns = maxTurns ?? settings.agent.guardrails.maxTurns;
+
+    // Resolve context window mode + thinking via the standard precedence chain:
+    // per-call (composer/RPC override) > thread (persisted from earlier turns)
+    // > settings default. The result is what actually flows to the SDK.
+    const effectiveContextWindowMode: ContextWindowMode =
+      contextWindowMode ??
+      (thread.context_window_mode as ContextWindowMode | null) ??
+      settings.model.defaults.contextWindow;
+    const effectiveThinking: boolean =
+      thinking ?? (thread.thinking ?? settings.model.defaults.thinking);
     this.threadRepo.updateModel(threadId, resolvedModel);
     // Only persist provider when the caller explicitly supplied one (new thread or deliberate switch).
     if (provider !== undefined) {
@@ -273,6 +286,8 @@ export class AgentService {
       ...(reasoningLevel !== undefined && { reasoning_level: reasoningLevel }),
       ...(interactionMode !== undefined && { interaction_mode: interactionMode }),
       ...(permissionMode !== undefined && permissionMode !== "default" && { permission_mode: permissionMode }),
+      ...(contextWindowMode !== undefined && { context_window_mode: contextWindowMode }),
+      ...(thinking !== undefined && { thinking }),
       ...(copilotAgent !== undefined && { copilot_agent: copilotAgent }),
     });
 
@@ -317,6 +332,8 @@ export class AgentService {
         permissionMode,
         attachments: persisted.length > 0 ? persisted : undefined,
         reasoningLevel,
+        contextWindowMode: effectiveContextWindowMode,
+        thinking: effectiveThinking,
         ...(effectiveBudget > 0 && { maxBudgetUsd: effectiveBudget }),
         ...(effectiveTurns > 0 && { maxTurns: effectiveTurns }),
         copilotAgent: effectiveCopilotAgent,
@@ -372,6 +389,8 @@ export class AgentService {
     answers: Array<{ questionId: string; selectedOptionId: string | null; freeText: string | null }>,
     permissionMode = "default",
     reasoningLevel?: ReasoningLevel,
+    contextWindowMode?: ContextWindowMode,
+    thinking?: boolean,
   ): Promise<void> {
     const thread = this.threadRepo.findById(threadId);
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
@@ -404,6 +423,12 @@ export class AgentService {
       [],
       reasoningLevel,
       (thread.provider as ProviderId) ?? "claude",
+      undefined, // interactionMode
+      undefined, // maxBudgetUsd
+      undefined, // maxTurns
+      undefined, // copilotAgent
+      contextWindowMode,
+      thinking,
     );
   }
 
@@ -429,6 +454,8 @@ export class AgentService {
     maxBudgetUsd?: number,
     maxTurns?: number,
     copilotAgent?: string,
+    contextWindowMode?: ContextWindowMode,
+    thinking?: boolean,
   ): Promise<Thread> {
     const title = truncateTitle(content);
 
@@ -439,6 +466,8 @@ export class AgentService {
         interactionMode, parentThreadId, forkedFromMessageId, title,
         maxBudgetUsd, maxTurns,
         copilotAgent,
+        contextWindowMode,
+        thinking,
       });
     }
 
@@ -500,6 +529,8 @@ export class AgentService {
       maxBudgetUsd,
       maxTurns,
       copilotAgent,
+      contextWindowMode,
+      thinking,
     );
 
     // Re-read from DB to pick up model update applied by sendMessage
@@ -531,6 +562,8 @@ export class AgentService {
     maxBudgetUsd?: number;
     maxTurns?: number;
     copilotAgent?: string;
+    contextWindowMode?: ContextWindowMode;
+    thinking?: boolean;
   }): Promise<Thread> {
     const {
       workspaceId, content, model, permissionMode, mode, branch,
@@ -538,6 +571,8 @@ export class AgentService {
       interactionMode, parentThreadId, forkedFromMessageId, title,
       maxBudgetUsd, maxTurns,
       copilotAgent,
+      contextWindowMode,
+      thinking,
     } = params;
 
     // Validate parent
@@ -703,6 +738,8 @@ export class AgentService {
         maxBudgetUsd,
         maxTurns,
         copilotAgent,
+        contextWindowMode,
+        thinking,
       );
     } finally {
       // Ensure override is cleaned up even if sendMessage throws before consuming it.
