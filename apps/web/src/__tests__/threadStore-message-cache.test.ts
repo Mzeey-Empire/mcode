@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { useThreadStore } from "@/stores/threadStore";
+import { useThreadStore, TOOL_CALL_CACHE_SIZE } from "@/stores/threadStore";
 import { clearMessageCache, getCachedSnapshot } from "@/stores/messageCache";
 import { mockTransport, createMockMessage } from "./mocks/transport";
+import { LruCache } from "@/lib/lru-cache";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -26,7 +27,21 @@ describe("loadMessages cache integration", () => {
       currentThreadId: null,
       runningThreadIds: new Set<string>(),
       loading: false,
-    } as any);
+      errorByThread: {},
+      streamingByThread: {},
+      toolCallsByThread: {},
+      persistedToolCallCounts: {},
+      serverMessageIds: {},
+      toolCallRecordCache: new LruCache(TOOL_CALL_CACHE_SIZE),
+      currentTurnMessageIdByThread: {},
+      agentStartTimes: {},
+      settingsByThread: {},
+      activeSubagentsByThread: {},
+      oldestLoadedSequence: {},
+      hasMoreMessages: {},
+      isLoadingMore: {},
+      loadEpochByThread: {},
+    });
   });
 
   it("calls getMessages on first load (cache miss) and populates cache", async () => {
@@ -89,7 +104,21 @@ describe("loadMessages cache eviction", () => {
       currentThreadId: null,
       runningThreadIds: new Set<string>(),
       loading: false,
-    } as any);
+      errorByThread: {},
+      streamingByThread: {},
+      toolCallsByThread: {},
+      persistedToolCallCounts: {},
+      serverMessageIds: {},
+      toolCallRecordCache: new LruCache(TOOL_CALL_CACHE_SIZE),
+      currentTurnMessageIdByThread: {},
+      agentStartTimes: {},
+      settingsByThread: {},
+      activeSubagentsByThread: {},
+      oldestLoadedSequence: {},
+      hasMoreMessages: {},
+      isLoadingMore: {},
+      loadEpochByThread: {},
+    });
   });
 
   it("evicts when handleAgentEvent fires for the thread", async () => {
