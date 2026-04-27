@@ -107,7 +107,9 @@ async function mockWebSocketServer(page: Page): Promise<void> {
     updated_at: new Date(Date.now() + i * 1000).toISOString(),
   }));
 
-  await page.routeWebSocket(/ws:\/\/localhost:\d{5}/, (ws) => {
+  let currentThreadId = "thread-a";
+
+  await page.routeWebSocket(/ws:\/\/localhost/, (ws) => {
     ws.onMessage((data) => {
       let msg: Record<string, unknown>;
       try {
@@ -120,8 +122,18 @@ async function mockWebSocketServer(page: Page): Promise<void> {
       if (method === "workspace.list") result = [workspace];
       else if (method === "thread.list") result = [threadA, threadB];
       else if (method === "message.list") {
-        // Return messages based on thread context from the previous call
-        result = messages;
+        // Extract thread_id from params if available, otherwise use current context
+        const params = msg.params as Record<string, unknown> | undefined;
+        if (params?.thread_id === "thread-b") {
+          currentThreadId = "thread-b";
+          result = messageB;
+        } else if (params?.thread_id === "thread-a") {
+          currentThreadId = "thread-a";
+          result = messages;
+        } else {
+          // Fallback to current thread
+          result = currentThreadId === "thread-b" ? messageB : messages;
+        }
       } else if (method?.endsWith(".list")) result = [];
       else if (method === "git.currentBranch") result = "main";
       else if (method === "agent.activeCount") result = 0;
@@ -173,14 +185,20 @@ test.describe("Thread switch — no MessageList remount", () => {
     const threadItems = page.locator("[data-testid='thread-item']");
     await threadItems.nth(1).click();
 
-    // Wait for the message list to update (give layout time)
-    await page.waitForTimeout(100);
+    // Wait for thread B's content to load
+    await page.waitForFunction(() => {
+      const text = document.querySelector("[data-testid=message-list]")?.textContent || "";
+      return text.includes("Thread B Message") && text.length > 0;
+    }, { timeout: 5000 });
 
     // Switch back to thread A
     await threadItems.nth(0).click();
 
-    // Wait for the message list to update back to thread A
-    await page.waitForTimeout(100);
+    // Wait for thread A's content to load back
+    await page.waitForFunction(() => {
+      const text = document.querySelector("[data-testid=message-list]")?.textContent || "";
+      return text.includes("Message") && !text.includes("Thread B");
+    }, { timeout: 5000 });
 
     // Check that scroll position was restored
     const restored = await scrollEl.evaluate(
@@ -202,19 +220,27 @@ test.describe("Thread switch — no MessageList remount", () => {
     const threadItems = page.locator("[data-testid='thread-item']");
     await threadItems.nth(1).click();
 
-    // Wait for thread B to load
-    await page.waitForTimeout(100);
+    // Wait for thread B's content to load
+    await page.waitForFunction(() => {
+      const text = document.querySelector("[data-testid=message-list]")?.textContent || "";
+      return text.includes("Thread B Message") && text.length > 0;
+    }, { timeout: 5000 });
 
     // Switch back to thread A — cached return must skip the opacity flash
     await threadItems.nth(0).click();
 
-    // Wait a brief moment for the DOM update
-    await page.waitForTimeout(50);
-
-    // Sample opacity immediately — should be 1 (no flash)
-    const opacity = await scrollEl.evaluate((el) =>
-      Number(getComputedStyle(el as Element).opacity),
-    );
-    expect(opacity).toBe(1);
+    // Sample opacity multiple times over 100ms to ensure no flash occurs
+    let hasFlash = false;
+    for (let i = 0; i < 5; i++) {
+      const opacity = await scrollEl.evaluate((el) =>
+        Number(getComputedStyle(el as Element).opacity),
+      );
+      if (opacity < 1) {
+        hasFlash = true;
+        break;
+      }
+      await page.waitForTimeout(20);
+    }
+    expect(hasFlash).toBe(false);
   });
 });
