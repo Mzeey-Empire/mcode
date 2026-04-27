@@ -20,13 +20,13 @@ describe("loadMessages cache integration", () => {
   beforeEach(() => {
     clearMessageCache();
     vi.clearAllMocks();
-    mockTransport.getMessages.mockResolvedValue({ messages: fakeMessages, hasMore: false });
+    (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockResolvedValue({ messages: fakeMessages, hasMore: false });
     useThreadStore.setState({
       messages: [],
       currentThreadId: null,
       runningThreadIds: new Set<string>(),
       loading: false,
-    } as Parameters<typeof useThreadStore.setState>[0]);
+    } as any);
   });
 
   it("calls getMessages on first load (cache miss) and populates cache", async () => {
@@ -83,13 +83,13 @@ describe("loadMessages cache eviction", () => {
   beforeEach(() => {
     clearMessageCache();
     vi.clearAllMocks();
-    mockTransport.getMessages.mockResolvedValue({ messages: fakeMessages, hasMore: false });
+    (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockResolvedValue({ messages: fakeMessages, hasMore: false });
     useThreadStore.setState({
       messages: [],
       currentThreadId: null,
       runningThreadIds: new Set<string>(),
       loading: false,
-    } as Parameters<typeof useThreadStore.setState>[0]);
+    } as any);
   });
 
   it("evicts when handleAgentEvent fires for the thread", async () => {
