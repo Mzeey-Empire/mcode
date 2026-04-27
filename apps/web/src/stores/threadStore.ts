@@ -191,6 +191,9 @@ export const OLDER_PAGE_SIZE = 50;
 /** Maximum messages kept in the in-memory sliding window. */
 export const MESSAGE_WINDOW_SIZE = 200;
 
+/** Initial message fetch size per thread */
+export const MESSAGE_FETCH_SIZE = 100;
+
 /**
  * Enforce the sliding window cap on a messages array.
  * Returns the trimmed array and whether messages were evicted.
@@ -408,7 +411,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       });
     }
     try {
-      const { messages, hasMore } = await getTransport().getMessages(threadId, 100);
+      const { messages, hasMore } = await getTransport().getMessages(threadId, MESSAGE_FETCH_SIZE);
       if (get().currentThreadId === threadId) {
         // Populate persisted tool call counts from loaded messages
         const counts: Record<string, number> = {};

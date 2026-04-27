@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { useThreadStore, TOOL_CALL_CACHE_SIZE } from "@/stores/threadStore";
+import { useThreadStore, TOOL_CALL_CACHE_SIZE, MESSAGE_FETCH_SIZE } from "@/stores/threadStore";
 import { clearMessageCache, getCachedSnapshot } from "@/stores/messageCache";
 import { mockTransport, createMockMessage } from "./mocks/transport";
 import { LruCache } from "@/lib/lru-cache";
@@ -17,37 +17,45 @@ const fakeMessages = [
   }),
 ];
 
+/**
+ * Reset thread store and message cache to a clean state for tests.
+ * Sets up mocked transport and properly-typed initial state.
+ */
+function resetThreadStoreTestState() {
+  clearMessageCache();
+  vi.clearAllMocks();
+  (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockResolvedValue({ messages: fakeMessages, hasMore: false });
+  useThreadStore.setState({
+    messages: [],
+    currentThreadId: null,
+    runningThreadIds: new Set<string>(),
+    loading: false,
+    errorByThread: {},
+    streamingByThread: {},
+    toolCallsByThread: {},
+    persistedToolCallCounts: {},
+    serverMessageIds: {},
+    toolCallRecordCache: new LruCache(TOOL_CALL_CACHE_SIZE),
+    currentTurnMessageIdByThread: {},
+    agentStartTimes: {},
+    settingsByThread: {},
+    activeSubagentsByThread: {},
+    oldestLoadedSequence: {},
+    hasMoreMessages: {},
+    isLoadingMore: {},
+    loadEpochByThread: {},
+  });
+}
+
 describe("loadMessages cache integration", () => {
   beforeEach(() => {
-    clearMessageCache();
-    vi.clearAllMocks();
-    (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockResolvedValue({ messages: fakeMessages, hasMore: false });
-    useThreadStore.setState({
-      messages: [],
-      currentThreadId: null,
-      runningThreadIds: new Set<string>(),
-      loading: false,
-      errorByThread: {},
-      streamingByThread: {},
-      toolCallsByThread: {},
-      persistedToolCallCounts: {},
-      serverMessageIds: {},
-      toolCallRecordCache: new LruCache(TOOL_CALL_CACHE_SIZE),
-      currentTurnMessageIdByThread: {},
-      agentStartTimes: {},
-      settingsByThread: {},
-      activeSubagentsByThread: {},
-      oldestLoadedSequence: {},
-      hasMoreMessages: {},
-      isLoadingMore: {},
-      loadEpochByThread: {},
-    });
+    resetThreadStoreTestState();
   });
 
   it("calls getMessages on first load (cache miss) and populates cache", async () => {
     await useThreadStore.getState().loadMessages("t1");
 
-    expect(mockTransport.getMessages).toHaveBeenCalledWith("t1", 100);
+    expect(mockTransport.getMessages).toHaveBeenCalledWith("t1", MESSAGE_FETCH_SIZE);
     expect(useThreadStore.getState().messages).toEqual(fakeMessages);
     expect(getCachedSnapshot("t1")).toBeDefined();
     expect(getCachedSnapshot("t1")?.messages).toEqual(fakeMessages);
@@ -89,6 +97,8 @@ describe("loadMessages cache integration", () => {
     await useThreadStore.getState().loadMessages("t1");
     unsub();
 
+    // Verify state updates were observed (not just an empty array)
+    expect(snapshots.length).toBeGreaterThan(0);
     // Every observed messages array should be non-empty for thread t1.
     expect(snapshots.every((m) => m.length > 0)).toBe(true);
   });
@@ -96,29 +106,7 @@ describe("loadMessages cache integration", () => {
 
 describe("loadMessages cache eviction", () => {
   beforeEach(() => {
-    clearMessageCache();
-    vi.clearAllMocks();
-    (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockResolvedValue({ messages: fakeMessages, hasMore: false });
-    useThreadStore.setState({
-      messages: [],
-      currentThreadId: null,
-      runningThreadIds: new Set<string>(),
-      loading: false,
-      errorByThread: {},
-      streamingByThread: {},
-      toolCallsByThread: {},
-      persistedToolCallCounts: {},
-      serverMessageIds: {},
-      toolCallRecordCache: new LruCache(TOOL_CALL_CACHE_SIZE),
-      currentTurnMessageIdByThread: {},
-      agentStartTimes: {},
-      settingsByThread: {},
-      activeSubagentsByThread: {},
-      oldestLoadedSequence: {},
-      hasMoreMessages: {},
-      isLoadingMore: {},
-      loadEpochByThread: {},
-    });
+    resetThreadStoreTestState();
   });
 
   it("evicts when handleAgentEvent fires for the thread", async () => {
