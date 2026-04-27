@@ -500,6 +500,8 @@ export function createWsTransport(
         interactionMode: settings.interactionMode,
         permissionMode: settings.permissionMode,
         copilotAgent: settings.copilotAgent,
+        contextWindow: settings.contextWindow,
+        thinking: settings.thinking,
       }),
     markThreadViewed: (threadId) => rpc<void>("thread.markViewed", { threadId }),
     syncThreadPrs: (workspaceId) =>
@@ -513,13 +515,14 @@ export function createWsTransport(
     listWorktrees: (workspaceId) => rpc<WorktreeInfo[]>("git.listWorktrees", { workspaceId }),
 
     // Agent
-    sendMessage: (threadId, content, model?, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], reasoningLevel?: ReasoningLevel, provider?: string, interactionMode?, copilotAgent?: string) => {
+    sendMessage: (threadId, content, model?, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], reasoningLevel?: ReasoningLevel, provider?: string, interactionMode?, copilotAgent?: string, contextWindow?, thinking?) => {
       const state = useSettingsStore.getState();
       const guardrails = state.loaded
         ? { maxBudgetUsd: state.settings.agent.guardrails.maxBudgetUsd, maxTurns: state.settings.agent.guardrails.maxTurns }
         : {};
       return rpc<void>("agent.send", {
         threadId, content, model, permissionMode, attachments, reasoningLevel, provider, interactionMode, copilotAgent,
+        contextWindow, thinking,
         ...guardrails,
       });
     },
@@ -538,6 +541,8 @@ export function createWsTransport(
       parentThreadId?,
       forkedFromMessageId?,
       copilotAgent?,
+      contextWindow?,
+      thinking?,
     ) => {
       const state = useSettingsStore.getState();
       const guardrails = state.loaded
@@ -558,6 +563,8 @@ export function createWsTransport(
         parentThreadId,
         forkedFromMessageId,
         copilotAgent,
+        contextWindow,
+        thinking,
         ...guardrails,
       });
     },
@@ -566,8 +573,8 @@ export function createWsTransport(
       rpc<void>("permission.respond", { requestId, decision }),
     listPendingPermissions: (threadId) =>
       rpc<PermissionRequest[]>("permission.listPending", { threadId }),
-    answerPlanQuestions: (threadId, answers, permissionMode?, reasoningLevel?) =>
-      rpc<void>("agent.answerQuestions", { threadId, answers, permissionMode, reasoningLevel }),
+    answerPlanQuestions: (threadId, answers, permissionMode?, reasoningLevel?, contextWindow?, thinking?) =>
+      rpc<void>("agent.answerQuestions", { threadId, answers, permissionMode, reasoningLevel, contextWindow, thinking }),
     readClipboardImage: () =>
       Promise.resolve(null as AttachmentMeta | null),
     saveClipboardFile: (data, mimeType, fileName) =>

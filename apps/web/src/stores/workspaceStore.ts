@@ -8,7 +8,7 @@ import { useQueueStore } from "./queueStore";
 import { useTaskStore } from "./taskStore";
 import { useComposerDraftStore } from "./composerDraftStore";
 import { useDiffStore } from "./diffStore";
-import type { NamingMode, ReasoningLevel, InteractionMode } from "@mcode/contracts";
+import type { ContextWindowMode, NamingMode, ReasoningLevel, InteractionMode } from "@mcode/contracts";
 import { useSettingsStore } from "./settingsStore";
 import { sanitizeCustomBranchInput, resolveBranchName } from "@/lib/branch-name";
 
@@ -66,7 +66,7 @@ interface WorkspaceState {
     mode: "direct" | "worktree",
     branch: string,
   ) => Promise<Thread>;
-  createAndSendMessage: (content: string, model: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], reasoningLevel?: ReasoningLevel, provider?: string, interactionMode?: InteractionMode, copilotAgent?: string) => Promise<Thread>;
+  createAndSendMessage: (content: string, model: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], reasoningLevel?: ReasoningLevel, provider?: string, interactionMode?: InteractionMode, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean) => Promise<Thread>;
   /** Branch an existing thread into a new child with handoff context. */
   branchThread: (params: {
     sourceThreadId: string;
@@ -82,6 +82,8 @@ interface WorkspaceState {
     attachments?: AttachmentMeta[];
     interactionMode?: InteractionMode;
     copilotAgent?: string;
+    contextWindow?: ContextWindowMode;
+    thinking?: boolean;
   }) => Promise<Thread>;
   deleteThread: (threadId: string, cleanupWorktree: boolean) => Promise<void>;
   setActiveThread: (id: string | null) => void;
@@ -326,7 +328,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
   },
 
-  createAndSendMessage: async (content, model, permissionMode, attachments, reasoningLevel, provider, interactionMode, copilotAgent) => {
+  createAndSendMessage: async (content, model, permissionMode, attachments, reasoningLevel, provider, interactionMode, copilotAgent, contextWindow, thinking) => {
     const workspaceId = get().activeWorkspaceId;
     if (!workspaceId) throw new Error("No workspace selected");
 
@@ -349,7 +351,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({ error: null });
     try {
       const thread = await getTransport().createAndSendMessage(
-        workspaceId, content, model, permissionMode, mode, branch, existingWorktreePath, attachments, reasoningLevel, provider, interactionMode, undefined, undefined, copilotAgent,
+        workspaceId, content, model, permissionMode, mode, branch, existingWorktreePath, attachments, reasoningLevel, provider, interactionMode, undefined, undefined, copilotAgent, contextWindow, thinking,
       );
       set((state) => ({
         threads: [thread, ...state.threads],
@@ -410,6 +412,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         params.sourceThreadId,
         params.forkedFromMessageId,
         params.copilotAgent,
+        params.contextWindow,
+        params.thinking,
       );
 
       set((state) => ({

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
-import type { ReasoningLevel } from "@mcode/contracts";
+import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts";
 
 /** Draft state for a single composer instance, keyed by thread ID. */
 export interface ComposerDraft {
@@ -10,6 +10,18 @@ export interface ComposerDraft {
   /** Provider ID stored alongside the model because multiple providers share model IDs. */
   provider?: string;
   reasoning: ReasoningLevel;
+  /**
+   * Per-thread context window override. Undefined falls back to the thread's
+   * persisted mode (or the global settings default). Honored only by Claude
+   * provider for models that support a 1M-context beta header.
+   */
+  contextWindow?: ContextWindowMode;
+  /**
+   * Per-thread thinking toggle override. Undefined falls back to the thread's
+   * persisted toggle (or the global settings default). Honored only by models
+   * that expose a thinking toggle (Haiku 4.5).
+   */
+  thinking?: boolean;
 }
 
 interface ComposerDraftState {

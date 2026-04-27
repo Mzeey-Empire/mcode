@@ -12,6 +12,7 @@ import type {
   SkillDiagnostics,
   PermissionMode,
   ReasoningLevel,
+  ContextWindowMode,
   ToolCallRecord,
   TurnSnapshot,
   Settings,
@@ -45,6 +46,7 @@ export type {
   SkillDiagnostics,
   PermissionMode,
   InteractionMode,
+  ContextWindowMode,
   Settings,
   PartialSettings,
   GitCommit,
@@ -94,7 +96,7 @@ export interface McodeTransport {
   listWorktrees(workspaceId: string): Promise<WorktreeInfo[]>;
 
   // Agent commands
-  sendMessage(threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], reasoningLevel?: ReasoningLevel, provider?: string, interactionMode?: InteractionMode, copilotAgent?: string): Promise<void>;
+  sendMessage(threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], reasoningLevel?: ReasoningLevel, provider?: string, interactionMode?: InteractionMode, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean): Promise<void>;
   createAndSendMessage(
     workspaceId: string,
     content: string,
@@ -110,6 +112,8 @@ export interface McodeTransport {
     parentThreadId?: string,
     forkedFromMessageId?: string,
     copilotAgent?: string,
+    contextWindow?: ContextWindowMode,
+    thinking?: boolean,
   ): Promise<Thread>;
   stopAgent(threadId: string): Promise<void>;
   /** Respond to a tool permission request from the agent. */
@@ -122,6 +126,8 @@ export interface McodeTransport {
     answers: PlanAnswer[],
     permissionMode?: PermissionMode,
     reasoningLevel?: ReasoningLevel,
+    contextWindow?: ContextWindowMode,
+    thinking?: boolean,
   ): Promise<void>;
   readClipboardImage(): Promise<AttachmentMeta | null>;
   /** Save a clipboard file blob to disk via the server. Returns attachment metadata. */
@@ -136,7 +142,7 @@ export interface McodeTransport {
 
   // Thread mutations
   updateThreadTitle(threadId: string, title: string): Promise<boolean>;
-  /** Persist per-thread composer settings (reasoning, mode, permission, copilot agent). */
+  /** Persist per-thread composer settings (reasoning, mode, permission, copilot agent, context window, thinking). */
   updateThreadSettings(
     threadId: string,
     settings: {
@@ -144,6 +150,8 @@ export interface McodeTransport {
       interactionMode?: InteractionMode;
       permissionMode?: PermissionMode;
       copilotAgent?: string | null;
+      contextWindow?: ContextWindowMode | null;
+      thinking?: boolean | null;
     },
   ): Promise<boolean>;
   /** Clear the "completed" badge for a thread. Transitions completed -> paused in the DB. */

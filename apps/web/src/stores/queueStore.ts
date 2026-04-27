@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { AttachmentMeta, PermissionMode } from "@/transport";
-import type { ReasoningLevel } from "@mcode/contracts";
+import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts";
 
 /** A message waiting to be sent while the thread is busy with another turn. */
 export interface QueuedMessage {
@@ -17,6 +17,10 @@ export interface QueuedMessage {
   provider?: string;
   /** Copilot sub-agent to use; undefined means inherit the thread's stored agent. */
   copilotAgent?: string;
+  /** Claude context window mode for this turn; undefined means inherit from thread/settings. */
+  contextWindow?: ContextWindowMode;
+  /** Haiku thinking toggle for this turn; undefined means inherit from thread/settings. */
+  thinking?: boolean;
   /** Unix timestamp (ms) when this message was enqueued. */
   queuedAt: number;
 }

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { Message, ToolCall, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
-import type { ReasoningLevel, PlanQuestion, PlanAnswer, ProviderUsageInfo, QuotaCategory } from "@mcode/contracts";
+import type { ContextWindowMode, ReasoningLevel, PlanQuestion, PlanAnswer, ProviderUsageInfo, QuotaCategory } from "@mcode/contracts";
 import type { PermissionRequest, PermissionDecision } from "@mcode/contracts";
 import { PlanQuestionSchema, PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts";
 import { getTransport } from "@/transport";
@@ -10,8 +10,8 @@ import { LruCache } from "@/lib/lru-cache";
 import { useTaskStore, coerceTaskStatus } from "./taskStore";
 import type { TaskItem } from "./taskStore";
 import { useToastStore } from "./toastStore";
-import { findModelById, getContextWindow } from "@/lib/model-registry";
-import { resolveContextWindow } from "../lib/resolve-context-window";
+import { findModelById } from "@/lib/model-registry";
+import { resolveContextWindow } from "@/lib/resolve-context-window";
 import { useSettingsStore } from "./settingsStore";
 
 /** A permission request with its current resolution state. */
@@ -30,6 +30,18 @@ export interface ThreadSettings {
   reasoningLevel?: ReasoningLevel;
   /** Selected Copilot sub-agent name. Null means provider default. Only relevant when provider is "copilot". */
   copilotAgent?: string | null;
+  /**
+   * Per-thread context window override. Null clears the override so the thread
+   * inherits from the global settings default. Honored only by Claude provider
+   * for models that support a 1M-context beta header.
+   */
+  contextWindow?: ContextWindowMode | null;
+  /**
+   * Per-thread thinking toggle override. Null clears the override so the thread
+   * inherits from the global settings default. Honored only by models that
+   * expose a thinking toggle (Haiku 4.5).
+   */
+  thinking?: boolean | null;
 }
 
 interface ThreadState {
@@ -98,7 +110,7 @@ interface ThreadState {
   // Message actions
   loadMessages: (threadId: string) => Promise<void>;
   loadOlderMessages: (threadId: string) => Promise<void>;
-  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, copilotAgent?: string) => Promise<void>;
+  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean) => Promise<void>;
   stopAgent: (threadId: string) => Promise<void>;
   /** Replace runningThreadIds with the authoritative server snapshot. Called on WS (re)connect. */
   hydrateRunningThreads: (ids: string[]) => void;
@@ -515,7 +527,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
    * message to local state, marks the thread as running, then dispatches
    * to the transport layer. On failure, rolls back the running state.
    */
-  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, copilotAgent) => {
+  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, copilotAgent, contextWindow, thinking) => {
     // Add user message to local state immediately (optimistic)
     // Use displayContent for the UI (without injected file blocks) if provided
     const userMessage: Message = {
@@ -546,9 +558,17 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         : {}),
       runningThreadIds: new Set([...state.runningThreadIds, threadId]),
       agentStartTimes: { ...state.agentStartTimes, [threadId]: Date.now() },
-      // Persist reasoningLevel so the post-wizard answer turn forwards the same setting
-      settingsByThread: reasoningLevel !== undefined
-        ? { ...state.settingsByThread, [threadId]: { ...state.getThreadSettings(threadId), reasoningLevel } }
+      // Persist composer-side overrides so the post-wizard answer turn forwards them
+      settingsByThread: (reasoningLevel !== undefined || contextWindow !== undefined || thinking !== undefined)
+        ? {
+            ...state.settingsByThread,
+            [threadId]: {
+              ...state.getThreadSettings(threadId),
+              ...(reasoningLevel !== undefined && { reasoningLevel }),
+              ...(contextWindow !== undefined && { contextWindow }),
+              ...(thinking !== undefined && { thinking }),
+            },
+          }
         : state.settingsByThread,
       // Clear any transient fallback from the previous turn so the next message uses the intended model
       lastFallbackByThread: (() => {
@@ -565,7 +585,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
 
     try {
       const { interactionMode } = get().getThreadSettings(threadId);
-      await getTransport().sendMessage(threadId, content, model, permissionMode, attachments, reasoningLevel, provider, interactionMode, copilotAgent);
+      await getTransport().sendMessage(threadId, content, model, permissionMode, attachments, reasoningLevel, provider, interactionMode, copilotAgent, contextWindow, thinking);
     } catch (e) {
       set((state) => {
         const next = new Set(state.runningThreadIds);
@@ -692,6 +712,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           ? (thread.reasoning_level as ReasoningLevel)
           : undefined,
         copilotAgent: thread.copilot_agent,
+        contextWindow: (thread.context_window_mode as ContextWindowMode | null) ?? null,
+        thinking: thread.thinking ?? null,
       };
     }
 
@@ -714,6 +736,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     if (settings.reasoningLevel !== undefined) patch.reasoningLevel = settings.reasoningLevel;
     // Use `in` check so explicit null clears the agent (null !== undefined).
     if ("copilotAgent" in settings) patch.copilotAgent = settings.copilotAgent;
+    // null clears the override so the thread inherits from the global default.
+    if ("contextWindow" in settings) patch.contextWindow = settings.contextWindow;
+    if ("thinking" in settings) patch.thinking = settings.thinking;
 
     if (Object.keys(patch).length === 0) return Promise.resolve(false);
 
@@ -738,22 +763,28 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               ...(patch.interactionMode !== undefined && { interaction_mode: patch.interactionMode }),
               ...(patch.reasoningLevel !== undefined && { reasoning_level: patch.reasoningLevel }),
               ...("copilotAgent" in patch && { copilot_agent: patch.copilotAgent ?? null }),
+              ...("contextWindow" in patch && { context_window_mode: patch.contextWindow ?? null }),
+              ...("thinking" in patch && { thinking: patch.thinking ?? null }),
             }
           : t,
       ),
     }));
 
-    // copilotAgent: null clears the persisted agent; undefined means don't change.
+    // copilotAgent / contextWindow / thinking: null clears the persisted value; undefined means don't change.
     const transportPatch: {
       reasoningLevel?: ReturnType<typeof get>["settingsByThread"][string]["reasoningLevel"];
       interactionMode?: ReturnType<typeof get>["settingsByThread"][string]["interactionMode"];
       permissionMode?: ReturnType<typeof get>["settingsByThread"][string]["permissionMode"];
       copilotAgent?: string | null;
+      contextWindow?: ContextWindowMode | null;
+      thinking?: boolean | null;
     } = {
       ...(patch.permissionMode !== undefined ? { permissionMode: patch.permissionMode } : {}),
       ...(patch.interactionMode !== undefined ? { interactionMode: patch.interactionMode } : {}),
       ...(patch.reasoningLevel !== undefined ? { reasoningLevel: patch.reasoningLevel } : {}),
       ...("copilotAgent" in patch ? { copilotAgent: patch.copilotAgent } : {}),
+      ...("contextWindow" in patch ? { contextWindow: patch.contextWindow } : {}),
+      ...("thinking" in patch ? { thinking: patch.thinking } : {}),
     };
     return getTransport().updateThreadSettings(threadId, transportPatch).catch(() => false);
   },
@@ -919,7 +950,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     const state = get();
     const answersMap = state.planAnswersByThread[threadId] ?? new Map<string, PlanAnswer>();
     const questions = state.planQuestionsByThread[threadId] ?? [];
-    const { permissionMode, reasoningLevel } = state.getThreadSettings(threadId);
+    const { permissionMode, reasoningLevel, contextWindow, thinking } = state.getThreadSettings(threadId);
 
     // Build an answer for every question; unanswered questions get nulls
     const answers: PlanAnswer[] = questions.map((q) => {
@@ -937,7 +968,14 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     }));
 
     try {
-      await getTransport().answerPlanQuestions(threadId, answers, permissionMode, reasoningLevel);
+      await getTransport().answerPlanQuestions(
+        threadId,
+        answers,
+        permissionMode,
+        reasoningLevel,
+        contextWindow ?? undefined,
+        thinking ?? undefined,
+      );
     } catch (e) {
       // Revert to pending on error so user can retry
       set((s) => ({
@@ -1434,18 +1472,21 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         // Prefer the actual model that ran (post-fallback) so context window
         // sizing reflects Haiku's limits rather than the requested Opus model.
         const fallback = get().lastFallbackByThread[threadId];
+        const thread = useWorkspaceStore.getState().threads.find((t) => t.id === threadId);
         const modelId = fallback?.actualModel
-          ?? useWorkspaceStore.getState().threads.find((t) => t.id === threadId)?.model
+          ?? thread?.model
           ?? "claude-sonnet-4-6";
-        // Preference chain: user settings override (default model only) > registry > SDK > previously stored.
+        // Effective mode chain: thread override > settings default > "200k".
         // Uses get() (not state) because this runs outside the set() callback.
         const settingsDefaults = useSettingsStore.getState().settings.model.defaults;
+        const effectiveMode: ContextWindowMode =
+          (thread?.context_window_mode as ContextWindowMode | null | undefined)
+          ?? settingsDefaults.contextWindow
+          ?? "200k";
         const contextWindow = resolveContextWindow({
           sdkContextWindow,
           modelId,
-          defaultModelId: settingsDefaults.id,
-          settingsContextWindow: settingsDefaults.contextWindow,
-          registryContextWindow: getContextWindow(modelId),
+          contextWindowMode: effectiveMode,
           previousContextWindow: get().contextByThread[threadId]?.contextWindow,
         });
         set((state) => ({
@@ -1511,6 +1552,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               next.reasoningLevel,
               next.provider,
               next.copilotAgent,
+              next.contextWindow,
+              next.thinking,
             );
           }
         }, 400);
