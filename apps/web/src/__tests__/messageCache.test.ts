@@ -83,3 +83,22 @@ describe("messageCache", () => {
     expect(getCachedSnapshot("t1")).toBeUndefined();
   });
 });
+
+describe("LruCache.delete", () => {
+  it("removes the entry and returns true when present", () => {
+    // Import LruCache for this test
+    const { LruCache } = require("@/lib/lru-cache");
+    const c = new LruCache<string, number>(3);
+    c.set("a", 1);
+    // @ts-expect-error - delete not yet defined
+    expect(c.delete("a")).toBe(true);
+    expect(c.get("a")).toBeUndefined();
+  });
+
+  it("returns false when key is absent", () => {
+    const { LruCache } = require("@/lib/lru-cache");
+    const c = new LruCache<string, number>(3);
+    // @ts-expect-error - delete not yet defined
+    expect(c.delete("missing")).toBe(false);
+  });
+});

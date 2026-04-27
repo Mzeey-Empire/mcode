@@ -35,13 +35,7 @@ export function cacheSnapshot(threadId: string, snapshot: MessageCacheSnapshot):
 
 /** Remove a single thread's snapshot. No-op when absent. */
 export function evictThread(threadId: string): void {
-  cacheDelete(threadId);
-}
-
-/** Internal: delete from LRU cache. Temporary scaffold until LruCache.delete() is added. */
-function cacheDelete(threadId: string): void {
-  // @ts-expect-error - private map access is acceptable here; a public delete() is added in Task 1a
-  cache["map"].delete(threadId);
+  cache.delete(threadId);
 }
 
 /** Drop all cached snapshots. Used in tests and on workspace deletion. */

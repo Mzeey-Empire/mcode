@@ -40,6 +40,11 @@ export class LruCache<K, V> {
     this.map.clear();
   }
 
+  /** Remove an entry. Returns true if the key existed, false otherwise. */
+  delete(key: K): boolean {
+    return this.map.delete(key);
+  }
+
   /** Number of entries currently in the cache. */
   get size(): number {
     return this.map.size;
