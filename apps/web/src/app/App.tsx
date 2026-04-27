@@ -3,6 +3,9 @@ import { Sidebar } from "@/components/sidebar/Sidebar";
 import { ChatView } from "@/components/chat/ChatView";
 import { SettingsView } from "@/components/settings/SettingsView";
 import { ConnectionBanner } from "@/components/ConnectionBanner";
+import { UpdateBanner } from "@/components/UpdateBanner";
+import { useUpdateStore } from "@/stores/updateStore";
+import type { UpdateStatus } from "@/transport/desktop-bridge";
 import { TerminalPanel } from "@/components/terminal";
 import { RightPanel } from "@/components/panels/RightPanel";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -40,6 +43,24 @@ export function App() {
     startPushListeners();
     useSettingsStore.getState().fetch();
     return () => stopPushListeners();
+  }, []);
+
+  // Hydrate app version + auto-updater status from the Electron preload bridge.
+  useEffect(() => {
+    const bridge = window.desktopBridge?.app;
+    if (!bridge) return;
+
+    void bridge.getVersion().then((v) => useUpdateStore.getState().setVersion(v));
+    void bridge.getUpdateStatus().then((s) => {
+      if (s && useUpdateStore.getState().status.state === "idle") {
+        useUpdateStore.getState().setStatus(s as UpdateStatus);
+      }
+    });
+
+    const listener = bridge.onUpdateStatus((status) => {
+      useUpdateStore.getState().setStatus(status);
+    });
+    return () => bridge.offUpdateStatus(listener);
   }, []);
 
   // Listen for deep-link requests to open a specific settings section
@@ -261,6 +282,7 @@ export function App() {
           appears lifted off the chrome — no inter-panel divider lines required. */}
       <div className="flex h-screen flex-col overflow-hidden bg-page text-foreground">
         <ConnectionBanner />
+        <UpdateBanner />
         <div className="flex flex-1 gap-1.5 overflow-hidden p-1.5">
           {/* Settings view force-expands the sidebar so the settings nav is reachable.
               When the sidebar is hidden, the chat panel claims the full width and the

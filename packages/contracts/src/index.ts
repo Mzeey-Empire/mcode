@@ -55,6 +55,7 @@ export {
   ReasoningLevelSchema,
   ProviderIdSchema,
   NamingModeSchema,
+  UpdateCheckIntervalSchema,
 } from "./models/settings.js";
 export type {
   Settings,
@@ -64,6 +65,7 @@ export type {
   ReasoningLevel,
   SettingsProviderId,
   NamingMode,
+  UpdateCheckInterval,
 } from "./models/settings.js";
 
 export {

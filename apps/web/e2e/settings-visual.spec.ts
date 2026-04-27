@@ -23,9 +23,10 @@ const DEFAULT_SETTINGS = {
   notifications: { enabled: false },
   worktree: { naming: { mode: "auto", aiConfirmation: true } },
   server: { memory: { heapMb: 96 } },
+  updates: { autoDownload: true, autoInstallOnQuit: true, checkInterval: "4hours" },
 };
 
-const SECTIONS = ["Model", "Agent", "Worktrees", "Appearance", "Notifications", "Terminal", "Server"];
+const SECTIONS = ["Model", "Agent", "Worktrees", "Appearance", "Notifications", "Terminal", "Server", "About"];
 
 test.describe("Settings visual review", () => {
   test.beforeEach(async ({ page }) => {

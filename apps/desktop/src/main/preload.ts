@@ -96,6 +96,36 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     },
   },
 
+  /** App version and auto-update controls. */
+  app: {
+    /** Read the running app version (from package.json at build time). */
+    getVersion(): Promise<string> {
+      return ipcRenderer.invoke("app:get-version");
+    },
+    /** Get the most recent update status without triggering a new check. */
+    getUpdateStatus(): Promise<unknown> {
+      return ipcRenderer.invoke("app:get-update-status");
+    },
+    /** Manually trigger a check for updates. Resolves with the resulting status. */
+    checkForUpdates(): Promise<unknown> {
+      return ipcRenderer.invoke("app:check-for-updates");
+    },
+    /** Quit and install a downloaded update. No-op if nothing is downloaded. */
+    installUpdate(): Promise<void> {
+      return ipcRenderer.invoke("app:install-update");
+    },
+    /** Subscribe to push updates of update-status. Returns the listener for cleanup. */
+    onUpdateStatus(callback: (status: unknown) => void) {
+      const listener = (_event: unknown, status: unknown) => callback(status);
+      ipcRenderer.on("app:update-status", listener);
+      return listener;
+    },
+    /** Remove a previously registered update-status listener. */
+    offUpdateStatus(listener: (...args: unknown[]) => void) {
+      ipcRenderer.removeListener("app:update-status", listener);
+    },
+  },
+
   /** IPC push transport relayed from the main process. */
   ipc: {
     /** Listen for push messages forwarded by the main process IPC relay. */
