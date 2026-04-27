@@ -473,60 +473,63 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           }
         }
 
-        // Populate file change summaries from persisted snapshots
+        // Populate file change summaries from persisted snapshots.
+        // Capture locals before async to avoid wrong-thread reads if user switches during await.
+        const capturedMessages = messages;
+        const capturedCounts = counts;
+        const capturedOldest = oldest;
+        const capturedHasMore = hasMore;
+
         void (async () => {
           try {
             const snapshots = await getTransport().listSnapshots(threadId);
-            if (snapshots.length === 0) {
-              // Cache populate without snapshot data.
-              cacheSnapshot(threadId, {
-                messages: get().messages,
-                oldestLoadedSequence: oldest,
-                hasMoreMessages: hasMore,
-                persistedToolCallCounts: counts,
-                persistedFilesChanged: get().persistedFilesChanged,
-                latestTurnWithChanges: get().latestTurnWithChanges,
-              });
-              return;
-            }
-            set((state) => {
-              if (state.currentThreadId !== threadId) return {};
-              const nextFilesChanged = { ...state.persistedFilesChanged };
-              let latestMsgId = state.latestTurnWithChanges;
+            // Discard if thread switched
+            if (get().currentThreadId !== threadId) return;
+
+            const persistedFilesChangedMap: Record<string, string[]> = {};
+            let latestTurnWithChanges: string | null = null;
+
+            if (snapshots.length > 0) {
               let latestTime = "";
               for (const snap of snapshots) {
                 if (snap.files_changed.length === 0) continue;
-                // snap.message_id matches m.id for DB-loaded messages directly
-                nextFilesChanged[snap.message_id] = snap.files_changed;
+                persistedFilesChangedMap[snap.message_id] = snap.files_changed;
                 if (snap.created_at > latestTime) {
                   latestTime = snap.created_at;
-                  latestMsgId = snap.message_id;
+                  latestTurnWithChanges = snap.message_id;
                 }
               }
-              return {
-                persistedFilesChanged: nextFilesChanged,
-                latestTurnWithChanges: latestMsgId,
-              };
-            });
-            // Cache populate after snapshots merged.
+              // Update state with derived file changes
+              set((state) => {
+                if (state.currentThreadId !== threadId) return {};
+                return {
+                  persistedFilesChanged: { ...state.persistedFilesChanged, ...persistedFilesChangedMap },
+                  latestTurnWithChanges,
+                };
+              });
+            }
+
+            // Cache populate using captured locals, not get() after await
             cacheSnapshot(threadId, {
-              messages: get().messages,
-              oldestLoadedSequence: oldest,
-              hasMoreMessages: hasMore,
-              persistedToolCallCounts: counts,
-              persistedFilesChanged: get().persistedFilesChanged,
-              latestTurnWithChanges: get().latestTurnWithChanges,
+              messages: capturedMessages,
+              oldestLoadedSequence: capturedOldest,
+              hasMoreMessages: capturedHasMore,
+              persistedToolCallCounts: capturedCounts,
+              persistedFilesChanged: persistedFilesChangedMap,
+              latestTurnWithChanges,
             });
           } catch {
             // Cache without snapshot data on failure
-            cacheSnapshot(threadId, {
-              messages: get().messages,
-              oldestLoadedSequence: oldest,
-              hasMoreMessages: hasMore,
-              persistedToolCallCounts: counts,
-              persistedFilesChanged: get().persistedFilesChanged,
-              latestTurnWithChanges: get().latestTurnWithChanges,
-            });
+            if (get().currentThreadId === threadId) {
+              cacheSnapshot(threadId, {
+                messages: capturedMessages,
+                oldestLoadedSequence: capturedOldest,
+                hasMoreMessages: capturedHasMore,
+                persistedToolCallCounts: capturedCounts,
+                persistedFilesChanged: {},
+                latestTurnWithChanges: null,
+              });
+            }
           }
         })();
       }
@@ -586,6 +589,17 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         hasMoreMessages: { ...s.hasMoreMessages, [threadId]: hasMore },
         isLoadingMore: { ...s.isLoadingMore, [threadId]: false },
       }));
+
+      // Refresh cache with merged state so snapshot stays current
+      const state = get();
+      cacheSnapshot(threadId, {
+        messages: state.messages,
+        oldestLoadedSequence: state.oldestLoadedSequence[threadId],
+        hasMoreMessages: state.hasMoreMessages[threadId],
+        persistedToolCallCounts: state.persistedToolCallCounts,
+        persistedFilesChanged: state.persistedFilesChanged,
+        latestTurnWithChanges: state.latestTurnWithChanges,
+      });
 
       // Hydrate file change data for older messages from snapshots
       const olderMsgIds = new Set(olderMessages.map((m) => m.id));

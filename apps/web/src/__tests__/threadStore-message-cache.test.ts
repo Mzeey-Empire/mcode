@@ -20,6 +20,7 @@ const fakeMessages = [
 /**
  * Reset thread store and message cache to a clean state for tests.
  * Sets up mocked transport and properly-typed initial state.
+ * Clears all ThreadState fields to prevent state leakage between tests.
  */
 function resetThreadStoreTestState() {
   clearMessageCache();
@@ -32,8 +33,11 @@ function resetThreadStoreTestState() {
     loading: false,
     errorByThread: {},
     streamingByThread: {},
+    streamingPreviewByThread: {},
     toolCallsByThread: {},
     persistedToolCallCounts: {},
+    persistedFilesChanged: {},
+    latestTurnWithChanges: null,
     serverMessageIds: {},
     toolCallRecordCache: new LruCache(TOOL_CALL_CACHE_SIZE),
     currentTurnMessageIdByThread: {},
@@ -44,6 +48,15 @@ function resetThreadStoreTestState() {
     hasMoreMessages: {},
     isLoadingMore: {},
     loadEpochByThread: {},
+    contextByThread: {},
+    usageByProvider: {},
+    isCompactingByThread: {},
+    lastFallbackByThread: {},
+    planQuestionsByThread: {},
+    planAnswersByThread: {},
+    activeQuestionIndexByThread: {},
+    planQuestionsStatusByThread: {},
+    permissionsByThread: {},
   });
 }
 
