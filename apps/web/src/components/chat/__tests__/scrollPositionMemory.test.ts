@@ -46,3 +46,13 @@ describe("scrollPositionMemory", () => {
     expect(recallScrollTop("thread-a")).toBeUndefined();
   });
 });
+
+describe("scrollPositionMemory — store integration", () => {
+  beforeEach(() => clearScrollMemory());
+
+  it("integrates with thread deletion (sanity)", () => {
+    rememberScrollTop("thread-deleted", 99);
+    forgetScrollTop("thread-deleted");
+    expect(recallScrollTop("thread-deleted")).toBeUndefined();
+  });
+});
