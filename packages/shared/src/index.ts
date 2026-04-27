@@ -16,5 +16,8 @@ export {
   isXhighEffortModel,
   isMaxEffortModel,
   supportsEffortParameter,
+  supportsUltrathink,
+  supports1MContextWindow,
+  supportsThinkingToggle,
   normalizeReasoningLevelForModel,
 } from "./model-effort/index.js";

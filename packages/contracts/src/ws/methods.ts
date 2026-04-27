@@ -17,6 +17,7 @@ import {
   PartialSettingsSchema,
   ReasoningLevelSchema,
   ProviderIdSchema,
+  ContextWindowModeSchema,
 } from "../models/settings.js";
 import { lazySchema } from "../utils/lazySchema.js";
 import { ProviderModelInfoSchema } from "../providers/models.js";
@@ -53,6 +54,10 @@ export const SendMessageSchema = lazySchema(() =>
     maxTurns: z.number().int().nonnegative().optional(),
     /** Copilot sub-agent to activate for this message. Ignored by other providers. */
     copilotAgent: CopilotAgentNameSchema.optional(),
+    /** Context window tier ("200k" default, "1m" extended). Honored only by 1M-capable Claude models. */
+    contextWindow: ContextWindowModeSchema.optional(),
+    /** Boolean thinking toggle. Honored only by models with a thinking toggle (Haiku 4.5). */
+    thinking: z.boolean().optional(),
   }),
 );
 
@@ -77,6 +82,10 @@ export const CreateAndSendSchema = lazySchema(() =>
     maxTurns: z.number().int().nonnegative().optional(),
     /** Copilot sub-agent to activate for this thread. Ignored by other providers. */
     copilotAgent: CopilotAgentNameSchema.optional(),
+    /** Context window tier ("200k" default, "1m" extended). Honored only by 1M-capable Claude models. */
+    contextWindow: ContextWindowModeSchema.optional(),
+    /** Boolean thinking toggle. Honored only by models with a thinking toggle (Haiku 4.5). */
+    thinking: z.boolean().optional(),
     /** Source thread ID when branching from an existing thread. */
   parentThreadId: z.string().optional(),
   /** Fork-point message ID in the parent thread. Defaults to last persisted message. */
@@ -128,12 +137,18 @@ export const WS_METHODS = lazySchema(() => ({
       permissionMode: PermissionModeSchema.optional(),
       /** Copilot-specific: name of the selected sub-agent. Pass null to clear back to provider default. */
       copilotAgent: CopilotAgentNameSchema.nullable().optional(),
+      /** Context window tier persisted on the thread. */
+      contextWindow: ContextWindowModeSchema.optional(),
+      /** Boolean thinking toggle persisted on the thread. Honored only for Haiku-class models. */
+      thinking: z.boolean().optional(),
     }).refine(
       (data) =>
         data.reasoningLevel !== undefined ||
         data.interactionMode !== undefined ||
         data.permissionMode !== undefined ||
-        data.copilotAgent !== undefined,
+        data.copilotAgent !== undefined ||
+        data.contextWindow !== undefined ||
+        data.thinking !== undefined,
       { message: "Must provide at least one setting to update" },
     ),
     result: z.boolean(),
@@ -227,6 +242,8 @@ export const WS_METHODS = lazySchema(() => ({
       answers: z.array(PlanAnswerSchema),
       permissionMode: PermissionModeSchema.optional(),
       reasoningLevel: ReasoningLevelSchema.optional(),
+      contextWindow: ContextWindowModeSchema.optional(),
+      thinking: z.boolean().optional(),
     }),
     result: z.void(),
   },

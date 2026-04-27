@@ -53,6 +53,7 @@ export {
   ThemeSchema,
   AgentDefaultModeSchema,
   ReasoningLevelSchema,
+  ContextWindowModeSchema,
   ProviderIdSchema,
   NamingModeSchema,
 } from "./models/settings.js";
@@ -62,6 +63,7 @@ export type {
   Theme,
   AgentDefaultMode,
   ReasoningLevel,
+  ContextWindowMode,
   SettingsProviderId,
   NamingMode,
 } from "./models/settings.js";

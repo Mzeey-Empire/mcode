@@ -112,30 +112,59 @@ describe("SettingsSchema", () => {
   });
 
   describe("model.defaults.contextWindow", () => {
-    it("accepts contextWindow as a number", () => {
+    it("accepts contextWindow '200k'", () => {
       const result = SettingsSchema().parse({
-        model: { defaults: { contextWindow: 1_000_000 } },
+        model: { defaults: { contextWindow: "200k" } },
       });
-      expect(result.model.defaults.contextWindow).toBe(1_000_000);
+      expect(result.model.defaults.contextWindow).toBe("200k");
     });
 
-    it("defaults contextWindow to undefined when omitted", () => {
+    it("accepts contextWindow '1m'", () => {
+      const result = SettingsSchema().parse({
+        model: { defaults: { contextWindow: "1m" } },
+      });
+      expect(result.model.defaults.contextWindow).toBe("1m");
+    });
+
+    it("defaults contextWindow to '200k' when omitted", () => {
       const result = SettingsSchema().parse({});
-      expect(result.model.defaults.contextWindow).toBeUndefined();
+      expect(result.model.defaults.contextWindow).toBe("200k");
     });
 
-    it("rejects non-number contextWindow", () => {
+    it("rejects numeric contextWindow", () => {
+      expect(() =>
+        SettingsSchema().parse({
+          model: { defaults: { contextWindow: 1_000_000 } },
+        }),
+      ).toThrow();
+    });
+
+    it("rejects unknown contextWindow strings", () => {
       expect(() =>
         SettingsSchema().parse({
           model: { defaults: { contextWindow: "1M" } },
         }),
       ).toThrow();
     });
+  });
 
-    it("rejects contextWindow above 2_000_000", () => {
+  describe("model.defaults.thinking", () => {
+    it("accepts thinking true", () => {
+      const result = SettingsSchema().parse({
+        model: { defaults: { thinking: true } },
+      });
+      expect(result.model.defaults.thinking).toBe(true);
+    });
+
+    it("defaults thinking to false when omitted", () => {
+      const result = SettingsSchema().parse({});
+      expect(result.model.defaults.thinking).toBe(false);
+    });
+
+    it("rejects non-boolean thinking", () => {
       expect(() =>
         SettingsSchema().parse({
-          model: { defaults: { contextWindow: 3_000_000 } },
+          model: { defaults: { thinking: "yes" } },
         }),
       ).toThrow();
     });
