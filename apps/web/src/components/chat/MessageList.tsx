@@ -301,7 +301,8 @@ export function MessageList({ onBranch }: MessageListProps) {
   // restoration useLayoutEffect reads it.
   useLayoutEffect(() => {
     const prevId = prevActiveThreadIdRef.current;
-    if (prevId && prevId !== activeThreadId) {
+    const isThreadSwitch = !!prevId && prevId !== activeThreadId;
+    if (isThreadSwitch && prevId) {
       const el = containerRef.current;
       if (el) rememberScrollTop(prevId, el.scrollTop);
     }
@@ -309,7 +310,18 @@ export function MessageList({ onBranch }: MessageListProps) {
 
     if (!activeThreadId) return;
 
-    turnExpandRef.current.clear();
+    if (isThreadSwitch) {
+      // Reset thread-scoped refs and affordance state so the prepend-detection
+      // effect, scroll-affordance UI, and turn-expand map don't carry stale
+      // measurements from the previous thread into the new one.
+      turnExpandRef.current.clear();
+      prevMessageCountRef.current = 0;
+      firstMessageIdRef.current = null;
+      prevScrollHeightRef.current = 0;
+      isScrolledUpRef.current = false;
+      setShowScrollBtn(false);
+      setHasNewContent(false);
+    }
 
     if (loading) {
       // Cache miss: full reset path. Hide until messages are positioned at bottom,
@@ -324,10 +336,16 @@ export function MessageList({ onBranch }: MessageListProps) {
     // Cache hit: keep the virtualizer's measurement cache (those rows have the
     // same item keys and dimensions — re-estimating would defeat the optimization).
     // Skip the opacity flash; mark initial-load done so the bottom-scroll effect
-    // does not retrigger.
-    isInitialLoadRef.current = false;
-    setIsPositioned(true);
-    pendingScrollRestoreRef.current = recallScrollTop(activeThreadId) ?? null;
+    // does not retrigger. Only enter this branch when there's a remembered
+    // scroll position; otherwise this also fires when `loading` flips
+    // true→false after a fresh fetch and would prematurely clear
+    // `isInitialLoadRef`, blocking the bottom-positioning effect.
+    const rememberedScrollTop = recallScrollTop(activeThreadId);
+    if (rememberedScrollTop != null) {
+      isInitialLoadRef.current = false;
+      setIsPositioned(true);
+      pendingScrollRestoreRef.current = rememberedScrollTop;
+    }
   }, [activeThreadId, loading, virtualizer]);
 
   // Stabilize scroll position when older messages are prepended.

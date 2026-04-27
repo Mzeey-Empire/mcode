@@ -31,7 +31,9 @@ describe("ChatView — MessageList container", () => {
     // And NOT:
     // <div key={activeThread.id} className="animate-fade-up-in flex-1 min-h-0">
 
-    const hasForceRemountKey = /key\s*=\s*\{\s*activeThread\.id\s*\}.*className="animate-fade-up-in/.test(
+    // Use [\s\S]* so a future multiline `key={activeThread.id}` wrapper
+    // can't slip through this guard.
+    const hasForceRemountKey = /key\s*=\s*\{\s*activeThread\.id\s*\}[\s\S]*className="animate-fade-up-in/.test(
       files
     );
 

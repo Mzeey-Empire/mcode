@@ -107,8 +107,6 @@ async function mockWebSocketServer(page: Page): Promise<void> {
     updated_at: new Date(Date.now() + i * 1000).toISOString(),
   }));
 
-  let currentThreadId = "thread-a";
-
   await page.routeWebSocket(/ws:\/\/localhost/, (ws) => {
     ws.onMessage((data) => {
       let msg: Record<string, unknown>;
@@ -122,17 +120,22 @@ async function mockWebSocketServer(page: Page): Promise<void> {
       if (method === "workspace.list") result = [workspace];
       else if (method === "thread.list") result = [threadA, threadB];
       else if (method === "message.list") {
-        // Extract thread_id from params if available, otherwise use current context
+        // Derive the response from the request payload so reordered or
+        // concurrent requests can't cross-contaminate replies.
         const params = msg.params as Record<string, unknown> | undefined;
-        if (params?.thread_id === "thread-b") {
-          currentThreadId = "thread-b";
+        const threadId = params?.thread_id;
+        if (threadId === "thread-b") {
           result = messageB;
-        } else if (params?.thread_id === "thread-a") {
-          currentThreadId = "thread-a";
+        } else if (threadId === "thread-a") {
           result = messages;
         } else {
-          // Fallback to current thread
-          result = currentThreadId === "thread-b" ? messageB : messages;
+          ws.send(
+            JSON.stringify({
+              id: msg.id,
+              error: { code: -32602, message: `Unknown thread_id: ${String(threadId)}` },
+            }),
+          );
+          return;
         }
       } else if (method?.endsWith(".list")) result = [];
       else if (method === "git.currentBranch") result = "main";

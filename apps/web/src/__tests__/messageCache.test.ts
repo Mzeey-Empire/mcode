@@ -103,9 +103,13 @@ describe("messageCache", () => {
       (MESSAGE_CACHE_SIZE - 1) * 100
     );
 
+    // Seed the new thread's scroll position before the eviction-triggering
+    // insert so this test exercises cleanup at the moment of eviction rather
+    // than just verifying that a value can be written afterward.
+    rememberScrollTop("new", 9999);
+
     // Trigger eviction by adding one more thread.
     cacheSnapshot("new", makeSnapshot("new"));
-    rememberScrollTop("new", 9999);
 
     // t0 should be evicted and its scroll position forgotten.
     expect(getCachedSnapshot("t0")).toBeUndefined();
