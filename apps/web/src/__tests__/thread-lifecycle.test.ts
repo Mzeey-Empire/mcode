@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 import { mockTransport, createMockMessage } from "./mocks/transport";
+import { clearMessageCache } from "@/stores/messageCache";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -9,6 +10,7 @@ vi.mock("@/transport", async () => ({
 
 describe("Thread Lifecycle Behavior", () => {
   beforeEach(() => {
+    clearMessageCache();
     useThreadStore.setState({
       messages: [],
       runningThreadIds: new Set(),
