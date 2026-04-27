@@ -1,5 +1,6 @@
 import type { Message } from "@/transport";
 import { LruCache } from "@/lib/lru-cache";
+import { forgetScrollTop } from "@/components/chat/scrollPositionMemory";
 
 /**
  * Snapshot of the message-loading state for one thread, stored in the
@@ -30,7 +31,10 @@ export function getCachedSnapshot(threadId: string): MessageCacheSnapshot | unde
 
 /** Store a snapshot for the given thread, evicting the LRU entry if at capacity. */
 export function cacheSnapshot(threadId: string, snapshot: MessageCacheSnapshot): void {
-  cache.set(threadId, snapshot);
+  const evicted = cache.set(threadId, snapshot);
+  if (evicted) {
+    forgetScrollTop(evicted);
+  }
 }
 
 /** Remove a single thread's snapshot. No-op when absent. */
