@@ -3,6 +3,7 @@ import { useThreadStore, TOOL_CALL_CACHE_SIZE } from "@/stores/threadStore";
 import type { Message } from "@/transport/types";
 import { mockTransport, createMockMessage } from "./mocks/transport";
 import { LruCache } from "@/lib/lru-cache";
+import { clearMessageCache } from "@/stores/messageCache";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -12,6 +13,7 @@ vi.mock("@/transport", async () => ({
 /** Verifies thread isolation: switching threads must not leak messages across views. */
 describe("Thread Switching", () => {
   beforeEach(() => {
+    clearMessageCache();
     useThreadStore.setState({
       messages: [],
       runningThreadIds: new Set(),
@@ -178,6 +180,9 @@ describe("Thread Switching", () => {
     (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ messages: [], hasMore: false });
     await useThreadStore.getState().loadMessages("thread-b");
     expect(useThreadStore.getState().messages).toEqual([]);
+
+    // Simulate: background agent adds a message to Thread A (push event would evict cache)
+    clearMessageCache();
 
     // Act: switch back to Thread A (DB now has an extra message from background agent)
     const updatedThreadAMsgs = [
