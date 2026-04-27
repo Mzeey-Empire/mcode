@@ -21,6 +21,7 @@ export type SettingsSection =
   | "server"
   | "about";
 
+/** Represents a navigation group in the settings sidebar. */
 export interface NavGroup {
   label: string;
   items: { id: SettingsSection; label: string }[];

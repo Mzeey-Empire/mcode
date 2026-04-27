@@ -79,13 +79,21 @@ export function AboutSection() {
     setChecking(true);
     try {
       await bridge.checkForUpdates();
+    } catch {
+      // The main process broadcasts an error status via IPC, which surfaces as
+      // status.state === "error" and renders "Check failed" in the status label.
     } finally {
       setChecking(false);
     }
   };
 
-  const handleInstall = (): void => {
-    void bridge?.installUpdate();
+  const handleInstall = async (): Promise<void> => {
+    if (!bridge) return;
+    try {
+      await bridge.installUpdate();
+    } catch {
+      // installUpdate triggers a quit-and-restart; rejections here are unexpected.
+    }
   };
 
   const autoDownload = settings.updates?.autoDownload ?? true;
