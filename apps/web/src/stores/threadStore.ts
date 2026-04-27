@@ -13,6 +13,11 @@ import { useToastStore } from "./toastStore";
 import { findModelById } from "@/lib/model-registry";
 import { resolveContextWindow } from "@/lib/resolve-context-window";
 import { useSettingsStore } from "./settingsStore";
+import {
+  cacheSnapshot,
+  evictThread as evictMessageCache,
+  getCachedSnapshot,
+} from "./messageCache";
 
 /** A permission request with its current resolution state. */
 interface StoredPermission extends PermissionRequest {
@@ -291,8 +296,67 @@ export const useThreadStore = create<ThreadState>((set, get) => {
    * real-time state intact to avoid disrupting live tool call rendering.
    */
   loadMessages: async (threadId) => {
-    // Clear stale real-time state for non-running threads so tool calls
-    // from a previous visit don't linger when switching back.
+    // Cache-hit fast path. Restores message-loading state synchronously,
+    // skipping the getMessages RPC and avoiding the blank-flash transition.
+    const cached = getCachedSnapshot(threadId);
+    if (cached) {
+      set((state) => {
+        const nextErrors = { ...state.errorByThread };
+        delete nextErrors[threadId];
+        return {
+          loading: false,
+          errorByThread: nextErrors,
+          currentThreadId: threadId,
+          messages: cached.messages,
+          persistedToolCallCounts: cached.persistedToolCallCounts,
+          persistedFilesChanged: cached.persistedFilesChanged,
+          latestTurnWithChanges: cached.latestTurnWithChanges,
+          oldestLoadedSequence: { ...state.oldestLoadedSequence, [threadId]: cached.oldestLoadedSequence },
+          hasMoreMessages: { ...state.hasMoreMessages, [threadId]: cached.hasMoreMessages },
+          isLoadingMore: {},
+          // Bump epoch so any pending loadOlderMessages from the previous activation is discarded.
+          loadEpochByThread: { ...state.loadEpochByThread, [threadId]: (state.loadEpochByThread[threadId] ?? 0) + 1 },
+          // Note: toolCallRecordCache is intentionally NOT cleared on cache hit
+          // so previously expanded tool calls don't refetch.
+        };
+      });
+
+      // Side-effect refresh: pending permissions and tasks may have changed since cache was last written.
+      void getTransport()
+        .listPendingPermissions(threadId)
+        .then((pending) => {
+          if (pending.length > 0) {
+            set((s) => ({
+              permissionsByThread: {
+                ...s.permissionsByThread,
+                [threadId]: pending.map((p) => ({ ...p, settled: false })),
+              },
+            }));
+          }
+        })
+        .catch(() => { /* non-critical */ });
+
+      getTransport()
+        .getThreadTasks(threadId)
+        .then((tasks) => {
+          if (tasks && tasks.length > 0 && !useTaskStore.getState().tasksByThread[threadId]?.length) {
+            const items: TaskItem[] = tasks.map((t, i) => ({
+              id: String(i),
+              content: t.content,
+              status: coerceTaskStatus(t.status),
+              group: "Tasks",
+            }));
+            useTaskStore.getState().setTasks(threadId, items);
+          }
+        })
+        .catch((err) => {
+          console.debug("[taskHydration] Failed to load tasks for thread %s:", threadId, err);
+        });
+
+      return;
+    }
+
+    // ----- Cache miss: existing path, with cache-populate at the end. -----
     const isRunning = get().runningThreadIds.has(threadId);
     if (!isRunning) {
       get().toolCallRecordCache.clear();
@@ -345,7 +409,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     }
     try {
       const { messages, hasMore } = await getTransport().getMessages(threadId, 100);
-      // Only commit if this thread is still current
       if (get().currentThreadId === threadId) {
         // Populate persisted tool call counts from loaded messages
         const counts: Record<string, number> = {};
@@ -355,6 +418,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           }
         }
         const oldest = messages.length > 0 ? messages[0].sequence : 0;
+
         set({
           messages,
           loading: false,
@@ -365,21 +429,18 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         });
 
         // Re-hydrate pending permissions (covers reconnect and thread switch)
-        void getTransport()
-          .listPendingPermissions(threadId)
-          .then((pending) => {
-            if (pending.length > 0) {
-              set((s) => ({
-                permissionsByThread: {
-                  ...s.permissionsByThread,
-                  [threadId]: pending.map((p) => ({ ...p, settled: false })),
-                },
-              }));
-            }
-          })
-          .catch(() => {
-            // non-critical; push events will update state if the server pushes
-          });
+        void getTransport().listPendingPermissions(threadId).then((pending) => {
+          if (pending.length > 0) {
+            set((s) => ({
+              permissionsByThread: {
+                ...s.permissionsByThread,
+                [threadId]: pending.map((p) => ({ ...p, settled: false })),
+              },
+            }));
+          }
+        }).catch(() => {
+          // non-critical; push events will update state if the server pushes
+        });
 
         // Hydrate task panel from persisted TodoWrite state.
         getTransport()
@@ -413,13 +474,23 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         void (async () => {
           try {
             const snapshots = await getTransport().listSnapshots(threadId);
-            if (snapshots.length === 0) return;
+            if (snapshots.length === 0) {
+              // Cache populate without snapshot data.
+              cacheSnapshot(threadId, {
+                messages: get().messages,
+                oldestLoadedSequence: oldest,
+                hasMoreMessages: hasMore,
+                persistedToolCallCounts: counts,
+                persistedFilesChanged: get().persistedFilesChanged,
+                latestTurnWithChanges: get().latestTurnWithChanges,
+              });
+              return;
+            }
             set((state) => {
-              if (state.currentThreadId !== threadId) return {}; // discard stale response
+              if (state.currentThreadId !== threadId) return {};
               const nextFilesChanged = { ...state.persistedFilesChanged };
               let latestMsgId = state.latestTurnWithChanges;
               let latestTime = "";
-
               for (const snap of snapshots) {
                 if (snap.files_changed.length === 0) continue;
                 // snap.message_id matches m.id for DB-loaded messages directly
@@ -429,14 +500,30 @@ export const useThreadStore = create<ThreadState>((set, get) => {
                   latestMsgId = snap.message_id;
                 }
               }
-
               return {
                 persistedFilesChanged: nextFilesChanged,
                 latestTurnWithChanges: latestMsgId,
               };
             });
+            // Cache populate after snapshots merged.
+            cacheSnapshot(threadId, {
+              messages: get().messages,
+              oldestLoadedSequence: oldest,
+              hasMoreMessages: hasMore,
+              persistedToolCallCounts: counts,
+              persistedFilesChanged: get().persistedFilesChanged,
+              latestTurnWithChanges: get().latestTurnWithChanges,
+            });
           } catch {
-            // Silently ignore — file change summaries are best-effort
+            // Cache without snapshot data on failure
+            cacheSnapshot(threadId, {
+              messages: get().messages,
+              oldestLoadedSequence: oldest,
+              hasMoreMessages: hasMore,
+              persistedToolCallCounts: counts,
+              persistedFilesChanged: get().persistedFilesChanged,
+              latestTurnWithChanges: get().latestTurnWithChanges,
+            });
           }
         })();
       }
@@ -447,6 +534,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           loading: false,
         }));
       }
+      // Defensive: ensure no stale snapshot remains for a thread that just failed to load.
+      evictMessageCache(threadId);
     }
   },
 
@@ -528,6 +617,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
    * to the transport layer. On failure, rolls back the running state.
    */
   sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, copilotAgent, contextWindow, thinking) => {
+    evictMessageCache(threadId);
+
     // Add user message to local state immediately (optimistic)
     // Use displayContent for the UI (without injected file blocks) if provided
     const userMessage: Message = {
@@ -655,6 +746,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
    * Does NOT reset runningThreadIds since agents may still be executing.
    */
   clearMessages: () => {
+    const current = get().currentThreadId;
+    if (current) evictMessageCache(current);
+
     get().toolCallRecordCache.clear();
     set((state) => ({
       messages: [],
@@ -790,6 +884,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   },
 
   clearThreadState: (threadId) => {
+    evictMessageCache(threadId);
     clearDequeueTimer(threadId);
 
     // Capture before set() to avoid relying on the post-mutation state value.
@@ -857,6 +952,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     if (threadIds.length === 0) return;
 
     for (const threadId of threadIds) {
+      evictMessageCache(threadId);
       clearDequeueTimer(threadId);
     }
 
@@ -1043,6 +1139,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
    * message and schedules tool call fade-out animations.
    */
   handleAgentEvent: (threadId, event) => {
+    // Any agent event for this thread implies the cached snapshot is stale.
+    evictMessageCache(threadId);
+
     const method = (event.method as string) || "";
     const params = (event.params as Record<string, unknown>) || event;
 
@@ -1778,6 +1877,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   },
 
   handleTurnPersisted: (payload) => {
+    evictMessageCache(payload.threadId);
+
     set((state) => {
       // Clear in-memory tool calls now that the DB-backed summary takes over
       const nextToolCalls = { ...state.toolCallsByThread };
