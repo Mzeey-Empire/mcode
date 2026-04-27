@@ -1,5 +1,31 @@
 import type { AttachmentMeta } from "./types";
 
+/** Discriminated union describing the auto-updater lifecycle state. */
+export type UpdateStatus =
+  | { state: "idle" }
+  | { state: "checking" }
+  | { state: "available"; version: string; releaseNotes?: string }
+  | { state: "not-available"; version: string }
+  | { state: "downloading"; percent: number; bytesPerSecond?: number }
+  | { state: "downloaded"; version: string; releaseNotes?: string }
+  | { state: "error"; message: string };
+
+/** App version and auto-update controls exposed by the main process. */
+interface AppBridge {
+  /** Read the running app version (from package.json at build time). */
+  getVersion(): Promise<string>;
+  /** Get the most recent update status without triggering a new check. */
+  getUpdateStatus(): Promise<UpdateStatus>;
+  /** Manually trigger a check for updates. Resolves with the resulting status. */
+  checkForUpdates(): Promise<UpdateStatus>;
+  /** Quit and install a downloaded update. No-op if nothing is downloaded. */
+  installUpdate(): Promise<void>;
+  /** Subscribe to push updates of update-status. Returns the listener for cleanup. */
+  onUpdateStatus(callback: (status: UpdateStatus) => void): (...args: unknown[]) => void;
+  /** Remove a previously registered update-status listener. */
+  offUpdateStatus(listener: (...args: unknown[]) => void): void;
+}
+
 /** IPC push transport relayed from the Electron main process. */
 interface IpcBridge {
   /** Register a callback for push messages forwarded by the main process. */
@@ -79,6 +105,8 @@ interface DesktopBridge {
   openKeybindingsFile(): Promise<string>;
   /** Spellcheck context menu and dictionary management. */
   spellcheck: SpellcheckBridge;
+  /** App version and auto-update controls. */
+  app: AppBridge;
   /** IPC push transport relayed from the main process. */
   ipc: IpcBridge;
 }

@@ -42,6 +42,11 @@ export const NamingModeSchema = z.enum(["auto", "custom", "ai"]);
 /** Worktree branch naming strategy value. */
 export type NamingMode = z.infer<typeof NamingModeSchema>;
 
+/** Auto-update check interval. */
+export const UpdateCheckIntervalSchema = z.enum(["15min", "1hour", "4hours", "1day", "never"]);
+/** Auto-update check interval value. */
+export type UpdateCheckInterval = z.infer<typeof UpdateCheckIntervalSchema>;
+
 // ---------------------------------------------------------------------------
 // Settings schema
 // ---------------------------------------------------------------------------
@@ -239,6 +244,18 @@ export const SettingsSchema = lazySchema(() =>
         model: z.string().default(""),
       })
       .default({}),
+
+    /** App auto-update settings. */
+    updates: z
+      .object({
+        /** Whether to automatically download available updates. */
+        autoDownload: z.boolean().default(true),
+        /** Whether to automatically install updates when the app quits. */
+        autoInstallOnQuit: z.boolean().default(true),
+        /** How often to check for updates. */
+        checkInterval: UpdateCheckIntervalSchema.default("4hours"),
+      })
+      .default({}),
   }),
 );
 
@@ -367,6 +384,13 @@ export const PartialSettingsSchema = lazySchema(() =>
       .object({
         provider: ProviderIdSchema.or(z.literal("")).optional(),
         model: z.string().optional(),
+      })
+      .optional(),
+    updates: z
+      .object({
+        autoDownload: z.boolean().optional(),
+        autoInstallOnQuit: z.boolean().optional(),
+        checkInterval: UpdateCheckIntervalSchema.optional(),
       })
       .optional(),
   }),

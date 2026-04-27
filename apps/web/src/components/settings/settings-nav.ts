@@ -7,6 +7,7 @@ import { NotificationsSection } from "./sections/NotificationsSection";
 import { TerminalSection } from "./sections/TerminalSection";
 import { ServerSection } from "./sections/ServerSection";
 import { KeyboardShortcutsSection } from "./sections/KeyboardShortcutsSection";
+import { AboutSection } from "./sections/AboutSection";
 
 export type SettingsSection =
   | "model"
@@ -16,7 +17,8 @@ export type SettingsSection =
   | "notifications"
   | "terminal"
   | "keyboard"
-  | "server";
+  | "server"
+  | "about";
 
 export interface NavGroup {
   label: string;
@@ -44,7 +46,10 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     label: "System",
-    items: [{ id: "server", label: "Server" }],
+    items: [
+      { id: "server", label: "Server" },
+      { id: "about", label: "About" },
+    ],
   },
 ];
 
@@ -58,4 +63,5 @@ export const SECTION_MAP: Record<SettingsSection, ComponentType> = {
   terminal: TerminalSection,
   keyboard: KeyboardShortcutsSection,
   server: ServerSection,
+  about: AboutSection,
 };

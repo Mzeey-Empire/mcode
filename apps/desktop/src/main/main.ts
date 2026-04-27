@@ -30,7 +30,13 @@ import { getExtension as bundledGetExtension } from "@mcode/contracts";
 const getExtension = globalThis.__v8Snapshot?.contracts?.getExtension ?? bundledGetExtension;
 import { ServerManager } from "./server-manager.js";
 import { startIpcRelay } from "./ipc-relay.js";
-import { initAutoUpdater } from "./auto-updater.js";
+import {
+  checkForUpdatesNow,
+  getUpdateStatus,
+  initAutoUpdater,
+  installUpdate,
+  cleanupAutoUpdater,
+} from "./auto-updater.js";
 import { setupSpellcheck } from "./spellcheck.js";
 
 // Isolate dev's Electron userData (cache, cookies, localStorage, IndexedDB)
@@ -468,6 +474,14 @@ function registerIpcHandlers(): void {
       mainWindow.webContents.paste();
     }
   });
+
+  // App version + auto-update controls
+  ipcMain.handle("app:get-version", () => app.getVersion());
+  ipcMain.handle("app:get-update-status", () => getUpdateStatus());
+  ipcMain.handle("app:check-for-updates", () => checkForUpdatesNow());
+  ipcMain.handle("app:install-update", () => {
+    installUpdate();
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -676,6 +690,10 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+app.on("will-quit", () => {
+  cleanupAutoUpdater();
 });
 
 export { mainWindow };
