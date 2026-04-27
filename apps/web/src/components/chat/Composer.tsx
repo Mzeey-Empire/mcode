@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { getDefaultModelId, getDefaultReasoningLevel, getDefaultProviderId, findModelById, isMaxEffortModel, isXhighEffortModel, supportsEffortParameter, resolveThreadModelId, normalizeReasoningLevelForModel, getCodexReasoningLevels } from "@/lib/model-registry";
+import { getDefaultModelId, getDefaultReasoningLevel, getDefaultProviderId, findModelById, isMaxEffortModel, isXhighEffortModel, supportsEffortParameter, supportsUltrathink, supports1MContextWindow, supportsThinkingToggle, resolveThreadModelId, normalizeReasoningLevelForModel, getCodexReasoningLevels } from "@/lib/model-registry";
 import { ModelSelector } from "./ModelSelector";
 import { ModeSelector, ALL_MODE_OPTIONS } from "./ModeSelector";
 import type { ComposerMode, ModeOption } from "./ModeSelector";
@@ -58,7 +58,8 @@ import {
   inferMimeType,
   MAX_ATTACHMENTS,
 } from "@mcode/contracts";
-import type { ReasoningLevel } from "@mcode/contracts";
+import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts";
+import { getModelContextWindow } from "@mcode/shared/model-context";
 import type { ProviderId } from "@mcode/contracts";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -67,11 +68,13 @@ import { useElementWidth } from "@/hooks/useElementWidth";
 import { ProviderUnavailableBanner } from "./ProviderUnavailableBanner";
 
 /** ReasoningLevel values as a Set for O(1) membership checks in the Codex level filter. */
-const VALID_REASONING_LEVELS_SET = new Set<string>(["low", "medium", "high", "xhigh", "max"]);
+const VALID_REASONING_LEVELS_SET = new Set<string>(["low", "medium", "high", "xhigh", "max", "ultrathink"]);
 
 /** Display label for a reasoning level value. */
 function reasoningLabel(level: string): string {
-  return level === "xhigh" ? "X-High" : level.charAt(0).toUpperCase() + level.slice(1);
+  if (level === "xhigh") return "X-High";
+  if (level === "ultrathink") return "Ultrathink";
+  return level.charAt(0).toUpperCase() + level.slice(1);
 }
 
 interface ComposerProps {
@@ -371,6 +374,9 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const [reasoning, setReasoning] = useState<ReasoningLevel>(getDefaultReasoningLevel());
   const [mode, setMode] = useState<InteractionMode>(INTERACTION_MODES.CHAT);
   const [copilotAgent, setCopilotAgent] = useState<string | null>(null);
+  // Per-thread overrides; null/undefined means inherit from settings default.
+  const [contextWindow, setContextWindow] = useState<ContextWindowMode | null>(null);
+  const [thinking, setThinking] = useState<boolean | null>(null);
   const [access, setAccess] = useState<AccessMode>(PERMISSION_MODES.FULL);
   const [showReasoningPicker, setShowReasoningPicker] = useState(false);
   const [composerMode, setComposerModeLocal] = useState<ComposerMode>("direct");
@@ -386,7 +392,15 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const editorContainerRef = useRef<HTMLDivElement>(null);
 
   const prevThreadIdRef = useRef<string | undefined>(threadId);
-  const draftRef = useRef({ input, attachments, modelId, provider, reasoning });
+  const draftRef = useRef<{
+    input: string;
+    attachments: PendingAttachment[];
+    modelId: string;
+    provider: string;
+    reasoning: ReasoningLevel;
+    contextWindow?: ContextWindowMode;
+    thinking?: boolean;
+  }>({ input, attachments, modelId, provider, reasoning });
   /** Tracks whether the user toggled mode/access before settings finished loading. */
   const agentSettingsTouchedRef = useRef(false);
   /** Set to true by the thread-switch effect; cleared by the model-sync effect.
@@ -395,7 +409,15 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
 
   // Keep draft ref in sync so the thread-switch effect reads current values
   useEffect(() => {
-    draftRef.current = { input, attachments, modelId, provider, reasoning };
+    draftRef.current = {
+      input,
+      attachments,
+      modelId,
+      provider,
+      reasoning,
+      contextWindow: contextWindow ?? undefined,
+      thinking: thinking ?? undefined,
+    };
   });
 
   const saveDraft = useComposerDraftStore((s) => s.saveDraft);
@@ -411,6 +433,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const settingsDefaultReasoning = useSettingsStore((s) => s.settings.model.defaults.reasoning);
   const settingsDefaultMode = useSettingsStore((s) => s.settings.agent.defaults.mode);
   const settingsDefaultPermission = useSettingsStore((s) => s.settings.agent.defaults.permission);
+  const settingsDefaultContextWindow = useSettingsStore((s) => s.settings.model.defaults.contextWindow);
+  const settingsDefaultThinking = useSettingsStore((s) => s.settings.model.defaults.thinking);
 
   useEffect(() => {
     if (!settingsLoaded) return;
@@ -483,6 +507,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         setMode(threadSettings.interactionMode);
         setAccess(threadSettings.permissionMode);
         setCopilotAgent(threadSettings.copilotAgent ?? null);
+        setContextWindow(threadSettings.contextWindow ?? null);
+        setThinking(threadSettings.thinking ?? null);
       } else {
         // No saved draft: use thread's persisted settings as-is
         setInput("");
@@ -515,6 +541,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
             : globalSettings.agent.defaults.permission,
         );
         setCopilotAgent(nextThread?.copilot_agent ?? null);
+        setContextWindow((nextThread?.context_window_mode as ContextWindowMode | null | undefined) ?? null);
+        setThinking(nextThread?.thinking ?? null);
 
         // Reset Lexical editor
         if (editorRef.current) {
@@ -538,6 +566,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       setMode(settings.agent.defaults.mode === "plan" ? INTERACTION_MODES.PLAN : INTERACTION_MODES.CHAT);
       setAccess(settings.agent.defaults.permission);
       setCopilotAgent(null);
+      setContextWindow(null);
+      setThinking(null);
       if (editorRef.current) {
         editorRef.current.update(() => {
           const root = $getRoot();
@@ -1103,6 +1133,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         reasoningLevel: reasoning,
         provider,
         copilotAgent: provider === "copilot" ? (copilotAgent ?? undefined) : undefined,
+        contextWindow: contextWindow ?? undefined,
+        thinking: thinking ?? undefined,
       });
 
       setInput("");
@@ -1160,7 +1192,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         setPreparingWorktree(true);
       }
       try {
-        await useWorkspaceStore.getState().createAndSendMessage(messageContent, modelId, access, currentAttachments.length > 0 ? currentAttachments : undefined, reasoning, provider, mode, provider === "copilot" ? (copilotAgent ?? undefined) : undefined);
+        await useWorkspaceStore.getState().createAndSendMessage(messageContent, modelId, access, currentAttachments.length > 0 ? currentAttachments : undefined, reasoning, provider, mode, provider === "copilot" ? (copilotAgent ?? undefined) : undefined, contextWindow ?? undefined, thinking ?? undefined);
       } finally {
         setPreparingWorktree(false);
       }
@@ -1196,10 +1228,12 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         existingWorktreePath: branchWorktree,
         forkedFromMessageId: branchFromMessageId,
         copilotAgent: provider === "copilot" ? (copilotAgent ?? undefined) : undefined,
+        contextWindow: contextWindow ?? undefined,
+        thinking: thinking ?? undefined,
       });
       onBranchModeExit?.();
     } else if (threadId) {
-      await sendMessage(threadId, messageContent, modelId, access, currentAttachments.length > 0 ? currentAttachments : undefined, displayContent, reasoning, provider, provider === "copilot" ? (copilotAgent ?? undefined) : undefined);
+      await sendMessage(threadId, messageContent, modelId, access, currentAttachments.length > 0 ? currentAttachments : undefined, displayContent, reasoning, provider, provider === "copilot" ? (copilotAgent ?? undefined) : undefined, contextWindow ?? undefined, thinking ?? undefined);
     }
 
     // Auto-save last-used mode and access as defaults (model defaults are managed in Settings)
@@ -1216,7 +1250,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     }
 
     editorRef.current?.focus();
-  }, [input, attachments, isAgentRunning, isNewThread, newThreadMode, newThreadBranch, workspaceId, threadId, sendMessage, modelId, provider, reasoning, mode, access, copilotAgent, namingMode, customBranchName, selectedWorktree, injectFileContent, collectAndClearAttachments, clearDraftFromStore, preparingWorktree, branchFromMessageId, branchExecMode, branchTargetBranch, branchNamingMode, branchCustomName, branchWorktreePath, activeThread, branchThread, branchAutoPreview, onBranchModeExit]);
+  }, [input, attachments, isAgentRunning, isNewThread, newThreadMode, newThreadBranch, workspaceId, threadId, sendMessage, modelId, provider, reasoning, mode, access, copilotAgent, contextWindow, thinking, namingMode, customBranchName, selectedWorktree, injectFileContent, collectAndClearAttachments, clearDraftFromStore, preparingWorktree, branchFromMessageId, branchExecMode, branchTargetBranch, branchNamingMode, branchCustomName, branchWorktreePath, activeThread, branchThread, branchAutoPreview, onBranchModeExit]);
 
   const handleEditorChange = useCallback((text: string) => {
     setInput(text);
@@ -1288,14 +1322,20 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       "high",
       ...(isXhighEffortModel(modelId) ? (["xhigh"] as const) : []),
       ...(isMaxEffortModel(modelId)   ? (["max"]   as const) : []),
+      ...(supportsUltrathink(modelId) ? (["ultrathink"] as const) : []),
     ];
   }, [modelId, provider]);
 
-  // Close the picker when the user switches to a model with no effort tiers (e.g. Haiku).
-  // Without this the popover stays open and points at nothing.
+  // Close the unified preferences picker when the active model exposes no
+  // knobs at all (no reasoning tiers, no 1M opt-in, no thinking toggle).
+  // Without this the popover would stay open pointing at an empty container.
+  const has1MCapability = supports1MContextWindow(modelId);
+  const hasThinkingCapability = supportsThinkingToggle(modelId);
   useEffect(() => {
-    if (reasoningLevels.length === 0) setShowReasoningPicker(false);
-  }, [reasoningLevels.length]);
+    if (reasoningLevels.length === 0 && !has1MCapability && !hasThinkingCapability) {
+      setShowReasoningPicker(false);
+    }
+  }, [reasoningLevels.length, has1MCapability, hasThinkingCapability]);
 
   return (
     <div className="relative px-8 py-4">
@@ -1414,53 +1454,158 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
             providerLocked={isProviderLocked}
           />
 
-          {/* Reasoning level — hidden for models that have no effort tiers (e.g. Haiku) */}
-          {reasoningLevels.length > 0 && (
-          <div className="relative">
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShowReasoningPicker(!showReasoningPicker);
-                    }}
-                    className="gap-1.5 text-muted-foreground hover:bg-muted/40 hover:text-foreground transition-colors"
+          {/*
+            Unified model-preferences popover. Combines reasoning effort,
+            context window (1M opt-in), and the Haiku thinking toggle into a
+            single trigger so the composer toolbar stays compact. The trigger
+            is hidden when the active model exposes none of these knobs.
+            Sections render conditionally based on model capability.
+          */}
+          {(() => {
+            const hasReasoning = reasoningLevels.length > 0;
+            const has1M = supports1MContextWindow(modelId);
+            const hasThinking = supportsThinkingToggle(modelId);
+            if (!hasReasoning && !has1M && !hasThinking) return null;
+
+            const ctxMode: ContextWindowMode = contextWindow ?? settingsDefaultContextWindow ?? "200k";
+            const thinkingOn: boolean = thinking ?? settingsDefaultThinking ?? false;
+
+            // Trigger label: reasoning level when present; falls back to a
+            // bare "Thinking" or the active context mode for models that only
+            // expose those knobs. Active state (1M / Thinking on) is conveyed
+            // through a trailing chip rather than rewriting the label, so the
+            // trigger width stays stable as users toggle.
+            const triggerLabel = hasReasoning
+              ? reasoningLabel(reasoning)
+              : hasThinking
+                ? "Thinking"
+                : ctxMode === "1m" ? "1M" : "200K";
+
+            // Show a trailing chip for any active "extension" of the base
+            // model behaviour: 1M context (when reasoning is also visible),
+            // or thinking-on (when thinking is the only knob). When context
+            // is the only knob, the mode is already in the trigger label, so
+            // no chip is needed.
+            const activeChipLabel = hasReasoning && has1M && ctxMode === "1m"
+              ? "1M"
+              : !hasReasoning && hasThinking && thinkingOn
+                ? "ON"
+                : null;
+
+            const tooltipLabel = hasReasoning
+              ? has1M || hasThinking ? "Reasoning, context & thinking" : "Reasoning level"
+              : hasThinking
+                ? "Thinking"
+                : "Context window";
+
+            const sectionHeaderClass = "px-3 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60 select-none";
+            const itemClass = (active: boolean) => cn(
+              "flex w-full items-center justify-between rounded px-3 py-1.5 text-xs",
+              active
+                ? "bg-accent text-foreground"
+                : "text-popover-foreground hover:bg-accent/50 hover:text-foreground",
+            );
+
+            return (
+              <div className="relative">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowReasoningPicker(!showReasoningPicker);
+                        }}
+                        className="gap-1.5 text-muted-foreground hover:bg-muted/40 hover:text-foreground transition-colors"
+                      >
+                        <span className="text-sm">{triggerLabel}</span>
+                        {activeChipLabel && (
+                          <span
+                            data-testid="composer-1m-badge"
+                            className="rounded-sm bg-foreground/5 px-1 py-px text-[9px] font-medium uppercase tracking-wide text-foreground/80 ring-1 ring-inset ring-foreground/10 tabular-nums"
+                          >
+                            {activeChipLabel}
+                          </span>
+                        )}
+                        <ChevronDown size={11} />
+                      </Button>
+                    }
+                  />
+                  <TooltipContent>{tooltipLabel}</TooltipContent>
+                </Tooltip>
+                {showReasoningPicker && (
+                  <div
+                    onClick={(e) => e.stopPropagation()}
+                    className="absolute bottom-full left-0 z-20 mb-1 min-w-[224px] rounded-md border border-border bg-popover p-1 shadow-lg animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-1 duration-150"
                   >
-                    <span className="text-sm">{reasoningLabel(reasoning)}</span>
-                    <ChevronDown size={11} />
-                  </Button>
-                }
-              />
-              <TooltipContent>Reasoning level</TooltipContent>
-            </Tooltip>
-            {showReasoningPicker && (
-              <div className="absolute bottom-full left-0 z-20 mb-1 rounded-md border border-border bg-card p-1 shadow-lg">
-                {reasoningLevels.map((level) => (
-                  <button
-                    key={level}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setReasoning(level);
-                      if (threadId) void setThreadSettings(threadId, { reasoningLevel: level });
-                      setShowReasoningPicker(false);
-                    }}
-                    className={cn(
-                      "flex w-full items-center rounded px-3 py-1.5 text-xs",
-                      reasoning === level
-                        ? "bg-accent text-foreground"
-                        : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                    {hasReasoning && (
+                      <>
+                        <div className={sectionHeaderClass}>Reasoning effort</div>
+                        {reasoningLevels.map((level) => (
+                          <button
+                            key={level}
+                            onClick={() => {
+                              setReasoning(level);
+                              if (threadId) void setThreadSettings(threadId, { reasoningLevel: level });
+                            }}
+                            className={itemClass(reasoning === level)}
+                          >
+                            <span>{reasoningLabel(level)}</span>
+                            {reasoning === level && <Check size={10} className="shrink-0 text-foreground" />}
+                          </button>
+                        ))}
+                      </>
                     )}
-                  >
-                    {reasoningLabel(level)}
-                  </button>
-                ))}
+
+                    {has1M && (
+                      <>
+                        {hasReasoning && <div className="my-1 h-px bg-border/60" />}
+                        <div className={sectionHeaderClass}>Context window</div>
+                        {(["200k", "1m"] as const).map((mode) => (
+                          <button
+                            key={mode}
+                            onClick={() => {
+                              setContextWindow(mode);
+                              if (threadId) void setThreadSettings(threadId, { contextWindow: mode });
+                            }}
+                            className={itemClass(ctxMode === mode)}
+                          >
+                            <span className="tabular-nums">{mode === "1m" ? "1M tokens" : "200K tokens"}</span>
+                            {ctxMode === mode && <Check size={10} className="shrink-0 text-foreground" />}
+                          </button>
+                        ))}
+                      </>
+                    )}
+
+                    {hasThinking && (
+                      <>
+                        {(hasReasoning || has1M) && <div className="my-1 h-px bg-border/60" />}
+                        <div className={sectionHeaderClass}>Thinking</div>
+                        {[
+                          { value: false, label: "Off" },
+                          { value: true, label: "On" },
+                        ].map(({ value, label }) => (
+                          <button
+                            key={String(value)}
+                            onClick={() => {
+                              setThinking(value);
+                              if (threadId) void setThreadSettings(threadId, { thinking: value });
+                            }}
+                            className={itemClass(thinkingOn === value)}
+                          >
+                            <span>{label}</span>
+                            {thinkingOn === value && <Check size={10} className="shrink-0 text-foreground" />}
+                          </button>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-          )}
+            );
+          })()}
 
           {/*
             Copilot exposes a per-agent selector inline (replaces Chat/Plan
@@ -1577,15 +1722,25 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
             />
           )}
 
-          {/* Context window tracker — live data from turnComplete, fallback to persisted thread record */}
-          {threadId && (
-            <ContextTracker
-              tokensIn={contextEntry?.lastTokensIn ?? activeThread?.last_context_tokens ?? 0}
-              contextWindow={contextEntry?.contextWindow ?? activeThread?.context_window ?? undefined}
-              totalProcessedTokens={contextEntry?.totalProcessedTokens}
-              hasLowQuota={hasLowQuota}
-            />
-          )}
+          {/* Context window tracker — live data from turnComplete, fallback to persisted thread record.
+              Always resolve the denominator against the current model + mode so switching from a 1M model
+              to Haiku immediately reflects 200K rather than the stale SDK-reported 1M value. */}
+          {threadId && (() => {
+            const effectiveCtxMode: ContextWindowMode = contextWindow ?? settingsDefaultContextWindow ?? "200k";
+            const trackerContextWindow =
+              getModelContextWindow(modelId, effectiveCtxMode) ??
+              contextEntry?.contextWindow ??
+              activeThread?.context_window ??
+              undefined;
+            return (
+              <ContextTracker
+                tokensIn={contextEntry?.lastTokensIn ?? activeThread?.last_context_tokens ?? 0}
+                contextWindow={trackerContextWindow}
+                totalProcessedTokens={contextEntry?.totalProcessedTokens}
+                hasLowQuota={hasLowQuota}
+              />
+            );
+          })()}
 
           {/* Send / Queue / Stop button */}
           <button

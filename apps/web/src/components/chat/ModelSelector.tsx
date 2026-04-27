@@ -105,9 +105,16 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
     }
   }, []);
 
-  /** Returns live models for a provider, falling back to the static registry. */
-  const getModels = (p: ModelProvider): ModelProvider["models"] =>
-    dynamicModels.get(p.id) ?? p.models;
+  /**
+   * Returns live models for a provider, falling back to the static registry.
+   * Empty dynamic lists fall through to the static registry — `listClaudeModels`
+   * returns `[]` when ANTHROPIC_API_KEY is unset, and `??` does not fall
+   * through on a truthy empty array, which would hide all Claude models.
+   */
+  const getModels = (p: ModelProvider): ModelProvider["models"] => {
+    const dynamic = dynamicModels.get(p.id);
+    return dynamic && dynamic.length > 0 ? dynamic : p.models;
+  };
 
   // Delayed hover close so user has time to move to submenu
   const setHoveredWithDelay = (providerId: string | null) => {

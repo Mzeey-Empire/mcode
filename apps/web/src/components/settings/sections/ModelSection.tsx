@@ -8,14 +8,16 @@ import {
   isMaxEffortModel,
   isXhighEffortModel,
   supportsEffortParameter,
+  supportsUltrathink,
+  supports1MContextWindow,
+  supportsThinkingToggle,
   normalizeReasoningLevelForModel,
   getCodexReasoningLevels,
-  getContextWindow,
 } from "@/lib/model-registry";
 import { SettingRow } from "../SettingRow";
 import { SegControl } from "../SegControl";
 import { SectionHeading } from "../SectionHeading";
-import type { ProviderAvailability, SettingsProviderId, ReasoningLevel } from "@mcode/contracts";
+import type { ContextWindowMode, ProviderAvailability, SettingsProviderId, ReasoningLevel } from "@mcode/contracts";
 import { ChevronDown } from "lucide-react";
 import {
   ClaudeIcon,
@@ -111,9 +113,10 @@ export function ModelSection() {
   const modelId = useSettingsStore((s) => s.settings.model.defaults.id);
   const fallbackId = useSettingsStore((s) => s.settings.model.defaults.fallbackId);
   const reasoning = useSettingsStore((s) => s.settings.model.defaults.reasoning);
-  const contextWindowOverride = useSettingsStore(
+  const contextWindowMode = useSettingsStore(
     (s) => s.settings.model.defaults.contextWindow,
   );
+  const thinking = useSettingsStore((s) => s.settings.model.defaults.thinking);
   const prDraftProvider = useSettingsStore((s) => s.settings.prDraft.provider);
   const prDraftModel = useSettingsStore((s) => s.settings.prDraft.model);
   const update = useSettingsStore((s) => s.update);
@@ -193,12 +196,13 @@ export function ModelSection() {
     if (provider === "copilot") {
       return REASONING_OPTIONS_BASE;
     }
-    // Claude: correct tier order is Low, Medium, High, X-High, Max.
-    // X-High and Max are disabled unless the selected model supports them.
+    // Claude: correct tier order is Low, Medium, High, X-High, Max, Ultrathink.
+    // Tiers above the model's ceiling are disabled.
     return [
       ...REASONING_OPTIONS_BASE,
-      { value: "xhigh", label: "X-High", disabled: !isXhighEffortModel(modelId) },
-      { value: "max",   label: "Max",    disabled: !isMaxEffortModel(modelId) },
+      { value: "xhigh",      label: "X-High",     disabled: !isXhighEffortModel(modelId) },
+      { value: "max",        label: "Max",        disabled: !isMaxEffortModel(modelId) },
+      { value: "ultrathink", label: "Ultrathink", disabled: !supportsUltrathink(modelId) },
     ];
   }, [modelId, codexLevels, provider]);
 
@@ -211,7 +215,7 @@ export function ModelSection() {
     if (provider === "copilot") {
       return "Reasoning effort passed to the Copilot model. Not all models support all levels.";
     }
-    return "Default reasoning level. Max requires Opus 4.7, Opus 4.6, or Sonnet 4.6. X-High requires Opus 4.7.";
+    return "Default reasoning level. Max and Ultrathink require Opus 4.7/4.6 or Sonnet 4.6. X-High requires Opus 4.7. Ultrathink prepends an explicit instruction to the prompt.";
   }, [codexLevels, provider]);
 
   const handleProviderChange = (v: string) => {
@@ -385,31 +389,36 @@ export function ModelSection() {
         <SettingRow
           label="Context window"
           configKey="model.defaults.contextWindow"
-          hint="Override the context window (tokens) for the default model. Leave empty to use the API or static value."
+          hint="200k is the standard window. 1M unlocks the extended beta window on Opus 4.7/4.6 and Sonnet 4.6."
         >
-          <input
-            type="number"
-            min={1}
-            max={2_000_000}
-            step={1000}
-            placeholder={String(getContextWindow(modelId) ?? "")}
-            value={contextWindowOverride ?? ""}
-            onChange={(e) => {
-              const raw = e.target.value.trim();
-              if (raw === "") {
-                void update({ model: { defaults: { contextWindow: undefined } } });
-                return;
-              }
-              const coerced = Math.round(Number(raw));
-              void update({
-                model: {
-                  defaults: {
-                    contextWindow: coerced > 0 ? coerced : undefined,
-                  },
-                },
-              });
-            }}
-            className="h-7 w-36 rounded-[min(var(--radius-md),12px)] border border-input bg-background px-2 py-0.5 text-xs text-foreground tabular-nums placeholder:text-muted-foreground/50 focus-visible:border-ring focus-visible:outline-none"
+          <SegControl
+            options={[
+              { value: "200k", label: "200K" },
+              { value: "1m",   label: "1M",   disabled: !supports1MContextWindow(modelId) },
+            ]}
+            value={contextWindowMode}
+            onChange={(v) =>
+              update({ model: { defaults: { contextWindow: v as ContextWindowMode } } })
+            }
+          />
+        </SettingRow>
+      )}
+
+      {provider === "claude" && supportsThinkingToggle(modelId) && (
+        <SettingRow
+          label="Thinking"
+          configKey="model.defaults.thinking"
+          hint="Enable extended thinking for Haiku 4.5. Effort-tier models ignore this and use the reasoning level instead."
+        >
+          <SegControl
+            options={[
+              { value: "off", label: "Off" },
+              { value: "on",  label: "On"  },
+            ]}
+            value={thinking ? "on" : "off"}
+            onChange={(v) =>
+              update({ model: { defaults: { thinking: v === "on" } } })
+            }
           />
         </SettingRow>
       )}
