@@ -3,12 +3,23 @@ import { useUpdateStore } from "@/stores/updateStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { SettingRow } from "../SettingRow";
 import { SectionHeading } from "../SectionHeading";
+import { Switch } from "@/components/ui/switch";
+import { SegControl } from "../SegControl";
 import type { UpdateStatus } from "@/transport/desktop-bridge";
 import type { UpdateCheckInterval } from "@mcode/contracts";
 
+/** Segmented control options for update check frequency. */
+const INTERVAL_OPTIONS = [
+  { value: "15min", label: "15m" },
+  { value: "1hour", label: "1h" },
+  { value: "4hours", label: "4h" },
+  { value: "1day", label: "1d" },
+  { value: "never", label: "Off" },
+];
+
 /**
  * About settings section: shows the running app version, the current
- * auto-updater state, and a manual "Check for updates" button.
+ * auto-updater state, and controls for update behavior.
  *
  * The version is read from the Electron main process at startup, so it
  * always reflects the installed build without manual maintenance.
@@ -36,21 +47,12 @@ export function AboutSection() {
     void bridge?.installUpdate();
   };
 
-  const handleAutoDownloadChange = (enabled: boolean): void => {
-    void updateSettings({ updates: { autoDownload: enabled } });
-  };
-
-  const handleAutoInstallChange = (enabled: boolean): void => {
-    void updateSettings({ updates: { autoInstallOnQuit: enabled } });
-  };
-
-  const handleCheckIntervalChange = (interval: UpdateCheckInterval): void => {
-    void updateSettings({ updates: { checkInterval: interval } });
-  };
-
   const autoDownload = settings.updates?.autoDownload ?? true;
   const autoInstallOnQuit = settings.updates?.autoInstallOnQuit ?? true;
   const checkInterval = settings.updates?.checkInterval ?? "4hours";
+
+  const statusLabel = describeStatus(status);
+  const isBusy = checking || status.state === "checking" || status.state === "downloading";
 
   return (
     <div>
@@ -58,111 +60,92 @@ export function AboutSection() {
       <div>
         <SettingRow
           label="Version"
-          hint="The currently installed version of Mcode."
+          hint="Currently installed build."
         >
-          <span className="rounded bg-muted px-2 py-1 font-mono text-xs text-foreground">
+          <span className="font-mono text-xs text-muted-foreground tabular-nums">
             {version || "—"}
           </span>
         </SettingRow>
 
         <SettingRow
           label="Updates"
-          hint="Check for new versions of Mcode."
+          hint={checkInterval === "never" ? "Automatic checks disabled." : "Checks for new releases on the configured interval."}
         >
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">
-              {describeStatus(status)}
-            </span>
+          <div className="flex items-center gap-3">
+            {statusLabel && (
+              <span className="font-mono text-xs text-muted-foreground">
+                {statusLabel}
+              </span>
+            )}
             {status.state === "downloaded" ? (
               <button
                 onClick={handleInstall}
-                className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700"
+                className="rounded bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
               >
                 Restart to install
               </button>
             ) : (
               <button
                 onClick={() => void handleCheck()}
-                disabled={!bridge || checking || status.state === "checking" || status.state === "downloading"}
-                className="rounded bg-foreground/10 px-3 py-1.5 text-xs font-medium text-foreground hover:bg-foreground/15 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!bridge || isBusy}
+                className="rounded bg-muted px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-muted/80 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {checking || status.state === "checking" ? "Checking…" : "Check now"}
+                {isBusy ? "Checking…" : "Check now"}
               </button>
             )}
           </div>
         </SettingRow>
 
         <SettingRow
-          label="Auto-download"
-          hint="Automatically download updates when they become available."
-        >
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={autoDownload}
-              onChange={(e) => handleAutoDownloadChange(e.target.checked)}
-              className="h-4 w-4 rounded border border-input bg-background"
-            />
-            <span className="text-xs text-muted-foreground">
-              {autoDownload ? "Enabled" : "Disabled"}
-            </span>
-          </label>
-        </SettingRow>
-
-        <SettingRow
-          label="Auto-install"
-          hint="Automatically install updates when the app closes."
-        >
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={autoInstallOnQuit}
-              onChange={(e) => handleAutoInstallChange(e.target.checked)}
-              className="h-4 w-4 rounded border border-input bg-background"
-            />
-            <span className="text-xs text-muted-foreground">
-              {autoInstallOnQuit ? "Enabled" : "Disabled"}
-            </span>
-          </label>
-        </SettingRow>
-
-        <SettingRow
           label="Check interval"
-          hint="How often to check for updates (takes effect on next app launch)."
+          hint="How often to poll for new releases. Takes effect on next launch."
         >
-          <select
+          <SegControl
+            options={INTERVAL_OPTIONS}
             value={checkInterval}
-            onChange={(e) => handleCheckIntervalChange(e.target.value as UpdateCheckInterval)}
-            className="rounded border border-input bg-background px-2 py-1.5 text-xs text-foreground"
-          >
-            <option value="15min">Every 15 minutes</option>
-            <option value="1hour">Every hour</option>
-            <option value="4hours">Every 4 hours</option>
-            <option value="1day">Every day</option>
-            <option value="never">Never</option>
-          </select>
+            onChange={(v) => void updateSettings({ updates: { checkInterval: v as UpdateCheckInterval } })}
+          />
+        </SettingRow>
+
+        <SettingRow
+          label="Auto-download"
+          hint="Download updates in the background as soon as they are available."
+        >
+          <Switch
+            checked={autoDownload}
+            onCheckedChange={(v) => void updateSettings({ updates: { autoDownload: v } })}
+          />
+        </SettingRow>
+
+        <SettingRow
+          label="Auto-install on quit"
+          hint="Apply downloaded updates automatically when the app closes."
+        >
+          <Switch
+            checked={autoInstallOnQuit}
+            onCheckedChange={(v) => void updateSettings({ updates: { autoInstallOnQuit: v } })}
+          />
         </SettingRow>
       </div>
     </div>
   );
 }
 
-/** Render the auto-updater status as a short, user-facing string. */
+/** Render the auto-updater status as a short monospace label, or empty string when idle/up-to-date. */
 function describeStatus(status: UpdateStatus): string {
   switch (status.state) {
     case "idle":
-      return "Idle";
-    case "checking":
-      return "Checking for updates…";
-    case "available":
-      return `Version ${status.version} is available — downloading…`;
     case "not-available":
-      return "You're on the latest version.";
+      return "";
+    case "checking":
+      return "Checking…";
+    case "available":
+      return `v${status.version} available`;
     case "downloading":
-      return `Downloading update… ${status.percent}%`;
+      return `${status.percent}%`;
     case "downloaded":
-      return `Version ${status.version} is downloaded.`;
+      return `v${status.version} ready`;
     case "error":
-      return `Update check failed: ${status.message}`;
+      return "Check failed";
   }
 }
