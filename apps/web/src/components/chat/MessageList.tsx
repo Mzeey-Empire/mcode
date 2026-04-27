@@ -431,7 +431,7 @@ export function MessageList({ onBranch }: MessageListProps) {
   }, [streamingText, scrollToBottom]);
 
   return (
-    <div className="relative h-full">
+    <div className="relative h-full" data-testid="message-list">
       <div
         ref={containerRef}
         onScroll={handleScroll}
