@@ -137,10 +137,10 @@ export const WS_METHODS = lazySchema(() => ({
       permissionMode: PermissionModeSchema.optional(),
       /** Copilot-specific: name of the selected sub-agent. Pass null to clear back to provider default. */
       copilotAgent: CopilotAgentNameSchema.nullable().optional(),
-      /** Context window tier persisted on the thread. */
-      contextWindow: ContextWindowModeSchema.optional(),
-      /** Boolean thinking toggle persisted on the thread. Honored only for Haiku-class models. */
-      thinking: z.boolean().optional(),
+      /** Context window tier persisted on the thread. Pass null to clear back to the global default. */
+      contextWindow: ContextWindowModeSchema.nullable().optional(),
+      /** Boolean thinking toggle persisted on the thread. Honored only for Haiku-class models. Pass null to clear. */
+      thinking: z.boolean().nullable().optional(),
     }).refine(
       (data) =>
         data.reasoningLevel !== undefined ||

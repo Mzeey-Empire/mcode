@@ -297,7 +297,7 @@ export class ThreadRepo {
       reasoning_level?: string;
       interaction_mode?: string;
       permission_mode?: string;
-      context_window_mode?: string | null;
+      context_window_mode?: ContextWindowMode | null;
       thinking?: boolean | null;
       copilot_agent?: string | null;
     },

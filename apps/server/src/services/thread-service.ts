@@ -6,7 +6,7 @@
 
 import { injectable, inject } from "tsyringe";
 import { validateBranchName, sanitizeBranchForFolder, logger } from "@mcode/shared";
-import type { Thread, ThreadMode } from "@mcode/contracts";
+import type { Thread, ThreadMode, ContextWindowMode } from "@mcode/contracts";
 import { ThreadRepo } from "../repositories/thread-repo";
 import { WorkspaceRepo } from "../repositories/workspace-repo";
 import { GitService } from "./git-service";
@@ -169,7 +169,7 @@ export class ThreadService {
       interaction_mode?: string;
       permission_mode?: string;
       copilot_agent?: string | null;
-      context_window_mode?: string | null;
+      context_window_mode?: ContextWindowMode | null;
       thinking?: boolean | null;
     },
   ): boolean {

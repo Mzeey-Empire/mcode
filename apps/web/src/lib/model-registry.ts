@@ -2,6 +2,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts";
 import {
   MODEL_CONTEXT_WINDOWS_DEFAULT,
+  MODEL_CONTEXT_WINDOWS_EXTENDED,
   getModelContextWindow as sharedGetModelContextWindow,
 } from "@mcode/shared/model-context";
 
@@ -66,11 +67,11 @@ export const MODEL_PROVIDERS: readonly ModelProvider[] = [
     supportsModelListing: true,
     models: [
       { id: "claude-opus-4-7", label: "Claude Opus 4.7", providerId: "claude",
-        contextWindow: MODEL_CONTEXT_WINDOWS_DEFAULT["claude-opus-4-7"] },
+        contextWindow: MODEL_CONTEXT_WINDOWS_EXTENDED["claude-opus-4-7"] },
       { id: "claude-opus-4-6", label: "Claude Opus 4.6", providerId: "claude",
-        contextWindow: MODEL_CONTEXT_WINDOWS_DEFAULT["claude-opus-4-6"] },
+        contextWindow: MODEL_CONTEXT_WINDOWS_EXTENDED["claude-opus-4-6"] },
       { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", providerId: "claude",
-        contextWindow: MODEL_CONTEXT_WINDOWS_DEFAULT["claude-sonnet-4-6"] },
+        contextWindow: MODEL_CONTEXT_WINDOWS_EXTENDED["claude-sonnet-4-6"] },
       { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", providerId: "claude",
         contextWindow: MODEL_CONTEXT_WINDOWS_DEFAULT["claude-haiku-4-5"] },
     ],

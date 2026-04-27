@@ -46,9 +46,11 @@ const SORTED_KEYS: readonly string[] = Object.keys(MODEL_CONTEXT_WINDOWS_DEFAULT
 /** Looks up a model in `map` with prefix matching for dated SDK variants. */
 function lookup(map: Readonly<Record<string, number>>, modelId: string): number | undefined {
   if (!modelId) return undefined;
-  const exact = map[modelId];
+  // Strip [1m] suffix that may be present on slugs returned by resolveSdkModelSlug.
+  const bare = modelId.replace(/\[1m\]$/, "");
+  const exact = map[bare];
   if (exact !== undefined) return exact;
-  const base = SORTED_KEYS.find((k) => modelId.startsWith(`${k}-`));
+  const base = SORTED_KEYS.find((k) => bare.startsWith(`${k}-`));
   return base ? map[base] : undefined;
 }
 

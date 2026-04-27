@@ -44,8 +44,12 @@ describe("listClaudeModels", () => {
   });
 
   afterEach(() => {
-    process.env.ANTHROPIC_API_KEY = originalEnv;
-    vi.restoreAllMocks();
+    if (originalEnv === undefined) {
+      delete process.env.ANTHROPIC_API_KEY;
+    } else {
+      process.env.ANTHROPIC_API_KEY = originalEnv;
+    }
+    vi.unstubAllGlobals();
     resetModelCache();
   });
 

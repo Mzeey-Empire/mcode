@@ -578,6 +578,14 @@ export class AgentService {
     // Validate parent
     const parentThread = this.threadRepo.findById(parentThreadId);
     if (!parentThread) throw new Error(`Parent thread not found: ${parentThreadId}`);
+
+    // Inherit context window mode and thinking from the parent thread when not
+    // explicitly overridden by the caller — branched threads continue in the same
+    // context tier / thinking mode as the thread they forked from.
+    const effectiveContextWindowMode =
+      contextWindowMode ?? (parentThread.context_window_mode as ContextWindowMode | null | undefined) ?? undefined;
+    const effectiveThinking =
+      thinking !== undefined ? thinking : (parentThread.thinking != null ? Boolean(parentThread.thinking) : undefined);
     if (parentThread.workspace_id !== workspaceId) {
       throw new Error("Cannot branch across workspaces");
     }
@@ -738,8 +746,8 @@ export class AgentService {
         maxBudgetUsd,
         maxTurns,
         copilotAgent,
-        contextWindowMode,
-        thinking,
+        effectiveContextWindowMode,
+        effectiveThinking,
       );
     } finally {
       // Ensure override is cleaned up even if sendMessage throws before consuming it.

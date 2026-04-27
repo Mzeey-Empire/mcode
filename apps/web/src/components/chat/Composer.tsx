@@ -1463,8 +1463,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
           */}
           {(() => {
             const hasReasoning = reasoningLevels.length > 0;
-            const has1M = supports1MContextWindow(modelId);
-            const hasThinking = supportsThinkingToggle(modelId);
+            const has1M = provider === "claude" && supports1MContextWindow(modelId);
+            const hasThinking = provider === "claude" && supportsThinkingToggle(modelId);
             if (!hasReasoning && !has1M && !hasThinking) return null;
 
             const ctxMode: ContextWindowMode = contextWindow ?? settingsDefaultContextWindow ?? "200k";
@@ -1568,7 +1568,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
                             key={mode}
                             onClick={() => {
                               setContextWindow(mode);
-                              if (threadId) void setThreadSettings(threadId, { contextWindow: mode });
+                              if (threadId && !branchFromMessageId) void setThreadSettings(threadId, { contextWindow: mode });
                             }}
                             className={itemClass(ctxMode === mode)}
                           >
@@ -1591,7 +1591,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
                             key={String(value)}
                             onClick={() => {
                               setThinking(value);
-                              if (threadId) void setThreadSettings(threadId, { thinking: value });
+                              if (threadId && !branchFromMessageId) void setThreadSettings(threadId, { thinking: value });
                             }}
                             className={itemClass(thinkingOn === value)}
                           >
