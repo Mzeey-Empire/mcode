@@ -67,7 +67,7 @@ describe("Settings-aware defaults", () => {
       settings: {
         ...getDefaultSettings(),
         model: {
-          defaults: { provider: "claude", id: "claude-opus-4-6", reasoning: "high", fallbackId: "" },
+          defaults: { provider: "claude", id: "claude-opus-4-6", reasoning: "high", fallbackId: "", contextWindow: "200k", thinking: false },
         },
       },
     });
@@ -79,7 +79,7 @@ describe("Settings-aware defaults", () => {
       settings: {
         ...getDefaultSettings(),
         model: {
-          defaults: { provider: "claude", id: "nonexistent-model", reasoning: "high", fallbackId: "" },
+          defaults: { provider: "claude", id: "nonexistent-model", reasoning: "high", fallbackId: "", contextWindow: "200k", thinking: false },
         },
       },
     });
@@ -95,7 +95,7 @@ describe("Settings-aware defaults", () => {
       settings: {
         ...getDefaultSettings(),
         model: {
-          defaults: { provider: "claude", id: "claude-sonnet-4-6", reasoning: "low", fallbackId: "" },
+          defaults: { provider: "claude", id: "claude-sonnet-4-6", reasoning: "low", fallbackId: "", contextWindow: "200k", thinking: false },
         },
       },
     });
@@ -111,7 +111,7 @@ describe("Settings-aware defaults", () => {
       settings: {
         ...getDefaultSettings(),
         model: {
-          defaults: { provider: "claude", id: "claude-opus-4-6", reasoning: "max", fallbackId: "" },
+          defaults: { provider: "claude", id: "claude-opus-4-6", reasoning: "max", fallbackId: "", contextWindow: "200k", thinking: false },
         },
       },
     });
