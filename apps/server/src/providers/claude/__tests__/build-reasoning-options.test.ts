@@ -127,4 +127,55 @@ describe("buildReasoningOptions", () => {
     const result = buildReasoningOptions("high", "claude-haiku-4-5");
     expect(result).not.toHaveProperty("thinking");
   });
+
+  // ---------------------------------------------------------------------------
+  // Ultrathink: virtual tier maps to effort "max" at SDK boundary
+  // ---------------------------------------------------------------------------
+
+  it("maps ultrathink to effort 'max' for opus-4-7", () => {
+    const result = buildReasoningOptions("ultrathink", "claude-opus-4-7");
+    expect(result).toMatchObject({ effort: "max", thinking: { type: "adaptive" } });
+  });
+
+  it("maps ultrathink to effort 'max' for opus-4-6", () => {
+    const result = buildReasoningOptions("ultrathink", "claude-opus-4-6");
+    expect(result).toMatchObject({ effort: "max" });
+  });
+
+  it("maps ultrathink to effort 'max' for sonnet-4-6", () => {
+    const result = buildReasoningOptions("ultrathink", "claude-sonnet-4-6");
+    expect(result).toMatchObject({ effort: "max" });
+  });
+
+  it("ignores ultrathink for haiku-4-5 (no effort param emitted)", () => {
+    expect(buildReasoningOptions("ultrathink", "claude-haiku-4-5")).toEqual({});
+  });
+
+  // ---------------------------------------------------------------------------
+  // Haiku thinking toggle: boolean flag → adaptive thinking
+  // ---------------------------------------------------------------------------
+
+  it("emits thinking adaptive for haiku-4-5 when thinking is true", () => {
+    const result = buildReasoningOptions("high", "claude-haiku-4-5", true);
+    expect(result).toEqual({ thinking: { type: "adaptive" } });
+    expect(result).not.toHaveProperty("effort");
+  });
+
+  it("omits thinking field for haiku-4-5 when thinking is false", () => {
+    const result = buildReasoningOptions("high", "claude-haiku-4-5", false);
+    expect(result).toEqual({});
+  });
+
+  it("omits thinking field for haiku-4-5 when thinking is undefined", () => {
+    const result = buildReasoningOptions("high", "claude-haiku-4-5", undefined);
+    expect(result).toEqual({});
+  });
+
+  it("ignores thinking flag for non-haiku models (effort path drives output)", () => {
+    // The thinking flag is a Haiku-specific override. For effort-capable models
+    // the thinking field is already set to adaptive whenever a level is provided,
+    // and the boolean is not consulted.
+    const result = buildReasoningOptions("high", "claude-sonnet-4-6", true);
+    expect(result).toMatchObject({ effort: "high", thinking: { type: "adaptive" } });
+  });
 });

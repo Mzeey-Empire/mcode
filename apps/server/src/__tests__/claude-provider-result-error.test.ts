@@ -4,9 +4,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const { mockQuery } = vi.hoisted(() => ({ mockQuery: vi.fn() }));
 
 vi.mock("@anthropic-ai/claude-agent-sdk", () => ({ query: mockQuery }));
-vi.mock("@mcode/shared", () => ({
-  logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
-}));
+vi.mock("@mcode/shared", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@mcode/shared")>();
+  return {
+    ...actual,
+    logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
+  };
+});
 
 import { ClaudeProvider } from "../providers/claude/claude-provider";
 import { queryMethodStubs } from "./helpers/mock-sdk-query";

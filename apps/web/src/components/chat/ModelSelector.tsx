@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, type ComponentType } from "react";
 import { ChevronDown, ChevronRight, Lock, Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatContextWindow } from "./format-context-window";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -84,6 +85,7 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
         label: m.name,
         providerId,
         group: m.group,
+        contextWindow: m.contextWindow,
         multiplier: m.multiplier,
       }));
       const updated = new Map(dynamicModelsRef.current).set(providerId, mapped);
@@ -103,9 +105,16 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
     }
   }, []);
 
-  /** Returns live models for a provider, falling back to the static registry. */
-  const getModels = (p: ModelProvider): ModelProvider["models"] =>
-    dynamicModels.get(p.id) ?? p.models;
+  /**
+   * Returns live models for a provider, falling back to the static registry.
+   * Empty dynamic lists fall through to the static registry — `listClaudeModels`
+   * returns `[]` when ANTHROPIC_API_KEY is unset, and `??` does not fall
+   * through on a truthy empty array, which would hide all Claude models.
+   */
+  const getModels = (p: ModelProvider): ModelProvider["models"] => {
+    const dynamic = dynamicModels.get(p.id);
+    return dynamic && dynamic.length > 0 ? dynamic : p.models;
+  };
 
   // Delayed hover close so user has time to move to submenu
   const setHoveredWithDelay = (providerId: string | null) => {
@@ -194,28 +203,36 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
     m: ModelProvider["models"][0],
     providerId: string,
     isSelected: (id: string) => boolean
-  ) => (
-    <button
-      key={m.id}
-      onClick={() => handleSelectModel(m.id, providerId)}
-      className={cn(
-        "flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs",
-        isSelected(m.id)
-          ? "bg-accent text-foreground"
-          : "text-popover-foreground hover:bg-accent/50 hover:text-foreground"
-      )}
-    >
-      <span className="flex-1 text-left">{m.label}</span>
-      {m.multiplier != null && (
-        <span className="text-[10px] text-muted-foreground/60 tabular-nums">
-          {m.multiplier}x
-        </span>
-      )}
-      {isSelected(m.id) && (
-        <Check size={10} className="shrink-0 text-foreground" />
-      )}
-    </button>
-  );
+  ) => {
+    const ctxLabel = formatContextWindow(m.contextWindow);
+    return (
+      <button
+        key={m.id}
+        onClick={() => handleSelectModel(m.id, providerId)}
+        className={cn(
+          "flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs",
+          isSelected(m.id)
+            ? "bg-accent text-foreground"
+            : "text-popover-foreground hover:bg-accent/50 hover:text-foreground"
+        )}
+      >
+        <span className="flex-1 text-left">{m.label}</span>
+        {ctxLabel && (
+          <span className="text-[10px] text-muted-foreground/60 tabular-nums">
+            {ctxLabel}
+          </span>
+        )}
+        {m.multiplier != null && (
+          <span className="text-[10px] text-muted-foreground/60 tabular-nums">
+            {m.multiplier}x
+          </span>
+        )}
+        {isSelected(m.id) && (
+          <Check size={10} className="shrink-0 text-foreground" />
+        )}
+      </button>
+    );
+  };
 
   const renderGroupedModels = (
     models: ModelProvider["models"],

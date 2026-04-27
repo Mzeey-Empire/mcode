@@ -26,11 +26,33 @@ export type AgentDefaultMode = z.infer<typeof AgentDefaultModeSchema>;
 
 /**
  * Reasoning effort level for model inference.
- * "max" maps to Claude's extended thinking; "xhigh" maps to Codex's xhigh effort tier and Claude Opus 4.7+.
+ * "max" maps to Claude's extended thinking; "xhigh" maps to Codex's xhigh effort tier and Claude Opus 4.7+;
+ * "ultrathink" is a virtual top-tier that prepends "Ultrathink:\n" to the user prompt and
+ * sends "max" effort to the SDK. Supported only by max-tier Claude models (Opus 4.7/4.6, Sonnet 4.6).
  */
-export const ReasoningLevelSchema = z.enum(["low", "medium", "high", "max", "xhigh"]);
+export const ReasoningLevelSchema = z.enum([
+  "low",
+  "medium",
+  "high",
+  "max",
+  "xhigh",
+  "ultrathink",
+]);
 /** Reasoning effort level value. */
 export type ReasoningLevel = z.infer<typeof ReasoningLevelSchema>;
+
+/**
+ * Context window selection for Claude models that support an extended 1M tier.
+ * "200k" is the default tier every Claude model supports; "1m" requests the
+ * 1,000,000-token tier (only honored for Opus 4.7/4.6 and Sonnet 4.6).
+ *
+ * At send time the server appends a `[1m]` suffix to the model slug to opt
+ * into the extended window via the Claude Agent SDK; the SDK forwards the
+ * appropriate beta header internally.
+ */
+export const ContextWindowModeSchema = z.enum(["200k", "1m"]);
+/** Context window selection value. */
+export type ContextWindowMode = z.infer<typeof ContextWindowModeSchema>;
 
 /** Supported AI provider identifier for settings. */
 export const ProviderIdSchema = z.enum(["claude", "codex", "gemini", "copilot"]);
@@ -102,6 +124,18 @@ export const SettingsSchema = lazySchema(() =>
             reasoning: ReasoningLevelSchema.default("high"),
             /** Fallback model when the primary is unavailable. Empty string disables fallback. */
             fallbackId: z.string().trim().default("claude-sonnet-4-6"),
+            /**
+             * Default context window mode. "200k" is the universally supported tier;
+             * "1m" requests the extended 1M-token window from Opus 4.7/4.6 and Sonnet 4.6.
+             * Models that do not support 1M ignore this and run on 200k.
+             */
+            contextWindow: ContextWindowModeSchema.default("200k"),
+            /**
+             * Default boolean thinking toggle. Honored only by models that expose
+             * thinking as a boolean (Haiku 4.5). Effort-tier models ignore this and
+             * use their reasoning level instead.
+             */
+            thinking: z.boolean().default(false),
           })
           .default({}),
       })
@@ -312,6 +346,8 @@ export const PartialSettingsSchema = lazySchema(() =>
             id: z.string().optional(),
             reasoning: ReasoningLevelSchema.optional(),
             fallbackId: z.string().trim().optional(),
+            contextWindow: ContextWindowModeSchema.optional(),
+            thinking: z.boolean().optional(),
           })
           .optional(),
       })

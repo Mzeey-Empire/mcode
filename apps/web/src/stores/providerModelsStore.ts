@@ -51,6 +51,7 @@ export const useProviderModelsStore = create<ProviderModelsState>((set, get) => 
         providerId,
         group: m.group,
         multiplier: m.multiplier,
+        contextWindow: m.contextWindow,
       }));
       set((s) => ({
         models: { ...s.models, [providerId]: mapped },

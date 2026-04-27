@@ -13,15 +13,16 @@ import type { ReasoningLevel } from "@mcode/contracts";
 //
 // xhigh sits below max because xhigh is exclusive to Opus 4.7, while max is a
 // broader "extended thinking" tier supported by Opus 4.6 and Sonnet 4.6 as well.
-// This ordering means: requesting "max" on Opus 4.6 passes through (max is in its
-// allowed set), but requesting "xhigh" on Opus 4.6 correctly downgrades to "high"
-// by walking down past xhigh (not in allowed) and landing on high (in allowed).
+// "ultrathink" is the virtual top tier: it is mapped to "max" effort at the SDK
+// boundary and additionally prepends "Ultrathink:\n" to the user prompt.
+// Eligibility is identical to the max tier (Opus 4.7/4.6, Sonnet 4.6).
 const TIER_LADDER: readonly ReasoningLevel[] = [
   "low",
   "medium",
   "high",
   "xhigh",
   "max",
+  "ultrathink",
 ];
 
 /** Claude model IDs that support the "xhigh" effort tier. */
@@ -33,6 +34,28 @@ const MAX_EFFORT_MODEL_IDS: readonly string[] = [
   "claude-opus-4-6",
   "claude-sonnet-4-6",
 ];
+
+/**
+ * Claude model IDs that support the "ultrathink" virtual tier.
+ * Identical to the max-tier set — ultrathink is "max + prompt prefix".
+ */
+const ULTRATHINK_MODEL_IDS: readonly string[] = MAX_EFFORT_MODEL_IDS;
+
+/**
+ * Claude model IDs that support the extended 1,000,000-token context window.
+ * The same Opus 4.7/4.6 + Sonnet 4.6 cohort that supports the max effort tier.
+ */
+const ONE_M_CONTEXT_MODEL_IDS: readonly string[] = [
+  "claude-opus-4-7",
+  "claude-opus-4-6",
+  "claude-sonnet-4-6",
+];
+
+/**
+ * Claude model IDs that expose a boolean thinking toggle (instead of an effort
+ * dial). Currently only Haiku 4.5 fits this shape.
+ */
+const THINKING_TOGGLE_MODEL_IDS: readonly string[] = ["claude-haiku-4-5"];
 
 /** Claude model IDs that do NOT support the effort parameter at all. */
 const EFFORT_UNSUPPORTED_CLAUDE_IDS: readonly string[] = ["claude-haiku-4-5"];
@@ -47,6 +70,9 @@ const ALL_KNOWN_BASE_IDS: readonly string[] = [
   ...new Set([
     ...XHIGH_EFFORT_MODEL_IDS,
     ...MAX_EFFORT_MODEL_IDS,
+    ...ULTRATHINK_MODEL_IDS,
+    ...ONE_M_CONTEXT_MODEL_IDS,
+    ...THINKING_TOGGLE_MODEL_IDS,
     ...EFFORT_UNSUPPORTED_CLAUDE_IDS,
   ]),
 ].sort((a, b) => b.length - a.length);
@@ -85,6 +111,36 @@ export function isMaxEffortModel(modelId: string): boolean {
 }
 
 /**
+ * Returns true when the model supports the "ultrathink" virtual tier.
+ *
+ * Applies to the opus-4-7, opus-4-6, and sonnet-4-6 families. Ultrathink
+ * resolves to "max" effort at the SDK boundary and additionally prepends
+ * "Ultrathink:\n" to the user prompt.
+ */
+export function supportsUltrathink(modelId: string): boolean {
+  return ULTRATHINK_MODEL_IDS.includes(normalizeModelId(modelId));
+}
+
+/**
+ * Returns true when the model supports the extended 1,000,000-token context
+ * window. Applies to opus-4-7, opus-4-6, and sonnet-4-6.
+ *
+ * The window is opted into by appending `[1m]` to the model slug at send
+ * time; the Claude Agent SDK handles the beta header internally.
+ */
+export function supports1MContextWindow(modelId: string): boolean {
+  return ONE_M_CONTEXT_MODEL_IDS.includes(normalizeModelId(modelId));
+}
+
+/**
+ * Returns true when the model exposes a boolean thinking toggle (instead of
+ * an effort dial). Currently Haiku 4.5 is the only such model.
+ */
+export function supportsThinkingToggle(modelId: string): boolean {
+  return THINKING_TOGGLE_MODEL_IDS.includes(normalizeModelId(modelId));
+}
+
+/**
  * Returns false when the model does not accept the effort parameter at all.
  *
  * Haiku-class models ignore effort; sending it causes API errors.
@@ -120,6 +176,9 @@ export function normalizeReasoningLevelForModel(
   }
   if (isXhighEffortModel(modelId)) {
     allowed.add("xhigh");
+  }
+  if (supportsUltrathink(modelId)) {
+    allowed.add("ultrathink");
   }
 
   if (allowed.has(level)) {

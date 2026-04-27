@@ -90,14 +90,14 @@ describe("ModelSection reasoning options", () => {
     vi.clearAllMocks();
   });
 
-  it("renders reasoning options in order: Low, Medium, High, X-High, Max for Claude Opus 4.7", () => {
+  it("renders reasoning options in order: Low, Medium, High, X-High, Max, Ultrathink for Claude Opus 4.7", () => {
     renderWithModel("claude", "claude-opus-4-7");
 
     const row = getReasoningRow();
     const radios = within(row).getAllByRole("radio");
     const labels = radios.map((r) => r.textContent?.trim());
 
-    expect(labels).toEqual(["Low", "Medium", "High", "X-High", "Max"]);
+    expect(labels).toEqual(["Low", "Medium", "High", "X-High", "Max", "Ultrathink"]);
   });
 
   it("X-High is enabled for Claude Opus 4.7", () => {

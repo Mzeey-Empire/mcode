@@ -6,7 +6,7 @@
 
 import { injectable, inject } from "tsyringe";
 import { validateBranchName, sanitizeBranchForFolder, logger } from "@mcode/shared";
-import type { Thread, ThreadMode } from "@mcode/contracts";
+import type { Thread, ThreadMode, ContextWindowMode } from "@mcode/contracts";
 import { ThreadRepo } from "../repositories/thread-repo";
 import { WorkspaceRepo } from "../repositories/workspace-repo";
 import { GitService } from "./git-service";
@@ -161,7 +161,7 @@ export class ThreadService {
     return this.threadRepo.updateTitle(threadId, title);
   }
 
-  /** Persist per-thread composer settings (reasoning, mode, permission, copilot agent). */
+  /** Persist per-thread composer settings (reasoning, mode, permission, copilot agent, context window, thinking). */
   updateSettings(
     threadId: string,
     settings: {
@@ -169,6 +169,8 @@ export class ThreadService {
       interaction_mode?: string;
       permission_mode?: string;
       copilot_agent?: string | null;
+      context_window_mode?: ContextWindowMode | null;
+      thinking?: boolean | null;
     },
   ): boolean {
     return this.threadRepo.updateSettings(threadId, {
@@ -176,6 +178,8 @@ export class ThreadService {
       ...(settings.interaction_mode !== undefined && { interaction_mode: settings.interaction_mode }),
       ...(settings.permission_mode !== undefined && { permission_mode: settings.permission_mode }),
       ...("copilot_agent" in settings && { copilot_agent: settings.copilot_agent }),
+      ...("context_window_mode" in settings && { context_window_mode: settings.context_window_mode }),
+      ...("thinking" in settings && { thinking: settings.thinking }),
     });
   }
 

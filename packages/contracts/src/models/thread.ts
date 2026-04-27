@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
 import { ThreadStatusSchema, ThreadModeSchema, InteractionModeSchema, PermissionModeSchema } from "./enums.js";
-import { ReasoningLevelSchema } from "./settings.js";
+import { ContextWindowModeSchema, ReasoningLevelSchema } from "./settings.js";
 
 /** Thread schema matching the SQLite row shape. */
 export const ThreadSchema = lazySchema(() =>
@@ -36,6 +36,10 @@ export const ThreadSchema = lazySchema(() =>
   interaction_mode: InteractionModeSchema.nullable(),
   /** Permission mode last used (full or supervised). */
   permission_mode: PermissionModeSchema.nullable(),
+  /** Context window mode last used in this thread ("200k" or "1m"). */
+  context_window_mode: ContextWindowModeSchema.nullable(),
+  /** Boolean thinking toggle last used in this thread. Honored only by models with a thinking toggle (Haiku 4.5). */
+  thinking: z.boolean().nullable(),
   /** Selected Copilot sub-agent name. Null means provider default (interactive). */
   copilot_agent: z.string().nullable(),
   /** ID of the parent thread this was branched from. Null for root threads. */

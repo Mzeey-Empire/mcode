@@ -49,6 +49,9 @@ describe("context tracker — Fix 2: output tokens included", () => {
 
     const ctx = useThreadStore.getState().contextByThread[THREAD];
     expect(ctx?.lastTokensIn).toBe(5000);
+    // SDK runtime value (200K) is truthful and wins over the static map.
+    // The new preference chain ranks SDK > static map > previous, so the
+    // SDK-reported 200K is what gets stored.
     expect(ctx?.contextWindow).toBe(200_000);
   });
 });

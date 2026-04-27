@@ -1,7 +1,7 @@
 import type { AgentEvent } from "../events/agent-event.js";
 import type { AttachmentMeta } from "../models/attachment.js";
 import type { PermissionDecision, PermissionRequest } from "../models/permission.js";
-import type { ReasoningLevel } from "../models/settings.js";
+import type { ContextWindowMode, ReasoningLevel } from "../models/settings.js";
 import type { ProviderModelInfo } from "./models.js";
 import type { ProviderUsageInfo } from "./usage.js";
 
@@ -34,6 +34,18 @@ export interface IAgentProvider {
     permissionMode: string;
     attachments?: AttachmentMeta[];
     reasoningLevel?: ReasoningLevel;
+    /**
+     * Per-thread context window selection. "1m" appends `[1m]` to the model
+     * slug at the SDK boundary so the SDK attaches the 1M-context beta header.
+     * Undefined falls back to the model's default 200k window.
+     * Honored only by Claude provider; ignored by Codex/Gemini/Copilot.
+     */
+    contextWindowMode?: ContextWindowMode;
+    /**
+     * Boolean thinking toggle for models that expose it (Haiku 4.5).
+     * Undefined and non-Haiku models ignore this field.
+     */
+    thinking?: boolean;
     /** USD budget cap for this session. Provider stops if exceeded. Undefined or 0 disables. */
     maxBudgetUsd?: number;
     /** Maximum agent turns for this session. Provider stops after this count. Undefined or 0 disables. */

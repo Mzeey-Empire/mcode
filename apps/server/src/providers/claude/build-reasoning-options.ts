@@ -4,25 +4,38 @@ import {
   logger,
   normalizeReasoningLevelForModel,
   supportsEffortParameter,
+  supportsThinkingToggle,
 } from "@mcode/shared";
 
 /**
- * Build the SDK reasoning options from a reasoning level and model ID.
+ * Build the SDK reasoning options from a reasoning level, model ID, and
+ * optional thinking toggle.
  *
- * Delegates normalization to the shared tier-ladder helper. Haiku 4.5
- * and other effort-unsupported models get an empty return (no `effort` field)
- * because the Claude SDK rejects the effort parameter for those models.
- * Emits a warning when the level is clamped.
+ * - For models with no effort support (Haiku-class), the `effort` field is
+ *   omitted entirely. If `thinking` is true and the model exposes the boolean
+ *   thinking toggle, we still emit `thinking: { type: "adaptive" }` so Haiku
+ *   uses its extended thinking pathway.
+ * - "ultrathink" is a Mcode virtual tier — it is mapped to `effort: "max"` at
+ *   the SDK boundary because the SDK's EffortLevel union does not include it.
+ *   The "Ultrathink:\n" prompt prefix is applied separately by
+ *   `applyUltrathinkPrefix` in the message-building path.
+ * - All other levels are normalized to the highest tier the model accepts via
+ *   the shared tier-ladder helper, with a warning logged on clamp.
  */
 export function buildReasoningOptions(
   reasoningLevel: ReasoningLevel | undefined,
   modelId: string,
+  thinking?: boolean,
 ): Pick<Options, "effort" | "thinking"> {
-  if (reasoningLevel === undefined) return {};
+  // Models that ignore the effort parameter (Haiku 4.5).
+  if (!supportsEffortParameter(modelId)) {
+    if (thinking === true && supportsThinkingToggle(modelId)) {
+      return { thinking: { type: "adaptive" } };
+    }
+    return {};
+  }
 
-  // Haiku and future no-effort models: omit the effort field entirely.
-  // The SDK rejects the field for these models rather than ignoring it.
-  if (!supportsEffortParameter(modelId)) return {};
+  if (reasoningLevel === undefined) return {};
 
   const normalized = normalizeReasoningLevelForModel(modelId, reasoningLevel);
   if (normalized !== reasoningLevel) {
@@ -33,11 +46,15 @@ export function buildReasoningOptions(
     });
   }
 
+  // Ultrathink is a Mcode virtual tier; the SDK only accepts up through "max".
+  // The "Ultrathink:\n" prompt prefix is applied separately by the caller.
+  const sdkEffort = normalized === "ultrathink" ? "max" : normalized;
+
   return {
     // "xhigh" is valid for claude-opus-4-7; the SDK's EffortLevel union does not
     // include "xhigh" yet, so we cast to any to avoid a compile-time rejection.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    effort: normalized as any,
+    effort: sdkEffort as any,
     thinking: { type: "adaptive" },
   };
 }

@@ -1,5 +1,9 @@
 import { useSettingsStore } from "@/stores/settingsStore";
-import type { ReasoningLevel } from "@mcode/contracts";
+import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts";
+import {
+  MODEL_CONTEXT_WINDOWS_DEFAULT,
+  getModelContextWindow as sharedGetModelContextWindow,
+} from "@mcode/shared/model-context";
 
 // Import from the subpath, NOT the barrel. The barrel re-exports
 // winston-bound logging at the top of index.ts, which throws
@@ -9,6 +13,9 @@ export {
   isXhighEffortModel,
   isMaxEffortModel,
   supportsEffortParameter,
+  supportsUltrathink,
+  supports1MContextWindow,
+  supportsThinkingToggle,
   normalizeReasoningLevelForModel,
 } from "@mcode/shared/model-effort";
 
@@ -56,11 +63,16 @@ export const MODEL_PROVIDERS: readonly ModelProvider[] = [
     name: "Claude",
     comingSoon: false,
     supportsCompletion: true,
+    supportsModelListing: true,
     models: [
-      { id: "claude-opus-4-7", label: "Claude Opus 4.7", providerId: "claude" },
-      { id: "claude-opus-4-6", label: "Claude Opus 4.6", providerId: "claude" },
-      { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", providerId: "claude" },
-      { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", providerId: "claude" },
+      { id: "claude-opus-4-7", label: "Claude Opus 4.7", providerId: "claude",
+        contextWindow: MODEL_CONTEXT_WINDOWS_DEFAULT["claude-opus-4-7"] },
+      { id: "claude-opus-4-6", label: "Claude Opus 4.6", providerId: "claude",
+        contextWindow: MODEL_CONTEXT_WINDOWS_DEFAULT["claude-opus-4-6"] },
+      { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", providerId: "claude",
+        contextWindow: MODEL_CONTEXT_WINDOWS_DEFAULT["claude-sonnet-4-6"] },
+      { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", providerId: "claude",
+        contextWindow: MODEL_CONTEXT_WINDOWS_DEFAULT["claude-haiku-4-5"] },
     ],
   },
   {
@@ -222,7 +234,7 @@ export function getDefaultProviderId(): string {
 }
 
 /** Valid reasoning levels for fallback validation. */
-const VALID_REASONING_LEVELS: readonly string[] = ["low", "medium", "high", "max", "xhigh"];
+const VALID_REASONING_LEVELS: readonly string[] = ["low", "medium", "high", "max", "xhigh", "ultrathink"];
 
 /**
  * Return the default reasoning level from user settings, falling back
@@ -236,6 +248,18 @@ export function getDefaultReasoningLevel(): ReasoningLevel {
 /** Returns the context window size for a model, if statically known. */
 export function getContextWindow(modelId: string): number | undefined {
   return findModelById(modelId)?.contextWindow;
+}
+
+/**
+ * Returns the active context window (tokens) for a model and the user's
+ * selected mode. "1m" yields the extended window only when the model supports
+ * it; otherwise falls through to the model's default 200k window.
+ */
+export function getModelContextWindow(
+  modelId: string,
+  mode: ContextWindowMode = "200k",
+): number | undefined {
+  return sharedGetModelContextWindow(modelId, mode);
 }
 
 /**
