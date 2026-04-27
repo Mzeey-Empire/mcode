@@ -9,6 +9,7 @@ import { ServerSection } from "./sections/ServerSection";
 import { KeyboardShortcutsSection } from "./sections/KeyboardShortcutsSection";
 import { AboutSection } from "./sections/AboutSection";
 
+/** Available settings pages/sections in the app. */
 export type SettingsSection =
   | "model"
   | "agent"

@@ -52,7 +52,9 @@ export function App() {
 
     void bridge.getVersion().then((v) => useUpdateStore.getState().setVersion(v));
     void bridge.getUpdateStatus().then((s) => {
-      if (s) useUpdateStore.getState().setStatus(s as UpdateStatus);
+      if (s && useUpdateStore.getState().status.state === "idle") {
+        useUpdateStore.getState().setStatus(s as UpdateStatus);
+      }
     });
 
     const listener = bridge.onUpdateStatus((status) => {

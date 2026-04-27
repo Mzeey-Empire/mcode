@@ -26,6 +26,6 @@ export const useUpdateStore = create<UpdateState>((set) => ({
   bannerDismissed: false,
   status: { state: "idle" },
   setVersion: (version) => set({ version }),
-  setStatus: (status) => set({ status, bannerDismissed: false }),
+  setStatus: (status) => set({ status }),
   dismissBanner: () => set({ bannerDismissed: true }),
 }));

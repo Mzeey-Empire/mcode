@@ -29,19 +29,34 @@ const INTERVAL_MS_MAP: Record<string, number> = {
   "never": Infinity,
 };
 
-/** Get the configured check interval from settings, or 4 hours if settings cannot be read. */
-function getCheckIntervalMs(): number {
+interface UpdaterSettings {
+  autoDownload: boolean;
+  autoInstallOnQuit: boolean;
+  checkInterval: string;
+}
+
+/** Read updater settings from settings.json; falls back to safe defaults if the file is missing or invalid. */
+function loadUpdaterSettings(): UpdaterSettings {
   try {
     const raw = readFileSync(join(getMcodeDir(), "settings.json"), "utf-8");
     const result = SettingsSchema().safeParse(JSON.parse(raw));
     if (result.success) {
-      const interval = result.data.updates?.checkInterval ?? "4hours";
-      return INTERVAL_MS_MAP[interval] ?? (4 * 60 * 60 * 1000);
+      return {
+        autoDownload: result.data.updates?.autoDownload ?? true,
+        autoInstallOnQuit: result.data.updates?.autoInstallOnQuit ?? true,
+        checkInterval: result.data.updates?.checkInterval ?? "4hours",
+      };
     }
   } catch {
-    // File missing or unreadable; use default
+    // File missing or unreadable; use defaults
   }
-  return 4 * 60 * 60 * 1000; // Default: 4 hours
+  return { autoDownload: true, autoInstallOnQuit: true, checkInterval: "4hours" };
+}
+
+/** Get the configured check interval from settings, or 4 hours if settings cannot be read. */
+function getCheckIntervalMs(): number {
+  const { checkInterval } = loadUpdaterSettings();
+  return INTERVAL_MS_MAP[checkInterval] ?? (4 * 60 * 60 * 1000);
 }
 
 /** IPC push channel used to broadcast update status to the renderer. */
@@ -61,6 +76,8 @@ let lastStatus: UpdateStatus = { state: "idle" };
 let initialized = false;
 let checkIntervalId: NodeJS.Timeout | null = null;
 let initialCheckTimeoutId: NodeJS.Timeout | null = null;
+/** Guards against promptRestart being invoked twice concurrently (notification click + direct call). */
+let isPrompting = false;
 
 /** Returns the most recently observed update status (for renderer hydration). */
 export function getUpdateStatus(): UpdateStatus {
@@ -116,22 +133,9 @@ export function initAutoUpdater(): void {
   if (!app.isPackaged) return;
   initialized = true;
 
-  // Read settings to determine auto-update behavior
-  let autoDownload = true;
-  let autoInstallOnAppQuit = true;
-  try {
-    const raw = readFileSync(join(getMcodeDir(), "settings.json"), "utf-8");
-    const result = SettingsSchema().safeParse(JSON.parse(raw));
-    if (result.success) {
-      autoDownload = result.data.updates?.autoDownload ?? true;
-      autoInstallOnAppQuit = result.data.updates?.autoInstallOnQuit ?? true;
-    }
-  } catch {
-    // File missing or unreadable; use defaults
-  }
-
+  const { autoDownload, autoInstallOnQuit } = loadUpdaterSettings();
   autoUpdater.autoDownload = autoDownload;
-  autoUpdater.autoInstallOnAppQuit = autoInstallOnAppQuit;
+  autoUpdater.autoInstallOnAppQuit = autoInstallOnQuit;
 
   autoUpdater.on("checking-for-update", () => {
     broadcastStatus({ state: "checking" });
@@ -175,13 +179,22 @@ export function initAutoUpdater(): void {
         title: "Mcode update ready",
         body: `Version ${info.version} has been downloaded. Restart to install.`,
       });
-      notification.on("click", () => promptRestart(info.version));
+      notification.on("click", () => {
+        if (!isPrompting) void promptRestart(info.version);
+      });
       notification.show();
     }
 
     // Also keep the existing modal as a hard prompt so users who only
     // see the chrome get a clear restart affordance.
-    await promptRestart(info.version);
+    if (!isPrompting) {
+      isPrompting = true;
+      try {
+        await promptRestart(info.version);
+      } finally {
+        isPrompting = false;
+      }
+    }
   });
 
   autoUpdater.on("error", (err) => {

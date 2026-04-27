@@ -195,7 +195,11 @@ export function AboutSection() {
   );
 }
 
-/** Short status label shown beside the button. Returns empty string when nothing noteworthy is happening. */
+/**
+ * Short status label shown beside the button.
+ * @param status - Current update status from the Electron main process.
+ * @returns Human-readable label, or empty string when nothing noteworthy is happening.
+ */
 function describeStatus(status: UpdateStatus): string {
   switch (status.state) {
     case "idle":
