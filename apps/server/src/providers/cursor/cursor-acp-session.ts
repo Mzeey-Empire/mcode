@@ -21,7 +21,7 @@ const PROMPT_RPC_TIMEOUT_MS = 10 * 60 * 1000;
 
 /** Options for constructing a {@link CursorAcpSession}. */
 export interface CursorAcpSessionOptions {
-  /** Path to the Cursor Agent CLI binary (`agent`, `cursor`, or absolute path). */
+  /** Path to the Cursor Agent CLI (`cursor-agent`, `agent`, or absolute path). */
   cliPath: string;
   /** Working directory for tool execution (usually the workspace/worktree cwd). */
   cwd: string;
@@ -108,7 +108,12 @@ export class CursorAcpSession {
       }
     });
 
-    await this.runHandshake();
+    try {
+      await this.runHandshake();
+    } catch (err) {
+      await this.kill().catch(() => {});
+      throw err;
+    }
   }
 
   /**

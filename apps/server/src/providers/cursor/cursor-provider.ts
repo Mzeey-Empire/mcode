@@ -8,18 +8,18 @@ import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { logger } from "@mcode/shared";
 import { SettingsService } from "../../services/settings-service.js";
-import { getCatalogEntry } from "@mcode/contracts";
+import { AgentEventType, getCatalogEntry } from "@mcode/contracts";
 import type {
   AttachmentMeta,
+  AgentEvent,
   IAgentProvider,
   PermissionDecision,
   PermissionRequest,
   ProviderId,
   ProviderModelInfo,
   ReasoningLevel,
-  AgentEvent,
+  Settings,
 } from "@mcode/contracts";
-import { AgentEventType } from "@mcode/contracts";
 import { CursorAcpSession } from "./cursor-acp-session.js";
 import {
   cursorPermissionDenyFallback,
@@ -56,6 +56,12 @@ interface PendingPermissionEntry {
  * Builds prompt text from the user message plus safe attachment references.
  * Images become explicit paths; non-images become labelled mentions without raw FS paths for prompt injection.
  */
+/** Executable paths to try for Cursor Agent (aligned with `listModels` and PATH probing). */
+function cursorCliProbeBinaries(settings: Settings): string[] {
+  const configured = settings.provider.cli.cursor?.trim();
+  return configured ? [configured] : [getCatalogEntry("cursor").cliBinary, "agent"];
+}
+
 function buildCursorPrompt(message: string, attachments?: AttachmentMeta[]): string {
   const lines: string[] = [];
   for (const att of attachments ?? []) {
@@ -93,12 +99,8 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
   /** Lists models by running `cursor-agent models` / `agent models` (falls back if discovery fails). */
   async listModels(): Promise<ProviderModelInfo[]> {
     const settings = this.settingsService.get();
-    const configured = settings.provider.cli.cursor?.trim();
-    const probeBinaries = configured
-      ? [configured]
-      : [getCatalogEntry("cursor").cliBinary, "agent"];
 
-    for (const cliPath of probeBinaries) {
+    for (const cliPath of cursorCliProbeBinaries(settings)) {
       const discovered = await fetchCursorCliModels(cliPath);
       if (discovered?.length) {
         return discovered;
@@ -129,8 +131,6 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     void params.reasoningLevel;
 
     const settings = this.settingsService.get();
-    const configured = settings.provider.cli.cursor?.trim();
-    const cliPath = configured || getCatalogEntry("cursor").cliBinary;
 
     const {
       sessionId,
@@ -162,6 +162,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         logger.error("Cursor sendPrompt failed", { sessionId, error: msg });
+        this.stopSession(sessionId);
         this.emit("event", { type: AgentEventType.Error, threadId, error: msg } satisfies AgentEvent);
         this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
       }
@@ -170,20 +171,30 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
 
     const trustWorkspace = permissionMode === "full";
 
-    const session = new CursorAcpSession({
-      cliPath,
-      cwd,
-      trustWorkspace,
-      resumeSessionId: attemptResume ? resumeId : undefined,
-      threadId,
-      onAgentEvent: (ev) => this.emit("event", ev),
-      handleServerRequest: (req) => this.handleAcpServerRequest(sessionId, threadId, req),
-    });
+    let session: CursorAcpSession | null = null;
+    let startErr: unknown = null;
+    for (const cliPath of cursorCliProbeBinaries(settings)) {
+      const attempt = new CursorAcpSession({
+        cliPath,
+        cwd,
+        trustWorkspace,
+        resumeSessionId: attemptResume ? resumeId : undefined,
+        threadId,
+        onAgentEvent: (ev) => this.emit("event", ev),
+        handleServerRequest: (req) => this.handleAcpServerRequest(sessionId, threadId, req),
+      });
+      try {
+        await attempt.start();
+        session = attempt;
+        break;
+      } catch (e) {
+        startErr = e;
+        await attempt.kill().catch(() => {});
+      }
+    }
 
-    try {
-      await session.start();
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
+    if (!session) {
+      const msg = startErr instanceof Error ? startErr.message : String(startErr ?? "failed to start Cursor ACP");
       logger.error("Cursor ACP start failed", { sessionId, error: msg });
       this.emit("event", { type: AgentEventType.Error, threadId, error: msg } satisfies AgentEvent);
       this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
@@ -209,6 +220,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       logger.error("Cursor sendPrompt failed", { sessionId, error: msg });
+      this.stopSession(sessionId);
       this.emit("event", { type: AgentEventType.Error, threadId, error: msg } satisfies AgentEvent);
       this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
     }

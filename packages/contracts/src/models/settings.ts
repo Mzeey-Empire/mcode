@@ -257,7 +257,7 @@ export const SettingsSchema = lazySchema(() =>
             claude: z.string().default(""),
             /** Path to the Copilot CLI binary. Empty uses PATH lookup. */
             copilot: z.string().default(""),
-            /** Path to the Cursor Agent CLI (`agent` / `cursor`). Empty uses PATH lookup. */
+            /** Path to the Cursor Agent CLI (`cursor-agent` / `agent`). Empty uses PATH lookup. */
             cursor: z.string().default(""),
           })
           .default({}),

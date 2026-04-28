@@ -62,12 +62,14 @@ export class CursorAcpRpcClient extends EventEmitter {
     };
 
     this.onClose = () => {
+      this.flushTrailingStdoutBuffer();
       this.disposed = true;
       this.rejectAll(new Error("Stream closed while waiting for response"));
     };
 
     this.onError = (err: Error) => {
       logger.error("CursorAcpRpcClient: stdout stream error", { err });
+      this.flushTrailingStdoutBuffer();
       this.disposed = true;
       this.rejectAll(new Error(`Stream error: ${err.message}`));
     };
@@ -159,6 +161,7 @@ export class CursorAcpRpcClient extends EventEmitter {
   /** Disposes the client and rejects any pending outbound requests. */
   dispose(): void {
     if (this.disposed) return;
+    this.flushTrailingStdoutBuffer();
     this.disposed = true;
 
     this.stdout.off("data", this.onData);
@@ -180,7 +183,7 @@ export class CursorAcpRpcClient extends EventEmitter {
     try {
       msg = JSON.parse(trimmed);
     } catch {
-      logger.warn("CursorAcpRpcClient: malformed JSON line", { line: trimmed });
+      logger.warn("CursorAcpRpcClient: malformed JSON line", { byteLength: trimmed.length });
       return;
     }
 
@@ -228,7 +231,20 @@ export class CursorAcpRpcClient extends EventEmitter {
       return;
     }
 
-    logger.warn("CursorAcpRpcClient: unrecognized message", { msg });
+    logger.warn("CursorAcpRpcClient: unrecognized message", {
+      hasId,
+      hasMethod,
+      idType: typeof idRaw,
+      method: typeof msg["method"] === "string" ? msg["method"] : undefined,
+    });
+  }
+
+  /** Parses any final NDJSON line buffered without a trailing newline before tearing down streams. */
+  private flushTrailingStdoutBuffer(): void {
+    const trailing = this.lineBuffer.trim();
+    if (!trailing) return;
+    this.lineBuffer = "";
+    this.processLine(trailing);
   }
 
   private rejectAll(err: Error): void {
