@@ -8,7 +8,8 @@ import { useUpdateStore } from "@/stores/updateStore";
 import type { UpdateStatus } from "@/transport/desktop-bridge";
 import { TerminalPanel } from "@/components/terminal";
 import { RightPanel } from "@/components/panels/RightPanel";
-import { CommandPalette } from "@/components/CommandPalette";
+import { CommandPalette } from "@/components/palette/CommandPalette";
+import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { ShortcutHelpDialog } from "@/components/ShortcutHelpDialog";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
@@ -85,12 +86,26 @@ export function App() {
 
     const disposers = [
       registerCommand({
+        id: "palette.open",
+        title: "Open Command Palette",
+        category: "Navigation",
+        handler: () => useCommandPaletteStore.getState().open(),
+      }),
+      registerCommand({
+        id: "palette.openProjects",
+        title: "Open Project…",
+        category: "Navigation",
+        handler: () => useCommandPaletteStore.getState().open({ intent: "projects" }),
+      }),
+      // Backward-compat alias — mod+p still opens the palette
+      registerCommand({
         id: "commandPalette.toggle",
         title: "Command Palette",
         category: "General",
         handler: () => {
-          const store = useUiStore.getState();
-          store.setCommandPaletteOpen(!store.commandPaletteOpen);
+          const palette = useCommandPaletteStore.getState();
+          if (palette.isOpen) palette.close();
+          else palette.open();
         },
       }),
       registerCommand({
@@ -98,10 +113,13 @@ export function App() {
         title: "Escape",
         category: "General",
         handler: () => {
+          const palette = useCommandPaletteStore.getState();
+          if (palette.isOpen) {
+            palette.close();
+            return;
+          }
           const ui = useUiStore.getState();
-          if (ui.commandPaletteOpen) {
-            ui.setCommandPaletteOpen(false);
-          } else if (ui.shortcutHelpOpen) {
+          if (ui.shortcutHelpOpen) {
             ui.setShortcutHelpOpen(false);
           } else {
             useWorkspaceStore.getState().setActiveThread(null);

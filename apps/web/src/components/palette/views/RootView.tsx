@@ -1,0 +1,138 @@
+import { useMemo } from "react";
+import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { getAllCommands, executeCommand } from "@/lib/command-registry";
+import { getKeybindingForCommand, formatKeybinding } from "@/lib/keybinding-manager";
+import { isMac } from "@/lib/platform";
+import {
+  filterCommandPaletteGroups,
+  buildProjectActionItems,
+  buildThreadActionItems,
+  type PaletteGroup,
+} from "../CommandPalette.logic";
+import { CommandPaletteResults } from "../CommandPaletteResults";
+import { Kbd } from "../Kbd";
+
+// Commands that should not appear in the palette listing
+const HIDDEN_COMMANDS = new Set(["escape.handle"]);
+
+/**
+ * Default root view of the command palette.
+ * Shows three sections: Actions, Recent Threads, Recent Projects.
+ * Search filters all three via rankSearchFieldMatch.
+ * Typing ">" limits results to Actions only (matches VS Code convention).
+ */
+export function RootView() {
+  const query = useCommandPaletteStore((s) => s.query);
+  const close = useCommandPaletteStore((s) => s.close);
+  const workspaces = useWorkspaceStore((s) => s.workspaces);
+  const threads = useWorkspaceStore((s) => s.threads);
+  const setActiveWorkspace = useWorkspaceStore((s) => s.setActiveWorkspace);
+  const setActiveThread = useWorkspaceStore((s) => s.setActiveThread);
+
+  // When query starts with ">" only show actions
+  const actionOnly = query.startsWith(">");
+  const effectiveQuery = actionOnly ? query.slice(1).trimStart() : query;
+
+  const groups = useMemo<PaletteGroup[]>(() => {
+    const commands = getAllCommands().filter((c) => !HIDDEN_COMMANDS.has(c.id));
+
+    const actionItems = commands.map((cmd) => {
+      const binding = getKeybindingForCommand(cmd.id);
+      return {
+        value: `cmd:${cmd.id}`,
+        title: cmd.title,
+        description: binding ? formatKeybinding(binding.key, isMac) : undefined,
+        searchTerms: [cmd.title.toLowerCase(), cmd.category.toLowerCase()],
+      };
+    });
+
+    const result: PaletteGroup[] = [{ heading: "Actions", items: actionItems }];
+
+    if (!actionOnly) {
+      // Recent threads (last 12, most recently updated first)
+      const recentThreads = [...threads]
+        .filter((t) => !t.deleted_at)
+        .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+        .slice(0, 12);
+
+      if (recentThreads.length > 0) {
+        result.push({
+          heading: "Recent Threads",
+          items: buildThreadActionItems(
+            recentThreads.map((t) => ({
+              id: t.id,
+              title: t.title,
+              workspaceId: Number(t.workspace_id),
+              createdAt: new Date(t.created_at).getTime(),
+              updatedAt: new Date(t.updated_at).getTime(),
+            })),
+          ),
+        });
+      }
+
+      // Recent projects (last 8, by lastOpenedAt)
+      const recentProjects = [...workspaces]
+        .filter((w) => (w as any).lastOpenedAt != null)
+        .sort((a, b) => ((b as any).lastOpenedAt ?? 0) - ((a as any).lastOpenedAt ?? 0))
+        .slice(0, 8);
+
+      if (recentProjects.length > 0) {
+        result.push({
+          heading: "Recent Projects",
+          items: buildProjectActionItems(
+            recentProjects.map((w) => ({
+              id: Number(w.id),
+              name: w.name,
+              path: w.path,
+              pinned: (w as any).pinned ?? false,
+              lastOpenedAt: (w as any).lastOpenedAt ?? null,
+              isGitRepo: w.is_git_repo ?? false,
+              createdAt: new Date(w.created_at ?? 0).getTime(),
+              updatedAt: new Date(w.updated_at ?? 0).getTime(),
+            })),
+          ),
+        });
+      }
+    }
+
+    return filterCommandPaletteGroups(result, effectiveQuery);
+  }, [query, effectiveQuery, actionOnly, threads, workspaces]);
+
+  const handleSelect = (value: string) => {
+    if (value.startsWith("cmd:")) {
+      const id = value.slice(4);
+      close();
+      requestAnimationFrame(() => executeCommand(id));
+    } else if (value.startsWith("workspace:")) {
+      const id = value.slice(10);
+      setActiveWorkspace(id);
+      close();
+    } else if (value.startsWith("thread:")) {
+      const id = value.slice(7);
+      setActiveThread(id);
+      close();
+    }
+  };
+
+  const footer = (
+    <div className="flex items-center justify-between border-t border-border/50 px-3 py-1.5">
+      <span className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground/40">
+        <Kbd>&gt;</Kbd> <span className="ml-1">Actions only</span>
+      </span>
+      <div className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground/30">
+        <span>
+          <Kbd>↑↓</Kbd> Navigate
+        </span>
+        <span>
+          <Kbd>↵</Kbd> Select
+        </span>
+        <span>
+          <Kbd>Esc</Kbd> Close
+        </span>
+      </div>
+    </div>
+  );
+
+  return <CommandPaletteResults groups={groups} onSelect={handleSelect} footer={footer} />;
+}

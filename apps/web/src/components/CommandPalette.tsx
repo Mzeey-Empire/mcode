@@ -9,7 +9,7 @@ import {
   CommandItem,
   CommandSeparator,
 } from "@/components/ui/command";
-import { useUiStore } from "@/stores/uiStore";
+import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { getAllCommands, executeCommand } from "@/lib/command-registry";
 import { getKeybindingForCommand, formatKeybinding } from "@/lib/keybinding-manager";
 import { setContext } from "@/lib/context-tracker";
@@ -21,8 +21,11 @@ import { isMac } from "@/lib/platform";
  * Uses cmdk for fuzzy search filtering and @base-ui Dialog for focus trapping.
  */
 export function CommandPalette() {
-  const open = useUiStore((s) => s.commandPaletteOpen);
-  const setOpen = useUiStore((s) => s.setCommandPaletteOpen);
+  const open = useCommandPaletteStore((s) => s.isOpen);
+  const setOpen = (value: boolean) => {
+    if (value) useCommandPaletteStore.getState().open();
+    else useCommandPaletteStore.getState().close();
+  };
 
   // Keep context tracker in sync
   useEffect(() => {

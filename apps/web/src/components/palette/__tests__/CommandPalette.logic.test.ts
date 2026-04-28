@@ -4,7 +4,6 @@ import {
   rankSearchFieldMatch,
   filterCommandPaletteGroups,
   buildProjectActionItems,
-  buildThreadActionItems,
 } from "../CommandPalette.logic";
 
 describe("normalizeQuery", () => {
