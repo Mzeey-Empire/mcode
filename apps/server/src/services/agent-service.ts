@@ -27,6 +27,7 @@ import { WorkspaceRepo } from "../repositories/workspace-repo";
 import { MessageRepo } from "../repositories/message-repo";
 import { ToolCallRecordRepo, type CreateToolCallRecordInput } from "../repositories/tool-call-record-repo";
 import { TurnSnapshotRepo } from "../repositories/turn-snapshot-repo";
+import type Database from "better-sqlite3";
 import { TaskRepo } from "../repositories/task-repo";
 import { GitService } from "./git-service";
 import { AttachmentService } from "./attachment-service";
@@ -122,6 +123,7 @@ export class AgentService {
     @inject(ToolCallRecordRepo) private readonly toolCallRecordRepo: ToolCallRecordRepo,
     @inject(TurnSnapshotRepo) private readonly turnSnapshotRepo: TurnSnapshotRepo,
     @inject(SnapshotService) private readonly snapshotService: SnapshotService,
+    @inject("Database") private readonly db: Database.Database,
     @inject(MemoryPressureService)
     private readonly memoryPressureService: MemoryPressureService,
     @inject(TaskRepo) private readonly taskRepo: TaskRepo,
@@ -1216,14 +1218,25 @@ ${userMessage}`;
           const refAfter = await this.snapshotService.captureRef(refData.cwd);
           if (refAfter !== refData.ref) {
             filesChanged = await this.snapshotService.getFilesChanged(refData.cwd, refData.ref, refAfter);
-            this.turnSnapshotRepo.create({
-              messageId,
-              threadId,
-              refBefore: refData.ref,
-              refAfter,
-              filesChanged,
-              worktreePath: null,
+
+            const writeTurn = this.db.transaction((files: string[]) => {
+              this.turnSnapshotRepo.create({
+                messageId,
+                threadId,
+                refBefore: refData.ref,
+                refAfter,
+                filesChanged: files,
+                worktreePath: null,
+              });
+              if (files.length > 0) {
+                this.db
+                  .prepare(
+                    "UPDATE threads SET has_file_changes = 1 WHERE id = ? AND has_file_changes = 0",
+                  )
+                  .run(threadId);
+              }
             });
+            writeTurn(filesChanged);
           }
         } catch (err) {
           logger.warn("Failed to capture turn snapshot", {
