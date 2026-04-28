@@ -116,6 +116,7 @@ function buildService({
 
   const turnSnapshotRepo = {
     listByThread: vi.fn(() => []),
+    create: vi.fn(),
   } as unknown as TurnSnapshotRepo;
 
   const snapshotService = {
