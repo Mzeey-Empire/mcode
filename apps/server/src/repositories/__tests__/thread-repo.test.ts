@@ -10,7 +10,6 @@ import { WorkspaceRepo } from "../workspace-repo.js";
 describe("ThreadRepo has_file_changes", () => {
   let db: Database.Database;
   let threadRepo: ThreadRepo;
-  let snapshotRepo: TurnSnapshotRepo;
   let workspaceId: string;
 
   beforeEach(() => {
@@ -18,7 +17,6 @@ describe("ThreadRepo has_file_changes", () => {
     container.reset();
     container.registerInstance("Database", db);
     threadRepo = container.resolve(ThreadRepo);
-    snapshotRepo = container.resolve(TurnSnapshotRepo);
     const workspaceRepo = container.resolve(WorkspaceRepo);
     const ws = workspaceRepo.create("test-ws", "/tmp/ws", false);
     workspaceId = ws.id;
@@ -57,6 +55,8 @@ describe("Migration 019 backfill", () => {
     const tEmptySnaps = threadRepo.create(ws.id, "empty", "thread", "main");
     const tNoSnaps = threadRepo.create(ws.id, "none", "thread", "main");
 
+    // Disable FK checks for snapshot inserts: message_id references messages(id)
+    // but the test uses fabricated IDs — only the backfill SQL correctness matters here.
     db.pragma("foreign_keys = OFF");
     snapshotRepo.create({
       messageId: "m1",
