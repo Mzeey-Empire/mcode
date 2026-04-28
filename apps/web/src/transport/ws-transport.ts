@@ -561,8 +561,8 @@ export function createWsTransport(
     fetchBranch: (workspaceId, branch, prNumber?) =>
       rpc<void>("git.fetchBranch", { workspaceId, branch, prNumber }),
     getPrByUrl: (url) => rpc<PrDetail | null>("github.prByUrl", { url }),
-    checkStatus: (threadId) =>
-      rpc<ChecksStatus>("github.checkStatus", { threadId }),
+    checkStatus: (threadId, force) =>
+      rpc<ChecksStatus>("github.checkStatus", { threadId, force }),
 
     // Skills
     listSkills: (cwd?, providerId?) => rpc<SkillInfo[]>("skill.list", { cwd, providerId }),
