@@ -18,6 +18,7 @@ import {
   evictThread as evictMessageCache,
   getCachedSnapshot,
 } from "./messageCache";
+import { shallowEqualBy } from "@/lib/shallowEqualBy";
 import { forgetScrollTop } from "@/components/chat/scrollPositionMemory";
 
 /** A permission request with its current resolution state. */
@@ -329,11 +330,13 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       void getTransport()
         .listPendingPermissions(threadId)
         .then((pending) => {
-          if (pending.length > 0) {
+          const mapped = pending.map((p) => ({ ...p, settled: false }));
+          const current = get().permissionsByThread[threadId] ?? [];
+          if (!shallowEqualBy(mapped, current, ["requestId", "toolName", "settled"])) {
             set((s) => ({
               permissionsByThread: {
                 ...s.permissionsByThread,
-                [threadId]: pending.map((p) => ({ ...p, settled: false })),
+                [threadId]: mapped,
               },
             }));
           }
@@ -343,14 +346,17 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       getTransport()
         .getThreadTasks(threadId)
         .then((tasks) => {
-          if (tasks && tasks.length > 0 && !useTaskStore.getState().tasksByThread[threadId]?.length) {
+          if (tasks && tasks.length > 0) {
             const items: TaskItem[] = tasks.map((t, i) => ({
               id: String(i),
               content: t.content,
               status: coerceTaskStatus(t.status),
               group: "Tasks",
             }));
-            useTaskStore.getState().setTasks(threadId, items);
+            const currentTasks = useTaskStore.getState().tasksByThread[threadId] ?? [];
+            if (!shallowEqualBy(items, currentTasks, ["content", "status"])) {
+              useTaskStore.getState().setTasks(threadId, items);
+            }
           }
         })
         .catch((err) => {
@@ -434,11 +440,13 @@ export const useThreadStore = create<ThreadState>((set, get) => {
 
         // Re-hydrate pending permissions (covers reconnect and thread switch)
         void getTransport().listPendingPermissions(threadId).then((pending) => {
-          if (pending.length > 0) {
+          const mapped = pending.map((p) => ({ ...p, settled: false }));
+          const current = get().permissionsByThread[threadId] ?? [];
+          if (!shallowEqualBy(mapped, current, ["requestId", "toolName", "settled"])) {
             set((s) => ({
               permissionsByThread: {
                 ...s.permissionsByThread,
-                [threadId]: pending.map((p) => ({ ...p, settled: false })),
+                [threadId]: mapped,
               },
             }));
           }
@@ -450,14 +458,17 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         getTransport()
           .getThreadTasks(threadId)
           .then((tasks) => {
-            if (tasks && tasks.length > 0 && !useTaskStore.getState().tasksByThread[threadId]?.length) {
+            if (tasks && tasks.length > 0) {
               const items: TaskItem[] = tasks.map((t, i) => ({
                 id: String(i),
                 content: t.content,
                 status: coerceTaskStatus(t.status),
                 group: "Tasks",
               }));
-              useTaskStore.getState().setTasks(threadId, items);
+              const currentTasks = useTaskStore.getState().tasksByThread[threadId] ?? [];
+              if (!shallowEqualBy(items, currentTasks, ["content", "status"])) {
+                useTaskStore.getState().setTasks(threadId, items);
+              }
             }
           })
           .catch((err) => {
