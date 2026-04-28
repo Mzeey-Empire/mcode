@@ -95,6 +95,19 @@ export class CiWatcherService {
   }
 
   /**
+   * Return the cached status only if it was fetched within `maxAgeMs`. Returns null
+   * when the thread is not watched, has no cached result, or the cache is older than
+   * `maxAgeMs`. Used by the `github.checkStatus` RPC handler to short-circuit live
+   * fetches when the watcher already has a fresh result.
+   */
+  getFreshCache(threadId: string, maxAgeMs: number): ChecksStatus | null {
+    const entry = this.getEntry(threadId);
+    if (!entry?.cache) return null;
+    if (Date.now() - entry.cache.fetchedAt > maxAgeMs) return null;
+    return entry.cache;
+  }
+
+  /**
    * Update the cached status for a thread and broadcast if anything changed.
    * Mirrors tick()'s promote/demote logic so a manual refresh keeps the
    * polling cadence correct (e.g. pending → active set, terminal → passive set).

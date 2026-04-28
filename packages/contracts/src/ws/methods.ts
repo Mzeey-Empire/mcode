@@ -321,7 +321,11 @@ export const WS_METHODS = lazySchema(() => ({
     result: CreatePrResultSchema(),
   },
   "github.checkStatus": {
-    params: z.object({ threadId: z.string() }),
+    params: z.object({
+      threadId: z.string(),
+      /** Bypass the watcher's staleness guard and always perform a live `gh pr checks` fetch. */
+      force: z.boolean().optional(),
+    }),
     result: ChecksStatusSchema(),
   },
   "config.discover": {

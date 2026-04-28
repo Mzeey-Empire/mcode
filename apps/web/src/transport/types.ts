@@ -195,7 +195,7 @@ export interface McodeTransport {
   fetchBranch(workspaceId: string, branch: string, prNumber?: number): Promise<void>;
   getPrByUrl(url: string): Promise<PrDetail | null>;
   /** Fetch fresh CI check status for a thread (manual refresh). */
-  checkStatus(threadId: string): Promise<ChecksStatus>;
+  checkStatus(threadId: string, force?: boolean): Promise<ChecksStatus>;
 
   // Skills
   /** List discoverable skills and commands, optionally scoped to a workspace path and provider. */
