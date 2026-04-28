@@ -164,16 +164,28 @@ See **[docs/guides/provider-architecture.md](docs/guides/provider-architecture.m
 
 ## Database Migrations
 
+Migrations are identified by a 14-character UTC timestamp (`YYYYMMDDHHMMSS`)
+embedded in the filename, e.g. `20260428192500_thread_has_file_changes.ts`.
+Sibling feature branches will never collide on the same identifier.
+
 ```sh
 cd apps/server
 
 bun run db:migrate status          # Show applied and pending migrations
 bun run db:migrate up              # Apply all pending migrations
 bun run db:migrate down            # Roll back the last migration
-bun run db:migrate new <name>      # Scaffold a new migration file
+bun run db:migrate new <name>      # Scaffold a new migration with the current UTC timestamp
 ```
 
-After scaffolding, implement `up()` and `down()` in the new file, then register it in `loadMigrations()` in `apps/server/src/store/database.ts`.
+After scaffolding, implement `up()` and `down()` in the new file, then register
+it in `loadMigrations()` in `apps/server/src/store/database.ts` keyed by the
+14-char timestamp string.
+
+The 19 historical migrations from the integer-versioned scheme are preserved as
+zero-padded prefixes (`00000000000001_*` through `00000000000020_*`). They sort
+lexicographically before any real timestamp, so the global execution order is
+unchanged. Existing user databases are auto-upgraded on first launch — see
+`apps/server/src/store/migrations/runner.ts`.
 
 ## Testing
 
