@@ -419,9 +419,47 @@ describe("MigrationRunner", () => {
 
       expect(rows).toEqual([
         { version: "00000000000001", name: "Initial schema" },
-        // Integer 19 maps to "00000000000020" because the original 019 was
-        // renumbered to 020 to avoid a branch collision before this migration landed.
-        { version: "00000000000020", name: "Add sort_order column to workspaces" },
+        // Integer 19 represents sort_order from the sibling branch and is
+        // translated identity-preserving to "00000000000019". This branch has
+        // no module for that key, so it remains a permanent gap (tolerated by
+        // the runner; only validate() reports it).
+        { version: "00000000000019", name: "Add sort_order column to workspaces" },
+      ]);
+    });
+
+    it("translates legacy DBs with both integer 19 (sort_order) and 20 (has_file_changes) without throwing", () => {
+      // Reproduces the real-world failure: a DB that applied sort_order from
+      // the sibling branch (int 19) and then later applied has_file_changes
+      // under the old integer runner after the 019→020 rename (int 20).
+      const db = freshDb();
+      db.exec(`
+        CREATE TABLE _migrations (
+          version INTEGER PRIMARY KEY,
+          name TEXT NOT NULL DEFAULT '',
+          applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      db.prepare("INSERT INTO _migrations (version, name, applied_at) VALUES (?, ?, ?)").run(
+        19,
+        "Add sort_order column to workspaces",
+        "2026-04-27T18:44:44.264Z",
+      );
+      db.prepare("INSERT INTO _migrations (version, name, applied_at) VALUES (?, ?, ?)").run(
+        20,
+        "Add has_file_changes column to threads",
+        "2026-04-27T19:00:00.000Z",
+      );
+
+      // Constructor must not throw — both integer keys are mapped.
+      new MigrationRunner(db, new Map());
+
+      const rows = db
+        .prepare("SELECT version, name FROM _migrations ORDER BY version")
+        .all() as { version: string; name: string }[];
+
+      expect(rows).toEqual([
+        { version: "00000000000019", name: "Add sort_order column to workspaces" },
+        { version: "00000000000020", name: "Add has_file_changes column to threads" },
       ]);
     });
 
