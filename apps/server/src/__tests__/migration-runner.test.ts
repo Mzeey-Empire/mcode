@@ -376,4 +376,108 @@ describe("MigrationRunner", () => {
       expect(row.name).toBe("");
     });
   });
+
+  // -------------------------------------------------------------------------
+  // 14. Legacy INTEGER _migrations upgrade to TEXT keys
+  // -------------------------------------------------------------------------
+  describe("legacy INTEGER _migrations upgrade", () => {
+    it("upgrades legacy INTEGER _migrations table to TEXT keys on first open", () => {
+      const db = freshDb();
+
+      // Simulate a legacy database created by the old runner.
+      db.exec(`
+        CREATE TABLE _migrations (
+          version INTEGER PRIMARY KEY,
+          name TEXT NOT NULL DEFAULT '',
+          applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      db.prepare("INSERT INTO _migrations (version, name, applied_at) VALUES (?, ?, ?)").run(
+        1,
+        "Initial schema",
+        "2026-01-01T00:00:00.000Z",
+      );
+      db.prepare("INSERT INTO _migrations (version, name, applied_at) VALUES (?, ?, ?)").run(
+        19,
+        "Add sort_order column to workspaces",
+        "2026-04-27T18:44:44.264Z",
+      );
+
+      // Construct a runner — this triggers ensureTable() which should detect and upgrade.
+      new MigrationRunner(db, new Map());
+
+      const cols = db.pragma("table_info(_migrations)") as Array<{ name: string; type: string }>;
+      const versionCol = cols.find((c) => c.name === "version");
+      expect(versionCol?.type).toBe("TEXT");
+
+      const rows = db
+        .prepare("SELECT version, name FROM _migrations ORDER BY version")
+        .all() as { version: string; name: string }[];
+
+      expect(rows).toEqual([
+        { version: "00000000000001", name: "Initial schema" },
+        { version: "00000000000019", name: "Add sort_order column to workspaces" },
+      ]);
+    });
+
+    it("is a no-op when _migrations.version is already TEXT", () => {
+      const db = freshDb();
+      db.exec(`
+        CREATE TABLE _migrations (
+          version TEXT PRIMARY KEY,
+          name TEXT NOT NULL DEFAULT '',
+          applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      db.prepare("INSERT INTO _migrations (version, name, applied_at) VALUES (?, ?, ?)").run(
+        "20260428192500",
+        "Already on the new scheme",
+        "2026-04-28T19:25:00.000Z",
+      );
+
+      new MigrationRunner(db, new Map());
+
+      const rows = db
+        .prepare("SELECT version FROM _migrations")
+        .all() as { version: string }[];
+      expect(rows.map((r) => r.version)).toEqual(["20260428192500"]);
+    });
+  });
+});
+
+describe("MigrationRunner with string version keys", () => {
+  it("applies migrations in lexicographic order of string keys", () => {
+    const db = new Database(":memory:");
+
+    const log: string[] = [];
+    const m1: MigrationModule = {
+      description: "first",
+      up: () => { log.push("up:00000000000001"); },
+      down: () => { log.push("down:00000000000001"); },
+    };
+    const m2: MigrationModule = {
+      description: "second",
+      up: () => { log.push("up:20260428192500"); },
+      down: () => { log.push("down:20260428192500"); },
+    };
+
+    // Insert in reverse order to prove the runner sorts.
+    const migrations = new Map<string, MigrationModule>();
+    migrations.set("20260428192500", m2);
+    migrations.set("00000000000001", m1);
+
+    const runner = new MigrationRunner(db, migrations);
+    const result = runner.up();
+
+    expect(result.applied).toBe(2);
+    expect(log).toEqual(["up:00000000000001", "up:20260428192500"]);
+
+    const rows = db
+      .prepare("SELECT version FROM _migrations ORDER BY version")
+      .all() as { version: string }[];
+    expect(rows.map((r) => r.version)).toEqual([
+      "00000000000001",
+      "20260428192500",
+    ]);
+  });
 });
