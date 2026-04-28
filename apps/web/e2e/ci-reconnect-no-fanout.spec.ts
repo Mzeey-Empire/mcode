@@ -140,3 +140,4 @@ test.describe("ci reconnect no fan-out", () => {
     // github.checkStatus. This is a regression guard.
     expect(afterReconnect).toBe(beforeReconnect);
   });
+});
