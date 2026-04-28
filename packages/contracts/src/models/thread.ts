@@ -48,6 +48,8 @@ export const ThreadSchema = lazySchema(() =>
   forked_from_message_id: z.string().nullable(),
   /** Most recent compaction summary from the AI provider. Used to seed branched thread replays. */
   last_compact_summary: z.string().nullable(),
+  /** Whether this thread has at least one turn snapshot with file changes. Used to skip listSnapshots on switch when false. */
+  has_file_changes: z.boolean().default(false),
   }),
 );
 /** Thread record from the database. */
