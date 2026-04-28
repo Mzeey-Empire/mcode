@@ -14,9 +14,6 @@ export function up(db: Database.Database): void {
     "ALTER TABLE threads ADD COLUMN has_file_changes INTEGER NOT NULL DEFAULT 0",
   );
 
-  // Backfill: flip the flag for any thread with at least one snapshot
-  // whose files_changed array is non-empty. The turn_snapshots(thread_id)
-  // index from migration 007 keeps this efficient.
   db.exec(
     `UPDATE threads
      SET has_file_changes = 1

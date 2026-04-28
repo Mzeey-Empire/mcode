@@ -488,12 +488,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         const capturedOldest = oldest;
         const capturedHasMore = hasMore;
 
-        // Check whether this thread has any file changes recorded. If the workspace
-        // store already has the thread record, use it to skip the listSnapshots RPC
-        // when no changes have ever been recorded (has_file_changes === false).
         const threadRecord = useWorkspaceStore.getState().threads.find((t) => t.id === threadId);
         if (threadRecord && !threadRecord.has_file_changes) {
-          // No file changes - skip the RPC entirely and cache with empty file data.
           cacheSnapshot(threadId, {
             messages: capturedMessages,
             oldestLoadedSequence: capturedOldest,
@@ -503,13 +499,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             latestTurnWithChanges: null,
           });
         } else {
-          // Either has_file_changes is true, or the thread record is not yet in the
-          // workspace store (race during initial workspace load) - fall back to the
-          // full listSnapshots path to preserve correctness.
           void (async () => {
             try {
               const snapshots = await getTransport().listSnapshots(threadId);
-              // Discard if thread switched
               if (get().currentThreadId !== threadId) return;
 
               const persistedFilesChangedMap: Record<string, string[]> = {};
@@ -525,7 +517,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
                     latestTurnWithChanges = snap.message_id;
                   }
                 }
-                // Update state with derived file changes
                 set((state) => {
                   if (state.currentThreadId !== threadId) return {};
                   return {
@@ -535,7 +526,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
                 });
               }
 
-              // Cache populate using captured locals, not get() after await
               cacheSnapshot(threadId, {
                 messages: capturedMessages,
                 oldestLoadedSequence: capturedOldest,
@@ -545,7 +535,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
                 latestTurnWithChanges,
               });
             } catch {
-              // Cache without snapshot data on failure
               if (get().currentThreadId === threadId) {
                 cacheSnapshot(threadId, {
                   messages: capturedMessages,
@@ -1976,9 +1965,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       };
     });
 
-    // Keep the workspace-thread metadata in sync so that the listSnapshots
-    // fast-path (which reads has_file_changes from workspaceStore) does not
-    // cache an empty snapshot result for this thread on the next switch.
     if (payload.filesChanged.length > 0) {
       useWorkspaceStore.setState((ws) => ({
         threads: ws.threads.map((t) =>
