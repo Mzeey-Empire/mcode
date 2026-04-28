@@ -1,4 +1,5 @@
 import { useSettingsStore } from "@/stores/settingsStore";
+import { CURSOR_STATIC_MODEL_FALLBACK } from "@mcode/contracts";
 import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts";
 import {
   MODEL_CONTEXT_WINDOWS_DEFAULT,
@@ -140,15 +141,12 @@ export const MODEL_PROVIDERS: readonly ModelProvider[] = [
     comingSoon: false,
     supportsModelListing: true,
     // Minimal static fallback — live list comes from listProviderModels (`cursor-agent models`).
-    models: [
-      { id: "auto", label: "Auto", providerId: "cursor", group: "Cursor" },
-      {
-        id: "composer-2-fast",
-        label: "Composer 2 Fast",
-        providerId: "cursor",
-        group: "Cursor",
-      },
-    ],
+    models: CURSOR_STATIC_MODEL_FALLBACK.map((m) => ({
+      id: m.id,
+      label: m.name,
+      providerId: "cursor",
+      group: m.group,
+    })),
   },
   {
     id: "opencode",

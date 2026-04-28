@@ -8,7 +8,7 @@ import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { logger } from "@mcode/shared";
 import { SettingsService } from "../../services/settings-service.js";
-import { AgentEventType, getCatalogEntry } from "@mcode/contracts";
+import { AgentEventType, CURSOR_STATIC_MODEL_FALLBACK, getCatalogEntry } from "@mcode/contracts";
 import type {
   AttachmentMeta,
   AgentEvent,
@@ -31,12 +31,6 @@ import { fetchCursorCliModels } from "./cursor-cli-models.js";
 const IDLE_TTL_MS = 10 * 60 * 1000;
 /** Interval between idle eviction passes (1 minute). */
 const EVICTION_INTERVAL_MS = 60 * 1000;
-
-/** Minimal fallback when `agent models` cannot be run (offline CLI, parse failure). */
-const CURSOR_STATIC_MODEL_FALLBACK: ProviderModelInfo[] = [
-  { id: "auto", name: "Auto", group: "Cursor" },
-  { id: "composer-2-fast", name: "Composer 2 Fast", group: "Cursor" },
-];
 
 interface SessionEntry {
   session: CursorAcpSession;

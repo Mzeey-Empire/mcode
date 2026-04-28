@@ -179,6 +179,7 @@ export type {
 
 export * from "./providers/catalog.js";
 export * from "./providers/availability.js";
+export { CURSOR_STATIC_MODEL_FALLBACK } from "./providers/cursor-static-fallback.js";
 
 export {
   ProviderModelInfoSchema,
