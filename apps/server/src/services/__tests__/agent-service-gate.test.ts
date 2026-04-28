@@ -146,10 +146,15 @@ function buildService({
     assertUsable,
   } as unknown as ProviderAvailabilityService;
 
-  // AgentService constructor (14 params):
+  const db = {
+    transaction: vi.fn((fn) => fn),
+    prepare: vi.fn(() => ({ run: vi.fn() })),
+  } as unknown as import("better-sqlite3").Database;
+
+  // AgentService constructor (15 params):
   //   threadRepo, workspaceRepo, messageRepo, gitService, attachmentService,
   //   providerRegistry, threadService, toolCallRecordRepo, turnSnapshotRepo,
-  //   snapshotService, memoryPressureService, taskRepo, settingsService, availability
+  //   snapshotService, db, memoryPressureService, taskRepo, settingsService, availability
   return new AgentService(
     threadRepo,
     workspaceRepo,
@@ -161,6 +166,7 @@ function buildService({
     toolCallRecordRepo,
     turnSnapshotRepo,
     snapshotService,
+    db,
     memoryPressureService,
     taskRepo,
     settingsService,
