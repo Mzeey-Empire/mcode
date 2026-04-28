@@ -337,8 +337,11 @@ export function ChatView() {
         </div>
       )}
 
-      {/* Messages, tool calls, and streaming - all in one scrollable area */}
-      <div key={activeThread.id} className="animate-fade-up-in flex-1 min-h-0">
+      {/* Messages, tool calls, and streaming — all in one scrollable area.
+          No `key` here: forcing remount on thread switch would destroy the
+          virtualizer and discard cached row heights. MessageList resets its
+          own per-thread state imperatively in a useEffect on activeThreadId. */}
+      <div className="animate-fade-up-in flex-1 min-h-0">
         {showEmptyState ? (
           <div className="flex h-full items-center justify-center">
             <EmptyState onPromptSelect={setPendingPrefill} />

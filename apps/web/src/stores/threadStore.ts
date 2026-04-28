@@ -18,6 +18,7 @@ import {
   evictThread as evictMessageCache,
   getCachedSnapshot,
 } from "./messageCache";
+import { forgetScrollTop } from "@/components/chat/scrollPositionMemory";
 
 /** A permission request with its current resolution state. */
 interface StoredPermission extends PermissionRequest {
@@ -903,6 +904,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   clearThreadState: (threadId) => {
     evictMessageCache(threadId);
     clearDequeueTimer(threadId);
+    forgetScrollTop(threadId);
 
     // Capture before set() to avoid relying on the post-mutation state value.
     const isCurrentThread = get().currentThreadId === threadId;
@@ -971,6 +973,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     for (const threadId of threadIds) {
       evictMessageCache(threadId);
       clearDequeueTimer(threadId);
+      forgetScrollTop(threadId);
     }
 
     // Capture before set() to avoid relying on post-mutation state.
