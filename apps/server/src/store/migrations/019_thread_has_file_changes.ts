@@ -23,7 +23,10 @@ export function up(db: Database.Database): void {
      WHERE id IN (
        SELECT DISTINCT thread_id
        FROM turn_snapshots
-       WHERE json_array_length(files_changed) > 0
+       WHERE CASE
+               WHEN json_valid(files_changed) THEN json_array_length(files_changed)
+               ELSE 0
+             END > 0
      )`,
   );
 }

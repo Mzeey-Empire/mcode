@@ -346,17 +346,15 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       getTransport()
         .getThreadTasks(threadId)
         .then((tasks) => {
-          if (tasks && tasks.length > 0) {
-            const items: TaskItem[] = tasks.map((t, i) => ({
-              id: String(i),
-              content: t.content,
-              status: coerceTaskStatus(t.status),
-              group: "Tasks",
-            }));
-            const currentTasks = useTaskStore.getState().tasksByThread[threadId] ?? [];
-            if (!shallowEqualBy(items, currentTasks, ["content", "status"])) {
-              useTaskStore.getState().setTasks(threadId, items);
-            }
+          const items: TaskItem[] = (tasks ?? []).map((t, i) => ({
+            id: String(i),
+            content: t.content,
+            status: coerceTaskStatus(t.status),
+            group: "Tasks",
+          }));
+          const currentTasks = useTaskStore.getState().tasksByThread[threadId] ?? [];
+          if (!shallowEqualBy(items, currentTasks, ["content", "status"])) {
+            useTaskStore.getState().setTasks(threadId, items);
           }
         })
         .catch((err) => {
@@ -458,17 +456,15 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         getTransport()
           .getThreadTasks(threadId)
           .then((tasks) => {
-            if (tasks && tasks.length > 0) {
-              const items: TaskItem[] = tasks.map((t, i) => ({
-                id: String(i),
-                content: t.content,
-                status: coerceTaskStatus(t.status),
-                group: "Tasks",
-              }));
-              const currentTasks = useTaskStore.getState().tasksByThread[threadId] ?? [];
-              if (!shallowEqualBy(items, currentTasks, ["content", "status"])) {
-                useTaskStore.getState().setTasks(threadId, items);
-              }
+            const items: TaskItem[] = (tasks ?? []).map((t, i) => ({
+              id: String(i),
+              content: t.content,
+              status: coerceTaskStatus(t.status),
+              group: "Tasks",
+            }));
+            const currentTasks = useTaskStore.getState().tasksByThread[threadId] ?? [];
+            if (!shallowEqualBy(items, currentTasks, ["content", "status"])) {
+              useTaskStore.getState().setTasks(threadId, items);
             }
           })
           .catch((err) => {
@@ -1979,6 +1975,19 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         currentTurnMessageIdByThread: nextTurnMsgIds,
       };
     });
+
+    // Keep the workspace-thread metadata in sync so that the listSnapshots
+    // fast-path (which reads has_file_changes from workspaceStore) does not
+    // cache an empty snapshot result for this thread on the next switch.
+    if (payload.filesChanged.length > 0) {
+      useWorkspaceStore.setState((ws) => ({
+        threads: ws.threads.map((t) =>
+          t.id === payload.threadId && !t.has_file_changes
+            ? { ...t, has_file_changes: true }
+            : t,
+        ),
+      }));
+    }
   },
   };
 });

@@ -121,7 +121,7 @@ The `loadEpochByThread` field is a render-affecting bump used by message-loading
 
 ## Data flow on thread switch (after change)
 
-```
+```text
 loadMessages(threadId)
   cache hit  -> restore from snapshot, fire listPendingPermissions + getThreadTasks (refresh).
                 listSnapshots NOT called.
@@ -175,7 +175,7 @@ Out of scope for this slice. No user-visible flow changes.
 
 ## Files touched
 
-```
+```text
 packages/contracts/src/models/thread.ts                    # add has_file_changes field
 apps/server/src/store/migrations/<NNNN>-thread-has-file-changes.ts  # new
 apps/server/src/store/database.ts                          # register migration
