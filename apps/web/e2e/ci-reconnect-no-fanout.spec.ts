@@ -52,7 +52,7 @@ async function mockCiServer(page: Page): Promise<CiMockController> {
   const methodCalls = new Map<string, number>();
   let activeWs: WebSocketRoute | null = null;
 
-  await page.routeWebSocket(/ws:\/\/localhost:\d{5}/, (ws) => {
+  await page.routeWebSocket(/ws:\/\/localhost:\d+/, (ws) => {
     activeWs = ws;
     ws.onMessage((data) => {
       let msg: Record<string, unknown>;
@@ -125,6 +125,16 @@ test.describe("ci reconnect no fan-out", () => {
 
     const beforeReconnect = ctrl.methodCalls.get("github.checkStatus") ?? 0;
 
+    // Verify push path works before reconnect
+    await ctrl.pushChecks("thread-1", {
+      aggregate: "failing",
+      runs: [
+        { name: "test-job", status: "completed", conclusion: "failure", durationMs: 5000, startedAt: new Date().toISOString() },
+      ],
+      fetchedAt: Date.now(),
+    });
+    await page.waitForTimeout(500); // Let store update
+
     // Reset the hydration sentinel so we can wait for the next reconnect cycle.
     await page.evaluate(() => {
       (window as unknown as { __mcodeHydrationComplete?: boolean }).__mcodeHydrationComplete = false;
@@ -133,6 +143,16 @@ test.describe("ci reconnect no fan-out", () => {
     await ctrl.forceReconnect();
     await waitForHydration(page);
     await page.waitForTimeout(1000);
+
+    // Verify push path still works after reconnect
+    await ctrl.pushChecks("thread-1", {
+      aggregate: "passing",
+      runs: [
+        { name: "test-job", status: "completed", conclusion: "success", durationMs: 3000, startedAt: new Date().toISOString() },
+      ],
+      fetchedAt: Date.now(),
+    });
+    await page.waitForTimeout(500); // Let store update
 
     const afterReconnect = ctrl.methodCalls.get("github.checkStatus") ?? 0;
 
