@@ -30,6 +30,6 @@ export const LEGACY_VERSION_MAP = new Map<number, string>([
   [16, "00000000000016"],
   [17, "00000000000017"],
   [18, "00000000000018"],
-  [19, "00000000000019"],
+  [19, "00000000000020"],   // was renumbered to 020 to avoid branch collision
   [20, "00000000000020"],
 ]);

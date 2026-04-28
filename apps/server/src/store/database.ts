@@ -88,6 +88,9 @@ export function loadMigrations(): Map<string, MigrationModule> {
   migrations.set("00000000000016", m016);
   migrations.set("00000000000017", m017);
   migrations.set("00000000000018", m018);
+  // 00000000000019 is intentionally absent: the original 019 was renumbered to
+  // 020 before the integer→timestamp migration landed, to avoid a version
+  // collision with the feat/mordern-project-selector branch's 019 migration.
   migrations.set("00000000000020", m020);
   return migrations;
 }

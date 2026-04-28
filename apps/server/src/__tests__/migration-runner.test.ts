@@ -419,7 +419,9 @@ describe("MigrationRunner", () => {
 
       expect(rows).toEqual([
         { version: "00000000000001", name: "Initial schema" },
-        { version: "00000000000019", name: "Add sort_order column to workspaces" },
+        // Integer 19 maps to "00000000000020" because the original 019 was
+        // renumbered to 020 to avoid a branch collision before this migration landed.
+        { version: "00000000000020", name: "Add sort_order column to workspaces" },
       ]);
     });
 

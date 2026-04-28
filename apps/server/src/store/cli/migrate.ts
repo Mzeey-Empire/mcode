@@ -23,11 +23,6 @@ const migrationsDir = join(__dirname, "..", "migrations");
 
 const dbPath = process.env.MCODE_DB_PATH ?? join(getMcodeDir(), "mcode.db");
 
-/** Formats a version string for display (already zero-padded, returned as-is). */
-function pad(v: string): string {
-  return v;
-}
-
 /** Pads an integer version to 3 digits for legacy file naming (e.g. 16 -> "016"). */
 function padInt(n: number): string {
   return String(n).padStart(3, "0");
@@ -72,10 +67,10 @@ try {
       }
 
       for (const m of applied) {
-        console.log(`✅ V${pad(m.version)} ${m.name}  (applied: ${m.appliedAt})`);
+        console.log(`✅ V${m.version} ${m.name}  (applied: ${m.appliedAt})`);
       }
       for (const m of pending) {
-        console.log(`⏳ V${pad(m.version)} ${m.name}  [not yet applied]`);
+        console.log(`⏳ V${m.version} ${m.name}  [not yet applied]`);
       }
       break;
     }
@@ -102,7 +97,7 @@ try {
       try {
         const result = runner.up(steps);
         for (const m of result.migrations) {
-          console.log(`✅ V${pad(m.version)} ${m.name}`);
+          console.log(`✅ V${m.version} ${m.name}`);
         }
         console.log(`Done. ${result.applied} migration${result.applied === 1 ? "" : "s"} applied.`);
       } catch (err) {
@@ -133,7 +128,7 @@ try {
       try {
         const result = runner.down(actualSteps);
         for (const m of result.migrations) {
-          console.log(`↩️  V${pad(m.version)} ${m.name}`);
+          console.log(`↩️  V${m.version} ${m.name}`);
         }
         console.log(`Done. ${result.reverted} migration${result.reverted === 1 ? "" : "s"} reverted.`);
       } catch (err) {
