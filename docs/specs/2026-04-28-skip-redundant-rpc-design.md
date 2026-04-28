@@ -102,7 +102,8 @@ In both the cache-hit refresh handlers (lines 329-358) and the cache-miss handle
 
 **`listPendingPermissions` resolution:**
 
-- Compare the incoming pending list against `state.permissionsByThread[threadId]` using a shallow per-element compare on the fields that matter (`id`, `tool_name`, `settled` — narrow to what `useShallow` would see).
+- Compare the **already-mapped** pending list (`pending.map((p) => ({ ...p, settled: false }))`) against the existing `state.permissionsByThread[threadId]`. Do not compare the raw RPC response — the existing state has the `settled: false` field added, so a raw-vs-mapped compare is always unequal.
+- The compare uses a shallow per-element check across the keys that `MessageList` / `buildVolatileItems` actually project. Before implementation, grep `apps/web/src/components/chat/MessageList.tsx` and `buildVolatileItems` for the exact field reads on permission objects and pin the key list to that surface.
 - If equal: skip `set()`.
 - If different: `set()` as today.
 
@@ -170,6 +171,7 @@ Out of scope for this slice. No user-visible flow changes.
 - **Stale flag on snapshot deletion.** Out of scope (deletion is a maintenance job; stale-true causes one redundant snapshot fetch per deleted-clean thread).
 - **Rollback.** `down()` drops the column. A rollback paired with code revert is required, otherwise a client built against the new contract reads `undefined` and (with `.default(false)`) treats every thread as having no file changes — visible diff features break silently. Document in PR.
 - **Pre-migration server / new client.** With `.default(false)`, an unmigrated server returns rows without the field; clients treat all threads as no-file-changes and skip snapshot loads. Diff badges disappear. Mitigated by lockstep deploy.
+- **Cross-client flag propagation.** Today the flag is read from `useWorkspaceStore.threads`, populated by `listThreads`. If the WS push channel `thread.updated` (or equivalent) does not already include the full thread row, a second connected client may keep `has_file_changes = false` cached after the first client flips it server-side. Out of scope for this slice (single-client is the common case), but flag during implementation and consider including the field in any push payload that already carries thread updates.
 
 ## Files touched
 
