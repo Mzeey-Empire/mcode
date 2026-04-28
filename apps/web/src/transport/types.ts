@@ -1,6 +1,7 @@
 // Import shared types for local use in the McodeTransport interface.
 import type {
   Workspace,
+  WorkspaceEnrichment,
   Thread,
   PaginatedMessages,
   AttachmentMeta,
@@ -34,6 +35,7 @@ import type {
 // Re-export shared types from the contracts package (single source of truth).
 export type {
   Workspace,
+  WorkspaceEnrichment,
   Thread,
   Message,
   AttachmentMeta,
@@ -84,6 +86,8 @@ export interface McodeTransport {
   pinWorkspace(id: string, pinned: boolean): Promise<void>;
   /** Remove a workspace from the recents list and unpin it. */
   removeRecent(id: string): Promise<void>;
+  /** Batch-fetch git branch, cleanliness, and thread count for the given workspace ids. */
+  enrichWorkspaces(ids: string[]): Promise<{ items: WorkspaceEnrichment[] }>;
   /** Browse the host filesystem at the given path. Returns entries and parent path. */
   filesystemBrowse(path: string): Promise<{
     path: string;

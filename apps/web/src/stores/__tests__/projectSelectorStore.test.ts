@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useProjectSelectorStore } from "../projectSelectorStore";
 
 beforeEach(() => {
-  useProjectSelectorStore.setState({ enrichmentCache: new Map(), pending: new Set() }, true);
+  // Reset data without replace=true so the patched setState preserves the enrich action.
+  useProjectSelectorStore.setState({ enrichmentCache: new Map(), pending: new Set() });
 });
 
 describe("projectSelectorStore", () => {

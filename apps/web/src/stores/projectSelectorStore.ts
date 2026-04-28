@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { getTransport } from "@/transport";
 
 /** Enrichment data for a workspace: branch, clean state, thread count. */
 export interface WorkspaceEnrichmentData {
@@ -18,10 +19,13 @@ interface State {
    * Fetch enrichment for the given workspace ids.
    * Already-cached and in-flight ids are skipped to avoid redundant RPCs.
    * @param ids - Workspace ids to enrich.
-   * @param call - Optional transport override (defaults to wsCall). Injected in tests.
+   * @param call - Optional transport override for testing. Defaults to `getTransport().enrichWorkspaces`.
    */
-  enrich: (ids: string[], call?: (method: string, params: any) => Promise<any>) => Promise<void>;
+  enrich: (ids: string[], call?: EnrichFn) => Promise<void>;
 }
+
+/** Injectable call function type — mirrors `McodeTransport.enrichWorkspaces`. */
+type EnrichFn = (ids: string[]) => Promise<{ items: WorkspaceEnrichmentData[] }>;
 
 /**
  * Perform batched enrichment of workspace ids.
@@ -32,7 +36,7 @@ interface State {
  */
 async function enrichImpl(
   ids: string[],
-  call?: (method: string, params: any) => Promise<any>,
+  call?: EnrichFn,
 ): Promise<void> {
   if (ids.length === 0) return;
   const store = useProjectSelectorStore;
@@ -46,8 +50,8 @@ async function enrichImpl(
   store.setState({ pending: nextPending });
 
   try {
-    const transport = call ?? (await import("../transport/ws-transport").then((m) => m.wsCall));
-    const { items } = await transport("workspace.enrich", { ids: todo });
+    const enrichFn = call ?? ((ids: string[]) => getTransport().enrichWorkspaces(ids));
+    const { items } = await enrichFn(todo);
     const next = new Map(store.getState().enrichmentCache);
     for (const item of items) next.set(String(item.id), item);
     store.setState({ enrichmentCache: next });

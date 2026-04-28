@@ -14,6 +14,11 @@ interface State {
   viewStack: View[];
   /** Current search query for the active view. */
   query: string;
+  /**
+   * Optional confirm action registered by the active view (e.g. AddProjectView's "Add" button).
+   * Called when the user presses Ctrl/Cmd+Enter in the palette input.
+   */
+  pendingConfirm: (() => void) | null;
   /** Open the palette, optionally at a specific intent view. */
   open: (opts?: { intent?: "projects" | "addProject" }) => void;
   /** Push a new view onto the navigation stack and clear the query. */
@@ -24,6 +29,8 @@ interface State {
   close: () => void;
   /** Update the search query for the active view. */
   setQuery: (q: string) => void;
+  /** Register a confirm action for the current view. Pass null to clear. */
+  setPendingConfirm: (fn: (() => void) | null) => void;
 }
 
 /** Map an open intent to its initial View. */
@@ -42,16 +49,18 @@ export const useCommandPaletteStore = create<State>((set, get) => ({
   isOpen: false,
   viewStack: [],
   query: "",
-  open: (opts) => set({ isOpen: true, viewStack: [intentToView(opts?.intent)], query: "" }),
-  push: (view) => set({ viewStack: [...get().viewStack, view], query: "" }),
+  pendingConfirm: null,
+  open: (opts) => set({ isOpen: true, viewStack: [intentToView(opts?.intent)], query: "", pendingConfirm: null }),
+  push: (view) => set({ viewStack: [...get().viewStack, view], query: "", pendingConfirm: null }),
   pop: () => {
     const next = get().viewStack.slice(0, -1);
     if (next.length === 0) {
-      set({ isOpen: false, viewStack: [], query: "" });
+      set({ isOpen: false, viewStack: [], query: "", pendingConfirm: null });
     } else {
-      set({ viewStack: next, query: "" });
+      set({ viewStack: next, query: "", pendingConfirm: null });
     }
   },
-  close: () => set({ isOpen: false, viewStack: [], query: "" }),
+  close: () => set({ isOpen: false, viewStack: [], query: "", pendingConfirm: null }),
   setQuery: (q) => set({ query: q }),
+  setPendingConfirm: (fn) => set({ pendingConfirm: fn }),
 }));

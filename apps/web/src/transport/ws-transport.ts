@@ -1,6 +1,7 @@
 import type {
   McodeTransport,
   Workspace,
+  WorkspaceEnrichment,
   Thread,
   GitBranch,
   WorktreeInfo,
@@ -487,6 +488,8 @@ export function createWsTransport(
     touchLastOpened: (id) => rpc<void>("workspace.touchLastOpened", { id }),
     pinWorkspace: (id, pinned) => rpc<void>("workspace.pin", { id, pinned }),
     removeRecent: (id) => rpc<void>("workspace.removeRecent", { id }),
+    enrichWorkspaces: (ids) =>
+      rpc<{ items: WorkspaceEnrichment[] }>("workspace.enrich", { ids }),
     filesystemBrowse: (path) =>
       rpc<{ path: string; parent: string | null; entries: { name: string; isDir: boolean }[] }>(
         "filesystem.browse",

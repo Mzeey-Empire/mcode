@@ -15,7 +15,7 @@ import { SelectionListView } from "./views/SelectionListView";
  * input pops the stack (or closes if on the root view).
  */
 export function CommandPalette() {
-  const { isOpen, viewStack, query, setQuery, close, pop } = useCommandPaletteStore();
+  const { isOpen, viewStack, query, setQuery, close, pop, pendingConfirm } = useCommandPaletteStore();
   const top = viewStack[viewStack.length - 1];
 
   // Keep context tracker in sync so keybinding `when` clauses can check palette state
@@ -39,6 +39,12 @@ export function CommandPalette() {
               value={query}
               onValueChange={setQuery}
               onKeyDown={(e) => {
+                // Ctrl/Cmd+Enter triggers the active view's confirm action
+                if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && pendingConfirm) {
+                  e.preventDefault();
+                  pendingConfirm();
+                  return;
+                }
                 // Backspace on empty input pops the view stack
                 if (e.key === "Backspace" && query === "" && viewStack.length > 1) {
                   e.preventDefault();
