@@ -21,6 +21,7 @@ import { CleanupJobRepo } from "./repositories/cleanup-job-repo";
 import { ClaudeProvider } from "./providers/claude/claude-provider";
 import { CodexProvider } from "./providers/codex/codex-provider";
 import { CopilotProvider } from "./providers/copilot/copilot-provider";
+import { CursorProvider } from "./providers/cursor/cursor-provider";
 import { ProviderRegistry } from "./providers/provider-registry";
 
 // Services
@@ -142,6 +143,14 @@ export function setupContainer(mcodeDir: string): typeof container {
   );
   container.register("IAgentProvider", {
     useFactory: (c) => c.resolve(CopilotProvider),
+  });
+  container.register(
+    CursorProvider,
+    { useClass: CursorProvider },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register("IAgentProvider", {
+    useFactory: (c) => c.resolve(CursorProvider),
   });
 
   // Provider Registry

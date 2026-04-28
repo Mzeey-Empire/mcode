@@ -7,8 +7,7 @@ import type { ProviderUsageInfo } from "./usage.js";
 
 /**
  * Identifier for a supported AI provider.
- * "cursor" and "opencode" are registered in the frontend model registry as
- * comingSoon placeholders but do not have active server-side adapters yet.
+ * "opencode" remains catalog-only until a server adapter ships.
  */
 export type ProviderId = "claude" | "codex" | "gemini" | "copilot" | "cursor" | "opencode";
 

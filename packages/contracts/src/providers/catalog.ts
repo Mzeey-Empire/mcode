@@ -14,7 +14,10 @@ export interface ProviderCatalogEntry {
   beta: boolean;
   /** When true, no adapter ships yet; the Settings switch is fixed off and non-interactive. */
   comingSoon: boolean;
-  /** Executable name looked up on PATH when `settings.provider.cli[id]` is empty. */
+  /**
+   * Executable name looked up on PATH when `settings.provider.cli[id]` is empty.
+   * For Cursor, the server also probes `agent` if `cursor-agent` is missing.
+   */
   cliBinary: string;
 }
 
@@ -24,7 +27,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
   { id: "codex",    name: "Codex",          beta: false, comingSoon: false, cliBinary: "codex"    },
   { id: "copilot",  name: "GitHub Copilot", beta: true,  comingSoon: false, cliBinary: "copilot"  },
   { id: "gemini",   name: "Gemini",         beta: false, comingSoon: true,  cliBinary: "gemini"   },
-  { id: "cursor",   name: "Cursor",         beta: false, comingSoon: true,  cliBinary: "cursor"   },
+  { id: "cursor",   name: "Cursor",         beta: true,  comingSoon: false, cliBinary: "cursor-agent" },
   { id: "opencode", name: "OpenCode",       beta: false, comingSoon: true,  cliBinary: "opencode" },
 ] as const;
 

@@ -55,7 +55,7 @@ export const ContextWindowModeSchema = z.enum(["200k", "1m"]);
 export type ContextWindowMode = z.infer<typeof ContextWindowModeSchema>;
 
 /** Supported AI provider identifier for settings. */
-export const ProviderIdSchema = z.enum(["claude", "codex", "gemini", "copilot"]);
+export const ProviderIdSchema = z.enum(["claude", "codex", "gemini", "copilot", "cursor"]);
 /** Supported AI provider identifier value. */
 export type SettingsProviderId = z.infer<typeof ProviderIdSchema>;
 
@@ -257,6 +257,8 @@ export const SettingsSchema = lazySchema(() =>
             claude: z.string().default(""),
             /** Path to the Copilot CLI binary. Empty uses PATH lookup. */
             copilot: z.string().default(""),
+            /** Path to the Cursor Agent CLI (`agent` / `cursor`). Empty uses PATH lookup. */
+            cursor: z.string().default(""),
           })
           .default({}),
       })
@@ -412,6 +414,7 @@ export const PartialSettingsSchema = lazySchema(() =>
             codex: z.string().optional(),
             claude: z.string().optional(),
             copilot: z.string().optional(),
+            cursor: z.string().optional(),
           })
           .optional(),
       })

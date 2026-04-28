@@ -137,8 +137,18 @@ export const MODEL_PROVIDERS: readonly ModelProvider[] = [
   {
     id: "cursor",
     name: "Cursor",
-    comingSoon: true,
-    models: [],
+    comingSoon: false,
+    supportsModelListing: true,
+    // Minimal static fallback — live list comes from listProviderModels (`cursor-agent models`).
+    models: [
+      { id: "auto", label: "Auto", providerId: "cursor", group: "Cursor" },
+      {
+        id: "composer-2-fast",
+        label: "Composer 2 Fast",
+        providerId: "cursor",
+        group: "Cursor",
+      },
+    ],
   },
   {
     id: "opencode",
