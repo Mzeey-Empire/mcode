@@ -46,6 +46,8 @@ import {
   defaultResolver,
 } from "./services/provider-availability-service";
 import { PtyPidRegistry } from "./services/pty-pid-registry";
+import { WorkspaceEnricher } from "./services/workspace-enricher";
+import { FilesystemBrowser } from "./services/filesystem-browser";
 
 /** Initialize the DI container with all server dependencies. */
 export function setupContainer(mcodeDir: string): typeof container {
@@ -253,6 +255,16 @@ export function setupContainer(mcodeDir: string): typeof container {
   container.register(
     ProviderAvailabilityService,
     { useClass: ProviderAvailabilityService },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register(
+    WorkspaceEnricher,
+    { useClass: WorkspaceEnricher },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register(
+    FilesystemBrowser,
+    { useClass: FilesystemBrowser },
     { lifecycle: Lifecycle.Singleton },
   );
 

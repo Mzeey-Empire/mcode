@@ -596,6 +596,23 @@ export class GitService {
     }
   }
 
+  /**
+   * Check whether the working tree at repoPath has no uncommitted changes.
+   * Returns true for a clean tree, true on error (non-git paths are treated as clean).
+   */
+  async isWorkingTreeClean(repoPath: string): Promise<boolean> {
+    try {
+      const { stdout } = await execFile(
+        "git",
+        ["-C", repoPath, "status", "--porcelain"],
+        { timeout: 5_000 },
+      );
+      return stdout.trim() === "";
+    } catch {
+      return true;
+    }
+  }
+
   private requireWorkspace(workspaceId: string) {
     const workspace = this.workspaceRepo.findById(workspaceId);
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);

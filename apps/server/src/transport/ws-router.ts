@@ -42,6 +42,8 @@ import type { PrDraftService } from "../services/pr-draft-service";
 import type { CiWatcherService } from "../services/ci-watcher";
 import type { ThreadRepo } from "../repositories/thread-repo";
 import type { WorkspaceRepo } from "../repositories/workspace-repo";
+import type { WorkspaceEnricher } from "../services/workspace-enricher";
+import type { FilesystemBrowser } from "../services/filesystem-browser";
 import { broadcast } from "./push";
 import {
   ProviderCliMissingError,
@@ -82,6 +84,10 @@ export interface RouterDeps {
   threadRepo: ThreadRepo;
   /** Workspace repository for resolving repo paths in git operations. */
   workspaceRepo: WorkspaceRepo;
+  /** Enriches workspaces with git and thread count metadata for the project selector. */
+  enricher: WorkspaceEnricher;
+  /** Browses the host filesystem for the project-selector folder picker. */
+  filesystemBrowser: FilesystemBrowser;
 }
 
 /**
@@ -203,6 +209,24 @@ async function dispatch(
       deps.gitWatcherService.unwatchWorkspace(params.id);
       return result;
     }
+    case "workspace.pin":
+      deps.workspaceRepo.setPinned(params.id, params.pinned);
+      return { ok: true as const };
+    case "workspace.removeRecent":
+      deps.workspaceRepo.removeRecent(params.id);
+      return { ok: true as const };
+    case "workspace.touchLastOpened":
+      deps.workspaceRepo.touchLastOpened(params.id);
+      return { ok: true as const };
+    case "workspace.enrich": {
+      const wsItems = (params.ids as string[])
+        .map((id: string) => deps.workspaceRepo.findById(id))
+        .filter((w): w is NonNullable<typeof w> => w !== null && w !== undefined)
+        .map((w) => ({ id: w.id, path: w.path }));
+      return { items: await deps.enricher.enrich(wsItems) };
+    }
+    case "filesystem.browse":
+      return deps.filesystemBrowser.browse(params.path);
 
     // Thread
     case "thread.list": {

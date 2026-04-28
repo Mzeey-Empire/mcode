@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { WorkspaceSchema } from "../models/workspace.js";
+import { WorkspaceSchema, WorkspaceEnrichmentSchema } from "../models/workspace.js";
 import { ThreadSchema } from "../models/thread.js";
 import { ThreadModeSchema, PermissionModeSchema, InteractionModeSchema } from "../models/enums.js";
 import { PaginatedMessagesSchema } from "../models/message.js";
@@ -109,6 +109,35 @@ export const WS_METHODS = lazySchema(() => ({
   "workspace.delete": {
     params: z.object({ id: z.string() }),
     result: z.boolean(),
+  },
+  /** Pin or unpin a workspace in the project selector. */
+  "workspace.pin": {
+    params: z.object({ id: z.string(), pinned: z.boolean() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  /** Remove a workspace from the recent/pinned list without deleting it. */
+  "workspace.removeRecent": {
+    params: z.object({ id: z.string() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  /** Record that a workspace was just opened, updating its recency timestamp. */
+  "workspace.touchLastOpened": {
+    params: z.object({ id: z.string() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
+  /** Batch-fetch git + thread enrichment for up to 200 workspace ids. */
+  "workspace.enrich": {
+    params: z.object({ ids: z.array(z.string()).max(200) }),
+    result: z.object({ items: z.array(WorkspaceEnrichmentSchema()) }),
+  },
+  /** Browse the host filesystem starting at the given path, for the folder picker. */
+  "filesystem.browse": {
+    params: z.object({ path: z.string() }),
+    result: z.object({
+      path: z.string(),
+      parent: z.string().nullable(),
+      entries: z.array(z.object({ name: z.string(), isDir: z.boolean() })),
+    }),
   },
   "thread.list": {
     params: z.object({ workspaceId: z.string() }),
