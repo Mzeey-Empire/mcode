@@ -360,6 +360,22 @@ export class ThreadRepo {
       .run(summary, new Date().toISOString(), threadId);
   }
 
+  /**
+   * Count active (non-deleted) threads for each workspace id in the list.
+   * Returns a Map keyed by workspace id. Workspace ids with no active threads are omitted.
+   */
+  countActiveByWorkspaceIds(ids: string[]): Map<string, number> {
+    if (ids.length === 0) return new Map();
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = this.db.prepare(
+      `SELECT workspace_id AS id, COUNT(*) AS n
+       FROM threads
+       WHERE workspace_id IN (${placeholders}) AND deleted_at IS NULL
+       GROUP BY workspace_id`,
+    ).all(...ids) as { id: string; n: number }[];
+    return new Map(rows.map((r) => [r.id, r.n]));
+  }
+
   /** Set lineage fields on a thread. Used when thread creation is handled by ThreadService. */
   updateLineage(id: string, parentThreadId: string, forkedFromMessageId: string): boolean {
     const now = new Date().toISOString();
