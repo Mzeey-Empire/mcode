@@ -1,5 +1,5 @@
 /**
- * Maps the legacy integer migration versions (1-20) to their corresponding
+ * Maps the legacy integer migration versions (1-19) to their corresponding
  * 14-character zero-padded string keys used by the timestamp-based scheme.
  *
  * This is consulted exactly once per database, the first time a database with
@@ -10,6 +10,12 @@
  * The mapping is intentionally hardcoded so that the upgrade is deterministic
  * and self-contained — adding new migrations after version 20 must use real
  * timestamps, not extend this map.
+ *
+ * Note: integer version 19 maps to "00000000000020" because the original
+ * 019_thread_has_file_changes.ts was renumbered to 020 before this
+ * integer→timestamp migration landed, to avoid a collision with the
+ * feat/modern-project-selector branch's own 019 migration. Integer version
+ * 20 never existed in the integer scheme.
  */
 export const LEGACY_VERSION_MAP = new Map<number, string>([
   [1, "00000000000001"],
@@ -30,6 +36,5 @@ export const LEGACY_VERSION_MAP = new Map<number, string>([
   [16, "00000000000016"],
   [17, "00000000000017"],
   [18, "00000000000018"],
-  [19, "00000000000020"],   // was renumbered to 020 to avoid branch collision
-  [20, "00000000000020"],
+  [19, "00000000000020"],
 ]);
