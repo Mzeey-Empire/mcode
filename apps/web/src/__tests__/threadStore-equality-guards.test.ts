@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useThreadStore, TOOL_CALL_CACHE_SIZE } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useTaskStore } from "@/stores/taskStore";
-import { clearMessageCache } from "@/stores/messageCache";
+import { clearMessageCache, getCachedSnapshot } from "@/stores/messageCache";
 import { mockTransport, createMockMessage } from "./mocks/transport";
 import { LruCache } from "@/lib/lru-cache";
 
@@ -78,7 +78,44 @@ function resetState() {
     permissionsByThread: {},
   });
 
-  useWorkspaceStore.setState({ threads: [] });
+  // Pre-populate workspace with a thread record that has no file changes so that
+  // loadMessages takes the synchronous cacheSnapshot path instead of the async
+  // listSnapshots path. This is critical for warmCache() to work correctly.
+  useWorkspaceStore.setState({
+    threads: [
+      {
+        id: THREAD_ID,
+        workspace_id: "ws-1",
+        title: "Test thread",
+        status: "active" as const,
+        mode: "direct" as const,
+        worktree_path: null,
+        branch: "main",
+        worktree_managed: false,
+        issue_number: null,
+        pr_number: null,
+        pr_status: null,
+        has_file_changes: false,
+        sdk_session_id: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        model: null,
+        provider: "claude",
+        deleted_at: null,
+        last_context_tokens: null,
+        context_window: null,
+        reasoning_level: null,
+        interaction_mode: null,
+        permission_mode: null,
+        context_window_mode: null,
+        thinking: null,
+        copilot_agent: null,
+        parent_thread_id: null,
+        forked_from_message_id: null,
+        last_compact_summary: null,
+      },
+    ],
+  });
 
   useTaskStore.setState({ tasksByThread: {} });
 }
@@ -162,7 +199,7 @@ describe("loadMessages (cache-miss) - getThreadTasks equality guard", () => {
       { content: "Run tests", status: "pending" },
     ]);
 
-    const setTasksSpy = vi.spyOn(useTaskStore.getState(), "setTasks");
+    const tasksBefore = useTaskStore.getState().tasksByThread[THREAD_ID];
 
     await useThreadStore.getState().loadMessages(THREAD_ID);
 
@@ -172,7 +209,8 @@ describe("loadMessages (cache-miss) - getThreadTasks equality guard", () => {
 
     await Promise.resolve();
 
-    expect(setTasksSpy).not.toHaveBeenCalled();
+    // Same reference means setTasks was NOT called (equality guard suppressed the update).
+    expect(useTaskStore.getState().tasksByThread[THREAD_ID]).toBe(tasksBefore);
   });
 
   it("DOES call setTasks when resolved tasks differ from existing store values", async () => {
@@ -187,7 +225,7 @@ describe("loadMessages (cache-miss) - getThreadTasks equality guard", () => {
       { content: "Run tests", status: "pending" },
     ]);
 
-    const setTasksSpy = vi.spyOn(useTaskStore.getState(), "setTasks");
+    const tasksBefore = useTaskStore.getState().tasksByThread[THREAD_ID];
 
     await useThreadStore.getState().loadMessages(THREAD_ID);
 
@@ -197,8 +235,10 @@ describe("loadMessages (cache-miss) - getThreadTasks equality guard", () => {
 
     await Promise.resolve();
 
-    expect(setTasksSpy).toHaveBeenCalledWith(
-      THREAD_ID,
+    const tasksAfter = useTaskStore.getState().tasksByThread[THREAD_ID];
+    // Different reference means setTasks was called (data changed).
+    expect(tasksAfter).not.toBe(tasksBefore);
+    expect(tasksAfter).toEqual(
       expect.arrayContaining([expect.objectContaining({ content: "Run tests", status: "pending" })]),
     );
   });
@@ -217,12 +257,17 @@ describe("loadMessages (cache-hit) - listPendingPermissions equality guard", () 
    * Warm the message cache by triggering a cache-miss load on THREAD_ID,
    * then reset currentThreadId so the second load for a different thread
    * will cause a cache-hit when we switch back.
+   *
+   * The workspace thread record has has_file_changes=false (set in resetState),
+   * so loadMessages takes the synchronous cacheSnapshot path, guaranteeing
+   * the cache is populated before we switch threads.
    */
   async function warmCache() {
     // First load populates cache for THREAD_ID.
     await useThreadStore.getState().loadMessages(THREAD_ID);
+    // Wait until the cache entry is actually written.
     await vi.waitFor(() => {
-      expect(mockTransport.getMessages).toHaveBeenCalledTimes(1);
+      expect(getCachedSnapshot(THREAD_ID)).toBeDefined();
     });
     // Switch away so that the next call to loadMessages(THREAD_ID) hits the cache.
     useThreadStore.setState({ currentThreadId: "other-thread" });
@@ -293,10 +338,11 @@ describe("loadMessages (cache-hit) - getThreadTasks equality guard", () => {
     resetState();
   });
 
+  /** @see warmCache in the listPendingPermissions describe block for rationale. */
   async function warmCache() {
     await useThreadStore.getState().loadMessages(THREAD_ID);
     await vi.waitFor(() => {
-      expect(mockTransport.getMessages).toHaveBeenCalledTimes(1);
+      expect(getCachedSnapshot(THREAD_ID)).toBeDefined();
     });
     useThreadStore.setState({ currentThreadId: "other-thread" });
     vi.clearAllMocks();
@@ -313,7 +359,7 @@ describe("loadMessages (cache-hit) - getThreadTasks equality guard", () => {
       { content: "Deploy", status: "in_progress" },
     ]);
 
-    const setTasksSpy = vi.spyOn(useTaskStore.getState(), "setTasks");
+    const tasksBefore = useTaskStore.getState().tasksByThread[THREAD_ID];
 
     await useThreadStore.getState().loadMessages(THREAD_ID);
 
@@ -324,7 +370,8 @@ describe("loadMessages (cache-hit) - getThreadTasks equality guard", () => {
     await Promise.resolve();
 
     expect(mockTransport.getMessages).not.toHaveBeenCalled();
-    expect(setTasksSpy).not.toHaveBeenCalled();
+    // Same reference means setTasks was NOT called (equality guard suppressed the update).
+    expect(useTaskStore.getState().tasksByThread[THREAD_ID]).toBe(tasksBefore);
   });
 
   it("DOES call setTasks on cache-hit when task content changed", async () => {
@@ -340,7 +387,7 @@ describe("loadMessages (cache-hit) - getThreadTasks equality guard", () => {
       { content: "New task", status: "pending" },
     ]);
 
-    const setTasksSpy = vi.spyOn(useTaskStore.getState(), "setTasks");
+    const tasksBefore = useTaskStore.getState().tasksByThread[THREAD_ID];
 
     await useThreadStore.getState().loadMessages(THREAD_ID);
 
@@ -350,8 +397,10 @@ describe("loadMessages (cache-hit) - getThreadTasks equality guard", () => {
 
     await Promise.resolve();
 
-    expect(setTasksSpy).toHaveBeenCalledWith(
-      THREAD_ID,
+    const tasksAfter = useTaskStore.getState().tasksByThread[THREAD_ID];
+    // Different reference means setTasks was called (data changed).
+    expect(tasksAfter).not.toBe(tasksBefore);
+    expect(tasksAfter).toEqual(
       expect.arrayContaining([expect.objectContaining({ content: "New task" })]),
     );
   });
