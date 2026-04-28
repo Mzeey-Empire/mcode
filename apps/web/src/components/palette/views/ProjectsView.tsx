@@ -1,14 +1,99 @@
-import { CommandList, CommandEmpty } from "@/components/ui/command";
+import { useMemo } from "react";
+import { CommandGroup, CommandList, CommandEmpty } from "@/components/ui/command";
+import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { ProjectRow } from "@/components/projects/ProjectRow";
+import { Kbd } from "../Kbd";
 
 /**
- * Palette subview for browsing and searching recent/pinned projects.
- * Full implementation in Task 16. This placeholder keeps the palette
- * shell compiling while the project selector data layer is built.
+ * Palette subview listing pinned and recently-opened workspaces.
+ * Filters by the palette's active query using simple substring matching on name and path.
+ * Uses ProjectRow for each entry so lazy enrichment (branch/status/count) fades in automatically.
  */
 export function ProjectsView() {
+  const query = useCommandPaletteStore((s) => s.query);
+  const close = useCommandPaletteStore((s) => s.close);
+  const push = useCommandPaletteStore((s) => s.push);
+  const workspaces = useWorkspaceStore((s) => s.workspaces);
+  const setActiveWorkspace = useWorkspaceStore((s) => s.setActiveWorkspace);
+  const pinWorkspace = useWorkspaceStore((s) => s.pinWorkspace);
+  const removeRecent = useWorkspaceStore((s) => s.removeRecent);
+
+  const q = query.trim().toLowerCase();
+
+  const filtered = useMemo(() => {
+    return workspaces.filter((w) => {
+      if (!q) return true;
+      return w.name.toLowerCase().includes(q) || w.path.toLowerCase().includes(q);
+    });
+  }, [workspaces, q]);
+
+  const pinned = filtered.filter((w) => w.pinned);
+  const recent = filtered.filter((w) => !w.pinned && w.last_opened_at != null);
+
+  const handleSelect = (id: string) => {
+    setActiveWorkspace(id);
+    close();
+  };
+
+  const handlePin = (id: string, pinned: boolean) => {
+    void pinWorkspace(id, pinned);
+  };
+
+  const handleRemove = (id: string) => {
+    void removeRecent(id);
+  };
+
+  const isEmpty = pinned.length === 0 && recent.length === 0;
+
   return (
-    <CommandList>
-      <CommandEmpty>No projects yet.</CommandEmpty>
-    </CommandList>
+    <>
+      <CommandList className="max-h-96 overflow-y-auto">
+        {isEmpty && (
+          <CommandEmpty>
+            {q ? "No matching projects." : "No recent projects. Add one below."}
+          </CommandEmpty>
+        )}
+
+        {pinned.length > 0 && (
+          <CommandGroup heading="Pinned">
+            {pinned.map((w) => (
+              <ProjectRow
+                key={w.id}
+                workspace={w}
+                onSelect={handleSelect}
+                onPin={handlePin}
+              />
+            ))}
+          </CommandGroup>
+        )}
+
+        {recent.length > 0 && (
+          <CommandGroup heading="Recent">
+            {recent.map((w) => (
+              <ProjectRow
+                key={w.id}
+                workspace={w}
+                onSelect={handleSelect}
+                onPin={handlePin}
+                onRemove={handleRemove}
+              />
+            ))}
+          </CommandGroup>
+        )}
+      </CommandList>
+
+      <div className="flex items-center justify-between border-t border-border/50 px-3 py-1.5">
+        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground/30">
+          <Kbd>↑↓</Kbd> Navigate · <Kbd>↵</Kbd> Open
+        </span>
+        <button
+          className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground/50 hover:text-foreground"
+          onClick={() => push({ kind: "addProject", path: "~/" })}
+        >
+          + Add project
+        </button>
+      </div>
+    </>
   );
 }

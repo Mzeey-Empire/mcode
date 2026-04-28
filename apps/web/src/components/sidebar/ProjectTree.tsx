@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useCallback, useState, useRef, useMemo } from "react";
+import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useShallow } from "zustand/shallow";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
@@ -149,7 +150,6 @@ export function ProjectTree() {
   const worktreesLoadedForWorkspace = useWorkspaceStore((s) => s.worktreesLoadedForWorkspace);
   const setActiveWorkspace = useWorkspaceStore((s) => s.setActiveWorkspace);
   const setActiveThread = useWorkspaceStore((s) => s.setActiveThread);
-  const createWorkspace = useWorkspaceStore((s) => s.createWorkspace);
   const deleteWorkspace = useWorkspaceStore((s) => s.deleteWorkspace);
   const deleteThread = useWorkspaceStore((s) => s.deleteThread);
   const setPendingNewThread = useWorkspaceStore((s) => s.setPendingNewThread);
@@ -171,7 +171,6 @@ export function ProjectTree() {
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>(getExpandedState);
   const [threadListExpanded, setThreadListExpandedState] = useState<Record<string, boolean>>(getThreadListExpanded);
-  const [isCreating, setIsCreating] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [inlineEdit, setInlineEdit] = useState<InlineEditState | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(null);
@@ -267,37 +266,11 @@ export function ProjectTree() {
     });
   }, [loadThreads]);
 
-  const handleOpenFolder = useCallback(async () => {
-    if (!window.desktopBridge || isCreating) return;
-    setIsCreating(true);
-    try {
-      const selected = await window.desktopBridge.showOpenDialog({
-        title: "Select a project folder",
-      });
-
-      if (selected && typeof selected === "string") {
-        const existing = workspaces.find((ws) => ws.path === selected);
-        if (existing) {
-          setExpanded((prev) => ({ ...prev, [existing.id]: true }));
-          setActiveWorkspace(existing.id);
-          return;
-        }
-
-        const name = selected
-          .replace(/[\\/]+$/, "")
-          .split(/[\\/]/)
-          .pop() || "Untitled";
-
-        const workspace = await createWorkspace(name, selected);
-        setExpanded((prev) => ({ ...prev, [workspace.id]: true }));
-        setActiveWorkspace(workspace.id);
-      }
-    } catch (e) {
-      console.error("Failed to open folder:", e);
-    } finally {
-      setIsCreating(false);
-    }
-  }, [createWorkspace, setActiveWorkspace, workspaces, isCreating]);
+  // Open the palette's folder-browse view instead of using the native OS dialog.
+  // This works across Electron and standalone web, and avoids the desktopBridge dependency.
+  const handleOpenFolder = useCallback(() => {
+    useCommandPaletteStore.getState().open({ intent: "addProject" });
+  }, []);
 
   const handleThreadContextMenu = useCallback(
     (e: React.MouseEvent, thread: Thread, workspacePath: string) => {
@@ -368,7 +341,7 @@ export function ProjectTree() {
         <Tooltip>
           <TooltipTrigger
             render={
-              <Button variant="ghost" size="icon-xs" disabled={isCreating} onClick={handleOpenFolder} aria-label="Open project folder" className="text-muted-foreground/60 hover:text-foreground">
+              <Button variant="ghost" size="icon-xs" onClick={handleOpenFolder} aria-label="Open project folder" className="text-muted-foreground/60 hover:text-foreground">
                 <Plus size={14} />
               </Button>
             }
@@ -434,7 +407,6 @@ export function ProjectTree() {
               <Button
                 variant="ghost"
                 size="xs"
-                disabled={isCreating}
                 onClick={handleOpenFolder}
                 className="group h-auto gap-1.5 rounded-md px-2 py-1 text-[11.5px] font-normal text-muted-foreground/70 hover:text-foreground"
               >

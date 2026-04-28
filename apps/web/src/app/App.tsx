@@ -10,6 +10,7 @@ import { TerminalPanel } from "@/components/terminal";
 import { RightPanel } from "@/components/panels/RightPanel";
 import { CommandPalette } from "@/components/palette/CommandPalette";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
+import { ProjectSelectorLanding } from "@/components/projects/ProjectSelectorLanding";
 import { ShortcutHelpDialog } from "@/components/ShortcutHelpDialog";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
@@ -38,6 +39,8 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("model");
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
+  const showLanding = activeWorkspaceId === null;
   useIdleReclamation();
 
   useEffect(() => {
@@ -319,15 +322,17 @@ export function App() {
           <div className="flex flex-1 flex-col gap-1.5 overflow-hidden">
             <div className="flex flex-1 gap-1.5 overflow-hidden">
               <main className="flex-1 overflow-hidden rounded-lg bg-background shadow-sm">
-                {settingsOpen ? (
+                {showLanding ? (
+                  <ProjectSelectorLanding />
+                ) : settingsOpen ? (
                   <SettingsView section={settingsSection} />
                 ) : (
                   <ChatView />
                 )}
               </main>
-              {!settingsOpen && <RightPanel />}
+              {!settingsOpen && !showLanding && <RightPanel />}
             </div>
-            {!settingsOpen && <TerminalPanel />}
+            {!settingsOpen && !showLanding && <TerminalPanel />}
           </div>
         </div>
       </div>
