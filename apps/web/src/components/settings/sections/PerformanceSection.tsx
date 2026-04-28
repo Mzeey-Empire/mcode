@@ -18,7 +18,7 @@ export function PerformanceSection() {
         <SettingRow
           label="Thread cache size"
           configKey="performance.threadCacheSize"
-          hint="Number of recently-visited threads kept in memory. Higher = faster thread switching, more memory."
+          hint="Keeps the last N threads in memory for instant switching. 10 is a good default for most workflows. Takes effect immediately."
         >
           <RangeControl
             min={1}
@@ -29,6 +29,11 @@ export function PerformanceSection() {
             formatValue={(v) => `${v} thread${v === 1 ? "" : "s"}`}
           />
         </SettingRow>
+        {threadCacheSize <= 3 && (
+          <p className="text-xs text-amber-500/80 mt-2 px-0">
+            At this size, most thread switches will reload from the server.
+          </p>
+        )}
       </div>
     </div>
   );
