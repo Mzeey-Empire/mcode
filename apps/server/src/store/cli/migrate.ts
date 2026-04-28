@@ -12,7 +12,7 @@
 import Database from "better-sqlite3";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { getMcodeDir } from "@mcode/shared";
 import { MigrationRunner } from "../migrations/runner.js";
 import { loadMigrations } from "../database.js";
@@ -23,9 +23,12 @@ const migrationsDir = join(__dirname, "..", "migrations");
 
 const dbPath = process.env.MCODE_DB_PATH ?? join(getMcodeDir(), "mcode.db");
 
-/** Pads an integer version to 3 digits for legacy file naming (e.g. 16 -> "016"). */
-function padInt(n: number): string {
-  return String(n).padStart(3, "0");
+/**
+ * Generates a 14-character UTC timestamp suitable as a migration ID.
+ * Format: YYYYMMDDHHMMSS (e.g. "20260428192500").
+ */
+function nowTimestamp(): string {
+  return new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
 }
 
 /** Prints usage instructions and exits with the given code. */
@@ -145,17 +148,6 @@ try {
         process.exit(1);
       }
 
-      // Find highest version number from existing migration filenames.
-      const files = existsSync(migrationsDir)
-        ? readdirSync(migrationsDir).filter((f) => /^\d+_/.test(f))
-        : [];
-
-      const highestVersion = files.reduce((max, f) => {
-        const match = f.match(/^(\d+)_/);
-        return match ? Math.max(max, parseInt(match[1], 10)) : max;
-      }, 0);
-
-      const nextVersion = highestVersion + 1;
       const slug = name
         .toLowerCase()
         .replace(/\s+/g, "_")
@@ -166,7 +158,8 @@ try {
         process.exit(1);
       }
 
-      const filename = `${padInt(nextVersion)}_${slug}.ts`;
+      const timestamp = nowTimestamp();
+      const filename = `${timestamp}_${slug}.ts`;
       const outputPath = join(migrationsDir, filename);
 
       if (existsSync(outputPath)) {
