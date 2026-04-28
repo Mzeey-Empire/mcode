@@ -78,6 +78,18 @@ export interface McodeTransport {
   createWorkspace(name: string, path: string): Promise<Workspace>;
   listWorkspaces(): Promise<Workspace[]>;
   deleteWorkspace(id: string): Promise<boolean>;
+  /** Record workspace as last-opened for recency ordering in the project selector. */
+  touchLastOpened(id: string): Promise<void>;
+  /** Pin or unpin a workspace in the project selector. */
+  pinWorkspace(id: string, pinned: boolean): Promise<void>;
+  /** Remove a workspace from the recents list and unpin it. */
+  removeRecent(id: string): Promise<void>;
+  /** Browse the host filesystem at the given path. Returns entries and parent path. */
+  filesystemBrowse(path: string): Promise<{
+    path: string;
+    parent: string | null;
+    entries: { name: string; isDir: boolean }[];
+  }>;
 
   // Thread commands
   createThread(

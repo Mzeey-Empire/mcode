@@ -57,7 +57,11 @@ interface WorkspaceState {
   loadWorkspaces: () => Promise<void>;
   createWorkspace: (name: string, path: string) => Promise<Workspace>;
   deleteWorkspace: (id: string) => Promise<void>;
-  setActiveWorkspace: (id: string | null) => void;
+  setActiveWorkspace: (id: string | null, call?: (method: string, params: any) => Promise<any>) => void;
+  /** Pin or unpin a workspace. Optimistically updates local state; reverts on RPC failure. */
+  pinWorkspace: (id: string, pinned: boolean, call?: (method: string, params: any) => Promise<any>) => Promise<void>;
+  /** Remove a workspace from the recents list. Clears last_opened_at and pinned locally; reverts on RPC failure. */
+  removeRecent: (id: string, call?: (method: string, params: any) => Promise<any>) => Promise<void>;
 
   // Thread actions
   loadThreads: (workspaceId: string) => Promise<void>;
@@ -242,7 +246,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
   },
 
-  setActiveWorkspace: (id) => {
+  setActiveWorkspace: (id, call) => {
     if (id === get().activeWorkspaceId) return;
     // Only clear activeThreadId if the current thread belongs to a different workspace
     const currentThread = get().threads.find(
@@ -267,6 +271,46 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
     if (id) {
       get().loadThreads(id);
+      // Record this as the last-opened workspace for recency ordering in the project selector.
+      if (call) {
+        call("workspace.touchLastOpened", { id }).catch(() => {});
+      } else {
+        getTransport().touchLastOpened(id).catch(() => {});
+      }
+    }
+  },
+
+  pinWorkspace: async (id, pinned, call) => {
+    // Optimistic update so the UI reflects the change instantly.
+    set((s) => ({
+      workspaces: s.workspaces.map((w) => w.id === id ? { ...w, pinned } : w),
+    }));
+    try {
+      if (call) {
+        await call("workspace.pin", { id, pinned });
+      } else {
+        await getTransport().pinWorkspace(id, pinned);
+      }
+    } catch (err) {
+      // Revert the optimistic update on failure.
+      set((s) => ({
+        workspaces: s.workspaces.map((w) => w.id === id ? { ...w, pinned: !pinned } : w),
+      }));
+      throw err;
+    }
+  },
+
+  removeRecent: async (id, call) => {
+    // Optimistic update: clear recency and pinned state locally.
+    set((s) => ({
+      workspaces: s.workspaces.map((w) =>
+        w.id === id ? { ...w, pinned: false, last_opened_at: null } : w
+      ),
+    }));
+    if (call) {
+      await call("workspace.removeRecent", { id });
+    } else {
+      await getTransport().removeRecent(id);
     }
   },
 
