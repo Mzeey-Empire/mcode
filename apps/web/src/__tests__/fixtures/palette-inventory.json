@@ -1,0 +1,25 @@
+{
+  "bindings": [
+    { "key": "mod+p", "commandId": "commandPalette.toggle" },
+    { "key": "mod+n", "commandId": "thread.new" },
+    { "key": "mod+shift+n", "commandId": "workspace.new" },
+    { "key": "mod+\\", "commandId": "sidebar.toggle" },
+    { "key": "mod+j", "commandId": "terminal.toggle" },
+    { "key": "mod+,", "commandId": "settings.open" },
+    { "key": "mod+shift+?", "commandId": "shortcuts.help" },
+    { "key": "mod+o", "commandId": "explorer.open" },
+    { "key": "Escape", "commandId": "escape.handle" },
+    { "key": "mod+t", "commandId": "tasks.toggle" },
+    { "key": "mod+d", "commandId": "changes.toggle" },
+    { "key": "mod+shift+c", "commandId": "checks.open" },
+    { "key": "mod+1", "commandId": "thread.goTo1" },
+    { "key": "mod+2", "commandId": "thread.goTo2" },
+    { "key": "mod+3", "commandId": "thread.goTo3" },
+    { "key": "mod+4", "commandId": "thread.goTo4" },
+    { "key": "mod+5", "commandId": "thread.goTo5" },
+    { "key": "mod+6", "commandId": "thread.goTo6" },
+    { "key": "mod+7", "commandId": "thread.goTo7" },
+    { "key": "mod+8", "commandId": "thread.goTo8" },
+    { "key": "mod+9", "commandId": "thread.goTo9" }
+  ]
+}
