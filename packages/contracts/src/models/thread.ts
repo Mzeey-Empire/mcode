@@ -18,6 +18,8 @@ export const ThreadSchema = lazySchema(() =>
   issue_number: z.number().nullable(),
   pr_number: z.number().nullable(),
   pr_status: z.string().nullable(),
+  /** Whether this thread has at least one turn snapshot with file changes. Used to skip listSnapshots on switch when false. */
+  has_file_changes: z.boolean().default(false),
   /** The SDK's internal session ID, used for resumeSession after app restart. */
   sdk_session_id: z.string().nullable(),
   created_at: z.string(),

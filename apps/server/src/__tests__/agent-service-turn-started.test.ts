@@ -130,6 +130,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
       toolCallRecordRepo,
       turnSnapshotRepo,
       snapshotServiceStub,
+      db,
       memoryPressureServiceStub,
       taskRepo,
       settingsServiceStub,

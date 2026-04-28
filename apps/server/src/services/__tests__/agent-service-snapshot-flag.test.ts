@@ -2,8 +2,6 @@ import "reflect-metadata";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Thread, IProviderRegistry } from "@mcode/contracts";
 import { AgentService } from "../agent-service.js";
-import { ProviderAvailabilityService } from "../provider-availability-service.js";
-import { ProviderDisabledError } from "../provider-availability-errors.js";
 import type { ThreadRepo } from "../../repositories/thread-repo.js";
 import type { WorkspaceRepo } from "../../repositories/workspace-repo.js";
 import type { MessageRepo } from "../../repositories/message-repo.js";
@@ -16,19 +14,19 @@ import type { MemoryPressureService } from "../memory-pressure-service.js";
 import type { TaskRepo } from "../../repositories/task-repo.js";
 import type { SettingsService } from "../settings-service.js";
 import type { ThreadService } from "../thread-service.js";
+import type { ProviderAvailabilityService } from "../provider-availability-service.js";
 
-// Mock the broadcast transport so we can assert agent.event emissions
-// without a real WebSocket server.
 vi.mock("../../transport/push.js", () => ({ broadcast: vi.fn() }));
-import { broadcast } from "../../transport/push.js";
 
-const THREAD_ID = "thread-abc";
+const THREAD_ID = "thread-snap-test";
+const IDEMPOTENT_SQL =
+  "UPDATE threads SET has_file_changes = 1 WHERE id = ? AND has_file_changes = 0";
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
     id: THREAD_ID,
     workspace_id: "ws-1",
-    title: "Test thread",
+    title: "Snapshot test thread",
     status: "idle",
     mode: "direct",
     branch: "main",
@@ -52,17 +50,23 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
   } as Thread;
 }
 
-/**
- * Build a minimal AgentService with only the dependencies needed to test
- * the provider availability gate. All other deps are no-op stubs.
- */
-function buildService({
-  assertUsable = vi.fn(),
-  resolveProvider = vi.fn(),
-}: {
-  assertUsable?: ReturnType<typeof vi.fn>;
-  resolveProvider?: ReturnType<typeof vi.fn>;
-} = {}): AgentService {
+interface BuildServiceOptions {
+  /** spy returned from db.prepare(...).run */
+  runSpy?: ReturnType<typeof vi.fn>;
+  /** files returned by snapshotService.getFilesChanged */
+  filesChanged?: string[];
+}
+
+function buildService(opts: BuildServiceOptions = {}): {
+  svc: AgentService;
+  turnSnapshotRepo: TurnSnapshotRepo;
+  snapshotService: SnapshotService;
+  db: import("better-sqlite3").Database;
+  runSpy: ReturnType<typeof vi.fn>;
+} {
+  const runSpy = opts.runSpy ?? vi.fn();
+  const filesChanged = opts.filesChanged ?? ["src/index.ts"];
+
   const thread = makeThread();
 
   const threadRepo = {
@@ -85,7 +89,9 @@ function buildService({
   } as unknown as WorkspaceRepo;
 
   const messageRepo = {
-    listByThread: vi.fn(() => ({ messages: [] })),
+    listByThread: vi.fn(() => ({
+      messages: [{ id: "msg-1", sequence: 1 }],
+    })),
     create: vi.fn(() => ({ id: "msg-1", sequence: 1 })),
     findByIdInThread: vi.fn(),
     listByThreadUpToSequence: vi.fn(() => []),
@@ -101,7 +107,7 @@ function buildService({
   } as unknown as AttachmentService;
 
   const providerRegistry = {
-    resolve: resolveProvider,
+    resolve: vi.fn(),
     resolveAll: vi.fn(() => []),
     shutdown: vi.fn(),
   } as unknown as IProviderRegistry;
@@ -120,9 +126,15 @@ function buildService({
   } as unknown as TurnSnapshotRepo;
 
   const snapshotService = {
-    captureRef: vi.fn(() => Promise.resolve("abc123")),
-    getFilesChanged: vi.fn(() => Promise.resolve([])),
+    // Return a ref different from the seeded "abc111" to trigger the transaction block
+    captureRef: vi.fn(() => Promise.resolve("def222")),
+    getFilesChanged: vi.fn(() => Promise.resolve(filesChanged)),
   } as unknown as SnapshotService;
+
+  const db = {
+    transaction: vi.fn((fn) => fn),
+    prepare: vi.fn(() => ({ run: runSpy })),
+  } as unknown as import("better-sqlite3").Database;
 
   const memoryPressureService = {
     markActive: vi.fn(),
@@ -144,19 +156,10 @@ function buildService({
   } as unknown as SettingsService;
 
   const availability = {
-    assertUsable,
+    assertUsable: vi.fn(),
   } as unknown as ProviderAvailabilityService;
 
-  const db = {
-    transaction: vi.fn((fn) => fn),
-    prepare: vi.fn(() => ({ run: vi.fn() })),
-  } as unknown as import("better-sqlite3").Database;
-
-  // AgentService constructor (15 params):
-  //   threadRepo, workspaceRepo, messageRepo, gitService, attachmentService,
-  //   providerRegistry, threadService, toolCallRecordRepo, turnSnapshotRepo,
-  //   snapshotService, db, memoryPressureService, taskRepo, settingsService, availability
-  return new AgentService(
+  const svc = new AgentService(
     threadRepo,
     workspaceRepo,
     messageRepo,
@@ -173,41 +176,78 @@ function buildService({
     settingsService,
     availability,
   );
+
+  return { svc, turnSnapshotRepo, snapshotService, db, runSpy };
 }
 
-describe("AgentService.sendMessage — provider availability gate", () => {
+describe("AgentService snapshot flag write", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("emits providerUnavailable and returns early when assertUsable throws ProviderDisabledError", async () => {
-    const resolveProvider = vi.fn();
-    const assertUsable = vi.fn(() => {
-      throw new ProviderDisabledError("codex");
+  it("calls db.transaction when ref changes", async () => {
+    const { svc, db } = buildService();
+
+    // Seed turnRefBefore so persistTurn has a ref to compare against
+    (svc as any).turnRefBefore.set(THREAD_ID, {
+      ref: "abc111",
+      cwd: "/workspace",
     });
 
-    const svc = buildService({ assertUsable, resolveProvider });
+    await (svc as any).persistTurn(THREAD_ID);
 
-    await svc.sendMessage(
-      THREAD_ID,
-      "Hello",
-      "default",
-      "claude-sonnet-4-6",
-      [],
-      undefined,
-      "codex",
-    );
+    expect(db.transaction).toHaveBeenCalledOnce();
+  });
 
-    // Provider must NOT be resolved — no agent session started
-    expect(resolveProvider).not.toHaveBeenCalled();
+  it("calls turnSnapshotRepo.create with correct args inside transaction", async () => {
+    const { svc, turnSnapshotRepo } = buildService({
+      filesChanged: ["src/index.ts"],
+    });
 
-    // A providerUnavailable event must have been broadcast on the agent.event channel
-    expect(broadcast).toHaveBeenCalledWith("agent.event", {
-      type: "providerUnavailable",
+    (svc as any).turnRefBefore.set(THREAD_ID, {
+      ref: "abc111",
+      cwd: "/workspace",
+    });
+
+    await (svc as any).persistTurn(THREAD_ID);
+
+    expect(turnSnapshotRepo.create).toHaveBeenCalledOnce();
+    expect(turnSnapshotRepo.create).toHaveBeenCalledWith({
+      messageId: "msg-1",
       threadId: THREAD_ID,
-      providerId: "codex",
-      reason: "disabled",
-      configuredPath: undefined,
+      refBefore: "abc111",
+      refAfter: "def222",
+      filesChanged: ["src/index.ts"],
+      worktreePath: null,
     });
+  });
+
+  it("calls db.prepare with idempotent SQL and runs with threadId when filesChanged is non-empty", async () => {
+    const { svc, db, runSpy } = buildService({
+      filesChanged: ["src/index.ts"],
+    });
+
+    (svc as any).turnRefBefore.set(THREAD_ID, {
+      ref: "abc111",
+      cwd: "/workspace",
+    });
+
+    await (svc as any).persistTurn(THREAD_ID);
+
+    expect(db.prepare).toHaveBeenCalledWith(IDEMPOTENT_SQL);
+    expect(runSpy).toHaveBeenCalledWith(THREAD_ID);
+  });
+
+  it("does NOT call db.prepare when filesChanged is empty", async () => {
+    const { svc, db } = buildService({ filesChanged: [] });
+
+    (svc as any).turnRefBefore.set(THREAD_ID, {
+      ref: "abc111",
+      cwd: "/workspace",
+    });
+
+    await (svc as any).persistTurn(THREAD_ID);
+
+    expect(db.prepare).not.toHaveBeenCalled();
   });
 });

@@ -18,6 +18,7 @@ import {
   evictThread as evictMessageCache,
   getCachedSnapshot,
 } from "./messageCache";
+import { shallowEqualBy } from "@/lib/shallowEqualBy";
 import { forgetScrollTop } from "@/components/chat/scrollPositionMemory";
 
 /** A permission request with its current resolution state. */
@@ -329,11 +330,13 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       void getTransport()
         .listPendingPermissions(threadId)
         .then((pending) => {
-          if (pending.length > 0) {
+          const mapped = pending.map((p) => ({ ...p, settled: false }));
+          const current = get().permissionsByThread[threadId] ?? [];
+          if (!shallowEqualBy(mapped, current, ["requestId", "toolName", "settled"])) {
             set((s) => ({
               permissionsByThread: {
                 ...s.permissionsByThread,
-                [threadId]: pending.map((p) => ({ ...p, settled: false })),
+                [threadId]: mapped,
               },
             }));
           }
@@ -343,13 +346,14 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       getTransport()
         .getThreadTasks(threadId)
         .then((tasks) => {
-          if (tasks && tasks.length > 0 && !useTaskStore.getState().tasksByThread[threadId]?.length) {
-            const items: TaskItem[] = tasks.map((t, i) => ({
-              id: String(i),
-              content: t.content,
-              status: coerceTaskStatus(t.status),
-              group: "Tasks",
-            }));
+          const items: TaskItem[] = (tasks ?? []).map((t, i) => ({
+            id: String(i),
+            content: t.content,
+            status: coerceTaskStatus(t.status),
+            group: "Tasks",
+          }));
+          const currentTasks = useTaskStore.getState().tasksByThread[threadId] ?? [];
+          if (!shallowEqualBy(items, currentTasks, ["content", "status"])) {
             useTaskStore.getState().setTasks(threadId, items);
           }
         })
@@ -434,11 +438,13 @@ export const useThreadStore = create<ThreadState>((set, get) => {
 
         // Re-hydrate pending permissions (covers reconnect and thread switch)
         void getTransport().listPendingPermissions(threadId).then((pending) => {
-          if (pending.length > 0) {
+          const mapped = pending.map((p) => ({ ...p, settled: false }));
+          const current = get().permissionsByThread[threadId] ?? [];
+          if (!shallowEqualBy(mapped, current, ["requestId", "toolName", "settled"])) {
             set((s) => ({
               permissionsByThread: {
                 ...s.permissionsByThread,
-                [threadId]: pending.map((p) => ({ ...p, settled: false })),
+                [threadId]: mapped,
               },
             }));
           }
@@ -450,13 +456,14 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         getTransport()
           .getThreadTasks(threadId)
           .then((tasks) => {
-            if (tasks && tasks.length > 0 && !useTaskStore.getState().tasksByThread[threadId]?.length) {
-              const items: TaskItem[] = tasks.map((t, i) => ({
-                id: String(i),
-                content: t.content,
-                status: coerceTaskStatus(t.status),
-                group: "Tasks",
-              }));
+            const items: TaskItem[] = (tasks ?? []).map((t, i) => ({
+              id: String(i),
+              content: t.content,
+              status: coerceTaskStatus(t.status),
+              group: "Tasks",
+            }));
+            const currentTasks = useTaskStore.getState().tasksByThread[threadId] ?? [];
+            if (!shallowEqualBy(items, currentTasks, ["content", "status"])) {
               useTaskStore.getState().setTasks(threadId, items);
             }
           })
@@ -481,58 +488,66 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         const capturedOldest = oldest;
         const capturedHasMore = hasMore;
 
-        void (async () => {
-          try {
-            const snapshots = await getTransport().listSnapshots(threadId);
-            // Discard if thread switched
-            if (get().currentThreadId !== threadId) return;
+        const threadRecord = useWorkspaceStore.getState().threads.find((t) => t.id === threadId);
+        if (threadRecord && !threadRecord.has_file_changes) {
+          cacheSnapshot(threadId, {
+            messages: capturedMessages,
+            oldestLoadedSequence: capturedOldest,
+            hasMoreMessages: capturedHasMore,
+            persistedToolCallCounts: capturedCounts,
+            persistedFilesChanged: {},
+            latestTurnWithChanges: null,
+          });
+        } else {
+          void (async () => {
+            try {
+              const snapshots = await getTransport().listSnapshots(threadId);
+              if (get().currentThreadId !== threadId) return;
 
-            const persistedFilesChangedMap: Record<string, string[]> = {};
-            let latestTurnWithChanges: string | null = null;
+              const persistedFilesChangedMap: Record<string, string[]> = {};
+              let latestTurnWithChanges: string | null = null;
 
-            if (snapshots.length > 0) {
-              let latestTime = "";
-              for (const snap of snapshots) {
-                if (snap.files_changed.length === 0) continue;
-                persistedFilesChangedMap[snap.message_id] = snap.files_changed;
-                if (snap.created_at > latestTime) {
-                  latestTime = snap.created_at;
-                  latestTurnWithChanges = snap.message_id;
+              if (snapshots.length > 0) {
+                let latestTime = "";
+                for (const snap of snapshots) {
+                  if (snap.files_changed.length === 0) continue;
+                  persistedFilesChangedMap[snap.message_id] = snap.files_changed;
+                  if (snap.created_at > latestTime) {
+                    latestTime = snap.created_at;
+                    latestTurnWithChanges = snap.message_id;
+                  }
                 }
+                set((state) => {
+                  if (state.currentThreadId !== threadId) return {};
+                  return {
+                    persistedFilesChanged: { ...state.persistedFilesChanged, ...persistedFilesChangedMap },
+                    latestTurnWithChanges,
+                  };
+                });
               }
-              // Update state with derived file changes
-              set((state) => {
-                if (state.currentThreadId !== threadId) return {};
-                return {
-                  persistedFilesChanged: { ...state.persistedFilesChanged, ...persistedFilesChangedMap },
-                  latestTurnWithChanges,
-                };
-              });
-            }
 
-            // Cache populate using captured locals, not get() after await
-            cacheSnapshot(threadId, {
-              messages: capturedMessages,
-              oldestLoadedSequence: capturedOldest,
-              hasMoreMessages: capturedHasMore,
-              persistedToolCallCounts: capturedCounts,
-              persistedFilesChanged: persistedFilesChangedMap,
-              latestTurnWithChanges,
-            });
-          } catch {
-            // Cache without snapshot data on failure
-            if (get().currentThreadId === threadId) {
               cacheSnapshot(threadId, {
                 messages: capturedMessages,
                 oldestLoadedSequence: capturedOldest,
                 hasMoreMessages: capturedHasMore,
                 persistedToolCallCounts: capturedCounts,
-                persistedFilesChanged: {},
-                latestTurnWithChanges: null,
+                persistedFilesChanged: persistedFilesChangedMap,
+                latestTurnWithChanges,
               });
+            } catch {
+              if (get().currentThreadId === threadId) {
+                cacheSnapshot(threadId, {
+                  messages: capturedMessages,
+                  oldestLoadedSequence: capturedOldest,
+                  hasMoreMessages: capturedHasMore,
+                  persistedToolCallCounts: capturedCounts,
+                  persistedFilesChanged: {},
+                  latestTurnWithChanges: null,
+                });
+              }
             }
-          }
-        })();
+          })();
+        }
       }
     } catch (e) {
       if (get().currentThreadId === threadId) {
@@ -1949,6 +1964,16 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         currentTurnMessageIdByThread: nextTurnMsgIds,
       };
     });
+
+    if (payload.filesChanged.length > 0) {
+      useWorkspaceStore.setState((ws) => ({
+        threads: ws.threads.map((t) =>
+          t.id === payload.threadId && !t.has_file_changes
+            ? { ...t, has_file_changes: true }
+            : t,
+        ),
+      }));
+    }
   },
   };
 });
