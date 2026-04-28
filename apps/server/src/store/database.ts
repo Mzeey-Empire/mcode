@@ -28,7 +28,7 @@ import * as m015 from "./migrations/015_thread_compact_summary.js";
 import * as m016 from "./migrations/016_copilot_agent.js";
 import * as m017 from "./migrations/017_workspace_is_git_repo.js";
 import * as m018 from "./migrations/018_thread_context_window_mode_thinking.js";
-import * as m019 from "./migrations/019_thread_has_file_changes.js";
+import * as m020 from "./migrations/020_thread_has_file_changes.js";
 
 /**
  * Resolve the correct native binding for better-sqlite3 based on runtime.
@@ -67,28 +67,28 @@ function resolveNativeBinding(): string | undefined {
   return bindingPath;
 }
 
-/** Builds the ordered map of all migration modules keyed by version number. */
-export function loadMigrations(): Map<number, MigrationModule> {
-  const migrations = new Map<number, MigrationModule>();
-  migrations.set(1, m001);
-  migrations.set(2, m002);
-  migrations.set(3, m003);
-  migrations.set(4, m004);
-  migrations.set(5, m005);
-  migrations.set(6, m006);
-  migrations.set(7, m007);
-  migrations.set(8, m008);
-  migrations.set(9, m009);
-  migrations.set(10, m010);
-  migrations.set(11, m011);
-  migrations.set(12, m012);
-  migrations.set(13, m013);
-  migrations.set(14, m014);
-  migrations.set(15, m015);
-  migrations.set(16, m016);
-  migrations.set(17, m017);
-  migrations.set(18, m018);
-  migrations.set(19, m019);
+/** Builds the ordered map of all migration modules keyed by 14-char zero-padded version string. */
+export function loadMigrations(): Map<string, MigrationModule> {
+  const migrations = new Map<string, MigrationModule>();
+  migrations.set("00000000000001", m001);
+  migrations.set("00000000000002", m002);
+  migrations.set("00000000000003", m003);
+  migrations.set("00000000000004", m004);
+  migrations.set("00000000000005", m005);
+  migrations.set("00000000000006", m006);
+  migrations.set("00000000000007", m007);
+  migrations.set("00000000000008", m008);
+  migrations.set("00000000000009", m009);
+  migrations.set("00000000000010", m010);
+  migrations.set("00000000000011", m011);
+  migrations.set("00000000000012", m012);
+  migrations.set("00000000000013", m013);
+  migrations.set("00000000000014", m014);
+  migrations.set("00000000000015", m015);
+  migrations.set("00000000000016", m016);
+  migrations.set("00000000000017", m017);
+  migrations.set("00000000000018", m018);
+  migrations.set("00000000000020", m020);
   return migrations;
 }
 

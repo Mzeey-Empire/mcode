@@ -38,11 +38,11 @@ function createTempTable(db: Database.Database, name: string): void {
 }
 
 // A reusable set of three migrations that all operate on table "items".
-function threeItemMigrations(): Map<number, MigrationModule> {
+function threeItemMigrations(): Map<string, MigrationModule> {
   return new Map([
-    [1, makeColumnMigration("add col_a", "items", "col_a")],
-    [2, makeColumnMigration("add col_b", "items", "col_b")],
-    [3, makeColumnMigration("add col_c", "items", "col_c")],
+    ["00000000000001", makeColumnMigration("add col_a", "items", "col_a")],
+    ["00000000000002", makeColumnMigration("add col_b", "items", "col_b")],
+    ["00000000000003", makeColumnMigration("add col_c", "items", "col_c")],
   ]);
 }
 
@@ -69,7 +69,7 @@ describe("MigrationRunner", () => {
 
       expect(result.applied).toBe(3);
       expect(result.migrations).toHaveLength(3);
-      expect(result.migrations.map((m) => m.version)).toEqual([1, 2, 3]);
+      expect(result.migrations.map((m) => m.version)).toEqual(["00000000000001", "00000000000002", "00000000000003"]);
 
       const allApplied = runner.applied();
       expect(allApplied).toHaveLength(3);
@@ -92,7 +92,7 @@ describe("MigrationRunner", () => {
       const result = runnerB.up();
 
       expect(result.applied).toBe(2);
-      expect(result.migrations.map((m) => m.version)).toEqual([2, 3]);
+      expect(result.migrations.map((m) => m.version)).toEqual(["00000000000002", "00000000000003"]);
     });
   });
 
@@ -109,7 +109,7 @@ describe("MigrationRunner", () => {
 
       expect(result.reverted).toBe(1);
       expect(result.migrations).toHaveLength(1);
-      expect(result.migrations[0].version).toBe(3);
+      expect(result.migrations[0].version).toBe("00000000000003");
 
       // col_c should be gone, col_a and col_b should remain.
       const cols = (db.pragma("table_info(items)")) as Array<{ name: string }>;
@@ -134,7 +134,7 @@ describe("MigrationRunner", () => {
       const result = runner.down(2);
 
       expect(result.reverted).toBe(2);
-      expect(result.migrations.map((m) => m.version)).toEqual([3, 2]);
+      expect(result.migrations.map((m) => m.version)).toEqual(["00000000000003", "00000000000002"]);
 
       const cols = (db.pragma("table_info(items)")) as Array<{ name: string }>;
       const colNames = cols.map((c) => c.name);
@@ -168,7 +168,7 @@ describe("MigrationRunner", () => {
       const runner = new MigrationRunner(db, threeItemMigrations());
 
       const pending = runner.pending();
-      expect(pending.map((m) => m.version)).toEqual([1, 2, 3]);
+      expect(pending.map((m) => m.version)).toEqual(["00000000000001", "00000000000002", "00000000000003"]);
     });
 
     it("returns only unapplied migrations after some are applied", () => {
@@ -177,7 +177,7 @@ describe("MigrationRunner", () => {
       runner.up(1);
 
       const pending = runner.pending();
-      expect(pending.map((m) => m.version)).toEqual([2, 3]);
+      expect(pending.map((m) => m.version)).toEqual(["00000000000002", "00000000000003"]);
     });
 
     it("returns empty list when all are applied", () => {
@@ -199,7 +199,7 @@ describe("MigrationRunner", () => {
       runner.up();
 
       const records = runner.applied();
-      expect(records.map((r) => r.version)).toEqual([1, 2, 3]);
+      expect(records.map((r) => r.version)).toEqual(["00000000000001", "00000000000002", "00000000000003"]);
     });
 
     it("records include name and appliedAt fields", () => {
@@ -208,7 +208,7 @@ describe("MigrationRunner", () => {
       runner.up(1);
 
       const [record] = runner.applied();
-      expect(record.version).toBe(1);
+      expect(record.version).toBe("00000000000001");
       expect(record.name).toBe("add col_a");
       expect(typeof record.appliedAt).toBe("string");
       expect(record.appliedAt.length).toBeGreaterThan(0);
@@ -230,11 +230,11 @@ describe("MigrationRunner", () => {
     it("reports applied version with no file in map as a gap", () => {
       // Manually insert a version that has no module in the map.
       const runner = new MigrationRunner(db, new Map());
-      db.exec("INSERT INTO _migrations (version, name) VALUES (99, 'ghost')");
+      db.exec("INSERT INTO _migrations (version, name) VALUES ('99999999999999', 'ghost')");
 
       const result = runner.validate();
       expect(result.valid).toBe(false);
-      expect(result.gaps).toContain(99);
+      expect(result.gaps).toContain("99999999999999");
     });
   });
 
@@ -245,10 +245,10 @@ describe("MigrationRunner", () => {
     it("leaves DB unchanged when a migration throws", () => {
       createTempTable(db, "items");
 
-      const failingMigrations: Map<number, MigrationModule> = new Map([
-        [1, makeColumnMigration("add col_a", "items", "col_a")],
+      const failingMigrations: Map<string, MigrationModule> = new Map([
+        ["00000000000001", makeColumnMigration("add col_a", "items", "col_a")],
         [
-          2,
+          "00000000000002",
           {
             description: "intentional failure",
             up(_db) {
@@ -272,7 +272,7 @@ describe("MigrationRunner", () => {
 
       // Only version 1 should be in _migrations.
       expect(runner.applied()).toHaveLength(1);
-      expect(runner.applied()[0].version).toBe(1);
+      expect(runner.applied()[0].version).toBe("00000000000001");
     });
   });
 
@@ -283,10 +283,10 @@ describe("MigrationRunner", () => {
     it("reverts down() if the module throws", () => {
       createTempTable(db, "items");
 
-      const migrations: Map<number, MigrationModule> = new Map([
-        [1, makeColumnMigration("add col_a", "items", "col_a")],
+      const migrations: Map<string, MigrationModule> = new Map([
+        ["00000000000001", makeColumnMigration("add col_a", "items", "col_a")],
         [
-          2,
+          "00000000000002",
           {
             description: "add col_b",
             up(db) {
@@ -352,8 +352,8 @@ describe("MigrationRunner", () => {
   // 13. name column migration for legacy _migrations tables
   // -------------------------------------------------------------------------
   describe("legacy _migrations table (no name column)", () => {
-    it("adds name column when _migrations exists without it", () => {
-      // Simulate a pre-existing legacy table (no name column).
+    it("upgrades legacy INTEGER _migrations table (without name column) to TEXT keys", () => {
+      // Simulate a very old pre-existing legacy table (INTEGER version, no name column).
       db.exec(`
         CREATE TABLE _migrations (
           version INTEGER PRIMARY KEY,
@@ -362,17 +362,20 @@ describe("MigrationRunner", () => {
       `);
       db.exec("INSERT INTO _migrations (version) VALUES (1)");
 
-      // Constructor should patch the table without throwing.
+      // Constructor should upgrade the table without throwing.
       new MigrationRunner(db, new Map());
 
-      const cols = (db.pragma("table_info(_migrations)")) as Array<{ name: string }>;
+      const cols = (db.pragma("table_info(_migrations)")) as Array<{ name: string; type: string }>;
       const colNames = cols.map((c) => c.name);
       expect(colNames).toContain("name");
+      expect(colNames).toContain("version");
 
-      // Existing row should have the default empty string for name.
-      const row = db.prepare("SELECT name FROM _migrations WHERE version = 1").get() as {
+      // Row should have been translated to the TEXT key for version 1.
+      const row = db.prepare("SELECT version, name FROM _migrations WHERE version = '00000000000001'").get() as {
+        version: string;
         name: string;
       };
+      expect(row.version).toBe("00000000000001");
       expect(row.name).toBe("");
     });
   });

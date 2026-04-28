@@ -23,8 +23,13 @@ const migrationsDir = join(__dirname, "..", "migrations");
 
 const dbPath = process.env.MCODE_DB_PATH ?? join(getMcodeDir(), "mcode.db");
 
-/** Pads a version number to 3 digits (e.g. 16 -> "016"). */
-function pad(n: number): string {
+/** Formats a version string for display (already zero-padded, returned as-is). */
+function pad(v: string): string {
+  return v;
+}
+
+/** Pads an integer version to 3 digits for legacy file naming (e.g. 16 -> "016"). */
+function padInt(n: number): string {
   return String(n).padStart(3, "0");
 }
 
@@ -166,7 +171,7 @@ try {
         process.exit(1);
       }
 
-      const filename = `${pad(nextVersion)}_${slug}.ts`;
+      const filename = `${padInt(nextVersion)}_${slug}.ts`;
       const outputPath = join(migrationsDir, filename);
 
       if (existsSync(outputPath)) {

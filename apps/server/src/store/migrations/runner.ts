@@ -5,10 +5,11 @@
  */
 
 import type Database from "better-sqlite3";
+import { LEGACY_VERSION_MAP } from "./legacy-version-map.js";
 
 /** A row from the _migrations tracking table. */
 export interface MigrationRecord {
-  version: number;
+  version: string;
   name: string;
   appliedAt: string;
 }
@@ -20,7 +21,7 @@ export interface MigrationRecord {
 export interface ValidationResult {
   valid: boolean;
   /** Applied DB versions that have no corresponding migration module. */
-  gaps: number[];
+  gaps: string[];
 }
 
 /**
@@ -37,7 +38,7 @@ export interface MigrationModule {
  * Reads the _migrations table and maps rows to MigrationRecord shape.
  * Centralises the snake_case -> camelCase mapping in one place.
  */
-function rowToRecord(row: { version: number; name: string; applied_at: string }): MigrationRecord {
+function rowToRecord(row: { version: string; name: string; applied_at: string }): MigrationRecord {
   return {
     version: row.version,
     name: row.name,
@@ -52,21 +53,26 @@ function rowToRecord(row: { version: number; name: string; applied_at: string })
 export class MigrationRunner {
   constructor(
     private db: Database.Database,
-    private migrations: Map<number, MigrationModule>,
+    private migrations: Map<string, MigrationModule>,
   ) {
     this.ensureTable();
   }
 
   /**
-   * Ensures the _migrations table exists with the expected schema. If the
-   * table already exists but lacks the `name` column (legacy schema), the
-   * column is added via ALTER TABLE so existing data is preserved.
+   * Ensures the _migrations table exists with the TEXT-keyed schema.
+   *
+   * Three cases handled:
+   * 1. No table yet → create it with TEXT version column.
+   * 2. Table has INTEGER version column (legacy) → one-shot upgrade via
+   *    upgradeLegacyMigrationsTable().
+   * 3. Table already has TEXT version column → backfill name column if absent,
+   *    then backfill empty name values from loaded modules.
    */
   private ensureTable(): void {
-    // Create table with full schema if it does not exist at all.
+    // Create table with the new TEXT-keyed schema if it does not exist at all.
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS _migrations (
-        version INTEGER PRIMARY KEY,
+        version TEXT PRIMARY KEY,
         name TEXT NOT NULL DEFAULT '',
         applied_at TEXT NOT NULL DEFAULT (datetime('now'))
       )
@@ -80,18 +86,25 @@ export class MigrationRunner {
       pk: number;
     }
 
-    // If table existed before (without name column), patch it in.
     const columns = this.db.pragma("table_info(_migrations)") as PragmaRow[];
-    const hasNameColumn = columns.some((col) => col.name === "name");
+    const versionCol = columns.find((c) => c.name === "version");
+    const hasNameColumn = columns.some((c) => c.name === "name");
+
+    // Legacy schema: INTEGER version column. Rewrite to TEXT and translate keys.
+    if (versionCol?.type === "INTEGER") {
+      this.upgradeLegacyMigrationsTable();
+      return;
+    }
+
     if (!hasNameColumn) {
       this.db.exec("ALTER TABLE _migrations ADD COLUMN name TEXT NOT NULL DEFAULT ''");
     }
 
-    // Backfill descriptions for rows that were applied before the name column
-    // existed (stored as ''). Guarded by a count check so the prepare and loop
-    // are skipped entirely when there is nothing to backfill.
+    // Backfill descriptions for rows applied before the name column existed.
     const emptyCount = (
-      this.db.prepare("SELECT COUNT(*) as n FROM _migrations WHERE name = ''").get() as { n: number }
+      this.db
+        .prepare("SELECT COUNT(*) as n FROM _migrations WHERE name = ''")
+        .get() as { n: number }
     ).n;
 
     if (emptyCount > 0) {
@@ -105,19 +118,66 @@ export class MigrationRunner {
   }
 
   /**
+   * One-shot migration of the `_migrations` tracking table from the legacy
+   * INTEGER `version` schema to the new TEXT schema. Translates each row's
+   * integer version into the corresponding 14-char zero-padded string using
+   * LEGACY_VERSION_MAP. Wrapped in a transaction so the original table is
+   * untouched if anything fails.
+   */
+  private upgradeLegacyMigrationsTable(): void {
+    this.db.transaction(() => {
+      // The legacy table may or may not have the name column — read only what exists.
+      interface PragmaRow { name: string; type: string; notnull: number; dflt_value: string | null; pk: number; }
+      const legacyCols = this.db.pragma("table_info(_migrations)") as PragmaRow[];
+      const hasName = legacyCols.some((c) => c.name === "name");
+      const selectSql = hasName
+        ? "SELECT version, name, applied_at FROM _migrations"
+        : "SELECT version, '' AS name, applied_at FROM _migrations";
+
+      const oldRows = this.db
+        .prepare(selectSql)
+        .all() as Array<{ version: number; name: string; applied_at: string }>;
+
+      this.db.exec("DROP TABLE _migrations");
+      this.db.exec(`
+        CREATE TABLE _migrations (
+          version TEXT PRIMARY KEY,
+          name TEXT NOT NULL DEFAULT '',
+          applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+
+      const insertStmt = this.db.prepare(
+        "INSERT INTO _migrations (version, name, applied_at) VALUES (?, ?, ?)",
+      );
+
+      for (const row of oldRows) {
+        const newKey = LEGACY_VERSION_MAP.get(row.version);
+        if (!newKey) {
+          throw new Error(
+            `Cannot upgrade _migrations row: no legacy mapping for integer version ${row.version}. ` +
+            `If this version was added by a feature branch outside the main lineage, you must add it to LEGACY_VERSION_MAP before opening this database.`,
+          );
+        }
+        insertStmt.run(newKey, row.name, row.applied_at);
+      }
+    })();
+  }
+
+  /**
    * Applies pending migrations in ascending version order. Stops after
    * `steps` migrations when provided; applies all pending when omitted.
    */
   up(steps?: number): { applied: number; migrations: MigrationRecord[] } {
     const appliedVersions = new Set(
-      (this.db.prepare("SELECT version FROM _migrations").all() as Array<{ version: number }>).map(
+      (this.db.prepare("SELECT version FROM _migrations").all() as Array<{ version: string }>).map(
         (r) => r.version,
       ),
     );
 
     const pending = [...this.migrations.entries()]
       .filter(([version]) => !appliedVersions.has(version))
-      .sort(([a], [b]) => a - b);
+      .sort(([a], [b]) => a.localeCompare(b));
 
     const toApply = steps !== undefined ? pending.slice(0, steps) : pending;
     const records: MigrationRecord[] = [];
@@ -156,7 +216,7 @@ export class MigrationRunner {
 
     const appliedRows = this.db
       .prepare("SELECT version, name, applied_at FROM _migrations ORDER BY version DESC")
-      .all() as Array<{ version: number; name: string; applied_at: string }>;
+      .all() as Array<{ version: string; name: string; applied_at: string }>;
 
     if (appliedRows.length === 0) {
       return { reverted: 0, migrations: [] };
@@ -191,16 +251,16 @@ export class MigrationRunner {
   /**
    * Returns all pending migrations (in map but not applied), sorted ascending.
    */
-  pending(): { version: number; name: string }[] {
+  pending(): { version: string; name: string }[] {
     const appliedVersions = new Set(
-      (this.db.prepare("SELECT version FROM _migrations").all() as Array<{ version: number }>).map(
+      (this.db.prepare("SELECT version FROM _migrations").all() as Array<{ version: string }>).map(
         (r) => r.version,
       ),
     );
 
     return [...this.migrations.entries()]
       .filter(([version]) => !appliedVersions.has(version))
-      .sort(([a], [b]) => a - b)
+      .sort(([a], [b]) => a.localeCompare(b))
       .map(([version, module]) => ({ version, name: module.description }));
   }
 
@@ -211,7 +271,7 @@ export class MigrationRunner {
   applied(): MigrationRecord[] {
     const rows = this.db
       .prepare("SELECT version, name, applied_at FROM _migrations ORDER BY version ASC")
-      .all() as Array<{ version: number; name: string; applied_at: string }>;
+      .all() as Array<{ version: string; name: string; applied_at: string }>;
     return rows.map(rowToRecord);
   }
 
@@ -221,7 +281,7 @@ export class MigrationRunner {
    */
   validate(): ValidationResult {
     const appliedVersions = (
-      this.db.prepare("SELECT version FROM _migrations").all() as Array<{ version: number }>
+      this.db.prepare("SELECT version FROM _migrations").all() as Array<{ version: string }>
     ).map((r) => r.version);
 
     const gaps = appliedVersions.filter((v) => !this.migrations.has(v));
