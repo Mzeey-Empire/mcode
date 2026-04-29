@@ -17,10 +17,18 @@ describe("commandPaletteStore", () => {
 
   it("push/pop maintain a stack", () => {
     useCommandPaletteStore.getState().open();
-    useCommandPaletteStore.getState().push({ kind: "addProject", path: "~/" });
+    useCommandPaletteStore.getState().push({ kind: "projects" });
     expect(useCommandPaletteStore.getState().viewStack.length).toBe(2);
     useCommandPaletteStore.getState().pop();
     expect(useCommandPaletteStore.getState().viewStack).toEqual([{ kind: "root" }]);
+  });
+
+  it("open({ intent: 'addProject' }) opens at root with seeded '~/' query", () => {
+    useCommandPaletteStore.getState().open({ intent: "addProject" });
+    const state = useCommandPaletteStore.getState();
+    expect(state.isOpen).toBe(true);
+    expect(state.viewStack).toEqual([{ kind: "root" }]);
+    expect(state.query).toBe("~/");
   });
 
   it("pop on single-item stack closes the palette", () => {

@@ -44,8 +44,8 @@ vi.mock("../../palette/views/RootView", () => ({
 vi.mock("../../palette/views/ProjectsView", () => ({
   ProjectsView: () => null,
 }));
-vi.mock("../../palette/views/AddProjectView", () => ({
-  AddProjectView: () => null,
+vi.mock("../../palette/views/BrowseView", () => ({
+  BrowseView: () => null,
 }));
 vi.mock("../../palette/views/SelectionListView", () => ({
   SelectionListView: () => null,

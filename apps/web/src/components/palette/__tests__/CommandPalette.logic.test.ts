@@ -4,6 +4,9 @@ import {
   rankSearchFieldMatch,
   filterCommandPaletteGroups,
   buildProjectActionItems,
+  getPaletteMode,
+  splitBrowseQuery,
+  filterBrowseEntries,
 } from "../CommandPalette.logic";
 
 describe("normalizeQuery", () => {
@@ -63,6 +66,119 @@ describe("buildProjectActionItems", () => {
   it("sets description to workspace path", () => {
     const out = buildProjectActionItems([ws]);
     expect(out[0].description).toBe("/src/mcode");
+  });
+});
+
+describe("getPaletteMode", () => {
+  it("returns 'root' for empty query", () => {
+    expect(getPaletteMode("")).toBe("root");
+  });
+  it("returns 'actions' for '>' prefix", () => {
+    expect(getPaletteMode(">tog")).toBe("actions");
+    expect(getPaletteMode(">")).toBe("actions");
+  });
+  it("returns 'browse' for '~' alone", () => {
+    expect(getPaletteMode("~")).toBe("browse");
+  });
+  it("returns 'browse' for '~/' and '~/path'", () => {
+    expect(getPaletteMode("~/")).toBe("browse");
+    expect(getPaletteMode("~/projects")).toBe("browse");
+  });
+  it("returns 'drives' for exactly '/'", () => {
+    expect(getPaletteMode("/")).toBe("drives");
+  });
+  it("returns 'browse' for unix-absolute path", () => {
+    expect(getPaletteMode("/foo")).toBe("browse");
+    expect(getPaletteMode("/foo/bar")).toBe("browse");
+  });
+  it("returns 'browse' for relative paths", () => {
+    expect(getPaletteMode("./x")).toBe("browse");
+    expect(getPaletteMode("../y")).toBe("browse");
+    expect(getPaletteMode(".\\x")).toBe("browse");
+    expect(getPaletteMode("..\\y")).toBe("browse");
+  });
+  it("returns 'browse' for windows absolute paths", () => {
+    expect(getPaletteMode("C:\\Users")).toBe("browse");
+    expect(getPaletteMode("c:/users")).toBe("browse");
+    expect(getPaletteMode("D:\\")).toBe("browse");
+  });
+  it("returns 'search' for plain text", () => {
+    expect(getPaletteMode("hello")).toBe("search");
+    expect(getPaletteMode("new thread")).toBe("search");
+  });
+});
+
+describe("splitBrowseQuery", () => {
+  it("splits a unix-style path with trailing slash", () => {
+    expect(splitBrowseQuery("~/projects/")).toEqual({
+      directoryPath: "~/projects/",
+      leafFilter: "",
+    });
+  });
+  it("splits a unix-style path with partial leaf", () => {
+    expect(splitBrowseQuery("~/projects/my-app")).toEqual({
+      directoryPath: "~/projects/",
+      leafFilter: "my-app",
+    });
+  });
+  it("treats '~' alone as home with no leaf", () => {
+    expect(splitBrowseQuery("~")).toEqual({
+      directoryPath: "~/",
+      leafFilter: "",
+    });
+  });
+  it("splits a windows absolute path with backslash separators", () => {
+    expect(splitBrowseQuery("C:\\Users\\cjnwo\\Doc")).toEqual({
+      directoryPath: "C:\\Users\\cjnwo\\",
+      leafFilter: "Doc",
+    });
+  });
+  it("preserves the bare drive root form", () => {
+    expect(splitBrowseQuery("C:\\")).toEqual({
+      directoryPath: "C:\\",
+      leafFilter: "",
+    });
+  });
+  it("handles relative paths", () => {
+    expect(splitBrowseQuery("./src/comp")).toEqual({
+      directoryPath: "./src/",
+      leafFilter: "comp",
+    });
+  });
+});
+
+describe("filterBrowseEntries", () => {
+  const entries = [
+    { name: "Documents", isDir: true },
+    { name: "Downloads", isDir: true },
+    { name: ".bashrc", isDir: false },
+    { name: ".config", isDir: true },
+    { name: "Projects", isDir: true },
+  ];
+
+  it("returns all non-dotfile dirs when filter is empty", () => {
+    const out = filterBrowseEntries(entries, "");
+    expect(out.map((e) => e.name)).toEqual(["Documents", "Downloads", "Projects"]);
+  });
+  it("filters by case-insensitive prefix", () => {
+    const out = filterBrowseEntries(entries, "do");
+    expect(out.map((e) => e.name)).toEqual(["Documents", "Downloads"]);
+  });
+  it("shows hidden directories only when filter starts with '.'", () => {
+    const out = filterBrowseEntries(entries, ".c");
+    expect(out.map((e) => e.name)).toEqual([".config"]);
+  });
+  it("hides hidden directories when filter is empty", () => {
+    const out = filterBrowseEntries(entries, "");
+    expect(out.map((e) => e.name)).not.toContain(".config");
+  });
+  it("never includes hidden files even with dot filter", () => {
+    const out = filterBrowseEntries(entries, ".b");
+    expect(out.map((e) => e.name)).not.toContain(".bashrc");
+  });
+  it("never includes file entries", () => {
+    const out = filterBrowseEntries(entries, "");
+    expect(out.every((e) => e.isDir)).toBe(true);
   });
 });
 

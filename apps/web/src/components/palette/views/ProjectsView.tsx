@@ -13,7 +13,7 @@ import { Kbd } from "../Kbd";
 export function ProjectsView() {
   const query = useCommandPaletteStore((s) => s.query);
   const close = useCommandPaletteStore((s) => s.close);
-  const push = useCommandPaletteStore((s) => s.push);
+  const setQuery = useCommandPaletteStore((s) => s.setQuery);
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const setActiveWorkspace = useWorkspaceStore((s) => s.setActiveWorkspace);
   const pinWorkspace = useWorkspaceStore((s) => s.pinWorkspace);
@@ -100,11 +100,11 @@ export function ProjectsView() {
 
       <div className="flex items-center justify-between border-t border-border/50 px-3 py-1.5">
         <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground/30">
-          <Kbd>↑↓</Kbd> Navigate · <Kbd>↵</Kbd> Open
+          <Kbd>↑↓</Kbd> Navigate · <Kbd>Enter</Kbd> Open
         </span>
         <button
           className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground/50 hover:text-foreground"
-          onClick={() => push({ kind: "addProject", path: "~/" })}
+          onClick={() => setQuery("~/")}
         >
           + Add project
         </button>

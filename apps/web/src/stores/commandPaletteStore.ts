@@ -1,10 +1,16 @@
 import { create } from "zustand";
 
-/** A palette view pushed onto the viewStack. */
+/**
+ * A palette view pushed onto the viewStack.
+ *
+ * `addProject` is intentionally absent — the unified palette handles folder
+ * browsing in-place via prefix detection on the input query (see `getPaletteMode`).
+ * To open the palette in browse mode, call `open({ intent: "addProject" })` which
+ * seeds the input with `~/` and stays on the root view.
+ */
 export type View =
   | { kind: "root" }
   | { kind: "projects" }
-  | { kind: "addProject"; path: string }
   | { kind: "selectionList"; title: string; items: { id: string; title: string }[]; onPick: (id: string) => void };
 
 interface State {
@@ -15,11 +21,17 @@ interface State {
   /** Current search query for the active view. */
   query: string;
   /**
-   * Optional confirm action registered by the active view (e.g. AddProjectView's "Add" button).
-   * Called when the user presses Ctrl/Cmd+Enter in the palette input.
+   * Optional confirm action registered by the active view (e.g. browse mode's
+   * "Add this folder" handler). Called when the user presses Ctrl/Cmd+Enter.
    */
   pendingConfirm: (() => void) | null;
-  /** Open the palette, optionally at a specific intent view. */
+  /**
+   * Open the palette, optionally at a specific intent.
+   * - `projects`: open at the projects view.
+   * - `addProject`: open at the root view with the input pre-seeded to `~/`.
+   *   The unified shell flips into browse mode on render because `~/` matches
+   *   the browse-mode prefix detection.
+   */
   open: (opts?: { intent?: "projects" | "addProject" }) => void;
   /** Push a new view onto the navigation stack and clear the query. */
   push: (view: View) => void;
@@ -33,13 +45,6 @@ interface State {
   setPendingConfirm: (fn: (() => void) | null) => void;
 }
 
-/** Map an open intent to its initial View. */
-const intentToView = (intent?: "projects" | "addProject"): View => {
-  if (intent === "projects") return { kind: "projects" };
-  if (intent === "addProject") return { kind: "addProject", path: "~/" };
-  return { kind: "root" };
-};
-
 /**
  * Zustand store for command palette state.
  * Navigation is stack-based: each sub-view is pushed onto `viewStack` and
@@ -50,7 +55,14 @@ export const useCommandPaletteStore = create<State>((set, get) => ({
   viewStack: [],
   query: "",
   pendingConfirm: null,
-  open: (opts) => set({ isOpen: true, viewStack: [intentToView(opts?.intent)], query: "", pendingConfirm: null }),
+  open: (opts) => {
+    const intent = opts?.intent;
+    const view: View = intent === "projects" ? { kind: "projects" } : { kind: "root" };
+    // The addProject intent stays on the root view but seeds the query with `~/`
+    // so the unified shell renders in browse mode immediately.
+    const query = intent === "addProject" ? "~/" : "";
+    set({ isOpen: true, viewStack: [view], query, pendingConfirm: null });
+  },
   push: (view) => set({ viewStack: [...get().viewStack, view], query: "", pendingConfirm: null }),
   pop: () => {
     const next = get().viewStack.slice(0, -1);
@@ -64,4 +76,3 @@ export const useCommandPaletteStore = create<State>((set, get) => ({
   setQuery: (q) => set({ query: q }),
   setPendingConfirm: (fn) => set({ pendingConfirm: fn }),
 }));
-

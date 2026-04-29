@@ -71,10 +71,12 @@ export function RootView() {
         });
       }
 
-      // Recent projects (last 8, by lastOpenedAt)
+      // Recent projects (last 8, by last_opened_at). The store uses snake_case fields
+      // mirroring the SQLite columns; the previous camelCase reads silently produced
+      // an empty list because every value was `undefined`.
       const recentProjects = [...workspaces]
-        .filter((w) => (w as any).lastOpenedAt != null)
-        .sort((a, b) => ((b as any).lastOpenedAt ?? 0) - ((a as any).lastOpenedAt ?? 0))
+        .filter((w) => w.last_opened_at != null)
+        .sort((a, b) => (b.last_opened_at ?? 0) - (a.last_opened_at ?? 0))
         .slice(0, 8);
 
       if (recentProjects.length > 0) {
@@ -82,11 +84,12 @@ export function RootView() {
           heading: "Recent Projects",
           items: buildProjectActionItems(
             recentProjects.map((w) => ({
-              id: Number(w.id),
+              // ULID string flows through `workspace:${id}` and round-trips intact in handleSelect.
+              id: w.id,
               name: w.name,
               path: w.path,
-              pinned: (w as any).pinned ?? false,
-              lastOpenedAt: (w as any).lastOpenedAt ?? null,
+              pinned: w.pinned ?? false,
+              lastOpenedAt: w.last_opened_at ?? null,
               isGitRepo: w.is_git_repo ?? false,
               createdAt: new Date(w.created_at ?? 0).getTime(),
               updatedAt: new Date(w.updated_at ?? 0).getTime(),
@@ -125,7 +128,7 @@ export function RootView() {
           <Kbd>↑↓</Kbd> Navigate
         </span>
         <span>
-          <Kbd>↵</Kbd> Select
+          <Kbd>Enter</Kbd> Select
         </span>
         <span>
           <Kbd>Esc</Kbd> Close

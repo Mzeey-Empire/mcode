@@ -93,10 +93,128 @@ export function filterCommandPaletteGroups(groups: PaletteGroup[], query: string
     .filter((g) => g.items.length > 0);
 }
 
+/**
+ * One of five mutually exclusive palette modes derived from the input query.
+ * Mode is computed each render — no persistent mode state.
+ *
+ * - `root`     — empty query; show Actions + Recent Threads + Recent Projects.
+ * - `actions`  — query starts with `>`; filter the Actions group only.
+ * - `browse`   — query is a path (~/, /foo, ./, ../, C:\…); show filesystem entries.
+ * - `drives`   — query is exactly `/`; show available drives (Windows) or filesystem root (POSIX).
+ * - `search`   — anything else; fuzzy-rank against commands + projects + threads.
+ */
+export type PaletteMode = "root" | "actions" | "browse" | "drives" | "search";
+
+/** Test whether `s` begins with a Windows drive letter and colon (e.g. "C:" or "d:"). */
+function startsWithWindowsDrive(s: string): boolean {
+  return /^[A-Za-z]:/.test(s);
+}
+
+/**
+ * Compute the palette mode from the raw input query.
+ * The query is checked verbatim — leading whitespace is treated as plain text.
+ */
+export function getPaletteMode(query: string): PaletteMode {
+  if (query.length === 0) return "root";
+  if (query.startsWith(">")) return "actions";
+  // `~` and `~/...` always mean "browse from home".
+  if (query === "~" || query.startsWith("~/") || query.startsWith("~\\")) return "browse";
+  // Bare `/` is the special "drives" trigger.
+  if (query === "/") return "drives";
+  // `/foo`, `./...`, `../...`, `.\...`, `..\...` are browse-mode path entries.
+  if (
+    query.startsWith("/") ||
+    query.startsWith("./") ||
+    query.startsWith("../") ||
+    query.startsWith(".\\") ||
+    query.startsWith("..\\")
+  ) {
+    return "browse";
+  }
+  // Windows absolute path: drive letter + colon, optionally followed by anything.
+  if (startsWithWindowsDrive(query)) return "browse";
+  return "search";
+}
+
+/** Returns true when the query represents any kind of filesystem path the picker should browse. */
+export function isBrowseQuery(query: string): boolean {
+  const mode = getPaletteMode(query);
+  return mode === "browse" || mode === "drives";
+}
+
+/**
+ * Result of splitting a browse query into a directory portion and a leaf filter.
+ * `directoryPath` always ends in a separator (or is a bare drive root like `C:\`).
+ * `leafFilter` is the partial segment after the final separator; may be empty.
+ */
+export interface BrowseQueryParts {
+  directoryPath: string;
+  leafFilter: string;
+}
+
+/**
+ * Find the index of the last `/` or `\` in `s`. Returns -1 if there is none.
+ */
+function lastSeparatorIndex(s: string): number {
+  const slash = s.lastIndexOf("/");
+  const back = s.lastIndexOf("\\");
+  return Math.max(slash, back);
+}
+
+/**
+ * Split a browse-mode query into the directory it refers to and the partial
+ * leaf segment used as a filter against that directory's entries.
+ *
+ * Examples:
+ *   "~/projects/my-app" → { directoryPath: "~/projects/", leafFilter: "my-app" }
+ *   "~/projects/"       → { directoryPath: "~/projects/", leafFilter: "" }
+ *   "~"                 → { directoryPath: "~/",          leafFilter: "" }
+ *   "C:\\Users\\Doc"    → { directoryPath: "C:\\Users\\", leafFilter: "Doc" }
+ *   "C:\\"              → { directoryPath: "C:\\",        leafFilter: "" }
+ */
+export function splitBrowseQuery(query: string): BrowseQueryParts {
+  if (query === "~") return { directoryPath: "~/", leafFilter: "" };
+
+  // Bare drive root like "C:" or "C:\" — treat as the drive root with no leaf.
+  if (/^[A-Za-z]:[\\/]?$/.test(query)) {
+    const driveLetter = query[0];
+    return { directoryPath: `${driveLetter}:\\`, leafFilter: "" };
+  }
+
+  const idx = lastSeparatorIndex(query);
+  if (idx === -1) {
+    // No separator at all — treat the whole query as a leaf relative to cwd.
+    return { directoryPath: "./", leafFilter: query };
+  }
+  return {
+    directoryPath: query.slice(0, idx + 1),
+    leafFilter: query.slice(idx + 1),
+  };
+}
+
+/**
+ * Filter a list of directory entries to directories only, by a case-insensitive
+ * prefix match against the leaf filter. Hidden entries (name starts with `.`)
+ * are included only when the filter itself starts with `.`.
+ */
+export function filterBrowseEntries(
+  entries: { name: string; isDir: boolean }[],
+  leafFilter: string,
+): { name: string; isDir: boolean }[] {
+  const lower = leafFilter.toLowerCase();
+  const showHidden = lower.startsWith(".");
+  return entries.filter((entry) => {
+    if (!entry.isDir) return false;
+    if (!showHidden && entry.name.startsWith(".")) return false;
+    if (lower === "") return true;
+    return entry.name.toLowerCase().startsWith(lower);
+  });
+}
+
 /** Minimal workspace shape required by palette logic. Avoids a direct contracts import. */
 export interface WorkspaceLike {
-  /** Numeric workspace identifier. */
-  id: number;
+  /** Workspace identifier — number in legacy tests, ULID string in the live store. */
+  id: number | string;
   /** Human-readable workspace name. */
   name: string;
   /** Absolute filesystem path. */
