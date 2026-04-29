@@ -10,6 +10,12 @@ import { AgentEventType } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import type { AgentEvent } from "@mcode/contracts";
 
+/** Safely extract a string field from an untyped record. */
+function stringField(obj: Record<string, unknown>, key: string): string | undefined {
+  const v = obj[key];
+  return typeof v === "string" ? v : undefined;
+}
+
 /** Accumulates streamed state during a single prompt turn. */
 export interface CursorStreamAccumulator {
   /** Full assistant text observed during the prompt. */
@@ -21,6 +27,13 @@ export interface CursorStreamAccumulator {
 /** sessionUpdate types we handle; everything else gets debug-logged. */
 const HANDLED_SESSION_UPDATES = new Set([
   "agent_message_chunk",
+  "tool_start",
+  "tool_end",
+  "tool_progress",
+  // Alternative names Cursor may use (aliases of the above)
+  "agent_action_start",
+  "agent_action_end",
+  "agent_action_progress",
 ]);
 
 /**
@@ -77,6 +90,95 @@ export function mapCursorAcpNotification(
     if (!delta) return [];
     acc.assistantText += delta;
     return [{ type: AgentEventType.TextDelta, threadId, delta }];
+  }
+
+  // Tool execution start: emit ToolUse
+  if (
+    sessionUpdate === "tool_start" ||
+    sessionUpdate === "agent_action_start"
+  ) {
+    const toolCallId =
+      stringField(update, "toolCallId") ??
+      stringField(update, "actionId") ??
+      `cursor-tc-${randomUUID()}`;
+    const toolName =
+      stringField(update, "toolName") ??
+      stringField(update, "actionName") ??
+      "cursor_tool";
+    const toolInput =
+      (update.toolInput as Record<string, unknown>) ??
+      (update.parameters as Record<string, unknown>) ??
+      {};
+
+    acc.toolStartTimes.set(toolCallId, Date.now());
+
+    return [
+      {
+        type: AgentEventType.ToolUse,
+        threadId,
+        toolCallId,
+        toolName,
+        toolInput,
+      },
+    ];
+  }
+
+  // Tool execution end: emit ToolResult
+  if (
+    sessionUpdate === "tool_end" ||
+    sessionUpdate === "agent_action_end"
+  ) {
+    const toolCallId =
+      stringField(update, "toolCallId") ??
+      stringField(update, "actionId") ??
+      "";
+    const output =
+      stringField(update, "output") ??
+      stringField(update, "result") ??
+      "";
+    const isError =
+      typeof update.isError === "boolean"
+        ? update.isError
+        : update.success === false;
+
+    acc.toolStartTimes.delete(toolCallId);
+
+    return [
+      {
+        type: AgentEventType.ToolResult,
+        threadId,
+        toolCallId,
+        output,
+        isError: !!isError,
+      },
+    ];
+  }
+
+  // Tool progress heartbeat: emit ToolProgress
+  if (
+    sessionUpdate === "tool_progress" ||
+    sessionUpdate === "agent_action_progress"
+  ) {
+    const toolCallId =
+      stringField(update, "toolCallId") ??
+      stringField(update, "actionId") ??
+      "";
+    const toolName =
+      stringField(update, "toolName") ??
+      stringField(update, "actionName") ??
+      "";
+    const startedAt = acc.toolStartTimes.get(toolCallId) ?? Date.now();
+    const elapsedSeconds = (Date.now() - startedAt) / 1000;
+
+    return [
+      {
+        type: AgentEventType.ToolProgress,
+        threadId,
+        toolCallId,
+        toolName,
+        elapsedSeconds,
+      },
+    ];
   }
 
   if (sessionUpdate && !HANDLED_SESSION_UPDATES.has(sessionUpdate)) {

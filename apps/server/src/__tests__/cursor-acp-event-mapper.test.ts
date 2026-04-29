@@ -89,4 +89,89 @@ describe("mapCursorAcpNotification", () => {
       });
     });
   });
+
+  describe("tool execution session updates", () => {
+    it("emits ToolUse for tool_start sessionUpdate", () => {
+      const acc = freshAcc();
+      const events = mapCursorAcpNotification(
+        {
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "tool_start",
+              toolCallId: "tc-1",
+              toolName: "edit_file",
+              toolInput: { file: "foo.ts", content: "bar" },
+            },
+          },
+        },
+        "t1",
+        acc,
+      );
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: "toolUse",
+        threadId: "t1",
+        toolCallId: "tc-1",
+        toolName: "edit_file",
+        toolInput: { file: "foo.ts", content: "bar" },
+      });
+      expect(acc.toolStartTimes.has("tc-1")).toBe(true);
+    });
+
+    it("emits ToolResult for tool_end sessionUpdate", () => {
+      const acc = freshAcc();
+      acc.toolStartTimes.set("tc-1", Date.now() - 3000);
+      const events = mapCursorAcpNotification(
+        {
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "tool_end",
+              toolCallId: "tc-1",
+              output: "File edited successfully",
+              isError: false,
+            },
+          },
+        },
+        "t1",
+        acc,
+      );
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: "toolResult",
+        threadId: "t1",
+        toolCallId: "tc-1",
+        output: "File edited successfully",
+        isError: false,
+      });
+      expect(acc.toolStartTimes.has("tc-1")).toBe(false);
+    });
+
+    it("handles alternative field names (actionId, actionName, parameters, result, success)", () => {
+      const acc = freshAcc();
+      const events = mapCursorAcpNotification(
+        {
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "tool_start",
+              actionId: "ac-2",
+              actionName: "run_command",
+              parameters: { command: "ls" },
+            },
+          },
+        },
+        "t1",
+        acc,
+      );
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: "toolUse",
+        toolCallId: "ac-2",
+        toolName: "run_command",
+        toolInput: { command: "ls" },
+      });
+    });
+  });
 });
