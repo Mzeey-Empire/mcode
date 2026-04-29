@@ -23,9 +23,9 @@ describe("resolveBinaryPaths", () => {
       electronPlatformName: "darwin",
       productFilename: "MCode",
     });
-    expect(result.srcBinary).toBe("/dist/mac/MCode.app/Contents/MacOS/MCode");
+    expect(result.srcBinary).toBe(path.join("/dist/mac", "MCode.app", "Contents", "MacOS", "MCode"));
     expect(result.dstBinary).toBe(
-      "/dist/mac/MCode.app/Contents/Resources/bin/mcode-server",
+      path.join("/dist/mac", "MCode.app", "Contents", "Resources", "bin", "mcode-server"),
     );
   });
 
@@ -35,9 +35,9 @@ describe("resolveBinaryPaths", () => {
       electronPlatformName: "mas",
       productFilename: "MCode",
     });
-    expect(result.srcBinary).toBe("/dist/mas/MCode.app/Contents/MacOS/MCode");
+    expect(result.srcBinary).toBe(path.join("/dist/mas", "MCode.app", "Contents", "MacOS", "MCode"));
     expect(result.dstBinary).toBe(
-      "/dist/mas/MCode.app/Contents/Resources/bin/mcode-server",
+      path.join("/dist/mas", "MCode.app", "Contents", "Resources", "bin", "mcode-server"),
     );
   });
 
@@ -47,8 +47,8 @@ describe("resolveBinaryPaths", () => {
       electronPlatformName: "linux",
       productFilename: "mcode",
     });
-    expect(result.srcBinary).toBe("/dist/linux-unpacked/mcode");
-    expect(result.dstBinary).toBe("/dist/linux-unpacked/resources/bin/mcode-server");
+    expect(result.srcBinary).toBe(path.join("/dist/linux-unpacked", "mcode"));
+    expect(result.dstBinary).toBe(path.join("/dist/linux-unpacked", "resources", "bin", "mcode-server"));
   });
 });
 
