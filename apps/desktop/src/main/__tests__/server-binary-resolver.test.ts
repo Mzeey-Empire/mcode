@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import path from "node:path";
 import { existsSync } from "node:fs";
 import { resolveServerBinary } from "../server-binary-resolver.js";
@@ -9,6 +9,8 @@ vi.mock("node:fs", async () => {
 });
 
 describe("resolveServerBinary", () => {
+  beforeEach(() => vi.resetAllMocks());
+
   it("returns process.execPath in dev mode regardless of platform", () => {
     const result = resolveServerBinary({
       isPackaged: false,
