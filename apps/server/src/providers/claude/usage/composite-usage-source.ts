@@ -17,6 +17,9 @@ export class CompositeUsageSource implements IUsageSource {
   readonly id = "claude.composite";
   private cache: CacheEntry | null = null;
   private inflight: Promise<QuotaCategory[] | null> | null = null;
+  // Incremented by invalidate() so any in-flight promise that resolves after
+  // an invalidation can detect the staleness and skip writing to the cache.
+  private generation = 0;
 
   /** @param sources Ordered list of sources; earlier sources take priority. */
   constructor(private readonly sources: IUsageSource[]) {}
@@ -34,12 +37,13 @@ export class CompositeUsageSource implements IUsageSource {
   }
 
   /**
-   * Clears the result cache so the next `fetch()` call bypasses the TTL.
-   * Call this immediately before emitting a QuotaUpdate event so the
-   * warm-refresh path always reads fresh plan utilization.
+   * Clears the result cache and bumps the generation counter so any
+   * outstanding in-flight promise cannot repopulate the cache with
+   * pre-invalidation data. Call before emitting QuotaUpdate.
    */
   invalidate(): void {
     this.cache = null;
+    this.generation++;
   }
 
   /** Returns the first non-null result from the chain, cached for 90s. Concurrent calls share one in-flight request. */
@@ -49,12 +53,17 @@ export class CompositeUsageSource implements IUsageSource {
     }
     if (this.inflight) return this.inflight;
 
+    const gen = this.generation;
     this.inflight = (async () => {
       for (const source of this.sources) {
         try {
           const result = await source.fetch();
           if (result !== null) {
-            this.cache = { result, expiresAt: Date.now() + CACHE_TTL_MS };
+            // Only write to cache if no invalidate() occurred while we were
+            // awaiting the network round-trip.
+            if (this.generation === gen) {
+              this.cache = { result, expiresAt: Date.now() + CACHE_TTL_MS };
+            }
             return result;
           }
         } catch {

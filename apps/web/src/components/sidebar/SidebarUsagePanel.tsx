@@ -187,11 +187,13 @@ export function SidebarUsagePanel() {
   );
   const fetchProviderUsage = useThreadStore((s) => s.fetchProviderUsage);
 
-  // Hydrate immediately — bars appear without waiting for a hover.
-  // Intentionally omits `usageInfo` (would cause an infinite refetch loop)
-  // and `fetchProviderUsage` (stable Zustand action reference).
+  // Re-fetch on every thread/provider switch so the bars reflect the active
+  // thread's current quota rather than showing a stale snapshot from a prior
+  // visit. The server-side 90s TTL absorbs the extra calls. Intentionally
+  // omits `usageInfo` (would cause an infinite refetch loop) and
+  // `fetchProviderUsage` (stable Zustand action reference).
   useEffect(() => {
-    if (activeThreadId && !usageInfo) {
+    if (activeThreadId) {
       void fetchProviderUsage(activeThreadId, providerId);
     }
   }, [activeThreadId, providerId]);
