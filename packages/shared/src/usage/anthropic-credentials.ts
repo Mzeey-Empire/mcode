@@ -26,7 +26,7 @@ interface CredentialsFile {
  * Per-OS storage:
  *  - darwin: macOS Keychain entry "Claude Code-credentials"
  *  - linux:  ~/.claude/.credentials.json (plain JSON)
- *  - win32:  returns null (DPAPI-decrypted reader added in a follow-up)
+ *  - win32:  ~/.claude/.credentials.json (DPAPI-encrypted, decrypted via win-dpapi)
  *
  * @param platform - Override the detected platform. Intended for testing only.
  */
@@ -82,8 +82,16 @@ async function readRawCredentials(platform: NodeJS.Platform): Promise<string | n
   }
 
   if (platform === "win32") {
-    // Windows DPAPI decryption is implemented in Task 4.
-    return null;
+    try {
+      const { unprotectData } = await import("win-dpapi");
+      const encrypted = await readFile(
+        join(homedir(), ".claude", ".credentials.json"),
+      );
+      const decrypted = unprotectData(encrypted, null, "CurrentUser");
+      return decrypted.toString("utf8");
+    } catch {
+      return null;
+    }
   }
 
   return null;
