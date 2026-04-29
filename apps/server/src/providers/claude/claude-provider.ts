@@ -246,6 +246,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     const queue = createPromptQueue();
     const ephemeralId = `complete-${crypto.randomUUID()}`;
 
+    // Note: the Claude Agent SDK spawns a 'claude' CLI subprocess internally.
+    // That subprocess PID is not exposed by the SDK, so it cannot be added to
+    // the server's Job Object. On server crash, this subprocess may briefly
+    // outlive the server until the OS job-object kill propagates via inheritance.
+    // Track: expose subprocess PID from claude-agent-sdk for explicit assignment.
     const q = sdkQuery({
       prompt: queue.iterable,
       options: {

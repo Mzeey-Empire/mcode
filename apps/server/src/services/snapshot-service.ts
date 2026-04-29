@@ -39,7 +39,7 @@ export class SnapshotService {
     const { stdout: gitDirOut } = await execFile(
       "git",
       ["-C", cwd, "rev-parse", "--git-dir"],
-      { timeout },
+      { timeout, windowsHide: true },
     );
     const gitDirRaw = gitDirOut.trim();
     // rev-parse --git-dir may return a relative path on some git versions
@@ -53,19 +53,19 @@ export class SnapshotService {
     try {
       // Seed from HEAD tree; swallow failure for unborn repos (no commits yet)
       try {
-        await execFile("git", ["-C", cwd, "read-tree", "HEAD"], { timeout, env });
+        await execFile("git", ["-C", cwd, "read-tree", "HEAD"], { timeout, env, windowsHide: true });
       } catch {
         // Unborn repo or corrupt HEAD - proceed with empty index
       }
 
       // Stage all working tree changes including untracked files
-      await execFile("git", ["-C", cwd, "add", "-A"], { timeout, env });
+      await execFile("git", ["-C", cwd, "add", "-A"], { timeout, env, windowsHide: true });
 
       // Write the staged index as a tree object and return the SHA
       const { stdout: treeOut } = await execFile(
         "git",
         ["-C", cwd, "write-tree"],
-        { timeout, env },
+        { timeout, env, windowsHide: true },
       );
       return treeOut.trim();
     } finally {
@@ -84,7 +84,7 @@ export class SnapshotService {
       const { stdout } = await execFile(
         "git",
         ["-C", cwd, "diff", "--name-only", refBefore, refAfter],
-        { timeout: 10_000 },
+        { timeout: 10_000, windowsHide: true },
       );
 
       const output = stdout.trim();
@@ -117,7 +117,7 @@ export class SnapshotService {
     }
 
     try {
-      const { stdout } = await execFile("git", args, { timeout: 10_000 });
+      const { stdout } = await execFile("git", args, { timeout: 10_000, windowsHide: true });
       const result = stdout.trim();
 
       if (maxLines) {
@@ -135,6 +135,7 @@ export class SnapshotService {
     try {
       await execFile("git", ["-C", cwd, "cat-file", "-t", ref], {
         timeout: 10_000,
+        windowsHide: true,
       });
       return true;
     } catch {
@@ -154,7 +155,7 @@ export class SnapshotService {
       const { stdout } = await execFile(
         "git",
         ["-C", cwd, "diff", "--numstat", "--find-renames", refBefore, refAfter],
-        { timeout: 10_000 },
+        { timeout: 10_000, windowsHide: true },
       );
 
       return stdout

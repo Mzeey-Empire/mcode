@@ -64,6 +64,7 @@ export class WorkspaceService {
     try {
       execFileSync("git", ["-C", path, "rev-parse", "--git-dir"], {
         stdio: "pipe",
+        windowsHide: true,
       });
       return true;
     } catch {
