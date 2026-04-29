@@ -5,6 +5,7 @@
  * future tasks can observe and map them without breaking the stream.
  */
 
+import { randomUUID } from "node:crypto";
 import { AgentEventType } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import type { AgentEvent } from "@mcode/contracts";
@@ -35,9 +36,36 @@ export function mapCursorAcpNotification(
   acc: CursorStreamAccumulator,
 ): AgentEvent[] {
   const method = typeof notification.method === "string" ? notification.method : "";
+  const params = notification.params as Record<string, unknown> | undefined;
+
+  // cursor/update_todos: Cursor pushes its internal todo list.
+  // Synthesize a TodoWrite ToolUse + ToolResult pair so the existing
+  // threadStore interception populates the task panel automatically.
+  if (method === "cursor/update_todos" && params) {
+    const todos = params.todos as Array<Record<string, unknown>> | undefined;
+    if (todos && Array.isArray(todos)) {
+      const toolCallId = `cursor-todo-${randomUUID()}`;
+      return [
+        {
+          type: AgentEventType.ToolUse,
+          threadId,
+          toolCallId,
+          toolName: "TodoWrite",
+          toolInput: { todos },
+        },
+        {
+          type: AgentEventType.ToolResult,
+          threadId,
+          toolCallId,
+          output: `Updated ${todos.length} todo(s)`,
+          isError: false,
+        },
+      ];
+    }
+  }
+
   if (method !== "session/update") return [];
 
-  const params = notification.params as Record<string, unknown> | undefined;
   const update = params?.update as Record<string, unknown> | undefined;
   if (!update) return [];
 
