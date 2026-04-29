@@ -24,9 +24,13 @@ export interface IUsageSource {
  */
 export class NullUsageSource implements IUsageSource {
   constructor(public readonly id: string) {}
+
+  /** Always returns false — this source is never usable by design. */
   async isAvailable(): Promise<boolean> {
     return false;
   }
+
+  /** Always returns null — this source never has quota data to report. */
   async fetch(): Promise<null> {
     return null;
   }

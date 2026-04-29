@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NullUsageSource } from "../usage-source.js";
+import { NullUsageSource } from "../index.js";
 
 describe("NullUsageSource", () => {
   const source = new NullUsageSource("null");
