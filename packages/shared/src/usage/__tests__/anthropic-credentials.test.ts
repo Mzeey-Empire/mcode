@@ -5,14 +5,13 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readAnthropicOauthToken } from "../anthropic-credentials.js";
 
-// Hoisted mock so execFile can be replaced per-test for the darwin path
-vi.mock("node:child_process", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:child_process")>();
-  return {
-    ...actual,
-    execFile: vi.fn(actual.execFile),
-  };
-});
+// vi.mock is hoisted to the top of the file, so the mock factory cannot
+// reference variables declared with const/let. vi.hoisted runs before the
+// hoist and makes the mock available to both the factory and test bodies.
+const { execFileMock } = vi.hoisted(() => ({ execFileMock: vi.fn() }));
+vi.mock("node:child_process", () => ({
+  execFile: execFileMock,
+}));
 
 describe("readAnthropicOauthToken", () => {
   let tmpHome: string;
@@ -64,20 +63,10 @@ describe("readAnthropicOauthToken", () => {
       claudeAiOauth: { accessToken: "sk-mac", expiresAt: 1, refreshToken: "r" },
     });
 
-    // Replace execFile for this test only to avoid spawning the real `security` binary
-    const { execFile } = await import("node:child_process");
-    vi.mocked(execFile).mockImplementation(
-      (
-        _cmd: unknown,
-        _args: unknown,
-        cb: unknown,
-      ) => {
-        (cb as (err: Error | null, stdout: string, stderr: string) => void)(
-          null,
-          mockJson,
-          "",
-        );
-        return {} as ReturnType<typeof execFile>;
+    // Drive execFile synchronously so the promise resolves with the mock output
+    execFileMock.mockImplementation(
+      (_cmd: unknown, _args: unknown, cb: (err: Error | null, stdout: string) => void) => {
+        cb(null, mockJson);
       },
     );
 
