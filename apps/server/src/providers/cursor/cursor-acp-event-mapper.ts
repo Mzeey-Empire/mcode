@@ -1,17 +1,26 @@
 /**
  * Maps Cursor ACP `session/update` notifications into {@link AgentEvent} objects.
  *
- * Cursor adds fields over time; unknown shapes are ignored.
+ * Cursor adds fields over time; unknown shapes are debug-logged and ignored so
+ * future tasks can observe and map them without breaking the stream.
  */
 
 import { AgentEventType } from "@mcode/contracts";
+import { logger } from "@mcode/shared";
 import type { AgentEvent } from "@mcode/contracts";
 
-/** Accumulates streamed assistant text for terminal {@link AgentEventType.Message} emission. */
+/** Accumulates streamed state during a single prompt turn. */
 export interface CursorStreamAccumulator {
   /** Full assistant text observed during the prompt. */
   assistantText: string;
+  /** Wall-clock start times for tool progress elapsed calculation. */
+  toolStartTimes: Map<string, number>;
 }
+
+/** sessionUpdate types we handle; everything else gets debug-logged. */
+const HANDLED_SESSION_UPDATES = new Set([
+  "agent_message_chunk",
+]);
 
 /**
  * Maps a single JSON-RPC notification line object into zero or more agent events.
@@ -32,13 +41,22 @@ export function mapCursorAcpNotification(
   const update = params?.update as Record<string, unknown> | undefined;
   if (!update) return [];
 
-  const sessionUpdate = update.sessionUpdate;
+  const sessionUpdate = update.sessionUpdate as string | undefined;
+
   if (sessionUpdate === "agent_message_chunk") {
     const content = update.content as { text?: string } | undefined;
     const delta = typeof content?.text === "string" ? content.text : "";
     if (!delta) return [];
     acc.assistantText += delta;
     return [{ type: AgentEventType.TextDelta, threadId, delta }];
+  }
+
+  if (sessionUpdate && !HANDLED_SESSION_UPDATES.has(sessionUpdate)) {
+    logger.debug("Cursor ACP unhandled sessionUpdate", {
+      sessionUpdate,
+      updateKeys: Object.keys(update).join(","),
+      raw: JSON.stringify(update).slice(0, 2000),
+    });
   }
 
   return [];

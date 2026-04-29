@@ -127,7 +127,7 @@ export class CursorAcpSession {
       throw new Error("Cursor ACP session not initialized");
     }
 
-    const acc: CursorStreamAccumulator = { assistantText: "" };
+    const acc: CursorStreamAccumulator = { assistantText: "", toolStartTimes: new Map() };
 
     const onNotification = (msg: unknown) => {
       const events = mapCursorAcpNotification(msg as Record<string, unknown>, this.opts.threadId, acc);
