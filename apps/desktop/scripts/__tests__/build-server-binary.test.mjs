@@ -208,9 +208,10 @@ describe("stampWindowsVersionInfo", () => {
     expect(NtExecutableResource.from).toHaveBeenCalledWith(exeInstance);
     expect(Resource.VersionInfo.createEmpty).toHaveBeenCalledTimes(1);
 
-    // setFileVersion and setProductVersion called with version string
-    expect(setFileVersion).toHaveBeenCalledWith("1.2.3.0");
-    expect(setProductVersion).toHaveBeenCalledWith("1.2.3.0");
+    // setFileVersion and setProductVersion called with numeric components
+    // (major, minor, micro, revision, langId)
+    expect(setFileVersion).toHaveBeenCalledWith(1, 2, 3, 0, 1033);
+    expect(setProductVersion).toHaveBeenCalledWith(1, 2, 3, 0, 1033);
 
     // setStringValues called with language object and string values
     expect(setStringValues).toHaveBeenCalledWith(

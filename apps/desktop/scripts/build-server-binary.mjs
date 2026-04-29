@@ -58,9 +58,15 @@ export async function stampWindowsVersionInfo(exePath, info) {
   const exe = NtExecutable.from(buf);
   const res = NtExecutableResource.from(exe);
 
+  // resedit's primary documented API takes numeric components, even though
+  // a string overload exists in the typings. Use the numeric form for
+  // clarity. The caller is expected to have validated dotted-quad shape and
+  // 16-bit segment bounds (see buildServerBinary win32 guard).
+  const [fMajor, fMinor, fMicro, fRevision] = info.fileVersion.split(".").map(Number);
+  const [pMajor, pMinor, pMicro, pRevision] = info.productVersion.split(".").map(Number);
   const versionInfo = Resource.VersionInfo.createEmpty();
-  versionInfo.setFileVersion(info.fileVersion);
-  versionInfo.setProductVersion(info.productVersion);
+  versionInfo.setFileVersion(fMajor, fMinor, fMicro, fRevision, 1033);
+  versionInfo.setProductVersion(pMajor, pMinor, pMicro, pRevision, 1033);
   versionInfo.setStringValues(
     { lang: 1033, codepage: 1200 }, // en-US, Unicode
     {
