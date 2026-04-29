@@ -16,6 +16,7 @@ import { ToolCallRecordRepo } from "./repositories/tool-call-record-repo";
 import { TurnSnapshotRepo } from "./repositories/turn-snapshot-repo";
 import { TaskRepo } from "./repositories/task-repo";
 import { CleanupJobRepo } from "./repositories/cleanup-job-repo";
+import { ModelCacheRepo } from "./repositories/model-cache-repo";
 
 // Providers
 import { ClaudeProvider } from "./providers/claude/claude-provider";
@@ -49,6 +50,7 @@ import {
 import { PtyPidRegistry } from "./services/pty-pid-registry";
 import { WorkspaceEnricher } from "./services/workspace-enricher";
 import { FilesystemBrowser } from "./services/filesystem-browser";
+import { ModelCacheService } from "./services/model-cache-service";
 
 /** Initialize the DI container with all server dependencies. */
 export function setupContainer(mcodeDir: string): typeof container {
@@ -120,6 +122,11 @@ export function setupContainer(mcodeDir: string): typeof container {
   container.register("CleanupJobRepo", {
     useFactory: (c) => c.resolve(CleanupJobRepo),
   });
+  container.register(
+    ModelCacheRepo,
+    { useClass: ModelCacheRepo },
+    { lifecycle: Lifecycle.Singleton },
+  );
 
   // Providers
   container.register(
@@ -264,6 +271,13 @@ export function setupContainer(mcodeDir: string): typeof container {
   container.register(
     ProviderAvailabilityService,
     { useClass: ProviderAvailabilityService },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  // Registered after ProviderRegistry — ModelCacheService depends on
+  // "IProviderRegistry" to fan out refreshAll() to every provider.
+  container.register(
+    ModelCacheService,
+    { useClass: ModelCacheService },
     { lifecycle: Lifecycle.Singleton },
   );
   container.register(

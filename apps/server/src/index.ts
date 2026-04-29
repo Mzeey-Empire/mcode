@@ -43,6 +43,7 @@ import { ProviderAvailabilityService } from "./services/provider-availability-se
 import { ProviderRegistry } from "./providers/provider-registry";
 import { WorkspaceEnricher } from "./services/workspace-enricher";
 import { FilesystemBrowser } from "./services/filesystem-browser";
+import { ModelCacheService } from "./services/model-cache-service";
 import { WebSocket } from "ws";
 import { AgentEventType } from "@mcode/contracts";
 import type { AgentEvent } from "@mcode/contracts";
@@ -134,6 +135,7 @@ const taskRepo = container.resolve(TaskRepo);
 const workspaceRepo = container.resolve(WorkspaceRepo); // Used only for startup watcher initialization
 const enricher = container.resolve(WorkspaceEnricher);
 const filesystemBrowser = container.resolve(FilesystemBrowser);
+const modelCacheService = container.resolve(ModelCacheService);
 const cleanupWorker = container.resolve(CleanupWorker);
 const prDraftService = container.resolve(PrDraftService);
 const db = container.resolve<Database.Database>("Database");
@@ -196,6 +198,15 @@ providerAvailability
   .verifyAllEnabled()
   .then(() => {
     broadcast("providers.availability", providerAvailability.listAvailability());
+    // Warm the model cache once after CLI verification has gated which providers
+    // are usable. Triggering this per WS connect would spam refreshes; running
+    // it once at startup is sufficient because ModelCacheService also refreshes
+    // lazily on stale reads (stale-while-revalidate).
+    void modelCacheService.refreshAll().catch((err: unknown) => {
+      logger.warn("Model cache startup refresh failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   })
   .catch((err: unknown) => {
     logger.error("Provider availability startup verification failed", err);
@@ -346,6 +357,7 @@ const { httpServer, wss } = createWsServer({
   taskRepo,
   providerRegistry,
   providerAvailability,
+  modelCacheService,
   prDraftService,
   ciWatcherService,
   threadRepo,

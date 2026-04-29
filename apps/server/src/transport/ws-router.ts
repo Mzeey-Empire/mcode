@@ -50,6 +50,7 @@ import {
   isProviderAvailabilityError,
 } from "../services/provider-availability-errors.js";
 import type { ProviderAvailabilityService } from "../services/provider-availability-service.js";
+import type { ModelCacheService } from "../services/model-cache-service.js";
 
 /** Service dependencies for the router. */
 export interface RouterDeps {
@@ -76,6 +77,8 @@ export interface RouterDeps {
   providerRegistry: IProviderRegistry;
   /** Tracks per-provider enabled flag and CLI verification state. */
   providerAvailability: ProviderAvailabilityService;
+  /** Stale-while-revalidate cache for provider model lists, backed by SQLite. */
+  modelCacheService: ModelCacheService;
   /** Generates AI-powered PR draft titles and bodies. */
   prDraftService: PrDraftService;
   /** CI check watcher for adaptive polling and manual refresh. */
@@ -641,11 +644,9 @@ async function dispatch(
     // Provider
     case "provider.listModels": {
       deps.providerAvailability.assertEnabled(params.providerId);
-      const provider = deps.providerRegistry.resolve(params.providerId);
-      if (!provider.listModels) {
-        throw new Error(`Provider "${params.providerId}" does not support model listing`);
-      }
-      return provider.listModels();
+      // Routed through ModelCacheService so cached entries hydrate the response
+      // synchronously while a background refresh keeps the cache fresh.
+      return deps.modelCacheService.listModels(params.providerId);
     }
     case "provider.getUsage": {
       deps.providerAvailability.assertUsable(params.providerId);
