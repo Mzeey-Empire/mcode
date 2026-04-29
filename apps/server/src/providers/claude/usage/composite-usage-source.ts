@@ -24,7 +24,11 @@ export class CompositeUsageSource implements IUsageSource {
   /** True when at least one source in the chain reports available. */
   async isAvailable(): Promise<boolean> {
     for (const source of this.sources) {
-      if (await source.isAvailable()) return true;
+      try {
+        if (await source.isAvailable()) return true;
+      } catch {
+        // Source threw — treat as unavailable and continue to next source.
+      }
     }
     return false;
   }
@@ -47,10 +51,14 @@ export class CompositeUsageSource implements IUsageSource {
 
     this.inflight = (async () => {
       for (const source of this.sources) {
-        const result = await source.fetch();
-        if (result !== null) {
-          this.cache = { result, expiresAt: Date.now() + CACHE_TTL_MS };
-          return result;
+        try {
+          const result = await source.fetch();
+          if (result !== null) {
+            this.cache = { result, expiresAt: Date.now() + CACHE_TTL_MS };
+            return result;
+          }
+        } catch {
+          // Source threw — continue to next source in the fallback chain.
         }
       }
       return null;
