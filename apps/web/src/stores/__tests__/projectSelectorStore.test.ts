@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { useProjectSelectorStore } from "../projectSelectorStore";
+import {
+  useProjectSelectorStore,
+  type WorkspaceEnrichmentData,
+} from "../projectSelectorStore";
+
+/** Shape of the response resolved by the enrich() RPC stub. */
+type EnrichResponse = { items: WorkspaceEnrichmentData[] };
 
 beforeEach(() => {
   // Reset data without replace=true so the patched setState preserves the enrich action.
@@ -27,7 +33,7 @@ describe("projectSelectorStore", () => {
   });
 
   it("enrich() de-dupes concurrent calls for the same id", async () => {
-    let resolve: (v: any) => void;
+    let resolve: (v: EnrichResponse) => void;
     const call = vi.fn().mockReturnValue(
       new Promise((r) => { resolve = r; })
     );

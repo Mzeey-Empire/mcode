@@ -76,12 +76,17 @@ export const useProjectSelectorStore = create<State>(() => ({
 // Patch the store's setState so full-state replacements (replace=true) always
 // restore the stable `enrich` action. This lets tests reset data-only state
 // without losing the action reference.
+//
+// Zustand's setState has overloaded signatures (`replace: true` requires the
+// full state, `false` accepts a partial). Borrow the original parameter tuple
+// so the wrapper preserves both arms without resorting to `any`.
 const originalSetState = useProjectSelectorStore.setState.bind(useProjectSelectorStore);
+type SetStateParams = Parameters<typeof originalSetState>;
 useProjectSelectorStore.setState = (
   partial: State | Partial<State> | ((state: State) => State | Partial<State>),
   replace?: boolean,
 ) => {
-  originalSetState(partial as any, replace as any);
+  originalSetState(...([partial, replace] as SetStateParams));
   // If replace wiped the enrich function, restore it.
   if (!useProjectSelectorStore.getState().enrich) {
     originalSetState({ enrich: enrichImpl } as Partial<State>, false);

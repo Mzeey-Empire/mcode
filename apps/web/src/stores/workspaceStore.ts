@@ -27,7 +27,7 @@ const lastSyncTime = new Map<string, number>();
  * stub here; production code uses {@link getTransport} directly. The shape
  * mirrors the transport's `call` method so handlers can be swapped freely.
  */
-type WorkspaceRpcCall = (method: string, params: unknown) => Promise<unknown>;
+export type WorkspaceRpcCall = (method: string, params: unknown) => Promise<unknown>;
 
 /** Full state shape and action interface for the workspace store. */
 interface WorkspaceState {
