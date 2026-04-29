@@ -18,8 +18,10 @@
   },
   "dependencies": {
     "@mcode/contracts": "workspace:*",
-    "win-dpapi": "^1.1.0",
     "winston": "^3.17.0",
     "winston-daily-rotate-file": "^5.0.0"
+  },
+  "optionalDependencies": {
+    "win-dpapi": "1.1.0"
   }
 }
