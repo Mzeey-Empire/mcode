@@ -10,6 +10,8 @@ import { spawn } from "child_process";
 import type { ChildProcess } from "child_process";
 import { createInterface } from "readline";
 import { EventEmitter } from "events";
+import { isAbsolute } from "path";
+import which from "which";
 import { logger } from "@mcode/shared";
 import { CodexRpcClient } from "./codex-rpc-client.js";
 import { mapDecisionToCodexResponse } from "./codex-permission-mapper.js";
@@ -63,6 +65,11 @@ export interface CodexAppServerOptions {
    * Ignored when approvalPolicy === "never" (full-access still auto-approves).
    */
   approvalHandler?: CodexApprovalHandler;
+  /**
+   * Optional Windows Job Object to attach the spawned child to.
+   * When set, the codex process dies with the server on crash.
+   */
+  jobObject?: import("../../services/job-object.js").JobObject;
 }
 
 /**
@@ -231,11 +238,34 @@ export class CodexAppServer extends EventEmitter {
   async start(): Promise<void> {
     const { cliPath, workingDirectory } = this.options;
 
-    const child = spawn(cliPath, ["app-server"], {
+    // Resolve bare command names to absolute paths so spawn works without shell.
+    // On Windows, which() respects PATHEXT (.EXE before .CMD), so native binaries
+    // are preferred over cmd shims. If we end up with a .cmd path, we fall back to
+    // shell:true — Node's CreateProcess can't execute .cmd files directly.
+    let resolvedCliPath = cliPath;
+    let needsShell = false;
+    if (!isAbsolute(cliPath)) {
+      try {
+        resolvedCliPath = await which(cliPath);
+      } catch {
+        // which() failed — bare name will be passed to spawn as-is.
+        // spawn will fail with a clear ENOENT if the binary is not on PATH.
+        resolvedCliPath = cliPath;
+      }
+    }
+    // Check for .cmd extension after resolving — applies to both absolute
+    // and which()-resolved paths. Node's CreateProcess cannot execute .cmd
+    // files directly; they require cmd.exe as the interpreter.
+    if (process.platform === "win32" && resolvedCliPath.toLowerCase().endsWith(".cmd")) {
+      needsShell = true;
+    }
+
+    const child = spawn(resolvedCliPath, ["app-server"], {
       stdio: ["pipe", "pipe", "pipe"],
-      shell: process.platform === "win32",
+      shell: needsShell,
       cwd: workingDirectory,
       env: { ...process.env },
+      windowsHide: true,
     });
 
     // Attach error listener immediately to catch spawn failures (ENOENT, EACCES)
@@ -251,6 +281,12 @@ export class CodexAppServer extends EventEmitter {
       const msg = `Failed to spawn codex app-server: ${spawnError.message}`;
       this.emit("fatal", msg);
       throw new Error(msg);
+    }
+
+    // Attach to the server's Job Object for crash cleanup.
+    // Must happen after spawn succeeds but before any async handshake steps.
+    if (this.options.jobObject && child.pid) {
+      this.options.jobObject.assign(child.pid);
     }
 
     this.child = child;

@@ -14,6 +14,7 @@ import { EventEmitter } from "events";
 import { randomUUID } from "crypto";
 import { logger } from "@mcode/shared";
 import { SettingsService } from "../../services/settings-service.js";
+import { JobObject } from "../../services/job-object.js";
 import type {
   IAgentProvider,
   ProviderId,
@@ -112,6 +113,7 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
 
   constructor(
     @inject(SettingsService) private readonly settingsService: SettingsService,
+    @inject("JobObject") private readonly jobObject: JobObject,
   ) {
     super();
   }
@@ -221,6 +223,7 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
       approvalHandler: supervised
         ? (req) => this.handleApprovalRequest(sessionId, threadId, req)
         : undefined,
+      jobObject: this.jobObject,
     });
 
     const mapper = new CodexEventMapper(threadId);

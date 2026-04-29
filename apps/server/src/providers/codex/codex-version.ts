@@ -38,6 +38,7 @@ export function checkCodexVersion(
     shell: true,
     timeout: 5000,
     encoding: "utf8",
+    windowsHide: true,
   });
 
   const notFoundError =
