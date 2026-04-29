@@ -16,8 +16,19 @@ const refs = vi.hoisted(() => {
     pid: 12345,
   };
 
+  // Shared existsSync spy used by "fs"/"node:fs" mocks.
+  const existsSyncSpy = vi.fn(() => false);
+
+  // Spy for resolveServerBinary — lets tests override the resolved binary path
+  // directly without depending on node:fs mock aliasing behaviour.
+  const resolveServerBinarySpy = vi.fn((input: { isPackaged: boolean; execPath: string }) =>
+    input.execPath,
+  );
+
   return {
     mockChildProcess,
+    existsSyncSpy,
+    resolveServerBinarySpy,
     getExitCallback: () => exitCallback,
     resetExitCallback: () => {
       exitCallback = null;
@@ -28,6 +39,12 @@ const refs = vi.hoisted(() => {
     getIsPackaged: () => isPackaged,
   };
 });
+
+// Mock the binary resolver so tests can control the spawn target directly
+// without depending on node:fs aliasing in the test environment.
+vi.mock("../server-binary-resolver.js", () => ({
+  resolveServerBinary: refs.resolveServerBinarySpy,
+}));
 
 vi.mock("electron", () => ({
   app: {
@@ -56,8 +73,11 @@ vi.mock("net", () => ({
   }),
 }));
 
-vi.mock("fs", () => ({
-  existsSync: vi.fn(() => false),
+// Single mock for both "fs" and "node:fs" (Vitest normalises them to the same
+// module). server-binary-resolver imports existsSync from "node:fs", while
+// server-manager imports from "fs" — the shared existsSyncSpy covers both.
+vi.mock("node:fs", () => ({
+  existsSync: refs.existsSyncSpy,
   readFileSync: vi.fn(() => {
     const err = new Error("ENOENT: no such file or directory") as NodeJS.ErrnoException;
     err.code = "ENOENT";
@@ -365,6 +385,46 @@ describe("ServerManager", () => {
     const spawnCall = vi.mocked(spawn).mock.calls[0];
     const args = spawnCall[1] as string[];
     expect(args.join(" ")).toContain("server.cjs");
+  });
+
+  it("uses process.execPath when packaged but renamed binary is missing", async () => {
+    refs.setIsPackaged(true);
+    Object.defineProperty(process, "resourcesPath", {
+      value: "/test/resources",
+      configurable: true,
+      writable: true,
+    });
+    // Resolver returns execPath (fallback) when renamed binary is absent
+    refs.resolveServerBinarySpy.mockReturnValue(process.execPath);
+
+    await manager.start();
+
+    const spawnCall = vi.mocked(spawn).mock.calls[0];
+    expect(spawnCall[0]).toBe(process.execPath);
+    const opts = spawnCall[2] as { env: Record<string, string> };
+    expect(opts.env.ELECTRON_RUN_AS_NODE).toBe("1");
+  });
+
+  it("uses renamed binary when packaged and mcode-server binary exists", async () => {
+    refs.setIsPackaged(true);
+    Object.defineProperty(process, "resourcesPath", {
+      value: "/test/resources",
+      configurable: true,
+      writable: true,
+    });
+    const expectedBinary =
+      process.platform === "win32"
+        ? "/test/resources/bin/mcode-server.exe"
+        : "/test/resources/bin/mcode-server";
+    // Resolver returns the renamed binary when it exists
+    refs.resolveServerBinarySpy.mockReturnValue(expectedBinary);
+
+    await manager.start();
+
+    const spawnCall = vi.mocked(spawn).mock.calls[0];
+    expect(spawnCall[0]).toBe(expectedBinary);
+    const opts = spawnCall[2] as { env: Record<string, string> };
+    expect(opts.env.ELECTRON_RUN_AS_NODE).toBe("1");
   });
 
   it("passes BETTER_SQLITE3_BINDING env var when packaged and binding exists", async () => {
