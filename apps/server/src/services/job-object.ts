@@ -31,7 +31,13 @@ interface WindowsState {
   OpenProcess: (access: number, inherit: number, pid: number) => unknown;
 }
 
+/**
+ * Groups child processes under a Windows Job Object so they die atomically
+ * when the server exits. No-op on non-Windows platforms (Unix process groups
+ * already provide equivalent semantics via process-kill.ts).
+ */
 export class JobObject {
+  /** True when this instance is backed by a real Windows Job Object. */
   public readonly isWindowsJob: boolean;
   private initialized = false;
   private windowsState: WindowsState | null = null;
