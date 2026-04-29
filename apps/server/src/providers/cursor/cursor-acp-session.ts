@@ -31,6 +31,12 @@ export interface CursorAcpSessionOptions {
   resumeSessionId?: string | undefined;
   /** Mcode thread id (without `mcode-` prefix) used when emitting streaming events. */
   threadId: string;
+  /**
+   * Optional Cursor interaction mode. Possible values: "agent", "plan", "ask".
+   * Undocumented in ACP protocol; passed to session/new as a probe.
+   * If Cursor rejects it, the field is silently ignored on next attempt.
+   */
+  mode?: "agent" | "plan" | "ask" | undefined;
   /** Streams mapped agent events (text deltas, etc.). */
   onAgentEvent: (event: AgentEvent) => void;
   /**
@@ -258,12 +264,20 @@ export class CursorAcpSession {
       }
     }
 
+    const sessionNewParams: Record<string, unknown> = {
+      cwd,
+      mcpServers: [],
+    };
+    if (this.opts.mode && this.opts.mode !== "agent") {
+      sessionNewParams.mode = this.opts.mode;
+    }
+
     const created = await rpc.sendRequest<
-      { cwd: string; mcpServers: unknown[] },
+      Record<string, unknown>,
       { sessionId?: string }
     >(
       "session/new",
-      { cwd, mcpServers: [] },
+      sessionNewParams,
       120_000,
     );
 
@@ -272,6 +286,9 @@ export class CursorAcpSession {
       throw new Error("Cursor ACP session/new returned no sessionId");
     }
     this.acpSessionId = sid;
-    logger.info("Cursor ACP session/new established", { sessionId: sid });
+    logger.info("Cursor ACP session/new established", {
+      sessionId: sid,
+      modeRequested: this.opts.mode ?? "agent",
+    });
   }
 }

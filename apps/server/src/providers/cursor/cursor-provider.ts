@@ -174,6 +174,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
         trustWorkspace,
         resumeSessionId: attemptResume ? resumeId : undefined,
         threadId,
+        // mode: cursorMode, // TODO: thread Cursor interaction mode ("plan" | "ask") from UI once Composer wires it through sendMessage params.
         onAgentEvent: (ev) => this.emit("event", ev),
         handleServerRequest: (req) => this.handleAcpServerRequest(sessionId, threadId, req),
       });
