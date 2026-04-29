@@ -30,6 +30,7 @@ import * as m017 from "./migrations/00000000000017_workspace_is_git_repo.js";
 import * as m018 from "./migrations/00000000000018_thread_context_window_mode_thinking.js";
 import * as m020 from "./migrations/00000000000020_thread_has_file_changes.js";
 import * as mPinned from "./migrations/20260429000000_workspace_pinned_and_last_opened.js";
+import * as mModelCache from "./migrations/20260429100000_provider_model_cache.js";
 
 /**
  * Resolve the correct native binding for better-sqlite3 based on runtime.
@@ -98,6 +99,7 @@ export function loadMigrations(): Map<string, MigrationModule> {
   // It was renamed to a real UTC timestamp on merge; legacy DBs that applied
   // it as integer 20 are translated by schema sniffing in the runner.
   migrations.set("20260429000000", mPinned);
+  migrations.set("20260429100000", mModelCache);
   return migrations;
 }
 
