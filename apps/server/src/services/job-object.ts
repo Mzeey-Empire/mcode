@@ -37,7 +37,11 @@ interface WindowsState {
  * already provide equivalent semantics via process-kill.ts).
  */
 export class JobObject {
-  /** True when this instance is backed by a real Windows Job Object. */
+  /**
+   * True when running on Windows. Reflects platform detection only;
+   * actual job-handle readiness is tracked by the private `initialized`
+   * field (false when koffi/native init fails).
+   */
   public readonly isWindowsJob: boolean;
   private initialized = false;
   private windowsState: WindowsState | null = null;
