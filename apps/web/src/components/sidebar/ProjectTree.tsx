@@ -398,17 +398,22 @@ export function ProjectTree() {
 
           {workspaces.length === 0 && (
             <div className="flex flex-col items-center justify-center gap-3 px-4 py-12">
-              <span aria-hidden="true" className="font-mono text-[28px] leading-none text-muted-foreground/15">
-                ⌂
-              </span>
-              <p className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/40">
+              {/* Lucide FolderPlus echoes the action below — keeps the empty state on-brand
+                  with the rest of the picker (no unicode glyphs). Larger/quieter than the CTA. */}
+              <FolderPlus
+                size={28}
+                strokeWidth={1.25}
+                aria-hidden
+                className="text-muted-foreground/25"
+              />
+              <p className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/45">
                 No projects yet
               </p>
               <Button
                 variant="ghost"
                 size="xs"
                 onClick={handleOpenFolder}
-                className="group h-auto gap-1.5 rounded-md px-2 py-1 text-[11.5px] font-normal text-muted-foreground/70 hover:text-foreground"
+                className="group h-auto gap-1.5 rounded-md border border-border/50 px-2.5 py-1 text-[11.5px] font-normal text-muted-foreground/80 hover:border-border hover:bg-accent/50 hover:text-foreground"
               >
                 <FolderPlus size={11} className="opacity-70 group-hover:opacity-100" />
                 Open a folder
@@ -1059,8 +1064,9 @@ function ProjectNode({
             <TooltipTrigger
               render={
                 <GitBranchMinus
-                  size={10}
-                  className="shrink-0 text-muted-foreground/35"
+                  size={12}
+                  strokeWidth={2}
+                  className="shrink-0 text-muted-foreground/45"
                   aria-label="Not a git repository"
                 />
               }

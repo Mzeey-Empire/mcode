@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { Pin, GitBranch, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PathLabel } from "./PathLabel";
 import { useProjectSelectorStore } from "@/stores/projectSelectorStore";
@@ -70,18 +71,24 @@ export function ProjectRow({ workspace, isActive, onSelect, onPin, onRemove, hom
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <span className="truncate font-medium">{workspace.name}</span>
-          {/* Pin toggle — always visible when pinned, shown on hover otherwise */}
+          {/* Pin toggle — always visible when pinned (filled), shown on hover otherwise (outline).
+              Lucide Pin icon keeps visual language consistent with the rest of the picker. */}
           <button
             data-testid="project-row-pin"
-            className="ml-1 shrink-0 text-[12px] text-primary/70 opacity-0 transition-opacity group-hover:opacity-100 data-[pinned=true]:opacity-100"
+            className="ml-1 inline-flex shrink-0 items-center justify-center rounded-sm p-0.5 text-primary/80 opacity-0 transition-opacity hover:bg-accent/60 group-hover:opacity-100 data-[pinned=true]:opacity-100"
             data-pinned={workspace.pinned}
             onClick={(e) => {
               e.stopPropagation();
               onPin(workspace.id, !workspace.pinned);
             }}
             aria-label={workspace.pinned ? "Unpin" : "Pin"}
+            title={workspace.pinned ? "Unpin project" : "Pin project"}
           >
-            {workspace.pinned ? "★" : "☆"}
+            <Pin
+              size={11}
+              strokeWidth={2}
+              className={workspace.pinned ? "fill-primary/80" : ""}
+            />
           </button>
         </div>
         <PathLabel path={workspace.path} home={home} />
@@ -99,15 +106,23 @@ export function ProjectRow({ workspace, isActive, onSelect, onPin, onRemove, hom
                       "h-1.5 w-1.5 rounded-full",
                       enrichment.isClean ? "bg-green-600/70" : "bg-amber-600/70",
                     )}
+                    aria-label={enrichment.isClean ? "Clean working tree" : "Uncommitted changes"}
+                    title={enrichment.isClean ? "Clean working tree" : "Uncommitted changes"}
                   />
-                  <span>⎇ {enrichment.branch ?? "detached"}</span>
+                  <GitBranch size={10} strokeWidth={2} className="opacity-70" aria-hidden />
+                  <span>{enrichment.branch ?? "detached"}</span>
                   {enrichment.threadCount > 0 && (
-                    <span className="tabular-nums">· {enrichment.threadCount}</span>
+                    <span
+                      className="tabular-nums"
+                      title={`${enrichment.threadCount} thread${enrichment.threadCount === 1 ? "" : "s"}`}
+                    >
+                      · {enrichment.threadCount}
+                    </span>
                   )}
                 </>
               ) : (
-                // Non-git workspace indicator in mono small-caps style
-                <span className="uppercase tracking-[0.14em] text-muted-foreground/40">⊘ no git</span>
+                // Non-git workspace indicator — quiet, all-lowercase reads less alarming than "no git"
+                <span className="text-muted-foreground/40">not a git repo</span>
               )}
             </div>
             {workspace.last_opened_at && (
@@ -122,11 +137,12 @@ export function ProjectRow({ workspace, isActive, onSelect, onPin, onRemove, hom
         )}
       </div>
 
-      {/* Remove from recents — only shown when handler is provided */}
+      {/* Remove from recents — only shown when handler is provided. Hidden until row hover so
+          the right rail stays calm; lucide X keeps the icon set consistent. */}
       {onRemove && (
         <button
           data-testid="project-row-remove"
-          className="shrink-0 text-[11px] text-muted-foreground/40 opacity-0 transition-opacity group-hover:opacity-100"
+          className="inline-flex shrink-0 items-center justify-center rounded-sm p-0.5 text-muted-foreground/40 opacity-0 transition-opacity hover:bg-accent/60 hover:text-foreground group-hover:opacity-100"
           onClick={(e) => {
             e.stopPropagation();
             onRemove(workspace.id);
@@ -134,7 +150,7 @@ export function ProjectRow({ workspace, isActive, onSelect, onPin, onRemove, hom
           aria-label="Remove from recents"
           title="Remove from recents (Ctrl+Backspace)"
         >
-          ✕
+          <X size={11} strokeWidth={2.25} aria-hidden />
         </button>
       )}
     </div>

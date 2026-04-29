@@ -7,7 +7,7 @@ import { ProjectRow } from "./ProjectRow";
  * Full-screen cold-start landing shown when no workspace is active.
  * Renders the app wordmark, then pinned and recent projects.
  * Opening a project calls setActiveWorkspace (same as the palette flow).
- * The "+ Add project" button opens the addProject palette view.
+ * The "+ Add project" button opens the palette in browse mode (input seeded to `~/`).
  */
 export function ProjectSelectorLanding() {
   const workspaces = useWorkspaceStore((s) => s.workspaces);
@@ -28,18 +28,22 @@ export function ProjectSelectorLanding() {
   const handleRemove = (id: string) => void removeRecent(id);
   const handleAdd = () => openPalette({ intent: "addProject" });
 
+  const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+  const modKey = isMac ? "⌘" : "Ctrl";
+
   return (
-    <div className="flex h-full flex-col items-center justify-center">
-      {/* Wordmark */}
-      <div className="mb-10 select-none font-mono text-2xl font-semibold tracking-tight text-foreground/80">
-        mcode
+    <div className="relative flex h-full flex-col items-center justify-center">
+      {/* Wordmark — generous size + a small caret accent give the cold-start a moment of personality */}
+      <div className="mb-12 flex items-baseline gap-1 select-none font-mono text-[34px] font-semibold leading-none tracking-tight text-foreground">
+        <span>mcode</span>
+        <span aria-hidden className="text-primary/80">_</span>
       </div>
 
       {hasProjects ? (
         <div className="w-full max-w-lg">
           {pinned.length > 0 && (
-            <section className="mb-4">
-              <h2 className="mb-1.5 px-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground/40">
+            <section className="mb-5">
+              <h2 className="mb-2 px-1 font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/70">
                 Pinned
               </h2>
               {pinned.map((w) => (
@@ -55,7 +59,7 @@ export function ProjectSelectorLanding() {
 
           {recent.length > 0 && (
             <section className="mb-6">
-              <h2 className="mb-1.5 px-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground/40">
+              <h2 className="mb-2 px-1 font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/70">
                 Recent
               </h2>
               {recent.map((w) => (
@@ -73,26 +77,36 @@ export function ProjectSelectorLanding() {
           <button
             data-testid="landing-add-project"
             onClick={handleAdd}
-            className="mt-2 w-full rounded-md border border-dashed border-border/60 py-2.5 font-mono text-[11.5px] uppercase tracking-[0.14em] text-muted-foreground/50 transition-colors hover:border-border hover:text-muted-foreground"
+            className="group mt-2 inline-flex w-full items-center justify-center gap-2 rounded-md border border-border/70 bg-secondary/40 py-2.5 text-[12.5px] text-foreground/80 transition-colors hover:border-border hover:bg-secondary/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
           >
-            + Add project
+            <span aria-hidden className="text-base leading-none text-muted-foreground/60 group-hover:text-foreground">+</span>
+            Add project
           </button>
         </div>
       ) : (
-        /* Empty state */
-        <div className="flex flex-col items-center gap-4">
-          <p className="font-mono text-[12px] uppercase tracking-[0.14em] text-muted-foreground/40">
-            No projects yet
+        /* Empty state — gives the brand-new user a single confident next step */
+        <div className="flex flex-col items-center gap-5">
+          <p className="text-[13px] text-muted-foreground/70">
+            No projects yet — open a folder to get started.
           </p>
           <button
             data-testid="landing-add-project"
             onClick={handleAdd}
-            className="rounded-md bg-primary/90 px-4 py-2 font-mono text-[11.5px] uppercase tracking-[0.14em] text-primary-foreground hover:bg-primary"
+            className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-[13px] font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
           >
-            + Add project
+            <span aria-hidden className="text-base leading-none">+</span>
+            Open a folder
           </button>
         </div>
       )}
+
+      {/* Keyboard hint — surfaces the palette so power users know it exists.
+          Pinned to the bottom so it doesn't compete with the wordmark/list. */}
+      <div className="pointer-events-none absolute bottom-6 flex items-center gap-2 font-mono text-[10.5px] tracking-[0.06em] text-muted-foreground/45">
+        <kbd className="rounded-sm border border-border/50 px-1.5 py-0.5 text-[10px]">{modKey}</kbd>
+        <kbd className="rounded-sm border border-border/50 px-1.5 py-0.5 text-[10px]">P</kbd>
+        <span className="ml-1">Command palette</span>
+      </div>
     </div>
   );
 }
