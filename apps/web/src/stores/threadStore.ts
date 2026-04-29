@@ -1698,7 +1698,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
 
     if (method === "session.quotaUpdate") {
       const providerId = params.providerId as string;
-      const categories = params.categories as QuotaCategory[];
+      const categories = Array.isArray(params.categories)
+        ? (params.categories as QuotaCategory[])
+        : [];
       const sessionCostUsd = params.sessionCostUsd as number | undefined;
       const serviceTier = params.serviceTier as "standard" | "priority" | "batch" | undefined;
       const numTurns = params.numTurns as number | undefined;
@@ -1712,7 +1714,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               ...state.usageByProvider,
               [key]: {
                 providerId,
-                quotaCategories: categories ?? [],
+                quotaCategories: categories.length > 0 ? categories : (existing?.quotaCategories ?? []),
                 sessionCostUsd: sessionCostUsd ?? existing?.sessionCostUsd,
                 serviceTier: serviceTier ?? existing?.serviceTier,
                 numTurns: numTurns ?? existing?.numTurns,
@@ -1721,6 +1723,10 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             },
           };
         });
+        // The QuotaUpdate event reports session-level deltas (cost, turns, duration).
+        // Plan utilization moves on the same edge, so re-fetch the provider snapshot
+        // to pick up fresh 5-hour / weekly numbers without forcing the user to hover.
+        get().fetchProviderUsage(threadId, providerId);
       }
       return;
     }

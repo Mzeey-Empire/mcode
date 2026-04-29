@@ -10,7 +10,7 @@
     },
     "apps/desktop": {
       "name": "mcode-desktop",
-      "version": "0.5.0",
+      "version": "0.7.0",
       "dependencies": {
         "@electron/rebuild": "^3.7.1",
         "@mcode/contracts": "workspace:*",

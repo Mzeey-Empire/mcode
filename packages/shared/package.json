@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./model-effort": "./src/model-effort/index.ts",
-    "./model-context": "./src/model-context/index.ts"
+    "./model-context": "./src/model-context/index.ts",
+    "./usage": "./src/usage/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
