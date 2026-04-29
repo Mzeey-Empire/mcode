@@ -1,24 +1,24 @@
-/**
- * Ambient module declaration for win-dpapi.
- * The package's own .d.ts declares "node-dpapi" instead of "win-dpapi",
- * so we provide the correct declaration here.
- */
+/** Ambient declaration for win-dpapi@1.1.0 (the package's own .d.ts uses the wrong module name). */
 declare module "win-dpapi" {
   /**
-   * Decrypts DPAPI-protected data.
+   * Encrypts data using DPAPI with the current user's key.
+   * Only available on Windows (win32).
    */
-  function unprotectData(
-    encryptedData: Buffer,
-    optionalEntropy: null | Buffer,
+  function protectData(
+    buffer: Buffer,
+    optionalEntropy: Buffer | null,
     scope: "CurrentUser" | "LocalMachine",
   ): Buffer;
 
   /**
-   * Encrypts data with DPAPI.
+   * Decrypts a DPAPI-protected buffer using the current user's key.
+   * Only available on Windows (win32).
    */
-  function protectData(
-    userData: Buffer,
-    optionalEntropy: null | Buffer,
+  function unprotectData(
+    buffer: Buffer,
+    optionalEntropy: Buffer | null,
     scope: "CurrentUser" | "LocalMachine",
   ): Buffer;
+
+  export { protectData, unprotectData };
 }
