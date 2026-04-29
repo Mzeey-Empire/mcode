@@ -360,9 +360,9 @@ test.describe("Architecture: Workspace management", () => {
   test("empty state shows Open a folder when no workspaces", async ({
     page,
   }) => {
-    // Default state has no workspaces
-    await expect(page.locator("text=Open a folder")).toBeVisible();
-    // "No projects yet" appears in both the sidebar and the landing (no period)
+    // Default state has no workspaces. Both the sidebar and the landing's
+    // empty state surface "Open a folder", so use `.first()` for both.
+    await expect(page.locator("text=Open a folder").first()).toBeVisible();
     await expect(page.locator("text=No projects yet").first()).toBeVisible();
   });
 });

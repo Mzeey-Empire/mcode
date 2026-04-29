@@ -136,7 +136,7 @@ test.describe("Project selector — cold-start landing", () => {
     await expect(page.getByTestId("landing-add-project")).toBeVisible();
   });
 
-  test("Add project CTA opens the palette addProject view", async ({ page }) => {
+  test("Add project CTA opens the palette in browse mode", async ({ page }) => {
     await mockWebSocketServer(page, {
       "workspace.list": [],
       "workspace.enrich": { items: [] },
@@ -151,9 +151,12 @@ test.describe("Project selector — cold-start landing", () => {
     await expect(page.getByText("No projects yet").first()).toBeVisible({ timeout: 15000 });
     await page.waitForTimeout(200);
     await page.getByTestId("landing-add-project").click();
-    // Palette dialog should open in addProject view (shows Add button)
+    // Palette opens with the input pre-seeded to "~/", so browse mode is active
+    // and the inline Add chip is visible.
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: 3000 });
+    await expect(page.getByTestId("palette-add-folder")).toBeVisible();
+    await expect(page.locator('[data-slot="palette-input"]')).toHaveValue("~/");
   });
 });
 
@@ -182,7 +185,7 @@ test.describe("Project selector — palette projects view", () => {
   test("search filters projects by name", async ({ page }) => {
     await setupWithWorkspace(page);
     await page.keyboard.press("Control+o");
-    await page.getByPlaceholder("Search commands, projects, threads…").fill("older");
+    await page.locator('[data-slot="palette-input"]').fill("older");
     const dialog = page.getByRole("dialog");
     // Use exact: true — path spans also contain the workspace name as a substring.
     await expect(dialog.getByText("older-app", { exact: true })).toBeVisible();
@@ -192,7 +195,7 @@ test.describe("Project selector — palette projects view", () => {
   test("search by path works", async ({ page }) => {
     await setupWithWorkspace(page);
     await page.keyboard.press("Control+o");
-    await page.getByPlaceholder("Search commands, projects, threads…").fill("pinned-app");
+    await page.locator('[data-slot="palette-input"]').fill("pinned-app");
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByText("pinned-app", { exact: true })).toBeVisible();
   });

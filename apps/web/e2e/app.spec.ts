@@ -70,7 +70,10 @@ test.describe("Sidebar", () => {
   test("displays Open a folder call-to-action when no workspaces exist", async ({
     page,
   }) => {
-    await expect(page.locator("text=Open a folder")).toBeVisible();
+    // The landing page's empty state also surfaces an "Open a folder" CTA, so
+    // there are multiple matches — `.first()` picks the sidebar's link, which
+    // is what this test is verifying.
+    await expect(page.locator("text=Open a folder").first()).toBeVisible();
     await page.screenshot({
       path: "e2e/screenshots/sidebar-empty-state.png",
       fullPage: true,

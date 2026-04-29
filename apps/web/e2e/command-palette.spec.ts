@@ -76,7 +76,7 @@ test.describe("Command palette", () => {
     await page.keyboard.press("Control+k");
     await expect(page.getByRole("dialog")).toBeVisible();
     // Palette input should be focused
-    await expect(page.getByPlaceholder("Search commands, projects, threads…")).toBeFocused();
+    await expect(page.locator('[data-slot="palette-input"]')).toBeFocused();
   });
 
   test("opens with Ctrl+P (legacy keybinding)", async ({ page }) => {
@@ -96,12 +96,26 @@ test.describe("Command palette", () => {
   test("> prefix filters to Actions only", async ({ page }) => {
     await setupPage(page);
     await page.keyboard.press("Control+k");
-    await page.getByPlaceholder("Search commands, projects, threads…").fill(">");
+    await page.locator('[data-slot="palette-input"]').fill(">");
     // Should show Actions section — use exact to avoid matching "Actions only" text
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByText("Actions", { exact: true })).toBeVisible();
     // Should NOT show Recent Projects heading
     await expect(dialog.getByText("Recent Projects")).not.toBeVisible();
+  });
+
+  test("typing a path prefix flips the palette into browse mode", async ({ page }) => {
+    await setupPage(page);
+    await page.keyboard.press("Control+k");
+    const input = page.locator('[data-slot="palette-input"]');
+    await input.fill("~/");
+    // The Add chip is the unmistakable signal that browse mode is active.
+    await expect(page.getByTestId("palette-add-folder")).toBeVisible();
+    // The mode label is exposed on the wrapper for diagnostics.
+    await expect(page.locator('[data-slot="palette-input-wrapper"]')).toHaveAttribute(
+      "data-palette-mode",
+      "browse",
+    );
   });
 
   test("Backspace on empty input pops from projects view to root", async ({ page }) => {
@@ -110,44 +124,27 @@ test.describe("Command palette", () => {
     // Navigate to projects view via Ctrl+O
     await page.keyboard.press("Control+o");
     const dialog = page.getByRole("dialog");
-    // Should show Projects heading or project items
     await expect(dialog).toBeVisible();
     // Backspace on empty input should pop back to root
-    const input = page.getByPlaceholder("Search commands, projects, threads…");
+    const input = page.locator('[data-slot="palette-input"]');
     await expect(input).toHaveValue("");
     await page.keyboard.press("Backspace");
-    // Root view shows "Actions" section — use exact to avoid matching "Actions only"
     await expect(dialog.getByText("Actions", { exact: true })).toBeVisible();
   });
 
-  test("filesystem browse shows directory contents", async ({ page }) => {
+  test("Ctrl+Enter in browse mode triggers the Add action", async ({ page }) => {
     await setupPage(page);
     await page.keyboard.press("Control+k");
-    // Navigate to addProject view directly
-    await page.evaluate(() => {
-      // @ts-ignore
-      const store = window.__DEBUG_commandPaletteStore;
-      if (store) store.getState().push({ kind: "addProject", path: "~/", });
-    });
-    await page.keyboard.press("Control+o");
-    // Fallback: check that projects view opened and we can click "+ Add project"
+    const input = page.locator('[data-slot="palette-input"]');
+    await input.fill("~/");
+    // The Add chip appears the instant browse mode flips on (purely query-based),
+    // but BrowseView's handleAdd needs the resolved server path from the
+    // filesystem.browse RPC before it can fire. Wait for entries to render.
     const dialog = page.getByRole("dialog");
-    await expect(dialog).toBeVisible();
-  });
-
-  test("Ctrl+Enter in addProject view triggers Add action", async ({ page }) => {
-    await setupPage(page);
-    await page.keyboard.press("Control+k");
-    await page.keyboard.press("Control+o");
-    const dialog = page.getByRole("dialog");
-    // Click "+ Add project" button in footer
-    const addBtn = dialog.getByRole("button", { name: "+ Add project" });
-    if (await addBtn.isVisible()) {
-      await addBtn.click();
-      // Now in addProject view — Ctrl+Enter should trigger the add
-      await page.keyboard.press("Control+Enter");
-      // Dialog may close on successful add or stay if RPC pending
-      await page.waitForTimeout(500);
-    }
+    await expect(page.getByTestId("palette-add-folder")).toBeVisible();
+    await expect(dialog.locator('[data-slot="command-item"]').first()).toBeVisible();
+    await page.keyboard.press("Control+Enter");
+    // Successful add closes the palette.
+    await expect(page.getByRole("dialog")).not.toBeVisible({ timeout: 3000 });
   });
 });

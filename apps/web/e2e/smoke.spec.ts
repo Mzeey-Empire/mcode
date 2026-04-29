@@ -50,7 +50,9 @@ test.describe("Mcode App", () => {
   test("open folder button is visible", async ({ page }) => {
     await page.goto("/");
     await page.waitForLoadState("networkidle");
-    await expect(page.locator("text=Open a folder")).toBeVisible();
+    // Both the sidebar and the landing's empty state surface "Open a folder";
+    // `.first()` picks one without making the assertion mode-strict.
+    await expect(page.locator("text=Open a folder").first()).toBeVisible();
     await page.screenshot({ path: "e2e/screenshots/open-folder.png", fullPage: true });
   });
 });
