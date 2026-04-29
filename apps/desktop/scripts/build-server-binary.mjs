@@ -1,4 +1,4 @@
-import { copyFile, mkdir, chmod } from "node:fs/promises";
+import { copyFile, mkdir, chmod, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 /**
@@ -38,16 +38,65 @@ export function resolveBinaryPaths({ appOutDir, electronPlatformName, productFil
 }
 
 /**
+ * Stamp Windows VERSIONINFO on an existing PE file using resedit.
+ * Task Manager's "Name" column reads FileDescription, so this is what makes
+ * the renamed binary show up as "Mcode Server" instead of "Electron".
+ *
+ * @param {string} exePath - absolute path to the .exe to modify in place
+ * @param {object} info
+ * @param {string} info.fileDescription
+ * @param {string} info.productName
+ * @param {string} info.companyName
+ * @param {string} info.fileVersion - dotted quad e.g. "1.2.3.0"
+ * @param {string} info.productVersion - dotted quad
+ * @param {string} info.originalFilename
+ * @returns {Promise<void>}
+ */
+export async function stampWindowsVersionInfo(exePath, info) {
+  const { NtExecutable, NtExecutableResource, Resource } = await import("resedit");
+  const buf = await readFile(exePath);
+  const exe = NtExecutable.from(buf);
+  const res = NtExecutableResource.from(exe);
+
+  const versionInfo = Resource.VersionInfo.createEmpty();
+  versionInfo.setFileVersion(info.fileVersion);
+  versionInfo.setProductVersion(info.productVersion);
+  versionInfo.setStringValues(
+    { lang: 1033, codepage: 1200 }, // en-US, Unicode
+    {
+      FileDescription: info.fileDescription,
+      ProductName: info.productName,
+      CompanyName: info.companyName,
+      OriginalFilename: info.originalFilename,
+      InternalName: info.originalFilename,
+    },
+  );
+  versionInfo.outputToResourceEntries(res.entries);
+  res.outputResource(exe);
+
+  await writeFile(exePath, Buffer.from(exe.generate()));
+}
+
+/**
  * Copy the Electron binary to a renamed location so the spawned server
  * shows up as "mcode-server" / "Mcode Server" in process viewers.
- * Windows VERSIONINFO stamping is added in a follow-up task.
+ * On Windows, also stamps VERSIONINFO so Task Manager shows "Mcode Server"
+ * in the Name column instead of "Electron".
  *
  * @param {object} args
  * @param {string} args.appOutDir
  * @param {"win32"|"darwin"|"linux"|"mas"|string} args.electronPlatformName
  * @param {string} args.productFilename
+ * @param {string} [args.appVersion] - dotted quad like "1.2.3.0"; required on win32
+ * @param {string} [args.companyName] - default "Mcode"
  */
-export async function buildServerBinary({ appOutDir, electronPlatformName, productFilename }) {
+export async function buildServerBinary({
+  appOutDir,
+  electronPlatformName,
+  productFilename,
+  appVersion,
+  companyName = "Mcode",
+}) {
   const { srcBinary, dstBinary } = resolveBinaryPaths({
     appOutDir,
     electronPlatformName,
@@ -57,5 +106,20 @@ export async function buildServerBinary({ appOutDir, electronPlatformName, produ
   await copyFile(srcBinary, dstBinary);
   if (electronPlatformName !== "win32") {
     await chmod(dstBinary, 0o755);
+  }
+  if (electronPlatformName === "win32") {
+    if (!appVersion) {
+      throw new Error(
+        "buildServerBinary: appVersion is required when electronPlatformName is win32",
+      );
+    }
+    await stampWindowsVersionInfo(dstBinary, {
+      fileDescription: "Mcode Server",
+      productName: "Mcode Server",
+      companyName,
+      fileVersion: appVersion,
+      productVersion: appVersion,
+      originalFilename: "mcode-server.exe",
+    });
   }
 }
