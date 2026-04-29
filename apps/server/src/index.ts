@@ -550,7 +550,15 @@ async function shutdown(): Promise<void> {
 
   // Close the Windows Job Object. With KILL_ON_JOB_CLOSE, any child processes
   // still alive are terminated atomically by the OS. No-op on non-Windows.
-  jobObject.close();
+  // Best-effort: an unexpected throw from the native handle must not abort
+  // the rest of shutdown.
+  try {
+    jobObject.close();
+  } catch (err) {
+    logger.warn("JobObject close failed during shutdown", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   logger.info("Shutdown complete");
   process.exit(0);
