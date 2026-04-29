@@ -16,6 +16,7 @@ interface CacheEntry {
 export class CompositeUsageSource implements IUsageSource {
   readonly id = "claude.composite";
   private cache: CacheEntry | null = null;
+  private inflight: Promise<QuotaCategory[] | null> | null = null;
 
   /** @param sources Ordered list of sources; earlier sources take priority. */
   constructor(private readonly sources: IUsageSource[]) {}
@@ -28,19 +29,26 @@ export class CompositeUsageSource implements IUsageSource {
     return false;
   }
 
-  /** Returns the first non-null result from the chain, cached for 90s. */
+  /** Returns the first non-null result from the chain, cached for 90s. Concurrent calls share one in-flight request. */
   async fetch(): Promise<QuotaCategory[] | null> {
     if (this.cache && this.cache.expiresAt > Date.now()) {
       return this.cache.result;
     }
+    if (this.inflight) return this.inflight;
 
-    for (const source of this.sources) {
-      const result = await source.fetch();
-      if (result !== null) {
-        this.cache = { result, expiresAt: Date.now() + CACHE_TTL_MS };
-        return result;
+    this.inflight = (async () => {
+      for (const source of this.sources) {
+        const result = await source.fetch();
+        if (result !== null) {
+          this.cache = { result, expiresAt: Date.now() + CACHE_TTL_MS };
+          return result;
+        }
       }
-    }
-    return null;
+      return null;
+    })().finally(() => {
+      this.inflight = null;
+    });
+
+    return this.inflight;
   }
 }

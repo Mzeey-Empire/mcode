@@ -61,4 +61,27 @@ describe("CompositeUsageSource", () => {
     expect(await composite.fetch()).toBeNull();
     expect(a.fetch).toHaveBeenCalledTimes(2);
   });
+
+  it("deduplicates concurrent fetch calls behind one in-flight request", async () => {
+    let callCount = 0;
+    const slowSource: IUsageSource = {
+      id: "slow",
+      isAvailable: async () => true,
+      fetch: vi.fn(async () => {
+        callCount++;
+        // Simulate async work
+        await Promise.resolve();
+        return sample;
+      }),
+    };
+    const composite = new CompositeUsageSource([slowSource]);
+
+    // Fire two concurrent fetches
+    const [r1, r2] = await Promise.all([composite.fetch(), composite.fetch()]);
+
+    expect(r1).toEqual(sample);
+    expect(r2).toEqual(sample);
+    // Source was called only once despite two concurrent fetches
+    expect(callCount).toBe(1);
+  });
 });
