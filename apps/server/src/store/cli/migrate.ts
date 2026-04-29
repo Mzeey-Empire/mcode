@@ -12,7 +12,7 @@
 import Database from "better-sqlite3";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from "fs";
 import { getMcodeDir } from "@mcode/shared";
 import { MigrationRunner } from "../migrations/runner.js";
 import { loadMigrations } from "../database.js";
@@ -29,6 +29,63 @@ const dbPath = process.env.MCODE_DB_PATH ?? join(getMcodeDir(), "mcode.db");
  */
 function nowTimestamp(): string {
   return new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
+}
+
+/**
+ * Parses a 14-char `YYYYMMDDHHMMSS` UTC timestamp into a Date instance.
+ */
+function timestampToDate(ts: string): Date {
+  const year = parseInt(ts.slice(0, 4), 10);
+  const month = parseInt(ts.slice(4, 6), 10) - 1;
+  const day = parseInt(ts.slice(6, 8), 10);
+  const hour = parseInt(ts.slice(8, 10), 10);
+  const minute = parseInt(ts.slice(10, 12), 10);
+  const second = parseInt(ts.slice(12, 14), 10);
+  return new Date(Date.UTC(year, month, day, hour, minute, second));
+}
+
+/**
+ * Formats a Date as a 14-char `YYYYMMDDHHMMSS` UTC timestamp.
+ */
+function dateToTimestamp(d: Date): string {
+  return d.toISOString().replace(/[-:T]/g, "").slice(0, 14);
+}
+
+/**
+ * Returns the highest existing migration ID (the 14-digit prefix of any
+ * `<id>_<slug>.ts` file) in `migrationsDir`, or `null` if none exist.
+ */
+function highestExistingMigrationId(): string | null {
+  if (!existsSync(migrationsDir)) {
+    return null;
+  }
+  const ids: string[] = [];
+  for (const file of readdirSync(migrationsDir)) {
+    const match = /^(\d{14})_.+\.ts$/.exec(file);
+    if (match) {
+      ids.push(match[1]);
+    }
+  }
+  if (ids.length === 0) {
+    return null;
+  }
+  return ids.reduce((a, b) => (a > b ? a : b));
+}
+
+/**
+ * Returns a migration ID strictly greater than every existing migration ID
+ * in `migrationsDir`. Falls back to `nowTimestamp()` when wall-clock time is
+ * already ahead; otherwise bumps the highest existing ID by 1 second so
+ * lexicographic ordering stays monotonic even if the local clock lags or a
+ * branch with a later timestamp has already been merged.
+ */
+function nextMigrationId(): string {
+  const now = nowTimestamp();
+  const max = highestExistingMigrationId();
+  if (max === null || now > max) {
+    return now;
+  }
+  return dateToTimestamp(new Date(timestampToDate(max).getTime() + 1000));
 }
 
 /** Prints usage instructions and exits with the given code. */
@@ -158,7 +215,7 @@ try {
         process.exit(1);
       }
 
-      const timestamp = nowTimestamp();
+      const timestamp = nextMigrationId();
       const filename = `${timestamp}_${slug}.ts`;
       const outputPath = join(migrationsDir, filename);
 
