@@ -113,6 +113,11 @@ export function RootView() {
       close();
     } else if (value.startsWith("thread:")) {
       const id = value.slice(7);
+      // Activate the thread's workspace first so downstream selectors (sidebar
+      // highlight, breadcrumb, settings panel) resolve against the right
+      // workspace before the thread itself becomes active.
+      const thread = threads.find((t) => t.id === id);
+      if (thread) setActiveWorkspace(String(thread.workspace_id));
       setActiveThread(id);
       close();
     }

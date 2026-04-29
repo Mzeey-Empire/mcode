@@ -1,7 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, type KeyboardEventHandler } from "react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { Command as CommandPrimitive } from "cmdk";
 import { SearchIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Command } from "@/components/ui/command";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { setContext } from "@/lib/context-tracker";
@@ -124,7 +125,7 @@ function PaletteInput({
   setQuery: (q: string) => void;
   browseMode: boolean;
   modeLabel: string;
-  onKeyDown: React.KeyboardEventHandler<HTMLInputElement>;
+  onKeyDown: KeyboardEventHandler<HTMLInputElement>;
   onAddClick: () => void;
 }) {
   const modKey = isMac ? "⌘" : "Ctrl";
@@ -150,8 +151,10 @@ function PaletteInput({
         }
       />
       {browseMode && (
-        <button
+        <Button
           type="button"
+          variant="default"
+          size="sm"
           data-testid="palette-add-folder"
           onMouseDown={(e) => {
             // Prevent the input from losing focus, which would dismiss cmdk highlight.
@@ -159,11 +162,11 @@ function PaletteInput({
           }}
           onClick={onAddClick}
           title={`Add this folder as a project (${modKey}+Enter)`}
-          className="absolute end-2.5 top-1/2 inline-flex -translate-y-1/2 items-center gap-1 rounded-sm bg-primary px-2 py-1 text-[11px] font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+          className="absolute end-2.5 top-1/2 -translate-y-1/2 h-7 gap-1 px-2 text-[11px]"
         >
           Add
           <Kbd variant="inline">{modKey}+Enter</Kbd>
-        </button>
+        </Button>
       )}
     </div>
   );

@@ -63,6 +63,12 @@ describe("FilesystemBrowser", () => {
       expect(result.entries.some((e) => e.name === "C:\\")).toBe(true);
       expect(result.parent).toBeNull();
       expect(result.path).toBe("/");
+    } else {
+      // POSIX: `/` resolves to the actual filesystem root, which has no parent
+      // and contains real entries (e.g. /etc, /usr, /tmp).
+      expect(result.path).toBe("/");
+      expect(result.parent).toBeNull();
+      expect(result.entries.length).toBeGreaterThan(0);
     }
   });
 

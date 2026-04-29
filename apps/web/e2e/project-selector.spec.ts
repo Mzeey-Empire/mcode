@@ -206,7 +206,10 @@ test.describe("Project selector — palette projects view", () => {
       "workspace.list": MOCK_WORKSPACES,
       "workspace.enrich": MOCK_ENRICHMENT,
       "workspace.touchLastOpened": null,
-      "workspace.pin": (() => { rpcs.push("workspace.pin"); return null; })(),
+      // Functional handler: records the call at invocation time, not at setup.
+      // The previous IIFE form ran once during object construction and missed
+      // the actual RPC, so this assertion was effectively a no-op.
+      "workspace.pin": () => { rpcs.push("workspace.pin"); return null; },
       "thread.list": [],
       "settings.get": MOCK_SETTINGS,
     });
@@ -221,8 +224,8 @@ test.describe("Project selector — palette projects view", () => {
     await row.hover();
     const pinBtn = row.getByTestId("project-row-pin");
     await pinBtn.click();
-    // RPC should have fired (check UI updated optimistically)
-    await page.waitForTimeout(300);
+    // Wait for the RPC to be recorded by the mock handler.
+    await expect.poll(() => rpcs).toContain("workspace.pin");
   });
 
   test("remove button on recent rows removes the workspace from recents", async ({ page }) => {
@@ -232,19 +235,19 @@ test.describe("Project selector — palette projects view", () => {
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: 3000 });
     const recentRows = dialog.getByTestId("project-row");
-    // Find a recent row (not pinned) — "recent-app" is the second workspace in mock data
-    if (await recentRows.count() > 1) {
-      const row = recentRows.nth(1);
-      await row.hover();
-      const removeBtn = row.getByTestId("project-row-remove");
-      if (await removeBtn.isVisible()) {
-        await removeBtn.click();
-        await page.waitForTimeout(300);
-        // Verify the removed workspace name is no longer in the list.
-        // Don't check nth(1) — the index shifts after removal.
-        await expect(dialog.getByText("recent-app", { exact: true })).not.toBeVisible();
-      }
-    }
+    // Mock data has 3 workspaces (1 pinned + 2 recent) so 3 rows total. The
+    // first recent row sits at index 1 (after the pinned row). Fail loudly if
+    // that ordering breaks, rather than silently skipping the assertion the
+    // way the previous if-guards did.
+    await expect(recentRows).toHaveCount(3);
+    const row = recentRows.nth(1);
+    await row.hover();
+    const removeBtn = row.getByTestId("project-row-remove");
+    await expect(removeBtn).toBeVisible();
+    await removeBtn.click();
+    // The removed workspace's name should disappear from the list.
+    // Don't check nth(1) — the index shifts after removal.
+    await expect(dialog.getByText("recent-app", { exact: true })).not.toBeVisible();
   });
 
   test("selecting a project from palette closes palette and activates workspace", async ({ page }) => {

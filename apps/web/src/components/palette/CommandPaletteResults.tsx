@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import {
   CommandGroup,
   CommandItem,
@@ -13,7 +14,7 @@ interface Props {
   /** Called when the user selects an item. Receives the item's value. */
   onSelect: (value: string) => void;
   /** Optional trailing content to render after the group list (e.g. an action row). */
-  footer?: React.ReactNode;
+  footer?: ReactNode;
 }
 
 /**

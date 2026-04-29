@@ -271,6 +271,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
     if (id) {
       get().loadThreads(id);
+      // Optimistically bump the local last_opened_at so the project selector
+      // re-sorts immediately. Without this the row only moves to the top of
+      // "Recent" after the next workspace list refresh, which feels laggy.
+      const now = Date.now();
+      set((s) => ({
+        workspaces: s.workspaces.map((w) =>
+          w.id === id ? { ...w, last_opened_at: now } : w
+        ),
+      }));
       // Record this as the last-opened workspace for recency ordering in the project selector.
       if (call) {
         call("workspace.touchLastOpened", { id }).catch(() => {});

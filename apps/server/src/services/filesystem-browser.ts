@@ -68,7 +68,9 @@ export class FilesystemBrowser {
     }
 
     // Expand ~ to home directory, then resolve to an absolute path.
-    let target = input.replace(/^~/, homedir());
+    // Lookahead restricts the match to standalone `~` and `~/...` so inputs
+    // like `~foo` are passed through untouched rather than rewritten.
+    let target = input.replace(/^~(?=$|[\\/])/, homedir());
     target = resolve(target);
 
     // Walk up to the nearest existing path (handles ghost paths from stale state).
@@ -84,7 +86,20 @@ export class FilesystemBrowser {
       }
     }
 
-    const s = await stat(target);
+    // Final stat can still reject when the ancestor walk lands on a path that
+    // disappeared (e.g. an ejected drive root on Windows). Fall back to the
+    // drives list on Windows or the root directory on POSIX so the RPC always
+    // resolves to a usable browse response.
+    let s;
+    try {
+      s = await stat(target);
+    } catch {
+      if (platform() === "win32") {
+        return { path: "/", parent: null, entries: listWindowsDrives() };
+      }
+      target = "/";
+      s = await stat(target);
+    }
     // When the resolved target is a file, browse its parent directory.
     const dir = s.isDirectory() ? target : dirname(target);
 

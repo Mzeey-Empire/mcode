@@ -54,8 +54,19 @@ export function ProjectRow({ workspace, isActive, onSelect, onPin, onRemove, hom
       aria-selected={isActive}
       data-active={isActive}
       data-testid="project-row"
+      // Keyboard reachability: in the landing page (no parent CommandItem),
+      // the row needs to be tabbable so non-mouse users can open a project.
+      // Inside the palette the parent CommandItem already handles focus, so the
+      // duplicate tab stop is harmless — both routes call onSelect.
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect(workspace.id);
+        }
+      }}
       className={cn(
-        "group flex cursor-pointer items-center gap-3 rounded-sm px-3 py-2 text-[13px] transition-colors",
+        "group flex cursor-pointer items-center gap-3 rounded-sm px-3 py-2 text-[13px] transition-colors outline-none focus-visible:ring-1 focus-visible:ring-ring",
         // group-aria-selected/cmd responds to parent CommandItem keyboard focus in the palette.
         // has no effect in landing page context (no parent with group/cmd).
         "hover:bg-accent/60 data-[active=true]:bg-accent group-aria-selected/cmd:bg-accent",

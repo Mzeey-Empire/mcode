@@ -2,6 +2,7 @@ import { useEffect, useMemo } from "react";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useProjectSelectorStore } from "@/stores/projectSelectorStore";
+import { Button } from "@/components/ui/button";
 import { ProjectRow } from "./ProjectRow";
 import { Kbd } from "../palette/Kbd";
 
@@ -88,14 +89,15 @@ export function ProjectSelectorLanding() {
             </section>
           )}
 
-          <button
+          <Button
             data-testid="landing-add-project"
+            variant="outline"
             onClick={handleAdd}
-            className="group mt-2 inline-flex w-full items-center justify-center gap-2 rounded-md border border-border/70 bg-secondary/40 py-2.5 text-[12.5px] text-foreground/80 transition-colors hover:border-border hover:bg-secondary/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            className="group mt-2 w-full gap-2 py-2.5 text-[12.5px] text-foreground/80"
           >
             <span aria-hidden className="text-base leading-none text-muted-foreground/60 group-hover:text-foreground">+</span>
             Add project
-          </button>
+          </Button>
         </div>
       ) : (
         /* Empty state — gives the brand-new user a single confident next step */
@@ -103,14 +105,14 @@ export function ProjectSelectorLanding() {
           <p className="text-[13px] text-muted-foreground/70">
             No projects yet — open a folder to get started.
           </p>
-          <button
+          <Button
             data-testid="landing-add-project"
             onClick={handleAdd}
-            className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-[13px] font-medium text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+            className="gap-2 px-4 py-2 text-[13px]"
           >
             <span aria-hidden className="text-base leading-none">+</span>
             Open a folder
-          </button>
+          </Button>
         </div>
       )}
 

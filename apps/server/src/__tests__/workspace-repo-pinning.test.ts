@@ -3,7 +3,7 @@
  */
 
 import "reflect-metadata";
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type Database from "better-sqlite3";
 import { openMemoryDatabase } from "../store/database.js";
 import { WorkspaceRepo } from "../repositories/workspace-repo.js";
@@ -50,14 +50,29 @@ describe("WorkspaceRepo pinning + recency", () => {
     const c = repo.create("c", "/c", true);
     const d = repo.create("d", "/d", true); // never opened
 
-    // Open in order: b, then c, then a (so a is most recent)
-    repo.touchLastOpened(b.id);
-    repo.touchLastOpened(c.id);
-    repo.touchLastOpened(a.id);
-    repo.setPinned(b.id, true); // b is pinned
+    // Stub Date.now so each touchLastOpened gets a strictly-increasing timestamp.
+    // Without this, three rapid Date.now() calls inside the same ms tick can
+    // produce equal values and the "DESC by last_opened_at" ordering becomes
+    // ambiguous, making this test flaky on fast hardware.
+    let tick = 1_700_000_000_000;
+    const spy = vi.spyOn(Date, "now").mockImplementation(() => ++tick);
 
-    const list = repo.listAll();
-    expect(list.map((w) => w.name)).toEqual(["b", "a", "c"]);
-    expect(list.find((w) => w.id === d.id)).toBeUndefined();
+    try {
+      // Open in order: b, then c, then a (so a is most recent)
+      repo.touchLastOpened(b.id);
+      repo.touchLastOpened(c.id);
+      repo.touchLastOpened(a.id);
+      repo.setPinned(b.id, true); // b is pinned
+
+      const list = repo.listAll();
+      expect(list.map((w) => w.name)).toEqual(["b", "a", "c"]);
+      expect(list.find((w) => w.id === d.id)).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 });

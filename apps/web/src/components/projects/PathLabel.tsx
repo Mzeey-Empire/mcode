@@ -17,10 +17,17 @@ interface Props {
  * the text remains logically left-to-right for screen readers.
  */
 export function PathLabel({ path, home, className }: Props) {
-  const display =
-    home && path.startsWith(home + "/")
-      ? "~" + path.slice(home.length)
-      : path;
+  // Match home + either separator so Windows paths (C:\Users\cj\...) collapse
+  // to "~\..." just like POSIX paths collapse to "~/...". An exact match (path
+  // === home) also collapses to a bare "~".
+  let display = path;
+  if (home) {
+    if (path === home) {
+      display = "~";
+    } else if (path.startsWith(home + "/") || path.startsWith(home + "\\")) {
+      display = "~" + path.slice(home.length);
+    }
+  }
 
   return (
     <span

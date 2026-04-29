@@ -59,6 +59,9 @@ export function BrowseView() {
   useEffect(() => {
     const reqKey = directoryPath;
     inflightRef.current = reqKey;
+    // Drop the previous directory's entries immediately so the user can't
+    // pick a stale folder belonging to the path they just navigated away from.
+    setResult(null);
     setLoading(true);
     setError(null);
     (async () => {
@@ -116,7 +119,12 @@ export function BrowseView() {
     (entryName: string) => {
       // Drives mode: replace the entire query with the chosen drive path.
       if (isDrivesMode) {
-        setQuery(entryName);
+        // Defensively root bare drive letters ("C:" → "C:\") so the next
+        // browse step doesn't get a drive-relative path that silently drops
+        // out of browse mode. listWindowsDrives() already returns the rooted
+        // form, so this is a safeguard for callers that might pass bare letters.
+        const rooted = /^[A-Za-z]:$/.test(entryName) ? `${entryName}\\` : entryName;
+        setQuery(rooted);
         return;
       }
       const newQuery = directoryPath + entryName + "/";
