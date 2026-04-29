@@ -45,6 +45,11 @@ import { WebSocket } from "ws";
 import { AgentEventType } from "@mcode/contracts";
 import type { AgentEvent } from "@mcode/contracts";
 import type Database from "better-sqlite3";
+import type { JobObject } from "./services/job-object.js";
+
+// Make this Node process identifiable in Task Manager / `tasklist` /
+// macOS Activity Monitor as "Mcode Server" instead of bare "node".
+process.title = "Mcode Server";
 
 const PREFERRED_PORT = parseInt(process.env.MCODE_PORT ?? "19400", 10);
 const MAX_PORT_ATTEMPTS = 10;
@@ -133,6 +138,7 @@ const workspaceRepo = container.resolve(WorkspaceRepo); // Used only for startup
 const cleanupWorker = container.resolve(CleanupWorker);
 const prDraftService = container.resolve(PrDraftService);
 const db = container.resolve<Database.Database>("Database");
+const jobObject = container.resolve<JobObject>("JobObject");
 
 const portPush = new PortPush();
 
@@ -539,6 +545,10 @@ async function shutdown(): Promise<void> {
   } catch {
     // Lock file may already be gone
   }
+
+  // Close the Windows Job Object. With KILL_ON_JOB_CLOSE, any child processes
+  // still alive are terminated atomically by the OS. No-op on non-Windows.
+  jobObject.close();
 
   logger.info("Shutdown complete");
   process.exit(0);
