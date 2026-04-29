@@ -17,7 +17,6 @@ interface RawUsageResponse {
 export class AnthropicOAuthUsageSource implements IUsageSource {
   readonly id = "claude.oauth";
   private cachedToken: AnthropicOauthToken | null = null;
-  private tokenEvicted = true;
 
   /**
    * @param readToken Per-OS OAuth token reader (e.g. `readAnthropicOauthToken`
@@ -54,9 +53,8 @@ export class AnthropicOAuthUsageSource implements IUsageSource {
     }
 
     if (response.status === 401) {
-      // Token rejected — evict so the next call re-reads from disk.
+      // Token rejected — clear cache so the next call re-reads from disk.
       // The SDK refreshes credentials on its own turns.
-      this.tokenEvicted = true;
       this.cachedToken = null;
       return null;
     }
@@ -74,16 +72,14 @@ export class AnthropicOAuthUsageSource implements IUsageSource {
 
   /**
    * Returns a valid cached token, or fetches a fresh one when the cache is
-   * stale, expired, or was evicted after a 401.
+   * absent, expired, or was evicted after a 401.
    */
   private async getToken(): Promise<AnthropicOauthToken | null> {
     if (this.cachedToken && this.cachedToken.expiresAt > Date.now()) {
       return this.cachedToken;
     }
-    if (this.tokenEvicted || !this.cachedToken) {
-      this.cachedToken = await this.readToken();
-      this.tokenEvicted = false;
-    }
+    // Token is absent, expired, or was cleared after a 401 — re-read from disk.
+    this.cachedToken = await this.readToken();
     return this.cachedToken;
   }
 }
@@ -98,7 +94,7 @@ function mapToCategories(body: RawUsageResponse): QuotaCategory[] {
       used: body.five_hour.utilization,
       total: 100,
       isUnlimited: false,
-      remainingPercent: clampPercent(1 - body.five_hour.utilization / 100),
+      remainingPercent: clampPercent((100 - body.five_hour.utilization) / 100),
       resetDate: body.five_hour.resets_at,
     });
   }
@@ -108,7 +104,7 @@ function mapToCategories(body: RawUsageResponse): QuotaCategory[] {
       used: body.seven_day.utilization,
       total: 100,
       isUnlimited: false,
-      remainingPercent: clampPercent(1 - body.seven_day.utilization / 100),
+      remainingPercent: clampPercent((100 - body.seven_day.utilization) / 100),
       resetDate: body.seven_day.resets_at,
     });
   }
@@ -125,12 +121,12 @@ function mapToCategories(body: RawUsageResponse): QuotaCategory[] {
 }
 
 /**
- * Clamps a ratio to [0, 1], treating NaN as 0, and rounds to two decimal
- * places to avoid IEEE-754 drift when utilization is an integer percentage.
+ * Clamps a ratio to [0, 1], treating NaN as 0.
+ * Callers use integer arithmetic `(100 - x) / 100` to avoid IEEE-754 drift.
  */
 function clampPercent(value: number): number {
   if (Number.isNaN(value)) return 0;
   if (value < 0) return 0;
   if (value > 1) return 1;
-  return Math.round(value * 100) / 100;
+  return value;
 }

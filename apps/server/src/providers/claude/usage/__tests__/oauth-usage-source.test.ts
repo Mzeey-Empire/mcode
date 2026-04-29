@@ -101,4 +101,41 @@ describe("AnthropicOAuthUsageSource", () => {
     expect(await source.fetch()).toBeNull();
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
+
+  it("caches a valid token across multiple fetch calls", async () => {
+    readToken.mockResolvedValue({ accessToken: "tok", expiresAt: Date.now() + 60_000 });
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      okResponse({
+        five_hour: { utilization: 1, resets_at: "z" },
+        seven_day: { utilization: 1, resets_at: "z" },
+        extra_usage: { used_cents: 0, utilization: 0 },
+      }),
+    );
+    const source = new AnthropicOAuthUsageSource(readToken);
+    await source.fetch();
+    await source.fetch();
+    // Token was valid and unexpired — readToken should only be called once.
+    expect(readToken).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-reads token when the cached token is expired", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      okResponse({
+        five_hour: { utilization: 1, resets_at: "z" },
+        seven_day: { utilization: 1, resets_at: "z" },
+        extra_usage: { used_cents: 0, utilization: 0 },
+      }),
+    );
+    // First call returns an already-expired token; second returns a fresh one.
+    readToken
+      .mockResolvedValueOnce({ accessToken: "stale", expiresAt: Date.now() - 1 })
+      .mockResolvedValueOnce({ accessToken: "fresh", expiresAt: Date.now() + 60_000 });
+
+    const source = new AnthropicOAuthUsageSource(readToken);
+    await source.fetch(); // stale token → re-read each call until a fresh one is stored
+    await source.fetch(); // fresh token cached — no further re-read
+    await source.fetch(); // served from cache
+    // readToken called twice: once for the expired token, once for the fresh one.
+    expect(readToken).toHaveBeenCalledTimes(2);
+  });
 });
