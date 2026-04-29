@@ -23,6 +23,7 @@ Per-setting reference for Mcode's `settings.json`. For schema conventions and st
 | `notifications.enabled` | boolean | `true` | - | - | Whether desktop notifications are enabled |
 | `worktree.naming.mode` | enum | `"auto"` | `"auto"` \| `"custom"` \| `"ai"` | - | Naming strategy for new worktree branches |
 | `worktree.naming.aiConfirmation` | boolean | `true` | - | - | Prompt before using AI-generated branch names |
+| `performance.threadCacheSize` | integer | `10` | 1-25 | - | Number of threads to keep in memory for instant switching. Lower values reduce memory use; values ≤ 3 mean most thread switches reload from the server. Takes effect immediately. |
 | `server.memory.heapMb` | integer | `512` | 64-8192 | `MCODE_SERVER_HEAP_MB` | V8 max old space for the server process (MB) |
 | `provider.cli.codex` | string | `""` | - | - | Path to the Codex CLI binary. When empty, mcode looks for `codex` on the system PATH. |
 | `provider.cli.claude` | string | `""` | - | - | Path to the Claude Code CLI binary. When empty, mcode looks for `claude` on the system PATH. |

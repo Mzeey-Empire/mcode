@@ -18,31 +18,37 @@ beforeAll(() => {
   Element.prototype.scrollIntoView = () => {};
 });
 
-vi.mock("@/stores/uiStore", () => ({
-  useUiStore: vi.fn((selector: (s: unknown) => unknown) =>
-    selector({
-      commandPaletteOpen: true,
-      setCommandPaletteOpen: vi.fn(),
-    }),
-  ),
-}));
-
-vi.mock("@/lib/command-registry", () => ({
-  getAllCommands: vi.fn(() => []),
-  executeCommand: vi.fn(),
-}));
-
-vi.mock("@/lib/keybinding-manager", () => ({
-  getKeybindingForCommand: vi.fn(() => null),
-  formatKeybinding: vi.fn(() => ""),
+vi.mock("@/stores/commandPaletteStore", () => ({
+  useCommandPaletteStore: vi.fn((selector?: (s: unknown) => unknown) => {
+    const state = {
+      isOpen: true,
+      viewStack: [{ kind: "root" }],
+      query: "",
+      pendingConfirm: null,
+      close: vi.fn(),
+      pop: vi.fn(),
+      setQuery: vi.fn(),
+    };
+    return selector ? selector(state) : state;
+  }),
 }));
 
 vi.mock("@/lib/context-tracker", () => ({
   setContext: vi.fn(),
 }));
 
-vi.mock("@/lib/platform", () => ({
-  isMac: false,
+// Mock subviews so they render nothing (avoids their own store dependencies)
+vi.mock("../../palette/views/RootView", () => ({
+  RootView: () => <div data-testid="root-view" />,
+}));
+vi.mock("../../palette/views/ProjectsView", () => ({
+  ProjectsView: () => null,
+}));
+vi.mock("../../palette/views/BrowseView", () => ({
+  BrowseView: () => null,
+}));
+vi.mock("../../palette/views/SelectionListView", () => ({
+  SelectionListView: () => null,
 }));
 
 // Mock the settings section map so SettingsView renders without real section components
@@ -52,13 +58,12 @@ vi.mock("../../settings/settings-nav", () => ({
   },
 }));
 
-import { CommandPalette } from "../../CommandPalette";
+import { CommandPalette } from "../../palette/CommandPalette";
 import { SettingsView } from "../../settings/SettingsView";
 
 describe("CommandPalette popup positioning", () => {
   it("does NOT have top-[15%] in the popup className", () => {
     render(<CommandPalette />);
-    // The Popup renders into a portal; query the full document
     const popup = document.querySelector("[class*='top-']");
     expect(popup?.className ?? "").not.toContain("top-[15%]");
   });

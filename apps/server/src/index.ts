@@ -41,6 +41,8 @@ import { PrDraftService } from "./services/pr-draft-service";
 import { CiWatcherService } from "./services/ci-watcher";
 import { ProviderAvailabilityService } from "./services/provider-availability-service";
 import { ProviderRegistry } from "./providers/provider-registry";
+import { WorkspaceEnricher } from "./services/workspace-enricher";
+import { FilesystemBrowser } from "./services/filesystem-browser";
 import { WebSocket } from "ws";
 import { AgentEventType } from "@mcode/contracts";
 import type { AgentEvent } from "@mcode/contracts";
@@ -137,6 +139,8 @@ const skillWatcherService = container.resolve(SkillWatcherService);
 const memoryPressureService = container.resolve(MemoryPressureService);
 const taskRepo = container.resolve(TaskRepo);
 const workspaceRepo = container.resolve(WorkspaceRepo); // Used only for startup watcher initialization
+const enricher = container.resolve(WorkspaceEnricher);
+const filesystemBrowser = container.resolve(FilesystemBrowser);
 const cleanupWorker = container.resolve(CleanupWorker);
 const prDraftService = container.resolve(PrDraftService);
 const db = container.resolve<Database.Database>("Database");
@@ -354,6 +358,8 @@ const { httpServer, wss } = createWsServer({
   ciWatcherService,
   threadRepo,
   workspaceRepo,
+  enricher,
+  filesystemBrowser,
   authToken: AUTH_TOKEN,
 });
 

@@ -1,98 +1,95 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
+import { mockWebSocketServer } from "./helpers/e2e-helpers";
+import { getDefaultSettings } from "@mcode/contracts";
 
-/**
- * Mock the WebSocket server so the WS transport connects and RPC calls
- * resolve instead of hanging. Required since App.tsx gates rendering on
- * transport readiness (shows "Connecting..." until WS opens).
- */
-async function mockWebSocketServer(page: Page): Promise<void> {
-  const now = new Date().toISOString();
-  const workspace = {
-    id: "ws-1",
-    name: "Test Workspace",
-    path: "/test/path",
-    provider_config: {},
-    created_at: now,
-    updated_at: now,
-  };
-  const thread1 = {
-    id: "thread-1",
-    workspace_id: "ws-1",
-    title: "Test Thread",
-    status: "paused" as const,
-    mode: "direct" as const,
-    worktree_path: null,
-    branch: "main",
-    worktree_managed: false,
-    issue_number: null,
-    pr_number: null,
-    pr_status: null,
-    sdk_session_id: null,
-    created_at: now,
-    updated_at: now,
-    model: "claude-3-5-sonnet",
-    provider: "claude",
-    deleted_at: null,
-    last_context_tokens: null,
-    context_window: null,
-    reasoning_level: null,
-    interaction_mode: null,
-    permission_mode: null,
-    parent_thread_id: null,
-    forked_from_message_id: null,
-  };
-  const thread2 = {
-    id: "thread-2",
-    workspace_id: "ws-1",
-    title: "Another Thread",
-    status: "paused" as const,
-    mode: "direct" as const,
-    worktree_path: null,
-    branch: "main",
-    worktree_managed: false,
-    issue_number: null,
-    pr_number: null,
-    pr_status: null,
-    sdk_session_id: null,
-    created_at: now,
-    updated_at: now,
-    model: "claude-3-5-sonnet",
-    provider: "claude",
-    deleted_at: null,
-    last_context_tokens: null,
-    context_window: null,
-    reasoning_level: null,
-    interaction_mode: null,
-    permission_mode: null,
-    parent_thread_id: null,
-    forked_from_message_id: null,
-  };
+const MOCK_SETTINGS = getDefaultSettings();
+const now = new Date().toISOString();
+const WS_ID = "ws-1";
 
-  await page.routeWebSocket(/ws:\/\/localhost:3100/, (ws) => {
-    ws.onMessage((data) => {
-      let msg: Record<string, unknown>;
-      try {
-        msg = JSON.parse(data.toString());
-      } catch {
-        return;
-      }
-      const method = msg.method as string;
-      let result: unknown = null;
-      if (method === "workspace.list") result = [workspace];
-      else if (method === "thread.list") result = [thread1, thread2];
-      else if (method?.endsWith(".list")) result = [];
-      else if (method === "git.currentBranch") result = "main";
-      else if (method === "agent.activeCount") result = 0;
-      else if (method === "app.version") result = "0.0.1-test";
-      else if (method === "config.discover") result = {};
-      ws.send(JSON.stringify({ id: msg.id, result }));
-    });
-  });
-}
+const workspace = {
+  id: WS_ID,
+  name: "Test Workspace",
+  path: "/test/path",
+  provider_config: {},
+  is_git_repo: true,
+  created_at: now,
+  updated_at: now,
+  pinned: false,
+  last_opened_at: Date.now() - 3600_000,
+};
+
+const thread1 = {
+  id: "thread-1",
+  workspace_id: WS_ID,
+  title: "Test Thread",
+  status: "paused" as const,
+  mode: "direct" as const,
+  worktree_path: null,
+  branch: "main",
+  worktree_managed: false,
+  issue_number: null,
+  pr_number: null,
+  pr_status: null,
+  sdk_session_id: null,
+  created_at: now,
+  updated_at: now,
+  model: "claude-3-5-sonnet",
+  provider: "claude",
+  deleted_at: null,
+  last_context_tokens: null,
+  context_window: null,
+  reasoning_level: null,
+  interaction_mode: null,
+  permission_mode: null,
+  parent_thread_id: null,
+  forked_from_message_id: null,
+};
+
+const thread2 = {
+  id: "thread-2",
+  workspace_id: WS_ID,
+  title: "Another Thread",
+  status: "paused" as const,
+  mode: "direct" as const,
+  worktree_path: null,
+  branch: "main",
+  worktree_managed: false,
+  issue_number: null,
+  pr_number: null,
+  pr_status: null,
+  sdk_session_id: null,
+  created_at: now,
+  updated_at: now,
+  model: "claude-3-5-sonnet",
+  provider: "claude",
+  deleted_at: null,
+  last_context_tokens: null,
+  context_window: null,
+  reasoning_level: null,
+  interaction_mode: null,
+  permission_mode: null,
+  parent_thread_id: null,
+  forked_from_message_id: null,
+};
 
 test.describe("Chat Header Thread Rename", () => {
   test.beforeEach(async ({ page }) => {
-    await mockWebSocketServer(page);
+    // Pre-expand the workspace in the sidebar so the thread list loads on mount.
+    await page.addInitScript((wsId: string) => {
+      localStorage.setItem(
+        "mcode-expanded-projects",
+        JSON.stringify({ [wsId]: true }),
+      );
+    }, WS_ID);
+
+    await mockWebSocketServer(page, {
+      "workspace.list": [workspace],
+      "workspace.enrich": { items: [] },
+      "workspace.touchLastOpened": null,
+      "thread.list": [thread1, thread2],
+      "thread.updateTitle": true,
+      "settings.get": MOCK_SETTINGS,
+    });
     await page.goto("/");
     await page.waitForSelector("[data-testid='thread-item']");
     // Navigate to a thread (wait for 250ms delay)

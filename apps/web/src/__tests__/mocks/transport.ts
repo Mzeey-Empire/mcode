@@ -8,6 +8,11 @@ import type {
 import { getDefaultSettings } from "@mcode/contracts";
 import { vi } from "vitest";
 
+/**
+ * Build a mock {@link Workspace} with stable defaults for web unit tests.
+ * Override any field via the `overrides` argument; the returned object is a
+ * fresh shallow copy so callers can freely mutate it without affecting siblings.
+ */
 export function createMockWorkspace(
   overrides?: Partial<Workspace>,
 ): Workspace {
@@ -19,6 +24,8 @@ export function createMockWorkspace(
     is_git_repo: true,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
+    pinned: false,
+    last_opened_at: null,
     ...overrides,
   };
 }
@@ -59,6 +66,7 @@ export function createMockThread(overrides?: Partial<Thread>): Thread {
   };
 }
 
+/** Build a mock {@link Message} with stable defaults for web unit tests. */
 export function createMockMessage(overrides?: Partial<Message>): Message {
   return {
     id: crypto.randomUUID(),
@@ -80,8 +88,14 @@ export const mockTransport: McodeTransport = {
   createWorkspace: vi.fn(),
   listWorkspaces: vi.fn().mockResolvedValue([]),
   deleteWorkspace: vi.fn().mockResolvedValue(true),
+  touchLastOpened: vi.fn().mockResolvedValue(undefined),
+  pinWorkspace: vi.fn().mockResolvedValue(undefined),
+  removeRecent: vi.fn().mockResolvedValue(undefined),
+  enrichWorkspaces: vi.fn().mockResolvedValue({ items: [] }),
+  filesystemBrowse: vi.fn().mockResolvedValue({ path: "/", parent: null, entries: [] }),
   createThread: vi.fn(),
   listThreads: vi.fn().mockResolvedValue([]),
+  listRecentThreads: vi.fn().mockResolvedValue([]),
   deleteThread: vi.fn().mockResolvedValue(true),
   listBranches: vi.fn().mockResolvedValue([]),
   getCurrentBranch: vi.fn().mockResolvedValue("main"),

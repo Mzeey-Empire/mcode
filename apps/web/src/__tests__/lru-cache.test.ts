@@ -55,4 +55,53 @@ describe("LruCache", () => {
     expect(cache.size).toBe(0);
     expect(cache.get("a")).toBeUndefined();
   });
+
+  it("resize() to a smaller capacity evicts the oldest entries and returns them in eviction order", () => {
+    const cache = new LruCache<string, number>(4);
+    cache.set("a", 1);
+    cache.set("b", 2);
+    cache.set("c", 3);
+    cache.set("d", 4);
+    const evicted = cache.resize(2);
+    expect(evicted).toEqual(["a", "b"]);
+    expect(cache.size).toBe(2);
+    expect(cache.get("a")).toBeUndefined();
+    expect(cache.get("b")).toBeUndefined();
+    expect(cache.get("c")).toBe(3);
+    expect(cache.get("d")).toBe(4);
+  });
+
+  it("resize() to a larger capacity preserves all entries and returns []", () => {
+    const cache = new LruCache<string, number>(2);
+    cache.set("a", 1);
+    cache.set("b", 2);
+    expect(cache.resize(5)).toEqual([]);
+    cache.set("c", 3);
+    cache.set("d", 4);
+    cache.set("e", 5);
+    expect(cache.size).toBe(5);
+    expect(cache.get("a")).toBe(1);
+    expect(cache.get("e")).toBe(5);
+  });
+
+  it("resize() clamps to a minimum of 1", () => {
+    const cache = new LruCache<string, number>(3);
+    cache.set("a", 1);
+    cache.set("b", 2);
+    cache.set("c", 3);
+    const evicted = cache.resize(0);
+    expect(cache.size).toBe(1);
+    expect(cache.get("c")).toBe(3);
+    expect(evicted).toEqual(["a", "b"]);
+  });
+
+  it("resize() to the same capacity is a no-op and returns []", () => {
+    const cache = new LruCache<string, number>(3);
+    cache.set("a", 1);
+    cache.set("b", 2);
+    expect(cache.resize(3)).toEqual([]);
+    expect(cache.size).toBe(2);
+    expect(cache.get("a")).toBe(1);
+    expect(cache.get("b")).toBe(2);
+  });
 });

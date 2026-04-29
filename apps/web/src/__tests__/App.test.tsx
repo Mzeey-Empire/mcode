@@ -21,6 +21,12 @@ vi.mock("@/transport", async () => ({
     getActiveAgentCount: vi.fn().mockResolvedValue(0),
     discoverConfig: vi.fn().mockResolvedValue({}),
     getVersion: vi.fn().mockResolvedValue("0.2.0"),
+    touchLastOpened: vi.fn().mockResolvedValue(undefined),
+    pinWorkspace: vi.fn().mockResolvedValue(undefined),
+    removeRecent: vi.fn().mockResolvedValue(undefined),
+    enrichWorkspaces: vi.fn().mockResolvedValue({ items: [] }),
+    filesystemBrowse: vi.fn().mockResolvedValue({ path: "/", parent: null, entries: [] }),
+    getSettings: vi.fn().mockResolvedValue({}),
   }),
 }));
 
@@ -38,8 +44,9 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByText("Mcode")).toBeInTheDocument());
   });
 
-  it("renders the empty thread state", async () => {
+  it("renders the landing screen when no workspace is active", async () => {
     render(<App />);
-    await waitFor(() => expect(screen.getByText("Select a thread")).toBeInTheDocument());
+    // With no active workspace, the cold-start landing is shown displaying the app wordmark.
+    await waitFor(() => expect(screen.getByText("mcode")).toBeInTheDocument());
   });
 });

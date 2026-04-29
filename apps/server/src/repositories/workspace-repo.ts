@@ -16,6 +16,8 @@ interface WorkspaceRow {
   is_git_repo: number;
   created_at: string;
   updated_at: string;
+  pinned: number;
+  last_opened_at: number | null;
 }
 
 function rowToWorkspace(row: WorkspaceRow): Workspace {
@@ -30,6 +32,8 @@ function rowToWorkspace(row: WorkspaceRow): Workspace {
     is_git_repo: row.is_git_repo === 1,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    pinned: row.pinned === 1,
+    last_opened_at: row.last_opened_at ?? null,
   };
 }
 
@@ -39,7 +43,7 @@ export class WorkspaceRepo {
   constructor(@inject("Database") private readonly db: Database.Database) {}
 
   /** Create a new workspace and return the fully-populated record. */
-  create(name: string, path: string, isGitRepo: boolean): Workspace {
+  create(name: string, path: string, isGitRepo = true): Workspace {
     const id = randomUUID();
     const now = new Date().toISOString();
 
@@ -57,6 +61,8 @@ export class WorkspaceRepo {
       is_git_repo: isGitRepo,
       created_at: now,
       updated_at: now,
+      pinned: false,
+      last_opened_at: null,
     };
   }
 
@@ -64,7 +70,7 @@ export class WorkspaceRepo {
   findById(id: string): Workspace | null {
     const row = this.db
       .prepare(
-        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at FROM workspaces WHERE id = ?",
+        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at FROM workspaces WHERE id = ?",
       )
       .get(id) as WorkspaceRow | undefined;
 
@@ -75,22 +81,40 @@ export class WorkspaceRepo {
   findByPath(path: string): Workspace | null {
     const row = this.db
       .prepare(
-        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at FROM workspaces WHERE path = ?",
+        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at FROM workspaces WHERE path = ?",
       )
       .get(path) as WorkspaceRow | undefined;
 
     return row ? rowToWorkspace(row) : null;
   }
 
-  /** List all workspaces ordered by most recently updated first. */
+  /**
+   * List workspaces that have been opened or pinned, ordered by pinned first then
+   * most recently opened. Workspaces that were never opened and are not pinned are excluded.
+   */
   listAll(): Workspace[] {
     const rows = this.db
       .prepare(
-        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at FROM workspaces ORDER BY updated_at DESC",
+        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at FROM workspaces WHERE last_opened_at IS NOT NULL OR pinned = 1 ORDER BY pinned DESC, last_opened_at DESC",
       )
       .all() as WorkspaceRow[];
 
     return rows.map(rowToWorkspace);
+  }
+
+  /** Set the pinned flag for a workspace. Pinned workspaces always sort above recents. */
+  setPinned(id: string, pinned: boolean): void {
+    this.db.prepare("UPDATE workspaces SET pinned = ? WHERE id = ?").run(pinned ? 1 : 0, id);
+  }
+
+  /** Update last_opened_at to now without touching updated_at. Used to track recency separately from edits. */
+  touchLastOpened(id: string): void {
+    this.db.prepare("UPDATE workspaces SET last_opened_at = ? WHERE id = ?").run(Date.now(), id);
+  }
+
+  /** Clear last_opened_at and pinned, removing the workspace from the recents/pinned list. */
+  removeRecent(id: string): void {
+    this.db.prepare("UPDATE workspaces SET last_opened_at = NULL, pinned = 0 WHERE id = ?").run(id);
   }
 
   /** Delete a workspace by ID. Returns true if a row was removed. */

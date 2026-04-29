@@ -23,14 +23,14 @@ describe("ThreadRepo has_file_changes", () => {
   });
 
   it("creates a thread with has_file_changes = false by default", () => {
-    const t = threadRepo.create(workspaceId, "t", "thread", "main");
+    const t = threadRepo.create(workspaceId, "t", "direct", "main");
     expect(t.has_file_changes).toBe(false);
     const reloaded = threadRepo.findById(t.id);
     expect(reloaded?.has_file_changes).toBe(false);
   });
 
   it("rowToThread coerces 1 to true and 0 to false", () => {
-    const t = threadRepo.create(workspaceId, "t", "thread", "main");
+    const t = threadRepo.create(workspaceId, "t", "direct", "main");
     db.prepare("UPDATE threads SET has_file_changes = 1 WHERE id = ?").run(t.id);
     const reloaded = threadRepo.findById(t.id);
     expect(reloaded?.has_file_changes).toBe(true);
@@ -51,9 +51,9 @@ describe("Migration 019 backfill", () => {
     const workspaceRepo = container.resolve(WorkspaceRepo);
     const ws = workspaceRepo.create("test-ws", "/tmp/ws", false);
 
-    const tWithChanges = threadRepo.create(ws.id, "with", "thread", "main");
-    const tEmptySnaps = threadRepo.create(ws.id, "empty", "thread", "main");
-    const tNoSnaps = threadRepo.create(ws.id, "none", "thread", "main");
+    const tWithChanges = threadRepo.create(ws.id, "with", "direct", "main");
+    const tEmptySnaps = threadRepo.create(ws.id, "empty", "direct", "main");
+    const tNoSnaps = threadRepo.create(ws.id, "none", "direct", "main");
 
     // Disable FK checks for snapshot inserts: message_id references messages(id)
     // but the test uses fabricated IDs — only the backfill SQL correctness matters here.
