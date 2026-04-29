@@ -69,12 +69,26 @@ export async function mockWebSocketServer(
         const handler = overrides[method];
         // If the override is a function, call it now with the request's params
         // so the test can observe the call timing/args. Static values are sent
-        // verbatim.
-        const result =
-          typeof handler === "function"
-            ? await (handler as (params?: unknown) => unknown)(msg.params)
-            : handler;
-        ws.send(JSON.stringify({ id: msg.id, result }));
+        // verbatim. The try/catch ensures a thrown handler returns a JSON-RPC
+        // error response — without it the RPC stays unresolved and the test
+        // hangs until Playwright's outer timeout fires.
+        try {
+          const result =
+            typeof handler === "function"
+              ? await (handler as (params?: unknown) => unknown | Promise<unknown>)(msg.params)
+              : handler;
+          ws.send(JSON.stringify({ id: msg.id, result }));
+        } catch (err) {
+          ws.send(
+            JSON.stringify({
+              id: msg.id,
+              error: {
+                code: -32000,
+                message: err instanceof Error ? err.message : "Override handler failed",
+              },
+            }),
+          );
+        }
         return;
       }
       // Default responses
