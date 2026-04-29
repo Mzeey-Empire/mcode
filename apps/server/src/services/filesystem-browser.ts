@@ -6,29 +6,51 @@
 
 import { injectable } from "tsyringe";
 import { stat, readdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { homedir } from "node:os";
+import { homedir, platform } from "node:os";
 
 /** Maximum number of directory entries returned in a single browse response. */
 const MAX_ENTRIES = 500;
+
+/**
+ * Probe `A:\` through `Z:\` synchronously and return the ones that exist.
+ * Used to populate the drives list when the user types `/` on Windows.
+ */
+function listWindowsDrives(): { name: string; isDir: boolean }[] {
+  const drives: { name: string; isDir: boolean }[] = [];
+  for (let code = "A".charCodeAt(0); code <= "Z".charCodeAt(0); code++) {
+    const letter = String.fromCharCode(code);
+    const root = `${letter}:\\`;
+    if (existsSync(root)) {
+      drives.push({ name: root, isDir: true });
+    }
+  }
+  return drives;
+}
 
 /** Browses the host filesystem for the project-selector palette's folder picker. */
 @injectable()
 export class FilesystemBrowser {
   /**
    * List entries at the given path (or its nearest existing ancestor).
-   * Expands ~ to home directory. Rejects path traversal. Returns at most 500 entries.
-   * Directories sort before files; both groups are sorted alphabetically.
+   *
+   * Special cases:
+   * - `~` and `~/...` are expanded to the user's home directory.
+   * - `/` on Windows returns the list of available drives.
+   * - `/` on POSIX returns the root directory listing.
+   *
+   * Returns at most 500 entries. Directories sort before files; both groups are sorted alphabetically.
    */
   async browse(input: string): Promise<{
     path: string;
     parent: string | null;
     entries: { name: string; isDir: boolean }[];
   }> {
-    // Reject path traversal before any resolution — callers should not be able
-    // to reference arbitrary locations by sneaking ".." into input.
-    if (input.includes("..")) {
-      throw new Error("Path traversal not allowed");
+    // Drive enumeration (Windows): bare `/` is a UI affordance to surface drives,
+    // since drives have no common parent in the Windows filesystem model.
+    if (input === "/" && platform() === "win32") {
+      return { path: "/", parent: null, entries: listWindowsDrives() };
     }
 
     // Expand ~ to home directory, then resolve to an absolute path.
@@ -54,7 +76,6 @@ export class FilesystemBrowser {
 
     const dirents = await readdir(dir, { withFileTypes: true });
     const entries = dirents
-      .filter((d) => !d.name.startsWith("."))
       .map((d) => ({ name: d.name, isDir: d.isDirectory() }))
       .sort((a, b) => {
         // Directories before files; ties broken alphabetically.

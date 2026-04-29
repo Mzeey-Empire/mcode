@@ -7,7 +7,7 @@ import "reflect-metadata";
 import { describe, it, expect } from "vitest";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
-import { tmpdir, homedir } from "node:os";
+import { tmpdir, homedir, platform } from "node:os";
 import { FilesystemBrowser } from "../services/filesystem-browser.js";
 
 describe("FilesystemBrowser", () => {
@@ -45,8 +45,25 @@ describe("FilesystemBrowser", () => {
     expect(Array.isArray(result.entries)).toBe(true);
   });
 
-  it("browse rejects path traversal attempts", async () => {
-    await expect(browser.browse("../../etc")).rejects.toThrow();
+  // Picker is intentionally permissive — the user can browse anywhere they own,
+  // mirroring an OS folder dialog. We only block the literal `..` token alone.
+  it("browse resolves '..' relative paths without throwing", async () => {
+    const result = await browser.browse("./..");
+    expect(Array.isArray(result.entries)).toBe(true);
+  });
+
+  it("browse on '/' returns drives list on Windows, root listing on POSIX", async () => {
+    const result = await browser.browse("/");
+    expect(Array.isArray(result.entries)).toBe(true);
+    if (platform() === "win32") {
+      // Drive entries look like "C:\", "D:\", etc.
+      const allDrives = result.entries.every((e) => /^[A-Z]:\\$/.test(e.name) && e.isDir);
+      expect(allDrives).toBe(true);
+      // C: practically always exists on Windows test envs.
+      expect(result.entries.some((e) => e.name === "C:\\")).toBe(true);
+      expect(result.parent).toBeNull();
+      expect(result.path).toBe("/");
+    }
   });
 
   it("browse returns at most 500 entries", async () => {
