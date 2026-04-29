@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { Pin, GitBranch, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PathLabel } from "./PathLabel";
@@ -41,17 +40,13 @@ function relativeTime(ms: number): string {
 /**
  * One row in the project selector list.
  * Lazy enrichment (branch, clean state, thread count) fades in from projectSelectorStore
- * as the RPC resolves. Pin and remove actions are callbacks to keep optimistic updates
- * in the parent.
+ * as the RPC resolves. The parent is responsible for batching the enrichment call
+ * across all visible rows — each row owning its own `enrich([id])` produces one RPC
+ * per workspace on first paint. Pin and remove actions are callbacks to keep
+ * optimistic updates in the parent.
  */
 export function ProjectRow({ workspace, isActive, onSelect, onPin, onRemove, home }: Props) {
   const enrichment = useProjectSelectorStore((s) => s.enrichmentCache.get(workspace.id));
-  const enrich = useProjectSelectorStore((s) => s.enrich);
-
-  // Kick off enrichment when the row mounts so meta appears as fast as possible.
-  useEffect(() => {
-    enrich([workspace.id]);
-  }, [workspace.id, enrich]);
 
   return (
     <div

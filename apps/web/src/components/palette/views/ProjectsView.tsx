@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { CommandGroup, CommandItem, CommandList, CommandEmpty } from "@/components/ui/command";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { useProjectSelectorStore } from "@/stores/projectSelectorStore";
 import { ProjectRow } from "@/components/projects/ProjectRow";
 import { Kbd } from "../Kbd";
 
@@ -30,6 +31,17 @@ export function ProjectsView() {
 
   const pinned = filtered.filter((w) => w.pinned);
   const recent = filtered.filter((w) => !w.pinned && w.last_opened_at != null);
+
+  // Batch enrichment for every visible row: a single RPC for the whole list
+  // beats N concurrent ones (one per ProjectRow) on first paint.
+  const enrich = useProjectSelectorStore((s) => s.enrich);
+  const visibleIds = useMemo(
+    () => [...pinned, ...recent].map((w) => w.id),
+    [pinned, recent],
+  );
+  useEffect(() => {
+    if (visibleIds.length > 0) enrich(visibleIds);
+  }, [visibleIds, enrich]);
 
   const handleSelect = (id: string) => {
     setActiveWorkspace(id);

@@ -1,6 +1,7 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
+import { useProjectSelectorStore } from "@/stores/projectSelectorStore";
 import { ProjectRow } from "./ProjectRow";
 import { Kbd } from "../palette/Kbd";
 
@@ -23,6 +24,18 @@ export function ProjectSelectorLanding() {
     [workspaces],
   );
   const hasProjects = pinned.length > 0 || recent.length > 0;
+
+  // Batch the enrichment fetch for every visible row in a single RPC. Without
+  // this, each ProjectRow would fire its own enrich([id]) on mount — N rows = N
+  // sequential round-trips, which is visibly slow on the cold-start landing.
+  const enrich = useProjectSelectorStore((s) => s.enrich);
+  const visibleIds = useMemo(
+    () => [...pinned, ...recent].map((w) => w.id),
+    [pinned, recent],
+  );
+  useEffect(() => {
+    if (visibleIds.length > 0) enrich(visibleIds);
+  }, [visibleIds, enrich]);
 
   const handleSelect = (id: string) => setActiveWorkspace(id);
   const handlePin = (id: string, pinned: boolean) => void pinWorkspace(id, pinned);
