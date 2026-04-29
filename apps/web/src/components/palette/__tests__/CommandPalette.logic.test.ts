@@ -152,6 +152,16 @@ describe("splitBrowseQuery", () => {
       leafFilter: "Users",
     });
   });
+  it("anchors drive-relative queries with separators to the drive root", () => {
+    expect(splitBrowseQuery("C:Users\\Bob")).toEqual({
+      directoryPath: "C:\\Users\\",
+      leafFilter: "Bob",
+    });
+    expect(splitBrowseQuery("D:foo/bar")).toEqual({
+      directoryPath: "D:\\foo/",
+      leafFilter: "bar",
+    });
+  });
 });
 
 describe("buildThreadActionItems", () => {

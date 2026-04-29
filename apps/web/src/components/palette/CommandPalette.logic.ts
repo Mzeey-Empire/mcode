@@ -181,14 +181,23 @@ export function splitBrowseQuery(query: string): BrowseQueryParts {
     return { directoryPath: `${driveLetter}:\\`, leafFilter: "" };
   }
 
-  // Drive-prefixed leaf with no separator like "C:Users" — Windows users typing
-  // a drive letter often start filtering immediately. Without this branch the
-  // generic separator search below picks up the colon and produces a bogus
-  // "C:" directoryPath. Treat the part after the colon as a leaf filter
-  // anchored at the drive root.
-  if (/^[A-Za-z]:[^\\/]+$/.test(query)) {
+  // Drive-prefixed query without an absolute-path separator after the colon
+  // (e.g. "C:Users", "C:Users\\Bob"). Windows users typing a drive letter often
+  // start filtering immediately, and without this branch the generic separator
+  // search below picks up the colon and produces a bogus drive-relative
+  // "C:Users\\" directoryPath. Anchor the result at the drive root and
+  // re-split the remainder so deeper queries still resolve correctly.
+  if (/^[A-Za-z]:/.test(query) && !/^[A-Za-z]:[\\/]/.test(query)) {
     const driveLetter = query[0];
-    return { directoryPath: `${driveLetter}:\\`, leafFilter: query.slice(2) };
+    const rest = query.slice(2);
+    const idx = lastSeparatorIndex(rest);
+    if (idx === -1) {
+      return { directoryPath: `${driveLetter}:\\`, leafFilter: rest };
+    }
+    return {
+      directoryPath: `${driveLetter}:\\${rest.slice(0, idx + 1)}`,
+      leafFilter: rest.slice(idx + 1),
+    };
   }
 
   const idx = lastSeparatorIndex(query);
