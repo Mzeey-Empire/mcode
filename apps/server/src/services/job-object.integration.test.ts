@@ -17,16 +17,18 @@ describe.runIf(process.platform === "win32")(
 
       // Spawn a parent that spawns a grandchild via cmd /c.
       // We use a nested ping so both parent and grandchild have measurable lifetime.
+      // cmd /c cmd /c ping keeps an intermediate cmd.exe alive as a grandchild,
+      // testing that job membership propagates through process inheritance.
       const parent = spawn(
         "cmd",
-        ["/c", "ping", "-n", "30", "127.0.0.1"],
+        ["/c", "cmd", "/c", "ping", "-n", "30", "127.0.0.1"],
         { stdio: "ignore", windowsHide: true },
       );
       expect(parent.pid).toBeGreaterThan(0);
       job.assign(parent.pid!);
 
-      // Allow the grandchild to come up.
-      await delay(500);
+      // Allow the nested cmd → ping chain time to start on a loaded CI machine.
+      await delay(1500);
 
       let exited = false;
       try {
