@@ -5,10 +5,12 @@ import { SectionHeading } from "../SectionHeading";
 
 /**
  * Performance settings section. Exposes runtime-tunable knobs that affect
- * memory and latency trade-offs (currently: in-memory thread cache size).
+ * memory and latency trade-offs: server V8 heap size and the in-memory
+ * thread cache size.
  */
 export function PerformanceSection() {
   const threadCacheSize = useSettingsStore((s) => s.settings.performance.threadCacheSize);
+  const heapMb = useSettingsStore((s) => s.settings.server.memory.heapMb);
   const update = useSettingsStore((s) => s.update);
 
   return (
@@ -34,6 +36,20 @@ export function PerformanceSection() {
             At this size, most thread switches will reload from the server.
           </p>
         )}
+        <SettingRow
+          label="Heap memory"
+          configKey="server.memory.heapMb"
+          hint="V8 max old space in MB (64–8192). Override via MCODE_SERVER_HEAP_MB. Changes apply after restart."
+        >
+          <RangeControl
+            min={64}
+            max={8192}
+            step={64}
+            value={heapMb}
+            onCommit={(v) => void update({ server: { memory: { heapMb: v } } })}
+            formatValue={(v) => `${v} MB`}
+          />
+        </SettingRow>
       </div>
     </div>
   );
