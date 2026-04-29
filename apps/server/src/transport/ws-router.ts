@@ -454,6 +454,15 @@ async function dispatch(
     case "github.prByUrl":
       return deps.githubService.getPrByUrl(params.url);
     case "github.checkStatus": {
+      // 15s window: matches the active-set polling cadence so a fresh tick result
+      // satisfies most reads without spawning a redundant `gh pr checks` subprocess.
+      // `force: true` (used by the manual refresh button) bypasses this guard.
+      const STALENESS_MS = 15_000;
+      if (!params.force) {
+        const fresh = deps.ciWatcherService.getFreshCache(params.threadId, STALENESS_MS);
+        if (fresh) return fresh;
+      }
+
       let entry = deps.ciWatcherService.getEntry(params.threadId);
       if (!entry) {
         // Bootstrap: thread may not be in the watcher yet (e.g. connect race before syncThreadPrs).

@@ -34,11 +34,6 @@ const MAX_RECONNECT_MS = 30_000;
 /** Number of immediate (delay=0) retries on auth failure before falling back to exponential backoff. */
 const MAX_IMMEDIATE_AUTH_RETRIES = 3;
 
-/** Timestamp of the last github.checkStatus fetch triggered on connect/reconnect. */
-let lastCheckStatusFetchAt = 0;
-/** Minimum interval between reconnect-triggered checkStatus fetches to avoid subprocess storms. */
-const CHECK_STATUS_RECONNECT_COOLDOWN_MS = 30_000;
-
 /** Last thread-list refresh timestamp per workspace, triggered on WS reconnect. */
 const lastLoadThreadsAtByWorkspace = new Map<string, number>();
 /** Minimum interval between reconnect-triggered thread-list fetches to avoid rapid-reconnect storms. */
@@ -262,51 +257,6 @@ export function createWsTransport(
           // Best-effort; terminal output from the gap window is already lost.
         }
       });
-
-      // On connect/reconnect, refresh CI checks for all visible PR threads (best-effort).
-      // Cooldown prevents subprocess storms during rapid reconnect loops.
-      // Deferred import avoids a circular dependency at module evaluation time.
-      const now = Date.now();
-      if (now - lastCheckStatusFetchAt > CHECK_STATUS_RECONNECT_COOLDOWN_MS) {
-        lastCheckStatusFetchAt = now;
-        import("@/stores/workspaceStore").then(({ useWorkspaceStore }) => {
-          const state = useWorkspaceStore.getState();
-
-          // Refresh all PR threads visible in the sidebar (including terminal ones — server
-          // handles merged/closed with a one-shot fetch rather than registering a watcher).
-          const prThreads = state.threads.filter((t) => t.pr_number != null);
-
-          for (const thread of prThreads) {
-            rpc<ChecksStatus>("github.checkStatus", { threadId: thread.id }).then((checks) => {
-              useWorkspaceStore.setState((ws) => {
-                const existing = ws.checksById[thread.id];
-                // Ignore stale in-flight responses that arrived after a newer update.
-                if (existing && existing.fetchedAt >= checks.fetchedAt) return ws;
-                return { checksById: { ...ws.checksById, [thread.id]: checks } };
-              });
-            }).catch(() => { /* best-effort */ });
-          }
-
-          // On initial connect, threads haven't loaded yet; subscribe to backfill all PR
-          // threads' CI status once the store is populated.
-          if (state.threads.length === 0) {
-            const unsub = useWorkspaceStore.subscribe((s) => {
-              if (s.threads.length === 0) return;
-              unsub();
-              for (const t of s.threads) {
-                if (t.pr_number == null) continue;
-                rpc<ChecksStatus>("github.checkStatus", { threadId: t.id }).then((checks) => {
-                  useWorkspaceStore.setState((ws) => {
-                    const existing = ws.checksById[t.id];
-                    if (existing && existing.fetchedAt >= checks.fetchedAt) return ws;
-                    return { checksById: { ...ws.checksById, [t.id]: checks } };
-                  });
-                }).catch(() => { /* best-effort */ });
-              }
-            });
-          }
-        });
-      }
     };
 
     ws.onmessage = (event) => {
@@ -622,8 +572,8 @@ export function createWsTransport(
     fetchBranch: (workspaceId, branch, prNumber?) =>
       rpc<void>("git.fetchBranch", { workspaceId, branch, prNumber }),
     getPrByUrl: (url) => rpc<PrDetail | null>("github.prByUrl", { url }),
-    checkStatus: (threadId) =>
-      rpc<ChecksStatus>("github.checkStatus", { threadId }),
+    checkStatus: (threadId, force) =>
+      rpc<ChecksStatus>("github.checkStatus", { threadId, force }),
 
     // Skills
     listSkills: (cwd?, providerId?) => rpc<SkillInfo[]>("skill.list", { cwd, providerId }),

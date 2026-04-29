@@ -20,6 +20,7 @@ import {
 } from "./virtual-items";
 import type { ChatVirtualItem } from "./virtual-items";
 import type { ToolCall } from "@/transport/types";
+import { rememberScrollTop, recallScrollTop } from "./scrollPositionMemory";
 
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
 const AUTO_SCROLL_THRESHOLD = 64;
@@ -136,6 +137,10 @@ export function MessageList({ onBranch }: MessageListProps) {
   const firstMessageIdRef = useRef<string | null>(null);
   /** True until initial messages are positioned at the bottom after a thread switch. */
   const isInitialLoadRef = useRef(true);
+  /** Tracks the previous activeThreadId so we can save its scrollTop before switching. */
+  const prevActiveThreadIdRef = useRef<string | null>(null);
+  /** Holds the scrollTop value to restore on the next layout effect. */
+  const pendingScrollRestoreRef = useRef<number | null>(null);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   /** True when new content arrived while the user was scrolled up. */
   const [hasNewContent, setHasNewContent] = useState(false);
@@ -145,6 +150,7 @@ export function MessageList({ onBranch }: MessageListProps) {
   const [isPositioned, setIsPositioned] = useState(false);
 
   const messages = useThreadStore((s) => s.messages);
+  const loading = useThreadStore((s) => s.loading);
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
   const isAgentRunning = useThreadStore((s) =>
     activeThreadId ? s.runningThreadIds.has(activeThreadId) : false,
@@ -288,16 +294,59 @@ export function MessageList({ onBranch }: MessageListProps) {
     };
   }, []);
 
-  // On thread switch, invalidate the virtualizer's cached sizes so
-  // stale heights from the previous thread don't cause overlap.
-  // Also reset positioning state so the container stays hidden until
-  // new messages are scrolled to the bottom.
-  useEffect(() => {
-    isInitialLoadRef.current = true;
-    setIsPositioned(false);
-    turnExpandRef.current.clear();
-    virtualizer.measure();
-  }, [activeThreadId, virtualizer]);
+  // Save the outgoing thread's scrollTop, then reset per-thread UI state.
+  // Cache-miss vs cache-hit is inferred from `loading`: the threadStore sets
+  // loading=true synchronously on miss and false synchronously on hit.
+  // Uses useLayoutEffect so pendingScrollRestoreRef is set before the scroll
+  // restoration useLayoutEffect reads it.
+  useLayoutEffect(() => {
+    const prevId = prevActiveThreadIdRef.current;
+    const isThreadSwitch = !!prevId && prevId !== activeThreadId;
+    if (isThreadSwitch && prevId) {
+      const el = containerRef.current;
+      if (el) rememberScrollTop(prevId, el.scrollTop);
+    }
+    prevActiveThreadIdRef.current = activeThreadId ?? null;
+
+    if (!activeThreadId) return;
+
+    if (isThreadSwitch) {
+      // Reset thread-scoped refs and affordance state so the prepend-detection
+      // effect, scroll-affordance UI, and turn-expand map don't carry stale
+      // measurements from the previous thread into the new one.
+      turnExpandRef.current.clear();
+      prevMessageCountRef.current = 0;
+      firstMessageIdRef.current = null;
+      prevScrollHeightRef.current = 0;
+      isScrolledUpRef.current = false;
+      setShowScrollBtn(false);
+      setHasNewContent(false);
+    }
+
+    if (loading) {
+      // Cache miss: full reset path. Hide until messages are positioned at bottom,
+      // and clear stale measurements so previous-thread heights don't bleed in.
+      isInitialLoadRef.current = true;
+      setIsPositioned(false);
+      pendingScrollRestoreRef.current = null;
+      virtualizer.measure();
+      return;
+    }
+
+    // Cache hit: keep the virtualizer's measurement cache (those rows have the
+    // same item keys and dimensions — re-estimating would defeat the optimization).
+    // Skip the opacity flash; mark initial-load done so the bottom-scroll effect
+    // does not retrigger. Only enter this branch when there's a remembered
+    // scroll position; otherwise this also fires when `loading` flips
+    // true→false after a fresh fetch and would prematurely clear
+    // `isInitialLoadRef`, blocking the bottom-positioning effect.
+    const rememberedScrollTop = recallScrollTop(activeThreadId);
+    if (rememberedScrollTop != null) {
+      isInitialLoadRef.current = false;
+      setIsPositioned(true);
+      pendingScrollRestoreRef.current = rememberedScrollTop;
+    }
+  }, [activeThreadId, loading, virtualizer]);
 
   // Stabilize scroll position when older messages are prepended.
   // Detects real prepends by comparing the first message ID before and after
@@ -333,7 +382,6 @@ export function MessageList({ onBranch }: MessageListProps) {
 
   // Initial load: position at the bottom before paint to avoid top-to-bottom flash.
   // useLayoutEffect fires after DOM mutations but before the browser paints.
-  const loading = useThreadStore((s) => s.loading);
   useLayoutEffect(() => {
     if (!isInitialLoadRef.current) return;
 
@@ -363,6 +411,23 @@ export function MessageList({ onBranch }: MessageListProps) {
     });
   }, [items.length, loading, virtualizer]);
 
+  // Apply the remembered scrollTop after the virtualizer has rendered the
+  // restored items. useLayoutEffect runs before paint, so the user never sees
+  // the bottom of the list flash before the restore.
+  useLayoutEffect(() => {
+    const target = pendingScrollRestoreRef.current;
+    if (target == null) return;
+    const el = containerRef.current;
+    if (!el) return;
+    // Only restore if items are actually loaded. On cache misses, this prevents
+    // restoring before items have arrived, which would cause the wrong scroll position
+    // to be briefly visible. When items load, items.length will change and trigger
+    // another effect pass where loading is false.
+    if (loading) return;
+    el.scrollTop = target;
+    pendingScrollRestoreRef.current = null;
+  }, [activeThreadId, items.length, loading]);
+
   // Discrete events (new message, tool call) -> scroll if at bottom, else highlight button
   useEffect(() => {
     if (isInitialLoadRef.current) return;
@@ -384,7 +449,7 @@ export function MessageList({ onBranch }: MessageListProps) {
   }, [streamingText, scrollToBottom]);
 
   return (
-    <div className="relative h-full">
+    <div className="relative h-full" data-testid="message-list">
       <div
         ref={containerRef}
         onScroll={handleScroll}

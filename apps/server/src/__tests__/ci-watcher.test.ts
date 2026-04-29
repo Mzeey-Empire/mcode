@@ -129,4 +129,62 @@ describe("CiWatcherService", () => {
     expect(entry!.prNumber).toBe(42);
     expect(entry!.cache).toEqual(passing);
   });
+
+  describe("getFreshCache", () => {
+    it("returns null when no entry exists", () => {
+      expect(watcher.getFreshCache("missing", 15_000)).toBeNull();
+    });
+
+    it("returns null when entry exists but cache is null", () => {
+      watcher.watch("t1", 42, "main", "/repo", { skipInitialFetch: true });
+      expect(watcher.getFreshCache("t1", 15_000)).toBeNull();
+    });
+
+    it("returns cached status when fetchedAt is within maxAgeMs", () => {
+      const fresh: ChecksStatus = {
+        aggregate: "passing",
+        runs: [],
+        fetchedAt: Date.now() - 5_000, // 5s old
+      };
+      watcher.watch("t1", 42, "main", "/repo", { skipInitialFetch: true });
+      watcher.refresh("t1", fresh);
+      expect(watcher.getFreshCache("t1", 15_000)).toEqual(fresh);
+    });
+
+    it("returns null when fetchedAt is older than maxAgeMs", () => {
+      const stale: ChecksStatus = {
+        aggregate: "passing",
+        runs: [],
+        fetchedAt: Date.now() - 20_000, // 20s old
+      };
+      watcher.watch("t1", 42, "main", "/repo", { skipInitialFetch: true });
+      watcher.refresh("t1", stale);
+      expect(watcher.getFreshCache("t1", 15_000)).toBeNull();
+    });
+
+    it("treats exact boundary (maxAgeMs) as fresh", () => {
+      const boundary: ChecksStatus = {
+        aggregate: "passing",
+        runs: [],
+        fetchedAt: Date.now() - 15_000,
+      };
+      watcher.watch("t1", 42, "main", "/repo", { skipInitialFetch: true });
+      watcher.refresh("t1", boundary);
+      expect(watcher.getFreshCache("t1", 15_000)).toEqual(boundary);
+    });
+  });
+
+  it("getFreshCache does not mutate state or broadcast", async () => {
+    const passing = makeChecks("passing");
+    watcher.watch("t1", 42, "main", "/repo", { skipInitialFetch: true });
+    watcher.refresh("t1", passing);
+    mockBroadcast.mockClear();
+
+    // Repeated reads must not cause broadcasts or move the entry between sets.
+    watcher.getFreshCache("t1", 15_000);
+    watcher.getFreshCache("t1", 15_000);
+
+    expect(mockBroadcast).not.toHaveBeenCalled();
+    expect(watcher.isWatching("t1")).toBe(true);
+  });
 });

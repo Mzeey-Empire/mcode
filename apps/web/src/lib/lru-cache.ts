@@ -5,7 +5,7 @@
  */
 export class LruCache<K, V> {
   private readonly map = new Map<K, V>();
-  private readonly capacity: number;
+  private capacity: number;
 
   /**
    * @param capacity Maximum number of entries to hold. Clamped to a minimum of 1.
@@ -24,15 +24,34 @@ export class LruCache<K, V> {
   }
 
   /** Insert or update a key. Evicts the least recently used entry if at capacity. */
-  set(key: K, value: V): void {
+  set(key: K, value: V): K | null {
+    let evicted: K | null = null;
     if (this.map.has(key)) {
       this.map.delete(key);
     } else if (this.map.size >= this.capacity) {
       // Map.keys().next() returns the oldest (least recently used) key
-      const oldest = this.map.keys().next().value!;
-      this.map.delete(oldest);
+      evicted = this.map.keys().next().value as K;
+      this.map.delete(evicted);
     }
     this.map.set(key, value);
+    return evicted;
+  }
+
+  /**
+   * Change the capacity. Clamped to a minimum of 1.
+   * When shrinking, evicts the least-recently-used entries until size <= capacity
+   * and returns the evicted keys in eviction order (oldest-first).
+   * When growing or unchanged, returns an empty array.
+   */
+  resize(capacity: number): K[] {
+    this.capacity = Math.max(1, capacity);
+    const evicted: K[] = [];
+    while (this.map.size > this.capacity) {
+      const oldest = this.map.keys().next().value as K;
+      this.map.delete(oldest);
+      evicted.push(oldest);
+    }
+    return evicted;
   }
 
   /** Remove all entries. */

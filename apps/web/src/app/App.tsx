@@ -14,6 +14,7 @@ import { ProjectSelectorLanding } from "@/components/projects/ProjectSelectorLan
 import { SidebarRevealButton } from "@/components/sidebar/SidebarRevealButton";
 import { ShortcutHelpDialog } from "@/components/ShortcutHelpDialog";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { resizeMessageCache } from "@/stores/messageCache";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useDiffStore } from "@/stores/diffStore";
@@ -37,6 +38,7 @@ const terminalCreationInFlight = new Set<string>();
 /** Root application component. Initializes WS transport and push listeners. */
 export function App() {
   const theme = useSettingsStore((s) => s.settings.appearance.theme);
+  const threadCacheSize = useSettingsStore((s) => s.settings.performance.threadCacheSize);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("model");
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
@@ -49,6 +51,12 @@ export function App() {
     useSettingsStore.getState().fetch();
     return () => stopPushListeners();
   }, []);
+
+  // Mirror the user-controlled message-cache capacity into the runtime cache.
+  // Runs on every settings change; LruCache.resize is a no-op when capacity is unchanged.
+  useEffect(() => {
+    resizeMessageCache(threadCacheSize);
+  }, [threadCacheSize]);
 
   // Hydrate app version + auto-updater status from the Electron preload bridge.
   useEffect(() => {

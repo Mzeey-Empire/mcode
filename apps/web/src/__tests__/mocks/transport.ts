@@ -56,6 +56,7 @@ export function createMockThread(overrides?: Partial<Thread>): Thread {
     parent_thread_id: null,
     forked_from_message_id: null,
     last_compact_summary: null,
+    has_file_changes: false,
     ...overrides,
   };
 }

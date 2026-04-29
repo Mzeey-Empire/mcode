@@ -37,6 +37,7 @@ interface ThreadRow {
   parent_thread_id: string | null;
   forked_from_message_id: string | null;
   last_compact_summary: string | null;
+  has_file_changes: number;
 }
 
 function rowToThread(row: ThreadRow): Thread {
@@ -70,11 +71,12 @@ function rowToThread(row: ThreadRow): Thread {
     parent_thread_id: row.parent_thread_id,
     forked_from_message_id: row.forked_from_message_id,
     last_compact_summary: row.last_compact_summary,
+    has_file_changes: row.has_file_changes === 1,
   };
 }
 
 const THREAD_COLUMNS =
-  "id, workspace_id, title, status, mode, worktree_path, branch, worktree_managed, issue_number, pr_number, pr_status, sdk_session_id, model, provider, created_at, updated_at, deleted_at, last_context_tokens, context_window, reasoning_level, interaction_mode, permission_mode, context_window_mode, thinking, copilot_agent, parent_thread_id, forked_from_message_id, last_compact_summary";
+  "id, workspace_id, title, status, mode, worktree_path, branch, worktree_managed, issue_number, pr_number, pr_status, sdk_session_id, model, provider, created_at, updated_at, deleted_at, last_context_tokens, context_window, reasoning_level, interaction_mode, permission_mode, context_window_mode, thinking, copilot_agent, parent_thread_id, forked_from_message_id, last_compact_summary, has_file_changes";
 
 /** Repository for thread lifecycle operations against SQLite. */
 @injectable()
@@ -146,6 +148,7 @@ export class ThreadRepo {
       parent_thread_id: lineage?.parentThreadId ?? null,
       forked_from_message_id: lineage?.forkedFromMessageId ?? null,
       last_compact_summary: null,
+      has_file_changes: false,
     };
   }
 

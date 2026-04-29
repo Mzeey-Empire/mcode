@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useThreadStore } from "@/stores/threadStore";
@@ -167,9 +167,6 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
  * inside the dark app shell rather than float above it as a system dialog.
  */
 export function SidebarUsagePanel() {
-  const [open, setOpen] = useState(false);
-  const closeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
   const activeThread = useWorkspaceStore((s) =>
     s.threads.find((t) => t.id === s.activeThreadId),
@@ -190,18 +187,16 @@ export function SidebarUsagePanel() {
   );
   const fetchProviderUsage = useThreadStore((s) => s.fetchProviderUsage);
 
-  // Hydrate immediately — bars appear without waiting for a hover. Intentionally
-  // omit fetchProviderUsage (stable Zustand action) and usageInfo (the guard)
-  // from deps so thread switches don't re-trigger a fetch mid-request.
+  // Re-fetch on every thread/provider switch so the bars reflect the active
+  // thread's current quota rather than showing a stale snapshot from a prior
+  // visit. The server-side 90s TTL absorbs the extra calls. Intentionally
+  // omits `usageInfo` (would cause an infinite refetch loop) and
+  // `fetchProviderUsage` (stable Zustand action reference).
   useEffect(() => {
-    if (activeThreadId && !usageInfo) {
+    if (activeThreadId) {
       void fetchProviderUsage(activeThreadId, providerId);
     }
   }, [activeThreadId, providerId]);
-
-  // Clear any in-flight close timer when the component unmounts so a late
-  // setOpen(false) can't fire against a destroyed component.
-  useEffect(() => () => clearTimeout(closeTimer.current), []);
 
   if (!activeThreadId) return null;
 
@@ -255,32 +250,21 @@ export function SidebarUsagePanel() {
 
   const costLabel = formatCost(sessionCost);
 
-  const show = (e: React.SyntheticEvent) => {
-    e.stopPropagation();
-    clearTimeout(closeTimer.current);
-    setOpen(true);
-  };
-
-  const hide = () => {
-    closeTimer.current = setTimeout(() => setOpen(false), 150);
-  };
-
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover>
 
       {/* ── Compact strip ── */}
       <PopoverTrigger
+        openOnHover
+        delay={80}
+        closeDelay={150}
+        nativeButton={false}
         render={
           <div
             role="button"
             tabIndex={0}
             aria-label="Show usage details"
-            aria-expanded={open}
             className="w-full cursor-default py-0.5 outline-none focus-visible:ring-1 focus-visible:ring-primary/40 focus-visible:ring-offset-0 rounded"
-            onMouseEnter={show}
-            onMouseLeave={hide}
-            onFocus={show}
-            onBlur={hide}
           />
         }
       >
@@ -347,10 +331,6 @@ export function SidebarUsagePanel() {
         align="end"
         sideOffset={12}
         className="w-64 p-0 overflow-hidden rounded-lg border border-border bg-popover text-popover-foreground shadow-[0_12px_32px_-4px_rgba(0,0,0,0.6),0_2px_6px_rgba(0,0,0,0.3)]"
-        onMouseEnter={show}
-        onMouseLeave={hide}
-        onFocus={show}
-        onBlur={hide}
       >
         {/* Header */}
         <div className="flex items-start justify-between px-4 pt-3.5 pb-3">

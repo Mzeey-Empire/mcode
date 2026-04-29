@@ -4,9 +4,15 @@ import {
   cacheSnapshot,
   evictThread,
   clearMessageCache,
+  resizeMessageCache,
   MESSAGE_CACHE_SIZE,
   type MessageCacheSnapshot,
 } from "@/stores/messageCache";
+import {
+  rememberScrollTop,
+  recallScrollTop,
+  clearScrollMemory,
+} from "@/components/chat/scrollPositionMemory";
 import { LruCache } from "@/lib/lru-cache";
 
 function makeSnapshot(id: string): MessageCacheSnapshot {
@@ -35,7 +41,10 @@ function makeSnapshot(id: string): MessageCacheSnapshot {
 }
 
 describe("messageCache", () => {
-  beforeEach(() => clearMessageCache());
+  beforeEach(() => {
+    clearMessageCache();
+    clearScrollMemory();
+  });
 
   it("returns undefined for a thread that was never cached", () => {
     expect(getCachedSnapshot("missing")).toBeUndefined();
@@ -82,6 +91,75 @@ describe("messageCache", () => {
     cacheSnapshot("t1", makeSnapshot("t1"));
     clearMessageCache();
     expect(getCachedSnapshot("t1")).toBeUndefined();
+  });
+
+  it("cleans up scroll memory when evicting via LRU capacity", () => {
+    for (let i = 0; i < MESSAGE_CACHE_SIZE; i++) {
+      cacheSnapshot(`t${i}`, makeSnapshot(`t${i}`));
+      rememberScrollTop(`t${i}`, i * 100);
+    }
+    // Verify scroll positions are stored.
+    expect(recallScrollTop("t0")).toBe(0);
+    expect(recallScrollTop(`t${MESSAGE_CACHE_SIZE - 1}`)).toBe(
+      (MESSAGE_CACHE_SIZE - 1) * 100
+    );
+
+    // Seed the new thread's scroll position before the eviction-triggering
+    // insert so this test exercises cleanup at the moment of eviction rather
+    // than just verifying that a value can be written afterward.
+    rememberScrollTop("new", 9999);
+
+    // Trigger eviction by adding one more thread.
+    cacheSnapshot("new", makeSnapshot("new"));
+
+    // t0 should be evicted and its scroll position forgotten.
+    expect(getCachedSnapshot("t0")).toBeUndefined();
+    expect(recallScrollTop("t0")).toBeUndefined();
+
+    // Other threads should still be cached and have scroll positions.
+    expect(getCachedSnapshot("t1")).toBeDefined();
+    expect(recallScrollTop("t1")).toBe(100);
+
+    // New thread should have its scroll position intact.
+    expect(recallScrollTop("new")).toBe(9999);
+  });
+
+  it("resizeMessageCache shrinks the active cache and evicts oldest entries", () => {
+    for (let i = 0; i < MESSAGE_CACHE_SIZE; i++) {
+      cacheSnapshot(`t${i}`, makeSnapshot(`t${i}`));
+    }
+    resizeMessageCache(2);
+    // Only the two most recent entries survive.
+    expect(getCachedSnapshot("t0")).toBeUndefined();
+    expect(getCachedSnapshot(`t${MESSAGE_CACHE_SIZE - 1}`)).toBeDefined();
+    expect(getCachedSnapshot(`t${MESSAGE_CACHE_SIZE - 2}`)).toBeDefined();
+    // Reset for sibling tests.
+    resizeMessageCache(MESSAGE_CACHE_SIZE);
+  });
+
+  it("resizeMessageCache grows the cache without dropping entries", () => {
+    cacheSnapshot("t1", makeSnapshot("t1"));
+    cacheSnapshot("t2", makeSnapshot("t2"));
+    resizeMessageCache(25);
+    expect(getCachedSnapshot("t1")).toBeDefined();
+    expect(getCachedSnapshot("t2")).toBeDefined();
+    resizeMessageCache(MESSAGE_CACHE_SIZE);
+  });
+
+  it("resizeMessageCache forgets scroll positions for evicted threads", () => {
+    for (let i = 0; i < MESSAGE_CACHE_SIZE; i++) {
+      cacheSnapshot(`t${i}`, makeSnapshot(`t${i}`));
+      rememberScrollTop(`t${i}`, i * 100);
+    }
+    resizeMessageCache(2);
+    // Surviving threads keep their scroll memory.
+    expect(recallScrollTop(`t${MESSAGE_CACHE_SIZE - 1}`)).toBe(
+      (MESSAGE_CACHE_SIZE - 1) * 100,
+    );
+    // Evicted threads' scroll memory is gone.
+    expect(recallScrollTop("t0")).toBeUndefined();
+    expect(recallScrollTop(`t${MESSAGE_CACHE_SIZE - 3}`)).toBeUndefined();
+    resizeMessageCache(MESSAGE_CACHE_SIZE);
   });
 });
 
