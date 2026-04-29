@@ -4,6 +4,7 @@ import {
   rankSearchFieldMatch,
   filterCommandPaletteGroups,
   buildProjectActionItems,
+  buildThreadActionItems,
   getPaletteMode,
   splitBrowseQuery,
   filterBrowseEntries,
@@ -144,6 +145,34 @@ describe("splitBrowseQuery", () => {
       directoryPath: "./src/",
       leafFilter: "comp",
     });
+  });
+  it("treats drive-prefixed leaf without separator as drive-root + leaf", () => {
+    expect(splitBrowseQuery("C:Users")).toEqual({
+      directoryPath: "C:\\",
+      leafFilter: "Users",
+    });
+  });
+});
+
+describe("buildThreadActionItems", () => {
+  it("uses 'Untitled thread' fallback when title is missing", () => {
+    const items = buildThreadActionItems([
+      { id: "t1", title: null, workspaceId: 1, createdAt: 0, updatedAt: 0 },
+    ]);
+    expect(items[0].title).toBe("Untitled thread");
+    expect(items[0].searchTerms).toEqual(["untitled thread"]);
+  });
+  it("uses 'Untitled thread' fallback for whitespace-only titles", () => {
+    const items = buildThreadActionItems([
+      { id: "t1", title: "   ", workspaceId: 1, createdAt: 0, updatedAt: 0 },
+    ]);
+    expect(items[0].title).toBe("Untitled thread");
+  });
+  it("trims surrounding whitespace from titles", () => {
+    const items = buildThreadActionItems([
+      { id: "t1", title: "  My thread  ", workspaceId: 1, createdAt: 0, updatedAt: 0 },
+    ]);
+    expect(items[0].title).toBe("My thread");
   });
 });
 

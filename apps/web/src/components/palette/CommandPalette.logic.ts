@@ -181,6 +181,16 @@ export function splitBrowseQuery(query: string): BrowseQueryParts {
     return { directoryPath: `${driveLetter}:\\`, leafFilter: "" };
   }
 
+  // Drive-prefixed leaf with no separator like "C:Users" — Windows users typing
+  // a drive letter often start filtering immediately. Without this branch the
+  // generic separator search below picks up the colon and produces a bogus
+  // "C:" directoryPath. Treat the part after the colon as a leaf filter
+  // anchored at the drive root.
+  if (/^[A-Za-z]:[^\\/]+$/.test(query)) {
+    const driveLetter = query[0];
+    return { directoryPath: `${driveLetter}:\\`, leafFilter: query.slice(2) };
+  }
+
   const idx = lastSeparatorIndex(query);
   if (idx === -1) {
     // No separator at all — treat the whole query as a leaf relative to cwd.
@@ -267,10 +277,17 @@ export function buildProjectActionItems(workspaces: WorkspaceLike[]): PaletteIte
  * Untitled threads fall back to the label "Untitled thread".
  */
 export function buildThreadActionItems(threads: ThreadLike[]): PaletteItem[] {
-  return threads.map((t) => ({
-    value: `thread:${t.id}`,
-    title: t.title ?? "Untitled thread",
-    description: undefined,
-    searchTerms: [t.title ?? "untitled thread"],
-  }));
+  return threads.map((t) => {
+    // Whitespace-only titles render as a blank palette row, which is a UI dead
+    // zone the user can't visually identify. Trim and fall back to the same
+    // placeholder we use for missing titles so every row carries a label.
+    const trimmed = t.title?.trim();
+    const title = trimmed ? trimmed : "Untitled thread";
+    return {
+      value: `thread:${t.id}`,
+      title,
+      description: undefined,
+      searchTerms: [title.toLowerCase()],
+    };
+  });
 }
