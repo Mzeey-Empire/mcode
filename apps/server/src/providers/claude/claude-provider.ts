@@ -26,6 +26,11 @@ import type {
 import { buildReasoningOptions } from "./build-reasoning-options.js";
 import { listClaudeModels } from "./list-models.js";
 import { applyUltrathinkPrefix, resolveSdkModelSlug } from "./resolve-slug.js";
+import { readAnthropicOauthToken } from "@mcode/shared/usage";
+import { AnthropicOAuthUsageSource } from "./usage/oauth-usage-source.js";
+import { AnthropicHeaderUsageSource } from "./usage/header-usage-source.js";
+import { CompositeUsageSource } from "./usage/composite-usage-source.js";
+import type { IUsageSource } from "@mcode/shared/usage";
 
 /** Idle TTL before a session is evicted (10 minutes). */
 const IDLE_TTL_MS = 10 * 60 * 1000;
@@ -205,6 +210,10 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
   private lastServiceTier?: "standard" | "priority" | "batch";
   private lastNumTurns?: number;
   private lastDurationMs?: number;
+  private readonly usageSource: IUsageSource = new CompositeUsageSource([
+    new AnthropicOAuthUsageSource(readAnthropicOauthToken),
+    new AnthropicHeaderUsageSource(),
+  ]);
 
   constructor() {
     super();
@@ -1364,11 +1373,12 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     });
   }
 
-  /** Return accumulated session data. Claude has no quota API via the SDK. */
+  /** Returns Claude plan utilization plus accumulated session stats. */
   async getUsage(): Promise<ProviderUsageInfo> {
+    const categories = await this.usageSource.fetch();
     return {
       providerId: "claude",
-      quotaCategories: [],
+      quotaCategories: categories ?? [],
       sessionCostUsd: this.lastSessionCostUsd,
       serviceTier: this.lastServiceTier,
       numTurns: this.lastNumTurns,
