@@ -120,7 +120,7 @@ export function RecentThreadRow({ thread, isActive, onSelect, onRemove, home }: 
       {onRemove && (
         <button
           data-testid="recent-thread-row-remove"
-          className="inline-flex shrink-0 items-center justify-center rounded-sm p-0.5 text-muted-foreground/40 opacity-0 transition-opacity hover:bg-accent/60 hover:text-foreground group-hover:opacity-100"
+          className="inline-flex shrink-0 items-center justify-center rounded-sm p-0.5 text-muted-foreground/40 opacity-0 transition-opacity hover:bg-accent/60 hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
           onClick={(e) => {
             e.stopPropagation();
             onRemove(thread);

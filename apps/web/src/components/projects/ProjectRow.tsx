@@ -81,7 +81,7 @@ export function ProjectRow({ workspace, isActive, onSelect, onPin, onRemove, hom
               Lucide Pin icon keeps visual language consistent with the rest of the picker. */}
           <button
             data-testid="project-row-pin"
-            className="ml-1 inline-flex shrink-0 items-center justify-center rounded-sm p-0.5 text-primary/80 opacity-0 transition-opacity hover:bg-accent/60 group-hover:opacity-100 data-[pinned=true]:opacity-100"
+            className="ml-1 inline-flex shrink-0 items-center justify-center rounded-sm p-0.5 text-primary/80 opacity-0 transition-opacity hover:bg-accent/60 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 data-[pinned=true]:opacity-100"
             data-pinned={workspace.pinned}
             onClick={(e) => {
               e.stopPropagation();
@@ -157,7 +157,7 @@ export function ProjectRow({ workspace, isActive, onSelect, onPin, onRemove, hom
       {onRemove && (
         <button
           data-testid="project-row-remove"
-          className="inline-flex shrink-0 items-center justify-center rounded-sm p-0.5 text-muted-foreground/40 opacity-0 transition-opacity hover:bg-accent/60 hover:text-foreground group-hover:opacity-100"
+          className="inline-flex shrink-0 items-center justify-center rounded-sm p-0.5 text-muted-foreground/40 opacity-0 transition-opacity hover:bg-accent/60 hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
           onClick={(e) => {
             e.stopPropagation();
             onRemove(workspace.id);

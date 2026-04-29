@@ -1,6 +1,7 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { useRecentThreadsStore } from "@/stores/recentThreadsStore";
 import { getAllCommands, executeCommand } from "@/lib/command-registry";
 import { getKeybindingForCommand, formatKeybinding } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
@@ -33,9 +34,18 @@ export function RootView() {
   const query = useCommandPaletteStore((s) => s.query);
   const close = useCommandPaletteStore((s) => s.close);
   const workspaces = useWorkspaceStore((s) => s.workspaces);
-  const threads = useWorkspaceStore((s) => s.threads);
   const setActiveWorkspace = useWorkspaceStore((s) => s.setActiveWorkspace);
   const setActiveThread = useWorkspaceStore((s) => s.setActiveThread);
+
+  // Cross-workspace recent threads — `useWorkspaceStore.threads` only carries
+  // the active workspace's threads, so reading from it would silently drop
+  // recents from other projects. The dedicated store is fed by the
+  // `thread.listRecent` RPC and joins the parent workspace metadata.
+  const recentThreads = useRecentThreadsStore((s) => s.threads);
+  const fetchRecentThreads = useRecentThreadsStore((s) => s.fetch);
+  useEffect(() => {
+    fetchRecentThreads();
+  }, [fetchRecentThreads]);
 
   // When query starts with ">" only show actions
   const actionOnly = query.startsWith(">");
@@ -57,12 +67,9 @@ export function RootView() {
     const result: PaletteGroup[] = [{ heading: "Actions", items: actionItems }];
 
     if (!actionOnly) {
-      // Recent threads (last 12, most recently updated first)
-      const recentThreads = [...threads]
-        .filter((t) => !t.deleted_at)
-        .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-        .slice(0, 12);
-
+      // Recent threads — the store already returns the cross-workspace list
+      // sorted freshest-first and capped server-side, so we just pass it
+      // through without re-sorting or trimming here.
       if (recentThreads.length > 0) {
         result.push({
           heading: "Recent Threads",
@@ -107,7 +114,7 @@ export function RootView() {
     }
 
     return filterCommandPaletteGroups(result, effectiveQuery);
-  }, [query, effectiveQuery, actionOnly, threads, workspaces]);
+  }, [query, effectiveQuery, actionOnly, recentThreads, workspaces]);
 
   const handleSelect = (value: string) => {
     if (value.startsWith("cmd:")) {
@@ -122,8 +129,10 @@ export function RootView() {
       const id = value.slice(7);
       // Activate the thread's workspace first so downstream selectors (sidebar
       // highlight, breadcrumb, settings panel) resolve against the right
-      // workspace before the thread itself becomes active.
-      const thread = threads.find((t) => t.id === id);
+      // workspace before the thread itself becomes active. Look up against
+      // the cross-workspace recents list so threads from other projects route
+      // correctly (per-workspace `useWorkspaceStore.threads` would miss them).
+      const thread = recentThreads.find((t) => t.id === id);
       if (thread) setActiveWorkspace(String(thread.workspace_id));
       setActiveThread(id);
       close();

@@ -56,7 +56,12 @@ export function ProjectSelectorLanding() {
     [pinned, recent],
   );
   useEffect(() => {
-    if (visibleIds.length > 0) enrich(visibleIds);
+    if (visibleIds.length === 0) return;
+    // The enrichment RPC can reject (transport hiccup, server churn). Swallow
+    // the rejection here — enrichment is purely decorative and the row falls
+    // back to the timestamp-only skeleton, so leaking an unhandled rejection
+    // would be noisier than the actual failure mode.
+    void enrich(visibleIds).catch(() => {});
   }, [visibleIds, enrich]);
 
   // Picking a project from the landing means "I want to start work on this".
@@ -68,8 +73,15 @@ export function ProjectSelectorLanding() {
     setActiveWorkspace(id);
     setPendingNewThread(true);
   };
-  const handlePin = (id: string, pinned: boolean) => void pinWorkspace(id, pinned);
-  const handleRemove = (id: string) => void removeRecent(id);
+  // pinWorkspace/removeRecent rethrow on RPC failure. The store has already
+  // rolled back its optimistic update by the time we get here, so swallow the
+  // rejection at the boundary rather than leaking an unhandled rejection.
+  const handlePin = (id: string, pinned: boolean) => {
+    void pinWorkspace(id, pinned).catch(() => {});
+  };
+  const handleRemove = (id: string) => {
+    void removeRecent(id).catch(() => {});
+  };
   const handleAdd = () => openPalette({ intent: "addProject" });
   /**
    * Open a thread from the recent-threads list. Activate the parent workspace

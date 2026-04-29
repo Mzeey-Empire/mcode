@@ -56,9 +56,18 @@ export function ShortcutHelpDialog() {
     const hidden = new Set(["escape.handle"]);
     const map = new Map<string, ShortcutRow[]>();
 
-    // Collapse `thread.goTo1`…`thread.goTo9` into a single "Go to thread (1…9)" row.
-    let goToThreadCollapsed = false;
+    // Collect `thread.goTo1`…`thread.goTo9` separately so we only collapse them
+    // into the single "Go to thread (1…9)" row when all nine bindings are
+    // uniform — same modifier prefix, numeric tail "1"…"9", same category.
+    // Customised or partial bindings fall back to individual rows so the help
+    // dialog can't lie about what the user actually typed.
     const goToThreadRe = /^thread\.goTo([1-9])$/;
+    const goToThreadCandidates: Array<{
+      digit: string;
+      title: string;
+      category: string;
+      pieces: string[];
+    }> = [];
 
     for (const cmd of all) {
       if (hidden.has(cmd.id)) continue;
@@ -67,17 +76,12 @@ export function ShortcutHelpDialog() {
 
       const goToMatch = goToThreadRe.exec(cmd.id);
       if (goToMatch) {
-        if (goToThreadCollapsed) continue;
-        goToThreadCollapsed = true;
-        const group = map.get(cmd.category) ?? [];
-        const samplePieces = splitCombo(formatKeybinding(binding.key, isMac));
-        const modifierPieces = samplePieces.slice(0, -1);
-        group.push({
-          key: "thread.goTo.range",
-          title: "Go to thread",
-          pieces: [...modifierPieces, "1", "9"],
+        goToThreadCandidates.push({
+          digit: goToMatch[1],
+          title: cmd.title,
+          category: cmd.category,
+          pieces: splitCombo(formatKeybinding(binding.key, isMac)),
         });
-        map.set(cmd.category, group);
         continue;
       }
 
@@ -88,6 +92,43 @@ export function ShortcutHelpDialog() {
         pieces: splitCombo(formatKeybinding(binding.key, isMac)),
       });
       map.set(cmd.category, group);
+    }
+
+    if (goToThreadCandidates.length > 0) {
+      const first = goToThreadCandidates[0];
+      const sharedModifiers = first.pieces.slice(0, -1).join("+");
+      const uniform =
+        goToThreadCandidates.length === 9 &&
+        goToThreadCandidates.every((c, i) => c.digit === String(i + 1)) &&
+        goToThreadCandidates.every((c) => c.category === first.category) &&
+        goToThreadCandidates.every((c) => c.pieces.length >= 2) &&
+        goToThreadCandidates.every(
+          (c, i) =>
+            c.pieces.slice(0, -1).join("+") === sharedModifiers &&
+            c.pieces[c.pieces.length - 1] === String(i + 1),
+        );
+
+      if (uniform) {
+        const group = map.get(first.category) ?? [];
+        group.push({
+          key: "thread.goTo.range",
+          title: "Go to thread",
+          pieces: [...first.pieces.slice(0, -1), "1", "9"],
+        });
+        map.set(first.category, group);
+      } else {
+        // Non-uniform bindings — render each one individually so the dialog
+        // shows the user's actual configuration.
+        for (const c of goToThreadCandidates) {
+          const group = map.get(c.category) ?? [];
+          group.push({
+            key: `thread.goTo${c.digit}`,
+            title: c.title,
+            pieces: c.pieces,
+          });
+          map.set(c.category, group);
+        }
+      }
     }
 
     // Sort each category alphabetically by title for stability.
