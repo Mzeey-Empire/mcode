@@ -78,8 +78,13 @@ export class AnthropicOAuthUsageSource implements IUsageSource {
     if (this.cachedToken && this.cachedToken.expiresAt > Date.now()) {
       return this.cachedToken;
     }
-    // Token is absent, expired, or was cleared after a 401 — re-read from disk.
+    // Re-read: token is absent, expired, or evicted after a 401.
     this.cachedToken = await this.readToken();
+    // Discard immediately if the credential store itself returned a stale token
+    // (avoids burning one HTTP round-trip on a guaranteed 401).
+    if (this.cachedToken && this.cachedToken.expiresAt <= Date.now()) {
+      this.cachedToken = null;
+    }
     return this.cachedToken;
   }
 }
