@@ -35,7 +35,7 @@ export default async function afterPack(context) {
     let snapshotDest;
     let electronBinary;
 
-    if (electronPlatformName === "darwin") {
+    if (electronPlatformName === "darwin" || electronPlatformName === "mas") {
       const frameworkDir = join(
         appOutDir,
         `${context.packager.appInfo.productFilename}.app`,
@@ -66,7 +66,7 @@ export default async function afterPack(context) {
       version: FuseVersion.V1,
       // On ARM64 macOS, flipping fuses invalidates the ad-hoc code signature.
       // Reset it so the binary can launch before electron-builder codesigns.
-      resetAdHocDarwinSignature: electronPlatformName === "darwin",
+      resetAdHocDarwinSignature: electronPlatformName === "darwin" || electronPlatformName === "mas",
       [FuseV1Options.LoadBrowserProcessSpecificV8Snapshot]: true,
     });
 
