@@ -347,4 +347,18 @@ describe("buildServerBinary win32 VERSIONINFO stamping", () => {
       }),
     ).rejects.toThrow(/numeric dotted quad/);
   });
+
+  it("throws when an appVersion segment exceeds the 16-bit max on win32", async () => {
+    const srcExe = path.join(tmpDir, "Mcode.exe");
+    await writeFile(srcExe, Buffer.from([0x4d, 0x5a]));
+
+    await expect(
+      buildServerBinary({
+        appOutDir: tmpDir,
+        electronPlatformName: "win32",
+        productFilename: "Mcode",
+        appVersion: "1.2.3.999999",
+      }),
+    ).rejects.toThrow(/\[0, 65535\]/);
+  });
 });
