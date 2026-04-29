@@ -1712,7 +1712,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               ...state.usageByProvider,
               [key]: {
                 providerId,
-                quotaCategories: categories ?? [],
+                quotaCategories: categories.length > 0 ? categories : (existing?.quotaCategories ?? []),
                 sessionCostUsd: sessionCostUsd ?? existing?.sessionCostUsd,
                 serviceTier: serviceTier ?? existing?.serviceTier,
                 numTurns: numTurns ?? existing?.numTurns,
