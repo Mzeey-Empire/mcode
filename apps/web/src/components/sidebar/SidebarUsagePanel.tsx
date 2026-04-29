@@ -187,9 +187,9 @@ export function SidebarUsagePanel() {
   );
   const fetchProviderUsage = useThreadStore((s) => s.fetchProviderUsage);
 
-  // Hydrate immediately — bars appear without waiting for a hover. Intentionally
-  // omit fetchProviderUsage (stable Zustand action) and usageInfo (the guard)
-  // from deps so thread switches don't re-trigger a fetch mid-request.
+  // Hydrate immediately — bars appear without waiting for a hover.
+  // Intentionally omits `usageInfo` (would cause an infinite refetch loop)
+  // and `fetchProviderUsage` (stable Zustand action reference).
   useEffect(() => {
     if (activeThreadId && !usageInfo) {
       void fetchProviderUsage(activeThreadId, providerId);
