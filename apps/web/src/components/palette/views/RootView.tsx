@@ -119,16 +119,21 @@ export function RootView() {
   };
 
   const footer = (
-    <div className="flex items-center justify-between border-t border-border/50 px-3 py-1.5">
-      <span className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground/40">
-        <Kbd>&gt;</Kbd> <span className="ml-1">Actions only</span>
-      </span>
-      <div className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground/30">
+    <div className="flex items-center justify-between gap-3 border-t border-border/50 px-3 py-1.5 font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground/55">
+      <div className="flex items-center gap-3">
         <span>
-          <Kbd>↑↓</Kbd> Navigate
+          <Kbd>&gt;</Kbd> <span className="ml-1">Actions only</span>
         </span>
         <span>
-          <Kbd>Enter</Kbd> Select
+          <Kbd>~/</Kbd> <span className="ml-1">Browse</span>
+        </span>
+      </div>
+      <div className="flex items-center gap-3">
+        <span>
+          <Kbd>↑↓</Kbd> Move
+        </span>
+        <span>
+          <Kbd>↵</Kbd> Select
         </span>
         <span>
           <Kbd>Esc</Kbd> Close

@@ -160,11 +160,11 @@ export function BrowseView() {
               value="__parent__"
               keywords={[".."]}
               onSelect={handleAscend}
-              className="flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-muted-foreground"
+              className="flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-foreground/85"
             >
-              <ArrowUp size={13} strokeWidth={2} className="shrink-0" />
+              <ArrowUp size={13} strokeWidth={2.25} className="shrink-0 text-primary/80" />
               <span className="font-mono">..</span>
-              <span className="ml-auto text-[10.5px] text-muted-foreground/50">parent</span>
+              <span className="ml-auto text-[10.5px] text-muted-foreground/55">parent</span>
             </CommandItem>
           )}
 

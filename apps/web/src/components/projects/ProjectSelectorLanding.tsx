@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { ProjectRow } from "./ProjectRow";
+import { Kbd } from "../palette/Kbd";
 
 /**
  * Full-screen cold-start landing shown when no workspace is active.
@@ -102,9 +103,9 @@ export function ProjectSelectorLanding() {
 
       {/* Keyboard hint — surfaces the palette so power users know it exists.
           Pinned to the bottom so it doesn't compete with the wordmark/list. */}
-      <div className="pointer-events-none absolute bottom-6 flex items-center gap-2 font-mono text-[10.5px] tracking-[0.06em] text-muted-foreground/45">
-        <kbd className="rounded-sm border border-border/50 px-1.5 py-0.5 text-[10px]">{modKey}</kbd>
-        <kbd className="rounded-sm border border-border/50 px-1.5 py-0.5 text-[10px]">P</kbd>
+      <div className="pointer-events-none absolute bottom-6 flex items-center gap-1.5 font-mono text-[10.5px] tracking-[0.06em] text-muted-foreground/55">
+        <Kbd>{modKey}</Kbd>
+        <Kbd>P</Kbd>
         <span className="ml-1">Command palette</span>
       </div>
     </div>
