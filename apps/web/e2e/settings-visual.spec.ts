@@ -26,7 +26,7 @@ const DEFAULT_SETTINGS = {
   updates: { autoDownload: true, autoInstallOnQuit: true, checkInterval: "4hours" },
 };
 
-const SECTIONS = ["Model", "Agent", "Worktrees", "Appearance", "Notifications", "Terminal", "Server", "About"];
+const SECTIONS = ["Model", "Agent", "Worktrees", "Appearance", "Notifications", "Terminal", "Performance", "About"];
 
 test.describe("Settings visual review", () => {
   test.beforeEach(async ({ page }) => {
