@@ -90,6 +90,26 @@ describe("mapCursorAcpNotification", () => {
     });
   });
 
+  describe("cursor/task notification", () => {
+    it("emits System event for cursor/task", () => {
+      const acc = freshAcc();
+      const events = mapCursorAcpNotification(
+        {
+          method: "cursor/task",
+          params: { taskId: "abc", status: "running", description: "Editing files" },
+        },
+        "t1",
+        acc,
+      );
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: "system",
+        threadId: "t1",
+        subtype: "cursor_task:running",
+      });
+    });
+  });
+
   describe("tool execution session updates", () => {
     it("emits ToolUse for tool_start sessionUpdate", () => {
       const acc = freshAcc();

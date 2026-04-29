@@ -77,6 +77,18 @@ export function mapCursorAcpNotification(
     }
   }
 
+  // cursor/task: status update for a running cursor task.
+  if (method === "cursor/task" && params) {
+    const status = stringField(params as Record<string, unknown>, "status") ?? "unknown";
+    return [
+      {
+        type: AgentEventType.System,
+        threadId,
+        subtype: `cursor_task:${status}`,
+      },
+    ];
+  }
+
   if (method !== "session/update") return [];
 
   const update = params?.update as Record<string, unknown> | undefined;
