@@ -173,5 +173,124 @@ describe("mapCursorAcpNotification", () => {
         toolInput: { command: "ls" },
       });
     });
+
+    it("emits ToolProgress with non-negative elapsedSeconds when tool_start preceded it", () => {
+      const acc = freshAcc();
+      // Simulate tool_start to populate toolStartTimes
+      mapCursorAcpNotification(
+        {
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "tool_start",
+              toolCallId: "tc-progress-1",
+              toolName: "edit_file",
+            },
+          },
+        },
+        "t1",
+        acc,
+      );
+      expect(acc.toolStartTimes.has("tc-progress-1")).toBe(true);
+
+      const events = mapCursorAcpNotification(
+        {
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "tool_progress",
+              toolCallId: "tc-progress-1",
+              toolName: "edit_file",
+            },
+          },
+        },
+        "t1",
+        acc,
+      );
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: "toolProgress",
+        threadId: "t1",
+        toolCallId: "tc-progress-1",
+        toolName: "edit_file",
+      });
+      const elapsed = (events[0] as { elapsedSeconds: number }).elapsedSeconds;
+      expect(elapsed).toBeGreaterThanOrEqual(0);
+    });
+
+    it("returns no events for tool_progress with unknown toolCallId", () => {
+      const acc = freshAcc();
+      const events = mapCursorAcpNotification(
+        {
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "tool_progress",
+              toolCallId: "unknown-tc",
+              toolName: "edit_file",
+            },
+          },
+        },
+        "t1",
+        acc,
+      );
+      expect(events).toEqual([]);
+    });
+
+    it("returns no events for tool_progress with no toolCallId or actionId", () => {
+      const acc = freshAcc();
+      const events = mapCursorAcpNotification(
+        {
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "tool_progress",
+              toolName: "edit_file",
+            },
+          },
+        },
+        "t1",
+        acc,
+      );
+      expect(events).toEqual([]);
+    });
+
+    it("returns no events for tool_end with no toolCallId or actionId", () => {
+      const acc = freshAcc();
+      const events = mapCursorAcpNotification(
+        {
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "tool_end",
+              output: "done",
+              isError: false,
+            },
+          },
+        },
+        "t1",
+        acc,
+      );
+      expect(events).toEqual([]);
+    });
+
+    it("returns no events for agent_action_end with no toolCallId or actionId", () => {
+      const acc = freshAcc();
+      const events = mapCursorAcpNotification(
+        {
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "agent_action_end",
+              result: "done",
+              success: true,
+            },
+          },
+        },
+        "t1",
+        acc,
+      );
+      expect(events).toEqual([]);
+    });
   });
 });

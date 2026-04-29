@@ -129,9 +129,14 @@ export function mapCursorAcpNotification(
     sessionUpdate === "agent_action_end"
   ) {
     const toolCallId =
-      stringField(update, "toolCallId") ??
-      stringField(update, "actionId") ??
-      "";
+      stringField(update, "toolCallId") ?? stringField(update, "actionId");
+    // Unlike tool_start, we cannot synthesize an id here: a ToolResult must
+    // match a previously-emitted ToolUse for downstream stack lookup to work.
+    // Drop the event and surface the malformed payload via debug logs.
+    if (!toolCallId) {
+      logger.debug("Cursor ACP tool_end missing toolCallId", { update });
+      return [];
+    }
     const output =
       stringField(update, "output") ??
       stringField(update, "result") ??
@@ -160,9 +165,13 @@ export function mapCursorAcpNotification(
     sessionUpdate === "agent_action_progress"
   ) {
     const toolCallId =
-      stringField(update, "toolCallId") ??
-      stringField(update, "actionId") ??
-      "";
+      stringField(update, "toolCallId") ?? stringField(update, "actionId");
+    // Without a known start time, elapsedSeconds would be a misleading 0;
+    // skip the heartbeat instead of fabricating one.
+    if (!toolCallId || !acc.toolStartTimes.has(toolCallId)) {
+      logger.debug("Cursor ACP tool_progress for unknown tool", { toolCallId });
+      return [];
+    }
     const toolName =
       stringField(update, "toolName") ??
       stringField(update, "actionName") ??
