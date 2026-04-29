@@ -90,6 +90,12 @@ export default async function afterPack(context) {
     : [...segments, ...Array(4 - segments.length).fill("0")].join(".");
   const companyName = context.packager.appInfo.companyName ?? "Mcode";
 
+  // TODO(macOS signing): when notarization is enabled, the renamed copy at
+  // Contents/Resources/bin/mcode-server will fail notarytool. The fix is to
+  // either add it to electron-builder's `mac.binaries` so it gets co-signed,
+  // re-sign it here with `codesign --force --sign <identity>`, or replace
+  // the copy with an extraResources entry. macOS signing is currently
+  // disabled, so this is a no-op today.
   await buildServerBinary({
     appOutDir: context.appOutDir,
     electronPlatformName,
