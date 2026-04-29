@@ -13,11 +13,23 @@ import { homedir, platform } from "node:os";
 /** Maximum number of directory entries returned in a single browse response. */
 const MAX_ENTRIES = 500;
 
+/** Cache window for the drive list — long enough that fast typing on `/` is free,
+ * short enough that newly-mounted drives surface within a couple of keystrokes. */
+const DRIVES_CACHE_TTL_MS = 5_000;
+
+let cachedDrives: { name: string; isDir: boolean }[] | null = null;
+let cachedDrivesAt = 0;
+
 /**
  * Probe `A:\` through `Z:\` synchronously and return the ones that exist.
- * Used to populate the drives list when the user types `/` on Windows.
+ * Result is cached for {@link DRIVES_CACHE_TTL_MS} so rapid keystrokes don't
+ * fan out into 26 stat calls per character.
  */
 function listWindowsDrives(): { name: string; isDir: boolean }[] {
+  const now = Date.now();
+  if (cachedDrives && now - cachedDrivesAt < DRIVES_CACHE_TTL_MS) {
+    return cachedDrives;
+  }
   const drives: { name: string; isDir: boolean }[] = [];
   for (let code = "A".charCodeAt(0); code <= "Z".charCodeAt(0); code++) {
     const letter = String.fromCharCode(code);
@@ -26,6 +38,8 @@ function listWindowsDrives(): { name: string; isDir: boolean }[] {
       drives.push({ name: root, isDir: true });
     }
   }
+  cachedDrives = drives;
+  cachedDrivesAt = now;
   return drives;
 }
 
