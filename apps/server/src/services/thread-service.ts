@@ -6,7 +6,7 @@
 
 import { injectable, inject } from "tsyringe";
 import { validateBranchName, sanitizeBranchForFolder, logger } from "@mcode/shared";
-import type { Thread, ThreadMode, ContextWindowMode } from "@mcode/contracts";
+import type { Thread, RecentThread, ThreadMode, ContextWindowMode } from "@mcode/contracts";
 import { ThreadRepo } from "../repositories/thread-repo";
 import { WorkspaceRepo } from "../repositories/workspace-repo";
 import { GitService } from "./git-service";
@@ -118,6 +118,11 @@ export class ThreadService {
   /** List non-deleted threads for a workspace. */
   list(workspaceId: string): Thread[] {
     return this.threadRepo.listByWorkspace(workspaceId);
+  }
+
+  /** List the most recently updated threads across all workspaces (joined with workspace name + path). */
+  listRecent(limit?: number): RecentThread[] {
+    return this.threadRepo.listRecent(limit);
   }
 
   /**

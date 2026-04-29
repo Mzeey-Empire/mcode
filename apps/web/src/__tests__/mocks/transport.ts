@@ -95,6 +95,7 @@ export const mockTransport: McodeTransport = {
   filesystemBrowse: vi.fn().mockResolvedValue({ path: "/", parent: null, entries: [] }),
   createThread: vi.fn(),
   listThreads: vi.fn().mockResolvedValue([]),
+  listRecentThreads: vi.fn().mockResolvedValue([]),
   deleteThread: vi.fn().mockResolvedValue(true),
   listBranches: vi.fn().mockResolvedValue([]),
   getCurrentBranch: vi.fn().mockResolvedValue("main"),

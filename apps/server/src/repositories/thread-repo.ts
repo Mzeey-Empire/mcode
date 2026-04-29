@@ -6,7 +6,7 @@
 import { randomUUID } from "crypto";
 import { injectable, inject } from "tsyringe";
 import type Database from "better-sqlite3";
-import type { Thread, ThreadMode, ThreadStatus, ReasoningLevel, InteractionMode, PermissionMode, ContextWindowMode } from "@mcode/contracts";
+import type { Thread, RecentThread, ThreadMode, ThreadStatus, ReasoningLevel, InteractionMode, PermissionMode, ContextWindowMode } from "@mcode/contracts";
 
 interface ThreadRow {
   id: string;
@@ -172,6 +172,37 @@ export class ThreadRepo {
       .all(workspaceId, clampedLimit) as ThreadRow[];
 
     return rows.map(rowToThread);
+  }
+
+  /**
+   * List the most recently active non-deleted threads across all workspaces,
+   * joined with the parent workspace's name + path. Used by the landing's
+   * "Recent threads" section to surface continuation candidates regardless of
+   * which workspace is currently active.
+   *
+   * Sorted by `updated_at` (last activity), not `created_at`, so a long-lived
+   * thread with recent traffic outranks a freshly-created idle one.
+   */
+  listRecent(limit = 12): RecentThread[] {
+    const clampedLimit = Math.max(1, Math.min(50, limit));
+
+    const rows = this.db
+      .prepare(
+        `SELECT ${THREAD_COLUMNS.split(", ").map((c) => `t.${c}`).join(", ")},
+                w.name AS workspace_name, w.path AS workspace_path
+         FROM threads t
+         JOIN workspaces w ON w.id = t.workspace_id
+         WHERE t.deleted_at IS NULL
+         ORDER BY t.updated_at DESC
+         LIMIT ?`,
+      )
+      .all(clampedLimit) as Array<ThreadRow & { workspace_name: string; workspace_path: string }>;
+
+    return rows.map((row) => ({
+      ...rowToThread(row),
+      workspace_name: row.workspace_name,
+      workspace_path: row.workspace_path,
+    }));
   }
 
   /** Update a thread's lifecycle status. Returns true if a row was changed. */

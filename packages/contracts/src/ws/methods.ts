@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { WorkspaceSchema, WorkspaceEnrichmentSchema } from "../models/workspace.js";
-import { ThreadSchema } from "../models/thread.js";
+import { ThreadSchema, RecentThreadSchema } from "../models/thread.js";
 import { ThreadModeSchema, PermissionModeSchema, InteractionModeSchema } from "../models/enums.js";
 import { PaginatedMessagesSchema } from "../models/message.js";
 import { AttachmentMetaSchema } from "../models/attachment.js";
@@ -142,6 +142,15 @@ export const WS_METHODS = lazySchema(() => ({
   "thread.list": {
     params: z.object({ workspaceId: z.string() }),
     result: z.array(ThreadSchema()),
+  },
+  /**
+   * List the most recently active threads across ALL workspaces. Joined with
+   * workspace name + path so the landing can render project context per row
+   * without a follow-up enrich call.
+   */
+  "thread.recent": {
+    params: z.object({ limit: z.number().int().positive().max(50).optional() }),
+    result: z.array(RecentThreadSchema()),
   },
   "thread.create": {
     params: CreateThreadSchema(),

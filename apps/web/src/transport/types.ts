@@ -3,6 +3,7 @@ import type {
   Workspace,
   WorkspaceEnrichment,
   Thread,
+  RecentThread,
   PaginatedMessages,
   AttachmentMeta,
   GitBranch,
@@ -37,6 +38,7 @@ export type {
   Workspace,
   WorkspaceEnrichment,
   Thread,
+  RecentThread,
   Message,
   AttachmentMeta,
   StoredAttachment,
@@ -103,6 +105,8 @@ export interface McodeTransport {
     branch: string,
   ): Promise<Thread>;
   listThreads(workspaceId: string): Promise<Thread[]>;
+  /** List the most recently active threads across all workspaces, joined with workspace name + path. */
+  listRecentThreads(limit?: number): Promise<RecentThread[]>;
   deleteThread(threadId: string, cleanupWorktree: boolean): Promise<boolean>;
 
   // Git branch commands

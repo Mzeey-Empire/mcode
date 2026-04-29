@@ -238,6 +238,8 @@ async function dispatch(
       }
       return deps.threadService.list(params.workspaceId);
     }
+    case "thread.recent":
+      return deps.threadService.listRecent(params.limit);
     case "thread.create":
       return deps.threadService.create(
         params.workspaceId,
