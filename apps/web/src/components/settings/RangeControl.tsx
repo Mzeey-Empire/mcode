@@ -43,18 +43,24 @@ export function RangeControl({
 
   return (
     <div className="flex w-52 items-center gap-3">
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={display}
-        onChange={(e) => setLocal(Number(e.target.value))}
-        onMouseUp={handlePointerCommit}
-        onKeyUp={(e) => { if (VALUE_KEYS.has(e.key)) commit(Number(e.currentTarget.value)); }}
-        onTouchEnd={() => { if (local !== null) commit(local); }}
-        className="settings-range flex-1"
-      />
+      <div className="relative flex-1">
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={display}
+          onChange={(e) => setLocal(Number(e.target.value))}
+          onMouseUp={handlePointerCommit}
+          onKeyUp={(e) => { if (VALUE_KEYS.has(e.key)) commit(Number(e.currentTarget.value)); }}
+          onTouchEnd={() => { if (local !== null) commit(local); }}
+          className="settings-range w-full"
+        />
+        <div className="flex justify-between text-xs text-muted-foreground mt-1">
+          <span>{min}</span>
+          <span>{max}</span>
+        </div>
+      </div>
       <span className="min-w-[2.5rem] text-right font-mono text-xs text-foreground">
         {formatted}
       </span>

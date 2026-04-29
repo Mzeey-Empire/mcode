@@ -54,3 +54,16 @@ export const ThreadSchema = lazySchema(() =>
 );
 /** Thread record from the database. */
 export type Thread = z.infer<ReturnType<typeof ThreadSchema>>;
+
+/**
+ * Thread plus a small slice of its parent workspace, used by the cross-workspace
+ * recent-threads landing list. The join is denormalized at the RPC boundary so
+ * the renderer can show project context per row without enriching afterwards.
+ */
+export const RecentThreadSchema = lazySchema(() =>
+  ThreadSchema().extend({
+    workspace_name: z.string(),
+    workspace_path: z.string(),
+  }),
+);
+export type RecentThread = z.infer<ReturnType<typeof RecentThreadSchema>>;

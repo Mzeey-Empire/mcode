@@ -1,7 +1,9 @@
 // Import shared types for local use in the McodeTransport interface.
 import type {
   Workspace,
+  WorkspaceEnrichment,
   Thread,
+  RecentThread,
   PaginatedMessages,
   AttachmentMeta,
   GitBranch,
@@ -34,7 +36,9 @@ import type {
 // Re-export shared types from the contracts package (single source of truth).
 export type {
   Workspace,
+  WorkspaceEnrichment,
   Thread,
+  RecentThread,
   Message,
   AttachmentMeta,
   StoredAttachment,
@@ -78,6 +82,20 @@ export interface McodeTransport {
   createWorkspace(name: string, path: string): Promise<Workspace>;
   listWorkspaces(): Promise<Workspace[]>;
   deleteWorkspace(id: string): Promise<boolean>;
+  /** Record workspace as last-opened for recency ordering in the project selector. */
+  touchLastOpened(id: string): Promise<void>;
+  /** Pin or unpin a workspace in the project selector. */
+  pinWorkspace(id: string, pinned: boolean): Promise<void>;
+  /** Remove a workspace from the recents list and unpin it. */
+  removeRecent(id: string): Promise<void>;
+  /** Batch-fetch git branch, cleanliness, and thread count for the given workspace ids. */
+  enrichWorkspaces(ids: string[]): Promise<{ items: WorkspaceEnrichment[] }>;
+  /** Browse the host filesystem at the given path. Returns entries and parent path. */
+  filesystemBrowse(path: string): Promise<{
+    path: string;
+    parent: string | null;
+    entries: { name: string; isDir: boolean }[];
+  }>;
 
   // Thread commands
   createThread(
@@ -87,6 +105,8 @@ export interface McodeTransport {
     branch: string,
   ): Promise<Thread>;
   listThreads(workspaceId: string): Promise<Thread[]>;
+  /** List the most recently active threads across all workspaces, joined with workspace name + path. */
+  listRecentThreads(limit?: number): Promise<RecentThread[]>;
   deleteThread(threadId: string, cleanupWorktree: boolean): Promise<boolean>;
 
   // Git branch commands
@@ -195,7 +215,7 @@ export interface McodeTransport {
   fetchBranch(workspaceId: string, branch: string, prNumber?: number): Promise<void>;
   getPrByUrl(url: string): Promise<PrDetail | null>;
   /** Fetch fresh CI check status for a thread (manual refresh). */
-  checkStatus(threadId: string): Promise<ChecksStatus>;
+  checkStatus(threadId: string, force?: boolean): Promise<ChecksStatus>;
 
   // Skills
   /** List discoverable skills and commands, optionally scoped to a workspace path and provider. */

@@ -29,6 +29,7 @@ import * as m016 from "./migrations/00000000000016_copilot_agent.js";
 import * as m017 from "./migrations/00000000000017_workspace_is_git_repo.js";
 import * as m018 from "./migrations/00000000000018_thread_context_window_mode_thinking.js";
 import * as m020 from "./migrations/00000000000020_thread_has_file_changes.js";
+import * as mPinned from "./migrations/20260429000000_workspace_pinned_and_last_opened.js";
 
 /**
  * Resolve the correct native binding for better-sqlite3 based on runtime.
@@ -92,6 +93,11 @@ export function loadMigrations(): Map<string, MigrationModule> {
   // 020 before the integer→timestamp migration landed, to avoid a version
   // collision with the feat/modern-project-selector branch's 019 migration.
   migrations.set("00000000000020", m020);
+  // Project-selector PR landed `020_workspace_pinned_and_last_opened.ts` on
+  // main while this branch was concurrently switching to timestamp keys.
+  // It was renamed to a real UTC timestamp on merge; legacy DBs that applied
+  // it as integer 20 are translated by schema sniffing in the runner.
+  migrations.set("20260429000000", mPinned);
   return migrations;
 }
 

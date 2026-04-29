@@ -5,7 +5,7 @@
  */
 export class LruCache<K, V> {
   private readonly map = new Map<K, V>();
-  private readonly capacity: number;
+  private capacity: number;
 
   /**
    * @param capacity Maximum number of entries to hold. Clamped to a minimum of 1.
@@ -34,6 +34,23 @@ export class LruCache<K, V> {
       this.map.delete(evicted);
     }
     this.map.set(key, value);
+    return evicted;
+  }
+
+  /**
+   * Change the capacity. Clamped to a minimum of 1.
+   * When shrinking, evicts the least-recently-used entries until size <= capacity
+   * and returns the evicted keys in eviction order (oldest-first).
+   * When growing or unchanged, returns an empty array.
+   */
+  resize(capacity: number): K[] {
+    this.capacity = Math.max(1, capacity);
+    const evicted: K[] = [];
+    while (this.map.size > this.capacity) {
+      const oldest = this.map.keys().next().value as K;
+      this.map.delete(oldest);
+      evicted.push(oldest);
+    }
     return evicted;
   }
 

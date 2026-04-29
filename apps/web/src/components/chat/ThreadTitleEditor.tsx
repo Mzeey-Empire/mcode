@@ -54,6 +54,9 @@ export function ThreadTitleEditor({
       didSaveRef.current = true;
     } else if (e.key === "Escape") {
       e.preventDefault();
+      // Stop propagation so the app-level Escape shortcut doesn't also fire
+      // (which would call setActiveThread(null) and deactivate the thread).
+      e.stopPropagation();
       didSaveRef.current = true;
       onCancel();
     }

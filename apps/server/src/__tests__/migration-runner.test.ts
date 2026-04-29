@@ -427,10 +427,12 @@ describe("MigrationRunner", () => {
       ]);
     });
 
-    it("translates legacy DBs with both integer 19 (sort_order) and 20 (has_file_changes) without throwing", () => {
+    it("translates legacy DBs with int 19 + int 20 to identity-preserving keys when no feature schema is present", () => {
       // Reproduces the real-world failure: a DB that applied sort_order from
       // the sibling branch (int 19) and then later applied has_file_changes
       // under the old integer runner after the 019→020 rename (int 20).
+      // Without the feature columns present in this fixture, the runner
+      // defaults to identity-preserving translations.
       const db = freshDb();
       db.exec(`
         CREATE TABLE _migrations (
@@ -450,7 +452,7 @@ describe("MigrationRunner", () => {
         "2026-04-27T19:00:00.000Z",
       );
 
-      // Constructor must not throw — both integer keys are mapped.
+      // Constructor must not throw — both integer keys are translated.
       new MigrationRunner(db, new Map());
 
       const rows = db
@@ -461,6 +463,52 @@ describe("MigrationRunner", () => {
         { version: "00000000000019", name: "Add sort_order column to workspaces" },
         { version: "00000000000020", name: "Add has_file_changes column to threads" },
       ]);
+    });
+
+    it("translates int 19 to '00000000000020' when threads.has_file_changes already exists", () => {
+      // Pre-rename state: int 19 was thread_has_file_changes on this branch.
+      const db = freshDb();
+      db.exec("CREATE TABLE threads (id INTEGER PRIMARY KEY, has_file_changes INTEGER)");
+      db.exec(`
+        CREATE TABLE _migrations (
+          version INTEGER PRIMARY KEY,
+          name TEXT NOT NULL DEFAULT '',
+          applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      db.prepare("INSERT INTO _migrations (version, name, applied_at) VALUES (?, ?, ?)").run(
+        19,
+        "Add has_file_changes column to threads",
+        "2026-04-20T00:00:00.000Z",
+      );
+
+      new MigrationRunner(db, new Map());
+
+      const row = db.prepare("SELECT version FROM _migrations").get() as { version: string };
+      expect(row.version).toBe("00000000000020");
+    });
+
+    it("translates int 20 to '20260429000000' when workspaces.pinned already exists", () => {
+      // Main lineage: int 20 was workspace_pinned_and_last_opened.
+      const db = freshDb();
+      db.exec("CREATE TABLE workspaces (id INTEGER PRIMARY KEY, pinned INTEGER)");
+      db.exec(`
+        CREATE TABLE _migrations (
+          version INTEGER PRIMARY KEY,
+          name TEXT NOT NULL DEFAULT '',
+          applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+      `);
+      db.prepare("INSERT INTO _migrations (version, name, applied_at) VALUES (?, ?, ?)").run(
+        20,
+        "Add pinned and last_opened_at columns to workspaces",
+        "2026-04-28T00:00:00.000Z",
+      );
+
+      new MigrationRunner(db, new Map());
+
+      const row = db.prepare("SELECT version FROM _migrations").get() as { version: string };
+      expect(row.version).toBe("20260429000000");
     });
 
     it("is a no-op when _migrations.version is already TEXT", () => {

@@ -1,0 +1,97 @@
+import { create } from "zustand";
+
+/**
+ * A palette view pushed onto the viewStack.
+ *
+ * `addProject` is intentionally absent — the unified palette handles folder
+ * browsing in-place via prefix detection on the input query (see `getPaletteMode`).
+ * To open the palette in browse mode, call `open({ intent: "addProject" })` which
+ * seeds the input with `~/` and stays on the root view.
+ */
+/**
+ * Optional follow-up action triggered after a project is selected from the
+ * projects view. Lets a caller (e.g. the "New Thread" command from the
+ * cold-start landing) open the picker first, then chain into the new-thread
+ * state inside the chosen project.
+ */
+export type ProjectsNextAction = "newThread";
+
+export type View =
+  | { kind: "root" }
+  | { kind: "projects"; nextAction?: ProjectsNextAction }
+  | { kind: "selectionList"; title: string; items: { id: string; title: string }[]; onPick: (id: string) => void };
+
+interface State {
+  /** Whether the palette overlay is visible. */
+  isOpen: boolean;
+  /** Navigation stack of views; the last entry is the active view. */
+  viewStack: View[];
+  /** Current search query for the active view. */
+  query: string;
+  /**
+   * Optional confirm action registered by the active view (e.g. browse mode's
+   * "Add this folder" handler). Called when the user presses Ctrl/Cmd+Enter.
+   */
+  pendingConfirm: (() => void) | null;
+  /**
+   * Open the palette, optionally at a specific intent.
+   * - `projects`: open at the projects view. Pass `nextAction` to chain a
+   *   follow-up (e.g. start a new thread inside the picked project).
+   * - `addProject`: open at the root view with the input pre-seeded to `~/`.
+   *   The unified shell flips into browse mode on render because `~/` matches
+   *   the browse-mode prefix detection.
+   */
+  open: (opts?: {
+    intent?: "projects" | "addProject";
+    nextAction?: ProjectsNextAction;
+  }) => void;
+  /** Push a new view onto the navigation stack and clear the query. */
+  push: (view: View) => void;
+  /** Pop the active view. Closes the palette if the stack would become empty. */
+  pop: () => void;
+  /** Close the palette, empty the stack, and reset the query. */
+  close: () => void;
+  /** Update the search query for the active view. */
+  setQuery: (q: string) => void;
+  /** Register a confirm action for the current view. Pass null to clear. */
+  setPendingConfirm: (fn: (() => void) | null) => void;
+}
+
+/**
+ * Zustand store for command palette state.
+ * Navigation is stack-based: each sub-view is pushed onto `viewStack` and
+ * popped on back. Closing or popping the last view resets everything.
+ */
+export const useCommandPaletteStore = create<State>((set, get) => ({
+  isOpen: false,
+  viewStack: [],
+  query: "",
+  pendingConfirm: null,
+  open: (opts) => {
+    const intent = opts?.intent;
+    // Only attach `nextAction` when set so equality-based tests on the bare
+    // `{ kind: "projects" }` view shape continue to match.
+    const view: View =
+      intent === "projects"
+        ? opts?.nextAction
+          ? { kind: "projects", nextAction: opts.nextAction }
+          : { kind: "projects" }
+        : { kind: "root" };
+    // The addProject intent stays on the root view but seeds the query with `~/`
+    // so the unified shell renders in browse mode immediately.
+    const query = intent === "addProject" ? "~/" : "";
+    set({ isOpen: true, viewStack: [view], query, pendingConfirm: null });
+  },
+  push: (view) => set({ viewStack: [...get().viewStack, view], query: "", pendingConfirm: null }),
+  pop: () => {
+    const next = get().viewStack.slice(0, -1);
+    if (next.length === 0) {
+      set({ isOpen: false, viewStack: [], query: "", pendingConfirm: null });
+    } else {
+      set({ viewStack: next, query: "", pendingConfirm: null });
+    }
+  },
+  close: () => set({ isOpen: false, viewStack: [], query: "", pendingConfirm: null }),
+  setQuery: (q) => set({ query: q }),
+  setPendingConfirm: (fn) => set({ pendingConfirm: fn }),
+}));

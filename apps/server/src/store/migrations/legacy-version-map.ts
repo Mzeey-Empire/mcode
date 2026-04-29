@@ -1,6 +1,7 @@
 /**
- * Maps the legacy integer migration versions to their corresponding
- * 14-character zero-padded string keys used by the timestamp-based scheme.
+ * Maps the unambiguous legacy integer migration versions (1-18) to their
+ * corresponding 14-character zero-padded string keys used by the timestamp-
+ * based scheme.
  *
  * This is consulted exactly once per database, the first time a database with
  * an INTEGER-typed `_migrations.version` column is opened after the timestamp
@@ -11,20 +12,12 @@
  * and self-contained — adding new migrations after the cutover must use real
  * timestamps, not extend this map.
  *
- * Why both 19 and 20 are mapped:
- * - Integer 19 represents `workspace_sort_order` from the sibling
- *   feat/modern-project-selector branch. Databases that picked it up retain
- *   it as the gap-keyed "00000000000019", which has no migration module on
- *   this branch (the runner tolerates gaps; only `validate()` reports them).
- * - Integer 20 represents `thread_has_file_changes`. The original 019 file
- *   on this branch was renumbered to 020 to avoid colliding with the sibling
- *   branch's 019. A database where 020 was applied under the old integer
- *   runner needs this row to translate to "00000000000020" so the upgraded
- *   runner sees it as already applied and does not re-run it.
- *
- * Identity-preserving translations are the safe default: each integer maps
- * to the same numeric value as a 14-char string, so the upgrade neither
- * fabricates a fresh apply nor invents history.
+ * Integers 19 and 20 are *not* listed here because they are ambiguous across
+ * sibling branches (this branch had `thread_has_file_changes` at v19, then
+ * v20 after a rename; main's lineage has `workspace_pinned_and_last_opened`
+ * at v20; another branch had `workspace_sort_order` at v19). The runner
+ * resolves them by sniffing the live schema — see
+ * `MigrationRunner.translateLegacyVersion`.
  */
 export const LEGACY_VERSION_MAP = new Map<number, string>([
   [1, "00000000000001"],
@@ -45,6 +38,4 @@ export const LEGACY_VERSION_MAP = new Map<number, string>([
   [16, "00000000000016"],
   [17, "00000000000017"],
   [18, "00000000000018"],
-  [19, "00000000000019"],
-  [20, "00000000000020"],
 ]);

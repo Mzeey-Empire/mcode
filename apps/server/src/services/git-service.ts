@@ -596,6 +596,35 @@ export class GitService {
     }
   }
 
+  /**
+   * Check whether the working tree at repoPath has no uncommitted changes.
+   * Returns true only for genuinely clean trees or paths git reports as
+   * "not a git repository". Other failures (timeouts, permission errors)
+   * return false so a dirty repo is never silently labelled clean — the
+   * UI then surfaces the warning state instead of the green "clean" pill.
+   */
+  async isWorkingTreeClean(repoPath: string): Promise<boolean> {
+    try {
+      const { stdout } = await execFile(
+        "git",
+        ["-C", repoPath, "status", "--porcelain"],
+        { timeout: 5_000 },
+      );
+      return stdout.trim() === "";
+    } catch (err) {
+      const stderr =
+        err && typeof err === "object" && "stderr" in err
+          ? String((err as { stderr?: string }).stderr ?? "")
+          : "";
+      if (/not a git repository/i.test(stderr)) return true;
+      logger.warn("git status failed while checking workspace cleanliness", {
+        repoPath,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    }
+  }
+
   private requireWorkspace(workspaceId: string) {
     const workspace = this.workspaceRepo.findById(workspaceId);
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);

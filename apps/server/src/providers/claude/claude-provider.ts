@@ -20,12 +20,17 @@ import type {
   AttachmentMeta,
   ProviderModelInfo,
   ProviderUsageInfo,
+  QuotaCategory,
   PermissionDecision,
   PermissionRequest,
 } from "@mcode/contracts";
 import { buildReasoningOptions } from "./build-reasoning-options.js";
 import { listClaudeModels } from "./list-models.js";
 import { applyUltrathinkPrefix, resolveSdkModelSlug } from "./resolve-slug.js";
+import { readAnthropicOauthToken } from "@mcode/shared/usage";
+import { AnthropicOAuthUsageSource } from "./usage/oauth-usage-source.js";
+import { AnthropicHeaderUsageSource } from "./usage/header-usage-source.js";
+import { CompositeUsageSource } from "./usage/composite-usage-source.js";
 
 /** Idle TTL before a session is evicted (10 minutes). */
 const IDLE_TTL_MS = 10 * 60 * 1000;
@@ -205,6 +210,10 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
   private lastServiceTier?: "standard" | "priority" | "batch";
   private lastNumTurns?: number;
   private lastDurationMs?: number;
+  private readonly usageSource: CompositeUsageSource = new CompositeUsageSource([
+    new AnthropicOAuthUsageSource(readAnthropicOauthToken),
+    new AnthropicHeaderUsageSource(),
+  ]);
 
   constructor() {
     super();
@@ -968,6 +977,9 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                 providerId: "claude",
               } satisfies AgentEvent);
 
+              // Invalidate the usage cache so the warm-refresh call from the
+              // client picks up fresh plan utilization after this turn.
+              this.usageSource.invalidate();
               this.emit("event", {
                 type: AgentEventType.QuotaUpdate,
                 threadId,
@@ -1364,11 +1376,19 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     });
   }
 
-  /** Return accumulated session data. Claude has no quota API via the SDK. */
+  /** Returns Claude plan utilization plus accumulated session stats. */
   async getUsage(): Promise<ProviderUsageInfo> {
+    let categories: QuotaCategory[] | null = null;
+    try {
+      categories = await this.usageSource.fetch();
+    } catch (error) {
+      logger.warn("Failed to fetch Claude usage categories", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     return {
       providerId: "claude",
-      quotaCategories: [],
+      quotaCategories: categories ?? [],
       sessionCostUsd: this.lastSessionCostUsd,
       serviceTier: this.lastServiceTier,
       numTurns: this.lastNumTurns,

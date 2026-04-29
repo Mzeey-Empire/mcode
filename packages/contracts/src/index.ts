@@ -25,11 +25,11 @@ export {
 } from "./models/attachment.js";
 export type { AttachmentMeta, StoredAttachment } from "./models/attachment.js";
 
-export { WorkspaceSchema } from "./models/workspace.js";
-export type { Workspace } from "./models/workspace.js";
+export { WorkspaceSchema, WorkspaceEnrichmentSchema } from "./models/workspace.js";
+export type { Workspace, WorkspaceEnrichment } from "./models/workspace.js";
 
-export { ThreadSchema } from "./models/thread.js";
-export type { Thread } from "./models/thread.js";
+export { ThreadSchema, RecentThreadSchema } from "./models/thread.js";
+export type { Thread, RecentThread } from "./models/thread.js";
 
 export { MessageSchema, PaginatedMessagesSchema } from "./models/message.js";
 export type { Message, PaginatedMessages } from "./models/message.js";

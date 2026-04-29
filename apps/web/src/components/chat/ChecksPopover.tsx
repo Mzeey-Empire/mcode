@@ -174,7 +174,7 @@ export function ChecksPopover({
     setRefreshing(true);
     setRefreshError(false);
     try {
-      const fresh = await getTransport().checkStatus(threadId);
+      const fresh = await getTransport().checkStatus(threadId, true);
       useWorkspaceStore.setState((ws) => ({
         checksById: { ...ws.checksById, [threadId]: fresh },
       }));

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { mockWebSocketServer } from "./helpers/e2e-helpers";
+import { mockWebSocketServer, interceptZustandStores } from "./helpers/e2e-helpers";
 
 /**
  * E2E coverage for the floating-panel UI overhaul:
@@ -9,7 +9,48 @@ import { mockWebSocketServer } from "./helpers/e2e-helpers";
  *     inter-panel border lines).
  */
 
+const now = new Date().toISOString();
+/** Minimal workspace fixture used to suppress the cold-start landing page. */
+const WORKSPACE_FIXTURE = {
+  id: "ws-float-1",
+  name: "Test Workspace",
+  path: "/test",
+  provider_config: {},
+  is_git_repo: true,
+  pinned: false,
+  last_opened_at: null,
+  created_at: now,
+  updated_at: now,
+};
+
+/**
+ * Activate a minimal workspace in the Zustand store so the landing page gives
+ * way to ChatView. Requires interceptZustandStores() to have been called in the
+ * enclosing test's beforeEach (before page.goto).
+ */
+async function activateWorkspace(page: Page): Promise<void> {
+  await page.evaluate((workspace) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const stores: any[] = (window as any).__mcodeStores ?? [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const wsStore = stores.find((s: any) => {
+      const st = s.getState();
+      return "activeWorkspaceId" in st && "threads" in st && "workspaces" in st;
+    });
+    if (!wsStore) throw new Error("[E2E] workspace store not found");
+    wsStore.setState({
+      workspaces: [workspace],
+      activeWorkspaceId: workspace.id,
+      threads: [],
+      loading: false,
+      error: null,
+    });
+  }, WORKSPACE_FIXTURE);
+}
+
 async function openComposerInNewThread(page: Page): Promise<void> {
+  // Activate a workspace so ChatView mounts (landing page would block it otherwise).
+  await activateWorkspace(page);
   // App.tsx registers a "thread.new" command via the command registry; the
   // shortcut layer wires Cmd/Ctrl+N to thread.new which sets pendingNewThread
   // and renders the composer.
@@ -24,6 +65,8 @@ async function openComposerInNewThread(page: Page): Promise<void> {
 test.describe("Composer options — wide viewport (md+)", () => {
   test.beforeEach(async ({ page }) => {
     await mockWebSocketServer(page);
+    // Must be called before page.goto so zustand.js is intercepted on load.
+    await interceptZustandStores(page);
     await page.setViewportSize({ width: 1280, height: 800 });
   });
 
@@ -44,6 +87,8 @@ test.describe("Composer options — wide viewport (md+)", () => {
 test.describe("Composer options — narrow viewport (below md)", () => {
   test.beforeEach(async ({ page }) => {
     await mockWebSocketServer(page);
+    // Must be called before page.goto so zustand.js is intercepted on load.
+    await interceptZustandStores(page);
     await page.setViewportSize({ width: 600, height: 800 });
   });
 
@@ -177,6 +222,9 @@ test.describe("Right panel modal overlay (narrow viewport)", () => {
 test.describe("Visual regression — floating layout", () => {
   test.beforeEach(async ({ page }) => {
     await mockWebSocketServer(page);
+    // Must be called before page.goto so zustand.js is intercepted on load.
+    // Needed by the composer popover test which injects a workspace to bypass landing.
+    await interceptZustandStores(page);
   });
 
   test("captures wide-viewport screenshot (1280×800) showing floating panels", async ({ page }, testInfo) => {
@@ -205,6 +253,8 @@ test.describe("Visual regression — floating layout", () => {
     await page.goto("/");
     await page.waitForLoadState("networkidle");
 
+    // Activate a workspace so the landing page gives way to ChatView before Ctrl+N.
+    await activateWorkspace(page);
     const isMac = process.platform === "darwin";
     await page.keyboard.press(isMac ? "Meta+n" : "Control+n");
     // Wait for the composer's overflow trigger to mount.

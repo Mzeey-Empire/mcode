@@ -784,6 +784,18 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     }
   }, [isNewThread, workspaceId, isGitRepo, loadBranches]);
 
+  // Auto-focus the editor when this mounts as a new-thread composer so the
+  // user can start typing immediately after picking a project (from the
+  // cold-start landing or the palette) without reaching for the mouse.
+  // rAF gives Lexical a tick to register the editor ref before we focus.
+  useEffect(() => {
+    if (!isNewThread) return;
+    const id = requestAnimationFrame(() => {
+      editorRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [isNewThread]);
+
   // Auto-select current branch if none selected
   useEffect(() => {
     if (isNewThread && !newThreadBranch && branches.length > 0) {

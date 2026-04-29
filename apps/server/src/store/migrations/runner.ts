@@ -120,9 +120,8 @@ export class MigrationRunner {
   /**
    * One-shot migration of the `_migrations` tracking table from the legacy
    * INTEGER `version` schema to the new TEXT schema. Translates each row's
-   * integer version into the corresponding 14-char zero-padded string using
-   * LEGACY_VERSION_MAP. Wrapped in a transaction so the original table is
-   * untouched if anything fails.
+   * integer version into the corresponding TEXT key via translateLegacyVersion.
+   * Wrapped in a transaction so the original table is untouched if anything fails.
    */
   private upgradeLegacyMigrationsTable(): void {
     this.db.transaction(() => {
@@ -138,6 +137,15 @@ export class MigrationRunner {
         .prepare(selectSql)
         .all() as Array<{ version: number; name: string; applied_at: string }>;
 
+      // Translate BEFORE dropping the legacy table so schema sniffing in
+      // translateLegacyVersion sees the original `_migrations` columns alongside
+      // any feature tables (workspaces.pinned, threads.has_file_changes, ...).
+      const translated = oldRows.map((row) => ({
+        version: this.translateLegacyVersion(row.version),
+        name: row.name,
+        appliedAt: row.applied_at,
+      }));
+
       this.db.exec("DROP TABLE _migrations");
       this.db.exec(`
         CREATE TABLE _migrations (
@@ -151,17 +159,58 @@ export class MigrationRunner {
         "INSERT INTO _migrations (version, name, applied_at) VALUES (?, ?, ?)",
       );
 
-      for (const row of oldRows) {
-        const newKey = LEGACY_VERSION_MAP.get(row.version);
-        if (!newKey) {
-          throw new Error(
-            `Cannot upgrade _migrations row: no legacy mapping for integer version ${row.version}. ` +
-            `If this version was added by a feature branch outside the main lineage, you must add it to LEGACY_VERSION_MAP before opening this database.`,
-          );
-        }
-        insertStmt.run(newKey, row.name, row.applied_at);
+      for (const row of translated) {
+        insertStmt.run(row.version, row.name, row.appliedAt);
       }
     })();
+  }
+
+  /**
+   * Translates one legacy integer migration version into its TEXT key. Most
+   * integers map mechanically through LEGACY_VERSION_MAP, but integers 19 and
+   * 20 are ambiguous: sibling branches diverged on those numbers before the
+   * integer→timestamp cutover. The runner sniffs the live schema to decide
+   * which migration actually ran.
+   *
+   * - Int 19: This branch's pre-rename state had `thread_has_file_changes` at
+   *   v19, later relocated to "00000000000020". The sibling
+   *   feat/modern-project-selector branch had `workspace_sort_order` at v19,
+   *   which has no module here and stays a permanent gap.
+   * - Int 20: Main's lineage applied `workspace_pinned_and_last_opened` at v20,
+   *   now keyed at "20260429000000". An intermediate "rename only" state on
+   *   this branch applied `thread_has_file_changes` at v20.
+   */
+  private translateLegacyVersion(version: number): string {
+    const mapped = LEGACY_VERSION_MAP.get(version);
+    if (mapped) return mapped;
+
+    if (version === 19) {
+      if (this.hasColumn("threads", "has_file_changes")) {
+        return "00000000000020";
+      }
+      // sort_order or unknown lineage — preserve identity so the row doesn't
+      // masquerade as a different migration. "00000000000019" has no module,
+      // which is the truthful representation of a gap.
+      return "00000000000019";
+    }
+
+    if (version === 20) {
+      if (this.hasColumn("workspaces", "pinned")) {
+        return "20260429000000";
+      }
+      return "00000000000020";
+    }
+
+    throw new Error(
+      `Cannot upgrade _migrations row: no legacy mapping for integer version ${version}. ` +
+      `If this version was added by a feature branch outside the main lineage, you must add it to LEGACY_VERSION_MAP before opening this database.`,
+    );
+  }
+
+  /** Returns true if the named column exists on the named table. Returns false when the table is absent. */
+  private hasColumn(table: string, column: string): boolean {
+    const cols = this.db.pragma(`table_info(${table})`) as Array<{ name: string }>;
+    return cols.some((c) => c.name === column);
   }
 
   /**
