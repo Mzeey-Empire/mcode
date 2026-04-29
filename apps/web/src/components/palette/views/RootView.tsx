@@ -13,8 +13,15 @@ import {
 import { CommandPaletteResults } from "../CommandPaletteResults";
 import { Kbd } from "../Kbd";
 
-// Commands that should not appear in the palette listing
-const HIDDEN_COMMANDS = new Set(["escape.handle"]);
+// Commands that should not appear in the palette listing.
+// `palette.open` and `commandPalette.toggle` are both bound to opening the palette
+// itself — listing them inside the palette is circular. Their keybindings (mod+k /
+// mod+p) still fire globally; only the in-palette row is suppressed.
+const HIDDEN_COMMANDS = new Set([
+  "escape.handle",
+  "palette.open",
+  "commandPalette.toggle",
+]);
 
 /**
  * Default root view of the command palette.

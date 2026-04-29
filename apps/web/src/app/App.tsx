@@ -42,8 +42,12 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("model");
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
-  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
-  const showLanding = activeWorkspaceId === null;
+  const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
+  const pendingNewThread = useWorkspaceStore((s) => s.pendingNewThread);
+  // Landing is the default whenever no thread is active. The new-thread composer
+  // takes precedence so the user can compose against an active workspace without
+  // bouncing back to the project list.
+  const showLanding = activeThreadId === null && !pendingNewThread;
   useIdleReclamation();
 
   useEffect(() => {
@@ -103,12 +107,6 @@ export function App() {
         category: "Navigation",
         handler: () => useCommandPaletteStore.getState().open(),
       }),
-      registerCommand({
-        id: "palette.openProjects",
-        title: "Open Project…",
-        category: "Navigation",
-        handler: () => useCommandPaletteStore.getState().open({ intent: "projects" }),
-      }),
       // Backward-compat alias — mod+p still opens the palette
       registerCommand({
         id: "commandPalette.toggle",
@@ -143,15 +141,31 @@ export function App() {
         title: "New Thread",
         category: "Thread",
         handler: () => {
-          useWorkspaceStore.getState().setPendingNewThread(true);
+          const ws = useWorkspaceStore.getState();
+          // When invoked from the cold-start landing there's no active project
+          // to attach the thread to, so the composer would render with a null
+          // workspaceId and quietly fail to send. Route through the project
+          // picker first and chain into the new-thread state on selection.
+          if (ws.activeWorkspaceId) {
+            ws.setPendingNewThread(true);
+          } else {
+            useCommandPaletteStore.getState().open({
+              intent: "projects",
+              nextAction: "newThread",
+            });
+          }
         },
       }),
       registerCommand({
+        // Command id stays `workspace.new` for shortcut/persistence stability
+        // even though the user-facing label is now "New Project".
         id: "workspace.new",
-        title: "New Workspace",
-        category: "Workspace",
+        title: "New Project",
+        category: "Project",
         handler: () => {
-          window.dispatchEvent(new CustomEvent("mcode:new-workspace"));
+          // Reuse the same browse-mode entry the landing's "+ Add project"
+          // button uses, instead of the previous orphan custom event.
+          useCommandPaletteStore.getState().open({ intent: "addProject" });
         },
       }),
       registerCommand({

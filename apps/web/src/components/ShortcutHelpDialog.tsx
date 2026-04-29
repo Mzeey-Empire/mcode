@@ -2,7 +2,6 @@ import { useMemo } from "react";
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useUiStore } from "@/stores/uiStore";
@@ -12,6 +11,34 @@ import {
   formatKeybinding,
 } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
+import { Kbd } from "@/components/palette/Kbd";
+
+/** Single shortcut entry as rendered in the dialog. */
+interface ShortcutRow {
+  /** Stable react key — derived from command id (or a synthetic id for collapsed rows). */
+  key: string;
+  /** Human-readable command title. */
+  title: string;
+  /**
+   * Pre-split keybinding pieces, in display order. For combos like "Ctrl+K" this is
+   * `["Ctrl", "K"]`; for ranges like the Go-to-thread block it's `[...modifiers, "1", "9"]`.
+   */
+  pieces: string[];
+}
+
+/**
+ * Categories render in this order. Anything not listed falls through to
+ * alphabetical order at the end. Keeps the dialog visually predictable.
+ */
+const CATEGORY_ORDER = ["Project", "Thread", "Navigation", "View", "Help"];
+
+/** Strip surrounding whitespace and split a formatted keybinding on the `+` separator. */
+function splitCombo(shortcut: string): string[] {
+  return shortcut
+    .split("+")
+    .map((piece) => piece.trim())
+    .filter(Boolean);
+}
 
 /**
  * Full-screen dialog showing all keyboard shortcuts grouped by category.
@@ -22,61 +49,155 @@ export function ShortcutHelpDialog() {
   const setOpen = useUiStore((s) => s.setShortcutHelpOpen);
 
   const grouped = useMemo(() => {
-    if (!open) return new Map<string, Array<{ title: string; shortcut: string }>>();
+    if (!open) return new Map<string, ShortcutRow[]>();
 
     const all = getAllCommands();
     // Escape handler is an internal command, not meaningful to surface to users.
     const hidden = new Set(["escape.handle"]);
-    const map = new Map<string, Array<{ title: string; shortcut: string }>>();
+    const map = new Map<string, ShortcutRow[]>();
+
+    // Collapse `thread.goTo1`…`thread.goTo9` into a single "Go to thread (1…9)" row.
+    let goToThreadCollapsed = false;
+    const goToThreadRe = /^thread\.goTo([1-9])$/;
 
     for (const cmd of all) {
       if (hidden.has(cmd.id)) continue;
       const binding = getKeybindingForCommand(cmd.id);
-      if (!binding) continue; // only show commands that have shortcuts
+      if (!binding) continue;
+
+      const goToMatch = goToThreadRe.exec(cmd.id);
+      if (goToMatch) {
+        if (goToThreadCollapsed) continue;
+        goToThreadCollapsed = true;
+        const group = map.get(cmd.category) ?? [];
+        const samplePieces = splitCombo(formatKeybinding(binding.key, isMac));
+        const modifierPieces = samplePieces.slice(0, -1);
+        group.push({
+          key: "thread.goTo.range",
+          title: "Go to thread",
+          pieces: [...modifierPieces, "1", "9"],
+        });
+        map.set(cmd.category, group);
+        continue;
+      }
 
       const group = map.get(cmd.category) ?? [];
       group.push({
+        key: cmd.id,
         title: cmd.title,
-        shortcut: formatKeybinding(binding.key, isMac),
+        pieces: splitCombo(formatKeybinding(binding.key, isMac)),
       });
       map.set(cmd.category, group);
+    }
+
+    // Sort each category alphabetically by title for stability.
+    for (const rows of map.values()) {
+      rows.sort((a, b) => a.title.localeCompare(b.title));
     }
 
     return map;
   }, [open]);
 
+  const orderedCategories = useMemo(() => {
+    const present = Array.from(grouped.keys());
+    const known = CATEGORY_ORDER.filter((c) => present.includes(c));
+    const unknown = present.filter((c) => !CATEGORY_ORDER.includes(c)).sort();
+    return [...known, ...unknown];
+  }, [grouped]);
+
+  const totalCount = useMemo(() => {
+    let total = 0;
+    for (const rows of grouped.values()) total += rows.length;
+    return total;
+  }, [grouped]);
+
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => setOpen(nextOpen)}>
-      <DialogContent className="max-w-lg" showCloseButton>
-        <DialogHeader>
-          <DialogTitle>Keyboard Shortcuts</DialogTitle>
-        </DialogHeader>
+      <DialogContent
+        className="flex max-h-[85vh] w-full max-w-xl flex-col gap-0 overflow-hidden p-0 sm:max-w-xl"
+        showCloseButton
+      >
+        {/* Sticky header — editorial label-then-title pattern matching the palette. */}
+        <div className="flex flex-col gap-1 border-b border-border/40 px-6 py-5">
+          <span className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/60">
+            Reference
+          </span>
+          <DialogTitle className="font-heading text-lg leading-tight tracking-tight">
+            Keyboard shortcuts
+          </DialogTitle>
+        </div>
 
-        <div className="space-y-6 py-2">
-          {Array.from(grouped.keys())
-            .sort()
-            .map((category) => (
-              <div key={category}>
-                <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  {category}
-                </h3>
-                <div className="space-y-1">
-                  {grouped.get(category)!.map((item) => (
-                    <div
-                      key={item.title}
-                      className="flex items-center justify-between rounded-md px-2 py-1.5 text-sm"
-                    >
-                      <span>{item.title}</span>
-                      <kbd className="rounded bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                        {item.shortcut}
-                      </kbd>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
+        {/* Scrollable body. */}
+        <div className="flex-1 overflow-y-auto px-6 py-5">
+          <div className="flex flex-col gap-7">
+            {orderedCategories.map((category) => {
+              const rows = grouped.get(category);
+              if (!rows || rows.length === 0) return null;
+              return (
+                <section key={category} className="flex flex-col gap-2.5">
+                  <h3 className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/70">
+                    {category}
+                  </h3>
+                  <ul className="flex flex-col">
+                    {rows.map((row) => (
+                      <li
+                        key={row.key}
+                        className="flex items-center justify-between gap-4 border-t border-border/30 py-2.5 first:border-t-0"
+                      >
+                        <span className="text-sm text-foreground/90">
+                          {row.title}
+                        </span>
+                        <ShortcutPieces row={row} />
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Footer rail — mirrors the palette's bottom hint area. */}
+        <div className="flex items-center justify-between border-t border-border/40 px-6 py-3">
+          <span className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/60">
+            {totalCount === 0 ? "No shortcuts" : `${totalCount} shortcuts`}
+          </span>
+          <span className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground/70">
+            <Kbd>Esc</Kbd>
+            <span>to close</span>
+          </span>
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * Renders the right-aligned key combo for a row. Each `piece` becomes its own
+ * `Kbd` chip, separated by a hairline `+` (or `…` for the gap before the
+ * final piece when the row is the collapsed Go-to-thread range).
+ */
+function ShortcutPieces({ row }: { row: ShortcutRow }) {
+  const isRange = row.key === "thread.goTo.range";
+  return (
+    <span className="flex items-center gap-1">
+      {row.pieces.map((piece, idx) => {
+        const isLast = idx === row.pieces.length - 1;
+        const separator = isRange && idx === row.pieces.length - 2 ? "\u2026" : "+";
+        return (
+          <span key={`${piece}-${idx}`} className="flex items-center gap-1">
+            <Kbd>{piece}</Kbd>
+            {!isLast && (
+              <span
+                aria-hidden
+                className="text-[11px] leading-none text-muted-foreground/40"
+              >
+                {separator}
+              </span>
+            )}
+          </span>
+        );
+      })}
+    </span>
   );
 }

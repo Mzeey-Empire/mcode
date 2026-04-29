@@ -100,26 +100,35 @@ export function ProjectRow({ workspace, isActive, onSelect, onPin, onRemove, hom
         <PathLabel path={workspace.path} home={home} />
       </div>
 
-      {/* Right: meta strip — branch, status dot, thread count, relative timestamp */}
-      <div className="flex shrink-0 flex-col items-end gap-0.5 font-mono text-[11px] text-muted-foreground/60">
+      {/* Right: meta strip — branch, status dot, thread count, relative timestamp.
+          The column caps at ~45% of the row so a long branch name can never
+          push the project name + path to a thin truncated stub on the left.
+          `min-w-0` lets the inner flex row shrink when the branch overflows;
+          the branch span itself has its own `max-w` + `truncate` ceiling. */}
+      <div className="flex shrink-0 min-w-0 max-w-[45%] flex-col items-end gap-0.5 font-mono text-[11px] text-muted-foreground/60">
         {enrichment ? (
           <>
-            <div className="flex items-center gap-1.5">
+            <div className="flex min-w-0 items-center gap-1.5">
               {enrichment.isGit ? (
                 <>
                   <span
                     className={cn(
-                      "h-1.5 w-1.5 rounded-full",
+                      "h-1.5 w-1.5 shrink-0 rounded-full",
                       enrichment.isClean ? "bg-green-600/70" : "bg-amber-600/70",
                     )}
                     aria-label={enrichment.isClean ? "Clean working tree" : "Uncommitted changes"}
                     title={enrichment.isClean ? "Clean working tree" : "Uncommitted changes"}
                   />
-                  <GitBranch size={10} strokeWidth={2} className="opacity-70" aria-hidden />
-                  <span>{enrichment.branch ?? "detached"}</span>
+                  <GitBranch size={10} strokeWidth={2} className="shrink-0 opacity-70" aria-hidden />
+                  <span
+                    className="block max-w-[10rem] truncate"
+                    title={enrichment.branch ?? "detached"}
+                  >
+                    {enrichment.branch ?? "detached"}
+                  </span>
                   {enrichment.threadCount > 0 && (
                     <span
-                      className="tabular-nums"
+                      className="shrink-0 tabular-nums"
                       title={`${enrichment.threadCount} thread${enrichment.threadCount === 1 ? "" : "s"}`}
                     >
                       · {enrichment.threadCount}
@@ -128,7 +137,7 @@ export function ProjectRow({ workspace, isActive, onSelect, onPin, onRemove, hom
                 </>
               ) : (
                 // Non-git workspace indicator — quiet, all-lowercase reads less alarming than "no git"
-                <span className="text-muted-foreground/40">not a git repo</span>
+                <span className="truncate text-muted-foreground/40">not a git repo</span>
               )}
             </div>
             {workspace.last_opened_at && (

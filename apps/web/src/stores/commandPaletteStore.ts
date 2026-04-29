@@ -8,9 +8,17 @@ import { create } from "zustand";
  * To open the palette in browse mode, call `open({ intent: "addProject" })` which
  * seeds the input with `~/` and stays on the root view.
  */
+/**
+ * Optional follow-up action triggered after a project is selected from the
+ * projects view. Lets a caller (e.g. the "New Thread" command from the
+ * cold-start landing) open the picker first, then chain into the new-thread
+ * state inside the chosen project.
+ */
+export type ProjectsNextAction = "newThread";
+
 export type View =
   | { kind: "root" }
-  | { kind: "projects" }
+  | { kind: "projects"; nextAction?: ProjectsNextAction }
   | { kind: "selectionList"; title: string; items: { id: string; title: string }[]; onPick: (id: string) => void };
 
 interface State {
@@ -27,12 +35,16 @@ interface State {
   pendingConfirm: (() => void) | null;
   /**
    * Open the palette, optionally at a specific intent.
-   * - `projects`: open at the projects view.
+   * - `projects`: open at the projects view. Pass `nextAction` to chain a
+   *   follow-up (e.g. start a new thread inside the picked project).
    * - `addProject`: open at the root view with the input pre-seeded to `~/`.
    *   The unified shell flips into browse mode on render because `~/` matches
    *   the browse-mode prefix detection.
    */
-  open: (opts?: { intent?: "projects" | "addProject" }) => void;
+  open: (opts?: {
+    intent?: "projects" | "addProject";
+    nextAction?: ProjectsNextAction;
+  }) => void;
   /** Push a new view onto the navigation stack and clear the query. */
   push: (view: View) => void;
   /** Pop the active view. Closes the palette if the stack would become empty. */
@@ -57,7 +69,14 @@ export const useCommandPaletteStore = create<State>((set, get) => ({
   pendingConfirm: null,
   open: (opts) => {
     const intent = opts?.intent;
-    const view: View = intent === "projects" ? { kind: "projects" } : { kind: "root" };
+    // Only attach `nextAction` when set so equality-based tests on the bare
+    // `{ kind: "projects" }` view shape continue to match.
+    const view: View =
+      intent === "projects"
+        ? opts?.nextAction
+          ? { kind: "projects", nextAction: opts.nextAction }
+          : { kind: "projects" }
+        : { kind: "root" };
     // The addProject intent stays on the root view but seeds the query with `~/`
     // so the unified shell renders in browse mode immediately.
     const query = intent === "addProject" ? "~/" : "";

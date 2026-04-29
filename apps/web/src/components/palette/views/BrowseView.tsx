@@ -146,53 +146,55 @@ export function BrowseView() {
   }, [result, setQuery]);
 
   return (
-    <CommandList className="max-h-80 overflow-y-auto">
-      {loading && !result && <CommandEmpty>Loading…</CommandEmpty>}
-      {error && <CommandEmpty>{error}</CommandEmpty>}
-      {!loading && !error && filteredEntries.length === 0 && !isDrivesMode && (
-        <CommandEmpty>
-          {leafFilter ? `No folders match "${leafFilter}".` : "No subfolders here."}
-        </CommandEmpty>
-      )}
+    <>
+      <CommandList className="max-h-80 overflow-y-auto">
+        {loading && !result && <CommandEmpty>Loading…</CommandEmpty>}
+        {error && <CommandEmpty>{error}</CommandEmpty>}
+        {!loading && !error && filteredEntries.length === 0 && !isDrivesMode && (
+          <CommandEmpty>
+            {leafFilter ? `No folders match "${leafFilter}".` : "No subfolders here."}
+          </CommandEmpty>
+        )}
 
-      {!error && (
-        <CommandGroup
-          heading={
-            <span className="px-3 py-1.5 font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/40">
-              {isDrivesMode ? "Drives" : "Folders"}
-            </span>
-          }
-        >
-          {!isDrivesMode && result?.parent && leafFilter === "" && (
-            <CommandItem
-              key="__parent__"
-              value="__parent__"
-              keywords={[".."]}
-              onSelect={handleAscend}
-              className="flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-foreground/85"
-            >
-              <ArrowUp size={13} strokeWidth={2.25} className="shrink-0 text-primary/80" />
-              <span className="font-mono">..</span>
-              <span className="ml-auto text-[10.5px] text-muted-foreground/55">parent</span>
-            </CommandItem>
-          )}
+        {!error && (
+          <CommandGroup
+            heading={
+              <span className="px-3 py-1.5 font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/40">
+                {isDrivesMode ? "Drives" : "Folders"}
+              </span>
+            }
+          >
+            {!isDrivesMode && result?.parent && leafFilter === "" && (
+              <CommandItem
+                key="__parent__"
+                value="__parent__"
+                keywords={[".."]}
+                onSelect={handleAscend}
+                className="flex items-center gap-2.5 px-3 py-1.5 text-[13px] text-foreground/85"
+              >
+                <ArrowUp size={13} strokeWidth={2.25} className="shrink-0 text-primary/80" />
+                <span className="font-mono">..</span>
+                <span className="ml-auto text-[10.5px] text-muted-foreground/55">parent</span>
+              </CommandItem>
+            )}
 
-          {filteredEntries.map((entry) => (
-            <CommandItem
-              key={entry.name}
-              value={entry.name}
-              keywords={[entry.name]}
-              onSelect={() => handleSelect(entry.name)}
-              className="flex items-center gap-2.5 px-3 py-1.5 text-[13px]"
-            >
-              <Folder size={13} strokeWidth={2} className="shrink-0 text-muted-foreground/70" />
-              <span className="font-mono text-foreground">{entry.name}</span>
-            </CommandItem>
-          ))}
-        </CommandGroup>
-      )}
+            {filteredEntries.map((entry) => (
+              <CommandItem
+                key={entry.name}
+                value={entry.name}
+                keywords={[entry.name]}
+                onSelect={() => handleSelect(entry.name)}
+                className="flex items-center gap-2.5 px-3 py-1.5 text-[13px]"
+              >
+                <Folder size={13} strokeWidth={2} className="shrink-0 text-muted-foreground/70" />
+                <span className="font-mono text-foreground">{entry.name}</span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+      </CommandList>
 
-      <div className="flex items-center justify-between gap-3 border-t border-border/50 px-3 py-1.5 text-[11px] text-muted-foreground/55">
+      <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border/50 px-3 py-1.5 text-[11px] text-muted-foreground/55">
         <span className="flex items-center gap-1.5">
           <Kbd>Enter</Kbd> open
           <span className="opacity-40">·</span>
@@ -202,6 +204,6 @@ export function BrowseView() {
           <Kbd>{isMac ? "⌘+Enter" : "Ctrl+Enter"}</Kbd> add project
         </span>
       </div>
-    </CommandList>
+    </>
   );
 }
