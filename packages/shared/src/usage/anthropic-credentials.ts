@@ -26,7 +26,7 @@ interface CredentialsFile {
  * Per-OS storage:
  *  - darwin: macOS Keychain entry "Claude Code-credentials"
  *  - linux:  ~/.claude/.credentials.json (plain JSON)
- *  - win32:  ~/.claude/.credentials.json (DPAPI-encrypted; see Task 4)
+ *  - win32:  returns null (DPAPI-decrypted reader added in a follow-up)
  *
  * @param platform - Override the detected platform. Intended for testing only.
  */

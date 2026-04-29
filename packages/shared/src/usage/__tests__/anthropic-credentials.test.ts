@@ -18,6 +18,8 @@ describe("readAnthropicOauthToken", () => {
 
   beforeEach(() => {
     tmpHome = mkdtempSync(join(tmpdir(), "mcode-cred-"));
+    // Stub both HOME (Linux/macOS) and USERPROFILE (Windows) so homedir()
+    // resolves to the temp dir on any platform this test suite runs on.
     vi.stubEnv("HOME", tmpHome);
     vi.stubEnv("USERPROFILE", tmpHome);
   });
@@ -72,5 +74,28 @@ describe("readAnthropicOauthToken", () => {
 
     const result = await readAnthropicOauthToken("darwin");
     expect(result).toEqual({ accessToken: "sk-mac", expiresAt: 1 });
+  });
+
+  it("returns null when `security` fails on darwin", async () => {
+    execFileMock.mockImplementation(
+      (_cmd: string, _args: string[], cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+        cb(new Error("security: item not found"), "", "");
+      },
+    );
+    const result = await readAnthropicOauthToken("darwin");
+    expect(result).toBeNull();
+  });
+
+  it("returns null when expiresAt is missing from credentials", async () => {
+    mkdirSync(join(tmpHome, ".claude"), { recursive: true });
+    writeFileSync(
+      join(tmpHome, ".claude", ".credentials.json"),
+      JSON.stringify({ claudeAiOauth: { accessToken: "sk-no-expiry" } }),
+    );
+    expect(await readAnthropicOauthToken("linux")).toBeNull();
+  });
+
+  it("returns null on win32 (stub for DPAPI support)", async () => {
+    expect(await readAnthropicOauthToken("win32")).toBeNull();
   });
 });
