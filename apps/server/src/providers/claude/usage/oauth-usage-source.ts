@@ -42,6 +42,7 @@ export class AnthropicOAuthUsageSource implements IUsageSource {
     try {
       response = await globalThis.fetch(ENDPOINT, {
         method: "GET",
+        signal: AbortSignal.timeout(5_000),
         headers: {
           Authorization: `Bearer ${token.accessToken}`,
           "anthropic-beta": BETA_HEADER,

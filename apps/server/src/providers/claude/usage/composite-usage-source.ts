@@ -29,6 +29,15 @@ export class CompositeUsageSource implements IUsageSource {
     return false;
   }
 
+  /**
+   * Clears the result cache so the next `fetch()` call bypasses the TTL.
+   * Call this immediately before emitting a QuotaUpdate event so the
+   * warm-refresh path always reads fresh plan utilization.
+   */
+  invalidate(): void {
+    this.cache = null;
+  }
+
   /** Returns the first non-null result from the chain, cached for 90s. Concurrent calls share one in-flight request. */
   async fetch(): Promise<QuotaCategory[] | null> {
     if (this.cache && this.cache.expiresAt > Date.now()) {

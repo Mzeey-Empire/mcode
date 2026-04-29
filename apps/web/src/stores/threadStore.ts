@@ -1698,7 +1698,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
 
     if (method === "session.quotaUpdate") {
       const providerId = params.providerId as string;
-      const categories = params.categories as QuotaCategory[];
+      const categories = Array.isArray(params.categories)
+        ? (params.categories as QuotaCategory[])
+        : [];
       const sessionCostUsd = params.sessionCostUsd as number | undefined;
       const serviceTier = params.serviceTier as "standard" | "priority" | "batch" | undefined;
       const numTurns = params.numTurns as number | undefined;
