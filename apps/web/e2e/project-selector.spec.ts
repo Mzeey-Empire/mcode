@@ -60,8 +60,10 @@ async function setupLanding(page: import("@playwright/test").Page) {
     "settings.get": MOCK_SETTINGS,
   });
   await page.goto("/");
-  // No active workspace = landing is shown
-  await page.waitForTimeout(800);
+  // Wait for React to mount — "pinned-app" appears in multiple places (sidebar
+  // + landing), so use .first() to avoid strict-mode violations.
+  await expect(page.getByText("pinned-app").first()).toBeVisible({ timeout: 15000 });
+  await page.waitForTimeout(200);
 }
 
 async function setupWithWorkspace(page: import("@playwright/test").Page) {
@@ -75,7 +77,10 @@ async function setupWithWorkspace(page: import("@playwright/test").Page) {
     "thread.list": [],
   });
   await page.goto("/");
-  await page.waitForTimeout(800);
+  // Wait for React to mount, then allow useEffects (initShortcuts) to run.
+  // "pinned-app" appears in multiple places (sidebar + landing), so use .first().
+  await expect(page.getByText("pinned-app").first()).toBeVisible({ timeout: 15000 });
+  await page.waitForTimeout(200);
   return ctrl;
 }
 
@@ -84,18 +89,18 @@ test.describe("Project selector — cold-start landing", () => {
 
   test("shows landing screen when no workspace is active", async ({ page }) => {
     await setupLanding(page);
-    // The landing has the app wordmark
-    await expect(page.getByText("mcode")).toBeVisible();
-    // Should show "Pinned" section heading
+    // The landing shows the pinned section (workspace is pinned in mock data)
     await expect(page.getByRole("heading", { name: "Pinned" })).toBeVisible();
+    // Landing wordmark — exact match avoids matching "Mcode" in the sidebar
+    await expect(page.getByText("mcode", { exact: true })).toBeVisible();
   });
 
   test("landing shows pinned and recent project sections", async ({ page }) => {
     await setupLanding(page);
     await expect(page.getByRole("heading", { name: "Pinned" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Recent" })).toBeVisible();
-    await expect(page.getByText("pinned-app")).toBeVisible();
-    await expect(page.getByText("recent-app")).toBeVisible();
+    await expect(page.getByText("pinned-app").first()).toBeVisible();
+    await expect(page.getByText("recent-app").first()).toBeVisible();
   });
 
   test("clicking a project on the landing opens it (hides landing)", async ({ page }) => {
@@ -107,12 +112,14 @@ test.describe("Project selector — cold-start landing", () => {
       "settings.get": MOCK_SETTINGS,
     });
     await page.goto("/");
-    await page.waitForTimeout(800);
+    await expect(page.getByText("pinned-app").first()).toBeVisible({ timeout: 15000 });
+    await page.waitForTimeout(200);
 
-    // Click the pinned project row
-    await page.getByText("pinned-app").click();
-    // Landing should disappear (workspace is now active)
-    await expect(page.getByText("mcode")).not.toBeVisible({ timeout: 3000 });
+    // Click the pinned project row — target the testid to avoid matching the sidebar entry.
+    await page.getByTestId("project-row").filter({ hasText: "pinned-app" }).click();
+    // Landing wordmark should disappear once a workspace is active.
+    // Use exact: true to avoid matching "Mcode" in the persistent sidebar.
+    await expect(page.getByText("mcode", { exact: true })).not.toBeVisible({ timeout: 3000 });
   });
 
   test("empty state shows Add project CTA when no workspaces exist", async ({ page }) => {
@@ -122,8 +129,10 @@ test.describe("Project selector — cold-start landing", () => {
       "settings.get": MOCK_SETTINGS,
     });
     await page.goto("/");
-    await page.waitForTimeout(800);
-    await expect(page.getByText("No projects yet")).toBeVisible();
+    // Empty state renders without projects — wait for the CTA.
+    // "No projects yet" appears in both sidebar and landing, so use .first().
+    await expect(page.getByText("No projects yet").first()).toBeVisible({ timeout: 15000 });
+    await page.waitForTimeout(200);
     await expect(page.getByTestId("landing-add-project")).toBeVisible();
   });
 
@@ -139,7 +148,8 @@ test.describe("Project selector — cold-start landing", () => {
       },
     });
     await page.goto("/");
-    await page.waitForTimeout(800);
+    await expect(page.getByText("No projects yet").first()).toBeVisible({ timeout: 15000 });
+    await page.waitForTimeout(200);
     await page.getByTestId("landing-add-project").click();
     // Palette dialog should open in addProject view (shows Add button)
     const dialog = page.getByRole("dialog");
@@ -155,7 +165,8 @@ test.describe("Project selector — palette projects view", () => {
     await page.keyboard.press("Control+o");
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByText("pinned-app")).toBeVisible();
+    // Use exact: true — project rows show both name and path, both containing "pinned-app".
+    await expect(dialog.getByText("pinned-app", { exact: true })).toBeVisible();
   });
 
   test("projects view shows pinned section first", async ({ page }) => {
@@ -173,8 +184,9 @@ test.describe("Project selector — palette projects view", () => {
     await page.keyboard.press("Control+o");
     await page.getByPlaceholder("Search commands, projects, threads…").fill("older");
     const dialog = page.getByRole("dialog");
-    await expect(dialog.getByText("older-app")).toBeVisible();
-    await expect(dialog.getByText("pinned-app")).not.toBeVisible();
+    // Use exact: true — path spans also contain the workspace name as a substring.
+    await expect(dialog.getByText("older-app", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("pinned-app", { exact: true })).not.toBeVisible();
   });
 
   test("search by path works", async ({ page }) => {
@@ -182,7 +194,7 @@ test.describe("Project selector — palette projects view", () => {
     await page.keyboard.press("Control+o");
     await page.getByPlaceholder("Search commands, projects, threads…").fill("pinned-app");
     const dialog = page.getByRole("dialog");
-    await expect(dialog.getByText("pinned-app")).toBeVisible();
+    await expect(dialog.getByText("pinned-app", { exact: true })).toBeVisible();
   });
 
   test("pin toggle calls workspace.pin RPC", async ({ page }) => {
@@ -196,10 +208,13 @@ test.describe("Project selector — palette projects view", () => {
       "settings.get": MOCK_SETTINGS,
     });
     await page.goto("/");
-    await page.waitForTimeout(800);
+    await expect(page.getByText("pinned-app").first()).toBeVisible({ timeout: 15000 });
+    await page.waitForTimeout(200);
     await page.keyboard.press("Control+o");
-    // Hover over a row to reveal the pin button
-    const row = page.getByTestId("project-row").first();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible({ timeout: 3000 });
+    // Scope to dialog — landing rows are behind the backdrop and can't be hovered.
+    const row = dialog.getByTestId("project-row").first();
     await row.hover();
     const pinBtn = row.getByTestId("project-row-pin");
     await pinBtn.click();
@@ -212,8 +227,9 @@ test.describe("Project selector — palette projects view", () => {
     await page.keyboard.press("Control+o");
     // Hover a recent row to reveal remove button
     const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible({ timeout: 3000 });
     const recentRows = dialog.getByTestId("project-row");
-    // Find a recent row (not pinned) — there should be at least one
+    // Find a recent row (not pinned) — "recent-app" is the second workspace in mock data
     if (await recentRows.count() > 1) {
       const row = recentRows.nth(1);
       await row.hover();
@@ -221,8 +237,9 @@ test.describe("Project selector — palette projects view", () => {
       if (await removeBtn.isVisible()) {
         await removeBtn.click();
         await page.waitForTimeout(300);
-        // Row should be removed from the visible list
-        await expect(row).not.toBeVisible();
+        // Verify the removed workspace name is no longer in the list.
+        // Don't check nth(1) — the index shifts after removal.
+        await expect(dialog.getByText("recent-app", { exact: true })).not.toBeVisible();
       }
     }
   });
@@ -231,10 +248,12 @@ test.describe("Project selector — palette projects view", () => {
     await setupWithWorkspace(page);
     await page.keyboard.press("Control+o");
     const dialog = page.getByRole("dialog");
-    await page.getByText("pinned-app").click();
+    // Scope click to dialog to avoid matching the sidebar entry.
+    await dialog.getByText("pinned-app", { exact: true }).first().click();
     // Palette should close
     await expect(dialog).not.toBeVisible({ timeout: 3000 });
-    // Landing should not be shown (workspace is now active)
-    await expect(page.getByText("mcode")).not.toBeVisible({ timeout: 3000 });
+    // Landing wordmark should disappear (workspace is now active)
+    // Use exact match to avoid matching "Mcode" in the sidebar
+    await expect(page.getByText("mcode", { exact: true })).not.toBeVisible({ timeout: 3000 });
   });
 });

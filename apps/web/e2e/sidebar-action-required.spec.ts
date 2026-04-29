@@ -19,6 +19,9 @@ async function mockWebSocketServer(
     name: "Test Workspace",
     path: "/test/path",
     provider_config: {},
+    is_git_repo: true,
+    pinned: false,
+    last_opened_at: Date.now() - 3600_000,
     created_at: now,
     updated_at: now,
   };
@@ -66,7 +69,8 @@ async function mockWebSocketServer(
     prDraft: { provider: "", model: "" },
   };
 
-  await page.routeWebSocket(/ws:\/\/localhost:19400/, (ws) => {
+  // Match 5-digit ports (mcode range) to avoid intercepting Vite's HMR socket.
+  await page.routeWebSocket(/ws:\/\/localhost:\d{5}/, (ws) => {
     ws.onMessage((data) => {
       let msg: Record<string, unknown>;
       try {
@@ -77,8 +81,11 @@ async function mockWebSocketServer(
       const method = msg.method as string;
       let result: unknown = null;
       if (method === "workspace.list") result = [workspace];
+      else if (method === "workspace.enrich") result = { items: [] };
+      else if (method === "workspace.touchLastOpened") result = null;
       else if (method === "thread.list") result = [thread];
       else if (method === "settings.get") result = defaultSettings;
+      else if (method === "providers.listAvailability") result = [];
       else if (method?.endsWith(".list")) result = [];
       else if (method === "git.currentBranch") result = "main";
       else if (method === "agent.activeCount") result = 0;

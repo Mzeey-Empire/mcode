@@ -284,10 +284,10 @@ test.describe("Architecture: App initialization", () => {
   }) => {
 
     await expect(page.locator("html")).toHaveClass(/dark/);
-    await expect(page.locator("text=Mcode")).toBeVisible();
-    await expect(
-      page.locator("h2", { hasText: "Select a thread" }),
-    ).toBeVisible();
+    // exact: true avoids strict-mode violation when both sidebar "Mcode" and landing "mcode" are visible
+    await expect(page.getByText("Mcode", { exact: true })).toBeVisible();
+    // When no workspace is active the full-screen landing replaces the chat empty state
+    await expect(page.getByText("mcode", { exact: true })).toBeVisible();
   });
 
   test("transport module initializes without crashing", async ({ page }) => {
@@ -362,7 +362,8 @@ test.describe("Architecture: Workspace management", () => {
   }) => {
     // Default state has no workspaces
     await expect(page.locator("text=Open a folder")).toBeVisible();
-    await expect(page.locator("text=No projects yet.")).toBeVisible();
+    // "No projects yet" appears in both the sidebar and the landing (no period)
+    await expect(page.locator("text=No projects yet").first()).toBeVisible();
   });
 });
 
@@ -887,8 +888,8 @@ test.describe("Architecture: Desktop bridge graceful degradation", () => {
     // In the Playwright browser context, desktopBridge should NOT exist
     expect(hasBridge).toBe(false);
 
-    // App should still render fully
-    await expect(page.locator("text=Mcode")).toBeVisible();
+    // App should still render fully — exact: true avoids strict-mode violation with landing "mcode"
+    await expect(page.getByText("Mcode", { exact: true })).toBeVisible();
     await expect(page.getByText("Projects", { exact: true })).toBeVisible();
   });
 
@@ -976,7 +977,7 @@ test.describe("Architecture: WebSocket transport structure", () => {
   }) => {
     // Verify that the transport module loaded (no import errors)
     // The app initializes without crash, which means the transport loaded
-    await expect(page.locator("text=Mcode")).toBeVisible();
+    await expect(page.getByText("Mcode", { exact: true })).toBeVisible();
 
     // Check that pushEmitter is available as a module-level export
     // We can verify this indirectly: if ws-events.ts loaded, push listeners

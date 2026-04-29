@@ -1,29 +1,17 @@
 import { test, expect, type Page } from "@playwright/test";
+import { mockWebSocketServer } from "./helpers/e2e-helpers";
+import { getDefaultSettings } from "@mcode/contracts";
 
-/**
- * Mock the WebSocket server so the WS transport connects and RPC calls
- * resolve instead of hanging. Required since App.tsx gates rendering on
- * transport readiness (shows "Connecting..." until WS opens).
- */
-async function mockWebSocketServer(page: Page): Promise<void> {
-  await page.routeWebSocket(/ws:\/\/localhost:3100/, (ws) => {
-    ws.onMessage((data) => {
-      let msg: Record<string, unknown>;
-      try {
-        msg = JSON.parse(data.toString());
-      } catch {
-        return;
-      }
-      const method = msg.method as string;
-      let result: unknown = null;
-      if (method?.endsWith(".list")) result = [];
-      else if (method === "git.currentBranch") result = "main";
-      else if (method === "agent.activeCount") result = 0;
-      else if (method === "app.version") result = "0.0.1-test";
-      else if (method === "config.discover") result = {};
-      ws.send(JSON.stringify({ id: msg.id, result }));
-    });
-  });
+const MOCK_SETTINGS = getDefaultSettings();
+const DEFAULT_OVERRIDES = {
+  "workspace.enrich": { items: [] },
+  "settings.get": MOCK_SETTINGS,
+};
+
+async function setup(page: Page): Promise<void> {
+  await mockWebSocketServer(page, DEFAULT_OVERRIDES);
+  await page.goto("/");
+  await page.waitForLoadState("networkidle");
 }
 
 // ---------------------------------------------------------------------------
@@ -32,13 +20,10 @@ async function mockWebSocketServer(page: Page): Promise<void> {
 
 test.describe("App shell", () => {
   test.beforeEach(async ({ page }) => {
-    await mockWebSocketServer(page);
-    await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await setup(page);
   });
 
   test("loads with dark theme applied to root", async ({ page }) => {
-
     // The App component toggles the "dark" class on <html> based on theme store
     const html = page.locator("html");
     await expect(html).toHaveClass(/dark/);
@@ -50,13 +35,11 @@ test.describe("App shell", () => {
   });
 
   test("layout has sidebar and main content area", async ({ page }) => {
-    // Sidebar header contains the brand name
-    await expect(page.locator("text=Mcode")).toBeVisible();
+    // Sidebar brand — exact match avoids matching "mcode" in the landing wordmark
+    await expect(page.getByText("Mcode", { exact: true })).toBeVisible();
 
-    // Main area shows empty-state heading
-    await expect(
-      page.locator("h2", { hasText: "Select a thread" })
-    ).toBeVisible();
+    // When no workspace is active, the landing shows the "mcode" wordmark in main area
+    await expect(page.getByText("mcode", { exact: true })).toBeVisible();
   });
 });
 
@@ -66,13 +49,12 @@ test.describe("App shell", () => {
 
 test.describe("Sidebar", () => {
   test.beforeEach(async ({ page }) => {
-    await mockWebSocketServer(page);
-    await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await setup(page);
   });
 
   test("displays brand name", async ({ page }) => {
-    await expect(page.locator("text=Mcode")).toBeVisible();
+    // exact: true distinguishes "Mcode" (sidebar) from "mcode" (landing wordmark)
+    await expect(page.getByText("Mcode", { exact: true })).toBeVisible();
   });
 
   test("displays Projects section heading", async ({ page }) => {
@@ -98,7 +80,7 @@ test.describe("Sidebar", () => {
   test("displays No projects yet message when no workspaces exist", async ({
     page,
   }) => {
-    await expect(page.locator("text=No projects yet.")).toBeVisible();
+    await expect(page.locator("text=No projects yet").first()).toBeVisible();
   });
 
   test("plus button to add a project is visible", async ({ page }) => {
@@ -111,56 +93,47 @@ test.describe("Sidebar", () => {
     page,
   }) => {
     // Brand name is visible when sidebar is expanded
-    await expect(page.locator("text=Mcode")).toBeVisible();
+    await expect(page.getByText("Mcode", { exact: true })).toBeVisible();
 
-    // Collapse the sidebar — the button lives in the sidebar header and is
-    // identified by its aria-label so the test survives class-name churn.
+    // Collapse the sidebar
     await page.getByRole("button", { name: "Collapse sidebar" }).click();
 
-    // The sidebar unmounts entirely on collapse so the chat panel can claim
-    // the full viewport width. Brand name and project tree should be gone.
-    await expect(page.locator("text=Mcode")).not.toBeVisible();
-    await expect(page.locator("text=Projects")).not.toBeVisible();
+    // The sidebar unmounts on collapse so brand and project tree are gone
+    await expect(page.getByText("Mcode", { exact: true })).not.toBeVisible();
+    await expect(page.getByText("Projects", { exact: true })).not.toBeVisible();
 
-    // The reveal control now lives inline in the chat header. Click it to
-    // bring the sidebar back.
+    // Reveal button is now inline in the main header — click to re-expand
     await page.getByRole("button", { name: "Expand sidebar" }).click();
-    await expect(page.locator("text=Mcode")).toBeVisible();
+    await expect(page.getByText("Mcode", { exact: true })).toBeVisible();
   });
 });
 
 // ---------------------------------------------------------------------------
-// Chat - empty / no thread selected
+// Landing / empty state (no active workspace)
 // ---------------------------------------------------------------------------
 
-test.describe("Chat empty state", () => {
+test.describe("Landing empty state", () => {
   test.beforeEach(async ({ page }) => {
-    await mockWebSocketServer(page);
-    await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await setup(page);
   });
 
-  test("shows Select a thread heading when no thread is active", async ({
-    page,
-  }) => {
-    await expect(
-      page.locator("h2", { hasText: "Select a thread" })
-    ).toBeVisible();
+  test("shows landing when no workspace is active", async ({ page }) => {
+    // When no workspace is active the landing replaces the chat view
+    await expect(page.getByText("mcode", { exact: true })).toBeVisible();
     await page.screenshot({
       path: "e2e/screenshots/chat-empty-state.png",
       fullPage: true,
     });
   });
 
-  test("shows helper text directing the user to the sidebar", async ({
+  test("landing shows Add project CTA when no workspaces exist", async ({
     page,
   }) => {
-    await expect(
-      page.locator("text=Choose a thread from the sidebar or create a new one.")
-    ).toBeVisible();
+    // The landing shows "No projects yet" (appears in sidebar and landing)
+    await expect(page.locator("text=No projects yet").first()).toBeVisible();
   });
 
-  test("no composer textarea is rendered in the empty state", async ({
+  test("no composer textarea is rendered on the landing", async ({
     page,
   }) => {
     // Composer is only mounted when a thread is active or a new thread is pending
@@ -174,9 +147,7 @@ test.describe("Chat empty state", () => {
 
 test.describe("Settings dialog", () => {
   test.beforeEach(async ({ page }) => {
-    await mockWebSocketServer(page);
-    await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await setup(page);
   });
 
   test("opens when Settings button is clicked", async ({ page }) => {
@@ -279,20 +250,18 @@ test.describe("Settings dialog", () => {
 
 test.describe("Keyboard shortcuts", () => {
   test.beforeEach(async ({ page }) => {
-    await mockWebSocketServer(page);
-    await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await setup(page);
   });
 
   test("Escape key does not crash the app when no thread is selected", async ({
     page,
   }) => {
-    // This exercises the Escape shortcut handler that calls setActiveThread(null)
+    // Escape fires the escape.handle command which calls setActiveThread(null) —
+    // a no-op when no thread is active. The landing should remain visible.
     await page.keyboard.press("Escape");
-    // App should still show the empty state without errors
-    await expect(
-      page.locator("h2", { hasText: "Select a thread" })
-    ).toBeVisible();
+    // Landing should still be visible, no error overlay
+    await expect(page.getByText("mcode", { exact: true })).toBeVisible();
+    await expect(page.locator(".vite-error-overlay")).not.toBeVisible();
   });
 });
 
@@ -302,9 +271,7 @@ test.describe("Keyboard shortcuts", () => {
 
 test.describe("Accessibility", () => {
   test.beforeEach(async ({ page }) => {
-    await mockWebSocketServer(page);
-    await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await setup(page);
   });
 
   test("open project folder button has aria-label", async ({ page }) => {

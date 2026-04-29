@@ -1,35 +1,17 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
+import { mockWebSocketServer } from "./helpers/e2e-helpers";
+import { getDefaultSettings } from "@mcode/contracts";
 
-/**
- * Mock the WebSocket server so the WS transport connects and RPC calls
- * resolve instead of hanging. Required since App.tsx gates rendering on
- * transport readiness (shows "Connecting..." until WS opens).
- */
-async function mockWebSocketServer(page: Page): Promise<void> {
-  await page.routeWebSocket(/ws:\/\/localhost:3100/, (ws) => {
-    ws.onMessage((data) => {
-      let msg: Record<string, unknown>;
-      try {
-        msg = JSON.parse(data.toString());
-      } catch {
-        return;
-      }
-      const method = msg.method as string;
-      let result: unknown = null;
-      if (method?.endsWith(".list")) result = [];
-      else if (method === "git.currentBranch") result = "main";
-      else if (method === "agent.activeCount") result = 0;
-      else if (method === "app.version") result = "0.0.1-test";
-      else if (method === "config.discover") result = {};
-      ws.send(JSON.stringify({ id: msg.id, result }));
-    });
-  });
-}
+const MOCK_SETTINGS = getDefaultSettings();
 
 test.describe("Mcode App", () => {
   test.beforeEach(async ({ page }) => {
-    await mockWebSocketServer(page);
+    await mockWebSocketServer(page, {
+      "workspace.enrich": { items: [] },
+      "settings.get": MOCK_SETTINGS,
+    });
   });
+
   test("loads with dark theme", async ({ page }) => {
     await page.goto("/");
     await page.waitForLoadState("networkidle");
@@ -46,15 +28,17 @@ test.describe("Mcode App", () => {
   test("sidebar shows Mcode title and Projects", async ({ page }) => {
     await page.goto("/");
     await page.waitForLoadState("networkidle");
-    await expect(page.locator("text=Mcode")).toBeVisible();
+    // Use exact: true to avoid matching "mcode" in the landing wordmark
+    await expect(page.getByText("Mcode", { exact: true })).toBeVisible();
     await expect(page.getByText("Projects", { exact: true })).toBeVisible();
     await page.screenshot({ path: "e2e/screenshots/sidebar.png", fullPage: true });
   });
 
-  test("shows select thread state when no thread active", async ({ page }) => {
+  test("shows landing when no workspace is active", async ({ page }) => {
     await page.goto("/");
     await page.waitForLoadState("networkidle");
-    await expect(page.locator("text=Select a thread")).toBeVisible();
+    // When no workspace is active, the full-screen landing shows with "mcode" wordmark
+    await expect(page.getByText("mcode", { exact: true })).toBeVisible();
   });
 
   test("settings button is visible", async ({ page }) => {

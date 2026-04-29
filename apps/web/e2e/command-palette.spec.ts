@@ -59,12 +59,13 @@ async function setupPage(page: import("@playwright/test").Page) {
     "settings.get": MOCK_SETTINGS,
   });
   await page.goto("/");
-  // Activate a workspace so the main UI (not the landing) is shown
-  await page.evaluate(() => {
-    // @ts-ignore
-    window.__zustand_workspaceStore?.setState?.({ activeWorkspaceId: "ws-1" });
-  });
-  await page.waitForTimeout(500);
+  // Wait for React to mount — "my-app" appears in the sidebar once the WS connects
+  // and initTransport resolves. Then allow useEffects (initShortcuts) to run.
+  // "my-app" appears in multiple places (sidebar + landing), so use .first().
+  await expect(page.getByText("my-app").first()).toBeVisible({ timeout: 15000 });
+  // React schedules useEffect after the first render/paint. Give effects time to
+  // attach the keydown listener before the test fires keyboard shortcuts.
+  await page.waitForTimeout(200);
 }
 
 test.describe("Command palette", () => {
@@ -96,9 +97,9 @@ test.describe("Command palette", () => {
     await setupPage(page);
     await page.keyboard.press("Control+k");
     await page.getByPlaceholder("Search commands, projects, threads…").fill(">");
-    // Should show Actions section
+    // Should show Actions section — use exact to avoid matching "Actions only" text
     const dialog = page.getByRole("dialog");
-    await expect(dialog.getByText("Actions")).toBeVisible();
+    await expect(dialog.getByText("Actions", { exact: true })).toBeVisible();
     // Should NOT show Recent Projects heading
     await expect(dialog.getByText("Recent Projects")).not.toBeVisible();
   });
@@ -115,8 +116,8 @@ test.describe("Command palette", () => {
     const input = page.getByPlaceholder("Search commands, projects, threads…");
     await expect(input).toHaveValue("");
     await page.keyboard.press("Backspace");
-    // Root view shows "Actions" section
-    await expect(dialog.getByText("Actions")).toBeVisible();
+    // Root view shows "Actions" section — use exact to avoid matching "Actions only"
+    await expect(dialog.getByText("Actions", { exact: true })).toBeVisible();
   });
 
   test("filesystem browse shows directory contents", async ({ page }) => {
