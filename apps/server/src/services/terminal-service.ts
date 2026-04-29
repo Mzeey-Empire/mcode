@@ -93,6 +93,7 @@ export class TerminalService {
     @inject("GitService") private readonly gitService: GitService,
     @inject("SettingsService") private readonly settingsService: SettingsService,
     @inject("PtyPidRegistry") private readonly pidRegistry: PtyPidRegistry,
+    @inject("JobObject") private readonly jobObject: import("./job-object.js").JobObject,
   ) {}
 
   /** Set the sender used to stream PTY data to connected clients. */
@@ -168,6 +169,11 @@ export class TerminalService {
     this.replayBuffers.set(id, replayBuffer);
 
     this.pidRegistry.register(id, pty.pid, shell);
+    // Attach the shell PID to the server's Job Object. node-pty uses ConPTY
+    // on Windows, which can spawn processes with CREATE_BREAKAWAY_FROM_JOB,
+    // so explicit assignment is needed — inheritance alone is not sufficient.
+    // Best-effort: no-op on non-Windows or if JobObject failed to init.
+    this.jobObject.assign(pty.pid);
 
     const dataDisposable = pty.onData((data: string) => {
       // Re-encode to bytes so multi-byte sequences that straddle a node-pty
