@@ -4,6 +4,7 @@ import { CommandGroup, CommandItem, CommandList, CommandEmpty } from "@/componen
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { getTransport } from "@/transport";
+import { isMac } from "@/lib/platform";
 import { Kbd } from "../Kbd";
 import {
   splitBrowseQuery,
@@ -190,7 +191,7 @@ export function BrowseView() {
           <Kbd>⌫</Kbd> back
         </span>
         <span className="flex items-center gap-1.5">
-          <Kbd>Ctrl+Enter</Kbd> add project
+          <Kbd>{isMac ? "⌘+Enter" : "Ctrl+Enter"}</Kbd> add project
         </span>
       </div>
     </CommandList>
