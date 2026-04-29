@@ -1721,6 +1721,10 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             },
           };
         });
+        // The QuotaUpdate event reports session-level deltas (cost, turns, duration).
+        // Plan utilization moves on the same edge, so re-fetch the provider snapshot
+        // to pick up fresh 5-hour / weekly numbers without forcing the user to hover.
+        get().fetchProviderUsage(threadId, providerId);
       }
       return;
     }
