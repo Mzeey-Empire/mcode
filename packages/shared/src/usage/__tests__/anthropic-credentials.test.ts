@@ -13,13 +13,6 @@ vi.mock("node:child_process", () => ({
   execFile: execFileMock,
 }));
 
-const { unprotectDataMock } = vi.hoisted(() => ({
-  unprotectDataMock: vi.fn(),
-}));
-vi.mock("win-dpapi", () => ({
-  unprotectData: unprotectDataMock,
-}));
-
 describe("readAnthropicOauthToken", () => {
   let tmpHome: string;
 
@@ -102,30 +95,24 @@ describe("readAnthropicOauthToken", () => {
     expect(await readAnthropicOauthToken("linux")).toBeNull();
   });
 
-  it("decrypts DPAPI-encrypted credentials on win32", async () => {
-    const decryptedJson = JSON.stringify({
-      claudeAiOauth: { accessToken: "sk-win", expiresAt: 42, refreshToken: "r" },
-    });
-    unprotectDataMock.mockReturnValue(Buffer.from(decryptedJson, "utf8"));
-
+  it("reads plaintext credentials on win32", async () => {
     mkdirSync(join(tmpHome, ".claude"), { recursive: true });
     writeFileSync(
       join(tmpHome, ".claude", ".credentials.json"),
-      Buffer.from([0x01, 0x02]), // encrypted blob (content ignored by mock)
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: "sk-win",
+          expiresAt: 42,
+          refreshToken: "r",
+        },
+      }),
     );
 
     const result = await readAnthropicOauthToken("win32");
     expect(result).toEqual({ accessToken: "sk-win", expiresAt: 42 });
   });
 
-  it("returns null on win32 when DPAPI throws", async () => {
-    unprotectDataMock.mockImplementation(() => {
-      throw new Error("DPAPI failed");
-    });
-
-    mkdirSync(join(tmpHome, ".claude"), { recursive: true });
-    writeFileSync(join(tmpHome, ".claude", ".credentials.json"), Buffer.from([0x01]));
-
+  it("returns null on win32 when the credentials file is missing", async () => {
     expect(await readAnthropicOauthToken("win32")).toBeNull();
   });
 });

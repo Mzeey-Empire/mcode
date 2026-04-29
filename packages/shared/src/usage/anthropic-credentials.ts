@@ -24,9 +24,14 @@ interface CredentialsFile {
  * Returns null when the file is missing, unreadable, or unparseable.
  *
  * Per-OS storage:
- *  - darwin: macOS Keychain entry "Claude Code-credentials"
- *  - linux:  ~/.claude/.credentials.json (plain JSON)
- *  - win32:  ~/.claude/.credentials.json (DPAPI-encrypted, decrypted via win-dpapi)
+ *  - darwin: macOS Keychain entry "Claude Code-credentials" (read via the
+ *            `security` CLI; no prompts once access has been granted).
+ *  - linux:  ~/.claude/.credentials.json (plain JSON, file-mode protected).
+ *  - win32:  %USERPROFILE%\.claude\.credentials.json (plain JSON in the
+ *            user's profile directory; relies on NTFS ACLs for confidentiality).
+ *            Earlier Claude Code releases shipped a DPAPI-encrypted blob; this
+ *            reader treats both the same — JSON parse simply fails on a
+ *            ciphertext blob and the caller gets null.
  *
  * @param platform - Override the detected platform. Intended for testing only.
  */
@@ -73,22 +78,12 @@ async function readRawCredentials(platform: NodeJS.Platform): Promise<string | n
     }
   }
 
-  if (platform === "linux") {
+  // Linux and Windows both write a plain JSON file at ~/.claude/.credentials.json.
+  // Confidentiality relies on the surrounding directory permissions (Linux:
+  // 0700 on .claude/; Windows: NTFS ACLs scoped to the user profile).
+  if (platform === "linux" || platform === "win32") {
     try {
       return await readFile(join(homedir(), ".claude", ".credentials.json"), "utf8");
-    } catch {
-      return null;
-    }
-  }
-
-  if (platform === "win32") {
-    try {
-      const { unprotectData } = await import("win-dpapi");
-      const encrypted = await readFile(
-        join(homedir(), ".claude", ".credentials.json"),
-      );
-      const decrypted = unprotectData(encrypted, null, "CurrentUser");
-      return decrypted.toString("utf8");
     } catch {
       return null;
     }
