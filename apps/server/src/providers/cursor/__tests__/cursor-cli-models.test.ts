@@ -36,11 +36,17 @@ Tip: use --model <id> (or /model <id> in interactive mode) to switch.
         name: "Composer 2 Fast (current, default)",
         group: "Cursor",
       },
-      { id: "gpt-5.4-medium", name: "GPT-5.4 1M", group: "OpenAI" },
+      {
+        id: "gpt-5.4-medium",
+        name: "GPT-5.4 1M (Max)",
+        group: "OpenAI",
+        contextWindow: 1_000_000,
+      },
       {
         id: "claude-4.6-sonnet-medium",
-        name: "Sonnet 4.6 1M",
+        name: "Sonnet 4.6 1M (Max)",
         group: "Anthropic",
+        contextWindow: 1_000_000,
       },
     ]);
   });
