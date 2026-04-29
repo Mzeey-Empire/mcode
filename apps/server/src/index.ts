@@ -47,8 +47,10 @@ import type { AgentEvent } from "@mcode/contracts";
 import type Database from "better-sqlite3";
 import type { JobObject } from "./services/job-object.js";
 
-// Make this Node process identifiable in Task Manager / `tasklist` /
-// macOS Activity Monitor as "Mcode Server" instead of bare "node".
+// process.title affects `ps`/`top`/`htop` output on Unix and the console window
+// title. On Windows, Task Manager pulls the display name from the binary's
+// VERSIONINFO instead — that's set at packaging time by the build-server-binary
+// helper, so process.title has no effect there but is harmless to set.
 process.title = "Mcode Server";
 
 const PREFERRED_PORT = parseInt(process.env.MCODE_PORT ?? "19400", 10);
