@@ -81,8 +81,13 @@ export default async function afterPack(context) {
   const productFilename =
     context.packager.appInfo.productFilename ??
     context.packager.appInfo.productName;
-  // electron-builder gives "1.2.3"; pad to dotted quad for Windows VERSIONINFO.
-  const appVersion = `${context.packager.appInfo.version}.0`;
+  // Windows VERSIONINFO requires a dotted quad (x.x.x.x). package.json versions
+  // are usually 3-part semver, so pad with a trailing ".0" when needed.
+  const rawVersion = context.packager.appInfo.version;
+  const segments = rawVersion.split(".");
+  const appVersion = segments.length >= 4
+    ? segments.slice(0, 4).join(".")
+    : [...segments, ...Array(4 - segments.length).fill("0")].join(".");
   const companyName = context.packager.appInfo.companyName ?? "Mcode";
 
   await buildServerBinary({
