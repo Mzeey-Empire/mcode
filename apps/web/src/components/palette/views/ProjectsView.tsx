@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { CommandGroup, CommandList, CommandEmpty } from "@/components/ui/command";
+import { CommandGroup, CommandItem, CommandList, CommandEmpty } from "@/components/ui/command";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { ProjectRow } from "@/components/projects/ProjectRow";
@@ -58,12 +58,21 @@ export function ProjectsView() {
         {pinned.length > 0 && (
           <CommandGroup heading="Pinned">
             {pinned.map((w) => (
-              <ProjectRow
+              // CommandItem makes the row visible to cmdk's keyboard navigator.
+              // p-0 removes CommandItem's own padding since ProjectRow has its own layout.
+              // group/cmd propagates aria-selected into ProjectRow via group-aria-selected/cmd
+              <CommandItem
                 key={w.id}
-                workspace={w}
-                onSelect={handleSelect}
-                onPin={handlePin}
-              />
+                value={`${w.name} ${w.path}`}
+                onSelect={() => handleSelect(w.id)}
+                className="p-0 rounded-sm aria-selected:bg-transparent group/cmd"
+              >
+                <ProjectRow
+                  workspace={w}
+                  onSelect={handleSelect}
+                  onPin={handlePin}
+                />
+              </CommandItem>
             ))}
           </CommandGroup>
         )}
@@ -71,13 +80,19 @@ export function ProjectsView() {
         {recent.length > 0 && (
           <CommandGroup heading="Recent">
             {recent.map((w) => (
-              <ProjectRow
+              <CommandItem
                 key={w.id}
-                workspace={w}
-                onSelect={handleSelect}
-                onPin={handlePin}
-                onRemove={handleRemove}
-              />
+                value={`${w.name} ${w.path}`}
+                onSelect={() => handleSelect(w.id)}
+                className="p-0 rounded-sm aria-selected:bg-transparent group/cmd"
+              >
+                <ProjectRow
+                  workspace={w}
+                  onSelect={handleSelect}
+                  onPin={handlePin}
+                  onRemove={handleRemove}
+                />
+              </CommandItem>
             ))}
           </CommandGroup>
         )}

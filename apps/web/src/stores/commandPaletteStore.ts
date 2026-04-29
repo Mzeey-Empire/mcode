@@ -64,3 +64,4 @@ export const useCommandPaletteStore = create<State>((set, get) => ({
   setQuery: (q) => set({ query: q }),
   setPendingConfirm: (fn) => set({ pendingConfirm: fn }),
 }));
+

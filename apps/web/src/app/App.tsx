@@ -11,6 +11,7 @@ import { RightPanel } from "@/components/panels/RightPanel";
 import { CommandPalette } from "@/components/palette/CommandPalette";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { ProjectSelectorLanding } from "@/components/projects/ProjectSelectorLanding";
+import { SidebarRevealButton } from "@/components/sidebar/SidebarRevealButton";
 import { ShortcutHelpDialog } from "@/components/ShortcutHelpDialog";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
@@ -322,10 +323,19 @@ export function App() {
           <div className="flex flex-1 flex-col gap-1.5 overflow-hidden">
             <div className="flex flex-1 gap-1.5 overflow-hidden">
               <main className="flex-1 overflow-hidden rounded-lg bg-background shadow-sm">
-                {showLanding ? (
-                  <ProjectSelectorLanding />
-                ) : settingsOpen ? (
+                {settingsOpen ? (
                   <SettingsView section={settingsSection} />
+                ) : showLanding ? (
+                  <div className="flex h-full flex-col">
+                    {/* When the sidebar is collapsed, show the reveal button so the
+                        user can re-expand it from the landing page. */}
+                    {sidebarCollapsed && (
+                      <div className="flex h-11 shrink-0 items-center px-2">
+                        <SidebarRevealButton />
+                      </div>
+                    )}
+                    <ProjectSelectorLanding />
+                  </div>
                 ) : (
                   <ChatView />
                 )}

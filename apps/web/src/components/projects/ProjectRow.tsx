@@ -60,7 +60,9 @@ export function ProjectRow({ workspace, isActive, onSelect, onPin, onRemove, hom
       data-testid="project-row"
       className={cn(
         "group flex cursor-pointer items-center gap-3 rounded-sm px-3 py-2 text-[13px] transition-colors",
-        "hover:bg-accent/60 data-[active=true]:bg-accent",
+        // group-aria-selected/cmd responds to parent CommandItem keyboard focus in the palette.
+        // has no effect in landing page context (no parent with group/cmd).
+        "hover:bg-accent/60 data-[active=true]:bg-accent group-aria-selected/cmd:bg-accent",
       )}
       onClick={() => onSelect(workspace.id)}
     >
