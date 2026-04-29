@@ -64,7 +64,8 @@ export class MigrationRunner {
    * Three cases handled:
    * 1. No table yet → create it with TEXT version column.
    * 2. Table has INTEGER version column (legacy) → one-shot upgrade via
-   *    upgradeLegacyMigrationsTable().
+   *    upgradeLegacyMigrationsTable(), then backfill empty names so
+   *    descriptions are populated on the same open.
    * 3. Table already has TEXT version column → backfill name column if absent,
    *    then backfill empty name values from loaded modules.
    */
@@ -90,13 +91,13 @@ export class MigrationRunner {
     const versionCol = columns.find((c) => c.name === "version");
     const hasNameColumn = columns.some((c) => c.name === "name");
 
-    // Legacy schema: INTEGER version column. Rewrite to TEXT and translate keys.
+    // Legacy schema: INTEGER version column. Rewrite to TEXT and translate
+    // keys. The recreated table has a `name` column with default '', so we
+    // fall through to the backfill below to populate descriptions on first
+    // open rather than waiting for the next process restart.
     if (versionCol?.type === "INTEGER") {
       this.upgradeLegacyMigrationsTable();
-      return;
-    }
-
-    if (!hasNameColumn) {
+    } else if (!hasNameColumn) {
       this.db.exec("ALTER TABLE _migrations ADD COLUMN name TEXT NOT NULL DEFAULT ''");
     }
 
