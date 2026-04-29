@@ -237,8 +237,12 @@ export interface ThreadLike {
   id: string;
   /** Optional user-visible thread title. */
   title?: string | null;
-  /** ID of the workspace this thread belongs to. */
-  workspaceId: number;
+  /**
+   * ID of the workspace this thread belongs to. Number for legacy fixtures,
+   * ULID string for the live store — coercing the ULID through `Number()`
+   * produces `NaN`, so the type accepts both forms.
+   */
+  workspaceId: number | string;
   /** Creation timestamp (unix ms). */
   createdAt: number;
   /** Last-updated timestamp (unix ms). */

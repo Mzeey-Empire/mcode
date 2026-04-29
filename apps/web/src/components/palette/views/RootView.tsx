@@ -77,7 +77,10 @@ export function RootView() {
             recentThreads.map((t) => ({
               id: t.id,
               title: t.title,
-              workspaceId: Number(t.workspace_id),
+              // workspace_id is a ULID string at runtime; pass through as-is
+              // so we don't NaN-out the ID we'd need for cross-workspace
+              // routing.
+              workspaceId: t.workspace_id,
               createdAt: new Date(t.created_at).getTime(),
               updatedAt: new Date(t.updated_at).getTime(),
             })),
