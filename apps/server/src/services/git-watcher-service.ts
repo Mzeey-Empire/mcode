@@ -47,7 +47,7 @@ export class GitWatcherService {
       const output = execFileSync(
         "git",
         ["-C", workspacePath, "rev-parse", "--git-dir"],
-        { stdio: "pipe", encoding: "utf-8" },
+        { stdio: "pipe", encoding: "utf-8", windowsHide: true },
       );
       gitDir = output.trim();
     } catch {

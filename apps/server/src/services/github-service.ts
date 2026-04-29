@@ -68,7 +68,7 @@ export class GithubService {
       execFile(
         "gh",
         ["pr", "view", branch, "--json", "number,url,state"],
-        { cwd, encoding: "utf-8", timeout: 10_000 },
+        { cwd, encoding: "utf-8", timeout: 10_000, windowsHide: true },
         (error, stdout) => {
           if (error || !stdout) {
             resolve(null);
@@ -116,7 +116,7 @@ export class GithubService {
           "--limit",
           "30",
         ],
-        { cwd: workspace.path, encoding: "utf-8", timeout: 15_000 },
+        { cwd: workspace.path, encoding: "utf-8", timeout: 15_000, windowsHide: true },
         (error, stdout) => {
           if (error || !stdout) {
             resolve([]);
@@ -185,7 +185,7 @@ export class GithubService {
       execFile(
         "gh",
         args,
-        { cwd: input.cwd, encoding: "utf-8", timeout: 30_000 },
+        { cwd: input.cwd, encoding: "utf-8", timeout: 30_000, windowsHide: true },
         (error, stdout) => {
           if (error) {
             reject(error);
@@ -279,7 +279,7 @@ export class GithubService {
         "-H", "Accept: application/vnd.github+json",
         "--jq", ".check_runs | map({name: .name, status: .status, conclusion: .conclusion, startedAt: .started_at, completedAt: .completed_at, appId: .app.id})",
       ],
-      { cwd: repoPath, encoding: "utf-8", timeout: 15_000, maxBuffer: 2 * 1024 * 1024 },
+      { cwd: repoPath, encoding: "utf-8", timeout: 15_000, maxBuffer: 2 * 1024 * 1024, windowsHide: true },
       (error, stdout) => {
         releaseOnce();
         this.checkRunsInflight.delete(inflightKey);
@@ -402,7 +402,7 @@ export class GithubService {
       execFile(
         "gh",
         ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-        { cwd: repoPath, encoding: "utf-8", timeout: 10_000 },
+        { cwd: repoPath, encoding: "utf-8", timeout: 10_000, windowsHide: true },
         (error, stdout) => {
           if (error || !stdout.trim()) {
             this.slugCache.delete(repoPath); // evict so next call can retry
@@ -445,7 +445,7 @@ export class GithubService {
           "--json",
           "number,title,headRefName,author,url,state",
         ],
-        { encoding: "utf-8", timeout: 15_000 },
+        { encoding: "utf-8", timeout: 15_000, windowsHide: true },
         (error, stdout) => {
           if (error || !stdout) {
             resolve(null);

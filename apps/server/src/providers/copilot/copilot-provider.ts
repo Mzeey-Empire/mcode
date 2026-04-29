@@ -393,6 +393,7 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
     try {
       const { stdout } = await execFileAsync("gh", ["auth", "token"], {
         timeout: 5000,
+        windowsHide: true,
       });
       const token = stdout.trim();
       if (token) {

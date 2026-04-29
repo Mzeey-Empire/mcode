@@ -36,6 +36,7 @@ export class FileService {
         {
           cwd,
           maxBuffer: 10 * 1024 * 1024,
+          windowsHide: true,
         },
       );
       return output

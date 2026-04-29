@@ -133,6 +133,7 @@ function branchExists(repoPath: string, branch: string): boolean {
   try {
     execFileSync("git", ["-C", repoPath, "rev-parse", "--verify", branch], {
       stdio: "pipe",
+      windowsHide: true,
     });
     return true;
   } catch {
@@ -173,6 +174,7 @@ export class GitService {
     const workspace = this.requireWorkspace(workspaceId);
     execFileSync("git", ["-C", workspace.path, "checkout", branch], {
       stdio: "pipe",
+      windowsHide: true,
     });
   }
 
@@ -233,13 +235,13 @@ export class GitService {
       execFileSync(
         "git",
         ["-C", repoPath, "worktree", "add", wtPath, branch],
-        { stdio: "pipe" },
+        { stdio: "pipe", windowsHide: true },
       );
     } else {
       execFileSync(
         "git",
         ["-C", repoPath, "worktree", "add", wtPath, "-b", branch],
-        { stdio: "pipe" },
+        { stdio: "pipe", windowsHide: true },
       );
     }
 
@@ -275,7 +277,7 @@ export class GitService {
         // Double --force: the second flag tells git to remove even if the
         // worktree directory is locked (e.g. held by a Windows process).
         ["-C", repoPath, "worktree", "remove", wtPath, "--force", "--force"],
-        { timeout: 30_000 },
+        { timeout: 30_000, windowsHide: true },
       );
     } catch (err) {
       logger.warn("git worktree remove failed", {
@@ -341,6 +343,7 @@ export class GitService {
     try {
       await execFile("git", ["-C", repoPath, "worktree", "prune"], {
         timeout: 10_000,
+        windowsHide: true,
       });
     } catch (err) {
       logger.warn("git worktree prune failed", {
@@ -365,6 +368,7 @@ export class GitService {
       try {
         await execFile("git", ["-C", repoPath, "branch", "-d", branch], {
           timeout: 10_000,
+          windowsHide: true,
         });
       } catch (err) {
         logger.warn("Branch deletion failed (may not exist)", {
@@ -423,7 +427,7 @@ export class GitService {
 
     let stdout: string;
     try {
-      const result = await execFile("git", args, { timeout: 10_000 });
+      const result = await execFile("git", args, { timeout: 10_000, windowsHide: true });
       stdout = result.stdout;
     } catch {
       return [];
@@ -472,7 +476,7 @@ export class GitService {
     if (filePath) args.push("--", filePath);
 
     try {
-      const { stdout } = await execFile("git", args, { timeout: 10_000 });
+      const { stdout } = await execFile("git", args, { timeout: 10_000, windowsHide: true });
       const result = stdout.trim();
       if (maxLines) {
         return result.split("\n").slice(0, maxLines).join("\n");
@@ -484,7 +488,7 @@ export class GitService {
         const emptyTree = "4b825dc642cb6eb9a060e54bf899d69f82049264";
         const args2 = ["-C", workspace.path, "diff", "--find-renames", `${emptyTree}..${sha}`];
         if (filePath) args2.push("--", filePath);
-        const { stdout } = await execFile("git", args2, { timeout: 10_000 });
+        const { stdout } = await execFile("git", args2, { timeout: 10_000, windowsHide: true });
         return stdout.trim();
       } catch {
         return "";
@@ -500,7 +504,7 @@ export class GitService {
     const workspace = this.requireWorkspace(workspaceId);
     const nameOnlyArgs = ["-C", workspace.path, "diff", "--name-only", `${sha}~1..${sha}`];
     try {
-      const { stdout } = await execFile("git", nameOnlyArgs, { timeout: 5_000 });
+      const { stdout } = await execFile("git", nameOnlyArgs, { timeout: 5_000, windowsHide: true });
       return stdout.trim().split("\n").filter(Boolean);
     } catch {
       // Root commit — diff against empty tree
@@ -509,7 +513,7 @@ export class GitService {
         const { stdout } = await execFile(
           "git",
           ["-C", workspace.path, "diff", "--name-only", `${emptyTree}..${sha}`],
-          { timeout: 5_000 },
+          { timeout: 5_000, windowsHide: true },
         );
         return stdout.trim().split("\n").filter(Boolean);
       } catch {
@@ -523,7 +527,7 @@ export class GitService {
     await execFile(
       "git",
       ["-C", repoPath, "push", "--set-upstream", "origin", branch],
-      { timeout: 60_000 },
+      { timeout: 60_000, windowsHide: true },
     );
   }
 
@@ -532,7 +536,7 @@ export class GitService {
     const { stdout } = await execFile(
       "git",
       ["-C", repoPath, "diff", "--stat", `${base}...${head}`],
-      { timeout: 30_000 },
+      { timeout: 30_000, windowsHide: true },
     );
     return stdout.trim();
   }
@@ -557,7 +561,7 @@ export class GitService {
       const { stdout } = await execFile(
         "git",
         ["-C", repoPath, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-        { timeout: 5_000 },
+        { timeout: 5_000, windowsHide: true },
       );
       return stdout.trim().replace(/^[^/]+\//, "");
     } catch (err) {
@@ -570,12 +574,12 @@ export class GitService {
       await execFile(
         "git",
         ["-C", repoPath, "remote", "set-head", "origin", "--auto"],
-        { timeout: 1_500 },
+        { timeout: 1_500, windowsHide: true },
       );
       const { stdout } = await execFile(
         "git",
         ["-C", repoPath, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-        { timeout: 5_000 },
+        { timeout: 5_000, windowsHide: true },
       );
       return stdout.trim().replace(/^[^/]+\//, "");
     } catch (err) {
@@ -587,7 +591,7 @@ export class GitService {
       const { stdout } = await execFile(
         "git",
         ["-C", repoPath, "rev-parse", "--abbrev-ref", "HEAD"],
-        { timeout: 5_000 },
+        { timeout: 5_000, windowsHide: true },
       );
       return stdout.trim();
     } catch (err) {
@@ -649,7 +653,7 @@ function listBranchesForPath(repoPath: string): GitBranch[] {
         "-a",
         "--format=%(refname)|||%(refname:short)|||%(objectname:short)|||%(HEAD)|||%(worktreepath)",
       ],
-      { stdio: "pipe", encoding: "utf-8" },
+      { stdio: "pipe", encoding: "utf-8", windowsHide: true },
     );
   } catch {
     return [];
@@ -702,7 +706,7 @@ export function getCurrentBranchForPath(repoPath: string): string | null {
     const output = execFileSync(
       "git",
       ["-C", repoPath, "rev-parse", "--abbrev-ref", "HEAD"],
-      { stdio: "pipe", encoding: "utf-8" },
+      { stdio: "pipe", encoding: "utf-8", windowsHide: true },
     );
     return output.trim() || null;
   } catch {
@@ -725,7 +729,7 @@ function listWorktreesForPath(repoPath: string): WorktreeInfo[] {
     output = execFileSync(
       "git",
       ["-C", repoPath, "worktree", "list", "--porcelain"],
-      { stdio: "pipe", encoding: "utf-8" },
+      { stdio: "pipe", encoding: "utf-8", windowsHide: true },
     );
   } catch {
     return [];
@@ -802,11 +806,12 @@ function fetchBranchForPath(
           "origin",
           `+pull/${prNumber}/head:${branch}`,
         ],
-        { stdio: "pipe" },
+        { stdio: "pipe", windowsHide: true },
       );
     } else {
       execFileSync("git", ["-C", repoPath, "fetch", "origin", branch], {
         stdio: "pipe",
+        windowsHide: true,
       });
     }
   } catch {
@@ -819,7 +824,7 @@ function fetchBranchForPath(
       execFileSync(
         "git",
         ["-C", repoPath, "branch", "-f", branch, `origin/${branch}`],
-        { stdio: "pipe" },
+        { stdio: "pipe", windowsHide: true },
       );
     } else {
       execFileSync(
@@ -832,7 +837,7 @@ function fetchBranchForPath(
           branch,
           `origin/${branch}`,
         ],
-        { stdio: "pipe" },
+        { stdio: "pipe", windowsHide: true },
       );
     }
   } else if (!fetchOk && !branchExists(repoPath, branch)) {

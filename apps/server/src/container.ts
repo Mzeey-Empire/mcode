@@ -46,6 +46,7 @@ import {
   defaultResolver,
 } from "./services/provider-availability-service";
 import { PtyPidRegistry } from "./services/pty-pid-registry";
+import { JobObject } from "./services/job-object.js";
 import { WorkspaceEnricher } from "./services/workspace-enricher";
 import { FilesystemBrowser } from "./services/filesystem-browser";
 
@@ -55,6 +56,10 @@ export function setupContainer(mcodeDir: string): typeof container {
   container.register("PtyPidRegistry", {
     useValue: new PtyPidRegistry(mcodeDir),
   });
+
+  // JobObject — constructed once so all child processes share the same kernel job
+  const jobObject = new JobObject();
+  container.registerInstance("JobObject", jobObject);
 
   // Database
   const db = openDatabase();

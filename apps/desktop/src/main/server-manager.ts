@@ -15,6 +15,7 @@ import { createServer, type AddressInfo } from "net";
 import { resolve, join, dirname } from "path";
 import { getMcodeDir } from "@mcode/shared";
 import { SettingsSchema as BundledSettingsSchema } from "@mcode/contracts";
+import { resolveServerBinary } from "./server-binary-resolver.js";
 
 /** Use snapshot-provided schema when available (V8 snapshot pre-initializes Zod). */
 const SettingsSchema = globalThis.__v8Snapshot?.contracts?.SettingsSchema ?? BundledSettingsSchema;
@@ -346,9 +347,17 @@ export class ServerManager {
         ? undefined
         : createWriteStream(SERVER_LOG_PATH, { flags: "w" });
 
+      // The renamed binary is a copy of the Electron binary, so ELECTRON_RUN_AS_NODE=1 is still required.
+      const serverBinary = resolveServerBinary({
+        isPackaged: app.isPackaged,
+        execPath: process.execPath,
+        resourcesPath: process.resourcesPath,
+        platform: process.platform,
+      });
+
       let child;
       try {
-        child = spawn(process.execPath, args, {
+        child = spawn(serverBinary, args, {
           cwd,
           env,
           detached: true,

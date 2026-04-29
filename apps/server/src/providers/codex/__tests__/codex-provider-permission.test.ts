@@ -22,8 +22,11 @@ describe("CodexProvider permission flow", () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    // settingsService is unused for these paths; pass a minimal stub.
-    provider = new CodexProvider({ get: async () => ({ provider: { cli: { codex: "codex" } } }) } as never);
+    // settingsService and jobObject are unused for these paths; pass minimal stubs.
+    provider = new CodexProvider(
+      { get: async () => ({ provider: { cli: { codex: "codex" } } }) } as never,
+      { assign: vi.fn() } as never,
+    );
     // Pre-register a session entry so drain logic has something to iterate.
     (provider as unknown as { sessions: Map<string, unknown> }).sessions.set(sessionId, {
       server: { kill: vi.fn().mockResolvedValue(undefined), isAlive: true },
