@@ -12,6 +12,11 @@ import path from "node:path";
  * @returns {{ srcBinary: string, dstBinary: string }}
  */
 export function resolveBinaryPaths({ appOutDir, electronPlatformName, productFilename }) {
+  if (!productFilename || typeof productFilename !== "string") {
+    throw new Error(
+      `resolveBinaryPaths: productFilename is required (got ${productFilename === undefined ? "undefined" : JSON.stringify(productFilename)})`,
+    );
+  }
   if (electronPlatformName === "win32") {
     return {
       srcBinary: path.join(appOutDir, `${productFilename}.exe`),
@@ -50,7 +55,7 @@ export async function buildServerBinary({ appOutDir, electronPlatformName, produ
   });
   await mkdir(path.dirname(dstBinary), { recursive: true });
   await copyFile(srcBinary, dstBinary);
-  if (process.platform !== "win32") {
+  if (electronPlatformName !== "win32") {
     await chmod(dstBinary, 0o755);
   }
 }

@@ -41,6 +41,26 @@ describe("resolveBinaryPaths", () => {
     );
   });
 
+  it("throws when productFilename is missing", () => {
+    expect(() =>
+      resolveBinaryPaths({
+        appOutDir: "/x",
+        electronPlatformName: "linux",
+        productFilename: undefined,
+      }),
+    ).toThrow(/productFilename is required/);
+  });
+
+  it("throws when productFilename is not a string", () => {
+    expect(() =>
+      resolveBinaryPaths({
+        appOutDir: "/x",
+        electronPlatformName: "linux",
+        productFilename: 42,
+      }),
+    ).toThrow(/productFilename is required/);
+  });
+
   it("Linux: copies <appOutDir>/<exe> to <appOutDir>/resources/bin/mcode-server", () => {
     const result = resolveBinaryPaths({
       appOutDir: "/dist/linux-unpacked",
