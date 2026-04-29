@@ -8,7 +8,10 @@ import { useUpdateStore } from "@/stores/updateStore";
 import type { UpdateStatus } from "@/transport/desktop-bridge";
 import { TerminalPanel } from "@/components/terminal";
 import { RightPanel } from "@/components/panels/RightPanel";
-import { CommandPalette } from "@/components/CommandPalette";
+import { CommandPalette } from "@/components/palette/CommandPalette";
+import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
+import { ProjectSelectorLanding } from "@/components/projects/ProjectSelectorLanding";
+import { SidebarRevealButton } from "@/components/sidebar/SidebarRevealButton";
 import { ShortcutHelpDialog } from "@/components/ShortcutHelpDialog";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { resizeMessageCache } from "@/stores/messageCache";
@@ -39,6 +42,12 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("model");
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
+  const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
+  const pendingNewThread = useWorkspaceStore((s) => s.pendingNewThread);
+  // Landing is the default whenever no thread is active. The new-thread composer
+  // takes precedence so the user can compose against an active workspace without
+  // bouncing back to the project list.
+  const showLanding = activeThreadId === null && !pendingNewThread;
   useIdleReclamation();
 
   useEffect(() => {
@@ -93,12 +102,20 @@ export function App() {
 
     const disposers = [
       registerCommand({
+        id: "palette.open",
+        title: "Open Command Palette",
+        category: "Navigation",
+        handler: () => useCommandPaletteStore.getState().open(),
+      }),
+      // Backward-compat alias — mod+p still opens the palette
+      registerCommand({
         id: "commandPalette.toggle",
         title: "Command Palette",
         category: "General",
         handler: () => {
-          const store = useUiStore.getState();
-          store.setCommandPaletteOpen(!store.commandPaletteOpen);
+          const palette = useCommandPaletteStore.getState();
+          if (palette.isOpen) palette.close();
+          else palette.open();
         },
       }),
       registerCommand({
@@ -106,10 +123,13 @@ export function App() {
         title: "Escape",
         category: "General",
         handler: () => {
+          const palette = useCommandPaletteStore.getState();
+          if (palette.isOpen) {
+            palette.close();
+            return;
+          }
           const ui = useUiStore.getState();
-          if (ui.commandPaletteOpen) {
-            ui.setCommandPaletteOpen(false);
-          } else if (ui.shortcutHelpOpen) {
+          if (ui.shortcutHelpOpen) {
             ui.setShortcutHelpOpen(false);
           } else {
             useWorkspaceStore.getState().setActiveThread(null);
@@ -121,15 +141,31 @@ export function App() {
         title: "New Thread",
         category: "Thread",
         handler: () => {
-          useWorkspaceStore.getState().setPendingNewThread(true);
+          const ws = useWorkspaceStore.getState();
+          // When invoked from the cold-start landing there's no active project
+          // to attach the thread to, so the composer would render with a null
+          // workspaceId and quietly fail to send. Route through the project
+          // picker first and chain into the new-thread state on selection.
+          if (ws.activeWorkspaceId) {
+            ws.setPendingNewThread(true);
+          } else {
+            useCommandPaletteStore.getState().open({
+              intent: "projects",
+              nextAction: "newThread",
+            });
+          }
         },
       }),
       registerCommand({
+        // Command id stays `workspace.new` for shortcut/persistence stability
+        // even though the user-facing label is now "New Project".
         id: "workspace.new",
-        title: "New Workspace",
-        category: "Workspace",
+        title: "New Project",
+        category: "Project",
         handler: () => {
-          window.dispatchEvent(new CustomEvent("mcode:new-workspace"));
+          // Reuse the same browse-mode entry the landing's "+ Add project"
+          // button uses, instead of the previous orphan custom event.
+          useCommandPaletteStore.getState().open({ intent: "addProject" });
         },
       }),
       registerCommand({
@@ -311,13 +347,24 @@ export function App() {
               <main className="flex-1 overflow-hidden rounded-lg bg-background shadow-sm">
                 {settingsOpen ? (
                   <SettingsView section={settingsSection} />
+                ) : showLanding ? (
+                  <div className="flex h-full flex-col">
+                    {/* When the sidebar is collapsed, show the reveal button so the
+                        user can re-expand it from the landing page. */}
+                    {sidebarCollapsed && (
+                      <div className="flex h-11 shrink-0 items-center px-2">
+                        <SidebarRevealButton />
+                      </div>
+                    )}
+                    <ProjectSelectorLanding />
+                  </div>
                 ) : (
                   <ChatView />
                 )}
               </main>
-              {!settingsOpen && <RightPanel />}
+              {!settingsOpen && !showLanding && <RightPanel />}
             </div>
-            {!settingsOpen && <TerminalPanel />}
+            {!settingsOpen && !showLanding && <TerminalPanel />}
           </div>
         </div>
       </div>

@@ -6,7 +6,7 @@
 import { randomUUID } from "crypto";
 import { injectable, inject } from "tsyringe";
 import type Database from "better-sqlite3";
-import type { Thread, ThreadMode, ThreadStatus, ReasoningLevel, InteractionMode, PermissionMode, ContextWindowMode } from "@mcode/contracts";
+import type { Thread, RecentThread, ThreadMode, ThreadStatus, ReasoningLevel, InteractionMode, PermissionMode, ContextWindowMode } from "@mcode/contracts";
 
 interface ThreadRow {
   id: string;
@@ -172,6 +172,37 @@ export class ThreadRepo {
       .all(workspaceId, clampedLimit) as ThreadRow[];
 
     return rows.map(rowToThread);
+  }
+
+  /**
+   * List the most recently active non-deleted threads across all workspaces,
+   * joined with the parent workspace's name + path. Used by the landing's
+   * "Recent threads" section to surface continuation candidates regardless of
+   * which workspace is currently active.
+   *
+   * Sorted by `updated_at` (last activity), not `created_at`, so a long-lived
+   * thread with recent traffic outranks a freshly-created idle one.
+   */
+  listRecent(limit = 12): RecentThread[] {
+    const clampedLimit = Math.max(1, Math.min(50, limit));
+
+    const rows = this.db
+      .prepare(
+        `SELECT ${THREAD_COLUMNS.split(", ").map((c) => `t.${c}`).join(", ")},
+                w.name AS workspace_name, w.path AS workspace_path
+         FROM threads t
+         JOIN workspaces w ON w.id = t.workspace_id
+         WHERE t.deleted_at IS NULL
+         ORDER BY t.updated_at DESC
+         LIMIT ?`,
+      )
+      .all(clampedLimit) as Array<ThreadRow & { workspace_name: string; workspace_path: string }>;
+
+    return rows.map((row) => ({
+      ...rowToThread(row),
+      workspace_name: row.workspace_name,
+      workspace_path: row.workspace_path,
+    }));
   }
 
   /** Update a thread's lifecycle status. Returns true if a row was changed. */
@@ -361,6 +392,22 @@ export class ThreadRepo {
     this.db
       .prepare("UPDATE threads SET last_compact_summary = ?, updated_at = ? WHERE id = ?")
       .run(summary, new Date().toISOString(), threadId);
+  }
+
+  /**
+   * Count active (non-deleted) threads for each workspace id in the list.
+   * Returns a Map keyed by workspace id. Workspace ids with no active threads are omitted.
+   */
+  countActiveByWorkspaceIds(ids: string[]): Map<string, number> {
+    if (ids.length === 0) return new Map();
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = this.db.prepare(
+      `SELECT workspace_id AS id, COUNT(*) AS n
+       FROM threads
+       WHERE workspace_id IN (${placeholders}) AND deleted_at IS NULL
+       GROUP BY workspace_id`,
+    ).all(...ids) as { id: string; n: number }[];
+    return new Map(rows.map((r) => [r.id, r.n]));
   }
 
   /** Set lineage fields on a thread. Used when thread creation is handled by ThreadService. */

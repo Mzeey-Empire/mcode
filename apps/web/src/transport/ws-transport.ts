@@ -1,6 +1,7 @@
 import type {
   McodeTransport,
   Workspace,
+  WorkspaceEnrichment,
   Thread,
   GitBranch,
   WorktreeInfo,
@@ -434,11 +435,23 @@ export function createWsTransport(
     listWorkspaces: () => rpc<Workspace[]>("workspace.list", {}),
     createWorkspace: (name, path) => rpc<Workspace>("workspace.create", { name, path }),
     deleteWorkspace: (id) => rpc<boolean>("workspace.delete", { id }),
+    touchLastOpened: (id) => rpc<void>("workspace.touchLastOpened", { id }),
+    pinWorkspace: (id, pinned) => rpc<void>("workspace.pin", { id, pinned }),
+    removeRecent: (id) => rpc<void>("workspace.removeRecent", { id }),
+    enrichWorkspaces: (ids) =>
+      rpc<{ items: WorkspaceEnrichment[] }>("workspace.enrich", { ids }),
+    filesystemBrowse: (path) =>
+      rpc<{ path: string; parent: string | null; entries: { name: string; isDir: boolean }[] }>(
+        "filesystem.browse",
+        { path },
+      ),
 
     // Thread
     createThread: (workspaceId, title, mode, branch) =>
       rpc<Thread>("thread.create", { workspaceId, title, mode, branch }),
     listThreads: (workspaceId) => rpc<Thread[]>("thread.list", { workspaceId }),
+    listRecentThreads: (limit) =>
+      rpc<import("./types").RecentThread[]>("thread.recent", limit !== undefined ? { limit } : {}),
     deleteThread: (threadId, cleanupWorktree) =>
       rpc<boolean>("thread.delete", { threadId, cleanupWorktree }),
     updateThreadTitle: (threadId, title) =>

@@ -3,9 +3,16 @@ import { getDefaultSettings } from "@mcode/contracts";
 
 /**
  * Optional overrides for RPC responses. Keyed by method name.
- * The value is the result to return for that method.
+ * The value is either:
+ * - a static result that will be returned verbatim, or
+ * - a function called with the request params at invocation time. The return
+ *   value (or its resolved value) is sent as the result. Functional handlers
+ *   let tests record calls or shape responses based on params.
  */
-export type RpcOverrides = Record<string, unknown>;
+export type RpcOverrides = Record<
+  string,
+  unknown | ((params?: unknown) => unknown | Promise<unknown>)
+>;
 
 /**
  * Controller returned by {@link mockWebSocketServer} to send server-initiated
@@ -43,7 +50,7 @@ export async function mockWebSocketServer(
   await page.routeWebSocket(/ws:\/\/localhost:\d{5}/, (ws) => {
     resolveWs(ws);
 
-    ws.onMessage((data) => {
+    ws.onMessage(async (data) => {
       let msg: Record<string, unknown>;
       try {
         msg = JSON.parse(data.toString());
@@ -59,7 +66,29 @@ export async function mockWebSocketServer(
       const method = msg.method as string;
       // Check overrides first
       if (method in overrides) {
-        ws.send(JSON.stringify({ id: msg.id, result: overrides[method] }));
+        const handler = overrides[method];
+        // If the override is a function, call it now with the request's params
+        // so the test can observe the call timing/args. Static values are sent
+        // verbatim. The try/catch ensures a thrown handler returns a JSON-RPC
+        // error response — without it the RPC stays unresolved and the test
+        // hangs until Playwright's outer timeout fires.
+        try {
+          const result =
+            typeof handler === "function"
+              ? await (handler as (params?: unknown) => unknown | Promise<unknown>)(msg.params)
+              : handler;
+          ws.send(JSON.stringify({ id: msg.id, result }));
+        } catch (err) {
+          ws.send(
+            JSON.stringify({
+              id: msg.id,
+              error: {
+                code: -32000,
+                message: err instanceof Error ? err.message : "Override handler failed",
+              },
+            }),
+          );
+        }
         return;
       }
       // Default responses

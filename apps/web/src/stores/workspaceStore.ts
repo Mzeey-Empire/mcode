@@ -22,6 +22,13 @@ const SYNC_THROTTLE_MS = 30_000;
 /** Tracks the last syncThreadPrs request time per workspace. */
 const lastSyncTime = new Map<string, number>();
 
+/**
+ * Optional RPC dispatch callback used by workspace actions. Tests inject a
+ * stub here; production code uses {@link getTransport} directly. The shape
+ * mirrors the transport's `call` method so handlers can be swapped freely.
+ */
+export type WorkspaceRpcCall = (method: string, params: unknown) => Promise<unknown>;
+
 /** Full state shape and action interface for the workspace store. */
 interface WorkspaceState {
   workspaces: Workspace[];
@@ -57,7 +64,17 @@ interface WorkspaceState {
   loadWorkspaces: () => Promise<void>;
   createWorkspace: (name: string, path: string) => Promise<Workspace>;
   deleteWorkspace: (id: string) => Promise<void>;
-  setActiveWorkspace: (id: string | null) => void;
+  /**
+   * Set the active workspace by ID. Clears the active thread if it belongs to a
+   * different workspace, and bumps the workspace's last_opened_at locally so
+   * the project selector re-sorts immediately. Pass an optional `call` to
+   * route the touchLastOpened RPC through a custom dispatcher (used in tests).
+   */
+  setActiveWorkspace: (id: string | null, call?: WorkspaceRpcCall) => void;
+  /** Pin or unpin a workspace. Optimistically updates local state; reverts on RPC failure. */
+  pinWorkspace: (id: string, pinned: boolean, call?: WorkspaceRpcCall) => Promise<void>;
+  /** Remove a workspace from the recents list. Clears last_opened_at and pinned locally; reverts on RPC failure. */
+  removeRecent: (id: string, call?: WorkspaceRpcCall) => Promise<void>;
 
   // Thread actions
   loadThreads: (workspaceId: string) => Promise<void>;
@@ -242,7 +259,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
   },
 
-  setActiveWorkspace: (id) => {
+  setActiveWorkspace: (id, call) => {
     if (id === get().activeWorkspaceId) return;
     // Only clear activeThreadId if the current thread belongs to a different workspace
     const currentThread = get().threads.find(
@@ -267,6 +284,79 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     });
     if (id) {
       get().loadThreads(id);
+      // Optimistically bump the local last_opened_at so the project selector
+      // re-sorts immediately. Without this the row only moves to the top of
+      // "Recent" after the next workspace list refresh, which feels laggy.
+      const now = Date.now();
+      set((s) => ({
+        workspaces: s.workspaces.map((w) =>
+          w.id === id ? { ...w, last_opened_at: now } : w
+        ),
+      }));
+      // Record this as the last-opened workspace for recency ordering in the project selector.
+      if (call) {
+        call("workspace.touchLastOpened", { id }).catch(() => {});
+      } else {
+        getTransport().touchLastOpened(id).catch(() => {});
+      }
+    }
+  },
+
+  pinWorkspace: async (id, pinned, call) => {
+    // Snapshot the prior pinned value so a retry/no-op (where the previous
+    // value already matches `pinned`) reverts to the correct state instead of
+    // toggling away from it.
+    const prevPinned = get().workspaces.find((w) => w.id === id)?.pinned;
+    // Optimistic update so the UI reflects the change instantly.
+    set((s) => ({
+      workspaces: s.workspaces.map((w) => w.id === id ? { ...w, pinned } : w),
+    }));
+    try {
+      if (call) {
+        await call("workspace.pin", { id, pinned });
+      } else {
+        await getTransport().pinWorkspace(id, pinned);
+      }
+    } catch (err) {
+      // Revert the optimistic update on failure using the snapshot.
+      if (prevPinned !== undefined) {
+        set((s) => ({
+          workspaces: s.workspaces.map((w) =>
+            w.id === id ? { ...w, pinned: prevPinned } : w
+          ),
+        }));
+      }
+      throw err;
+    }
+  },
+
+  removeRecent: async (id, call) => {
+    // Snapshot the prior state so we can revert if the RPC fails — otherwise a
+    // server error would silently strip the row from the UI's recents list.
+    const prev = get().workspaces.find((w) => w.id === id);
+    // Optimistic update: clear recency and pinned state locally.
+    set((s) => ({
+      workspaces: s.workspaces.map((w) =>
+        w.id === id ? { ...w, pinned: false, last_opened_at: null } : w
+      ),
+    }));
+    try {
+      if (call) {
+        await call("workspace.removeRecent", { id });
+      } else {
+        await getTransport().removeRecent(id);
+      }
+    } catch (err) {
+      if (prev) {
+        set((s) => ({
+          workspaces: s.workspaces.map((w) =>
+            w.id === id
+              ? { ...w, pinned: prev.pinned, last_opened_at: prev.last_opened_at }
+              : w
+          ),
+        }));
+      }
+      throw err;
     }
   },
 
