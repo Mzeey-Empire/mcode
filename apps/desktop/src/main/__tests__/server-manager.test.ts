@@ -399,6 +399,12 @@ describe("ServerManager", () => {
 
     await manager.start();
 
+    expect(refs.resolveServerBinarySpy).toHaveBeenCalledWith({
+      isPackaged: true,
+      execPath: process.execPath,
+      resourcesPath: "/test/resources",
+      platform: process.platform,
+    });
     const spawnCall = vi.mocked(spawn).mock.calls[0];
     expect(spawnCall[0]).toBe(process.execPath);
     const opts = spawnCall[2] as { env: Record<string, string> };
@@ -421,6 +427,12 @@ describe("ServerManager", () => {
 
     await manager.start();
 
+    expect(refs.resolveServerBinarySpy).toHaveBeenCalledWith({
+      isPackaged: true,
+      execPath: process.execPath,
+      resourcesPath: "/test/resources",
+      platform: process.platform,
+    });
     const spawnCall = vi.mocked(spawn).mock.calls[0];
     expect(spawnCall[0]).toBe(expectedBinary);
     const opts = spawnCall[2] as { env: Record<string, string> };

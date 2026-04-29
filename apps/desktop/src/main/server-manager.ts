@@ -347,6 +347,7 @@ export class ServerManager {
         ? undefined
         : createWriteStream(SERVER_LOG_PATH, { flags: "w" });
 
+      // The renamed binary is a copy of the Electron binary, so ELECTRON_RUN_AS_NODE=1 is still required.
       const serverBinary = resolveServerBinary({
         isPackaged: app.isPackaged,
         execPath: process.execPath,
