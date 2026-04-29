@@ -70,7 +70,10 @@
         "dmg",
         "zip"
       ],
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "binaries": [
+        "Contents/Resources/bin/mcode-server"
+      ]
     },
     "win": {
       "target": [
