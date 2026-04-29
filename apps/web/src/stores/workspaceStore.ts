@@ -301,16 +301,32 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   removeRecent: async (id, call) => {
+    // Snapshot the prior state so we can revert if the RPC fails — otherwise a
+    // server error would silently strip the row from the UI's recents list.
+    const prev = get().workspaces.find((w) => w.id === id);
     // Optimistic update: clear recency and pinned state locally.
     set((s) => ({
       workspaces: s.workspaces.map((w) =>
         w.id === id ? { ...w, pinned: false, last_opened_at: null } : w
       ),
     }));
-    if (call) {
-      await call("workspace.removeRecent", { id });
-    } else {
-      await getTransport().removeRecent(id);
+    try {
+      if (call) {
+        await call("workspace.removeRecent", { id });
+      } else {
+        await getTransport().removeRecent(id);
+      }
+    } catch (err) {
+      if (prev) {
+        set((s) => ({
+          workspaces: s.workspaces.map((w) =>
+            w.id === id
+              ? { ...w, pinned: prev.pinned, last_opened_at: prev.last_opened_at }
+              : w
+          ),
+        }));
+      }
+      throw err;
     }
   },
 
