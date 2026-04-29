@@ -113,6 +113,14 @@ export async function buildServerBinary({
         "buildServerBinary: appVersion is required when electronPlatformName is win32",
       );
     }
+    // VERSIONINFO numeric fields require a dotted quad of integers. Catch
+    // upstream callers that forgot to normalize semver prerelease suffixes
+    // before they reach resedit.
+    if (!/^\d+\.\d+\.\d+\.\d+$/.test(appVersion)) {
+      throw new Error(
+        `buildServerBinary: appVersion must be a numeric dotted quad (x.x.x.x) on win32 (got ${JSON.stringify(appVersion)})`,
+      );
+    }
     await stampWindowsVersionInfo(dstBinary, {
       fileDescription: "Mcode Server",
       productName: "Mcode Server",

@@ -333,4 +333,18 @@ describe("buildServerBinary win32 VERSIONINFO stamping", () => {
       }),
     ).rejects.toThrow(/appVersion is required/);
   });
+
+  it("throws when appVersion is not a numeric dotted quad on win32", async () => {
+    const srcExe = path.join(tmpDir, "Mcode.exe");
+    await writeFile(srcExe, Buffer.from([0x4d, 0x5a]));
+
+    await expect(
+      buildServerBinary({
+        appOutDir: tmpDir,
+        electronPlatformName: "win32",
+        productFilename: "Mcode",
+        appVersion: "1.2.3-beta.1",
+      }),
+    ).rejects.toThrow(/numeric dotted quad/);
+  });
 });
