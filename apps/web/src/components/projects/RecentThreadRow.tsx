@@ -17,11 +17,16 @@ interface Props {
   home?: string;
 }
 
-/** Format an ISO-8601 timestamp as a short relative time string. */
-function relativeTime(iso: string): string {
+/**
+ * Format an ISO-8601 timestamp as a short relative time string.
+ * Returns null when the input cannot be parsed to a finite millisecond value
+ * so callers can skip rendering.
+ */
+function relativeTime(iso: string): string | null {
   const ms = new Date(iso).getTime();
-  if (!Number.isFinite(ms)) return "";
+  if (!Number.isFinite(ms)) return null;
   const diff = Date.now() - ms;
+  if (!Number.isFinite(diff)) return null;
   const mins = Math.floor(diff / 60_000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;
@@ -62,6 +67,7 @@ function statusDot(status: RecentThread["status"]): { className: string; label: 
  */
 export function RecentThreadRow({ thread, isActive, onSelect, onRemove, home }: Props) {
   const dot = statusDot(thread.status);
+  const updatedLabel = relativeTime(thread.updated_at);
 
   return (
     <div
@@ -113,7 +119,9 @@ export function RecentThreadRow({ thread, isActive, onSelect, onRemove, home }: 
             </>
           )}
         </div>
-        <span className="tabular-nums">{relativeTime(thread.updated_at)}</span>
+        {updatedLabel && (
+          <span className="tabular-nums">{updatedLabel}</span>
+        )}
       </div>
 
       {/* Remove from recents — only shown when handler is provided. */}
