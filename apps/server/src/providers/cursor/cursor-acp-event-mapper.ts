@@ -107,6 +107,11 @@ const HANDLED_SESSION_UPDATES = new Set([
   "tool_call",
   "tool_call_update",
   "plan",
+  // Cursor-specific informational notifications. We deliberately ignore them
+  // (no UI surface yet) but they're frequent enough that letting them fall
+  // through to the unhandled-info log spams `mcode.log`.
+  "available_commands_update",
+  "session_info_update",
 ]);
 
 /** ACP tool-call statuses that should produce a ToolResult. */

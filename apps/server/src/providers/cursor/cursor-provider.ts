@@ -35,6 +35,13 @@ const EVICTION_INTERVAL_MS = 60 * 1000;
 interface SessionEntry {
   session: CursorAcpSession;
   lastUsedAt: number;
+  /**
+   * Last permission mode the user requested for this session ("default" | "full").
+   * Stored on the entry so `session/request_permission` requests can be
+   * auto-approved without round-tripping back to `sendMessage`. Refreshed on
+   * every `sendMessage` so the user can flip Full access on/off mid-thread.
+   */
+  permissionMode: string;
 }
 
 interface PendingPermissionEntry {
@@ -149,6 +156,9 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     const existing = this.sessions.get(sessionId);
     if (existing) {
       existing.lastUsedAt = Date.now();
+      // Refresh permission mode so flipping Full access mid-thread takes effect
+      // on the next tool permission request without a session restart.
+      existing.permissionMode = permissionMode;
       try {
         this.emit("event", { type: AgentEventType.TurnStarted, threadId } satisfies AgentEvent);
         const { assistantText } = await existing.session.sendPrompt(prompt, model || undefined);
@@ -206,7 +216,11 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       } satisfies AgentEvent);
     }
 
-    this.sessions.set(sessionId, { session, lastUsedAt: Date.now() });
+    this.sessions.set(sessionId, {
+      session,
+      lastUsedAt: Date.now(),
+      permissionMode,
+    });
 
     try {
       this.emit("event", { type: AgentEventType.TurnStarted, threadId } satisfies AgentEvent);
@@ -317,6 +331,18 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     const method = req.method;
 
     if (method === "session/request_permission") {
+      // Full-access mode short-circuits the permission card. The user has
+      // pre-authorized all tools for this session, so emitting a card and
+      // waiting for a click would just block the agent on every tool call.
+      const entry = this.sessions.get(sessionId);
+      if (entry?.permissionMode === "full") {
+        logger.info("Cursor ACP permission auto-approved (full access)", {
+          sessionId,
+          threadId,
+        });
+        return mapCursorPermissionRpcResult("allow-session");
+      }
+
       return await new Promise<unknown>((resolve) => {
         const requestId = randomUUID();
         const synthesized: PermissionRequest = {
