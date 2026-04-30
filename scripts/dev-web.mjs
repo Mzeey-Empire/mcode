@@ -15,9 +15,12 @@ import { randomUUID } from "node:crypto";
 import { resolve, dirname } from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { rebuildServerDevBundle } from "./build-server-dev-bundle.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
+const desktopRoot = resolve(rootDir, "apps", "desktop");
+const serverCjs = resolve(desktopRoot, "dist", "server", "server.cjs");
 const SERVER_PORT = 19400;
 
 /** Find an available port starting from `preferred`, incrementing on conflict. */
@@ -82,6 +85,15 @@ if (!electronBin) {
   process.exit(1);
 }
 
+console.log(`\x1b[36m[dev:web]\x1b[0m Building server bundle (${serverCjs})...`);
+
+try {
+  await rebuildServerDevBundle();
+} catch (err) {
+  console.error("[dev:web] Server bundle failed:", err);
+  process.exit(1);
+}
+
 console.log(`\x1b[36m[dev:web]\x1b[0m Starting server on port ${port}...`);
 
 let serverFailed = false;
@@ -89,9 +101,9 @@ let serverFailed = false;
 // Start the server using Electron's Node.js (matches better-sqlite3 ABI).
 const server = spawn(
   electronBin,
-  ["--import", "tsx", "src/index.ts"],
+  [serverCjs],
   {
-    cwd: resolve(rootDir, "apps", "server"),
+    cwd: dirname(serverCjs),
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: "1",

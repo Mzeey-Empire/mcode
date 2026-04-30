@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { ChevronsDownUp, Code2, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDiffStore, type SelectedFile } from "@/stores/diffStore";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { getTransport } from "@/transport";
 import { parseDiffLines, isMarkdownFile } from "@/lib/diff-parser";
 import { langFromPath } from "@/lib/lang-from-path";
@@ -94,7 +95,6 @@ export function FileEntry({ filePath, source, id, depth = 0 }: FileEntryProps) {
         } else if (source === "cumulative") {
           result = await transport.getCumulativeDiff(id, filePath);
         } else {
-          const { useWorkspaceStore } = await import("@/stores/workspaceStore");
           const workspaceId = useWorkspaceStore.getState().activeWorkspaceId;
           result = workspaceId
             ? await transport.getCommitDiff(workspaceId, id, filePath)

@@ -1,6 +1,9 @@
 import type { Settings, ProviderAvailability } from "@mcode/contracts";
 import type { PermissionRequest, PermissionDecision } from "@mcode/contracts";
 import { pushEmitter } from "./ws-transport";
+import { getTransport } from "@/transport";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { useDiffStore } from "@/stores/diffStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -124,15 +127,11 @@ export function startPushListeners(): void {
         threadId: string;
         status: string;
       };
-      // The workspace store mirrors thread status; import lazily to
-      // avoid circular deps at module evaluation time.
-      import("@/stores/workspaceStore").then(({ useWorkspaceStore }) => {
-        useWorkspaceStore.setState((ws) => ({
-          threads: ws.threads.map((t) =>
-            t.id === threadId ? { ...t, status: status as typeof t.status } : t,
-          ),
-        }));
-      });
+      useWorkspaceStore.setState((ws) => ({
+        threads: ws.threads.map((t) =>
+          t.id === threadId ? { ...t, status: status as typeof t.status } : t,
+        ),
+      }));
     }),
   );
 
@@ -144,15 +143,11 @@ export function startPushListeners(): void {
         prNumber: number;
         prStatus: string;
       };
-      import("@/stores/workspaceStore").then(({ useWorkspaceStore }) => {
-        useWorkspaceStore.setState((ws) => ({
-          threads: ws.threads.map((t) =>
-            t.id === threadId
-              ? { ...t, pr_number: prNumber, pr_status: prStatus }
-              : t,
-          ),
-        }));
-      });
+      useWorkspaceStore.setState((ws) => ({
+        threads: ws.threads.map((t) =>
+          t.id === threadId ? { ...t, pr_number: prNumber, pr_status: prStatus } : t,
+        ),
+      }));
     }),
   );
 
@@ -163,11 +158,9 @@ export function startPushListeners(): void {
         threadId: string;
         checks: import("@mcode/contracts").ChecksStatus;
       };
-      import("@/stores/workspaceStore").then(({ useWorkspaceStore }) => {
-        useWorkspaceStore.setState((ws) => ({
-          checksById: { ...ws.checksById, [threadId]: checks },
-        }));
-      });
+      useWorkspaceStore.setState((ws) => ({
+        checksById: { ...ws.checksById, [threadId]: checks },
+      }));
     }),
   );
 
@@ -200,39 +193,45 @@ export function startPushListeners(): void {
       };
       useThreadStore.getState().handleTurnPersisted(payload);
 
-      // Update diff panel snapshots and commits if this thread is already loaded
-      import("@/stores/diffStore").then(({ useDiffStore }) => {
-        const snap = useDiffStore.getState();
-        const hasSnapshots = snap.snapshotsByThread[payload.threadId] !== undefined;
-        const hasCommits = snap.commitsByThread[payload.threadId] !== undefined;
-        // Skip transport import entirely when neither panel has data for this thread
-        if (!hasSnapshots && !hasCommits) return;
+      const snap = useDiffStore.getState();
+      const hasSnapshots = snap.snapshotsByThread[payload.threadId] !== undefined;
+      const hasCommits = snap.commitsByThread[payload.threadId] !== undefined;
+      if (!hasSnapshots && !hasCommits) return;
 
-        import("@/transport").then(({ getTransport }) => {
-          if (hasSnapshots) {
-            getTransport()
-              .listSnapshots(payload.threadId)
-              .then((snapshots) => useDiffStore.getState().setSnapshots(payload.threadId, snapshots))
-              .catch(() => { /* non-critical */ });
-          }
+      try {
+        const transport = getTransport();
+        if (hasSnapshots) {
+          transport
+            .listSnapshots(payload.threadId)
+            .then((snapshots) =>
+              useDiffStore.getState().setSnapshots(payload.threadId, snapshots),
+            )
+            .catch(() => { /* non-critical */ });
+        }
 
-          if (hasCommits) {
-            import("@/stores/workspaceStore").then(({ useWorkspaceStore }) => {
-              const thread = useWorkspaceStore.getState().threads.find((t) => t.id === payload.threadId);
-              if (!thread) return;
-              getTransport()
-                .getGitLog(thread.workspace_id, thread.branch, 100)
-                .then((commits) => {
-                  // Re-read current state at write time to avoid stale-closure races
-                  const current = useDiffStore.getState().commitsByThread[payload.threadId];
-                  if (current && commits.length === current.length && commits.every((c, i) => c.sha === current[i].sha)) return;
-                  useDiffStore.getState().setCommits(payload.threadId, commits);
-                })
-                .catch(() => { /* non-critical */ });
-            });
-          }
-        });
-      });
+        if (hasCommits) {
+          const thread = useWorkspaceStore
+            .getState()
+            .threads.find((t) => t.id === payload.threadId);
+          if (!thread) return;
+          transport
+            .getGitLog(thread.workspace_id, thread.branch, 100)
+            .then((commits) => {
+              const current = useDiffStore.getState().commitsByThread[payload.threadId];
+              if (
+                current &&
+                commits.length === current.length &&
+                commits.every((c, i) => c.sha === current[i].sha)
+              ) {
+                return;
+              }
+              useDiffStore.getState().setCommits(payload.threadId, commits);
+            })
+            .catch(() => { /* non-critical */ });
+        }
+      } catch {
+        // Transport not initialized — ignore (startup race / tests).
+      }
     }),
   );
 
@@ -248,16 +247,14 @@ export function startPushListeners(): void {
   unsubs.push(
     pushEmitter.on("branch.changed", (data) => {
       const { workspaceId, branch } = data as { workspaceId: string; branch: string | null };
-      import("@/stores/workspaceStore").then(({ useWorkspaceStore }) => {
-        const state = useWorkspaceStore.getState();
-        // Only refresh if this event is for the active workspace
-        if (state.activeWorkspaceId === workspaceId) {
-          state.loadBranches(workspaceId);
-          if (!state.branchManuallySelected && branch) {
-            state.setNewThreadBranch(branch);
-          }
+      const state = useWorkspaceStore.getState();
+      // Only refresh if this event is for the active workspace
+      if (state.activeWorkspaceId === workspaceId) {
+        state.loadBranches(workspaceId);
+        if (!state.branchManuallySelected && branch) {
+          state.setNewThreadBranch(branch);
         }
-      });
+      }
     }),
   );
 
@@ -265,13 +262,11 @@ export function startPushListeners(): void {
   unsubs.push(
     pushEmitter.on("workspace.gitStatusChanged", (data) => {
       const { workspaceId, isGitRepo } = data as { workspaceId: string; isGitRepo: boolean };
-      import("@/stores/workspaceStore").then(({ useWorkspaceStore }) => {
-        useWorkspaceStore.setState((state) => ({
-          workspaces: state.workspaces.map((w) =>
-            w.id === workspaceId ? { ...w, is_git_repo: isGitRepo } : w,
-          ),
-        }));
-      });
+      useWorkspaceStore.setState((state) => ({
+        workspaces: state.workspaces.map((w) =>
+          w.id === workspaceId ? { ...w, is_git_repo: isGitRepo } : w,
+        ),
+      }));
     }),
   );
 

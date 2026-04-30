@@ -22,9 +22,9 @@ const SettingsSchema = globalThis.__v8Snapshot?.contracts?.SettingsSchema ?? Bun
 
 /**
  * Resolve the server entry point and working directory based on whether the
- * app is packaged or running from source. In packaged mode, the server is a
- * single CJS bundle at `dist/server/server.cjs`; in dev mode it uses the
- * tsx bootstrap at `src/entry.mjs`.
+ * app is packaged or running from source. Packaged and dev both run the same
+ * bundled CJS entry (`dist/server/server.cjs`); dev builds it via
+ * `apps/desktop/scripts/dev-electron.mjs` (tsc → esbuild watch).
  *
  * Also returns the native binding path for better-sqlite3 when packaged so
  * the server child process can find it outside the asar archive.
@@ -47,8 +47,9 @@ function getServerPaths(): {
     return { entry: serverBundle, cwd: dirname(serverBundle), nativeBindingPath };
   }
 
-  const serverDir = resolve(__dirname, "../../../server");
-  return { entry: resolve(serverDir, "src/index.ts"), cwd: serverDir };
+  /** Matches both `src/main/` (Vitest) and bundled `dist/main/` (`__dirname`). */
+  const serverBundle = resolve(__dirname, "..", "..", "dist", "server", "server.cjs");
+  return { entry: serverBundle, cwd: dirname(serverBundle) };
 }
 
 /**
@@ -334,12 +335,8 @@ export class ServerManager {
       }
 
       // V8 flags go in the args array for child_process.spawn.
-      // Module loader flags (--import tsx) are supported here, unlike utilityProcess.
       const v8Flags = [`--max-old-space-size=${heapMb}`, "--max-semi-space-size=2", "--expose-gc"];
-      const entryArgs = entry.endsWith(".cjs")
-        ? [entry]
-        : ["--import", "tsx", entry];
-      const args = [...v8Flags, ...entryArgs];
+      const args = [...v8Flags, entry];
 
       // In production, route stderr to a log file so crashes are diagnosable.
       // Dev mode inherits stdio for immediate console visibility.

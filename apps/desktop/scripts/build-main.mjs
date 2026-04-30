@@ -89,7 +89,7 @@ await build({
   ...shared,
   entryPoints: [resolve(serverRoot, "dist-tsc/index.js")],
   outfile: "dist/server/server.cjs",
-  external: ["better-sqlite3", "node-pty", "electron"],
+  external: ["better-sqlite3", "node-pty", "electron", "koffi"],
   banner: {
     js: 'var __importMetaUrl = require("url").pathToFileURL(__filename).href;',
   },

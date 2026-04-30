@@ -1,13 +1,12 @@
 /**
- * Bootstrap entry for Electron utilityProcess.
+ * @deprecated Legacy bootstrap for running the server as raw TypeScript under
+ * Electron `utilityProcess`. The supported paths are:
+ * - Standalone: `bun src/index.ts` (see `apps/server/package.json` `start`)
+ * - Desktop: bundled `apps/desktop/dist/server/server.cjs` (see `server-manager.ts`)
  *
- * utilityProcess.fork() does not process execArgv as Node.js CLI flags
- * and Electron strips NODE_OPTIONS in utility processes, so --import tsx
- * cannot be used. Instead, we use tsx's programmatic ESM API to register
- * the TypeScript loader, then dynamically import the server entry point.
+ * This module is retained so accidental imports fail with a clear message
+ * instead of a missing `tsx` dependency.
  */
-import { register } from "tsx/esm/api";
-
-register();
-
-await import("./index.ts");
+throw new Error(
+  "apps/server/src/entry.mjs is deprecated. Use `bun src/index.ts` or spawn apps/desktop/dist/server/server.cjs under Electron (ELECTRON_RUN_AS_NODE=1).",
+);

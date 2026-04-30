@@ -1,6 +1,7 @@
-import { useMemo } from "react";
+import { useMemo, lazy, Suspense } from "react";
 import { reconstructNewContent, type ParsedDiffLine } from "@/lib/diff-parser";
-import { MarkdownContent } from "@/components/chat/MarkdownContent";
+
+const PreviewMarkdown = lazy(() => import("@/components/chat/MarkdownContent"));
 
 /** Props for {@link DiffPreview}. */
 interface DiffPreviewProps {
@@ -18,7 +19,9 @@ export function DiffPreview({ lines }: DiffPreviewProps) {
 
   return (
     <div className="p-4 text-sm leading-relaxed text-foreground/80">
-      <MarkdownContent content={markdown} />
+      <Suspense fallback={<span className="text-muted-foreground text-sm">Loading preview…</span>}>
+        <PreviewMarkdown content={markdown} />
+      </Suspense>
     </div>
   );
 }

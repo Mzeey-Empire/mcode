@@ -2,10 +2,13 @@
  * Dev orchestration script for the Electron desktop app.
  *
  * 1. Starts the web (renderer) dev server and esbuild in parallel.
- * 2. Detects the actual Vite dev server URL (auto-increments port if taken).
- * 3. Spawns Electron with ELECTRON_RENDERER_URL pointing at the dev server.
- * 4. Restarts Electron when dist/main/main.cjs changes (debounced 300ms).
- * 5. Cleans up all child processes on SIGINT/SIGTERM.
+ * 2. Compiles the backend server (`tsc` → `esbuild`, same pipeline as packaged
+ *    builds) so the desktop child runs `server.cjs` without `--import tsx`.
+ * 3. Detects the actual Vite dev server URL (auto-increments port if taken).
+ * 4. Spawns Electron with ELECTRON_RENDERER_URL pointing at the dev server.
+ * 5. Restarts Electron when dist/main/main.cjs or dist/server/server.cjs
+ *    changes (debounced 300ms).
+ * 6. Cleans up all child processes on SIGINT/SIGTERM.
  */
 
 import { context } from "esbuild";
@@ -14,10 +17,20 @@ import { watch } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
+import {
+  rebuildServerDevBundle,
+  resolveServerTscBin,
+} from "../../../scripts/build-server-dev-bundle.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, "..");
 const webRoot = resolve(projectRoot, "..", "web");
+const serverRoot = resolve(projectRoot, "..", "server");
+
+/** Paths to Electron main/preload bundles and server bundle (restart triggers). */
+const mainOutFile = resolve(projectRoot, "dist/main/main.cjs");
+const preloadOutFile = resolve(projectRoot, "dist/preload/preload.cjs");
+const serverOutFile = resolve(projectRoot, "dist/server/server.cjs");
 
 /** Shared esbuild options. */
 const shared = {
@@ -28,12 +41,30 @@ const shared = {
   format: "cjs",
 };
 
+/**
+ * Spawn `tsc --watch` so server source edits re-emit apps/server/dist-tsc.
+ *
+ * @returns Detached subprocess handle (caller must `.kill()` on shutdown).
+ */
+function startServerTscWatch() {  const tscBin = resolveServerTscBin(serverRoot);
+  return spawn(process.execPath, [
+    tscBin,
+    "--project",
+    resolve(serverRoot, "tsconfig.build.json"),
+    "--watch",
+    "--preserveWatchOutput",
+  ], {
+    cwd: serverRoot,
+    stdio: "inherit",
+  });
+}
+
 /** esbuild entry point configs. */
 const entries = [
   {
     ...shared,
     entryPoints: [resolve(projectRoot, "src/main/main.ts")],
-    outfile: resolve(projectRoot, "dist/main/main.cjs"),
+    outfile: mainOutFile,
     external: ["electron"],
   },
   {
@@ -43,6 +74,23 @@ const entries = [
     external: ["electron"],
   },
 ];
+
+console.log("[dev] Building bundled server entry (apps/desktop/dist/server/server.cjs)...");
+await rebuildServerDevBundle();
+
+const serverEsbuildCfg = {
+  ...shared,
+  entryPoints: [resolve(serverRoot, "dist-tsc/index.js")],
+  outfile: serverOutFile,
+  external: ["better-sqlite3", "node-pty", "electron", "koffi"],
+  banner: {
+    js: 'var __importMetaUrl = require("url").pathToFileURL(__filename).href;',
+  },
+  define: {
+    "import.meta.url": "__importMetaUrl",
+    // Do not bake NODE_ENV — the server child inherits Electron's runtime env.
+  },
+};
 
 // -------------------------------------------------------------------------
 // Step 1: Start web dev server + esbuild in parallel
@@ -100,11 +148,11 @@ function startViteDevServer() {
   });
 }
 
-// Run Vite startup and esbuild initial build in parallel
+// Run Vite startup and esbuild (main/preload/server) watch in parallel
 const [devServerUrl, watchContexts] = await Promise.all([
   startViteDevServer(),
   Promise.all(
-    entries.map(async (cfg) => {
+    [...entries, serverEsbuildCfg].map(async (cfg) => {
       const ctx = await context(cfg);
       await ctx.rebuild();
       await ctx.watch();
@@ -112,6 +160,9 @@ const [devServerUrl, watchContexts] = await Promise.all([
     }),
   ),
 ]);
+
+/** `tsc --watch` subprocess for apps/server → dist-tsc (killed on cleanup). */
+let serverTscWatch = startServerTscWatch();
 
 if (!devServerUrl) {
   console.error("[dev] Vite dev server failed to start");
@@ -177,19 +228,27 @@ function spawnElectron() {
 spawnElectron();
 
 // -------------------------------------------------------------------------
-// Step 3: Restart Electron on main process rebuild (debounced)
+// Step 3: Restart Electron on main/server bundle rebuild (debounced)
 // -------------------------------------------------------------------------
 
-const mainOutFile = resolve(projectRoot, "dist/main/main.cjs");
 let debounceTimer = null;
 
-watch(mainOutFile, () => {
+/**
+ * Debounce Electron restart so rapid esbuild increments coalesce.
+ *
+ * @param {string} reason Log line fragment after `[dev]`.
+ */
+function scheduleElectronRestart(reason) {
   if (debounceTimer) clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => {
-    console.log("[dev] main.cjs changed, restarting Electron...");
+    console.log(`[dev] ${reason}, restarting Electron...`);
     spawnElectron();
   }, 300);
-});
+}
+
+watch(mainOutFile, () => scheduleElectronRestart("main bundle updated"));
+watch(preloadOutFile, () => scheduleElectronRestart("preload bundle updated"));
+watch(serverOutFile, () => scheduleElectronRestart("server bundle updated"));
 
 // -------------------------------------------------------------------------
 // Step 4: Cleanup on exit signals
@@ -198,6 +257,11 @@ watch(mainOutFile, () => {
 /** Stop all child processes and esbuild watchers. */
 function cleanup() {
   if (debounceTimer) clearTimeout(debounceTimer);
+
+  if (serverTscWatch) {
+    serverTscWatch.kill();
+    serverTscWatch = null;
+  }
 
   for (const ctx of watchContexts) {
     ctx.dispose().catch(() => {});
