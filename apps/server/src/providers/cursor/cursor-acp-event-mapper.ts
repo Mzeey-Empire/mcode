@@ -11,6 +11,7 @@ import {
   reconcileCursorTodos,
   type CursorTodoSnapshot,
 } from "./cursor-todo-snapshot.js";
+import { normalizeMcodeCursorToolInput } from "./cursor-tool-input-normalize.js";
 import type { CursorStreamAccumulator } from "./cursor-stream-event-mapper.js";
 
 const TOOL_NAME_BY_DISCRIMINATOR: Record<string, string> = {
@@ -24,6 +25,8 @@ const TOOL_NAME_BY_DISCRIMINATOR: Record<string, string> = {
   deleteToolCall: "Delete",
   webSearchToolCall: "WebSearch",
   fetchToolCall: "WebFetch",
+  searchReplaceToolCall: "Edit",
+  strReplaceToolCall: "Edit",
 };
 
 /**
@@ -125,6 +128,18 @@ function extractArgs(payload: Record<string, unknown> | undefined): Record<strin
   return undefined;
 }
 
+/**
+ * Resolves tool-call argument fields: prefer nested `args`, else flatten the payload
+ * minus `result` so ACP shapes that inline fields still reach the UI extractors.
+ */
+function coercePayloadArgs(payload: Record<string, unknown> | undefined): Record<string, unknown> {
+  if (!payload) return {};
+  const nested = extractArgs(payload);
+  if (nested && Object.keys(nested).length > 0) return { ...nested };
+  const { result: _omitResult, ...rest } = payload;
+  return { ...rest };
+}
+
 function extractResult(payload: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
   if (!payload) return undefined;
   const v = payload.result;
@@ -172,11 +187,17 @@ function mapAcpToolCallStarted(
   todoSnapshot: CursorTodoSnapshot | undefined,
 ): AgentEvent[] {
   const raw = coerceRawToolEnvelope(update.rawInput);
+  const payloadRecord =
+    raw.payload ??
+    (typeof update.rawInput === "object" && update.rawInput !== null && !Array.isArray(update.rawInput)
+      ? (update.rawInput as Record<string, unknown>)
+      : undefined);
+  const args = coercePayloadArgs(payloadRecord);
+
   if (raw.discriminator === "updateTodosToolCall") {
-    const args = extractArgs(raw.payload);
     const entries = extractCursorTodoEntries(args);
     if (!entries || entries.length === 0) return [];
-    const merge = args?.merge === true;
+    const merge = args.merge === true;
     const incoming = entries.map((entry, index) => normalizeCursorTodoEntry(entry, index));
     const todos = reconcileCursorTodos(incoming, merge, todoSnapshot);
     acc.toolStartTimes.set(update.toolCallId, Date.now());
@@ -194,7 +215,16 @@ function mapAcpToolCallStarted(
   const toolName = raw.discriminator
     ? (TOOL_NAME_BY_DISCRIMINATOR[raw.discriminator] ?? raw.discriminator)
     : update.title || "Tool";
-  const args = extractArgs(raw.payload);
+  let toolInput: Record<string, unknown> =
+    args && Object.keys(args).length > 0
+      ? args
+      : (typeof update.rawInput === "object" && update.rawInput !== null && !Array.isArray(update.rawInput))
+        ? coercePayloadArgs(update.rawInput as Record<string, unknown>)
+        : {};
+
+  if (toolName === "Edit" || toolName === "Write") {
+    toolInput = normalizeMcodeCursorToolInput(toolName, toolInput);
+  }
   acc.toolStartTimes.set(update.toolCallId, Date.now());
   return [
     {
@@ -202,7 +232,7 @@ function mapAcpToolCallStarted(
       threadId,
       toolCallId: update.toolCallId,
       toolName,
-      toolInput: args ?? (update.rawInput as Record<string, unknown>) ?? {},
+      toolInput,
     },
   ];
 }
@@ -247,12 +277,16 @@ function mapAcpToolCallUpdated(
     const toolName =
       discriminator != null ? (TOOL_NAME_BY_DISCRIMINATOR[discriminator] ?? discriminator) : update.title ?? "Tool";
     if (discriminator !== "updateTodosToolCall") {
+      let orphanInput = coercePayloadArgs(payload ?? undefined);
+      if (toolName === "Edit" || toolName === "Write") {
+        orphanInput = normalizeMcodeCursorToolInput(toolName, orphanInput);
+      }
       events.push({
         type: AgentEventType.ToolUse,
         threadId,
         toolCallId: update.toolCallId,
         toolName,
-        toolInput: extractArgs(payload) ?? {},
+        toolInput: orphanInput,
       });
     }
   }

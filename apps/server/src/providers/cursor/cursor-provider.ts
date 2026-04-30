@@ -43,7 +43,11 @@ import type {
   ReasoningLevel,
   Settings,
 } from "@mcode/contracts";
-import { createCursorTodoSnapshot, type CursorTodoSnapshot } from "./cursor-todo-snapshot.js";
+import {
+  createCursorTodoSnapshot,
+  cursorUpdateTodosExtNotificationToAgentEvents,
+  type CursorTodoSnapshot,
+} from "./cursor-todo-snapshot.js";
 import { fetchCursorCliModels } from "./cursor-cli-models.js";
 import { buildCursorAcpArgs } from "./cursor-acp-spawn-args.js";
 import { buildCursorAcpPromptBlocks } from "./cursor-acp-prompt.js";
@@ -398,6 +402,22 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
         return {};
       },
       extNotification: async (method, params) => {
+        if (
+          method === "cursor/update_todos" &&
+          params !== null &&
+          typeof params === "object" &&
+          !Array.isArray(params)
+        ) {
+          const events = cursorUpdateTodosExtNotificationToAgentEvents(
+            entry.threadId,
+            params as Record<string, unknown>,
+            entry.todoSnapshot,
+          );
+          for (const ev of events) {
+            this.emit("event", ev);
+          }
+          return;
+        }
         void method;
         void params;
       },

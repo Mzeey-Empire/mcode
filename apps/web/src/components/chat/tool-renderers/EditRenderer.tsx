@@ -7,9 +7,11 @@ import { basename } from "@/lib/path";
 
 /** Renders an inline diff for file edit tool calls. */
 export const EditRenderer = memo(function EditRenderer({ toolCall, isActive }: ToolRendererProps) {
-  const filePath = String(toolCall.toolInput.file_path ?? "");
-  const oldStr = String(toolCall.toolInput.old_string ?? "");
-  const newStr = String(toolCall.toolInput.new_string ?? "");
+  const filePath = String(
+    toolCall.toolInput.file_path ?? toolCall.toolInput.path ?? toolCall.toolInput.filePath ?? "",
+  );
+  const oldStr = String(toolCall.toolInput.old_string ?? toolCall.toolInput.oldString ?? "");
+  const newStr = String(toolCall.toolInput.new_string ?? toolCall.toolInput.newString ?? "");
   const lines = useMemo(() => buildSimpleDiff(oldStr, newStr), [oldStr, newStr]);
 
   return (

@@ -15,6 +15,7 @@ import {
   normalizeCursorTodoEntry,
   isCursorUpdateTodosTool,
   buildTodoWriteEvents,
+  cursorUpdateTodosExtNotificationToAgentEvents,
 } from "../cursor-todo-snapshot.js";
 import type { NormalizedCursorTodo } from "../cursor-todo-snapshot.js";
 import { AgentEventType } from "@mcode/contracts";
@@ -186,5 +187,41 @@ describe("buildTodoWriteEvents", () => {
     const events = buildTodoWriteEvents([{ id: "1", content: "x", status: "pending" }], "t");
     if (events[0].type !== AgentEventType.ToolUse) throw new Error("unreachable");
     expect(events[0].toolCallId.startsWith("cursor-todos-")).toBe(true);
+  });
+});
+
+describe("cursorUpdateTodosExtNotificationToAgentEvents", () => {
+  it("emits TodoWrite + ToolResult and applies merge semantics to snapshot", () => {
+    const snap = createCursorTodoSnapshot();
+    snap.todos.set("a", { id: "a", content: "old", status: "pending" });
+    const events = cursorUpdateTodosExtNotificationToAgentEvents(
+      "t1",
+      {
+        toolCallId: "todo-ext-1",
+        merge: true,
+        todos: [{ id: "a", content: "new", status: "completed" }],
+      },
+      snap,
+    );
+    expect(events).toHaveLength(2);
+    const use = events[0];
+    expect(use?.type).toBe(AgentEventType.ToolUse);
+    if (!use || use.type !== AgentEventType.ToolUse) throw new Error("unreachable");
+    expect(use.toolName).toBe("TodoWrite");
+    expect(use.toolCallId).toBe("todo-ext-1");
+    expect(use.toolInput).toMatchObject({
+      todos: [{ id: "a", content: "new", status: "completed" }],
+    });
+    expect(events[1]?.type).toBe(AgentEventType.ToolResult);
+  });
+
+  it("returns empty array when todos missing", () => {
+    expect(
+      cursorUpdateTodosExtNotificationToAgentEvents(
+        "t",
+        { toolCallId: "x", merge: false, todos: [] },
+        createCursorTodoSnapshot(),
+      ).length,
+    ).toBe(0);
   });
 });

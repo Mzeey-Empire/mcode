@@ -21,6 +21,7 @@ import {
   normalizeCursorTodoEntry,
   reconcileCursorTodos,
 } from "./cursor-todo-snapshot.js";
+import { normalizeMcodeCursorToolInput } from "./cursor-tool-input-normalize.js";
 import type { CursorTodoSnapshot } from "./cursor-todo-snapshot.js";
 import type {
   CursorStreamAssistant,
@@ -74,6 +75,8 @@ const TOOL_NAME_BY_DISCRIMINATOR: Record<string, string> = {
   deleteToolCall: "Delete",
   webSearchToolCall: "WebSearch",
   fetchToolCall: "WebFetch",
+  searchReplaceToolCall: "Edit",
+  strReplaceToolCall: "Edit",
 };
 
 /**
@@ -228,13 +231,18 @@ function mapToolCallStarted(
 
   const toolName = TOOL_NAME_BY_DISCRIMINATOR[discriminator] ?? discriminator;
   acc.toolStartTimes.set(callId, Date.now());
+  const toolInput =
+    toolName === "Edit" || toolName === "Write"
+      ? normalizeMcodeCursorToolInput(toolName, args ?? {})
+      : args ?? {};
+
   return [
     {
       type: AgentEventType.ToolUse,
       threadId,
       toolCallId: callId,
       toolName,
-      toolInput: args ?? {},
+      toolInput,
     },
   ];
 }
@@ -282,12 +290,17 @@ function mapToolCallCompleted(
   if (!acc.toolStartTimes.has(callId)) {
     if (discriminator !== "updateTodosToolCall") {
       const toolName = TOOL_NAME_BY_DISCRIMINATOR[discriminator] ?? discriminator;
+      const orphanArgs = extractArgs(payload) ?? {};
+      const toolInput =
+        toolName === "Edit" || toolName === "Write"
+          ? normalizeMcodeCursorToolInput(toolName, orphanArgs)
+          : orphanArgs;
       events.push({
         type: AgentEventType.ToolUse,
         threadId,
         toolCallId: callId,
         toolName,
-        toolInput: extractArgs(payload) ?? {},
+        toolInput,
       });
     }
   }
