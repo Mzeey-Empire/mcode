@@ -9,6 +9,7 @@ import {
   extractCursorTodoEntries,
   normalizeCursorTodoEntry,
   reconcileCursorTodos,
+  buildTodoWriteEvents,
   type CursorTodoSnapshot,
 } from "./cursor-todo-snapshot.js";
 import { normalizeMcodeCursorToolInput } from "./cursor-tool-input-normalize.js";
@@ -68,8 +69,9 @@ export function mapCursorAcpSessionNotification(
     case "agent_message_chunk":
     case "agent_thought_chunk":
       return mapAgentLanguageChunk(threadId, acc, update);
-    case "user_message_chunk":
     case "plan":
+      return mapAcpPlanUpdate(update, threadId, todoSnapshot);
+    case "user_message_chunk":
     case "available_commands_update":
     case "current_mode_update":
     case "config_option_update":
@@ -301,4 +303,45 @@ function mapAcpToolCallUpdated(
     isError,
   });
   return events;
+}
+
+/**
+ * Maps an ACP `plan` session update to TodoWrite events.
+ *
+ * Cursor sends task progress both through `cursor/update_todos` (ext notification)
+ * and through `session/update` with `sessionUpdate: "plan"`. Both paths must emit
+ * TodoWrite events so the task panel stays in sync regardless of which channel fires.
+ */
+function mapAcpPlanUpdate(
+  update: { entries: Array<{ content: string; status: string; priority?: string }> },
+  threadId: string,
+  todoSnapshot: CursorTodoSnapshot | undefined,
+): AgentEvent[] {
+  if (!update.entries || update.entries.length === 0) return [];
+
+  const incoming = update.entries.map((entry, i) => ({
+    id: String(i),
+    content: entry.content?.trim() || `Step ${i + 1}`,
+    status: normalizePlanStatus(entry.status),
+    priority: entry.priority,
+  }));
+
+  // Plan updates are full replacements per ACP spec, so merge=false
+  const todos = reconcileCursorTodos(incoming, false, todoSnapshot);
+  return buildTodoWriteEvents(todos, threadId);
+}
+
+/** Normalize ACP PlanEntryStatus to our TaskStatus. */
+function normalizePlanStatus(
+  status: string,
+): "pending" | "in_progress" | "completed" | "cancelled" {
+  switch (status) {
+    case "completed":
+      return "completed";
+    case "in_progress":
+    case "inProgress":
+      return "in_progress";
+    default:
+      return "pending";
+  }
 }

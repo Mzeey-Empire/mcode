@@ -95,4 +95,52 @@ describe("mapCursorAcpSessionNotification", () => {
       true,
     );
   });
+
+  it("maps plan session update to TodoWrite events", () => {
+    const state = createCursorAcpTurnState();
+    const events = mapCursorAcpSessionNotification(
+      {
+        sessionId: "s",
+        update: {
+          sessionUpdate: "plan",
+          entries: [
+            { content: "Read the file", status: "completed", priority: "high" },
+            { content: "Edit the function", status: "in_progress", priority: "medium" },
+            { content: "Run tests", status: "pending", priority: "low" },
+          ],
+        },
+      } as any,
+      threadId,
+      state,
+    );
+    expect(events.length).toBe(2);
+    expect(events[0]).toMatchObject({
+      type: AgentEventType.ToolUse,
+      threadId,
+      toolName: "TodoWrite",
+    });
+    const todos = (events[0] as any).toolInput.todos;
+    expect(todos).toHaveLength(3);
+    expect(todos[0]).toMatchObject({ content: "Read the file", status: "completed" });
+    expect(todos[1]).toMatchObject({ content: "Edit the function", status: "in_progress" });
+    expect(todos[2]).toMatchObject({ content: "Run tests", status: "pending" });
+    expect(events[1]).toMatchObject({
+      type: AgentEventType.ToolResult,
+      threadId,
+      isError: false,
+    });
+  });
+
+  it("returns empty for plan with no entries", () => {
+    const state = createCursorAcpTurnState();
+    const events = mapCursorAcpSessionNotification(
+      {
+        sessionId: "s",
+        update: { sessionUpdate: "plan", entries: [] },
+      } as any,
+      threadId,
+      state,
+    );
+    expect(events).toEqual([]);
+  });
 });
