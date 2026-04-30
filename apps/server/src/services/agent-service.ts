@@ -577,6 +577,8 @@ export class AgentService {
       );
     }
 
+    this.threadRepo.updateModel(thread.id, model);
+
     void this.sendMessage(
       thread.id,
       content,
