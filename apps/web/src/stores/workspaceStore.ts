@@ -23,6 +23,26 @@ const SYNC_THROTTLE_MS = 30_000;
 const lastSyncTime = new Map<string, number>();
 
 /**
+ * Bumped immediately before applying local additions/removals that must win over
+ * in-flight {@link WorkspaceState.loadThreads} responses. Without this, a slow
+ * `thread.list` that started before branching (for example) can finish after the
+ * new thread was merged and overwrite the sidebar with an older snapshot.
+ */
+const threadListMutationEpochByWorkspace = new Map<string, number>();
+
+function bumpThreadListMutationEpoch(workspaceId: string): void {
+  threadListMutationEpochByWorkspace.set(
+    workspaceId,
+    (threadListMutationEpochByWorkspace.get(workspaceId) ?? 0) + 1,
+  );
+}
+
+/** Clears mutation-epoch bookkeeping. Used by Vitest only. */
+export function __resetThreadListMutationEpochForTests(): void {
+  threadListMutationEpochByWorkspace.clear();
+}
+
+/**
  * Optional RPC dispatch callback used by workspace actions. Tests inject a
  * stub here; production code uses {@link getTransport} directly. The shape
  * mirrors the transport's `call` method so handlers can be swapped freely.
@@ -361,9 +381,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   loadThreads: async (workspaceId) => {
+    const epochAtStart = threadListMutationEpochByWorkspace.get(workspaceId) ?? 0;
     set({ loading: true, error: null });
     try {
       const newThreads = await getTransport().listThreads(workspaceId);
+      if ((threadListMutationEpochByWorkspace.get(workspaceId) ?? 0) !== epochAtStart) {
+        set({ loading: false });
+        return;
+      }
       // Replace threads for this workspace; keep threads from other workspaces intact.
       set((state) => ({
         threads: [
@@ -372,6 +397,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         ],
         loading: false,
       }));
+
+      const epochForPrSync = epochAtStart;
 
       // Background PR sync: scanned for new PRs and refreshed stale PR states (throttled)
       const now = Date.now();
@@ -382,6 +409,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           if (results.length === 0) return;
           // Discard results if the workspace changed while the request was in flight
           if (get().activeWorkspaceId !== workspaceId) return;
+          if ((threadListMutationEpochByWorkspace.get(workspaceId) ?? 0) !== epochForPrSync) {
+            return;
+          }
           const resultMap = new Map(results.map((r) => [r.threadId, r]));
           set((state) => ({
             threads: state.threads.map((t) => {
@@ -410,6 +440,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         mode,
         branch,
       );
+      bumpThreadListMutationEpoch(activeWorkspaceId);
       set((state) => ({ threads: [thread, ...state.threads] }));
       return thread;
     } catch (e) {
@@ -443,6 +474,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const thread = await getTransport().createAndSendMessage(
         workspaceId, content, model, permissionMode, mode, branch, existingWorktreePath, attachments, reasoningLevel, provider, interactionMode, undefined, undefined, copilotAgent, contextWindow, thinking,
       );
+      bumpThreadListMutationEpoch(workspaceId);
       set((state) => ({
         threads: [thread, ...state.threads],
         activeThreadId: thread.id,
@@ -506,6 +538,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         params.thinking,
       );
 
+      bumpThreadListMutationEpoch(workspaceId);
       set((state) => ({
         threads: [thread, ...state.threads],
         activeThreadId: thread.id,
@@ -531,7 +564,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   deleteThread: async (threadId, cleanupWorktree) => {
     set({ error: null });
     try {
+      const workspaceIdForEpoch = get().threads.find((t) => t.id === threadId)?.workspace_id;
       await getTransport().deleteThread(threadId, cleanupWorktree);
+      if (workspaceIdForEpoch) {
+        bumpThreadListMutationEpoch(workspaceIdForEpoch);
+      }
       useTerminalStore.getState().clearThread(threadId);
       useQueueStore.getState().clearQueue(threadId);
       useComposerDraftStore.getState().clearDraft(threadId);

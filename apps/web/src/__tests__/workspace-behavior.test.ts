@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { useWorkspaceStore, __resetThreadListMutationEpochForTests } from "@/stores/workspaceStore";
 import { useThreadStore } from "@/stores/threadStore";
 import {
   mockTransport,
@@ -14,6 +14,7 @@ vi.mock("@/transport", async () => ({
 
 describe("Workspace Behavior", () => {
   beforeEach(() => {
+    __resetThreadListMutationEpochForTests();
     useWorkspaceStore.setState({
       workspaces: [],
       activeWorkspaceId: null,
@@ -111,6 +112,54 @@ describe("Workspace Behavior", () => {
     // Both workspaces' threads should be present (merged, not replaced)
     expect(state.threads).toHaveLength(2);
     expect(state.threads.map((t) => t.title).sort()).toEqual(["Thread A", "Thread B"]);
+  });
+
+  it("when branchThread completes while loadThreads is in flight, stale listThreads does not drop the new branch", async () => {
+    const ws = createMockWorkspace({ id: "ws-branch" });
+    const parent = createMockThread({
+      id: "parent-1",
+      workspace_id: ws.id,
+      title: "Parent",
+    });
+    let listResolve!: (value: typeof parent[]) => void;
+    const listPromise = new Promise<typeof parent[]>((resolve) => {
+      listResolve = resolve;
+    });
+
+    useWorkspaceStore.setState({
+      workspaces: [ws],
+      activeWorkspaceId: ws.id,
+      threads: [parent],
+    });
+
+    (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockImplementation(() => listPromise);
+
+    void useWorkspaceStore.getState().loadThreads(ws.id);
+
+    const child = createMockThread({
+      id: "child-1",
+      workspace_id: ws.id,
+      title: "Branched",
+      parent_thread_id: "parent-1",
+    });
+    (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockResolvedValue(child);
+
+    await useWorkspaceStore.getState().branchThread({
+      sourceThreadId: "parent-1",
+      content: "Continue",
+      model: "gpt-4",
+      mode: "direct",
+      forkedFromMessageId: "msg-1",
+    });
+
+    expect(useWorkspaceStore.getState().threads.some((t) => t.id === "child-1")).toBe(true);
+
+    listResolve([parent]);
+
+    await listPromise;
+    await Promise.resolve();
+
+    expect(useWorkspaceStore.getState().threads.some((t) => t.id === "child-1")).toBe(true);
   });
 
   it("when the user creates a thread, it appears in the list", async () => {
