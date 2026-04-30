@@ -1,14 +1,23 @@
 import { create } from "zustand";
 
 /** Status of an individual task item. */
-export type TaskStatus = "pending" | "in_progress" | "completed";
+export type TaskStatus = "pending" | "in_progress" | "completed" | "cancelled";
 
 /** Valid task status values for runtime validation. */
-const VALID_TASK_STATUSES = new Set<string>(["pending", "in_progress", "completed"]);
+const VALID_TASK_STATUSES = new Set<string>([
+  "pending",
+  "in_progress",
+  "completed",
+  "cancelled",
+]);
 
-/** Coerce an unknown status string to a valid TaskStatus, defaulting to "pending". */
+/**
+ * Coerce an unknown status string to a valid TaskStatus, defaulting to "pending".
+ * Accepts the American "canceled" spelling and normalizes it to "cancelled".
+ */
 export function coerceTaskStatus(raw: unknown): TaskStatus {
   const s = String(raw ?? "");
+  if (s === "canceled") return "cancelled";
   return VALID_TASK_STATUSES.has(s) ? (s as TaskStatus) : "pending";
 }
 

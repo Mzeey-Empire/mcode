@@ -367,6 +367,24 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     }
 
     if (method.startsWith("cursor/")) {
+      // `cursor/update_todos` is the actual delivery channel for Cursor's
+      // TodoWrite payloads — the inline `tool_call` for `updateTodos` only
+      // carries `{ _toolName: "updateTodos" }`. Route the payload to the
+      // owning session so it can reconcile (`merge: true`) and emit
+      // TodoWrite events.
+      if (method === "cursor/update_todos") {
+        const entry = this.sessions.get(sessionId);
+        if (entry) {
+          entry.lastUsedAt = Date.now();
+          entry.session.processUpdateTodosExtensionRpc(req.params);
+        } else {
+          logger.warn("Cursor ACP cursor/update_todos for unknown session", {
+            sessionId,
+            threadId,
+          });
+        }
+        return { outcome: { outcome: "skipped", reason: "mcode:handled" } };
+      }
       logger.info("Cursor ACP extension RPC skipped by host", { method });
       return { outcome: { outcome: "skipped", reason: `mcode:unsupported:${method}` } };
     }

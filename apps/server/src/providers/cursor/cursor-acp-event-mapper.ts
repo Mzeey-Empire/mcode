@@ -81,10 +81,225 @@ function stringifyRawOutput(rawOutput: unknown): string {
 }
 
 /** Coerce ACP plan entry status to TodoWrite-compatible status. */
-function coercePlanStatus(s: unknown): "pending" | "in_progress" | "completed" {
+function coercePlanStatus(
+  s: unknown,
+): "pending" | "in_progress" | "completed" | "cancelled" {
   if (s === "in_progress") return "in_progress";
   if (s === "completed") return "completed";
+  if (s === "cancelled" || s === "canceled") return "cancelled";
   return "pending";
+}
+
+/** Keys we have observed cursor-agent using to ship the todo collection. */
+const TODO_COLLECTION_KEYS = ["todos", "items", "entries", "list", "tasks"] as const;
+
+/** Wrapper keys cursor-agent occasionally nests the real arguments under. */
+const TODO_NESTED_WRAPPERS = ["_params", "params", "args", "input", "arguments"] as const;
+
+/**
+ * Extracts a todo-collection array from a cursor `tool_call.rawInput` payload.
+ *
+ * Cursor sends the `updateTodos` tool as `rawInput: { _toolName: "updateTodos",
+ * ... }`, but the actual entries can land under several keys (`todos`,
+ * `items`, ...) and may be nested one level deep under `_params` / `args`.
+ * We probe both layers and return the first array found whose entries are
+ * objects (so we don't mis-pick a keyword list).
+ */
+function extractCursorTodoEntries(
+  rawInput: Record<string, unknown> | undefined,
+): Array<Record<string, unknown>> | null {
+  if (!rawInput) return null;
+
+  const probe = (obj: Record<string, unknown>): Array<Record<string, unknown>> | null => {
+    for (const key of TODO_COLLECTION_KEYS) {
+      const v = obj[key];
+      if (
+        Array.isArray(v) &&
+        v.length > 0 &&
+        v.every((x) => typeof x === "object" && x !== null && !Array.isArray(x))
+      ) {
+        return v as Array<Record<string, unknown>>;
+      }
+    }
+    return null;
+  };
+
+  const top = probe(rawInput);
+  if (top) return top;
+
+  for (const wrapper of TODO_NESTED_WRAPPERS) {
+    const inner = rawInput[wrapper];
+    if (inner && typeof inner === "object" && !Array.isArray(inner)) {
+      const nested = probe(inner as Record<string, unknown>);
+      if (nested) return nested;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * True when a cursor `tool_call` looks like the internal `updateTodos` tool.
+ *
+ * Cursor wraps it as `rawInput._toolName === "updateTodos"`; we also accept
+ * a fuzzy title match (`Update TODOs`) as a fallback in case the wrapper
+ * field is renamed in a future cursor-agent release.
+ */
+function isCursorUpdateTodosTool(
+  rawInput: Record<string, unknown> | undefined,
+  title: string,
+  kind: string,
+): boolean {
+  if (rawInput && typeof rawInput._toolName === "string" && rawInput._toolName === "updateTodos") {
+    return true;
+  }
+  if (kind === "updateTodos") return true;
+  if (/^update\s*todos$/i.test(title.trim())) return true;
+  return false;
+}
+
+/** Normalized todo shape, matching threadStore's TodoWrite interception contract. */
+export interface NormalizedCursorTodo {
+  id: string;
+  content: string;
+  status: "pending" | "in_progress" | "completed" | "cancelled";
+  priority?: string;
+}
+
+/**
+ * Normalizes a heterogeneous cursor todo entry into the shape that
+ * threadStore's TodoWrite interception expects (`id`, `content`, `status`).
+ */
+function normalizeCursorTodoEntry(
+  entry: Record<string, unknown>,
+  index: number,
+): NormalizedCursorTodo {
+  const todo: NormalizedCursorTodo = {
+    id: stringField(entry, "id") ?? String(index + 1),
+    content:
+      stringField(entry, "content") ??
+      stringField(entry, "title") ??
+      stringField(entry, "text") ??
+      "",
+    status: coercePlanStatus(entry.status),
+  };
+  const priority = stringField(entry, "priority");
+  if (priority) todo.priority = priority;
+  return todo;
+}
+
+/**
+ * Per-session todo snapshot, persisted across prompts so cursor's
+ * `merge: true` invocations can patch by id without losing items the
+ * agent omitted from the partial list.
+ *
+ * Cursor's TodoWrite tool follows two semantics: `merge: false` replaces
+ * the full list; `merge: true` patches existing entries (and inserts new
+ * ids) while preserving any entry the agent didn't mention. The mapper
+ * reconciles these against this snapshot and emits the **fully-merged**
+ * list to the frontend, which keeps `threadStore` ignorant of the merge
+ * protocol — it always receives a complete list and replaces.
+ *
+ * Insertion order is preserved through `Map` iteration, so the on-screen
+ * task order remains stable across patches.
+ */
+export interface CursorTodoSnapshot {
+  todos: Map<string, NormalizedCursorTodo>;
+}
+
+/** Factory for a fresh per-session todo snapshot. */
+export function createCursorTodoSnapshot(): CursorTodoSnapshot {
+  return { todos: new Map() };
+}
+
+/**
+ * Synthesizes TodoWrite ToolUse + ToolResult events from a Cursor
+ * `cursor/update_todos` JSON-RPC extension request.
+ *
+ * Cursor's actual `updateTodos` payload travels on this server-request
+ * channel rather than on the `tool_call`'s `rawInput` (which arrives empty
+ * with only `{ _toolName: "updateTodos" }`). The RPC params look like the
+ * spec: `{ merge: boolean, todos: [...] }`, optionally nested under
+ * `_params` / `args` per the same wrapper conventions we already probe for.
+ *
+ * Reconciles via the supplied snapshot when present so `merge: true`
+ * patches survive across turns. Returns `[]` when params are unusable
+ * (null, non-object, or no extractable entries) — caller can ignore the
+ * RPC silently in that case.
+ */
+export function buildTodoWriteEventsFromExtensionRpc(
+  params: unknown,
+  threadId: string,
+  snapshot: CursorTodoSnapshot | undefined,
+): AgentEvent[] {
+  if (!params || typeof params !== "object" || Array.isArray(params)) return [];
+  const p = params as Record<string, unknown>;
+  const entries = extractCursorTodoEntries(p);
+  if (!entries || entries.length === 0) return [];
+  const merge = p.merge === true;
+  const incoming = entries.map((entry, index) => normalizeCursorTodoEntry(entry, index));
+  const todos = reconcileCursorTodos(incoming, merge, snapshot);
+
+  const toolCallId = `cursor-todos-${randomUUID()}`;
+  return [
+    {
+      type: AgentEventType.ToolUse,
+      threadId,
+      toolCallId,
+      toolName: "TodoWrite",
+      toolInput: { todos },
+    },
+    {
+      type: AgentEventType.ToolResult,
+      threadId,
+      toolCallId,
+      output: `Updated ${todos.length} todo(s)`,
+      isError: false,
+    },
+  ];
+}
+
+/**
+ * Reconciles an incoming `updateTodos` payload against the per-session
+ * snapshot, honoring the `merge` flag.
+ *
+ * - `merge: false` (or absent) → snapshot is replaced by `incoming`.
+ * - `merge: true` → existing entries are patched (status/content/priority
+ *   from `incoming` win when provided), new ids are appended in order, and
+ *   ids absent from `incoming` are left untouched.
+ *
+ * If no snapshot is supplied (legacy callers, tests), behavior degrades
+ * gracefully to "always replace" by returning `incoming` as-is.
+ */
+function reconcileCursorTodos(
+  incoming: NormalizedCursorTodo[],
+  merge: boolean,
+  snapshot: CursorTodoSnapshot | undefined,
+): NormalizedCursorTodo[] {
+  if (!snapshot) return incoming;
+
+  if (!merge) {
+    snapshot.todos.clear();
+    for (const t of incoming) snapshot.todos.set(t.id, t);
+    return Array.from(snapshot.todos.values());
+  }
+
+  for (const t of incoming) {
+    const existing = snapshot.todos.get(t.id);
+    if (existing) {
+      const merged: NormalizedCursorTodo = {
+        id: existing.id,
+        content: t.content || existing.content,
+        status: t.status,
+      };
+      const priority = t.priority ?? existing.priority;
+      if (priority) merged.priority = priority;
+      snapshot.todos.set(t.id, merged);
+    } else {
+      snapshot.todos.set(t.id, t);
+    }
+  }
+  return Array.from(snapshot.todos.values());
 }
 
 /** Accumulates streamed state during a single prompt turn. */
@@ -123,11 +338,16 @@ const TERMINAL_TOOL_STATUSES = new Set(["completed", "failed"]);
  * @param notification - Parsed JSON-RPC notification object (`method` + optional `params`).
  * @param threadId - Mcode thread id (`mcode-…` prefix stripped by caller).
  * @param acc - Running accumulator for assistant message text and tool start times.
+ * @param todoSnapshot - Optional per-session todo state for `updateTodos` merge
+ *   semantics. When present, `merge: true` invocations patch by id; when omitted
+ *   the mapper falls back to "always replace" (correct but loses prior context
+ *   on partial updates, so callers should pass a stable instance).
  */
 export function mapCursorAcpNotification(
   notification: Record<string, unknown>,
   threadId: string,
   acc: CursorStreamAccumulator,
+  todoSnapshot?: CursorTodoSnapshot,
 ): AgentEvent[] {
   const method = typeof notification.method === "string" ? notification.method : "";
   const params = notification.params as Record<string, unknown> | undefined;
@@ -180,12 +400,68 @@ export function mapCursorAcpNotification(
     const toolName = title || kind || "cursor_tool";
 
     const rawInput = update.rawInput;
-    const toolInput: Record<string, unknown> =
+    const rawInputObj: Record<string, unknown> | undefined =
       rawInput && typeof rawInput === "object" && !Array.isArray(rawInput)
         ? (rawInput as Record<string, unknown>)
-        : title
-          ? { title }
-          : {};
+        : undefined;
+
+    // Cursor's internal `updateTodos` tool surfaces as a generic tool_call
+    // with `rawInput._toolName === "updateTodos"`. Re-emit it as a TodoWrite
+    // synthesized pair so the existing threadStore interception lights up
+    // the task panel instead of rendering as an opaque GenericRenderer card.
+    if (isCursorUpdateTodosTool(rawInputObj, title, kind)) {
+      const entries = extractCursorTodoEntries(rawInputObj);
+      const merge = rawInputObj?.merge === true;
+      logger.info("Cursor ACP updateTodos tool_call observed", {
+        toolCallId,
+        title,
+        kind,
+        merge,
+        rawInputKeys: rawInputObj ? Object.keys(rawInputObj).join(",") : "",
+        todoCount: entries?.length ?? 0,
+      });
+      if (entries && entries.length > 0) {
+        const incoming = entries.map((entry, index) => normalizeCursorTodoEntry(entry, index));
+        const todos = reconcileCursorTodos(incoming, merge, todoSnapshot);
+        acc.toolStartTimes.set(toolCallId, Date.now());
+        const events: AgentEvent[] = [
+          {
+            type: AgentEventType.ToolUse,
+            threadId,
+            toolCallId,
+            toolName: "TodoWrite",
+            toolInput: { todos },
+          },
+        ];
+        const status = stringField(update, "status");
+        if (status && TERMINAL_TOOL_STATUSES.has(status)) {
+          acc.toolStartTimes.delete(toolCallId);
+          events.push({
+            type: AgentEventType.ToolResult,
+            threadId,
+            toolCallId,
+            output: `Updated ${todos.length} todo(s)`,
+            isError: status === "failed",
+          });
+        }
+        return events;
+      }
+      // No extractable todos in rawInput. In practice this is the dominant
+      // case: cursor-agent ships the `tool_call` as a placeholder (rawInput
+      // contains only `_toolName`) and delivers the real payload on a
+      // separate `cursor/update_todos` JSON-RPC server request — handled by
+      // the provider's `handleAcpServerRequest` and routed back through
+      // `CursorAcpSession.processUpdateTodosExtensionRpc`. Suppress the
+      // empty placeholder so the chat doesn't show a meaningless "Update
+      // TODOs {_toolName:'updateTodos'}" card.
+      return [];
+    }
+
+    const toolInput: Record<string, unknown> = rawInputObj
+      ? rawInputObj
+      : title
+        ? { title }
+        : {};
 
     acc.toolStartTimes.set(toolCallId, Date.now());
 

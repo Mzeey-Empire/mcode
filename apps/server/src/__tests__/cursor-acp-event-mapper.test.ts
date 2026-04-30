@@ -1,11 +1,18 @@
 import { describe, it, expect } from "vitest";
 import {
   mapCursorAcpNotification,
+  createCursorTodoSnapshot,
+  buildTodoWriteEventsFromExtensionRpc,
   type CursorStreamAccumulator,
+  type CursorTodoSnapshot,
 } from "../providers/cursor/cursor-acp-event-mapper.js";
 
 function freshAcc(): CursorStreamAccumulator {
   return { assistantText: "", toolStartTimes: new Map() };
+}
+
+function freshSnapshot(): CursorTodoSnapshot {
+  return createCursorTodoSnapshot();
 }
 
 describe("mapCursorAcpNotification", () => {
@@ -315,6 +322,415 @@ describe("mapCursorAcpNotification", () => {
       );
       expect(events).toEqual([]);
     });
+
+    describe("updateTodos (cursor-specific TodoWrite synthesis)", () => {
+      it("synthesizes TodoWrite when rawInput._toolName === 'updateTodos'", () => {
+        const acc = freshAcc();
+        const events = mapCursorAcpNotification(
+          {
+            method: "session/update",
+            params: {
+              update: {
+                sessionUpdate: "tool_call",
+                toolCallId: "tc-todos-1",
+                title: "Update TODOs",
+                kind: "other",
+                rawInput: {
+                  _toolName: "updateTodos",
+                  todos: [
+                    { id: "1", content: "Fix the bug", status: "in_progress" },
+                    { id: "2", content: "Write tests", status: "pending" },
+                  ],
+                },
+              },
+            },
+          },
+          "t1",
+          acc,
+        );
+
+        expect(events).toHaveLength(1);
+        expect(events[0]).toMatchObject({
+          type: "toolUse",
+          threadId: "t1",
+          toolCallId: "tc-todos-1",
+          toolName: "TodoWrite",
+        });
+        const todos = (events[0] as { toolInput: { todos: Array<Record<string, unknown>> } })
+          .toolInput.todos;
+        expect(todos).toHaveLength(2);
+        expect(todos[0]).toMatchObject({
+          id: "1",
+          content: "Fix the bug",
+          status: "in_progress",
+        });
+      });
+
+      it("emits TodoWrite + ToolResult when updateTodos arrives in terminal status", () => {
+        const acc = freshAcc();
+        const events = mapCursorAcpNotification(
+          {
+            method: "session/update",
+            params: {
+              update: {
+                sessionUpdate: "tool_call",
+                toolCallId: "tc-todos-term",
+                title: "Update TODOs",
+                status: "completed",
+                rawInput: {
+                  _toolName: "updateTodos",
+                  todos: [{ id: "1", content: "Done", status: "completed" }],
+                },
+              },
+            },
+          },
+          "t1",
+          acc,
+        );
+        expect(events).toHaveLength(2);
+        expect(events[0]).toMatchObject({ type: "toolUse", toolName: "TodoWrite" });
+        expect(events[1]).toMatchObject({
+          type: "toolResult",
+          toolCallId: "tc-todos-term",
+          isError: false,
+        });
+        expect(acc.toolStartTimes.has("tc-todos-term")).toBe(false);
+      });
+
+      it("extracts todos nested under _params wrapper", () => {
+        const acc = freshAcc();
+        const events = mapCursorAcpNotification(
+          {
+            method: "session/update",
+            params: {
+              update: {
+                sessionUpdate: "tool_call",
+                toolCallId: "tc-todos-nested",
+                title: "Update TODOs",
+                rawInput: {
+                  _toolName: "updateTodos",
+                  _params: {
+                    todos: [{ content: "Nested", status: "pending" }],
+                  },
+                },
+              },
+            },
+          },
+          "t1",
+          acc,
+        );
+        expect(events).toHaveLength(1);
+        const todos = (events[0] as { toolInput: { todos: Array<Record<string, unknown>> } })
+          .toolInput.todos;
+        expect(todos).toHaveLength(1);
+        expect(todos[0]).toMatchObject({ content: "Nested", status: "pending" });
+      });
+
+      it("detects updateTodos by title fallback when _toolName is absent", () => {
+        const acc = freshAcc();
+        const events = mapCursorAcpNotification(
+          {
+            method: "session/update",
+            params: {
+              update: {
+                sessionUpdate: "tool_call",
+                toolCallId: "tc-todos-title",
+                title: "Update TODOs",
+                rawInput: {
+                  todos: [{ content: "By title", status: "pending" }],
+                },
+              },
+            },
+          },
+          "t1",
+          acc,
+        );
+        expect(events).toHaveLength(1);
+        expect(events[0]).toMatchObject({ toolName: "TodoWrite" });
+      });
+
+      it("suppresses the placeholder tool_call when updateTodos has no extractable todos", () => {
+        const acc = freshAcc();
+        const events = mapCursorAcpNotification(
+          {
+            method: "session/update",
+            params: {
+              update: {
+                sessionUpdate: "tool_call",
+                toolCallId: "tc-todos-empty",
+                title: "Update TODOs",
+                rawInput: { _toolName: "updateTodos" },
+              },
+            },
+          },
+          "t1",
+          acc,
+        );
+        // Cursor's actual payload arrives on the `cursor/update_todos`
+        // extension RPC, not on this tool_call. Emitting a generic
+        // `Update TODOs {_toolName:'updateTodos'}` card here would just
+        // create chat noise. The provider's handleAcpServerRequest will
+        // synthesize the real TodoWrite events from the RPC.
+        expect(events).toEqual([]);
+      });
+
+      it("preserves cancelled status without coercing it to pending", () => {
+        const acc = freshAcc();
+        const events = mapCursorAcpNotification(
+          {
+            method: "session/update",
+            params: {
+              update: {
+                sessionUpdate: "tool_call",
+                toolCallId: "tc-todos-cancelled",
+                title: "Update TODOs",
+                rawInput: {
+                  _toolName: "updateTodos",
+                  todos: [
+                    { id: "1", content: "Keep this", status: "completed" },
+                    { id: "2", content: "Drop this", status: "cancelled" },
+                  ],
+                },
+              },
+            },
+          },
+          "t1",
+          acc,
+        );
+        const todos = (events[0] as { toolInput: { todos: Array<Record<string, unknown>> } })
+          .toolInput.todos;
+        expect(todos[0]).toMatchObject({ id: "1", status: "completed" });
+        expect(todos[1]).toMatchObject({ id: "2", status: "cancelled" });
+      });
+
+      it("normalizes American 'canceled' spelling to 'cancelled'", () => {
+        const acc = freshAcc();
+        const events = mapCursorAcpNotification(
+          {
+            method: "session/update",
+            params: {
+              update: {
+                sessionUpdate: "tool_call",
+                toolCallId: "tc-todos-canceled-us",
+                title: "Update TODOs",
+                rawInput: {
+                  _toolName: "updateTodos",
+                  todos: [
+                    { id: "1", content: "Done", status: "completed" },
+                    { id: "2", content: "Dropped", status: "canceled" },
+                  ],
+                },
+              },
+            },
+          },
+          "t1",
+          acc,
+        );
+        const todos = (events[0] as { toolInput: { todos: Array<Record<string, unknown>> } })
+          .toolInput.todos;
+        expect(todos[1]).toMatchObject({ id: "2", status: "cancelled" });
+      });
+
+      it("merge:false replaces the snapshot list", () => {
+        const acc = freshAcc();
+        const snapshot = freshSnapshot();
+
+        // Seed snapshot with a prior list
+        mapCursorAcpNotification(
+          {
+            method: "session/update",
+            params: {
+              update: {
+                sessionUpdate: "tool_call",
+                toolCallId: "tc-seed",
+                title: "Update TODOs",
+                rawInput: {
+                  _toolName: "updateTodos",
+                  merge: false,
+                  todos: [
+                    { id: "1", content: "Old A", status: "pending" },
+                    { id: "2", content: "Old B", status: "pending" },
+                  ],
+                },
+              },
+            },
+          },
+          "t1",
+          acc,
+          snapshot,
+        );
+        expect(snapshot.todos.size).toBe(2);
+
+        // Replace with a fresh list
+        const events = mapCursorAcpNotification(
+          {
+            method: "session/update",
+            params: {
+              update: {
+                sessionUpdate: "tool_call",
+                toolCallId: "tc-replace",
+                title: "Update TODOs",
+                rawInput: {
+                  _toolName: "updateTodos",
+                  merge: false,
+                  todos: [{ id: "9", content: "Brand new", status: "pending" }],
+                },
+              },
+            },
+          },
+          "t1",
+          acc,
+          snapshot,
+        );
+
+        const todos = (events[0] as { toolInput: { todos: Array<Record<string, unknown>> } })
+          .toolInput.todos;
+        expect(todos).toHaveLength(1);
+        expect(todos[0]).toMatchObject({ id: "9", content: "Brand new" });
+        expect(snapshot.todos.size).toBe(1);
+        expect(snapshot.todos.has("1")).toBe(false);
+      });
+
+      it("merge:true patches existing ids by id and preserves omitted ones", () => {
+        const acc = freshAcc();
+        const snapshot = freshSnapshot();
+
+        // Seed: two pending tasks
+        mapCursorAcpNotification(
+          {
+            method: "session/update",
+            params: {
+              update: {
+                sessionUpdate: "tool_call",
+                toolCallId: "tc-seed",
+                title: "Update TODOs",
+                rawInput: {
+                  _toolName: "updateTodos",
+                  merge: false,
+                  todos: [
+                    { id: "1", content: "First task", status: "pending" },
+                    { id: "2", content: "Second task", status: "pending" },
+                  ],
+                },
+              },
+            },
+          },
+          "t1",
+          acc,
+          snapshot,
+        );
+
+        // Patch: only mark id=1 completed; id=2 must survive untouched
+        const events = mapCursorAcpNotification(
+          {
+            method: "session/update",
+            params: {
+              update: {
+                sessionUpdate: "tool_call",
+                toolCallId: "tc-patch",
+                title: "Update TODOs",
+                rawInput: {
+                  _toolName: "updateTodos",
+                  merge: true,
+                  todos: [{ id: "1", content: "First task", status: "completed" }],
+                },
+              },
+            },
+          },
+          "t1",
+          acc,
+          snapshot,
+        );
+
+        const todos = (events[0] as { toolInput: { todos: Array<Record<string, unknown>> } })
+          .toolInput.todos;
+        expect(todos).toHaveLength(2);
+        expect(todos[0]).toMatchObject({ id: "1", status: "completed" });
+        expect(todos[1]).toMatchObject({ id: "2", status: "pending" });
+      });
+
+      it("merge:true appends new ids while preserving existing entries", () => {
+        const acc = freshAcc();
+        const snapshot = freshSnapshot();
+
+        mapCursorAcpNotification(
+          {
+            method: "session/update",
+            params: {
+              update: {
+                sessionUpdate: "tool_call",
+                toolCallId: "tc-seed",
+                title: "Update TODOs",
+                rawInput: {
+                  _toolName: "updateTodos",
+                  merge: false,
+                  todos: [{ id: "1", content: "Original", status: "in_progress" }],
+                },
+              },
+            },
+          },
+          "t1",
+          acc,
+          snapshot,
+        );
+
+        const events = mapCursorAcpNotification(
+          {
+            method: "session/update",
+            params: {
+              update: {
+                sessionUpdate: "tool_call",
+                toolCallId: "tc-append",
+                title: "Update TODOs",
+                rawInput: {
+                  _toolName: "updateTodos",
+                  merge: true,
+                  todos: [{ id: "2", content: "Newly added", status: "pending" }],
+                },
+              },
+            },
+          },
+          "t1",
+          acc,
+          snapshot,
+        );
+
+        const todos = (events[0] as { toolInput: { todos: Array<Record<string, unknown>> } })
+          .toolInput.todos;
+        expect(todos).toHaveLength(2);
+        expect(todos.map((t) => t.id)).toEqual(["1", "2"]);
+        expect(todos[0]).toMatchObject({ status: "in_progress", content: "Original" });
+        expect(todos[1]).toMatchObject({ status: "pending", content: "Newly added" });
+      });
+
+      it("falls back to replace semantics when no snapshot is provided", () => {
+        const acc = freshAcc();
+        const events = mapCursorAcpNotification(
+          {
+            method: "session/update",
+            params: {
+              update: {
+                sessionUpdate: "tool_call",
+                toolCallId: "tc-no-snapshot",
+                title: "Update TODOs",
+                rawInput: {
+                  _toolName: "updateTodos",
+                  merge: true, // merge requested, but snapshot missing
+                  todos: [{ id: "1", content: "Lonely", status: "pending" }],
+                },
+              },
+            },
+          },
+          "t1",
+          acc,
+        );
+        const todos = (events[0] as { toolInput: { todos: Array<Record<string, unknown>> } })
+          .toolInput.todos;
+        // No snapshot to merge against — emit incoming as-is.
+        expect(todos).toHaveLength(1);
+        expect(todos[0]).toMatchObject({ id: "1" });
+      });
+    });
   });
 
   describe("tool_call_update (canonical ACP)", () => {
@@ -549,5 +965,144 @@ describe("mapCursorAcpNotification", () => {
       expect(output).toContain("--- old");
       expect(output).toContain("+++ new");
     });
+  });
+});
+
+describe("buildTodoWriteEventsFromExtensionRpc", () => {
+  it("emits TodoWrite ToolUse + ToolResult from a flat { merge, todos } payload", () => {
+    const snapshot = createCursorTodoSnapshot();
+    const events = buildTodoWriteEventsFromExtensionRpc(
+      {
+        merge: false,
+        todos: [
+          { id: "1", content: "First", status: "pending" },
+          { id: "2", content: "Second", status: "in_progress" },
+        ],
+      },
+      "t1",
+      snapshot,
+    );
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      type: "toolUse",
+      threadId: "t1",
+      toolName: "TodoWrite",
+    });
+    expect(events[1]).toMatchObject({ type: "toolResult", isError: false });
+    const todos = (events[0] as { toolInput: { todos: Array<Record<string, unknown>> } })
+      .toolInput.todos;
+    expect(todos).toHaveLength(2);
+    expect(snapshot.todos.size).toBe(2);
+  });
+
+  it("merges by id across consecutive RPCs when snapshot is provided", () => {
+    const snapshot = createCursorTodoSnapshot();
+
+    buildTodoWriteEventsFromExtensionRpc(
+      {
+        merge: false,
+        todos: [
+          { id: "1", content: "First", status: "in_progress" },
+          { id: "2", content: "Second", status: "pending" },
+        ],
+      },
+      "t1",
+      snapshot,
+    );
+
+    const events = buildTodoWriteEventsFromExtensionRpc(
+      {
+        merge: true,
+        todos: [
+          { id: "1", content: "First", status: "completed" },
+          { id: "2", content: "Second", status: "completed" },
+        ],
+      },
+      "t1",
+      snapshot,
+    );
+
+    const todos = (events[0] as { toolInput: { todos: Array<Record<string, unknown>> } })
+      .toolInput.todos;
+    expect(todos).toHaveLength(2);
+    expect(todos[0]).toMatchObject({ id: "1", status: "completed" });
+    expect(todos[1]).toMatchObject({ id: "2", status: "completed" });
+  });
+
+  it("extracts todos nested under _params wrapper", () => {
+    const events = buildTodoWriteEventsFromExtensionRpc(
+      {
+        _params: {
+          merge: false,
+          todos: [{ id: "1", content: "Nested", status: "pending" }],
+        },
+      },
+      "t1",
+      createCursorTodoSnapshot(),
+    );
+    expect(events).toHaveLength(2);
+    const todos = (events[0] as { toolInput: { todos: Array<Record<string, unknown>> } })
+      .toolInput.todos;
+    expect(todos[0]).toMatchObject({ content: "Nested" });
+  });
+
+  it("preserves cancelled status from extension RPC payload", () => {
+    const events = buildTodoWriteEventsFromExtensionRpc(
+      {
+        merge: false,
+        todos: [
+          { id: "1", content: "Done", status: "completed" },
+          { id: "2", content: "Dropped", status: "cancelled" },
+        ],
+      },
+      "t1",
+      createCursorTodoSnapshot(),
+    );
+    const todos = (events[0] as { toolInput: { todos: Array<Record<string, unknown>> } })
+      .toolInput.todos;
+    expect(todos[1]).toMatchObject({ status: "cancelled" });
+  });
+
+  it("returns [] for null/non-object/array params", () => {
+    expect(
+      buildTodoWriteEventsFromExtensionRpc(null, "t1", createCursorTodoSnapshot()),
+    ).toEqual([]);
+    expect(
+      buildTodoWriteEventsFromExtensionRpc(undefined, "t1", createCursorTodoSnapshot()),
+    ).toEqual([]);
+    expect(
+      buildTodoWriteEventsFromExtensionRpc("nope", "t1", createCursorTodoSnapshot()),
+    ).toEqual([]);
+    expect(
+      buildTodoWriteEventsFromExtensionRpc([1, 2], "t1", createCursorTodoSnapshot()),
+    ).toEqual([]);
+  });
+
+  it("returns [] when no todo entries are extractable", () => {
+    expect(
+      buildTodoWriteEventsFromExtensionRpc({}, "t1", createCursorTodoSnapshot()),
+    ).toEqual([]);
+    expect(
+      buildTodoWriteEventsFromExtensionRpc(
+        { merge: true, todos: [] },
+        "t1",
+        createCursorTodoSnapshot(),
+      ),
+    ).toEqual([]);
+  });
+
+  it("works without a snapshot — emits incoming as-is", () => {
+    const events = buildTodoWriteEventsFromExtensionRpc(
+      {
+        merge: true,
+        todos: [{ id: "1", content: "Lonely", status: "pending" }],
+      },
+      "t1",
+      undefined,
+    );
+    expect(events).toHaveLength(2);
+    const todos = (events[0] as { toolInput: { todos: Array<Record<string, unknown>> } })
+      .toolInput.todos;
+    expect(todos).toHaveLength(1);
   });
 });

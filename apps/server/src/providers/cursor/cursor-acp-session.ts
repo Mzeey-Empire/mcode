@@ -12,7 +12,13 @@ import { promisify } from "node:util";
 import { logger } from "@mcode/shared";
 import type { AgentEvent } from "@mcode/contracts";
 import { CursorAcpRpcClient } from "./cursor-acp-rpc-client.js";
-import { mapCursorAcpNotification, type CursorStreamAccumulator } from "./cursor-acp-event-mapper.js";
+import {
+  mapCursorAcpNotification,
+  createCursorTodoSnapshot,
+  buildTodoWriteEventsFromExtensionRpc,
+  type CursorStreamAccumulator,
+  type CursorTodoSnapshot,
+} from "./cursor-acp-event-mapper.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -59,6 +65,12 @@ export class CursorAcpSession {
   private killRequested = false;
   /** Cursor-assigned session id from `session/new` / `session/load`. */
   private acpSessionId: string | null = null;
+  /**
+   * Per-session todo state, persisted across prompts so cursor's
+   * `merge: true` updateTodos invocations can patch by id without
+   * losing items omitted from the partial payload.
+   */
+  private readonly todoSnapshot: CursorTodoSnapshot = createCursorTodoSnapshot();
 
   /** Public Cursor session id for persistence (`setSdkSessionId`). */
   public get cursorSessionId(): string | null {
@@ -144,7 +156,12 @@ export class CursorAcpSession {
     const acc: CursorStreamAccumulator = { assistantText: "", toolStartTimes: new Map() };
 
     const onNotification = (msg: unknown) => {
-      const events = mapCursorAcpNotification(msg as Record<string, unknown>, this.opts.threadId, acc);
+      const events = mapCursorAcpNotification(
+        msg as Record<string, unknown>,
+        this.opts.threadId,
+        acc,
+        this.todoSnapshot,
+      );
       for (const ev of events) {
         this.opts.onAgentEvent(ev);
       }
@@ -166,6 +183,28 @@ export class CursorAcpSession {
     }
 
     return { assistantText: acc.assistantText };
+  }
+
+  /**
+   * Handles a `cursor/update_todos` JSON-RPC server request.
+   *
+   * Cursor's `tool_call` for `updateTodos` ships an empty placeholder
+   * (`rawInput: { _toolName: "updateTodos" }`); the actual `{ merge, todos }`
+   * payload arrives on this separate extension RPC. We reconcile against the
+   * per-session snapshot and forward synthesized TodoWrite events through
+   * `onAgentEvent` so threadStore's TodoWrite interception lights up the
+   * task panel — the same path used by ACP `plan` updates and by the inline
+   * `tool_call` synthesis when entries are present.
+   */
+  public processUpdateTodosExtensionRpc(params: unknown): void {
+    const events = buildTodoWriteEventsFromExtensionRpc(
+      params,
+      this.opts.threadId,
+      this.todoSnapshot,
+    );
+    for (const ev of events) {
+      this.opts.onAgentEvent(ev);
+    }
   }
 
   /** Best-effort graceful shutdown followed by process termination. */
