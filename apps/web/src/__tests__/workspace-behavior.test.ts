@@ -162,6 +162,47 @@ describe("Workspace Behavior", () => {
     expect(useWorkspaceStore.getState().threads.some((t) => t.id === "child-1")).toBe(true);
   });
 
+  it("when createAndSendMessage completes while loadThreads is in flight, stale listThreads does not drop the new thread", async () => {
+    const ws = createMockWorkspace({ id: "ws-first-msg" });
+    const existing = createMockThread({
+      id: "existing-1",
+      workspace_id: ws.id,
+      title: "Existing",
+    });
+    let listResolve!: (value: typeof existing[]) => void;
+    const listPromise = new Promise<typeof existing[]>((resolve) => {
+      listResolve = resolve;
+    });
+
+    useWorkspaceStore.setState({
+      workspaces: [ws],
+      activeWorkspaceId: ws.id,
+      threads: [existing],
+    });
+
+    (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockImplementation(() => listPromise);
+
+    void useWorkspaceStore.getState().loadThreads(ws.id);
+
+    const created = createMockThread({
+      id: "new-first-send",
+      workspace_id: ws.id,
+      title: "New from first message",
+    });
+    (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockResolvedValue(created);
+
+    await useWorkspaceStore.getState().createAndSendMessage("Hello", "composer-2-fast");
+
+    expect(useWorkspaceStore.getState().threads.some((t) => t.id === "new-first-send")).toBe(true);
+
+    listResolve([existing]);
+
+    await listPromise;
+    await Promise.resolve();
+
+    expect(useWorkspaceStore.getState().threads.some((t) => t.id === "new-first-send")).toBe(true);
+  });
+
   it("when the user creates a thread, it appears in the list", async () => {
     const ws = createMockWorkspace();
     const thread = createMockThread({
