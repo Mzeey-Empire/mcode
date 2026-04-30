@@ -91,23 +91,3 @@ export function ZedIcon({ size = 14, className }: IconProps) {
     </svg>
   );
 }
-
-/** Cursor - official Cursor editor brand mark (rounded rect with arrow cutout). */
-export function CursorIcon({ size = 14, className }: IconProps) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 28 28"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
-    >
-      <rect width="28" height="28" rx="5" fill="currentColor" />
-      <path
-        d="M22.3 13.5L8 4v20l4.8-6.5L17.5 24l3-1.2-4.7-6.8L22.3 13.5z"
-        fill="var(--popover)"
-      />
-    </svg>
-  );
-}
