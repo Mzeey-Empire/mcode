@@ -31,6 +31,7 @@ const _legacyEncoder = new TextEncoder();
  * - `settings.changed` -- server-pushed settings updates forwarded to settingsStore
  * - `branch.changed` -- refreshes branch list and updates current branch if not manually overridden
  * - `plan.questions` -- model-proposed plan questions forwarded to threadStore wizard
+ * - `plan.answered` -- server committed an answered marker; dismisses the wizard on this client
  * - `permission.request` -- tool permission awaiting user decision
  * - `permission.resolved` -- a permission was settled (by user or session stop)
  * - `providers.availability` -- server-pushed provider availability snapshot forwarded to providerAvailabilityStore
@@ -283,6 +284,18 @@ export function startPushListeners(): void {
       };
       if (!threadId || !Array.isArray(questions)) return;
       useThreadStore.getState().setPlanQuestions(threadId, questions);
+    }),
+  );
+
+  // plan.answered: server committed an answered marker for a plan-questions message
+  unsubs.push(
+    pushEmitter.on("plan.answered", (data) => {
+      const { threadId, assistantMessageId } = data as {
+        threadId: string;
+        assistantMessageId: string;
+      };
+      if (!threadId || !assistantMessageId) return;
+      useThreadStore.getState().markPlanAnswered(threadId, assistantMessageId);
     }),
   );
 

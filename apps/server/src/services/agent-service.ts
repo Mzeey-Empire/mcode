@@ -29,6 +29,7 @@ import { ToolCallRecordRepo, type CreateToolCallRecordInput } from "../repositor
 import { TurnSnapshotRepo } from "../repositories/turn-snapshot-repo";
 import type Database from "better-sqlite3";
 import { TaskRepo } from "../repositories/task-repo";
+import { PlanQuestionAnswersRepo } from "../repositories/plan-question-answers-repo";
 import { GitService } from "./git-service";
 import { AttachmentService } from "./attachment-service";
 import { SnapshotService } from "./snapshot-service";
@@ -130,6 +131,8 @@ export class AgentService {
     @inject(SettingsService) private readonly settingsService: SettingsService,
     @inject(ProviderAvailabilityService)
     private readonly availability: ProviderAvailabilityService,
+    @inject(PlanQuestionAnswersRepo)
+    private readonly planQuestionAnswersRepo: PlanQuestionAnswersRepo,
   ) {}
 
   /**
@@ -151,6 +154,13 @@ export class AgentService {
     copilotAgent?: string,
     contextWindowMode?: ContextWindowMode,
     thinking?: boolean,
+    /**
+     * If set, persist a plan-questions "answered" marker for the given
+     * assistant message id in the same SQLite transaction as the user
+     * message create. Used by `answerQuestions` to record that the wizard
+     * has been satisfied so it does not re-pop on reload.
+     */
+    markPlanAnswerForMessageId?: string,
   ): Promise<void> {
     const thread = this.threadRepo.findById(threadId);
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
@@ -214,13 +224,38 @@ export class AgentService {
       threadId,
       attachments,
     );
-    this.messageRepo.create(
-      threadId,
-      "user",
-      content,
-      nextSeq,
-      stored.length > 0 ? stored : undefined,
-    );
+    // Persist the user message and (when answering plan questions) the
+    // answered marker in a single transaction. If the marker insert fails
+    // (e.g. FK rejects an unknown messageId) the user message is rolled
+    // back too, keeping marker durability == answer durability.
+    this.db.transaction(() => {
+      this.messageRepo.create(
+        threadId,
+        "user",
+        content,
+        nextSeq,
+        stored.length > 0 ? stored : undefined,
+      );
+      if (markPlanAnswerForMessageId) {
+        // INSERT OR IGNORE inside the repo skips PK collisions (idempotent
+        // re-marking) but FK violations still abort the tx, which is exactly
+        // what we want — durable iff the answer is durable.
+        this.planQuestionAnswersRepo.markAnswered(
+          markPlanAnswerForMessageId,
+          threadId,
+        );
+      }
+    })();
+
+    // Notify other tabs/clients on the same thread that the wizard can be
+    // hidden. Fired only after the tx commits so listeners never see a
+    // marker that was rolled back.
+    if (markPlanAnswerForMessageId) {
+      broadcast("plan.answered", {
+        threadId,
+        assistantMessageId: markPlanAnswerForMessageId,
+      });
+    }
 
     // In plan mode, register the parser so the wizard flow works regardless of
     // whether a provider content override exists. When branching (override present),
@@ -416,6 +451,12 @@ export class AgentService {
     }
     lines.push("\nNow generate the full plan based on these decisions.");
 
+    // Locate the assistant message carrying the plan-questions fence so the
+    // marker is keyed on it (not just on the thread). Survives restarts and
+    // mid-turn errors — see docs/plans/2026-04-30-plan-question-answers-marker.md.
+    const markPlanAnswerForMessageId =
+      this.findLatestPlanQuestionsMessageId(threadId) ?? undefined;
+
     // interactionMode intentionally omitted — no question wrapping for the answer turn
     await this.sendMessage(
       threadId,
@@ -431,7 +472,24 @@ export class AgentService {
       undefined, // copilotAgent
       contextWindowMode,
       thinking,
+      markPlanAnswerForMessageId,
     );
+  }
+
+  /**
+   * Walk message history newest-first and return the id of the most recent
+   * assistant message containing a `plan-questions` fence, or null when no
+   * such message exists in the thread.
+   */
+  private findLatestPlanQuestionsMessageId(threadId: string): string | null {
+    const PLAN_QUESTIONS_RE = /```plan-questions\n([\s\S]*?)```/;
+    const { messages } = this.messageRepo.listByThread(threadId, 50);
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role !== "assistant") continue;
+      if (PLAN_QUESTIONS_RE.test(msg.content)) return msg.id;
+    }
+    return null;
   }
 
   /**
@@ -1113,7 +1171,12 @@ ${userMessage}`;
     if (event.toolName === "TodoWrite") {
       const todos = event.toolInput?.todos;
       if (Array.isArray(todos)) {
-        const validStatuses = new Set(["pending", "in_progress", "completed"]);
+        const validStatuses = new Set([
+          "pending",
+          "in_progress",
+          "completed",
+          "cancelled",
+        ]);
         const cleanedTodos = todos
           .filter(
             (t): t is Record<string, unknown> =>
@@ -1126,7 +1189,8 @@ ${userMessage}`;
               status: (validStatuses.has(rawStatus) ? rawStatus : "pending") as
                 | "pending"
                 | "in_progress"
-                | "completed",
+                | "completed"
+                | "cancelled",
             };
           });
         if (cleanedTodos.length > 0) {

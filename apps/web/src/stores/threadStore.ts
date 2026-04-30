@@ -104,6 +104,12 @@ interface ThreadState {
   activeQuestionIndexByThread: Record<string, number>;
   /** Plan wizard status per thread. */
   planQuestionsStatusByThread: Record<string, "idle" | "pending" | "answered">;
+  /**
+   * Server-authoritative set of assistant message IDs whose plan-questions
+   * block has been answered, per thread. Hydrated from `message.list` and
+   * extended by the `plan.answered` push channel.
+   */
+  answeredPlanMessageIdsByThread: Record<string, Set<string>>;
   /** Pending and recently-settled permission requests per thread. */
   permissionsByThread: Record<string, StoredPermission[]>;
 
@@ -135,6 +141,12 @@ interface ThreadState {
   submitPlanAnswers: (threadId: string) => Promise<void>;
   /** Reset plan question state for a thread (called on clear/reload). */
   clearPlanQuestions: (threadId: string) => void;
+  /**
+   * Record that the plan-questions block on `assistantMessageId` has been
+   * answered server-side, and dismiss the wizard for that thread. Wired to
+   * the `plan.answered` push channel from `ws-events.ts`.
+   */
+  markPlanAnswered: (threadId: string, assistantMessageId: string) => void;
   /** Add a new pending permission request for a thread. */
   addPermissionRequest: (request: PermissionRequest) => void;
   /** Mark a permission request as settled with its decision. */
@@ -217,34 +229,64 @@ function capMessages(messages: Message[]): { messages: Message[]; evicted: boole
  * then parses and validates the JSON array inside the block.
  * Returns the parsed questions or null if none found.
  */
-function extractPendingPlanQuestions(messages: Message[]): PlanQuestion[] | null {
+/**
+ * Walk messages newest-first to find the latest assistant `plan-questions`
+ * fence and decide whether the wizard should pop.
+ *
+ * Decision order:
+ *   1. The fence assistant message id is in `answeredIds` -> null (answered).
+ *   2. A user message follows the fence in the array -> null (legacy fallback
+ *      for threads that answered plan-questions before the marker landed).
+ *   3. Otherwise -> parsed questions.
+ *
+ * Trailing assistant messages without a fence (e.g. a partially-streamed
+ * follow-up) are skipped so the wizard still surfaces while the model is
+ * mid-turn.
+ */
+export function extractPendingPlanQuestions(
+  messages: Message[],
+  answeredIds: ReadonlySet<string>,
+): PlanQuestion[] | null {
   const PLAN_QUESTIONS_RE = /```plan-questions\n([\s\S]*?)```/;
 
-  // Walk messages in reverse to find the last assistant message with a plan-questions block
+  // First pass: locate the fence message index, walking newest-first.
+  let fenceIndex = -1;
+  let fenceContent: string | null = null;
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
-    if (msg.role === "user") {
-      // A user message after the assistant message means questions were already answered
-      return null;
-    }
-    if (msg.role === "assistant") {
-      const match = PLAN_QUESTIONS_RE.exec(msg.content);
-      if (!match) return null;
-      try {
-        const raw = JSON.parse(match[1]);
-        if (!Array.isArray(raw)) return null;
-        const results = raw.map((item) => PlanQuestionSchema.safeParse(item));
-        // Reject the whole batch if any question fails — partial batches break
-        // index continuity between the wizard UI and the answer map keys.
-        if (results.some((r) => !r.success)) return null;
-        const validated = results.map((r) => (r as { success: true; data: PlanQuestion }).data);
-        return validated.length > 0 ? validated : null;
-      } catch {
-        return null;
-      }
+    if (msg.role !== "assistant") continue;
+    const match = msg.content.match(PLAN_QUESTIONS_RE);
+    if (match) {
+      fenceIndex = i;
+      fenceContent = match[1];
+      break;
     }
   }
-  return null;
+  if (fenceIndex === -1 || fenceContent == null) return null;
+
+  // Authoritative marker: the server says this round was answered.
+  if (answeredIds.has(messages[fenceIndex].id)) return null;
+
+  // Legacy fallback: any user message after the fence implies the user
+  // already answered (covers threads from before the marker existed).
+  for (let i = fenceIndex + 1; i < messages.length; i++) {
+    if (messages[i].role === "user") return null;
+  }
+
+  try {
+    const raw = JSON.parse(fenceContent);
+    if (!Array.isArray(raw)) return null;
+    const results = raw.map((item) => PlanQuestionSchema.safeParse(item));
+    // Reject the whole batch if any question fails — partial batches break
+    // index continuity between the wizard UI and the answer map keys.
+    if (results.some((r) => !r.success)) return null;
+    const validated = results.map(
+      (r) => (r as { success: true; data: PlanQuestion }).data,
+    );
+    return validated.length > 0 ? validated : null;
+  } catch {
+    return null;
+  }
 }
 
 export const useThreadStore = create<ThreadState>((set, get) => {
@@ -278,6 +320,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   planAnswersByThread: {},
   activeQuestionIndexByThread: {},
   planQuestionsStatusByThread: {},
+  answeredPlanMessageIdsByThread: {},
   permissionsByThread: {},
 
   cacheToolCallRecords: (key, records) => {
@@ -416,7 +459,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       });
     }
     try {
-      const { messages, hasMore } = await getTransport().getMessages(threadId, MESSAGE_FETCH_SIZE);
+      const { messages, hasMore, answeredPlanMessageIds } = await getTransport().getMessages(threadId, MESSAGE_FETCH_SIZE);
       if (get().currentThreadId === threadId) {
         // Populate persisted tool call counts from loaded messages
         const counts: Record<string, number> = {};
@@ -427,14 +470,22 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         }
         const oldest = messages.length > 0 ? messages[0].sequence : 0;
 
-        set({
+        // Hydrate the per-thread answered-plan-questions marker set from the
+        // server response. Older servers omit the field; treat as empty so
+        // `extractPendingPlanQuestions` falls back to the legacy heuristic.
+        const answeredSet = new Set<string>(answeredPlanMessageIds ?? []);
+        set((state) => ({
           messages,
           loading: false,
           persistedToolCallCounts: counts,
           oldestLoadedSequence: { [threadId]: oldest },
           hasMoreMessages: { [threadId]: hasMore },
           isLoadingMore: {},
-        });
+          answeredPlanMessageIdsByThread: {
+            ...state.answeredPlanMessageIdsByThread,
+            [threadId]: answeredSet,
+          },
+        }));
 
         // Re-hydrate pending permissions (covers reconnect and thread switch)
         void getTransport().listPendingPermissions(threadId).then((pending) => {
@@ -475,7 +526,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         // exists in the loaded messages. This handles app restart without losing wizard state.
         const existingStatus = get().planQuestionsStatusByThread[threadId];
         if (existingStatus !== "pending") {
-          const pendingQuestions = extractPendingPlanQuestions(messages);
+          const pendingQuestions = extractPendingPlanQuestions(messages, answeredSet);
           if (pendingQuestions) {
             get().setPlanQuestions(threadId, pendingQuestions);
           }
@@ -1128,6 +1179,36 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       delete nextIndex[threadId];
       delete nextStatus[threadId];
       return {
+        planQuestionsByThread: nextQuestions,
+        planAnswersByThread: nextAnswers,
+        activeQuestionIndexByThread: nextIndex,
+        planQuestionsStatusByThread: nextStatus,
+      };
+    });
+  },
+
+  markPlanAnswered: (threadId, assistantMessageId) => {
+    set((state) => {
+      const existing =
+        state.answeredPlanMessageIdsByThread[threadId] ?? new Set<string>();
+      const nextSet = new Set(existing);
+      nextSet.add(assistantMessageId);
+
+      // Dismiss the wizard for the thread now that the round is settled.
+      const nextQuestions = { ...state.planQuestionsByThread };
+      const nextAnswers = { ...state.planAnswersByThread };
+      const nextIndex = { ...state.activeQuestionIndexByThread };
+      const nextStatus = { ...state.planQuestionsStatusByThread };
+      delete nextQuestions[threadId];
+      delete nextAnswers[threadId];
+      delete nextIndex[threadId];
+      delete nextStatus[threadId];
+
+      return {
+        answeredPlanMessageIdsByThread: {
+          ...state.answeredPlanMessageIdsByThread,
+          [threadId]: nextSet,
+        },
         planQuestionsByThread: nextQuestions,
         planAnswersByThread: nextAnswers,
         activeQuestionIndexByThread: nextIndex,

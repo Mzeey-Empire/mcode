@@ -21,11 +21,17 @@ type CliRuntime = {
 };
 
 /** Provider IDs whose CLI path is user-configurable via `settings.provider.cli`. */
-type CliProvider = "codex" | "claude" | "copilot";
+type CliProvider = "codex" | "claude" | "copilot" | "cursor";
 
 /** Narrows a ProviderId to those that carry a configurable CLI path setting. */
 function hasCliPath(id: ProviderId): id is CliProvider {
-  return id === "codex" || id === "claude" || id === "copilot";
+  return id === "codex" || id === "claude" || id === "copilot" || id === "cursor";
+}
+
+/** Executable names to try on PATH when no custom CLI path is set (Cursor installs vary by platform). */
+function cliPathLookupBinaries(id: ProviderId): readonly string[] {
+  if (id === "cursor") return ["cursor-agent", "agent"];
+  return [getCatalogEntry(id).cliBinary];
 }
 
 /** Thin shim over `which` + fs so tests can inject stubs. */
@@ -105,12 +111,18 @@ export class ProviderAvailabilityService {
         ? { status: "found", resolvedPath: configured }
         : { status: "not_found", resolvedPath: null };
     } else {
-      try {
-        const resolved = await this.resolver.which(getCatalogEntry(id).cliBinary);
-        result = { status: "found", resolvedPath: resolved };
-      } catch {
-        result = { status: "not_found", resolvedPath: null };
+      let resolved: string | null = null;
+      for (const binary of cliPathLookupBinaries(id)) {
+        try {
+          resolved = await this.resolver.which(binary);
+          break;
+        } catch {
+          /* try next candidate */
+        }
       }
+      result = resolved
+        ? { status: "found", resolvedPath: resolved }
+        : { status: "not_found", resolvedPath: null };
     }
     this.cliCache.set(id, result);
     return result;

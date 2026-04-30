@@ -16,11 +16,14 @@ import { ToolCallRecordRepo } from "./repositories/tool-call-record-repo";
 import { TurnSnapshotRepo } from "./repositories/turn-snapshot-repo";
 import { TaskRepo } from "./repositories/task-repo";
 import { CleanupJobRepo } from "./repositories/cleanup-job-repo";
+import { ModelCacheRepo } from "./repositories/model-cache-repo";
+import { PlanQuestionAnswersRepo } from "./repositories/plan-question-answers-repo";
 
 // Providers
 import { ClaudeProvider } from "./providers/claude/claude-provider";
 import { CodexProvider } from "./providers/codex/codex-provider";
 import { CopilotProvider } from "./providers/copilot/copilot-provider";
+import { CursorProvider } from "./providers/cursor/cursor-provider";
 import { ProviderRegistry } from "./providers/provider-registry";
 
 // Services
@@ -49,6 +52,7 @@ import { PtyPidRegistry } from "./services/pty-pid-registry";
 import { JobObject } from "./services/job-object.js";
 import { WorkspaceEnricher } from "./services/workspace-enricher";
 import { FilesystemBrowser } from "./services/filesystem-browser";
+import { ModelCacheService } from "./services/model-cache-service";
 
 /** Initialize the DI container with all server dependencies. */
 export function setupContainer(mcodeDir: string): typeof container {
@@ -124,6 +128,19 @@ export function setupContainer(mcodeDir: string): typeof container {
   container.register("CleanupJobRepo", {
     useFactory: (c) => c.resolve(CleanupJobRepo),
   });
+  container.register(
+    ModelCacheRepo,
+    { useClass: ModelCacheRepo },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register(
+    PlanQuestionAnswersRepo,
+    { useClass: PlanQuestionAnswersRepo },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register("PlanQuestionAnswersRepo", {
+    useFactory: (c) => c.resolve(PlanQuestionAnswersRepo),
+  });
 
   // Providers
   container.register(
@@ -149,6 +166,14 @@ export function setupContainer(mcodeDir: string): typeof container {
   );
   container.register("IAgentProvider", {
     useFactory: (c) => c.resolve(CopilotProvider),
+  });
+  container.register(
+    CursorProvider,
+    { useClass: CursorProvider },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register("IAgentProvider", {
+    useFactory: (c) => c.resolve(CursorProvider),
   });
 
   // Provider Registry
@@ -260,6 +285,13 @@ export function setupContainer(mcodeDir: string): typeof container {
   container.register(
     ProviderAvailabilityService,
     { useClass: ProviderAvailabilityService },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  // Registered after ProviderRegistry — ModelCacheService depends on
+  // "IProviderRegistry" to fan out refreshAll() to every provider.
+  container.register(
+    ModelCacheService,
+    { useClass: ModelCacheService },
     { lifecycle: Lifecycle.Singleton },
   );
   container.register(

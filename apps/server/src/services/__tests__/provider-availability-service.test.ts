@@ -91,6 +91,49 @@ describe("ProviderAvailabilityService.verifyCli", () => {
     expect(result.resolvedPath).toBeNull();
   });
 
+  it("resolves cursor via cursor-agent when present on PATH", async () => {
+    const which = vi.fn(async () => "/mock/cursor-agent");
+    const svc = new ProviderAvailabilityService(
+      stubSettings(),
+      stubRegistry(["cursor"]),
+      { which, statExecutable: vi.fn() },
+    );
+    const result = await svc.verifyCli("cursor");
+    expect(which).toHaveBeenCalledTimes(1);
+    expect(which).toHaveBeenCalledWith("cursor-agent");
+    expect(result).toEqual({ status: "found", resolvedPath: "/mock/cursor-agent" });
+  });
+
+  it("falls back to agent when cursor-agent is missing", async () => {
+    const which = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("no cursor-agent"))
+      .mockResolvedValueOnce("/usr/local/bin/agent");
+    const svc = new ProviderAvailabilityService(
+      stubSettings(),
+      stubRegistry(["cursor"]),
+      { which, statExecutable: vi.fn() },
+    );
+    const result = await svc.verifyCli("cursor");
+    expect(which).toHaveBeenNthCalledWith(1, "cursor-agent");
+    expect(which).toHaveBeenNthCalledWith(2, "agent");
+    expect(result).toEqual({ status: "found", resolvedPath: "/usr/local/bin/agent" });
+  });
+
+  it("reports not_found for cursor only after both PATH candidates fail", async () => {
+    const which = vi.fn(async () => {
+      throw new Error("not on PATH");
+    });
+    const svc = new ProviderAvailabilityService(
+      stubSettings(),
+      stubRegistry(["cursor"]),
+      { which, statExecutable: vi.fn() },
+    );
+    const result = await svc.verifyCli("cursor");
+    expect(which).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe("not_found");
+  });
+
   it("prefers a configured path over PATH lookup and validates it with statExecutable", async () => {
     const s = getDefaultSettings();
     s.provider.cli.codex = "/custom/codex";

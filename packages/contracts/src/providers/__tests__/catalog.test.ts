@@ -8,10 +8,11 @@ describe("PROVIDER_CATALOG", () => {
     ]);
   });
 
-  it("flags copilot as beta and gemini/cursor/opencode as comingSoon", () => {
+  it("flags copilot and cursor as beta; gemini/opencode remain comingSoon", () => {
     expect(getCatalogEntry("copilot").beta).toBe(true);
+    expect(getCatalogEntry("cursor").beta).toBe(true);
     expect(getCatalogEntry("gemini").comingSoon).toBe(true);
-    expect(getCatalogEntry("cursor").comingSoon).toBe(true);
+    expect(getCatalogEntry("cursor").comingSoon).toBe(false);
     expect(getCatalogEntry("opencode").comingSoon).toBe(true);
   });
 
@@ -19,5 +20,6 @@ describe("PROVIDER_CATALOG", () => {
     expect(getCatalogEntry("claude").cliBinary).toBe("claude");
     expect(getCatalogEntry("codex").cliBinary).toBe("codex");
     expect(getCatalogEntry("copilot").cliBinary).toBe("copilot");
+    expect(getCatalogEntry("cursor").cliBinary).toBe("cursor-agent");
   });
 });

@@ -65,6 +65,15 @@ export const WS_CHANNELS = {
     threadId: z.string(),
     questions: z.array(PlanQuestionSchema),
   }),
+  /**
+   * Emitted after the user submits answers and the plan-questions answered
+   * marker is committed. Lets multi-tab clients on the same thread hide the
+   * wizard without a full reload.
+   */
+  "plan.answered": z.object({
+    threadId: z.string(),
+    assistantMessageId: z.string(),
+  }),
   /** A tool permission request awaiting user decision. */
   "permission.request": PermissionRequestSchema(),
   /** Notification that a permission request has been settled. */

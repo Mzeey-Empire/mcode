@@ -30,6 +30,7 @@ import { ThreadRepo } from "./repositories/thread-repo";
 import { ToolCallRecordRepo } from "./repositories/tool-call-record-repo";
 import { TurnSnapshotRepo } from "./repositories/turn-snapshot-repo";
 import { TaskRepo } from "./repositories/task-repo";
+import { PlanQuestionAnswersRepo } from "./repositories/plan-question-answers-repo";
 import { SnapshotService } from "./services/snapshot-service";
 import { SettingsService } from "./services/settings-service";
 import { GitWatcherService } from "./services/git-watcher-service";
@@ -43,6 +44,7 @@ import { ProviderAvailabilityService } from "./services/provider-availability-se
 import { ProviderRegistry } from "./providers/provider-registry";
 import { WorkspaceEnricher } from "./services/workspace-enricher";
 import { FilesystemBrowser } from "./services/filesystem-browser";
+import { ModelCacheService } from "./services/model-cache-service";
 import { WebSocket } from "ws";
 import { AgentEventType } from "@mcode/contracts";
 import type { AgentEvent } from "@mcode/contracts";
@@ -138,9 +140,11 @@ const gitWatcherService = container.resolve(GitWatcherService);
 const skillWatcherService = container.resolve(SkillWatcherService);
 const memoryPressureService = container.resolve(MemoryPressureService);
 const taskRepo = container.resolve(TaskRepo);
+const planQuestionAnswersRepo = container.resolve(PlanQuestionAnswersRepo);
 const workspaceRepo = container.resolve(WorkspaceRepo); // Used only for startup watcher initialization
 const enricher = container.resolve(WorkspaceEnricher);
 const filesystemBrowser = container.resolve(FilesystemBrowser);
+const modelCacheService = container.resolve(ModelCacheService);
 const cleanupWorker = container.resolve(CleanupWorker);
 const prDraftService = container.resolve(PrDraftService);
 const db = container.resolve<Database.Database>("Database");
@@ -204,6 +208,15 @@ providerAvailability
   .verifyAllEnabled()
   .then(() => {
     broadcast("providers.availability", providerAvailability.listAvailability());
+    // Warm the model cache once after CLI verification has gated which providers
+    // are usable. Triggering this per WS connect would spam refreshes; running
+    // it once at startup is sufficient because ModelCacheService also refreshes
+    // lazily on stale reads (stale-while-revalidate).
+    void modelCacheService.refreshAll().catch((err: unknown) => {
+      logger.warn("Model cache startup refresh failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   })
   .catch((err: unknown) => {
     logger.error("Provider availability startup verification failed", err);
@@ -352,8 +365,10 @@ const { httpServer, wss } = createWsServer({
   gitWatcherService,
   memoryPressureService,
   taskRepo,
+  planQuestionAnswersRepo,
   providerRegistry,
   providerAvailability,
+  modelCacheService,
   prDraftService,
   ciWatcherService,
   threadRepo,

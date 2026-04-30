@@ -34,6 +34,7 @@ import type { MessageRepo } from "../repositories/message-repo";
 import type { ToolCallRecordRepo } from "../repositories/tool-call-record-repo";
 import type { TurnSnapshotRepo } from "../repositories/turn-snapshot-repo";
 import type { TaskRepo } from "../repositories/task-repo";
+import type { PlanQuestionAnswersRepo } from "../repositories/plan-question-answers-repo";
 import type { SnapshotService } from "../services/snapshot-service";
 import type { SettingsService } from "../services/settings-service";
 import type { GitWatcherService } from "../services/git-watcher-service";
@@ -50,6 +51,7 @@ import {
   isProviderAvailabilityError,
 } from "../services/provider-availability-errors.js";
 import type { ProviderAvailabilityService } from "../services/provider-availability-service.js";
+import type { ModelCacheService } from "../services/model-cache-service.js";
 
 /** Service dependencies for the router. */
 export interface RouterDeps {
@@ -72,10 +74,14 @@ export interface RouterDeps {
   /** Manages lifecycle-aware memory pressure (idle timers, SQLite cache, GC). */
   memoryPressureService: MemoryPressureService;
   taskRepo: TaskRepo;
+  /** Repository for the plan-question wizard answered marker (sidecar table). */
+  planQuestionAnswersRepo: PlanQuestionAnswersRepo;
   /** Registry of AI provider adapters for model discovery. */
   providerRegistry: IProviderRegistry;
   /** Tracks per-provider enabled flag and CLI verification state. */
   providerAvailability: ProviderAvailabilityService;
+  /** Stale-while-revalidate cache for provider model lists, backed by SQLite. */
+  modelCacheService: ModelCacheService;
   /** Generates AI-powered PR draft titles and bodies. */
   prDraftService: PrDraftService;
   /** CI check watcher for adaptive polling and manual refresh. */
@@ -425,12 +431,18 @@ async function dispatch(
       return;
 
     // Messages
-    case "message.list":
-      return deps.messageRepo.listByThread(
+    case "message.list": {
+      const paginated = deps.messageRepo.listByThread(
         params.threadId,
         params.limit,
         params.before,
       );
+      return {
+        ...paginated,
+        answeredPlanMessageIds:
+          deps.planQuestionAnswersRepo.listAnsweredForThread(params.threadId),
+      };
+    }
 
     // Files
     case "file.list":
@@ -641,11 +653,9 @@ async function dispatch(
     // Provider
     case "provider.listModels": {
       deps.providerAvailability.assertEnabled(params.providerId);
-      const provider = deps.providerRegistry.resolve(params.providerId);
-      if (!provider.listModels) {
-        throw new Error(`Provider "${params.providerId}" does not support model listing`);
-      }
-      return provider.listModels();
+      // Routed through ModelCacheService so cached entries hydrate the response
+      // synchronously while a background refresh keeps the cache fresh.
+      return deps.modelCacheService.listModels(params.providerId);
     }
     case "provider.getUsage": {
       deps.providerAvailability.assertUsable(params.providerId);

@@ -260,7 +260,7 @@ export interface McodeTransport {
   listToolCallRecordsByParent(parentToolCallId: string): Promise<ToolCallRecord[]>;
 
   /** Fetch persisted task list for a thread (from last TodoWrite). */
-  getThreadTasks(threadId: string): Promise<Array<{ content: string; status: "pending" | "in_progress" | "completed" }> | null>;
+  getThreadTasks(threadId: string): Promise<Array<{ content: string; status: "pending" | "in_progress" | "completed" | "cancelled" }> | null>;
 
   // Snapshots
   /** Get a unified diff for a specific file from a turn snapshot. */

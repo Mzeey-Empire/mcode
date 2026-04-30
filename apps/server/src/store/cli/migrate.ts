@@ -23,9 +23,69 @@ const migrationsDir = join(__dirname, "..", "migrations");
 
 const dbPath = process.env.MCODE_DB_PATH ?? join(getMcodeDir(), "mcode.db");
 
-/** Pads a version number to 3 digits (e.g. 16 -> "016"). */
-function pad(n: number): string {
-  return String(n).padStart(3, "0");
+/**
+ * Generates a 14-character UTC timestamp suitable as a migration ID.
+ * Format: YYYYMMDDHHMMSS (e.g. "20260428192500").
+ */
+function nowTimestamp(): string {
+  return new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14);
+}
+
+/**
+ * Parses a 14-char `YYYYMMDDHHMMSS` UTC timestamp into a Date instance.
+ */
+function timestampToDate(ts: string): Date {
+  const year = parseInt(ts.slice(0, 4), 10);
+  const month = parseInt(ts.slice(4, 6), 10) - 1;
+  const day = parseInt(ts.slice(6, 8), 10);
+  const hour = parseInt(ts.slice(8, 10), 10);
+  const minute = parseInt(ts.slice(10, 12), 10);
+  const second = parseInt(ts.slice(12, 14), 10);
+  return new Date(Date.UTC(year, month, day, hour, minute, second));
+}
+
+/**
+ * Formats a Date as a 14-char `YYYYMMDDHHMMSS` UTC timestamp.
+ */
+function dateToTimestamp(d: Date): string {
+  return d.toISOString().replace(/[-:T]/g, "").slice(0, 14);
+}
+
+/**
+ * Returns the highest existing migration ID (the 14-digit prefix of any
+ * `<id>_<slug>.ts` file) in `migrationsDir`, or `null` if none exist.
+ */
+function highestExistingMigrationId(): string | null {
+  if (!existsSync(migrationsDir)) {
+    return null;
+  }
+  const ids: string[] = [];
+  for (const file of readdirSync(migrationsDir)) {
+    const match = /^(\d{14})_.+\.ts$/.exec(file);
+    if (match) {
+      ids.push(match[1]);
+    }
+  }
+  if (ids.length === 0) {
+    return null;
+  }
+  return ids.reduce((a, b) => (a > b ? a : b));
+}
+
+/**
+ * Returns a migration ID strictly greater than every existing migration ID
+ * in `migrationsDir`. Falls back to `nowTimestamp()` when wall-clock time is
+ * already ahead; otherwise bumps the highest existing ID by 1 second so
+ * lexicographic ordering stays monotonic even if the local clock lags or a
+ * branch with a later timestamp has already been merged.
+ */
+function nextMigrationId(): string {
+  const now = nowTimestamp();
+  const max = highestExistingMigrationId();
+  if (max === null || now > max) {
+    return now;
+  }
+  return dateToTimestamp(new Date(timestampToDate(max).getTime() + 1000));
 }
 
 /** Prints usage instructions and exits with the given code. */
@@ -67,10 +127,10 @@ try {
       }
 
       for (const m of applied) {
-        console.log(`✅ V${pad(m.version)} ${m.name}  (applied: ${m.appliedAt})`);
+        console.log(`✅ V${m.version} ${m.name}  (applied: ${m.appliedAt})`);
       }
       for (const m of pending) {
-        console.log(`⏳ V${pad(m.version)} ${m.name}  [not yet applied]`);
+        console.log(`⏳ V${m.version} ${m.name}  [not yet applied]`);
       }
       break;
     }
@@ -97,7 +157,7 @@ try {
       try {
         const result = runner.up(steps);
         for (const m of result.migrations) {
-          console.log(`✅ V${pad(m.version)} ${m.name}`);
+          console.log(`✅ V${m.version} ${m.name}`);
         }
         console.log(`Done. ${result.applied} migration${result.applied === 1 ? "" : "s"} applied.`);
       } catch (err) {
@@ -128,7 +188,7 @@ try {
       try {
         const result = runner.down(actualSteps);
         for (const m of result.migrations) {
-          console.log(`↩️  V${pad(m.version)} ${m.name}`);
+          console.log(`↩️  V${m.version} ${m.name}`);
         }
         console.log(`Done. ${result.reverted} migration${result.reverted === 1 ? "" : "s"} reverted.`);
       } catch (err) {
@@ -145,17 +205,6 @@ try {
         process.exit(1);
       }
 
-      // Find highest version number from existing migration filenames.
-      const files = existsSync(migrationsDir)
-        ? readdirSync(migrationsDir).filter((f) => /^\d+_/.test(f))
-        : [];
-
-      const highestVersion = files.reduce((max, f) => {
-        const match = f.match(/^(\d+)_/);
-        return match ? Math.max(max, parseInt(match[1], 10)) : max;
-      }, 0);
-
-      const nextVersion = highestVersion + 1;
       const slug = name
         .toLowerCase()
         .replace(/\s+/g, "_")
@@ -166,7 +215,8 @@ try {
         process.exit(1);
       }
 
-      const filename = `${pad(nextVersion)}_${slug}.ts`;
+      const timestamp = nextMigrationId();
+      const filename = `${timestamp}_${slug}.ts`;
       const outputPath = join(migrationsDir, filename);
 
       if (existsSync(outputPath)) {

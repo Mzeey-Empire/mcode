@@ -9,15 +9,21 @@ interface TaskPanelHeaderProps {
 
 /**
  * Compact progress header for the task panel.
- * Shows per-task status dots (completed/active/pending) with a fraction counter.
+ * Shows per-task status dots (completed/active/cancelled/pending) with a fraction counter.
  * Falls back to a progress bar when there are more than 24 tasks.
+ *
+ * Cancelled tasks count as "settled" alongside completed for the all-done /
+ * progress calculation (a dropped task is no longer pending work), but render
+ * with a distinct dimmed tick so the visual ledger still distinguishes them.
  */
 export function TaskPanelHeader({ tasks }: TaskPanelHeaderProps) {
   const completed = tasks.filter((t) => t.status === "completed").length;
+  const cancelled = tasks.filter((t) => t.status === "cancelled").length;
+  const settled = completed + cancelled;
   const total = tasks.length;
   const hasActive = tasks.some((t) => t.status === "in_progress");
-  const allDone = total > 0 && completed === total;
-  const pct = total > 0 ? (completed / total) * 100 : 0;
+  const allDone = total > 0 && settled === total;
+  const pct = total > 0 ? (settled / total) * 100 : 0;
 
   if (total === 0) return null;
 
@@ -38,7 +44,9 @@ export function TaskPanelHeader({ tasks }: TaskPanelHeaderProps) {
                       ? "bg-[var(--diff-add-strong)]/65"
                       : task.status === "in_progress"
                         ? "bg-primary animate-pulse"
-                        : "bg-muted-foreground/20"
+                        : task.status === "cancelled"
+                          ? "bg-muted-foreground/35"
+                          : "bg-muted-foreground/20"
                   }`}
                 />
               ))}
@@ -68,14 +76,20 @@ export function TaskPanelHeader({ tasks }: TaskPanelHeaderProps) {
                       : "text-muted-foreground/55"
                 }`}
               >
-                <span className="font-medium">{completed}</span>
+                <span className="font-medium">{settled}</span>
                 <span className="text-muted-foreground/30">/</span>
                 {total}
               </span>
             }
           />
           <TooltipContent side="top" className="text-xs">
-            {allDone ? "All tasks completed" : `${completed} of ${total} tasks completed`}
+            {allDone
+              ? cancelled > 0
+                ? `All tasks settled (${completed} completed, ${cancelled} cancelled)`
+                : "All tasks completed"
+              : cancelled > 0
+                ? `${completed} completed, ${cancelled} cancelled, ${total - settled} remaining`
+                : `${completed} of ${total} tasks completed`}
           </TooltipContent>
         </Tooltip>
       </div>

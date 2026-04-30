@@ -1,5 +1,6 @@
 import { useSettingsStore } from "@/stores/settingsStore";
-import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts";
+import { CURSOR_STATIC_MODEL_FALLBACK } from "@mcode/contracts";
+import type { ContextWindowMode, ProviderId, ReasoningLevel } from "@mcode/contracts";
 import {
   MODEL_CONTEXT_WINDOWS_DEFAULT,
   getModelContextWindow as sharedGetModelContextWindow,
@@ -137,8 +138,15 @@ export const MODEL_PROVIDERS: readonly ModelProvider[] = [
   {
     id: "cursor",
     name: "Cursor",
-    comingSoon: true,
-    models: [],
+    comingSoon: false,
+    supportsModelListing: true,
+    // Minimal static fallback — live list comes from listProviderModels (`cursor-agent models`).
+    models: CURSOR_STATIC_MODEL_FALLBACK.map((m) => ({
+      id: m.id,
+      label: m.name,
+      providerId: "cursor",
+      group: m.group,
+    })),
   },
   {
     id: "opencode",
@@ -260,6 +268,33 @@ export function getModelContextWindow(
   mode: ContextWindowMode = "200k",
 ): number | undefined {
   return sharedGetModelContextWindow(modelId, mode);
+}
+
+/**
+ * Providers whose backends do **not** accept a per-call reasoning-effort
+ * parameter. The Composer hides the reasoning pill for these providers
+ * regardless of the active model id (cursor models, for example, can share
+ * an id with a provider that does expose effort tiers, so a model-only
+ * check would surface the pill incorrectly).
+ *
+ * Add a provider id here when integrating a backend that picks reasoning
+ * effort internally (cursor's Composer mode, hosted assistants without an
+ * exposed effort knob, etc.). Entries are matched by exact `ProviderId`.
+ */
+export const PROVIDERS_WITHOUT_REASONING_LEVELS: ReadonlySet<ProviderId> = new Set<ProviderId>([
+  "cursor",
+  "copilot",
+]);
+
+/**
+ * Returns true when the given provider exposes a reasoning-effort knob
+ * that the Composer should surface. Falls back to `true` for unknown
+ * provider strings so newly added providers default to "show the pill",
+ * forcing an opt-out via {@link PROVIDERS_WITHOUT_REASONING_LEVELS}.
+ */
+export function providerSupportsReasoningLevels(provider: ProviderId | string | undefined): boolean {
+  if (!provider) return true;
+  return !PROVIDERS_WITHOUT_REASONING_LEVELS.has(provider as ProviderId);
 }
 
 /**

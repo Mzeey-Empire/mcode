@@ -11,8 +11,8 @@ import type { ProviderAvailability, ProviderId } from "@mcode/contracts";
 import { ConfirmDisableDialog } from "./ConfirmDisableDialog";
 
 /** Provider IDs that expose a CLI path input field. */
-type CliProvider = "claude" | "codex" | "copilot";
-const HAS_CLI_INPUT: readonly CliProvider[] = ["claude", "codex", "copilot"];
+type CliProvider = "claude" | "codex" | "copilot" | "cursor";
+const HAS_CLI_INPUT: readonly CliProvider[] = ["claude", "codex", "copilot", "cursor"];
 
 /** Narrows a ProviderId to those that have an editable CLI path setting. */
 function hasCliInput(id: ProviderId): id is CliProvider {
