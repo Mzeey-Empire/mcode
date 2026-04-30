@@ -39,6 +39,24 @@ describe("mapCursorAcpSessionNotification", () => {
     expect(state.accumulator.assistantText).toBe("Hi there");
   });
 
+  it("maps agent_thought_chunk to TextDelta like message chunks", () => {
+    const state = createCursorAcpTurnState();
+    const ev = mapCursorAcpSessionNotification(
+      {
+        sessionId: "s",
+        update: {
+          sessionUpdate: "agent_thought_chunk",
+          content: { type: "text", text: "Thinking out loud..." },
+        },
+      },
+      threadId,
+      state,
+    );
+    expect(ev).toEqual([
+      { type: AgentEventType.TextDelta, threadId, delta: "Thinking out loud..." },
+    ]);
+  });
+
   it("maps tool_call_update to ToolResult", () => {
     const state = createCursorAcpTurnState();
     mapCursorAcpSessionNotification(

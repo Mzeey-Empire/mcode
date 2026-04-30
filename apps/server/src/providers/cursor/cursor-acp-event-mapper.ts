@@ -62,13 +62,9 @@ export function mapCursorAcpSessionNotification(
   const acc = state.accumulator;
 
   switch (update.sessionUpdate) {
-    case "agent_message_chunk": {
-      if (update.content.type !== "text" || !update.content.text) return [];
-      const text = update.content.text;
-      acc.assistantText += text;
-      return [{ type: AgentEventType.TextDelta, threadId, delta: text }];
-    }
+    case "agent_message_chunk":
     case "agent_thought_chunk":
+      return mapAgentLanguageChunk(threadId, acc, update);
     case "user_message_chunk":
     case "plan":
     case "available_commands_update":
@@ -84,6 +80,27 @@ export function mapCursorAcpSessionNotification(
     default:
       return [];
   }
+}
+
+/**
+ * Normal assistant text uses `agent_message_chunk`, but Cursor streams some models
+ * (e.g. composer) as `agent_thought_chunk` only. Map both so the UI receives TextDelta.
+ */
+function mapAgentLanguageChunk(
+  threadId: string,
+  acc: CursorStreamAccumulator,
+  update:
+    | (import("@agentclientprotocol/sdk").ContentChunk & {
+        sessionUpdate: "agent_message_chunk";
+      })
+    | (import("@agentclientprotocol/sdk").ContentChunk & {
+        sessionUpdate: "agent_thought_chunk";
+      }),
+): AgentEvent[] {
+  if (update.content.type !== "text" || !update.content.text) return [];
+  const text = update.content.text;
+  acc.assistantText += text;
+  return [{ type: AgentEventType.TextDelta, threadId, delta: text }];
 }
 
 function extractToolCallDiscriminator(toolCall: Record<string, unknown> | undefined): {
