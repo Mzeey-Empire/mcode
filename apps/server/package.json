@@ -11,6 +11,7 @@
     "db:migrate": "bun src/store/cli/migrate.ts"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^0.21.0",
     "@anthropic-ai/claude-agent-sdk": "*",
     "@github/copilot-sdk": "^0.2.2",
     "@mcode/contracts": "workspace:*",
