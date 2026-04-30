@@ -129,7 +129,15 @@ export class CursorAcpSession {
    * @param model - Optional model id override when supported by Cursor CLI.
    */
   async sendPrompt(text: string, model?: string): Promise<{ assistantText: string }> {
-    if (!this.rpc || !this.acpSessionId) {
+    // Capture the RPC client and session id at the start of the turn. A
+    // concurrent `kill()` (user-initiated stop, idle eviction, shutdown) sets
+    // `this.rpc = null` while the pending `session/prompt` is still being
+    // awaited. Using `this.rpc` in the finally block would then NPE and
+    // mask the real cancellation error. EventEmitter.off is safe on a
+    // disposed client, so the captured local ref is the right cleanup target.
+    const rpc = this.rpc;
+    const sid = this.acpSessionId;
+    if (!rpc || !sid) {
       throw new Error("Cursor ACP session not initialized");
     }
 
@@ -142,19 +150,19 @@ export class CursorAcpSession {
       }
     };
 
-    this.rpc.on("notification", onNotification);
+    rpc.on("notification", onNotification);
     try {
-      await this.rpc.sendRequest(
+      await rpc.sendRequest(
         "session/prompt",
         {
-          sessionId: this.acpSessionId,
+          sessionId: sid,
           prompt: [{ type: "text", text }],
           ...(model ? { model } : {}),
         },
         PROMPT_RPC_TIMEOUT_MS,
       );
     } finally {
-      this.rpc.off("notification", onNotification);
+      rpc.off("notification", onNotification);
     }
 
     return { assistantText: acc.assistantText };
