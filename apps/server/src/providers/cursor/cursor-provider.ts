@@ -26,6 +26,7 @@ import {
 } from "@agentclientprotocol/sdk";
 
 import { SettingsService } from "../../services/settings-service.js";
+import { SkillService } from "../../services/skill-service.js";
 import {
   AgentEventType,
   CURSOR_STATIC_MODEL_FALLBACK,
@@ -46,6 +47,11 @@ import { createCursorTodoSnapshot, type CursorTodoSnapshot } from "./cursor-todo
 import { fetchCursorCliModels } from "./cursor-cli-models.js";
 import { buildCursorAcpArgs } from "./cursor-acp-spawn-args.js";
 import { buildCursorAcpPromptBlocks } from "./cursor-acp-prompt.js";
+import {
+  buildCursorAgentGuidanceMarkdown,
+  formatCursorSkillsAndCommandsForPrompt,
+} from "./cursor-agent-guidance.js";
+import { readCursorUserInstructions } from "./cursor-prompt.js";
 import {
   createCursorAcpTurnState,
   mapCursorAcpSessionNotification,
@@ -99,6 +105,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
 
   constructor(
     @inject(SettingsService) private readonly settingsService: SettingsService,
+    @inject(SkillService) private readonly skillService: SkillService,
   ) {
     super();
   }
@@ -305,7 +312,9 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     const inp = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
     const stream = ndJsonStream(out, inp);
 
-    const shell: Omit<CursorAcpSessionEntry, "connection"> = {
+    const entry: Omit<CursorAcpSessionEntry, "connection"> & {
+      connection?: CursorAcpSessionEntry["connection"];
+    } = {
       mcodeSessionId,
       threadId,
       child,
@@ -318,12 +327,12 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       activeTurnState: null,
     };
 
-    const connection = new ClientSideConnection(
-      () => this.buildAcpClient(shell as CursorAcpSessionEntry),
+    entry.connection = new ClientSideConnection(
+      () => this.buildAcpClient(entry as CursorAcpSessionEntry),
       stream,
-    );
+    ) as CursorAcpSessionEntry["connection"];
 
-    const entry = { ...shell, connection } as CursorAcpSessionEntry;
+    const connection = entry.connection;
 
     child.stderr?.on("data", (chunk: Buffer) => {
       for (const line of chunk.toString().split("\n")) {
@@ -346,7 +355,8 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     });
 
     const authMethods = initResult.authMethods ?? [];
-    const methodId = authMethods[0]?.id;
+    const methodId =
+      authMethods.find((m) => m.id === "cursor_login")?.id ?? authMethods[0]?.id;
     if (methodId) {
       await connection.authenticate({ methodId }).catch((err: unknown) => {
         logger.info("Cursor ACP authenticate noop", {
@@ -356,7 +366,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       });
     }
 
-    return entry;
+    return entry as CursorAcpSessionEntry;
   }
 
   private buildAcpClient(entry: CursorAcpSessionEntry): Client {
@@ -367,6 +377,29 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       writeTextFile: async (r) => {
         this.safeWriteWorkspaceFile(entry.cwd, r.path, r.content);
         return {};
+      },
+      extMethod: async (method, params) => {
+        void params;
+        if (method === "cursor/ask_question") {
+          return {
+            outcome: {
+              outcome: "skipped",
+              reason: "Mcode ACP client does not surface interactive questions.",
+            },
+          };
+        }
+        if (method === "cursor/create_plan") {
+          return { outcome: { outcome: "accepted" } };
+        }
+        logger.debug("Cursor ACP extMethod unhandled", {
+          threadId: entry.threadId,
+          method,
+        });
+        return {};
+      },
+      extNotification: async (method, params) => {
+        void method;
+        void params;
       },
     };
   }
@@ -524,7 +557,18 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       await this.openLogicalSession(entry, resume);
       await this.applyModel(entry, model);
 
-      const blocks = buildCursorAcpPromptBlocks(message, attachments);
+      const guidance = buildCursorAgentGuidanceMarkdown(entry.cwd);
+      const skillsBlock = formatCursorSkillsAndCommandsForPrompt(
+        this.skillService.list(entry.cwd, "cursor"),
+      );
+      const instructionParts = [guidance, skillsBlock].filter(
+        (s): s is string => typeof s === "string" && s.length > 0,
+      );
+      const instructions =
+        instructionParts.length > 0
+          ? instructionParts.join("\n\n---\n\n")
+          : readCursorUserInstructions();
+      const blocks = buildCursorAcpPromptBlocks(message, attachments, instructions);
       const promptResponse = await entry.connection.prompt({
         sessionId: entry.acpSessionId,
         prompt: blocks,

@@ -17,7 +17,8 @@ import {
  *
  * @param message - User-visible message for this turn (may include branch replay text).
  * @param attachments - Persisted attachment metadata with `sourcePath` for images.
- * @param userInstructions - Optional AGENTS.md contents; defaults to {@link readCursorUserInstructions}.
+ * @param userInstructions - Precomposed instructions string (layered AGENTS files, skill index).
+ * When omitted, falls back to {@link readCursorUserInstructions} (~/.cursor/AGENTS.md only).
  */
 export function buildCursorAcpPromptBlocks(
   message: string,
