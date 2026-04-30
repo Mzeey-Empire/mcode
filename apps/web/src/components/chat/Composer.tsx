@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { getDefaultModelId, getDefaultReasoningLevel, getDefaultProviderId, findModelById, isMaxEffortModel, isXhighEffortModel, supportsEffortParameter, supportsUltrathink, supports1MContextWindow, supportsThinkingToggle, resolveThreadModelId, normalizeReasoningLevelForModel, getCodexReasoningLevels } from "@/lib/model-registry";
+import { getDefaultModelId, getDefaultReasoningLevel, getDefaultProviderId, findModelById, isMaxEffortModel, isXhighEffortModel, supportsEffortParameter, supportsUltrathink, supports1MContextWindow, supportsThinkingToggle, resolveThreadModelId, normalizeReasoningLevelForModel, getCodexReasoningLevels, providerSupportsReasoningLevels } from "@/lib/model-registry";
 import { ModelSelector } from "./ModelSelector";
 import { ModeSelector, ALL_MODE_OPTIONS } from "./ModeSelector";
 import type { ComposerMode, ModeOption } from "./ModeSelector";
@@ -1321,6 +1321,11 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const toast = useQueueStore((s) => s.toast);
 
   const reasoningLevels = useMemo<ReasoningLevel[]>(() => {
+    // Some providers pick reasoning effort internally (e.g. cursor's
+    // Composer mode) and have no per-call knob to surface. Hide the pill
+    // entirely for those — a model-id-only check would mis-fire when a
+    // model id is shared across providers.
+    if (!providerSupportsReasoningLevels(provider)) return [];
     // Gate on provider to prevent Copilot models sharing Codex IDs from taking Codex branch.
     const codexLvls = provider === "codex" ? getCodexReasoningLevels(modelId) : null;
     if (codexLvls) {
