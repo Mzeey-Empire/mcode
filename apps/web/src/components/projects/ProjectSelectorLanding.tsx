@@ -26,7 +26,10 @@ export function ProjectSelectorLanding() {
   const removeRecent = useWorkspaceStore((s) => s.removeRecent);
   const pinned = useMemo(() => workspaces.filter((w) => w.pinned), [workspaces]);
   const recent = useMemo(
-    () => workspaces.filter((w) => !w.pinned && w.last_opened_at != null),
+    () =>
+      workspaces
+        .filter((w) => !w.pinned && w.last_opened_at != null)
+        .slice(0, 5),
     [workspaces],
   );
   const hasProjects = pinned.length > 0 || recent.length > 0;
@@ -172,7 +175,7 @@ export function ProjectSelectorLanding() {
           {recent.length > 0 && (
             <section className="mb-6">
               <h2 className="mb-2 px-1 font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/70">
-                Recent
+                Recent Projects
               </h2>
               {recent.map((w) => (
                 <ProjectRow
