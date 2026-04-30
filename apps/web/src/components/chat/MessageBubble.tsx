@@ -7,6 +7,18 @@ import { stripInjectedFiles } from "@/lib/file-tags";
 import { isHandoffMessage, parseHandoffJson } from "./handoff-utils";
 import { HandoffCard } from "./HandoffCard";
 
+/**
+ * Returns true when the assistant message body collapses to nothing visible
+ * after stripping content that other components render (the plan-questions
+ * fenced block is consumed by the wizard, so it must not also leave behind
+ * an empty assistant bubble — which is what cursor-agent's strict "Output
+ * ONLY the plan-questions block" obedience produces).
+ */
+function isAssistantContentEmpty(content: string): boolean {
+  const withoutPlanQuestions = content.replace(/```plan-questions\n[\s\S]*?```/g, "");
+  return withoutPlanQuestions.trim().length === 0;
+}
+
 /** Parses the message content of a synthetic agent-error system message. Returns the error text, or null if not an agent error. */
 function parseAgentError(content: string): string | null {
   try {
@@ -231,6 +243,14 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch }: 
         </div>
       </div>
     );
+  }
+
+  // Assistant body that collapses to nothing visible (e.g. cursor-agent's
+  // plan-mode output is exclusively a `plan-questions` fenced block, which
+  // the markdown renderer suppresses). Skip the bubble entirely so the
+  // wizard alone represents that turn instead of a stray empty header.
+  if (isAssistantContentEmpty(message.content)) {
+    return null;
   }
 
   // Assistant message — borderless prose flowing directly on the page

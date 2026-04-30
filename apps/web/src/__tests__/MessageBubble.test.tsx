@@ -47,3 +47,65 @@ describe("MessageBubble user messages", () => {
     });
   });
 });
+
+describe("MessageBubble assistant plan-questions suppression", () => {
+  const makeAssistantMessage = (content: string) => ({
+    id: "msg-asst",
+    thread_id: "thread-1",
+    role: "assistant" as const,
+    content,
+    timestamp: new Date().toISOString(),
+    attachments: [],
+    cost_usd: null,
+    tokens_used: null,
+    sequence: 2,
+  });
+
+  it("renders nothing when the assistant body is exclusively a plan-questions block", () => {
+    const planQuestionsOnly = [
+      "```plan-questions",
+      JSON.stringify([
+        {
+          id: "q1",
+          category: "ARCHITECTURE",
+          question: "Which approach?",
+          options: [
+            { id: "o1", title: "A", description: "First" },
+            { id: "o2", title: "B", description: "Second" },
+          ],
+        },
+      ]),
+      "```",
+    ].join("\n");
+
+    const { container } = render(
+      <MessageBubble message={makeAssistantMessage(planQuestionsOnly)} />,
+    );
+    // The wizard renders the questions; an empty assistant bubble must not show
+    // up as a stray ASSISTANT header with no body.
+    expect(container.textContent ?? "").not.toMatch(/assistant/i);
+    expect(container.querySelector("[data-testid='markdown-content']")).toBeNull();
+  });
+
+  it("still renders the assistant bubble when prose surrounds the plan-questions block", () => {
+    const mixed = [
+      "Here are some questions:",
+      "```plan-questions",
+      "[]",
+      "```",
+      "Let me know.",
+    ].join("\n");
+
+    const { container } = render(
+      <MessageBubble message={makeAssistantMessage(mixed)} />,
+    );
+    expect(container.querySelector("[data-testid='markdown-content']")).not.toBeNull();
+  });
+
+  it("renders nothing when the assistant body is only whitespace", () => {
+    const { container } = render(
+      <MessageBubble message={makeAssistantMessage("   \n  \n")} />,
+    );
+    expect(container.textContent ?? "").not.toMatch(/assistant/i);
+  });
+});
