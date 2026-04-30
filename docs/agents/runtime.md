@@ -9,13 +9,15 @@ Read it before starting any work. Run `bun run doctor` to verify your environmen
 
 | Command | What it starts |
 |---------|---------------|
-| `bun run dev:web` | Vite frontend + backend server (web-only, no Electron needed) |
+| `bun run dev:web` | Vite frontend + bundled backend under Electron's Node (no Electron window) |
 | `bun run dev:desktop` | Full Electron desktop app |
-| `bun run dev:server` | Backend server only (no frontend) |
+| `bun run dev:server` | Backend server only (no frontend): `bun src/index.ts` |
 
-**For most development work, use `bun run dev:web`.** It starts the server under
-Electron's Node.js (required for the `better-sqlite3` native module ABI) and Vite
-together. No Electron binary is needed.
+**For most development work, use `bun run dev:web`.** It builds the server bundle
+into `apps/desktop/dist/server/server.cjs` on startup (`scripts/build-server-dev-bundle.mjs`),
+then runs it under Electron's Node.js (`ELECTRON_RUN_AS_NODE=1`) so `better-sqlite3` matches
+Electron's ABI, and starts Vite. The Electron **package** must be installed (`bun install`);
+no Electron window is opened.
 
 Use `bun run dev:desktop` only when testing Electron-specific behavior (native IPC,
 tray, window management).

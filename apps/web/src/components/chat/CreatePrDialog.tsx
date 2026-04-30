@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from "react";
 import { Loader2, GitPullRequest, GitBranch, ChevronDown, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -20,11 +20,12 @@ import {
 } from "@/components/ui/command";
 import { Switch } from "@/components/ui/switch";
 import { SegControl } from "@/components/settings/SegControl";
-import { MarkdownContent } from "./MarkdownContent";
 import { getTransport } from "@/transport";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useToastStore } from "@/stores/toastStore";
 import type { GitBranch as GitBranchType } from "@mcode/contracts";
+
+const PreviewMarkdown = lazy(() => import("./MarkdownContent"));
 
 // ---------------------------------------------------------------------------
 // BaseBranchSelect — searchable local-branch picker for the PR dialog sidebar
@@ -424,7 +425,9 @@ export function CreatePrDialog({
                     className="flex-1 min-h-0 overflow-y-auto rounded-lg border border-input bg-background px-3 py-2.5 text-sm"
                   >
                     {body.trim() ? (
-                      <MarkdownContent content={body} />
+                    <Suspense fallback={<span className="text-muted-foreground text-sm">Loading preview…</span>}>
+                      <PreviewMarkdown content={body} />
+                    </Suspense>
                     ) : (
                       <span className="text-muted-foreground italic">Nothing to preview.</span>
                     )}

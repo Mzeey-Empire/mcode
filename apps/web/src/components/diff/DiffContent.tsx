@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { useDiffStore } from "@/stores/diffStore";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { getTransport } from "@/transport";
 import { parseDiffLines } from "@/lib/diff-parser";
 import { langFromPath } from "@/lib/lang-from-path";
@@ -31,7 +32,6 @@ export function DiffContent() {
         } else if (selectedFile.source === "cumulative") {
           result = await transport.getCumulativeDiff(selectedFile.id, selectedFile.filePath);
         } else {
-          const { useWorkspaceStore } = await import("@/stores/workspaceStore");
           const workspaceId = useWorkspaceStore.getState().activeWorkspaceId;
           result = workspaceId
             ? await transport.getCommitDiff(workspaceId, selectedFile.id, selectedFile.filePath)

@@ -354,14 +354,14 @@ describe("ServerManager", () => {
   // Packaged vs dev entry path branching
   // -----------------------------------------------------------------------
 
-  it("spawns the dev index.ts with --import tsx when app.isPackaged is false", async () => {
+  it("spawns the bundled server.cjs without ts-loader when app.isPackaged is false", async () => {
     await manager.start();
 
     const spawnCall = vi.mocked(spawn).mock.calls[0];
     const args = spawnCall[1] as string[];
-    expect(args.join(" ")).toContain("index.ts");
-    expect(args).toContain("--import");
-    expect(args).toContain("tsx");
+    expect(args.some((arg) => arg.includes("dist") && arg.includes("server") && arg.endsWith("server.cjs"))).toBe(true);
+    expect(args.join(" ")).not.toContain("tsx");
+    expect(args.join(" ")).not.toContain("--import");
   });
 
   it("sets ELECTRON_RUN_AS_NODE=1 in the server child process env", async () => {

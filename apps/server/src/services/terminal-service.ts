@@ -21,7 +21,7 @@ import type { GitService } from "./git-service";
 import type { SettingsService } from "./settings-service";
 
 // createRequire lets us load native CJS modules (node-pty) from both ESM
-// (dev mode via entry.mjs + tsx) and the CJS production bundle.
+// (Bun running `src/index.ts`) and the CJS production / dev bundle.
 const _require = createRequire(import.meta.url);
 
 /**

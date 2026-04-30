@@ -23,6 +23,7 @@ import { initShortcuts } from "@/lib/shortcuts";
 import { registerCommand } from "@/lib/command-registry";
 import { setContext } from "@/lib/context-tracker";
 import { startPushListeners, stopPushListeners } from "@/transport/ws-events";
+import { getTransport } from "@/transport";
 import { useIdleReclamation } from "@/hooks/useIdleReclamation";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ToastContainer } from "@/components/Toast";
@@ -190,7 +191,7 @@ export function App() {
             const terminals = store.terminals[tid];
             if (!terminals || terminals.length === 0) {
               terminalCreationInFlight.add(tid);
-              import("@/transport").then(({ getTransport }) => {
+              try {
                 const transport = getTransport();
                 transport
                   .terminalCreate(tid)
@@ -215,7 +216,9 @@ export function App() {
                   .catch(() => {
                     terminalCreationInFlight.delete(tid);
                   });
-              });
+              } catch {
+                terminalCreationInFlight.delete(tid);
+              }
             }
           }
         },

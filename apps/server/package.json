@@ -5,10 +5,10 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
-    "start": "node --import tsx src/index.ts",
+    "start": "bun src/index.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "db:migrate": "node --import tsx src/store/cli/migrate.ts"
+    "db:migrate": "bun src/store/cli/migrate.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "*",
@@ -19,7 +19,6 @@
     "koffi": "^2.16.1",
     "node-pty": "^1.0.0",
     "reflect-metadata": "^0.2.2",
-    "tsx": "^4.19.0",
     "tsyringe": "^4.8.0",
     "uuid": "^11.1.0",
     "which": "^5.0.0",
@@ -28,6 +27,7 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@types/node": "^22.19.17",
     "@types/better-sqlite3": "^7.6.12",
     "@types/uuid": "^10.0.0",
     "@types/which": "^3.0.4",
