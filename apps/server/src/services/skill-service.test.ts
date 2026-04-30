@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, utimesSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { SkillService } from "./skill-service.js";
@@ -288,6 +288,136 @@ describe("SkillService", () => {
       expect(cmd).toBeDefined();
       expect(cmd!.kind).toBe("command");
       expect(cmd!.providers).toEqual(["codex"]);
+    });
+
+    it("tags skills from ~/.cursor/skills with providers=['cursor']", () => {
+      const skillDir = join(fakeHome, ".cursor", "skills", "my-cursor-skill");
+      mkdirSync(skillDir, { recursive: true });
+      writeMd(join(skillDir, "SKILL.md"), { description: "Cursor user skill" });
+
+      const items = new SkillService().list(undefined, "cursor");
+      const skill = items.find((i) => i.name === "my-cursor-skill");
+      expect(skill).toMatchObject({
+        kind: "skill",
+        source: "user",
+        description: "Cursor user skill",
+        providers: ["cursor"],
+      });
+    });
+
+    it("tags commands from ~/.cursor/commands with providers=['cursor']", () => {
+      const cmdDir = join(fakeHome, ".cursor", "commands");
+      mkdirSync(cmdDir, { recursive: true });
+      writeMd(join(cmdDir, "lint.md"), { description: "Cursor lint command" });
+
+      const items = new SkillService().list(undefined, "cursor");
+      const cmd = items.find((i) => i.name === "lint");
+      expect(cmd).toMatchObject({
+        kind: "command",
+        source: "user",
+        description: "Cursor lint command",
+        providers: ["cursor"],
+      });
+    });
+
+    it("scans project-level <cwd>/.cursor/skills and commands for cursor", () => {
+      const cwd = tmp();
+      try {
+        const skillDir = join(cwd, ".cursor", "skills", "proj-skill");
+        mkdirSync(skillDir, { recursive: true });
+        writeMd(join(skillDir, "SKILL.md"), { description: "Project cursor skill" });
+
+        const cmdDir = join(cwd, ".cursor", "commands");
+        mkdirSync(cmdDir, { recursive: true });
+        writeMd(join(cmdDir, "ship.md"), { description: "Ship it" });
+
+        const items = new SkillService().list(cwd, "cursor");
+        expect(items.find((i) => i.name === "proj-skill")).toMatchObject({
+          kind: "skill",
+          source: "project",
+          providers: ["cursor"],
+        });
+        expect(items.find((i) => i.name === "ship")).toMatchObject({
+          kind: "command",
+          source: "project",
+          providers: ["cursor"],
+        });
+      } finally {
+        rmSync(cwd, { recursive: true, force: true });
+      }
+    });
+
+    it("cursor plugin cache: scans newest hash dir by mtime, not lexical order", () => {
+      const pluginRoot = join(fakeHome, ".cursor", "plugins", "cache", "mp", "myplug");
+      /** Lexically last — would win if we wrongly sorted by name instead of mtime. */
+      const dirStaleLexLast = join(pluginRoot, "zebra-hash");
+      /** Lexically first — must win because its mtime is newest. */
+      const dirFreshLexFirst = join(pluginRoot, "apple-hash");
+      mkdirSync(join(dirStaleLexLast, "skills", "deploy"), { recursive: true });
+      mkdirSync(join(dirFreshLexFirst, "skills", "deploy"), { recursive: true });
+      writeMd(join(dirStaleLexLast, "skills", "deploy", "SKILL.md"), {
+        description: "Stale plugin skill",
+      });
+      writeMd(join(dirFreshLexFirst, "skills", "deploy", "SKILL.md"), {
+        description: "Fresh plugin skill",
+      });
+
+      utimesSync(dirStaleLexLast, new Date("2020-06-01"), new Date("2020-06-01"));
+      utimesSync(dirFreshLexFirst, new Date("2025-06-01"), new Date("2025-06-01"));
+
+      const items = new SkillService().list(undefined, "cursor");
+      const deploy = items.find((i) => i.name === "myplug:deploy");
+      expect(deploy).toMatchObject({
+        kind: "skill",
+        source: "plugin",
+        description: "Fresh plugin skill",
+        providers: ["cursor"],
+      });
+    });
+
+    it("cursor plugin cache: scans workflow-skills alongside skills/", () => {
+      const wfDir = join(
+        fakeHome,
+        ".cursor",
+        "plugins",
+        "local",
+        "mp",
+        "wfplug",
+        "hash1",
+        "workflow-skills",
+        "analyze",
+      );
+      mkdirSync(wfDir, { recursive: true });
+      writeMd(join(wfDir, "SKILL.md"), { description: "Workflow skill" });
+
+      const items = new SkillService().list(undefined, "cursor");
+      expect(items.find((i) => i.name === "wfplug:analyze")).toMatchObject({
+        kind: "skill",
+        source: "plugin",
+        providers: ["cursor"],
+      });
+    });
+
+    it("cursor plugin skills under .cursor/skills are tagged for cursor provider", () => {
+      const skillDir = join(
+        fakeHome,
+        ".cursor",
+        "plugins",
+        "cache",
+        "mp",
+        "native",
+        "v1",
+        ".cursor",
+        "skills",
+        "native-skill",
+      );
+      mkdirSync(skillDir, { recursive: true });
+      writeMd(join(skillDir, "SKILL.md"), { description: "Native cursor plugin layout" });
+
+      const items = new SkillService().list(undefined, "cursor");
+      expect(items.find((i) => i.name === "native:native-skill")).toMatchObject({
+        providers: ["cursor"],
+      });
     });
 
     it("plugin .agents/skills/ is NOT exposed to non-Claude providers", () => {
