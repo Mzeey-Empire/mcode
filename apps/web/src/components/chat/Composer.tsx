@@ -19,6 +19,8 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { isWindows } from "@/lib/platform";
+import { isCursorPermissionLockedToFull } from "@/lib/cursor-permission";
 import { getDefaultModelId, getDefaultReasoningLevel, getDefaultProviderId, findModelById, isMaxEffortModel, isXhighEffortModel, supportsEffortParameter, supportsUltrathink, supports1MContextWindow, supportsThinkingToggle, resolveThreadModelId, normalizeReasoningLevelForModel, getCodexReasoningLevels, providerSupportsReasoningLevels } from "@/lib/model-registry";
 import { ModelSelector } from "./ModelSelector";
 import { ModeSelector, ALL_MODE_OPTIONS } from "./ModeSelector";
@@ -103,12 +105,20 @@ function ComposerOptionsMenu({
   threadId,
   mode,
   access,
+  permissionLocked,
   onModeChange,
   onAccessChange,
 }: {
   threadId?: string;
   mode: InteractionMode;
   access: PermissionMode;
+  /**
+   * When true, the permission toggle is hidden and Full access is shown
+   * as a non-interactive badge. Set for cursor on Windows because
+   * cursor-agent --print has no interactive permission flow and the OS
+   * sandbox is unavailable on Windows. See {@link isCursorPermissionLockedToFull}.
+   */
+  permissionLocked: boolean;
   onModeChange: (next: InteractionMode) => void;
   onAccessChange: (next: PermissionMode) => void;
 }) {
@@ -180,38 +190,51 @@ function ComposerOptionsMenu({
         <div className="px-1.5 pt-1 pb-1.5 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70">
           Permissions
         </div>
-        <div className={cn("flex rounded-md bg-muted/40 p-0.5", hasTasks && "mb-2")}>
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={() => onAccessChange(PERMISSION_MODES.FULL)}
-            aria-pressed={access === PERMISSION_MODES.FULL}
+        {permissionLocked ? (
+          <div
             className={cn(
-              "h-auto flex-1 gap-1.5 rounded-[5px] px-2 py-1 text-xs font-medium hover:bg-transparent",
-              access === PERMISSION_MODES.FULL
-                ? "bg-background text-foreground shadow-sm hover:bg-background"
-                : "text-muted-foreground hover:text-foreground",
+              "flex items-center gap-1.5 rounded-md bg-muted/40 px-2 py-1.5 text-xs font-medium text-muted-foreground",
+              hasTasks && "mb-2",
             )}
+            title="Cursor on Windows runs in full access — supervised mode is unavailable because cursor-agent's OS sandbox requires macOS or Linux."
           >
             <Unlock size={12} />
-            Full
-          </Button>
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={() => onAccessChange(PERMISSION_MODES.SUPERVISED)}
-            aria-pressed={access === PERMISSION_MODES.SUPERVISED}
-            className={cn(
-              "h-auto flex-1 gap-1.5 rounded-[5px] px-2 py-1 text-xs font-medium hover:bg-transparent",
-              access === PERMISSION_MODES.SUPERVISED
-                ? "bg-background text-foreground shadow-sm hover:bg-background"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <Lock size={12} />
-            Supervised
-          </Button>
-        </div>
+            Full access (Cursor on Windows)
+          </div>
+        ) : (
+          <div className={cn("flex rounded-md bg-muted/40 p-0.5", hasTasks && "mb-2")}>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => onAccessChange(PERMISSION_MODES.FULL)}
+              aria-pressed={access === PERMISSION_MODES.FULL}
+              className={cn(
+                "h-auto flex-1 gap-1.5 rounded-[5px] px-2 py-1 text-xs font-medium hover:bg-transparent",
+                access === PERMISSION_MODES.FULL
+                  ? "bg-background text-foreground shadow-sm hover:bg-background"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Unlock size={12} />
+              Full
+            </Button>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => onAccessChange(PERMISSION_MODES.SUPERVISED)}
+              aria-pressed={access === PERMISSION_MODES.SUPERVISED}
+              className={cn(
+                "h-auto flex-1 gap-1.5 rounded-[5px] px-2 py-1 text-xs font-medium hover:bg-transparent",
+                access === PERMISSION_MODES.SUPERVISED
+                  ? "bg-background text-foreground shadow-sm hover:bg-background"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Lock size={12} />
+              Supervised
+            </Button>
+          </div>
+        )}
 
         {/* Tasks panel — only available when the thread has tasks. */}
         {hasTasks && (
@@ -246,12 +269,15 @@ function InlineComposerOptions({
   threadId,
   mode,
   access,
+  permissionLocked,
   onModeChange,
   onAccessChange,
 }: {
   threadId?: string;
   mode: InteractionMode;
   access: PermissionMode;
+  /** See {@link ComposerOptionsMenu}. */
+  permissionLocked: boolean;
   onModeChange: (next: InteractionMode) => void;
   onAccessChange: (next: PermissionMode) => void;
 }) {
@@ -291,22 +317,41 @@ function InlineComposerOptions({
         <TooltipContent>{mode === INTERACTION_MODES.CHAT ? "Chat mode" : "Plan mode"}</TooltipContent>
       </Tooltip>
 
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={() => onAccessChange(access === PERMISSION_MODES.FULL ? PERMISSION_MODES.SUPERVISED : PERMISSION_MODES.FULL)}
-              className="gap-1.5 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
-            >
-              {access === PERMISSION_MODES.FULL ? <Unlock size={14} /> : <Lock size={14} />}
-              <span className="text-sm">{access === PERMISSION_MODES.FULL ? "Full access" : "Supervised"}</span>
-            </Button>
-          }
-        />
-        <TooltipContent>{access === PERMISSION_MODES.FULL ? "Full access mode" : "Supervised mode"}</TooltipContent>
-      </Tooltip>
+      {permissionLocked ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span
+                className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-sm text-muted-foreground"
+                aria-label="Permission mode locked to Full access"
+              >
+                <Unlock size={14} />
+                <span className="text-sm">Full access</span>
+              </span>
+            }
+          />
+          <TooltipContent>
+            Cursor on Windows runs in full access — supervised mode is unavailable because cursor-agent's OS sandbox requires macOS or Linux.
+          </TooltipContent>
+        </Tooltip>
+      ) : (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => onAccessChange(access === PERMISSION_MODES.FULL ? PERMISSION_MODES.SUPERVISED : PERMISSION_MODES.FULL)}
+                className="gap-1.5 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+              >
+                {access === PERMISSION_MODES.FULL ? <Unlock size={14} /> : <Lock size={14} />}
+                <span className="text-sm">{access === PERMISSION_MODES.FULL ? "Full access" : "Supervised"}</span>
+              </Button>
+            }
+          />
+          <TooltipContent>{access === PERMISSION_MODES.FULL ? "Full access mode" : "Supervised mode"}</TooltipContent>
+        </Tooltip>
+      )}
 
       {hasTasks && (
         <Tooltip>
@@ -647,6 +692,19 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const branchThread = useWorkspaceStore((s) => s.branchThread);
   const runningThreadIds = useThreadStore((s) => s.runningThreadIds);
   const setThreadSettings = useThreadStore((s) => s.setThreadSettings);
+
+  // Cursor on Windows has no usable supervised mode (cursor-agent's OS
+  // sandbox requires macOS/Linux and `--print` mode has no per-tool
+  // prompts). Hide the toggle and force Full access. See
+  // {@link isCursorPermissionLockedToFull}.
+  const permissionLocked = isCursorPermissionLockedToFull(provider, isWindows);
+  useEffect(() => {
+    if (permissionLocked && access !== PERMISSION_MODES.FULL) {
+      setAccess(PERMISSION_MODES.FULL);
+      agentSettingsTouchedRef.current = true;
+      if (threadId) void setThreadSettings(threadId, { permissionMode: PERMISSION_MODES.FULL });
+    }
+  }, [permissionLocked, access, threadId, setThreadSettings]);
   const contextEntry = useThreadStore((s) => threadId ? s.contextByThread[threadId] : undefined);
   const isCompacting = useThreadStore((s) => !!(threadId && s.isCompactingByThread[threadId]));
   const planPending = useThreadStore(
@@ -1671,6 +1729,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
               threadId={threadId}
               mode={mode}
               access={access}
+              permissionLocked={permissionLocked}
               onModeChange={(next) => {
                 setMode(next);
                 agentSettingsTouchedRef.current = true;
@@ -1687,6 +1746,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
               threadId={threadId}
               mode={mode}
               access={access}
+              permissionLocked={permissionLocked}
               onModeChange={(next) => {
                 setMode(next);
                 agentSettingsTouchedRef.current = true;

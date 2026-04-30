@@ -83,6 +83,82 @@ describe("buildCursorTurnArgs", () => {
     const args = buildCursorTurnArgs({ permissionMode: "default", chatId: null });
     expect(args).not.toContain("--force");
   });
+
+  // --trust grants pure workspace trust without bypassing tool prompts.
+  // Without it, supervised-mode `cursor-agent --print` rejects every prompt
+  // with "Workspace Trust Required" until trust is granted out-of-band. We
+  // pass it in default mode so the supervised flow works on first run.
+  it("appends --trust in default mode so workspace trust is granted", () => {
+    const args = buildCursorTurnArgs({ permissionMode: "default", chatId: null });
+    expect(args).toContain("--trust");
+  });
+
+  // In full-access mode, --force already grants both tool approval and
+  // workspace trust, so --trust would be redundant.
+  it("omits --trust in full-access mode (--force subsumes it)", () => {
+    const args = buildCursorTurnArgs({ permissionMode: "full", chatId: null });
+    expect(args).not.toContain("--trust");
+  });
+
+  // cursor-agent --print has no interactive permission flow, so supervised
+  // mode delegates safety to whatever sandbox cursor-agent supports on the
+  // host. On macOS/Linux this is OS-level sandboxing (file writes outside
+  // workspace blocked). On Windows the OS sandbox is unavailable and
+  // `--sandbox enabled` errors with "Sandbox requires macOS or Linux", so we
+  // fall back to cursor-agent's built-in allowlist mode (`--sandbox
+  // disabled`). The flag is always passed explicitly so user config can't
+  // override the intended semantics.
+  it("appends --sandbox enabled in default mode on linux", () => {
+    const args = buildCursorTurnArgs({
+      permissionMode: "default",
+      chatId: null,
+      platform: "linux",
+    });
+    const i = args.indexOf("--sandbox");
+    expect(i).toBeGreaterThanOrEqual(0);
+    expect(args[i + 1]).toBe("enabled");
+  });
+
+  it("appends --sandbox enabled in default mode on darwin", () => {
+    const args = buildCursorTurnArgs({
+      permissionMode: "default",
+      chatId: null,
+      platform: "darwin",
+    });
+    const i = args.indexOf("--sandbox");
+    expect(i).toBeGreaterThanOrEqual(0);
+    expect(args[i + 1]).toBe("enabled");
+  });
+
+  // On Windows the OS sandbox is unavailable; cursor-agent's allowlist mode
+  // (`--sandbox disabled`) is the next-best gate.
+  it("appends --sandbox disabled in default mode on win32 (allowlist mode)", () => {
+    const args = buildCursorTurnArgs({
+      permissionMode: "default",
+      chatId: null,
+      platform: "win32",
+    });
+    const i = args.indexOf("--sandbox");
+    expect(i).toBeGreaterThanOrEqual(0);
+    expect(args[i + 1]).toBe("disabled");
+  });
+
+  // Full-access mode disables the sandbox on every platform so --force
+  // genuinely means "run anything". Pass it explicitly so user config can't
+  // accidentally turn it back on.
+  it.each(["linux", "darwin", "win32"] as const)(
+    "appends --sandbox disabled in full-access mode on %s",
+    (platform) => {
+      const args = buildCursorTurnArgs({
+        permissionMode: "full",
+        chatId: null,
+        platform,
+      });
+      const i = args.indexOf("--sandbox");
+      expect(i).toBeGreaterThanOrEqual(0);
+      expect(args[i + 1]).toBe("disabled");
+    },
+  );
 });
 
 // ── runCursorTurn (mocked child) ──────────────────────────────────────────

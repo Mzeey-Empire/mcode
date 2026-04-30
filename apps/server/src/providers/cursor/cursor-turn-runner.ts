@@ -52,7 +52,15 @@ export interface CursorTurnRunnerOptions {
   threadId: string;
   /** Optional model override (passed via `--model`). */
   model?: string;
-  /** "full" → `--force` (no permission prompts). "default" omits the flag. */
+  /**
+   * "full" → `--force --sandbox disabled` (tool approval + workspace trust,
+   * sandbox off; runs anywhere on the host). "default" → `--trust` plus
+   * `--sandbox enabled` on macOS/Linux (OS-level sandbox blocks writes
+   * outside workspace and dangerous shell) or `--sandbox disabled` on
+   * Windows (cursor-agent's built-in allowlist mode — the OS sandbox is
+   * unsupported on Windows). `--print` has no interactive permission flow,
+   * so sandboxing is the only gate in supervised mode.
+   */
   permissionMode: "default" | "full";
   /** Persistent chat id to resume; pass null on the first turn of a thread. */
   chatId: string | null;
@@ -78,14 +86,44 @@ export function buildCursorTurnArgs(opts: {
   model?: string;
   permissionMode: "default" | "full";
   chatId: string | null;
+  /**
+   * Host platform — controls the sandbox flag in supervised mode.
+   * Defaults to `process.platform`; tests pass it explicitly so the matrix
+   * (linux/darwin/win32) is exhaustively covered without monkey-patching
+   * the global.
+   */
+  platform?: NodeJS.Platform;
 }): string[] {
+  const platform = opts.platform ?? process.platform;
   const args: string[] = [
     "--print",
     "--output-format",
     "stream-json",
     "--stream-partial-output",
   ];
-  if (opts.permissionMode === "full") args.push("--force");
+  // --force grants tool approval AND workspace trust; --trust grants only
+  // workspace trust. Without --trust, default-mode `cursor-agent --print`
+  // rejects every prompt with "Workspace Trust Required" until trust is
+  // granted out of band. We pick exactly one so the flags don't shadow each
+  // other.
+  //
+  // --print has no interactive permission flow ("Has access to all tools"),
+  // so supervised mode delegates safety to cursor-agent's sandbox. On
+  // macOS/Linux that's an OS-level sandbox; on Windows the OS sandbox is
+  // unavailable and cursor-agent errors with "Sandbox requires macOS or
+  // Linux", so we fall back to `--sandbox disabled` which switches
+  // cursor-agent into its built-in allowlist mode (off-allowlist commands
+  // are auto-rejected at the agent layer). Full-access mode always disables
+  // the sandbox so --force genuinely means "run anything". All flags are
+  // passed explicitly so user config can't override the intended semantics.
+  if (opts.permissionMode === "full") {
+    args.push("--force");
+    args.push("--sandbox", "disabled");
+  } else {
+    args.push("--trust");
+    const supervisedSandboxAvailable = platform === "darwin" || platform === "linux";
+    args.push("--sandbox", supervisedSandboxAvailable ? "enabled" : "disabled");
+  }
   if (opts.model && opts.model.length > 0) {
     args.push("--model", opts.model);
   }

@@ -12,11 +12,23 @@
  * Trade-offs vs the ACP transport:
  *   - **Resume across restarts** works: chat ids round-trip through
  *     `setSdkSessionId` and disk persistence.
- *   - **Permissions** are simplified: full-access mode passes `--force`, so
- *     tools execute without prompting; default mode lets cursor-agent
- *     auto-reject and the UI surfaces the rejection as a `result.rejected`
- *     ToolResult card. There is no interactive permission flow in --print
- *     mode.
+ *   - **Permissions** are simplified: `cursor-agent --print` has no
+ *     interactive permission flow ("Has access to all tools, including write
+ *     and shell"), so we cannot route per-tool prompts through the UI like
+ *     the ACP transport did. Instead we delegate safety to whatever
+ *     cursor-agent supports on the host:
+ *       - **full mode** (all platforms): `--force --sandbox disabled`
+ *         (tool approval + workspace trust, sandbox off — anything goes)
+ *       - **default mode on macOS/Linux**: `--trust --sandbox enabled`
+ *         (workspace trust granted; OS sandbox blocks writes outside the
+ *         workspace and dangerous shell commands)
+ *       - **default mode on Windows**: `--trust --sandbox disabled` — the
+ *         OS sandbox is unsupported on Windows ("Sandbox requires macOS or
+ *         Linux"), so we fall back to cursor-agent's built-in allowlist
+ *         mode. Off-allowlist commands are auto-rejected at the agent
+ *         layer; this is weaker than the OS sandbox but better than `--force`.
+ *     All flags are passed explicitly so the user's local cursor-agent
+ *     config cannot override the intended semantics.
  *   - **No subprocess pool / idle eviction** — every turn is fresh, so the
  *     resource model is "pay per turn" instead of "pay to keep alive".
  */
