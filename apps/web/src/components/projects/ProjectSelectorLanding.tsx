@@ -14,6 +14,8 @@ import type { RecentThread } from "@/transport/types";
  * Renders the app wordmark, then pinned and recent projects.
  * Opening a project calls setActiveWorkspace (same as the palette flow).
  * The "+ Add project" button opens the palette in browse mode (input seeded to `~/`).
+ * While this screen is mounted, Ctrl/Cmd+Enter runs the same action (mirrors browse
+ * mode's confirm shortcut) and is suppressed when an input or contenteditable is focused.
  */
 export function ProjectSelectorLanding() {
   const workspaces = useWorkspaceStore((s) => s.workspaces);
@@ -22,8 +24,6 @@ export function ProjectSelectorLanding() {
   const setPendingNewThread = useWorkspaceStore((s) => s.setPendingNewThread);
   const pinWorkspace = useWorkspaceStore((s) => s.pinWorkspace);
   const removeRecent = useWorkspaceStore((s) => s.removeRecent);
-  const openPalette = useCommandPaletteStore((s) => s.open);
-
   const pinned = useMemo(() => workspaces.filter((w) => w.pinned), [workspaces]);
   const recent = useMemo(
     () => workspaces.filter((w) => !w.pinned && w.last_opened_at != null),
@@ -82,7 +82,30 @@ export function ProjectSelectorLanding() {
   const handleRemove = (id: string) => {
     void removeRecent(id).catch(() => {});
   };
-  const handleAdd = () => openPalette({ intent: "addProject" });
+  const handleAdd = () =>
+    useCommandPaletteStore.getState().open({ intent: "addProject" });
+
+  useEffect(() => {
+    function isInputFocused(): boolean {
+      const el = document.activeElement;
+      if (!el) return false;
+      const tag = el.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return true;
+      if (el instanceof HTMLElement && el.isContentEditable) return true;
+      return false;
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      const isEnter =
+        e.key === "Enter" || e.code === "Enter" || e.code === "NumpadEnter";
+      if (!(e.ctrlKey || e.metaKey) || !isEnter) return;
+      if (e.shiftKey || e.altKey) return;
+      if (isInputFocused()) return;
+      e.preventDefault();
+      useCommandPaletteStore.getState().open({ intent: "addProject" });
+    }
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, []);
   /**
    * Open a thread from the recent-threads list. Activate the parent workspace
    * first so downstream selectors (sidebar highlight, breadcrumb, settings) see
@@ -98,17 +121,14 @@ export function ProjectSelectorLanding() {
   const modKey = isMac ? "⌘" : "Ctrl";
 
   return (
-    // `flex-1 min-h-0` (instead of `h-full`) so when this is nested in a flex
-    // column with a sibling — e.g. the sidebar-reveal strip rendered by App.tsx
-    // when the sidebar is collapsed — we claim only our allotted slot rather
-    // than overflowing the parent and pushing the absolute keyboard hint
-    // (`bottom-6`) below the viewport.
-    <div className="relative flex min-h-0 flex-1 flex-col">
+    // `flex-1 min-h-0` nests correctly under App's flex column (e.g. beside a
+    // sidebar-reveal strip). Scroll lives only in the middle pane; shortcut hints
+    // sit in a normal-flow footer so they never paint over list rows or the CTA.
+    <div className="flex min-h-0 flex-1 flex-col">
       {/* Scrollable column — `my-auto` on the inner stack centers content when it
           fits and falls back to natural top-alignment when it overflows, so the
-          wordmark never gets pushed offscreen on short viewports.
-          `pb-16` keeps the bottom keyboard hint from overlapping list items. */}
-      <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4 pb-16">
+          wordmark never gets pushed offscreen on short viewports. */}
+      <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4">
         <div className="my-auto flex w-full flex-col items-center py-8">
           {/* Wordmark — generous size + a small caret accent give the cold-start a moment of personality */}
           <div className="mb-12 flex items-baseline gap-1 select-none font-mono text-[34px] font-semibold leading-none tracking-tight text-foreground">
@@ -169,6 +189,8 @@ export function ProjectSelectorLanding() {
           <Button
             data-testid="landing-add-project"
             variant="outline"
+            draggable={false}
+            onDragStart={(e) => e.preventDefault()}
             onClick={handleAdd}
             className="group mt-2 w-full gap-2 py-2.5 text-[12.5px] text-foreground/80"
           >
@@ -184,6 +206,8 @@ export function ProjectSelectorLanding() {
           </p>
           <Button
             data-testid="landing-add-project"
+            draggable={false}
+            onDragStart={(e) => e.preventDefault()}
             onClick={handleAdd}
             className="gap-2 px-4 py-2 text-[13px]"
           >
@@ -195,13 +219,19 @@ export function ProjectSelectorLanding() {
         </div>
       </div>
 
-      {/* Keyboard hint — surfaces the palette so power users know it exists.
-          Pinned to the bottom so it doesn't compete with the wordmark/list.
-          Sits outside the scroll container so it stays anchored as the list scrolls. */}
-      <div className="pointer-events-none absolute bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-1.5 font-mono text-[10.5px] tracking-[0.06em] text-muted-foreground/55">
-        <Kbd>{modKey}</Kbd>
-        <Kbd>P</Kbd>
-        <span className="ml-1">Command palette</span>
+      {/* Shortcut cheatsheet — fixed footer row below the scroller so it stays
+          readable and never overlaps scrolled content (unlike an overlay). */}
+      <div className="pointer-events-none flex shrink-0 flex-col items-center gap-2 border-t border-border/30 bg-background px-4 pb-5 pt-3 font-mono text-[10.5px] tracking-[0.06em] text-muted-foreground/55">
+        <div className="flex items-center gap-1.5">
+          <Kbd>{modKey}</Kbd>
+          <Kbd>P</Kbd>
+          <span className="ml-1">Command palette</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Kbd>{modKey}</Kbd>
+          <Kbd>Enter</Kbd>
+          <span className="ml-1">Add project</span>
+        </div>
       </div>
     </div>
   );

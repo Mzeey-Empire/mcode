@@ -2,6 +2,14 @@ import { defineConfig } from "@playwright/test";
 
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
 
+/**
+ * Attach to an already-running dev server on `BASE_URL` instead of starting one.
+ * Only honored locally — CI always boots a fresh server so runs stay reproducible.
+ * Useful when you intentionally keep `bun run dev` open and want faster test iteration.
+ */
+const reuseExistingServer =
+  !process.env.CI && process.env.PLAYWRIGHT_REUSE_WEB_SERVER === "1";
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
@@ -21,7 +29,7 @@ export default defineConfig({
   webServer: {
     command: "bun run dev",
     url: BASE_URL,
-    reuseExistingServer: true,
+    reuseExistingServer,
     timeout: 30000,
   },
 });
