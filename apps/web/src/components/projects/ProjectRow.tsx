@@ -26,10 +26,17 @@ interface Props {
   home?: string;
 }
 
-/** Format a unix timestamp (ms) as a short relative time string (e.g. "2h ago", "3d ago"). */
-function relativeTime(ms: number): string {
+/**
+ * Format a unix timestamp (ms) as a short relative time string (e.g. "2h ago", "3d ago").
+ * Returns null when the input is not a finite number so callers can skip rendering.
+ */
+function relativeTime(ms: number): string | null {
+  if (!Number.isFinite(ms)) return null;
   const diff = Date.now() - ms;
+  if (!Number.isFinite(diff)) return null;
+  if (diff <= 0) return "just now";
   const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(diff / 3_600_000);
   if (hrs < 24) return `${hrs}h ago`;
@@ -47,6 +54,8 @@ function relativeTime(ms: number): string {
  */
 export function ProjectRow({ workspace, isActive, onSelect, onPin, onRemove, home }: Props) {
   const enrichment = useProjectSelectorStore((s) => s.enrichmentCache.get(workspace.id));
+  const lastOpenedLabel =
+    workspace.last_opened_at != null ? relativeTime(workspace.last_opened_at) : null;
 
   return (
     <div
@@ -140,14 +149,14 @@ export function ProjectRow({ workspace, isActive, onSelect, onPin, onRemove, hom
                 <span className="truncate text-muted-foreground/40">not a git repo</span>
               )}
             </div>
-            {workspace.last_opened_at && (
-              <span className="tabular-nums">{relativeTime(workspace.last_opened_at)}</span>
+            {lastOpenedLabel && (
+              <span className="tabular-nums">{lastOpenedLabel}</span>
             )}
           </>
         ) : (
           // Show timestamp as skeleton while enrichment is loading
-          workspace.last_opened_at && (
-            <span className="tabular-nums">{relativeTime(workspace.last_opened_at)}</span>
+          lastOpenedLabel && (
+            <span className="tabular-nums">{lastOpenedLabel}</span>
           )
         )}
       </div>
