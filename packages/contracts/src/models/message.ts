@@ -24,6 +24,14 @@ export type Message = z.infer<typeof MessageSchema>;
 export const PaginatedMessagesSchema = z.object({
   messages: z.array(MessageSchema),
   hasMore: z.boolean(),
+  /**
+   * IDs of assistant messages whose plan-questions block has been answered.
+   * Used by the web client to suppress the plan-question wizard from
+   * re-popping after restarts or mid-turn errors. Optional for backwards
+   * compatibility — older servers omit it and the client falls back to the
+   * structural heuristic.
+   */
+  answeredPlanMessageIds: z.array(z.string()).optional(),
 });
 /** Paginated message response from the server. */
 export type PaginatedMessages = z.infer<typeof PaginatedMessagesSchema>;

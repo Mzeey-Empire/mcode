@@ -34,6 +34,7 @@ import type { MessageRepo } from "../repositories/message-repo";
 import type { ToolCallRecordRepo } from "../repositories/tool-call-record-repo";
 import type { TurnSnapshotRepo } from "../repositories/turn-snapshot-repo";
 import type { TaskRepo } from "../repositories/task-repo";
+import type { PlanQuestionAnswersRepo } from "../repositories/plan-question-answers-repo";
 import type { SnapshotService } from "../services/snapshot-service";
 import type { SettingsService } from "../services/settings-service";
 import type { GitWatcherService } from "../services/git-watcher-service";
@@ -73,6 +74,8 @@ export interface RouterDeps {
   /** Manages lifecycle-aware memory pressure (idle timers, SQLite cache, GC). */
   memoryPressureService: MemoryPressureService;
   taskRepo: TaskRepo;
+  /** Repository for the plan-question wizard answered marker (sidecar table). */
+  planQuestionAnswersRepo: PlanQuestionAnswersRepo;
   /** Registry of AI provider adapters for model discovery. */
   providerRegistry: IProviderRegistry;
   /** Tracks per-provider enabled flag and CLI verification state. */
@@ -428,12 +431,18 @@ async function dispatch(
       return;
 
     // Messages
-    case "message.list":
-      return deps.messageRepo.listByThread(
+    case "message.list": {
+      const paginated = deps.messageRepo.listByThread(
         params.threadId,
         params.limit,
         params.before,
       );
+      return {
+        ...paginated,
+        answeredPlanMessageIds:
+          deps.planQuestionAnswersRepo.listAnsweredForThread(params.threadId),
+      };
+    }
 
     // Files
     case "file.list":

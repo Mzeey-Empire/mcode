@@ -156,6 +156,12 @@ function buildService({
   //   threadRepo, workspaceRepo, messageRepo, gitService, attachmentService,
   //   providerRegistry, threadService, toolCallRecordRepo, turnSnapshotRepo,
   //   snapshotService, db, memoryPressureService, taskRepo, settingsService, availability
+  const planQuestionAnswersRepo = {
+    markAnswered: vi.fn(),
+    isAnswered: vi.fn(() => false),
+    listAnsweredForThread: vi.fn(() => []),
+  } as unknown as import("../../repositories/plan-question-answers-repo.js").PlanQuestionAnswersRepo;
+
   return new AgentService(
     threadRepo,
     workspaceRepo,
@@ -172,6 +178,7 @@ function buildService({
     taskRepo,
     settingsService,
     availability,
+    planQuestionAnswersRepo,
   );
 }
 
