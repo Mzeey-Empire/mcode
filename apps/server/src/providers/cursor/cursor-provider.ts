@@ -1,11 +1,28 @@
 /**
- * Cursor CLI provider via `agent acp` (ACP): persistent subprocess per mcode session,
- * JSON-RPC over NDJSON stdio, mapped into {@link AgentEvent} for AgentService.
+ * Cursor CLI provider via `cursor-agent --print --output-format stream-json`.
+ *
+ * Each prompt turn spawns a fresh subprocess that resolves the persistent
+ * chat from disk via `--resume <chatId>` and exits when the turn completes.
+ * This replaces the prior `cursor-agent acp` long-lived subprocess pool: the
+ * ACP transport's `session/load` resume path is broken on Cursor's side
+ * (sessionIds are subprocess-scoped and cannot be reattached after a
+ * restart), and the chat-id namespace exposed via `--resume` is the only
+ * stable persistence handle Cursor offers.
+ *
+ * Trade-offs vs the ACP transport:
+ *   - **Resume across restarts** works: chat ids round-trip through
+ *     `setSdkSessionId` and disk persistence.
+ *   - **Permissions** are simplified: full-access mode passes `--force`, so
+ *     tools execute without prompting; default mode lets cursor-agent
+ *     auto-reject and the UI surfaces the rejection as a `result.rejected`
+ *     ToolResult card. There is no interactive permission flow in --print
+ *     mode.
+ *   - **No subprocess pool / idle eviction** — every turn is fresh, so the
+ *     resource model is "pay per turn" instead of "pay to keep alive".
  */
 
 import { injectable, inject } from "tsyringe";
 import { EventEmitter } from "node:events";
-import { randomUUID } from "node:crypto";
 import { logger } from "@mcode/shared";
 import { SettingsService } from "../../services/settings-service.js";
 import { AgentEventType, CURSOR_STATIC_MODEL_FALLBACK, getCatalogEntry } from "@mcode/contracts";
@@ -20,49 +37,28 @@ import type {
   ReasoningLevel,
   Settings,
 } from "@mcode/contracts";
-import { CursorAcpSession } from "./cursor-acp-session.js";
+import { runCursorTurn } from "./cursor-turn-runner.js";
 import {
-  cursorPermissionDenyFallback,
-  mapCursorPermissionRpcResult,
-} from "./cursor-permission-mapper.js";
+  createCursorTodoSnapshot,
+  type CursorTodoSnapshot,
+} from "./cursor-todo-snapshot.js";
 import { fetchCursorCliModels } from "./cursor-cli-models.js";
 
-/** Idle TTL before evicting an idle Cursor ACP session (10 minutes). */
-const IDLE_TTL_MS = 10 * 60 * 1000;
-/** Interval between idle eviction passes (1 minute). */
-const EVICTION_INTERVAL_MS = 60 * 1000;
-
-interface SessionEntry {
-  session: CursorAcpSession;
-  lastUsedAt: number;
-  /**
-   * Last permission mode the user requested for this session ("default" | "full").
-   * Stored on the entry so `session/request_permission` requests can be
-   * auto-approved without round-tripping back to `sendMessage`. Refreshed on
-   * every `sendMessage` so the user can flip Full access on/off mid-thread.
-   */
-  permissionMode: string;
-}
-
-interface PendingPermissionEntry {
-  sessionId: string;
-  threadId: string;
-  toolName: string;
-  input: unknown;
-  title?: string;
-  resolve: (result: unknown) => void;
+/** Per-mcode-session state that survives across prompt turns. */
+interface CursorSessionState {
+  /** Persistent cursor chat id (used with `--resume`). Null until first turn captures it. */
+  chatId: string | null;
+  /** Snapshot for `merge: true` updateTodos reconciliation across turns. */
+  todoSnapshot: CursorTodoSnapshot;
+  /** AbortController for the in-flight turn (if any), used by stopSession. */
+  inFlight: AbortController | null;
 }
 
 /**
  * Builds prompt text from the user message plus safe attachment references.
- * Images become explicit paths; non-images become labelled mentions without raw FS paths for prompt injection.
+ * Images become explicit paths; non-images become labelled mentions without
+ * raw FS paths to avoid injection-style attacks via filenames.
  */
-/** Executable paths to try for Cursor Agent (aligned with `listModels` and PATH probing). */
-function cursorCliProbeBinaries(settings: Settings): string[] {
-  const configured = settings.provider.cli.cursor?.trim();
-  return configured ? [configured] : [getCatalogEntry("cursor").cliBinary, "agent"];
-}
-
 function buildCursorPrompt(message: string, attachments?: AttachmentMeta[]): string {
   const lines: string[] = [];
   for (const att of attachments ?? []) {
@@ -78,18 +74,23 @@ function buildCursorPrompt(message: string, attachments?: AttachmentMeta[]): str
   return lines.join("\n\n");
 }
 
+/** Executable paths to try for cursor-agent (configured override → catalog → bare name). */
+function cursorCliProbeBinaries(settings: Settings): string[] {
+  const configured = settings.provider.cli.cursor?.trim();
+  return configured ? [configured] : [getCatalogEntry("cursor").cliBinary, "agent"];
+}
+
 /**
- * Cursor CLI-backed agent provider using Cursor's ACP (`agent acp`) integration surface.
+ * Cursor CLI-backed agent provider using the `--print` stream-json transport.
  */
 @injectable()
 export class CursorProvider extends EventEmitter implements IAgentProvider {
   readonly id: ProviderId = "cursor";
   readonly supportsCompletion = false;
 
-  private sessions = new Map<string, SessionEntry>();
+  private states = new Map<string, CursorSessionState>();
+  /** Mirror of states[*].chatId so `setSdkSessionId` works before first send. */
   private sdkSessionIds = new Map<string, string>();
-  private evictionTimer: ReturnType<typeof setInterval> | null = null;
-  private pendingPermissions = new Map<string, PendingPermissionEntry>();
 
   constructor(
     @inject(SettingsService) private readonly settingsService: SettingsService,
@@ -97,7 +98,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     super();
   }
 
-  /** Lists models by running `cursor-agent models` / `agent models` (falls back if discovery fails). */
+  /** Lists models by running `cursor-agent models` (falls back when discovery fails). */
   async listModels(): Promise<ProviderModelInfo[]> {
     const settings = this.settingsService.get();
 
@@ -113,9 +114,11 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
   }
 
   /**
-   * Sends a user message using Cursor ACP on a persistent subprocess per mcode session id.
+   * Sends a user message by spawning one cursor-agent --print turn.
    *
-   * Emits streaming deltas where available, then Message + TurnComplete + Ended for persistence parity.
+   * Emits TurnStarted, then streamed deltas/tool events from the runner,
+   * then Message + TurnComplete + Ended for persistence parity. On error,
+   * emits Error + Ended so the UI doesn't show a stuck spinner.
    */
   async sendMessage(params: {
     sessionId: string;
@@ -146,158 +149,103 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     const threadId = sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;
     const prompt = buildCursorPrompt(message, attachments);
 
-    if (!this.evictionTimer) {
-      this.evictionTimer = setInterval(() => this.evictIdleSessions(), EVICTION_INTERVAL_MS);
-    }
+    const state = this.getOrCreateState(sessionId);
+    const chatId = resume ? state.chatId ?? this.sdkSessionIds.get(sessionId) ?? null : null;
 
-    const resumeId = this.sdkSessionIds.get(sessionId);
-    const attemptResume = !!(resume && resumeId);
+    const abort = new AbortController();
+    state.inFlight = abort;
 
-    const existing = this.sessions.get(sessionId);
-    if (existing) {
-      existing.lastUsedAt = Date.now();
-      // Refresh permission mode so flipping Full access mid-thread takes effect
-      // on the next tool permission request without a session restart.
-      existing.permissionMode = permissionMode;
+    this.emit("event", { type: AgentEventType.TurnStarted, threadId } satisfies AgentEvent);
+
+    const cliCandidates = cursorCliProbeBinaries(settings);
+    let lastErr: unknown = null;
+    for (const cliPath of cliCandidates) {
       try {
-        this.emit("event", { type: AgentEventType.TurnStarted, threadId } satisfies AgentEvent);
-        const { assistantText } = await existing.session.sendPrompt(prompt, model || undefined);
+        const { chatId: capturedChatId, assistantText } = await runCursorTurn(
+          {
+            cliPath,
+            prompt,
+            cwd,
+            threadId,
+            model: model || undefined,
+            permissionMode: permissionMode === "full" ? "full" : "default",
+            chatId,
+          },
+          (ev) => this.emit("event", ev),
+          state.todoSnapshot,
+          abort.signal,
+        );
+        if (capturedChatId) {
+          state.chatId = capturedChatId;
+          this.sdkSessionIds.set(sessionId, capturedChatId);
+        }
+        state.inFlight = null;
         this.finishTurn(threadId, assistantText);
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        logger.error("Cursor sendPrompt failed", { sessionId, error: msg });
-        this.stopSession(sessionId);
-        this.emit("event", { type: AgentEventType.Error, threadId, error: msg } satisfies AgentEvent);
-        this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
-      }
-      return;
-    }
-
-    const trustWorkspace = permissionMode === "full";
-
-    let session: CursorAcpSession | null = null;
-    let startErr: unknown = null;
-    for (const cliPath of cursorCliProbeBinaries(settings)) {
-      const attempt = new CursorAcpSession({
-        cliPath,
-        cwd,
-        trustWorkspace,
-        resumeSessionId: attemptResume ? resumeId : undefined,
-        threadId,
-        // mode: cursorMode, // TODO: thread Cursor interaction mode ("plan" | "ask") from UI once Composer wires it through sendMessage params.
-        onAgentEvent: (ev) => this.emit("event", ev),
-        handleServerRequest: (req) => this.handleAcpServerRequest(sessionId, threadId, req),
-      });
-      try {
-        await attempt.start();
-        session = attempt;
-        break;
+        return;
       } catch (e) {
-        startErr = e;
-        await attempt.kill().catch(() => {});
+        lastErr = e;
+        // ENOENT / spawn errors → try the next probed binary.
+        const msg = e instanceof Error ? e.message : String(e);
+        if (/Failed to spawn cursor-agent/i.test(msg)) continue;
+        // All other errors are real turn failures — surface immediately.
+        break;
       }
     }
 
-    if (!session) {
-      const msg = startErr instanceof Error ? startErr.message : String(startErr ?? "failed to start Cursor ACP");
-      logger.error("Cursor ACP start failed", { sessionId, error: msg });
-      this.emit("event", { type: AgentEventType.Error, threadId, error: msg } satisfies AgentEvent);
-      this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
-      return;
-    }
-
-    const sid = session.cursorSessionId;
-    if (sid) {
-      this.sdkSessionIds.set(sessionId, sid);
-      this.emit("event", {
-        type: AgentEventType.System,
-        threadId,
-        subtype: `sdk_session_id:${sid}`,
-      } satisfies AgentEvent);
-    }
-
-    this.sessions.set(sessionId, {
-      session,
-      lastUsedAt: Date.now(),
-      permissionMode,
-    });
-
-    try {
-      this.emit("event", { type: AgentEventType.TurnStarted, threadId } satisfies AgentEvent);
-      const { assistantText } = await session.sendPrompt(prompt, model || undefined);
-      this.finishTurn(threadId, assistantText);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      logger.error("Cursor sendPrompt failed", { sessionId, error: msg });
-      this.stopSession(sessionId);
-      this.emit("event", { type: AgentEventType.Error, threadId, error: msg } satisfies AgentEvent);
-      this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
-    }
+    state.inFlight = null;
+    const errMsg = lastErr instanceof Error ? lastErr.message : String(lastErr ?? "cursor-agent failed");
+    logger.error("Cursor turn failed", { sessionId, error: errMsg });
+    this.emit("event", { type: AgentEventType.Error, threadId, error: errMsg } satisfies AgentEvent);
+    this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
   }
 
-  /** Persists SDK session ids for Cursor resume (`session/load`). */
+  /** Persists chat ids so subsequent turns resume the same cursor chat. */
   setSdkSessionId(sessionId: string, sdkSessionId: string): void {
     this.sdkSessionIds.set(sessionId, sdkSessionId);
+    const state = this.states.get(sessionId);
+    if (state) state.chatId = sdkSessionId;
   }
 
-  /** Aborts the Cursor subprocess for this session cancels pending approvals. */
+  /** Aborts the in-flight turn (if any). State is preserved for the next turn. */
   stopSession(sessionId: string): void {
-    this.drainPending((e) => e.sessionId === sessionId);
-    const entry = this.sessions.get(sessionId);
-    if (entry) {
-      void entry.session.kill().catch((err: unknown) => {
-        logger.warn("Cursor session kill failed", { sessionId, error: String(err) });
-      });
-      this.sessions.delete(sessionId);
+    const state = this.states.get(sessionId);
+    if (!state?.inFlight) return;
+    try {
+      state.inFlight.abort();
+    } catch {
+      /* ignore */
     }
+    state.inFlight = null;
   }
 
-  /** Kills every Cursor subprocess and clears bookkeeping. */
+  /** Aborts every in-flight turn and clears bookkeeping. */
   shutdown(): void {
-    if (this.evictionTimer) {
-      clearInterval(this.evictionTimer);
-      this.evictionTimer = null;
+    for (const state of this.states.values()) {
+      if (state.inFlight) {
+        try {
+          state.inFlight.abort();
+        } catch {
+          /* ignore */
+        }
+      }
     }
-    this.drainPending(() => true);
-    for (const [, entry] of this.sessions) {
-      void entry.session.kill().catch(() => {});
-    }
-    this.sessions.clear();
+    this.states.clear();
     this.sdkSessionIds.clear();
     logger.info("CursorProvider shutdown complete");
   }
 
-  resolvePermission(requestId: string, decision: PermissionDecision): boolean {
-    const entry = this.pendingPermissions.get(requestId);
-    if (!entry) return false;
-    this.pendingPermissions.delete(requestId);
-
-    const owning = this.sessions.get(entry.sessionId);
-    if (owning) owning.lastUsedAt = Date.now();
-
-    try {
-      entry.resolve(mapCursorPermissionRpcResult(decision));
-    } catch {
-      entry.resolve(cursorPermissionDenyFallback());
-    }
-
-    this.emit("permission_resolved", { requestId, decision });
-    return true;
+  /**
+   * Stream-json --print mode does not surface interactive permission prompts.
+   * The method is preserved on the interface as a no-op so the WebSocket RPC
+   * router can call it uniformly across providers.
+   */
+  resolvePermission(_requestId: string, _decision: PermissionDecision): boolean {
+    return false;
   }
 
-  listPendingPermissions(threadId: string): PermissionRequest[] {
-    const out: PermissionRequest[] = [];
-    for (const [requestId, entry] of this.pendingPermissions) {
-      if (entry.threadId !== threadId) continue;
-      out.push({
-        requestId,
-        threadId: entry.threadId,
-        toolName: entry.toolName,
-        input: entry.input,
-        title: entry.title,
-      });
-    }
-    return out;
+  /** Stream-json --print mode never produces pending permissions. */
+  listPendingPermissions(_threadId: string): PermissionRequest[] {
+    return [];
   }
 
   private finishTurn(threadId: string, assistantText: string): void {
@@ -323,98 +271,16 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
   }
 
-  private async handleAcpServerRequest(
-    sessionId: string,
-    threadId: string,
-    req: { id: number | string; method: string; params: unknown },
-  ): Promise<unknown> {
-    const method = req.method;
-
-    if (method === "session/request_permission") {
-      // Full-access mode short-circuits the permission card. The user has
-      // pre-authorized all tools for this session, so emitting a card and
-      // waiting for a click would just block the agent on every tool call.
-      const entry = this.sessions.get(sessionId);
-      if (entry?.permissionMode === "full") {
-        logger.info("Cursor ACP permission auto-approved (full access)", {
-          sessionId,
-          threadId,
-        });
-        return mapCursorPermissionRpcResult("allow-session");
-      }
-
-      return await new Promise<unknown>((resolve) => {
-        const requestId = randomUUID();
-        const synthesized: PermissionRequest = {
-          requestId,
-          threadId,
-          toolName: "session/request_permission",
-          input: req.params,
-          title: "Cursor permission",
-        };
-
-        this.pendingPermissions.set(requestId, {
-          sessionId,
-          threadId,
-          toolName: synthesized.toolName,
-          input: synthesized.input,
-          title: synthesized.title,
-          resolve,
-        });
-
-        this.emit("permission_request", synthesized);
-      });
+  private getOrCreateState(sessionId: string): CursorSessionState {
+    let state = this.states.get(sessionId);
+    if (!state) {
+      state = {
+        chatId: this.sdkSessionIds.get(sessionId) ?? null,
+        todoSnapshot: createCursorTodoSnapshot(),
+        inFlight: null,
+      };
+      this.states.set(sessionId, state);
     }
-
-    if (method.startsWith("cursor/")) {
-      // `cursor/update_todos` is the actual delivery channel for Cursor's
-      // TodoWrite payloads — the inline `tool_call` for `updateTodos` only
-      // carries `{ _toolName: "updateTodos" }`. Route the payload to the
-      // owning session so it can reconcile (`merge: true`) and emit
-      // TodoWrite events.
-      if (method === "cursor/update_todos") {
-        const entry = this.sessions.get(sessionId);
-        if (entry) {
-          entry.lastUsedAt = Date.now();
-          entry.session.processUpdateTodosExtensionRpc(req.params);
-        } else {
-          logger.warn("Cursor ACP cursor/update_todos for unknown session", {
-            sessionId,
-            threadId,
-          });
-        }
-        return { outcome: { outcome: "skipped", reason: "mcode:handled" } };
-      }
-      logger.info("Cursor ACP extension RPC skipped by host", { method });
-      return { outcome: { outcome: "skipped", reason: `mcode:unsupported:${method}` } };
-    }
-
-    logger.warn("Cursor ACP unknown serverRequest — denying safely", { method });
-    return cursorPermissionDenyFallback();
-  }
-
-  private drainPending(predicate: (entry: PendingPermissionEntry) => boolean): void {
-    for (const [requestId, entry] of [...this.pendingPermissions]) {
-      if (!predicate(entry)) continue;
-      this.pendingPermissions.delete(requestId);
-      entry.resolve(cursorPermissionDenyFallback());
-      this.emit("permission_resolved", { requestId, decision: "cancelled" as const });
-    }
-  }
-
-  private evictIdleSessions(): void {
-    const now = Date.now();
-    const busy = new Set<string>();
-    for (const e of this.pendingPermissions.values()) {
-      busy.add(e.sessionId);
-    }
-    for (const [sessionId, entry] of this.sessions) {
-      if (busy.has(sessionId)) continue;
-      if (now - entry.lastUsedAt > IDLE_TTL_MS) {
-        logger.info("Evicted idle Cursor session", { sessionId });
-        void entry.session.kill().catch(() => {});
-        this.sessions.delete(sessionId);
-      }
-    }
+    return state;
   }
 }
