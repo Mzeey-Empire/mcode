@@ -26,7 +26,7 @@ const PROVIDER_META: Record<string, { icon: IconComponent; color: string }> = {
   claude: { icon: ClaudeIcon, color: "text-orange-500 dark:text-orange-400" },
   codex: { icon: CodexIcon, color: "text-emerald-400" },
   copilot: { icon: CopilotIcon, color: "text-violet-400 dark:text-violet-300" },
-  cursor: { icon: CursorProviderIcon, color: "text-blue-400" },
+  cursor: { icon: CursorProviderIcon, color: "" },
   opencode: { icon: OpenCodeIcon, color: "text-violet-400" },
   gemini: { icon: GeminiIcon, color: "text-sky-400" },
 };

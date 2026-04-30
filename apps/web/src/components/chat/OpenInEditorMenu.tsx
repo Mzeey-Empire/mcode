@@ -6,7 +6,8 @@ import { registerCommand } from "@/lib/shortcuts";
 import { formatKeybinding } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
 import { useToastStore } from "@/stores/toastStore";
-import { VsCodeIcon, ZedIcon, CursorIcon } from "./EditorIcons";
+import { VsCodeIcon, ZedIcon } from "./EditorIcons";
+import { CursorProviderIcon } from "./ProviderIcons";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -24,7 +25,7 @@ interface EditorEntry {
 
 const EDITOR_CONFIG: Record<string, { label: string; icon: (size: number) => React.ReactNode }> = {
   code: { label: "VS Code", icon: (s) => <VsCodeIcon size={s} /> },
-  cursor: { label: "Cursor", icon: (s) => <CursorIcon size={s} /> },
+  cursor: { label: "Cursor", icon: (s) => <CursorProviderIcon size={s} /> },
   zed: { label: "Zed", icon: (s) => <ZedIcon size={s} /> },
 };
 
