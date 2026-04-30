@@ -52,6 +52,13 @@ const THREAD = {
   forked_from_message_id: null,
 };
 
+/** Cursor-backed thread — `skill.list` must receive `providerId: "cursor"`. */
+const THREAD_CURSOR = {
+  ...THREAD,
+  provider: "cursor" as const,
+  model: "cursor-auto",
+};
+
 /** Varied skills payload covering multiple kinds and sources. */
 const FIXTURE_SKILLS = [
   { name: "superpowers:brainstorming", description: "Generate ideas creatively", kind: "skill", source: "user" },
@@ -190,6 +197,41 @@ test.describe("Slash command popup", () => {
 
     await page.screenshot({
       path: "e2e/screenshots/slash-command/04-refresh-button.png",
+      fullPage: true,
+    });
+  });
+
+  test("05 - cursor provider thread scopes skill.list to providerId cursor", async ({ page }) => {
+    let listParams: { cwd?: string; providerId?: string } | undefined;
+    const cursorSkills = [
+      {
+        name: "cursor-plugin:deploy",
+        description: "Example Cursor-only skill entry",
+        kind: "skill" as const,
+        source: "plugin" as const,
+        providers: ["cursor"],
+      },
+    ];
+
+    await mockWebSocketServer(page, {
+      "workspace.list": [WORKSPACE],
+      "thread.list": [THREAD_CURSOR],
+      "message.list": [],
+      "skill.list": (params) => {
+        listParams = params as { cwd?: string; providerId?: string };
+        return cursorSkills;
+      },
+    });
+
+    await openPopup(page, "/cursor");
+
+    expect(listParams?.providerId).toBe("cursor");
+
+    const popup = page.locator("[data-slash-popup]");
+    await expect(popup.getByText("/cursor-plugin:deploy")).toBeVisible();
+
+    await page.screenshot({
+      path: "e2e/screenshots/slash-command/05-cursor-provider-skills.png",
       fullPage: true,
     });
   });

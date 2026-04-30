@@ -106,7 +106,7 @@ describe("SkillWatcherService", () => {
     expect(invalidateSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("watches codex and agents roots in addition to claude roots", () => {
+  it("watches codex, agents, and cursor roots in addition to claude roots", () => {
     const watchSpy = vi.spyOn(watcher, "watch");
 
     watcher.start();
@@ -115,6 +115,7 @@ describe("SkillWatcherService", () => {
     // Should watch all the new provider roots
     expect(watchedPaths.some((p) => p.includes(".codex"))).toBe(true);
     expect(watchedPaths.some((p) => p.includes(".agents"))).toBe(true);
+    expect(watchedPaths.some((p) => p.replace(/\\/g, "/").includes(".cursor/skills"))).toBe(true);
   });
 
   it("auto-registers roots from multiple parent directories", async () => {

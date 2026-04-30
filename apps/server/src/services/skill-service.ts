@@ -3,11 +3,11 @@
  * Walks user, project, agent, and plugin directories looking for both
  * `skills/` (each subdirectory is a skill) and `commands/` (each .md file
  * is a command). Mirrors Claude Code's native discovery, extended to cover
- * Codex and Copilot provider directories.
+ * Codex and Copilot provider directories, plus Cursor `.cursor/skills` and commands.
  */
 
 import { injectable } from "tsyringe";
-import { readdirSync, readFileSync, existsSync, type Dirent } from "fs";
+import { readdirSync, readFileSync, existsSync, statSync, type Dirent } from "fs";
 import { join } from "path";
 import { homedir, platform } from "os";
 import { logger } from "@mcode/shared";
@@ -178,6 +178,58 @@ function scanPluginMarketplaceDir(ctx: ScanContext, marketplacesDir: string, pro
 }
 
 /**
+ * Scan one Cursor plugin install directory (hash-named version folder).
+ * Extends Claude-shaped layouts with Cursor-native `.cursor/skills`,
+ * `.cursor/commands`, and peer `workflow-skills/` trees.
+ */
+function scanCursorPluginVersionDir(
+  ctx: ScanContext,
+  versionDir: string,
+  pluginName: string,
+  providers: string[],
+): void {
+  scanPluginVersionDir(ctx, versionDir, pluginName, providers);
+  const cursorBase = join(versionDir, ".cursor");
+  scanSkillsDir(ctx, join(cursorBase, "skills"), pluginName, "plugin", providers);
+  scanCommandsDir(ctx, join(cursorBase, "commands"), pluginName, "plugin", providers);
+  scanSkillsDir(ctx, join(versionDir, "workflow-skills"), pluginName, "plugin", providers);
+  scanSkillsDir(ctx, join(cursorBase, "workflow-skills"), pluginName, "plugin", providers);
+}
+
+/**
+ * Walk Cursor plugin caches (`~/.cursor/plugins/cache`, `local`): cache/<mp>/<plugin>/<hash>/.
+ * Version dirs are opaque hashes (not semver); pick the newest by directory mtime.
+ */
+function scanCursorPluginCacheDir(ctx: ScanContext, cacheDir: string, providers: string[]): void {
+  for (const mp of scanDir(ctx, cacheDir)) {
+    if (!mp.isDirectory()) continue;
+    const mpDir = join(cacheDir, mp.name);
+    for (const plugin of scanDir(ctx, mpDir)) {
+      if (!plugin.isDirectory()) continue;
+      const pluginDir = join(mpDir, plugin.name);
+      const versionDirs = scanDir(ctx, pluginDir).filter((e) => e.isDirectory());
+      if (versionDirs.length === 0) continue;
+      let best: { name: string; mtime: number } | null = null;
+      for (const e of versionDirs) {
+        const p = join(pluginDir, e.name);
+        let mtime = 0;
+        try {
+          mtime = statSync(p).mtimeMs;
+        } catch {
+          /* stale symlink / race — treat as 0 */
+        }
+        if (!best || mtime > best.mtime) {
+          best = { name: e.name, mtime };
+        }
+      }
+      if (best) {
+        scanCursorPluginVersionDir(ctx, join(pluginDir, best.name), plugin.name, providers);
+      }
+    }
+  }
+}
+
+/**
  * Resolve the Copilot user-level agents directory.
  *
  * @returns The platform-specific path to Copilot's user-level agents directory.
@@ -208,6 +260,7 @@ function buildScanRoots(home: string, cwd?: string): ScanRoot[] {
   const codexDir = join(home, ".codex");
   const copilotDir = join(home, ".copilot");
   const agentsDir = join(home, ".agents");
+  const cursorDir = join(home, ".cursor");
 
   const roots: ScanRoot[] = [
     // Claude ecosystem
@@ -222,6 +275,10 @@ function buildScanRoots(home: string, cwd?: string): ScanRoot[] {
     // Copilot ecosystem
     { path: join(copilotDir, "skills"), source: "user", providers: ["copilot"], kind: "skills" },
     { path: join(copilotDir, "commands"), source: "user", providers: ["copilot"], kind: "commands" },
+
+    // Cursor CLI ecosystem (cursor-agent discovers workspace rules separately; these roots drive Mcode UI listing)
+    { path: join(cursorDir, "skills"), source: "user", providers: ["cursor"], kind: "skills" },
+    { path: join(cursorDir, "commands"), source: "user", providers: ["cursor"], kind: "commands" },
 
     // Cross-provider (.agents at home root — visible to Codex but not Claude or Copilot)
     { path: join(agentsDir, "skills"), source: "agent", providers: ["codex"], kind: "skills" },
@@ -248,6 +305,10 @@ function buildScanRoots(home: string, cwd?: string): ScanRoot[] {
       // Copilot project-level agents
       { path: join(cwd, ".github", "agents"), source: "project", providers: ["copilot"], kind: "both" },
       { path: join(cwd, ".copilot", "agents"), source: "project", providers: ["copilot"], kind: "both" },
+
+      // Cursor project-level
+      { path: join(cwd, ".cursor", "skills"), source: "project", providers: ["cursor"], kind: "skills" },
+      { path: join(cwd, ".cursor", "commands"), source: "project", providers: ["cursor"], kind: "commands" },
     );
   }
 
@@ -332,6 +393,7 @@ export class SkillService {
   private scan(cwd?: string): { items: SkillInfo[]; diag: SkillDiagnostics } {
     const home = homedir();
     const claudeDir = join(home, ".claude");
+    const cursorDir = join(home, ".cursor");
     const ctx: ScanContext = {
       out: [],
       diag: { scanned: [], errors: [], totalSkills: 0, totalCommands: 0 },
@@ -347,9 +409,13 @@ export class SkillService {
       }
     }
 
-    // Plugins remain Claude-scoped
+    // Claude plugin infrastructure (semver-sorted cache + marketplace checkouts)
     scanPluginCacheDir(ctx, join(claudeDir, "plugins", "cache"), ["claude"]);
     scanPluginMarketplaceDir(ctx, join(claudeDir, "plugins", "marketplaces"), ["claude"]);
+
+    // Cursor plugin installs (mtime-selected hash dirs under ~/.cursor/plugins)
+    scanCursorPluginCacheDir(ctx, join(cursorDir, "plugins", "cache"), ["cursor"]);
+    scanCursorPluginCacheDir(ctx, join(cursorDir, "plugins", "local"), ["cursor"]);
 
     return { items: ctx.out, diag: ctx.diag };
   }

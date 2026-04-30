@@ -51,6 +51,10 @@ import type {
 } from "@mcode/contracts";
 import { runCursorTurn } from "./cursor-turn-runner.js";
 import {
+  buildCursorPrompt,
+  readCursorUserInstructions,
+} from "./cursor-prompt.js";
+import {
   createCursorTodoSnapshot,
   type CursorTodoSnapshot,
 } from "./cursor-todo-snapshot.js";
@@ -64,26 +68,6 @@ interface CursorSessionState {
   todoSnapshot: CursorTodoSnapshot;
   /** AbortController for the in-flight turn (if any), used by stopSession. */
   inFlight: AbortController | null;
-}
-
-/**
- * Builds prompt text from the user message plus safe attachment references.
- * Images become explicit paths; non-images become labelled mentions without
- * raw FS paths to avoid injection-style attacks via filenames.
- */
-function buildCursorPrompt(message: string, attachments?: AttachmentMeta[]): string {
-  const lines: string[] = [];
-  for (const att of attachments ?? []) {
-    if (att.mimeType.startsWith("image/")) {
-      lines.push(`[Attached image path: ${att.sourcePath}]`);
-    } else {
-      const safeName = att.name.replace(/[\x00-\x1f\x7f]/g, "");
-      const safeMime = att.mimeType.replace(/[\x00-\x1f\x7f]/g, "");
-      lines.push(`[Attached file: ${safeName} (${safeMime})]`);
-    }
-  }
-  lines.push(message);
-  return lines.join("\n\n");
 }
 
 /** Executable paths to try for cursor-agent (configured override → catalog → bare name). */
@@ -159,7 +143,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     } = params;
 
     const threadId = sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;
-    const prompt = buildCursorPrompt(message, attachments);
+    const prompt = buildCursorPrompt(message, attachments, readCursorUserInstructions());
 
     const state = this.getOrCreateState(sessionId);
     const chatId = resume ? state.chatId ?? this.sdkSessionIds.get(sessionId) ?? null : null;

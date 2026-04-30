@@ -1,6 +1,7 @@
 /**
- * Watches Claude plugin and skills directories for changes and triggers
- * `SkillService` cache invalidation plus a `skills.changed` broadcast.
+ * Watches Claude, Cursor, Codex, Copilot-adjacent, and cross-provider skill
+ * directories for changes and triggers `SkillService` cache invalidation plus
+ * a `skills.changed` broadcast.
  *
  * Mirrors the debounce + fs.watch pattern of `GitWatcherService`.
  */
@@ -59,8 +60,10 @@ export class SkillWatcherService {
     const claudeDir = join(home, ".claude");
     const codexDir = join(home, ".codex");
     const agentsDir = join(home, ".agents");
+    const cursorDir = join(home, ".cursor");
 
-    const parentDirs = overrides?.parentDirs ?? [claudeDir, codexDir, agentsDir];
+    const parentDirs =
+      overrides?.parentDirs ?? [claudeDir, codexDir, agentsDir, cursorDir];
     const roots = overrides?.roots ?? [
       // Claude roots
       join(claudeDir, "skills"),
@@ -75,6 +78,10 @@ export class SkillWatcherService {
       join(agentsDir, "commands"),
       // Copilot user-level agents
       copilotUserAgentsDir(),
+      // Cursor CLI roots (skills/commands/plugins mirror Claude-style layout)
+      join(cursorDir, "skills"),
+      join(cursorDir, "commands"),
+      join(cursorDir, "plugins"),
     ];
 
     this.dynamicRoots = roots;
