@@ -1113,7 +1113,12 @@ ${userMessage}`;
     if (event.toolName === "TodoWrite") {
       const todos = event.toolInput?.todos;
       if (Array.isArray(todos)) {
-        const validStatuses = new Set(["pending", "in_progress", "completed"]);
+        const validStatuses = new Set([
+          "pending",
+          "in_progress",
+          "completed",
+          "cancelled",
+        ]);
         const cleanedTodos = todos
           .filter(
             (t): t is Record<string, unknown> =>
@@ -1126,7 +1131,8 @@ ${userMessage}`;
               status: (validStatuses.has(rawStatus) ? rawStatus : "pending") as
                 | "pending"
                 | "in_progress"
-                | "completed",
+                | "completed"
+                | "cancelled",
             };
           });
         if (cleanedTodos.length > 0) {

@@ -467,7 +467,7 @@ export const WS_METHODS = lazySchema(() => ({
     result: z
       .array(z.object({
         content: z.string(),
-        status: z.enum(["pending", "in_progress", "completed"]),
+        status: z.enum(["pending", "in_progress", "completed", "cancelled"]),
       }))
       .nullable(),
   },

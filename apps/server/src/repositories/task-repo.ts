@@ -7,10 +7,16 @@ import { injectable, inject } from "tsyringe";
 import type Database from "better-sqlite3";
 import { logger } from "@mcode/shared";
 
-/** Serialized task item stored in thread_tasks.tasks_json. */
+/**
+ * Serialized task item stored in `thread_tasks.tasks_json`.
+ *
+ * `cancelled` is included so that cursor-agent's TodoWrite cancellations
+ * (and any future provider that surfaces them) round-trip across server
+ * restarts instead of being silently coerced to `pending` on rehydrate.
+ */
 export interface StoredTask {
   content: string;
-  status: "pending" | "in_progress" | "completed";
+  status: "pending" | "in_progress" | "completed" | "cancelled";
 }
 
 /** Repository for persisting and retrieving per-thread TodoWrite task state. */
