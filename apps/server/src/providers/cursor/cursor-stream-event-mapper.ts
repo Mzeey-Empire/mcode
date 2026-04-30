@@ -1,18 +1,16 @@
 /**
  * Maps {@link CursorStreamEvent} objects produced by the cursor-agent
  * `--print --output-format stream-json` parser into {@link AgentEvent}
- * objects the rest of mcode consumes.
+ * values.
  *
- * The stream-json transport replaces the broken ACP `session/load` resume
- * path: each turn invokes a fresh `cursor-agent --print --resume <chatId>`
- * subprocess that resolves the persistent chat from disk, then emits a
- * deterministic NDJSON event stream and exits. This mapper is the analogue
- * of {@link mapCursorAcpNotification} for that stream — it preserves the
- * existing UI contract (TextDelta, ToolUse, ToolResult, TodoWrite synthesis
- * for `updateTodosToolCall`) so the transport swap is invisible downstream.
+ * **`--print` only.** The Cursor provider uses `agent acp` for normal chat;
+ * ACP notification mapping lives in `cursor-acp-event-mapper.ts`.
+ *
+ * Preserves the streaming contract (TextDelta, ToolUse, ToolResult, TodoWrite
+ * synthesis for `updateTodosToolCall`) consumed by `AgentService`.
  *
  * The terminal `result` event resolves the runner's per-turn promise out of
- * band; the mapper itself returns `[]` for it so no agent event is emitted.
+ * band; the mapper returns `[]` for it so no agent event is emitted.
  */
 
 import { AgentEventType } from "@mcode/contracts";
