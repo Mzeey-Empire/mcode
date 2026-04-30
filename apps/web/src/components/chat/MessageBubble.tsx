@@ -190,7 +190,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch }: 
 
     return (
       <div className="group/msg flex justify-end">
-        <div className="max-w-[75%] space-y-1.5">
+        <div className="min-w-0 max-w-[75%] space-y-1.5">
           {/* Image attachments — standalone thumbnails above the bubble */}
           {imageAttachments.length > 0 && (
             <div className={cn(
@@ -210,7 +210,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch }: 
 
           {/* Text bubble — only if there's text or file attachments */}
           {(textContent.trim() || fileAttachments.length > 0) && (
-            <div className="rounded-lg rounded-br-md bg-primary px-3 py-1.5 text-sm text-primary-foreground shadow-sm shadow-primary/15">
+            <div className="overflow-hidden break-words rounded-lg rounded-br-md bg-primary px-3 py-1.5 text-sm text-primary-foreground shadow-sm shadow-primary/15">
               {fileAttachments.length > 0 && (
                 <div className="mb-2 space-y-1">
                   {fileAttachments.map((file) => (
