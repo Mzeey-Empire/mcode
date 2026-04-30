@@ -9,24 +9,104 @@ function freshAcc(): CursorStreamAccumulator {
 }
 
 describe("mapCursorAcpNotification", () => {
-  it("emits TextDelta for agent_message_chunk", () => {
-    const acc = freshAcc();
-    const events = mapCursorAcpNotification(
-      {
-        method: "session/update",
-        params: {
-          update: {
-            sessionUpdate: "agent_message_chunk",
-            content: { text: "hello" },
+  describe("agent_message_chunk (streaming text)", () => {
+    it("emits TextDelta from a text content block", () => {
+      const acc = freshAcc();
+      const events = mapCursorAcpNotification(
+        {
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "text", text: "hello" },
+            },
           },
         },
-      },
-      "t1",
-      acc,
-    );
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({ type: "textDelta", delta: "hello" });
-    expect(acc.assistantText).toBe("hello");
+        "t1",
+        acc,
+      );
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ type: "textDelta", delta: "hello" });
+      expect(acc.assistantText).toBe("hello");
+    });
+
+    it("ignores non-text content blocks (e.g. image) without leaking text", () => {
+      const acc = freshAcc();
+      const events = mapCursorAcpNotification(
+        {
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: { type: "image", data: "base64..." },
+            },
+          },
+        },
+        "t1",
+        acc,
+      );
+      expect(events).toEqual([]);
+      expect(acc.assistantText).toBe("");
+    });
+
+    it("accepts legacy `{ text: ... }` shape without explicit type discriminator", () => {
+      const acc = freshAcc();
+      const events = mapCursorAcpNotification(
+        {
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: { text: "legacy" },
+            },
+          },
+        },
+        "t1",
+        acc,
+      );
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({ type: "textDelta", delta: "legacy" });
+    });
+  });
+
+  describe("agent_thought_chunk (reasoning)", () => {
+    it("drops thought chunks without polluting assistant text", () => {
+      const acc = freshAcc();
+      const events = mapCursorAcpNotification(
+        {
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "agent_thought_chunk",
+              content: { type: "text", text: "internal reasoning" },
+            },
+          },
+        },
+        "t1",
+        acc,
+      );
+      expect(events).toEqual([]);
+      expect(acc.assistantText).toBe("");
+    });
+  });
+
+  describe("user_message_chunk (echo)", () => {
+    it("drops user message echoes silently", () => {
+      const events = mapCursorAcpNotification(
+        {
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "user_message_chunk",
+              content: { type: "text", text: "hi" },
+            },
+          },
+        },
+        "t1",
+        freshAcc(),
+      );
+      expect(events).toEqual([]);
+    });
   });
 
   it("returns empty for non-session/update methods", () => {
@@ -50,43 +130,68 @@ describe("mapCursorAcpNotification", () => {
     expect(events).toEqual([]);
   });
 
-  describe("cursor/update_todos", () => {
-    it("emits ToolUse with TodoWrite toolName for cursor/update_todos", () => {
+  describe("plan (TodoWrite synthesis)", () => {
+    it("emits ToolUse(TodoWrite) + ToolResult for sessionUpdate=plan", () => {
       const acc = freshAcc();
       const events = mapCursorAcpNotification(
         {
-          method: "cursor/update_todos",
+          method: "session/update",
           params: {
-            todos: [
-              { id: "1", content: "Fix the bug", status: "in_progress" },
-              { id: "2", content: "Write tests", status: "pending" },
-            ],
+            update: {
+              sessionUpdate: "plan",
+              entries: [
+                { content: "Fix the bug", priority: "high", status: "in_progress" },
+                { content: "Write tests", priority: "medium", status: "pending" },
+              ],
+            },
           },
         },
         "t1",
         acc,
       );
 
-      // Should emit a single ToolUse event that looks like a TodoWrite call
-      // so the existing threadStore TodoWrite interception picks it up.
       expect(events).toHaveLength(2);
 
-      const toolUse = events[0];
+      const [toolUse, toolResult] = events;
       expect(toolUse).toMatchObject({
         type: "toolUse",
         threadId: "t1",
         toolName: "TodoWrite",
       });
-      // toolInput should contain the todos array
-      const input = (toolUse as { toolInput: Record<string, unknown> }).toolInput;
-      expect(input.todos).toHaveLength(2);
 
-      const toolResult = events[1];
+      const input = (toolUse as { toolInput: Record<string, unknown> }).toolInput;
+      const todos = input.todos as Array<Record<string, unknown>>;
+      expect(todos).toHaveLength(2);
+      expect(todos[0]).toMatchObject({
+        content: "Fix the bug",
+        status: "in_progress",
+        priority: "high",
+      });
+      expect(todos[1]).toMatchObject({
+        content: "Write tests",
+        status: "pending",
+        priority: "medium",
+      });
+
       expect(toolResult).toMatchObject({
         type: "toolResult",
         threadId: "t1",
         isError: false,
       });
+    });
+
+    it("returns empty for plan with non-array entries (defensive)", () => {
+      const events = mapCursorAcpNotification(
+        {
+          method: "session/update",
+          params: {
+            update: { sessionUpdate: "plan", entries: "not-an-array" },
+          },
+        },
+        "t1",
+        freshAcc(),
+      );
+      expect(events).toEqual([]);
     });
   });
 
@@ -110,18 +215,19 @@ describe("mapCursorAcpNotification", () => {
     });
   });
 
-  describe("tool execution session updates", () => {
-    it("emits ToolUse for tool_start sessionUpdate", () => {
+  describe("tool_call (canonical ACP)", () => {
+    it("emits ToolUse for a tool_call with title, kind, and rawInput", () => {
       const acc = freshAcc();
       const events = mapCursorAcpNotification(
         {
           method: "session/update",
           params: {
             update: {
-              sessionUpdate: "tool_start",
+              sessionUpdate: "tool_call",
               toolCallId: "tc-1",
-              toolName: "edit_file",
-              toolInput: { file: "foo.ts", content: "bar" },
+              title: "Edit foo.ts",
+              kind: "edit",
+              rawInput: { file: "foo.ts", content: "bar" },
             },
           },
         },
@@ -133,13 +239,86 @@ describe("mapCursorAcpNotification", () => {
         type: "toolUse",
         threadId: "t1",
         toolCallId: "tc-1",
-        toolName: "edit_file",
+        toolName: "Edit foo.ts",
         toolInput: { file: "foo.ts", content: "bar" },
       });
       expect(acc.toolStartTimes.has("tc-1")).toBe(true);
     });
 
-    it("emits ToolResult for tool_end sessionUpdate", () => {
+    it("falls back to kind when title is missing", () => {
+      const acc = freshAcc();
+      const events = mapCursorAcpNotification(
+        {
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "tool_call",
+              toolCallId: "tc-2",
+              kind: "search",
+            },
+          },
+        },
+        "t1",
+        acc,
+      );
+      expect(events[0]).toMatchObject({ toolName: "search" });
+    });
+
+    it("emits ToolUse + ToolResult when tool_call already carries terminal status", () => {
+      const acc = freshAcc();
+      const events = mapCursorAcpNotification(
+        {
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "tool_call",
+              toolCallId: "tc-3",
+              title: "Read README.md",
+              kind: "read",
+              status: "completed",
+              content: [
+                { type: "content", content: { type: "text", text: "file body" } },
+              ],
+            },
+          },
+        },
+        "t1",
+        acc,
+      );
+      expect(events).toHaveLength(2);
+      expect(events[0]).toMatchObject({ type: "toolUse", toolCallId: "tc-3" });
+      expect(events[1]).toMatchObject({
+        type: "toolResult",
+        toolCallId: "tc-3",
+        output: "file body",
+        isError: false,
+      });
+      // Inline-completed call must clear its start time so a stray later
+      // update doesn't think we're still running.
+      expect(acc.toolStartTimes.has("tc-3")).toBe(false);
+    });
+
+    it("returns no events for tool_call without toolCallId", () => {
+      const events = mapCursorAcpNotification(
+        {
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "tool_call",
+              title: "Anonymous",
+              kind: "execute",
+            },
+          },
+        },
+        "t1",
+        freshAcc(),
+      );
+      expect(events).toEqual([]);
+    });
+  });
+
+  describe("tool_call_update (canonical ACP)", () => {
+    it("emits ToolResult on status=completed for a known tool", () => {
       const acc = freshAcc();
       acc.toolStartTimes.set("tc-1", Date.now() - 3000);
       const events = mapCursorAcpNotification(
@@ -147,10 +326,12 @@ describe("mapCursorAcpNotification", () => {
           method: "session/update",
           params: {
             update: {
-              sessionUpdate: "tool_end",
+              sessionUpdate: "tool_call_update",
               toolCallId: "tc-1",
-              output: "File edited successfully",
-              isError: false,
+              status: "completed",
+              content: [
+                { type: "content", content: { type: "text", text: "done" } },
+              ],
             },
           },
         },
@@ -160,25 +341,73 @@ describe("mapCursorAcpNotification", () => {
       expect(events).toHaveLength(1);
       expect(events[0]).toMatchObject({
         type: "toolResult",
-        threadId: "t1",
         toolCallId: "tc-1",
-        output: "File edited successfully",
+        output: "done",
         isError: false,
       });
       expect(acc.toolStartTimes.has("tc-1")).toBe(false);
     });
 
-    it("handles alternative field names (actionId, actionName, parameters, result, success)", () => {
+    it("falls back to rawOutput string when no content text is available", () => {
       const acc = freshAcc();
+      acc.toolStartTimes.set("tc-raw", Date.now());
       const events = mapCursorAcpNotification(
         {
           method: "session/update",
           params: {
             update: {
-              sessionUpdate: "tool_start",
-              actionId: "ac-2",
-              actionName: "run_command",
-              parameters: { command: "ls" },
+              sessionUpdate: "tool_call_update",
+              toolCallId: "tc-raw",
+              status: "completed",
+              rawOutput: "stdout text",
+            },
+          },
+        },
+        "t1",
+        acc,
+      );
+      expect(events[0]).toMatchObject({
+        type: "toolResult",
+        output: "stdout text",
+      });
+    });
+
+    it("stringifies non-string rawOutput to JSON", () => {
+      const acc = freshAcc();
+      acc.toolStartTimes.set("tc-obj", Date.now());
+      const events = mapCursorAcpNotification(
+        {
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "tc-obj",
+              status: "completed",
+              rawOutput: { exit: 0, stdout: "ok" },
+            },
+          },
+        },
+        "t1",
+        acc,
+      );
+      expect(events[0]).toMatchObject({
+        type: "toolResult",
+        output: '{"exit":0,"stdout":"ok"}',
+      });
+    });
+
+    it("emits ToolResult with isError=true on status=failed", () => {
+      const acc = freshAcc();
+      acc.toolStartTimes.set("tc-fail", Date.now());
+      const events = mapCursorAcpNotification(
+        {
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "tc-fail",
+              status: "failed",
+              rawOutput: "EACCES",
             },
           },
         },
@@ -187,40 +416,24 @@ describe("mapCursorAcpNotification", () => {
       );
       expect(events).toHaveLength(1);
       expect(events[0]).toMatchObject({
-        type: "toolUse",
-        toolCallId: "ac-2",
-        toolName: "run_command",
-        toolInput: { command: "ls" },
+        type: "toolResult",
+        toolCallId: "tc-fail",
+        isError: true,
       });
     });
 
-    it("emits ToolProgress with non-negative elapsedSeconds when tool_start preceded it", () => {
+    it("emits ToolProgress heartbeat for non-terminal status of a known tool", () => {
       const acc = freshAcc();
-      // Simulate tool_start to populate toolStartTimes
-      mapCursorAcpNotification(
-        {
-          method: "session/update",
-          params: {
-            update: {
-              sessionUpdate: "tool_start",
-              toolCallId: "tc-progress-1",
-              toolName: "edit_file",
-            },
-          },
-        },
-        "t1",
-        acc,
-      );
-      expect(acc.toolStartTimes.has("tc-progress-1")).toBe(true);
-
+      acc.toolStartTimes.set("tc-prog", Date.now() - 100);
       const events = mapCursorAcpNotification(
         {
           method: "session/update",
           params: {
             update: {
-              sessionUpdate: "tool_progress",
-              toolCallId: "tc-progress-1",
-              toolName: "edit_file",
+              sessionUpdate: "tool_call_update",
+              toolCallId: "tc-prog",
+              status: "in_progress",
+              title: "Searching",
             },
           },
         },
@@ -230,87 +443,111 @@ describe("mapCursorAcpNotification", () => {
       expect(events).toHaveLength(1);
       expect(events[0]).toMatchObject({
         type: "toolProgress",
-        threadId: "t1",
-        toolCallId: "tc-progress-1",
-        toolName: "edit_file",
+        toolCallId: "tc-prog",
+        toolName: "Searching",
       });
       const elapsed = (events[0] as { elapsedSeconds: number }).elapsedSeconds;
       expect(elapsed).toBeGreaterThanOrEqual(0);
     });
 
-    it("returns no events for tool_progress with unknown toolCallId", () => {
+    it("synthesizes ToolUse + ToolResult when tool_call_update arrives without prior tool_call", () => {
       const acc = freshAcc();
       const events = mapCursorAcpNotification(
         {
           method: "session/update",
           params: {
             update: {
-              sessionUpdate: "tool_progress",
-              toolCallId: "unknown-tc",
-              toolName: "edit_file",
+              sessionUpdate: "tool_call_update",
+              toolCallId: "tc-late",
+              title: "Late tool",
+              kind: "execute",
+              status: "completed",
+              rawOutput: "ok",
             },
           },
         },
         "t1",
         acc,
+      );
+      expect(events).toHaveLength(2);
+      expect(events[0]).toMatchObject({
+        type: "toolUse",
+        toolCallId: "tc-late",
+        toolName: "Late tool",
+      });
+      expect(events[1]).toMatchObject({
+        type: "toolResult",
+        toolCallId: "tc-late",
+        output: "ok",
+      });
+    });
+
+    it("drops tool_call_update with non-terminal status for an unknown toolCallId", () => {
+      const events = mapCursorAcpNotification(
+        {
+          method: "session/update",
+          params: {
+            update: {
+              sessionUpdate: "tool_call_update",
+              toolCallId: "tc-unknown",
+              status: "in_progress",
+            },
+          },
+        },
+        "t1",
+        freshAcc(),
       );
       expect(events).toEqual([]);
     });
 
-    it("returns no events for tool_progress with no toolCallId or actionId", () => {
-      const acc = freshAcc();
+    it("returns no events for tool_call_update without toolCallId", () => {
       const events = mapCursorAcpNotification(
         {
           method: "session/update",
           params: {
             update: {
-              sessionUpdate: "tool_progress",
-              toolName: "edit_file",
+              sessionUpdate: "tool_call_update",
+              status: "completed",
+              rawOutput: "done",
             },
           },
         },
         "t1",
-        acc,
+        freshAcc(),
       );
       expect(events).toEqual([]);
     });
 
-    it("returns no events for tool_end with no toolCallId or actionId", () => {
+    it("renders diff content blocks into a readable summary", () => {
       const acc = freshAcc();
+      acc.toolStartTimes.set("tc-diff", Date.now());
       const events = mapCursorAcpNotification(
         {
           method: "session/update",
           params: {
             update: {
-              sessionUpdate: "tool_end",
-              output: "done",
-              isError: false,
+              sessionUpdate: "tool_call_update",
+              toolCallId: "tc-diff",
+              status: "completed",
+              content: [
+                {
+                  type: "diff",
+                  path: "foo.ts",
+                  oldText: "a",
+                  newText: "b",
+                },
+              ],
             },
           },
         },
         "t1",
         acc,
       );
-      expect(events).toEqual([]);
-    });
-
-    it("returns no events for agent_action_end with no toolCallId or actionId", () => {
-      const acc = freshAcc();
-      const events = mapCursorAcpNotification(
-        {
-          method: "session/update",
-          params: {
-            update: {
-              sessionUpdate: "agent_action_end",
-              result: "done",
-              success: true,
-            },
-          },
-        },
-        "t1",
-        acc,
-      );
-      expect(events).toEqual([]);
+      expect(events).toHaveLength(1);
+      const output = (events[0] as { output: string }).output;
+      expect(output).toContain("Diff: foo.ts");
+      expect(output).toContain("--- old");
+      expect(output).toContain("+++ new");
     });
   });
 });
