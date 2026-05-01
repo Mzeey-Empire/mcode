@@ -1845,18 +1845,22 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
                       : "bg-muted text-muted-foreground opacity-40"
             )}
             title={
-              isAgentRunning && hasContent
-                ? "Queue message"
-                : isAgentRunning
-                  ? "Stop agent"
-                  : "Send message"
+              isThreadScaffold
+                ? "Starting thread"
+                : isAgentRunning && hasContent
+                  ? "Queue message"
+                  : isAgentRunning
+                    ? "Stop agent"
+                    : "Send message"
             }
             aria-label={
-              isAgentRunning && hasContent
-                ? "Queue message"
-                : isAgentRunning
-                  ? "Stop agent"
-                  : "Send message"
+              isThreadScaffold
+                ? "Starting thread"
+                : isAgentRunning && hasContent
+                  ? "Queue message"
+                  : isAgentRunning
+                    ? "Stop agent"
+                    : "Send message"
             }
           >
             {isThreadScaffold ? (
