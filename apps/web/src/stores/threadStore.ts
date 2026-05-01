@@ -1410,17 +1410,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             group: "Tasks",
           }));
           useTaskStore.getState().setTasks(threadId, taskItems);
-          // Only open the task panel if the user is viewing this thread.
-          // Background threads populate tasksByThread silently.
-          if (useWorkspaceStore.getState().activeThreadId === threadId) {
-            // Imported lazily to avoid circular dependency at module evaluation time.
-            import("./diffStore").then(({ useDiffStore }) => {
-              // Re-check after async import: user may have switched threads.
-              if (useWorkspaceStore.getState().activeThreadId !== threadId) return;
-              useDiffStore.getState().showRightPanel(threadId);
-              useDiffStore.getState().setRightPanelTab(threadId, "tasks");
-            });
-          }
         }
       }
 
