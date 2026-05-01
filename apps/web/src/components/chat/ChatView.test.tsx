@@ -5,9 +5,29 @@ import type { Thread } from "@/transport/types";
 
 // Store mocks must be declared before importing the component under test.
 
+/** Holds the store snapshot backing both the hook selector and `getState()` (real Zustand API). */
+const { chatViewWorkspaceMockRef } = vi.hoisted(() => ({
+  chatViewWorkspaceMockRef: { current: null as Record<string, unknown> | null },
+}));
+
 vi.mock("@/stores/workspaceStore", () => ({
-  useWorkspaceStore: vi.fn((selector: (s: unknown) => unknown) =>
-    selector(defaultWorkspaceState())
+  useWorkspaceStore: Object.assign(
+    vi.fn((selector: (s: unknown) => unknown) => {
+      const snap = chatViewWorkspaceMockRef.current;
+      if (!snap) {
+        throw new Error("ChatView tests: set chatViewWorkspaceMockRef via setupWorkspaceMock before render");
+      }
+      return selector(snap);
+    }),
+    {
+      getState: () => {
+        const snap = chatViewWorkspaceMockRef.current;
+        if (!snap) {
+          throw new Error("ChatView tests: set chatViewWorkspaceMockRef via setupWorkspaceMock before render");
+        }
+        return snap;
+      },
+    },
   ),
 }));
 
@@ -120,12 +140,20 @@ function defaultWorkspaceState(overrides: Partial<{
     deleteThread: vi.fn(),
     setPendingNewThread: vi.fn(),
     updateThreadTitle: overrides.updateThreadTitle ?? vi.fn().mockResolvedValue(undefined),
+    failPreparingThreadOnConnectionLost: vi.fn(),
+    retryPreparingThread: vi.fn(),
+    dismissPreparingThread: vi.fn(),
+    loadWorktrees: vi.fn(),
+    worktrees: [],
+    worktreesLoadedForWorkspace: null,
+    checksById: {},
     error: null,
   };
 }
 
 /** Re-configure the workspace store mock with the given state. */
 function setupWorkspaceMock(state: ReturnType<typeof defaultWorkspaceState>) {
+  chatViewWorkspaceMockRef.current = state;
   // Cast via unknown to avoid requiring every field of WorkspaceState in the fixture.
   (useWorkspaceStore as unknown as { mockImplementation: (fn: (selector: (s: unknown) => unknown) => unknown) => void }).mockImplementation(
     (selector) => selector(state)

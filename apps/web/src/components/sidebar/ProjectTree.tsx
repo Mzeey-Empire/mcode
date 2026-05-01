@@ -25,6 +25,7 @@ import { getStatusDisplay, getNotificationDot } from "@/lib/thread-status";
 import { getBreakdown, getCiVisual, CI_ICON_STROKE } from "@/lib/ci-status";
 import type { ChecksStatus } from "@mcode/contracts";
 import type { Workspace, Thread } from "@/transport/types";
+import type { WorkspaceThread } from "@/lib/workspace-thread";
 
 // Persist expand/collapse in localStorage
 function getExpandedState(): Record<string, boolean> {
@@ -99,14 +100,14 @@ interface InlineEditState {
 
 /** A thread with its nesting depth in the sidebar tree. */
 interface ThreadTreeItem {
-  thread: Thread;
+  thread: WorkspaceThread;
   depth: number;
 }
 
 /** Builds a depth-first flattened tree from a flat list of threads, ordered by parent-child relationships. */
-function buildThreadTree(threads: Thread[]): ThreadTreeItem[] {
-  const childrenByParent = new Map<string, Thread[]>();
-  const roots: Thread[] = [];
+function buildThreadTree(threads: WorkspaceThread[]): ThreadTreeItem[] {
+  const childrenByParent = new Map<string, WorkspaceThread[]>();
+  const roots: WorkspaceThread[] = [];
   const threadIds = new Set(threads.map((t) => t.id));
 
   for (const thread of threads) {
@@ -121,7 +122,7 @@ function buildThreadTree(threads: Thread[]): ThreadTreeItem[] {
   }
 
   const result: ThreadTreeItem[] = [];
-  function walk(thread: Thread, depth: number) {
+  function walk(thread: WorkspaceThread, depth: number) {
     result.push({ thread, depth });
     const children = childrenByParent.get(thread.id);
     if (children) {
@@ -577,7 +578,7 @@ export function ProjectTree() {
 
 /** Props for the virtualized thread list rendered inside an expanded workspace. */
 interface VirtualizedThreadListProps {
-  threads: Thread[];
+  threads: WorkspaceThread[];
   /** Maximum number of tree rows to render. Used by the parent to enforce the THREAD_LIST_CAP. */
   maxVisible: number;
   activeThreadId: string | null;
@@ -663,7 +664,7 @@ function WorkspaceCiRollupChip({
   threads,
   checksById,
 }: {
-  threads: Thread[];
+  threads: WorkspaceThread[];
   checksById: Record<string, ChecksStatus>;
 }) {
   // Count threads by their CI aggregate — one per thread, regardless of how many
@@ -819,6 +820,9 @@ function VirtualizedThreadList({
           : !providerRow.enabled
             ? "Provider disabled"
             : "CLI not found";
+        // Opacity on the row would compound onto CiChip; dim only the title cluster and timestamp.
+        const scaffoldDim =
+          (thread.clientPreparing || thread.clientError) && "opacity-[0.72]";
         return (
           <div
             key={thread.id}
@@ -855,6 +859,12 @@ function VirtualizedThreadList({
                 )}
                 style={{ paddingLeft: `${10 + depth * 14}px` }}
               >
+                <div
+                  className={cn(
+                    "flex min-w-0 flex-1 items-center gap-2",
+                    scaffoldDim,
+                  )}
+                >
                 {thread.pr_number != null ? (() => {
                   const { Icon: PrIcon, color: prColor } = getPrVisual(thread.pr_status);
                   const agentDot = getNotificationDot(thread, runningThreadIds.has(thread.id), pendingPermissionThreadIds.has(thread.id));
@@ -942,11 +952,17 @@ function VirtualizedThreadList({
                     <TooltipContent side="right" className="text-xs">{unusableReason}</TooltipContent>
                   </Tooltip>
                 )}
+                </div>
                 {!isEditing && thread.pr_number != null && checksById[thread.id] && (
                   <CiChip checks={checksById[thread.id]} />
                 )}
                 {!isEditing && (
-                  <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/45">
+                  <span
+                    className={cn(
+                      "shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/45",
+                      scaffoldDim,
+                    )}
+                  >
                     {thread.pr_number != null && (
                       <span className="mr-1 opacity-80">#{thread.pr_number}</span>
                     )}
@@ -969,7 +985,7 @@ interface ProjectNodeProps {
   isExpanded: boolean;
   isActive: boolean;
   activeThreadId: string | null;
-  threads: Thread[];
+  threads: WorkspaceThread[];
   runningThreadIds: Set<string>;
   /** Thread IDs with at least one unsettled permission request. */
   pendingPermissionThreadIds: Set<string>;

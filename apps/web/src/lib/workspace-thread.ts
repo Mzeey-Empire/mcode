@@ -1,0 +1,112 @@
+import type { Thread } from "@/transport";
+
+/**
+ * Thread row in the workspace store may include client-only fields while the
+ * server-backed record is still being created.
+ */
+export type WorkspaceThread = Thread & {
+  /** True while createAndSend / branch RPC is in flight. */
+  clientPreparing?: boolean;
+  /** Set when creation failed; user can retry or dismiss. */
+  clientError?: string | null;
+  /** Message body shown in the preparing shell (mirrors cleared composer input). */
+  clientQueuedMessage?: string;
+  /**
+   * Drives status copy in the preparing shell (new vs branch, direct vs worktree).
+   */
+  clientPreparingContext?:
+    | "new-direct"
+    | "new-worktree"
+    | "new-existing-worktree"
+    | "branch-direct"
+    | "branch-worktree"
+    | "branch-existing-worktree";
+};
+
+const TITLE_MAX = 72;
+
+/**
+ * Derives a thread title from the first line or first chars of the user's message.
+ */
+export function titleFromMessageContent(content: string): string {
+  const firstLine = content.split(/\r?\n/).find((l) => l.trim().length > 0) ?? content;
+  const trimmed = firstLine.trim();
+  if (trimmed.length <= TITLE_MAX) return trimmed || "New thread";
+  return `${trimmed.slice(0, TITLE_MAX - 1)}…`;
+}
+
+/** Union of all preparing-context values for exhaustive switch checks. */
+export type ClientPreparingContext = NonNullable<WorkspaceThread["clientPreparingContext"]>;
+
+/**
+ * User-visible status line for the preparing shell.
+ */
+export function preparingStatusLabel(ctx: ClientPreparingContext): string {
+  switch (ctx) {
+    case "new-direct":
+    case "branch-direct":
+      return "Starting thread…";
+    case "new-worktree":
+    case "branch-worktree":
+      return "Creating worktree…";
+    case "new-existing-worktree":
+    case "branch-existing-worktree":
+      return "Attaching worktree…";
+    default: {
+      const _exhaustive: never = ctx;
+      return _exhaustive;
+    }
+  }
+}
+
+/**
+ * Builds a minimal {@link Thread} shape for an optimistic sidebar row and chat shell.
+ */
+export function buildPlaceholderWorkspaceThread(params: {
+  id: string;
+  workspaceId: string;
+  title: string;
+  queuedMessage: string;
+  transportMode: "direct" | "worktree";
+  branch: string;
+  clientPreparingContext: ClientPreparingContext;
+  parentThreadId?: string | null;
+  forkedFromMessageId?: string | null;
+}): WorkspaceThread {
+  const now = new Date().toISOString();
+  return {
+    id: params.id,
+    workspace_id: params.workspaceId,
+    title: params.title,
+    status: "active",
+    mode: params.transportMode,
+    worktree_path: null,
+    branch: params.branch,
+    worktree_managed: params.transportMode === "worktree",
+    issue_number: null,
+    pr_number: null,
+    pr_status: null,
+    has_file_changes: false,
+    sdk_session_id: null,
+    created_at: now,
+    updated_at: now,
+    model: null,
+    provider: "claude",
+    deleted_at: null,
+    last_context_tokens: null,
+    context_window: null,
+    reasoning_level: null,
+    interaction_mode: null,
+    permission_mode: null,
+    context_window_mode: null,
+    thinking: null,
+    copilot_agent: null,
+    parent_thread_id: params.parentThreadId ?? null,
+    forked_from_message_id: params.forkedFromMessageId ?? null,
+    last_compact_summary: null,
+    clientPreparing: true,
+    clientError: null,
+    clientQueuedMessage: params.queuedMessage,
+    clientPreparingContext: params.clientPreparingContext,
+  };
+}

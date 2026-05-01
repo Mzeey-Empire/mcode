@@ -425,7 +425,6 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const [access, setAccess] = useState<AccessMode>(PERMISSION_MODES.FULL);
   const [showReasoningPicker, setShowReasoningPicker] = useState(false);
   const [composerMode, setComposerModeLocal] = useState<ComposerMode>("direct");
-  const [preparingWorktree, setPreparingWorktree] = useState(false);
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const dragDepthRef = useRef(0);
@@ -717,6 +716,9 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
 
   const threads = useWorkspaceStore((s) => s.threads);
   const activeThread = threadId ? threads.find((t) => t.id === threadId) : undefined;
+  const isThreadScaffold = !!(
+    activeThread?.clientPreparing || activeThread?.clientError
+  );
 
   const activeProviderId = activeThread?.provider ?? "claude";
   const usageInfo = useThreadStore((s) => s.usageByProvider[activeProviderId]);
@@ -1185,11 +1187,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
 
   const handleSend = useCallback(async () => {
     if (!hasContent) return;
-    // Prevent double-submission via keyboard while a worktree is being created.
-    // The button is already disabled via `preparingWorktree`, but the keyboard
-    // Enter handler bypasses that. Without this guard, a second Enter press can
-    // trigger a duplicate createAndSendMessage call before the first RPC returns.
-    if (preparingWorktree) return;
+    // Avoid duplicate submissions while a placeholder thread is still materializing.
+    if (isThreadScaffold) return;
     const trimmed = input.trim();
 
     // ---- Queue path: agent is running on this thread ----
@@ -1261,14 +1260,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     if (threadId) clearDraftFromStore(threadId);
 
     if (isNewThread && workspaceId) {
-      if (newThreadMode === "worktree" || newThreadMode === "existing-worktree") {
-        setPreparingWorktree(true);
-      }
-      try {
-        await useWorkspaceStore.getState().createAndSendMessage(messageContent, modelId, access, currentAttachments.length > 0 ? currentAttachments : undefined, reasoning, provider, mode, provider === "copilot" ? (copilotAgent ?? undefined) : undefined, contextWindow ?? undefined, thinking ?? undefined);
-      } finally {
-        setPreparingWorktree(false);
-      }
+      await useWorkspaceStore.getState().createAndSendMessage(messageContent, modelId, access, currentAttachments.length > 0 ? currentAttachments : undefined, reasoning, provider, mode, provider === "copilot" ? (copilotAgent ?? undefined) : undefined, contextWindow ?? undefined, thinking ?? undefined);
     } else if (branchFromMessageId && threadId) {
       // Branch mode: create a child thread from the quoted message instead of sending.
       let branchMode: "direct" | "worktree" | "existing-worktree" = "direct";
@@ -1323,7 +1315,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     }
 
     editorRef.current?.focus();
-  }, [input, attachments, isAgentRunning, isNewThread, newThreadMode, newThreadBranch, workspaceId, threadId, sendMessage, modelId, provider, reasoning, mode, access, copilotAgent, contextWindow, thinking, namingMode, customBranchName, selectedWorktree, injectFileContent, collectAndClearAttachments, clearDraftFromStore, preparingWorktree, branchFromMessageId, branchExecMode, branchTargetBranch, branchNamingMode, branchCustomName, branchWorktreePath, activeThread, branchThread, branchAutoPreview, onBranchModeExit]);
+  }, [input, attachments, isAgentRunning, isNewThread, newThreadMode, newThreadBranch, workspaceId, threadId, sendMessage, modelId, provider, reasoning, mode, access, copilotAgent, contextWindow, thinking, namingMode, customBranchName, selectedWorktree, injectFileContent, collectAndClearAttachments, clearDraftFromStore, isThreadScaffold, branchFromMessageId, branchExecMode, branchTargetBranch, branchNamingMode, branchCustomName, branchWorktreePath, activeThread, branchThread, branchAutoPreview, onBranchModeExit]);
 
   const handleEditorChange = useCallback((text: string) => {
     setInput(text);
@@ -1767,9 +1759,9 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
           <div className="flex-1" />
 
           {/* Preparing worktree indicator */}
-          {preparingWorktree && (
+          {isThreadScaffold && (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              Preparing worktree...
+              Preparing thread…
             </span>
           )}
 
@@ -1825,7 +1817,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
           {/* Send / Queue / Stop button */}
           <button
             onClick={
-              preparingWorktree
+              isThreadScaffold
                 ? undefined
                 : isAgentRunning && hasContent
                   ? handleSend
@@ -1837,12 +1829,12 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
               !!providerReason ||
               isStaleWorktree ||
               planPending ||
-              preparingWorktree ||
+              isThreadScaffold ||
               (!isAgentRunning && !hasContent)
             }
             className={cn(
               "rounded-full p-1.5 transition-colors",
-              preparingWorktree
+              isThreadScaffold
                 ? "bg-primary text-primary-foreground animate-spin"
                 : isAgentRunning && hasContent
                   ? "bg-primary/60 text-primary-foreground hover:bg-primary/75"
@@ -1853,21 +1845,25 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
                       : "bg-muted text-muted-foreground opacity-40"
             )}
             title={
-              isAgentRunning && hasContent
-                ? "Queue message"
-                : isAgentRunning
-                  ? "Stop agent"
-                  : "Send message"
+              isThreadScaffold
+                ? "Starting thread"
+                : isAgentRunning && hasContent
+                  ? "Queue message"
+                  : isAgentRunning
+                    ? "Stop agent"
+                    : "Send message"
             }
             aria-label={
-              isAgentRunning && hasContent
-                ? "Queue message"
-                : isAgentRunning
-                  ? "Stop agent"
-                  : "Send message"
+              isThreadScaffold
+                ? "Starting thread"
+                : isAgentRunning && hasContent
+                  ? "Queue message"
+                  : isAgentRunning
+                    ? "Stop agent"
+                    : "Send message"
             }
           >
-            {preparingWorktree ? (
+            {isThreadScaffold ? (
               <Loader2 size={14} />
             ) : isAgentRunning && hasContent ? (
               <ArrowUp size={14} />

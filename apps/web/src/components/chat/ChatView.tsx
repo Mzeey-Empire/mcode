@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { GitBranch } from "lucide-react";
+import { GitBranch, Loader2 } from "lucide-react";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { useConnectionStore } from "@/stores/connectionStore";
@@ -15,6 +15,8 @@ import { InterruptedSessionsBanner } from "./InterruptedSessionsBanner";
 import { ThreadTitleEditor } from "./ThreadTitleEditor";
 import { SidebarRevealButton } from "@/components/sidebar/SidebarRevealButton";
 import { useUiStore } from "@/stores/uiStore";
+import { preparingStatusLabel, type WorkspaceThread } from "@/lib/workspace-thread";
+import { Button } from "@/components/ui/button";
 
 /** Entry point suggestions shown in the empty state — each maps to a real Mcode capability. */
 const ENTRY_POINTS = [
@@ -71,7 +73,97 @@ function EmptyState({ onPromptSelect }: EmptyStateProps) {
   );
 }
 
-/** Blink cache threshold (bytes) above which we evict on thread switch. */
+/** Props for {@link ThreadPreparingShell}. */
+interface ThreadPreparingShellProps {
+  /** Placeholder or errored row until the server thread exists. */
+  thread: WorkspaceThread;
+  workspaceName: string;
+  sidebarCollapsed: boolean;
+  onRetry: () => void;
+  onDismiss: () => void;
+  activeWorkspaceId: string | null;
+}
+
+/** Full-height chat layout while a thread row is still being created on the server. */
+function ThreadPreparingShell({
+  thread,
+  workspaceName,
+  sidebarCollapsed,
+  onRetry,
+  onDismiss,
+  activeWorkspaceId,
+}: ThreadPreparingShellProps) {
+  const statusLabel = thread.clientPreparingContext
+    ? preparingStatusLabel(thread.clientPreparingContext)
+    : "Preparing…";
+  const threads = useWorkspaceStore((s) => s.threads);
+
+  return (
+    <div className="flex h-full flex-col bg-background" data-testid="thread-preparing-shell">
+      <div className="flex h-11 items-center justify-between border-b border-border pr-4 pl-2">
+        <div className="flex min-w-0 items-center gap-2">
+          {sidebarCollapsed && <SidebarRevealButton />}
+          <span
+            data-testid="chat-header-title"
+            className="truncate text-sm font-medium"
+          >
+            {thread.title}
+            {thread.clientPreparing && (
+              <span className="ml-2 inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-primary/60 align-middle" aria-hidden />
+            )}
+          </span>
+          {activeWorkspaceId && (
+            <Badge variant="secondary">{workspaceName}</Badge>
+          )}
+          {thread.parent_thread_id && threads.some((t) => t.id === thread.parent_thread_id) && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    onClick={() => useWorkspaceStore.getState().setActiveThread(thread.parent_thread_id!)}
+                    className="flex shrink-0 items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[11px] font-medium text-primary/80 transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+                  >
+                    <GitBranch size={10} />
+                    <span>Branched</span>
+                  </button>
+                }
+              />
+              <TooltipContent side="bottom" className="text-xs">Go to parent thread</TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-1 flex-col items-stretch justify-center gap-6 px-6 py-8">
+        <div className="mx-auto w-full max-w-xl rounded-xl border border-border/50 bg-muted/15 px-4 py-3 text-sm text-foreground/90 shadow-sm">
+          <p className="whitespace-pre-wrap break-words">{thread.clientQueuedMessage ?? ""}</p>
+        </div>
+
+        {thread.clientError ? (
+          <div className="mx-auto flex w-full max-w-xl flex-col items-stretch gap-3">
+            <p className="text-center text-sm text-destructive">{thread.clientError}</p>
+            <div className="flex justify-center gap-2">
+              <Button type="button" size="sm" variant="default" onClick={onRetry}>
+                Retry
+              </Button>
+              <Button type="button" size="sm" variant="outline" onClick={onDismiss}>
+                Dismiss
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="text-muted-foreground flex items-center justify-center gap-2 text-sm">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            <span>{statusLabel}</span>
+          </div>
+        )}
+      </div>
+
+      <Composer threadId={thread.id} workspaceId={activeWorkspaceId ?? undefined} />
+    </div>
+  );
+}
 const CACHE_PRESSURE_BYTES = 20 * 1024 * 1024; // 20 MB
 
 /** Renders the main chat UI for sending and receiving messages within a thread. */
@@ -203,13 +295,33 @@ export function ChatView() {
     [workspaces, activeThread?.workspace_id, activeWorkspaceId],
   );
 
+  const prevConnectionStatusRef = useRef(connectionStatus);
+
+  useEffect(() => {
+    const prev = prevConnectionStatusRef.current;
+    prevConnectionStatusRef.current = connectionStatus;
+    if (prev !== "connected") return;
+    if (connectionStatus !== "reconnecting" && connectionStatus !== "authFailed") return;
+    const id = useWorkspaceStore.getState().activeThreadId;
+    if (!id) return;
+    const row = useWorkspaceStore.getState().threads.find((t) => t.id === id);
+    if (row?.clientPreparing) {
+      useWorkspaceStore.getState().failPreparingThreadOnConnectionLost(id);
+    }
+  }, [connectionStatus]);
+
   const prevThreadIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (activeThreadId) {
-      loadMessages(activeThreadId);
-    } else {
+    if (!activeThreadId) {
       clearMessages();
+    } else {
+      const row = useWorkspaceStore.getState().threads.find((t) => t.id === activeThreadId);
+      if (row?.clientPreparing || row?.clientError) {
+        clearMessages();
+      } else {
+        loadMessages(activeThreadId);
+      }
     }
     // Only evict Blink's resource cache when it exceeds the pressure threshold.
     // Avoids unnecessary re-fetches on routine thread switches.
@@ -248,6 +360,26 @@ export function ChatView() {
         {/* Composer for new thread */}
         <Composer isNewThread workspaceId={activeWorkspaceId ?? undefined} />
       </div>
+    );
+  }
+
+  if (
+    activeThread &&
+    (activeThread.clientPreparing || activeThread.clientError)
+  ) {
+    return (
+      <ThreadPreparingShell
+        thread={activeThread}
+        workspaceName={activeWorkspaceName}
+        sidebarCollapsed={sidebarCollapsed}
+        activeWorkspaceId={activeWorkspaceId}
+        onRetry={() => {
+          void useWorkspaceStore.getState().retryPreparingThread(activeThread.id);
+        }}
+        onDismiss={() => {
+          useWorkspaceStore.getState().dismissPreparingThread(activeThread.id);
+        }}
+      />
     );
   }
 
