@@ -81,12 +81,13 @@ export function ProjectsView() {
             {pinned.map((w) => (
               // CommandItem makes the row visible to cmdk's keyboard navigator.
               // p-0 removes CommandItem's own padding since ProjectRow has its own layout.
+              // w-full/min-w-0: cmdk items shrink-wrap otherwise; fills list width for hit area + selection.
               // group/cmd propagates aria-selected into ProjectRow via group-aria-selected/cmd
               <CommandItem
                 key={w.id}
                 value={`${w.name} ${w.path}`}
                 onSelect={() => handleSelect(w.id)}
-                className="p-0 rounded-sm aria-selected:bg-transparent group/cmd"
+                className="w-full min-w-0 p-0 rounded-sm aria-selected:bg-transparent group/cmd"
               >
                 <ProjectRow
                   workspace={w}
@@ -105,7 +106,7 @@ export function ProjectsView() {
                 key={w.id}
                 value={`${w.name} ${w.path}`}
                 onSelect={() => handleSelect(w.id)}
-                className="p-0 rounded-sm aria-selected:bg-transparent group/cmd"
+                className="w-full min-w-0 p-0 rounded-sm aria-selected:bg-transparent group/cmd"
               >
                 <ProjectRow
                   workspace={w}
@@ -124,7 +125,7 @@ export function ProjectsView() {
                 key={w.id}
                 value={`${w.name} ${w.path}`}
                 onSelect={() => handleSelect(w.id)}
-                className="p-0 rounded-sm aria-selected:bg-transparent group/cmd"
+                className="w-full min-w-0 p-0 rounded-sm aria-selected:bg-transparent group/cmd"
               >
                 <ProjectRow
                   workspace={w}
