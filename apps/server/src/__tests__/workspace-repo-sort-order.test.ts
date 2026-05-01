@@ -63,4 +63,22 @@ describe("WorkspaceRepo sort_order", () => {
     const orders = list.map((w) => w.sort_order);
     expect(new Set(orders).size).toBe(orders.length);
   });
+
+  it("prependToSortOrder is a no-op when the workspace is already first", () => {
+    const a = repo.create("a", "/a", true);
+    const b = repo.create("b", "/b", true);
+    repo.prependToSortOrder(b.id);
+    const before = repo.listAll().map((w) => ({ id: w.id, sort_order: w.sort_order }));
+    repo.prependToSortOrder(b.id);
+    const after = repo.listAll().map((w) => ({ id: w.id, sort_order: w.sort_order }));
+    expect(after).toEqual(before);
+  });
+
+  it("prependToSortOrder ignores unknown ids without shifting other rows", () => {
+    repo.create("a", "/a", true);
+    const before = repo.listAll().map((w) => w.sort_order);
+    repo.prependToSortOrder("nonexistent-id");
+    const after = repo.listAll().map((w) => w.sort_order);
+    expect(after).toEqual(before);
+  });
 });

@@ -77,10 +77,17 @@ export class WorkspaceRepo {
 
   /** Move an existing workspace to the top of the sidebar (sort_order 0). */
   prependToSortOrder(id: string): void {
+    const row = this.db
+      .prepare("SELECT sort_order FROM workspaces WHERE id = ?")
+      .get(id) as { sort_order: number } | undefined;
+    if (!row || row.sort_order === 0) return;
+
     const trx = this.db.transaction(() => {
       this.db
-        .prepare("UPDATE workspaces SET sort_order = sort_order + 1 WHERE id != ?")
-        .run(id);
+        .prepare(
+          "UPDATE workspaces SET sort_order = sort_order + 1 WHERE sort_order < ?",
+        )
+        .run(row.sort_order);
       this.db.prepare("UPDATE workspaces SET sort_order = 0 WHERE id = ?").run(id);
     });
     trx();

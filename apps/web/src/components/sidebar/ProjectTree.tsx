@@ -1147,6 +1147,7 @@ function ProjectNode({
         {...sortableListeners}
         onKeyDown={(e) => {
           sortableListeners?.onKeyDown?.(e);
+          if (e.defaultPrevented) return;
           if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
             e.preventDefault();
             onToggle();

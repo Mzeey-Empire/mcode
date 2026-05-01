@@ -60,7 +60,7 @@ test.describe("Sidebar project drag — scroll and layout", () => {
 
   test("dragging short project list does not grow sidebar-body scrollbox", async ({
     page,
-  }) => {
+  }, testInfo) => {
     await injectWorkspaceList(
       page,
       [
@@ -142,7 +142,7 @@ test.describe("Sidebar project drag — scroll and layout", () => {
     );
 
     await page.screenshot({
-      path: "e2e/screenshots/sidebar-project-drag-mid.png",
+      path: testInfo.outputPath("sidebar-project-drag-mid.png"),
     });
 
     await page.mouse.up();
