@@ -1,4 +1,12 @@
-import { useEffect, useLayoutEffect, useCallback, useState, useRef, useMemo, type CSSProperties } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useState,
+  useRef,
+  useMemo,
+  type CSSProperties,
+} from "react";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useShallow } from "zustand/shallow";
@@ -380,6 +388,29 @@ export function ProjectTree() {
 
   const scrollViewportRef = useRef<HTMLDivElement>(null);
 
+  /**
+   * Only the project list viewport may autoscroll during drag so outer sidebar
+   * regions (or the document) are not pulled by `@dnd-kit` when reordering.
+   */
+  const projectTreeAutoScroll = useMemo(
+    () => ({
+      canScroll(element: Element) {
+        const vp = scrollViewportRef.current;
+        return vp != null && element === vp;
+      },
+    }),
+    [],
+  );
+
+  useLayoutEffect(() => {
+    if (!activeDragId) return;
+    const prev = document.body.style.cursor;
+    document.body.style.cursor = "grabbing";
+    return () => {
+      document.body.style.cursor = prev;
+    };
+  }, [activeDragId]);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 mb-0.5">
@@ -406,6 +437,7 @@ export function ProjectTree() {
             sensors={sensors}
             collisionDetection={closestCenter}
             modifiers={[restrictToVerticalAxis]}
+            autoScroll={projectTreeAutoScroll}
             onDragStart={handleProjectDragStart}
             onDragEnd={handleProjectDragEnd}
             onDragCancel={handleProjectDragCancel}
@@ -1052,6 +1084,8 @@ interface ProjectNodeProps {
   onThreadContextMenu: (e: React.MouseEvent, thread: Thread) => void;
   /** When set, forwards drag-handle listeners from `@dnd-kit/sortable` onto the project row. */
   sortableListeners?: DraggableSyntheticListeners;
+  /** True while this project row is the item being dragged. */
+  isProjectDragging?: boolean;
 }
 
 /** Renders a collapsible workspace row with its virtualized thread list. */
@@ -1077,6 +1111,7 @@ function ProjectNode({
   onDelete,
   onThreadContextMenu,
   sortableListeners,
+  isProjectDragging = false,
 }: ProjectNodeProps) {
   const checksById = useWorkspaceStore(useShallow((s) => s.checksById));
   const parentDir = useMemo(() => parentDirName(workspace.path), [workspace.path]);
@@ -1103,10 +1138,12 @@ function ProjectNode({
         aria-expanded={isExpanded}
         data-testid={`project-row-${workspace.id}`}
         className={cn(
-          "group/ws relative flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12.5px] cursor-pointer transition-colors touch-none",
+          "group/ws relative flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12.5px] transition-colors touch-none",
+          sortableListeners ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
+          isProjectDragging && "cursor-grabbing",
           isActive
             ? "text-foreground"
-            : "text-muted-foreground/85 hover:text-foreground"
+            : "text-muted-foreground/85 hover:text-foreground",
         )}
         {...sortableListeners}
         onKeyDown={(e) => {
@@ -1287,6 +1324,7 @@ function SortableProjectShell(
       <ProjectNode
         {...nodeProps}
         isExpanded={nodeProps.isExpanded && !collapseForDrag}
+        isProjectDragging={isDragging}
         sortableListeners={listeners}
       />
     </div>
