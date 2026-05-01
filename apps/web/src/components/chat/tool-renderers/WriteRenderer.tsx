@@ -9,8 +9,16 @@ const MAX_LINES = 10;
 
 export function WriteRenderer({ toolCall, isActive }: ToolRendererProps) {
   const [showAll, setShowAll] = useState(false);
-  const filePath = String(toolCall.toolInput.file_path ?? "");
-  const content = String(toolCall.toolInput.content ?? "");
+  const filePath = String(toolCall.toolInput.file_path ?? toolCall.toolInput.path ?? "");
+  const rawContent = toolCall.toolInput.content ?? toolCall.toolInput.contents;
+  const content =
+    typeof rawContent === "string"
+      ? rawContent
+      : rawContent == null
+        ? ""
+        : Array.isArray(rawContent)
+          ? rawContent.join("\n")
+          : JSON.stringify(rawContent, null, 2);
   const lines = content.split("\n");
   const visible = showAll ? lines : lines.slice(0, MAX_LINES);
 

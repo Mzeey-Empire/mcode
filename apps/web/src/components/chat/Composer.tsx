@@ -917,8 +917,11 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
 
   // Full lock when agent running, unless the user is branching (child thread is independent).
   const isModelFullyLocked = isAgentRunning && !branchFromMessageId;
-  // Allow provider switching when creating a new thread or branching (child thread can use any provider).
-  const isProviderLocked = !isNewThread && !branchFromMessageId && activeThread?.model != null;
+  // Lock provider on any persisted thread except the branching composer. Rows always have
+  // `provider`; `model` stays null until the first sendMessage transaction runs, which is easy
+  // to race now that createAndSend returns before sendMessage finishes.
+  const isProviderLocked =
+    Boolean(threadId && !isNewThread && !branchFromMessageId && activeThread?.provider);
 
   // Close dropdowns on click outside
   useEffect(() => {

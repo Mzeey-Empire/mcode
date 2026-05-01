@@ -188,6 +188,57 @@ export function reconcileCursorTodos(
 }
 
 /**
+ * Builds {@link AgentEvent} values from an ACP notification `cursor/update_todos`.
+ *
+ * Parallel to streaming `tool_call` with `updateTodosToolCall`; some Cursor builds emit
+ * only this notification channel, so swallowing it left the tasks panel stale.
+ *
+ * @param threadId - Mcode thread id.
+ * @param notification - JSON-RPC notification params (`toolCallId`, `todos`, `merge`).
+ * @param snapshot - Per-connection todo snapshot for merge semantics.
+ */
+export function cursorUpdateTodosExtNotificationToAgentEvents(
+  threadId: string,
+  notification: Record<string, unknown>,
+  snapshot: CursorTodoSnapshot | undefined,
+): AgentEvent[] {
+  const rawTodos = notification.todos;
+  if (!Array.isArray(rawTodos) || rawTodos.length === 0) return [];
+
+  const toolCallId =
+    typeof notification.toolCallId === "string" && notification.toolCallId.length > 0
+      ? notification.toolCallId
+      : `cursor-todos-${randomUUID()}`;
+
+  const merge = notification.merge === true;
+  const asRecords = rawTodos.filter(
+    (t): t is Record<string, unknown> =>
+      t != null && typeof t === "object" && !Array.isArray(t),
+  );
+  if (asRecords.length === 0) return [];
+
+  const incoming = asRecords.map((e, i) => normalizeCursorTodoEntry(e, i));
+  const todos = reconcileCursorTodos(incoming, merge, snapshot);
+
+  return [
+    {
+      type: AgentEventType.ToolUse,
+      threadId,
+      toolCallId,
+      toolName: "TodoWrite",
+      toolInput: { todos },
+    },
+    {
+      type: AgentEventType.ToolResult,
+      threadId,
+      toolCallId,
+      output: `Updated ${todos.length} todo(s)`,
+      isError: false,
+    },
+  ];
+}
+
+/**
  * Synthesizes a paired TodoWrite `ToolUse` + `ToolResult` from an already-
  * reconciled todo list. Caller is responsible for merge/replace semantics
  * via {@link reconcileCursorTodos}; this just constructs the events.

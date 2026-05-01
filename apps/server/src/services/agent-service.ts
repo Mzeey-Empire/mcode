@@ -106,10 +106,6 @@ export class AgentService {
    * Broadcasting from `ended` ensures the session is fully closed before the client
    * can submit answers, preventing overlapping sends on the same thread. */
   private pendingPlanQuestions = new Map<string, z.infer<typeof PlanQuestionSchema>[]>();
-  /** Per-thread override for the content sent to the provider on the next sendMessage call.
-   * Used by branching to stitch handoff prose into the first turn without polluting the DB. */
-  private providerContentOverride = new Map<string, string>();
-
   constructor(
     @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
     @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
@@ -161,6 +157,12 @@ export class AgentService {
      * has been satisfied so it does not re-pop on reload.
      */
     markPlanAnswerForMessageId?: string,
+    /**
+     * Provider-only payload for this send (fork continuation, stitched replay).
+     * The persisted user row still uses `content`; this string is forwarded to
+     * the agent without writing it to SQLite.
+     */
+    providerWireOverride?: string,
   ): Promise<void> {
     const thread = this.threadRepo.findById(threadId);
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
@@ -263,7 +265,7 @@ export class AgentService {
     // plain content when there is no override.
     if (interactionMode === "plan") {
       this.planParsers.set(threadId, new PlanQuestionParser());
-      if (!this.providerContentOverride.has(threadId)) {
+      if (providerWireOverride === undefined) {
         content = this.buildPlanPrompt(content);
       }
     }
@@ -354,9 +356,7 @@ export class AgentService {
       threadId,
     } satisfies AgentEvent);
 
-    // Check for branching content override (stitched handoff + user prompt)
-    const providerMessage = this.providerContentOverride.get(threadId) ?? content;
-    this.providerContentOverride.delete(threadId);
+    const providerMessage = providerWireOverride ?? content;
 
     try {
       await resolvedProvider.sendMessage({
@@ -577,7 +577,9 @@ export class AgentService {
       );
     }
 
-    await this.sendMessage(
+    this.threadRepo.updateModel(thread.id, model);
+
+    void this.sendMessage(
       thread.id,
       content,
       permissionMode,
@@ -591,9 +593,13 @@ export class AgentService {
       copilotAgent,
       contextWindowMode,
       thinking,
-    );
+    ).catch((err) => {
+      logger.error("createAndSend initial send failed", {
+        threadId: thread.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
 
-    // Re-read from DB to pick up model update applied by sendMessage
     const updated = this.threadRepo.findById(thread.id);
     return updated ?? thread;
   }
@@ -602,7 +608,7 @@ export class AgentService {
    * Create a child thread branched from a parent at a specific message.
    * Injects a conversation replay into the provider's first turn for continuity.
    * The handoff system message (seq 1) is stored in the DB for the UI; the replay
-   * is sent only to the provider via providerContentOverride.
+   * is sent only to the provider via `providerWireOverride` on `sendMessage`.
    */
   private async createBranchedThread(params: {
     workspaceId: string;
@@ -786,36 +792,30 @@ export class AgentService {
     const providerInput =
       interactionMode === "plan" ? this.buildPlanPrompt(stitchedContent) : stitchedContent;
 
-    // Set provider content override so sendMessage uses the prepared content.
-    // IMPORTANT: sendMessage deletes this override before its try block, so the override
-    // is always consumed on the next call. Do not add any await between this set and the
-    // sendMessage call below, or the override could be consumed by an unrelated invocation.
-    this.providerContentOverride.set(thread.id, providerInput);
+    void this.sendMessage(
+      thread.id,
+      content,
+      permissionMode,
+      model,
+      attachments,
+      reasoningLevel,
+      provider,
+      interactionMode,
+      maxBudgetUsd,
+      maxTurns,
+      copilotAgent,
+      effectiveContextWindowMode,
+      effectiveThinking,
+      undefined,
+      providerInput,
+    ).catch((err) => {
+      logger.error("createBranchedThread initial send failed", {
+        threadId: thread.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
 
-    // sendMessage will persist the clean user prompt at seq 2 and send stitched content to provider
-    try {
-      await this.sendMessage(
-        thread.id,
-        content,
-        permissionMode,
-        model,
-        attachments,
-        reasoningLevel,
-        provider,
-        interactionMode,
-        maxBudgetUsd,
-        maxTurns,
-        copilotAgent,
-        effectiveContextWindowMode,
-        effectiveThinking,
-      );
-    } finally {
-      // Ensure override is cleaned up even if sendMessage throws before consuming it.
-      this.providerContentOverride.delete(thread.id);
-    }
-
-    const updated = this.threadRepo.findById(thread.id);
-    return updated ?? thread;
+    return thread;
   }
 
   /** Stop the agent for a given thread, persisting any buffered tool calls first. */
