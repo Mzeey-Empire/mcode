@@ -317,7 +317,7 @@ export function ChatView() {
       clearMessages();
     } else {
       const row = useWorkspaceStore.getState().threads.find((t) => t.id === activeThreadId);
-      if (row?.clientPreparing) {
+      if (row?.clientPreparing || row?.clientError) {
         clearMessages();
       } else {
         loadMessages(activeThreadId);

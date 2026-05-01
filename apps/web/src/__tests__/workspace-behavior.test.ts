@@ -496,5 +496,28 @@ describe("Workspace Behavior", () => {
       resolveRpc(createMockThread({ id: "real-new", workspace_id: ws.id, title: "New" }));
       await sendOp;
     });
+
+    it("loadThreads retains errored client placeholders for retry UI", async () => {
+      const ws = createMockWorkspace({ id: "ws-err-ph" });
+      const errRow = {
+        ...createMockThread({
+          id: "ph-err",
+          workspace_id: ws.id,
+          title: "Failed",
+        }),
+        clientPreparing: false,
+        clientError: "rpc failed",
+        clientQueuedMessage: "hello",
+      };
+      useWorkspaceStore.setState({
+        workspaces: [ws],
+        activeWorkspaceId: ws.id,
+        threads: [errRow],
+      });
+      (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+      await useWorkspaceStore.getState().loadThreads(ws.id);
+      expect(useWorkspaceStore.getState().threads.some((t) => t.id === "ph-err")).toBe(true);
+    });
   });
 });
+

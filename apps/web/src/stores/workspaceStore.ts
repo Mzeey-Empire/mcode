@@ -249,6 +249,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     thread: Thread,
     transportWasWorktree: boolean,
   ) => {
+    if (!pendingThreadCreationByPlaceholderId.has(placeholderId)) {
+      return;
+    }
+    if (!get().workspaces.some((w) => w.id === workspaceId)) {
+      pendingThreadCreationByPlaceholderId.delete(placeholderId);
+      return;
+    }
     bumpThreadListMutationEpoch(workspaceId);
     pendingThreadCreationByPlaceholderId.delete(placeholderId);
     const startTime =
@@ -512,7 +519,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         const placeholders = state.threads.filter(
           (t) =>
             t.workspace_id === workspaceId &&
-            t.clientPreparing === true,
+            (t.clientPreparing === true || t.clientError != null),
         );
         const incomingIds = new Set(newThreads.map((t) => t.id));
         const extraPlaceholders = placeholders.filter((p) => !incomingIds.has(p.id));
