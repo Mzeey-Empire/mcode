@@ -40,6 +40,12 @@ export const WS_CHANNELS = {
     threadId: z.string(),
     checks: ChecksStatusSchema(),
   }),
+  /** Emitted after the thread row's model (and active provider) are persisted for a send. */
+  "thread.modelUpdated": z.object({
+    threadId: z.string(),
+    model: z.string(),
+    provider: z.string(),
+  }),
   "files.changed": z.object({
     workspaceId: z.string(),
     threadId: z.string().optional(),
