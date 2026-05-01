@@ -1,5 +1,10 @@
 import { create } from "zustand";
 import type { Workspace, Thread, GitBranch, PermissionMode, WorktreeInfo, AttachmentMeta, PrDetail } from "@/transport";
+import {
+  type WorkspaceThread,
+  buildPlaceholderWorkspaceThread,
+  titleFromMessageContent,
+} from "@/lib/workspace-thread";
 import type { ChecksStatus } from "@mcode/contracts";
 import { getTransport } from "@/transport";
 import { useThreadStore } from "./threadStore";
@@ -42,6 +47,53 @@ export function __resetThreadListMutationEpochForTests(): void {
   threadListMutationEpochByWorkspace.clear();
 }
 
+/** RPC payload remembered so a failed placeholder can retry. Used by Vitest only. */
+export function __clearPendingThreadCreationsForTests(): void {
+  pendingThreadCreationByPlaceholderId.clear();
+}
+
+/** Parameters to replay {@link McodeTransport.createAndSendMessage} after an optimistic insert. */
+interface PendingThreadCreation {
+  workspaceId: string;
+  content: string;
+  model: string;
+  permissionMode?: PermissionMode;
+  transportMode: "direct" | "worktree";
+  branch: string;
+  existingWorktreePath?: string;
+  attachments?: AttachmentMeta[];
+  reasoningLevel?: ReasoningLevel;
+  provider?: string;
+  interactionMode?: InteractionMode;
+  sourceThreadId?: string;
+  forkedFromMessageId?: string;
+  copilotAgent?: string;
+  contextWindow?: ContextWindowMode;
+  thinking?: boolean;
+}
+
+const pendingThreadCreationByPlaceholderId = new Map<string, PendingThreadCreation>();
+
+async function runCreateAndSend(pending: PendingThreadCreation): Promise<Thread> {
+  return getTransport().createAndSendMessage(
+    pending.workspaceId,
+    pending.content,
+    pending.model,
+    pending.permissionMode,
+    pending.transportMode,
+    pending.branch,
+    pending.existingWorktreePath,
+    pending.attachments,
+    pending.reasoningLevel,
+    pending.provider,
+    pending.interactionMode,
+    pending.sourceThreadId,
+    pending.forkedFromMessageId,
+    pending.copilotAgent,
+    pending.contextWindow,
+    pending.thinking,
+  );
+}
 /**
  * Optional RPC dispatch callback used by workspace actions. Tests inject a
  * stub here; production code uses {@link getTransport} directly. The shape
@@ -53,7 +105,7 @@ export type WorkspaceRpcCall = (method: string, params: unknown) => Promise<unkn
 interface WorkspaceState {
   workspaces: Workspace[];
   activeWorkspaceId: string | null;
-  threads: Thread[];
+  threads: WorkspaceThread[];
   activeThreadId: string | null;
   pendingNewThread: boolean;
   loading: boolean;
@@ -122,6 +174,14 @@ interface WorkspaceState {
     contextWindow?: ContextWindowMode;
     thinking?: boolean;
   }) => Promise<Thread>;
+  /**
+   * Re-run server creation for a placeholder thread after {@link WorkspaceThread.clientError}.
+   */
+  retryPreparingThread: (placeholderId: string) => Promise<Thread>;
+  /** Remove a failed or abandoned placeholder row and drop selection when it was active. */
+  dismissPreparingThread: (placeholderId: string) => void;
+  /** Surface connection loss while {@link WorkspaceThread.clientPreparing} is true. */
+  failPreparingThreadOnConnectionLost: (placeholderId: string) => void;
   deleteThread: (threadId: string, cleanupWorktree: boolean) => Promise<void>;
   setActiveThread: (id: string | null) => void;
   setPendingNewThread: (value: boolean) => void;
@@ -182,7 +242,63 @@ interface WorkspaceState {
 }
 
 /** Zustand store for workspace, thread, branch, and PR state management. */
-export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
+export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
+  const applyOptimisticSuccess = (
+    placeholderId: string,
+    workspaceId: string,
+    thread: Thread,
+    transportWasWorktree: boolean,
+  ) => {
+    bumpThreadListMutationEpoch(workspaceId);
+    pendingThreadCreationByPlaceholderId.delete(placeholderId);
+    const startTime =
+      useThreadStore.getState().agentStartTimes[placeholderId] ?? Date.now();
+    useThreadStore.setState((state) => {
+      const nextRunning = new Set(state.runningThreadIds);
+      nextRunning.delete(placeholderId);
+      nextRunning.add(thread.id);
+      const nextTimes = { ...state.agentStartTimes };
+      delete nextTimes[placeholderId];
+      nextTimes[thread.id] = startTime;
+      return { runningThreadIds: nextRunning, agentStartTimes: nextTimes };
+    });
+    set((state) => {
+      const without = state.threads.filter((t) => t.id !== placeholderId);
+      const deduped = without.filter((t) => t.id !== thread.id);
+      const nextThreads: WorkspaceThread[] = [thread, ...deduped];
+      const stillOnPlaceholder = state.activeThreadId === placeholderId;
+      return {
+        threads: nextThreads,
+        activeThreadId: stillOnPlaceholder ? thread.id : state.activeThreadId,
+        error: null,
+        ...(transportWasWorktree ? { worktreesLoadedForWorkspace: null } : {}),
+      };
+    });
+    if (get().activeThreadId === thread.id) {
+      void useThreadStore.getState().loadMessages(thread.id);
+    }
+  };
+
+  const applyOptimisticFailure = (placeholderId: string, err: unknown) => {
+    const msg = String(err);
+    useThreadStore.setState((state) => {
+      const nextRunning = new Set(state.runningThreadIds);
+      nextRunning.delete(placeholderId);
+      const nextTimes = { ...state.agentStartTimes };
+      delete nextTimes[placeholderId];
+      return { runningThreadIds: nextRunning, agentStartTimes: nextTimes };
+    });
+    set((state) => ({
+      threads: state.threads.map((t) =>
+        t.id === placeholderId
+          ? { ...t, clientPreparing: false, clientError: msg }
+          : t,
+      ),
+      error: msg,
+    }));
+  };
+
+  return {
   workspaces: [],
   activeWorkspaceId: null,
   threads: [],
@@ -391,13 +507,24 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         return;
       }
       // Replace threads for this workspace; keep threads from other workspaces intact.
-      set((state) => ({
-        threads: [
-          ...state.threads.filter((t) => t.workspace_id !== workspaceId),
-          ...newThreads,
-        ],
-        loading: false,
-      }));
+      // Retain optimistic placeholder rows until the server confirms the real thread.
+      set((state) => {
+        const placeholders = state.threads.filter(
+          (t) =>
+            t.workspace_id === workspaceId &&
+            t.clientPreparing === true,
+        );
+        const incomingIds = new Set(newThreads.map((t) => t.id));
+        const extraPlaceholders = placeholders.filter((p) => !incomingIds.has(p.id));
+        const mergedForWorkspace = [...extraPlaceholders, ...newThreads];
+        return {
+          threads: [
+            ...state.threads.filter((t) => t.workspace_id !== workspaceId),
+            ...mergedForWorkspace,
+          ],
+          loading: false,
+        };
+      });
 
       const epochForPrSync = epochAtStart;
 
@@ -470,32 +597,62 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       existingWorktreePath = selectedWorktree.path;
     }
 
-    set({ error: null });
+    const clientPreparingContext =
+      newThreadMode === "worktree"
+        ? "new-worktree"
+        : newThreadMode === "existing-worktree"
+          ? "new-existing-worktree"
+          : "new-direct";
+
+    const placeholderId = crypto.randomUUID();
+    const pending: PendingThreadCreation = {
+      workspaceId,
+      content,
+      model,
+      permissionMode,
+      transportMode: mode,
+      branch,
+      existingWorktreePath,
+      attachments,
+      reasoningLevel,
+      provider,
+      interactionMode,
+      copilotAgent,
+      contextWindow,
+      thinking,
+    };
+
+    const placeholder = buildPlaceholderWorkspaceThread({
+      id: placeholderId,
+      workspaceId,
+      title: titleFromMessageContent(content),
+      queuedMessage: content,
+      transportMode: mode,
+      branch,
+      clientPreparingContext,
+    });
+
+    bumpThreadListMutationEpoch(workspaceId);
+    pendingThreadCreationByPlaceholderId.set(placeholderId, pending);
+    set((state) => ({
+      threads: [placeholder, ...state.threads],
+      activeThreadId: placeholderId,
+      pendingNewThread: false,
+      branchManuallySelected: false,
+      error: null,
+    }));
+
+    useThreadStore.setState((state) => ({
+      runningThreadIds: new Set([...state.runningThreadIds, placeholderId]),
+      agentStartTimes: { ...state.agentStartTimes, [placeholderId]: Date.now() },
+    }));
+
     try {
-      const thread = await getTransport().createAndSendMessage(
-        workspaceId, content, model, permissionMode, mode, branch, existingWorktreePath, attachments, reasoningLevel, provider, interactionMode, undefined, undefined, copilotAgent, contextWindow, thinking,
-      );
-      bumpThreadListMutationEpoch(workspaceId);
-      set((state) => ({
-        threads: [thread, ...state.threads],
-        activeThreadId: thread.id,
-        pendingNewThread: false,
-        branchManuallySelected: false,
-        // Invalidate worktree cache so the new worktree is included in the
-        // stale-worktree check. ProjectTree's effect will reload the list.
-        ...(mode === "worktree" ? { worktreesLoadedForWorkspace: null } : {}),
-      }));
-
-      // Mark the new thread as running in the threadStore so the
-      // "Working for Xs" timer appears for the first message too.
-      useThreadStore.setState((state) => ({
-        runningThreadIds: new Set([...state.runningThreadIds, thread.id]),
-        agentStartTimes: { ...state.agentStartTimes, [thread.id]: Date.now() },
-      }));
-
+      const thread = await runCreateAndSend(pending);
+      applyOptimisticSuccess(placeholderId, workspaceId, thread, mode === "worktree");
       return thread;
     } catch (e) {
-      set({ error: String(e) });
+      applyOptimisticFailure(placeholderId, e);
       throw e;
     }
   },
@@ -518,54 +675,151 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       existingWorktreePath = params.existingWorktreePath;
     }
 
-    set({ error: null });
+    const clientPreparingContext =
+      params.mode === "worktree"
+        ? "branch-worktree"
+        : params.mode === "existing-worktree"
+          ? "branch-existing-worktree"
+          : "branch-direct";
+
+    const placeholderId = crypto.randomUUID();
+    const pending: PendingThreadCreation = {
+      workspaceId,
+      content: params.content,
+      model: params.model,
+      permissionMode: params.permissionMode,
+      transportMode,
+      branch,
+      existingWorktreePath,
+      attachments: params.attachments,
+      reasoningLevel: params.reasoningLevel,
+      provider: params.provider,
+      interactionMode: params.interactionMode,
+      sourceThreadId: params.sourceThreadId,
+      forkedFromMessageId: params.forkedFromMessageId,
+      copilotAgent: params.copilotAgent,
+      contextWindow: params.contextWindow,
+      thinking: params.thinking,
+    };
+
+    const placeholder = buildPlaceholderWorkspaceThread({
+      id: placeholderId,
+      workspaceId,
+      title: titleFromMessageContent(params.content),
+      queuedMessage: params.content,
+      transportMode,
+      branch,
+      clientPreparingContext,
+      parentThreadId: params.sourceThreadId,
+      forkedFromMessageId: params.forkedFromMessageId,
+    });
+
+    bumpThreadListMutationEpoch(workspaceId);
+    pendingThreadCreationByPlaceholderId.set(placeholderId, pending);
+    set((state) => ({
+      threads: [placeholder, ...state.threads],
+      activeThreadId: placeholderId,
+      pendingNewThread: false,
+      branchManuallySelected: false,
+      error: null,
+    }));
+
+    useThreadStore.setState((state) => ({
+      runningThreadIds: new Set([...state.runningThreadIds, placeholderId]),
+      agentStartTimes: { ...state.agentStartTimes, [placeholderId]: Date.now() },
+    }));
+
     try {
-      const thread = await getTransport().createAndSendMessage(
-        workspaceId,
-        params.content,
-        params.model,
-        params.permissionMode,
-        transportMode,
-        branch,
-        existingWorktreePath,
-        params.attachments,
-        params.reasoningLevel,
-        params.provider,
-        params.interactionMode,
-        params.sourceThreadId,
-        params.forkedFromMessageId,
-        params.copilotAgent,
-        params.contextWindow,
-        params.thinking,
-      );
-
-      bumpThreadListMutationEpoch(workspaceId);
-      set((state) => ({
-        threads: [thread, ...state.threads],
-        activeThreadId: thread.id,
-        pendingNewThread: false,
-        branchManuallySelected: false,
-        // Invalidate worktree cache so the branched worktree is included in
-        // the stale-worktree check. ProjectTree's effect will reload the list.
-        ...(transportMode === "worktree" ? { worktreesLoadedForWorkspace: null } : {}),
-      }));
-
-      useThreadStore.setState((state) => ({
-        runningThreadIds: new Set([...state.runningThreadIds, thread.id]),
-        agentStartTimes: { ...state.agentStartTimes, [thread.id]: Date.now() },
-      }));
-
+      const thread = await runCreateAndSend(pending);
+      applyOptimisticSuccess(placeholderId, workspaceId, thread, transportMode === "worktree");
       return thread;
     } catch (e) {
-      set({ error: String(e) });
+      applyOptimisticFailure(placeholderId, e);
       throw e;
     }
+  },
+
+  retryPreparingThread: async (placeholderId) => {
+    const pending = pendingThreadCreationByPlaceholderId.get(placeholderId);
+    if (!pending) {
+      throw new Error("No pending creation for this thread");
+    }
+    const row = get().threads.find((t) => t.id === placeholderId);
+    if (!row?.clientError) {
+      throw new Error("Thread is not in a retryable state");
+    }
+    set((state) => ({
+      error: null,
+      threads: state.threads.map((t) =>
+        t.id === placeholderId
+          ? { ...t, clientPreparing: true, clientError: null }
+          : t,
+      ),
+    }));
+    useThreadStore.setState((state) => ({
+      runningThreadIds: new Set([...state.runningThreadIds, placeholderId]),
+      agentStartTimes: { ...state.agentStartTimes, [placeholderId]: Date.now() },
+    }));
+    try {
+      const thread = await runCreateAndSend(pending);
+      applyOptimisticSuccess(placeholderId, pending.workspaceId, thread, pending.transportMode === "worktree");
+      return thread;
+    } catch (e) {
+      applyOptimisticFailure(placeholderId, e);
+      throw e;
+    }
+  },
+
+  dismissPreparingThread: (placeholderId) => {
+    pendingThreadCreationByPlaceholderId.delete(placeholderId);
+    useThreadStore.getState().clearThreadState(placeholderId);
+    set((state) => ({
+      threads: state.threads.filter((t) => t.id !== placeholderId),
+      activeThreadId: state.activeThreadId === placeholderId ? null : state.activeThreadId,
+    }));
+  },
+
+  failPreparingThreadOnConnectionLost: (placeholderId) => {
+    const row = get().threads.find((t) => t.id === placeholderId);
+    if (!row?.clientPreparing) return;
+    applyOptimisticFailure(placeholderId, new Error("Connection lost while creating this thread. Try again."));
   },
 
   deleteThread: async (threadId, cleanupWorktree) => {
     set({ error: null });
     try {
-      const workspaceIdForEpoch = get().threads.find((t) => t.id === threadId)?.workspace_id;
+      pendingThreadCreationByPlaceholderId.delete(threadId);
+      const row = get().threads.find((t) => t.id === threadId);
+      const workspaceIdForEpoch = row?.workspace_id;
+      const isClientOnly = !!(row?.clientPreparing || row?.clientError);
+
+      if (isClientOnly) {
+        if (workspaceIdForEpoch) {
+          bumpThreadListMutationEpoch(workspaceIdForEpoch);
+        }
+        useTerminalStore.getState().clearThread(threadId);
+        useQueueStore.getState().clearQueue(threadId);
+        useComposerDraftStore.getState().clearDraft(threadId);
+        useTaskStore.getState().clearTasks(threadId);
+        useDiffStore.getState().clearThread(threadId);
+        set((state) => {
+          const remainingUrls = Object.fromEntries(
+            Object.entries(state.prUrlsByThreadId).filter(([k]) => k !== threadId),
+          ) as Record<string, string>;
+          const remainingChecks = Object.fromEntries(
+            Object.entries(state.checksById).filter(([k]) => k !== threadId),
+          ) as typeof state.checksById;
+          return {
+            threads: state.threads.filter((t) => t.id !== threadId),
+            activeThreadId: state.activeThreadId === threadId ? null : state.activeThreadId,
+            prUrlsByThreadId: remainingUrls,
+            checksById: remainingChecks,
+          };
+        });
+        useThreadStore.getState().clearThreadState(threadId);
+        return;
+      }
+
       await getTransport().deleteThread(threadId, cleanupWorktree);
       if (workspaceIdForEpoch) {
         bumpThreadListMutationEpoch(workspaceIdForEpoch);
@@ -762,4 +1016,5 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       };
     });
   },
-}));
+};
+});

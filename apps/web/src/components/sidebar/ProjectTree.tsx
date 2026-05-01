@@ -25,6 +25,7 @@ import { getStatusDisplay, getNotificationDot } from "@/lib/thread-status";
 import { getBreakdown, getCiVisual, CI_ICON_STROKE } from "@/lib/ci-status";
 import type { ChecksStatus } from "@mcode/contracts";
 import type { Workspace, Thread } from "@/transport/types";
+import type { WorkspaceThread } from "@/lib/workspace-thread";
 
 // Persist expand/collapse in localStorage
 function getExpandedState(): Record<string, boolean> {
@@ -99,14 +100,14 @@ interface InlineEditState {
 
 /** A thread with its nesting depth in the sidebar tree. */
 interface ThreadTreeItem {
-  thread: Thread;
+  thread: WorkspaceThread;
   depth: number;
 }
 
 /** Builds a depth-first flattened tree from a flat list of threads, ordered by parent-child relationships. */
-function buildThreadTree(threads: Thread[]): ThreadTreeItem[] {
-  const childrenByParent = new Map<string, Thread[]>();
-  const roots: Thread[] = [];
+function buildThreadTree(threads: WorkspaceThread[]): ThreadTreeItem[] {
+  const childrenByParent = new Map<string, WorkspaceThread[]>();
+  const roots: WorkspaceThread[] = [];
   const threadIds = new Set(threads.map((t) => t.id));
 
   for (const thread of threads) {
@@ -121,7 +122,7 @@ function buildThreadTree(threads: Thread[]): ThreadTreeItem[] {
   }
 
   const result: ThreadTreeItem[] = [];
-  function walk(thread: Thread, depth: number) {
+  function walk(thread: WorkspaceThread, depth: number) {
     result.push({ thread, depth });
     const children = childrenByParent.get(thread.id);
     if (children) {
@@ -577,7 +578,7 @@ export function ProjectTree() {
 
 /** Props for the virtualized thread list rendered inside an expanded workspace. */
 interface VirtualizedThreadListProps {
-  threads: Thread[];
+  threads: WorkspaceThread[];
   /** Maximum number of tree rows to render. Used by the parent to enforce the THREAD_LIST_CAP. */
   maxVisible: number;
   activeThreadId: string | null;
@@ -663,7 +664,7 @@ function WorkspaceCiRollupChip({
   threads,
   checksById,
 }: {
-  threads: Thread[];
+  threads: WorkspaceThread[];
   checksById: Record<string, ChecksStatus>;
 }) {
   // Count threads by their CI aggregate — one per thread, regardless of how many
@@ -849,6 +850,7 @@ function VirtualizedThreadList({
                 onContextMenu={(e) => onThreadContextMenu(e, thread)}
                 className={cn(
                   "group/row flex items-center gap-2 rounded-md pr-2 py-1 text-[13px] cursor-pointer transition-colors",
+                  (thread.clientPreparing || thread.clientError) && "opacity-[0.72]",
                   activeThreadId === thread.id
                     ? "bg-accent text-foreground"
                     : "text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
@@ -969,7 +971,7 @@ interface ProjectNodeProps {
   isExpanded: boolean;
   isActive: boolean;
   activeThreadId: string | null;
-  threads: Thread[];
+  threads: WorkspaceThread[];
   runningThreadIds: Set<string>;
   /** Thread IDs with at least one unsettled permission request. */
   pendingPermissionThreadIds: Set<string>;

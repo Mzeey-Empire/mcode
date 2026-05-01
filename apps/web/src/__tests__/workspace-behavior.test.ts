@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { useWorkspaceStore, __resetThreadListMutationEpochForTests } from "@/stores/workspaceStore";
+import { useWorkspaceStore, __resetThreadListMutationEpochForTests, __clearPendingThreadCreationsForTests } from "@/stores/workspaceStore";
 import { useThreadStore } from "@/stores/threadStore";
 import {
   mockTransport,
@@ -15,6 +15,7 @@ vi.mock("@/transport", async () => ({
 describe("Workspace Behavior", () => {
   beforeEach(() => {
     __resetThreadListMutationEpochForTests();
+    __clearPendingThreadCreationsForTests();
     useWorkspaceStore.setState({
       workspaces: [],
       activeWorkspaceId: null,
@@ -390,6 +391,110 @@ describe("Workspace Behavior", () => {
       expect(ts.errorByThread["t-2"]).toBeUndefined();
       expect(ts.streamingByThread["t-1"]).toBeUndefined();
       expect(ts.streamingByThread["t-2"]).toBeUndefined();
+    });
+  });
+
+  describe("optimistic thread scaffolding", () => {
+    it("createAndSendMessage shows a preparing placeholder before the RPC resolves", async () => {
+      const ws = createMockWorkspace({ id: "ws-opt" });
+      let resolveRpc!: (value: ReturnType<typeof createMockThread>) => void;
+      const rpcPromise = new Promise<ReturnType<typeof createMockThread>>((resolve) => {
+        resolveRpc = resolve;
+      });
+
+      useWorkspaceStore.setState({
+        workspaces: [ws],
+        activeWorkspaceId: ws.id,
+      });
+      (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockReturnValue(rpcPromise);
+
+      const done = useWorkspaceStore.getState().createAndSendMessage("Hello world", "composer-2-fast");
+      await Promise.resolve();
+
+      const mid = useWorkspaceStore.getState();
+      expect(mid.activeThreadId).not.toBeNull();
+      expect(mid.threads[0]?.clientPreparing).toBe(true);
+      expect(mid.threads[0]?.clientQueuedMessage).toBe("Hello world");
+
+      const created = createMockThread({
+        id: "server-thread-1",
+        workspace_id: ws.id,
+        title: "Hello world",
+      });
+      resolveRpc(created);
+      await done;
+
+      const fin = useWorkspaceStore.getState();
+      expect(fin.threads.some((t) => t.id === "server-thread-1")).toBe(true);
+      expect(fin.activeThreadId).toBe("server-thread-1");
+    });
+
+    it("when createAndSendMessage succeeds after the user navigates away, activeThreadId is not forced to the new thread", async () => {
+      const ws = createMockWorkspace({ id: "ws-nav" });
+      let resolveRpc!: (value: ReturnType<typeof createMockThread>) => void;
+      const rpcPromise = new Promise<ReturnType<typeof createMockThread>>((resolve) => {
+        resolveRpc = resolve;
+      });
+
+      useWorkspaceStore.setState({
+        workspaces: [ws],
+        activeWorkspaceId: ws.id,
+      });
+      (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockReturnValue(rpcPromise);
+
+      const done = useWorkspaceStore.getState().createAndSendMessage("Hi", "composer-2-fast");
+      await Promise.resolve();
+      useWorkspaceStore.getState().setActiveThread(null);
+
+      resolveRpc(
+        createMockThread({ id: "server-thread-2", workspace_id: ws.id, title: "Hi" }),
+      );
+      await done;
+
+      const fin = useWorkspaceStore.getState();
+      expect(fin.activeThreadId).toBeNull();
+      expect(fin.threads.some((t) => t.id === "server-thread-2")).toBe(true);
+    });
+
+    it("stale loadThreads does not drop a preparing placeholder mid-RPC", async () => {
+      const ws = createMockWorkspace({ id: "ws-ph" });
+      const existing = createMockThread({ id: "old-1", workspace_id: ws.id, title: "Old" });
+      let listResolve!: (value: typeof existing[]) => void;
+      const listPromise = new Promise<typeof existing[]>((resolve) => {
+        listResolve = resolve;
+      });
+
+      useWorkspaceStore.setState({
+        workspaces: [ws],
+        activeWorkspaceId: ws.id,
+        threads: [existing],
+      });
+      (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockImplementation(() => listPromise);
+
+      void useWorkspaceStore.getState().loadThreads(ws.id);
+
+      let resolveRpc!: (value: ReturnType<typeof createMockThread>) => void;
+      const rpcPromise = new Promise<ReturnType<typeof createMockThread>>((resolve) => {
+        resolveRpc = resolve;
+      });
+      (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockReturnValue(rpcPromise);
+
+      const sendOp = useWorkspaceStore.getState().createAndSendMessage("New", "composer-2-fast");
+      await Promise.resolve();
+
+      const mid = useWorkspaceStore.getState();
+      const placeholderId = mid.activeThreadId;
+      expect(placeholderId).not.toBeNull();
+      expect(mid.threads.some((t) => t.clientPreparing)).toBe(true);
+
+      listResolve([existing]);
+      await listPromise;
+      await Promise.resolve();
+
+      expect(useWorkspaceStore.getState().threads.some((t) => t.id === placeholderId)).toBe(true);
+
+      resolveRpc(createMockThread({ id: "real-new", workspace_id: ws.id, title: "New" }));
+      await sendOp;
     });
   });
 });
