@@ -498,8 +498,8 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
   }
 
   private safeReadWorkspaceFile(cwd: string, filePath: string): string {
-    const resolved = path.resolve(filePath);
     const root = path.resolve(cwd);
+    const resolved = path.resolve(root, filePath);
     if (resolved !== root && !resolved.startsWith(root + path.sep)) return "";
     try {
       if (!existsSync(resolved)) return "";
@@ -510,15 +510,13 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
   }
 
   private safeWriteWorkspaceFile(cwd: string, filePath: string, content: string): void {
-    const resolved = path.resolve(filePath);
     const root = path.resolve(cwd);
-    if (resolved !== root && !resolved.startsWith(root + path.sep)) return;
-    try {
-      mkdirSync(path.dirname(resolved), { recursive: true });
-      writeFileSync(resolved, content, "utf-8");
-    } catch {
-      /* tool layer records failure */
+    const resolved = path.resolve(root, filePath);
+    if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+      throw new Error("Path outside workspace root");
     }
+    mkdirSync(path.dirname(resolved), { recursive: true });
+    writeFileSync(resolved, content, "utf-8");
   }
 
   /** Ensures `entry.acpSessionId` is ready (new or load). */

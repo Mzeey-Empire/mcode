@@ -27,6 +27,7 @@ export function buildCursorAcpPromptBlocks(
 ): ContentBlock[] {
   const instructions = userInstructions ?? readCursorUserInstructions();
   const blocks: ContentBlock[] = [];
+  const unreadableNotes: string[] = [];
 
   const nonImageAttachments =
     attachments?.filter((att) => !att.mimeType.startsWith("image/")) ?? [];
@@ -41,14 +42,19 @@ export function buildCursorAcpPromptBlocks(
         data: buf.toString("base64"),
       });
     } catch {
-      blocks.push({
-        type: "text",
-        text: `[Attached image unreadable: ${att.name.replace(/[\x00-\x1f\x7f]/g, "")}]`,
-      });
+      unreadableNotes.push(
+        `[Attached image unreadable: ${att.name.replace(/[\x00-\x1f\x7f]/g, "")}]`,
+      );
     }
   }
 
   const textBody = buildCursorPrompt(message, nonImageAttachments, instructions);
-  blocks.push({ type: "text", text: textBody });
+  blocks.push({
+    type: "text",
+    text:
+      unreadableNotes.length > 0
+        ? `${unreadableNotes.join("\n\n")}\n\n${textBody}`
+        : textBody,
+  });
   return blocks;
 }

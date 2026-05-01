@@ -438,15 +438,18 @@ function mapAcpToolCallUpdated(
     output = rawOut.raw;
   }
 
-  // Emit ToolUse with actual data. The initial tool_call deferred ToolUse
-  // when rawInput was empty; this is where the real data arrives.
-  events.push({
-    type: AgentEventType.ToolUse,
-    threadId,
-    toolCallId: update.toolCallId,
-    toolName,
-    toolInput,
-  });
+  // Emit ToolUse with actual data only if the initial tool_call deferred it
+  // (rawInput was empty). If tool_call already emitted ToolUse, skip to avoid
+  // duplicate tool-call cards.
+  if (!acc.toolStartTimes.has(update.toolCallId)) {
+    events.push({
+      type: AgentEventType.ToolUse,
+      threadId,
+      toolCallId: update.toolCallId,
+      toolName,
+      toolInput,
+    });
+  }
 
   acc.toolStartTimes.delete(update.toolCallId);
   state.toolNameByCallId.delete(update.toolCallId);
@@ -489,6 +492,9 @@ function normalizePlanStatus(
   switch (status) {
     case "completed":
       return "completed";
+    case "cancelled":
+    case "canceled":
+      return "cancelled";
     case "in_progress":
     case "inProgress":
       return "in_progress";

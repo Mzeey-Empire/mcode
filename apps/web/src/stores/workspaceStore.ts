@@ -241,6 +241,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     set({ error: null });
     try {
       await getTransport().deleteWorkspace(id);
+      bumpThreadListMutationEpoch(id);
       const deletedThreadIds = get()
         .threads.filter((t) => t.workspace_id === id)
         .map((t) => t.id);

@@ -32,8 +32,8 @@ export function normalizeMcodeCursorToolInput(
   }
 
   if (toolName === "Write") {
-    copyIfMissing(out, "file_path", pickString(raw, ["file_path", "path", "filePath", "target_file"]));
-    if (out.content === undefined) {
+    copyIfMissing(out, "file_path", pickString(raw, ["file_path", "path", "filePath", "target_file", "filepath"]));
+    if (out.content === undefined || out.content === "") {
       const fromContents =
         typeof raw.contents === "string"
           ? raw.contents

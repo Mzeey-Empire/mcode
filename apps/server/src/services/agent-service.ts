@@ -792,7 +792,7 @@ export class AgentService {
     const providerInput =
       interactionMode === "plan" ? this.buildPlanPrompt(stitchedContent) : stitchedContent;
 
-    await this.sendMessage(
+    void this.sendMessage(
       thread.id,
       content,
       permissionMode,
@@ -808,10 +808,14 @@ export class AgentService {
       effectiveThinking,
       undefined,
       providerInput,
-    );
+    ).catch((err) => {
+      logger.error("createBranchedThread initial send failed", {
+        threadId: thread.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
 
-    const updated = this.threadRepo.findById(thread.id);
-    return updated ?? thread;
+    return thread;
   }
 
   /** Stop the agent for a given thread, persisting any buffered tool calls first. */
