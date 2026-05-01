@@ -18,6 +18,12 @@ import type { TerminalService } from "../services/terminal-service";
 import type { GitService } from "../services/git-service";
 import { getMcodeDir } from "@mcode/shared";
 
+// Avoid real wmic/taskkill on Windows: unbounded wall time and Vitest's default
+// 5s test timeout (integration tests must not depend on the host process tree).
+vi.mock("../services/process-kill.js", () => ({
+  killDescendantsByName: vi.fn().mockResolvedValue(undefined),
+}));
+
 // Stub filesystem checks for synthetic test paths.
 vi.mock("fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("fs")>();
