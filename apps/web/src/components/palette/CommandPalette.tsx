@@ -58,6 +58,7 @@ export function CommandPalette() {
       <DialogPrimitive.Portal>
         <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-foreground/40 backdrop-blur-sm" />
         <DialogPrimitive.Popup
+          data-testid="command-palette"
           className={cn(
             "fixed left-1/2 top-[clamp(4rem,15vh,9rem)] z-50 w-full -translate-x-1/2 outline-none",
             top?.kind === "projects" ? "max-w-2xl" : "max-w-xl",
