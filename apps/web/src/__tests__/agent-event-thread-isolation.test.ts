@@ -174,7 +174,7 @@ describe("Agent event thread isolation", () => {
       expect(useDiffStore.getState().rightPanelByThread[THREAD_A]?.visible).toBeFalsy();
     });
 
-    it("opens task panel when TodoWrite fires on the active thread", async () => {
+    it("does not auto-open task panel on TodoWrite", async () => {
       const { handleAgentEvent } = useThreadStore.getState();
 
       handleAgentEvent(THREAD_A, {
@@ -184,38 +184,11 @@ describe("Agent event thread isolation", () => {
         toolInput: { todos: [{ id: "0", content: "Plan", status: "in_progress" }] },
       });
 
-      // Give the dynamic import time to resolve
       await vi.advanceTimersByTime(0);
       await Promise.resolve();
       await Promise.resolve();
 
       const { useDiffStore } = await import("@/stores/diffStore");
-      expect(useDiffStore.getState().rightPanelByThread[THREAD_A]?.visible).toBe(true);
-    });
-
-    it("does not open task panel if user switches threads before the import resolves", async () => {
-      // Reset panel state from previous tests
-      const { useDiffStore } = await import("@/stores/diffStore");
-      useDiffStore.setState({ rightPanelByThread: {} });
-
-      const { handleAgentEvent } = useThreadStore.getState();
-
-      // TodoWrite fires on the active thread (A)
-      handleAgentEvent(THREAD_A, {
-        method: "session.toolUse",
-        toolCallId: "tc-todo-race",
-        toolName: "TodoWrite",
-        toolInput: { todos: [{ id: "0", content: "Plan", status: "in_progress" }] },
-      });
-
-      // User switches to Thread B before the .then() microtask runs
-      useWorkspaceStore.setState({ activeThreadId: THREAD_B });
-
-      // Flush microtasks so the .then() callback executes
-      await vi.advanceTimersByTime(0);
-      await Promise.resolve();
-      await Promise.resolve();
-
       expect(useDiffStore.getState().rightPanelByThread[THREAD_A]?.visible).toBeFalsy();
     });
   });
