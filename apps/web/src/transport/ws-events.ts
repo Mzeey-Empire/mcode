@@ -39,6 +39,7 @@ const _legacyEncoder = new TextEncoder();
  * - `permission.resolved` -- a permission was settled (by user or session stop)
  * - `providers.availability` -- server-pushed provider availability snapshot forwarded to providerAvailabilityStore
  * - `workspace.gitStatusChanged` -- workspace git status changed (e.g. non-git folder became a repo), updates is_git_repo flag
+ * - `workspace.orderChanged` -- sidebar project order changed on the server; refreshes workspace list
  */
 export function startPushListeners(): void {
   // Guard against double-init
@@ -267,6 +268,12 @@ export function startPushListeners(): void {
           w.id === workspaceId ? { ...w, is_git_repo: isGitRepo } : w,
         ),
       }));
+    }),
+  );
+
+  unsubs.push(
+    pushEmitter.on("workspace.orderChanged", () => {
+      void useWorkspaceStore.getState().loadWorkspaces();
     }),
   );
 

@@ -436,6 +436,8 @@ export function createWsTransport(
     createWorkspace: (name, path) => rpc<Workspace>("workspace.create", { name, path }),
     deleteWorkspace: (id) => rpc<boolean>("workspace.delete", { id }),
     touchLastOpened: (id) => rpc<void>("workspace.touchLastOpened", { id }),
+    reorderWorkspace: (id, newIndex) =>
+      rpc<void>("workspace.reorder", { id, newIndex }),
     pinWorkspace: (id, pinned) => rpc<void>("workspace.pin", { id, pinned }),
     removeRecent: (id) => rpc<void>("workspace.removeRecent", { id }),
     enrichWorkspaces: (ids) =>

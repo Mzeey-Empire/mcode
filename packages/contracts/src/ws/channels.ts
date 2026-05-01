@@ -54,6 +54,8 @@ export const WS_CHANNELS = {
   "workspace.gitStatusChanged": lazySchema(() =>
     z.object({ workspaceId: z.string(), isGitRepo: z.boolean() }),
   )(),
+  /** Sidebar project order changed on the server; clients should refresh `workspace.list`. */
+  "workspace.orderChanged": z.object({}),
   "turn.persisted": z.object({
     threadId: z.string(),
     messageId: z.string(),

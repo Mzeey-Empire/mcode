@@ -18,6 +18,7 @@ interface WorkspaceRow {
   updated_at: string;
   pinned: number;
   last_opened_at: number | null;
+  sort_order: number;
 }
 
 function rowToWorkspace(row: WorkspaceRow): Workspace {
@@ -34,6 +35,7 @@ function rowToWorkspace(row: WorkspaceRow): Workspace {
     updated_at: row.updated_at,
     pinned: row.pinned === 1,
     last_opened_at: row.last_opened_at ?? null,
+    sort_order: row.sort_order,
   };
 }
 
@@ -47,11 +49,17 @@ export class WorkspaceRepo {
     const id = randomUUID();
     const now = new Date().toISOString();
 
-    this.db
-      .prepare(
-        "INSERT INTO workspaces (id, name, path, is_git_repo, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-      )
-      .run(id, name, path, isGitRepo ? 1 : 0, now, now);
+    const trx = this.db.transaction(() => {
+      this.db
+        .prepare("UPDATE workspaces SET sort_order = sort_order + 1")
+        .run();
+      this.db
+        .prepare(
+          "INSERT INTO workspaces (id, name, path, is_git_repo, created_at, updated_at, sort_order) VALUES (?, ?, ?, ?, ?, ?, 0)",
+        )
+        .run(id, name, path, isGitRepo ? 1 : 0, now, now);
+    });
+    trx();
 
     return {
       id,
@@ -63,14 +71,69 @@ export class WorkspaceRepo {
       updated_at: now,
       pinned: false,
       last_opened_at: null,
+      sort_order: 0,
     };
+  }
+
+  /** Move an existing workspace to the top of the sidebar (sort_order 0). */
+  prependToSortOrder(id: string): void {
+    const trx = this.db.transaction(() => {
+      this.db
+        .prepare("UPDATE workspaces SET sort_order = sort_order + 1 WHERE id != ?")
+        .run(id);
+      this.db.prepare("UPDATE workspaces SET sort_order = 0 WHERE id = ?").run(id);
+    });
+    trx();
+  }
+
+  /**
+   * Reorder a workspace to a zero-based index in the current sort_order ordering.
+   * Uses a two-statement range shift inside a transaction.
+   */
+  reorderToIndex(id: string, newIndex: number): void {
+    const rows = this.db
+      .prepare(
+        "SELECT id, sort_order FROM workspaces ORDER BY sort_order ASC, id ASC",
+      )
+      .all() as Array<{ id: string; sort_order: number }>;
+
+    const oldIdx = rows.findIndex((r) => r.id === id);
+    if (oldIdx < 0) return;
+
+    const n = rows.length;
+    const idx = Math.max(0, Math.min(newIndex, n - 1));
+    if (oldIdx === idx) return;
+
+    const orders = rows.map((r) => r.sort_order);
+    const fromPos = orders[oldIdx]!;
+    const toPos = orders[idx]!;
+
+    const trx = this.db.transaction(() => {
+      if (idx < oldIdx) {
+        this.db
+          .prepare(
+            "UPDATE workspaces SET sort_order = sort_order + 1 WHERE sort_order >= ? AND sort_order < ?",
+          )
+          .run(toPos, fromPos);
+      } else {
+        this.db
+          .prepare(
+            "UPDATE workspaces SET sort_order = sort_order - 1 WHERE sort_order > ? AND sort_order <= ?",
+          )
+          .run(fromPos, toPos);
+      }
+      this.db
+        .prepare("UPDATE workspaces SET sort_order = ? WHERE id = ?")
+        .run(toPos, id);
+    });
+    trx();
   }
 
   /** Find a workspace by its primary key. Returns null if not found. */
   findById(id: string): Workspace | null {
     const row = this.db
       .prepare(
-        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at FROM workspaces WHERE id = ?",
+        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at, sort_order FROM workspaces WHERE id = ?",
       )
       .get(id) as WorkspaceRow | undefined;
 
@@ -81,21 +144,18 @@ export class WorkspaceRepo {
   findByPath(path: string): Workspace | null {
     const row = this.db
       .prepare(
-        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at FROM workspaces WHERE path = ?",
+        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at, sort_order FROM workspaces WHERE path = ?",
       )
       .get(path) as WorkspaceRow | undefined;
 
     return row ? rowToWorkspace(row) : null;
   }
 
-  /**
-   * List workspaces that have been opened or pinned, ordered by pinned first then
-   * most recently opened. Workspaces that were never opened and are not pinned are excluded.
-   */
+  /** List all workspaces ordered by ascending sidebar sort_order. */
   listAll(): Workspace[] {
     const rows = this.db
       .prepare(
-        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at FROM workspaces WHERE last_opened_at IS NOT NULL OR pinned = 1 ORDER BY pinned DESC, last_opened_at DESC",
+        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at, sort_order FROM workspaces ORDER BY sort_order ASC, id ASC",
       )
       .all() as WorkspaceRow[];
 

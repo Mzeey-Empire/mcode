@@ -88,6 +88,8 @@ export interface McodeTransport {
   pinWorkspace(id: string, pinned: boolean): Promise<void>;
   /** Remove a workspace from the recents list and unpin it. */
   removeRecent(id: string): Promise<void>;
+  /** Persist sidebar index for a workspace after drag-and-drop (zero-based). */
+  reorderWorkspace(id: string, newIndex: number): Promise<void>;
   /** Batch-fetch git branch, cleanliness, and thread count for the given workspace ids. */
   enrichWorkspaces(ids: string[]): Promise<{ items: WorkspaceEnrichment[] }>;
   /** Browse the host filesystem at the given path. Returns entries and parent path. */

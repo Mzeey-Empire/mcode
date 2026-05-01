@@ -19,6 +19,7 @@ const WORKSPACE_FIXTURE = {
   is_git_repo: true,
   pinned: false,
   last_opened_at: null,
+  sort_order: 0,
   created_at: now,
   updated_at: now,
 };

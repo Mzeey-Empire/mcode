@@ -32,6 +32,7 @@ import * as m020 from "./migrations/00000000000020_thread_has_file_changes.js";
 import * as mPinned from "./migrations/20260429000000_workspace_pinned_and_last_opened.js";
 import * as mModelCache from "./migrations/20260429100000_provider_model_cache.js";
 import * as mPlanQuestionAnswers from "./migrations/20260430142010_plan_question_answers.js";
+import * as mWorkspaceSortOrder from "./migrations/20260501120000_workspace_sort_order.js";
 
 /**
  * Resolve the correct native binding for better-sqlite3 based on runtime.
@@ -102,6 +103,7 @@ export function loadMigrations(): Map<string, MigrationModule> {
   migrations.set("20260429000000", mPinned);
   migrations.set("20260429100000", mModelCache);
   migrations.set("20260430142010", mPlanQuestionAnswers);
+  migrations.set("20260501120000", mWorkspaceSortOrder);
   return migrations;
 }
 

@@ -28,13 +28,22 @@ export class WorkspaceService {
     const existing = this.workspaceRepo.findByPath(path);
     if (existing) {
       this.workspaceRepo.touch(existing.id);
-      return existing;
+      this.workspaceRepo.prependToSortOrder(existing.id);
+      return this.workspaceRepo.findById(existing.id)!;
     }
     const isGitRepo = this.detectGitRepo(path);
     return this.workspaceRepo.create(name, path, isGitRepo);
   }
 
-  /** List all workspaces ordered by most recently updated. */
+  /**
+   * Persist a new sidebar index for a workspace (zero-based). Other connected
+   * clients receive `workspace.orderChanged` and should refresh the list.
+   */
+  reorder(id: string, newIndex: number): void {
+    this.workspaceRepo.reorderToIndex(id, newIndex);
+  }
+
+  /** List all workspaces ordered by ascending sidebar `sort_order`. */
   list(): Workspace[] {
     return this.workspaceRepo.listAll();
   }

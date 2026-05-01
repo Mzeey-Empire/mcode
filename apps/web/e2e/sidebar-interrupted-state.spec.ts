@@ -20,6 +20,9 @@ const WORKSPACE = {
   path: "/tmp/interrupted-test",
   provider_config: {},
   is_git_repo: true,
+  pinned: false,
+  last_opened_at: null,
+  sort_order: 0,
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
 };

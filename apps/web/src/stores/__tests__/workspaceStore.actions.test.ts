@@ -13,6 +13,7 @@ function makeWs(overrides?: Partial<Workspace>): Workspace {
     updated_at: new Date().toISOString(),
     pinned: false,
     last_opened_at: null,
+    sort_order: 0,
     ...overrides,
   };
 }
@@ -53,5 +54,36 @@ describe("workspaceStore pin/remove/touch", () => {
     expect(ws.last_opened_at).toBeNull();
     expect(ws.pinned).toBe(false);
     expect(call).toHaveBeenCalledWith("workspace.removeRecent", { id: "ws-1" });
+  });
+});
+
+describe("workspaceStore reorderWorkspace", () => {
+  it("splices order locally and calls workspace.reorder with the bounded index", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        makeWs({ id: "a", name: "a", sort_order: 0 }),
+        makeWs({ id: "b", name: "b", sort_order: 1 }),
+        makeWs({ id: "c", name: "c", sort_order: 2 }),
+      ],
+    });
+    const call = vi.fn().mockResolvedValue({ ok: true });
+    await useWorkspaceStore.getState().reorderWorkspace("c", 0, call as unknown as WorkspaceRpcCall);
+    expect(useWorkspaceStore.getState().workspaces.map((w) => w.id)).toEqual(["c", "a", "b"]);
+    expect(call).toHaveBeenCalledWith("workspace.reorder", { id: "c", newIndex: 0 });
+  });
+
+  it("reverts workspaces order when RPC fails", async () => {
+    useWorkspaceStore.setState({
+      workspaces: [
+        makeWs({ id: "a", name: "a", sort_order: 0 }),
+        makeWs({ id: "b", name: "b", sort_order: 1 }),
+      ],
+    });
+    const call = vi.fn().mockRejectedValue(new Error("offline"));
+    try {
+      await useWorkspaceStore.getState().reorderWorkspace("b", 0, call as unknown as WorkspaceRpcCall);
+    } catch { /* expected */ }
+    expect(useWorkspaceStore.getState().workspaces.map((w) => w.id)).toEqual(["a", "b"]);
+    expect(useWorkspaceStore.getState().error).toMatch(/offline/);
   });
 });

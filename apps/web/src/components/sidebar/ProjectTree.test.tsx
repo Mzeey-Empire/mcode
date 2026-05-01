@@ -27,6 +27,7 @@ vi.mock("@/stores/workspaceStore", () => ({
       worktreesLoadedForWorkspace: null,
       checksById: {},
       error: null,
+      reorderWorkspace: vi.fn(),
     })
   ),
 }));

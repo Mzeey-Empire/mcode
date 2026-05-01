@@ -47,6 +47,10 @@ const WORKSPACE_A = {
   name: "Architecture Test",
   path: "/tmp/arch-test",
   provider_config: {},
+  is_git_repo: true,
+  pinned: false,
+  last_opened_at: null,
+  sort_order: 0,
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
 };
@@ -56,6 +60,10 @@ const WORKSPACE_B = {
   name: "Second Project",
   path: "/tmp/second-project",
   provider_config: {},
+  is_git_repo: true,
+  pinned: false,
+  last_opened_at: null,
+  sort_order: 1,
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
 };

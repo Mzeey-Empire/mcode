@@ -224,6 +224,11 @@ async function dispatch(
     case "workspace.touchLastOpened":
       deps.workspaceRepo.touchLastOpened(params.id);
       return { ok: true as const };
+    case "workspace.reorder": {
+      deps.workspaceService.reorder(params.id, params.newIndex);
+      broadcast("workspace.orderChanged", {});
+      return { ok: true as const };
+    }
     case "workspace.enrich": {
       const wsItems = (params.ids as string[])
         .map((id: string) => deps.workspaceRepo.findById(id))

@@ -95,6 +95,8 @@ interface WorkspaceState {
   pinWorkspace: (id: string, pinned: boolean, call?: WorkspaceRpcCall) => Promise<void>;
   /** Remove a workspace from the recents list. Clears last_opened_at and pinned locally; reverts on RPC failure. */
   removeRecent: (id: string, call?: WorkspaceRpcCall) => Promise<void>;
+  /** Reorder a workspace in the sidebar (zero-based index). Optimistic update with RPC persistence. */
+  reorderWorkspace: (id: string, newIndex: number, call?: WorkspaceRpcCall) => Promise<void>;
 
   // Thread actions
   loadThreads: (workspaceId: string) => Promise<void>;
@@ -377,6 +379,28 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
           ),
         }));
       }
+      throw err;
+    }
+  },
+
+  reorderWorkspace: async (id, newIndex, call) => {
+    const prev = get().workspaces.slice();
+    const oldIndex = prev.findIndex((w) => w.id === id);
+    if (oldIndex < 0) return;
+    const bounded = Math.max(0, Math.min(newIndex, prev.length - 1));
+    if (oldIndex === bounded) return;
+    const next = [...prev];
+    const [removed] = next.splice(oldIndex, 1);
+    next.splice(bounded, 0, removed!);
+    set({ workspaces: next, error: null });
+    try {
+      if (call) {
+        await call("workspace.reorder", { id, newIndex: bounded });
+      } else {
+        await getTransport().reorderWorkspace(id, bounded);
+      }
+    } catch (err) {
+      set({ workspaces: prev, error: String(err) });
       throw err;
     }
   },

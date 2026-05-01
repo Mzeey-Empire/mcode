@@ -125,6 +125,11 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({ id: z.string() }),
     result: z.object({ ok: z.literal(true) }),
   },
+  /** Move a workspace to a new zero-based index in the sidebar order. */
+  "workspace.reorder": {
+    params: z.object({ id: z.string(), newIndex: z.number().int().nonnegative() }),
+    result: z.object({ ok: z.literal(true) }),
+  },
   /** Batch-fetch git + thread enrichment for up to 200 workspace ids. */
   "workspace.enrich": {
     params: z.object({ ids: z.array(z.string()).max(200) }),

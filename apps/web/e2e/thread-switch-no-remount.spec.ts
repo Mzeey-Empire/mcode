@@ -20,8 +20,12 @@ async function mockWebSocketServer(page: Page): Promise<void> {
     name: "Test Workspace",
     path: "/test/path",
     provider_config: {},
+    is_git_repo: true,
     created_at: now,
     updated_at: now,
+    pinned: false,
+    last_opened_at: Date.now(),
+    sort_order: 0,
   };
   const threadA = {
     id: "thread-a",
