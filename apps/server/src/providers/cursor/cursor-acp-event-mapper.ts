@@ -1,5 +1,13 @@
 /**
  * Maps ACP `session/update` notifications to mcode {@link AgentEvent} values.
+ *
+ * ACP tool calls differ fundamentally from `--print` stream-json:
+ * - `tool_call` is a lifecycle marker with `kind`/`title` but often empty `rawInput`
+ * - `_toolName` tools (e.g. updateTodos) carry no args; data arrives via ext methods
+ * - Actual tool output arrives on `tool_call_update` via:
+ *   - `rawOutput.content` for Read (file content)
+ *   - `content[]` with `type: "diff"` for Edit (path, oldText, newText)
+ *   - `rawOutput.{stdout,stderr,exitCode}` for Terminal/Bash
  */
 
 import type { SessionNotification } from "@agentclientprotocol/sdk";
@@ -15,6 +23,17 @@ import {
 import { normalizeMcodeCursorToolInput } from "./cursor-tool-input-normalize.js";
 import type { CursorStreamAccumulator } from "./cursor-stream-event-mapper.js";
 
+/** Maps ACP `kind` field to Mcode tool names. */
+const TOOL_NAME_BY_ACP_KIND: Record<string, string> = {
+  read: "Read",
+  edit: "Edit",
+  write: "Write",
+  command: "Bash",
+  search: "Grep",
+  other: "Tool",
+};
+
+/** Maps `--print` style discriminator keys to Mcode tool names (legacy compat). */
 const TOOL_NAME_BY_DISCRIMINATOR: Record<string, string> = {
   readToolCall: "Read",
   writeToolCall: "Write",
@@ -30,11 +49,26 @@ const TOOL_NAME_BY_DISCRIMINATOR: Record<string, string> = {
   strReplaceToolCall: "Edit",
 };
 
+/** Maps ACP `title` strings to Mcode tool names as fallback. */
+const TOOL_NAME_BY_TITLE: Record<string, string> = {
+  "Read File": "Read",
+  "Edit File": "Edit",
+  "Write File": "Write",
+  "Terminal": "Bash",
+  "Find": "Glob",
+  "Read Lints": "Read",
+  "Search": "Grep",
+};
+
 /**
  * Accumulator for streaming state during one ACP prompt turn on a thread.
  */
 export interface CursorAcpTurnState {
   accumulator: CursorStreamAccumulator;
+  /** Tool call IDs whose data arrives via ext methods, not session updates. */
+  suppressedToolCallIds: Set<string>;
+  /** Tracks the ACP tool name (kind/title) per tool call ID for enriching updates. */
+  toolNameByCallId: Map<string, string>;
 }
 
 /** Creates a fresh per-turn state bundle (wraps shared stream accumulator shape). */
@@ -45,16 +79,13 @@ export function createCursorAcpTurnState(): CursorAcpTurnState {
       toolStartTimes: new Map(),
       chatId: null,
     },
+    suppressedToolCallIds: new Set(),
+    toolNameByCallId: new Map(),
   };
 }
 
 /**
  * Converts a single `session/update` notification into zero or more agent events.
- *
- * @param notification - ACP session update (already scoped to the active session).
- * @param threadId - Mcode thread UUID.
- * @param state - Mutable per-turn state; reset by the provider at the start of each prompt.
- * @param todoSnapshot - Optional todo merge state for `updateTodosToolCall` parity with stream-json.
  */
 export function mapCursorAcpSessionNotification(
   notification: SessionNotification,
@@ -79,18 +110,18 @@ export function mapCursorAcpSessionNotification(
     case "usage_update":
       return [];
     case "tool_call":
-      return mapAcpToolCallStarted(update, threadId, acc, todoSnapshot);
+      return mapAcpToolCallStarted(update, threadId, state, acc, todoSnapshot);
     case "tool_call_update":
-      return mapAcpToolCallUpdated(update, threadId, acc);
+      return mapAcpToolCallUpdated(update, threadId, state, acc);
     default:
       return [];
   }
 }
 
-/**
- * Normal assistant text uses `agent_message_chunk`, but Cursor streams some models
- * (e.g. composer) as `agent_thought_chunk` only. Map both so the UI receives TextDelta.
- */
+// ---------------------------------------------------------------------------
+// Text chunks
+// ---------------------------------------------------------------------------
+
 function mapAgentLanguageChunk(
   threadId: string,
   acc: CursorStreamAccumulator,
@@ -107,6 +138,115 @@ function mapAgentLanguageChunk(
   acc.assistantText += text;
   return [{ type: AgentEventType.TextDelta, threadId, delta: text }];
 }
+
+// ---------------------------------------------------------------------------
+// Tool call helpers
+// ---------------------------------------------------------------------------
+
+/** Resolve an ACP tool call to a Mcode tool name using kind → title → discriminator. */
+function resolveAcpToolName(update: {
+  kind?: unknown;
+  title?: string | null;
+  rawInput?: unknown;
+}): string {
+  // 1. ACP `kind` field (most reliable for ACP-native calls)
+  if (typeof update.kind === "string" && TOOL_NAME_BY_ACP_KIND[update.kind]) {
+    return TOOL_NAME_BY_ACP_KIND[update.kind];
+  }
+
+  // 2. Title-based lookup
+  const title = typeof update.title === "string" ? update.title : null;
+  if (title && TOOL_NAME_BY_TITLE[title]) {
+    return TOOL_NAME_BY_TITLE[title];
+  }
+
+  // 3. Legacy discriminator in rawInput (--print compat)
+  if (update.rawInput && typeof update.rawInput === "object" && !Array.isArray(update.rawInput)) {
+    const rec = update.rawInput as Record<string, unknown>;
+    for (const key of Object.keys(rec)) {
+      if (key === "result" || key === "args" || key === "_toolName") continue;
+      if (rec[key] && typeof rec[key] === "object" && !Array.isArray(rec[key])) {
+        if (TOOL_NAME_BY_DISCRIMINATOR[key]) return TOOL_NAME_BY_DISCRIMINATOR[key];
+      }
+    }
+  }
+
+  return title || "Tool";
+}
+
+/** Extract `content` blocks from an ACP tool_call or tool_call_update. */
+interface AcpDiffBlock {
+  type: "diff";
+  path: string;
+  oldText: string;
+  newText: string;
+}
+
+function extractContentDiffs(update: Record<string, unknown>): AcpDiffBlock[] {
+  const content = update.content;
+  if (!Array.isArray(content)) return [];
+  return content.filter(
+    (c): c is AcpDiffBlock =>
+      c != null &&
+      typeof c === "object" &&
+      (c as Record<string, unknown>).type === "diff" &&
+      typeof (c as Record<string, unknown>).path === "string",
+  );
+}
+
+/** Extract structured rawOutput fields for different tool types. */
+function extractAcpRawOutput(rawOutput: unknown): {
+  /** File content (Read tool) */
+  fileContent?: string;
+  /** Terminal stdout */
+  stdout?: string;
+  /** Terminal stderr */
+  stderr?: string;
+  /** Terminal exit code */
+  exitCode?: number;
+  /** Raw string output */
+  raw?: string;
+} {
+  if (rawOutput === undefined || rawOutput === null) return {};
+  if (typeof rawOutput === "string") return { raw: rawOutput };
+  if (typeof rawOutput !== "object" || Array.isArray(rawOutput)) return {};
+
+  const r = rawOutput as Record<string, unknown>;
+
+  // Read tool: { content: "file contents..." }
+  if (typeof r.content === "string") {
+    return { fileContent: r.content };
+  }
+
+  // Terminal/Bash: { exitCode, stdout, stderr }
+  if ("stdout" in r || "exitCode" in r) {
+    return {
+      stdout: typeof r.stdout === "string" ? r.stdout : undefined,
+      stderr: typeof r.stderr === "string" ? r.stderr : undefined,
+      exitCode: typeof r.exitCode === "number" ? r.exitCode : undefined,
+    };
+  }
+
+  // Legacy: { success/rejected/failure }
+  const body = r.success ?? r.rejected ?? r.failure;
+  if (body != null) {
+    return { raw: typeof body === "string" ? body : safeStringify(body) };
+  }
+
+  return { raw: safeStringify(rawOutput) };
+}
+
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Legacy --print helpers (kept for backward compat if mixed transports)
+// ---------------------------------------------------------------------------
 
 function extractToolCallDiscriminator(toolCall: Record<string, unknown> | undefined): {
   discriminator: string | null;
@@ -130,10 +270,6 @@ function extractArgs(payload: Record<string, unknown> | undefined): Record<strin
   return undefined;
 }
 
-/**
- * Resolves tool-call argument fields: prefer nested `args`, else flatten the payload
- * minus `result` so ACP shapes that inline fields still reach the UI extractors.
- */
 function coercePayloadArgs(payload: Record<string, unknown> | undefined): Record<string, unknown> {
   if (!payload) return {};
   const nested = extractArgs(payload);
@@ -142,61 +278,40 @@ function coercePayloadArgs(payload: Record<string, unknown> | undefined): Record
   return { ...rest };
 }
 
-function extractResult(payload: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
-  if (!payload) return undefined;
-  const v = payload.result;
-  if (v && typeof v === "object" && !Array.isArray(v)) return v as Record<string, unknown>;
-  return undefined;
-}
-
-function safeStringify(value: unknown): string {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-function formatResultOutput(result: Record<string, unknown> | undefined): string {
-  if (!result) return "";
-  const body = result.success ?? result.rejected ?? result.failure;
-  if (body == null) return safeStringify(result);
-  if (typeof body === "string") return body;
-  return safeStringify(body);
-}
-
-function coerceRawToolEnvelope(rawInput: unknown): {
-  discriminator: string | null;
-  payload: Record<string, unknown> | undefined;
-} {
-  if (rawInput !== undefined && typeof rawInput === "object" && rawInput !== null && !Array.isArray(rawInput)) {
-    const rec = rawInput as Record<string, unknown>;
-    const extracted = extractToolCallDiscriminator(rec);
-    if (extracted.discriminator) return extracted;
-    return { discriminator: null, payload: rec };
-  }
-  return { discriminator: null, payload: undefined };
-}
+// ---------------------------------------------------------------------------
+// tool_call (initial)
+// ---------------------------------------------------------------------------
 
 function mapAcpToolCallStarted(
   update: {
     rawInput?: unknown;
     toolCallId: string;
     title: string;
+    kind?: unknown;
   },
   threadId: string,
+  state: CursorAcpTurnState,
   acc: CursorStreamAccumulator,
   todoSnapshot: CursorTodoSnapshot | undefined,
 ): AgentEvent[] {
-  const raw = coerceRawToolEnvelope(update.rawInput);
-  const payloadRecord =
-    raw.payload ??
-    (typeof update.rawInput === "object" && update.rawInput !== null && !Array.isArray(update.rawInput)
+  const rawInputRecord =
+    update.rawInput && typeof update.rawInput === "object" && !Array.isArray(update.rawInput)
       ? (update.rawInput as Record<string, unknown>)
-      : undefined);
-  const args = coercePayloadArgs(payloadRecord);
+      : undefined;
 
+  // ACP `_toolName` tools (e.g. updateTodos) carry no args in rawInput;
+  // data arrives via ext methods. Suppress these lifecycle markers.
+  const acpToolName = rawInputRecord?._toolName;
+  if (typeof acpToolName === "string") {
+    acc.toolStartTimes.set(update.toolCallId, Date.now());
+    state.suppressedToolCallIds.add(update.toolCallId);
+    return [];
+  }
+
+  // Legacy --print discriminator (updateTodosToolCall, shellToolCall, etc.)
+  const raw = rawInputRecord ? extractToolCallDiscriminator(rawInputRecord) : { discriminator: null, payload: undefined };
   if (raw.discriminator === "updateTodosToolCall") {
+    const args = coercePayloadArgs(raw.payload);
     const entries = extractCursorTodoEntries(args);
     if (!entries || entries.length === 0) return [];
     const merge = args.merge === true;
@@ -214,20 +329,33 @@ function mapAcpToolCallStarted(
     ];
   }
 
+  // Resolve tool name from ACP kind/title/discriminator
   const toolName = raw.discriminator
     ? (TOOL_NAME_BY_DISCRIMINATOR[raw.discriminator] ?? raw.discriminator)
-    : update.title || "Tool";
+    : resolveAcpToolName(update);
+
+  // Build toolInput from rawInput if available
   let toolInput: Record<string, unknown> =
-    args && Object.keys(args).length > 0
-      ? args
-      : (typeof update.rawInput === "object" && update.rawInput !== null && !Array.isArray(update.rawInput))
-        ? coercePayloadArgs(update.rawInput as Record<string, unknown>)
-        : {};
+    raw.payload ? coercePayloadArgs(raw.payload) : {};
+  if (Object.keys(toolInput).length === 0 && rawInputRecord) {
+    const { _toolName: _, ...rest } = rawInputRecord;
+    if (Object.keys(rest).length > 0) toolInput = rest;
+  }
 
   if (toolName === "Edit" || toolName === "Write") {
     toolInput = normalizeMcodeCursorToolInput(toolName, toolInput);
   }
+
   acc.toolStartTimes.set(update.toolCallId, Date.now());
+  state.toolNameByCallId.set(update.toolCallId, toolName);
+
+  // ACP tool_calls with empty rawInput are lifecycle markers; actual data
+  // arrives on tool_call_update (content blocks or rawOutput). Defer ToolUse
+  // so we emit one event with real data instead of an empty one now + duplicate later.
+  if (Object.keys(toolInput).length === 0) {
+    return [];
+  }
+
   return [
     {
       type: AgentEventType.ToolUse,
@@ -239,79 +367,104 @@ function mapAcpToolCallStarted(
   ];
 }
 
+// ---------------------------------------------------------------------------
+// tool_call_update (progress + completion)
+// ---------------------------------------------------------------------------
+
 function mapAcpToolCallUpdated(
   update: {
     rawInput?: unknown;
     rawOutput?: unknown;
+    content?: unknown;
     status?: unknown;
     toolCallId: string;
     title?: string | null;
+    kind?: unknown;
   },
   threadId: string,
+  state: CursorAcpTurnState,
   acc: CursorStreamAccumulator,
 ): AgentEvent[] {
-  const raw = coerceRawToolEnvelope(update.rawInput);
-  const discriminator = raw.discriminator;
-  const payload = raw.payload;
-
-  let isError = update.status === "failed";
-
-  const resultEnvelope =
-    extractResult(payload) ??
-    (update.rawOutput !== undefined && typeof update.rawOutput === "object" && update.rawOutput !== null
-      ? (update.rawOutput as Record<string, unknown>)
-      : typeof update.rawOutput === "string"
-        ? ({ success: update.rawOutput } as Record<string, unknown>)
-        : undefined);
-
-  if (resultEnvelope) {
-    isError = isError || resultEnvelope.rejected != null || resultEnvelope.failure != null;
+  // Suppress lifecycle-only tool calls (handled by ext methods)
+  if (state.suppressedToolCallIds.has(update.toolCallId)) {
+    acc.toolStartTimes.delete(update.toolCallId);
+    if (update.status === "completed" || update.status === "failed") {
+      state.suppressedToolCallIds.delete(update.toolCallId);
+    }
+    return [];
   }
 
-  const output =
-    typeof update.rawOutput === "string"
-      ? update.rawOutput
-      : formatResultOutput(resultEnvelope);
+  // Skip in-progress updates that carry no data
+  const hasData =
+    update.rawOutput !== undefined ||
+    (Array.isArray(update.content) && (update.content as unknown[]).length > 0) ||
+    update.status === "completed" ||
+    update.status === "failed";
+  if (!hasData) return [];
 
   const events: AgentEvent[] = [];
+  const isError = update.status === "failed";
+  const knownToolName = state.toolNameByCallId.get(update.toolCallId);
 
-  if (!acc.toolStartTimes.has(update.toolCallId)) {
-    const toolName =
-      discriminator != null ? (TOOL_NAME_BY_DISCRIMINATOR[discriminator] ?? discriminator) : update.title ?? "Tool";
-    if (discriminator !== "updateTodosToolCall") {
-      let orphanInput = coercePayloadArgs(payload ?? undefined);
-      if (toolName === "Edit" || toolName === "Write") {
-        orphanInput = normalizeMcodeCursorToolInput(toolName, orphanInput);
-      }
-      events.push({
-        type: AgentEventType.ToolUse,
-        threadId,
-        toolCallId: update.toolCallId,
-        toolName,
-        toolInput: orphanInput,
-      });
+  // Extract structured output from the two ACP channels
+  const diffs = extractContentDiffs(update as Record<string, unknown>);
+  const rawOut = extractAcpRawOutput(update.rawOutput);
+
+  // Determine tool name and build ToolUse input from available data
+  const toolName = knownToolName ?? resolveAcpToolName(update);
+  let toolInput: Record<string, unknown> = {};
+  let output = "";
+
+  if (diffs.length > 0) {
+    const diff = diffs[0];
+    toolInput = {
+      file_path: diff.path,
+      old_string: diff.oldText,
+      new_string: diff.newText,
+    };
+    output = `Applied edit to ${diff.path}`;
+  } else if (rawOut.fileContent !== undefined) {
+    toolInput = { file_path: "" };
+    output = rawOut.fileContent;
+  } else if (rawOut.stdout !== undefined || rawOut.stderr !== undefined) {
+    const parts: string[] = [];
+    if (rawOut.stdout) parts.push(rawOut.stdout);
+    if (rawOut.stderr) parts.push(`stderr: ${rawOut.stderr}`);
+    if (rawOut.exitCode !== undefined && rawOut.exitCode !== 0) {
+      parts.push(`exit code: ${rawOut.exitCode}`);
     }
+    output = parts.join("\n");
+  } else if (rawOut.raw) {
+    output = rawOut.raw;
   }
 
+  // Emit ToolUse with actual data. The initial tool_call deferred ToolUse
+  // when rawInput was empty; this is where the real data arrives.
+  events.push({
+    type: AgentEventType.ToolUse,
+    threadId,
+    toolCallId: update.toolCallId,
+    toolName,
+    toolInput,
+  });
+
   acc.toolStartTimes.delete(update.toolCallId);
+  state.toolNameByCallId.delete(update.toolCallId);
 
   events.push({
     type: AgentEventType.ToolResult,
     threadId,
     toolCallId: update.toolCallId,
-    output: output || (discriminator === "updateTodosToolCall" ? "Updated todos" : ""),
+    output,
     isError,
   });
   return events;
 }
 
-/**
- * Maps an ACP `plan` session update to TodoWrite events.
- *
- * Cursor sends task progress both through `cursor/update_todos` (ext notification)
- * and through `session/update` with `sessionUpdate: "plan"`. Both paths must emit
- * TodoWrite events so the task panel stays in sync regardless of which channel fires.
- */
+// ---------------------------------------------------------------------------
+// Plan session update → TodoWrite
+// ---------------------------------------------------------------------------
+
 function mapAcpPlanUpdate(
   update: { entries: Array<{ content: string; status: string; priority?: string }> },
   threadId: string,
@@ -326,12 +479,10 @@ function mapAcpPlanUpdate(
     priority: entry.priority,
   }));
 
-  // Plan updates are full replacements per ACP spec, so merge=false
   const todos = reconcileCursorTodos(incoming, false, todoSnapshot);
   return buildTodoWriteEvents(todos, threadId);
 }
 
-/** Normalize ACP PlanEntryStatus to our TaskStatus. */
 function normalizePlanStatus(
   status: string,
 ): "pending" | "in_progress" | "completed" | "cancelled" {

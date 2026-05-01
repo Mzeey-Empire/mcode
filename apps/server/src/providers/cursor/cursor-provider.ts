@@ -383,7 +383,6 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
         return {};
       },
       extMethod: async (method, params) => {
-        void params;
         if (method === "cursor/ask_question") {
           return {
             outcome: {
@@ -394,6 +393,24 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
         }
         if (method === "cursor/create_plan") {
           return { outcome: { outcome: "accepted" } };
+        }
+        // cursor/update_todos arrives as a request (not notification) in the
+        // ACP SDK dispatch. Handle it here so the task panel stays in sync.
+        if (
+          method === "cursor/update_todos" &&
+          params !== null &&
+          typeof params === "object" &&
+          !Array.isArray(params)
+        ) {
+          const events = cursorUpdateTodosExtNotificationToAgentEvents(
+            entry.threadId,
+            params as Record<string, unknown>,
+            entry.todoSnapshot,
+          );
+          for (const ev of events) {
+            this.emit("event", ev);
+          }
+          return {};
         }
         logger.debug("Cursor ACP extMethod unhandled", {
           threadId: entry.threadId,
@@ -468,6 +485,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     if (!entry.acpSessionId || params.sessionId !== entry.acpSessionId) return;
     const state = entry.activeTurnState;
     if (!state) return;
+
     const mapped = mapCursorAcpSessionNotification(
       params,
       entry.threadId,
