@@ -10,10 +10,13 @@ const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
 const reuseExistingServer =
   !process.env.CI && process.env.PLAYWRIGHT_REUSE_WEB_SERVER === "1";
 
+const isCI = Boolean(process.env.CI);
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
-  retries: 0,
+  forbidOnly: isCI,
+  retries: isCI ? 2 : 0,
   workers: 1,
   reporter: [["html", { outputFolder: "playwright-report" }]],
   use: {
@@ -30,6 +33,12 @@ export default defineConfig({
     command: "bun run dev",
     url: BASE_URL,
     reuseExistingServer,
-    timeout: 30000,
+    timeout: 120_000,
+    // Spawning inherits the parent process env. React Fast Refresh in Vite
+    // assumes development; a production NODE_ENV causes `$RefreshReg$` runtime errors.
+    env: {
+      ...process.env,
+      NODE_ENV: "development",
+    },
   },
 });
