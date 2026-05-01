@@ -451,6 +451,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   /** Set to true by the thread-switch effect; cleared by the model-sync effect.
    *  Prevents Effect 2 from overwriting Effect 1's model choice on thread switch. */
   const threadSwitchRef = useRef(false);
+  /** Last thread row model or provider applied from the server (for multi-tab sync). */
+  const lastServerThreadModelKeyRef = useRef("");
 
   // Keep draft ref in sync so the thread-switch effect reads current values
   useEffect(() => {
@@ -799,6 +801,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     if (!activeThread?.model) return;
     if (threadSwitchRef.current) {
       threadSwitchRef.current = false;
+      lastServerThreadModelKeyRef.current = `${activeThread.model}\0${(activeThread.provider ?? "claude") as string}`;
       return;
     }
     const hasDraft = threadId ? getDraft(threadId) != null : false;
@@ -806,15 +809,21 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     if (hasDraft && !isRunning) return;
     const threadModel = activeThread.model;
     const threadProv = (activeThread.provider ?? "claude") as string;
+    const serverKey = `${threadModel}\0${threadProv}`;
+    const serverRowChanged = lastServerThreadModelKeyRef.current !== serverKey;
+    lastServerThreadModelKeyRef.current = serverKey;
     if (
       !isRunning &&
+      !serverRowChanged &&
       (modelId !== threadModel || provider !== threadProv)
     ) {
       return;
     }
     setModelId(threadModel);
     if (activeThread.provider) setProvider(activeThread.provider as string);
-  }, [activeThread?.model, activeThread?.provider, threadId, getDraft, modelId, provider]);
+    // Intentionally omit modelId/provider: this effect should run when the thread row
+    // changes, not when the user edits the picker (local drift while serverKey is stable).
+  }, [activeThread?.model, activeThread?.provider, threadId, getDraft]);
 
   // Combined setter that keeps local + store in sync
   const setComposerMode = useCallback(

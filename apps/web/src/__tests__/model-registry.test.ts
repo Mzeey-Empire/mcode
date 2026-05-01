@@ -74,7 +74,7 @@ describe("Settings-aware defaults", () => {
     expect(getDefaultModelId()).toBe("claude-opus-4-6");
   });
 
-  it("getDefaultModelId falls back to sonnet when model ID is unknown for a static-catalog provider", () => {
+  it("getDefaultModelId falls back to first catalog model when ID is unknown for a static-catalog provider", () => {
     useSettingsStore.setState({
       settings: {
         ...getDefaultSettings(),
@@ -83,7 +83,7 @@ describe("Settings-aware defaults", () => {
         },
       },
     });
-    expect(getDefaultModelId()).toBe("claude-sonnet-4-6");
+    expect(getDefaultModelId()).toBe("gpt-5.4");
   });
 
   it("getDefaultModelId preserves Cursor settings ID when absent from the static registry", () => {

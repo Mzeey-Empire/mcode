@@ -224,19 +224,40 @@ export function getDefaultModel(): ModelDefinition {
 }
 
 /**
- * Return the default model ID from user settings, falling back to
- * Claude Sonnet 4.6 when the stored value is empty or unknown for a
- * statically catalogued provider (e.g. Codex).
+ * Return the default model ID from user settings. Empty or invalid values
+ * resolve to a model that belongs to the configured provider (never a Claude
+ * ID when the default provider is Codex or another catalog).
  */
 export function getDefaultModelId(): string {
   const { settings } = useSettingsStore.getState();
-  const id = settings.model.defaults.id;
-  if (!id?.trim()) return "claude-sonnet-4-6";
-  if (findModelById(id)) return id;
   const providerId = settings.model.defaults.provider ?? "claude";
   const catalog = MODEL_PROVIDERS.find((p) => p.id === providerId);
-  if (catalog?.supportsModelListing) return id;
-  return "claude-sonnet-4-6";
+  const providerStaticFallback =
+    providerId === "claude"
+      ? "claude-sonnet-4-6"
+      : (catalog?.models[0]?.id ?? "claude-sonnet-4-6");
+
+  const rawId = settings.model.defaults.id;
+  if (!rawId?.trim()) {
+    return providerId === "claude" ? "claude-sonnet-4-6" : providerStaticFallback;
+  }
+
+  const id = rawId.trim();
+
+  if (catalog?.models.some((m) => m.id === id)) {
+    return id;
+  }
+
+  const def = findModelById(id);
+  if (def?.providerId === providerId) {
+    return id;
+  }
+
+  if (catalog?.supportsModelListing) {
+    return id;
+  }
+
+  return providerStaticFallback;
 }
 
 /**
