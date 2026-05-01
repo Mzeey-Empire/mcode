@@ -330,6 +330,14 @@ export class AgentService {
       ...(copilotAgent !== undefined && { copilot_agent: copilotAgent }),
     });
 
+    const persistedProvider: ProviderId =
+      provider !== undefined ? effectiveProvider : (thread.provider as ProviderId) ?? "claude";
+    broadcast("thread.modelUpdated", {
+      threadId,
+      model: resolvedModel,
+      provider: persistedProvider,
+    });
+
     const sessionName = `mcode-${threadId}`;
     // A branched child has a system handoff at seq 1 but no sdk_session_id.
     // Only treat as resume if there is actually a session to resume.
