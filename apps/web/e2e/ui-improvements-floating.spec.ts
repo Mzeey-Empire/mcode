@@ -52,8 +52,11 @@ async function openComposerInNewThread(page: Page): Promise<void> {
   const isMac = process.platform === "darwin";
   await page.keyboard.press(isMac ? "Meta+n" : "Control+n");
   await expect(page.getByPlaceholder("Search projects…")).toBeVisible();
-  // Palette content portals after the landing; prefer the last row when both surfaces list projects.
-  const projectRow = page.getByTestId("project-row").last();
+  // Palette content portals after the landing; scope rows to the palette shell so we do not
+  // collide with landing page project lists that reuse the same data-testid.
+  const palette = page.getByTestId("command-palette");
+  await expect(palette).toBeVisible();
+  const projectRow = palette.getByTestId("project-row").last();
   await expect(projectRow).toBeVisible();
   await projectRow.click();
   await expect(page.getByRole("button", { name: /^(Send message|Queue message|Stop agent)$/ })).toBeVisible();
