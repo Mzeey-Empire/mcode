@@ -10,7 +10,7 @@ import { mockWebSocketServer, interceptZustandStores } from "./helpers/e2e-helpe
  */
 
 const now = new Date().toISOString();
-/** Minimal workspace fixture used to suppress the cold-start landing page. */
+/** Minimal workspace so the palette projects list has at least one row to select. */
 const WORKSPACE_FIXTURE = {
   id: "ws-float-1",
   name: "Test Workspace",
@@ -25,9 +25,8 @@ const WORKSPACE_FIXTURE = {
 };
 
 /**
- * Activate a minimal workspace in the Zustand store so the landing page gives
- * way to ChatView. Requires interceptZustandStores() to have been called in the
- * enclosing test's beforeEach (before page.goto).
+ * Activate a minimal workspace in the Zustand store. Requires interceptZustandStores()
+ * before page.goto in the enclosing test so the patched store receives injected state.
  */
 async function activateWorkspace(page: Page): Promise<void> {
   await page.evaluate((workspace) => {
@@ -50,16 +49,17 @@ async function activateWorkspace(page: Page): Promise<void> {
 }
 
 async function openComposerInNewThread(page: Page): Promise<void> {
-  // Activate a workspace so ChatView mounts (landing page would block it otherwise).
   await activateWorkspace(page);
-  // App.tsx registers a "thread.new" command via the command registry; the
-  // shortcut layer wires Cmd/Ctrl+N to thread.new which sets pendingNewThread
-  // and renders the composer.
   const isMac = process.platform === "darwin";
   await page.keyboard.press(isMac ? "Meta+n" : "Control+n");
-  // Wait for the composer's send button to mount instead of sleeping a fixed
-  // interval. Send is the stable terminal control on the composer; if it's in
-  // the DOM the surrounding mode/permissions controls have rendered too.
+  await expect(page.getByPlaceholder("Search projects…")).toBeVisible();
+  // Palette content portals after the landing; scope rows to the palette shell so we do not
+  // collide with landing page project lists that reuse the same data-testid.
+  const palette = page.getByTestId("command-palette");
+  await expect(palette).toBeVisible();
+  const projectRow = palette.getByTestId("project-row").last();
+  await expect(projectRow).toBeVisible();
+  await projectRow.click();
   await expect(page.getByRole("button", { name: /^(Send message|Queue message|Stop agent)$/ })).toBeVisible();
 }
 
@@ -224,7 +224,6 @@ test.describe("Visual regression — floating layout", () => {
   test.beforeEach(async ({ page }) => {
     await mockWebSocketServer(page);
     // Must be called before page.goto so zustand.js is intercepted on load.
-    // Needed by the composer popover test which injects a workspace to bypass landing.
     await interceptZustandStores(page);
   });
 
@@ -254,11 +253,7 @@ test.describe("Visual regression — floating layout", () => {
     await page.goto("/");
     await page.waitForLoadState("networkidle");
 
-    // Activate a workspace so the landing page gives way to ChatView before Ctrl+N.
-    await activateWorkspace(page);
-    const isMac = process.platform === "darwin";
-    await page.keyboard.press(isMac ? "Meta+n" : "Control+n");
-    // Wait for the composer's overflow trigger to mount.
+    await openComposerInNewThread(page);
     const trigger = page.getByRole("button", { name: "Composer options" });
     await expect(trigger).toBeVisible();
     await trigger.click();

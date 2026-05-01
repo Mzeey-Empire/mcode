@@ -193,21 +193,22 @@ export function findModelById(id: string): ModelDefinition | undefined {
 
 /**
  * Resolves the model ID to display when switching to a thread with no draft.
- * Returns the thread's locked model normalized to its base ID if recognized,
- * otherwise falls back to the supplied default.
+ * Normalizes dated SDK variants and known static IDs; passes through any other
+ * non-empty string so dynamic provider models stay intact.
  *
  * @param lockedModel - The thread's stored model ID (may be a dated SDK variant, null, or undefined).
- * @param defaultModelId - Fallback model ID when the locked model is absent or unrecognized.
+ * @param defaultModelId - Fallback model ID when the locked model is absent.
  */
 export function resolveThreadModelId(
   lockedModel: string | null | undefined,
   defaultModelId: string,
 ): string {
-  if (lockedModel) {
-    const def = findModelById(lockedModel);
-    if (def) return def.id;
-  }
-  return defaultModelId;
+  if (!lockedModel) return defaultModelId;
+  const def = findModelById(lockedModel);
+  if (def) return def.id;
+  // Dynamic provider models (Cursor, Copilot, future Claude SKUs) are not in
+  // the static registry but are valid persisted IDs.
+  return lockedModel;
 }
 
 /** Finds the provider that owns the given model ID, including dated SDK variants. */
@@ -223,12 +224,40 @@ export function getDefaultModel(): ModelDefinition {
 }
 
 /**
- * Return the default model ID from user settings, falling back to
- * Claude Sonnet 4.6 when settings have not loaded yet.
+ * Return the default model ID from user settings. Empty or invalid values
+ * resolve to a model that belongs to the configured provider (never a Claude
+ * ID when the default provider is Codex or another catalog).
  */
 export function getDefaultModelId(): string {
-  const id = useSettingsStore.getState().settings.model.defaults.id;
-  return findModelById(id) ? id : "claude-sonnet-4-6";
+  const { settings } = useSettingsStore.getState();
+  const providerId = settings.model.defaults.provider ?? "claude";
+  const catalog = MODEL_PROVIDERS.find((p) => p.id === providerId);
+  const providerStaticFallback =
+    providerId === "claude"
+      ? "claude-sonnet-4-6"
+      : (catalog?.models[0]?.id ?? "claude-sonnet-4-6");
+
+  const rawId = settings.model.defaults.id;
+  if (!rawId?.trim()) {
+    return providerId === "claude" ? "claude-sonnet-4-6" : providerStaticFallback;
+  }
+
+  const id = rawId.trim();
+
+  if (catalog?.models.some((m) => m.id === id)) {
+    return id;
+  }
+
+  const def = findModelById(id);
+  if (def?.providerId === providerId) {
+    return id;
+  }
+
+  if (catalog?.supportsModelListing) {
+    return id;
+  }
+
+  return providerStaticFallback;
 }
 
 /**

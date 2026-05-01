@@ -142,19 +142,10 @@ export function App() {
         title: "New Thread",
         category: "Thread",
         handler: () => {
-          const ws = useWorkspaceStore.getState();
-          // When invoked from the cold-start landing there's no active project
-          // to attach the thread to, so the composer would render with a null
-          // workspaceId and quietly fail to send. Route through the project
-          // picker first and chain into the new-thread state on selection.
-          if (ws.activeWorkspaceId) {
-            ws.setPendingNewThread(true);
-          } else {
-            useCommandPaletteStore.getState().open({
-              intent: "projects",
-              nextAction: "newThread",
-            });
-          }
+          useCommandPaletteStore.getState().open({
+            intent: "projects",
+            nextAction: "newThread",
+          });
         },
       }),
       registerCommand({

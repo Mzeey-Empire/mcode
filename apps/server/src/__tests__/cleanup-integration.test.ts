@@ -16,7 +16,14 @@ import { ThreadService } from "../services/thread-service";
 import type { ClaudeProvider } from "../providers/claude/claude-provider";
 import type { TerminalService } from "../services/terminal-service";
 import type { GitService } from "../services/git-service";
+import { killDescendantsByName } from "../services/process-kill.js";
 import { getMcodeDir } from "@mcode/shared";
+
+// Avoid real wmic/taskkill on Windows: unbounded wall time and Vitest's default
+// 5s test timeout (integration tests must not depend on the host process tree).
+vi.mock("../services/process-kill.js", () => ({
+  killDescendantsByName: vi.fn().mockResolvedValue(undefined),
+}));
 
 // Stub filesystem checks for synthetic test paths.
 vi.mock("fs", async (importOriginal) => {
@@ -38,6 +45,7 @@ describe("Cleanup integration", () => {
   let mockGitService: GitService;
 
   beforeEach(() => {
+    vi.mocked(killDescendantsByName).mockClear();
     db = openMemoryDatabase();
     cleanupJobRepo = new CleanupJobRepo(db);
     threadRepo = new ThreadRepo(db);
@@ -106,6 +114,8 @@ describe("Cleanup integration", () => {
 
     // Step 2: Worker processes the job
     await worker.poll();
+
+    expect(vi.mocked(killDescendantsByName)).toHaveBeenCalledWith(process.pid, "claude.exe");
 
     // Verify: subprocess signalled, terminals killed, worktree removed
     expect(mockClaudeProvider.waitForSessionExit).toHaveBeenCalledWith(
