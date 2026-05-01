@@ -28,6 +28,7 @@ const _legacyEncoder = new TextEncoder();
  * - `thread.status` -- thread status changes reflected in threadStore
  * - `thread.prLinked` -- PR detected for a thread, updates pr_number/pr_status
  * - `thread.checksUpdated` -- CI check status polled for a thread's PR, updates checksById
+ * - `thread.modelUpdated` -- thread model and provider synced after a message send (multi-client)
  * - `files.changed` -- invalidates the file autocomplete cache
  * - `skills.changed` -- invalidates the skill cache; popup re-fetches on next open
  * - `turn.persisted` -- tool call persistence confirmation forwarded to threadStore
@@ -160,6 +161,23 @@ export function startPushListeners(): void {
       };
       useWorkspaceStore.setState((ws) => ({
         checksById: { ...ws.checksById, [threadId]: checks },
+      }));
+    }),
+  );
+
+  // thread.modelUpdated: thread row model/provider persisted for this send (multi-tab / client)
+  unsubs.push(
+    pushEmitter.on("thread.modelUpdated", (data) => {
+      const { threadId, model, provider } = data as {
+        threadId: string;
+        model: string;
+        provider: string;
+      };
+      if (!threadId || !model) return;
+      useWorkspaceStore.setState((ws) => ({
+        threads: ws.threads.map((t) =>
+          t.id === threadId ? { ...t, model, provider } : t,
+        ),
       }));
     }),
   );

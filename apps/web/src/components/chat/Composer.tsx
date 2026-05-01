@@ -21,7 +21,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 import { isWindows } from "@/lib/platform";
 import { isCursorPermissionLockedToFull } from "@/lib/cursor-permission";
-import { getDefaultModelId, getDefaultReasoningLevel, getDefaultProviderId, findModelById, isMaxEffortModel, isXhighEffortModel, supportsEffortParameter, supportsUltrathink, supports1MContextWindow, supportsThinkingToggle, resolveThreadModelId, normalizeReasoningLevelForModel, getCodexReasoningLevels, providerSupportsReasoningLevels } from "@/lib/model-registry";
+import { getDefaultModelId, getDefaultReasoningLevel, getDefaultProviderId, isMaxEffortModel, isXhighEffortModel, supportsEffortParameter, supportsUltrathink, supports1MContextWindow, supportsThinkingToggle, resolveThreadModelId, normalizeReasoningLevelForModel, getCodexReasoningLevels, providerSupportsReasoningLevels } from "@/lib/model-registry";
 import { ModelSelector } from "./ModelSelector";
 import { ModeSelector, ALL_MODE_OPTIONS } from "./ModeSelector";
 import type { ComposerMode, ModeOption } from "./ModeSelector";
@@ -487,7 +487,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     // Existing threads restore settings from the thread record in the thread-switch effect.
     if (threadId) return;
 
-    const validModelId = findModelById(settingsDefaultModelId) ? settingsDefaultModelId : "claude-sonnet-4-6";
+    const validModelId = getDefaultModelId();
     setModelId(validModelId);
     setProvider(settingsDefaultProvider ?? "claude");
     setReasoning(normalizeReasoningLevelForModel(validModelId, settingsDefaultReasoning));
@@ -804,9 +804,17 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     const hasDraft = threadId ? getDraft(threadId) != null : false;
     const isRunning = threadId ? useThreadStore.getState().runningThreadIds.has(threadId) : false;
     if (hasDraft && !isRunning) return;
-    setModelId(activeThread.model);
+    const threadModel = activeThread.model;
+    const threadProv = (activeThread.provider ?? "claude") as string;
+    if (
+      !isRunning &&
+      (modelId !== threadModel || provider !== threadProv)
+    ) {
+      return;
+    }
+    setModelId(threadModel);
     if (activeThread.provider) setProvider(activeThread.provider as string);
-  }, [activeThread?.model, activeThread?.provider, threadId, getDraft]);
+  }, [activeThread?.model, activeThread?.provider, threadId, getDraft, modelId, provider]);
 
   // Combined setter that keeps local + store in sync
   const setComposerMode = useCallback(

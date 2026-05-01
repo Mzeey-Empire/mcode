@@ -74,16 +74,28 @@ describe("Settings-aware defaults", () => {
     expect(getDefaultModelId()).toBe("claude-opus-4-6");
   });
 
-  it("getDefaultModelId falls back to sonnet when model ID is unknown", () => {
+  it("getDefaultModelId falls back to sonnet when model ID is unknown for a static-catalog provider", () => {
     useSettingsStore.setState({
       settings: {
         ...getDefaultSettings(),
         model: {
-          defaults: { provider: "claude", id: "nonexistent-model", reasoning: "high", fallbackId: "", contextWindow: "200k", thinking: false },
+          defaults: { provider: "codex", id: "nonexistent-model", reasoning: "high", fallbackId: "", contextWindow: "200k", thinking: false },
         },
       },
     });
     expect(getDefaultModelId()).toBe("claude-sonnet-4-6");
+  });
+
+  it("getDefaultModelId preserves Cursor settings ID when absent from the static registry", () => {
+    useSettingsStore.setState({
+      settings: {
+        ...getDefaultSettings(),
+        model: {
+          defaults: { provider: "cursor", id: "cursor-dynamic-model-xyz", reasoning: "high", fallbackId: "", contextWindow: "200k", thinking: false },
+        },
+      },
+    });
+    expect(getDefaultModelId()).toBe("cursor-dynamic-model-xyz");
   });
 
   it("getDefaultModelId returns opus-4-7 from default settings", () => {
@@ -369,7 +381,7 @@ describe("resolveThreadModelId", () => {
     expect(resolveThreadModelId(undefined, "claude-sonnet-4-6")).toBe("claude-sonnet-4-6");
   });
 
-  it("returns default when locked model is an unknown ID", () => {
-    expect(resolveThreadModelId("some-unknown-model", "claude-sonnet-4-6")).toBe("claude-sonnet-4-6");
+  it("passes through unknown locked model ID (dynamic listing providers)", () => {
+    expect(resolveThreadModelId("cursor-dynamic-123", "claude-sonnet-4-6")).toBe("cursor-dynamic-123");
   });
 });
