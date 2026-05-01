@@ -13,6 +13,7 @@ import { BrowseView } from "./views/BrowseView";
 import { SelectionListView } from "./views/SelectionListView";
 import { Kbd } from "./Kbd";
 import { isBrowseQuery, getPaletteMode } from "./CommandPalette.logic";
+import { cn } from "@/lib/utils";
 
 /**
  * Top-center floating command palette overlay — the single shell that handles
@@ -56,7 +57,12 @@ export function CommandPalette() {
     <DialogPrimitive.Root open={isOpen} onOpenChange={(o) => !o && close()} modal="trap-focus">
       <DialogPrimitive.Portal>
         <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-foreground/40 backdrop-blur-sm" />
-        <DialogPrimitive.Popup className="fixed left-1/2 top-[clamp(4rem,15vh,9rem)] z-50 w-full max-w-xl -translate-x-1/2 outline-none">
+        <DialogPrimitive.Popup
+          className={cn(
+            "fixed left-1/2 top-[clamp(4rem,15vh,9rem)] z-50 w-full -translate-x-1/2 outline-none",
+            top?.kind === "projects" ? "max-w-2xl" : "max-w-xl",
+          )}
+        >
           <Command
             className="rounded-lg border border-border bg-popover shadow-2xl"
             // We do all filtering/ranking ourselves (filterCommandPaletteGroups,
