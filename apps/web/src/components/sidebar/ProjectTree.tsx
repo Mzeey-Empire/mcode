@@ -1138,8 +1138,7 @@ function ProjectNode({
         aria-expanded={isExpanded}
         data-testid={`project-row-${workspace.id}`}
         className={cn(
-          "group/ws relative flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12.5px] transition-colors touch-none",
-          sortableListeners ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
+          "group/ws relative flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12.5px] cursor-pointer transition-colors touch-none",
           isProjectDragging && "cursor-grabbing",
           isActive
             ? "text-foreground"
