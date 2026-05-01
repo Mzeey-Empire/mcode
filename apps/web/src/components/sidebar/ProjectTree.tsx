@@ -820,6 +820,9 @@ function VirtualizedThreadList({
           : !providerRow.enabled
             ? "Provider disabled"
             : "CLI not found";
+        // Opacity on the row would compound onto CiChip; dim only the title cluster and timestamp.
+        const scaffoldDim =
+          (thread.clientPreparing || thread.clientError) && "opacity-[0.72]";
         return (
           <div
             key={thread.id}
@@ -850,13 +853,18 @@ function VirtualizedThreadList({
                 onContextMenu={(e) => onThreadContextMenu(e, thread)}
                 className={cn(
                   "group/row flex items-center gap-2 rounded-md pr-2 py-1 text-[13px] cursor-pointer transition-colors",
-                  (thread.clientPreparing || thread.clientError) && "opacity-[0.72]",
                   activeThreadId === thread.id
                     ? "bg-accent text-foreground"
                     : "text-muted-foreground/85 hover:bg-accent/40 hover:text-foreground"
                 )}
                 style={{ paddingLeft: `${10 + depth * 14}px` }}
               >
+                <div
+                  className={cn(
+                    "flex min-w-0 flex-1 items-center gap-2",
+                    scaffoldDim,
+                  )}
+                >
                 {thread.pr_number != null ? (() => {
                   const { Icon: PrIcon, color: prColor } = getPrVisual(thread.pr_status);
                   const agentDot = getNotificationDot(thread, runningThreadIds.has(thread.id), pendingPermissionThreadIds.has(thread.id));
@@ -944,11 +952,17 @@ function VirtualizedThreadList({
                     <TooltipContent side="right" className="text-xs">{unusableReason}</TooltipContent>
                   </Tooltip>
                 )}
+                </div>
                 {!isEditing && thread.pr_number != null && checksById[thread.id] && (
                   <CiChip checks={checksById[thread.id]} />
                 )}
                 {!isEditing && (
-                  <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/45">
+                  <span
+                    className={cn(
+                      "shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground/45",
+                      scaffoldDim,
+                    )}
+                  >
                     {thread.pr_number != null && (
                       <span className="mr-1 opacity-80">#{thread.pr_number}</span>
                     )}

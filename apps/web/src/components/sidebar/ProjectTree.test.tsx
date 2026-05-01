@@ -429,4 +429,40 @@ describe("ProjectTree action-required indicator", () => {
     // CI "failing" would normally paint bg-red-500; the ring must suppress it.
     expect(indicator.className).not.toContain("bg-red-500");
   });
+
+  it("does not dim the CI chip when the thread row is a client scaffold", () => {
+    currentThread = {
+      ...makeThread({
+        id: "thread-pending",
+        pr_number: 42,
+        pr_status: "open",
+      }),
+      clientPreparing: true,
+    } as Thread;
+    currentChecks = {
+      "thread-pending": {
+        aggregate: "pending",
+        runs: [
+          {
+            name: "build",
+            status: "in_progress",
+            conclusion: null,
+            durationMs: null,
+            startedAt: null,
+          },
+        ],
+      },
+    };
+    installWorkspaceMock();
+    render(<ProjectTree />);
+
+    const row = screen.getByRole("button", { name: /My Thread/i });
+    expect(row.className).not.toContain("opacity-[0.72]");
+
+    const titleCluster = screen.getByTestId("thread-title").parentElement;
+    expect(titleCluster?.className).toContain("opacity-[0.72]");
+
+    const chip = screen.getByLabelText("0 of 1 checks done");
+    expect(chip.className).not.toContain("opacity-[0.72]");
+  });
 });
