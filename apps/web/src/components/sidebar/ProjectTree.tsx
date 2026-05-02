@@ -1327,7 +1327,10 @@ function SortableProjectShell(
       ? { opacity: 0.92, zIndex: 2, boxShadow: "0 2px 10px rgba(0,0,0,0.08)" }
       : {}),
   };
-  const { role: _sortableOuterRole, tabIndex: _outerTab, ...sortableA11y } = attributes;
+  // useSortable sets role/tabIndex on the activator; this outer div uses explicit group semantics.
+  const { role, tabIndex, ...sortableA11y } = attributes;
+  void role;
+  void tabIndex;
   return (
     <div
       ref={setNodeRef}
