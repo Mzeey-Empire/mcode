@@ -102,6 +102,7 @@ export async function mockWebSocketServer(
       // Return canonical settings defaults so App can bootstrap correctly.
       // Using getDefaultSettings() ensures this stays in sync with schema changes.
       else if (method === "settings.get") result = getDefaultSettings();
+      else if (method === "workspace.reorder") result = { ok: true };
       else {
         ws.send(
           JSON.stringify({

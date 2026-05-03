@@ -22,6 +22,7 @@ async function mockWebSocketServer(
     is_git_repo: true,
     pinned: false,
     last_opened_at: Date.now() - 3600_000,
+    sort_order: 0,
     created_at: now,
     updated_at: now,
   };

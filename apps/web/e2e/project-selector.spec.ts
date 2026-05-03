@@ -15,6 +15,7 @@ const MOCK_WORKSPACES = [
     updated_at: new Date().toISOString(),
     pinned: true,
     last_opened_at: NOW - 3600_000,
+    sort_order: 0,
   },
   {
     id: "ws-recent",
@@ -26,6 +27,7 @@ const MOCK_WORKSPACES = [
     updated_at: new Date().toISOString(),
     pinned: false,
     last_opened_at: NOW - 7200_000,
+    sort_order: 1,
   },
   {
     id: "ws-older",
@@ -37,6 +39,7 @@ const MOCK_WORKSPACES = [
     updated_at: new Date().toISOString(),
     pinned: false,
     last_opened_at: NOW - 86400_000,
+    sort_order: 2,
   },
 ];
 

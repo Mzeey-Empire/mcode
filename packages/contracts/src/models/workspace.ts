@@ -15,6 +15,8 @@ export const WorkspaceSchema = lazySchema(() =>
     pinned: z.boolean(),
     /** Unix timestamp (ms) of when this workspace was last opened. Null if never explicitly opened. */
     last_opened_at: z.number().nullable(),
+    /** Ascending sidebar order; lower values appear higher in the project list. */
+    sort_order: z.number().int(),
   }),
 );
 /** Workspace record from the database. */

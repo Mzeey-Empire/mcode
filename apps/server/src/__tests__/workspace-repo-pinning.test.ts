@@ -44,29 +44,25 @@ describe("WorkspaceRepo pinning + recency", () => {
     expect(after.pinned).toBe(false);
   });
 
-  it("listAll orders pinned first, then last_opened_at DESC, excludes workspaces never opened", () => {
+  it("listAll includes never-opened workspaces and follows sort_order only", () => {
     const a = repo.create("a", "/a", true);
     const b = repo.create("b", "/b", true);
     const c = repo.create("c", "/c", true);
     const d = repo.create("d", "/d", true); // never opened
 
-    // Stub Date.now so each touchLastOpened gets a strictly-increasing timestamp.
-    // Without this, three rapid Date.now() calls inside the same ms tick can
-    // produce equal values and the "DESC by last_opened_at" ordering becomes
-    // ambiguous, making this test flaky on fast hardware.
     let tick = 1_700_000_000_000;
     const spy = vi.spyOn(Date, "now").mockImplementation(() => ++tick);
 
     try {
-      // Open in order: b, then c, then a (so a is most recent)
       repo.touchLastOpened(b.id);
       repo.touchLastOpened(c.id);
       repo.touchLastOpened(a.id);
-      repo.setPinned(b.id, true); // b is pinned
+      repo.setPinned(b.id, true);
 
       const list = repo.listAll();
-      expect(list.map((w) => w.name)).toEqual(["b", "a", "c"]);
-      expect(list.find((w) => w.id === d.id)).toBeUndefined();
+      // Created newest-first sort_order (d,c,b,a) by create(); pin/recency does not reorder the sidebar.
+      expect(list.map((w) => w.name)).toEqual(["d", "c", "b", "a"]);
+      expect(list.find((w) => w.id === d.id)).toBeDefined();
     } finally {
       spy.mockRestore();
     }

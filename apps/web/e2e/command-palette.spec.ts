@@ -13,6 +13,7 @@ const MOCK_WORKSPACES = [
     updated_at: new Date().toISOString(),
     pinned: true,
     last_opened_at: Date.now() - 3600_000,
+    sort_order: 0,
   },
   {
     id: "ws-2",
@@ -24,6 +25,7 @@ const MOCK_WORKSPACES = [
     updated_at: new Date().toISOString(),
     pinned: false,
     last_opened_at: Date.now() - 86400_000,
+    sort_order: 1,
   },
 ];
 
@@ -55,6 +57,7 @@ async function setupPage(page: import("@playwright/test").Page) {
       updated_at: new Date().toISOString(),
       pinned: false,
       last_opened_at: null,
+      sort_order: 0,
     },
     "settings.get": MOCK_SETTINGS,
   });

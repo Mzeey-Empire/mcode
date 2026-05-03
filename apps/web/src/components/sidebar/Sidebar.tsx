@@ -72,10 +72,17 @@ export function Sidebar({
         )}
       </div>
 
-      {/* Body */}
-      <div className="flex-1 overflow-y-auto">
+      {/* Body: projects use an inner ScrollArea only; avoid stacking overflow-y-auto
+          here or drag transforms and autoscroll can expand this region and show a
+          scrollbar when the list is short. Settings stays scrollable. */}
+      <div
+        data-testid="sidebar-body"
+        className="flex min-h-0 flex-1 flex-col overflow-hidden"
+      >
         {settingsOpen && settingsSection && onSettingsSection ? (
-          <SettingsNav section={settingsSection} onSection={onSettingsSection} />
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            <SettingsNav section={settingsSection} onSection={onSettingsSection} />
+          </div>
         ) : (
           <ProjectTree />
         )}

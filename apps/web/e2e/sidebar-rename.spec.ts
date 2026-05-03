@@ -16,6 +16,7 @@ const workspace = {
   updated_at: now,
   pinned: false,
   last_opened_at: Date.now() - 3600_000,
+  sort_order: 0,
 };
 
 const thread = {

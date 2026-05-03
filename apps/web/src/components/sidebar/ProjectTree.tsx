@@ -1,4 +1,12 @@
-import { useEffect, useLayoutEffect, useCallback, useState, useRef, useMemo } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useState,
+  useRef,
+  useMemo,
+  type CSSProperties,
+} from "react";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useShallow } from "zustand/shallow";
@@ -26,6 +34,25 @@ import { getBreakdown, getCiVisual, CI_ICON_STROKE } from "@/lib/ci-status";
 import type { ChecksStatus } from "@mcode/contracts";
 import type { Workspace, Thread } from "@/transport/types";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+  type DraggableSyntheticListeners,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 
 // Persist expand/collapse in localStorage
 function getExpandedState(): Record<string, boolean> {
@@ -155,6 +182,7 @@ export function ProjectTree() {
   const deleteThread = useWorkspaceStore((s) => s.deleteThread);
   const setPendingNewThread = useWorkspaceStore((s) => s.setPendingNewThread);
   const updateThreadTitle = useWorkspaceStore((s) => s.updateThreadTitle);
+  const reorderWorkspace = useWorkspaceStore((s) => s.reorderWorkspace);
   const error = useWorkspaceStore((s) => s.error);
   const runningThreadIds = useThreadStore((s) => s.runningThreadIds);
   const permissionsByThread = useThreadStore((s) => s.permissionsByThread);
@@ -178,6 +206,13 @@ export function ProjectTree() {
   const [deleteWorktree, setDeleteWorktree] = useState(false);
   const [wsDeleteDialog, setWsDeleteDialog] = useState<WorkspaceDeleteDialogState | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+
+  const workspaceIds = useMemo(() => workspaces.map((w) => w.id), [workspaces]);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   useEffect(() => {
     loadWorkspaces();
@@ -331,7 +366,51 @@ export function ProjectTree() {
     setInlineEdit({ threadId, title, originalTitle: title });
   }, []);
 
+  const handleProjectDragStart = useCallback((event: DragStartEvent) => {
+    setActiveDragId(String(event.active.id));
+  }, []);
+
+  const handleProjectDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      setActiveDragId(null);
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const oldIndex = workspaceIds.indexOf(active.id as string);
+      const newIndex = workspaceIds.indexOf(over.id as string);
+      if (oldIndex < 0 || newIndex < 0) return;
+      void reorderWorkspace(active.id as string, newIndex);
+    },
+    [workspaceIds, reorderWorkspace],
+  );
+
+  const handleProjectDragCancel = useCallback(() => {
+    setActiveDragId(null);
+  }, []);
+
   const scrollViewportRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Only the project list viewport may autoscroll during drag so outer sidebar
+   * regions (or the document) are not pulled by `@dnd-kit` when reordering.
+   */
+  const projectTreeAutoScroll = useMemo(
+    () => ({
+      canScroll(element: Element) {
+        const vp = scrollViewportRef.current;
+        return vp != null && element === vp;
+      },
+    }),
+    [],
+  );
+
+  useLayoutEffect(() => {
+    if (!activeDragId) return;
+    const prev = document.body.style.cursor;
+    document.body.style.cursor = "grabbing";
+    return () => {
+      document.body.style.cursor = prev;
+    };
+  }, [activeDragId]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -355,47 +434,61 @@ export function ProjectTree() {
 
       <ScrollArea className="flex-1" viewportRef={scrollViewportRef}>
         <div className="px-1" data-testid="thread-list">
-          {workspaces.map((ws) => (
-            <ProjectNode
-              key={ws.id}
-              workspace={ws}
-              isExpanded={expanded[ws.id] ?? false}
-              isActive={activeWorkspaceId === ws.id}
-              activeThreadId={activeThreadId}
-              threads={threads.filter((t) => t.workspace_id === ws.id)}
-              runningThreadIds={runningThreadIds}
-              pendingPermissionThreadIds={pendingPermissionThreadIds}
-              isThreadListExpanded={threadListExpanded[ws.id] ?? false}
-              onToggleThreadList={() => toggleThreadList(ws.id)}
-              scrollElementRef={scrollViewportRef}
-              inlineEdit={inlineEdit}
-              onInlineEditChange={(title) =>
-                setInlineEdit((prev) => prev ? { ...prev, title } : null)
-              }
-              onInlineEditCommit={handleInlineEditCommit}
-              onInlineEditCancel={() => setInlineEdit(null)}
-              onStartInlineEdit={handleStartInlineEdit}
-              onToggle={() => toggleExpand(ws.id)}
-              onSelectThread={(id) => {
-                setActiveWorkspace(ws.id);
-                setActiveThread(id);
-              }}
-              onCreateThread={() => {
-                setActiveWorkspace(ws.id);
-                setPendingNewThread(true);
-                setActiveThread(null);
-              }}
-              onDelete={() => {
-                setWsDeleteDialog({
-                  workspaceId: ws.id,
-                  workspaceName: ws.name,
-                });
-              }}
-              onThreadContextMenu={(e, thread) =>
-                handleThreadContextMenu(e, thread, ws.path)
-              }
-            />
-          ))}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            modifiers={[restrictToVerticalAxis]}
+            autoScroll={projectTreeAutoScroll}
+            onDragStart={handleProjectDragStart}
+            onDragEnd={handleProjectDragEnd}
+            onDragCancel={handleProjectDragCancel}
+          >
+            <SortableContext items={workspaceIds} strategy={verticalListSortingStrategy}>
+              {workspaces.map((ws) => (
+                <SortableProjectShell
+                  key={ws.id}
+                  sortableId={ws.id}
+                  activeDragId={activeDragId}
+                  workspace={ws}
+                  isExpanded={expanded[ws.id] ?? false}
+                  isActive={activeWorkspaceId === ws.id}
+                  activeThreadId={activeThreadId}
+                  threads={threads.filter((t) => t.workspace_id === ws.id)}
+                  runningThreadIds={runningThreadIds}
+                  pendingPermissionThreadIds={pendingPermissionThreadIds}
+                  isThreadListExpanded={threadListExpanded[ws.id] ?? false}
+                  onToggleThreadList={() => toggleThreadList(ws.id)}
+                  scrollElementRef={scrollViewportRef}
+                  inlineEdit={inlineEdit}
+                  onInlineEditChange={(title) =>
+                    setInlineEdit((prev) => prev ? { ...prev, title } : null)
+                  }
+                  onInlineEditCommit={handleInlineEditCommit}
+                  onInlineEditCancel={() => setInlineEdit(null)}
+                  onStartInlineEdit={handleStartInlineEdit}
+                  onToggle={() => toggleExpand(ws.id)}
+                  onSelectThread={(id) => {
+                    setActiveWorkspace(ws.id);
+                    setActiveThread(id);
+                  }}
+                  onCreateThread={() => {
+                    setActiveWorkspace(ws.id);
+                    setPendingNewThread(true);
+                    setActiveThread(null);
+                  }}
+                  onDelete={() => {
+                    setWsDeleteDialog({
+                      workspaceId: ws.id,
+                      workspaceName: ws.name,
+                    });
+                  }}
+                  onThreadContextMenu={(e, thread) =>
+                    handleThreadContextMenu(e, thread, ws.path)
+                  }
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
 
           {workspaces.length === 0 && (
             <div className="flex flex-col items-center justify-center gap-3 px-4 py-12">
@@ -1005,6 +1098,10 @@ interface ProjectNodeProps {
   onCreateThread: () => void;
   onDelete: () => void;
   onThreadContextMenu: (e: React.MouseEvent, thread: Thread) => void;
+  /** When set, forwards drag-handle listeners from `@dnd-kit/sortable` onto the project row. */
+  sortableListeners?: DraggableSyntheticListeners;
+  /** True while this project row is the item being dragged. */
+  isProjectDragging?: boolean;
 }
 
 /** Renders a collapsible workspace row with its virtualized thread list. */
@@ -1029,6 +1126,8 @@ function ProjectNode({
   onCreateThread,
   onDelete,
   onThreadContextMenu,
+  sortableListeners,
+  isProjectDragging = false,
 }: ProjectNodeProps) {
   const checksById = useWorkspaceStore(useShallow((s) => s.checksById));
   const parentDir = useMemo(() => parentDirName(workspace.path), [workspace.path]);
@@ -1047,25 +1146,32 @@ function ProjectNode({
   const maxVisible = !needsCap || isThreadListExpanded || forceExpand ? Infinity : THREAD_LIST_CAP;
 
   return (
-    <div className="mb-1">
+    <div>
       {/* Workspace row — typographic anchor. No folder icon; a quiet caret + name + parent caption. */}
       <div
         role="button"
         tabIndex={0}
         aria-expanded={isExpanded}
+        data-testid={`project-row-${workspace.id}`}
+        className={cn(
+          "group/ws relative flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12.5px] cursor-pointer transition-colors touch-none",
+          isProjectDragging && "cursor-grabbing",
+          isActive
+            ? "text-foreground"
+            : "text-muted-foreground/85 hover:text-foreground",
+        )}
+        {...sortableListeners}
         onKeyDown={(e) => {
+          sortableListeners?.onKeyDown?.(e);
+          if (e.defaultPrevented) return;
           if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
             e.preventDefault();
             onToggle();
           }
         }}
-        onClick={onToggle}
-        className={cn(
-          "group/ws relative flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12.5px] cursor-pointer transition-colors",
-          isActive
-            ? "text-foreground"
-            : "text-muted-foreground/85 hover:text-foreground"
-        )}
+        onClick={() => {
+          onToggle();
+        }}
       >
         {isExpanded ? (
           <ChevronDown size={12} className="shrink-0 text-muted-foreground/55 transition-transform" />
@@ -1198,6 +1304,48 @@ function ProjectNode({
           </Button>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Wraps {@link ProjectNode} with `@dnd-kit/sortable` transforms and collapses
+ * thread children while the user is dragging this project.
+ */
+function SortableProjectShell(
+  props: ProjectNodeProps & { sortableId: string; activeDragId: string | null },
+) {
+  const { sortableId, activeDragId, ...nodeProps } = props;
+  const collapseForDrag = activeDragId === sortableId;
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: sortableId,
+  });
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    ...(isDragging
+      ? { opacity: 0.92, zIndex: 2, boxShadow: "0 2px 10px rgba(0,0,0,0.08)" }
+      : {}),
+  };
+  // useSortable sets role/tabIndex on the activator; this outer div uses explicit group semantics.
+  const { role, tabIndex, ...sortableA11y } = attributes;
+  void role;
+  void tabIndex;
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="mb-1"
+      {...sortableA11y}
+      role="group"
+      tabIndex={-1}
+    >
+      <ProjectNode
+        {...nodeProps}
+        isExpanded={nodeProps.isExpanded && !collapseForDrag}
+        isProjectDragging={isDragging}
+        sortableListeners={listeners}
+      />
     </div>
   );
 }

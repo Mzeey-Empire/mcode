@@ -88,11 +88,13 @@ describe("WorkspaceService", () => {
 
   it("create() returns existing workspace when path already exists", () => {
     const ws1 = service.create("project-a", "/tmp/existing");
+    service.create("other", "/tmp/other");
 
     const ws2 = service.create("project-a-renamed", "/tmp/existing");
 
     expect(ws2.id).toBe(ws1.id);
     expect(ws2.name).toBe("project-a");
+    expect(repo.listAll()[0]!.id).toBe(ws1.id);
   });
 
   it("create() creates a new workspace when path does not exist", () => {

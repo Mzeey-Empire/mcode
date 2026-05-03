@@ -26,6 +26,7 @@ export function createMockWorkspace(
     updated_at: new Date().toISOString(),
     pinned: false,
     last_opened_at: null,
+    sort_order: 0,
     ...overrides,
   };
 }
@@ -89,6 +90,7 @@ export const mockTransport: McodeTransport = {
   listWorkspaces: vi.fn().mockResolvedValue([]),
   deleteWorkspace: vi.fn().mockResolvedValue(true),
   touchLastOpened: vi.fn().mockResolvedValue(undefined),
+  reorderWorkspace: vi.fn().mockResolvedValue(undefined),
   pinWorkspace: vi.fn().mockResolvedValue(undefined),
   removeRecent: vi.fn().mockResolvedValue(undefined),
   enrichWorkspaces: vi.fn().mockResolvedValue({ items: [] }),
