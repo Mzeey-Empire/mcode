@@ -10,9 +10,10 @@ import path from "node:path";
  * @param {string} args.appOutDir - electron-builder afterPack appOutDir.
  * @param {"win32"|"darwin"|"linux"|"mas"|string} args.electronPlatformName
  * @param {string} args.productFilename - filename (no extension) of the main app binary.
+ * @param {string} [args.executableName] - Linux executable name (defaults to productFilename).
  * @returns {{ srcBinary: string, dstBinary: string }}
  */
-export function resolveBinaryPaths({ appOutDir, electronPlatformName, productFilename }) {
+export function resolveBinaryPaths({ appOutDir, electronPlatformName, productFilename, executableName }) {
   if (!productFilename || typeof productFilename !== "string") {
     throw new Error(
       `resolveBinaryPaths: productFilename is required (got ${productFilename === undefined ? "undefined" : JSON.stringify(productFilename)})`,
@@ -31,9 +32,10 @@ export function resolveBinaryPaths({ appOutDir, electronPlatformName, productFil
       dstBinary: path.join(appBundle, "Contents", "Resources", "bin", "mcode-server"),
     };
   }
-  // linux and any other Unix
+  // linux and any other Unix — electron-builder names the binary after
+  // executableName (package.json "name"), not productName.
   return {
-    srcBinary: path.join(appOutDir, productFilename),
+    srcBinary: path.join(appOutDir, executableName || productFilename),
     dstBinary: path.join(appOutDir, "resources", "bin", "mcode-server"),
   };
 }
@@ -94,6 +96,7 @@ export async function stampWindowsVersionInfo(exePath, info) {
  * @param {string} args.appOutDir
  * @param {"win32"|"darwin"|"linux"|"mas"|string} args.electronPlatformName
  * @param {string} args.productFilename
+ * @param {string} [args.executableName] - Linux executable name (defaults to productFilename).
  * @param {string} [args.appVersion] - dotted quad like "1.2.3.0"; required on win32
  * @param {string} [args.companyName] - default "Mcode"
  */
@@ -101,6 +104,7 @@ export async function buildServerBinary({
   appOutDir,
   electronPlatformName,
   productFilename,
+  executableName,
   appVersion,
   companyName = "Mcode",
 }) {
@@ -108,6 +112,7 @@ export async function buildServerBinary({
     appOutDir,
     electronPlatformName,
     productFilename,
+    executableName,
   });
   await mkdir(path.dirname(dstBinary), { recursive: true });
   await copyFile(srcBinary, dstBinary);

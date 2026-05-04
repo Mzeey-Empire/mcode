@@ -55,7 +55,7 @@ jobs:
 
       - name: Install Python setuptools (node-gyp on Python 3.12+ needs it)
         shell: bash
-        run: pip install setuptools 2>/dev/null || pip install --break-system-packages setuptools 2>/dev/null || true
+        run: python3 -m pip install setuptools --break-system-packages 2>/dev/null || python3 -m pip install setuptools 2>/dev/null || pip install setuptools 2>/dev/null || true
 
       - name: Package with electron-builder
         run: node apps/desktop/scripts/ci-package.mjs ${{ matrix.build-args }}
