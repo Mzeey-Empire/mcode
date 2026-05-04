@@ -97,4 +97,75 @@ describe("bootstrapDrizzle", () => {
     bootstrapDrizzle(db, DRIZZLE_DIR);
     expect(tableExists(db, "__drizzle_migrations")).toBe(false);
   });
+
+  it("recovers when __drizzle_migrations exists but is empty (interrupted bootstrap)", () => {
+    seedLegacyMigrations(db);
+    db.exec("CREATE TABLE workspaces (id TEXT PRIMARY KEY)");
+    db.exec(`
+      CREATE TABLE __drizzle_migrations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        hash text NOT NULL,
+        created_at numeric
+      )
+    `);
+
+    bootstrapDrizzle(db, DRIZZLE_DIR);
+
+    const rows = db.prepare("SELECT * FROM __drizzle_migrations").all() as Array<{
+      hash: string;
+      created_at: number;
+    }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].hash).toBe(baselineSqlHash());
+    expect(rows[0].created_at).toBe(journal.entries[0].when);
+  });
+
+  it("does nothing when __drizzle_migrations is empty and no legacy tracker exists", () => {
+    db.exec(`
+      CREATE TABLE __drizzle_migrations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        hash text NOT NULL,
+        created_at numeric
+      )
+    `);
+
+    bootstrapDrizzle(db, DRIZZLE_DIR);
+
+    const rows = db.prepare("SELECT * FROM __drizzle_migrations").all();
+    expect(rows).toHaveLength(0);
+  });
+
+  it("seeds when sentinel app table exists but no migration tracking (db:push DB)", () => {
+    // No _migrations, no __drizzle_migrations: schema came from db:push or
+    // a pre-legacy build. Sentinel `workspaces` proves the baseline ran.
+    db.exec("CREATE TABLE workspaces (id TEXT PRIMARY KEY)");
+
+    bootstrapDrizzle(db, DRIZZLE_DIR);
+
+    const rows = db.prepare("SELECT * FROM __drizzle_migrations").all() as Array<{
+      hash: string;
+      created_at: number;
+    }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].hash).toBe(baselineSqlHash());
+  });
+
+  it("seeds when sentinel app table exists and __drizzle_migrations is empty", () => {
+    db.exec("CREATE TABLE workspaces (id TEXT PRIMARY KEY)");
+    db.exec(`
+      CREATE TABLE __drizzle_migrations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        hash text NOT NULL,
+        created_at numeric
+      )
+    `);
+
+    bootstrapDrizzle(db, DRIZZLE_DIR);
+
+    const rows = db.prepare("SELECT * FROM __drizzle_migrations").all() as Array<{
+      hash: string;
+    }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].hash).toBe(baselineSqlHash());
+  });
 });

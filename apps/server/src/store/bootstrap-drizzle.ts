@@ -17,22 +17,58 @@ function tableExists(db: Database.Database, name: string): boolean {
 }
 
 /**
- * When `_migrations` has rows but Drizzle tracking is absent, inserts the
- * baseline migration row using the same hash algorithm as Drizzle Kit.
- * Packaged production builds hit this path once per legacy database so
- * `migrate()` never replays destructive baseline SQL on existing installs.
+ * Sentinel application table. Its presence on a DB without any migration
+ * tracking means the schema was set up out-of-band (e.g. `drizzle-kit push`
+ * during dev) or by a build older than the legacy `_migrations` runner. In
+ * both cases the baseline DDL has effectively been applied and must be
+ * marked as such so `migrate()` does not try to replay it.
+ */
+const SCHEMA_SENTINEL_TABLE = "workspaces";
+
+/**
+ * Returns `true` when the DB should be treated as having the Drizzle baseline
+ * already applied. Three independent signals satisfy this:
+ *   1. Legacy `_migrations` has at least one row (snapshot from the old runner).
+ *   2. The sentinel application table exists (DB created via `db:push` or by
+ *      a pre-legacy build).
+ *   3. Both — handled by either branch above.
+ */
+function baselineAlreadyApplied(db: Database.Database): boolean {
+  if (tableExists(db, "_migrations")) {
+    const legacyCount = (
+      db.prepare("SELECT count(*) AS c FROM _migrations").get() as { c: number }
+    ).c;
+    if (legacyCount > 0) return true;
+  }
+  return tableExists(db, SCHEMA_SENTINEL_TABLE);
+}
+
+/**
+ * Seeds Drizzle's tracking table so `migrate()` skips the baseline SQL on
+ * databases that were already set up by an older path. Covers four cases:
+ *
+ *   - Legacy `_migrations` populated, no Drizzle tracker → seed baseline.
+ *   - `__drizzle_migrations` exists but empty (interrupted bootstrap, or
+ *     Drizzle's own migrator created the table before failing) → seed.
+ *   - Sentinel app table exists with no tracking at all (`db:push` or
+ *     pre-legacy DB) → seed.
+ *   - Truly fresh DB → no-op; `migrate()` applies everything from scratch.
+ *
+ * The CREATE + INSERT runs in a single transaction so an interrupted
+ * bootstrap can never leave the tracking table in a half-initialised state.
  *
  * @param db Open SQLite database (foreign keys enabled by caller).
  * @param drizzleDir Absolute or cwd-relative path to `apps/server/drizzle`.
  */
 export function bootstrapDrizzle(db: Database.Database, drizzleDir: string): void {
-  if (tableExists(db, "__drizzle_migrations")) return;
+  if (tableExists(db, "__drizzle_migrations")) {
+    const drizzleCount = (
+      db.prepare("SELECT count(*) AS c FROM __drizzle_migrations").get() as { c: number }
+    ).c;
+    if (drizzleCount > 0) return;
+  }
 
-  if (!tableExists(db, "_migrations")) return;
-  const legacyCount = (
-    db.prepare("SELECT count(*) AS c FROM _migrations").get() as { c: number }
-  ).c;
-  if (legacyCount === 0) return;
+  if (!baselineAlreadyApplied(db)) return;
 
   const journalPath = join(drizzleDir, "meta", "_journal.json");
   const journal = JSON.parse(readFileSync(journalPath, "utf-8")) as {
@@ -47,14 +83,18 @@ export function bootstrapDrizzle(db: Database.Database, drizzleDir: string): voi
   const sqlContent = readFileSync(sqlPath, "utf-8");
   const hash = createHash("sha256").update(sqlContent).digest("hex");
 
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS __drizzle_migrations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-      hash text NOT NULL,
-      created_at numeric
-    )
-  `);
-  db.prepare(
-    `INSERT INTO __drizzle_migrations ("hash", "created_at") VALUES (?, ?)`,
-  ).run(hash, baseline.when);
+  // Atomic CREATE + INSERT so an interrupted bootstrap can never leave the
+  // tracking table in a "exists but empty" state that fools the early-return.
+  db.transaction(() => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS __drizzle_migrations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        hash text NOT NULL,
+        created_at numeric
+      )
+    `);
+    db.prepare(
+      `INSERT INTO __drizzle_migrations ("hash", "created_at") VALUES (?, ?)`,
+    ).run(hash, baseline.when);
+  })();
 }
