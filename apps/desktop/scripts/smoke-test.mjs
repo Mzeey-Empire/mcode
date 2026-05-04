@@ -72,9 +72,12 @@ function findUnpackedServer() {
   ];
 
   for (const c of candidates) {
-    // The renamed binary mirrors production; fall back to the main binary.
-    // Track the original Electron dir so we can set library search paths.
-    const useRenamed = existsSync(c.renamedBinary);
+    // On macOS, the renamed binary triggers SIGTRAP due to library validation
+    // when not co-signed by electron-builder (CI runs with signing disabled).
+    // In production, mac.binaries handles co-signing. For the smoke test, use
+    // the main Electron binary on macOS to validate the server bundle.
+    const isMac = c.server.includes(".app/Contents/");
+    const useRenamed = !isMac && existsSync(c.renamedBinary);
     const runtime = useRenamed ? c.renamedBinary : c.electron;
     if (existsSync(c.server) && existsSync(runtime)) {
       const electronBinding = resolve(c.sqlite, "better_sqlite3.electron.node");
