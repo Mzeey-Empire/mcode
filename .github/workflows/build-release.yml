@@ -21,9 +21,13 @@ jobs:
       matrix:
         include:
           - os: blacksmith-4vcpu-windows-2025
+            build-args: ""
           - os: ubuntu-22.04
-          # Uncomment when ready to spend macOS CI minutes:
-          # - os: macos-latest
+            build-args: ""
+          - os: blacksmith-12vcpu-macos-26
+            build-args: "--mac --arm64"
+          - os: blacksmith-12vcpu-macos-26
+            build-args: "--mac --x64"
 
     runs-on: ${{ matrix.os }}
 
@@ -48,7 +52,9 @@ jobs:
         run: pip install setuptools
 
       - name: Package with electron-builder
-        run: node apps/desktop/scripts/ci-package.mjs
+        run: node apps/desktop/scripts/ci-package.mjs ${{ matrix.build-args }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ runner.os == 'macOS' && 'false' || '' }}
 
       - name: Smoke test packaged server
         run: node apps/desktop/scripts/smoke-test.mjs
