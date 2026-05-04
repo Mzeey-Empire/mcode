@@ -66,7 +66,7 @@ export function setupContainer(mcodeDir: string): typeof container {
   container.registerInstance("JobObject", jobObject);
 
   // Database
-  const db = openDatabase();
+  const db = openDatabase({ branch: process.env.MCODE_GIT_BRANCH });
   container.register("Database", { useValue: db });
 
   // Repositories (Singleton)

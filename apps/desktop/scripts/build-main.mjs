@@ -12,7 +12,7 @@
 
 import { build } from "esbuild";
 import { execSync, execFileSync } from "child_process";
-import { copyFileSync, existsSync } from "fs";
+import { cpSync, copyFileSync, existsSync, rmSync } from "fs";
 import { createRequire } from "module";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -102,6 +102,14 @@ await build({
 });
 
 console.log("Server bundle complete: dist/server/server.cjs");
+
+const drizzleSrc = resolve(serverRoot, "drizzle");
+const drizzleDst = resolve(desktopRoot, "dist/server/drizzle");
+if (existsSync(drizzleSrc)) {
+  if (existsSync(drizzleDst)) rmSync(drizzleDst, { recursive: true, force: true });
+  cpSync(drizzleSrc, drizzleDst, { recursive: true });
+  console.log(`Copied Drizzle migrations -> ${drizzleDst}`);
+}
 
 // Copy the Claude Agent SDK's cli.js next to server.cjs so the SDK can locate
 // it via dirname(fileURLToPath(import.meta.url)) + "/cli.js".

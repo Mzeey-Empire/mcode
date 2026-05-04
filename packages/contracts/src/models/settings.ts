@@ -231,6 +231,13 @@ export const SettingsSchema = lazySchema(() =>
             heapMb: z.number().int().min(64).max(8192).default(96),
           })
           .default({}),
+        /** Grace period before auto-shutdown after all UI sessions disconnect. */
+        gracePeriod: z
+          .object({
+            /** Seconds to wait. 0 shuts down immediately. Max 300 (5 minutes). */
+            seconds: z.number().int().min(0).max(300).default(30),
+          })
+          .default({}),
       })
       .default({}),
 
@@ -405,6 +412,11 @@ export const PartialSettingsSchema = lazySchema(() =>
         memory: z
           .object({
             heapMb: z.number().int().min(64).max(8192).optional(),
+          })
+          .optional(),
+        gracePeriod: z
+          .object({
+            seconds: z.number().int().min(0).max(300).optional(),
           })
           .optional(),
       })

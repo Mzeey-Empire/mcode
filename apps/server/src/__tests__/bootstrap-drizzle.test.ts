@@ -1,0 +1,100 @@
+import { createHash } from "crypto";
+import Database from "better-sqlite3";
+import { readFileSync } from "fs";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { bootstrapDrizzle } from "../store/bootstrap-drizzle.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const DRIZZLE_DIR = join(__dirname, "../../drizzle");
+
+const journal = JSON.parse(
+  readFileSync(join(DRIZZLE_DIR, "meta/_journal.json"), "utf-8"),
+) as { entries: Array<{ tag: string; when: number }> };
+
+const baselineTag = journal.entries[0]?.tag;
+if (!baselineTag) throw new Error("missing baseline migration");
+
+function baselineSqlHash(): string {
+  const sqlContent = readFileSync(join(DRIZZLE_DIR, `${baselineTag}.sql`), "utf-8");
+  return createHash("sha256").update(sqlContent).digest("hex");
+}
+
+function freshDb(): Database.Database {
+  const db = new Database(":memory:");
+  db.pragma("foreign_keys = ON");
+  return db;
+}
+
+/** Mimics legacy `_migrations` tracking rows without touching application DDL. */
+function seedLegacyMigrations(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE _migrations (
+      version TEXT PRIMARY KEY,
+      name TEXT NOT NULL DEFAULT '',
+      applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  db.exec(
+    `INSERT INTO _migrations (version, name) VALUES ('00000000000001', 'Initial schema')`,
+  );
+}
+
+function tableExists(db: Database.Database, name: string): boolean {
+  const row = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?")
+    .get(name);
+  return row !== undefined;
+}
+
+describe("bootstrapDrizzle", () => {
+  let db: Database.Database;
+
+  beforeEach(() => {
+    db = freshDb();
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("seeds __drizzle_migrations on legacy DB without creating application tables", () => {
+    seedLegacyMigrations(db);
+    db.exec("CREATE TABLE workspaces (id TEXT PRIMARY KEY)");
+
+    bootstrapDrizzle(db, DRIZZLE_DIR);
+
+    expect(tableExists(db, "__drizzle_migrations")).toBe(true);
+    const rows = db.prepare("SELECT * FROM __drizzle_migrations").all() as Array<{
+      hash: string;
+      created_at: number;
+    }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].hash).toBe(baselineSqlHash());
+    expect(rows[0].created_at).toBe(journal.entries[0].when);
+  });
+
+  it("is a no-op when __drizzle_migrations already exists", () => {
+    db.exec(`
+      CREATE TABLE __drizzle_migrations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        hash text NOT NULL,
+        created_at numeric
+      )
+    `);
+    db
+      .prepare(`INSERT INTO __drizzle_migrations ("hash", "created_at") VALUES (?, ?)`)
+      .run("existing_hash", 1234567890);
+
+    bootstrapDrizzle(db, DRIZZLE_DIR);
+
+    const rows = db.prepare("SELECT * FROM __drizzle_migrations").all();
+    expect(rows).toHaveLength(1);
+  });
+
+  it("does nothing on a fresh DB (no legacy tracker)", () => {
+    bootstrapDrizzle(db, DRIZZLE_DIR);
+    expect(tableExists(db, "__drizzle_migrations")).toBe(false);
+  });
+});

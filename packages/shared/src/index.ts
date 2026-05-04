@@ -2,7 +2,7 @@
 export { logger, getLogPath, getRecentLogs } from "./logging/index.js";
 
 // Paths
-export { getMcodeDir } from "./paths/index.js";
+export { getMcodeDir, resolveDbPath } from "./paths/index.js";
 
 // Git utilities
 export {
