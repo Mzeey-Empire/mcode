@@ -8,7 +8,7 @@
  */
 
 import { app } from "electron";
-import { spawn, type ChildProcess } from "child_process";
+import { execSync, spawn, type ChildProcess } from "child_process";
 import { createWriteStream, existsSync, readFileSync, unlinkSync, writeFileSync } from "fs";
 import { readFile } from "fs/promises";
 import { createServer, type AddressInfo } from "net";
@@ -329,6 +329,40 @@ export class ServerManager {
         MCODE_TEMP_DIR: app.getPath("temp"),
         MCODE_VERSION: app.getVersion(),
       };
+
+      if (isDev && !process.env.MCODE_GIT_BRANCH) {
+        try {
+          const branch = execSync("git rev-parse --abbrev-ref HEAD", {
+            encoding: "utf-8",
+            timeout: 3000,
+            cwd,
+          }).trim();
+          if (branch && branch !== "HEAD") {
+            env.MCODE_GIT_BRANCH = branch;
+          }
+        } catch {
+          // Not a git repo or git unavailable; shared mcode.db
+        }
+      } else if (process.env.MCODE_GIT_BRANCH) {
+        env.MCODE_GIT_BRANCH = process.env.MCODE_GIT_BRANCH;
+      }
+
+      if (isDev && !process.env.MCODE_GIT_TOPLEVEL) {
+        try {
+          const top = execSync("git rev-parse --show-toplevel", {
+            encoding: "utf-8",
+            timeout: 3000,
+            cwd,
+          }).trim();
+          if (top) {
+            env.MCODE_GIT_TOPLEVEL = top;
+          }
+        } catch {
+          // Not a git repo or git unavailable
+        }
+      } else if (process.env.MCODE_GIT_TOPLEVEL) {
+        env.MCODE_GIT_TOPLEVEL = process.env.MCODE_GIT_TOPLEVEL;
+      }
 
       if (nativeBindingPath) {
         env.BETTER_SQLITE3_BINDING = nativeBindingPath;

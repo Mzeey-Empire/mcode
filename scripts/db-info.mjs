@@ -1,21 +1,18 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Print SQLite database location, schema version, and basic table stats.
  * Opens the database read-only; safe to run while the server is running.
  */
-import { join, resolve } from 'node:path';
-import { homedir } from 'node:os';
+import { resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
 import { resolveMainRoot } from './utils.mjs';
+import { resolveCliDbPath } from './resolve-cli-db-path.mjs';
 
 const require = createRequire(import.meta.url);
 const root    = resolveMainRoot();
 
-const dataDir = process.env.MCODE_DATA_DIR
-  ?? join(homedir(), process.env.NODE_ENV === 'production' ? '.mcode' : '.mcode-dev');
-const dbPath  = process.env.MCODE_DB_PATH ?? join(dataDir, 'mcode.db');
+const dbPath  = resolveCliDbPath();
 
 console.log(`Database : ${dbPath}`);
 

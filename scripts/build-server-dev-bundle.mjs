@@ -7,7 +7,7 @@
 
 import { build } from "esbuild";
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -91,5 +91,14 @@ export async function rebuildServerDevBundle(options = {}) {
   });
 
   copyClaudeSdkCliNextTo(serverOutFile, serverRoot);
+
+  const drizzleSrc = resolve(serverRoot, "drizzle");
+  const drizzleDst = resolve(desktopRoot, "dist/server/drizzle");
+  if (existsSync(drizzleSrc)) {
+    if (existsSync(drizzleDst)) rmSync(drizzleDst, { recursive: true, force: true });
+    cpSync(drizzleSrc, drizzleDst, { recursive: true });
+    console.log(`[server-dev-bundle] Copied Drizzle migrations -> ${drizzleDst}`);
+  }
+
   console.log(`[server-dev-bundle] Complete: ${serverOutFile}`);
 }

@@ -1,0 +1,198 @@
+/**
+ * Drizzle ORM schema for the Mcode SQLite database (single source of truth).
+ * Edit here and run `bun run db:generate` to emit SQL migrations.
+ */
+
+import { sql } from "drizzle-orm";
+import { asc, desc } from "drizzle-orm";
+import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+
+const timestampDefault = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
+
+export const workspaces = sqliteTable(
+  "workspaces",
+  {
+    id: text("id").primaryKey().notNull(),
+    name: text("name").notNull(),
+    path: text("path").notNull().unique(),
+    providerConfig: text("provider_config").notNull().default("{}"),
+    createdAt: text("created_at").notNull().default(timestampDefault),
+    updatedAt: text("updated_at").notNull().default(timestampDefault),
+    pinned: integer("pinned").notNull().default(0),
+    lastOpenedAt: integer("last_opened_at"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    isGitRepo: integer("is_git_repo").notNull().default(1),
+  },
+  (table) => [
+    index("idx_workspaces_sort_order").on(asc(table.sortOrder)),
+    index("idx_workspaces_pinned_last_opened").on(
+      desc(table.pinned),
+      desc(table.lastOpenedAt),
+    ),
+  ],
+);
+
+export const threads = sqliteTable(
+  "threads",
+  {
+    id: text("id").primaryKey().notNull(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => workspaces.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    status: text("status").notNull().default("active"),
+    mode: text("mode").notNull().default("direct"),
+    worktreePath: text("worktree_path"),
+    branch: text("branch").notNull(),
+    issueNumber: integer("issue_number"),
+    prNumber: integer("pr_number"),
+    prStatus: text("pr_status"),
+    createdAt: text("created_at").notNull().default(timestampDefault),
+    updatedAt: text("updated_at").notNull().default(timestampDefault),
+    deletedAt: text("deleted_at"),
+    model: text("model"),
+    worktreeManaged: integer("worktree_managed").notNull().default(1),
+    sdkSessionId: text("sdk_session_id"),
+    lastContextTokens: integer("last_context_tokens"),
+    contextWindow: integer("context_window"),
+    provider: text("provider").notNull().default("claude"),
+    reasoningLevel: text("reasoning_level"),
+    interactionMode: text("interaction_mode"),
+    permissionMode: text("permission_mode"),
+    parentThreadId: text("parent_thread_id"),
+    forkedFromMessageId: text("forked_from_message_id"),
+    lastCompactSummary: text("last_compact_summary"),
+    copilotAgent: text("copilot_agent"),
+    contextWindowMode: text("context_window_mode"),
+    thinking: integer("thinking"),
+    hasFileChanges: integer("has_file_changes").notNull().default(0),
+  },
+  (table) => [
+    index("idx_threads_workspace").on(table.workspaceId),
+    index("idx_threads_status").on(table.status),
+    index("idx_threads_parent_thread_id").on(table.parentThreadId),
+    index("idx_threads_forked_from_message_id").on(table.forkedFromMessageId),
+  ],
+);
+
+export const messages = sqliteTable(
+  "messages",
+  {
+    id: text("id").primaryKey().notNull(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    role: text("role").notNull(),
+    content: text("content").notNull(),
+    toolCalls: text("tool_calls"),
+    filesChanged: text("files_changed"),
+    costUsd: real("cost_usd"),
+    tokensUsed: integer("tokens_used"),
+    timestamp: text("timestamp").notNull().default(timestampDefault),
+    sequence: integer("sequence").notNull(),
+    attachments: text("attachments"),
+  },
+  (table) => [
+    index("idx_messages_thread").on(table.threadId),
+    index("idx_messages_sequence").on(table.threadId, table.sequence),
+  ],
+);
+
+export const toolCallRecords = sqliteTable(
+  "tool_call_records",
+  {
+    id: text("id").primaryKey().notNull(),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    parentToolCallId: text("parent_tool_call_id"),
+    toolName: text("tool_name").notNull(),
+    inputSummary: text("input_summary").notNull().default(""),
+    outputSummary: text("output_summary").notNull().default(""),
+    status: text("status").notNull().default("running"),
+    startedAt: text("started_at").notNull().default(timestampDefault),
+    completedAt: text("completed_at"),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (table) => [
+    index("idx_tool_call_records_message").on(table.messageId),
+    index("idx_tool_call_records_parent").on(table.parentToolCallId),
+  ],
+);
+
+export const turnSnapshots = sqliteTable(
+  "turn_snapshots",
+  {
+    id: text("id").primaryKey().notNull(),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    refBefore: text("ref_before").notNull(),
+    refAfter: text("ref_after").notNull(),
+    filesChanged: text("files_changed").notNull().default("[]"),
+    worktreePath: text("worktree_path"),
+    createdAt: text("created_at").notNull().default(timestampDefault),
+  },
+  (table) => [
+    index("idx_turn_snapshots_message").on(table.messageId),
+    index("idx_turn_snapshots_thread").on(table.threadId),
+  ],
+);
+
+export const threadTasks = sqliteTable("thread_tasks", {
+  threadId: text("thread_id")
+    .primaryKey()
+    .notNull()
+    .references(() => threads.id, { onDelete: "cascade" }),
+  tasksJson: text("tasks_json").notNull(),
+  updatedAt: text("updated_at").notNull().default(timestampDefault),
+});
+
+export const cleanupJobs = sqliteTable(
+  "cleanup_jobs",
+  {
+    id: text("id").primaryKey().notNull(),
+    threadId: text("thread_id").notNull().unique(),
+    workspacePath: text("workspace_path").notNull(),
+    worktreePath: text("worktree_path").notNull(),
+    branch: text("branch"),
+    attempts: integer("attempts").notNull().default(0),
+    nextRetryAt: integer("next_retry_at").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: integer("created_at").notNull(),
+  },
+  (table) => [
+    index("idx_cleanup_jobs_retry").on(
+      table.nextRetryAt,
+      table.attempts,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const providerModelCache = sqliteTable("provider_model_cache", {
+  providerId: text("provider_id").primaryKey().notNull(),
+  modelsJson: text("models_json").notNull(),
+  fetchedAt: text("fetched_at").notNull().default(timestampDefault),
+  modelCount: integer("model_count").notNull().default(0),
+});
+
+export const planQuestionAnswers = sqliteTable(
+  "plan_question_answers",
+  {
+    assistantMessageId: text("assistant_message_id")
+      .primaryKey()
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    answeredAt: text("answered_at").notNull().default(timestampDefault),
+  },
+  (table) => [
+    index("idx_plan_question_answers_thread").on(table.threadId),
+  ],
+);

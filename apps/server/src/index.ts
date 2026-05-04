@@ -12,6 +12,7 @@ import { logger, getMcodeDir } from "@mcode/shared";
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
+import { execSync } from "child_process";
 import { killOrphanedServer, reapOrphanedPtys } from "./services/orphan-cleanup";
 import { PtyPidRegistry } from "./services/pty-pid-registry";
 
@@ -46,6 +47,7 @@ import { WorkspaceEnricher } from "./services/workspace-enricher";
 import { FilesystemBrowser } from "./services/filesystem-browser";
 import { ModelCacheService } from "./services/model-cache-service";
 import { WebSocket } from "ws";
+import { resolveGracePeriodMs } from "./grace-period-ms";
 import { AgentEventType } from "@mcode/contracts";
 import type { AgentEvent } from "@mcode/contracts";
 import type Database from "better-sqlite3";
@@ -115,6 +117,38 @@ if (existsSync(SHUTDOWN_MARKER_PATH)) {
   );
 }
 
+// Standalone dev: detect the checkout branch for branch-specific DB paths.
+// The desktop shell sets MCODE_GIT_BRANCH when it spawns the server.
+if (!process.env.MCODE_GIT_BRANCH && process.env.NODE_ENV !== "production") {
+  try {
+    const branch = execSync("git rev-parse --abbrev-ref HEAD", {
+      encoding: "utf-8",
+      timeout: 3000,
+    }).trim();
+    if (branch && branch !== "HEAD") {
+      process.env.MCODE_GIT_BRANCH = branch;
+    }
+  } catch {
+    // Not a git checkout or git missing; keep shared mcode.db
+  }
+}
+
+// Standalone dev: detect checkout root for `.mcode-local` DB paths in linked worktrees.
+// The desktop shell sets MCODE_GIT_TOPLEVEL when it spawns the server.
+if (!process.env.MCODE_GIT_TOPLEVEL && process.env.NODE_ENV !== "production") {
+  try {
+    const top = execSync("git rev-parse --show-toplevel", {
+      encoding: "utf-8",
+      timeout: 3000,
+    }).trim();
+    if (top) {
+      process.env.MCODE_GIT_TOPLEVEL = top;
+    }
+  } catch {
+    // Not a git checkout or git missing
+  }
+}
+
 // Initialize DI container (PtyPidRegistry needs the data dir path at construction time)
 const container = setupContainer(getMcodeDir());
 
@@ -136,6 +170,10 @@ const toolCallRecordRepo = container.resolve(ToolCallRecordRepo);
 const turnSnapshotRepo = container.resolve(TurnSnapshotRepo);
 const snapshotService = container.resolve(SnapshotService);
 const settingsService = container.resolve(SettingsService);
+const GRACE_PERIOD_MS = resolveGracePeriodMs(
+  settingsService.get().server.gracePeriod.seconds,
+  process.env.NODE_ENV === "production",
+);
 const gitWatcherService = container.resolve(GitWatcherService);
 const skillWatcherService = container.resolve(SkillWatcherService);
 const memoryPressureService = container.resolve(MemoryPressureService);
@@ -412,9 +450,6 @@ function listen(port: number, attempt = 1): void {
     }
   });
 }
-
-/** Grace period in milliseconds before shutting down when all sessions disconnect. */
-const GRACE_PERIOD_MS = 30_000;
 
 /** Timer handle for the active grace period, null when no grace period is running. */
 let graceTimer: ReturnType<typeof setTimeout> | null = null;
