@@ -4,7 +4,7 @@
  * Migrated from apps/desktop/src/main/sidecar/client.ts.
  */
 
-import { injectable } from "tsyringe";
+import { injectable, inject } from "tsyringe";
 import { EventEmitter } from "events";
 import { readFile } from "fs/promises";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
@@ -31,6 +31,7 @@ import { readAnthropicOauthToken } from "@mcode/shared/usage";
 import { AnthropicOAuthUsageSource } from "./usage/oauth-usage-source.js";
 import { AnthropicHeaderUsageSource } from "./usage/header-usage-source.js";
 import { CompositeUsageSource } from "./usage/composite-usage-source.js";
+import { EnvService } from "../../services/env-service.js";
 
 /** Idle TTL before a session is evicted (10 minutes). */
 const IDLE_TTL_MS = 10 * 60 * 1000;
@@ -215,7 +216,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     new AnthropicHeaderUsageSource(),
   ]);
 
-  constructor() {
+  constructor(@inject(EnvService) private readonly envService: EnvService) {
     super();
   }
 
@@ -260,6 +261,9 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     // the server's Job Object. On server crash, this subprocess may briefly
     // outlive the server until the OS job-object kill propagates via inheritance.
     // Track: expose subprocess PID from claude-agent-sdk for explicit assignment.
+    // The SDK spawns `claude` internally without accepting a custom env; align
+    // `process.env` once per subprocess start so PATH and user tools stay current.
+    Object.assign(process.env, this.envService.getEnv());
     const q = sdkQuery({
       prompt: queue.iterable,
       options: {
@@ -646,6 +650,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       cwd: resolvedCwd,
     });
 
+    Object.assign(process.env, this.envService.getEnv());
     const q = sdkQuery({ prompt: queue.iterable, options });
 
     const entry: SessionEntry = {
@@ -699,6 +704,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
         const freshQueue = createPromptQueue();
         const freshOptions = { ...baseOptions, sessionId: uuid };
 
+        Object.assign(process.env, this.envService.getEnv());
         const freshQ = sdkQuery({
           prompt: freshQueue.iterable,
           options: freshOptions,

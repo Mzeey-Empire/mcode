@@ -520,6 +520,8 @@ Lifecycle per session:
 
 On Windows, `shell: true` on spawn resolves `.cmd` shims. Process tree kill uses `taskkill /T /F /PID` because Node's `child.kill()` does not kill grandchildren.
 
+Child processes inherit an explicit `env` object from **`EnvService`**, which layers a short-TTL refresh of the user's shell or Windows registry configuration over the server's `process.env`, then applies **`ProtectedEnvStore`** so `MCODE_*`, `ELECTRON_*`, and `BETTER_SQLITE3_*` values from server startup are not overridden (see `docs/agents/runtime.md`).
+
 ## 9. Desktop Shell
 
 ### 9.1 ServerManager

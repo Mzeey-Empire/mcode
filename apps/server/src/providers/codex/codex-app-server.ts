@@ -13,6 +13,7 @@ import { EventEmitter } from "events";
 import { isAbsolute } from "path";
 import which from "which";
 import { logger } from "@mcode/shared";
+import { flattenProcessEnv } from "../../services/shell-env-utils.js";
 import { CodexRpcClient } from "./codex-rpc-client.js";
 import { mapDecisionToCodexResponse } from "./codex-permission-mapper.js";
 import type {
@@ -70,6 +71,10 @@ export interface CodexAppServerOptions {
    * When set, the codex process dies with the server on crash.
    */
   jobObject?: import("../../services/job-object.js").JobObject;
+  /**
+   * Supplies env for the child `codex` process. When unset, `process.env` is copied.
+   */
+  getSpawnEnv?: () => Record<string, string>;
 }
 
 /**
@@ -264,7 +269,7 @@ export class CodexAppServer extends EventEmitter {
       stdio: ["pipe", "pipe", "pipe"],
       shell: needsShell,
       cwd: workingDirectory,
-      env: { ...process.env },
+      env: this.options.getSpawnEnv ? this.options.getSpawnEnv() : flattenProcessEnv(process.env),
       windowsHide: true,
     });
 
