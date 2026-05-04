@@ -10,6 +10,8 @@ import { flattenProcessEnv } from "./shell-env-utils.js";
 import { ShellEnvResolver } from "./shell-env-resolver.js";
 
 const DEFAULT_TTL_MS = 60_000;
+/** Coalesces overlapping `getEnv` calls while an async shell/registry refresh is in flight. */
+const UNTIL_ASYNC_MS = 2_000;
 
 /**
  * Public facade used by terminals and providers when spawning subprocesses.
@@ -18,6 +20,7 @@ const DEFAULT_TTL_MS = 60_000;
 export class EnvService {
   private cached: Record<string, string> | null = null;
   private cacheExpiresAt = 0;
+  private refreshInFlight = false;
 
   constructor(
     @inject(ShellEnvResolver) private readonly shellEnvResolver: ShellEnvResolver,
@@ -25,21 +28,43 @@ export class EnvService {
   ) {}
 
   /**
-   * Returns env for `spawn` / PTY: live `process.env`, overlaid with cached
-   * shell/registry resolution (refreshed at most every {@link DEFAULT_TTL_MS}),
-   * then server-protected keys from startup.
+   * Returns env for `spawn` / PTY: live `process.env`, overlaid with the last
+   * async shell/registry resolution (TTL {@link DEFAULT_TTL_MS}), then
+   * server-protected keys. Never blocks the event loop on a shell spawn; a
+   * background refresh runs when the cache expires.
    */
   getEnv(): Record<string, string> {
     const now = Date.now();
-    if (this.cached && now < this.cacheExpiresAt) {
+    if (this.cached !== null && now < this.cacheExpiresAt) {
       return { ...this.cached };
     }
 
-    const resolved = this.shellEnvResolver.resolveFresh();
     const base = flattenProcessEnv(process.env);
-    const merged = this.protectedEnvStore.applyTo({ ...base, ...resolved });
+    const overlay = this.shellEnvResolver.peekResolvedOverlay();
+    const merged = this.protectedEnvStore.applyTo({ ...base, ...overlay });
     this.cached = merged;
-    this.cacheExpiresAt = now + DEFAULT_TTL_MS;
+    this.cacheExpiresAt = now + UNTIL_ASYNC_MS;
+    this.scheduleRefresh();
     return { ...merged };
+  }
+
+  private scheduleRefresh(): void {
+    if (this.refreshInFlight) {
+      return;
+    }
+    this.refreshInFlight = true;
+    void this.shellEnvResolver
+      .resolveFreshAsync()
+      .then((resolved) => {
+        const base = flattenProcessEnv(process.env);
+        this.cached = this.protectedEnvStore.applyTo({ ...base, ...resolved });
+        this.cacheExpiresAt = Date.now() + DEFAULT_TTL_MS;
+      })
+      .catch(() => {
+        /* resolveFreshAsync already logged and returned fallback */
+      })
+      .finally(() => {
+        this.refreshInFlight = false;
+      });
   }
 }

@@ -73,6 +73,19 @@ describe("ProtectedEnvStore", () => {
     }
   });
 
+  it("drops explicit protected keys from resolved when no snapshot value exists", () => {
+    delete process.env.ORPHAN_PROTECTED_KEY;
+    const store = new ProtectedEnvStore();
+    store.protect("ORPHAN_PROTECTED_KEY");
+
+    const merged = store.applyTo({
+      ORPHAN_PROTECTED_KEY: "from-shell",
+      PATH: "/bin",
+    });
+    expect(merged.ORPHAN_PROTECTED_KEY).toBeUndefined();
+    expect(merged.PATH).toBe("/bin");
+  });
+
   it("passes through non-protected keys unchanged", () => {
     const store = new ProtectedEnvStore();
     const merged = store.applyTo({ PATH: "/usr/bin", HOME: "/home/dev" });

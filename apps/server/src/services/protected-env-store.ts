@@ -46,10 +46,17 @@ export class ProtectedEnvStore {
   }
 
   /**
-   * Overlays captured server values onto a resolved env so protected keys always win.
+   * Drops protected names from the resolved map, then overlays the snapshotted
+   * server values so shell or registry cannot set server-owned keys.
    */
   applyTo(resolved: Record<string, string>): Record<string, string> {
-    return { ...resolved, ...this.snapshot };
+    const out: Record<string, string> = { ...resolved };
+    for (const key of Object.keys(out)) {
+      if (this.isProtected(key)) {
+        delete out[key];
+      }
+    }
+    return { ...out, ...this.snapshot };
   }
 
   private captureFromProcessEnv(): void {

@@ -385,9 +385,14 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
       }
       if (this.cachedNodePath) {
         const nodeDir = dirname(this.cachedNodePath);
+        const sep = process.platform === "win32" ? ";" : ":";
+        const existingPath =
+          opts.env?.PATH ?? opts.env?.Path ?? "";
+        const pathValue = existingPath ? `${nodeDir}${sep}${existingPath}` : nodeDir;
         opts.env = {
           ...opts.env,
-          PATH: `${nodeDir}${process.platform === "win32" ? ";" : ":"}${opts.env?.PATH ?? ""}`,
+          PATH: pathValue,
+          ...(process.platform === "win32" ? { Path: pathValue } : {}),
         };
       }
     }

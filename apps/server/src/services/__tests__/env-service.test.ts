@@ -7,18 +7,36 @@ import type { ShellEnvResolver } from "../shell-env-resolver.js";
 function makeResolver(
   envMap: Record<string, string> = { PATH: "/usr/bin", HOME: "/home/user" },
 ): ShellEnvResolver {
-  return { resolveFresh: vi.fn(() => ({ ...envMap })) } as unknown as ShellEnvResolver;
+  return {
+    peekResolvedOverlay: vi.fn(() => ({ ...envMap })),
+    resolveFreshAsync: vi.fn(async () => ({ ...envMap })),
+  } as unknown as ShellEnvResolver;
 }
 
 function makeStore(
   snapshot: Record<string, string> = { MCODE_PORT: "19400" },
 ): ProtectedEnvStore {
   return {
-    applyTo: vi.fn((resolved: Record<string, string>) => ({
-      ...resolved,
-      ...snapshot,
-    })),
+    applyTo: vi.fn((resolved: Record<string, string>) => {
+      const out: Record<string, string> = { ...resolved };
+      for (const k of Object.keys(resolved)) {
+        if (
+          k.startsWith("MCODE_") ||
+          k.startsWith("ELECTRON_") ||
+          k.startsWith("BETTER_SQLITE3_")
+        ) {
+          delete out[k];
+        }
+      }
+      return { ...out, ...snapshot };
+    }),
   } as unknown as ProtectedEnvStore;
+}
+
+async function flushRefresh(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 describe("EnvService", () => {
@@ -39,37 +57,43 @@ describe("EnvService", () => {
     expect(env.MCODE_PORT).toBe("19400");
   });
 
-  it("calls resolveFresh on first access", () => {
+  it("schedules resolveFreshAsync on first access", async () => {
     service.getEnv();
-    expect(resolver.resolveFresh).toHaveBeenCalledOnce();
+    expect(resolver.resolveFreshAsync).toHaveBeenCalledOnce();
+    await flushRefresh();
   });
 
-  it("returns cached result within TTL window", () => {
+  it("does not call resolveFreshAsync again until TTL expires after refresh", async () => {
+    service.getEnv();
+    await flushRefresh();
+    vi.mocked(resolver.resolveFreshAsync).mockClear();
+
     service.getEnv();
     service.getEnv();
-    service.getEnv();
-    // Only one resolution despite three calls.
-    expect(resolver.resolveFresh).toHaveBeenCalledOnce();
+    expect(resolver.resolveFreshAsync).not.toHaveBeenCalled();
   });
 
-  it("re-resolves after TTL expires", () => {
+  it("re-resolves after TTL expires", async () => {
     vi.useFakeTimers();
+    vi.setSystemTime(new Date(0));
     try {
       service.getEnv();
-      expect(resolver.resolveFresh).toHaveBeenCalledOnce();
+      await flushRefresh();
+      expect(resolver.resolveFreshAsync).toHaveBeenCalledTimes(1);
 
-      // Advance past the 60s TTL.
-      vi.advanceTimersByTime(61_000);
+      vi.setSystemTime(new Date(61_000));
       service.getEnv();
-      expect(resolver.resolveFresh).toHaveBeenCalledTimes(2);
+      await flushRefresh();
+      expect(resolver.resolveFreshAsync).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("returns a defensive copy (mutations do not leak back)", () => {
+  it("returns a defensive copy (mutations do not leak back)", async () => {
     const first = service.getEnv();
     first.PATH = "/hacked";
+    await flushRefresh();
     const second = service.getEnv();
     expect(second.PATH).toBe("/usr/bin");
   });
@@ -79,8 +103,6 @@ describe("EnvService", () => {
     process.env.SOME_RANDOM_VAR = "from-process";
     try {
       const env = service.getEnv();
-      // process.env values appear in the base, but shell resolution values
-      // override them when both define the same key.
       expect(env.SOME_RANDOM_VAR).toBe("from-process");
     } finally {
       if (prev === undefined) delete process.env.SOME_RANDOM_VAR;

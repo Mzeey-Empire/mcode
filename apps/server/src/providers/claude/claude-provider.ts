@@ -33,6 +33,27 @@ import { AnthropicHeaderUsageSource } from "./usage/header-usage-source.js";
 import { CompositeUsageSource } from "./usage/composite-usage-source.js";
 import { EnvService } from "../../services/env-service.js";
 
+/** Shallow snapshot of `process.env` for temporary Claude SDK subprocess alignment. */
+function snapshotProcessEnv(): Record<string, string | undefined> {
+  return { ...process.env };
+}
+
+/** Restores `process.env` after {@link snapshotProcessEnv}. */
+function restoreProcessEnv(backup: Record<string, string | undefined>): void {
+  for (const k of Object.keys(process.env)) {
+    if (!(k in backup)) {
+      delete process.env[k];
+    }
+  }
+  for (const [k, v] of Object.entries(backup)) {
+    if (v === undefined) {
+      delete process.env[k];
+    } else {
+      process.env[k] = v;
+    }
+  }
+}
+
 /** Idle TTL before a session is evicted (10 minutes). */
 const IDLE_TTL_MS = 10 * 60 * 1000;
 /** How often to check for idle sessions (1 minute). */
@@ -220,6 +241,23 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     super();
   }
 
+  /**
+   * Merges {@link EnvService.getEnv} into `process.env` for the Claude SDK spawn window
+   * only, then restores the previous environment.
+   */
+  private withSdkSpawnEnv<T>(fn: () => T): T {
+    const backup = snapshotProcessEnv();
+    try {
+      const merged = this.envService.getEnv();
+      for (const [k, v] of Object.entries(merged)) {
+        process.env[k] = v;
+      }
+      return fn();
+    } finally {
+      restoreProcessEnv(backup);
+    }
+  }
+
   /** Start or continue a session by sending a message via the SDK. */
   async sendMessage(params: {
     sessionId: string;
@@ -253,82 +291,89 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
    * disabled and maxTurns: 1, collects the response text, then tears down.
    */
   async complete(prompt: string, model: string, cwd: string): Promise<string> {
-    const queue = createPromptQueue();
-    const ephemeralId = `complete-${crypto.randomUUID()}`;
-
-    // Note: the Claude Agent SDK spawns a 'claude' CLI subprocess internally.
-    // That subprocess PID is not exposed by the SDK, so it cannot be added to
-    // the server's Job Object. On server crash, this subprocess may briefly
-    // outlive the server until the OS job-object kill propagates via inheritance.
-    // Track: expose subprocess PID from claude-agent-sdk for explicit assignment.
-    // The SDK spawns `claude` internally without accepting a custom env; align
-    // `process.env` once per subprocess start so PATH and user tools stay current.
-    Object.assign(process.env, this.envService.getEnv());
-    const q = sdkQuery({
-      prompt: queue.iterable,
-      options: {
-        cwd,
-        model,
-        maxTurns: 1,
-        tools: [],
-        systemPrompt: "Respond with exactly what is requested. No questions, no commentary.",
-        settingSources: [],
-        permissionMode: "default" as const,
-        persistSession: false,
-        includePartialMessages: true,
-      },
-    });
-
-    queue.push(toUserMessage(prompt, ephemeralId));
-    // Close immediately: the message is already queued. This signals end-of-input
-    // so the SDK subprocess exits after processing instead of blocking on the
-    // next read from the queue (which would deadlock the for-await loop below).
-    queue.close();
-
-    let resultText = "";
-    let assistantText = "";
-    let deltaText = "";
-
-    for await (const msg of q) {
-      const anyMsg = msg as Record<string, unknown>;
-
-      if (anyMsg.type === "result") {
-        if (anyMsg.is_error) {
-          const errors = (anyMsg.errors as string[]) ?? [];
-          throw new Error(`Claude SDK error: ${errors.join(", ") || "unknown error"}`);
-        }
-        const res = anyMsg.result;
-        if (typeof res === "string" && res) resultText = res;
+    const backup = snapshotProcessEnv();
+    try {
+      const merged = this.envService.getEnv();
+      for (const [k, v] of Object.entries(merged)) {
+        process.env[k] = v;
       }
 
-      if (anyMsg.type === "assistant") {
-        const content =
-          (anyMsg.message as { content?: Array<{ type: string; text?: string }> })
-            ?.content ?? [];
-        for (const block of content) {
-          if (block.type === "text" && block.text) assistantText += block.text;
+      const queue = createPromptQueue();
+      const ephemeralId = `complete-${crypto.randomUUID()}`;
+
+      // Note: the Claude Agent SDK spawns a 'claude' CLI subprocess internally.
+      // That subprocess PID is not exposed by the SDK, so it cannot be added to
+      // the server's Job Object. On server crash, this subprocess may briefly
+      // outlive the server until the OS job-object kill propagates via inheritance.
+      // Track: expose subprocess PID from claude-agent-sdk for explicit assignment.
+      const q = sdkQuery({
+        prompt: queue.iterable,
+        options: {
+          cwd,
+          model,
+          maxTurns: 1,
+          tools: [],
+          systemPrompt: "Respond with exactly what is requested. No questions, no commentary.",
+          settingSources: [],
+          permissionMode: "default" as const,
+          persistSession: false,
+          includePartialMessages: true,
+        },
+      });
+
+      queue.push(toUserMessage(prompt, ephemeralId));
+      // Close immediately: the message is already queued. This signals end-of-input
+      // so the SDK subprocess exits after processing instead of blocking on the
+      // next read from the queue (which would deadlock the for-await loop below).
+      queue.close();
+
+      let resultText = "";
+      let assistantText = "";
+      let deltaText = "";
+
+      for await (const msg of q) {
+        const anyMsg = msg as Record<string, unknown>;
+
+        if (anyMsg.type === "result") {
+          if (anyMsg.is_error) {
+            const errors = (anyMsg.errors as string[]) ?? [];
+            throw new Error(`Claude SDK error: ${errors.join(", ") || "unknown error"}`);
+          }
+          const res = anyMsg.result;
+          if (typeof res === "string" && res) resultText = res;
+        }
+
+        if (anyMsg.type === "assistant") {
+          const content =
+            (anyMsg.message as { content?: Array<{ type: string; text?: string }> })
+              ?.content ?? [];
+          for (const block of content) {
+            if (block.type === "text" && block.text) assistantText += block.text;
+          }
+        }
+
+        // Collect incremental text deltas as a third fallback source
+        if (anyMsg.type === "stream_event") {
+          const streamEvent = anyMsg.event as {
+            type?: string;
+            delta?: { type?: string; text?: string };
+          };
+          if (
+            streamEvent?.type === "content_block_delta" &&
+            streamEvent.delta?.type === "text_delta" &&
+            streamEvent.delta.text
+          ) {
+            deltaText += streamEvent.delta.text;
+          }
         }
       }
 
-      // Collect incremental text deltas as a third fallback source
-      if (anyMsg.type === "stream_event") {
-        const streamEvent = anyMsg.event as {
-          type?: string;
-          delta?: { type?: string; text?: string };
-        };
-        if (
-          streamEvent?.type === "content_block_delta" &&
-          streamEvent.delta?.type === "text_delta" &&
-          streamEvent.delta.text
-        ) {
-          deltaText += streamEvent.delta.text;
-        }
-      }
+      const text = resultText || assistantText || deltaText;
+      if (!text) throw new Error("Claude SDK returned no text content");
+      return text.trim();
+    } finally {
+      restoreProcessEnv(backup);
     }
-
-    const text = resultText || assistantText || deltaText;
-    if (!text) throw new Error("Claude SDK returned no text content");
-    return text.trim();
   }
 
   private async doSendMessage(params: {
@@ -650,8 +695,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       cwd: resolvedCwd,
     });
 
-    Object.assign(process.env, this.envService.getEnv());
-    const q = sdkQuery({ prompt: queue.iterable, options });
+    const q = this.withSdkSpawnEnv(() => sdkQuery({ prompt: queue.iterable, options }));
 
     const entry: SessionEntry = {
       query: q,
@@ -704,11 +748,12 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
         const freshQueue = createPromptQueue();
         const freshOptions = { ...baseOptions, sessionId: uuid };
 
-        Object.assign(process.env, this.envService.getEnv());
-        const freshQ = sdkQuery({
-          prompt: freshQueue.iterable,
-          options: freshOptions,
-        });
+        const freshQ = this.withSdkSpawnEnv(() =>
+          sdkQuery({
+            prompt: freshQueue.iterable,
+            options: freshOptions,
+          }),
+        );
         const freshEntry: SessionEntry = {
           query: freshQ,
           pushMessage: freshQueue.push,

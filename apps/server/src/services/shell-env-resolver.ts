@@ -3,10 +3,14 @@
  * Windows registry machine + user hives, for passing to child processes.
  */
 
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { userInfo } from "node:os";
+import { promisify } from "node:util";
 import { injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
 import { flattenProcessEnv, parseNewlineDelimitedEnv, parseNullDelimitedEnv } from "./shell-env-utils.js";
+
+const execFileAsync = promisify(execFile);
 
 const RESOLVE_TIMEOUT_MS = 5000;
 const MAX_ENV_BUFFER_BYTES = 32 * 1024 * 1024;
@@ -27,13 +31,39 @@ export class ShellEnvResolver {
   }
 
   /**
-   * Attempts a fresh resolution; on failure logs and returns the last successful
-   * map, or the boot-time process env if none.
+   * Best-known resolved overlay (fresh shell/registry or boot snapshot).
+   * Safe to merge synchronously without blocking on a shell spawn.
    */
-  resolveFresh(): Record<string, string> {
+  peekResolvedOverlay(): Record<string, string> {
+    return this.lastSuccess ?? { ...this.bootEnv };
+  }
+
+  private unixLoginShell(): string {
+    const fromEnv = process.env.SHELL?.trim();
+    if (fromEnv) {
+      return fromEnv;
+    }
+    try {
+      const fromOs = userInfo().shell?.trim();
+      if (fromOs) {
+        return fromOs;
+      }
+    } catch {
+      /* ignored: unmapped uid on some systems */
+    }
+    return "/bin/sh";
+  }
+
+  /**
+   * Refreshes overlay asynchronously (no `execFileSync`) and updates
+   * {@link peekResolvedOverlay} on success.
+   */
+  async resolveFreshAsync(): Promise<Record<string, string>> {
     try {
       const resolved =
-        process.platform === "win32" ? this.resolveWindows() : this.resolveUnix();
+        process.platform === "win32"
+          ? await this.resolveWindowsAsync()
+          : await this.resolveUnixAsync();
       if (Object.keys(resolved).length === 0) {
         throw new Error("resolved env empty");
       }
@@ -47,38 +77,32 @@ export class ShellEnvResolver {
     }
   }
 
-  private resolveUnix(): Record<string, string> {
-    const shell = process.env.SHELL ?? "/bin/bash";
-    // `env -0` is a GNU extension unavailable on macOS/BSD. Try it first,
-    // and fall back to newline-delimited `env` when it fails.
+  private async resolveUnixAsync(): Promise<Record<string, string>> {
+    const shell = this.unixLoginShell();
     try {
-      const buf = execFileSync(shell, ["-ilc", "env -0"], {
+      const { stdout: buf } = await execFileAsync(shell, ["-ilc", "env -0"], {
         encoding: "buffer",
         timeout: RESOLVE_TIMEOUT_MS,
         maxBuffer: MAX_ENV_BUFFER_BYTES,
         windowsHide: true,
-      }) as Buffer;
-      // Sanity: NUL-delimited output must contain at least one NUL byte.
-      if (buf.includes(0)) {
-        return parseNullDelimitedEnv(buf);
+      });
+      const buffer = Buffer.isBuffer(buf) ? buf : Buffer.from(buf as string, "utf8");
+      if (buffer.includes(0)) {
+        return parseNullDelimitedEnv(buffer);
       }
     } catch {
-      // Expected on macOS/BSD where env(1) lacks -0. Fall through.
+      /* macOS/BSD often lack env -0 */
     }
-    // Newline-delimited fallback. Values containing literal newlines will
-    // be split incorrectly, but that is rare and matches VS Code's behavior.
-    const text = execFileSync(shell, ["-ilc", "env"], {
+    const { stdout: text } = await execFileAsync(shell, ["-ilc", "env"], {
       encoding: "utf8",
       timeout: RESOLVE_TIMEOUT_MS,
       maxBuffer: MAX_ENV_BUFFER_BYTES,
       windowsHide: true,
     });
-    return parseNewlineDelimitedEnv(text);
+    return parseNewlineDelimitedEnv(text as string);
   }
 
-  private resolveWindows(): Record<string, string> {
-    // Base64 wraps UTF-8 NUL-delimited pairs so we do not depend on the console
-    // code page (raw Write would often emit UTF-16 on Windows).
+  private async resolveWindowsAsync(): Promise<Record<string, string>> {
     const script = [
       "$m = [Environment]::GetEnvironmentVariables('Machine')",
       "$u = [Environment]::GetEnvironmentVariables('User')",
@@ -96,7 +120,7 @@ export class ShellEnvResolver {
       "[Console]::Out.Write([Convert]::ToBase64String($bytes))",
     ].join("; ");
 
-    const out = execFileSync(
+    const { stdout: out } = await execFileAsync(
       "powershell.exe",
       ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
       {
@@ -105,8 +129,8 @@ export class ShellEnvResolver {
         maxBuffer: MAX_ENV_BUFFER_BYTES,
         windowsHide: true,
       },
-    ).trim();
-    const buf = Buffer.from(out, "base64");
+    );
+    const buf = Buffer.from((out as string).trim(), "base64");
     return parseNullDelimitedEnv(buf);
   }
 }
