@@ -22,6 +22,7 @@ import type { CopilotSession, ModelInfo } from "@github/copilot-sdk";
 import { discoverCopilotAgents, COPILOT_DEFAULT_AGENTS } from "./copilot-agent-discovery.js";
 import { logger } from "@mcode/shared";
 import { SettingsService } from "../../services/settings-service.js";
+import { EnvService } from "../../services/env-service.js";
 import type {
   IAgentProvider,
   ProviderId,
@@ -157,6 +158,7 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
 
   constructor(
     @inject(SettingsService) private readonly settingsService: SettingsService,
+    @inject(EnvService) private readonly envService: EnvService,
   ) {
     super();
   }
@@ -360,6 +362,8 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
       env?: Record<string, string | undefined>;
     } = {};
 
+    opts.env = { ...this.envService.getEnv() };
+
     // User-configured CLI path takes priority over all other resolution.
     if (configuredCliPath) {
       opts.cliPath = configuredCliPath;
@@ -381,9 +385,14 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
       }
       if (this.cachedNodePath) {
         const nodeDir = dirname(this.cachedNodePath);
+        const sep = process.platform === "win32" ? ";" : ":";
+        const existingPath =
+          opts.env?.PATH ?? opts.env?.Path ?? "";
+        const pathValue = existingPath ? `${nodeDir}${sep}${existingPath}` : nodeDir;
         opts.env = {
-          ...process.env,
-          PATH: `${nodeDir}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
+          ...opts.env,
+          PATH: pathValue,
+          ...(process.platform === "win32" ? { Path: pathValue } : {}),
         };
       }
     }

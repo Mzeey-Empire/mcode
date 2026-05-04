@@ -2,6 +2,7 @@ import "reflect-metadata";
 import { describe, it, expect, beforeEach } from "vitest";
 import { EventEmitter } from "events";
 import { ClaudeProvider } from "../providers/claude/claude-provider.js";
+import { stubEnvService } from "./stub-env-service.js";
 
 /**
  * Tests that verify resume listener cleanup in ClaudeProvider.
@@ -15,7 +16,7 @@ describe("ClaudeProvider resume listener cleanup", () => {
   let provider: ClaudeProvider;
 
   beforeEach(() => {
-    provider = new ClaudeProvider();
+    provider = new ClaudeProvider(stubEnvService());
   });
 
   /**

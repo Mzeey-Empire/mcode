@@ -19,6 +19,7 @@ import type { ThreadRepo } from "../repositories/thread-repo";
 import type { WorkspaceRepo } from "../repositories/workspace-repo";
 import type { GitService } from "./git-service";
 import type { SettingsService } from "./settings-service";
+import { EnvService } from "./env-service.js";
 
 // createRequire lets us load native CJS modules (node-pty) from both ESM
 // (Bun running `src/index.ts`) and the CJS production / dev bundle.
@@ -92,6 +93,7 @@ export class TerminalService {
     @inject("WorkspaceRepo") private readonly workspaceRepo: WorkspaceRepo,
     @inject("GitService") private readonly gitService: GitService,
     @inject("SettingsService") private readonly settingsService: SettingsService,
+    @inject(EnvService) private readonly envService: EnvService,
     @inject("PtyPidRegistry") private readonly pidRegistry: PtyPidRegistry,
     @inject("JobObject") private readonly jobObject: import("./job-object.js").JobObject,
   ) {}
@@ -148,6 +150,7 @@ export class TerminalService {
       cols: DEFAULT_COLS,
       rows: DEFAULT_ROWS,
       cwd,
+      env: this.envService.getEnv(),
     });
 
     let seq = 0;

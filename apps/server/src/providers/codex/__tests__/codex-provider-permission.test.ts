@@ -7,6 +7,7 @@ vi.mock("@mcode/shared", () => ({
 
 import { CodexProvider } from "../codex-provider.js";
 import type { PermissionRequest, PermissionDecision } from "@mcode/contracts";
+import { stubEnvService } from "../../../__tests__/stub-env-service.js";
 
 /**
  * These tests exercise the provider-level permission plumbing in isolation:
@@ -26,6 +27,7 @@ describe("CodexProvider permission flow", () => {
     provider = new CodexProvider(
       { get: async () => ({ provider: { cli: { codex: "codex" } } }) } as never,
       { assign: vi.fn() } as never,
+      stubEnvService() as never,
     );
     // Pre-register a session entry so drain logic has something to iterate.
     (provider as unknown as { sessions: Map<string, unknown> }).sessions.set(sessionId, {

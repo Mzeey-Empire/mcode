@@ -141,6 +141,10 @@ Syntax highlighting runs in `apps/web/src/workers/shiki.worker.ts` via `@shikijs
 
 See **[docs/guides/provider-architecture.md](docs/guides/provider-architecture.md)**.
 
+## Child process environment (server)
+
+Integrated terminals and provider subprocesses use **`EnvService`** plus **`ProtectedEnvStore`** and **`ShellEnvResolver`** under `apps/server/src/services/`. Keys prefixed with `MCODE_`, `ELECTRON_`, or `BETTER_SQLITE3_` are snapshotted at server boot and always win over shell or registry resolution. For one-off internal variables without those prefixes, call `ProtectedEnvStore.protect("NAME")` during server startup before spawning children.
+
 ## Key Documentation
 
 - **Architecture:** [ARCHITECTURE.md](ARCHITECTURE.md)

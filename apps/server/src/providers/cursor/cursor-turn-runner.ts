@@ -20,6 +20,7 @@ import { spawn as nodeSpawn } from "node:child_process";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { logger } from "@mcode/shared";
 import type { AgentEvent } from "@mcode/contracts";
+import { flattenProcessEnv } from "../../services/shell-env-utils.js";
 import { CursorStreamJsonParser } from "./cursor-stream-json-parser.js";
 import {
   createCursorStreamAccumulator,
@@ -64,6 +65,8 @@ export interface CursorTurnRunnerOptions {
   permissionMode: "default" | "full";
   /** Persistent chat id to resume; pass null on the first turn of a thread. */
   chatId: string | null;
+  /** When set, passed to `spawn` as `env` (defaults to a string snapshot of `process.env`). */
+  env?: Record<string, string>;
 }
 
 /** Successful turn outcome. The caller persists `chatId` for the next turn. */
@@ -164,7 +167,7 @@ export async function runCursorTurn(
     stdio: ["pipe", "pipe", "pipe"],
     shell: process.platform === "win32",
     cwd: options.cwd,
-    env: { ...process.env },
+    env: options.env ?? flattenProcessEnv(process.env),
   });
 
   return new Promise<CursorTurnResult>((resolve, reject) => {

@@ -93,13 +93,14 @@ vi.mock("@mcode/shared", () => ({
 }));
 
 import { ClaudeProvider } from "../providers/claude/claude-provider";
+import { stubEnvService } from "./stub-env-service.js";
 
 describe("ClaudeProvider.complete()", () => {
   let provider: ClaudeProvider;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    provider = new ClaudeProvider();
+    provider = new ClaudeProvider(stubEnvService());
   });
 
   it("resolves with the result text (does not deadlock)", async () => {

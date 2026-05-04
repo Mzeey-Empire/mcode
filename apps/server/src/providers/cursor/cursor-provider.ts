@@ -27,6 +27,7 @@ import {
 
 import { SettingsService } from "../../services/settings-service.js";
 import { SkillService } from "../../services/skill-service.js";
+import { EnvService } from "../../services/env-service.js";
 import {
   AgentEventType,
   CURSOR_STATIC_MODEL_FALLBACK,
@@ -110,6 +111,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
   constructor(
     @inject(SettingsService) private readonly settingsService: SettingsService,
     @inject(SkillService) private readonly skillService: SkillService,
+    @inject(EnvService) private readonly envService: EnvService,
   ) {
     super();
   }
@@ -305,7 +307,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       stdio: ["pipe", "pipe", "pipe"],
       cwd,
       shell: process.platform === "win32",
-      env: { ...process.env },
+      env: this.envService.getEnv(),
     });
 
     if (!child.stdin || !child.stdout) {

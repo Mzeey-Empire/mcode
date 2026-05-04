@@ -53,6 +53,9 @@ import { JobObject } from "./services/job-object.js";
 import { WorkspaceEnricher } from "./services/workspace-enricher";
 import { FilesystemBrowser } from "./services/filesystem-browser";
 import { ModelCacheService } from "./services/model-cache-service";
+import { ProtectedEnvStore } from "./services/protected-env-store";
+import { ShellEnvResolver } from "./services/shell-env-resolver";
+import { EnvService } from "./services/env-service";
 
 /** Initialize the DI container with all server dependencies. */
 export function setupContainer(mcodeDir: string): typeof container {
@@ -64,6 +67,22 @@ export function setupContainer(mcodeDir: string): typeof container {
   // JobObject — constructed once so all child processes share the same kernel job
   const jobObject = new JobObject();
   container.registerInstance("JobObject", jobObject);
+
+  container.register(
+    ProtectedEnvStore,
+    { useClass: ProtectedEnvStore },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register(
+    ShellEnvResolver,
+    { useClass: ShellEnvResolver },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register(
+    EnvService,
+    { useClass: EnvService },
+    { lifecycle: Lifecycle.Singleton },
+  );
 
   // Database
   const db = openDatabase();

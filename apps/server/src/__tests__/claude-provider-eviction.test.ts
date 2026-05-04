@@ -12,6 +12,7 @@ vi.mock("@mcode/shared", async (importOriginal) => {
 });
 
 import { ClaudeProvider } from "../providers/claude/claude-provider";
+import { stubEnvService } from "./stub-env-service.js";
 import { queryMethodStubs } from "./helpers/mock-sdk-query";
 
 /** Mock SDK that yields a tool_use then pauses indefinitely (simulating a long-running tool). */
@@ -56,7 +57,7 @@ describe("ClaudeProvider idle eviction with pending tool_use (#291)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
-    provider = new ClaudeProvider();
+    provider = new ClaudeProvider(stubEnvService());
   });
 
   afterEach(() => {

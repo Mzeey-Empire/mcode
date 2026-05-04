@@ -65,6 +65,7 @@ vi.mock("@github/copilot-sdk", () => ({
 
 import which from "which";
 import { CopilotProvider } from "../providers/copilot/copilot-provider.js";
+import { stubEnvService } from "./stub-env-service.js";
 
 /** Minimal SettingsService stub. */
 function makeSettingsService(cliPath = "") {
@@ -110,7 +111,7 @@ describe("CopilotProvider bootstrap", () => {
       });
       (which as unknown as Mock).mockResolvedValue("/usr/bin/node");
 
-      const provider = new CopilotProvider(makeSettingsService() as any);
+      const provider = new CopilotProvider(makeSettingsService() as any, stubEnvService());
       await provider.listModels();
 
       // which was called to find the real node binary
@@ -127,7 +128,7 @@ describe("CopilotProvider bootstrap", () => {
         configurable: true,
       });
 
-      const provider = new CopilotProvider(makeSettingsService() as any);
+      const provider = new CopilotProvider(makeSettingsService() as any, stubEnvService());
       await provider.listModels();
 
       // which should not be called when not in Electron
@@ -145,7 +146,7 @@ describe("CopilotProvider bootstrap", () => {
         },
       );
 
-      const provider = new CopilotProvider(makeSettingsService() as any);
+      const provider = new CopilotProvider(makeSettingsService() as any, stubEnvService());
       await provider.listModels();
 
       const opts = MockCopilotClient.mock.calls[0]?.[0];
@@ -159,7 +160,7 @@ describe("CopilotProvider bootstrap", () => {
         },
       );
 
-      const provider = new CopilotProvider(makeSettingsService() as any);
+      const provider = new CopilotProvider(makeSettingsService() as any, stubEnvService());
       await provider.listModels();
 
       const opts = MockCopilotClient.mock.calls[0]?.[0] ?? {};
@@ -169,7 +170,7 @@ describe("CopilotProvider bootstrap", () => {
 
   describe("client reuse", () => {
     it("reuses healthy connected client", async () => {
-      const provider = new CopilotProvider(makeSettingsService() as any);
+      const provider = new CopilotProvider(makeSettingsService() as any, stubEnvService());
 
       await provider.listModels();
       mockClient.getState.mockReturnValue("connected");
@@ -188,7 +189,7 @@ describe("CopilotProvider bootstrap", () => {
         new Error("CLI server exited with code 1"),
       );
 
-      const provider = new CopilotProvider(makeSettingsService() as any);
+      const provider = new CopilotProvider(makeSettingsService() as any, stubEnvService());
 
       const events: AgentEvent[] = [];
       provider.on("event", (e: AgentEvent) => events.push(e));
@@ -214,7 +215,7 @@ describe("CopilotProvider bootstrap", () => {
         new Error("Could not find @github/copilot"),
       );
 
-      const provider = new CopilotProvider(makeSettingsService() as any);
+      const provider = new CopilotProvider(makeSettingsService() as any, stubEnvService());
 
       const events: AgentEvent[] = [];
       provider.on("event", (e: AgentEvent) => events.push(e));
@@ -266,7 +267,7 @@ async function runWithMockSession(
     mockSession.fire("session.idle");
   });
 
-  const provider = new CopilotProvider(makeSettingsService() as any);
+  const provider = new CopilotProvider(makeSettingsService() as any, stubEnvService());
   const events: AgentEvent[] = [];
   provider.on("event", (e: AgentEvent) => events.push(e));
 
@@ -408,7 +409,7 @@ describe("CopilotProvider.complete()", () => {
       mockSession.fire("session.idle");
     });
 
-    const provider = new CopilotProvider(makeSettingsService() as any);
+    const provider = new CopilotProvider(makeSettingsService() as any, stubEnvService());
     const result = await provider.complete("Generate PR draft", "gpt-4.1", "/tmp");
 
     expect(result).toBe(jsonResponse);
@@ -426,7 +427,7 @@ describe("CopilotProvider.complete()", () => {
       mockSession.fire("session.idle");
     });
 
-    const provider = new CopilotProvider(makeSettingsService() as any);
+    const provider = new CopilotProvider(makeSettingsService() as any, stubEnvService());
     const result = await provider.complete("Generate PR draft", "gpt-4.1", "/tmp");
 
     expect(result).toBe('{"title":"feat: x","body":"b"}');
@@ -441,7 +442,7 @@ describe("CopilotProvider.complete()", () => {
       mockSession.fire("session.error", { message: "Model not available" });
     });
 
-    const provider = new CopilotProvider(makeSettingsService() as any);
+    const provider = new CopilotProvider(makeSettingsService() as any, stubEnvService());
 
     await expect(provider.complete("prompt", "gpt-4.1", "/tmp")).rejects.toThrow(
       "Model not available",
@@ -457,7 +458,7 @@ describe("CopilotProvider.complete()", () => {
       mockSession.fire("session.idle");
     });
 
-    const provider = new CopilotProvider(makeSettingsService() as any);
+    const provider = new CopilotProvider(makeSettingsService() as any, stubEnvService());
 
     await expect(provider.complete("prompt", "gpt-4.1", "/tmp")).rejects.toThrow(
       "no text content",
@@ -470,7 +471,7 @@ describe("CopilotProvider.complete()", () => {
     mockClient.createSession.mockResolvedValue(mockSession);
     mockSession.send.mockRejectedValue(new Error("network error"));
 
-    const provider = new CopilotProvider(makeSettingsService() as any);
+    const provider = new CopilotProvider(makeSettingsService() as any, stubEnvService());
 
     await expect(provider.complete("prompt", "gpt-4.1", "/tmp")).rejects.toThrow(
       "network error",
@@ -573,7 +574,7 @@ describe("CopilotProvider.listModels() cache", () => {
       { id: "gpt-4.1", name: "GPT-4.1", capabilities: {}, billing: {} },
     ]);
 
-    const provider = new CopilotProvider(makeSettingsService() as any);
+    const provider = new CopilotProvider(makeSettingsService() as any, stubEnvService());
 
     const first = await provider.listModels();
     const second = await provider.listModels();
@@ -589,7 +590,7 @@ describe("CopilotProvider.listModels() cache", () => {
       { id: "gpt-4.1", name: "GPT-4.1", capabilities: {}, billing: {} },
     ]);
 
-    const provider = new CopilotProvider(makeSettingsService() as any);
+    const provider = new CopilotProvider(makeSettingsService() as any, stubEnvService());
 
     await provider.listModels();
     // Advance past the 10-minute TTL
