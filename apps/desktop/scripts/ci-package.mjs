@@ -125,11 +125,12 @@ const ebCli = findEbCli();
 console.log(`[ci-package] Resolved electron-builder CLI: ${ebCli}`);
 
 // ---------------------------------------------------------------------------
-// 7. Run electron-builder
+// 7. Run electron-builder (extra CLI args forwarded for platform/arch control)
 // ---------------------------------------------------------------------------
 
+const extraArgs = process.argv.slice(2);
 console.log("[ci-package] Running electron-builder (npm fallback)...");
-execFileSync(process.execPath, [ebCli, "--publish", "never"], {
+execFileSync(process.execPath, [ebCli, "--publish", "never", ...extraArgs], {
   cwd: desktopRoot,
   stdio: "inherit",
   env: { ...process.env, PATH: filteredPath },
