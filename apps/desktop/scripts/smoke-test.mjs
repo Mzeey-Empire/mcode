@@ -17,7 +17,7 @@
  *   node apps/desktop/scripts/smoke-test.mjs --bundle    # test pre-packaging bundle (requires native deps on PATH)
  */
 
-import { spawn } from "child_process";
+import { spawn, execFileSync } from "child_process";
 import { existsSync, mkdirSync, rmSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -153,6 +153,23 @@ if (found.electronDir) {
   }
 }
 
+// On macOS, verify the binary's code signature before attempting to run.
+// A bad signature causes a silent SIGKILL from the kernel.
+if (process.platform === "darwin") {
+  try {
+    const sigInfo = execFileSync("codesign", ["-dvv", found.electron], { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] });
+    console.log(`[smoke-test] codesign info:\n${sigInfo}`);
+  } catch (e) {
+    console.log(`[smoke-test] codesign -dvv output: ${e.stderr || e.stdout || e.message}`);
+  }
+  try {
+    execFileSync("codesign", ["--verify", "--strict", found.electron], { encoding: "utf-8" });
+    console.log("[smoke-test] codesign --verify: OK");
+  } catch (e) {
+    console.error(`[smoke-test] codesign --verify FAILED: ${e.stderr || e.message}`);
+  }
+}
+
 console.log(`[smoke-test] Starting server on port ${SMOKE_PORT}...`);
 
 const child = spawn(found.electron, [
@@ -175,10 +192,15 @@ child.stdout.on("data", (chunk) => { process.stdout.write(chunk); });
 let exited = false;
 /** Resolves when the child process exits. */
 const exitPromise = new Promise((resolve) => {
-  child.on("exit", (code) => {
+  child.on("exit", (code, signal) => {
     exited = true;
+    if (signal) {
+      console.error(`[smoke-test] Server killed by signal ${signal}`);
+    }
     if (code !== null && code !== 0) {
       console.error(`[smoke-test] Server exited with code ${code}`);
+    }
+    if ((code !== null && code !== 0) || signal) {
       if (serverStderr) {
         console.error("[smoke-test] stderr:\n" + serverStderr.slice(-2000));
       }

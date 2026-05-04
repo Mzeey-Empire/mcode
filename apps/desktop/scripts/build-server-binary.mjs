@@ -124,7 +124,7 @@ export async function buildServerBinary({
   // ARM64 macOS requires all executables to be signed. The copy invalidates
   // the original ad-hoc signature, so re-sign to prevent a kernel SIGKILL.
   if (electronPlatformName === "darwin" || electronPlatformName === "mas") {
-    execFileSync("codesign", ["--sign", "-", "--force", "--preserve-metadata=entitlements", dstBinary]);
+    execFileSync("codesign", ["--sign", "-", "--force", dstBinary]);
     console.log(`[build-server-binary] Ad-hoc signed ${dstBinary}`);
   }
 
