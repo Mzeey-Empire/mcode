@@ -98,10 +98,10 @@ export function mapCursorAcpSessionNotification(
 
   switch (update.sessionUpdate) {
     case "agent_message_chunk":
-    case "agent_thought_chunk":
       return mapAgentLanguageChunk(threadId, acc, update);
     case "plan":
       return mapAcpPlanUpdate(update, threadId, todoSnapshot);
+    case "agent_thought_chunk":
     case "user_message_chunk":
     case "available_commands_update":
     case "current_mode_update":
@@ -125,13 +125,9 @@ export function mapCursorAcpSessionNotification(
 function mapAgentLanguageChunk(
   threadId: string,
   acc: CursorStreamAccumulator,
-  update:
-    | (import("@agentclientprotocol/sdk").ContentChunk & {
-        sessionUpdate: "agent_message_chunk";
-      })
-    | (import("@agentclientprotocol/sdk").ContentChunk & {
-        sessionUpdate: "agent_thought_chunk";
-      }),
+  update: import("@agentclientprotocol/sdk").ContentChunk & {
+    sessionUpdate: "agent_message_chunk";
+  },
 ): AgentEvent[] {
   if (update.content.type !== "text" || !update.content.text) return [];
   const text = update.content.text;

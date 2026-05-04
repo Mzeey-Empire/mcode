@@ -39,7 +39,7 @@ describe("mapCursorAcpSessionNotification", () => {
     expect(state.accumulator.assistantText).toBe("Hi there");
   });
 
-  it("maps agent_thought_chunk to TextDelta like message chunks", () => {
+  it("suppresses agent_thought_chunk so thinking data never leaks to the UI", () => {
     const state = createCursorAcpTurnState();
     const ev = mapCursorAcpSessionNotification(
       {
@@ -52,9 +52,8 @@ describe("mapCursorAcpSessionNotification", () => {
       threadId,
       state,
     );
-    expect(ev).toEqual([
-      { type: AgentEventType.TextDelta, threadId, delta: "Thinking out loud..." },
-    ]);
+    expect(ev).toEqual([]);
+    expect(state.accumulator.assistantText).toBe("");
   });
 
   it("maps tool_call_update to ToolResult", () => {
