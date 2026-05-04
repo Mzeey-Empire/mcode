@@ -19,6 +19,22 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(__dirname, "..");
 const snapshotDir = resolve(desktopRoot, "dist/snapshot");
 
+// ---------------------------------------------------------------------------
+// Cross-arch guard: electron-mksnapshot can only produce snapshots for the
+// host architecture. When CI cross-compiles (e.g. arm64 host → x64 target),
+// skip snapshot generation entirely. The after-pack hook handles the missing
+// snapshot gracefully by skipping the fuse flip.
+// ---------------------------------------------------------------------------
+
+const targetArch = process.env.MCODE_TARGET_ARCH || process.arch;
+if (targetArch !== process.arch) {
+  console.log(
+    `Skipping V8 snapshot: target arch "${targetArch}" !== host arch "${process.arch}". ` +
+    `The app will start without a custom snapshot.`,
+  );
+  process.exit(0);
+}
+
 // Clean stale artifacts from previous builds to prevent after-pack from
 // copying an outdated snapshot if this script fails mid-way.
 if (existsSync(snapshotDir)) {

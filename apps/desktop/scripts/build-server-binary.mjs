@@ -1,4 +1,5 @@
 import { copyFile, mkdir, chmod, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 
 /**
@@ -113,6 +114,28 @@ export async function buildServerBinary({
   if (electronPlatformName !== "win32") {
     await chmod(dstBinary, 0o755);
   }
+
+  // Electron (even with ELECTRON_RUN_AS_NODE=1) resolves icudtl.dat relative
+  // to its own binary location. The renamed copy lives in a different directory
+  // than the original, so we must place a copy of icudtl.dat alongside it.
+  let icuSrc;
+  if (electronPlatformName === "darwin" || electronPlatformName === "mas") {
+    const appBundle = path.join(appOutDir, `${productFilename}.app`);
+    icuSrc = path.join(
+      appBundle, "Contents", "Frameworks",
+      "Electron Framework.framework", "Resources", "icudtl.dat",
+    );
+  } else {
+    icuSrc = path.join(path.dirname(srcBinary), "icudtl.dat");
+  }
+  if (existsSync(icuSrc)) {
+    const icuDst = path.join(path.dirname(dstBinary), "icudtl.dat");
+    await copyFile(icuSrc, icuDst);
+    console.log(`[build-server-binary] Copied icudtl.dat to ${icuDst}`);
+  } else {
+    console.warn(`[build-server-binary] icudtl.dat not found at ${icuSrc}, server may fail to start`);
+  }
+
   if (electronPlatformName === "win32") {
     if (!appVersion) {
       throw new Error(
