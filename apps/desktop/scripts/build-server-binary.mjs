@@ -1,5 +1,6 @@
 import { copyFile, mkdir, chmod, readFile, writeFile, symlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 
 /**
@@ -118,6 +119,13 @@ export async function buildServerBinary({
   await copyFile(srcBinary, dstBinary);
   if (electronPlatformName !== "win32") {
     await chmod(dstBinary, 0o755);
+  }
+
+  // ARM64 macOS requires all executables to be signed. The copy invalidates
+  // the original ad-hoc signature, so re-sign to prevent a kernel SIGKILL.
+  if (electronPlatformName === "darwin" || electronPlatformName === "mas") {
+    execFileSync("codesign", ["--sign", "-", "--force", "--preserve-metadata=entitlements", dstBinary]);
+    console.log(`[build-server-binary] Ad-hoc signed ${dstBinary}`);
   }
 
   // Electron (even with ELECTRON_RUN_AS_NODE=1) resolves icudtl.dat relative
