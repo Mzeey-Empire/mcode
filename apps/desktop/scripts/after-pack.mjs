@@ -26,7 +26,44 @@ export default async function afterPack(context) {
   );
 
   // -------------------------------------------------------------------------
-  // Step 1: V8 snapshot copy + fuse flip (skip if snapshot not generated)
+  // Step 1: Produce renamed server binary BEFORE the fuse flip. The server
+  // binary runs with ELECTRON_RUN_AS_NODE=1 and must NOT have the browser
+  // V8 snapshot fuse enabled, otherwise it crashes trying to load a snapshot
+  // file that isn't alongside it.
+  // -------------------------------------------------------------------------
+
+  const productFilename =
+    context.packager.appInfo.productFilename ??
+    context.packager.appInfo.productName;
+  // Windows VERSIONINFO requires a numeric dotted quad (x.x.x.x). package.json
+  // versions can include semver prerelease/build suffixes (e.g. "1.2.3-beta.1"),
+  // so extract numeric segments only and pad to four.
+  const rawVersion = context.packager.appInfo.version;
+  const numericSegments = (rawVersion.match(/\d+/g) ?? []).slice(0, 4);
+  const appVersion = [
+    ...numericSegments,
+    ...Array(Math.max(0, 4 - numericSegments.length)).fill("0"),
+  ].join(".");
+  const companyName = context.packager.appInfo.companyName ?? "Mcode";
+
+  // The renamed copy at Contents/Resources/bin/mcode-server is co-signed by
+  // electron-builder via the `mac.binaries` entry in package.json, so it
+  // passes notarytool when notarization is enabled.
+  await buildServerBinary({
+    appOutDir: context.appOutDir,
+    electronPlatformName,
+    productFilename,
+    executableName: context.packager.executableName,
+    appVersion,
+    companyName,
+  });
+
+  console.log("[after-pack] Built renamed server binary");
+
+  // -------------------------------------------------------------------------
+  // Step 2: V8 snapshot copy + fuse flip (skip if snapshot not generated).
+  // This runs AFTER the server binary copy so only the main Electron binary
+  // (used for the GUI) gets the fuse — not the ELECTRON_RUN_AS_NODE copy.
   // -------------------------------------------------------------------------
 
   if (!existsSync(snapshotFile)) {
@@ -72,36 +109,4 @@ export default async function afterPack(context) {
 
     console.log("[after-pack] V8 snapshot fuse enabled");
   }
-
-  // -------------------------------------------------------------------------
-  // Step 2: Produce renamed server binary (runs after fuse flip so the copy
-  // inherits the already-flipped state byte-for-byte).
-  // -------------------------------------------------------------------------
-
-  const productFilename =
-    context.packager.appInfo.productFilename ??
-    context.packager.appInfo.productName;
-  // Windows VERSIONINFO requires a numeric dotted quad (x.x.x.x). package.json
-  // versions can include semver prerelease/build suffixes (e.g. "1.2.3-beta.1"),
-  // so extract numeric segments only and pad to four.
-  const rawVersion = context.packager.appInfo.version;
-  const numericSegments = (rawVersion.match(/\d+/g) ?? []).slice(0, 4);
-  const appVersion = [
-    ...numericSegments,
-    ...Array(Math.max(0, 4 - numericSegments.length)).fill("0"),
-  ].join(".");
-  const companyName = context.packager.appInfo.companyName ?? "Mcode";
-
-  // The renamed copy at Contents/Resources/bin/mcode-server is co-signed by
-  // electron-builder via the `mac.binaries` entry in package.json, so it
-  // passes notarytool when notarization is enabled.
-  await buildServerBinary({
-    appOutDir: context.appOutDir,
-    electronPlatformName,
-    productFilename,
-    appVersion,
-    companyName,
-  });
-
-  console.log("[after-pack] Built renamed server binary");
 }
