@@ -368,6 +368,14 @@ export class ServerManager {
         env.BETTER_SQLITE3_BINDING = nativeBindingPath;
       }
 
+      // The renamed server binary lives in resources/bin/ which lacks Electron's
+      // shared libraries (libffmpeg.so). Point LD_LIBRARY_PATH at the original
+      // Electron binary directory so the dynamic linker finds them.
+      if (process.platform === "linux" && app.isPackaged) {
+        const electronDir = dirname(process.execPath);
+        env.LD_LIBRARY_PATH = [electronDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(":");
+      }
+
       // V8 flags go in the args array for child_process.spawn.
       const v8Flags = [`--max-old-space-size=${heapMb}`, "--max-semi-space-size=2", "--expose-gc"];
       const args = [...v8Flags, entry];

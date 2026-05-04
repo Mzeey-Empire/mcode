@@ -72,13 +72,16 @@ function findUnpackedServer() {
   ];
 
   for (const c of candidates) {
-    // The renamed binary mirrors production; fall back to the main binary
-    const runtime = existsSync(c.renamedBinary) ? c.renamedBinary : c.electron;
+    // The renamed binary mirrors production; fall back to the main binary.
+    // Track the original Electron dir so we can set library search paths.
+    const useRenamed = existsSync(c.renamedBinary);
+    const runtime = useRenamed ? c.renamedBinary : c.electron;
     if (existsSync(c.server) && existsSync(runtime)) {
       const electronBinding = resolve(c.sqlite, "better_sqlite3.electron.node");
       const nodeBinding = resolve(c.sqlite, "better_sqlite3.node");
       const binding = existsSync(electronBinding) ? electronBinding : existsSync(nodeBinding) ? nodeBinding : undefined;
-      return { server: c.server, electron: runtime, binding };
+      const electronDir = useRenamed ? dirname(c.electron) : undefined;
+      return { server: c.server, electron: runtime, binding, electronDir };
     }
   }
   return null;
@@ -137,6 +140,17 @@ const env = {
 
 if (found.binding) {
   env.BETTER_SQLITE3_BINDING = found.binding;
+}
+
+// When using the renamed binary in a different directory, the dynamic linker
+// can't find Electron's shared libraries (libffmpeg.so on Linux). Point
+// LD_LIBRARY_PATH at the original Electron binary directory as a fallback.
+if (found.electronDir) {
+  if (process.platform === "linux") {
+    env.LD_LIBRARY_PATH = [found.electronDir, process.env.LD_LIBRARY_PATH].filter(Boolean).join(":");
+  } else if (process.platform === "darwin") {
+    env.DYLD_LIBRARY_PATH = [found.electronDir, process.env.DYLD_LIBRARY_PATH].filter(Boolean).join(":");
+  }
 }
 
 console.log(`[smoke-test] Starting server on port ${SMOKE_PORT}...`);

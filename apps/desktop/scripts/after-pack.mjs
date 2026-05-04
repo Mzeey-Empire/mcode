@@ -79,10 +79,13 @@ export default async function afterPack(context) {
         "Contents/Frameworks/Electron Framework.framework/Resources",
       );
       snapshotDest = join(frameworkDir, "browser_v8_context_snapshot.bin");
+      // @electron/fuses expects the main executable, not the framework binary.
+      // It resolves to the framework internally; passing the framework path
+      // causes double Frameworks/ resolution (ENOENT).
       electronBinary = join(
         appOutDir,
         `${context.packager.appInfo.productFilename}.app`,
-        "Contents/Frameworks/Electron Framework.framework/Electron Framework",
+        "Contents", "MacOS", context.packager.appInfo.productFilename,
       );
     } else if (electronPlatformName === "win32") {
       snapshotDest = join(appOutDir, "browser_v8_context_snapshot.bin");
