@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.8.0](https://github.com/Mzeey-Emipre/mcode/compare/mcode-v0.7.0...mcode-v0.8.0) (2026-05-04)
+
+
+### Features
+
+* add performance.threadCacheSize setting ([#375](https://github.com/Mzeey-Emipre/mcode/issues/375)) ([1344cb3](https://github.com/Mzeey-Emipre/mcode/commit/1344cb3438bbb7d62167151dfb24c21b5a237e93))
+* add staleness guard to github.checkStatus RPC handler ([#374](https://github.com/Mzeey-Emipre/mcode/issues/374)) ([cf79711](https://github.com/Mzeey-Emipre/mcode/commit/cf79711dcab9bce9857281cfe360956495aa1414))
+* auto-updater with user controls, notifications, and release notes ([#368](https://github.com/Mzeey-Emipre/mcode/issues/368)) ([a77f2a4](https://github.com/Mzeey-Emipre/mcode/commit/a77f2a49571d5843e9eb0312f4e3dffc9548e974))
+* Claude usage limits in sidebar popover + hover fix ([#376](https://github.com/Mzeey-Emipre/mcode/issues/376)) ([03e82e2](https://github.com/Mzeey-Emipre/mcode/commit/03e82e211b20cc802a1bc5419b22e0d7f00f893b))
+* **cursor:** Cursor CLI provider, settings UI, and agent models discovery ([#373](https://github.com/Mzeey-Emipre/mcode/issues/373)) ([8cee807](https://github.com/Mzeey-Emipre/mcode/commit/8cee807dfc5ae8178c8a2b0f7230e90193dcd4ec))
+* Drizzle migration framework + branch-aware dev DBs ([#393](https://github.com/Mzeey-Emipre/mcode/issues/393)) ([3eb79ca](https://github.com/Mzeey-Emipre/mcode/commit/3eb79ca457daec64e834ba52c53fb82a5f6db9b2))
+* remove client-side CI check fan-out on reconnect ([#372](https://github.com/Mzeey-Emipre/mcode/issues/372)) ([2cbba86](https://github.com/Mzeey-Emipre/mcode/commit/2cbba86399e96bc5fb0756c81675397f93d0a70b))
+* **server:** refresh child env from shell or registry on demand ([#394](https://github.com/Mzeey-Emipre/mcode/issues/394)) ([73bf7fb](https://github.com/Mzeey-Emipre/mcode/commit/73bf7fbe0d0aaf3a9eabcc55882a4e6dc02d5fea))
+* **sidebar:** persist project sort order and drag reorder ([#389](https://github.com/Mzeey-Emipre/mcode/issues/389)) ([659b707](https://github.com/Mzeey-Emipre/mcode/commit/659b707f725cbcce267caab666e2df42f664562a))
+* skip redundant RPCs on thread switch ([#333](https://github.com/Mzeey-Emipre/mcode/issues/333)) ([#371](https://github.com/Mzeey-Emipre/mcode/issues/371)) ([adce0af](https://github.com/Mzeey-Emipre/mcode/commit/adce0afd68f602e3627a5b950eab5cf59f38d5d1))
+* **web:** eliminate MessageList unmount/remount on thread switch ([#370](https://github.com/Mzeey-Emipre/mcode/issues/370)) ([38141af](https://github.com/Mzeey-Emipre/mcode/commit/38141aff7a540959f2b06b266d3e0a5cee344897))
+* **web:** LRU message cache for thread switching ([#369](https://github.com/Mzeey-Emipre/mcode/issues/369)) ([cbe53c6](https://github.com/Mzeey-Emipre/mcode/commit/cbe53c64296bb58db3740be66359c503cb5bf60d))
+* **web:** modern project selector + unified command palette ([#378](https://github.com/Mzeey-Emipre/mcode/issues/378)) ([43a1326](https://github.com/Mzeey-Emipre/mcode/commit/43a1326e5698e087d4f571627f06c934f1291faa))
+* **web:** optimistic thread scaffold during create and branch ([#387](https://github.com/Mzeey-Emipre/mcode/issues/387)) ([1c1b1a7](https://github.com/Mzeey-Emipre/mcode/commit/1c1b1a79830f268ed8d546c5ca5633aecefd68f9))
+
+
+### Bug Fixes
+
+* add per-model context window metadata for Claude models ([#356](https://github.com/Mzeey-Emipre/mcode/issues/356)) ([5134469](https://github.com/Mzeey-Emipre/mcode/commit/5134469fa3a13cb0ce7da8f7f28d5f58df3f3c1a))
+* **cursor:** discover .cursor skills/commands/plugins and inject user AGENTS.md ([#381](https://github.com/Mzeey-Emipre/mcode/issues/381)) ([3e99b39](https://github.com/Mzeey-Emipre/mcode/commit/3e99b39772c5c221d9ea721f4840359dc5e61d68))
+* **cursor:** persistent ACP subprocess and unified tool call handling ([#385](https://github.com/Mzeey-Emipre/mcode/issues/385)) ([e49d0eb](https://github.com/Mzeey-Emipre/mcode/commit/e49d0eb22655d53a60c5c530e6607f258a7a9784))
+* **cursor:** suppress agent_thought_chunk to prevent thinking data leak ([04e7d34](https://github.com/Mzeey-Emipre/mcode/commit/04e7d34debdb47712ec077886cb43c70d0bac358))
+* **cursor:** suppress thinking data leak in ACP responses ([#392](https://github.com/Mzeey-Emipre/mcode/issues/392)) ([04e7d34](https://github.com/Mzeey-Emipre/mcode/commit/04e7d34debdb47712ec077886cb43c70d0bac358))
+* **desktop:** bundle server for dev without tsx loader ([#382](https://github.com/Mzeey-Emipre/mcode/issues/382)) ([14ad3a2](https://github.com/Mzeey-Emipre/mcode/commit/14ad3a26b694f7d3b05d354d37187a2219a503ca))
+* persist user-selected model for dynamic provider IDs ([#388](https://github.com/Mzeey-Emipre/mcode/issues/388)) ([4e24692](https://github.com/Mzeey-Emipre/mcode/commit/4e246926954cf04345280dbec705557efea45767))
+* rename packaged server process to 'Mcode Server' across platforms ([#377](https://github.com/Mzeey-Emipre/mcode/issues/377)) ([f58a7e1](https://github.com/Mzeey-Emipre/mcode/commit/f58a7e196f99119002abc37e06df140b134f9413))
+* **server:** self-heal migrations on databases from older builds ([#395](https://github.com/Mzeey-Emipre/mcode/issues/395)) ([b8e423f](https://github.com/Mzeey-Emipre/mcode/commit/b8e423f2c50fecbeec53018a6e5d519c4285033c))
+* **web:** align Cursor brand icon across Open menu and model selector ([60fd1d1](https://github.com/Mzeey-Emipre/mcode/commit/60fd1d15731e1430103ff9f9d990067114b54530))
+* **web:** align Cursor brand icon in Open menu and model selector ([#379](https://github.com/Mzeey-Emipre/mcode/issues/379)) ([60fd1d1](https://github.com/Mzeey-Emipre/mcode/commit/60fd1d15731e1430103ff9f9d990067114b54530))
+* **web:** cold-start landing add-project shortcuts and footer hints ([#380](https://github.com/Mzeey-Emipre/mcode/issues/380)) ([03b53fa](https://github.com/Mzeey-Emipre/mcode/commit/03b53faba266c0739d210a94c0fae546a4cb0488))
+* **web:** hide invalid relative time and tidy recent projects landing ([#384](https://github.com/Mzeey-Emipre/mcode/issues/384)) ([1b2518c](https://github.com/Mzeey-Emipre/mcode/commit/1b2518c9fe33746d214239f496c7bd8ec5d9149a))
+* **web:** New Thread palette flow, picker layout, stable E2E ([#386](https://github.com/Mzeey-Emipre/mcode/issues/386)) ([ea6993b](https://github.com/Mzeey-Emipre/mcode/commit/ea6993bcd7e00b31e01fc41ab1b0866a637304a2))
+* **web:** prevent user chat bubble from overflowing horizontally ([#383](https://github.com/Mzeey-Emipre/mcode/issues/383)) ([62666e9](https://github.com/Mzeey-Emipre/mcode/commit/62666e9fb6e5bf8335cba7dcccfc06f6be832f02))
+
 ## [0.7.0](https://github.com/Mzeey-Emipre/mcode/compare/mcode-v0.6.0...mcode-v0.7.0) (2026-04-24)
 
 
