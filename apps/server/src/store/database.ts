@@ -11,6 +11,14 @@ import { getMcodeDir, resolveDbPath } from "@mcode/shared";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { bootstrapDrizzle } from "./bootstrap-drizzle.js";
+import {
+  createMigrationBackup,
+  pruneMigrationBackups,
+  restoreMigrationBackup,
+} from "./migration-backup.js";
+
+/** How many pre-migration backups to retain per DB file. */
+const MIGRATION_BACKUP_RETENTION = 3;
 
 /**
  * Drizzle's migrator joins paths with `/` inside readMigrationFiles; normalize so
@@ -129,6 +137,40 @@ function runMigrations(db: Database.Database): void {
 }
 
 /**
+ * Run migrations with a pre-flight backup and auto-restore on failure.
+ *
+ * The backup is created from the on-disk file before opening the connection,
+ * so a partially-applied migration that throws cannot leave the user without
+ * a clean recovery point. On success, old backups are pruned to a small ring
+ * so disk usage stays bounded across many app starts.
+ *
+ * `:memory:` databases skip the backup path entirely (nothing to restore).
+ */
+function runMigrationsWithBackup(db: Database.Database, dbPath: string): void {
+  const backupPath = createMigrationBackup(dbPath);
+  try {
+    runMigrations(db);
+  } catch (err) {
+    if (backupPath) {
+      try {
+        db.close();
+      } catch {
+        // ignore: connection may already be invalid after a failed migration
+      }
+      restoreMigrationBackup(backupPath, dbPath);
+    }
+    throw err;
+  }
+  if (backupPath) {
+    try {
+      pruneMigrationBackups(dbPath, MIGRATION_BACKUP_RETENTION);
+    } catch {
+      // ignore: pruning is best-effort and should never block startup
+    }
+  }
+}
+
+/**
  * Open (or create) a SQLite database with WAL mode and foreign keys enabled,
  * then run any pending Drizzle migrations.
  *
@@ -157,9 +199,13 @@ export function openDatabase(opts?: {
   const db = new Database(resolvedPath, { nativeBinding });
   applyPragmas(db, true);
   try {
-    runMigrations(db);
+    runMigrationsWithBackup(db, resolvedPath);
   } catch (err) {
-    db.close();
+    try {
+      db.close();
+    } catch {
+      // ignore: connection may already be invalid
+    }
     throw err;
   }
   return db;
