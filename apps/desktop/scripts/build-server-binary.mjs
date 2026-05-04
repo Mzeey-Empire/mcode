@@ -141,6 +141,37 @@ export async function buildServerBinary({
     console.warn(`[build-server-binary] icudtl.dat not found at ${icuSrc}, server may fail to start`);
   }
 
+  // Electron's built-in v8_context_snapshot.bin is required by V8 at startup
+  // (separate from the custom browser snapshot used by the GUI fuse). Without
+  // it next to the binary, ELECTRON_RUN_AS_NODE crashes on snapshot load.
+  let v8SnapSrc;
+  if (electronPlatformName === "darwin" || electronPlatformName === "mas") {
+    const appBundle = path.join(appOutDir, `${productFilename}.app`);
+    v8SnapSrc = path.join(
+      appBundle, "Contents", "Frameworks",
+      "Electron Framework.framework", "Resources", "v8_context_snapshot.bin",
+    );
+  } else {
+    v8SnapSrc = path.join(path.dirname(srcBinary), "v8_context_snapshot.bin");
+  }
+  if (existsSync(v8SnapSrc)) {
+    const v8SnapDst = path.join(path.dirname(dstBinary), "v8_context_snapshot.bin");
+    await copyFile(v8SnapSrc, v8SnapDst);
+    console.log(`[build-server-binary] Copied v8_context_snapshot.bin to ${v8SnapDst}`);
+  }
+
+  // On Linux, libffmpeg.so is linked into the Electron binary. The dynamic
+  // linker uses RPATH ($ORIGIN) to find it, so a copy in a different directory
+  // needs the library alongside it or LD_LIBRARY_PATH set at runtime.
+  if (electronPlatformName === "linux") {
+    const ffmpegSrc = path.join(path.dirname(srcBinary), "libffmpeg.so");
+    if (existsSync(ffmpegSrc)) {
+      const ffmpegDst = path.join(path.dirname(dstBinary), "libffmpeg.so");
+      await copyFile(ffmpegSrc, ffmpegDst);
+      console.log(`[build-server-binary] Copied libffmpeg.so to ${ffmpegDst}`);
+    }
+  }
+
   if (electronPlatformName === "win32") {
     if (!appVersion) {
       throw new Error(
