@@ -1,4 +1,4 @@
-import { copyFile, mkdir, chmod, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, chmod, readFile, writeFile, symlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
@@ -158,6 +158,21 @@ export async function buildServerBinary({
     const v8SnapDst = path.join(path.dirname(dstBinary), "v8_context_snapshot.bin");
     await copyFile(v8SnapSrc, v8SnapDst);
     console.log(`[build-server-binary] Copied v8_context_snapshot.bin to ${v8SnapDst}`);
+  }
+
+  // On macOS, the Electron binary's @rpath includes @loader_path/../Frameworks.
+  // For the original at Contents/MacOS/<name> this resolves to Contents/Frameworks.
+  // For the renamed copy at Contents/Resources/bin/mcode-server it resolves to
+  // Contents/Resources/Frameworks (doesn't exist). Create a symlink so dyld
+  // finds the Electron Framework without requiring DYLD_* env vars (which SIP
+  // strips from signed binaries).
+  if (electronPlatformName === "darwin" || electronPlatformName === "mas") {
+    const appBundle = path.join(appOutDir, `${productFilename}.app`);
+    const frameworksLink = path.join(appBundle, "Contents", "Resources", "Frameworks");
+    if (!existsSync(frameworksLink)) {
+      await symlink("../Frameworks", frameworksLink);
+      console.log(`[build-server-binary] Created Frameworks symlink at ${frameworksLink}`);
+    }
   }
 
   // On Linux, libffmpeg.so is linked into the Electron binary. The dynamic
