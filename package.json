@@ -22,9 +22,9 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "logs:tail": "node scripts/logs-tail.mjs",
-    "state:paths": "node scripts/state-paths.mjs",
+    "state:paths": "bun scripts/state-paths.mjs",
     "state:reset": "node scripts/state-reset.mjs",
-    "db:info": "node scripts/db-info.mjs"
+    "db:info": "bun scripts/db-info.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.19.17",

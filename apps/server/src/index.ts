@@ -133,6 +133,22 @@ if (!process.env.MCODE_GIT_BRANCH && process.env.NODE_ENV !== "production") {
   }
 }
 
+// Standalone dev: detect checkout root for `.mcode-local` DB paths in linked worktrees.
+// The desktop shell sets MCODE_GIT_TOPLEVEL when it spawns the server.
+if (!process.env.MCODE_GIT_TOPLEVEL && process.env.NODE_ENV !== "production") {
+  try {
+    const top = execSync("git rev-parse --show-toplevel", {
+      encoding: "utf-8",
+      timeout: 3000,
+    }).trim();
+    if (top) {
+      process.env.MCODE_GIT_TOPLEVEL = top;
+    }
+  } catch {
+    // Not a git checkout or git missing
+  }
+}
+
 // Initialize DI container (PtyPidRegistry needs the data dir path at construction time)
 const container = setupContainer(getMcodeDir());
 

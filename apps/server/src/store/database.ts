@@ -13,8 +13,8 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { bootstrapDrizzle } from "./bootstrap-drizzle.js";
 
 /**
- * Drizzle Kit joins paths with `/` inside readMigrationFiles; normalize so Windows
- * `migrationsFolder` strings remain valid for fs.*
+ * Drizzle's migrator joins paths with `/` inside readMigrationFiles; normalize so
+ * Windows `migrationsFolder` strings remain valid for fs.*
  */
 function migrationsFolderForDrizzle(absDir: string): string {
   return resolve(absDir).replace(/\\/g, "/");
@@ -132,17 +132,21 @@ function runMigrations(db: Database.Database): void {
  * Open (or create) a SQLite database with WAL mode and foreign keys enabled,
  * then run any pending Drizzle migrations.
  *
- * In non-production, a git branch name opts in to a dedicated file under
- * `dbs/` so switching branches does not reuse a mismatched schema.
+ * In non-production, a linked git worktree uses `<toplevel>/.mcode-local/mcode.db`; otherwise a
+ * branch opts in to `dbs/dev-<hash>.db`. Resolution matches `resolveDbPath` from `@mcode/shared`.
  */
 export function openDatabase(opts?: {
   dbPath?: string;
   branch?: string;
+  gitToplevel?: string;
 }): Database.Database {
   const resolvedPath =
     opts?.dbPath ??
     process.env.MCODE_DB_PATH ??
-    resolveDbPath(getMcodeDir(), { branch: opts?.branch });
+    resolveDbPath(getMcodeDir(), {
+      branch: opts?.branch ?? process.env.MCODE_GIT_BRANCH,
+      gitToplevel: opts?.gitToplevel ?? process.env.MCODE_GIT_TOPLEVEL,
+    });
 
   const dir = dirname(resolvedPath);
   if (!existsSync(dir)) {

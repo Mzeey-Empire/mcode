@@ -13,6 +13,8 @@
   "env": {
     "MCODE_DATA_DIR":          { "default": "~/.mcode-dev",             "description": "Root data directory (dev default; ~/.mcode in prod)" },
     "MCODE_DB_PATH":           { "default": "<MCODE_DATA_DIR>/mcode.db", "description": "SQLite database path override" },
+    "MCODE_GIT_BRANCH":        { "default": "(unset)",                "description": "Dev-only branch label for hashed DB under data dir when not in a linked worktree" },
+    "MCODE_GIT_TOPLEVEL":      { "default": "(unset)",                "description": "git rev-parse --show-toplevel; linked dev worktrees prefer <toplevel>/.mcode-local/mcode.db" },
     "MCODE_PORT":              { "default": "19400",                    "description": "HTTP/WS server port (increments on collision, up to 19409 (10 attempts))" },
     "MCODE_HOST":              { "default": "127.0.0.1",                "description": "Server bind host" },
     "MCODE_AUTH_TOKEN":        { "default": "",                          "description": "Empty string bypasses WebSocket auth in dev" },
@@ -31,7 +33,7 @@
   },
   "artifacts": {
     "logs":        "<MCODE_DATA_DIR>/logs",
-    "db":          "<MCODE_DATA_DIR>/mcode.db",
+    "db":          "Resolved like the server (worktree-local, hashed dev path, or <MCODE_DATA_DIR>/mcode.db); see bun run state:paths",
     "screenshots": "apps/web/e2e/screenshots"
   },
   "server": {

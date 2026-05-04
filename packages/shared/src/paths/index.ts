@@ -5,8 +5,9 @@
  */
 
 import { createHash } from "crypto";
-import { join } from "path";
+import { lstatSync } from "fs";
 import { homedir } from "os";
+import { join } from "path";
 
 /**
  * Resolve the absolute path to the Mcode data directory.
@@ -24,15 +25,37 @@ export function getMcodeDir(): string {
 }
 
 /**
+ * Returns true when `repoRoot/.git` is a file, meaning this checkout is a linked git worktree
+ * rather than the primary repository directory.
+ */
+export function isLinkedGitWorktree(repoRoot: string): boolean {
+  const gitPath = join(repoRoot, ".git");
+  try {
+    return lstatSync(gitPath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Resolve the SQLite database file path.
- * In non-production with a branch, returns a branch-specific path under `<mcodeDir>/dbs/`
- * to avoid schema drift when switching branches. Otherwise returns `<mcodeDir>/mcode.db`.
+ *
+ * In non-production, if `gitToplevel` points at a linked worktree (a `.git` pointer file rather
+ * than a directory), returns `<gitToplevel>/.mcode-local/mcode.db` so each worktree keeps its DB inside the checkout.
+ *
+ * Otherwise in non-production with a branch name, returns `<mcodeDir>/dbs/dev-<hash>.db`.
+ * Fallback: `<mcodeDir>/mcode.db`.
  */
 export function resolveDbPath(
   mcodeDir: string,
-  opts?: { branch?: string },
+  opts?: { branch?: string; gitToplevel?: string },
 ): string {
   const isProduction = process.env.NODE_ENV === "production";
+  const gitToplevel = opts?.gitToplevel?.trim();
+  if (!isProduction && gitToplevel && isLinkedGitWorktree(gitToplevel)) {
+    return join(gitToplevel, ".mcode-local", "mcode.db");
+  }
+
   const branch = opts?.branch?.trim();
   if (isProduction || !branch) {
     return join(mcodeDir, "mcode.db");

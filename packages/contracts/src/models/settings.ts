@@ -70,6 +70,17 @@ export const UpdateCheckIntervalSchema = z.enum(["15min", "1hour", "4hours", "1d
 export type UpdateCheckInterval = z.infer<typeof UpdateCheckIntervalSchema>;
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/**
+ * Default grace-period seconds before the server auto-shuts down after all
+ * sessions disconnect. Shared between the schema default and the
+ * mode-aware resolver in `grace-period-ms.ts`.
+ */
+export const GRACE_PERIOD_DEFAULT_SECONDS = 30;
+
+// ---------------------------------------------------------------------------
 // Settings schema
 // ---------------------------------------------------------------------------
 
@@ -235,7 +246,7 @@ export const SettingsSchema = lazySchema(() =>
         gracePeriod: z
           .object({
             /** Seconds to wait. 0 shuts down immediately. Max 300 (5 minutes). */
-            seconds: z.number().int().min(0).max(300).default(30),
+            seconds: z.number().int().min(0).max(300).default(GRACE_PERIOD_DEFAULT_SECONDS),
           })
           .default({}),
       })

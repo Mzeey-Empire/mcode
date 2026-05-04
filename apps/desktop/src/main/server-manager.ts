@@ -347,6 +347,23 @@ export class ServerManager {
         env.MCODE_GIT_BRANCH = process.env.MCODE_GIT_BRANCH;
       }
 
+      if (isDev && !process.env.MCODE_GIT_TOPLEVEL) {
+        try {
+          const top = execSync("git rev-parse --show-toplevel", {
+            encoding: "utf-8",
+            timeout: 3000,
+            cwd,
+          }).trim();
+          if (top) {
+            env.MCODE_GIT_TOPLEVEL = top;
+          }
+        } catch {
+          // Not a git repo or git unavailable
+        }
+      } else if (process.env.MCODE_GIT_TOPLEVEL) {
+        env.MCODE_GIT_TOPLEVEL = process.env.MCODE_GIT_TOPLEVEL;
+      }
+
       if (nativeBindingPath) {
         env.BETTER_SQLITE3_BINDING = nativeBindingPath;
       }

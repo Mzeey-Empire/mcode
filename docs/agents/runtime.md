@@ -70,7 +70,8 @@ All variables are optional — defaults work for local development.
 | `MCODE_DATA_DIR` | `~/.mcode-dev` | Root data directory (`~/.mcode` in prod) |
 | `MCODE_DB_PATH` | `$MCODE_DATA_DIR/mcode.db` | SQLite database path override |
 | `MCODE_DRIZZLE_MIGRATIONS_DIR` | (unset) | Absolute path to `apps/server/drizzle`; Vitest sets this automatically |
-| `MCODE_GIT_BRANCH` | (unset) | Current checkout branch for dev-only DB file names (`dbs/dev-*.db`) |
+| `MCODE_GIT_BRANCH` | (unset) | Current checkout branch for dev-only hashed DB files (`dbs/dev-*.db`) when not using a linked worktree |
+| `MCODE_GIT_TOPLEVEL` | (unset) | `git rev-parse --show-toplevel`; with a linked worktree, enables `<toplevel>/.mcode-local/mcode.db` |
 | `MCODE_PORT` | `19400` | HTTP/WS server port (increments on collision, up to 19409) |
 | `MCODE_HOST` | `127.0.0.1` | Server bind host |
 | `MCODE_AUTH_TOKEN` | `""` (empty) | Empty string bypasses auth in dev |
@@ -94,7 +95,7 @@ Use `bun run state:paths` to print all resolved paths for the current environmen
 | Repo root | `<cwd>` |
 | Worktrees | `.worktrees/` (relative to repo root) |
 | Data directory | `MCODE_DATA_DIR` (see above) |
-| Database | `MCODE_DB_PATH` (see above) |
+| Database | `MCODE_DB_PATH`, or `<toplevel>/.mcode-local/mcode.db` in a dev linked worktree, else dev `dbs/dev-*.db`, else default under data dir (see env table) |
 | Log files | `$MCODE_DATA_DIR/logs/mcode.log.YYYY-MM-DD` |
 | Playwright screenshots | `apps/web/e2e/screenshots/` |
 
