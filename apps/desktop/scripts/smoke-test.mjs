@@ -36,42 +36,49 @@ const POLL_INTERVAL_MS = 300;
 // Locate the unpacked server bundle and Electron binary
 // ---------------------------------------------------------------------------
 
-/** Find the server.cjs and runtime binary from the unpacked directory. */
+/** Find the server.cjs and runtime binary from the unpacked directory.
+ *  Prefers the renamed `mcode-server` binary (production code path) and
+ *  falls back to the main Electron binary when the renamed copy is absent. */
 function findUnpackedServer() {
   const candidates = [
     // Windows
     {
       server: resolve(releaseDir, "win-unpacked/resources/app.asar.unpacked/dist/server/server.cjs"),
+      renamedBinary: resolve(releaseDir, "win-unpacked/resources/bin/mcode-server.exe"),
       electron: resolve(releaseDir, "win-unpacked/Mcode.exe"),
       sqlite: resolve(releaseDir, "win-unpacked/resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release"),
     },
     // Linux (electron-builder uses package name as binary name)
     {
       server: resolve(releaseDir, "linux-unpacked/resources/app.asar.unpacked/dist/server/server.cjs"),
+      renamedBinary: resolve(releaseDir, "linux-unpacked/resources/bin/mcode-server"),
       electron: resolve(releaseDir, "linux-unpacked/mcode-desktop"),
       sqlite: resolve(releaseDir, "linux-unpacked/resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release"),
     },
     // macOS Intel
     {
       server: resolve(releaseDir, "mac/Mcode.app/Contents/Resources/app.asar.unpacked/dist/server/server.cjs"),
+      renamedBinary: resolve(releaseDir, "mac/Mcode.app/Contents/Resources/bin/mcode-server"),
       electron: resolve(releaseDir, "mac/Mcode.app/Contents/MacOS/Mcode"),
       sqlite: resolve(releaseDir, "mac/Mcode.app/Contents/Resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release"),
     },
     // macOS ARM
     {
       server: resolve(releaseDir, "mac-arm64/Mcode.app/Contents/Resources/app.asar.unpacked/dist/server/server.cjs"),
+      renamedBinary: resolve(releaseDir, "mac-arm64/Mcode.app/Contents/Resources/bin/mcode-server"),
       electron: resolve(releaseDir, "mac-arm64/Mcode.app/Contents/MacOS/Mcode"),
       sqlite: resolve(releaseDir, "mac-arm64/Mcode.app/Contents/Resources/app.asar.unpacked/node_modules/better-sqlite3/build/Release"),
     },
   ];
 
   for (const c of candidates) {
-    if (existsSync(c.server) && existsSync(c.electron)) {
-      // Find the actual .node binding
+    // The renamed binary mirrors production; fall back to the main binary
+    const runtime = existsSync(c.renamedBinary) ? c.renamedBinary : c.electron;
+    if (existsSync(c.server) && existsSync(runtime)) {
       const electronBinding = resolve(c.sqlite, "better_sqlite3.electron.node");
       const nodeBinding = resolve(c.sqlite, "better_sqlite3.node");
       const binding = existsSync(electronBinding) ? electronBinding : existsSync(nodeBinding) ? nodeBinding : undefined;
-      return { server: c.server, electron: c.electron, binding };
+      return { server: c.server, electron: runtime, binding };
     }
   }
   return null;

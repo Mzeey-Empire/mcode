@@ -76,3 +76,6 @@ jobs:
 
       - name: Generate V8 snapshot
         run: bun apps/desktop/scripts/generate-snapshot.mjs
+
+      - name: Smoke test server bundle
+        run: node apps/desktop/scripts/smoke-test.mjs --bundle
