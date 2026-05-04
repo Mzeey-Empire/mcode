@@ -6,13 +6,13 @@
 import { execFileSync } from "node:child_process";
 import { injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
-import { flattenProcessEnv, parseNullDelimitedEnv } from "./shell-env-utils.js";
+import { flattenProcessEnv, parseNewlineDelimitedEnv, parseNullDelimitedEnv } from "./shell-env-utils.js";
 
 const RESOLVE_TIMEOUT_MS = 5000;
 const MAX_ENV_BUFFER_BYTES = 32 * 1024 * 1024;
 
 // Re-export for call sites that only need helpers without pulling tsyringe metadata.
-export { flattenProcessEnv, parseNullDelimitedEnv } from "./shell-env-utils.js";
+export { flattenProcessEnv, parseNewlineDelimitedEnv, parseNullDelimitedEnv } from "./shell-env-utils.js";
 
 /**
  * Platform-specific env resolution with a retained last-good fallback.
@@ -49,13 +49,31 @@ export class ShellEnvResolver {
 
   private resolveUnix(): Record<string, string> {
     const shell = process.env.SHELL ?? "/bin/bash";
-    const buf = execFileSync(shell, ["-ilc", "env -0"], {
-      encoding: "buffer",
+    // `env -0` is a GNU extension unavailable on macOS/BSD. Try it first,
+    // and fall back to newline-delimited `env` when it fails.
+    try {
+      const buf = execFileSync(shell, ["-ilc", "env -0"], {
+        encoding: "buffer",
+        timeout: RESOLVE_TIMEOUT_MS,
+        maxBuffer: MAX_ENV_BUFFER_BYTES,
+        windowsHide: true,
+      }) as Buffer;
+      // Sanity: NUL-delimited output must contain at least one NUL byte.
+      if (buf.includes(0)) {
+        return parseNullDelimitedEnv(buf);
+      }
+    } catch {
+      // Expected on macOS/BSD where env(1) lacks -0. Fall through.
+    }
+    // Newline-delimited fallback. Values containing literal newlines will
+    // be split incorrectly, but that is rare and matches VS Code's behavior.
+    const text = execFileSync(shell, ["-ilc", "env"], {
+      encoding: "utf8",
       timeout: RESOLVE_TIMEOUT_MS,
       maxBuffer: MAX_ENV_BUFFER_BYTES,
       windowsHide: true,
-    }) as Buffer;
-    return parseNullDelimitedEnv(buf);
+    });
+    return parseNewlineDelimitedEnv(text);
   }
 
   private resolveWindows(): Record<string, string> {

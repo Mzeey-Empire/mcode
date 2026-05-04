@@ -17,6 +17,22 @@ export function flattenProcessEnv(env: NodeJS.ProcessEnv): Record<string, string
 }
 
 /**
+ * Parses newline-delimited `env` output (KEY=value per line).
+ * Values containing literal newlines will be split incorrectly;
+ * prefer {@link parseNullDelimitedEnv} when `env -0` is available.
+ */
+export function parseNewlineDelimitedEnv(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0) continue;
+    out[line.slice(0, eq)] = line.slice(eq + 1);
+  }
+  return out;
+}
+
+/**
  * Parses `env -0` style NUL-delimited KEY=value chunks.
  */
 export function parseNullDelimitedEnv(buf: Buffer): Record<string, string> {

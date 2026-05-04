@@ -20,12 +20,48 @@ describe("ProtectedEnvStore", () => {
     }
   });
 
+  it("auto-protects ELECTRON_ prefixed keys", () => {
+    const prev = process.env.ELECTRON_RUN_AS_NODE;
+    process.env.ELECTRON_RUN_AS_NODE = "1";
+    try {
+      const store = new ProtectedEnvStore();
+      expect(store.isProtected("ELECTRON_RUN_AS_NODE")).toBe(true);
+      const merged = store.applyTo({ ELECTRON_RUN_AS_NODE: "from-shell" });
+      expect(merged.ELECTRON_RUN_AS_NODE).toBe("1");
+    } finally {
+      if (prev === undefined) delete process.env.ELECTRON_RUN_AS_NODE;
+      else process.env.ELECTRON_RUN_AS_NODE = prev;
+    }
+  });
+
+  it("auto-protects BETTER_SQLITE3_ prefixed keys", () => {
+    const prev = process.env.BETTER_SQLITE3_BINDING;
+    process.env.BETTER_SQLITE3_BINDING = "/native/path";
+    try {
+      const store = new ProtectedEnvStore();
+      expect(store.isProtected("BETTER_SQLITE3_BINDING")).toBe(true);
+      const merged = store.applyTo({ BETTER_SQLITE3_BINDING: "from-shell" });
+      expect(merged.BETTER_SQLITE3_BINDING).toBe("/native/path");
+    } finally {
+      if (prev === undefined) delete process.env.BETTER_SQLITE3_BINDING;
+      else process.env.BETTER_SQLITE3_BINDING = prev;
+    }
+  });
+
+  it("isProtected returns false for non-protected keys", () => {
+    const store = new ProtectedEnvStore();
+    expect(store.isProtected("PATH")).toBe(false);
+    expect(store.isProtected("HOME")).toBe(false);
+    expect(store.isProtected("USER")).toBe(false);
+  });
+
   it("honours protect() for non-prefixed keys", () => {
     const prev = process.env.CUSTOM_SERVER_FLAG;
     process.env.CUSTOM_SERVER_FLAG = "keep-me";
     try {
       const store = new ProtectedEnvStore();
       store.protect("CUSTOM_SERVER_FLAG");
+      expect(store.isProtected("CUSTOM_SERVER_FLAG")).toBe(true);
       const merged = store.applyTo({ CUSTOM_SERVER_FLAG: "from-shell" });
       expect(merged.CUSTOM_SERVER_FLAG).toBe("keep-me");
     } finally {
@@ -35,5 +71,12 @@ describe("ProtectedEnvStore", () => {
         process.env.CUSTOM_SERVER_FLAG = prev;
       }
     }
+  });
+
+  it("passes through non-protected keys unchanged", () => {
+    const store = new ProtectedEnvStore();
+    const merged = store.applyTo({ PATH: "/usr/bin", HOME: "/home/dev" });
+    expect(merged.PATH).toBe("/usr/bin");
+    expect(merged.HOME).toBe("/home/dev");
   });
 });
