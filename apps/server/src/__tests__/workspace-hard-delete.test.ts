@@ -85,3 +85,50 @@ describe("WorkspaceRepo - soft/hard delete", () => {
     expect(threads).toHaveLength(0);
   });
 });
+
+describe("ThreadRepo - workspace deletion helpers", () => {
+  let db: Database.Database;
+  let workspaceRepo: WorkspaceRepo;
+  let threadRepo: ThreadRepo;
+
+  beforeEach(() => {
+    db = openMemoryDatabase();
+    workspaceRepo = new WorkspaceRepo(db);
+    threadRepo = new ThreadRepo(db);
+  });
+
+  it("findWorktreeThreadsByWorkspace returns threads with worktree_path set", () => {
+    const ws = workspaceRepo.create("Test", "/tmp/test-ws");
+    const t1 = threadRepo.create(ws.id, "Direct", "direct", "main");
+    const t2 = threadRepo.create(ws.id, "Worktree", "worktree", "feat/x");
+    // Simulate worktree path being set after creation
+    db.prepare("UPDATE threads SET worktree_path = ? WHERE id = ?")
+      .run("/tmp/test-ws/.worktrees/feat-x", t2.id);
+
+    const results = threadRepo.findWorktreeThreadsByWorkspace(ws.id);
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe(t2.id);
+    expect(results[0].worktree_path).toBe("/tmp/test-ws/.worktrees/feat-x");
+  });
+
+  it("findWorktreeThreadsByWorkspace includes soft-deleted threads", () => {
+    const ws = workspaceRepo.create("Test", "/tmp/test-ws");
+    const t1 = threadRepo.create(ws.id, "WT Thread", "worktree", "feat/y");
+    db.prepare("UPDATE threads SET worktree_path = ? WHERE id = ?")
+      .run("/tmp/wt", t1.id);
+    threadRepo.softDelete(t1.id);
+
+    const results = threadRepo.findWorktreeThreadsByWorkspace(ws.id);
+    expect(results).toHaveLength(1);
+  });
+
+  it("listAllByWorkspace returns both active and soft-deleted threads", () => {
+    const ws = workspaceRepo.create("Test", "/tmp/test-ws");
+    threadRepo.create(ws.id, "Active", "direct", "main");
+    const t2 = threadRepo.create(ws.id, "Deleted", "direct", "main");
+    threadRepo.softDelete(t2.id);
+
+    const all = threadRepo.listAllByWorkspace(ws.id);
+    expect(all).toHaveLength(2);
+  });
+});
