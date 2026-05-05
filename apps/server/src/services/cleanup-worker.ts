@@ -16,7 +16,9 @@ import { ThreadRepo } from "../repositories/thread-repo.js";
 import { ClaudeProvider } from "../providers/claude/claude-provider.js";
 import { TerminalService } from "./terminal-service.js";
 import { GitService } from "./git-service.js";
+import { AttachmentService } from "./attachment-service.js";
 import { killDescendantsByName } from "./process-kill.js";
+import { WorkspaceRepo } from "../repositories/workspace-repo.js";
 
 /** How often to check for due cleanup jobs (ms). */
 const POLL_INTERVAL_MS = 5_000;
@@ -53,6 +55,8 @@ export class CleanupWorker {
     @inject(ClaudeProvider) private readonly claudeProvider: ClaudeProvider,
     @inject(TerminalService) private readonly terminalService: TerminalService,
     @inject(GitService) private readonly gitService: GitService,
+    @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
+    @inject(AttachmentService) private readonly attachmentService: AttachmentService,
   ) {}
 
   /**
@@ -184,6 +188,9 @@ export class CleanupWorker {
         throw new Error(`Worktree directory still exists after removal: ${resolvedWt}`);
       }
 
+      // 5b. Clean up attachment files for this thread (idempotent - ignores missing dirs)
+      this.attachmentService.removeForThread(job.thread_id);
+
       // 6. Hard-delete thread row and cleanup job atomically.
       //    Wrapping in a transaction ensures no orphaned job if either statement fails.
       this.db.transaction(() => {
@@ -195,6 +202,9 @@ export class CleanupWorker {
         jobId: job.id,
         threadId: job.thread_id,
       });
+
+      // 7. If this was the last cleanup job for a soft-deleted workspace, hard-delete it.
+      this.finalizeWorkspaceIfDone(job.workspace_path);
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       logger.warn("CleanupWorker job failed, scheduled for retry", {
@@ -205,5 +215,30 @@ export class CleanupWorker {
       });
       this.cleanupJobRepo.recordFailure(job.id, error);
     }
+  }
+
+  /** Check if workspace cleanup is complete and hard-delete if so. */
+  private finalizeWorkspaceIfDone(workspacePath: string): void {
+    const remaining = this.cleanupJobRepo.countByWorkspacePath(workspacePath);
+    if (remaining > 0) return;
+
+    // Find the soft-deleted workspace for this path and hard-delete it
+    const deleting = this.workspaceRepo.findDeleting();
+    const workspace = deleting.find((w) => w.path === workspacePath);
+    if (workspace) {
+      this.workspaceRepo.hardDelete(workspace.id);
+      logger.info("Workspace hard-deleted after final cleanup job", {
+        workspaceId: workspace.id,
+        workspacePath,
+      });
+    }
+  }
+
+  /** Process a single due cleanup job. Returns true if a job was processed. Exported for testing. */
+  async processOneJob(): Promise<boolean> {
+    const jobs = this.cleanupJobRepo.findDue(Date.now());
+    if (jobs.length === 0) return false;
+    await this.executeJob(jobs[0]);
+    return true;
   }
 }

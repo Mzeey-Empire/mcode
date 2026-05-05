@@ -16,6 +16,7 @@ import { ThreadService } from "../services/thread-service";
 import type { ClaudeProvider } from "../providers/claude/claude-provider";
 import type { TerminalService } from "../services/terminal-service";
 import type { GitService } from "../services/git-service";
+import { AttachmentService } from "../services/attachment-service";
 import { killDescendantsByName } from "../services/process-kill.js";
 import { getMcodeDir } from "@mcode/shared";
 
@@ -73,6 +74,8 @@ describe("Cleanup integration", () => {
       mockClaudeProvider,
       mockTerminalService,
       mockGitService,
+      workspaceRepo,
+      { removeForThread: vi.fn() } as unknown as AttachmentService,
     );
   });
 
