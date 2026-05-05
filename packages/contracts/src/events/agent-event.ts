@@ -194,7 +194,7 @@ export const AgentEventSchema = lazySchema(() =>
       /** Provider-specific rate limit category (e.g. 'five_hour', 'seven_day'). */
       limitType: z.string().optional(),
       /** Utilization fraction (0-1) of the current rate limit window, if available. */
-      utilization: z.number().optional(),
+      utilization: z.number().min(0).max(1).optional(),
     }),
     z.object({
       /** Emitted when an API request fails with a retryable error and the provider will retry. */
