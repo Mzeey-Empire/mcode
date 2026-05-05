@@ -142,6 +142,23 @@ export const turnSnapshots = sqliteTable(
   ],
 );
 
+/** Persisted AI-generated diff summaries, one per thread. */
+export const diffSummaries = sqliteTable(
+  "diff_summaries",
+  {
+    id: text("id").primaryKey().notNull(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    turnCount: integer("turn_count").notNull(),
+    lastTurnId: text("last_turn_id"),
+    model: text("model").notNull(),
+    createdAt: text("created_at").notNull().default(timestampDefault),
+  },
+  (table) => [index("idx_diff_summaries_thread").on(table.threadId)],
+);
+
 export const threadTasks = sqliteTable("thread_tasks", {
   threadId: text("thread_id")
     .primaryKey()

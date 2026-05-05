@@ -15,6 +15,13 @@
       "when": 1777901649311,
       "tag": "0001_outgoing_paibok",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1778012996482,
+      "tag": "0002_polite_nuke",
+      "breakpoints": true
     }
   ]
 }
