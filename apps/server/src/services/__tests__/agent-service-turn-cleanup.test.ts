@@ -193,7 +193,7 @@ function buildService(): {
     planQuestionAnswersRepo,
   );
 
-  return { service, providerEmitter, memoryPressureService };
+  return { service, providerEmitter, memoryPressureService: memoryPressureService as MemoryPressureService & { markActive: ReturnType<typeof vi.fn>; markIdle: ReturnType<typeof vi.fn> } };
 }
 
 describe("AgentService turn cleanup", () => {

@@ -971,6 +971,18 @@ export class AgentService {
             });
           });
 
+          // Clear the "running" flag so agent.listRunning no longer reports
+          // this thread and shutdown won't downgrade it to "interrupted."
+          // Skip during compaction: the SDK fires a synthetic TurnComplete
+          // before the compaction API call, but the session continues
+          // automatically.
+          if (!this.compactionInProgressByThread.has(event.threadId)) {
+            this.activeSessionIds.delete(event.threadId);
+            if (this.activeSessionIds.size === 0) {
+              this.memoryPressureService.markIdle();
+            }
+          }
+
           // Persist context usage so the tracker shows immediately on thread reload.
           // Skip during compaction: the compaction API call emits a turnComplete
           // with the pre-compaction token count. Persisting it would cause cold
