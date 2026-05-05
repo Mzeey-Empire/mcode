@@ -394,6 +394,10 @@ async function dispatch(
         params.copilotAgent,
         params.contextWindow,
         params.thinking,
+        undefined, // markPlanAnswerForMessageId
+        undefined, // providerWireOverride
+        params.replyToMessageId,
+        params.quotedText,
       );
       return;
     case "agent.createAndSend":
