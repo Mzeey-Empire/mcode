@@ -567,7 +567,25 @@ export function ProjectTree() {
             onDragCancel={handleProjectDragCancel}
           >
             <SortableContext items={workspaceIds} strategy={verticalListSortingStrategy}>
-              {workspaces.map((ws) => (
+              {workspaces.map((ws) => {
+                const wsThreads = isSearchActive
+                  ? filterAndSortThreads(
+                      threads.filter((t) => t.workspace_id === ws.id),
+                      searchQuery, searchFilters, sortField, sortDirection,
+                      runningThreadIds, pendingPermissionThreadIds,
+                    )
+                  : sortField !== "updated_at" || sortDirection !== "desc"
+                    ? filterAndSortThreads(
+                        threads.filter((t) => t.workspace_id === ws.id),
+                        "", { status: [], provider: [] }, sortField, sortDirection,
+                        runningThreadIds, pendingPermissionThreadIds,
+                      )
+                    : threads.filter((t) => t.workspace_id === ws.id);
+
+                // Hide projects with zero matches during active search
+                if (isSearchActive && wsThreads.length === 0) return null;
+
+                return (
                 <SortableProjectShell
                   key={ws.id}
                   sortableId={ws.id}
@@ -576,21 +594,7 @@ export function ProjectTree() {
                   isExpanded={expanded[ws.id] ?? false}
                   isActive={activeWorkspaceId === ws.id}
                   activeThreadId={activeThreadId}
-                  threads={
-                    isSearchActive
-                      ? filterAndSortThreads(
-                          threads.filter((t) => t.workspace_id === ws.id),
-                          searchQuery, searchFilters, sortField, sortDirection,
-                          runningThreadIds, pendingPermissionThreadIds,
-                        )
-                      : sortField !== "updated_at" || sortDirection !== "desc"
-                        ? filterAndSortThreads(
-                            threads.filter((t) => t.workspace_id === ws.id),
-                            "", { status: [], provider: [] }, sortField, sortDirection,
-                            runningThreadIds, pendingPermissionThreadIds,
-                          )
-                        : threads.filter((t) => t.workspace_id === ws.id)
-                  }
+                  threads={wsThreads}
                   runningThreadIds={runningThreadIds}
                   pendingPermissionThreadIds={pendingPermissionThreadIds}
                   isThreadListExpanded={threadListExpanded[ws.id] ?? false}
@@ -623,7 +627,8 @@ export function ProjectTree() {
                     handleThreadContextMenu(e, thread, ws.path)
                   }
                 />
-              ))}
+                );
+              })}
             </SortableContext>
           </DndContext>
 
