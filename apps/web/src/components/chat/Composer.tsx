@@ -52,6 +52,8 @@ import { QueuePopover } from "./QueuePopover";
 import { ContextTracker } from "./ContextTracker";
 import { CompactingBanner } from "./CompactingBanner";
 import { ComposerBranchBar } from "./ComposerBranchBar";
+import { ComposerReplyBar } from "./ComposerReplyBar";
+import { useReplyStore } from "@/stores/replyStore";
 import { useQueueStore } from "@/stores/queueStore";
 import {
   classifyFile,
@@ -409,6 +411,9 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   // doesn't briefly render the popover trigger and snap to inline buttons.
   const showInlineComposerOptions =
     composerWidth === 0 || composerWidth >= COMPOSER_INLINE_OPTIONS_THRESHOLD;
+
+  const replyContext = useReplyStore((s) => threadId ? s.replyByThread[threadId] : undefined);
+  const clearReply = useReplyStore((s) => s.clearReply);
 
   const [input, setInput] = useState("");
   const [modelId, setModelId] = useState(getDefaultModelId());
@@ -951,6 +956,32 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     return () => document.removeEventListener("click", handleClickOutside);
   }, []);
 
+  // Clear reply context when the user copies text — disambiguates "copy to reply"
+  // from "copy for clipboard" so the reply bar doesn't linger unexpectedly.
+  useEffect(() => {
+    const handleCopy = () => {
+      if (threadId) clearReply(threadId);
+    };
+    document.addEventListener("copy", handleCopy);
+    return () => document.removeEventListener("copy", handleCopy);
+  }, [threadId, clearReply]);
+
+  // Dismiss reply when the user clicks outside both the composer and any message bubble.
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (!threadId) return;
+      const composerEl = composerContainerRef.current;
+      if (composerEl && !composerEl.contains(e.target as Node)) {
+        const msgElement = (e.target as Element)?.closest?.("[data-message-id]");
+        if (!msgElement) {
+          clearReply(threadId);
+        }
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [threadId, clearReply]);
+
   const handleStop = useCallback(() => {
     if (threadId) {
       stopAgent(threadId);
@@ -1315,7 +1346,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       });
       onBranchModeExit?.();
     } else if (threadId) {
-      await sendMessage(threadId, messageContent, modelId, access, currentAttachments.length > 0 ? currentAttachments : undefined, displayContent, reasoning, provider, provider === "copilot" ? (copilotAgent ?? undefined) : undefined, contextWindow ?? undefined, thinking ?? undefined);
+      await sendMessage(threadId, messageContent, modelId, access, currentAttachments.length > 0 ? currentAttachments : undefined, displayContent, reasoning, provider, provider === "copilot" ? (copilotAgent ?? undefined) : undefined, contextWindow ?? undefined, thinking ?? undefined, replyContext?.messageId, replyContext?.quotedText);
+      if (threadId) clearReply(threadId);
     }
 
     // Auto-save last-used mode and access as defaults (model defaults are managed in Settings)
@@ -1332,7 +1364,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     }
 
     editorRef.current?.focus();
-  }, [input, attachments, isAgentRunning, isNewThread, newThreadMode, newThreadBranch, workspaceId, threadId, sendMessage, modelId, provider, reasoning, mode, access, copilotAgent, contextWindow, thinking, namingMode, customBranchName, selectedWorktree, injectFileContent, collectAndClearAttachments, clearDraftFromStore, isThreadScaffold, branchFromMessageId, branchExecMode, branchTargetBranch, branchNamingMode, branchCustomName, branchWorktreePath, activeThread, branchThread, branchAutoPreview, onBranchModeExit]);
+  }, [input, attachments, isAgentRunning, isNewThread, newThreadMode, newThreadBranch, workspaceId, threadId, sendMessage, modelId, provider, reasoning, mode, access, copilotAgent, contextWindow, thinking, namingMode, customBranchName, selectedWorktree, injectFileContent, collectAndClearAttachments, clearDraftFromStore, isThreadScaffold, branchFromMessageId, branchExecMode, branchTargetBranch, branchNamingMode, branchCustomName, branchWorktreePath, activeThread, branchThread, branchAutoPreview, onBranchModeExit, replyContext, clearReply]);
 
   const handleEditorChange = useCallback((text: string) => {
     setInput(text);
@@ -1458,6 +1490,15 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
           onBranchModeExit={onBranchModeExit}
         />
 
+        {/* Reply quote bar — shown when replying to a specific message */}
+        {replyContext && threadId && (
+          <ComposerReplyBar
+            sourceRole={replyContext.sourceRole}
+            previewText={replyContext.previewText}
+            onDismiss={() => clearReply(threadId)}
+          />
+        )}
+
         {/* PR URL detection card */}
         {detectedPr && !prDismissed && (
           <PrDetectedCard
@@ -1503,7 +1544,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
             disabled={planPending || isStaleWorktree || !!providerReason}
             isPopupOpen={isAnyPopupOpen}
             onPopupKeyDown={handlePopupKeyDown}
-            placeholder={isStaleWorktree ? "Worktree directory no longer exists. This thread is read-only." : planPending ? "Answer the planning questions above" : branchFromMessageId ? "What should the branch work on?" : isAgentRunning ? "Queue a follow-up..." : "Message Mcode..."}
+            placeholder={isStaleWorktree ? "Worktree directory no longer exists. This thread is read-only." : planPending ? "Answer the planning questions above" : branchFromMessageId ? "What should the branch work on?" : replyContext ? "Type your reply..." : isAgentRunning ? "Queue a follow-up..." : "Message Mcode..."}
           />
           <FileTagPopup
             files={fileAutocomplete.filteredFiles}
