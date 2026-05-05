@@ -91,6 +91,8 @@ export const messages = sqliteTable(
     timestamp: text("timestamp").notNull().default(timestampDefault),
     sequence: integer("sequence").notNull(),
     attachments: text("attachments"),
+    replyToMessageId: text("reply_to_message_id").references(() => messages.id, { onDelete: "set null" }),
+    quotedText: text("quoted_text"),
   },
   (table) => [
     index("idx_messages_thread").on(table.threadId),
