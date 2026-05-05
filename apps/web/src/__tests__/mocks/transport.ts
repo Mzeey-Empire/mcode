@@ -98,6 +98,7 @@ export const mockTransport: McodeTransport = {
   createThread: vi.fn(),
   listThreads: vi.fn().mockResolvedValue([]),
   listRecentThreads: vi.fn().mockResolvedValue([]),
+  searchThreads: vi.fn().mockResolvedValue({ threads: [], workspaces: [] }),
   deleteThread: vi.fn().mockResolvedValue(true),
   listBranches: vi.fn().mockResolvedValue([]),
   getCurrentBranch: vi.fn().mockResolvedValue("main"),
