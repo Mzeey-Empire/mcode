@@ -138,12 +138,13 @@ function applyPragmas(db: Database.Database, isFileBacked: boolean): void {
  * Safe to run on fresh databases: the PRAGMA check is a no-op when the column
  * already exists.
  */
-function applySchemaPatches(db: Database.Database): void {
+export function applySchemaPatches(db: Database.Database): void {
   const cols = (
     db.prepare("PRAGMA table_info(workspaces)").all() as Array<{ name: string }>
   ).map((r) => r.name);
 
-  if (!cols.includes("sort_order")) {
+  // cols is empty when the table doesn't exist; nothing to patch in that case
+  if (cols.length > 0 && !cols.includes("sort_order")) {
     db.prepare(
       "ALTER TABLE workspaces ADD COLUMN sort_order INTEGER DEFAULT 0 NOT NULL",
     ).run();
