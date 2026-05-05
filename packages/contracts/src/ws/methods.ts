@@ -312,7 +312,7 @@ export const WS_METHODS = lazySchema(() => ({
       limit: z.number().int().min(1).max(1000),
       before: z.number().int().optional(),
     }),
-    result: PaginatedMessagesSchema,
+    result: PaginatedMessagesSchema(),
   },
   "file.list": {
     params: z.object({

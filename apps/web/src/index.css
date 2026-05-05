@@ -184,6 +184,12 @@
   animation: flash-highlight 1.5s ease-out;
   border-radius: var(--radius-md);
 }
+@media (prefers-reduced-motion: reduce) {
+  .animate-flash-highlight {
+    animation: none;
+    background-color: transparent;
+  }
+}
 
 
 .glow-primary {

@@ -1255,10 +1255,13 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         copilotAgent: provider === "copilot" ? (copilotAgent ?? undefined) : undefined,
         contextWindow: contextWindow ?? undefined,
         thinking: thinking ?? undefined,
+        replyToMessageId: replyContext?.messageId,
+        quotedText: replyContext?.quotedText,
       });
 
       setInput("");
       if (threadId) clearDraftFromStore(threadId);
+      if (threadId) clearReply(threadId);
       if (editorRef.current) {
         editorRef.current.update(() => {
           const root = $getRoot();
@@ -1846,7 +1849,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
                 const next = useQueueStore.getState().dequeueNext(threadId);
                 if (next) {
                   sendMessage(threadId, next.content, next.model, next.permissionMode,
-                    next.attachments.length > 0 ? next.attachments : undefined, next.displayContent, next.reasoningLevel, next.provider);
+                    next.attachments.length > 0 ? next.attachments : undefined, next.displayContent, next.reasoningLevel, next.provider,
+                    next.copilotAgent, next.contextWindow, next.thinking, next.replyToMessageId, next.quotedText);
                 }
               }}
             />

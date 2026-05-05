@@ -1760,6 +1760,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               next.copilotAgent,
               next.contextWindow,
               next.thinking,
+              next.replyToMessageId,
+              next.quotedText,
             );
           }
         }, 400);

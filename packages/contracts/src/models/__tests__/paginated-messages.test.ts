@@ -8,7 +8,7 @@ import { PaginatedMessagesSchema } from "../message.js";
  */
 describe("PaginatedMessagesSchema", () => {
   it("validates a response with answeredPlanMessageIds", () => {
-    const ok = PaginatedMessagesSchema.safeParse({
+    const ok = PaginatedMessagesSchema().safeParse({
       messages: [],
       hasMore: false,
       answeredPlanMessageIds: ["msg-1", "msg-2"],
@@ -20,7 +20,7 @@ describe("PaginatedMessagesSchema", () => {
   });
 
   it("treats answeredPlanMessageIds as optional for backwards compatibility", () => {
-    const ok = PaginatedMessagesSchema.safeParse({
+    const ok = PaginatedMessagesSchema().safeParse({
       messages: [],
       hasMore: false,
     });
@@ -28,7 +28,7 @@ describe("PaginatedMessagesSchema", () => {
   });
 
   it("rejects a non-string-array for answeredPlanMessageIds", () => {
-    const bad = PaginatedMessagesSchema.safeParse({
+    const bad = PaginatedMessagesSchema().safeParse({
       messages: [],
       hasMore: false,
       answeredPlanMessageIds: [123],

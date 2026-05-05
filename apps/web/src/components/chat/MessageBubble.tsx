@@ -307,7 +307,16 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
 
           <div className="flex flex-col items-end gap-0.5 pr-1">
             <div className="flex items-center gap-1.5">
-              {onReply && <ReplyButton onClick={() => onReply(message.id, textContent.trim() || "[Image attachment]", "user")} />}
+              {onReply && <ReplyButton onClick={() => {
+                let fallback = "[Attachment]";
+                if (!textContent.trim()) {
+                  const firstAtt = message.attachments?.[0];
+                  if (firstAtt?.mimeType.startsWith("image/")) fallback = "[Image attachment]";
+                  else if (firstAtt?.mimeType === "application/pdf") fallback = "[PDF attachment]";
+                  else if (firstAtt) fallback = "[File attachment]";
+                }
+                onReply(message.id, textContent.trim() || fallback, "user");
+              }} />}
               {onBranch && <BranchButton onClick={() => onBranch(message.id)} />}
               {textContent.trim() && <CopyButton content={textContent} />}
             </div>
