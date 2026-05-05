@@ -1307,6 +1307,15 @@ export const useThreadStore = create<ThreadState>((set, get) => {
 
     // -- Sidecar events (new format) --
 
+    // Any non-retry event on this thread means a pending API retry resolved
+    if (method !== "session.apiRetry" && get().apiRetryByThread[threadId]) {
+      set((state) => {
+        const next = { ...state.apiRetryByThread };
+        delete next[threadId];
+        return { apiRetryByThread: next };
+      });
+    }
+
     if (method === "session.system") {
       const subtype = params.subtype as string;
       if (subtype === "session_restarted") {
@@ -1644,6 +1653,11 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               delete next[threadId];
               return next;
             })(),
+            rateLimitByThread: (() => {
+              const next = { ...state.rateLimitByThread };
+              delete next[threadId];
+              return next;
+            })(),
           };
         });
       } else {
@@ -1683,6 +1697,11 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             // Clear permission cards now that the agent has responded.
             permissionsByThread: (() => {
               const next = { ...state.permissionsByThread };
+              delete next[threadId];
+              return next;
+            })(),
+            rateLimitByThread: (() => {
+              const next = { ...state.rateLimitByThread };
               delete next[threadId];
               return next;
             })(),
@@ -1995,6 +2014,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         delete nextSubagents[threadId];
         const nextCompacting = { ...state.isCompactingByThread };
         delete nextCompacting[threadId];
+        const nextRateLimit = { ...state.rateLimitByThread };
+        delete nextRateLimit[threadId];
         const base = {
           errorByThread: { ...state.errorByThread, [threadId]: errorMsg },
           runningThreadIds: nextRunning,
@@ -2004,6 +2025,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           toolCallsByThread: nextToolCalls,
           activeSubagentsByThread: nextSubagents,
           isCompactingByThread: nextCompacting,
+          rateLimitByThread: nextRateLimit,
         };
         if (state.currentThreadId !== threadId) return base;
         const { messages: capped, evicted } = capMessages([...state.messages, errorMessage]);
