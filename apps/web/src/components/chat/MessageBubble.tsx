@@ -168,12 +168,10 @@ function ReplyButton({ onClick }: { onClick: () => void }) {
  */
 function QuoteBlock({
   quotedText,
-  sourceRole,
   available = true,
   onClick,
 }: {
   quotedText: string;
-  sourceRole: string;
   available?: boolean;
   onClick?: () => void;
 }) {
@@ -185,7 +183,7 @@ function QuoteBlock({
     );
   }
 
-  const label = sourceRole === "user" ? "Replying to you" : "Replying to assistant";
+  const label = "Reply";
   const displayText = quotedText.slice(0, 150) + (quotedText.length > 150 ? "..." : "");
 
   return (
@@ -258,7 +256,6 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
           {message.reply_to_message_id && (
             <QuoteBlock
               quotedText={message.quoted_text ?? ""}
-              sourceRole="assistant"
               available={!!message.quoted_text}
               onClick={() => onScrollToMessage?.(message.reply_to_message_id!)}
             />
@@ -346,7 +343,6 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
       {message.reply_to_message_id && (
         <QuoteBlock
           quotedText={message.quoted_text ?? ""}
-          sourceRole="user"
           available={!!message.quoted_text}
           onClick={() => onScrollToMessage?.(message.reply_to_message_id!)}
         />

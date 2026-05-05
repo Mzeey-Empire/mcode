@@ -971,15 +971,17 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   }, [threadId, clearReply]);
 
   // Dismiss reply when the user clicks outside both the composer and any message bubble.
+  // Portaled overlays (popovers, dropdowns) render outside the composer DOM tree,
+  // so we also check for popover-content markers to avoid false dismissals.
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (!threadId) return;
+      const target = e.target as Element;
       const composerEl = composerContainerRef.current;
-      if (composerEl && !composerEl.contains(e.target as Node)) {
-        const msgElement = (e.target as Element)?.closest?.("[data-message-id]");
-        if (!msgElement) {
-          clearReply(threadId);
-        }
+      if (composerEl && !composerEl.contains(target)) {
+        if (target.closest?.("[data-message-id]")) return;
+        if (target.closest?.('[data-slot="popover-content"], [role="dialog"], [role="listbox"], [role="menu"]')) return;
+        clearReply(threadId);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -1497,8 +1499,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
           onBranchModeExit={onBranchModeExit}
         />
 
-        {/* Reply quote bar — shown when replying to a specific message */}
-        {replyContext && threadId && (
+        {/* Reply quote bar — hidden during branch mode since branches ignore reply context */}
+        {replyContext && threadId && !branchFromMessageId && (
           <ComposerReplyBar
             sourceRole={replyContext.sourceRole}
             previewText={replyContext.previewText}
