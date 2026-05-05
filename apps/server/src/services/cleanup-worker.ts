@@ -66,6 +66,7 @@ export class CleanupWorker {
   start(): void {
     if (this.pollTimer !== null) return;
     this.cleanupJobRepo.resetAttempts();
+    this.reconcileOnStartup();
     this.stopped = false;
     this.pollTimer = setInterval(() => {
       this.poll().catch((err) => {
@@ -214,6 +215,59 @@ export class CleanupWorker {
         error,
       });
       this.cleanupJobRepo.recordFailure(job.id, error);
+    }
+  }
+
+  /**
+   * Reconcile incomplete workspace deletions after app restart.
+   * Finds soft-deleted workspaces and ensures all their worktree threads
+   * have cleanup jobs enqueued. If a workspace has no remaining threads or jobs,
+   * hard-deletes it immediately.
+   */
+  reconcileOnStartup(): void {
+    const deletingWorkspaces = this.workspaceRepo.findDeleting();
+
+    for (const ws of deletingWorkspaces) {
+      const threads = this.threadRepo.listAllByWorkspace(ws.id);
+
+      if (threads.length === 0) {
+        // No threads remain - just hard-delete the workspace
+        this.workspaceRepo.hardDelete(ws.id);
+        logger.info("Reconciled orphaned workspace (no threads)", { workspaceId: ws.id });
+        continue;
+      }
+
+      // Find worktree threads missing cleanup jobs
+      const worktreeThreads = threads.filter((t) => t.worktree_path);
+      const missingJobs = worktreeThreads.filter(
+        (t) => !this.cleanupJobRepo.findByThreadId(t.id),
+      );
+
+      if (missingJobs.length > 0) {
+        this.cleanupJobRepo.insertBatch(
+          missingJobs.map((t) => ({
+            thread_id: t.id,
+            workspace_path: ws.path,
+            worktree_path: t.worktree_path!,
+            branch: t.branch,
+          })),
+        );
+        logger.info("Reconciled missing cleanup jobs for workspace", {
+          workspaceId: ws.id,
+          jobsEnqueued: missingJobs.length,
+        });
+      }
+
+      // If the only remaining threads are non-worktree (already soft-deleted),
+      // hard-delete them and the workspace now
+      const pendingJobs = this.cleanupJobRepo.countByWorkspacePath(ws.path);
+      if (pendingJobs === 0) {
+        for (const t of threads) {
+          this.threadRepo.hardDelete(t.id);
+        }
+        this.workspaceRepo.hardDelete(ws.id);
+        logger.info("Reconciled workspace with no pending cleanup", { workspaceId: ws.id });
+      }
     }
   }
 

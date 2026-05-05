@@ -441,3 +441,92 @@ describe("CleanupWorker - attachment cleanup and workspace finalization", () => 
     expect(row).toBeDefined();
   });
 });
+
+describe("CleanupWorker - startup reconciliation", () => {
+  let db: Database.Database;
+  let workspaceRepo: WorkspaceRepo;
+  let threadRepo: ThreadRepo;
+  let cleanupJobRepo: CleanupJobRepo;
+  let mockClaudeProvider: ClaudeProvider;
+  let mockTerminalService: TerminalService;
+  let mockGitService: GitService;
+  let mockAttachmentService: AttachmentService;
+  let worker: CleanupWorker;
+
+  beforeEach(() => {
+    vi.mocked(existsSync).mockReturnValue(true);
+
+    db = openMemoryDatabase();
+    cleanupJobRepo = new CleanupJobRepo(db);
+    threadRepo = new ThreadRepo(db);
+    workspaceRepo = new WorkspaceRepo(db);
+
+    mockClaudeProvider = {
+      waitForSessionExit: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ClaudeProvider;
+
+    mockTerminalService = {
+      killByThread: vi.fn(),
+    } as unknown as TerminalService;
+
+    mockGitService = {
+      removeWorktree: vi.fn().mockResolvedValue(true),
+      isRegisteredWorktreePath: vi.fn().mockReturnValue(true),
+    } as unknown as GitService;
+
+    mockAttachmentService = {
+      removeForThread: vi.fn(),
+    } as unknown as AttachmentService;
+
+    worker = new CleanupWorker(
+      db,
+      cleanupJobRepo,
+      threadRepo,
+      mockClaudeProvider,
+      mockTerminalService,
+      mockGitService,
+      workspaceRepo,
+      mockAttachmentService,
+    );
+  });
+
+  afterEach(() => {
+    worker.dispose();
+  });
+
+  it("enqueues missing cleanup jobs for soft-deleted workspaces on startup", () => {
+    const ws = workspaceRepo.create("Orphan", "/tmp/orphan");
+    const t1 = threadRepo.create(ws.id, "WT", "worktree", "feat/x");
+    db.prepare("UPDATE threads SET worktree_path = ? WHERE id = ?")
+      .run("/tmp/orphan/.worktrees/x", t1.id);
+    threadRepo.softDelete(t1.id);
+    workspaceRepo.softDelete(ws.id);
+
+    // No cleanup job exists (simulating crash after soft-delete)
+    expect(cleanupJobRepo.countByWorkspacePath("/tmp/orphan")).toBe(0);
+
+    worker.reconcileOnStartup();
+
+    expect(cleanupJobRepo.countByWorkspacePath("/tmp/orphan")).toBe(1);
+  });
+
+  it("hard-deletes soft-deleted workspace with no remaining threads or jobs", () => {
+    const ws = workspaceRepo.create("Empty Deleted", "/tmp/empty-del");
+    workspaceRepo.softDelete(ws.id);
+    // No threads at all
+
+    worker.reconcileOnStartup();
+
+    const row = db.prepare("SELECT id FROM workspaces WHERE id = ?").get(ws.id);
+    expect(row).toBeUndefined();
+  });
+
+  it("does not touch active workspaces during reconciliation", () => {
+    const ws = workspaceRepo.create("Active", "/tmp/active");
+    threadRepo.create(ws.id, "Thread", "direct", "main");
+
+    worker.reconcileOnStartup();
+
+    expect(workspaceRepo.findById(ws.id)).not.toBeNull();
+  });
+});
