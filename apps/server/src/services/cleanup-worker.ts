@@ -174,8 +174,10 @@ export class CleanupWorker {
       // 5. Remove the worktree directory and delete the exact thread branch when
       //    the thread record has one. The delete-thread dialog is the user intent
       //    boundary; rollback paths are handled separately in ThreadService.
+      //    Skip branch deletion when another active thread references the same branch.
       const wtName = resolvedWt.replace(/\\/g, "/").split("/").pop() ?? resolvedWt;
-      const removeOptions = job.branch
+      const shouldDelete = job.branch ? this.shouldDeleteBranch(job) : false;
+      const removeOptions = (job.branch && shouldDelete)
         ? { branchName: job.branch, worktreePath: resolvedWt }
         : { deleteBranch: false, worktreePath: resolvedWt };
 
@@ -216,6 +218,12 @@ export class CleanupWorker {
       });
       this.cleanupJobRepo.recordFailure(job.id, error);
     }
+  }
+
+  /** Check whether the branch is safe to delete (no other active thread references it). */
+  private shouldDeleteBranch(job: CleanupJob): boolean {
+    if (!job.branch) return false;
+    return this.threadRepo.countActiveByBranch(job.thread_id, job.branch) === 0;
   }
 
   /**
