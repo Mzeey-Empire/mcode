@@ -794,6 +794,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
          * context fill vs. the accumulated result.usage which inflates across API calls).
          * Reset to undefined after each turnComplete. */
         let lastStreamInputTokens: number | undefined = undefined;
+        /** Set after a `result` (TurnComplete). When the SDK auto-resumes
+         *  (e.g. ScheduleWakeup/loop), the next non-system/non-result event
+         *  triggers a synthetic TurnStarted so the server and UI know a new
+         *  turn has begun without going through sendMessage(). */
+        let awaitingResume = false;
 
         /**
          * Emit an Error event with a best-effort message extracted from an SDK
@@ -855,6 +860,18 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
               type: AgentEventType.System,
               threadId,
               subtype: "sdk_session_id:" + sdkSid,
+            } satisfies AgentEvent);
+          }
+
+          // Auto-resume detection: the SDK can start a new turn without
+          // going through sendMessage() (e.g. ScheduleWakeup/loop timer).
+          // Emit a synthetic TurnStarted so AgentService re-adds to
+          // activeSessionIds and the frontend shows the running indicator.
+          if (awaitingResume && anyMsg.type !== "result" && anyMsg.type !== "system") {
+            awaitingResume = false;
+            this.emit("event", {
+              type: AgentEventType.TurnStarted,
+              threadId,
             } satisfies AgentEvent);
           }
 
@@ -1052,6 +1069,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
               lastStreamInputTokens = undefined;
 
               lastAssistantText = "";
+              awaitingResume = true;
               break;
             }
 
