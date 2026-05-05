@@ -182,7 +182,7 @@ export function applySchemaPatches(db: Database.Database): void {
       const ids = (
         db
           .prepare(
-            "SELECT id FROM workspaces ORDER BY sort_order ASC, created_at ASC, id ASC",
+            "SELECT id FROM workspaces ORDER BY sort_order ASC, created_at DESC, id ASC",
           )
           .all() as Array<{ id: string }>
       ).map((r) => r.id);
