@@ -963,6 +963,16 @@ export class AgentService {
           this.updateBufferedToolCallOutput(event.threadId, event.toolCallId, event.output, event.isError);
         }
 
+        if (event.type === AgentEventType.TurnStarted) {
+          // Re-add to activeSessionIds for auto-resumed turns (ScheduleWakeup/loop).
+          // For sendMessage()-originated turns this is a no-op since sendMessage()
+          // already added the thread before emitting TurnStarted.
+          if (!this.activeSessionIds.has(event.threadId)) {
+            this.activeSessionIds.add(event.threadId);
+            this.memoryPressureService.markActive();
+          }
+        }
+
         if (event.type === AgentEventType.TurnComplete) {
           this.persistTurn(event.threadId).catch((err) => {
             logger.error("persistTurn failed on turnComplete", {
@@ -970,6 +980,15 @@ export class AgentService {
               error: err instanceof Error ? err.message : String(err),
             });
           });
+
+          // Clear the "running" flag so agent.listRunning no longer reports
+          // this thread and shutdown won't downgrade it to "interrupted."
+          // Skip during compaction: the SDK fires a synthetic TurnComplete
+          // before the compaction API call, but the session continues
+          // automatically.
+          if (!this.compactionInProgressByThread.has(event.threadId)) {
+            this.trackSessionEnded(event.threadId);
+          }
 
           // Persist context usage so the tracker shows immediately on thread reload.
           // Skip during compaction: the compaction API call emits a turnComplete
