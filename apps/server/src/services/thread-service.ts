@@ -125,6 +125,16 @@ export class ThreadService {
     return this.threadRepo.listRecent(limit);
   }
 
+  /** Search threads across all workspaces by title, status, and provider. */
+  search(opts: {
+    query: string;
+    filters?: { status?: string[]; provider?: string[] };
+    sort?: { field: "updated_at" | "created_at" | "title"; direction: "asc" | "desc" };
+    limit?: number;
+  }) {
+    return this.threadRepo.search(opts);
+  }
+
   /**
    * Soft-delete a thread and enqueue a background cleanup job when the thread
    * has a worktree path. The cleanup job handles process termination,

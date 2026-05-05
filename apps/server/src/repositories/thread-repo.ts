@@ -205,6 +205,73 @@ export class ThreadRepo {
     }));
   }
 
+  /**
+   * Search non-deleted threads across all workspaces by title substring,
+   * with optional status/provider filters and sort order.
+   */
+  search(opts: {
+    query: string;
+    filters?: { status?: string[]; provider?: string[] };
+    sort?: { field: "updated_at" | "created_at" | "title"; direction: "asc" | "desc" };
+    limit?: number;
+  }): { threads: Thread[]; workspaces: { id: string; name: string; path: string }[] } {
+    const clampedLimit = Math.max(1, Math.min(200, opts.limit ?? 100));
+    const conditions: string[] = ["t.deleted_at IS NULL"];
+    const params: unknown[] = [];
+
+    if (opts.query) {
+      const escapedQuery = opts.query.replace(/[%_]/g, "\\$&");
+      conditions.push("t.title LIKE ? ESCAPE '\\' COLLATE NOCASE");
+      params.push(`%${escapedQuery}%`);
+    }
+
+    if (opts.filters?.status?.length) {
+      const placeholders = opts.filters.status.map(() => "?").join(", ");
+      conditions.push(`t.status IN (${placeholders})`);
+      params.push(...opts.filters.status);
+    }
+
+    if (opts.filters?.provider?.length) {
+      const placeholders = opts.filters.provider.map(() => "?").join(", ");
+      conditions.push(`t.provider IN (${placeholders})`);
+      params.push(...opts.filters.provider);
+    }
+
+    const sortField = opts.sort?.field ?? "updated_at";
+    const sortDir = opts.sort?.direction ?? "desc";
+    const ALLOWED_SORT_FIELDS = new Set(["updated_at", "created_at", "title"]);
+    const ALLOWED_SORT_DIRS = new Set(["asc", "desc"]);
+    if (!ALLOWED_SORT_FIELDS.has(sortField) || !ALLOWED_SORT_DIRS.has(sortDir)) {
+      throw new Error(`Invalid sort parameters: ${sortField} ${sortDir}`);
+    }
+    const orderBy = `t.${sortField} ${sortDir.toUpperCase()}`;
+
+    const threadCols = THREAD_COLUMNS.split(", ").map((c) => `t.${c}`).join(", ");
+    const sql = `
+      SELECT ${threadCols}, w.id AS w_id, w.name AS w_name, w.path AS w_path
+      FROM threads t
+      JOIN workspaces w ON w.id = t.workspace_id
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY ${orderBy}
+      LIMIT ?
+    `;
+    params.push(clampedLimit);
+
+    const rows = this.db.prepare(sql).all(...params) as Array<
+      ThreadRow & { w_id: string; w_name: string; w_path: string }
+    >;
+
+    const threads = rows.map((row) => rowToThread(row));
+    const workspaceMap = new Map<string, { id: string; name: string; path: string }>();
+    for (const row of rows) {
+      if (!workspaceMap.has(row.w_id)) {
+        workspaceMap.set(row.w_id, { id: row.w_id, name: row.w_name, path: row.w_path });
+      }
+    }
+
+    return { threads, workspaces: [...workspaceMap.values()] };
+  }
+
   /** Update a thread's lifecycle status. Returns true if a row was changed. */
   updateStatus(id: string, status: ThreadStatus): boolean {
     const now = new Date().toISOString();

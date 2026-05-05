@@ -109,6 +109,13 @@ export interface McodeTransport {
   listThreads(workspaceId: string): Promise<Thread[]>;
   /** List the most recently active threads across all workspaces, joined with workspace name + path. */
   listRecentThreads(limit?: number): Promise<RecentThread[]>;
+  /** Search threads across all workspaces by title, with optional status/provider filters. */
+  searchThreads(opts: {
+    query: string;
+    filters?: { status?: string[]; provider?: string[] };
+    sort?: { field: "updated_at" | "created_at" | "title"; direction: "asc" | "desc" };
+    limit?: number;
+  }): Promise<{ threads: Thread[]; workspaces: { id: string; name: string; path: string }[] }>;
   deleteThread(threadId: string, cleanupWorktree: boolean): Promise<boolean>;
 
   // Git branch commands

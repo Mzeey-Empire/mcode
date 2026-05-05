@@ -218,6 +218,29 @@ export const WS_METHODS = lazySchema(() => ({
       prStatus: z.string().nullable(),
     })),
   },
+  /** Search threads across all workspaces by title substring, with optional status/provider filters and sort order. */
+  "thread.search": {
+    params: z.object({
+      query: z.string().max(500),
+      filters: z.object({
+        status: z.array(z.string()).max(20).optional(),
+        provider: z.array(z.string()).max(20).optional(),
+      }).optional(),
+      sort: z.object({
+        field: z.enum(["updated_at", "created_at", "title"]),
+        direction: z.enum(["asc", "desc"]),
+      }).optional(),
+      limit: z.number().int().positive().max(200).optional(),
+    }),
+    result: z.object({
+      threads: z.array(ThreadSchema()),
+      workspaces: z.array(z.object({
+        id: z.string(),
+        name: z.string(),
+        path: z.string(),
+      })),
+    }),
+  },
   "git.listBranches": {
     params: z.object({ workspaceId: z.string() }),
     result: z.array(GitBranchSchema),

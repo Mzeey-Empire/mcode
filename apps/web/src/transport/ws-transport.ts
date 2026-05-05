@@ -454,6 +454,16 @@ export function createWsTransport(
     listThreads: (workspaceId) => rpc<Thread[]>("thread.list", { workspaceId }),
     listRecentThreads: (limit) =>
       rpc<import("./types").RecentThread[]>("thread.recent", limit !== undefined ? { limit } : {}),
+    searchThreads: (opts) =>
+      rpc<{ threads: Thread[]; workspaces: { id: string; name: string; path: string }[] }>(
+        "thread.search",
+        {
+          query: opts.query,
+          filters: opts.filters,
+          sort: opts.sort,
+          limit: opts.limit,
+        },
+      ),
     deleteThread: (threadId, cleanupWorktree) =>
       rpc<boolean>("thread.delete", { threadId, cleanupWorktree }),
     updateThreadTitle: (threadId, title) =>
