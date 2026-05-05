@@ -1,9 +1,12 @@
 import "reflect-metadata";
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import type Database from "better-sqlite3";
 import { openMemoryDatabase } from "../store/database";
 import { WorkspaceRepo } from "../repositories/workspace-repo";
+import { ThreadRepo } from "../repositories/thread-repo";
+import { CleanupJobRepo } from "../repositories/cleanup-job-repo";
 import { WorkspaceService } from "../services/workspace-service";
+import { AttachmentService } from "../services/attachment-service";
 
 describe("WorkspaceRepo", () => {
   let db: Database.Database;
@@ -83,7 +86,10 @@ describe("WorkspaceService", () => {
   beforeEach(() => {
     db = openMemoryDatabase();
     repo = new WorkspaceRepo(db);
-    service = new WorkspaceService(repo);
+    const threadRepo = new ThreadRepo(db);
+    const cleanupJobRepo = new CleanupJobRepo(db);
+    const mockAttachmentService = { removeForThread: vi.fn() } as unknown as AttachmentService;
+    service = new WorkspaceService(repo, threadRepo, cleanupJobRepo, mockAttachmentService);
   });
 
   it("create() returns existing workspace when path already exists", () => {

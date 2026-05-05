@@ -1,10 +1,12 @@
 import "reflect-metadata";
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import type Database from "better-sqlite3";
 import { openMemoryDatabase } from "../store/database";
 import { WorkspaceRepo } from "../repositories/workspace-repo";
 import { ThreadRepo } from "../repositories/thread-repo";
 import { CleanupJobRepo } from "../repositories/cleanup-job-repo";
+import { WorkspaceService } from "../services/workspace-service";
+import { AttachmentService } from "../services/attachment-service";
 
 describe("WorkspaceRepo - soft/hard delete", () => {
   let db: Database.Database;
@@ -182,5 +184,126 @@ describe("CleanupJobRepo - workspace helpers", () => {
   it("countByWorkspacePath returns 0 when no jobs exist for the path", () => {
     const count = cleanupJobRepo.countByWorkspacePath("/tmp/nonexistent");
     expect(count).toBe(0);
+  });
+});
+
+describe("WorkspaceService.delete - two-phase orchestration", () => {
+  let db: Database.Database;
+  let workspaceRepo: WorkspaceRepo;
+  let threadRepo: ThreadRepo;
+  let cleanupJobRepo: CleanupJobRepo;
+  let workspaceService: WorkspaceService;
+  let mockAttachmentService: AttachmentService;
+
+  beforeEach(() => {
+    db = openMemoryDatabase();
+    workspaceRepo = new WorkspaceRepo(db);
+    threadRepo = new ThreadRepo(db);
+    cleanupJobRepo = new CleanupJobRepo(db);
+
+    mockAttachmentService = {
+      removeForThread: vi.fn(),
+    } as unknown as AttachmentService;
+
+    workspaceService = new WorkspaceService(
+      workspaceRepo,
+      threadRepo,
+      cleanupJobRepo,
+      mockAttachmentService,
+    );
+  });
+
+  it("immediately hides workspace from listing", () => {
+    const ws = workspaceRepo.create("Test", "/tmp/ws");
+    workspaceService.delete(ws.id);
+    expect(workspaceRepo.listAll()).toHaveLength(0);
+  });
+
+  it("soft-deletes all active threads", () => {
+    const ws = workspaceRepo.create("Test", "/tmp/ws");
+    const t1 = threadRepo.create(ws.id, "T1", "direct", "main");
+    const t2 = threadRepo.create(ws.id, "T2", "direct", "main");
+
+    workspaceService.delete(ws.id);
+
+    const threads = threadRepo.listAllByWorkspace(ws.id);
+    expect(threads.every((t) => t.deleted_at !== null)).toBe(true);
+  });
+
+  it("enqueues cleanup jobs for threads with worktrees", () => {
+    const ws = workspaceRepo.create("Test", "/tmp/ws");
+    const t1 = threadRepo.create(ws.id, "WT", "worktree", "feat/x");
+    db.prepare("UPDATE threads SET worktree_path = ? WHERE id = ?")
+      .run("/tmp/ws/.worktrees/feat-x", t1.id);
+
+    workspaceService.delete(ws.id);
+
+    expect(cleanupJobRepo.countByWorkspacePath("/tmp/ws")).toBe(1);
+  });
+
+  it("hard-deletes workspace immediately when no worktree threads exist", () => {
+    const ws = workspaceRepo.create("Test", "/tmp/ws");
+    threadRepo.create(ws.id, "Direct", "direct", "main");
+
+    workspaceService.delete(ws.id);
+
+    // Workspace should be fully gone
+    const row = db.prepare("SELECT id FROM workspaces WHERE id = ?").get(ws.id);
+    expect(row).toBeUndefined();
+  });
+
+  it("keeps workspace in soft-deleted state when worktree cleanup is pending", () => {
+    const ws = workspaceRepo.create("Test", "/tmp/ws");
+    const t1 = threadRepo.create(ws.id, "WT", "worktree", "feat/x");
+    db.prepare("UPDATE threads SET worktree_path = ? WHERE id = ?")
+      .run("/tmp/ws/.worktrees/feat-x", t1.id);
+
+    workspaceService.delete(ws.id);
+
+    // Workspace row still exists (soft-deleted, waiting for cleanup)
+    const row = db.prepare("SELECT deleted_at FROM workspaces WHERE id = ?").get(ws.id) as any;
+    expect(row).toBeDefined();
+    expect(row.deleted_at).not.toBeNull();
+  });
+
+  it("removes attachments for non-worktree threads before hard-deleting them", () => {
+    const ws = workspaceRepo.create("Test", "/tmp/ws");
+    const t1 = threadRepo.create(ws.id, "Direct", "direct", "main");
+
+    workspaceService.delete(ws.id);
+
+    expect(mockAttachmentService.removeForThread).toHaveBeenCalledWith(t1.id);
+  });
+
+  it("handles workspace with no threads (immediate hard-delete)", () => {
+    const ws = workspaceRepo.create("Empty", "/tmp/empty");
+    workspaceService.delete(ws.id);
+
+    const row = db.prepare("SELECT id FROM workspaces WHERE id = ?").get(ws.id);
+    expect(row).toBeUndefined();
+  });
+
+  it("does not enqueue duplicate cleanup jobs for already-soft-deleted threads with pending jobs", () => {
+    const ws = workspaceRepo.create("Test", "/tmp/ws");
+    const t1 = threadRepo.create(ws.id, "WT", "worktree", "feat/x");
+    db.prepare("UPDATE threads SET worktree_path = ? WHERE id = ?")
+      .run("/tmp/ws/.worktrees/feat-x", t1.id);
+
+    // Pre-existing cleanup job (thread was individually deleted before workspace delete)
+    threadRepo.softDelete(t1.id);
+    cleanupJobRepo.insert({
+      thread_id: t1.id, workspace_path: "/tmp/ws",
+      worktree_path: "/tmp/ws/.worktrees/feat-x", branch: "feat/x",
+    });
+
+    workspaceService.delete(ws.id);
+
+    // Should still be 1 job, not 2
+    expect(cleanupJobRepo.countByWorkspacePath("/tmp/ws")).toBe(1);
+  });
+
+  it("returns false for non-existent workspace", () => {
+    const result = workspaceService.delete("fake-id");
+    expect(result).toBe(false);
   });
 });

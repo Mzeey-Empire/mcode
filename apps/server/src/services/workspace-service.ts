@@ -1,6 +1,6 @@
 /**
  * Workspace CRUD service.
- * Thin orchestration layer over WorkspaceRepo with git detection.
+ * Orchestrates two-phase workspace deletion: soft-delete + async cleanup.
  */
 
 import { execFileSync } from "child_process";
@@ -9,13 +9,19 @@ import { join } from "path";
 import { injectable, inject } from "tsyringe";
 import type { Workspace } from "@mcode/contracts";
 import { WorkspaceRepo } from "../repositories/workspace-repo";
+import { ThreadRepo } from "../repositories/thread-repo";
+import { CleanupJobRepo } from "../repositories/cleanup-job-repo";
+import { AttachmentService } from "./attachment-service";
 import { logger } from "@mcode/shared";
 
-/** Handles workspace creation, listing, and deletion. */
+/** Handles workspace creation, listing, and two-phase deletion. */
 @injectable()
 export class WorkspaceService {
   constructor(
     @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
+    @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
+    @inject(CleanupJobRepo) private readonly cleanupJobRepo: CleanupJobRepo,
+    @inject(AttachmentService) private readonly attachmentService: AttachmentService,
   ) {}
 
   /**
@@ -48,9 +54,66 @@ export class WorkspaceService {
     return this.workspaceRepo.listAll();
   }
 
-  /** Delete a workspace by ID. Returns true if the workspace was removed. */
+  /**
+   * Two-phase workspace deletion.
+   * Phase 1 (synchronous): soft-delete workspace + threads, enqueue cleanup jobs.
+   * Phase 2 (async via CleanupWorker): drain jobs, then hard-delete workspace.
+   *
+   * Returns false if the workspace does not exist.
+   */
   delete(id: string): boolean {
-    return this.workspaceRepo.remove(id);
+    // Attempt soft-delete. If workspace doesn't exist or is already deleted, bail.
+    if (!this.workspaceRepo.softDelete(id)) {
+      return false;
+    }
+
+    const workspacePath = this.getWorkspacePathForCleanup(id);
+
+    // Gather all threads (active + already-soft-deleted) that have a worktree
+    const worktreeThreads = this.threadRepo.findWorktreeThreadsByWorkspace(id);
+
+    // Get all threads regardless of status
+    const allThreads = this.threadRepo.listAllByWorkspace(id);
+
+    // Separate threads by whether they need async worktree cleanup
+    const worktreeThreadIds = new Set(worktreeThreads.map((t) => t.id));
+    const directThreads = allThreads.filter((t) => !worktreeThreadIds.has(t.id));
+
+    // Soft-delete all threads that aren't already deleted
+    for (const thread of allThreads) {
+      if (!thread.deleted_at) {
+        this.threadRepo.softDelete(thread.id);
+      }
+    }
+
+    // Enqueue cleanup jobs for worktree threads (batch, skips duplicates)
+    if (worktreeThreads.length > 0 && workspacePath) {
+      this.cleanupJobRepo.insertBatch(
+        worktreeThreads.map((t) => ({
+          thread_id: t.id,
+          workspace_path: workspacePath,
+          worktree_path: t.worktree_path!,
+          branch: t.branch,
+        })),
+      );
+    }
+
+    // For direct threads (no worktree), clean up attachments and hard-delete now
+    for (const thread of directThreads) {
+      this.attachmentService.removeForThread(thread.id);
+      this.threadRepo.hardDelete(thread.id);
+    }
+
+    // If no worktree cleanup is pending, hard-delete the workspace immediately
+    const pendingJobs = workspacePath
+      ? this.cleanupJobRepo.countByWorkspacePath(workspacePath)
+      : 0;
+
+    if (pendingJobs === 0) {
+      this.workspaceRepo.hardDelete(id);
+    }
+
+    return true;
   }
 
   /** Find a workspace by its primary key. Returns null if not found. */
@@ -66,6 +129,12 @@ export class WorkspaceService {
   /** Update the is_git_repo flag on a workspace record. */
   setIsGitRepo(id: string, isGitRepo: boolean): void {
     this.workspaceRepo.setIsGitRepo(id, isGitRepo);
+  }
+
+  /** Retrieve workspace path even if soft-deleted (uses unfiltered repo lookup). */
+  private getWorkspacePathForCleanup(id: string): string | null {
+    const ws = this.workspaceRepo.findByIdIncludeDeleted(id);
+    return ws?.path ?? null;
   }
 
   /** Check whether a filesystem path is inside a git repository. */
