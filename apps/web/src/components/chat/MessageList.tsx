@@ -468,8 +468,9 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
       if (!msgElement) return;
 
       const messageId = msgElement.getAttribute("data-message-id");
-      const messageRole = msgElement.getAttribute("data-message-role") as "user" | "assistant" | null;
-      if (!messageId || !messageRole || messageRole === "system") return;
+      const messageRoleRaw = msgElement.getAttribute("data-message-role");
+      if (!messageId || !messageRoleRaw || messageRoleRaw === "system") return;
+      const messageRole = messageRoleRaw as "user" | "assistant";
 
       const selectedText = selection.toString().trim();
       if (!selectedText) return;
@@ -479,7 +480,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
         useReplyStore.getState().setReply(
           threadId,
           messageId,
-          messageRole as "user" | "assistant",
+          messageRole,
           selectedText.slice(0, 150),
           selectedText.slice(0, 2000),
         );
