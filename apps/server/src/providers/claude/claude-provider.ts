@@ -954,6 +954,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                 emitResultError(anyMsg);
                 lastAssistantText = "";
                 lastStreamInputTokens = undefined;
+                awaitingResume = false;
                 break;
               }
               if (lastAssistantText) {
