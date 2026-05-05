@@ -17,6 +17,8 @@ export const WorkspaceSchema = lazySchema(() =>
     last_opened_at: z.number().nullable(),
     /** Ascending sidebar order; lower values appear higher in the project list. */
     sort_order: z.number().int(),
+    /** ISO timestamp when the workspace was soft-deleted. Null if active. */
+    deleted_at: z.string().nullable(),
   }),
 );
 /** Workspace record from the database. */
