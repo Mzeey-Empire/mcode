@@ -116,6 +116,19 @@ export class WorkspaceService {
     return true;
   }
 
+  /**
+   * Force-delete a workspace, abandoning any pending filesystem cleanup.
+   * Removes all DB records immediately. Orphaned worktree directories may remain on disk.
+   */
+  forceDelete(id: string): boolean {
+    const threads = this.threadRepo.listAllByWorkspace(id);
+    for (const t of threads) {
+      this.cleanupJobRepo.deleteByThreadId(t.id);
+      this.attachmentService.removeForThread(t.id);
+    }
+    return this.workspaceRepo.hardDelete(id);
+  }
+
   /** Find a workspace by its primary key. Returns null if not found. */
   findById(id: string): Workspace | null {
     return this.workspaceRepo.findById(id);

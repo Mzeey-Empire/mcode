@@ -324,6 +324,32 @@ export class CleanupWorker {
     }
   }
 
+  /**
+   * Find soft-deleted workspaces where ALL remaining cleanup jobs have exhausted retries.
+   * These workspaces are permanently stuck and need user intervention (force-delete).
+   */
+  findStuckWorkspaces(): Array<{ workspaceId: string; workspacePath: string; reason: string }> {
+    const deleting = this.workspaceRepo.findDeleting();
+    const stuck: Array<{ workspaceId: string; workspacePath: string; reason: string }> = [];
+
+    for (const ws of deleting) {
+      const totalJobs = this.cleanupJobRepo.countByWorkspacePath(ws.path);
+      if (totalJobs === 0) continue;
+
+      const retriable = this.cleanupJobRepo.countRetriableByWorkspacePath(ws.path);
+      if (retriable === 0) {
+        const lastError = this.cleanupJobRepo.getLastErrorByWorkspacePath(ws.path);
+        stuck.push({
+          workspaceId: ws.id,
+          workspacePath: ws.path,
+          reason: lastError ?? "Unknown error after 5 attempts",
+        });
+      }
+    }
+
+    return stuck;
+  }
+
   /** Process a single due cleanup job. Returns true if a job was processed. Exported for testing. */
   async processOneJob(): Promise<boolean> {
     const jobs = this.cleanupJobRepo.findDue(Date.now());

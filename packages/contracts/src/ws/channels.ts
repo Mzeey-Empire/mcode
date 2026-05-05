@@ -89,6 +89,12 @@ export const WS_CHANNELS = {
     requestId: z.string(),
     decision: PermissionDecisionSchema,
   }),
+  /** Emitted when a workspace deletion is permanently stuck after max retries. */
+  "workspace.deleteFailed": z.object({
+    workspaceId: z.string(),
+    workspacePath: z.string(),
+    reason: z.string(),
+  }),
 } as const;
 
 /** Union of all push channel names. */

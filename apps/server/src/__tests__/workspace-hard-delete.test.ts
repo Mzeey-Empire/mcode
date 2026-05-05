@@ -608,6 +608,57 @@ describe("CleanupWorker - shared branch protection", () => {
   });
 });
 
+describe("CleanupWorker - exhausted retries", () => {
+  let db: Database.Database;
+  let workspaceRepo: WorkspaceRepo;
+  let threadRepo: ThreadRepo;
+  let cleanupJobRepo: CleanupJobRepo;
+  let worker: CleanupWorker;
+
+  beforeEach(() => {
+    db = openMemoryDatabase();
+    workspaceRepo = new WorkspaceRepo(db);
+    threadRepo = new ThreadRepo(db);
+    cleanupJobRepo = new CleanupJobRepo(db);
+
+    worker = new CleanupWorker(
+      db,
+      cleanupJobRepo,
+      threadRepo,
+      { waitForSessionExit: vi.fn().mockResolvedValue(undefined) } as any,
+      { killByThread: vi.fn() } as any,
+      { removeWorktree: vi.fn().mockResolvedValue(true), isRegisteredWorktreePath: vi.fn().mockReturnValue(true) } as any,
+      workspaceRepo,
+      { removeForThread: vi.fn() } as any,
+    );
+  });
+
+  afterEach(() => { worker.dispose(); });
+
+  it("finds stuck workspaces when all jobs exhausted retries", () => {
+    const ws = workspaceRepo.create("Stuck", "/tmp/stuck");
+    workspaceRepo.softDelete(ws.id);
+
+    const t1 = threadRepo.create(ws.id, "WT", "worktree", "feat/x");
+    db.prepare("UPDATE threads SET worktree_path = ? WHERE id = ?")
+      .run("/tmp/stuck/.worktrees/x", t1.id);
+    threadRepo.softDelete(t1.id);
+
+    cleanupJobRepo.insert({
+      thread_id: t1.id,
+      workspace_path: "/tmp/stuck",
+      worktree_path: "/tmp/stuck/.worktrees/x",
+      branch: "feat/x",
+    });
+    // Set attempts to 5 (max)
+    db.prepare("UPDATE cleanup_jobs SET attempts = 5 WHERE thread_id = ?").run(t1.id);
+
+    const stuckWorkspaces = worker.findStuckWorkspaces();
+    expect(stuckWorkspaces).toHaveLength(1);
+    expect(stuckWorkspaces[0].workspaceId).toBe(ws.id);
+  });
+});
+
 describe("CleanupWorker - missing directory handling", () => {
   let db: Database.Database;
   let workspaceRepo: WorkspaceRepo;
