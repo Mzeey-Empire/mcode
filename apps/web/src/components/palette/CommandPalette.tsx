@@ -82,10 +82,14 @@ export function CommandPalette() {
               modeLabel={browseMode ? "browse" : top?.kind === "projects" ? "projects" : getPaletteMode(query)}
               onKeyDown={(e) => {
                 // Ctrl/Cmd+Enter triggers the active view's confirm action.
-                if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && pendingConfirm) {
-                  e.preventDefault();
-                  pendingConfirm();
-                  return;
+                if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                  const confirm = useCommandPaletteStore.getState().pendingConfirm;
+                  if (confirm) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    confirm();
+                    return;
+                  }
                 }
                 // Backspace on empty input pops the view stack.
                 if (e.key === "Backspace" && query === "" && viewStack.length > 1) {

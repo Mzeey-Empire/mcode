@@ -17,6 +17,7 @@ describe("ContextTracker", () => {
     expect(ctx.terminalFocused).toBe(false);
     expect(ctx.commandPaletteOpen).toBe(false);
     expect(ctx.settingsOpen).toBe(false);
+    expect(ctx.showLanding).toBe(false);
   });
 
   it("updates a context value", () => {
@@ -43,5 +44,18 @@ describe("ContextTracker", () => {
 
   it("evaluateWhen returns false for unknown context keys", () => {
     expect(evaluateWhen("unknownKey")).toBe(false);
+  });
+
+  it("evaluateWhen supports && conjunction", () => {
+    setContext("showLanding", true);
+    setContext("commandPaletteOpen", false);
+    setContext("inputFocused", false);
+    expect(
+      evaluateWhen("showLanding && !commandPaletteOpen && !inputFocused"),
+    ).toBe(true);
+    setContext("commandPaletteOpen", true);
+    expect(
+      evaluateWhen("showLanding && !commandPaletteOpen && !inputFocused"),
+    ).toBe(false);
   });
 });
