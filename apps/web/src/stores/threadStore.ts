@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { Message, ToolCall, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
-import type { ContextWindowMode, ReasoningLevel, PlanQuestion, PlanAnswer, ProviderUsageInfo, QuotaCategory } from "@mcode/contracts";
+import type { ContextWindowMode, ReasoningLevel, PlanQuestion, PlanAnswer, ProviderUsageInfo, QuotaCategory, TurnSnapshot } from "@mcode/contracts";
 import type { PermissionRequest, PermissionDecision } from "@mcode/contracts";
 import { PlanQuestionSchema, PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts";
 import { getTransport } from "@/transport";
@@ -488,7 +488,21 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       });
     }
     try {
-      const { messages, hasMore, answeredPlanMessageIds } = await getTransport().getMessages(threadId, MESSAGE_FETCH_SIZE);
+      // Determine whether file-change snapshots are needed.
+      // When the thread record is absent (race during workspace load), fetch
+      // snapshots defensively. Only skip when explicitly has_file_changes=false.
+      const threadRecord = useWorkspaceStore.getState().threads.find((t) => t.id === threadId);
+      const shouldFetchSnapshots = threadRecord?.has_file_changes !== false;
+
+      const [messageResult, snapshots] = await Promise.all([
+        getTransport().getMessages(threadId, MESSAGE_FETCH_SIZE),
+        shouldFetchSnapshots
+          ? getTransport().listSnapshots(threadId).catch(() => [] as TurnSnapshot[])
+          : Promise.resolve([] as TurnSnapshot[]),
+      ]);
+
+      const { messages, hasMore, answeredPlanMessageIds } = messageResult;
+
       if (get().currentThreadId === threadId) {
         // Populate persisted tool call counts from loaded messages
         const counts: Record<string, number> = {};
@@ -561,73 +575,37 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           }
         }
 
-        // Populate file change summaries from persisted snapshots.
-        // Capture locals before async to avoid wrong-thread reads if user switches during await.
-        const capturedMessages = messages;
-        const capturedCounts = counts;
-        const capturedOldest = oldest;
-        const capturedHasMore = hasMore;
+        // Process snapshot results into the file-change map
+        const persistedFilesChangedMap: Record<string, string[]> = {};
+        let latestTurnWithChanges: string | null = null;
 
-        const threadRecord = useWorkspaceStore.getState().threads.find((t) => t.id === threadId);
-        if (threadRecord && !threadRecord.has_file_changes) {
-          cacheSnapshot(threadId, {
-            messages: capturedMessages,
-            oldestLoadedSequence: capturedOldest,
-            hasMoreMessages: capturedHasMore,
-            persistedToolCallCounts: capturedCounts,
-            persistedFilesChanged: {},
-            latestTurnWithChanges: null,
-          });
-        } else {
-          void (async () => {
-            try {
-              const snapshots = await getTransport().listSnapshots(threadId);
-              if (get().currentThreadId !== threadId) return;
-
-              const persistedFilesChangedMap: Record<string, string[]> = {};
-              let latestTurnWithChanges: string | null = null;
-
-              if (snapshots.length > 0) {
-                let latestTime = "";
-                for (const snap of snapshots) {
-                  if (snap.files_changed.length === 0) continue;
-                  persistedFilesChangedMap[snap.message_id] = snap.files_changed;
-                  if (snap.created_at > latestTime) {
-                    latestTime = snap.created_at;
-                    latestTurnWithChanges = snap.message_id;
-                  }
-                }
-                set((state) => {
-                  if (state.currentThreadId !== threadId) return {};
-                  return {
-                    persistedFilesChanged: { ...state.persistedFilesChanged, ...persistedFilesChangedMap },
-                    latestTurnWithChanges,
-                  };
-                });
-              }
-
-              cacheSnapshot(threadId, {
-                messages: capturedMessages,
-                oldestLoadedSequence: capturedOldest,
-                hasMoreMessages: capturedHasMore,
-                persistedToolCallCounts: capturedCounts,
-                persistedFilesChanged: persistedFilesChangedMap,
-                latestTurnWithChanges,
-              });
-            } catch {
-              if (get().currentThreadId === threadId) {
-                cacheSnapshot(threadId, {
-                  messages: capturedMessages,
-                  oldestLoadedSequence: capturedOldest,
-                  hasMoreMessages: capturedHasMore,
-                  persistedToolCallCounts: capturedCounts,
-                  persistedFilesChanged: {},
-                  latestTurnWithChanges: null,
-                });
-              }
+        if (snapshots.length > 0) {
+          let latestTime = "";
+          for (const snap of snapshots) {
+            if (snap.files_changed.length === 0) continue;
+            persistedFilesChangedMap[snap.message_id] = snap.files_changed;
+            if (snap.created_at > latestTime) {
+              latestTime = snap.created_at;
+              latestTurnWithChanges = snap.message_id;
             }
-          })();
+          }
+          set((state) => {
+            if (state.currentThreadId !== threadId) return {};
+            return {
+              persistedFilesChanged: { ...state.persistedFilesChanged, ...persistedFilesChangedMap },
+              latestTurnWithChanges,
+            };
+          });
         }
+
+        cacheSnapshot(threadId, {
+          messages,
+          oldestLoadedSequence: oldest,
+          hasMoreMessages: hasMore,
+          persistedToolCallCounts: counts,
+          persistedFilesChanged: persistedFilesChangedMap,
+          latestTurnWithChanges,
+        });
       }
     } catch (e) {
       if (get().currentThreadId === threadId) {
