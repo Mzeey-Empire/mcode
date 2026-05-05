@@ -95,14 +95,14 @@ export class WorkspaceRepo {
 
   /**
    * Reorder a workspace to a zero-based index in the current sort_order ordering.
-   * Uses a two-statement range shift inside a transaction.
+   * Rebuilds sequential sort_order values to handle duplicates from legacy migrations.
    */
   reorderToIndex(id: string, newIndex: number): void {
     const rows = this.db
       .prepare(
-        "SELECT id, sort_order FROM workspaces ORDER BY sort_order ASC, id ASC",
+        "SELECT id FROM workspaces ORDER BY sort_order ASC, id ASC",
       )
-      .all() as Array<{ id: string; sort_order: number }>;
+      .all() as Array<{ id: string }>;
 
     const oldIdx = rows.findIndex((r) => r.id === id);
     if (oldIdx < 0) return;
@@ -111,27 +111,17 @@ export class WorkspaceRepo {
     const idx = Math.max(0, Math.min(newIndex, n - 1));
     if (oldIdx === idx) return;
 
-    const orders = rows.map((r) => r.sort_order);
-    const fromPos = orders[oldIdx]!;
-    const toPos = orders[idx]!;
+    const ids = rows.map((r) => r.id);
+    const [moved] = ids.splice(oldIdx, 1);
+    ids.splice(idx, 0, moved!);
 
+    const stmt = this.db.prepare(
+      "UPDATE workspaces SET sort_order = ? WHERE id = ?",
+    );
     const trx = this.db.transaction(() => {
-      if (idx < oldIdx) {
-        this.db
-          .prepare(
-            "UPDATE workspaces SET sort_order = sort_order + 1 WHERE sort_order >= ? AND sort_order < ?",
-          )
-          .run(toPos, fromPos);
-      } else {
-        this.db
-          .prepare(
-            "UPDATE workspaces SET sort_order = sort_order - 1 WHERE sort_order > ? AND sort_order <= ?",
-          )
-          .run(fromPos, toPos);
+      for (let i = 0; i < ids.length; i++) {
+        stmt.run(i, ids[i]);
       }
-      this.db
-        .prepare("UPDATE workspaces SET sort_order = ? WHERE id = ?")
-        .run(toPos, id);
     });
     trx();
   }

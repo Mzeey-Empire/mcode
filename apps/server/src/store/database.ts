@@ -161,6 +161,42 @@ export function applySchemaPatches(db: Database.Database): void {
       }
     }
   }
+
+  // Normalize sort_order when duplicates exist (e.g. column added with DEFAULT 0).
+  // Without unique values, reorder operations silently fail.
+  if (cols.length > 0) {
+    const distinctCount = (
+      db
+        .prepare(
+          "SELECT COUNT(DISTINCT sort_order) AS cnt FROM workspaces",
+        )
+        .get() as { cnt: number }
+    ).cnt;
+    const totalCount = (
+      db.prepare("SELECT COUNT(*) AS cnt FROM workspaces").get() as {
+        cnt: number;
+      }
+    ).cnt;
+
+    if (totalCount > 1 && distinctCount < totalCount) {
+      const ids = (
+        db
+          .prepare(
+            "SELECT id FROM workspaces ORDER BY sort_order ASC, created_at ASC, id ASC",
+          )
+          .all() as Array<{ id: string }>
+      ).map((r) => r.id);
+      const stmt = db.prepare(
+        "UPDATE workspaces SET sort_order = ? WHERE id = ?",
+      );
+      const assign = db.transaction(() => {
+        for (let i = 0; i < ids.length; i++) {
+          stmt.run(i, ids[i]);
+        }
+      });
+      assign();
+    }
+  }
 }
 
 function runMigrations(db: Database.Database): void {
