@@ -404,6 +404,35 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           console.debug("[taskHydration] Failed to load tasks for thread %s:", threadId, err);
         });
 
+      // If the cached snapshot has no file-change data but the thread has changes,
+      // fetch snapshots in the background (covers prefetched entries).
+      const threadRecord = useWorkspaceStore.getState().threads.find((t) => t.id === threadId);
+      if (threadRecord?.has_file_changes && !cached.latestTurnWithChanges) {
+        void getTransport().listSnapshots(threadId).then((snapshots) => {
+          if (get().currentThreadId !== threadId) return;
+          if (snapshots.length === 0) return;
+
+          const persistedFilesChangedMap: Record<string, string[]> = {};
+          let latestTurnWithChanges: string | null = null;
+          let latestTime = "";
+          for (const snap of snapshots) {
+            if (snap.files_changed.length === 0) continue;
+            persistedFilesChangedMap[snap.message_id] = snap.files_changed;
+            if (snap.created_at > latestTime) {
+              latestTime = snap.created_at;
+              latestTurnWithChanges = snap.message_id;
+            }
+          }
+          set((state) => {
+            if (state.currentThreadId !== threadId) return {};
+            return {
+              persistedFilesChanged: { ...state.persistedFilesChanged, ...persistedFilesChangedMap },
+              latestTurnWithChanges,
+            };
+          });
+        }).catch(() => { /* non-critical */ });
+      }
+
       return;
     }
 
