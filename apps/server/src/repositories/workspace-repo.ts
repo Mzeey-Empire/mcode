@@ -19,6 +19,7 @@ interface WorkspaceRow {
   pinned: number;
   last_opened_at: number | null;
   sort_order: number;
+  deleted_at: string | null;
 }
 
 function rowToWorkspace(row: WorkspaceRow): Workspace {
@@ -36,6 +37,7 @@ function rowToWorkspace(row: WorkspaceRow): Workspace {
     pinned: row.pinned === 1,
     last_opened_at: row.last_opened_at ?? null,
     sort_order: row.sort_order,
+    deleted_at: row.deleted_at ?? null,
   };
 }
 
@@ -72,6 +74,7 @@ export class WorkspaceRepo {
       pinned: false,
       last_opened_at: null,
       sort_order: 0,
+      deleted_at: null,
     };
   }
 
@@ -136,33 +139,33 @@ export class WorkspaceRepo {
     trx();
   }
 
-  /** Find a workspace by its primary key. Returns null if not found. */
+  /** Find a workspace by its primary key. Returns null if not found or soft-deleted. */
   findById(id: string): Workspace | null {
     const row = this.db
       .prepare(
-        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at, sort_order FROM workspaces WHERE id = ?",
+        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at, sort_order, deleted_at FROM workspaces WHERE id = ? AND deleted_at IS NULL",
       )
       .get(id) as WorkspaceRow | undefined;
 
     return row ? rowToWorkspace(row) : null;
   }
 
-  /** Find a workspace by its filesystem path. Returns null if not found. */
+  /** Find a workspace by its filesystem path. Returns null if not found or soft-deleted. */
   findByPath(path: string): Workspace | null {
     const row = this.db
       .prepare(
-        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at, sort_order FROM workspaces WHERE path = ?",
+        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at, sort_order, deleted_at FROM workspaces WHERE path = ? AND deleted_at IS NULL",
       )
       .get(path) as WorkspaceRow | undefined;
 
     return row ? rowToWorkspace(row) : null;
   }
 
-  /** List all workspaces ordered by ascending sidebar sort_order. */
+  /** List all non-deleted workspaces ordered by ascending sidebar sort_order. */
   listAll(): Workspace[] {
     const rows = this.db
       .prepare(
-        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at, sort_order FROM workspaces ORDER BY sort_order ASC, id ASC",
+        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at, sort_order, deleted_at FROM workspaces WHERE deleted_at IS NULL ORDER BY sort_order ASC, id ASC",
       )
       .all() as WorkspaceRow[];
 
@@ -191,6 +194,40 @@ export class WorkspaceRepo {
       .run(id);
 
     return result.changes > 0;
+  }
+
+  /** Soft-delete a workspace by setting deleted_at. Returns true if a row was changed. */
+  softDelete(id: string): boolean {
+    const now = new Date().toISOString();
+    const result = this.db
+      .prepare("UPDATE workspaces SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL")
+      .run(now, now, id);
+    return result.changes > 0;
+  }
+
+  /** Permanently remove a workspace and all its children (via FK cascade). */
+  hardDelete(id: string): boolean {
+    const result = this.db
+      .prepare("DELETE FROM workspaces WHERE id = ?")
+      .run(id);
+    return result.changes > 0;
+  }
+
+  /** Find all workspaces currently in the soft-deleted (deleting) state. */
+  findDeleting(): Array<{ id: string; path: string; deletedAt: string }> {
+    return this.db
+      .prepare("SELECT id, path, deleted_at AS deletedAt FROM workspaces WHERE deleted_at IS NOT NULL")
+      .all() as Array<{ id: string; path: string; deletedAt: string }>;
+  }
+
+  /** Find a workspace by ID regardless of deletion status. Used during cleanup. */
+  findByIdIncludeDeleted(id: string): Workspace | null {
+    const row = this.db
+      .prepare(
+        "SELECT id, name, path, provider_config, is_git_repo, created_at, updated_at, pinned, last_opened_at, sort_order, deleted_at FROM workspaces WHERE id = ?",
+      )
+      .get(id) as WorkspaceRow | undefined;
+    return row ? rowToWorkspace(row) : null;
   }
 
   /** Bump updated_at to the current time so the workspace sorts to the top of the recent list. */

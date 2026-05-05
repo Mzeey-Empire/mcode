@@ -27,6 +27,7 @@ export function createMockWorkspace(
     pinned: false,
     last_opened_at: null,
     sort_order: 0,
+    deleted_at: null,
     ...overrides,
   };
 }
