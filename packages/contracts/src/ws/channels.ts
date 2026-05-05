@@ -89,6 +89,8 @@ export const WS_CHANNELS = {
     requestId: z.string(),
     decision: PermissionDecisionSchema,
   }),
+  /** Emitted when a workspace is fully hard-deleted (all cleanup complete). */
+  "workspace.deleted": z.object({ workspaceId: z.string() }),
   /** Emitted when a workspace deletion is permanently stuck after max retries. */
   "workspace.deleteFailed": z.object({
     workspaceId: z.string(),

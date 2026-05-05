@@ -19,6 +19,7 @@ import { GitService } from "./git-service.js";
 import { AttachmentService } from "./attachment-service.js";
 import { killDescendantsByName } from "./process-kill.js";
 import { WorkspaceRepo } from "../repositories/workspace-repo.js";
+import { broadcast } from "../transport/push.js";
 
 /** How often to check for due cleanup jobs (ms). */
 const POLL_INTERVAL_MS = 5_000;
@@ -317,6 +318,7 @@ export class CleanupWorker {
     const workspace = deleting.find((w) => w.path === workspacePath);
     if (workspace) {
       this.workspaceRepo.hardDelete(workspace.id);
+      broadcast("workspace.deleted", { workspaceId: workspace.id });
       logger.info("Workspace hard-deleted after final cleanup job", {
         workspaceId: workspace.id,
         workspacePath,

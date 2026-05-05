@@ -136,6 +136,8 @@ interface WorkspaceState {
   loadWorkspaces: () => Promise<void>;
   createWorkspace: (name: string, path: string) => Promise<Workspace>;
   deleteWorkspace: (id: string) => Promise<void>;
+  /** Remove a workspace from local state immediately (used by push channel handlers). */
+  removeWorkspaceFromState: (id: string) => void;
   /**
    * Set the active workspace by ID. Clears the active thread if it belongs to a
    * different workspace, and bumps the workspace's last_opened_at locally so
@@ -403,6 +405,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       set({ error: String(e) });
       throw e;
     }
+  },
+
+  removeWorkspaceFromState: (id) => {
+    set((state) => ({
+      workspaces: state.workspaces.filter((w) => w.id !== id),
+      activeWorkspaceId: state.activeWorkspaceId === id ? null : state.activeWorkspaceId,
+    }));
   },
 
   setActiveWorkspace: (id, call) => {
