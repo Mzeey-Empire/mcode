@@ -187,15 +187,6 @@ export class WorkspaceRepo {
     this.db.prepare("UPDATE workspaces SET last_opened_at = NULL, pinned = 0 WHERE id = ?").run(id);
   }
 
-  /** Delete a workspace by ID. Returns true if a row was removed. */
-  remove(id: string): boolean {
-    const result = this.db
-      .prepare("DELETE FROM workspaces WHERE id = ?")
-      .run(id);
-
-    return result.changes > 0;
-  }
-
   /** Soft-delete a workspace by setting deleted_at. Returns true if a row was changed. */
   softDelete(id: string): boolean {
     const now = new Date().toISOString();

@@ -18,17 +18,17 @@ describe("WorkspaceRepo", () => {
     repo = new WorkspaceRepo(db);
   });
 
-  it("remove() deletes the workspace row", () => {
+  it("hardDelete() deletes the workspace row", () => {
     const ws = repo.create("test", "/tmp/test");
     expect(repo.findById(ws.id)).not.toBeNull();
 
-    const deleted = repo.remove(ws.id);
+    const deleted = repo.hardDelete(ws.id);
 
     expect(deleted).toBe(true);
     expect(repo.findById(ws.id)).toBeNull();
   });
 
-  it("remove() cascade-deletes associated threads", () => {
+  it("hardDelete() cascade-deletes associated threads", () => {
     const ws = repo.create("test", "/tmp/test");
     const now = new Date().toISOString();
     db.prepare(
@@ -38,7 +38,7 @@ describe("WorkspaceRepo", () => {
       "INSERT INTO threads (id, workspace_id, title, branch, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
     ).run("t-2", ws.id, "Thread 2", "main", now, now);
 
-    repo.remove(ws.id);
+    repo.hardDelete(ws.id);
 
     const threads = db
       .prepare("SELECT id FROM threads WHERE workspace_id = ?")
@@ -46,7 +46,7 @@ describe("WorkspaceRepo", () => {
     expect(threads).toHaveLength(0);
   });
 
-  it("remove() cascade-deletes messages through threads", () => {
+  it("hardDelete() cascade-deletes messages through threads", () => {
     const ws = repo.create("test", "/tmp/test");
     const now = new Date().toISOString();
     db.prepare(
@@ -56,7 +56,7 @@ describe("WorkspaceRepo", () => {
       "INSERT INTO messages (id, thread_id, role, content, timestamp, sequence) VALUES (?, ?, ?, ?, ?, ?)",
     ).run("m-1", "t-1", "user", "hello", now, 1);
 
-    repo.remove(ws.id);
+    repo.hardDelete(ws.id);
 
     const messages = db
       .prepare("SELECT id FROM messages WHERE thread_id = ?")
@@ -64,13 +64,13 @@ describe("WorkspaceRepo", () => {
     expect(messages).toHaveLength(0);
   });
 
-  it("remove() returns false for non-existent ID", () => {
-    expect(repo.remove("non-existent")).toBe(false);
+  it("hardDelete() returns false for non-existent ID", () => {
+    expect(repo.hardDelete("non-existent")).toBe(false);
   });
 
   it("create() allows re-using a path after the previous workspace was deleted", () => {
     const ws1 = repo.create("test", "/tmp/reuse");
-    repo.remove(ws1.id);
+    repo.hardDelete(ws1.id);
 
     const ws2 = repo.create("test-2", "/tmp/reuse");
 
