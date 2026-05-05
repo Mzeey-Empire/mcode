@@ -4,6 +4,7 @@ import type Database from "better-sqlite3";
 import { openMemoryDatabase } from "../store/database";
 import { WorkspaceRepo } from "../repositories/workspace-repo";
 import { ThreadRepo } from "../repositories/thread-repo";
+import { CleanupJobRepo } from "../repositories/cleanup-job-repo";
 
 describe("WorkspaceRepo - soft/hard delete", () => {
   let db: Database.Database;
@@ -130,5 +131,56 @@ describe("ThreadRepo - workspace deletion helpers", () => {
 
     const all = threadRepo.listAllByWorkspace(ws.id);
     expect(all).toHaveLength(2);
+  });
+});
+
+describe("CleanupJobRepo - workspace helpers", () => {
+  let db: Database.Database;
+  let workspaceRepo: WorkspaceRepo;
+  let threadRepo: ThreadRepo;
+  let cleanupJobRepo: CleanupJobRepo;
+
+  beforeEach(() => {
+    db = openMemoryDatabase();
+    workspaceRepo = new WorkspaceRepo(db);
+    threadRepo = new ThreadRepo(db);
+    cleanupJobRepo = new CleanupJobRepo(db);
+  });
+
+  it("insertBatch creates multiple cleanup jobs in one transaction", () => {
+    const ws = workspaceRepo.create("Test", "/tmp/ws");
+    const t1 = threadRepo.create(ws.id, "T1", "worktree", "feat/a");
+    const t2 = threadRepo.create(ws.id, "T2", "worktree", "feat/b");
+
+    cleanupJobRepo.insertBatch([
+      { thread_id: t1.id, workspace_path: "/tmp/ws", worktree_path: "/tmp/ws/.worktrees/a", branch: "feat/a" },
+      { thread_id: t2.id, workspace_path: "/tmp/ws", worktree_path: "/tmp/ws/.worktrees/b", branch: "feat/b" },
+    ]);
+
+    const count = cleanupJobRepo.countByWorkspacePath("/tmp/ws");
+    expect(count).toBe(2);
+  });
+
+  it("insertBatch skips threads that already have a cleanup job", () => {
+    const ws = workspaceRepo.create("Test", "/tmp/ws");
+    const t1 = threadRepo.create(ws.id, "T1", "worktree", "feat/a");
+
+    // Insert one job directly
+    cleanupJobRepo.insert({
+      thread_id: t1.id, workspace_path: "/tmp/ws", worktree_path: "/tmp/ws/.worktrees/a", branch: "feat/a",
+    });
+
+    // Batch should not fail on duplicate thread_id
+    cleanupJobRepo.insertBatch([
+      { thread_id: t1.id, workspace_path: "/tmp/ws", worktree_path: "/tmp/ws/.worktrees/a", branch: "feat/a" },
+    ]);
+
+    const count = cleanupJobRepo.countByWorkspacePath("/tmp/ws");
+    expect(count).toBe(1);
+  });
+
+  it("countByWorkspacePath returns 0 when no jobs exist for the path", () => {
+    const count = cleanupJobRepo.countByWorkspacePath("/tmp/nonexistent");
+    expect(count).toBe(0);
   });
 });
