@@ -24,6 +24,8 @@ interface MessageRow {
   timestamp: string;
   sequence: number;
   attachments: string | null;
+  reply_to_message_id: string | null;
+  quoted_text: string | null;
   tool_call_count?: number;
 }
 
@@ -53,6 +55,8 @@ function rowToMessage(row: MessageRow): Message {
     attachments: parseJsonField(row.attachments) as
       | StoredAttachment[]
       | null,
+    reply_to_message_id: row.reply_to_message_id,
+    quoted_text: row.quoted_text,
   };
 
   if (row.tool_call_count && row.tool_call_count > 0) {
@@ -63,10 +67,10 @@ function rowToMessage(row: MessageRow): Message {
 }
 
 const MESSAGE_COLUMNS =
-  "id, thread_id, role, content, tool_calls, files_changed, cost_usd, tokens_used, timestamp, sequence, attachments";
+  "id, thread_id, role, content, tool_calls, files_changed, cost_usd, tokens_used, timestamp, sequence, attachments, reply_to_message_id, quoted_text";
 
 const MESSAGE_COLUMNS_PREFIXED =
-  "m.id, m.thread_id, m.role, m.content, m.tool_calls, m.files_changed, m.cost_usd, m.tokens_used, m.timestamp, m.sequence, m.attachments";
+  "m.id, m.thread_id, m.role, m.content, m.tool_calls, m.files_changed, m.cost_usd, m.tokens_used, m.timestamp, m.sequence, m.attachments, m.reply_to_message_id, m.quoted_text";
 
 /** Repository for message creation and retrieval against SQLite. */
 @injectable()
@@ -80,6 +84,8 @@ export class MessageRepo {
     content: string,
     sequence: number,
     attachments?: StoredAttachment[],
+    replyToMessageId?: string,
+    quotedText?: string,
   ): Message {
     const id = randomUUID();
     const now = new Date().toISOString();
@@ -90,9 +96,9 @@ export class MessageRepo {
 
     this.db
       .prepare(
-        "INSERT INTO messages (id, thread_id, role, content, timestamp, sequence, attachments) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO messages (id, thread_id, role, content, timestamp, sequence, attachments, reply_to_message_id, quoted_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
-      .run(id, threadId, role, content, now, sequence, attachmentsJson);
+      .run(id, threadId, role, content, now, sequence, attachmentsJson, replyToMessageId ?? null, quotedText ?? null);
 
     return {
       id,
@@ -106,6 +112,8 @@ export class MessageRepo {
       timestamp: now,
       sequence,
       attachments: attachments ?? null,
+      reply_to_message_id: replyToMessageId ?? null,
+      quoted_text: quotedText ?? null,
     };
   }
 
@@ -198,5 +206,13 @@ ORDER BY m.sequence ASC`,
       .get(messageId, threadId) as MessageRow | undefined;
 
     return row ? rowToMessage(row) : null;
+  }
+
+  /** Look up a single message by its primary key. */
+  findById(id: string): Message | undefined {
+    const row = this.db
+      .prepare(`SELECT ${MESSAGE_COLUMNS} FROM messages WHERE id = ?`)
+      .get(id) as MessageRow | undefined;
+    return row ? rowToMessage(row) : undefined;
   }
 }
