@@ -24,12 +24,23 @@ interface PersistedPrefs {
 const STORAGE_KEY = "mcode-sidebar-search-prefs";
 
 function loadPrefs(): PersistedPrefs {
+  const defaults: PersistedPrefs = { sortField: "updated_at", sortDirection: "desc", filters: { status: [], provider: [] } };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { sortField: "updated_at", sortDirection: "desc", filters: { status: [], provider: [] } };
-    return JSON.parse(raw);
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw);
+    const validFields = new Set<string>(["updated_at", "created_at", "title"]);
+    const validDirs = new Set<string>(["asc", "desc"]);
+    return {
+      sortField: validFields.has(parsed?.sortField) ? parsed.sortField : "updated_at",
+      sortDirection: validDirs.has(parsed?.sortDirection) ? parsed.sortDirection : "desc",
+      filters: {
+        status: Array.isArray(parsed?.filters?.status) ? parsed.filters.status : [],
+        provider: Array.isArray(parsed?.filters?.provider) ? parsed.filters.provider : [],
+      },
+    };
   } catch {
-    return { sortField: "updated_at", sortDirection: "desc", filters: { status: [], provider: [] } };
+    return defaults;
   }
 }
 
@@ -89,7 +100,6 @@ export const useSidebarSearchStore = create<SidebarSearchState>((set, get) => {
         set({ serverResults: [], serverWorkspaces: [], isSearching: false });
         return;
       }
-      set({ isSearching: true });
       debounceTimer = setTimeout(() => {
         get().executeServerSearch();
       }, 250);
@@ -99,12 +109,20 @@ export const useSidebarSearchStore = create<SidebarSearchState>((set, get) => {
       set({ sortField: field });
       const { sortDirection, filters } = get();
       savePrefs({ sortField: field, sortDirection, filters });
+      if (get().query.trim()) {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        get().executeServerSearch();
+      }
     },
 
     setSortDirection: (dir) => {
       set({ sortDirection: dir });
       const { sortField, filters } = get();
       savePrefs({ sortField, sortDirection: dir, filters });
+      if (get().query.trim()) {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        get().executeServerSearch();
+      }
     },
 
     toggleSortDirection: () => {
@@ -122,6 +140,10 @@ export const useSidebarSearchStore = create<SidebarSearchState>((set, get) => {
       set({ filters });
       const { sortField, sortDirection } = get();
       savePrefs({ sortField, sortDirection, filters });
+      if (get().query.trim()) {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        get().executeServerSearch();
+      }
     },
 
     clearFilters: () => {
@@ -129,17 +151,25 @@ export const useSidebarSearchStore = create<SidebarSearchState>((set, get) => {
       set({ filters });
       const { sortField, sortDirection } = get();
       savePrefs({ sortField, sortDirection, filters });
+      if (get().query.trim()) {
+        if (debounceTimer) clearTimeout(debounceTimer);
+        get().executeServerSearch();
+      }
     },
 
     clearAll: () => {
       if (debounceTimer) clearTimeout(debounceTimer);
+      const filters = { status: [], provider: [] };
       set({
         query: "",
+        filters,
         serverResults: [],
         serverWorkspaces: [],
         isSearching: false,
         expandedSnapshot: null,
       });
+      const { sortField, sortDirection } = get();
+      savePrefs({ sortField, sortDirection, filters });
     },
 
     setExpandedSnapshot: (snapshot) => {
@@ -154,17 +184,21 @@ export const useSidebarSearchStore = create<SidebarSearchState>((set, get) => {
         set({ isSearching: false, serverResults: [], serverWorkspaces: [] });
         return;
       }
+      set({ isSearching: true });
+      const requestFilters = JSON.stringify(filters);
+      // Strip pseudo-statuses that don't exist in the DB
+      const serverStatuses = filters.status.filter((s) => s !== "action_required");
       try {
         const result = await getTransport().searchThreads({
           query: query.trim(),
           filters: {
-            status: filters.status.length > 0 ? filters.status : undefined,
+            status: serverStatuses.length > 0 ? serverStatuses : undefined,
             provider: filters.provider.length > 0 ? filters.provider : undefined,
           },
           sort: { field: sortField, direction: sortDirection },
         });
-        // Only apply results if query hasn't changed during the request
-        if (get().query.trim() === query.trim()) {
+        // Only apply results if query and filters haven't changed during the request
+        if (get().query.trim() === query.trim() && JSON.stringify(get().filters) === requestFilters) {
           set({
             serverResults: result.threads,
             serverWorkspaces: result.workspaces,

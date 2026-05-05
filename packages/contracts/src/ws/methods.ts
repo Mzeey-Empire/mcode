@@ -212,10 +212,10 @@ export const WS_METHODS = lazySchema(() => ({
   /** Search threads across all workspaces by title substring, with optional status/provider filters and sort order. */
   "thread.search": {
     params: z.object({
-      query: z.string(),
+      query: z.string().max(500),
       filters: z.object({
-        status: z.array(z.string()).optional(),
-        provider: z.array(z.string()).optional(),
+        status: z.array(z.string()).max(20).optional(),
+        provider: z.array(z.string()).max(20).optional(),
       }).optional(),
       sort: z.object({
         field: z.enum(["updated_at", "created_at", "title"]),

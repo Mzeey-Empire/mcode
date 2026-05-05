@@ -220,8 +220,9 @@ export class ThreadRepo {
     const params: unknown[] = [];
 
     if (opts.query) {
-      conditions.push("t.title LIKE ? COLLATE NOCASE");
-      params.push(`%${opts.query}%`);
+      const escapedQuery = opts.query.replace(/[%_]/g, "\\$&");
+      conditions.push("t.title LIKE ? ESCAPE '\\' COLLATE NOCASE");
+      params.push(`%${escapedQuery}%`);
     }
 
     if (opts.filters?.status?.length) {
@@ -238,6 +239,11 @@ export class ThreadRepo {
 
     const sortField = opts.sort?.field ?? "updated_at";
     const sortDir = opts.sort?.direction ?? "desc";
+    const ALLOWED_SORT_FIELDS = new Set(["updated_at", "created_at", "title"]);
+    const ALLOWED_SORT_DIRS = new Set(["asc", "desc"]);
+    if (!ALLOWED_SORT_FIELDS.has(sortField) || !ALLOWED_SORT_DIRS.has(sortDir)) {
+      throw new Error(`Invalid sort parameters: ${sortField} ${sortDir}`);
+    }
     const orderBy = `t.${sortField} ${sortDir.toUpperCase()}`;
 
     const threadCols = THREAD_COLUMNS.split(", ").map((c) => `t.${c}`).join(", ");

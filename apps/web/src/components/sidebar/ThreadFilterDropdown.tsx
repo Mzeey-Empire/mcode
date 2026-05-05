@@ -24,6 +24,8 @@ function FilterCheckbox({
 }) {
   return (
     <button
+      role="checkbox"
+      aria-checked={checked}
       className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent/40"
       onClick={onChange}
     >

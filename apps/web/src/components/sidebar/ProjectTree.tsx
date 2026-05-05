@@ -189,15 +189,21 @@ function filterAndSortThreads(
   // Status filter
   if (filters.status.length > 0) {
     result = result.filter((t) => {
+      // "action_required" is a client-side pseudo-status
       if (filters.status.includes("action_required") && pendingPermissionThreadIds.has(t.id)) {
         return true;
       }
-      if (filters.status.includes("active") && runningThreadIds.has(t.id)) {
+      // "active" means currently running
+      if (filters.status.includes("active") && t.status === "active" && runningThreadIds.has(t.id)) {
         return true;
       }
+      // "paused" means status is active but NOT running
       if (filters.status.includes("paused") && t.status === "active" && !runningThreadIds.has(t.id)) {
         return true;
       }
+      // For DB-level statuses (completed, errored, interrupted), match directly
+      // but exclude "active" from fallthrough since it's handled above
+      if (t.status === "active") return false;
       return filters.status.includes(t.status);
     });
   }
@@ -271,6 +277,25 @@ export function ProjectTree() {
   const expandedSnapshot = useSidebarSearchStore((s) => s.expandedSnapshot);
   const isSearchActive = searchQuery.trim().length > 0 || searchFilters.status.length > 0 || searchFilters.provider.length > 0;
 
+  const availableProviders = useMemo(
+    () => [...new Set(threads.map((t) => t.provider))].sort(),
+    [threads],
+  );
+
+  const filteredThreadsByWorkspace = useMemo(() => {
+    const map = new Map<string, WorkspaceThread[]>();
+    for (const ws of workspaces) {
+      const wsThreads = threads.filter((t) => t.workspace_id === ws.id);
+      const filtered = isSearchActive
+        ? filterAndSortThreads(wsThreads, searchQuery, searchFilters, sortField, sortDirection, runningThreadIds, pendingPermissionThreadIds)
+        : sortField !== "updated_at" || sortDirection !== "desc"
+          ? filterAndSortThreads(wsThreads, "", { status: [], provider: [] }, sortField, sortDirection, runningThreadIds, pendingPermissionThreadIds)
+          : wsThreads;
+      map.set(ws.id, filtered);
+    }
+    return map;
+  }, [workspaces, threads, isSearchActive, searchQuery, searchFilters, sortField, sortDirection, runningThreadIds, pendingPermissionThreadIds]);
+
   const [expanded, setExpanded] = useState<Record<string, boolean>>(getExpandedState);
   const [threadListExpanded, setThreadListExpandedState] = useState<Record<string, boolean>>(getThreadListExpanded);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -330,31 +355,32 @@ export function ProjectTree() {
     const workspaceIdsWithMatches = new Set<string>();
 
     for (const ws of workspaces) {
-      const wsThreads = threads.filter((t) => t.workspace_id === ws.id);
-      const filtered = filterAndSortThreads(
-        wsThreads, searchQuery, searchFilters, sortField, sortDirection,
-        runningThreadIds, pendingPermissionThreadIds,
-      );
-      if (filtered.length > 0) workspaceIdsWithMatches.add(ws.id);
+      const wsThreads = filteredThreadsByWorkspace.get(ws.id) ?? [];
+      if (wsThreads.length > 0) workspaceIdsWithMatches.add(ws.id);
     }
 
     for (const t of serverResults) {
       workspaceIdsWithMatches.add(t.workspace_id);
     }
 
-    setExpanded((prev) => {
-      const next = { ...prev };
-      for (const ws of workspaces) {
-        if (workspaceIdsWithMatches.has(ws.id)) {
-          next[ws.id] = true;
-          if (!prev[ws.id]) loadThreads(ws.id);
-        } else {
-          next[ws.id] = false;
-        }
+    const next: Record<string, boolean> = {};
+    const workspacesToLoad: string[] = [];
+
+    for (const ws of workspaces) {
+      if (workspaceIdsWithMatches.has(ws.id)) {
+        next[ws.id] = true;
+        if (!expanded[ws.id]) workspacesToLoad.push(ws.id);
+      } else {
+        next[ws.id] = false;
       }
-      return next;
-    });
-  }, [isSearchActive, searchQuery, searchFilters, serverResults, workspaces, threads, sortField, sortDirection, runningThreadIds, pendingPermissionThreadIds, loadThreads]);
+    }
+
+    setExpanded(next);
+
+    for (const wsId of workspacesToLoad) {
+      loadThreads(wsId);
+    }
+  }, [isSearchActive, filteredThreadsByWorkspace, serverResults, workspaces, expanded, loadThreads]);
 
   const toggleThreadList = useCallback((wsId: string) => {
     setThreadListExpandedState((prev) => ({ ...prev, [wsId]: !prev[wsId] }));
@@ -531,7 +557,7 @@ export function ProjectTree() {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {/* Search bar */}
-      <ThreadSearchBar providers={[...new Set(threads.map((t) => t.provider))].sort()} />
+      <ThreadSearchBar providers={availableProviders} />
 
       <div className="flex items-center justify-between px-3 py-2 mb-0.5">
         <span className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/55">
@@ -564,19 +590,7 @@ export function ProjectTree() {
           >
             <SortableContext items={workspaceIds} strategy={verticalListSortingStrategy}>
               {workspaces.map((ws) => {
-                const wsThreads = isSearchActive
-                  ? filterAndSortThreads(
-                      threads.filter((t) => t.workspace_id === ws.id),
-                      searchQuery, searchFilters, sortField, sortDirection,
-                      runningThreadIds, pendingPermissionThreadIds,
-                    )
-                  : sortField !== "updated_at" || sortDirection !== "desc"
-                    ? filterAndSortThreads(
-                        threads.filter((t) => t.workspace_id === ws.id),
-                        "", { status: [], provider: [] }, sortField, sortDirection,
-                        runningThreadIds, pendingPermissionThreadIds,
-                      )
-                    : threads.filter((t) => t.workspace_id === ws.id);
+                const wsThreads = filteredThreadsByWorkspace.get(ws.id) ?? [];
 
                 // Hide projects with zero matches during active search
                 if (isSearchActive && wsThreads.length === 0) return null;
@@ -640,11 +654,7 @@ export function ProjectTree() {
 
           {/* No results empty state */}
           {isSearchActive && !isSearching && workspaces.every((ws) => {
-            const wsThreads = threads.filter((t) => t.workspace_id === ws.id);
-            return filterAndSortThreads(
-              wsThreads, searchQuery, searchFilters, sortField, sortDirection,
-              runningThreadIds, pendingPermissionThreadIds,
-            ).length === 0;
+            return (filteredThreadsByWorkspace.get(ws.id) ?? []).length === 0;
           }) && serverResults.length === 0 && (
             <div className="flex flex-col items-center justify-center gap-2 px-4 py-8">
               <span className="font-mono text-[28px] text-muted-foreground/15" aria-hidden>&#x2298;</span>
