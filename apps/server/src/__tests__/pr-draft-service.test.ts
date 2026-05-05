@@ -39,28 +39,17 @@ describe("PrDraftService", () => {
   const mockThreadRepo = {
     findById: vi.fn(),
   };
-  const mockSettingsService = {
-    get: vi.fn().mockResolvedValue({
-      model: { defaults: { provider: "claude" } },
-      prDraft: { provider: "", model: "" },
-    }),
-  };
-  const mockProviderRegistry = {
-    resolve: vi.fn().mockReturnValue({ complete: mockComplete, supportsCompletion: true }),
-  };
-  // assertUsable throws ProviderDisabledError / ProviderCliMissingError in prod; here we
-  // default to a no-op so existing tests that don't care about availability stay green.
-  const mockProviderAvailability = {
-    assertUsable: vi.fn(),
+  const mockUtilityCompletion = {
+    complete: vi.fn(),
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSettingsService.get.mockResolvedValue({
-      model: { defaults: { provider: "claude" } },
-      prDraft: { provider: "", model: "" },
+    // Default: delegate complete() to the underlying mockComplete fn for easy assertion
+    mockUtilityCompletion.complete.mockImplementation(async (prompt: string, cwd: string) => {
+      const text = await mockComplete(prompt, "utility-model", cwd);
+      return { text, model: "utility-model" };
     });
-    mockProviderRegistry.resolve.mockReturnValue({ complete: mockComplete, supportsCompletion: true });
     // Default: direct thread in workspace ws-1
     mockThreadRepo.findById.mockReturnValue({
       id: "thread-1",
@@ -75,9 +64,7 @@ describe("PrDraftService", () => {
       mockMessageRepo as any,
       mockWorkspaceRepo as any,
       mockThreadRepo as any,
-      mockSettingsService as any,
-      mockProviderRegistry as any,
-      mockProviderAvailability as any,
+      mockUtilityCompletion as any,
     );
   });
 
@@ -103,9 +90,8 @@ describe("PrDraftService", () => {
 
     expect(result.title).toBe("feat: add dashboard widget");
     expect(result.body).toContain("## What");
-    expect(mockComplete).toHaveBeenCalledWith(
+    expect(mockUtilityCompletion.complete).toHaveBeenCalledWith(
       expect.stringContaining("Generate a pull request title"),
-      expect.stringContaining("claude-haiku"),
       "/repo",
     );
   });
@@ -206,7 +192,7 @@ describe("PrDraftService", () => {
     expect(mockGitService.getCurrentBranchAt).toHaveBeenCalledWith(worktreePath);
     expect(mockGitService.diffStat).toHaveBeenCalledWith(worktreePath, "main", "feat/my-feature");
     // complete() must also receive the worktree path as cwd
-    expect(mockComplete).toHaveBeenCalledWith(expect.any(String), expect.any(String), worktreePath);
+    expect(mockUtilityCompletion.complete).toHaveBeenCalledWith(expect.any(String), worktreePath);
   });
 
   it("uses workspace root for git operations when thread is in direct mode", async () => {
@@ -253,28 +239,9 @@ describe("PrDraftService", () => {
     );
   });
 
-  it("throws when configured provider does not support completion", async () => {
-    mockSettingsService.get.mockResolvedValue({
-      model: { defaults: { provider: "codex" } },
-      prDraft: { provider: "codex", model: "" },
-    });
-    mockProviderRegistry.resolve.mockReturnValue({ supportsCompletion: false });
-    mockWorkspaceRepo.findById.mockReturnValue({ path: "/repo" });
-    mockGitService.log.mockResolvedValue([{ message: "feat: x", sha: "aaa" }]);
-    mockGitService.diffStat.mockResolvedValue("1 file changed");
-    mockMessageRepo.listByThread.mockReturnValue({ messages: [], hasMore: false });
-
-    await expect(service.generateDraft("ws-1", "thread-1", "main")).rejects.toThrow(
-      /does not support.*completion/i,
-    );
-  });
-
-  it("uses Copilot provider with gpt-4.1 default when configured", async () => {
-    mockSettingsService.get.mockResolvedValue({
-      model: { defaults: { provider: "claude" } },
-      prDraft: { provider: "copilot", model: "" },
-    });
-    mockProviderRegistry.resolve.mockReturnValue({ complete: mockComplete, supportsCompletion: true });
+  it("delegates provider and model resolution to UtilityCompletionService", async () => {
+    // Provider/model resolution is entirely owned by UtilityCompletionService.
+    // PrDraftService should call utilityCompletion.complete() with the prompt and cwd only.
     mockWorkspaceRepo.findById.mockReturnValue({ path: "/repo" });
     mockGitService.log.mockResolvedValue([{ message: "feat: thing", sha: "aaa" }]);
     mockGitService.diffStat.mockResolvedValue("1 file changed");
@@ -283,32 +250,8 @@ describe("PrDraftService", () => {
 
     await service.generateDraft("ws-1", "thread-1", "main");
 
-    expect(mockProviderRegistry.resolve).toHaveBeenCalledWith("copilot");
-    expect(mockComplete).toHaveBeenCalledWith(
-      expect.any(String),
-      "gpt-4.1",
-      "/repo",
-    );
-  });
-
-  it("auto-delegates to Copilot when it is the default provider and supports completion", async () => {
-    mockSettingsService.get.mockResolvedValue({
-      model: { defaults: { provider: "copilot" } },
-      prDraft: { provider: "", model: "" },
-    });
-    mockProviderRegistry.resolve.mockReturnValue({ complete: mockComplete, supportsCompletion: true });
-    mockWorkspaceRepo.findById.mockReturnValue({ path: "/repo" });
-    mockGitService.log.mockResolvedValue([{ message: "feat: thing", sha: "aaa" }]);
-    mockGitService.diffStat.mockResolvedValue("1 file changed");
-    mockMessageRepo.listByThread.mockReturnValue({ messages: [], hasMore: false });
-    mockComplete.mockResolvedValue(JSON.stringify({ title: "feat: thing", body: "body" }));
-
-    await service.generateDraft("ws-1", "thread-1", "main");
-
-    expect(mockProviderRegistry.resolve).toHaveBeenCalledWith("copilot");
-    expect(mockComplete).toHaveBeenCalledWith(
-      expect.any(String),
-      "gpt-4.1",
+    expect(mockUtilityCompletion.complete).toHaveBeenCalledWith(
+      expect.stringContaining("Generate a pull request title"),
       "/repo",
     );
   });
