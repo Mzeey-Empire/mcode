@@ -53,6 +53,9 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import { ThreadSearchBar } from "./ThreadSearchBar";
+import { ThreadSortControl } from "./ThreadSortControl";
+import { useSidebarSearchStore, type ThreadSortField } from "@/stores/sidebarSearchStore";
 
 // Persist expand/collapse in localStorage
 function getExpandedState(): Record<string, boolean> {
@@ -166,6 +169,67 @@ function buildThreadTree(threads: WorkspaceThread[]): ThreadTreeItem[] {
   return result;
 }
 
+/** Filter and sort threads based on sidebar search state. */
+function filterAndSortThreads(
+  threads: WorkspaceThread[],
+  query: string,
+  filters: { status: string[]; provider: string[] },
+  sortField: ThreadSortField,
+  sortDirection: "asc" | "desc",
+  runningThreadIds: Set<string>,
+  pendingPermissionThreadIds: Set<string>,
+): WorkspaceThread[] {
+  let result = threads;
+
+  // Text search filter
+  if (query) {
+    const q = query.toLowerCase();
+    result = result.filter((t) => t.title.toLowerCase().includes(q));
+  }
+
+  // Status filter
+  if (filters.status.length > 0) {
+    result = result.filter((t) => {
+      if (filters.status.includes("action_required") && pendingPermissionThreadIds.has(t.id)) {
+        return true;
+      }
+      if (filters.status.includes("active") && runningThreadIds.has(t.id)) {
+        return true;
+      }
+      if (filters.status.includes("paused") && t.status === "active" && !runningThreadIds.has(t.id)) {
+        return true;
+      }
+      return filters.status.includes(t.status);
+    });
+  }
+
+  // Provider filter
+  if (filters.provider.length > 0) {
+    result = result.filter((t) => filters.provider.includes(t.provider));
+  }
+
+  // Sort
+  const dir = sortDirection === "asc" ? 1 : -1;
+  result = [...result].sort((a, b) => {
+    let cmp: number;
+    switch (sortField) {
+      case "title":
+        cmp = a.title.localeCompare(b.title);
+        break;
+      case "created_at":
+        cmp = a.created_at.localeCompare(b.created_at);
+        break;
+      case "updated_at":
+      default:
+        cmp = a.updated_at.localeCompare(b.updated_at);
+        break;
+    }
+    return cmp * dir;
+  });
+
+  return result;
+}
+
 /** Sidebar tree listing workspaces and their threads with CRUD actions. */
 export function ProjectTree() {
   const workspaces = useWorkspaceStore((s) => s.workspaces);
@@ -197,6 +261,16 @@ export function ProjectTree() {
       ),
     [permissionsByThread],
   );
+
+  const searchQuery = useSidebarSearchStore((s) => s.query);
+  const searchFilters = useSidebarSearchStore((s) => s.filters);
+  const sortField = useSidebarSearchStore((s) => s.sortField);
+  const sortDirection = useSidebarSearchStore((s) => s.sortDirection);
+  const isSearching = useSidebarSearchStore((s) => s.isSearching);
+  const serverResults = useSidebarSearchStore((s) => s.serverResults);
+  const setExpandedSnapshot = useSidebarSearchStore((s) => s.setExpandedSnapshot);
+  const expandedSnapshot = useSidebarSearchStore((s) => s.expandedSnapshot);
+  const isSearchActive = searchQuery.trim().length > 0 || searchFilters.status.length > 0 || searchFilters.provider.length > 0;
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>(getExpandedState);
   const [threadListExpanded, setThreadListExpandedState] = useState<Record<string, boolean>>(getThreadListExpanded);
@@ -239,6 +313,49 @@ export function ProjectTree() {
   useEffect(() => {
     setThreadListExpanded(threadListExpanded);
   }, [threadListExpanded]);
+
+  // Snapshot expanded state when search begins, restore when cleared
+  useEffect(() => {
+    if (isSearchActive && !expandedSnapshot) {
+      setExpandedSnapshot({ ...expanded });
+    }
+    if (!isSearchActive && expandedSnapshot) {
+      setExpanded(expandedSnapshot);
+      useSidebarSearchStore.setState({ expandedSnapshot: null });
+    }
+  }, [isSearchActive, expandedSnapshot, expanded, setExpandedSnapshot]);
+
+  // Auto-expand projects with matching threads during search
+  useEffect(() => {
+    if (!isSearchActive) return;
+    const workspaceIdsWithMatches = new Set<string>();
+
+    for (const ws of workspaces) {
+      const wsThreads = threads.filter((t) => t.workspace_id === ws.id);
+      const filtered = filterAndSortThreads(
+        wsThreads, searchQuery, searchFilters, sortField, sortDirection,
+        runningThreadIds, pendingPermissionThreadIds,
+      );
+      if (filtered.length > 0) workspaceIdsWithMatches.add(ws.id);
+    }
+
+    for (const t of serverResults) {
+      workspaceIdsWithMatches.add(t.workspace_id);
+    }
+
+    setExpanded((prev) => {
+      const next = { ...prev };
+      for (const ws of workspaces) {
+        if (workspaceIdsWithMatches.has(ws.id)) {
+          next[ws.id] = true;
+          if (!prev[ws.id]) loadThreads(ws.id);
+        } else {
+          next[ws.id] = false;
+        }
+      }
+      return next;
+    });
+  }, [isSearchActive, searchQuery, searchFilters, serverResults, workspaces, threads, sortField, sortDirection, runningThreadIds, pendingPermissionThreadIds, loadThreads]);
 
   const toggleThreadList = useCallback((wsId: string) => {
     setThreadListExpandedState((prev) => ({ ...prev, [wsId]: !prev[wsId] }));
@@ -414,22 +531,28 @@ export function ProjectTree() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {/* Search bar */}
+      <ThreadSearchBar providers={[...new Set(threads.map((t) => t.provider))].sort()} />
+
       <div className="flex items-center justify-between px-3 py-2 mb-0.5">
         <span className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/55">
           Projects
         </span>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button variant="ghost" size="icon-xs" onClick={handleOpenFolder} aria-label="Open project folder" className="text-muted-foreground/60 hover:text-foreground">
-                <Plus size={14} />
-              </Button>
-            }
-          />
-          <TooltipContent side="right" className="text-xs">
-            Open project folder
-          </TooltipContent>
-        </Tooltip>
+        <div className="flex items-center gap-1">
+          <ThreadSortControl />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button variant="ghost" size="icon-xs" onClick={handleOpenFolder} aria-label="Open project folder" className="text-muted-foreground/60 hover:text-foreground">
+                  <Plus size={14} />
+                </Button>
+              }
+            />
+            <TooltipContent side="right" className="text-xs">
+              Open project folder
+            </TooltipContent>
+          </Tooltip>
+        </div>
       </div>
 
       <ScrollArea className="flex-1" viewportRef={scrollViewportRef}>
@@ -453,7 +576,21 @@ export function ProjectTree() {
                   isExpanded={expanded[ws.id] ?? false}
                   isActive={activeWorkspaceId === ws.id}
                   activeThreadId={activeThreadId}
-                  threads={threads.filter((t) => t.workspace_id === ws.id)}
+                  threads={
+                    isSearchActive
+                      ? filterAndSortThreads(
+                          threads.filter((t) => t.workspace_id === ws.id),
+                          searchQuery, searchFilters, sortField, sortDirection,
+                          runningThreadIds, pendingPermissionThreadIds,
+                        )
+                      : sortField !== "updated_at" || sortDirection !== "desc"
+                        ? filterAndSortThreads(
+                            threads.filter((t) => t.workspace_id === ws.id),
+                            "", { status: [], provider: [] }, sortField, sortDirection,
+                            runningThreadIds, pendingPermissionThreadIds,
+                          )
+                        : threads.filter((t) => t.workspace_id === ws.id)
+                  }
                   runningThreadIds={runningThreadIds}
                   pendingPermissionThreadIds={pendingPermissionThreadIds}
                   isThreadListExpanded={threadListExpanded[ws.id] ?? false}
@@ -489,6 +626,32 @@ export function ProjectTree() {
               ))}
             </SortableContext>
           </DndContext>
+
+          {/* Loading more results from server */}
+          {isSearching && (
+            <div className="flex items-center gap-1.5 px-4 py-2">
+              <Loader2 size={10} className="animate-spin text-muted-foreground/30" />
+              <span className="font-mono text-[10px] text-muted-foreground/30">
+                loading more...
+              </span>
+            </div>
+          )}
+
+          {/* No results empty state */}
+          {isSearchActive && !isSearching && workspaces.every((ws) => {
+            const wsThreads = threads.filter((t) => t.workspace_id === ws.id);
+            return filterAndSortThreads(
+              wsThreads, searchQuery, searchFilters, sortField, sortDirection,
+              runningThreadIds, pendingPermissionThreadIds,
+            ).length === 0;
+          }) && serverResults.length === 0 && (
+            <div className="flex flex-col items-center justify-center gap-2 px-4 py-8">
+              <span className="font-mono text-[28px] text-muted-foreground/15" aria-hidden>&#x2298;</span>
+              <p className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/40">
+                No matching threads
+              </p>
+            </div>
+          )}
 
           {workspaces.length === 0 && (
             <div className="flex flex-col items-center justify-center gap-3 px-4 py-12">
