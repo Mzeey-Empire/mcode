@@ -58,6 +58,10 @@ export const SendMessageSchema = lazySchema(() =>
     contextWindow: ContextWindowModeSchema.optional(),
     /** Boolean thinking toggle. Honored only by models with a thinking toggle (Haiku 4.5). */
     thinking: z.boolean().optional(),
+    /** ID of the message being replied to. */
+    replyToMessageId: z.string().uuid().optional(),
+    /** Highlighted text excerpt from the original message. Absent for full-message replies. */
+    quotedText: z.string().max(2000).optional(),
   }),
 );
 
@@ -313,7 +317,7 @@ export const WS_METHODS = lazySchema(() => ({
       limit: z.number().int().min(1).max(1000),
       before: z.number().int().optional(),
     }),
-    result: PaginatedMessagesSchema,
+    result: PaginatedMessagesSchema(),
   },
   "file.list": {
     params: z.object({

@@ -1,4 +1,5 @@
 import { useRef, useEffect, useLayoutEffect, useMemo, useCallback, memo, useState } from "react";
+import { useReplyStore } from "@/stores/replyStore";
 import { ArrowDown, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useShallow } from "zustand/shallow";
@@ -33,14 +34,18 @@ const VirtualItemRenderer = memo(function VirtualItemRenderer({
   item,
   turnExpandRef,
   onBranch,
+  onReply,
+  onScrollToMessage,
 }: {
   item: ChatVirtualItem;
   turnExpandRef?: React.RefObject<Map<string, boolean>>;
   onBranch?: (messageId: string) => void;
+  onReply?: (messageId: string, content: string, role: "user" | "assistant") => void;
+  onScrollToMessage?: (messageId: string) => void;
 }) {
   switch (item.type) {
     case "message":
-      return <MessageBubble message={item.message} onBranch={onBranch} />;
+      return <MessageBubble message={item.message} onBranch={onBranch} onReply={onReply} onScrollToMessage={onScrollToMessage} />;
     case "active-tools":
       return <ToolCallCard toolCalls={item.toolCalls} />;
     case "indicator":
@@ -84,7 +89,9 @@ const VirtualItemRenderer = memo(function VirtualItemRenderer({
   prev.item.key === next.item.key
   && prev.item === next.item
   && prev.turnExpandRef === next.turnExpandRef
-  && prev.onBranch === next.onBranch,
+  && prev.onBranch === next.onBranch
+  && prev.onReply === next.onReply
+  && prev.onScrollToMessage === next.onScrollToMessage,
 );
 
 /** Props for {@link ScrollToBottomButton}. */
@@ -122,10 +129,12 @@ export function ScrollToBottomButton({ hasNewContent, onScrollToBottom }: Scroll
 interface MessageListProps {
   /** Called when the user clicks the branch icon on a message. */
   onBranch?: (messageId: string) => void;
+  /** Called when the user clicks the reply button or selects text in a message. */
+  onReply?: (messageId: string, content: string, role: "user" | "assistant") => void;
 }
 
 /** Virtualized list of chat messages, tool calls, and streaming indicators. */
-export function MessageList({ onBranch }: MessageListProps) {
+export function MessageList({ onBranch, onReply }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   /** Survives virtualizer remounts: remembers manual expand/collapse toggles by messageId. */
   const turnExpandRef = useRef<Map<string, boolean>>(new Map());
@@ -230,6 +239,12 @@ export function MessageList({ onBranch }: MessageListProps) {
 
   itemsLengthRef.current = items.length;
 
+  // Mirror items in a ref so scrollToMessage can read the latest list
+  // without adding items to its dependency array (which would re-create
+  // the callback on every streaming token).
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => containerRef.current,
@@ -293,6 +308,23 @@ export function MessageList({ onBranch }: MessageListProps) {
       }
     };
   }, []);
+
+  /** Scrolls to a message by ID, then briefly flashes it to orient the user. */
+  const scrollToMessage = useCallback((messageId: string) => {
+    const idx = itemsRef.current.findIndex(
+      (item) => item.type === "message" && item.message.id === messageId,
+    );
+    if (idx !== -1) {
+      virtualizer.scrollToIndex(idx, { align: "center", behavior: "smooth" });
+      setTimeout(() => {
+        const element = document.querySelector(`[data-message-id="${messageId}"]`);
+        if (element) {
+          element.classList.add("animate-flash-highlight");
+          setTimeout(() => element.classList.remove("animate-flash-highlight"), 1500);
+        }
+      }, 300);
+    }
+  }, [virtualizer]);
 
   // Save the outgoing thread's scrollTop, then reset per-thread UI state.
   // Cache-miss vs cache-hit is inferred from `loading`: the threadStore sets
@@ -448,6 +480,43 @@ export function MessageList({ onBranch }: MessageListProps) {
     }
   }, [streamingText, scrollToBottom]);
 
+  // Capture text selections in message bubbles and activate reply mode for the selected text.
+  // Fires on mouseup so the selection is already finalised when we read it.
+  useEffect(() => {
+    const handleMouseUp = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || !selection.toString().trim()) return;
+
+      const anchorNode = selection.anchorNode;
+      if (!anchorNode) return;
+      const msgElement = (anchorNode instanceof Element ? anchorNode : anchorNode.parentElement)
+        ?.closest("[data-message-id]");
+      if (!msgElement) return;
+
+      const messageId = msgElement.getAttribute("data-message-id");
+      const messageRoleRaw = msgElement.getAttribute("data-message-role");
+      if (!messageId || !messageRoleRaw || messageRoleRaw === "system") return;
+      const messageRole = messageRoleRaw as "user" | "assistant";
+
+      const selectedText = selection.toString().trim();
+      if (!selectedText) return;
+
+      const threadId = msgElement.getAttribute("data-thread-id");
+      if (threadId) {
+        useReplyStore.getState().setReply(
+          threadId,
+          messageId,
+          messageRole,
+          selectedText.slice(0, 150),
+          selectedText.slice(0, 2000),
+        );
+      }
+    };
+
+    document.addEventListener("mouseup", handleMouseUp);
+    return () => document.removeEventListener("mouseup", handleMouseUp);
+  }, []);
+
   return (
     <div className="relative h-full" data-testid="message-list">
       <div
@@ -471,7 +540,7 @@ export function MessageList({ onBranch }: MessageListProps) {
                 style={{ transform: `translateY(${vi.start}px)` }}
               >
                 <div className="mx-auto w-full max-w-4xl">
-                  <VirtualItemRenderer item={item} turnExpandRef={turnExpandRef} onBranch={onBranch} />
+                  <VirtualItemRenderer item={item} turnExpandRef={turnExpandRef} onBranch={onBranch} onReply={onReply} onScrollToMessage={scrollToMessage} />
                 </div>
               </div>
             );

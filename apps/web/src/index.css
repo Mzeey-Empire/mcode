@@ -176,6 +176,21 @@
   }
 }
 
+@keyframes flash-highlight {
+  0% { background-color: color-mix(in oklch, var(--primary), transparent 85%); }
+  100% { background-color: transparent; }
+}
+.animate-flash-highlight {
+  animation: flash-highlight 1.5s ease-out;
+  border-radius: var(--radius-md);
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-flash-highlight {
+    animation: none;
+    background-color: transparent;
+  }
+}
+
 
 .glow-primary {
   box-shadow: -2px 0 8px -1px oklch(0.72 0.17 75 / 0.35);
