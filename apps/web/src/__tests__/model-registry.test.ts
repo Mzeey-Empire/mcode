@@ -68,6 +68,7 @@ describe("Settings-aware defaults", () => {
         ...getDefaultSettings(),
         model: {
           defaults: { provider: "claude", id: "claude-opus-4-6", reasoning: "high", fallbackId: "", contextWindow: "200k", thinking: false },
+          utility: { provider: "", id: "" },
         },
       },
     });
@@ -80,6 +81,7 @@ describe("Settings-aware defaults", () => {
         ...getDefaultSettings(),
         model: {
           defaults: { provider: "codex", id: "nonexistent-model", reasoning: "high", fallbackId: "", contextWindow: "200k", thinking: false },
+          utility: { provider: "", id: "" },
         },
       },
     });
@@ -92,6 +94,7 @@ describe("Settings-aware defaults", () => {
         ...getDefaultSettings(),
         model: {
           defaults: { provider: "cursor", id: "cursor-dynamic-model-xyz", reasoning: "high", fallbackId: "", contextWindow: "200k", thinking: false },
+          utility: { provider: "", id: "" },
         },
       },
     });
@@ -108,6 +111,7 @@ describe("Settings-aware defaults", () => {
         ...getDefaultSettings(),
         model: {
           defaults: { provider: "claude", id: "claude-sonnet-4-6", reasoning: "low", fallbackId: "", contextWindow: "200k", thinking: false },
+          utility: { provider: "", id: "" },
         },
       },
     });
@@ -124,6 +128,7 @@ describe("Settings-aware defaults", () => {
         ...getDefaultSettings(),
         model: {
           defaults: { provider: "claude", id: "claude-opus-4-6", reasoning: "max", fallbackId: "", contextWindow: "200k", thinking: false },
+          utility: { provider: "", id: "" },
         },
       },
     });

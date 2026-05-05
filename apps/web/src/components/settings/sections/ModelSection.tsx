@@ -17,6 +17,7 @@ import {
 import { SettingRow } from "../SettingRow";
 import { SegControl } from "../SegControl";
 import { SectionHeading } from "../SectionHeading";
+import { Switch } from "@/components/ui/switch";
 import type { ContextWindowMode, ProviderAvailability, SettingsProviderId, ReasoningLevel } from "@mcode/contracts";
 import { ChevronDown } from "lucide-react";
 import {
@@ -67,10 +68,10 @@ const CODEX_REASONING_LABELS: Record<string, string> = {
 };
 
 /**
- * Builds a provider option for the Model / PR Draft pickers. A provider is only
- * rendered as disabled once its availability row has loaded and indicates it is
- * unusable (disabled by user, no adapter, or CLI missing). While availability is
- * still loading, the option stays selectable to avoid falsely blanking every
+ * Builds a provider option for the Model / Utility Model pickers. A provider is
+ * only rendered as disabled once its availability row has loaded and indicates it
+ * is unusable (disabled by user, no adapter, or CLI missing). While availability
+ * is still loading, the option stays selectable to avoid falsely blanking every
  * entry on first paint.
  */
 function buildProviderOption(
@@ -102,7 +103,7 @@ function buildProviderOption(
 
 /**
  * Model settings section: provider, default model, fallback model, reasoning effort,
- * PR draft provider/model, and CLI paths.
+ * utility model provider/model, diff summary toggle, and CLI paths.
  *
  * Model options update when the provider changes. Switching provider resets the default
  * model to the new provider's first model and clears the fallback. The reasoning level
@@ -117,8 +118,9 @@ export function ModelSection() {
     (s) => s.settings.model.defaults.contextWindow,
   );
   const thinking = useSettingsStore((s) => s.settings.model.defaults.thinking);
-  const prDraftProvider = useSettingsStore((s) => s.settings.prDraft.provider);
-  const prDraftModel = useSettingsStore((s) => s.settings.prDraft.model);
+  const utilityProvider = useSettingsStore((s) => s.settings.model.utility.provider);
+  const utilityModelId = useSettingsStore((s) => s.settings.model.utility.id);
+  const diffSummaryEnabled = useSettingsStore((s) => s.settings.diffSummary.enabled);
   const update = useSettingsStore((s) => s.update);
   const availabilityProviders = useProviderAvailabilityStore((s) => s.providers);
   const availabilityById = useMemo(
@@ -131,7 +133,7 @@ export function ModelSection() {
     [availabilityById],
   );
 
-  const prDraftProviderOptions = useMemo(
+  const utilityProviderOptions = useMemo(
     () => [
       { value: "", label: "Auto" },
       ...MODEL_PROVIDERS.filter((p) => p.supportsCompletion).map((p) =>
@@ -143,13 +145,13 @@ export function ModelSection() {
 
   const activeProvider = MODEL_PROVIDERS.find((p) => p.id === provider);
 
-  // Effective provider for PR draft: explicit selection or inherit from default
-  const prDraftEffectiveProvider = MODEL_PROVIDERS.find(
-    (p) => p.id === (prDraftProvider || provider),
+  // Effective provider for utility model: explicit selection or inherit from default
+  const utilityEffectiveProvider = MODEL_PROVIDERS.find(
+    (p) => p.id === (utilityProvider || provider),
   );
 
-  const prDraftEffectiveId = prDraftProvider || provider;
-  const dynamicPrDraftModels = useProviderModelsStore((s) => s.models[prDraftEffectiveId]);
+  const utilityEffectiveId = utilityProvider || provider;
+  const dynamicUtilityModels = useProviderModelsStore((s) => s.models[utilityEffectiveId]);
 
   const modelOptions = useMemo(
     () => (activeProvider?.models ?? []).map((m) => ({
@@ -165,18 +167,18 @@ export function ModelSection() {
     [modelOptions],
   );
 
-  // PR draft model options: "Auto" (provider default) + all models for the effective provider.
+  // Utility model options: "Auto" (provider default) + all models for the effective provider.
   // Dynamic models from the store take priority; static registry is the fallback when the
   // store hasn't fetched yet (e.g. Copilot not connected).
-  const prDraftModelOptions = useMemo(
+  const utilityModelOptions = useMemo(
     () => [
       { value: "", label: "Auto" },
-      ...(dynamicPrDraftModels ?? prDraftEffectiveProvider?.models ?? []).map((m) => ({
+      ...(dynamicUtilityModels ?? utilityEffectiveProvider?.models ?? []).map((m) => ({
         value: m.id,
         label: m.label,
       })),
     ],
-    [dynamicPrDraftModels, prDraftEffectiveProvider],
+    [dynamicUtilityModels, utilityEffectiveProvider],
   );
 
   // Gate on provider so Copilot models that share IDs with Codex models
@@ -426,32 +428,32 @@ export function ModelSection() {
       </div>
 
       <div className="mt-8">
-        <SectionHeading>PR Draft</SectionHeading>
+        <SectionHeading>Utility Model</SectionHeading>
         <div>
           <SettingRow
             label="Provider"
-            configKey="prDraft.provider"
-            hint="AI provider for PR draft generation. Auto inherits from the default provider above."
+            configKey="model.utility.provider"
+            hint="AI provider for lightweight tasks (PR drafts, diff summaries). Auto inherits from the default provider above."
           >
             <SegControl
-              options={prDraftProviderOptions}
-              value={prDraftProvider}
-              onChange={(v) => void update({ prDraft: { provider: v as SettingsProviderId | "", model: "" } })}
+              options={utilityProviderOptions}
+              value={utilityProvider}
+              onChange={(v) => void update({ model: { utility: { provider: v as SettingsProviderId | "", id: "" } } })}
             />
           </SettingRow>
           <SettingRow
             label="Model"
-            configKey="prDraft.model"
-            hint="Model for AI-generated PR titles and descriptions. Auto uses a provider-appropriate default."
+            configKey="model.utility.id"
+            hint="Model for utility tasks. Auto selects a provider-appropriate cheap default."
           >
-            {prDraftProvider ? (
+            {utilityProvider ? (
               <div className="relative inline-flex w-56">
                 <select
-                  value={prDraftModel}
-                  onChange={(e) => void update({ prDraft: { model: e.target.value } })}
+                  value={utilityModelId}
+                  onChange={(e) => void update({ model: { utility: { id: e.target.value } } })}
                   className="h-7 w-full appearance-none cursor-pointer rounded-[min(var(--radius-md),12px)] border border-input bg-background pl-2 pr-7 py-0.5 text-xs text-foreground focus-visible:border-ring focus-visible:outline-none"
                 >
-                  {prDraftModelOptions.map((opt) => (
+                  {utilityModelOptions.map((opt) => (
                     <option key={opt.value} value={opt.value}>
                       {opt.label}
                     </option>
@@ -467,6 +469,22 @@ export function ModelSection() {
                 Auto
               </div>
             )}
+          </SettingRow>
+        </div>
+      </div>
+
+      <div className="mt-8">
+        <SectionHeading>AI Features</SectionHeading>
+        <div>
+          <SettingRow
+            label="Diff summary"
+            configKey="diffSummary.enabled"
+            hint="Show an AI-generated Summary tab in the diff panel."
+          >
+            <Switch
+              checked={diffSummaryEnabled}
+              onCheckedChange={(v) => update({ diffSummary: { enabled: v } })}
+            />
           </SettingRow>
         </div>
       </div>
