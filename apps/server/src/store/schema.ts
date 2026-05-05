@@ -5,7 +5,7 @@
 
 import { sql } from "drizzle-orm";
 import { asc, desc } from "drizzle-orm";
-import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { type AnySQLiteColumn, index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 const timestampDefault = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
 
@@ -91,7 +91,7 @@ export const messages = sqliteTable(
     timestamp: text("timestamp").notNull().default(timestampDefault),
     sequence: integer("sequence").notNull(),
     attachments: text("attachments"),
-    replyToMessageId: text("reply_to_message_id").references(() => messages.id, { onDelete: "set null" }),
+    replyToMessageId: text("reply_to_message_id").references((): AnySQLiteColumn => messages.id, { onDelete: "set null" }),
     quotedText: text("quoted_text"),
   },
   (table) => [
