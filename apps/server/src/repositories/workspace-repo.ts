@@ -52,10 +52,20 @@ export class WorkspaceRepo {
     const now = new Date().toISOString();
 
     const trx = this.db.transaction(() => {
-      // Evict any soft-deleted row occupying this path so the UNIQUE constraint won't block re-creation.
-      this.db
-        .prepare("DELETE FROM workspaces WHERE path = ? AND deleted_at IS NOT NULL")
-        .run(path);
+      // Evict a soft-deleted row occupying this path only if it has no remaining
+      // child threads (i.e. async cleanup already finished). If threads still
+      // exist the CleanupWorker will hard-delete the workspace once done.
+      const stale = this.db
+        .prepare("SELECT id FROM workspaces WHERE path = ? AND deleted_at IS NOT NULL")
+        .get(path) as { id: string } | undefined;
+      if (stale) {
+        const threadCount = this.db
+          .prepare("SELECT COUNT(*) AS n FROM threads WHERE workspace_id = ?")
+          .get(stale.id) as { n: number };
+        if (threadCount.n === 0) {
+          this.db.prepare("DELETE FROM workspaces WHERE id = ?").run(stale.id);
+        }
+      }
       this.db
         .prepare("UPDATE workspaces SET sort_order = sort_order + 1")
         .run();

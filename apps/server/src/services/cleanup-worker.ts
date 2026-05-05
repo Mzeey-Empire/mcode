@@ -252,6 +252,10 @@ export class CleanupWorker {
   /** Check whether the branch is safe to delete (no other active thread references it). */
   private shouldDeleteBranch(job: CleanupJob): boolean {
     if (!job.branch) return false;
+    // If the source thread has already been hard-deleted, we can't resolve its
+    // workspace to check for siblings. Conservatively keep the branch.
+    const thread = this.threadRepo.findById(job.thread_id);
+    if (!thread) return false;
     return this.threadRepo.countActiveByBranch(job.thread_id, job.branch) === 0;
   }
 

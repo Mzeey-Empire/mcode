@@ -29,8 +29,9 @@ export class WorkspaceService {
   /**
    * Create a new workspace, or return the existing one if the path is already registered.
    * Detects whether the path is a git repository and stores the result.
-   * Handles the case where the workspace still exists in the DB (e.g., after a failed
-   * delete or stale client state) to prevent UNIQUE constraint errors on re-add.
+   * If a soft-deleted workspace occupies the path and cleanup has finished (no threads
+   * remain), it is evicted automatically. If cleanup is still in progress, force-deletes
+   * the stale workspace so the user can re-add immediately.
    */
   create(name: string, path: string): Workspace {
     const existing = this.workspaceRepo.findByPath(path);
@@ -39,6 +40,15 @@ export class WorkspaceService {
       this.workspaceRepo.prependToSortOrder(existing.id);
       return this.workspaceRepo.findById(existing.id)!;
     }
+
+    // A soft-deleted workspace may still occupy this path. findByPath filters those
+    // out, but the UNIQUE constraint will block the insert. The repo-level create
+    // evicts only if no threads remain; if it can't, force-delete here.
+    const stale = this.workspaceRepo.findDeletingByPath(path);
+    if (stale) {
+      this.forceDelete(stale.id);
+    }
+
     const isGitRepo = this.detectGitRepo(path);
     return this.workspaceRepo.create(name, path, isGitRepo);
   }
