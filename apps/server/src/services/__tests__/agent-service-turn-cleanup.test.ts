@@ -33,6 +33,7 @@ vi.mock("fs", async (importOriginal) => {
 
 const THREAD_ID = "thread-cleanup-test";
 
+/** Create a minimal Thread fixture with sensible defaults for turn cleanup tests. */
 function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
     id: THREAD_ID,
@@ -291,6 +292,40 @@ describe("AgentService turn cleanup", () => {
     // Thread should be active again
     expect(service.activeThreadIds()).toContain(THREAD_ID);
     expect(memoryPressureService.markActive).toHaveBeenCalled();
+  });
+
+  it("does not re-add thread after an Error event following TurnComplete", async () => {
+    const { service, providerEmitter, memoryPressureService } = buildService();
+    service.init();
+
+    await service.sendMessage(THREAD_ID, "hello", "default", "claude-sonnet-4-6", [], undefined, "claude");
+    expect(service.activeThreadIds()).toContain(THREAD_ID);
+
+    // Turn completes, thread removed
+    providerEmitter.emit("event", {
+      type: AgentEventType.TurnComplete,
+      threadId: THREAD_ID,
+      reason: "end_turn",
+      costUsd: null,
+      tokensIn: 100,
+      tokensOut: 50,
+      contextWindow: 200000,
+      totalProcessedTokens: 150,
+      providerId: "claude",
+    } satisfies AgentEvent);
+
+    expect(service.activeThreadIds()).not.toContain(THREAD_ID);
+
+    // Error event should not re-add the thread
+    memoryPressureService.markActive.mockClear();
+    providerEmitter.emit("event", {
+      type: AgentEventType.Error,
+      threadId: THREAD_ID,
+      error: "Something went wrong",
+    } satisfies AgentEvent);
+
+    expect(service.activeThreadIds()).not.toContain(THREAD_ID);
+    expect(memoryPressureService.markActive).not.toHaveBeenCalled();
   });
 
   it("removes thread from activeThreadIds on Ended event", async () => {
