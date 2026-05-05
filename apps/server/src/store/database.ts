@@ -136,7 +136,10 @@ function applyPragmas(db: Database.Database, isFileBacked: boolean): void {
  * the normal migration path on pre-existing installs.
  *
  * Safe to run on fresh databases: the PRAGMA check is a no-op when the column
- * already exists.
+ * already exists. Safe under concurrent startup: if two processes both pass the
+ * PRAGMA check and race to ALTER TABLE, the second will receive a
+ * "duplicate column name" error which is swallowed — any other error is
+ * rethrown.
  */
 export function applySchemaPatches(db: Database.Database): void {
   const cols = (
@@ -145,9 +148,18 @@ export function applySchemaPatches(db: Database.Database): void {
 
   // cols is empty when the table doesn't exist; nothing to patch in that case
   if (cols.length > 0 && !cols.includes("sort_order")) {
-    db.prepare(
-      "ALTER TABLE workspaces ADD COLUMN sort_order INTEGER DEFAULT 0 NOT NULL",
-    ).run();
+    try {
+      db.prepare(
+        "ALTER TABLE workspaces ADD COLUMN sort_order INTEGER DEFAULT 0 NOT NULL",
+      ).run();
+    } catch (err) {
+      if (
+        !(err instanceof Error) ||
+        !err.message.includes("duplicate column name")
+      ) {
+        throw err;
+      }
+    }
   }
 }
 
