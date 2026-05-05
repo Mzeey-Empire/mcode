@@ -186,17 +186,21 @@ export function ProjectTree() {
   const reorderWorkspace = useWorkspaceStore((s) => s.reorderWorkspace);
   const error = useWorkspaceStore((s) => s.error);
   const runningThreadIds = useThreadStore((s) => s.runningThreadIds);
-  const permissionsByThread = useThreadStore((s) => s.permissionsByThread);
-  // Derive a set of thread IDs that have at least one unsettled permission request,
-  // so the sidebar can render the amber pending indicator without per-thread subscriptions.
+  // Derive pending permission thread IDs directly in the selector with useShallow
+  // so the component only re-renders when the actual set of IDs changes, not on
+  // every unrelated threadStore update that creates a new permissionsByThread ref.
+  const pendingPermissionIds = useThreadStore(
+    useShallow((s) => {
+      const ids: string[] = [];
+      for (const [id, perms] of Object.entries(s.permissionsByThread ?? {})) {
+        if (perms.some((p) => !p.settled)) ids.push(id);
+      }
+      return ids;
+    }),
+  );
   const pendingPermissionThreadIds = useMemo(
-    () =>
-      new Set(
-        Object.entries(permissionsByThread ?? {})
-          .filter(([, perms]) => perms.some((p) => !p.settled))
-          .map(([id]) => id),
-      ),
-    [permissionsByThread],
+    () => new Set(pendingPermissionIds),
+    [pendingPermissionIds],
   );
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>(getExpandedState);
