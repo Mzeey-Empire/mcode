@@ -17,6 +17,8 @@ import type { ClaudeProvider } from "../providers/claude/claude-provider";
 import type { TerminalService } from "../services/terminal-service";
 import type { GitService } from "../services/git-service";
 import { AttachmentService } from "../services/attachment-service";
+import { WorkspaceService } from "../services/workspace-service";
+import type { AgentService } from "../services/agent-service";
 import { killDescendantsByName } from "../services/process-kill.js";
 import { getMcodeDir } from "@mcode/shared";
 
@@ -44,6 +46,9 @@ describe("Cleanup integration", () => {
   let mockClaudeProvider: ClaudeProvider;
   let mockTerminalService: TerminalService;
   let mockGitService: GitService;
+  let mockAttachmentService: AttachmentService;
+  let mockAgentService: AgentService;
+  let workspaceService: WorkspaceService;
 
   beforeEach(() => {
     vi.mocked(killDescendantsByName).mockClear();
@@ -63,6 +68,7 @@ describe("Cleanup integration", () => {
     mockGitService = {
       createWorktree: vi.fn().mockReturnValue({ path: join(WT_BASE, "test-wt") }),
       removeWorktree: vi.fn().mockResolvedValue(true),
+      isRegisteredWorktreePath: vi.fn().mockReturnValue(true),
     } as unknown as GitService;
 
     threadService = new ThreadService(threadRepo, workspaceRepo, mockGitService, cleanupJobRepo);
@@ -76,6 +82,16 @@ describe("Cleanup integration", () => {
       mockGitService,
       workspaceRepo,
       { removeForThread: vi.fn() } as unknown as AttachmentService,
+    );
+
+    mockAttachmentService = { removeForThread: vi.fn() } as unknown as AttachmentService;
+    mockAgentService = { stopSession: vi.fn().mockResolvedValue(undefined) } as unknown as AgentService;
+    workspaceService = new WorkspaceService(
+      workspaceRepo,
+      threadRepo,
+      cleanupJobRepo,
+      mockAttachmentService,
+      mockAgentService,
     );
   });
 
@@ -245,5 +261,42 @@ describe("Cleanup integration", () => {
     const after = cleanupJobRepo.findById(job.id)!;
     expect(after.attempts).toBe(0);
     expect(after.next_retry_at).toBe(0);
+  });
+
+  describe("Workspace deletion - full lifecycle", () => {
+    it("completes two-phase delete: soft-delete → worker drains → hard-delete", async () => {
+      const ws = workspaceRepo.create("Full Test", "/tmp/full");
+      const direct = threadRepo.create(ws.id, "Direct", "direct", "main");
+      const wt1 = threadRepo.create(ws.id, "WT1", "worktree", "feat/a");
+      const wt2 = threadRepo.create(ws.id, "WT2", "worktree", "feat/b");
+      db.prepare("UPDATE threads SET worktree_path = ? WHERE id = ?")
+        .run("/tmp/full/.worktrees/a", wt1.id);
+      db.prepare("UPDATE threads SET worktree_path = ? WHERE id = ?")
+        .run("/tmp/full/.worktrees/b", wt2.id);
+
+      // Phase 1: workspace service delete
+      workspaceService.delete(ws.id);
+
+      // Direct thread is hard-deleted immediately
+      expect(threadRepo.findById(direct.id)).toBeNull();
+      // Worktree threads are soft-deleted with pending jobs
+      expect(cleanupJobRepo.countByWorkspacePath("/tmp/full")).toBe(2);
+      // Workspace is soft-deleted (not visible in listAll)
+      expect(workspaceRepo.listAll().find((w) => w.id === ws.id)).toBeUndefined();
+
+      // Phase 2: worker processes first job
+      await worker.processOneJob();
+
+      // One job remaining, workspace still in DB
+      expect(cleanupJobRepo.countByWorkspacePath("/tmp/full")).toBe(1);
+      expect(db.prepare("SELECT id FROM workspaces WHERE id = ?").get(ws.id)).toBeDefined();
+
+      // Phase 2 continued: worker processes second job
+      await worker.processOneJob();
+
+      // Zero jobs remaining, workspace hard-deleted
+      expect(cleanupJobRepo.countByWorkspacePath("/tmp/full")).toBe(0);
+      expect(db.prepare("SELECT id FROM workspaces WHERE id = ?").get(ws.id)).toBeUndefined();
+    });
   });
 });
