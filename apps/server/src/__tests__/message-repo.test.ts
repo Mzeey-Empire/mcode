@@ -17,7 +17,9 @@ function createTestDb(): Database.Database {
       tokens_used INTEGER,
       timestamp TEXT NOT NULL,
       sequence INTEGER NOT NULL,
-      attachments TEXT
+      attachments TEXT,
+      reply_to_message_id TEXT,
+      quoted_text TEXT
     );
     CREATE TABLE tool_call_records (
       id TEXT PRIMARY KEY,

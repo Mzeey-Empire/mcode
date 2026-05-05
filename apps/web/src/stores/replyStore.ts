@@ -36,7 +36,8 @@ export const useReplyStore = create<ReplyState>((set, get) => ({
 
   clearReply: (threadId) => {
     set((state) => {
-      const { [threadId]: _, ...rest } = state.replyByThread;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [threadId]: _removed, ...rest } = state.replyByThread;
       return { replyByThread: rest };
     });
   },
