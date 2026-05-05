@@ -853,3 +853,120 @@ describe("CleanupWorker - missing directory handling", () => {
     expect(mockGitService.removeWorktree).not.toHaveBeenCalled();
   });
 });
+
+describe("CleanupWorker - idempotent retry", () => {
+  let db: Database.Database;
+  let workspaceRepo: WorkspaceRepo;
+  let threadRepo: ThreadRepo;
+  let cleanupJobRepo: CleanupJobRepo;
+  let mockClaudeProvider: ClaudeProvider;
+  let mockTerminalService: TerminalService;
+  let mockGitService: GitService;
+  let mockAttachmentService: AttachmentService;
+  let worker: CleanupWorker;
+
+  beforeEach(() => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(killDescendantsByName).mockClear();
+
+    db = openMemoryDatabase();
+    cleanupJobRepo = new CleanupJobRepo(db);
+    threadRepo = new ThreadRepo(db);
+    workspaceRepo = new WorkspaceRepo(db);
+
+    mockClaudeProvider = { waitForSessionExit: vi.fn().mockResolvedValue(undefined) } as unknown as ClaudeProvider;
+    mockTerminalService = { killByThread: vi.fn() } as unknown as TerminalService;
+    mockGitService = { removeWorktree: vi.fn().mockResolvedValue(true), isRegisteredWorktreePath: vi.fn().mockReturnValue(true) } as unknown as GitService;
+    mockAttachmentService = { removeForThread: vi.fn() } as unknown as AttachmentService;
+
+    worker = new CleanupWorker(db, cleanupJobRepo, threadRepo, mockClaudeProvider, mockTerminalService, mockGitService, workspaceRepo, mockAttachmentService);
+  });
+
+  afterEach(() => { worker.dispose(); });
+
+  it("does not fail when retrying after attachment dir was already removed", async () => {
+    const ws = workspaceRepo.create("Test", "/tmp/ws");
+    const t1 = threadRepo.create(ws.id, "WT", "worktree", "feat/x");
+    db.prepare("UPDATE threads SET worktree_path = ? WHERE id = ?")
+      .run("/tmp/ws/.worktrees/x", t1.id);
+    threadRepo.softDelete(t1.id);
+
+    cleanupJobRepo.insert({
+      thread_id: t1.id,
+      workspace_path: "/tmp/ws",
+      worktree_path: "/tmp/ws/.worktrees/x",
+      branch: "feat/x",
+    });
+
+    // First call: attachment removal succeeds, but removeWorktree returns false
+    (mockGitService.removeWorktree as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false);
+
+    await worker.processOneJob();
+    // Job should still exist (recorded failure - worktree still exists)
+    expect(cleanupJobRepo.countByWorkspacePath("/tmp/ws")).toBe(1);
+
+    // Reset retry backoff so the job is eligible immediately on the next poll
+    db.prepare("UPDATE cleanup_jobs SET next_retry_at = 0").run();
+
+    // Second call: removeWorktree succeeds this time
+    (mockGitService.removeWorktree as ReturnType<typeof vi.fn>).mockResolvedValueOnce(true);
+
+    await worker.processOneJob();
+    // Should succeed this time
+    expect(cleanupJobRepo.countByWorkspacePath("/tmp/ws")).toBe(0);
+  });
+});
+
+describe("Workspace delete - zero-worktree fast path", () => {
+  let db: Database.Database;
+  let workspaceRepo: WorkspaceRepo;
+  let threadRepo: ThreadRepo;
+  let cleanupJobRepo: CleanupJobRepo;
+  let workspaceService: WorkspaceService;
+  let mockAttachmentService: AttachmentService;
+
+  beforeEach(() => {
+    db = openMemoryDatabase();
+    workspaceRepo = new WorkspaceRepo(db);
+    threadRepo = new ThreadRepo(db);
+    cleanupJobRepo = new CleanupJobRepo(db);
+    mockAttachmentService = { removeForThread: vi.fn() } as unknown as AttachmentService;
+    workspaceService = new WorkspaceService(
+      workspaceRepo,
+      threadRepo,
+      cleanupJobRepo,
+      mockAttachmentService,
+      { stopSession: vi.fn().mockResolvedValue(undefined) } as unknown as AgentService,
+    );
+  });
+
+  it("synchronously hard-deletes workspace with only direct-mode threads", () => {
+    const ws = workspaceRepo.create("Direct Only", "/tmp/direct");
+    const t1 = threadRepo.create(ws.id, "T1", "direct", "main");
+    const t2 = threadRepo.create(ws.id, "T2", "direct", "develop");
+    const t3 = threadRepo.create(ws.id, "T3", "direct", "main");
+    threadRepo.softDelete(t3.id);
+
+    workspaceService.delete(ws.id);
+
+    // Everything should be gone from DB
+    expect(db.prepare("SELECT COUNT(*) AS c FROM workspaces WHERE id = ?").get(ws.id)).toEqual({ c: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS c FROM threads WHERE workspace_id = ?").get(ws.id)).toEqual({ c: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS c FROM cleanup_jobs WHERE workspace_path = ?").get("/tmp/direct")).toEqual({ c: 0 });
+
+    // Attachments removed for each thread
+    expect(mockAttachmentService.removeForThread).toHaveBeenCalledTimes(3);
+  });
+
+  it("completes in a single synchronous call (no worker needed)", () => {
+    const ws = workspaceRepo.create("Fast", "/tmp/fast");
+    threadRepo.create(ws.id, "T", "direct", "main");
+
+    const before = Date.now();
+    workspaceService.delete(ws.id);
+    const elapsed = Date.now() - before;
+
+    expect(elapsed).toBeLessThan(100);
+    expect(cleanupJobRepo.countByWorkspacePath("/tmp/fast")).toBe(0);
+  });
+});
