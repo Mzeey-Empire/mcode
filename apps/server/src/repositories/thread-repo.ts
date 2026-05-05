@@ -446,6 +446,22 @@ export class ThreadRepo {
   }
 
   /**
+   * Nullify parent_thread_id and forked_from_message_id on threads in OTHER workspaces
+   * that reference threads in the given workspace. Prevents dangling references
+   * when a workspace is deleted.
+   */
+  nullifyExternalLineage(workspaceId: string): number {
+    const result = this.db
+      .prepare(
+        `UPDATE threads SET parent_thread_id = NULL, forked_from_message_id = NULL, updated_at = ?
+         WHERE parent_thread_id IN (SELECT id FROM threads WHERE workspace_id = ?)
+         AND workspace_id != ?`,
+      )
+      .run(new Date().toISOString(), workspaceId, workspaceId);
+    return result.changes;
+  }
+
+  /**
    * Count active (non-deleted) threads on a given branch in the same workspace,
    * excluding a specific thread. Used to decide whether a branch is safe to delete.
    */

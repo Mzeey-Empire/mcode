@@ -665,6 +665,62 @@ describe("WorkspaceService.delete - active session handling", () => {
   });
 });
 
+describe("Workspace delete - cross-workspace fork lineage", () => {
+  let db: Database.Database;
+  let workspaceRepo: WorkspaceRepo;
+  let threadRepo: ThreadRepo;
+  let cleanupJobRepo: CleanupJobRepo;
+  let workspaceService: WorkspaceService;
+  let mockAttachmentService: AttachmentService;
+
+  beforeEach(() => {
+    db = openMemoryDatabase();
+    workspaceRepo = new WorkspaceRepo(db);
+    threadRepo = new ThreadRepo(db);
+    cleanupJobRepo = new CleanupJobRepo(db);
+    mockAttachmentService = { removeForThread: vi.fn() } as unknown as AttachmentService;
+    workspaceService = new WorkspaceService(
+      workspaceRepo,
+      threadRepo,
+      cleanupJobRepo,
+      mockAttachmentService,
+      { stopSession: vi.fn().mockResolvedValue(undefined) } as unknown as AgentService,
+    );
+  });
+
+  it("nullifies forked_from_message_id on threads in other workspaces", () => {
+    const wsX = workspaceRepo.create("Source", "/tmp/source");
+    const wsY = workspaceRepo.create("Target", "/tmp/target");
+
+    const tA = threadRepo.create(wsX.id, "Parent", "direct", "main");
+    const tB = threadRepo.create(wsY.id, "Fork", "direct", "main", true, "claude", {
+      parentThreadId: tA.id,
+      forkedFromMessageId: "msg-123",
+    });
+
+    workspaceService.delete(wsX.id);
+
+    const updatedTB = threadRepo.findById(tB.id);
+    expect(updatedTB!.parent_thread_id).toBeNull();
+    expect(updatedTB!.forked_from_message_id).toBeNull();
+  });
+
+  it("does not nullify lineage within the same workspace (handled by cascade)", () => {
+    const ws = workspaceRepo.create("Same", "/tmp/same");
+    const t1 = threadRepo.create(ws.id, "Parent", "direct", "main");
+    const t2 = threadRepo.create(ws.id, "Fork", "direct", "main", true, "claude", {
+      parentThreadId: t1.id,
+      forkedFromMessageId: "msg-456",
+    });
+
+    workspaceService.delete(ws.id);
+
+    // Both threads should be gone (cascade from workspace hardDelete)
+    const row = db.prepare("SELECT id FROM threads WHERE id = ?").get(t2.id);
+    expect(row).toBeUndefined();
+  });
+});
+
 describe("CleanupWorker - exhausted retries", () => {
   let db: Database.Database;
   let workspaceRepo: WorkspaceRepo;

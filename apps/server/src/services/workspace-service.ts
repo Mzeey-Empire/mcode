@@ -71,6 +71,9 @@ export class WorkspaceService {
 
     const workspacePath = this.getWorkspacePathForCleanup(id);
 
+    // Nullify cross-workspace fork lineage before threads are deleted
+    this.threadRepo.nullifyExternalLineage(id);
+
     // Gather all threads (active + already-soft-deleted) that have a worktree
     const worktreeThreads = this.threadRepo.findWorktreeThreadsByWorkspace(id);
 
