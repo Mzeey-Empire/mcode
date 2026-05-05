@@ -96,6 +96,10 @@ interface ThreadState {
   isCompactingByThread: Record<string, boolean>;
   /** Transient fallback state per thread. Cleared when the user sends the next message. */
   lastFallbackByThread: Record<string, { requestedModel: string; actualModel: string }>;
+  /** Transient rate-limit indicator per thread. Cleared when the provider reports the limit has lifted. */
+  rateLimitByThread: Record<string, { retryAfterMs?: number; limitType?: string; utilization?: number }>;
+  /** Transient API retry indicator per thread. Cleared when a non-retry event arrives. */
+  apiRetryByThread: Record<string, { reason: string; attempt?: number; maxRetries?: number; delayMs?: number }>;
   /** Questions proposed by the model in plan mode, keyed by thread ID. Null when not pending. */
   planQuestionsByThread: Record<string, PlanQuestion[] | null>;
   /** User's answers to plan questions, keyed by thread ID then question ID. */
@@ -316,6 +320,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   usageByProvider: {},
   isCompactingByThread: {},
   lastFallbackByThread: {},
+  rateLimitByThread: {},
+  apiRetryByThread: {},
   planQuestionsByThread: {},
   planAnswersByThread: {},
   activeQuestionIndexByThread: {},
@@ -751,6 +757,16 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         delete next[threadId];
         return next;
       })(),
+      rateLimitByThread: (() => {
+        const next = { ...state.rateLimitByThread };
+        delete next[threadId];
+        return next;
+      })(),
+      apiRetryByThread: (() => {
+        const next = { ...state.apiRetryByThread };
+        delete next[threadId];
+        return next;
+      })(),
       errorByThread: (() => {
         const next = { ...state.errorByThread };
         delete next[threadId];
@@ -996,6 +1012,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         contextByThread: omitKey(state.contextByThread, threadId),
         isCompactingByThread: omitKey(state.isCompactingByThread, threadId),
         lastFallbackByThread: omitKey(state.lastFallbackByThread, threadId),
+        rateLimitByThread: omitKey(state.rateLimitByThread, threadId),
+        apiRetryByThread: omitKey(state.apiRetryByThread, threadId),
         planQuestionsByThread: omitKey(state.planQuestionsByThread, threadId),
         planAnswersByThread: omitKey(state.planAnswersByThread, threadId),
         activeQuestionIndexByThread: omitKey(state.activeQuestionIndexByThread, threadId),
@@ -1076,6 +1094,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         contextByThread: pruneAll(state.contextByThread),
         isCompactingByThread: pruneAll(state.isCompactingByThread),
         lastFallbackByThread: pruneAll(state.lastFallbackByThread),
+        rateLimitByThread: pruneAll(state.rateLimitByThread),
+        apiRetryByThread: pruneAll(state.apiRetryByThread),
         planQuestionsByThread: pruneAll(state.planQuestionsByThread),
         planAnswersByThread: pruneAll(state.planAnswersByThread),
         activeQuestionIndexByThread: pruneAll(state.activeQuestionIndexByThread),
@@ -1325,6 +1345,15 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         next.add(threadId);
         return { runningThreadIds: next, agentStartTimes: { ...state.agentStartTimes, [threadId]: Date.now() } };
       });
+      // A new turn means any pending retry is resolved — clear it regardless of
+      // whether this thread was already in runningThreadIds.
+      set((state) => ({
+        apiRetryByThread: (() => {
+          const next = { ...state.apiRetryByThread };
+          delete next[threadId];
+          return next;
+        })(),
+      }));
       // Clear interrupted status so the resume banner no longer lists this
       // thread while the agent processes the continuation message.
       useWorkspaceStore.setState((ws) => {
@@ -1822,6 +1851,39 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           };
         });
       }
+      return;
+    }
+
+    if (method === "session.rateLimited") {
+      const active = params.active as boolean;
+      set((state) => {
+        const next = { ...state.rateLimitByThread };
+        if (active) {
+          next[threadId] = {
+            retryAfterMs: params.retryAfterMs as number | undefined,
+            limitType: params.limitType as string | undefined,
+            utilization: params.utilization as number | undefined,
+          };
+        } else {
+          delete next[threadId];
+        }
+        return { rateLimitByThread: next };
+      });
+      return;
+    }
+
+    if (method === "session.apiRetry") {
+      set((state) => ({
+        apiRetryByThread: {
+          ...state.apiRetryByThread,
+          [threadId]: {
+            reason: params.reason as string,
+            attempt: params.attempt as number | undefined,
+            maxRetries: params.maxRetries as number | undefined,
+            delayMs: params.delayMs as number | undefined,
+          },
+        },
+      }));
       return;
     }
 
