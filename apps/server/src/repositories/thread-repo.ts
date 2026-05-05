@@ -418,4 +418,63 @@ export class ThreadRepo {
       .run(parentThreadId, forkedFromMessageId, now, id);
     return result.changes > 0;
   }
+
+  /**
+   * Find all threads in a workspace that have a worktree_path set (both active and deleted).
+   * Used during workspace deletion to know which threads need filesystem cleanup.
+   */
+  findWorktreeThreadsByWorkspace(workspaceId: string): Thread[] {
+    const rows = this.db
+      .prepare(
+        `SELECT ${THREAD_COLUMNS} FROM threads WHERE workspace_id = ? AND worktree_path IS NOT NULL`,
+      )
+      .all(workspaceId) as ThreadRow[];
+    return rows.map(rowToThread);
+  }
+
+  /**
+   * List ALL threads for a workspace regardless of deletion status.
+   * Used during workspace hard-delete reconciliation.
+   */
+  listAllByWorkspace(workspaceId: string): Thread[] {
+    const rows = this.db
+      .prepare(
+        `SELECT ${THREAD_COLUMNS} FROM threads WHERE workspace_id = ?`,
+      )
+      .all(workspaceId) as ThreadRow[];
+    return rows.map(rowToThread);
+  }
+
+  /**
+   * Nullify parent_thread_id and forked_from_message_id on threads in OTHER workspaces
+   * that reference threads in the given workspace. Prevents dangling references
+   * when a workspace is deleted.
+   */
+  nullifyExternalLineage(workspaceId: string): number {
+    const result = this.db
+      .prepare(
+        `UPDATE threads SET parent_thread_id = NULL, forked_from_message_id = NULL, updated_at = ?
+         WHERE parent_thread_id IN (SELECT id FROM threads WHERE workspace_id = ?)
+         AND workspace_id != ?`,
+      )
+      .run(new Date().toISOString(), workspaceId, workspaceId);
+    return result.changes;
+  }
+
+  /**
+   * Count active (non-deleted) threads on a given branch in the same workspace,
+   * excluding a specific thread. Used to decide whether a branch is safe to delete.
+   */
+  countActiveByBranch(threadId: string, branch: string): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS count FROM threads
+         WHERE workspace_id = (SELECT workspace_id FROM threads WHERE id = ?)
+         AND branch = ?
+         AND id != ?
+         AND deleted_at IS NULL`,
+      )
+      .get(threadId, branch, threadId) as { count: number };
+    return row.count;
+  }
 }
