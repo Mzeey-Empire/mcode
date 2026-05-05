@@ -9,6 +9,7 @@ import { CleanupJobRepo } from "../repositories/cleanup-job-repo";
 import { WorkspaceService } from "../services/workspace-service";
 import { AttachmentService } from "../services/attachment-service";
 import { CleanupWorker } from "../services/cleanup-worker";
+import type { AgentService } from "../services/agent-service";
 import type { ClaudeProvider } from "../providers/claude/claude-provider";
 import type { TerminalService } from "../services/terminal-service";
 import type { GitService } from "../services/git-service";
@@ -224,6 +225,7 @@ describe("WorkspaceService.delete - two-phase orchestration", () => {
       threadRepo,
       cleanupJobRepo,
       mockAttachmentService,
+      { stopSession: vi.fn().mockResolvedValue(undefined) } as unknown as AgentService,
     );
   });
 
@@ -605,6 +607,61 @@ describe("CleanupWorker - shared branch protection", () => {
       expect.any(String),
       expect.objectContaining({ branchName: "feat/solo" }),
     );
+  });
+});
+
+describe("WorkspaceService.delete - active session handling", () => {
+  let db: Database.Database;
+  let workspaceRepo: WorkspaceRepo;
+  let threadRepo: ThreadRepo;
+  let cleanupJobRepo: CleanupJobRepo;
+  let workspaceService: WorkspaceService;
+  let mockAttachmentService: AttachmentService;
+  let mockAgentService: { stopSession: ReturnType<typeof vi.fn> };
+
+  beforeEach(() => {
+    db = openMemoryDatabase();
+    workspaceRepo = new WorkspaceRepo(db);
+    threadRepo = new ThreadRepo(db);
+    cleanupJobRepo = new CleanupJobRepo(db);
+
+    mockAttachmentService = {
+      removeForThread: vi.fn(),
+    } as unknown as AttachmentService;
+
+    mockAgentService = {
+      stopSession: vi.fn().mockResolvedValue(undefined),
+    };
+
+    workspaceService = new WorkspaceService(
+      workspaceRepo,
+      threadRepo,
+      cleanupJobRepo,
+      mockAttachmentService,
+      mockAgentService as unknown as AgentService,
+    );
+  });
+
+  it("signals all active agent sessions in the workspace to stop", () => {
+    const ws = workspaceRepo.create("Active", "/tmp/active");
+    const t1 = threadRepo.create(ws.id, "Running", "direct", "main");
+    db.prepare("UPDATE threads SET sdk_session_id = ? WHERE id = ?")
+      .run("session-123", t1.id);
+
+    workspaceService.delete(ws.id);
+
+    expect(mockAgentService.stopSession).toHaveBeenCalledWith(t1.id);
+  });
+
+  it("proceeds with deletion even if stop fails", () => {
+    const ws = workspaceRepo.create("Active", "/tmp/active");
+    const t1 = threadRepo.create(ws.id, "Running", "direct", "main");
+    db.prepare("UPDATE threads SET sdk_session_id = ? WHERE id = ?")
+      .run("session-123", t1.id);
+
+    mockAgentService.stopSession.mockRejectedValue(new Error("process gone"));
+
+    expect(() => workspaceService.delete(ws.id)).not.toThrow();
   });
 });
 

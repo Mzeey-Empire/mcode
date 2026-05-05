@@ -12,6 +12,7 @@ import { WorkspaceRepo } from "../repositories/workspace-repo";
 import { ThreadRepo } from "../repositories/thread-repo";
 import { CleanupJobRepo } from "../repositories/cleanup-job-repo";
 import { AttachmentService } from "./attachment-service";
+import { AgentService } from "./agent-service.js";
 import { logger } from "@mcode/shared";
 
 /** Handles workspace creation, listing, and two-phase deletion. */
@@ -22,6 +23,7 @@ export class WorkspaceService {
     @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
     @inject(CleanupJobRepo) private readonly cleanupJobRepo: CleanupJobRepo,
     @inject(AttachmentService) private readonly attachmentService: AttachmentService,
+    @inject(AgentService) private readonly agentService: AgentService,
   ) {}
 
   /**
@@ -74,6 +76,14 @@ export class WorkspaceService {
 
     // Get all threads regardless of status
     const allThreads = this.threadRepo.listAllByWorkspace(id);
+
+    // Signal all active agent sessions to stop (fire-and-forget)
+    const activeThreads = allThreads.filter((t) => t.sdk_session_id);
+    for (const thread of activeThreads) {
+      this.agentService.stopSession(thread.id).catch(() => {
+        logger.debug("Failed to stop session during workspace delete", { threadId: thread.id });
+      });
+    }
 
     // Separate threads by whether they need async worktree cleanup
     const worktreeThreadIds = new Set(worktreeThreads.map((t) => t.id));
