@@ -81,4 +81,21 @@ describe("WorkspaceRepo sort_order", () => {
     const after = repo.listAll().map((w) => w.sort_order);
     expect(after).toEqual(before);
   });
+
+  it("reorderToIndex succeeds when all sort_order values are duplicates", () => {
+    // Simulate legacy databases where schema patch gave all rows sort_order=0
+    const a = repo.create("a", "/a", true);
+    const b = repo.create("b", "/b", true);
+    const c = repo.create("c", "/c", true);
+    // Force all sort_order to 0 (simulates the schema patch bug)
+    db.prepare("UPDATE workspaces SET sort_order = 0").run();
+    const before = repo.listAll().map((w) => w.name);
+    // Move last item to first position
+    const lastId = repo.listAll().at(-1)!.id;
+    repo.reorderToIndex(lastId, 0);
+    const after = repo.listAll();
+    expect(after[0]!.id).toBe(lastId);
+    // All sort_order values should now be unique and sequential
+    expect(after.map((w) => w.sort_order)).toEqual([0, 1, 2]);
+  });
 });

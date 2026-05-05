@@ -8,6 +8,11 @@ export interface ContextState {
   commandPaletteOpen: boolean;
   /** The settings view is visible. */
   settingsOpen: boolean;
+  /**
+   * The project landing is visible (no active thread, not obscured by settings).
+   * Used so landing-only shortcuts do not fire in chat or fullscreen settings.
+   */
+  showLanding: boolean;
 }
 
 /** Valid context key names. */
@@ -20,6 +25,7 @@ function getDefaultContext(): ContextState {
     terminalFocused: false,
     commandPaletteOpen: false,
     settingsOpen: false,
+    showLanding: false,
   };
 }
 
@@ -36,20 +42,33 @@ export function setContext<K extends ContextKey>(key: K, value: ContextState[K])
 }
 
 /**
- * Evaluate a "when" clause against the current context.
- * Supports simple keys ("inputFocused") and negation ("!inputFocused").
- * Returns true if the clause is undefined (unconditional).
+ * Evaluates one context atom: `key` or `!key` for a known `ContextKey`.
  */
-export function evaluateWhen(when: string | undefined): boolean {
-  if (when === undefined) return true;
-
-  const negated = when.startsWith("!");
-  const key = (negated ? when.slice(1) : when) as ContextKey;
+function evaluateWhenAtom(atom: string): boolean {
+  const trimmed = atom.trim();
+  const negated = trimmed.startsWith("!");
+  const key = (negated ? trimmed.slice(1) : trimmed) as ContextKey;
 
   if (!Object.prototype.hasOwnProperty.call(state, key)) return false;
 
   const value = state[key];
-  return negated ? !value : value;
+  return negated ? !value : !!value;
+}
+
+/**
+ * Evaluate a "when" clause against the current context.
+ * Supports simple keys (`inputFocused`), negation (`!inputFocused`), and
+ * conjunction with ` && ` (all subclauses must pass). Returns true if the
+ * clause is undefined (unconditional).
+ */
+export function evaluateWhen(when: string | undefined): boolean {
+  if (when === undefined) return true;
+
+  const parts = when.split(/\s+&&\s+/);
+  for (let i = 0; i < parts.length; i++) {
+    if (!evaluateWhenAtom(parts[i]!)) return false;
+  }
+  return true;
 }
 
 /** Reset all context to defaults (for testing). */

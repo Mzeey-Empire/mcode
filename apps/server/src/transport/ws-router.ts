@@ -212,7 +212,19 @@ async function dispatch(
     }
     case "workspace.delete": {
       const result = deps.workspaceService.delete(params.id);
-      deps.gitWatcherService.unwatchWorkspace(params.id);
+      if (result) {
+        deps.gitWatcherService.unwatchWorkspace(params.id);
+        broadcast("workspace.orderChanged", {});
+      }
+      return result;
+    }
+    case "workspace.forceDelete": {
+      const result = deps.workspaceService.forceDelete(params.id);
+      if (result) {
+        deps.gitWatcherService.unwatchWorkspace(params.id);
+        broadcast("workspace.deleted", { workspaceId: params.id });
+        broadcast("workspace.orderChanged", {});
+      }
       return result;
     }
     case "workspace.pin":

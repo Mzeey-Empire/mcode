@@ -114,6 +114,11 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({ id: z.string() }),
     result: z.boolean(),
   },
+  /** Hard-delete a workspace and all its data immediately, bypassing the cleanup queue. */
+  "workspace.forceDelete": {
+    params: z.object({ id: z.string() }),
+    result: z.boolean(),
+  },
   /** Pin or unpin a workspace in the project selector. */
   "workspace.pin": {
     params: z.object({ id: z.string(), pinned: z.boolean() }),

@@ -28,6 +28,8 @@ export const AgentEventType = {
   ContextEstimate: "contextEstimate",
   QuotaUpdate: "quotaUpdate",
   ProviderUnavailable: "providerUnavailable",
+  RateLimited: "rateLimited",
+  ApiRetry: "apiRetry",
 } as const;
 
 /** Union of all valid `AgentEvent` type discriminants. */
@@ -180,6 +182,34 @@ export const AgentEventSchema = lazySchema(() =>
        * enforces this at emission, and consumers can rely on the invariant.
        */
       configuredPath: z.string().optional(),
+    }),
+    z.object({
+      /** Emitted when the provider is rate-limited or approaching its rate limit. */
+      type: z.literal(AgentEventType.RateLimited),
+      threadId: z.string(),
+      /** Whether the rate limit is currently active (warning or rejected). False clears the indicator. */
+      active: z.boolean(),
+      /** Milliseconds until the rate limit resets. Computed from the SDK's absolute timestamp at emission time. */
+      retryAfterMs: z.number().optional(),
+      /** Provider-specific rate limit category (e.g. 'five_hour', 'seven_day'). */
+      limitType: z.string().optional(),
+      /** Utilization fraction (0-1) of the current rate limit window, if available. */
+      utilization: z.number().min(0).max(1).optional(),
+    }),
+    z.object({
+      /** Emitted when an API request fails with a retryable error and the provider will retry. */
+      type: z.literal(AgentEventType.ApiRetry),
+      threadId: z.string(),
+      /** Human-readable reason for the retry (e.g. 'rate_limit', 'server_error'). */
+      reason: z.string(),
+      /** Current retry attempt number (1-based). */
+      attempt: z.number().optional(),
+      /** Maximum number of retries the provider will attempt. */
+      maxRetries: z.number().optional(),
+      /** Milliseconds until the next retry attempt. */
+      delayMs: z.number().optional(),
+      /** HTTP status code that triggered the retry, if available. Omitted for connection errors. */
+      errorStatus: z.number().optional(),
     }),
   ]),
 );

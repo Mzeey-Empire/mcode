@@ -42,21 +42,17 @@ export function AboutSection() {
 
   const bridge = typeof window !== "undefined" ? window.desktopBridge?.app : undefined;
 
-  // When the status transitions to "not-available" after we were checking,
-  // briefly show "Up to date" so the user sees the result of their click.
-  const prevStatusRef = useRef(status.state);
+  /** Show the "Up to date" label for a few seconds, then clear it. */
+  const flashUpToDate = () => {
+    setUpToDateLabel(true);
+    if (upToDateTimer.current) clearTimeout(upToDateTimer.current);
+    upToDateTimer.current = setTimeout(() => {
+      setUpToDateLabel(false);
+    }, UP_TO_DATE_HOLD_MS);
+  };
+
+  // Any active update state clears the transient "Up to date" label.
   useEffect(() => {
-    if (
-      prevStatusRef.current === "checking" &&
-      status.state === "not-available"
-    ) {
-      setUpToDateLabel(true);
-      if (upToDateTimer.current) clearTimeout(upToDateTimer.current);
-      upToDateTimer.current = setTimeout(() => {
-        setUpToDateLabel(false);
-      }, UP_TO_DATE_HOLD_MS);
-    }
-    // Any active update state clears the transient label.
     if (
       status.state === "available" ||
       status.state === "downloading" ||
@@ -65,7 +61,6 @@ export function AboutSection() {
       setUpToDateLabel(false);
       if (upToDateTimer.current) clearTimeout(upToDateTimer.current);
     }
-    prevStatusRef.current = status.state;
   }, [status.state]);
 
   // Clean up timer on unmount.
@@ -78,7 +73,10 @@ export function AboutSection() {
     setUpToDateLabel(false);
     setChecking(true);
     try {
-      await bridge.checkForUpdates();
+      const result = await bridge.checkForUpdates();
+      if (result.state === "not-available") {
+        flashUpToDate();
+      }
     } catch {
       // The main process broadcasts an error status via IPC, which surfaces as
       // status.state === "error" and renders "Check failed" in the status label.
