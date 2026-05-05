@@ -51,6 +51,7 @@ import type { PrDetail } from "@/transport/types";
 import { QueuePopover } from "./QueuePopover";
 import { ContextTracker } from "./ContextTracker";
 import { CompactingBanner } from "./CompactingBanner";
+import { RetryBanner } from "./RetryBanner";
 import { ComposerBranchBar } from "./ComposerBranchBar";
 import { useQueueStore } from "@/stores/queueStore";
 import {
@@ -708,6 +709,9 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   }, [permissionLocked, access, threadId, setThreadSettings]);
   const contextEntry = useThreadStore((s) => threadId ? s.contextByThread[threadId] : undefined);
   const isCompacting = useThreadStore((s) => !!(threadId && s.isCompactingByThread[threadId]));
+  const hasRetryState = useThreadStore(
+    (s) => !!(threadId && (s.rateLimitByThread[threadId] || s.apiRetryByThread[threadId])),
+  );
   const planPending = useThreadStore(
     (s) => !!threadId && (s.planQuestionsStatusByThread[threadId] ?? "idle") === "pending",
   );
@@ -1520,6 +1524,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
 
         {/* Compacting banner — shown while the SDK is summarising the context window */}
         {isCompacting && <CompactingBanner />}
+        {!isCompacting && hasRetryState && threadId && <RetryBanner threadId={threadId} />}
 
         {/* Drag overlay */}
         {isDragOver && (

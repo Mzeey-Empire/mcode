@@ -121,11 +121,10 @@ export class CodexEventMapper {
       const errorMsg = notification.params.error?.message ?? "Unknown error from codex app-server";
       const willRetry = notification.params.willRetry ?? false;
       logger.debug("Codex error notification", { error: errorMsg, willRetry });
-      // Only surface non-retried errors; retried ones are transient and will resolve
-      if (!willRetry) {
-        return [{ type: AgentEventType.Error, threadId: this.threadId, error: errorMsg }];
+      if (willRetry) {
+        return [{ type: AgentEventType.ApiRetry, threadId: this.threadId, reason: errorMsg }];
       }
-      return [];
+      return [{ type: AgentEventType.Error, threadId: this.threadId, error: errorMsg }];
     }
 
     if (SILENCED_METHODS.has(method)) {
