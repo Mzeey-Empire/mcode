@@ -118,7 +118,7 @@ export interface McodeTransport {
   listWorktrees(workspaceId: string): Promise<WorktreeInfo[]>;
 
   // Agent commands
-  sendMessage(threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], reasoningLevel?: ReasoningLevel, provider?: string, interactionMode?: InteractionMode, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean): Promise<void>;
+  sendMessage(threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], reasoningLevel?: ReasoningLevel, provider?: string, interactionMode?: InteractionMode, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean, replyToMessageId?: string, quotedText?: string): Promise<void>;
   createAndSendMessage(
     workspaceId: string,
     content: string,
