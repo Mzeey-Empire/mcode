@@ -129,11 +129,46 @@ function applyPragmas(db: Database.Database, isFileBacked: boolean): void {
   db.pragma("foreign_keys = ON");
 }
 
+/**
+ * Adds columns that were retrofitted into migration 0000 after some databases
+ * were already created. `bootstrapDrizzle` marks 0000 as done for any DB that
+ * has the `workspaces` sentinel table, so these columns are never applied via
+ * the normal migration path on pre-existing installs.
+ *
+ * Safe to run on fresh databases: the PRAGMA check is a no-op when the column
+ * already exists. Safe under concurrent startup: if two processes both pass the
+ * PRAGMA check and race to ALTER TABLE, the second will receive a
+ * "duplicate column name" error which is swallowed — any other error is
+ * rethrown.
+ */
+export function applySchemaPatches(db: Database.Database): void {
+  const cols = (
+    db.prepare("PRAGMA table_info(workspaces)").all() as Array<{ name: string }>
+  ).map((r) => r.name);
+
+  // cols is empty when the table doesn't exist; nothing to patch in that case
+  if (cols.length > 0 && !cols.includes("sort_order")) {
+    try {
+      db.prepare(
+        "ALTER TABLE workspaces ADD COLUMN sort_order INTEGER DEFAULT 0 NOT NULL",
+      ).run();
+    } catch (err) {
+      if (
+        !(err instanceof Error) ||
+        !err.message.includes("duplicate column name")
+      ) {
+        throw err;
+      }
+    }
+  }
+}
+
 function runMigrations(db: Database.Database): void {
   const dir = getDrizzleMigrationsDir();
   bootstrapDrizzle(db, dir);
   const d = drizzle(db);
   migrate(d, { migrationsFolder: migrationsFolderForDrizzle(dir) });
+  applySchemaPatches(db);
 }
 
 /**
