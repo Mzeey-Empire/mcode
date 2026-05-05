@@ -3,12 +3,14 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDiffStore, type DiffViewMode } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { useSettingsStore } from "@/stores/settingsStore";
 
 /** View mode options for the diff panel toolbar. */
-const ALL_VIEW_MODES: { value: DiffViewMode; label: string; worktreeOnly: boolean }[] = [
+const BASE_VIEW_MODES: { value: DiffViewMode; label: string; worktreeOnly: boolean; settingsGate?: "diffSummary" }[] = [
   { value: "all", label: "All", worktreeOnly: false },
   { value: "by-turn", label: "By Turn", worktreeOnly: false },
   { value: "commits", label: "Commits", worktreeOnly: true },
+  { value: "summary", label: "Summary", worktreeOnly: false, settingsGate: "diffSummary" },
 ];
 
 /** Toolbar for the diff panel: view mode switcher + unified/side-by-side toggle. */
@@ -25,8 +27,13 @@ export function DiffToolbar() {
     const thread = s.threads.find((t) => t.id === activeThreadId);
     return thread?.mode === "worktree";
   });
+  const diffSummaryEnabled = useSettingsStore((s) => s.settings.diffSummary.enabled);
 
-  const viewModes = ALL_VIEW_MODES.filter((m) => !m.worktreeOnly || isWorktree);
+  const viewModes = BASE_VIEW_MODES.filter((m) => {
+    if (m.worktreeOnly && !isWorktree) return false;
+    if (m.settingsGate === "diffSummary" && !diffSummaryEnabled) return false;
+    return true;
+  });
 
   return (
     <div className="flex items-center justify-between px-3 py-2 border-b border-border/30">
