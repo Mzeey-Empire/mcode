@@ -607,3 +607,85 @@ describe("CleanupWorker - shared branch protection", () => {
     );
   });
 });
+
+describe("CleanupWorker - missing directory handling", () => {
+  let db: Database.Database;
+  let workspaceRepo: WorkspaceRepo;
+  let threadRepo: ThreadRepo;
+  let cleanupJobRepo: CleanupJobRepo;
+  let mockClaudeProvider: ClaudeProvider;
+  let mockTerminalService: TerminalService;
+  let mockGitService: GitService;
+  let mockAttachmentService: AttachmentService;
+  let worker: CleanupWorker;
+
+  beforeEach(() => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(killDescendantsByName).mockClear();
+
+    db = openMemoryDatabase();
+    cleanupJobRepo = new CleanupJobRepo(db);
+    threadRepo = new ThreadRepo(db);
+    workspaceRepo = new WorkspaceRepo(db);
+
+    mockClaudeProvider = { waitForSessionExit: vi.fn().mockResolvedValue(undefined) } as unknown as ClaudeProvider;
+    mockTerminalService = { killByThread: vi.fn() } as unknown as TerminalService;
+    mockGitService = { removeWorktree: vi.fn().mockResolvedValue(true), isRegisteredWorktreePath: vi.fn().mockReturnValue(true) } as unknown as GitService;
+    mockAttachmentService = { removeForThread: vi.fn() } as unknown as AttachmentService;
+
+    worker = new CleanupWorker(db, cleanupJobRepo, threadRepo, mockClaudeProvider, mockTerminalService, mockGitService, workspaceRepo, mockAttachmentService);
+  });
+
+  afterEach(() => { worker.dispose(); });
+
+  it("treats non-existent worktree directory as successful cleanup", async () => {
+    const ws = workspaceRepo.create("Test", "/tmp/ws");
+    const t1 = threadRepo.create(ws.id, "WT", "worktree", "feat/x");
+    db.prepare("UPDATE threads SET worktree_path = ? WHERE id = ?")
+      .run("/tmp/ws/.worktrees/gone", t1.id);
+    threadRepo.softDelete(t1.id);
+
+    cleanupJobRepo.insert({
+      thread_id: t1.id,
+      workspace_path: "/tmp/ws",
+      worktree_path: "/tmp/ws/.worktrees/gone",
+      branch: "feat/x",
+    });
+
+    // Both workspace and worktree paths missing
+    vi.mocked(existsSync).mockReturnValue(false);
+
+    await worker.processOneJob();
+
+    // Thread should still be hard-deleted (cleanup succeeded)
+    const thread = db.prepare("SELECT id FROM threads WHERE id = ?").get(t1.id);
+    expect(thread).toBeUndefined();
+    // Cleanup job should be removed
+    expect(cleanupJobRepo.countByWorkspacePath("/tmp/ws")).toBe(0);
+  });
+
+  it("treats non-existent workspace path gracefully (skip git commands)", async () => {
+    const ws = workspaceRepo.create("Test", "/tmp/gone-ws");
+    const t1 = threadRepo.create(ws.id, "WT", "worktree", "feat/x");
+    db.prepare("UPDATE threads SET worktree_path = ? WHERE id = ?")
+      .run("/tmp/gone-ws/.worktrees/x", t1.id);
+    threadRepo.softDelete(t1.id);
+
+    cleanupJobRepo.insert({
+      thread_id: t1.id,
+      workspace_path: "/tmp/gone-ws",
+      worktree_path: "/tmp/gone-ws/.worktrees/x",
+      branch: "feat/x",
+    });
+
+    vi.mocked(existsSync).mockReturnValue(false);
+
+    await worker.processOneJob();
+
+    // Should complete without error, thread hard-deleted
+    const thread = db.prepare("SELECT id FROM threads WHERE id = ?").get(t1.id);
+    expect(thread).toBeUndefined();
+    // removeWorktree should NOT have been called (no filesystem to clean)
+    expect(mockGitService.removeWorktree).not.toHaveBeenCalled();
+  });
+});

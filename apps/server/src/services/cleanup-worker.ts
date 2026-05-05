@@ -127,7 +127,19 @@ export class CleanupWorker {
       const resolvedWs = resolve(job.workspace_path.replace(/\\/g, "/"));
 
       if (!existsSync(resolvedWs)) {
-        throw new Error(`workspace_path does not exist: ${resolvedWs}`);
+        // The workspace directory is already gone (e.g. external deletion, re-installation).
+        // Treat this as a successful cleanup: there's nothing on disk to remove.
+        logger.info("Workspace directory gone, skipping filesystem cleanup", {
+          threadId: job.thread_id,
+          workspacePath: resolvedWs,
+        });
+        this.attachmentService.removeForThread(job.thread_id);
+        this.db.transaction(() => {
+          this.threadRepo.hardDelete(job.thread_id);
+          this.cleanupJobRepo.delete(job.id);
+        })();
+        this.finalizeWorkspaceIfDone(job.workspace_path);
+        return;
       }
       if (resolvedWt === resolvedWs) {
         throw new Error(`worktree_path must not equal workspace_path: ${resolvedWt}`);
@@ -169,6 +181,22 @@ export class CleanupWorker {
       // 4. Brief delay on Windows so the OS releases directory handles.
       if (process.platform === "win32") {
         await new Promise<void>((resolve) => setTimeout(resolve, HANDLE_RELEASE_DELAY_MS));
+      }
+
+      if (!existsSync(resolvedWt)) {
+        // The worktree directory is already gone but the workspace root exists.
+        // Treat this as a successful cleanup: no git operation needed.
+        logger.info("Worktree directory already removed, skipping filesystem cleanup", {
+          threadId: job.thread_id,
+          worktreePath: resolvedWt,
+        });
+        this.attachmentService.removeForThread(job.thread_id);
+        this.db.transaction(() => {
+          this.threadRepo.hardDelete(job.thread_id);
+          this.cleanupJobRepo.delete(job.id);
+        })();
+        this.finalizeWorkspaceIfDone(job.workspace_path);
+        return;
       }
 
       // 5. Remove the worktree directory and delete the exact thread branch when
