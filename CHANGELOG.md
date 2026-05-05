@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/Mzeey-Emipre/mcode/compare/mcode-v0.8.0...mcode-v0.8.1) (2026-05-05)
+
+
+### Bug Fixes
+
+* add schema patch for missing sort_order column on existing databases ([#404](https://github.com/Mzeey-Emipre/mcode/issues/404)) ([64cd42d](https://github.com/Mzeey-Emipre/mcode/commit/64cd42d4e3fae318314e190f7030c44b7ca6a498))
+
 ## [0.8.0](https://github.com/Mzeey-Emipre/mcode/compare/mcode-v0.7.0...mcode-v0.8.0) (2026-05-04)
 
 
