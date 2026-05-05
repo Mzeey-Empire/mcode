@@ -300,10 +300,11 @@ export class CleanupWorker {
       }
 
       // If the only remaining threads are non-worktree (already soft-deleted),
-      // hard-delete them and the workspace now
+      // clean up attachments, hard-delete them, and hard-delete the workspace now
       const pendingJobs = this.cleanupJobRepo.countByWorkspacePath(ws.path);
       if (pendingJobs === 0) {
         for (const t of threads) {
+          this.attachmentService.removeForThread(t.id);
           this.threadRepo.hardDelete(t.id);
         }
         this.workspaceRepo.hardDelete(ws.id);

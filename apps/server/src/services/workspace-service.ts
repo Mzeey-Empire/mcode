@@ -141,11 +141,20 @@ export class WorkspaceService {
 
   /**
    * Force-delete a workspace, abandoning any pending filesystem cleanup.
-   * Removes all DB records immediately. Orphaned worktree directories may remain on disk.
+   * Signals active sessions to stop (best-effort), then removes all DB records
+   * immediately. Orphaned worktree directories may remain on disk.
    */
   forceDelete(id: string): boolean {
     this.threadRepo.nullifyExternalLineage(id);
     const threads = this.threadRepo.listAllByWorkspace(id);
+
+    // Best-effort signal to active sessions before removing their backing rows
+    for (const t of threads) {
+      if (t.sdk_session_id) {
+        this.agentService.stopSession(t.id).catch(() => {});
+      }
+    }
+
     for (const t of threads) {
       this.cleanupJobRepo.deleteByThreadId(t.id);
       this.attachmentService.removeForThread(t.id);
