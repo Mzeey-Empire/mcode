@@ -253,6 +253,18 @@ describe("selective cache eviction in handleAgentEvent", () => {
     expect(getCachedSnapshot(THREAD_ID)).toBeUndefined();
   });
 
+  it("session.ended evicts the cache", () => {
+    cacheSnapshot(THREAD_ID, makeSnapshot(THREAD_ID));
+    expect(getCachedSnapshot(THREAD_ID)).toBeDefined();
+
+    useThreadStore.getState().handleAgentEvent(THREAD_ID, {
+      method: "session.ended",
+      params: {},
+    });
+
+    expect(getCachedSnapshot(THREAD_ID)).toBeUndefined();
+  });
+
   it("many streaming events preserve the cache throughout", () => {
     cacheSnapshot(THREAD_ID, makeSnapshot(THREAD_ID));
 

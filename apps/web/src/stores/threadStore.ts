@@ -1263,6 +1263,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     // ephemeral and don't change what loadMessages would return from the DB.
     const isStructuralEvent =
       method === "session.turnComplete" ||
+      method === "session.ended" ||
       method === "session.message" ||
       method === "session.error";
     if (isStructuralEvent) {
