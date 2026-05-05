@@ -58,6 +58,10 @@ export const SendMessageSchema = lazySchema(() =>
     contextWindow: ContextWindowModeSchema.optional(),
     /** Boolean thinking toggle. Honored only by models with a thinking toggle (Haiku 4.5). */
     thinking: z.boolean().optional(),
+    /** ID of the message being replied to. */
+    replyToMessageId: z.string().optional(),
+    /** Highlighted text excerpt from the original message. Absent for full-message replies. */
+    quotedText: z.string().optional(),
   }),
 );
 
@@ -90,6 +94,10 @@ export const CreateAndSendSchema = lazySchema(() =>
   parentThreadId: z.string().optional(),
   /** Fork-point message ID in the parent thread. Defaults to last persisted message. */
   forkedFromMessageId: z.string().optional(),
+  /** ID of the message being replied to. */
+  replyToMessageId: z.string().optional(),
+  /** Highlighted text excerpt from the original message. Absent for full-message replies. */
+  quotedText: z.string().optional(),
 }).refine(
   (d) => !d.forkedFromMessageId || d.parentThreadId,
   { message: "forkedFromMessageId requires parentThreadId", path: ["forkedFromMessageId"] },
