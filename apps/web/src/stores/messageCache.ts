@@ -29,6 +29,11 @@ export function getCachedSnapshot(threadId: string): MessageCacheSnapshot | unde
   return cache.get(threadId);
 }
 
+/** Check if a thread has a cached snapshot. Touches LRU recency. */
+export function hasCachedSnapshot(threadId: string): boolean {
+  return cache.get(threadId) !== undefined;
+}
+
 /** Store a snapshot for the given thread, evicting the LRU entry if at capacity. */
 export function cacheSnapshot(threadId: string, snapshot: MessageCacheSnapshot): void {
   const evicted = cache.set(threadId, snapshot);

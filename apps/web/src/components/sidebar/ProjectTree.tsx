@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { relativeTime } from "@/lib/time";
+import { schedulePrefetch, cancelPrefetch } from "@/lib/prefetch";
 import { getStatusDisplay, getNotificationDot } from "@/lib/thread-status";
 import { getBreakdown, getCiVisual, CI_ICON_STROKE } from "@/lib/ci-status";
 import type { ChecksStatus } from "@mcode/contracts";
@@ -944,6 +945,8 @@ function VirtualizedThreadList({
                 }}
                 onClick={() => handleThreadClick(thread.id, thread.title)}
                 onContextMenu={(e) => onThreadContextMenu(e, thread)}
+                onMouseEnter={() => schedulePrefetch(thread.id)}
+                onMouseLeave={cancelPrefetch}
                 className={cn(
                   "group/row flex items-center gap-2 rounded-md pr-2 py-1 text-[13px] cursor-pointer transition-colors",
                   activeThreadId === thread.id
