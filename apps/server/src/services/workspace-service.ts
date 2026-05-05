@@ -134,6 +134,7 @@ export class WorkspaceService {
    * Removes all DB records immediately. Orphaned worktree directories may remain on disk.
    */
   forceDelete(id: string): boolean {
+    this.threadRepo.nullifyExternalLineage(id);
     const threads = this.threadRepo.listAllByWorkspace(id);
     for (const t of threads) {
       this.cleanupJobRepo.deleteByThreadId(t.id);

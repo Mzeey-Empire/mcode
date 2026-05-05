@@ -315,6 +315,13 @@ export class CleanupWorker {
 
     const workspace = this.workspaceRepo.findDeletingByPath(workspacePath);
     if (workspace) {
+      // Clean up any remaining threads (e.g. crash-orphaned soft-deleted direct threads)
+      // before FK cascade removes them without attachment file cleanup.
+      const remainingThreads = this.threadRepo.listAllByWorkspace(workspace.id);
+      for (const thread of remainingThreads) {
+        this.attachmentService.removeForThread(thread.id);
+      }
+
       this.workspaceRepo.hardDelete(workspace.id);
       broadcast("workspace.deleted", { workspaceId: workspace.id });
       logger.info("Workspace hard-deleted after final cleanup job", {
