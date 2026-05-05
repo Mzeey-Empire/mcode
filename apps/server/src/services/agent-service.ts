@@ -963,6 +963,16 @@ export class AgentService {
           this.updateBufferedToolCallOutput(event.threadId, event.toolCallId, event.output, event.isError);
         }
 
+        if (event.type === AgentEventType.TurnStarted) {
+          // Re-add to activeSessionIds for auto-resumed turns (ScheduleWakeup/loop).
+          // For sendMessage()-originated turns this is a no-op since sendMessage()
+          // already added the thread before emitting TurnStarted.
+          if (!this.activeSessionIds.has(event.threadId)) {
+            this.activeSessionIds.add(event.threadId);
+            this.memoryPressureService.markActive();
+          }
+        }
+
         if (event.type === AgentEventType.TurnComplete) {
           this.persistTurn(event.threadId).catch((err) => {
             logger.error("persistTurn failed on turnComplete", {

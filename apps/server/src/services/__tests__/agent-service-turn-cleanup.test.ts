@@ -259,6 +259,40 @@ describe("AgentService turn cleanup", () => {
     expect(service.activeThreadIds()).toContain(THREAD_ID);
   });
 
+  it("re-adds thread to activeThreadIds on TurnStarted after TurnComplete (auto-resume)", async () => {
+    const { service, providerEmitter, memoryPressureService } = buildService();
+    service.init();
+
+    await service.sendMessage(THREAD_ID, "hello", "default", "claude-sonnet-4-6", [], undefined, "claude");
+    expect(service.activeThreadIds()).toContain(THREAD_ID);
+
+    // Turn completes, thread removed from active
+    providerEmitter.emit("event", {
+      type: AgentEventType.TurnComplete,
+      threadId: THREAD_ID,
+      reason: "end_turn",
+      costUsd: null,
+      tokensIn: 100,
+      tokensOut: 50,
+      contextWindow: 200000,
+      totalProcessedTokens: 150,
+      providerId: "claude",
+    } satisfies AgentEvent);
+
+    expect(service.activeThreadIds()).not.toContain(THREAD_ID);
+
+    // SDK auto-resumes: TurnStarted fires from stream loop
+    memoryPressureService.markActive.mockClear();
+    providerEmitter.emit("event", {
+      type: AgentEventType.TurnStarted,
+      threadId: THREAD_ID,
+    } satisfies AgentEvent);
+
+    // Thread should be active again
+    expect(service.activeThreadIds()).toContain(THREAD_ID);
+    expect(memoryPressureService.markActive).toHaveBeenCalled();
+  });
+
   it("removes thread from activeThreadIds on Ended event", async () => {
     const { service, providerEmitter, memoryPressureService } = buildService();
     service.init();
