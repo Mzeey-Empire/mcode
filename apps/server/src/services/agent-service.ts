@@ -163,6 +163,10 @@ export class AgentService {
      * the agent without writing it to SQLite.
      */
     providerWireOverride?: string,
+    /** ID of the message being replied to. Stored on the user message row. */
+    replyToMessageId?: string,
+    /** Highlighted text excerpt from the replied-to message. Stored on the user message row. */
+    quotedText?: string,
   ): Promise<void> {
     const thread = this.threadRepo.findById(threadId);
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
@@ -237,6 +241,8 @@ export class AgentService {
         content,
         nextSeq,
         stored.length > 0 ? stored : undefined,
+        replyToMessageId,
+        quotedText,
       );
       if (markPlanAnswerForMessageId) {
         // INSERT OR IGNORE inside the repo skips PK collisions (idempotent
@@ -267,6 +273,19 @@ export class AgentService {
       this.planParsers.set(threadId, new PlanQuestionParser());
       if (providerWireOverride === undefined) {
         content = this.buildPlanPrompt(content);
+      }
+    }
+
+    // When the user is replying to a previous message, wrap the quoted context
+    // in XML tags so the AI provider understands the reference.
+    if (replyToMessageId && providerWireOverride === undefined) {
+      const replyTarget = this.messageRepo.findById(replyToMessageId);
+      if (replyTarget) {
+        const quoteBody = quotedText
+          ? quotedText.slice(0, 2000)
+          : replyTarget.content.slice(0, 2000);
+        const truncated = quoteBody.length < (quotedText ?? replyTarget.content).length ? "..." : "";
+        content = `<reply-to role="${replyTarget.role}" sequence="${replyTarget.sequence}">\n${quoteBody}${truncated}\n</reply-to>\n\n${content}`;
       }
     }
 
