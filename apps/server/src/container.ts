@@ -56,6 +56,7 @@ import { ModelCacheService } from "./services/model-cache-service";
 import { ProtectedEnvStore } from "./services/protected-env-store";
 import { ShellEnvResolver } from "./services/shell-env-resolver";
 import { EnvService } from "./services/env-service";
+import { UtilityCompletionService } from "./services/utility-completion-service";
 
 /** Initialize the DI container with all server dependencies. */
 export function setupContainer(mcodeDir: string): typeof container {
@@ -321,6 +322,11 @@ export function setupContainer(mcodeDir: string): typeof container {
   container.register(
     FilesystemBrowser,
     { useClass: FilesystemBrowser },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register(
+    UtilityCompletionService,
+    { useClass: UtilityCompletionService },
     { lifecycle: Lifecycle.Singleton },
   );
 
