@@ -282,6 +282,13 @@ async function dispatch(
     case "thread.markViewed":
       deps.threadService.markViewed(params.threadId);
       return;
+    case "thread.search":
+      return deps.threadService.search({
+        query: params.query,
+        filters: params.filters,
+        sort: params.sort,
+        limit: params.limit,
+      });
     case "thread.syncPrs": {
       const syncWs = deps.workspaceService.findById(params.workspaceId);
       if (!syncWs?.is_git_repo) return [];
