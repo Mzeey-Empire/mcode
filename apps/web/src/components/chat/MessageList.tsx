@@ -239,6 +239,12 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
 
   itemsLengthRef.current = items.length;
 
+  // Mirror items in a ref so scrollToMessage can read the latest list
+  // without adding items to its dependency array (which would re-create
+  // the callback on every streaming token).
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => containerRef.current,
@@ -305,7 +311,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
 
   /** Scrolls to a message by ID, then briefly flashes it to orient the user. */
   const scrollToMessage = useCallback((messageId: string) => {
-    const idx = items.findIndex(
+    const idx = itemsRef.current.findIndex(
       (item) => item.type === "message" && item.message.id === messageId,
     );
     if (idx !== -1) {
@@ -318,7 +324,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
         }
       }, 300);
     }
-  }, [items, virtualizer]);
+  }, [virtualizer]);
 
   // Save the outgoing thread's scrollTop, then reset per-thread UI state.
   // Cache-miss vs cache-hit is inferred from `loading`: the threadStore sets

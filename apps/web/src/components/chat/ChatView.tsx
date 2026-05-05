@@ -288,10 +288,12 @@ export function ChatView() {
 
   /** Activates reply mode on the composer for the given message. */
   const handleReply = useCallback((messageId: string, content: string, role: "user" | "assistant") => {
-    if (!activeThread) return;
-    const previewText = content.slice(0, 150);
-    useReplyStore.getState().setReply(activeThread.id, messageId, role, previewText);
-  }, [activeThread]);
+    // Read threadId from store at call time to avoid re-creating this callback
+    // on every status change, matching the pattern used by handleBranch.
+    const threadId = useWorkspaceStore.getState().activeThreadId;
+    if (!threadId) return;
+    useReplyStore.getState().setReply(threadId, messageId, role, content.slice(0, 150), content.slice(0, 2000));
+  }, []);
 
   const showCliError =
     !!sessionError &&

@@ -259,7 +259,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
             <QuoteBlock
               quotedText={message.quoted_text ?? ""}
               sourceRole="assistant"
-              available={!!message.quoted_text || !!message.reply_to_message_id}
+              available={!!message.quoted_text}
               onClick={() => onScrollToMessage?.(message.reply_to_message_id!)}
             />
           )}
@@ -338,7 +338,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
         <QuoteBlock
           quotedText={message.quoted_text ?? ""}
           sourceRole="user"
-          available={!!message.quoted_text || !!message.reply_to_message_id}
+          available={!!message.quoted_text}
           onClick={() => onScrollToMessage?.(message.reply_to_message_id!)}
         />
       )}
