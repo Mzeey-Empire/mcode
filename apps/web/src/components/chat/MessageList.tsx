@@ -35,15 +35,17 @@ const VirtualItemRenderer = memo(function VirtualItemRenderer({
   turnExpandRef,
   onBranch,
   onReply,
+  onScrollToMessage,
 }: {
   item: ChatVirtualItem;
   turnExpandRef?: React.RefObject<Map<string, boolean>>;
   onBranch?: (messageId: string) => void;
   onReply?: (messageId: string, content: string, role: "user" | "assistant") => void;
+  onScrollToMessage?: (messageId: string) => void;
 }) {
   switch (item.type) {
     case "message":
-      return <MessageBubble message={item.message} onBranch={onBranch} onReply={onReply} />;
+      return <MessageBubble message={item.message} onBranch={onBranch} onReply={onReply} onScrollToMessage={onScrollToMessage} />;
     case "active-tools":
       return <ToolCallCard toolCalls={item.toolCalls} />;
     case "indicator":
@@ -88,7 +90,8 @@ const VirtualItemRenderer = memo(function VirtualItemRenderer({
   && prev.item === next.item
   && prev.turnExpandRef === next.turnExpandRef
   && prev.onBranch === next.onBranch
-  && prev.onReply === next.onReply,
+  && prev.onReply === next.onReply
+  && prev.onScrollToMessage === next.onScrollToMessage,
 );
 
 /** Props for {@link ScrollToBottomButton}. */
@@ -299,6 +302,23 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
       }
     };
   }, []);
+
+  /** Scrolls to a message by ID, then briefly flashes it to orient the user. */
+  const scrollToMessage = useCallback((messageId: string) => {
+    const idx = items.findIndex(
+      (item) => item.type === "message" && item.message.id === messageId,
+    );
+    if (idx !== -1) {
+      virtualizer.scrollToIndex(idx, { align: "center", behavior: "smooth" });
+      setTimeout(() => {
+        const element = document.querySelector(`[data-message-id="${messageId}"]`);
+        if (element) {
+          element.classList.add("animate-flash-highlight");
+          setTimeout(() => element.classList.remove("animate-flash-highlight"), 1500);
+        }
+      }, 300);
+    }
+  }, [items, virtualizer]);
 
   // Save the outgoing thread's scrollTop, then reset per-thread UI state.
   // Cache-miss vs cache-hit is inferred from `loading`: the threadStore sets
@@ -514,7 +534,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
                 style={{ transform: `translateY(${vi.start}px)` }}
               >
                 <div className="mx-auto w-full max-w-4xl">
-                  <VirtualItemRenderer item={item} turnExpandRef={turnExpandRef} onBranch={onBranch} onReply={onReply} />
+                  <VirtualItemRenderer item={item} turnExpandRef={turnExpandRef} onBranch={onBranch} onReply={onReply} onScrollToMessage={scrollToMessage} />
                 </div>
               </div>
             );

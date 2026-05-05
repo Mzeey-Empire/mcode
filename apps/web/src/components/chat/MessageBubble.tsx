@@ -41,6 +41,8 @@ interface MessageBubbleProps {
   onBranch?: (messageId: string) => void;
   /** Called when the user clicks the reply button on this message. */
   onReply?: (messageId: string, content: string, role: "user" | "assistant") => void;
+  /** Called when the user clicks a quote block to scroll to the original message. */
+  onScrollToMessage?: (messageId: string) => void;
 }
 
 /** Maps a MIME type to a file extension for attachment URLs. */
@@ -199,7 +201,7 @@ function QuoteBlock({
 }
 
 /** Renders a single chat message (system, user, or assistant). Memoized to prevent re-renders when the message ref is unchanged. */
-export const MessageBubble = memo(function MessageBubble({ message, onBranch, onReply }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ message, onBranch, onReply, onScrollToMessage }: MessageBubbleProps) {
   const formattedTime = useMemo(
     () => new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     [message.timestamp],
@@ -258,6 +260,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
               quotedText={message.quoted_text ?? ""}
               sourceRole="assistant"
               available={!!message.quoted_text || !!message.reply_to_message_id}
+              onClick={() => onScrollToMessage?.(message.reply_to_message_id!)}
             />
           )}
           {/* Image attachments — standalone thumbnails above the bubble */}
@@ -336,6 +339,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
           quotedText={message.quoted_text ?? ""}
           sourceRole="user"
           available={!!message.quoted_text || !!message.reply_to_message_id}
+          onClick={() => onScrollToMessage?.(message.reply_to_message_id!)}
         />
       )}
       <div className="text-sm text-foreground">
