@@ -1,6 +1,7 @@
 import { useRef, useEffect } from "react";
 import { useSidebarSearchStore } from "@/stores/sidebarSearchStore";
 import { ThreadFilterDropdown } from "./ThreadFilterDropdown";
+import { ThreadSortControl } from "./ThreadSortControl";
 import { Search, X, Loader2 } from "lucide-react";
 
 /** Dismissible filter chip. */
@@ -97,6 +98,19 @@ export function ThreadSearchBar({ providers }: { providers: string[] }) {
         <ThreadFilterDropdown providers={providers} />
       </div>
 
+      {/* Sort + filter controls row */}
+      <div className="mt-1 flex items-center justify-between px-0.5">
+        <ThreadSortControl />
+        {hasFilters && (
+          <button
+            className="cursor-pointer font-mono text-[8px] tracking-[0.06em] text-muted-foreground/35 transition-colors hover:text-muted-foreground/60"
+            onClick={clearFilters}
+          >
+            clear filters
+          </button>
+        )}
+      </div>
+
       {hasFilters && (
         <div className="mt-1 flex flex-wrap items-center gap-1 px-0.5" data-testid="filter-chip-row">
           {filters.status.map((s) => (
@@ -105,12 +119,6 @@ export function ThreadSearchBar({ providers }: { providers: string[] }) {
           {filters.provider.map((p) => (
             <FilterChip key={p} label={p} onRemove={() => toggleFilter("provider", p)} />
           ))}
-          <button
-            className="cursor-pointer font-mono text-[8px] tracking-[0.06em] text-muted-foreground/35 transition-colors hover:text-muted-foreground/60"
-            onClick={clearFilters}
-          >
-            clear
-          </button>
         </div>
       )}
     </div>

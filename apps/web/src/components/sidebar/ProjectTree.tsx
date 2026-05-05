@@ -54,7 +54,6 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 import { ThreadSearchBar } from "./ThreadSearchBar";
-import { ThreadSortControl } from "./ThreadSortControl";
 import { useSidebarSearchStore, type ThreadSortField } from "@/stores/sidebarSearchStore";
 
 // Persist expand/collapse in localStorage
@@ -538,21 +537,18 @@ export function ProjectTree() {
         <span className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/55">
           Projects
         </span>
-        <div className="flex items-center gap-1">
-          <ThreadSortControl />
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button variant="ghost" size="icon-xs" onClick={handleOpenFolder} aria-label="Open project folder" className="text-muted-foreground/60 hover:text-foreground">
-                  <Plus size={14} />
-                </Button>
-              }
-            />
-            <TooltipContent side="right" className="text-xs">
-              Open project folder
-            </TooltipContent>
-          </Tooltip>
-        </div>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button variant="ghost" size="icon-xs" onClick={handleOpenFolder} aria-label="Open project folder" className="text-muted-foreground/60 hover:text-foreground">
+                <Plus size={14} />
+              </Button>
+            }
+          />
+          <TooltipContent side="right" className="text-xs">
+            Open project folder
+          </TooltipContent>
+        </Tooltip>
       </div>
 
       <ScrollArea className="flex-1" viewportRef={scrollViewportRef}>
