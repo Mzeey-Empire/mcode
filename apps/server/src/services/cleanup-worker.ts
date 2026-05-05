@@ -313,9 +313,7 @@ export class CleanupWorker {
     const remaining = this.cleanupJobRepo.countByWorkspacePath(workspacePath);
     if (remaining > 0) return;
 
-    // Find the soft-deleted workspace for this path and hard-delete it
-    const deleting = this.workspaceRepo.findDeleting();
-    const workspace = deleting.find((w) => w.path === workspacePath);
+    const workspace = this.workspaceRepo.findDeletingByPath(workspacePath);
     if (workspace) {
       this.workspaceRepo.hardDelete(workspace.id);
       broadcast("workspace.deleted", { workspaceId: workspace.id });

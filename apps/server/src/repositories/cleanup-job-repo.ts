@@ -219,7 +219,12 @@ export class CleanupJobRepo {
   /** Get the most recent error message from cleanup jobs for a workspace path. */
   getLastErrorByWorkspacePath(workspacePath: string): string | null {
     const row = this.db
-      .prepare("SELECT last_error FROM cleanup_jobs WHERE workspace_path = ? ORDER BY created_at DESC LIMIT 1")
+      .prepare(
+        `SELECT last_error FROM cleanup_jobs
+          WHERE workspace_path = ? AND last_error IS NOT NULL
+          ORDER BY next_retry_at DESC, created_at DESC
+          LIMIT 1`,
+      )
       .get(workspacePath) as { last_error: string | null } | undefined;
     return row?.last_error ?? null;
   }

@@ -52,6 +52,10 @@ export class WorkspaceRepo {
     const now = new Date().toISOString();
 
     const trx = this.db.transaction(() => {
+      // Evict any soft-deleted row occupying this path so the UNIQUE constraint won't block re-creation.
+      this.db
+        .prepare("DELETE FROM workspaces WHERE path = ? AND deleted_at IS NOT NULL")
+        .run(path);
       this.db
         .prepare("UPDATE workspaces SET sort_order = sort_order + 1")
         .run();
@@ -209,6 +213,14 @@ export class WorkspaceRepo {
     return this.db
       .prepare("SELECT id, path, deleted_at AS deletedAt FROM workspaces WHERE deleted_at IS NOT NULL")
       .all() as Array<{ id: string; path: string; deletedAt: string }>;
+  }
+
+  /** Find a single soft-deleted workspace by path. O(1) lookup for finalization. */
+  findDeletingByPath(path: string): { id: string; path: string; deletedAt: string } | null {
+    const row = this.db
+      .prepare("SELECT id, path, deleted_at AS deletedAt FROM workspaces WHERE path = ? AND deleted_at IS NOT NULL")
+      .get(path) as { id: string; path: string; deletedAt: string } | undefined;
+    return row ?? null;
   }
 
   /** Find a workspace by ID regardless of deletion status. Used during cleanup. */
