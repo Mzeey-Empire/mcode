@@ -41,7 +41,7 @@ export function UpdateBanner() {
       <div className="space-y-1.5 bg-blue-600/90 px-4 py-2 text-white">
         <div className="flex items-center justify-between">
           <span className="flex-1 text-xs font-medium">
-            Update available — version {status.version} is ready to install.
+            Version {status.version} is available for download.
           </span>
           {status.releaseNotes && (
             <button
