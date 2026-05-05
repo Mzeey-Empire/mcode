@@ -671,6 +671,28 @@ export function createWsTransport(
     listProviderAvailability: () =>
       rpc<ProviderAvailability[]>("providers.listAvailability", {}),
 
+    // Diff summaries
+    getDiffSummary: (threadId: string) =>
+      rpc<{
+        id: string;
+        threadId: string;
+        content: string;
+        turnCount: number;
+        lastTurnId: string | null;
+        model: string;
+        createdAt: string;
+      } | null>("diffSummary.get", { threadId }),
+    generateDiffSummary: (threadId: string) =>
+      rpc<{
+        id: string;
+        threadId: string;
+        content: string;
+        turnCount: number;
+        lastTurnId: string | null;
+        model: string;
+        createdAt: string;
+      }>("diffSummary.generate", { threadId }),
+
     // Memory pressure
     setBackground: (background) => rpc<void>("memory.setBackground", { background }),
 
