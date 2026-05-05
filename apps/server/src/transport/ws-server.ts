@@ -69,10 +69,13 @@ export function createWsServer(deps: RouterDeps & { authToken: string }): {
     perMessageDeflate: {
       zlibDeflateOptions: { level: 6 },
       // Only compress messages larger than 1 KB to avoid CPU overhead on
-      // small heartbeat/delta events
+      // small streaming delta events during active agent turns
       threshold: 1024,
+      // Context takeover disabled server-side so the threshold check is
+      // actually applied by the ws library (threshold is a no-op when
+      // context takeover is enabled).
       clientNoContextTakeover: false,
-      serverNoContextTakeover: false,
+      serverNoContextTakeover: true,
     },
   });
 

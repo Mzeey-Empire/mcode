@@ -573,8 +573,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         }
 
         // Process snapshot results into the file-change map.
-        // Snapshots arrive sorted by created_at ASC from the DB, so findLast
-        // gives us the most recent snapshot with file changes in O(1).
+        // Snapshots arrive sorted by created_at ASC from the DB, so the
+        // last match in a forward iteration is the most recent with changes.
         const persistedFilesChangedMap: Record<string, string[]> = {};
         let latestTurnWithChanges: string | null = null;
 

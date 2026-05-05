@@ -24,7 +24,7 @@ export function PerformanceSection() {
         >
           <RangeControl
             min={1}
-            max={25}
+            max={50}
             step={1}
             value={threadCacheSize}
             onCommit={(v) => void update({ performance: { threadCacheSize: v } })}
