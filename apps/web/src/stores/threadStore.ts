@@ -414,14 +414,11 @@ export const useThreadStore = create<ThreadState>((set, get) => {
 
           const persistedFilesChangedMap: Record<string, string[]> = {};
           let latestTurnWithChanges: string | null = null;
-          let latestTime = "";
           for (const snap of snapshots) {
             if (snap.files_changed.length === 0) continue;
             persistedFilesChangedMap[snap.message_id] = snap.files_changed;
-            if (snap.created_at > latestTime) {
-              latestTime = snap.created_at;
-              latestTurnWithChanges = snap.message_id;
-            }
+            // Snapshots sorted ASC by created_at, so last match wins
+            latestTurnWithChanges = snap.message_id;
           }
           set((state) => {
             if (state.currentThreadId !== threadId) return {};
@@ -575,19 +572,18 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           }
         }
 
-        // Process snapshot results into the file-change map
+        // Process snapshot results into the file-change map.
+        // Snapshots arrive sorted by created_at ASC from the DB, so findLast
+        // gives us the most recent snapshot with file changes in O(1).
         const persistedFilesChangedMap: Record<string, string[]> = {};
         let latestTurnWithChanges: string | null = null;
 
         if (snapshots.length > 0) {
-          let latestTime = "";
           for (const snap of snapshots) {
             if (snap.files_changed.length === 0) continue;
             persistedFilesChangedMap[snap.message_id] = snap.files_changed;
-            if (snap.created_at > latestTime) {
-              latestTime = snap.created_at;
-              latestTurnWithChanges = snap.message_id;
-            }
+            // Snapshots sorted ASC by created_at, so last match wins
+            latestTurnWithChanges = snap.message_id;
           }
           set((state) => {
             if (state.currentThreadId !== threadId) return {};
