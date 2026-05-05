@@ -1,5 +1,4 @@
 import { useThreadStore } from "@/stores/threadStore";
-import { useWorkspaceStore } from "@/stores/workspaceStore";
 
 /**
  * Inline banner shown when the provider is rate-limited or retrying an API request.
@@ -7,10 +6,9 @@ import { useWorkspaceStore } from "@/stores/workspaceStore";
  * Renders in the same Composer slot as CompactingBanner. Shows a pulsing indicator
  * with a human-readable description of why the agent is paused.
  */
-export function RetryBanner() {
-  const threadId = useWorkspaceStore((s) => s.activeThreadId);
-  const rateLimit = useThreadStore((s) => threadId ? s.rateLimitByThread[threadId] : undefined);
-  const apiRetry = useThreadStore((s) => threadId ? s.apiRetryByThread[threadId] : undefined);
+export function RetryBanner({ threadId }: { threadId: string }) {
+  const rateLimit = useThreadStore((s) => s.rateLimitByThread[threadId]);
+  const apiRetry = useThreadStore((s) => s.apiRetryByThread[threadId]);
 
   if (!rateLimit && !apiRetry) return null;
 

@@ -1524,7 +1524,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
 
         {/* Compacting banner — shown while the SDK is summarising the context window */}
         {isCompacting && <CompactingBanner />}
-        {!isCompacting && hasRetryState && <RetryBanner />}
+        {!isCompacting && hasRetryState && threadId && <RetryBanner threadId={threadId} />}
 
         {/* Drag overlay */}
         {isDragOver && (

@@ -208,8 +208,8 @@ export const AgentEventSchema = lazySchema(() =>
       maxRetries: z.number().optional(),
       /** Milliseconds until the next retry attempt. */
       delayMs: z.number().optional(),
-      /** HTTP status code that triggered the retry, if available. Null for connection errors. */
-      errorStatus: z.number().nullable().optional(),
+      /** HTTP status code that triggered the retry, if available. Omitted for connection errors. */
+      errorStatus: z.number().optional(),
     }),
   ]),
 );

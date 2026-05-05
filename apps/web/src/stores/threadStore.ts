@@ -799,8 +799,14 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     set((state) => {
       const next = new Set(state.runningThreadIds);
       next.delete(threadId);
+      const nextRateLimit = { ...state.rateLimitByThread };
+      delete nextRateLimit[threadId];
+      const nextApiRetry = { ...state.apiRetryByThread };
+      delete nextApiRetry[threadId];
       return {
         runningThreadIds: next,
+        rateLimitByThread: nextRateLimit,
+        apiRetryByThread: nextApiRetry,
       };
     });
   },
@@ -1354,15 +1360,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         next.add(threadId);
         return { runningThreadIds: next, agentStartTimes: { ...state.agentStartTimes, [threadId]: Date.now() } };
       });
-      // A new turn means any pending retry is resolved — clear it regardless of
-      // whether this thread was already in runningThreadIds.
-      set((state) => ({
-        apiRetryByThread: (() => {
-          const next = { ...state.apiRetryByThread };
-          delete next[threadId];
-          return next;
-        })(),
-      }));
       // Clear interrupted status so the resume banner no longer lists this
       // thread while the agent processes the continuation message.
       useWorkspaceStore.setState((ws) => {
@@ -2016,6 +2013,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         delete nextCompacting[threadId];
         const nextRateLimit = { ...state.rateLimitByThread };
         delete nextRateLimit[threadId];
+        const nextApiRetry = { ...state.apiRetryByThread };
+        delete nextApiRetry[threadId];
         const base = {
           errorByThread: { ...state.errorByThread, [threadId]: errorMsg },
           runningThreadIds: nextRunning,
@@ -2026,6 +2025,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           activeSubagentsByThread: nextSubagents,
           isCompactingByThread: nextCompacting,
           rateLimitByThread: nextRateLimit,
+          apiRetryByThread: nextApiRetry,
         };
         if (state.currentThreadId !== threadId) return base;
         const { messages: capped, evicted } = capMessages([...state.messages, errorMessage]);

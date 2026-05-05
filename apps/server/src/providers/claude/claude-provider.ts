@@ -1097,7 +1097,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                   attempt: anyMsg.attempt as number | undefined,
                   maxRetries: anyMsg.max_retries as number | undefined,
                   delayMs: anyMsg.retry_delay_ms as number | undefined,
-                  errorStatus: (anyMsg.error_status as number | null) ?? undefined,
+                  errorStatus: (anyMsg.error_status as number | undefined) ?? undefined,
                 } satisfies AgentEvent);
               } else {
                 this.emit("event", {
