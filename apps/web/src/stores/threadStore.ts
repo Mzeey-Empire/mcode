@@ -1255,11 +1255,19 @@ export const useThreadStore = create<ThreadState>((set, get) => {
    * message and schedules tool call fade-out animations.
    */
   handleAgentEvent: (threadId, event) => {
-    // Any agent event for this thread implies the cached snapshot is stale.
-    evictMessageCache(threadId);
-
     const method = (event.method as string) || "";
     const params = (event.params as Record<string, unknown>) || event;
+
+    // Only evict the message cache on structural changes that add or modify
+    // persisted messages. Streaming deltas (textDelta, toolProgress) are
+    // ephemeral and don't change what loadMessages would return from the DB.
+    const isStructuralEvent =
+      method === "session.turnComplete" ||
+      method === "session.message" ||
+      method === "session.error";
+    if (isStructuralEvent) {
+      evictMessageCache(threadId);
+    }
 
     // Helper: mark all prior incomplete tool calls as complete.
     // The Claude Agent SDK handles tool execution internally and does not

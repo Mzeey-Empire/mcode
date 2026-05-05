@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   getCachedSnapshot,
   cacheSnapshot,
@@ -14,6 +14,13 @@ import {
   clearScrollMemory,
 } from "@/components/chat/scrollPositionMemory";
 import { LruCache } from "@/lib/lru-cache";
+import { useThreadStore } from "@/stores/threadStore";
+import { mockTransport } from "./mocks/transport";
+
+vi.mock("@/transport", async () => ({
+  ...(await vi.importActual("@/transport")),
+  getTransport: () => mockTransport,
+}));
 
 function makeSnapshot(id: string): MessageCacheSnapshot {
   return {
@@ -160,6 +167,104 @@ describe("messageCache", () => {
     expect(recallScrollTop("t0")).toBeUndefined();
     expect(recallScrollTop(`t${MESSAGE_CACHE_SIZE - 3}`)).toBeUndefined();
     resizeMessageCache(MESSAGE_CACHE_SIZE);
+  });
+});
+
+describe("selective cache eviction in handleAgentEvent", () => {
+  const THREAD_ID = "thread-evict-test";
+
+  beforeEach(() => {
+    clearMessageCache();
+    useThreadStore.setState({
+      messages: [],
+      runningThreadIds: new Set([THREAD_ID]),
+      loading: false,
+      errorByThread: {},
+      streamingByThread: {},
+      streamingPreviewByThread: {},
+      toolCallsByThread: {},
+      agentStartTimes: { [THREAD_ID]: Date.now() },
+      currentThreadId: THREAD_ID,
+      activeSubagentsByThread: {},
+      currentTurnMessageIdByThread: {},
+      isCompactingByThread: {},
+      lastFallbackByThread: {},
+      contextByThread: {},
+    });
+  });
+
+  it("streaming textDelta events do NOT evict the cache", () => {
+    cacheSnapshot(THREAD_ID, makeSnapshot(THREAD_ID));
+    expect(getCachedSnapshot(THREAD_ID)).toBeDefined();
+
+    useThreadStore.getState().handleAgentEvent(THREAD_ID, {
+      method: "session.textDelta",
+      params: { delta: "hello " },
+    });
+
+    expect(getCachedSnapshot(THREAD_ID)).toBeDefined();
+  });
+
+  it("streaming toolUse events do NOT evict the cache", () => {
+    cacheSnapshot(THREAD_ID, makeSnapshot(THREAD_ID));
+    expect(getCachedSnapshot(THREAD_ID)).toBeDefined();
+
+    useThreadStore.getState().handleAgentEvent(THREAD_ID, {
+      method: "session.toolUse",
+      params: { id: "tool-1", name: "Read", input: "{}" },
+    });
+
+    expect(getCachedSnapshot(THREAD_ID)).toBeDefined();
+  });
+
+  it("session.turnComplete evicts the cache", () => {
+    cacheSnapshot(THREAD_ID, makeSnapshot(THREAD_ID));
+    expect(getCachedSnapshot(THREAD_ID)).toBeDefined();
+
+    useThreadStore.getState().handleAgentEvent(THREAD_ID, {
+      method: "session.turnComplete",
+      params: {},
+    });
+
+    expect(getCachedSnapshot(THREAD_ID)).toBeUndefined();
+  });
+
+  it("session.message evicts the cache", () => {
+    cacheSnapshot(THREAD_ID, makeSnapshot(THREAD_ID));
+    expect(getCachedSnapshot(THREAD_ID)).toBeDefined();
+
+    useThreadStore.getState().handleAgentEvent(THREAD_ID, {
+      method: "session.message",
+      params: { role: "assistant", content: "done" },
+    });
+
+    expect(getCachedSnapshot(THREAD_ID)).toBeUndefined();
+  });
+
+  it("session.error evicts the cache", () => {
+    cacheSnapshot(THREAD_ID, makeSnapshot(THREAD_ID));
+    expect(getCachedSnapshot(THREAD_ID)).toBeDefined();
+
+    useThreadStore.getState().handleAgentEvent(THREAD_ID, {
+      method: "session.error",
+      error: "Something broke",
+    });
+
+    expect(getCachedSnapshot(THREAD_ID)).toBeUndefined();
+  });
+
+  it("many streaming events preserve the cache throughout", () => {
+    cacheSnapshot(THREAD_ID, makeSnapshot(THREAD_ID));
+
+    const { handleAgentEvent } = useThreadStore.getState();
+    for (let i = 0; i < 100; i++) {
+      handleAgentEvent(THREAD_ID, {
+        method: "session.textDelta",
+        params: { delta: `token-${i} ` },
+      });
+    }
+
+    expect(getCachedSnapshot(THREAD_ID)).toBeDefined();
   });
 });
 
