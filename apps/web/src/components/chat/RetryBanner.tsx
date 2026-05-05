@@ -18,9 +18,9 @@ export function RetryBanner() {
   if (rateLimit) {
     if (rateLimit.retryAfterMs && rateLimit.retryAfterMs > 0) {
       const seconds = Math.ceil(rateLimit.retryAfterMs / 1000);
-      label = `Rate limited \u2014 retrying in ${formatDuration(seconds)}`;
+      label = `Rate limited - retrying in ${formatDuration(seconds)}`;
     } else {
-      label = "Rate limited \u2014 waiting for capacity\u2026";
+      label = "Rate limited - waiting for capacity...";
     }
   } else if (apiRetry) {
     const parts: string[] = ["Retrying"];
@@ -33,7 +33,7 @@ export function RetryBanner() {
       const seconds = Math.ceil(apiRetry.delayMs / 1000);
       parts.push(`in ${formatDuration(seconds)}`);
     }
-    label = parts.join(" ") + "\u2026";
+    label = parts.join(" ") + "...";
   } else {
     return null;
   }
