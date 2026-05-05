@@ -20,7 +20,7 @@ export interface MessageCacheSnapshot {
 }
 
 /** Initial default number of threads kept in the message cache. Overridden by user settings at runtime via resizeMessageCache. */
-export const MESSAGE_CACHE_SIZE = 10;
+export const MESSAGE_CACHE_SIZE = 15;
 
 const cache = new LruCache<string, MessageCacheSnapshot>(MESSAGE_CACHE_SIZE);
 
