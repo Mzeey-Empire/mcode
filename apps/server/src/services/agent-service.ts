@@ -987,10 +987,7 @@ export class AgentService {
           // before the compaction API call, but the session continues
           // automatically.
           if (!this.compactionInProgressByThread.has(event.threadId)) {
-            this.activeSessionIds.delete(event.threadId);
-            if (this.activeSessionIds.size === 0) {
-              this.memoryPressureService.markIdle();
-            }
+            this.trackSessionEnded(event.threadId);
           }
 
           // Persist context usage so the tracker shows immediately on thread reload.
