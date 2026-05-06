@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.9.0](https://github.com/Mzeey-Emipre/mcode/compare/mcode-v0.8.2...mcode-v0.9.0) (2026-05-06)
+
+
+### Features
+
+* add AI diff summary tab with shared utility model ([#415](https://github.com/Mzeey-Emipre/mcode/issues/415)) ([0bf4d85](https://github.com/Mzeey-Emipre/mcode/commit/0bf4d85e72560e8e8f6dc4c7e71f45cda5240f0d))
+* add reply-to-message with passage quoting and AI context ([#413](https://github.com/Mzeey-Emipre/mcode/issues/413)) ([1436ffd](https://github.com/Mzeey-Emipre/mcode/commit/1436ffd1a181f7d0f1ceb292af9f3327ae7ab2a6))
+* **server:** two-phase workspace hard-delete with async cleanup ([#412](https://github.com/Mzeey-Emipre/mcode/issues/412)) ([1f698a5](https://github.com/Mzeey-Emipre/mcode/commit/1f698a5e4d7f98e7e7c7931c42dd4b5dab950b03))
+* surface rate limit and API retry events to users ([#411](https://github.com/Mzeey-Emipre/mcode/issues/411)) ([ee6c04a](https://github.com/Mzeey-Emipre/mcode/commit/ee6c04a1edbe5e84c99373cd402fdcd2b0be7155))
+* thread search, filter, and sort in sidebar ([#414](https://github.com/Mzeey-Emipre/mcode/issues/414)) ([2bc55ec](https://github.com/Mzeey-Emipre/mcode/commit/2bc55ec08efdff6b0cfaf084e11e3ae1a021b80a))
+
+
+### Bug Fixes
+
+* eliminate false thread in-progress indicators ([#410](https://github.com/Mzeey-Emipre/mcode/issues/410)) ([09e9edf](https://github.com/Mzeey-Emipre/mcode/commit/09e9edf1e90bfc8f9a0989e10e60f6f8bad77c56))
+* improve search box visibility and fix filter render loop ([#417](https://github.com/Mzeey-Emipre/mcode/issues/417)) ([5052f54](https://github.com/Mzeey-Emipre/mcode/commit/5052f5401e73977edf5721cc001fff51db353211))
+
+
+### Performance Improvements
+
+* optimise thread switching with caching, prefetch, and parallel RPCs ([#416](https://github.com/Mzeey-Emipre/mcode/issues/416)) ([0ca0ea8](https://github.com/Mzeey-Emipre/mcode/commit/0ca0ea8182e72b5ead1bad2d7a7b774bfcc865c7))
+
 ## [0.8.2](https://github.com/Mzeey-Emipre/mcode/compare/mcode-v0.8.1...mcode-v0.8.2) (2026-05-05)
 
 
