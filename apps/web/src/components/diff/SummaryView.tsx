@@ -104,7 +104,12 @@ export function SummaryView() {
   // Loading state — three-dot pulse matching sibling diff views
   if (summaryLoading) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 py-14">
+      <div
+        className="flex flex-col items-center justify-center gap-3 py-14"
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+      >
         <div className="flex items-center gap-1.5">
           {[0, 150, 300].map((delay) => (
             <div
@@ -126,8 +131,8 @@ export function SummaryView() {
     return (
       <div className="flex flex-col gap-3 p-4">
         {error && (
-          <div className="flex items-center gap-1.5 text-xs text-destructive">
-            <AlertCircle size={12} />
+          <div className="flex items-center gap-1.5 text-xs text-destructive" role="alert">
+            <AlertCircle size={12} aria-hidden="true" />
             <span>{error}</span>
           </div>
         )}
