@@ -65,6 +65,8 @@ interface SidebarSearchState {
   filters: ThreadFilters;
   /** Snapshot of expanded state before search began (for restoring on clear). */
   expandedSnapshot: Record<string, boolean> | null;
+  /** Whether the last server search failed. */
+  searchError: boolean;
 
   setQuery: (query: string) => void;
   setSortField: (field: ThreadSortField) => void;
@@ -72,6 +74,8 @@ interface SidebarSearchState {
   toggleSortDirection: () => void;
   toggleFilter: (category: "status" | "provider", value: string) => void;
   clearFilters: () => void;
+  /** Clear only the search query, preserving active filters. */
+  clearQuery: () => void;
   clearAll: () => void;
   setExpandedSnapshot: (snapshot: Record<string, boolean>) => void;
   /** Debounced server search. Call after query/filter changes. */
@@ -92,9 +96,10 @@ export const useSidebarSearchStore = create<SidebarSearchState>((set, get) => {
     sortDirection: prefs.sortDirection,
     filters: prefs.filters,
     expandedSnapshot: null,
+    searchError: false,
 
     setQuery: (query) => {
-      set({ query });
+      set({ query, searchError: false });
       if (debounceTimer) clearTimeout(debounceTimer);
       if (!query.trim()) {
         set({ serverResults: [], serverWorkspaces: [], isSearching: false });
@@ -157,6 +162,17 @@ export const useSidebarSearchStore = create<SidebarSearchState>((set, get) => {
       }
     },
 
+    clearQuery: () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      set({
+        query: "",
+        serverResults: [],
+        serverWorkspaces: [],
+        isSearching: false,
+        searchError: false,
+      });
+    },
+
     clearAll: () => {
       if (debounceTimer) clearTimeout(debounceTimer);
       const filters = { status: [], provider: [] };
@@ -166,6 +182,7 @@ export const useSidebarSearchStore = create<SidebarSearchState>((set, get) => {
         serverResults: [],
         serverWorkspaces: [],
         isSearching: false,
+        searchError: false,
         expandedSnapshot: null,
       });
       const { sortField, sortDirection } = get();
@@ -203,10 +220,11 @@ export const useSidebarSearchStore = create<SidebarSearchState>((set, get) => {
             serverResults: result.threads,
             serverWorkspaces: result.workspaces,
             isSearching: false,
+            searchError: false,
           });
         }
       } catch {
-        set({ isSearching: false });
+        set({ isSearching: false, searchError: true });
       }
     },
   };

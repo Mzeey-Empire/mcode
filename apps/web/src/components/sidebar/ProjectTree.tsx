@@ -302,6 +302,9 @@ export function ProjectTree() {
   }, [workspaces, threads, isSearchActive, searchQuery, searchFilters, sortField, sortDirection, runningThreadIds, pendingPermissionThreadIds]);
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>(getExpandedState);
+  /** Ref mirror of `expanded` so effects can read current state without re-triggering. */
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
   const [threadListExpanded, setThreadListExpandedState] = useState<Record<string, boolean>>(getThreadListExpanded);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [inlineEdit, setInlineEdit] = useState<InlineEditState | null>(null);
@@ -346,13 +349,13 @@ export function ProjectTree() {
   // Snapshot expanded state when search begins, restore when cleared
   useEffect(() => {
     if (isSearchActive && !expandedSnapshot) {
-      setExpandedSnapshot({ ...expanded });
+      setExpandedSnapshot({ ...expandedRef.current });
     }
     if (!isSearchActive && expandedSnapshot) {
       setExpanded(expandedSnapshot);
       useSidebarSearchStore.setState({ expandedSnapshot: null });
     }
-  }, [isSearchActive, expandedSnapshot, expanded, setExpandedSnapshot]);
+  }, [isSearchActive, expandedSnapshot, setExpandedSnapshot]);
 
   // Auto-expand projects with matching threads during search
   useEffect(() => {
@@ -368,24 +371,31 @@ export function ProjectTree() {
       workspaceIdsWithMatches.add(t.workspace_id);
     }
 
+    const prev = expandedRef.current;
     const next: Record<string, boolean> = {};
     const workspacesToLoad: string[] = [];
 
     for (const ws of workspaces) {
       if (workspaceIdsWithMatches.has(ws.id)) {
         next[ws.id] = true;
-        if (!expanded[ws.id]) workspacesToLoad.push(ws.id);
+        if (!prev[ws.id]) workspacesToLoad.push(ws.id);
       } else {
         next[ws.id] = false;
       }
     }
 
-    setExpanded(next);
+    // Only update state if expanded values actually changed (prevents infinite loop)
+    const changed = workspaces.some(
+      (ws) => (prev[ws.id] ?? false) !== (next[ws.id] ?? false),
+    );
+    if (changed) {
+      setExpanded(next);
+    }
 
     for (const wsId of workspacesToLoad) {
       loadThreads(wsId);
     }
-  }, [isSearchActive, filteredThreadsByWorkspace, serverResults, workspaces, expanded, loadThreads]);
+  }, [isSearchActive, filteredThreadsByWorkspace, serverResults, workspaces, loadThreads]);
 
   const toggleThreadList = useCallback((wsId: string) => {
     setThreadListExpandedState((prev) => ({ ...prev, [wsId]: !prev[wsId] }));

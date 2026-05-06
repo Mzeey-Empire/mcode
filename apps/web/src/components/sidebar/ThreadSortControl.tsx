@@ -37,8 +37,8 @@ export function ThreadSortControl() {
       <PopoverTrigger
         render={
           <button
-            className={`inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 font-mono text-[9px] tracking-[0.06em] transition-colors hover:bg-accent/40 ${
-              isNonDefault ? "text-primary/70" : "text-primary/40"
+            className={`inline-flex cursor-pointer items-center gap-0.5 rounded px-1 py-0.5 font-mono text-[9px] tracking-[0.06em] transition-colors hover:bg-accent/40 focus-visible:ring-1 focus-visible:ring-primary/40 ${
+              isNonDefault ? "text-primary/70" : "text-primary/55"
             }`}
             aria-label="Sort threads"
           >
@@ -52,13 +52,13 @@ export function ThreadSortControl() {
         sideOffset={4}
         className="w-44 rounded-md border border-border bg-popover p-1 shadow-lg"
       >
-        <div className="px-2 pb-1 pt-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground/30">
+        <div className="px-2 pb-1 pt-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground/50">
           Sort threads by
         </div>
         {SORT_OPTIONS.map((opt) => (
           <button
             key={opt.field}
-            className={`flex w-full cursor-pointer items-center justify-between rounded px-2 py-1.5 text-[11px] transition-colors hover:bg-accent/40 ${
+            className={`flex w-full cursor-pointer items-center justify-between rounded px-2 py-1.5 text-[11px] transition-colors hover:bg-accent/40 focus-visible:ring-1 focus-visible:ring-primary/40 ${
               sortField === opt.field ? "text-primary" : "text-muted-foreground"
             }`}
             onClick={() => {
@@ -72,7 +72,7 @@ export function ThreadSortControl() {
         ))}
         <div className="mx-1 my-1 h-px bg-border/50" />
         <button
-          className="flex w-full cursor-pointer items-center gap-1.5 rounded px-2 py-1.5 text-[10.5px] text-muted-foreground transition-colors hover:bg-accent/40"
+          className="flex w-full cursor-pointer items-center gap-1.5 rounded px-2 py-1.5 text-[10.5px] text-muted-foreground transition-colors hover:bg-accent/40 focus-visible:ring-1 focus-visible:ring-primary/40"
           onClick={toggleSortDirection}
         >
           {directionLabel(sortField, sortDirection)}

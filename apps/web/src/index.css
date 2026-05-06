@@ -158,6 +158,19 @@
   animation: fade-up-in 150ms ease-out;
 }
 
+@keyframes chip-enter {
+  from { opacity: 0; transform: translateX(-4px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.animate-chip-enter {
+  animation: chip-enter 150ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-chip-enter {
+    animation: none;
+  }
+}
+
 /* Indeterminate progress sweep used on running-CI chrome (PrSplitButton).
  * Belt-and-braces reduced-motion handling: callers gate .animate-ci-slide with
  * motion-reduce:hidden, and this rule also neutralises the animation in case
