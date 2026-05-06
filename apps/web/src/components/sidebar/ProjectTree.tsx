@@ -355,7 +355,6 @@ export function ProjectTree() {
       setExpanded(expandedSnapshot);
       useSidebarSearchStore.setState({ expandedSnapshot: null });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- expandedRef avoids infinite loop
   }, [isSearchActive, expandedSnapshot, setExpandedSnapshot]);
 
   // Auto-expand projects with matching threads during search
@@ -396,7 +395,6 @@ export function ProjectTree() {
     for (const wsId of workspacesToLoad) {
       loadThreads(wsId);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- expandedRef avoids infinite loop
   }, [isSearchActive, filteredThreadsByWorkspace, serverResults, workspaces, loadThreads]);
 
   const toggleThreadList = useCallback((wsId: string) => {
