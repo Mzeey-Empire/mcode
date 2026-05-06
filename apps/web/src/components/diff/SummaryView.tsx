@@ -69,8 +69,10 @@ export function SummaryView() {
       try {
         const result = await getTransport().getDiffSummary(activeThreadId);
         if (!cancelled) setSummaryRecord(result);
-      } catch {
-        if (!cancelled) setSummaryRecord(null);
+      } catch (err) {
+        if (cancelled) return;
+        setSummaryRecord(null);
+        setError(err instanceof Error ? err.message : "Failed to load summary");
       }
     };
 
