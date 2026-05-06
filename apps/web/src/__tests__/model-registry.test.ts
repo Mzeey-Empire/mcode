@@ -75,7 +75,7 @@ describe("Settings-aware defaults", () => {
     expect(getDefaultModelId()).toBe("claude-opus-4-6");
   });
 
-  it("getDefaultModelId falls back to first catalog model when ID is unknown for a static-catalog provider", () => {
+  it("getDefaultModelId passes through unknown IDs as valid persisted provider model IDs", () => {
     useSettingsStore.setState({
       settings: {
         ...getDefaultSettings(),
@@ -85,7 +85,7 @@ describe("Settings-aware defaults", () => {
         },
       },
     });
-    expect(getDefaultModelId()).toBe("gpt-5.4");
+    expect(getDefaultModelId()).toBe("nonexistent-model");
   });
 
   it("getDefaultModelId preserves Cursor settings ID when absent from the static registry", () => {

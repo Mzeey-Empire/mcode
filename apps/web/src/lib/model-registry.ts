@@ -28,8 +28,6 @@ export interface ModelProvider {
   /** Whether this provider supports one-shot structured completion (e.g. PR draft generation). */
   supportsCompletion?: boolean;
   models: ModelDefinition[];
-  /** Whether this provider supports live model listing via listProviderModels(). */
-  supportsModelListing?: boolean;
 }
 
 /**
@@ -64,7 +62,6 @@ export const MODEL_PROVIDERS: readonly ModelProvider[] = [
     name: "Claude",
     comingSoon: false,
     supportsCompletion: true,
-    supportsModelListing: true,
     models: [
       { id: "claude-opus-4-7", label: "Claude Opus 4.7", providerId: "claude",
         contextWindow: MODEL_CONTEXT_WINDOWS_DEFAULT["claude-opus-4-7"] },
@@ -125,7 +122,6 @@ export const MODEL_PROVIDERS: readonly ModelProvider[] = [
     name: "GitHub Copilot",
     comingSoon: false,
     supportsCompletion: true,
-    supportsModelListing: true,
     // Minimal static fallback — the live list from listProviderModels() is the
     // source of truth. These are shown only while the spinner is loading or if
     // the fetch fails (e.g. Copilot client not connected).
@@ -139,7 +135,6 @@ export const MODEL_PROVIDERS: readonly ModelProvider[] = [
     id: "cursor",
     name: "Cursor",
     comingSoon: false,
-    supportsModelListing: true,
     // Minimal static fallback — live list comes from listProviderModels (`cursor-agent models`).
     models: CURSOR_STATIC_MODEL_FALLBACK.map((m) => ({
       id: m.id,
@@ -253,11 +248,8 @@ export function getDefaultModelId(): string {
     return id;
   }
 
-  if (catalog?.supportsModelListing) {
-    return id;
-  }
-
-  return providerStaticFallback;
+  // Dynamic provider models are valid persisted IDs even when not in the static registry
+  return id;
 }
 
 /**

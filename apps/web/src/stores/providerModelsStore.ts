@@ -65,9 +65,7 @@ export const useProviderModelsStore = create<ProviderModelsState>((set, get) => 
   },
 
   initialize: () => {
-    const providers = MODEL_PROVIDERS.filter(
-      (p) => p.supportsModelListing && !p.comingSoon,
-    );
+    const providers = MODEL_PROVIDERS.filter((p) => !p.comingSoon);
     for (const p of providers) {
       void get().fetchModels(p.id);
     }
