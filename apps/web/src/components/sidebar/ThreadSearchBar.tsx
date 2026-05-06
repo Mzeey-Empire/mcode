@@ -13,10 +13,10 @@ function FilterChip({
   onRemove: () => void;
 }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded border border-primary/15 bg-primary/8 px-1.5 py-px font-mono text-[9px] tracking-[0.04em] text-primary/60">
+    <span className="animate-chip-enter inline-flex items-center gap-1 rounded border border-primary/25 bg-primary/8 px-1.5 py-px font-mono text-[9px] tracking-[0.04em] text-primary/60">
       {label}
       <button
-        className="cursor-pointer text-primary/30 transition-colors hover:text-primary/60"
+        className="cursor-pointer p-1 -m-0.5 text-primary/40 transition-colors hover:text-primary/60 focus-visible:ring-1 focus-visible:ring-primary/40"
         onClick={onRemove}
         aria-label={`Remove ${label} filter`}
       >
@@ -31,8 +31,9 @@ export function ThreadSearchBar({ providers }: { providers: string[] }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const query = useSidebarSearchStore((s) => s.query);
   const setQuery = useSidebarSearchStore((s) => s.setQuery);
-  const clearAll = useSidebarSearchStore((s) => s.clearAll);
+  const clearQuery = useSidebarSearchStore((s) => s.clearQuery);
   const isSearching = useSidebarSearchStore((s) => s.isSearching);
+  const searchError = useSidebarSearchStore((s) => s.searchError);
   const filters = useSidebarSearchStore((s) => s.filters);
   const toggleFilter = useSidebarSearchStore((s) => s.toggleFilter);
   const clearFilters = useSidebarSearchStore((s) => s.clearFilters);
@@ -67,7 +68,7 @@ export function ThreadSearchBar({ providers }: { providers: string[] }) {
         <Search
           size={12}
           className={`pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 transition-colors ${
-            query ? "text-primary/35" : "text-muted-foreground/15"
+            query ? "text-primary/50" : "text-muted-foreground/35"
           }`}
         />
         <input
@@ -77,19 +78,19 @@ export function ThreadSearchBar({ providers }: { providers: string[] }) {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Search threads..."
-          className="w-full rounded-[5px] border-none bg-black/25 py-[5px] pl-7 pr-16 text-[11px] text-foreground shadow-[inset_0_1px_2px_rgba(0,0,0,0.3)] outline-none placeholder:text-muted-foreground/18 focus:shadow-[inset_0_1px_2px_rgba(0,0,0,0.4),0_0_0_1px_rgba(var(--color-primary)/0.12)]"
+          className="w-full rounded-[5px] border border-sidebar-border/40 bg-white/[0.06] py-[5px] pl-7 pr-16 text-[11px] text-foreground shadow-[inset_0_1px_2px_rgba(0,0,0,0.2)] outline-none transition-[box-shadow,border-color] duration-150 ease-out placeholder:text-muted-foreground/40 focus:border-primary/30 focus:shadow-[inset_0_1px_2px_rgba(0,0,0,0.3),0_0_0_1px_rgba(var(--color-primary)/0.35)]"
           data-testid="sidebar-search-input"
         />
         {isSearching && (
           <Loader2
             size={10}
-            className="absolute right-8 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground/30"
+            className="absolute right-8 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground/45 motion-reduce:animate-none"
           />
         )}
         {query && !isSearching && (
           <button
-            className="absolute right-8 top-1/2 -translate-y-1/2 cursor-pointer rounded p-0.5 text-muted-foreground/25 transition-colors hover:text-muted-foreground/50"
-            onClick={() => clearAll()}
+            className="absolute right-8 top-1/2 -translate-y-1/2 cursor-pointer rounded p-0.5 text-muted-foreground/40 transition-colors hover:text-muted-foreground/60 focus-visible:ring-1 focus-visible:ring-primary/40"
+            onClick={clearQuery}
             aria-label="Clear search"
           >
             <X size={10} />
@@ -98,12 +99,18 @@ export function ThreadSearchBar({ providers }: { providers: string[] }) {
         <ThreadFilterDropdown providers={providers} />
       </div>
 
+      {searchError && (
+        <div className="mt-1 px-0.5 text-[9px] text-destructive/60">
+          Search unavailable
+        </div>
+      )}
+
       {/* Sort + filter controls row */}
       <div className="mt-1 flex items-center justify-between px-0.5">
         <ThreadSortControl />
         {hasFilters && (
           <button
-            className="cursor-pointer font-mono text-[8px] tracking-[0.06em] text-muted-foreground/35 transition-colors hover:text-muted-foreground/60"
+            className="cursor-pointer font-mono text-[9px] tracking-[0.06em] text-muted-foreground/45 transition-colors hover:text-muted-foreground/60 focus-visible:ring-1 focus-visible:ring-primary/40"
             onClick={clearFilters}
           >
             clear filters
