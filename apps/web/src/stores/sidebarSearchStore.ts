@@ -170,7 +170,6 @@ export const useSidebarSearchStore = create<SidebarSearchState>((set, get) => {
         serverWorkspaces: [],
         isSearching: false,
         searchError: false,
-        expandedSnapshot: null,
       });
     },
 

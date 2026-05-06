@@ -78,7 +78,7 @@ export function ThreadSearchBar({ providers }: { providers: string[] }) {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Search threads..."
-          className="w-full rounded-[5px] border border-sidebar-border/40 bg-white/[0.06] py-[5px] pl-7 pr-16 text-[11px] text-foreground shadow-[inset_0_1px_2px_rgba(0,0,0,0.2)] outline-none transition-[box-shadow,border-color] duration-150 ease-out placeholder:text-muted-foreground/40 focus:border-primary/30 focus:shadow-[inset_0_1px_2px_rgba(0,0,0,0.3),0_0_0_1px_rgba(var(--color-primary)/0.35)]"
+          className="w-full rounded-[5px] border border-sidebar-border/40 bg-white/[0.06] py-[5px] pl-7 pr-16 text-[11px] text-foreground shadow-[inset_0_1px_2px_rgba(0,0,0,0.2)] outline-none transition-[box-shadow,border-color] duration-150 ease-out placeholder:text-muted-foreground/40 focus-visible:border-primary/30 focus-visible:shadow-[inset_0_1px_2px_rgba(0,0,0,0.3)] focus-visible:ring-1 focus-visible:ring-primary/35"
           data-testid="sidebar-search-input"
         />
         {isSearching && (
@@ -100,7 +100,7 @@ export function ThreadSearchBar({ providers }: { providers: string[] }) {
       </div>
 
       {searchError && (
-        <div className="mt-1 px-0.5 text-[9px] text-destructive/60">
+        <div role="status" aria-live="polite" className="mt-1 px-0.5 text-[9px] text-destructive/60">
           Search unavailable
         </div>
       )}
