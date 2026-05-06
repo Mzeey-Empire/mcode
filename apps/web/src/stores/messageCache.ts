@@ -17,6 +17,8 @@ export interface MessageCacheSnapshot {
   persistedToolCallCounts: Record<string, number>;
   persistedFilesChanged: Record<string, string[]>;
   latestTurnWithChanges: string | null;
+  /** IDs of messages whose plan-questions have been answered. */
+  answeredPlanMessageIds: string[];
 }
 
 /** Initial default number of threads kept in the message cache. Overridden by user settings at runtime via resizeMessageCache. */

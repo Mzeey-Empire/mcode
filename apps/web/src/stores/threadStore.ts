@@ -364,6 +364,11 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           isLoadingMore: {},
           // Bump epoch so any pending loadOlderMessages from the previous activation is discarded.
           loadEpochByThread: { ...state.loadEpochByThread, [threadId]: (state.loadEpochByThread[threadId] ?? 0) + 1 },
+          // Restore plan-question answered markers so the wizard renders correctly on cache hit.
+          answeredPlanMessageIdsByThread: {
+            ...state.answeredPlanMessageIdsByThread,
+            [threadId]: new Set<string>(cached.answeredPlanMessageIds),
+          },
           // Note: toolCallRecordCache is intentionally NOT cleared on cache hit
           // so previously expanded tool calls don't refetch.
         };
@@ -409,7 +414,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       const threadRecord = useWorkspaceStore.getState().threads.find((t) => t.id === threadId);
       if (threadRecord?.has_file_changes && !cached.latestTurnWithChanges) {
         void getTransport().listSnapshots(threadId).then((snapshots) => {
-          if (get().currentThreadId !== threadId) return;
           if (snapshots.length === 0) return;
 
           const persistedFilesChangedMap: Record<string, string[]> = {};
@@ -420,6 +424,16 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             // Snapshots sorted ASC by created_at, so last match wins
             latestTurnWithChanges = snap.message_id;
           }
+          // Persist back into cache so subsequent visits don't re-fetch
+          cacheSnapshot(threadId, {
+            ...cached,
+            persistedFilesChanged: {
+              ...cached.persistedFilesChanged,
+              ...persistedFilesChangedMap,
+            },
+            latestTurnWithChanges,
+          });
+          if (get().currentThreadId !== threadId) return;
           set((state) => {
             if (state.currentThreadId !== threadId) return {};
             return {
@@ -601,6 +615,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           persistedToolCallCounts: counts,
           persistedFilesChanged: persistedFilesChangedMap,
           latestTurnWithChanges,
+          answeredPlanMessageIds: answeredPlanMessageIds ?? [],
         });
       }
     } catch (e) {
@@ -669,6 +684,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         persistedToolCallCounts: state.persistedToolCallCounts,
         persistedFilesChanged: state.persistedFilesChanged,
         latestTurnWithChanges: state.latestTurnWithChanges,
+        answeredPlanMessageIds: [...(state.answeredPlanMessageIdsByThread[threadId] ?? [])],
       });
 
       // Hydrate file change data for older messages from snapshots

@@ -45,7 +45,7 @@ async function prefetchThread(threadId: string): Promise<void> {
   if (hasCachedSnapshot(threadId) || inflight.has(threadId)) return;
   inflight.add(threadId);
   try {
-    const { messages, hasMore } = await getTransport().getMessages(threadId, PREFETCH_LIMIT);
+    const { messages, hasMore, answeredPlanMessageIds } = await getTransport().getMessages(threadId, PREFETCH_LIMIT);
     // Don't overwrite a snapshot that loadMessages populated while we were in flight
     if (hasCachedSnapshot(threadId)) return;
 
@@ -64,6 +64,7 @@ async function prefetchThread(threadId: string): Promise<void> {
       persistedToolCallCounts: counts,
       persistedFilesChanged: {},
       latestTurnWithChanges: null,
+      answeredPlanMessageIds: answeredPlanMessageIds ?? [],
     };
     cacheSnapshot(threadId, snapshot);
   } catch {

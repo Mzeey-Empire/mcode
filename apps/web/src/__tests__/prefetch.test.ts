@@ -25,6 +25,7 @@ function makeSnapshot(id: string): MessageCacheSnapshot {
     persistedToolCallCounts: {},
     persistedFilesChanged: {},
     latestTurnWithChanges: null,
+    answeredPlanMessageIds: [],
   };
 }
 
