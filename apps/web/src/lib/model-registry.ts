@@ -248,8 +248,13 @@ export function getDefaultModelId(): string {
     return id;
   }
 
-  // Dynamic provider models are valid persisted IDs even when not in the static registry
-  return id;
+  // Dynamic provider models are valid persisted IDs even when not in the static registry,
+  // but only if findModelById didn't find the ID under a different provider.
+  // If it matched a different provider, the saved ID is stale from a provider switch.
+  if (!def) {
+    return id;
+  }
+  return providerStaticFallback;
 }
 
 /**

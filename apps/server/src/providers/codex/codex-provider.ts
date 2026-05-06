@@ -109,7 +109,7 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
 
   /** Returns the static Codex model catalog. Codex does not support dynamic model discovery. */
   async listModels(): Promise<ProviderModelInfo[]> {
-    return [...CODEX_STATIC_MODELS];
+    return CODEX_STATIC_MODELS.map((m) => ({ ...m }));
   }
 
   private sessions = new Map<string, SessionEntry>();
