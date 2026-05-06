@@ -51,7 +51,10 @@ import type { PrDetail } from "@/transport/types";
 import { QueuePopover } from "./QueuePopover";
 import { ContextTracker } from "./ContextTracker";
 import { CompactingBanner } from "./CompactingBanner";
+import { RetryBanner } from "./RetryBanner";
 import { ComposerBranchBar } from "./ComposerBranchBar";
+import { ComposerReplyBar } from "./ComposerReplyBar";
+import { useReplyStore } from "@/stores/replyStore";
 import { useQueueStore } from "@/stores/queueStore";
 import {
   classifyFile,
@@ -410,6 +413,9 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const showInlineComposerOptions =
     composerWidth === 0 || composerWidth >= COMPOSER_INLINE_OPTIONS_THRESHOLD;
 
+  const replyContext = useReplyStore((s) => threadId ? s.replyByThread[threadId] : undefined);
+  const clearReply = useReplyStore((s) => s.clearReply);
+
   const [input, setInput] = useState("");
   const [modelId, setModelId] = useState(getDefaultModelId());
   // Track provider explicitly: multiple providers share the same model IDs
@@ -708,6 +714,9 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   }, [permissionLocked, access, threadId, setThreadSettings]);
   const contextEntry = useThreadStore((s) => threadId ? s.contextByThread[threadId] : undefined);
   const isCompacting = useThreadStore((s) => !!(threadId && s.isCompactingByThread[threadId]));
+  const hasRetryState = useThreadStore(
+    (s) => !!(threadId && (s.rateLimitByThread[threadId] || s.apiRetryByThread[threadId])),
+  );
   const planPending = useThreadStore(
     (s) => !!threadId && (s.planQuestionsStatusByThread[threadId] ?? "idle") === "pending",
   );
@@ -950,6 +959,34 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     document.addEventListener("click", handleClickOutside);
     return () => document.removeEventListener("click", handleClickOutside);
   }, []);
+
+  // Clear reply context when the user copies text — disambiguates "copy to reply"
+  // from "copy for clipboard" so the reply bar doesn't linger unexpectedly.
+  useEffect(() => {
+    const handleCopy = () => {
+      if (threadId) clearReply(threadId);
+    };
+    document.addEventListener("copy", handleCopy);
+    return () => document.removeEventListener("copy", handleCopy);
+  }, [threadId, clearReply]);
+
+  // Dismiss reply when the user clicks outside both the composer and any message bubble.
+  // Portaled overlays (popovers, dropdowns) render outside the composer DOM tree,
+  // so we also check for popover-content markers to avoid false dismissals.
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (!threadId) return;
+      const target = e.target as Element;
+      const composerEl = composerContainerRef.current;
+      if (composerEl && !composerEl.contains(target)) {
+        if (target.closest?.("[data-message-id]")) return;
+        if (target.closest?.('[data-slot="popover-content"], [role="dialog"], [role="listbox"], [role="menu"]')) return;
+        clearReply(threadId);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [threadId, clearReply]);
 
   const handleStop = useCallback(() => {
     if (threadId) {
@@ -1224,10 +1261,13 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         copilotAgent: provider === "copilot" ? (copilotAgent ?? undefined) : undefined,
         contextWindow: contextWindow ?? undefined,
         thinking: thinking ?? undefined,
+        replyToMessageId: replyContext?.messageId,
+        quotedText: replyContext?.quotedText,
       });
 
       setInput("");
       if (threadId) clearDraftFromStore(threadId);
+      if (threadId) clearReply(threadId);
       if (editorRef.current) {
         editorRef.current.update(() => {
           const root = $getRoot();
@@ -1315,7 +1355,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       });
       onBranchModeExit?.();
     } else if (threadId) {
-      await sendMessage(threadId, messageContent, modelId, access, currentAttachments.length > 0 ? currentAttachments : undefined, displayContent, reasoning, provider, provider === "copilot" ? (copilotAgent ?? undefined) : undefined, contextWindow ?? undefined, thinking ?? undefined);
+      await sendMessage(threadId, messageContent, modelId, access, currentAttachments.length > 0 ? currentAttachments : undefined, displayContent, reasoning, provider, provider === "copilot" ? (copilotAgent ?? undefined) : undefined, contextWindow ?? undefined, thinking ?? undefined, replyContext?.messageId, replyContext?.quotedText);
+      if (threadId) clearReply(threadId);
     }
 
     // Auto-save last-used mode and access as defaults (model defaults are managed in Settings)
@@ -1332,7 +1373,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     }
 
     editorRef.current?.focus();
-  }, [input, attachments, isAgentRunning, isNewThread, newThreadMode, newThreadBranch, workspaceId, threadId, sendMessage, modelId, provider, reasoning, mode, access, copilotAgent, contextWindow, thinking, namingMode, customBranchName, selectedWorktree, injectFileContent, collectAndClearAttachments, clearDraftFromStore, isThreadScaffold, branchFromMessageId, branchExecMode, branchTargetBranch, branchNamingMode, branchCustomName, branchWorktreePath, activeThread, branchThread, branchAutoPreview, onBranchModeExit]);
+  }, [input, attachments, isAgentRunning, isNewThread, newThreadMode, newThreadBranch, workspaceId, threadId, sendMessage, modelId, provider, reasoning, mode, access, copilotAgent, contextWindow, thinking, namingMode, customBranchName, selectedWorktree, injectFileContent, collectAndClearAttachments, clearDraftFromStore, isThreadScaffold, branchFromMessageId, branchExecMode, branchTargetBranch, branchNamingMode, branchCustomName, branchWorktreePath, activeThread, branchThread, branchAutoPreview, onBranchModeExit, replyContext, clearReply]);
 
   const handleEditorChange = useCallback((text: string) => {
     setInput(text);
@@ -1458,6 +1499,15 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
           onBranchModeExit={onBranchModeExit}
         />
 
+        {/* Reply quote bar — hidden during branch mode since branches ignore reply context */}
+        {replyContext && threadId && !branchFromMessageId && (
+          <ComposerReplyBar
+            sourceRole={replyContext.sourceRole}
+            previewText={replyContext.previewText}
+            onDismiss={() => clearReply(threadId)}
+          />
+        )}
+
         {/* PR URL detection card */}
         {detectedPr && !prDismissed && (
           <PrDetectedCard
@@ -1503,7 +1553,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
             disabled={planPending || isStaleWorktree || !!providerReason}
             isPopupOpen={isAnyPopupOpen}
             onPopupKeyDown={handlePopupKeyDown}
-            placeholder={isStaleWorktree ? "Worktree directory no longer exists. This thread is read-only." : planPending ? "Answer the planning questions above" : branchFromMessageId ? "What should the branch work on?" : isAgentRunning ? "Queue a follow-up..." : "Message Mcode..."}
+            placeholder={isStaleWorktree ? "Worktree directory no longer exists. This thread is read-only." : planPending ? "Answer the planning questions above" : branchFromMessageId ? "What should the branch work on?" : replyContext ? "Type your reply..." : isAgentRunning ? "Queue a follow-up..." : "Message Mcode..."}
           />
           <FileTagPopup
             files={fileAutocomplete.filteredFiles}
@@ -1520,6 +1570,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
 
         {/* Compacting banner — shown while the SDK is summarising the context window */}
         {isCompacting && <CompactingBanner />}
+        {!isCompacting && hasRetryState && threadId && <RetryBanner threadId={threadId} />}
 
         {/* Drag overlay */}
         {isDragOver && (
@@ -1805,7 +1856,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
                 const next = useQueueStore.getState().dequeueNext(threadId);
                 if (next) {
                   sendMessage(threadId, next.content, next.model, next.permissionMode,
-                    next.attachments.length > 0 ? next.attachments : undefined, next.displayContent, next.reasoningLevel, next.provider);
+                    next.attachments.length > 0 ? next.attachments : undefined, next.displayContent, next.reasoningLevel, next.provider,
+                    next.copilotAgent, next.contextWindow, next.thinking, next.replyToMessageId, next.quotedText);
                 }
               }}
             />

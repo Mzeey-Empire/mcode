@@ -17,16 +17,23 @@ export interface MessageCacheSnapshot {
   persistedToolCallCounts: Record<string, number>;
   persistedFilesChanged: Record<string, string[]>;
   latestTurnWithChanges: string | null;
+  /** IDs of messages whose plan-questions have been answered. */
+  answeredPlanMessageIds: string[];
 }
 
 /** Initial default number of threads kept in the message cache. Overridden by user settings at runtime via resizeMessageCache. */
-export const MESSAGE_CACHE_SIZE = 10;
+export const MESSAGE_CACHE_SIZE = 15;
 
 const cache = new LruCache<string, MessageCacheSnapshot>(MESSAGE_CACHE_SIZE);
 
 /** Read the cached snapshot for a thread, refreshing LRU recency on hit. */
 export function getCachedSnapshot(threadId: string): MessageCacheSnapshot | undefined {
   return cache.get(threadId);
+}
+
+/** Check if a thread has a cached snapshot without promoting LRU recency. */
+export function hasCachedSnapshot(threadId: string): boolean {
+  return cache.has(threadId);
 }
 
 /** Store a snapshot for the given thread, evicting the LRU entry if at capacity. */

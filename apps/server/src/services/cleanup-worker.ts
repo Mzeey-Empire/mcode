@@ -16,7 +16,10 @@ import { ThreadRepo } from "../repositories/thread-repo.js";
 import { ClaudeProvider } from "../providers/claude/claude-provider.js";
 import { TerminalService } from "./terminal-service.js";
 import { GitService } from "./git-service.js";
+import { AttachmentService } from "./attachment-service.js";
 import { killDescendantsByName } from "./process-kill.js";
+import { WorkspaceRepo } from "../repositories/workspace-repo.js";
+import { broadcast } from "../transport/push.js";
 
 /** How often to check for due cleanup jobs (ms). */
 const POLL_INTERVAL_MS = 5_000;
@@ -53,6 +56,8 @@ export class CleanupWorker {
     @inject(ClaudeProvider) private readonly claudeProvider: ClaudeProvider,
     @inject(TerminalService) private readonly terminalService: TerminalService,
     @inject(GitService) private readonly gitService: GitService,
+    @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
+    @inject(AttachmentService) private readonly attachmentService: AttachmentService,
   ) {}
 
   /**
@@ -62,6 +67,7 @@ export class CleanupWorker {
   start(): void {
     if (this.pollTimer !== null) return;
     this.cleanupJobRepo.resetAttempts();
+    this.reconcileOnStartup();
     this.stopped = false;
     this.pollTimer = setInterval(() => {
       this.poll().catch((err) => {
@@ -122,7 +128,19 @@ export class CleanupWorker {
       const resolvedWs = resolve(job.workspace_path.replace(/\\/g, "/"));
 
       if (!existsSync(resolvedWs)) {
-        throw new Error(`workspace_path does not exist: ${resolvedWs}`);
+        // The workspace directory is already gone (e.g. external deletion, re-installation).
+        // Treat this as a successful cleanup: there's nothing on disk to remove.
+        logger.info("Workspace directory gone, skipping filesystem cleanup", {
+          threadId: job.thread_id,
+          workspacePath: resolvedWs,
+        });
+        this.attachmentService.removeForThread(job.thread_id);
+        this.db.transaction(() => {
+          this.threadRepo.hardDelete(job.thread_id);
+          this.cleanupJobRepo.delete(job.id);
+        })();
+        this.finalizeWorkspaceIfDone(job.workspace_path);
+        return;
       }
       if (resolvedWt === resolvedWs) {
         throw new Error(`worktree_path must not equal workspace_path: ${resolvedWt}`);
@@ -166,11 +184,29 @@ export class CleanupWorker {
         await new Promise<void>((resolve) => setTimeout(resolve, HANDLE_RELEASE_DELAY_MS));
       }
 
+      if (!existsSync(resolvedWt)) {
+        // The worktree directory is already gone but the workspace root exists.
+        // Treat this as a successful cleanup: no git operation needed.
+        logger.info("Worktree directory already removed, skipping filesystem cleanup", {
+          threadId: job.thread_id,
+          worktreePath: resolvedWt,
+        });
+        this.attachmentService.removeForThread(job.thread_id);
+        this.db.transaction(() => {
+          this.threadRepo.hardDelete(job.thread_id);
+          this.cleanupJobRepo.delete(job.id);
+        })();
+        this.finalizeWorkspaceIfDone(job.workspace_path);
+        return;
+      }
+
       // 5. Remove the worktree directory and delete the exact thread branch when
       //    the thread record has one. The delete-thread dialog is the user intent
       //    boundary; rollback paths are handled separately in ThreadService.
+      //    Skip branch deletion when another active thread references the same branch.
       const wtName = resolvedWt.replace(/\\/g, "/").split("/").pop() ?? resolvedWt;
-      const removeOptions = job.branch
+      const shouldDelete = job.branch ? this.shouldDeleteBranch(job) : false;
+      const removeOptions = (job.branch && shouldDelete)
         ? { branchName: job.branch, worktreePath: resolvedWt }
         : { deleteBranch: false, worktreePath: resolvedWt };
 
@@ -184,6 +220,9 @@ export class CleanupWorker {
         throw new Error(`Worktree directory still exists after removal: ${resolvedWt}`);
       }
 
+      // 5b. Clean up attachment files for this thread (idempotent - ignores missing dirs)
+      this.attachmentService.removeForThread(job.thread_id);
+
       // 6. Hard-delete thread row and cleanup job atomically.
       //    Wrapping in a transaction ensures no orphaned job if either statement fails.
       this.db.transaction(() => {
@@ -195,6 +234,9 @@ export class CleanupWorker {
         jobId: job.id,
         threadId: job.thread_id,
       });
+
+      // 7. If this was the last cleanup job for a soft-deleted workspace, hard-delete it.
+      this.finalizeWorkspaceIfDone(job.workspace_path);
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       logger.warn("CleanupWorker job failed, scheduled for retry", {
@@ -205,5 +247,126 @@ export class CleanupWorker {
       });
       this.cleanupJobRepo.recordFailure(job.id, error);
     }
+  }
+
+  /** Check whether the branch is safe to delete (no other active thread references it). */
+  private shouldDeleteBranch(job: CleanupJob): boolean {
+    if (!job.branch) return false;
+    // If the source thread has already been hard-deleted, we can't resolve its
+    // workspace to check for siblings. Conservatively keep the branch.
+    const thread = this.threadRepo.findById(job.thread_id);
+    if (!thread) return false;
+    return this.threadRepo.countActiveByBranch(job.thread_id, job.branch) === 0;
+  }
+
+  /**
+   * Reconcile incomplete workspace deletions after app restart.
+   * Finds soft-deleted workspaces and ensures all their worktree threads
+   * have cleanup jobs enqueued. If a workspace has no remaining threads or jobs,
+   * hard-deletes it immediately.
+   */
+  reconcileOnStartup(): void {
+    const deletingWorkspaces = this.workspaceRepo.findDeleting();
+
+    for (const ws of deletingWorkspaces) {
+      const threads = this.threadRepo.listAllByWorkspace(ws.id);
+
+      if (threads.length === 0) {
+        // No threads remain - just hard-delete the workspace
+        this.workspaceRepo.hardDelete(ws.id);
+        logger.info("Reconciled orphaned workspace (no threads)", { workspaceId: ws.id });
+        continue;
+      }
+
+      // Find worktree threads missing cleanup jobs
+      const worktreeThreads = threads.filter((t) => t.worktree_path);
+      const missingJobs = worktreeThreads.filter(
+        (t) => !this.cleanupJobRepo.findByThreadId(t.id),
+      );
+
+      if (missingJobs.length > 0) {
+        this.cleanupJobRepo.insertBatch(
+          missingJobs.map((t) => ({
+            thread_id: t.id,
+            workspace_path: ws.path,
+            worktree_path: t.worktree_path!,
+            branch: t.branch,
+          })),
+        );
+        logger.info("Reconciled missing cleanup jobs for workspace", {
+          workspaceId: ws.id,
+          jobsEnqueued: missingJobs.length,
+        });
+      }
+
+      // If the only remaining threads are non-worktree (already soft-deleted),
+      // clean up attachments, hard-delete them, and hard-delete the workspace now
+      const pendingJobs = this.cleanupJobRepo.countByWorkspacePath(ws.path);
+      if (pendingJobs === 0) {
+        for (const t of threads) {
+          this.attachmentService.removeForThread(t.id);
+          this.threadRepo.hardDelete(t.id);
+        }
+        this.workspaceRepo.hardDelete(ws.id);
+        logger.info("Reconciled workspace with no pending cleanup", { workspaceId: ws.id });
+      }
+    }
+  }
+
+  /** Check if workspace cleanup is complete and hard-delete if so. */
+  private finalizeWorkspaceIfDone(workspacePath: string): void {
+    const remaining = this.cleanupJobRepo.countByWorkspacePath(workspacePath);
+    if (remaining > 0) return;
+
+    const workspace = this.workspaceRepo.findDeletingByPath(workspacePath);
+    if (workspace) {
+      // Clean up any remaining threads (e.g. crash-orphaned soft-deleted direct threads)
+      // before FK cascade removes them without attachment file cleanup.
+      const remainingThreads = this.threadRepo.listAllByWorkspace(workspace.id);
+      for (const thread of remainingThreads) {
+        this.attachmentService.removeForThread(thread.id);
+      }
+
+      this.workspaceRepo.hardDelete(workspace.id);
+      broadcast("workspace.deleted", { workspaceId: workspace.id });
+      logger.info("Workspace hard-deleted after final cleanup job", {
+        workspaceId: workspace.id,
+        workspacePath,
+      });
+    }
+  }
+
+  /**
+   * Find soft-deleted workspaces where ALL remaining cleanup jobs have exhausted retries.
+   * These workspaces are permanently stuck and need user intervention (force-delete).
+   */
+  findStuckWorkspaces(): Array<{ workspaceId: string; workspacePath: string; reason: string }> {
+    const deleting = this.workspaceRepo.findDeleting();
+    const stuck: Array<{ workspaceId: string; workspacePath: string; reason: string }> = [];
+
+    for (const ws of deleting) {
+      const totalJobs = this.cleanupJobRepo.countByWorkspacePath(ws.path);
+      if (totalJobs === 0) continue;
+
+      const retriable = this.cleanupJobRepo.countRetriableByWorkspacePath(ws.path);
+      if (retriable === 0) {
+        const lastError = this.cleanupJobRepo.getLastErrorByWorkspacePath(ws.path);
+        stuck.push({
+          workspaceId: ws.id,
+          workspacePath: ws.path,
+          reason: lastError ?? "Unknown error after 5 attempts",
+        });
+      }
+    }
+
+    return stuck;
+  }
+
+  /** Process a single due cleanup job. Returns true if a job was processed. Exported for testing. */
+  async processOneJob(): Promise<boolean> {
+    const jobs = this.cleanupJobRepo.findDue(Date.now());
+    if (jobs.length === 0) return false;
+    await this.executeJob(jobs[0]);
+    return true;
   }
 }

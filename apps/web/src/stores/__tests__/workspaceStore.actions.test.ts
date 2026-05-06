@@ -14,6 +14,7 @@ function makeWs(overrides?: Partial<Workspace>): Workspace {
     pinned: false,
     last_opened_at: null,
     sort_order: 0,
+    deleted_at: null,
     ...overrides,
   };
 }

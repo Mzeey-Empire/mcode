@@ -17,6 +17,7 @@ import { SidebarRevealButton } from "@/components/sidebar/SidebarRevealButton";
 import { useUiStore } from "@/stores/uiStore";
 import { preparingStatusLabel, type WorkspaceThread } from "@/lib/workspace-thread";
 import { Button } from "@/components/ui/button";
+import { useReplyStore } from "@/stores/replyStore";
 
 /** Entry point suggestions shown in the empty state — each maps to a real Mcode capability. */
 const ENTRY_POINTS = [
@@ -285,6 +286,15 @@ export function ChatView() {
     setBranchFromMessageContent(msg?.content);
   }, []);
 
+  /** Activates reply mode on the composer for the given message. */
+  const handleReply = useCallback((messageId: string, content: string, role: "user" | "assistant") => {
+    // Read threadId from store at call time to avoid re-creating this callback
+    // on every status change, matching the pattern used by handleBranch.
+    const threadId = useWorkspaceStore.getState().activeThreadId;
+    if (!threadId) return;
+    useReplyStore.getState().setReply(threadId, messageId, role, content.slice(0, 150), content.slice(0, 2000));
+  }, []);
+
   const showCliError =
     !!sessionError &&
     isCliError(sessionError) &&
@@ -479,7 +489,7 @@ export function ChatView() {
             <EmptyState onPromptSelect={setPendingPrefill} />
           </div>
         ) : (
-          <MessageList onBranch={handleBranch} />
+          <MessageList onBranch={handleBranch} onReply={handleReply} />
         )}
       </div>
 

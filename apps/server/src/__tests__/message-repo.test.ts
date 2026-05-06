@@ -17,7 +17,9 @@ function createTestDb(): Database.Database {
       tokens_used INTEGER,
       timestamp TEXT NOT NULL,
       sequence INTEGER NOT NULL,
-      attachments TEXT
+      attachments TEXT,
+      reply_to_message_id TEXT,
+      quoted_text TEXT
     );
     CREATE TABLE tool_call_records (
       id TEXT PRIMARY KEY,
@@ -80,6 +82,33 @@ describe("MessageRepo", () => {
       const result = repo.listByThreadUpToSequence("thread-1", 10);
       expect(result).toHaveLength(1);
       expect(result[0].thread_id).toBe("thread-1");
+    });
+  });
+
+  describe("create with reply fields", () => {
+    it("persists replyToMessageId and quotedText", () => {
+      const original = repo.create("thread-1", "assistant", "hello", 1);
+      const reply = repo.create("thread-1", "user", "reply text", 2, undefined, original.id, "quoted excerpt");
+
+      expect(reply.reply_to_message_id).toBe(original.id);
+      expect(reply.quoted_text).toBe("quoted excerpt");
+    });
+
+    it("stores null when reply fields are omitted", () => {
+      const msg = repo.create("thread-1", "user", "no reply", 1);
+
+      expect(msg.reply_to_message_id).toBeNull();
+      expect(msg.quoted_text).toBeNull();
+    });
+
+    it("round-trips reply fields through findByIdInThread", () => {
+      const original = repo.create("thread-1", "user", "original", 1);
+      const reply = repo.create("thread-1", "assistant", "response", 2, undefined, original.id, "some quote");
+
+      const found = repo.findByIdInThread("thread-1", reply.id);
+      expect(found).not.toBeNull();
+      expect(found!.reply_to_message_id).toBe(original.id);
+      expect(found!.quoted_text).toBe("some quote");
     });
   });
 

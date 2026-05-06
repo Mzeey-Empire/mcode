@@ -454,6 +454,16 @@ export function createWsTransport(
     listThreads: (workspaceId) => rpc<Thread[]>("thread.list", { workspaceId }),
     listRecentThreads: (limit) =>
       rpc<import("./types").RecentThread[]>("thread.recent", limit !== undefined ? { limit } : {}),
+    searchThreads: (opts) =>
+      rpc<{ threads: Thread[]; workspaces: { id: string; name: string; path: string }[] }>(
+        "thread.search",
+        {
+          query: opts.query,
+          filters: opts.filters,
+          sort: opts.sort,
+          limit: opts.limit,
+        },
+      ),
     deleteThread: (threadId, cleanupWorktree) =>
       rpc<boolean>("thread.delete", { threadId, cleanupWorktree }),
     updateThreadTitle: (threadId, title) =>
@@ -480,7 +490,7 @@ export function createWsTransport(
     listWorktrees: (workspaceId) => rpc<WorktreeInfo[]>("git.listWorktrees", { workspaceId }),
 
     // Agent
-    sendMessage: (threadId, content, model?, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], reasoningLevel?: ReasoningLevel, provider?: string, interactionMode?, copilotAgent?: string, contextWindow?, thinking?) => {
+    sendMessage: (threadId, content, model?, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], reasoningLevel?: ReasoningLevel, provider?: string, interactionMode?, copilotAgent?: string, contextWindow?, thinking?, replyToMessageId?, quotedText?) => {
       const state = useSettingsStore.getState();
       const guardrails = state.loaded
         ? { maxBudgetUsd: state.settings.agent.guardrails.maxBudgetUsd, maxTurns: state.settings.agent.guardrails.maxTurns }
@@ -488,6 +498,8 @@ export function createWsTransport(
       return rpc<void>("agent.send", {
         threadId, content, model, permissionMode, attachments, reasoningLevel, provider, interactionMode, copilotAgent,
         contextWindow, thinking,
+        ...(replyToMessageId && { replyToMessageId }),
+        ...(quotedText && { quotedText }),
         ...guardrails,
       });
     },

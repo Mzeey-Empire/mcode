@@ -97,6 +97,12 @@ export function App() {
     setContext("settingsOpen", settingsOpen);
   }, [settingsOpen]);
 
+  // Landing-only shortcuts (e.g. mod+Enter for new project) should not fire
+  // when settings covers the main pane or chat is visible.
+  useEffect(() => {
+    setContext("showLanding", showLanding && !settingsOpen);
+  }, [showLanding, settingsOpen]);
+
   // Register all commands and initialize shortcuts
   useEffect(() => {
     const cleanup = initShortcuts();

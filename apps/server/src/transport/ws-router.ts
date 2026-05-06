@@ -215,7 +215,19 @@ async function dispatch(
     }
     case "workspace.delete": {
       const result = deps.workspaceService.delete(params.id);
-      deps.gitWatcherService.unwatchWorkspace(params.id);
+      if (result) {
+        deps.gitWatcherService.unwatchWorkspace(params.id);
+        broadcast("workspace.orderChanged", {});
+      }
+      return result;
+    }
+    case "workspace.forceDelete": {
+      const result = deps.workspaceService.forceDelete(params.id);
+      if (result) {
+        deps.gitWatcherService.unwatchWorkspace(params.id);
+        broadcast("workspace.deleted", { workspaceId: params.id });
+        broadcast("workspace.orderChanged", {});
+      }
       return result;
     }
     case "workspace.pin":
@@ -285,6 +297,13 @@ async function dispatch(
     case "thread.markViewed":
       deps.threadService.markViewed(params.threadId);
       return;
+    case "thread.search":
+      return deps.threadService.search({
+        query: params.query,
+        filters: params.filters,
+        sort: params.sort,
+        limit: params.limit,
+      });
     case "thread.syncPrs": {
       const syncWs = deps.workspaceService.findById(params.workspaceId);
       if (!syncWs?.is_git_repo) return [];
@@ -397,6 +416,10 @@ async function dispatch(
         params.copilotAgent,
         params.contextWindow,
         params.thinking,
+        undefined, // markPlanAnswerForMessageId
+        undefined, // providerWireOverride
+        params.replyToMessageId,
+        params.quotedText,
       );
       return;
     case "agent.createAndSend":

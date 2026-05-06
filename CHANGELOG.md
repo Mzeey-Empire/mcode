@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.8.2](https://github.com/Mzeey-Emipre/mcode/compare/mcode-v0.8.1...mcode-v0.8.2) (2026-05-05)
+
+
+### Bug Fixes
+
+* **auto-updater:** use IPC return value for check-for-updates feedback ([#408](https://github.com/Mzeey-Emipre/mcode/issues/408)) ([e8808d5](https://github.com/Mzeey-Emipre/mcode/commit/e8808d5616d5ca490bdb22c5b07e006ca16001af))
+* resolve project reorder failing on duplicate sort_order ([#406](https://github.com/Mzeey-Emipre/mcode/issues/406)) ([61517e5](https://github.com/Mzeey-Emipre/mcode/commit/61517e59ff8037812775bf319219c381212362d7))
+* **web:** Ctrl+Enter for new project on landing and in browse palette ([#407](https://github.com/Mzeey-Emipre/mcode/issues/407)) ([f0375a5](https://github.com/Mzeey-Emipre/mcode/commit/f0375a52426f5c504ee8221469aee2d7d5e35810))
+* **web:** landing and palette Ctrl+Enter for new project ([f0375a5](https://github.com/Mzeey-Emipre/mcode/commit/f0375a52426f5c504ee8221469aee2d7d5e35810))
+
+## [0.8.1](https://github.com/Mzeey-Emipre/mcode/compare/mcode-v0.8.0...mcode-v0.8.1) (2026-05-05)
+
+
+### Bug Fixes
+
+* add schema patch for missing sort_order column on existing databases ([#404](https://github.com/Mzeey-Emipre/mcode/issues/404)) ([64cd42d](https://github.com/Mzeey-Emipre/mcode/commit/64cd42d4e3fae318314e190f7030c44b7ca6a498))
+
 ## [0.8.0](https://github.com/Mzeey-Emipre/mcode/compare/mcode-v0.7.0...mcode-v0.8.0) (2026-05-04)
 
 

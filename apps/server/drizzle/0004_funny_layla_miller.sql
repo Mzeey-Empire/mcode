@@ -9,4 +9,4 @@ CREATE TABLE `diff_summaries` (
 	FOREIGN KEY (`thread_id`) REFERENCES `threads`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE INDEX `idx_diff_summaries_thread` ON `diff_summaries` (`thread_id`);
+CREATE UNIQUE INDEX `idx_diff_summaries_thread` ON `diff_summaries` (`thread_id`);

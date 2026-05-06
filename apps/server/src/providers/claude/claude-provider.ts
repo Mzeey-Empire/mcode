@@ -794,6 +794,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
          * context fill vs. the accumulated result.usage which inflates across API calls).
          * Reset to undefined after each turnComplete. */
         let lastStreamInputTokens: number | undefined = undefined;
+        /** Set after a `result` (TurnComplete). When the SDK auto-resumes
+         *  (e.g. ScheduleWakeup/loop), the next non-system/non-result event
+         *  triggers a synthetic TurnStarted so the server and UI know a new
+         *  turn has begun without going through sendMessage(). */
+        let awaitingResume = false;
 
         /**
          * Emit an Error event with a best-effort message extracted from an SDK
@@ -855,6 +860,18 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
               type: AgentEventType.System,
               threadId,
               subtype: "sdk_session_id:" + sdkSid,
+            } satisfies AgentEvent);
+          }
+
+          // Auto-resume detection: the SDK can start a new turn without
+          // going through sendMessage() (e.g. ScheduleWakeup/loop timer).
+          // Emit a synthetic TurnStarted so AgentService re-adds to
+          // activeSessionIds and the frontend shows the running indicator.
+          if (awaitingResume && anyMsg.type !== "result" && anyMsg.type !== "system") {
+            awaitingResume = false;
+            this.emit("event", {
+              type: AgentEventType.TurnStarted,
+              threadId,
             } satisfies AgentEvent);
           }
 
@@ -937,6 +954,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                 emitResultError(anyMsg);
                 lastAssistantText = "";
                 lastStreamInputTokens = undefined;
+                awaitingResume = false;
                 break;
               }
               if (lastAssistantText) {
@@ -1052,6 +1070,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
               lastStreamInputTokens = undefined;
 
               lastAssistantText = "";
+              awaitingResume = true;
               break;
             }
 
@@ -1089,6 +1108,16 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                     trigger: metadata.trigger,
                   });
                 }
+              } else if ((anyMsg.subtype as string) === "api_retry") {
+                this.emit("event", {
+                  type: AgentEventType.ApiRetry,
+                  threadId,
+                  reason: (anyMsg.error as string) || "unknown",
+                  attempt: anyMsg.attempt as number | undefined,
+                  maxRetries: anyMsg.max_retries as number | undefined,
+                  delayMs: anyMsg.retry_delay_ms as number | undefined,
+                  errorStatus: (anyMsg.error_status as number | undefined) ?? undefined,
+                } satisfies AgentEvent);
               } else {
                 this.emit("event", {
                   type: AgentEventType.System,
@@ -1217,6 +1246,39 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                   toolCallId: toolUseId,
                   toolName,
                   elapsedSeconds,
+                } satisfies AgentEvent);
+              }
+              break;
+            }
+
+            case "rate_limit_event": {
+              const info = anyMsg.rate_limit_info as {
+                status?: string;
+                resetsAt?: number;
+                rateLimitType?: string;
+                utilization?: number;
+              } | undefined;
+              const status = info?.status;
+
+              // Only surface warnings and rejections; 'allowed' is noise
+              if (status === "allowed_warning" || status === "rejected") {
+                const retryAfterMs = info?.resetsAt
+                  ? Math.max(0, info.resetsAt * 1000 - Date.now())
+                  : undefined;
+                this.emit("event", {
+                  type: AgentEventType.RateLimited,
+                  threadId,
+                  active: true,
+                  retryAfterMs,
+                  limitType: info?.rateLimitType,
+                  utilization: info?.utilization,
+                } satisfies AgentEvent);
+              } else if (status === "allowed") {
+                // Clear any previously active rate limit indicator
+                this.emit("event", {
+                  type: AgentEventType.RateLimited,
+                  threadId,
+                  active: false,
                 } satisfies AgentEvent);
               }
               break;

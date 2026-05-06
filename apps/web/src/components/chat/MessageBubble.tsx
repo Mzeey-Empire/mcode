@@ -1,6 +1,6 @@
 import { memo, useMemo, useState, useCallback, useRef, useEffect, lazy, Suspense } from "react";
 import type { Message } from "@/transport";
-import { FileText, File, ImageIcon, RotateCcw, Copy, Check, GitBranch, AlertCircle } from "lucide-react";
+import { FileText, File, ImageIcon, RotateCcw, Copy, Check, GitBranch, AlertCircle, Reply } from "lucide-react";
 import { cn } from "@/lib/utils";
 const LazyMarkdownContent = lazy(() => import("./MarkdownContent"));
 import { stripInjectedFiles } from "@/lib/file-tags";
@@ -39,6 +39,10 @@ interface MessageBubbleProps {
   message: Message;
   /** Called when the user clicks the branch icon on this message. */
   onBranch?: (messageId: string) => void;
+  /** Called when the user clicks the reply button on this message. */
+  onReply?: (messageId: string, content: string, role: "user" | "assistant") => void;
+  /** Called when the user clicks a quote block to scroll to the original message. */
+  onScrollToMessage?: (messageId: string) => void;
 }
 
 /** Maps a MIME type to a file extension for attachment URLs. */
@@ -137,8 +141,65 @@ function BranchButton({ onClick }: { onClick: () => void }) {
   );
 }
 
+/** Reply button visible on hover, matching BranchButton style. */
+function ReplyButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            onClick={onClick}
+            className="flex h-7 w-7 items-center justify-center rounded-md bg-muted/60 text-muted-foreground opacity-0 scale-90 transition-all duration-150 hover:bg-primary/10 hover:text-primary group-hover/msg:opacity-100 group-hover/msg:scale-100"
+            aria-label="Reply to this message"
+          >
+            <Reply size={14} className="scale-x-[-1]" />
+          </button>
+        }
+      />
+      <TooltipContent side="top" className="text-xs">Reply</TooltipContent>
+    </Tooltip>
+  );
+}
+
+/**
+ * Quoted message preview rendered above the bubble content when
+ * `reply_to_message_id` is set on the message.
+ */
+function QuoteBlock({
+  quotedText,
+  available = true,
+  onClick,
+}: {
+  quotedText: string;
+  available?: boolean;
+  onClick?: () => void;
+}) {
+  if (!available) {
+    return (
+      <div className="mb-1.5 rounded-md border-l-2 border-muted-foreground/20 bg-muted/20 px-2.5 py-1.5 select-none">
+        <p className="text-xs text-muted-foreground/40 italic">Original message unavailable</p>
+      </div>
+    );
+  }
+
+  const label = "Reply";
+  const displayText = quotedText.slice(0, 150) + (quotedText.length > 150 ? "..." : "");
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="mb-1.5 w-full cursor-pointer rounded-md border-l-2 border-primary/40 bg-muted/30 px-2.5 py-1.5 text-left transition-colors hover:bg-muted/50 select-none"
+    >
+      <p className="text-[10px] font-semibold text-primary/60 leading-none mb-0.5">{label}</p>
+      <p className="text-xs text-muted-foreground/60 truncate italic">{displayText}</p>
+    </button>
+  );
+}
+
 /** Renders a single chat message (system, user, or assistant). Memoized to prevent re-renders when the message ref is unchanged. */
-export const MessageBubble = memo(function MessageBubble({ message, onBranch }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ message, onBranch, onReply, onScrollToMessage }: MessageBubbleProps) {
   const formattedTime = useMemo(
     () => new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     [message.timestamp],
@@ -189,8 +250,16 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch }: 
   if (isUser) {
 
     return (
-      <div className="group/msg flex justify-end">
+      <div className="group/msg flex justify-end" data-message-id={message.id} data-message-role={message.role} data-thread-id={message.thread_id}>
         <div className="min-w-0 max-w-[75%] space-y-1.5">
+          {/* Quote block — shown when this message is a reply */}
+          {message.reply_to_message_id && (
+            <QuoteBlock
+              quotedText={message.quoted_text ?? ""}
+              available={!!message.quoted_text}
+              onClick={() => onScrollToMessage?.(message.reply_to_message_id!)}
+            />
+          )}
           {/* Image attachments — standalone thumbnails above the bubble */}
           {imageAttachments.length > 0 && (
             <div className={cn(
@@ -235,6 +304,16 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch }: 
 
           <div className="flex flex-col items-end gap-0.5 pr-1">
             <div className="flex items-center gap-1.5">
+              {onReply && <ReplyButton onClick={() => {
+                let fallback = "[Attachment]";
+                if (!textContent.trim()) {
+                  const firstAtt = message.attachments?.[0];
+                  if (firstAtt?.mimeType.startsWith("image/")) fallback = "[Image attachment]";
+                  else if (firstAtt?.mimeType === "application/pdf") fallback = "[PDF attachment]";
+                  else if (firstAtt) fallback = "[File attachment]";
+                }
+                onReply(message.id, textContent.trim() || fallback, "user");
+              }} />}
               {onBranch && <BranchButton onClick={() => onBranch(message.id)} />}
               {textContent.trim() && <CopyButton content={textContent} />}
             </div>
@@ -255,17 +334,26 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch }: 
 
   // Assistant message — borderless prose flowing directly on the page
   return (
-    <div className="group/msg space-y-2">
+    <div className="group/msg space-y-2" data-message-id={message.id} data-message-role={message.role} data-thread-id={message.thread_id}>
       <div className="flex items-baseline gap-2">
         <span aria-hidden="true" className="font-mono text-[10px] leading-none text-muted-foreground/50">▸</span>
         <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-muted-foreground/55">assistant</span>
       </div>
+      {/* Quote block — shown when this message is a reply */}
+      {message.reply_to_message_id && (
+        <QuoteBlock
+          quotedText={message.quoted_text ?? ""}
+          available={!!message.quoted_text}
+          onClick={() => onScrollToMessage?.(message.reply_to_message_id!)}
+        />
+      )}
       <div className="text-sm text-foreground">
         <Suspense fallback={null}>
           <LazyMarkdownContent content={message.content} isStreaming={false} />
         </Suspense>
       </div>
       <div className="flex items-center gap-3 px-1">
+        {onReply && <ReplyButton onClick={() => onReply(message.id, message.content, "assistant")} />}
         {onBranch && <BranchButton onClick={() => onBranch(message.id)} />}
         <CopyButton content={textContent} />
         {(message.tokens_used != null || message.cost_usd != null || formattedTime) && (

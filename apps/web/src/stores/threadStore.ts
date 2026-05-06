@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { Message, ToolCall, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
-import type { ContextWindowMode, ReasoningLevel, PlanQuestion, PlanAnswer, ProviderUsageInfo, QuotaCategory } from "@mcode/contracts";
+import type { ContextWindowMode, ReasoningLevel, PlanQuestion, PlanAnswer, ProviderUsageInfo, QuotaCategory, TurnSnapshot } from "@mcode/contracts";
 import type { PermissionRequest, PermissionDecision } from "@mcode/contracts";
 import { PlanQuestionSchema, PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts";
 import { getTransport } from "@/transport";
@@ -96,6 +96,10 @@ interface ThreadState {
   isCompactingByThread: Record<string, boolean>;
   /** Transient fallback state per thread. Cleared when the user sends the next message. */
   lastFallbackByThread: Record<string, { requestedModel: string; actualModel: string }>;
+  /** Transient rate-limit indicator per thread. Cleared when the provider reports the limit has lifted. */
+  rateLimitByThread: Record<string, { retryAfterMs?: number; limitType?: string; utilization?: number }>;
+  /** Transient API retry indicator per thread. Cleared when a non-retry event arrives. */
+  apiRetryByThread: Record<string, { reason: string; attempt?: number; maxRetries?: number; delayMs?: number }>;
   /** Questions proposed by the model in plan mode, keyed by thread ID. Null when not pending. */
   planQuestionsByThread: Record<string, PlanQuestion[] | null>;
   /** User's answers to plan questions, keyed by thread ID then question ID. */
@@ -123,7 +127,7 @@ interface ThreadState {
   // Message actions
   loadMessages: (threadId: string) => Promise<void>;
   loadOlderMessages: (threadId: string) => Promise<void>;
-  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean) => Promise<void>;
+  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean, replyToMessageId?: string, quotedText?: string) => Promise<void>;
   stopAgent: (threadId: string) => Promise<void>;
   /** Replace runningThreadIds with the authoritative server snapshot. Called on WS (re)connect. */
   hydrateRunningThreads: (ids: string[]) => void;
@@ -316,6 +320,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   usageByProvider: {},
   isCompactingByThread: {},
   lastFallbackByThread: {},
+  rateLimitByThread: {},
+  apiRetryByThread: {},
   planQuestionsByThread: {},
   planAnswersByThread: {},
   activeQuestionIndexByThread: {},
@@ -364,6 +370,11 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           isLoadingMore: {},
           // Bump epoch so any pending loadOlderMessages from the previous activation is discarded.
           loadEpochByThread: { ...state.loadEpochByThread, [threadId]: (state.loadEpochByThread[threadId] ?? 0) + 1 },
+          // Restore plan-question answered markers so the wizard renders correctly on cache hit.
+          answeredPlanMessageIdsByThread: {
+            ...state.answeredPlanMessageIdsByThread,
+            [threadId]: new Set<string>(cached.answeredPlanMessageIds),
+          },
           // Note: toolCallRecordCache is intentionally NOT cleared on cache hit
           // so previously expanded tool calls don't refetch.
         };
@@ -403,6 +414,45 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         .catch((err) => {
           console.debug("[taskHydration] Failed to load tasks for thread %s:", threadId, err);
         });
+
+      // If the cached snapshot has no file-change data but the thread has changes,
+      // fetch snapshots in the background (covers prefetched entries).
+      const threadRecord = useWorkspaceStore.getState().threads.find((t) => t.id === threadId);
+      if (threadRecord?.has_file_changes && !cached.latestTurnWithChanges) {
+        void getTransport().listSnapshots(threadId).then((snapshots) => {
+          if (snapshots.length === 0) return;
+          // Re-read current cache entry to avoid overwriting fresher data
+          // that loadOlderMessages or another path may have written.
+          const latestCached = getCachedSnapshot(threadId);
+          if (!latestCached) return;
+
+          const persistedFilesChangedMap: Record<string, string[]> = {};
+          let latestTurnWithChanges: string | null = null;
+          for (const snap of snapshots) {
+            if (snap.files_changed.length === 0) continue;
+            persistedFilesChangedMap[snap.message_id] = snap.files_changed;
+            // Snapshots sorted ASC by created_at, so last match wins
+            latestTurnWithChanges = snap.message_id;
+          }
+          // Persist back into cache so subsequent visits don't re-fetch
+          cacheSnapshot(threadId, {
+            ...latestCached,
+            persistedFilesChanged: {
+              ...latestCached.persistedFilesChanged,
+              ...persistedFilesChangedMap,
+            },
+            latestTurnWithChanges,
+          });
+          if (get().currentThreadId !== threadId) return;
+          set((state) => {
+            if (state.currentThreadId !== threadId) return {};
+            return {
+              persistedFilesChanged: { ...state.persistedFilesChanged, ...persistedFilesChangedMap },
+              latestTurnWithChanges,
+            };
+          });
+        }).catch(() => { /* non-critical */ });
+      }
 
       return;
     }
@@ -459,7 +509,21 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       });
     }
     try {
-      const { messages, hasMore, answeredPlanMessageIds } = await getTransport().getMessages(threadId, MESSAGE_FETCH_SIZE);
+      // Determine whether file-change snapshots are needed.
+      // When the thread record is absent (race during workspace load), fetch
+      // snapshots defensively. Only skip when explicitly has_file_changes=false.
+      const threadRecord = useWorkspaceStore.getState().threads.find((t) => t.id === threadId);
+      const shouldFetchSnapshots = threadRecord?.has_file_changes !== false;
+
+      const [messageResult, snapshots] = await Promise.all([
+        getTransport().getMessages(threadId, MESSAGE_FETCH_SIZE),
+        shouldFetchSnapshots
+          ? getTransport().listSnapshots(threadId).catch(() => [] as TurnSnapshot[])
+          : Promise.resolve([] as TurnSnapshot[]),
+      ]);
+
+      const { messages, hasMore, answeredPlanMessageIds } = messageResult;
+
       if (get().currentThreadId === threadId) {
         // Populate persisted tool call counts from loaded messages
         const counts: Record<string, number> = {};
@@ -532,73 +596,37 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           }
         }
 
-        // Populate file change summaries from persisted snapshots.
-        // Capture locals before async to avoid wrong-thread reads if user switches during await.
-        const capturedMessages = messages;
-        const capturedCounts = counts;
-        const capturedOldest = oldest;
-        const capturedHasMore = hasMore;
+        // Process snapshot results into the file-change map.
+        // Snapshots arrive sorted by created_at ASC from the DB, so the
+        // last match in a forward iteration is the most recent with changes.
+        const persistedFilesChangedMap: Record<string, string[]> = {};
+        let latestTurnWithChanges: string | null = null;
 
-        const threadRecord = useWorkspaceStore.getState().threads.find((t) => t.id === threadId);
-        if (threadRecord && !threadRecord.has_file_changes) {
-          cacheSnapshot(threadId, {
-            messages: capturedMessages,
-            oldestLoadedSequence: capturedOldest,
-            hasMoreMessages: capturedHasMore,
-            persistedToolCallCounts: capturedCounts,
-            persistedFilesChanged: {},
-            latestTurnWithChanges: null,
+        if (snapshots.length > 0) {
+          for (const snap of snapshots) {
+            if (snap.files_changed.length === 0) continue;
+            persistedFilesChangedMap[snap.message_id] = snap.files_changed;
+            // Snapshots sorted ASC by created_at, so last match wins
+            latestTurnWithChanges = snap.message_id;
+          }
+          set((state) => {
+            if (state.currentThreadId !== threadId) return {};
+            return {
+              persistedFilesChanged: { ...state.persistedFilesChanged, ...persistedFilesChangedMap },
+              latestTurnWithChanges,
+            };
           });
-        } else {
-          void (async () => {
-            try {
-              const snapshots = await getTransport().listSnapshots(threadId);
-              if (get().currentThreadId !== threadId) return;
-
-              const persistedFilesChangedMap: Record<string, string[]> = {};
-              let latestTurnWithChanges: string | null = null;
-
-              if (snapshots.length > 0) {
-                let latestTime = "";
-                for (const snap of snapshots) {
-                  if (snap.files_changed.length === 0) continue;
-                  persistedFilesChangedMap[snap.message_id] = snap.files_changed;
-                  if (snap.created_at > latestTime) {
-                    latestTime = snap.created_at;
-                    latestTurnWithChanges = snap.message_id;
-                  }
-                }
-                set((state) => {
-                  if (state.currentThreadId !== threadId) return {};
-                  return {
-                    persistedFilesChanged: { ...state.persistedFilesChanged, ...persistedFilesChangedMap },
-                    latestTurnWithChanges,
-                  };
-                });
-              }
-
-              cacheSnapshot(threadId, {
-                messages: capturedMessages,
-                oldestLoadedSequence: capturedOldest,
-                hasMoreMessages: capturedHasMore,
-                persistedToolCallCounts: capturedCounts,
-                persistedFilesChanged: persistedFilesChangedMap,
-                latestTurnWithChanges,
-              });
-            } catch {
-              if (get().currentThreadId === threadId) {
-                cacheSnapshot(threadId, {
-                  messages: capturedMessages,
-                  oldestLoadedSequence: capturedOldest,
-                  hasMoreMessages: capturedHasMore,
-                  persistedToolCallCounts: capturedCounts,
-                  persistedFilesChanged: {},
-                  latestTurnWithChanges: null,
-                });
-              }
-            }
-          })();
         }
+
+        cacheSnapshot(threadId, {
+          messages,
+          oldestLoadedSequence: oldest,
+          hasMoreMessages: hasMore,
+          persistedToolCallCounts: counts,
+          persistedFilesChanged: persistedFilesChangedMap,
+          latestTurnWithChanges,
+          answeredPlanMessageIds: answeredPlanMessageIds ?? [],
+        });
       }
     } catch (e) {
       if (get().currentThreadId === threadId) {
@@ -666,6 +694,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         persistedToolCallCounts: state.persistedToolCallCounts,
         persistedFilesChanged: state.persistedFilesChanged,
         latestTurnWithChanges: state.latestTurnWithChanges,
+        answeredPlanMessageIds: [...(state.answeredPlanMessageIdsByThread[threadId] ?? [])],
       });
 
       // Hydrate file change data for older messages from snapshots
@@ -700,7 +729,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
    * message to local state, marks the thread as running, then dispatches
    * to the transport layer. On failure, rolls back the running state.
    */
-  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, copilotAgent, contextWindow, thinking) => {
+  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, copilotAgent, contextWindow, thinking, replyToMessageId, quotedText) => {
     evictMessageCache(threadId);
 
     // Add user message to local state immediately (optimistic)
@@ -722,6 +751,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         mimeType: a.mimeType,
         sizeBytes: a.sizeBytes,
       })) ?? null,
+      reply_to_message_id: replyToMessageId ?? null,
+      quoted_text: quotedText ?? null,
     };
 
     set((state) => ({
@@ -751,6 +782,16 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         delete next[threadId];
         return next;
       })(),
+      rateLimitByThread: (() => {
+        const next = { ...state.rateLimitByThread };
+        delete next[threadId];
+        return next;
+      })(),
+      apiRetryByThread: (() => {
+        const next = { ...state.apiRetryByThread };
+        delete next[threadId];
+        return next;
+      })(),
       errorByThread: (() => {
         const next = { ...state.errorByThread };
         delete next[threadId];
@@ -760,7 +801,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
 
     try {
       const { interactionMode } = get().getThreadSettings(threadId);
-      await getTransport().sendMessage(threadId, content, model, permissionMode, attachments, reasoningLevel, provider, interactionMode, copilotAgent, contextWindow, thinking);
+      await getTransport().sendMessage(threadId, content, model, permissionMode, attachments, reasoningLevel, provider, interactionMode, copilotAgent, contextWindow, thinking, replyToMessageId, quotedText);
     } catch (e) {
       set((state) => {
         const next = new Set(state.runningThreadIds);
@@ -783,8 +824,14 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     set((state) => {
       const next = new Set(state.runningThreadIds);
       next.delete(threadId);
+      const nextRateLimit = { ...state.rateLimitByThread };
+      delete nextRateLimit[threadId];
+      const nextApiRetry = { ...state.apiRetryByThread };
+      delete nextApiRetry[threadId];
       return {
         runningThreadIds: next,
+        rateLimitByThread: nextRateLimit,
+        apiRetryByThread: nextApiRetry,
       };
     });
   },
@@ -996,10 +1043,13 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         contextByThread: omitKey(state.contextByThread, threadId),
         isCompactingByThread: omitKey(state.isCompactingByThread, threadId),
         lastFallbackByThread: omitKey(state.lastFallbackByThread, threadId),
+        rateLimitByThread: omitKey(state.rateLimitByThread, threadId),
+        apiRetryByThread: omitKey(state.apiRetryByThread, threadId),
         planQuestionsByThread: omitKey(state.planQuestionsByThread, threadId),
         planAnswersByThread: omitKey(state.planAnswersByThread, threadId),
         activeQuestionIndexByThread: omitKey(state.activeQuestionIndexByThread, threadId),
         planQuestionsStatusByThread: omitKey(state.planQuestionsStatusByThread, threadId),
+        answeredPlanMessageIdsByThread: omitKey(state.answeredPlanMessageIdsByThread, threadId),
         permissionsByThread: omitKey(state.permissionsByThread, threadId),
         usageByProvider: Object.fromEntries(
           Object.entries(state.usageByProvider).filter(([k]) => !k.startsWith(`${threadId}:`)),
@@ -1076,10 +1126,13 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         contextByThread: pruneAll(state.contextByThread),
         isCompactingByThread: pruneAll(state.isCompactingByThread),
         lastFallbackByThread: pruneAll(state.lastFallbackByThread),
+        rateLimitByThread: pruneAll(state.rateLimitByThread),
+        apiRetryByThread: pruneAll(state.apiRetryByThread),
         planQuestionsByThread: pruneAll(state.planQuestionsByThread),
         planAnswersByThread: pruneAll(state.planAnswersByThread),
         activeQuestionIndexByThread: pruneAll(state.activeQuestionIndexByThread),
         planQuestionsStatusByThread: pruneAll(state.planQuestionsStatusByThread),
+        answeredPlanMessageIdsByThread: pruneAll(state.answeredPlanMessageIdsByThread),
         permissionsByThread: pruneAll(state.permissionsByThread),
         usageByProvider: Object.fromEntries(
           Object.entries(state.usageByProvider).filter(([k]) => !threadIds.some((tid) => k.startsWith(`${tid}:`))),
@@ -1255,11 +1308,20 @@ export const useThreadStore = create<ThreadState>((set, get) => {
    * message and schedules tool call fade-out animations.
    */
   handleAgentEvent: (threadId, event) => {
-    // Any agent event for this thread implies the cached snapshot is stale.
-    evictMessageCache(threadId);
-
     const method = (event.method as string) || "";
     const params = (event.params as Record<string, unknown>) || event;
+
+    // Only evict the message cache on structural changes that add or modify
+    // persisted messages. Streaming deltas (textDelta, toolProgress) are
+    // ephemeral and don't change what loadMessages would return from the DB.
+    const isStructuralEvent =
+      method === "session.turnComplete" ||
+      method === "session.ended" ||
+      method === "session.message" ||
+      method === "session.error";
+    if (isStructuralEvent) {
+      evictMessageCache(threadId);
+    }
 
     // Helper: mark all prior incomplete tool calls as complete.
     // The Claude Agent SDK handles tool execution internally and does not
@@ -1286,6 +1348,15 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     };
 
     // -- Sidecar events (new format) --
+
+    // Any non-retry event on this thread means a pending API retry resolved
+    if (method !== "session.apiRetry" && get().apiRetryByThread[threadId]) {
+      set((state) => {
+        const next = { ...state.apiRetryByThread };
+        delete next[threadId];
+        return { apiRetryByThread: next };
+      });
+    }
 
     if (method === "session.system") {
       const subtype = params.subtype as string;
@@ -1615,6 +1686,11 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               delete next[threadId];
               return next;
             })(),
+            rateLimitByThread: (() => {
+              const next = { ...state.rateLimitByThread };
+              delete next[threadId];
+              return next;
+            })(),
           };
         });
       } else {
@@ -1654,6 +1730,11 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             // Clear permission cards now that the agent has responded.
             permissionsByThread: (() => {
               const next = { ...state.permissionsByThread };
+              delete next[threadId];
+              return next;
+            })(),
+            rateLimitByThread: (() => {
+              const next = { ...state.rateLimitByThread };
               delete next[threadId];
               return next;
             })(),
@@ -1758,6 +1839,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               next.copilotAgent,
               next.contextWindow,
               next.thinking,
+              next.replyToMessageId,
+              next.quotedText,
             );
           }
         }, 400);
@@ -1822,6 +1905,39 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           };
         });
       }
+      return;
+    }
+
+    if (method === "session.rateLimited") {
+      const active = params.active as boolean;
+      set((state) => {
+        const next = { ...state.rateLimitByThread };
+        if (active) {
+          next[threadId] = {
+            retryAfterMs: params.retryAfterMs as number | undefined,
+            limitType: params.limitType as string | undefined,
+            utilization: params.utilization as number | undefined,
+          };
+        } else {
+          delete next[threadId];
+        }
+        return { rateLimitByThread: next };
+      });
+      return;
+    }
+
+    if (method === "session.apiRetry") {
+      set((state) => ({
+        apiRetryByThread: {
+          ...state.apiRetryByThread,
+          [threadId]: {
+            reason: params.reason as string,
+            attempt: params.attempt as number | undefined,
+            maxRetries: params.maxRetries as number | undefined,
+            delayMs: params.delayMs as number | undefined,
+          },
+        },
+      }));
       return;
     }
 
@@ -1933,6 +2049,10 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         delete nextSubagents[threadId];
         const nextCompacting = { ...state.isCompactingByThread };
         delete nextCompacting[threadId];
+        const nextRateLimit = { ...state.rateLimitByThread };
+        delete nextRateLimit[threadId];
+        const nextApiRetry = { ...state.apiRetryByThread };
+        delete nextApiRetry[threadId];
         const base = {
           errorByThread: { ...state.errorByThread, [threadId]: errorMsg },
           runningThreadIds: nextRunning,
@@ -1942,6 +2062,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           toolCallsByThread: nextToolCalls,
           activeSubagentsByThread: nextSubagents,
           isCompactingByThread: nextCompacting,
+          rateLimitByThread: nextRateLimit,
+          apiRetryByThread: nextApiRetry,
         };
         if (state.currentThreadId !== threadId) return base;
         const { messages: capped, evicted } = capMessages([...state.messages, errorMessage]);

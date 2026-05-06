@@ -312,7 +312,7 @@ export const SettingsSchema = lazySchema(() =>
          * Higher values reduce thread-switch latency at the cost of memory;
          * lower values free memory at the cost of more getMessages round-trips.
          */
-        threadCacheSize: z.number().int().min(1).max(25).default(10),
+        threadCacheSize: z.number().int().min(1).max(50).default(15),
       })
       .default({}),
 
@@ -473,7 +473,7 @@ export const PartialSettingsSchema = lazySchema(() =>
       .optional(),
     performance: z
       .object({
-        threadCacheSize: z.number().int().min(1).max(25).optional(),
+        threadCacheSize: z.number().int().min(1).max(50).optional(),
       })
       .optional(),
     updates: z
