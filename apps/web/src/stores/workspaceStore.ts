@@ -539,7 +539,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
 
   loadThreads: async (workspaceId) => {
     const epochAtStart = threadListMutationEpochByWorkspace.get(workspaceId) ?? 0;
-    set({ loading: true, error: null });
+    // Stale-while-revalidate: only show loading spinner if there are NO
+    // existing threads for this workspace. If threads are already in state
+    // (from a prior load), keep showing them while the refresh runs.
+    const hasStaleThreads = get().threads.some((t) => t.workspace_id === workspaceId);
+    set({ loading: !hasStaleThreads, error: null });
     try {
       const newThreads = await getTransport().listThreads(workspaceId);
       if ((threadListMutationEpochByWorkspace.get(workspaceId) ?? 0) !== epochAtStart) {

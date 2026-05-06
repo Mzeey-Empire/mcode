@@ -63,7 +63,21 @@ export function createWsServer(deps: RouterDeps & { authToken: string }): {
     res.end("Not found");
   });
 
-  const wss = new WebSocketServer({ server: httpServer, maxPayload: 45 * 1024 * 1024 });
+  const wss = new WebSocketServer({
+    server: httpServer,
+    maxPayload: 45 * 1024 * 1024,
+    perMessageDeflate: {
+      zlibDeflateOptions: { level: 6 },
+      // Only compress messages larger than 1 KB to avoid CPU overhead on
+      // small streaming delta events during active agent turns
+      threshold: 1024,
+      // Context takeover disabled server-side so the threshold check is
+      // actually applied by the ws library (threshold is a no-op when
+      // context takeover is enabled).
+      clientNoContextTakeover: false,
+      serverNoContextTakeover: true,
+    },
+  });
 
   // The ws library forwards httpServer 'error' events to wss via
   // `error: this.emit.bind(this, 'error')`. Without this listener, an

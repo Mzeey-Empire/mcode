@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { relativeTime } from "@/lib/time";
+import { schedulePrefetch, cancelPrefetch } from "@/lib/prefetch";
 import { getStatusDisplay, getNotificationDot } from "@/lib/thread-status";
 import { getBreakdown, getCiVisual, CI_ICON_STROKE } from "@/lib/ci-status";
 import type { ChecksStatus } from "@mcode/contracts";
@@ -254,17 +255,21 @@ export function ProjectTree() {
   const reorderWorkspace = useWorkspaceStore((s) => s.reorderWorkspace);
   const error = useWorkspaceStore((s) => s.error);
   const runningThreadIds = useThreadStore((s) => s.runningThreadIds);
-  const permissionsByThread = useThreadStore((s) => s.permissionsByThread);
-  // Derive a set of thread IDs that have at least one unsettled permission request,
-  // so the sidebar can render the amber pending indicator without per-thread subscriptions.
+  // Derive pending permission thread IDs directly in the selector with useShallow
+  // so the component only re-renders when the actual set of IDs changes, not on
+  // every unrelated threadStore update that creates a new permissionsByThread ref.
+  const pendingPermissionIds = useThreadStore(
+    useShallow((s) => {
+      const ids: string[] = [];
+      for (const [id, perms] of Object.entries(s.permissionsByThread ?? {})) {
+        if (perms.some((p) => !p.settled)) ids.push(id);
+      }
+      return ids;
+    }),
+  );
   const pendingPermissionThreadIds = useMemo(
-    () =>
-      new Set(
-        Object.entries(permissionsByThread ?? {})
-          .filter(([, perms]) => perms.some((p) => !p.settled))
-          .map(([id]) => id),
-      ),
-    [permissionsByThread],
+    () => new Set(pendingPermissionIds),
+    [pendingPermissionIds],
   );
 
   const searchQuery = useSidebarSearchStore((s) => s.query);
@@ -1118,6 +1123,12 @@ function VirtualizedThreadList({
                 }}
                 onClick={() => handleThreadClick(thread.id, thread.title)}
                 onContextMenu={(e) => onThreadContextMenu(e, thread)}
+                onMouseEnter={() => {
+                  if (!thread.clientPreparing && !thread.clientError) {
+                    schedulePrefetch(thread.id);
+                  }
+                }}
+                onMouseLeave={cancelPrefetch}
                 className={cn(
                   "group/row flex items-center gap-2 rounded-md pr-2 py-1 text-[13px] cursor-pointer transition-colors",
                   activeThreadId === thread.id

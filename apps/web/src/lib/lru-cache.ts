@@ -59,6 +59,11 @@ export class LruCache<K, V> {
     this.map.clear();
   }
 
+  /** Check if a key exists without refreshing access order. */
+  has(key: K): boolean {
+    return this.map.has(key);
+  }
+
   /** Remove an entry. Returns true if the key existed, false otherwise. */
   delete(key: K): boolean {
     return this.map.delete(key);

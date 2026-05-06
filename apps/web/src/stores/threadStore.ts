@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { Message, ToolCall, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
-import type { ContextWindowMode, ReasoningLevel, PlanQuestion, PlanAnswer, ProviderUsageInfo, QuotaCategory } from "@mcode/contracts";
+import type { ContextWindowMode, ReasoningLevel, PlanQuestion, PlanAnswer, ProviderUsageInfo, QuotaCategory, TurnSnapshot } from "@mcode/contracts";
 import type { PermissionRequest, PermissionDecision } from "@mcode/contracts";
 import { PlanQuestionSchema, PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts";
 import { getTransport } from "@/transport";
@@ -370,6 +370,11 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           isLoadingMore: {},
           // Bump epoch so any pending loadOlderMessages from the previous activation is discarded.
           loadEpochByThread: { ...state.loadEpochByThread, [threadId]: (state.loadEpochByThread[threadId] ?? 0) + 1 },
+          // Restore plan-question answered markers so the wizard renders correctly on cache hit.
+          answeredPlanMessageIdsByThread: {
+            ...state.answeredPlanMessageIdsByThread,
+            [threadId]: new Set<string>(cached.answeredPlanMessageIds),
+          },
           // Note: toolCallRecordCache is intentionally NOT cleared on cache hit
           // so previously expanded tool calls don't refetch.
         };
@@ -409,6 +414,45 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         .catch((err) => {
           console.debug("[taskHydration] Failed to load tasks for thread %s:", threadId, err);
         });
+
+      // If the cached snapshot has no file-change data but the thread has changes,
+      // fetch snapshots in the background (covers prefetched entries).
+      const threadRecord = useWorkspaceStore.getState().threads.find((t) => t.id === threadId);
+      if (threadRecord?.has_file_changes && !cached.latestTurnWithChanges) {
+        void getTransport().listSnapshots(threadId).then((snapshots) => {
+          if (snapshots.length === 0) return;
+          // Re-read current cache entry to avoid overwriting fresher data
+          // that loadOlderMessages or another path may have written.
+          const latestCached = getCachedSnapshot(threadId);
+          if (!latestCached) return;
+
+          const persistedFilesChangedMap: Record<string, string[]> = {};
+          let latestTurnWithChanges: string | null = null;
+          for (const snap of snapshots) {
+            if (snap.files_changed.length === 0) continue;
+            persistedFilesChangedMap[snap.message_id] = snap.files_changed;
+            // Snapshots sorted ASC by created_at, so last match wins
+            latestTurnWithChanges = snap.message_id;
+          }
+          // Persist back into cache so subsequent visits don't re-fetch
+          cacheSnapshot(threadId, {
+            ...latestCached,
+            persistedFilesChanged: {
+              ...latestCached.persistedFilesChanged,
+              ...persistedFilesChangedMap,
+            },
+            latestTurnWithChanges,
+          });
+          if (get().currentThreadId !== threadId) return;
+          set((state) => {
+            if (state.currentThreadId !== threadId) return {};
+            return {
+              persistedFilesChanged: { ...state.persistedFilesChanged, ...persistedFilesChangedMap },
+              latestTurnWithChanges,
+            };
+          });
+        }).catch(() => { /* non-critical */ });
+      }
 
       return;
     }
@@ -465,7 +509,21 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       });
     }
     try {
-      const { messages, hasMore, answeredPlanMessageIds } = await getTransport().getMessages(threadId, MESSAGE_FETCH_SIZE);
+      // Determine whether file-change snapshots are needed.
+      // When the thread record is absent (race during workspace load), fetch
+      // snapshots defensively. Only skip when explicitly has_file_changes=false.
+      const threadRecord = useWorkspaceStore.getState().threads.find((t) => t.id === threadId);
+      const shouldFetchSnapshots = threadRecord?.has_file_changes !== false;
+
+      const [messageResult, snapshots] = await Promise.all([
+        getTransport().getMessages(threadId, MESSAGE_FETCH_SIZE),
+        shouldFetchSnapshots
+          ? getTransport().listSnapshots(threadId).catch(() => [] as TurnSnapshot[])
+          : Promise.resolve([] as TurnSnapshot[]),
+      ]);
+
+      const { messages, hasMore, answeredPlanMessageIds } = messageResult;
+
       if (get().currentThreadId === threadId) {
         // Populate persisted tool call counts from loaded messages
         const counts: Record<string, number> = {};
@@ -538,73 +596,37 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           }
         }
 
-        // Populate file change summaries from persisted snapshots.
-        // Capture locals before async to avoid wrong-thread reads if user switches during await.
-        const capturedMessages = messages;
-        const capturedCounts = counts;
-        const capturedOldest = oldest;
-        const capturedHasMore = hasMore;
+        // Process snapshot results into the file-change map.
+        // Snapshots arrive sorted by created_at ASC from the DB, so the
+        // last match in a forward iteration is the most recent with changes.
+        const persistedFilesChangedMap: Record<string, string[]> = {};
+        let latestTurnWithChanges: string | null = null;
 
-        const threadRecord = useWorkspaceStore.getState().threads.find((t) => t.id === threadId);
-        if (threadRecord && !threadRecord.has_file_changes) {
-          cacheSnapshot(threadId, {
-            messages: capturedMessages,
-            oldestLoadedSequence: capturedOldest,
-            hasMoreMessages: capturedHasMore,
-            persistedToolCallCounts: capturedCounts,
-            persistedFilesChanged: {},
-            latestTurnWithChanges: null,
+        if (snapshots.length > 0) {
+          for (const snap of snapshots) {
+            if (snap.files_changed.length === 0) continue;
+            persistedFilesChangedMap[snap.message_id] = snap.files_changed;
+            // Snapshots sorted ASC by created_at, so last match wins
+            latestTurnWithChanges = snap.message_id;
+          }
+          set((state) => {
+            if (state.currentThreadId !== threadId) return {};
+            return {
+              persistedFilesChanged: { ...state.persistedFilesChanged, ...persistedFilesChangedMap },
+              latestTurnWithChanges,
+            };
           });
-        } else {
-          void (async () => {
-            try {
-              const snapshots = await getTransport().listSnapshots(threadId);
-              if (get().currentThreadId !== threadId) return;
-
-              const persistedFilesChangedMap: Record<string, string[]> = {};
-              let latestTurnWithChanges: string | null = null;
-
-              if (snapshots.length > 0) {
-                let latestTime = "";
-                for (const snap of snapshots) {
-                  if (snap.files_changed.length === 0) continue;
-                  persistedFilesChangedMap[snap.message_id] = snap.files_changed;
-                  if (snap.created_at > latestTime) {
-                    latestTime = snap.created_at;
-                    latestTurnWithChanges = snap.message_id;
-                  }
-                }
-                set((state) => {
-                  if (state.currentThreadId !== threadId) return {};
-                  return {
-                    persistedFilesChanged: { ...state.persistedFilesChanged, ...persistedFilesChangedMap },
-                    latestTurnWithChanges,
-                  };
-                });
-              }
-
-              cacheSnapshot(threadId, {
-                messages: capturedMessages,
-                oldestLoadedSequence: capturedOldest,
-                hasMoreMessages: capturedHasMore,
-                persistedToolCallCounts: capturedCounts,
-                persistedFilesChanged: persistedFilesChangedMap,
-                latestTurnWithChanges,
-              });
-            } catch {
-              if (get().currentThreadId === threadId) {
-                cacheSnapshot(threadId, {
-                  messages: capturedMessages,
-                  oldestLoadedSequence: capturedOldest,
-                  hasMoreMessages: capturedHasMore,
-                  persistedToolCallCounts: capturedCounts,
-                  persistedFilesChanged: {},
-                  latestTurnWithChanges: null,
-                });
-              }
-            }
-          })();
         }
+
+        cacheSnapshot(threadId, {
+          messages,
+          oldestLoadedSequence: oldest,
+          hasMoreMessages: hasMore,
+          persistedToolCallCounts: counts,
+          persistedFilesChanged: persistedFilesChangedMap,
+          latestTurnWithChanges,
+          answeredPlanMessageIds: answeredPlanMessageIds ?? [],
+        });
       }
     } catch (e) {
       if (get().currentThreadId === threadId) {
@@ -672,6 +694,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         persistedToolCallCounts: state.persistedToolCallCounts,
         persistedFilesChanged: state.persistedFilesChanged,
         latestTurnWithChanges: state.latestTurnWithChanges,
+        answeredPlanMessageIds: [...(state.answeredPlanMessageIdsByThread[threadId] ?? [])],
       });
 
       // Hydrate file change data for older messages from snapshots
@@ -1026,6 +1049,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         planAnswersByThread: omitKey(state.planAnswersByThread, threadId),
         activeQuestionIndexByThread: omitKey(state.activeQuestionIndexByThread, threadId),
         planQuestionsStatusByThread: omitKey(state.planQuestionsStatusByThread, threadId),
+        answeredPlanMessageIdsByThread: omitKey(state.answeredPlanMessageIdsByThread, threadId),
         permissionsByThread: omitKey(state.permissionsByThread, threadId),
         usageByProvider: Object.fromEntries(
           Object.entries(state.usageByProvider).filter(([k]) => !k.startsWith(`${threadId}:`)),
@@ -1108,6 +1132,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         planAnswersByThread: pruneAll(state.planAnswersByThread),
         activeQuestionIndexByThread: pruneAll(state.activeQuestionIndexByThread),
         planQuestionsStatusByThread: pruneAll(state.planQuestionsStatusByThread),
+        answeredPlanMessageIdsByThread: pruneAll(state.answeredPlanMessageIdsByThread),
         permissionsByThread: pruneAll(state.permissionsByThread),
         usageByProvider: Object.fromEntries(
           Object.entries(state.usageByProvider).filter(([k]) => !threadIds.some((tid) => k.startsWith(`${tid}:`))),
@@ -1283,11 +1308,20 @@ export const useThreadStore = create<ThreadState>((set, get) => {
    * message and schedules tool call fade-out animations.
    */
   handleAgentEvent: (threadId, event) => {
-    // Any agent event for this thread implies the cached snapshot is stale.
-    evictMessageCache(threadId);
-
     const method = (event.method as string) || "";
     const params = (event.params as Record<string, unknown>) || event;
+
+    // Only evict the message cache on structural changes that add or modify
+    // persisted messages. Streaming deltas (textDelta, toolProgress) are
+    // ephemeral and don't change what loadMessages would return from the DB.
+    const isStructuralEvent =
+      method === "session.turnComplete" ||
+      method === "session.ended" ||
+      method === "session.message" ||
+      method === "session.error";
+    if (isStructuralEvent) {
+      evictMessageCache(threadId);
+    }
 
     // Helper: mark all prior incomplete tool calls as complete.
     // The Claude Agent SDK handles tool execution internally and does not
