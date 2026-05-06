@@ -153,6 +153,11 @@ if (electronABI) {
         timeout: 60_000,
       });
 
+      // Pre-create extraction target so tar doesn't need to create nested dirs.
+      // Windows tar (bsdtar/GNU tar via MSYS2) can intermittently fail to
+      // auto-create directories inside C:\Windows\Temp during bun install hooks.
+      mkdirSync(resolve(tmpDir, "build", "Release"), { recursive: true });
+
       // Extract using tar. Avoid --force-local (unsupported by Windows' bsdtar)
       // and avoid absolute paths with drive letters (the colon in "C:" is
       // misinterpreted as a remote host prefix by some tar implementations).
@@ -216,6 +221,7 @@ if (!nodePrebuiltOk) {
       timeout: 60_000,
     });
 
+    mkdirSync(resolve(nodeTmpDir, "build", "Release"), { recursive: true });
     execSync(`tar -xzf "${nodeTarName}"`, {
       stdio: "inherit",
       cwd: nodeTmpDir,
