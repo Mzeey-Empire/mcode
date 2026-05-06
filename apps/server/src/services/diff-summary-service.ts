@@ -55,7 +55,6 @@ function rowToRecord(row: DiffSummaryRow): DiffSummaryRecord {
 @injectable()
 export class DiffSummaryService {
   private readonly stmtGet: Database.Statement;
-  private readonly stmtDelete: Database.Statement;
   private readonly stmtInsert: Database.Statement;
 
   constructor(
@@ -69,11 +68,8 @@ export class DiffSummaryService {
     this.stmtGet = db.prepare(
       "SELECT id, thread_id, content, turn_count, last_turn_id, model, created_at FROM diff_summaries WHERE thread_id = ? LIMIT 1",
     );
-    this.stmtDelete = db.prepare(
-      "DELETE FROM diff_summaries WHERE thread_id = ?",
-    );
     this.stmtInsert = db.prepare(
-      "INSERT INTO diff_summaries (id, thread_id, content, turn_count, last_turn_id, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT OR REPLACE INTO diff_summaries (id, thread_id, content, turn_count, last_turn_id, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
     );
   }
 
@@ -113,8 +109,7 @@ export class DiffSummaryService {
       createdAt: new Date().toISOString(),
     };
 
-    // Upsert: delete existing row then insert fresh — no history retained
-    this.stmtDelete.run(threadId);
+    // Atomic upsert via INSERT OR REPLACE (unique index on thread_id)
     this.stmtInsert.run(
       record.id,
       record.threadId,

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Columns2, AlignJustify, WrapText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -34,6 +35,13 @@ export function DiffToolbar() {
     if (m.settingsGate === "diffSummary" && !diffSummaryEnabled) return false;
     return true;
   });
+
+  // Reset to "all" if the active viewMode was filtered out (e.g. summary tab disabled)
+  useEffect(() => {
+    if (!viewModes.some((m) => m.value === viewMode)) {
+      setViewMode("all");
+    }
+  }, [viewMode, viewModes, setViewMode]);
 
   return (
     <div className="flex items-center justify-between px-3 py-2 border-b border-border/30">

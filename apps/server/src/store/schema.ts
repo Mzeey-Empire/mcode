@@ -5,7 +5,7 @@
 
 import { sql } from "drizzle-orm";
 import { asc, desc } from "drizzle-orm";
-import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 const timestampDefault = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
 
@@ -156,7 +156,7 @@ export const diffSummaries = sqliteTable(
     model: text("model").notNull(),
     createdAt: text("created_at").notNull().default(timestampDefault),
   },
-  (table) => [index("idx_diff_summaries_thread").on(table.threadId)],
+  (table) => [uniqueIndex("idx_diff_summaries_thread").on(table.threadId)],
 );
 
 export const threadTasks = sqliteTable("thread_tasks", {

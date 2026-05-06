@@ -111,7 +111,7 @@ export class ThreadDiffSource implements DiffSummarySource {
     };
   }
 
-  /** Build a partial diff from the top N files by churn when the full diff is too large. */
+  /** Build a partial diff from the top N files by churn, capped to the same char budget. */
   private async buildPartialDiff(
     stats: FileDiffStat[],
     refBefore: string,
@@ -122,15 +122,18 @@ export class ThreadDiffSource implements DiffSummarySource {
     );
     const topFiles = sorted.slice(0, PARTIAL_TOP_FILES);
 
+    let remaining = DIFF_CHAR_LIMIT;
     const parts: string[] = [];
     for (const file of topFiles) {
+      if (remaining <= 0) break;
       const fileDiff = await this.snapshotService.getDiff(
         this.cwd,
         refBefore,
         refAfter,
         file.filePath,
       );
-      parts.push(fileDiff);
+      parts.push(fileDiff.slice(0, remaining));
+      remaining -= fileDiff.length;
     }
 
     return parts.join("\n");

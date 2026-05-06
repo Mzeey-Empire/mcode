@@ -35,9 +35,10 @@ export class UtilityCompletionService {
     const { provider: resolvedProvider, model: resolvedModel } =
       this.resolveProviderAndModel(settings);
 
-    this.availability.assertUsable(resolvedProvider);
-
     let provider = resolvedProvider;
+    let model = resolvedModel;
+    this.availability.assertUsable(provider);
+
     let agent = this.providerRegistry.resolve(provider);
 
     if (!isCompletionCapable(agent)) {
@@ -45,6 +46,8 @@ export class UtilityCompletionService {
         `Utility provider "${provider}" does not support completion, falling back to claude`,
       );
       provider = "claude" as ProviderId;
+      model = "";
+      this.availability.assertUsable(provider);
       agent = this.providerRegistry.resolve(provider);
 
       if (!isCompletionCapable(agent)) {
@@ -52,8 +55,7 @@ export class UtilityCompletionService {
       }
     }
 
-    const model =
-      resolvedModel || UTILITY_MODEL_DEFAULTS[provider] || "claude-haiku-4-5-20251001";
+    model = model || UTILITY_MODEL_DEFAULTS[provider] || "claude-haiku-4-5-20251001";
 
     const text = await agent.complete(prompt, model, cwd);
     return { text, model };

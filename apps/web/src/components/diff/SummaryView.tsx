@@ -59,6 +59,7 @@ export function SummaryView() {
 
   // Load persisted summary on mount or when the thread changes
   useEffect(() => {
+    setError(null);
     if (!activeThreadId) return;
     if (summaryRecord?.threadId === activeThreadId) return;
 
@@ -81,12 +82,16 @@ export function SummaryView() {
 
   const handleGenerate = useCallback(async () => {
     if (!activeThreadId) return;
+    const requestThreadId = activeThreadId;
     setError(null);
     setSummaryLoading(true);
     try {
-      const result = await getTransport().generateDiffSummary(activeThreadId);
+      const result = await getTransport().generateDiffSummary(requestThreadId);
+      // Ignore stale responses if the user switched threads during generation
+      if (useWorkspaceStore.getState().activeThreadId !== requestThreadId) return;
       setSummaryRecord(result);
     } catch (err) {
+      if (useWorkspaceStore.getState().activeThreadId !== requestThreadId) return;
       const message = err instanceof Error ? err.message : "Failed to generate summary";
       setError(message);
     } finally {
