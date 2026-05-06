@@ -149,6 +149,15 @@ export const SettingsSchema = lazySchema(() =>
             thinking: z.boolean().default(false),
           })
           .default({}),
+        /** Provider and model for lightweight utility tasks (PR drafts, diff summaries, etc.). */
+        utility: z
+          .object({
+            /** AI provider for utility tasks. Empty string inherits from model.defaults.provider. */
+            provider: ProviderIdSchema.or(z.literal("")).default(""),
+            /** Model ID for utility tasks. Empty string selects a provider-appropriate cheap default. */
+            id: z.string().default(""),
+          })
+          .default({}),
       })
       .default({}),
 
@@ -284,18 +293,14 @@ export const SettingsSchema = lazySchema(() =>
 
     /** PR draft generation settings. */
     prDraft: z
+      .object({})
+      .default({}),
+
+    /** Diff summary generation settings. */
+    diffSummary: z
       .object({
-        /**
-         * AI provider for PR draft generation.
-         * Empty string inherits from `model.defaults.provider` at runtime.
-         */
-        provider: ProviderIdSchema.or(z.literal("")).default(""),
-        /**
-         * Model used for AI-powered PR draft generation.
-         * Empty string selects a provider-appropriate default at runtime
-         * (claude-haiku-4-5-20251001 for Claude, gpt-5.1-codex-mini for Codex).
-         */
-        model: z.string().default(""),
+        /** Enable the AI-generated Summary tab in the diff panel. */
+        enabled: z.boolean().default(false),
       })
       .default({}),
 
@@ -382,6 +387,12 @@ export const PartialSettingsSchema = lazySchema(() =>
             thinking: z.boolean().optional(),
           })
           .optional(),
+        utility: z
+          .object({
+            provider: ProviderIdSchema.or(z.literal("")).optional(),
+            id: z.string().optional(),
+          })
+          .optional(),
       })
       .optional(),
     terminal: z
@@ -454,10 +465,10 @@ export const PartialSettingsSchema = lazySchema(() =>
           .optional(),
       })
       .optional(),
-    prDraft: z
+    prDraft: z.object({}).optional(),
+    diffSummary: z
       .object({
-        provider: ProviderIdSchema.or(z.literal("")).optional(),
-        model: z.string().optional(),
+        enabled: z.boolean().optional(),
       })
       .optional(),
     performance: z

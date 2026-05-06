@@ -587,6 +587,38 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({}),
     result: z.array(ProviderAvailabilitySchema()),
   },
+  /** Retrieve the stored diff summary for a thread (null if none exists). */
+  "diffSummary.get": {
+    params: z.object({
+      threadId: z.string(),
+    }),
+    result: z
+      .object({
+        id: z.string(),
+        threadId: z.string(),
+        content: z.string(),
+        turnCount: z.number(),
+        lastTurnId: z.string().nullable(),
+        model: z.string(),
+        createdAt: z.string(),
+      })
+      .nullable(),
+  },
+  /** Generate (or regenerate) an AI-powered diff summary for a thread. */
+  "diffSummary.generate": {
+    params: z.object({
+      threadId: z.string(),
+    }),
+    result: z.object({
+      id: z.string(),
+      threadId: z.string(),
+      content: z.string(),
+      turnCount: z.number(),
+      lastTurnId: z.string().nullable(),
+      model: z.string(),
+      createdAt: z.string(),
+    }),
+  },
 } as const));
 
 /** Union of all RPC method names. */

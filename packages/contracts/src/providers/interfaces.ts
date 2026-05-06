@@ -67,8 +67,8 @@ export interface IAgentProvider {
   /** Tear down all sessions and release resources. */
   shutdown(): void;
 
-  /** List models available from this provider. Not all providers support dynamic discovery. */
-  listModels?(): Promise<ProviderModelInfo[]>;
+  /** List models available from this provider. */
+  listModels(): Promise<ProviderModelInfo[]>;
 
   /** Return current usage/quota state for this provider. */
   getUsage?(): Promise<ProviderUsageInfo>;

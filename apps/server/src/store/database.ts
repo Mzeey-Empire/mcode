@@ -10,7 +10,7 @@ import { fileURLToPath } from "url";
 import { getMcodeDir, resolveDbPath } from "@mcode/shared";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { bootstrapDrizzle } from "./bootstrap-drizzle.js";
+import { bootstrapDrizzle, reconcileMigrations } from "./bootstrap-drizzle.js";
 import {
   createMigrationBackup,
   pruneMigrationBackups,
@@ -202,6 +202,7 @@ export function applySchemaPatches(db: Database.Database): void {
 function runMigrations(db: Database.Database): void {
   const dir = getDrizzleMigrationsDir();
   bootstrapDrizzle(db, dir);
+  reconcileMigrations(db, dir);
   const d = drizzle(db);
   migrate(d, { migrationsFolder: migrationsFolderForDrizzle(dir) });
   applySchemaPatches(db);

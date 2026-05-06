@@ -2,6 +2,10 @@
  * Seeds Drizzle migration bookkeeping when opening a database that was migrated
  * with the legacy `_migrations` runner so `migrate()` stays in sync without
  * re-applying the baseline SQL.
+ *
+ * Also provides {@link reconcileMigrations} to clean up orphaned tracking
+ * entries left behind when migration files are renumbered (e.g. after
+ * resolving merge conflicts).
  */
 
 import { createHash } from "crypto";
@@ -96,5 +100,49 @@ export function bootstrapDrizzle(db: Database.Database, drizzleDir: string): voi
     db.prepare(
       `INSERT INTO __drizzle_migrations ("hash", "created_at") VALUES (?, ?)`,
     ).run(hash, baseline.when);
+  })();
+}
+
+/**
+ * Removes stale entries from `__drizzle_migrations` whose hashes no longer
+ * correspond to any current migration file.
+ *
+ * This happens when migration files are deleted and renumbered (e.g. after
+ * resolving a merge conflict). The orphaned entries' `created_at` timestamps
+ * can act as a watermark that blocks newer migrations from being applied,
+ * since Drizzle only applies migrations whose `when` exceeds the latest
+ * recorded `created_at`.
+ *
+ * Safe in production: when all applied hashes match the current journal,
+ * nothing is deleted.
+ */
+export function reconcileMigrations(db: Database.Database, drizzleDir: string): void {
+  if (!tableExists(db, "__drizzle_migrations")) return;
+
+  const journalPath = join(drizzleDir, "meta", "_journal.json");
+  const journal = JSON.parse(readFileSync(journalPath, "utf-8")) as {
+    entries: Array<{ idx: number; tag: string; when: number }>;
+  };
+
+  // Compute hashes the same way Drizzle does: Buffer.toString() then SHA-256
+  const currentHashes = new Set<string>();
+  for (const entry of journal.entries) {
+    const sqlPath = join(drizzleDir, `${entry.tag}.sql`);
+    const sqlContent = readFileSync(sqlPath).toString();
+    currentHashes.add(createHash("sha256").update(sqlContent).digest("hex"));
+  }
+
+  const applied = db
+    .prepare("SELECT id, hash FROM __drizzle_migrations")
+    .all() as Array<{ id: number; hash: string }>;
+
+  const stale = applied.filter((row) => !currentHashes.has(row.hash));
+  if (stale.length === 0) return;
+
+  const del = db.prepare("DELETE FROM __drizzle_migrations WHERE id = ?");
+  db.transaction(() => {
+    for (const row of stale) {
+      del.run(row.id);
+    }
   })();
 }

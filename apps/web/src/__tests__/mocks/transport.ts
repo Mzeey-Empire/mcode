@@ -170,4 +170,14 @@ export const mockTransport: McodeTransport = {
     quotaCategories: [],
   }),
   listCopilotAgents: vi.fn().mockResolvedValue([]),
+  getDiffSummary: vi.fn().mockResolvedValue(null),
+  generateDiffSummary: vi.fn().mockResolvedValue({
+    id: "mock-id",
+    threadId: "mock-thread",
+    content: "",
+    turnCount: 0,
+    lastTurnId: null,
+    model: "mock-model",
+    createdAt: new Date().toISOString(),
+  }),
 };

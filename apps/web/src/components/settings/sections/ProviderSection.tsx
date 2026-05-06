@@ -42,7 +42,7 @@ export function ProviderSection() {
 
       // Warn before disabling a provider that is currently set as the default.
       const isDefault =
-        settings.model.defaults.provider === id || settings.prDraft.provider === id;
+        settings.model.defaults.provider === id || settings.model.utility.provider === id;
       if (isDefault) {
         setPendingDisable(id);
         return;

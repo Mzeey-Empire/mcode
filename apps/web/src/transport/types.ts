@@ -322,6 +322,28 @@ export interface McodeTransport {
   /** Fetch the current availability snapshot for all registered providers. */
   listProviderAvailability(): Promise<ProviderAvailability[]>;
 
+  // Diff summaries
+  /** Fetch the stored diff summary for a thread, or null if none exists. */
+  getDiffSummary(threadId: string): Promise<{
+    id: string;
+    threadId: string;
+    content: string;
+    turnCount: number;
+    lastTurnId: string | null;
+    model: string;
+    createdAt: string;
+  } | null>;
+  /** Generate (or regenerate) an AI-powered diff summary for a thread. */
+  generateDiffSummary(threadId: string): Promise<{
+    id: string;
+    threadId: string;
+    content: string;
+    turnCount: number;
+    lastTurnId: string | null;
+    model: string;
+    createdAt: string;
+  }>;
+
   // Memory pressure
   /** Notify server of window background/foreground state for memory management. */
   setBackground(background: boolean): Promise<void>;

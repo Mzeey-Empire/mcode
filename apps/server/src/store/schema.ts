@@ -5,7 +5,7 @@
 
 import { sql } from "drizzle-orm";
 import { asc, desc } from "drizzle-orm";
-import { type AnySQLiteColumn, index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { type AnySQLiteColumn, index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 const timestampDefault = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
 
@@ -143,6 +143,23 @@ export const turnSnapshots = sqliteTable(
     index("idx_turn_snapshots_message").on(table.messageId),
     index("idx_turn_snapshots_thread").on(table.threadId),
   ],
+);
+
+/** Persisted AI-generated diff summaries, one per thread. */
+export const diffSummaries = sqliteTable(
+  "diff_summaries",
+  {
+    id: text("id").primaryKey().notNull(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    turnCount: integer("turn_count").notNull(),
+    lastTurnId: text("last_turn_id"),
+    model: text("model").notNull(),
+    createdAt: text("created_at").notNull().default(timestampDefault),
+  },
+  (table) => [uniqueIndex("idx_diff_summaries_thread").on(table.threadId)],
 );
 
 export const threadTasks = sqliteTable("thread_tasks", {

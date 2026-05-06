@@ -134,22 +134,16 @@ export class ModelCacheService {
    */
   async refreshAll(): Promise<void> {
     const providers = this.registry.resolveAll();
-    const promises = providers
-      .filter((p) => typeof p.listModels === "function")
-      .map((p) =>
-        this.refreshProvider(p.id).catch((err) => {
-          logger.warn("Model refresh failed", { providerId: p.id, err: String(err) });
-        }),
-      );
+    const promises = providers.map((p) =>
+      this.refreshProvider(p.id).catch((err) => {
+        logger.warn("Model refresh failed", { providerId: p.id, err: String(err) });
+      }),
+    );
     await Promise.allSettled(promises);
   }
 
   private async doRefresh(providerId: string): Promise<ProviderModelInfo[]> {
     const provider = this.registry.resolve(providerId as never);
-    if (!provider.listModels) {
-      throw new Error(`Provider "${providerId}" does not support model listing`);
-    }
-
     const models = await provider.listModels();
     const now = Date.now();
 

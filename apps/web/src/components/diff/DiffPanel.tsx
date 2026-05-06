@@ -6,6 +6,7 @@ import { DiffToolbar } from "./DiffToolbar";
 import { TurnTimeline } from "./TurnTimeline";
 import { CumulativeView } from "./CumulativeView";
 import { CommitsView } from "./CommitsView";
+import { SummaryView } from "./SummaryView";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 /**
@@ -53,7 +54,9 @@ export function DiffPanel() {
       <DiffToolbar />
 
       <ScrollArea className="flex-1 min-h-0">
-        {snapshotsLoading ? (
+        {viewMode === "summary" ? (
+          <SummaryView />
+        ) : snapshotsLoading ? (
           <div className="flex items-center justify-center gap-1.5 py-10">
             {[0, 150, 300].map((delay) => (
               <div

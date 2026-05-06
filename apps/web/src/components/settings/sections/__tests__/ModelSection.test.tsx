@@ -12,9 +12,12 @@ vi.mock("@/stores/settingsStore", () => {
     {
       getState: vi.fn().mockReturnValue({
         settings: {
-          model: { defaults: { provider: "claude", id: "claude-opus-4-7", reasoning: "high", fallbackId: "" } },
+          model: {
+            defaults: { provider: "claude", id: "claude-opus-4-7", reasoning: "high", fallbackId: "" },
+            utility: { provider: "", id: "" },
+          },
           provider: { cli: { codex: "", claude: "", copilot: "" } },
-          prDraft: { provider: "", model: "" },
+          diffSummary: { enabled: false },
         },
       }),
       setState: vi.fn(),
@@ -53,9 +56,10 @@ function makeState(provider: string, modelId: string, reasoning = "high") {
     settings: {
       model: {
         defaults: { provider, id: modelId, reasoning, fallbackId: "" },
+        utility: { provider: "", id: "" },
       },
       provider: { cli: { codex: "", claude: "", copilot: "" } },
-      prDraft: { provider: "", model: "" },
+      diffSummary: { enabled: false },
     },
     update: vi.fn(),
   };

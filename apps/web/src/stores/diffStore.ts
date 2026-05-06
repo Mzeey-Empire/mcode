@@ -7,7 +7,7 @@ export type { GitCommit };
 export type RightPanelTab = "tasks" | "changes";
 
 /** View mode within the Changes tab. */
-export type DiffViewMode = "by-turn" | "all" | "commits";
+export type DiffViewMode = "by-turn" | "all" | "commits" | "summary";
 
 /** Diff rendering mode. */
 export type DiffRenderMode = "unified" | "side-by-side";
@@ -71,6 +71,18 @@ interface DiffState {
   diffContent: string | null;
   /** Whether diff content is currently loading. */
   diffLoading: boolean;
+  /** Persisted diff summary for the current thread. */
+  summaryRecord: {
+    id: string;
+    threadId: string;
+    content: string;
+    turnCount: number;
+    lastTurnId: string | null;
+    model: string;
+    createdAt: string;
+  } | null;
+  /** Whether a summary is currently being generated. */
+  summaryLoading: boolean;
   getRightPanel: (threadId: string) => RightPanelState;
   toggleRightPanel: (threadId: string) => void;
   showRightPanel: (threadId: string) => void;
@@ -87,6 +99,10 @@ interface DiffState {
   selectFile: (file: SelectedFile | null) => void;
   setDiffContent: (content: string | null) => void;
   setDiffLoading: (loading: boolean) => void;
+  /** Set the loaded summary record. */
+  setSummaryRecord: (record: DiffState["summaryRecord"]) => void;
+  /** Set summary loading state. */
+  setSummaryLoading: (loading: boolean) => void;
   clearThread: (threadId: string) => void;
 }
 
@@ -103,6 +119,8 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   selectedFile: null,
   diffContent: null,
   diffLoading: false,
+  summaryRecord: null,
+  summaryLoading: false,
 
   getRightPanel: (threadId) =>
     get().rightPanelByThread[threadId] ?? RIGHT_PANEL_DEFAULTS,
@@ -176,6 +194,8 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   selectFile: (file) => set({ selectedFile: file, diffContent: null, diffLoading: false }),
   setDiffContent: (content) => set({ diffContent: content, diffLoading: false }),
   setDiffLoading: (loading) => set({ diffLoading: loading }),
+  setSummaryRecord: (record) => set({ summaryRecord: record }),
+  setSummaryLoading: (loading) => set({ summaryLoading: loading }),
   clearThread: (threadId) =>
     set((state) => {
       const snapshots = { ...state.snapshotsByThread };
@@ -191,6 +211,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
 
       // Only clear the global selection when it belongs to the deleted thread.
       const selectionBelongsToThread = state.selectedFile?.threadId === threadId;
+      const summaryBelongsToThread = state.summaryRecord?.threadId === threadId;
 
       return {
         snapshotsByThread: snapshots,
@@ -200,6 +221,9 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         rightPanelByThread: rightPanels,
         ...(selectionBelongsToThread
           ? { selectedFile: null, diffContent: null, diffLoading: false }
+          : {}),
+        ...(summaryBelongsToThread
+          ? { summaryRecord: null, summaryLoading: false }
           : {}),
       };
     }),

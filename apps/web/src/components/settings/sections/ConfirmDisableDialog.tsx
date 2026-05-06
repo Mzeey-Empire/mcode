@@ -23,7 +23,7 @@ export interface ConfirmDisableDialogProps {
 }
 
 /**
- * Confirms disabling a provider currently used as a default (model and/or prDraft).
+ * Confirms disabling a provider currently used as a default (model and/or utility model).
  * On confirm, performs a single settings.update that flips the toggle AND rewrites
  * the affected defaults to the deterministic replacement, keeping the settings
  * consistent in one atomic RPC call.
@@ -42,17 +42,17 @@ export function ConfirmDisableDialog({
   const replacementName = PROVIDER_CATALOG.find((e) => e.id === replacement)?.name ?? replacement;
 
   const affectedModel = settings.model.defaults.provider === providerId;
-  // prDraft.provider defaults to "" (inherit), so only flag it when explicitly set.
-  const affectedPrDraft =
-    settings.prDraft.provider !== "" && settings.prDraft.provider === providerId;
+  // utility provider defaults to "" (inherit), so only flag it when explicitly set.
+  const affectedUtility =
+    settings.model.utility.provider !== "" && settings.model.utility.provider === providerId;
 
-  // Default case is only for new threads; PR-draft-only uses a different phrasing.
+  // Default case is only for new threads; utility-only uses a different phrasing.
   const scope =
-    affectedModel && affectedPrDraft
-      ? "your default provider for new threads and PR draft generation"
+    affectedModel && affectedUtility
+      ? "your default provider for new threads and utility tasks"
       : affectedModel
         ? "your default provider for new threads"
-        : "your PR draft generation provider";
+        : "your utility model provider";
   const description = `${disablingName} is currently ${scope}. Disabling it will switch your default to ${replacementName}.`;
 
   async function handleConfirm() {
@@ -70,8 +70,8 @@ export function ConfirmDisableDialog({
     if (affectedModel) {
       patch.model = { defaults: { provider: replacement as SettingsProviderId } };
     }
-    if (affectedPrDraft) {
-      patch.prDraft = { provider: replacement as SettingsProviderId };
+    if (affectedUtility) {
+      patch.model = { ...patch.model, utility: { provider: replacement as SettingsProviderId } };
     }
     await update(patch);
     await onConfirm();

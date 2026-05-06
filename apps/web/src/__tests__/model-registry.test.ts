@@ -68,22 +68,24 @@ describe("Settings-aware defaults", () => {
         ...getDefaultSettings(),
         model: {
           defaults: { provider: "claude", id: "claude-opus-4-6", reasoning: "high", fallbackId: "", contextWindow: "200k", thinking: false },
+          utility: { provider: "", id: "" },
         },
       },
     });
     expect(getDefaultModelId()).toBe("claude-opus-4-6");
   });
 
-  it("getDefaultModelId falls back to first catalog model when ID is unknown for a static-catalog provider", () => {
+  it("getDefaultModelId passes through unknown IDs as valid persisted provider model IDs", () => {
     useSettingsStore.setState({
       settings: {
         ...getDefaultSettings(),
         model: {
           defaults: { provider: "codex", id: "nonexistent-model", reasoning: "high", fallbackId: "", contextWindow: "200k", thinking: false },
+          utility: { provider: "", id: "" },
         },
       },
     });
-    expect(getDefaultModelId()).toBe("gpt-5.4");
+    expect(getDefaultModelId()).toBe("nonexistent-model");
   });
 
   it("getDefaultModelId preserves Cursor settings ID when absent from the static registry", () => {
@@ -92,6 +94,7 @@ describe("Settings-aware defaults", () => {
         ...getDefaultSettings(),
         model: {
           defaults: { provider: "cursor", id: "cursor-dynamic-model-xyz", reasoning: "high", fallbackId: "", contextWindow: "200k", thinking: false },
+          utility: { provider: "", id: "" },
         },
       },
     });
@@ -108,6 +111,7 @@ describe("Settings-aware defaults", () => {
         ...getDefaultSettings(),
         model: {
           defaults: { provider: "claude", id: "claude-sonnet-4-6", reasoning: "low", fallbackId: "", contextWindow: "200k", thinking: false },
+          utility: { provider: "", id: "" },
         },
       },
     });
@@ -124,6 +128,7 @@ describe("Settings-aware defaults", () => {
         ...getDefaultSettings(),
         model: {
           defaults: { provider: "claude", id: "claude-opus-4-6", reasoning: "max", fallbackId: "", contextWindow: "200k", thinking: false },
+          utility: { provider: "", id: "" },
         },
       },
     });
