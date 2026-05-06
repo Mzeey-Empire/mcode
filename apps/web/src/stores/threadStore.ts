@@ -415,6 +415,10 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       if (threadRecord?.has_file_changes && !cached.latestTurnWithChanges) {
         void getTransport().listSnapshots(threadId).then((snapshots) => {
           if (snapshots.length === 0) return;
+          // Re-read current cache entry to avoid overwriting fresher data
+          // that loadOlderMessages or another path may have written.
+          const latestCached = getCachedSnapshot(threadId);
+          if (!latestCached) return;
 
           const persistedFilesChangedMap: Record<string, string[]> = {};
           let latestTurnWithChanges: string | null = null;
@@ -426,9 +430,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           }
           // Persist back into cache so subsequent visits don't re-fetch
           cacheSnapshot(threadId, {
-            ...cached,
+            ...latestCached,
             persistedFilesChanged: {
-              ...cached.persistedFilesChanged,
+              ...latestCached.persistedFilesChanged,
               ...persistedFilesChangedMap,
             },
             latestTurnWithChanges,
@@ -1019,6 +1023,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         planAnswersByThread: omitKey(state.planAnswersByThread, threadId),
         activeQuestionIndexByThread: omitKey(state.activeQuestionIndexByThread, threadId),
         planQuestionsStatusByThread: omitKey(state.planQuestionsStatusByThread, threadId),
+        answeredPlanMessageIdsByThread: omitKey(state.answeredPlanMessageIdsByThread, threadId),
         permissionsByThread: omitKey(state.permissionsByThread, threadId),
         usageByProvider: Object.fromEntries(
           Object.entries(state.usageByProvider).filter(([k]) => !k.startsWith(`${threadId}:`)),
@@ -1099,6 +1104,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         planAnswersByThread: pruneAll(state.planAnswersByThread),
         activeQuestionIndexByThread: pruneAll(state.activeQuestionIndexByThread),
         planQuestionsStatusByThread: pruneAll(state.planQuestionsStatusByThread),
+        answeredPlanMessageIdsByThread: pruneAll(state.answeredPlanMessageIdsByThread),
         permissionsByThread: pruneAll(state.permissionsByThread),
         usageByProvider: Object.fromEntries(
           Object.entries(state.usageByProvider).filter(([k]) => !threadIds.some((tid) => k.startsWith(`${tid}:`))),
