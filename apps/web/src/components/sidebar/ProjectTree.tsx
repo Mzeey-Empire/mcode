@@ -949,7 +949,11 @@ function VirtualizedThreadList({
                 }}
                 onClick={() => handleThreadClick(thread.id, thread.title)}
                 onContextMenu={(e) => onThreadContextMenu(e, thread)}
-                onMouseEnter={() => schedulePrefetch(thread.id)}
+                onMouseEnter={() => {
+                  if (!thread.clientPreparing && !thread.clientError) {
+                    schedulePrefetch(thread.id);
+                  }
+                }}
                 onMouseLeave={cancelPrefetch}
                 className={cn(
                   "group/row flex items-center gap-2 rounded-md pr-2 py-1 text-[13px] cursor-pointer transition-colors",
