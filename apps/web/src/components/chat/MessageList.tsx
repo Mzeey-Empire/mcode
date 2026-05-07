@@ -28,13 +28,6 @@ const AUTO_SCROLL_THRESHOLD = 64;
 const OVERSCAN = 8;
 const DEFAULT_ITEM_HEIGHT = 80;
 const PAGINATION_THRESHOLD = 200;
-/**
- * Keep the list hidden until the scroll container's height stops changing for a few
- * frames so long threads do not reveal while the virtual spacer is still mostly estimates.
- */
-const TAIL_SETTLE_MIN_FRAMES = 20;
-const TAIL_SETTLE_STABLE_FRAMES = 3;
-const TAIL_SETTLE_MAX_FRAMES = 180;
 
 /** Renders a single virtual item based on its type discriminant. */
 const VirtualItemRenderer = memo(function VirtualItemRenderer({
@@ -390,73 +383,47 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   );
 
   /**
-   * Positions the list at the bottom and reveals only after {@link scrollHeight}
-   * has been stable across frames (long threads: virtual row measurement and lazy
-   * content). Avoids revealing at the bottom of an underestimated spacer.
+   * Pins the scroll element to the list tail, then reveals after layout frames.
+   * Initial hydrate also calls `scrollToIndex` with `behavior: 'auto'` so the virtualizer
+   * anchors the viewport before row heights finish measuring (stable `scrollHeight` alone
+   * can sit on estimates for long threads).
    *
    * @param options.measureFirst - When true, runs `virtualizer.measure()` first (cache miss
    *   and first open). Omit on cache-hit switches so the measurement cache stays warm.
    */
   const positionAtBottom = useCallback((options?: { measureFirst?: boolean }) => {
     beginSuppressPassiveAutoBottomScroll();
-    if (options?.measureFirst) {
-      virtualizer.measure();
-    }
     const settleGen = ++tailSettleGenRef.current;
     pinListTailRef.current = true;
     isInitialLoadRef.current = false;
 
-    let lastScrollHeight = -1;
-    let lastTotalSize = -1;
-    let stableHeightFrames = 0;
-    let frame = 0;
-
-    const snapAndStep = () => {
-      if (tailSettleGenRef.current !== settleGen) return;
-      if (!pinListTailRef.current) {
-        setIsPositioned(true);
-        scheduleEndSuppressPassiveAutoBottomScroll();
-        return;
+    if (options?.measureFirst) {
+      virtualizer.measure();
+      const n = itemsLengthRef.current;
+      if (n > 0) {
+        virtualizer.scrollToIndex(n - 1, { align: "end", behavior: "auto" });
       }
+    }
 
+    const snap = () => {
       const el = containerRef.current;
-      if (!el) {
-        setIsPositioned(true);
-        scheduleEndSuppressPassiveAutoBottomScroll();
-        return;
+      if (el) {
+        el.scrollTop = el.scrollHeight;
+        pinTailBaselineMaxScrollRef.current = Math.max(0, el.scrollHeight - el.clientHeight);
       }
-
-      el.scrollTop = el.scrollHeight;
-      pinTailBaselineMaxScrollRef.current = Math.max(0, el.scrollHeight - el.clientHeight);
-
-      const h = el.scrollHeight;
-      const total = virtualizer.getTotalSize();
-      frame++;
-      if (frame > TAIL_SETTLE_MIN_FRAMES && h === lastScrollHeight && total === lastTotalSize) {
-        stableHeightFrames++;
-      } else if (h !== lastScrollHeight || total !== lastTotalSize) {
-        stableHeightFrames = 0;
-      }
-      lastScrollHeight = h;
-      lastTotalSize = total;
-
-      const settled =
-        stableHeightFrames >= TAIL_SETTLE_STABLE_FRAMES
-        || frame >= TAIL_SETTLE_MAX_FRAMES;
-      if (settled) {
-        setIsPositioned(true);
-        scheduleEndSuppressPassiveAutoBottomScroll();
-        return;
-      }
-      requestAnimationFrame(snapAndStep);
     };
 
-    const el0 = containerRef.current;
-    if (el0) {
-      el0.scrollTop = el0.scrollHeight;
-      pinTailBaselineMaxScrollRef.current = Math.max(0, el0.scrollHeight - el0.clientHeight);
-    }
-    requestAnimationFrame(snapAndStep);
+    snap();
+    requestAnimationFrame(() => {
+      if (tailSettleGenRef.current !== settleGen) return;
+      snap();
+      requestAnimationFrame(() => {
+        if (tailSettleGenRef.current !== settleGen) return;
+        snap();
+        setIsPositioned(true);
+        scheduleEndSuppressPassiveAutoBottomScroll();
+      });
+    });
   }, [beginSuppressPassiveAutoBottomScroll, scheduleEndSuppressPassiveAutoBottomScroll, virtualizer]);
 
   // Clean up pending scroll timer on unmount

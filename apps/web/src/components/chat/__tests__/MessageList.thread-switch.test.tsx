@@ -13,6 +13,10 @@
  * to preserve cached row heights. Without a remembered scroll offset, we pin
  * `scrollTop` on switch instead of calling `scrollToIndex`, so no smooth or
  * reconcile-driven motion runs on open.
+ *
+ * When a cache miss finishes (`loading` true to false) on the same thread,
+ * `positionAtBottom({ measureFirst: true })` calls `scrollToIndex` with
+ * `behavior: "auto"` so the list anchors to the tail before rows finish measuring.
  */
 import { render, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -112,6 +116,39 @@ describe("MessageList thread switch", () => {
     rerender(<MessageList />);
 
     expect(measureSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls scrollToIndex with auto when cache-miss hydrate completes", () => {
+    loadingValue = false;
+    activeThreadIdValue = "thread-A";
+    messagesValue = [{ id: "m-a", sequence: 1 }];
+    const { rerender } = render(<MessageList />);
+
+    measureSpy.mockClear();
+    scrollToIndexSpy.mockClear();
+
+    loadingValue = true;
+    activeThreadIdValue = "thread-B";
+    messagesValue = [];
+    act(() => {
+      rerender(<MessageList />);
+    });
+
+    expect(scrollToIndexSpy).not.toHaveBeenCalled();
+
+    loadingValue = false;
+    messagesValue = [{ id: "m-b", sequence: 1 }];
+    act(() => {
+      rerender(<MessageList />);
+    });
+
+    const autoTailCalls = scrollToIndexSpy.mock.calls.filter(
+      (call) =>
+        (call[1] as { behavior?: string; align?: string } | undefined)?.behavior === "auto" &&
+        (call[1] as { align?: string } | undefined)?.align === "end",
+    );
+    expect(autoTailCalls.length).toBe(1);
+    expect(autoTailCalls[0]?.[0]).toBeGreaterThanOrEqual(0);
   });
 
   it("pins scrollTop without virtualizer scrollToIndex on cache-hit switch without remembered scroll", () => {
