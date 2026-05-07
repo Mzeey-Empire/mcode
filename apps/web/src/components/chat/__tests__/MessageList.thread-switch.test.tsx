@@ -1,13 +1,25 @@
 /**
  * Tests for MessageList thread-switch behavior: cache-hit detection,
- * virtualizer measurement optimization, and scroll position restoration.
+ * virtualizer measurement optimization, scroll position restoration, and
+ * synchronous bottom positioning when a prefetched thread has no saved offset.
+ *
+ * Revisits use double-requestAnimationFrame suppression so passive effects
+ * that fire again after the store settles do not call smooth scrollToBottom.
+ * Near-bottom remembered offsets clamp to the current max scroll when content
+ * grew so a stale pixel does not sit above the tail.
  *
  * A cache hit occurs when threadStore has messages already loaded (loading: false
  * synchronously after activeThreadId changes). On cache hit, we skip virtualizer.measure()
- * to preserve cached row heights and avoid opacity flash by keeping isPositioned=true.
+ * to preserve cached row heights. Without a remembered scroll offset, we pin
+ * `scrollTop` on switch instead of calling `scrollToIndex`, so no smooth or
+ * reconcile-driven motion runs on open.
+ *
+ * When a cache miss finishes (`loading` true to false) on the same thread,
+ * `positionAtBottom({ measureFirst: true })` calls `scrollToIndex` with
+ * `behavior: "auto"` so the list anchors to the tail before rows finish measuring.
  */
 import { render, act } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const measureSpy = vi.fn();
 const scrollToIndexSpy = vi.fn();
@@ -75,6 +87,10 @@ beforeEach(() => {
   clearScrollMemory();
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("MessageList thread switch", () => {
   it("does not call virtualizer.measure() on a cache-hit switch", () => {
     loadingValue = false;            // cache hit ⇒ loading is false synchronously
@@ -102,6 +118,133 @@ describe("MessageList thread switch", () => {
     expect(measureSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("calls scrollToIndex with auto when cache-miss hydrate completes", () => {
+    loadingValue = false;
+    activeThreadIdValue = "thread-A";
+    messagesValue = [{ id: "m-a", sequence: 1 }];
+    const { rerender } = render(<MessageList />);
+
+    measureSpy.mockClear();
+    scrollToIndexSpy.mockClear();
+
+    loadingValue = true;
+    activeThreadIdValue = "thread-B";
+    messagesValue = [];
+    act(() => {
+      rerender(<MessageList />);
+    });
+
+    expect(scrollToIndexSpy).not.toHaveBeenCalled();
+
+    loadingValue = false;
+    messagesValue = [{ id: "m-b", sequence: 1 }];
+    act(() => {
+      rerender(<MessageList />);
+    });
+
+    const autoTailCalls = scrollToIndexSpy.mock.calls.filter(
+      (call) =>
+        (call[1] as { behavior?: string; align?: string } | undefined)?.behavior === "auto" &&
+        (call[1] as { align?: string } | undefined)?.align === "end",
+    );
+    expect(autoTailCalls.length).toBe(1);
+    expect(autoTailCalls[0]?.[0]).toBeGreaterThanOrEqual(0);
+  });
+
+  it("pins scrollTop without virtualizer scrollToIndex on cache-hit switch without remembered scroll", () => {
+    loadingValue = false;
+    activeThreadIdValue = "thread-A";
+    messagesValue = [{ id: "m-a", sequence: 1 }];
+    const { rerender, container } = render(<MessageList />);
+
+    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement | null;
+    expect(scrollEl).not.toBeNull();
+
+    let scrollTop = 0;
+    Object.defineProperty(scrollEl!, "scrollHeight", {
+      configurable: true,
+      value: 10_000,
+    });
+    Object.defineProperty(scrollEl!, "clientHeight", {
+      configurable: true,
+      value: 400,
+    });
+    Object.defineProperty(scrollEl!, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (v: number) => {
+        scrollTop = v;
+      },
+    });
+
+    scrollToIndexSpy.mockClear();
+    activeThreadIdValue = "thread-B";
+    messagesValue = [{ id: "m-b", sequence: 1 }];
+    act(() => {
+      rerender(<MessageList />);
+    });
+
+    expect(scrollToIndexSpy).not.toHaveBeenCalled();
+    expect(scrollTop).toBe(10_000);
+  });
+
+  it("does not schedule throttled smooth scroll after cache-hit switch without remembered scroll", () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    loadingValue = false;
+    activeThreadIdValue = "thread-A";
+    messagesValue = [{ id: "m-a", sequence: 1 }];
+    const { rerender } = render(<MessageList />);
+
+    scrollToIndexSpy.mockClear();
+    activeThreadIdValue = "thread-B";
+    messagesValue = [{ id: "m-b", sequence: 1 }];
+    act(() => {
+      rerender(<MessageList />);
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+
+    const smoothCalls = scrollToIndexSpy.mock.calls.filter(
+      (call) => (call[1] as { behavior?: string } | undefined)?.behavior === "smooth",
+    );
+    expect(smoothCalls.length).toBe(0);
+  });
+
+  it("keeps scroll container hidden until layout has had a chance to settle on cache-miss hydrate", () => {
+    // Long-thread regression: TanStack Virtual measures rows after mount and
+    // `scrollHeight` keeps growing for several frames. Revealing immediately
+    // (before settle) leaves the user above the true tail. Verify that on a
+    // cache-miss hydrate completion the container is still opacity:0
+    // synchronously after the rerender — settle happens in rAF.
+    loadingValue = false;
+    activeThreadIdValue = "thread-A";
+    messagesValue = [{ id: "m-a", sequence: 1 }];
+    const { rerender, container } = render(<MessageList />);
+
+    // Cache miss begins
+    loadingValue = true;
+    activeThreadIdValue = "thread-B";
+    messagesValue = [];
+    act(() => {
+      rerender(<MessageList />);
+    });
+
+    // Cache miss completes with messages
+    loadingValue = false;
+    messagesValue = [{ id: "m-b", sequence: 1 }];
+    act(() => {
+      rerender(<MessageList />);
+    });
+
+    // Scroll container is the .overflow-y-auto div; settle holds opacity at 0
+    // until the rAF chain stabilizes scrollHeight + getTotalSize.
+    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement | null;
+    expect(scrollEl).not.toBeNull();
+    expect(scrollEl!.style.opacity).toBe("0");
+  });
+
   it("restores remembered scrollTop on a cache-hit switch", () => {
     loadingValue = false;
     activeThreadIdValue = "thread-A";
@@ -114,6 +257,15 @@ describe("MessageList thread switch", () => {
 
     const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement | null;
     expect(scrollEl).not.toBeNull();
+
+    Object.defineProperty(scrollEl!, "scrollHeight", {
+      configurable: true,
+      value: 5000,
+    });
+    Object.defineProperty(scrollEl!, "clientHeight", {
+      configurable: true,
+      value: 400,
+    });
 
     // Mock scrollTop setter to track if it's called with the right value
     let setScrollTopValue: number | null = null;

@@ -1,4 +1,4 @@
-import { useRef, useEffect, useLayoutEffect, useMemo, useCallback, memo, useState } from "react";
+import { useRef, useEffect, useLayoutEffect, useMemo, useCallback, memo, useState, type WheelEvent } from "react";
 import { useReplyStore } from "@/stores/replyStore";
 import { ArrowDown, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,20 @@ const AUTO_SCROLL_THRESHOLD = 64;
 const OVERSCAN = 8;
 const DEFAULT_ITEM_HEIGHT = 80;
 const PAGINATION_THRESHOLD = 200;
+/**
+ * Initial-load reveal is gated on the inner list height stabilizing across frames.
+ * TanStack Virtual measures rows asynchronously after mount, so `scrollHeight`
+ * grows for several frames after we first snap to it. Revealing during that
+ * growth lands on a stale tail (the bug: long threads sit short of the bottom).
+ *
+ * STABLE: number of consecutive identical frames required before revealing.
+ *   4 frames ≈ 67ms — imperceptible on the happy path (short threads).
+ * MAX:    hard cap so a perpetually-growing list (e.g. lazy markdown that
+ *   never settles within a second) cannot leave the user staring at a blank pane.
+ *   60 frames ≈ 1s.
+ */
+const TAIL_SETTLE_STABLE_FRAMES = 4;
+const TAIL_SETTLE_MAX_FRAMES = 60;
 
 /** Renders a single virtual item based on its type discriminant. */
 const VirtualItemRenderer = memo(function VirtualItemRenderer({
@@ -146,6 +160,26 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   const firstMessageIdRef = useRef<string | null>(null);
   /** True until initial messages are positioned at the bottom after a thread switch. */
   const isInitialLoadRef = useRef(true);
+  /**
+   * Blocks discrete/streaming auto bottom-scroll while a navigation applies scroll.
+   * One-shot skip flags miss follow-up effect runs when stores settle after revisit.
+   */
+  const suppressPassiveAutoBottomScrollRef = useRef(false);
+  /** Cancels stale triple-rAF clears when another navigation starts. */
+  const suppressPassiveAutoBottomGenRef = useRef(0);
+  /** Cancels in-flight tail-settle rAF loops when a new navigation calls `positionAtBottom`. */
+  const tailSettleGenRef = useRef(0);
+  /**
+   * While true, list height growth snaps the viewport to the tail so virtual rows
+   * and async layout cannot leave the thread short of the bottom after open.
+   */
+  const pinListTailRef = useRef(false);
+  /**
+   * Last `scrollHeight - clientHeight` when we believed the viewport sat on the pinned
+   * tail. Used to tell virtualizer measurement growth (`scrollTop` stale vs old max)
+   * from the user leaving the tail (`scrollTop` below this baseline).
+   */
+  const pinTailBaselineMaxScrollRef = useRef(0);
   /** Tracks the previous activeThreadId so we can save its scrollTop before switching. */
   const prevActiveThreadIdRef = useRef<string | null>(null);
   /** Holds the scrollTop value to restore on the next layout effect. */
@@ -157,6 +191,8 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   const isScrolledUpRef = useRef(false);
   /** Controls container visibility: hidden while positioning to prevent top-to-bottom flash. */
   const [isPositioned, setIsPositioned] = useState(false);
+  /** Mirrors `isPositioned` for `handleScroll` so affordances do not run while the scroller is opacity-0. */
+  const isPositionedRef = useRef(false);
 
   const messages = useThreadStore((s) => s.messages);
   const loading = useThreadStore((s) => s.loading);
@@ -199,12 +235,58 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
 
   const toolCalls = toolCallsRaw ?? EMPTY_TOOL_CALLS;
 
+  useLayoutEffect(() => {
+    isPositionedRef.current = isPositioned;
+  }, [isPositioned]);
+
+  const beginSuppressPassiveAutoBottomScroll = useCallback(() => {
+    suppressPassiveAutoBottomScrollRef.current = true;
+  }, []);
+
+  /** Ends passive auto bottom-scroll suppression after layout settles across frames. */
+  const scheduleEndSuppressPassiveAutoBottomScroll = useCallback(() => {
+    const gen = ++suppressPassiveAutoBottomGenRef.current;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (suppressPassiveAutoBottomGenRef.current === gen) {
+            suppressPassiveAutoBottomScrollRef.current = false;
+          }
+        });
+      });
+    });
+  }, []);
+
+  /** Clears tail pin when the user scrolls content upward (wheel / trackpad). */
+  const handleWheel = useCallback((e: WheelEvent<HTMLDivElement>) => {
+    if (e.deltaY < 0) pinListTailRef.current = false;
+  }, []);
+
   /** Track scroll-to-bottom button visibility and trigger upward pagination near the top. */
   const handleScroll = useCallback(() => {
+    if (!isPositionedRef.current) return;
     const el = containerRef.current;
     if (!el) return;
+
+    const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+
+    if (pinListTailRef.current) {
+      const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (gap > AUTO_SCROLL_THRESHOLD) {
+        if (el.scrollTop < pinTailBaselineMaxScrollRef.current - 1) {
+          pinListTailRef.current = false;
+        } else {
+          el.scrollTop = el.scrollHeight;
+          pinTailBaselineMaxScrollRef.current = maxScroll;
+        }
+      } else {
+        pinTailBaselineMaxScrollRef.current = maxScroll;
+      }
+    }
+
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     const scrolledUp = distanceFromBottom > 200;
+    if (scrolledUp) pinListTailRef.current = false;
     isScrolledUpRef.current = scrolledUp;
     setShowScrollBtn(scrolledUp);
     // Clear new-content highlight once the user reaches the bottom
@@ -256,50 +338,176 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     overscan: OVERSCAN,
   });
 
-  // Don't adjust scroll when near bottom -- prevents jitter during streaming.
+  // Pinned to tail: always compensate for size changes so the viewport tracks
+  // the bottom as rows measure. Adjusting by +delta when at scrollOffset = oldMaxScroll
+  // gives newScrollOffset = oldMaxScroll + delta = newMaxScroll, exactly the new tail.
+  // Near the tail (not pinned): adjust within AUTO_SCROLL_THRESHOLD so a small
+  // user-induced scroll-up can still settle on the true bottom as items measure.
+  // Farther up: keep default above-viewport anchoring so history reading stays stable.
   // Assigned on the stable virtualizer instance (TanStack Virtual v3 API);
   // not available as a useVirtualizer option in the current type definitions.
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (
-    _item,
+    item,
     _delta,
     instance,
   ) => {
+    if (pinListTailRef.current) return true;
     const viewportHeight = instance.scrollRect?.height ?? 0;
     const scrollOffset = instance.scrollOffset ?? 0;
     const remaining =
       instance.getTotalSize() - (scrollOffset + viewportHeight);
-    return remaining > AUTO_SCROLL_THRESHOLD;
+    if (remaining <= AUTO_SCROLL_THRESHOLD) {
+      return true;
+    }
+    return item.start < scrollOffset;
   };
 
-  // Throttled scroll-to-bottom using virtualizer.
-  // Uses refs to avoid stale closures: itemsLengthRef always has the
-  // current count when the timer fires, even if messages arrived after
-  // the timer was scheduled.
+  /**
+   * Programmatic scroll to the list tail. Auto-follow uses the scroll element
+   * directly (no virtualizer reconcile, no CSS smooth). The floating button
+   * passes smooth=true for intentional animation.
+   */
   const scrollToBottom = useCallback(
     (smooth: boolean) => {
       if (scrollTimerRef.current) return;
+      const delay = smooth ? 200 : 0;
       scrollTimerRef.current = setTimeout(() => {
         scrollTimerRef.current = null;
         const count = itemsLengthRef.current;
         if (count === 0) return;
-        virtualizer.scrollToIndex(count - 1, {
-          align: "end",
-          behavior: smooth ? "smooth" : "auto",
-        });
-        // Fallback nudge for items whose size is not yet measured.
-        // Only for instant scroll to avoid cancelling smooth animations.
-        if (!smooth) {
+        const el = containerRef.current;
+        if (smooth) {
+          virtualizer.scrollToIndex(count - 1, {
+            align: "end",
+            behavior: "smooth",
+          });
+          return;
+        }
+        if (el) {
+          pinListTailRef.current = true;
+          el.scrollTop = el.scrollHeight;
+          pinTailBaselineMaxScrollRef.current = Math.max(0, el.scrollHeight - el.clientHeight);
           requestAnimationFrame(() => {
-            const el = containerRef.current;
-            if (el) el.scrollTop = el.scrollHeight;
+            const el2 = containerRef.current;
+            if (el2) {
+              el2.scrollTop = el2.scrollHeight;
+              pinTailBaselineMaxScrollRef.current = Math.max(0, el2.scrollHeight - el2.clientHeight);
+            }
           });
         }
-      }, 200);
+      }, delay);
     },
     [virtualizer],
   );
 
-  // Clean up pending scroll timer on unmount
+  /**
+   * Pins the scroll element to the list tail and reveals only after the inner
+   * list height has been stable for {@link TAIL_SETTLE_STABLE_FRAMES} consecutive
+   * frames (or {@link TAIL_SETTLE_MAX_FRAMES} hard cap, whichever comes first).
+   *
+   * Why a settle loop: TanStack Virtual measures rows after mount via its
+   * internal ResizeObserver. On long threads the estimated total size can be
+   * significantly less than the measured total. A single (or few) `scrollTop =
+   * scrollHeight` snap revealed before measurements complete leaves the user
+   * sitting *above* the real tail. ResizeObserver-based pinning fires too late
+   * to fix the perceived first paint. Hiding the list (opacity: 0) until both
+   * `scrollHeight` and `virtualizer.getTotalSize()` stop changing means the
+   * very first thing the user sees is already at the true bottom.
+   *
+   * @param options.measureFirst - When true, runs `virtualizer.measure()` and
+   *   `scrollToIndex(n-1, end, auto)` to anchor the virtualizer to the tail
+   *   before rows finish measuring. Used on cache-miss completion and first
+   *   open. Cache-hit switches omit this so the cached measurement state stays
+   *   warm and we land exactly where the cache says the tail is.
+   */
+  const positionAtBottom = useCallback((options?: { measureFirst?: boolean }) => {
+    beginSuppressPassiveAutoBottomScroll();
+    const settleGen = ++tailSettleGenRef.current;
+    pinListTailRef.current = true;
+    isInitialLoadRef.current = false;
+
+    if (options?.measureFirst) {
+      virtualizer.measure();
+      const n = itemsLengthRef.current;
+      if (n > 0) {
+        virtualizer.scrollToIndex(n - 1, { align: "end", behavior: "auto" });
+      }
+    }
+
+    const snap = () => {
+      const el = containerRef.current;
+      if (!el) return;
+      el.scrollTop = el.scrollHeight;
+      pinTailBaselineMaxScrollRef.current = Math.max(0, el.scrollHeight - el.clientHeight);
+    };
+
+    // Synchronous first snap so non-rAF environments (jsdom in unit tests)
+    // still see scrollTop applied before the rAF-based settle loop runs.
+    snap();
+
+    let lastScrollHeight = -1;
+    let lastTotalSize = -1;
+    let stableFrames = 0;
+    let frame = 0;
+
+    const reveal = () => {
+      snap();
+      setIsPositioned(true);
+      scheduleEndSuppressPassiveAutoBottomScroll();
+    };
+
+    const tick = () => {
+      if (tailSettleGenRef.current !== settleGen) return;
+      // If the user cleared the pin (wheel up, scrollbar drag) during settle,
+      // reveal immediately so they can interact with whatever they've scrolled to.
+      if (!pinListTailRef.current) {
+        setIsPositioned(true);
+        scheduleEndSuppressPassiveAutoBottomScroll();
+        return;
+      }
+      frame++;
+      snap();
+      const el = containerRef.current;
+      if (!el) {
+        setIsPositioned(true);
+        scheduleEndSuppressPassiveAutoBottomScroll();
+        return;
+      }
+      const h = el.scrollHeight;
+      const total = virtualizer.getTotalSize();
+      // Both scrollHeight (DOM) and getTotalSize (virtualizer state) must be
+      // unchanged. They can drift by one frame: the virtualizer updates its
+      // internal total first, then React re-renders the inner div with the new
+      // height. Requiring both to match for STABLE_FRAMES proves no measurement
+      // is in flight.
+      if (h === lastScrollHeight && total === lastTotalSize) {
+        stableFrames++;
+      } else {
+        stableFrames = 0;
+      }
+      lastScrollHeight = h;
+      lastTotalSize = total;
+      if (stableFrames >= TAIL_SETTLE_STABLE_FRAMES || frame >= TAIL_SETTLE_MAX_FRAMES) {
+        reveal();
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+
+    requestAnimationFrame(tick);
+  }, [beginSuppressPassiveAutoBottomScroll, scheduleEndSuppressPassiveAutoBottomScroll, virtualizer]);
+
+  // Clean up pending scroll timer on unmount.
+  //
+  // Do NOT bump `tailSettleGenRef` here. In React StrictMode dev the unmount
+  // cleanup fires between mount-1 and mount-2 of the initial mount; if we
+  // bumped the gen we would invalidate the in-flight settle rAF scheduled by
+  // mount-1, and mount-2 would not re-call `positionAtBottom` (because
+  // `isInitialLoadRef.current` was already flipped to false). The list would
+  // then sit at opacity:0 forever. A real unmount makes `containerRef.current`
+  // null, which the settle tick already handles by revealing and bailing.
+  // The gen is still bumped by each new `positionAtBottom` call, which is what
+  // we actually need to cancel a stale tick when the user navigates.
   useEffect(() => {
     return () => {
       if (scrollTimerRef.current) {
@@ -315,6 +523,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
       (item) => item.type === "message" && item.message.id === messageId,
     );
     if (idx !== -1) {
+      pinListTailRef.current = false;
       virtualizer.scrollToIndex(idx, { align: "center", behavior: "smooth" });
       setTimeout(() => {
         const element = document.querySelector(`[data-message-id="${messageId}"]`);
@@ -346,6 +555,11 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
       // Reset thread-scoped refs and affordance state so the prepend-detection
       // effect, scroll-affordance UI, and turn-expand map don't carry stale
       // measurements from the previous thread into the new one.
+      pinListTailRef.current = false;
+      if (scrollTimerRef.current) {
+        clearTimeout(scrollTimerRef.current);
+        scrollTimerRef.current = null;
+      }
       turnExpandRef.current.clear();
       prevMessageCountRef.current = 0;
       firstMessageIdRef.current = null;
@@ -360,6 +574,8 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
       // and clear stale measurements so previous-thread heights don't bleed in.
       isInitialLoadRef.current = true;
       setIsPositioned(false);
+      setShowScrollBtn(false);
+      setHasNewContent(false);
       pendingScrollRestoreRef.current = null;
       virtualizer.measure();
       return;
@@ -367,18 +583,30 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
 
     // Cache hit: keep the virtualizer's measurement cache (those rows have the
     // same item keys and dimensions — re-estimating would defeat the optimization).
-    // Skip the opacity flash; mark initial-load done so the bottom-scroll effect
-    // does not retrigger. Only enter this branch when there's a remembered
-    // scroll position; otherwise this also fires when `loading` flips
-    // true→false after a fresh fetch and would prematurely clear
-    // `isInitialLoadRef`, blocking the bottom-positioning effect.
+    // With a remembered offset, restore it in a later effect. On thread switch
+    // with no memory, jump to the bottom synchronously so the discrete-messages
+    // effect does not run a visible smooth scroll from a stale offset. This block
+    // still runs when `loading` flips true→false on the same thread; the
+    // `isThreadSwitch` guard on the bottom branch avoids clobbering initial load.
     const rememberedScrollTop = recallScrollTop(activeThreadId);
     if (rememberedScrollTop != null) {
       isInitialLoadRef.current = false;
       setIsPositioned(true);
       pendingScrollRestoreRef.current = rememberedScrollTop;
+    } else if (isThreadSwitch) {
+      // Cache hit on switch with no saved offset: avoid leaving stale scroll and
+      // throttled smooth scroll from the discrete-messages effect.
+      pendingScrollRestoreRef.current = null;
+      positionAtBottom();
+    } else if (isInitialLoadRef.current && items.length > 0) {
+      // Cache miss (or same-thread load): when `loading` becomes false, `prevId`
+      // already matches `activeThreadId`, so `isThreadSwitch` is false. First open
+      // also hits this branch. Pin the tail here so it tracks the same path as a
+      // cache-hit switch (lazy markdown and measured row heights included).
+      pendingScrollRestoreRef.current = null;
+      positionAtBottom({ measureFirst: true });
     }
-  }, [activeThreadId, loading, virtualizer]);
+  }, [activeThreadId, loading, virtualizer, positionAtBottom, items.length]);
 
   // Stabilize scroll position when older messages are prepended.
   // Detects real prepends by comparing the first message ID before and after
@@ -412,8 +640,9 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     }
   }, [messages]);
 
-  // Initial load: position at the bottom before paint to avoid top-to-bottom flash.
-  // useLayoutEffect fires after DOM mutations but before the browser paints.
+  // Empty thread: reveal without a tail jump. Non-empty initial tail positioning
+  // runs in the active-thread useLayoutEffect so cache-miss completion (same
+  // `activeThreadId` as `prevId`) is not skipped when `isThreadSwitch` is false.
   useLayoutEffect(() => {
     if (!isInitialLoadRef.current) return;
 
@@ -425,23 +654,8 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     }
 
     if (items.length === 0) return;
-    if (loading) return; // don't position until persisted messages are loaded
-
-    isInitialLoadRef.current = false;
-
-    virtualizer.scrollToIndex(items.length - 1, {
-      align: "end",
-      behavior: "auto",
-    });
-
-    // Fallback nudge + reveal: the virtualizer may not have measured all items
-    // yet, so force scrollTop to the absolute bottom and then show the container.
-    requestAnimationFrame(() => {
-      const el = containerRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
-      setIsPositioned(true);
-    });
-  }, [items.length, loading, virtualizer]);
+    if (loading) return;
+  }, [items.length, loading]);
 
   // Apply the remembered scrollTop after the virtualizer has rendered the
   // restored items. useLayoutEffect runs before paint, so the user never sees
@@ -456,29 +670,56 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     // to be briefly visible. When items load, items.length will change and trigger
     // another effect pass where loading is false.
     if (loading) return;
-    el.scrollTop = target;
+    beginSuppressPassiveAutoBottomScroll();
+    const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+    const withinTail =
+      target <= maxScroll && maxScroll - target <= AUTO_SCROLL_THRESHOLD;
+    const snapToTail = withinTail || target > maxScroll;
+    if (snapToTail) {
+      pinListTailRef.current = true;
+      el.scrollTop = el.scrollHeight;
+      pinTailBaselineMaxScrollRef.current = Math.max(0, el.scrollHeight - el.clientHeight);
+    } else {
+      pinListTailRef.current = false;
+      el.scrollTop = target;
+    }
     pendingScrollRestoreRef.current = null;
-  }, [activeThreadId, items.length, loading]);
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const scrolledUp = distanceFromBottom > 200;
+    isScrolledUpRef.current = scrolledUp;
+    setShowScrollBtn(scrolledUp);
+    if (!scrolledUp) setHasNewContent(false);
+    requestAnimationFrame(() => {
+      const el2 = containerRef.current;
+      if (el2 && snapToTail) {
+        el2.scrollTop = el2.scrollHeight;
+        pinTailBaselineMaxScrollRef.current = Math.max(0, el2.scrollHeight - el2.clientHeight);
+      }
+      scheduleEndSuppressPassiveAutoBottomScroll();
+    });
+  }, [activeThreadId, items.length, loading, beginSuppressPassiveAutoBottomScroll, scheduleEndSuppressPassiveAutoBottomScroll]);
 
   // Discrete events (new message, tool call) -> scroll if at bottom, else highlight button
   useEffect(() => {
     if (isInitialLoadRef.current) return;
+    if (suppressPassiveAutoBottomScrollRef.current) return;
     if (isScrolledUpRef.current) {
       setHasNewContent(true);
     } else {
-      scrollToBottom(true);
+      scrollToBottom(false);
     }
-  }, [messages.length, toolCalls.length, isAgentRunning, scrollToBottom]);
+  }, [activeThreadId, messages.length, toolCalls.length, isAgentRunning, scrollToBottom]);
 
   // Streaming deltas -> scroll if at bottom, else highlight button
   useEffect(() => {
+    if (suppressPassiveAutoBottomScrollRef.current) return;
     if (!streamingText || isInitialLoadRef.current) return;
     if (isScrolledUpRef.current) {
       setHasNewContent(true);
     } else {
       scrollToBottom(false);
     }
-  }, [streamingText, scrollToBottom]);
+  }, [streamingText, activeThreadId, scrollToBottom]);
 
   // Capture text selections in message bubbles and activate reply mode for the selected text.
   // Fires on mouseup so the selection is already finalised when we read it.
@@ -517,11 +758,30 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     return () => document.removeEventListener("mouseup", handleMouseUp);
   }, []);
 
+  /**
+   * While {@link pinListTailRef} is set (open or tail restore), keep the viewport on the tail as row heights stabilize.
+   * Re-run when `loading` clears so the observer attaches after the list inner exists and has non-zero size.
+   */
+  useEffect(() => {
+    if (typeof ResizeObserver === "undefined") return;
+    const outer = containerRef.current;
+    const inner = outer?.firstElementChild as HTMLElement | undefined;
+    if (!outer || !inner) return;
+    const ro = new ResizeObserver(() => {
+      if (!pinListTailRef.current) return;
+      outer.scrollTop = outer.scrollHeight;
+      pinTailBaselineMaxScrollRef.current = Math.max(0, outer.scrollHeight - outer.clientHeight);
+    });
+    ro.observe(inner);
+    return () => ro.disconnect();
+  }, [activeThreadId, loading]);
+
   return (
     <div className="relative h-full" data-testid="message-list">
       <div
         ref={containerRef}
         onScroll={handleScroll}
+        onWheel={handleWheel}
         className="h-full overflow-y-auto pt-4 transition-opacity duration-75"
         style={{ opacity: isPositioned ? 1 : 0 }}
       >
@@ -558,7 +818,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
       )}
 
       {/* Scroll-to-bottom floating button — pulses when new content arrives */}
-      {showScrollBtn && (
+      {showScrollBtn && isPositioned && (
         <ScrollToBottomButton
           hasNewContent={hasNewContent}
           onScrollToBottom={() => {
