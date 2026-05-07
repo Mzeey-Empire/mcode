@@ -800,6 +800,9 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
          *  turn has begun without going through sendMessage(). */
         let awaitingResume = false;
 
+        /** Suppresses duplicate ToolUse events when the SDK emits the same id on assistant blocks and tool_use messages. */
+        const emittedToolUseIds = new Set<string>();
+
         /**
          * Emit an Error event with a best-effort message extracted from an SDK
          * result payload. The full raw payload is logged so operators can see
@@ -924,7 +927,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
               for (const block of contentBlocks) {
                 if (block.type === "tool_use") {
                   const toolId = (block.id as string) || "";
+                  if (toolId && emittedToolUseIds.has(toolId)) {
+                    continue;
+                  }
                   if (toolId) {
+                    emittedToolUseIds.add(toolId);
                     const entry = this.sessions.get(sessionId);
                     entry?.pendingToolUses.add(toolId);
                   }
@@ -1130,7 +1137,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
 
             case "tool_use": {
               const toolId = (anyMsg.id as string) || "";
+              if (toolId && emittedToolUseIds.has(toolId)) {
+                break;
+              }
               if (toolId) {
+                emittedToolUseIds.add(toolId);
                 const entry = this.sessions.get(sessionId);
                 entry?.pendingToolUses.add(toolId);
               }
