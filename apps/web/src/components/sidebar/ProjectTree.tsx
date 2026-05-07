@@ -1511,7 +1511,7 @@ function SortableProjectShell(
   props: ProjectNodeProps & { sortableId: string; activeDragId: string | null },
 ) {
   const { sortableId, activeDragId, ...nodeProps } = props;
-  const collapseForDrag = activeDragId === sortableId;
+  const collapseForDrag = activeDragId !== null;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: sortableId,
   });
