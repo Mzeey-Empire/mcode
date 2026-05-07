@@ -153,6 +153,11 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   const suppressPassiveAutoBottomScrollRef = useRef(false);
   /** Cancels stale double-rAF clears when another navigation starts. */
   const suppressPassiveAutoBottomGenRef = useRef(0);
+  /**
+   * While true, list height growth snaps the viewport to the tail so virtual rows
+   * and async layout cannot leave the thread short of the bottom after open.
+   */
+  const pinListTailRef = useRef(false);
   /** Tracks the previous activeThreadId so we can save its scrollTop before switching. */
   const prevActiveThreadIdRef = useRef<string | null>(null);
   /** Holds the scrollTop value to restore on the next layout effect. */
@@ -215,9 +220,11 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     const gen = ++suppressPassiveAutoBottomGenRef.current;
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        if (suppressPassiveAutoBottomGenRef.current === gen) {
-          suppressPassiveAutoBottomScrollRef.current = false;
-        }
+        requestAnimationFrame(() => {
+          if (suppressPassiveAutoBottomGenRef.current === gen) {
+            suppressPassiveAutoBottomScrollRef.current = false;
+          }
+        });
       });
     });
   }, []);
@@ -228,6 +235,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     if (!el) return;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     const scrolledUp = distanceFromBottom > 200;
+    if (scrolledUp) pinListTailRef.current = false;
     isScrolledUpRef.current = scrolledUp;
     setShowScrollBtn(scrolledUp);
     // Clear new-content highlight once the user reaches the bottom
@@ -299,30 +307,36 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     return item.start < scrollOffset;
   };
 
-  // Throttled scroll-to-bottom using virtualizer.
-  // Uses refs to avoid stale closures: itemsLengthRef always has the
-  // current count when the timer fires, even if messages arrived after
-  // the timer was scheduled.
+  /**
+   * Programmatic scroll to the list tail. Auto-follow uses the scroll element
+   * directly (no virtualizer reconcile, no CSS smooth). The floating button
+   * passes smooth=true for intentional animation.
+   */
   const scrollToBottom = useCallback(
     (smooth: boolean) => {
       if (scrollTimerRef.current) return;
+      const delay = smooth ? 200 : 0;
       scrollTimerRef.current = setTimeout(() => {
         scrollTimerRef.current = null;
         const count = itemsLengthRef.current;
         if (count === 0) return;
-        virtualizer.scrollToIndex(count - 1, {
-          align: "end",
-          behavior: smooth ? "smooth" : "auto",
-        });
-        // Fallback nudge for items whose size is not yet measured.
-        // Only for instant scroll to avoid cancelling smooth animations.
-        if (!smooth) {
+        const el = containerRef.current;
+        if (smooth) {
+          virtualizer.scrollToIndex(count - 1, {
+            align: "end",
+            behavior: "smooth",
+          });
+          return;
+        }
+        if (el) {
+          pinListTailRef.current = true;
+          el.scrollTop = el.scrollHeight;
           requestAnimationFrame(() => {
-            const el = containerRef.current;
-            if (el) el.scrollTop = el.scrollHeight;
+            const el2 = containerRef.current;
+            if (el2) el2.scrollTop = el2.scrollHeight;
           });
         }
-      }, 200);
+      }, delay);
     },
     [virtualizer],
   );
@@ -337,6 +351,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
    */
   const positionAtBottom = useCallback(() => {
     beginSuppressPassiveAutoBottomScroll();
+    pinListTailRef.current = true;
     isInitialLoadRef.current = false;
     const el = containerRef.current;
     if (el) {
@@ -401,6 +416,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
       // Reset thread-scoped refs and affordance state so the prepend-detection
       // effect, scroll-affordance UI, and turn-expand map don't carry stale
       // measurements from the previous thread into the new one.
+      pinListTailRef.current = false;
       if (scrollTimerRef.current) {
         clearTimeout(scrollTimerRef.current);
         scrollTimerRef.current = null;
@@ -511,11 +527,12 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
     const withinTail =
       target <= maxScroll && maxScroll - target <= AUTO_SCROLL_THRESHOLD;
-    if (withinTail) {
+    const snapToTail = withinTail || target > maxScroll;
+    if (snapToTail) {
+      pinListTailRef.current = true;
       el.scrollTop = el.scrollHeight;
-    } else if (target > maxScroll) {
-      el.scrollTop = maxScroll;
     } else {
+      pinListTailRef.current = false;
       el.scrollTop = target;
     }
     pendingScrollRestoreRef.current = null;
@@ -526,7 +543,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     if (!scrolledUp) setHasNewContent(false);
     requestAnimationFrame(() => {
       const el2 = containerRef.current;
-      if (el2 && withinTail) el2.scrollTop = el2.scrollHeight;
+      if (el2 && snapToTail) el2.scrollTop = el2.scrollHeight;
       scheduleEndSuppressPassiveAutoBottomScroll();
     });
   }, [activeThreadId, items.length, loading, beginSuppressPassiveAutoBottomScroll, scheduleEndSuppressPassiveAutoBottomScroll]);
@@ -538,7 +555,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     if (isScrolledUpRef.current) {
       setHasNewContent(true);
     } else {
-      scrollToBottom(true);
+      scrollToBottom(false);
     }
   }, [activeThreadId, messages.length, toolCalls.length, isAgentRunning, scrollToBottom]);
 
@@ -589,6 +606,20 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     document.addEventListener("mouseup", handleMouseUp);
     return () => document.removeEventListener("mouseup", handleMouseUp);
   }, []);
+
+  /** While {@link pinListTailRef} is set (open or tail restore), keep the viewport on the tail as row heights stabilize. */
+  useEffect(() => {
+    if (typeof ResizeObserver === "undefined") return;
+    const outer = containerRef.current;
+    const inner = outer?.firstElementChild as HTMLElement | undefined;
+    if (!outer || !inner) return;
+    const ro = new ResizeObserver(() => {
+      if (!pinListTailRef.current) return;
+      outer.scrollTop = outer.scrollHeight;
+    });
+    ro.observe(inner);
+    return () => ro.disconnect();
+  }, [activeThreadId]);
 
   return (
     <div className="relative h-full" data-testid="message-list">
