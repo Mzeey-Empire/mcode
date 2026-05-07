@@ -184,6 +184,8 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   const isScrolledUpRef = useRef(false);
   /** Controls container visibility: hidden while positioning to prevent top-to-bottom flash. */
   const [isPositioned, setIsPositioned] = useState(false);
+  /** Mirrors `isPositioned` for `handleScroll` so affordances do not run while the scroller is opacity-0. */
+  const isPositionedRef = useRef(false);
 
   const messages = useThreadStore((s) => s.messages);
   const loading = useThreadStore((s) => s.loading);
@@ -226,6 +228,10 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
 
   const toolCalls = toolCallsRaw ?? EMPTY_TOOL_CALLS;
 
+  useLayoutEffect(() => {
+    isPositionedRef.current = isPositioned;
+  }, [isPositioned]);
+
   const beginSuppressPassiveAutoBottomScroll = useCallback(() => {
     suppressPassiveAutoBottomScrollRef.current = true;
   }, []);
@@ -251,6 +257,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
 
   /** Track scroll-to-bottom button visibility and trigger upward pagination near the top. */
   const handleScroll = useCallback(() => {
+    if (!isPositionedRef.current) return;
     const el = containerRef.current;
     if (!el) return;
 
@@ -400,6 +407,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     isInitialLoadRef.current = false;
 
     let lastScrollHeight = -1;
+    let lastTotalSize = -1;
     let stableHeightFrames = 0;
     let frame = 0;
 
@@ -422,13 +430,15 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
       pinTailBaselineMaxScrollRef.current = Math.max(0, el.scrollHeight - el.clientHeight);
 
       const h = el.scrollHeight;
+      const total = virtualizer.getTotalSize();
       frame++;
-      if (frame > TAIL_SETTLE_MIN_FRAMES && h === lastScrollHeight) {
+      if (frame > TAIL_SETTLE_MIN_FRAMES && h === lastScrollHeight && total === lastTotalSize) {
         stableHeightFrames++;
-      } else if (h !== lastScrollHeight) {
+      } else if (h !== lastScrollHeight || total !== lastTotalSize) {
         stableHeightFrames = 0;
       }
       lastScrollHeight = h;
+      lastTotalSize = total;
 
       const settled =
         stableHeightFrames >= TAIL_SETTLE_STABLE_FRAMES
@@ -517,6 +527,8 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
       // and clear stale measurements so previous-thread heights don't bleed in.
       isInitialLoadRef.current = true;
       setIsPositioned(false);
+      setShowScrollBtn(false);
+      setHasNewContent(false);
       pendingScrollRestoreRef.current = null;
       virtualizer.measure();
       return;
@@ -759,7 +771,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
       )}
 
       {/* Scroll-to-bottom floating button — pulses when new content arrives */}
-      {showScrollBtn && (
+      {showScrollBtn && isPositioned && (
         <ScrollToBottomButton
           hasNewContent={hasNewContent}
           onScrollToBottom={() => {
