@@ -132,9 +132,9 @@ export async function checkForUpdatesNow(): Promise<UpdateStatus> {
   return lastStatus;
 }
 
-/** Quit and install a downloaded update. No-op if nothing is downloaded. */
+/** Quit and install a downloaded update. No-op in dev or if nothing is downloaded. */
 export function installUpdate(): void {
-  if (!initialized) return;
+  if (!app.isPackaged) return;
   if (lastStatus.state !== "downloaded") return;
   autoUpdater.quitAndInstall();
 }
@@ -144,8 +144,16 @@ export function installUpdate(): void {
  * No-op in dev (no packaged app to update).
  */
 export function initAutoUpdater(): void {
-  if (!app.isPackaged) return;
+  if (initialized) return;
   initialized = true;
+
+  // In dev, force electron-updater to read dev-app-update.yml so we can
+  // test the check/download flow without a packaged build.
+  if (!app.isPackaged) {
+    autoUpdater.forceDevUpdateConfig = true;
+  }
+
+  autoUpdater.allowDowngrade = false;
 
   const { autoDownload, autoInstallOnQuit } = loadUpdaterSettings();
   autoUpdater.autoDownload = autoDownload;
@@ -250,7 +258,7 @@ export function cleanupAutoUpdater(): void {
 /** Prompt the user to restart and install a downloaded update. */
 async function promptRestart(version: string): Promise<void> {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
-  if (!win) return;
+  if (!win || win.isDestroyed()) return;
 
   const { response } = await dialog.showMessageBox(win, {
     type: "info",
@@ -260,7 +268,7 @@ async function promptRestart(version: string): Promise<void> {
     defaultId: 0,
   });
 
-  if (response === 0) {
+  if (response === 0 && app.isPackaged) {
     autoUpdater.quitAndInstall();
   }
 }
