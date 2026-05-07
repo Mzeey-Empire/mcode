@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.9.1](https://github.com/Mzeey-Empire/mcode/compare/mcode-v0.9.0...mcode-v0.9.1) (2026-05-07)
+
+
+### Bug Fixes
+
+* collapse all projects during drag to prevent render distortion ([#419](https://github.com/Mzeey-Empire/mcode/issues/419)) ([55b54e2](https://github.com/Mzeey-Empire/mcode/commit/55b54e29e096eb6754add9dd7957cd21ee74fef7))
+* require Ctrl+highlight to activate reply mode ([#421](https://github.com/Mzeey-Empire/mcode/issues/421)) ([907ba98](https://github.com/Mzeey-Empire/mcode/commit/907ba98c2254320c918048592a5c30e43c8f1d95))
+* **web:** MessageList scroll behavior on thread open and switch ([#420](https://github.com/Mzeey-Empire/mcode/issues/420)) ([b9eb658](https://github.com/Mzeey-Empire/mcode/commit/b9eb6584b2fe97dc32932a2820b3018fb8a8b2ba))
+
 ## [0.9.0](https://github.com/Mzeey-Emipre/mcode/compare/mcode-v0.8.2...mcode-v0.9.0) (2026-05-06)
 
 
