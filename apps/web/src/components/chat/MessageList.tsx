@@ -481,9 +481,12 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   }, [streamingText, scrollToBottom]);
 
   // Capture text selections in message bubbles and activate reply mode for the selected text.
-  // Fires on mouseup so the selection is already finalised when we read it.
+  // Only triggers when Ctrl (or Cmd on Mac) is held during mouseup so casual
+  // highlights don't accidentally activate the reply bar.
   useEffect(() => {
-    const handleMouseUp = () => {
+    const handleMouseUp = (e: MouseEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed || !selection.toString().trim()) return;
 

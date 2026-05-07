@@ -960,16 +960,6 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     return () => document.removeEventListener("click", handleClickOutside);
   }, []);
 
-  // Clear reply context when the user copies text — disambiguates "copy to reply"
-  // from "copy for clipboard" so the reply bar doesn't linger unexpectedly.
-  useEffect(() => {
-    const handleCopy = () => {
-      if (threadId) clearReply(threadId);
-    };
-    document.addEventListener("copy", handleCopy);
-    return () => document.removeEventListener("copy", handleCopy);
-  }, [threadId, clearReply]);
-
   // Dismiss reply when the user clicks outside both the composer and any message bubble.
   // Portaled overlays (popovers, dropdowns) render outside the composer DOM tree,
   // so we also check for popover-content markers to avoid false dismissals.
