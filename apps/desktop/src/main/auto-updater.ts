@@ -37,20 +37,26 @@ interface UpdaterSettings {
 
 /** Read updater settings from settings.json; falls back to safe defaults if the file is missing or invalid. */
 function loadUpdaterSettings(): UpdaterSettings {
+  const defaults: UpdaterSettings = {
+    autoDownload: true,
+    autoInstallOnQuit: true,
+    checkInterval: "4hours",
+  };
   try {
     const raw = readFileSync(join(getMcodeDir(), "settings.json"), "utf-8");
     const result = SettingsSchema().safeParse(JSON.parse(raw));
     if (result.success) {
       return {
-        autoDownload: result.data.updates?.autoDownload ?? true,
-        autoInstallOnQuit: result.data.updates?.autoInstallOnQuit ?? true,
-        checkInterval: result.data.updates?.checkInterval ?? "4hours",
+        autoDownload: result.data.updates?.autoDownload ?? defaults.autoDownload,
+        autoInstallOnQuit: result.data.updates?.autoInstallOnQuit ?? defaults.autoInstallOnQuit,
+        checkInterval: result.data.updates?.checkInterval ?? defaults.checkInterval,
       };
     }
+    console.warn("[auto-updater] settings.json failed validation, using defaults");
   } catch {
-    // File missing or unreadable; use defaults
+    // File missing or unreadable on first launch; expected.
   }
-  return { autoDownload: true, autoInstallOnQuit: true, checkInterval: "4hours" };
+  return defaults;
 }
 
 /** Get the configured check interval from settings, or 4 hours if settings cannot be read. */
@@ -137,6 +143,21 @@ export function installUpdate(): void {
   if (!app.isPackaged) return;
   if (lastStatus.state !== "downloaded") return;
   autoUpdater.quitAndInstall();
+}
+
+/**
+ * Trigger a manual download of a discovered update.
+ * Used when autoDownload is off and the user clicks "Download" in the banner.
+ */
+export async function downloadUpdate(): Promise<void> {
+  if (!initialized) return;
+  if (lastStatus.state !== "available") return;
+  try {
+    await autoUpdater.downloadUpdate();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    broadcastStatus({ state: "error", message });
+  }
 }
 
 /**
