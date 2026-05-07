@@ -299,6 +299,27 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     [virtualizer],
   );
 
+  /**
+   * Positions the list at the bottom synchronously and reveals the container.
+   * Used for initial layout and cache-hit thread switches so discrete scroll
+   * effects never show a smooth scroll from the wrong offset.
+   */
+  const positionAtBottom = useCallback(() => {
+    isInitialLoadRef.current = false;
+    const count = itemsLengthRef.current;
+    if (count > 0) {
+      virtualizer.scrollToIndex(count - 1, {
+        align: "end",
+        behavior: "auto",
+      });
+    }
+    requestAnimationFrame(() => {
+      const el = containerRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+      setIsPositioned(true);
+    });
+  }, [virtualizer]);
+
   // Clean up pending scroll timer on unmount
   useEffect(() => {
     return () => {
@@ -367,18 +388,23 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
 
     // Cache hit: keep the virtualizer's measurement cache (those rows have the
     // same item keys and dimensions — re-estimating would defeat the optimization).
-    // Skip the opacity flash; mark initial-load done so the bottom-scroll effect
-    // does not retrigger. Only enter this branch when there's a remembered
-    // scroll position; otherwise this also fires when `loading` flips
-    // true→false after a fresh fetch and would prematurely clear
-    // `isInitialLoadRef`, blocking the bottom-positioning effect.
+    // With a remembered offset, restore it in a later effect. On thread switch
+    // with no memory, jump to the bottom synchronously so the discrete-messages
+    // effect does not run a visible smooth scroll from a stale offset. This block
+    // still runs when `loading` flips true→false on the same thread; the
+    // `isThreadSwitch` guard on the bottom branch avoids clobbering initial load.
     const rememberedScrollTop = recallScrollTop(activeThreadId);
     if (rememberedScrollTop != null) {
       isInitialLoadRef.current = false;
       setIsPositioned(true);
       pendingScrollRestoreRef.current = rememberedScrollTop;
+    } else if (isThreadSwitch) {
+      // Cache hit on switch with no saved offset: avoid leaving stale scroll and
+      // throttled smooth scroll from the discrete-messages effect.
+      pendingScrollRestoreRef.current = null;
+      positionAtBottom();
     }
-  }, [activeThreadId, loading, virtualizer]);
+  }, [activeThreadId, loading, virtualizer, positionAtBottom]);
 
   // Stabilize scroll position when older messages are prepended.
   // Detects real prepends by comparing the first message ID before and after
@@ -427,21 +453,8 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     if (items.length === 0) return;
     if (loading) return; // don't position until persisted messages are loaded
 
-    isInitialLoadRef.current = false;
-
-    virtualizer.scrollToIndex(items.length - 1, {
-      align: "end",
-      behavior: "auto",
-    });
-
-    // Fallback nudge + reveal: the virtualizer may not have measured all items
-    // yet, so force scrollTop to the absolute bottom and then show the container.
-    requestAnimationFrame(() => {
-      const el = containerRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
-      setIsPositioned(true);
-    });
-  }, [items.length, loading, virtualizer]);
+    positionAtBottom();
+  }, [items.length, loading, virtualizer, positionAtBottom]);
 
   // Apply the remembered scrollTop after the virtualizer has rendered the
   // restored items. useLayoutEffect runs before paint, so the user never sees

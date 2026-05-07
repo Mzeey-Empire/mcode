@@ -1,10 +1,12 @@
 /**
  * Tests for MessageList thread-switch behavior: cache-hit detection,
- * virtualizer measurement optimization, and scroll position restoration.
+ * virtualizer measurement optimization, scroll position restoration, and
+ * synchronous bottom positioning when a prefetched thread has no saved offset.
  *
  * A cache hit occurs when threadStore has messages already loaded (loading: false
  * synchronously after activeThreadId changes). On cache hit, we skip virtualizer.measure()
- * to preserve cached row heights and avoid opacity flash by keeping isPositioned=true.
+ * to preserve cached row heights. Without a remembered scroll offset, we still call
+ * scrollToIndex (instant) on switch so the list does not animate from a stale position.
  */
 import { render, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -100,6 +102,30 @@ describe("MessageList thread switch", () => {
     rerender(<MessageList />);
 
     expect(measureSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("scrolls to bottom with instant behavior on cache-hit switch without remembered scroll", () => {
+    loadingValue = false;
+    activeThreadIdValue = "thread-A";
+    messagesValue = [{ id: "m-a", sequence: 1 }];
+    const { rerender } = render(<MessageList />);
+
+    scrollToIndexSpy.mockClear();
+    activeThreadIdValue = "thread-B";
+    messagesValue = [{ id: "m-b", sequence: 1 }];
+    act(() => {
+      rerender(<MessageList />);
+    });
+
+    expect(scrollToIndexSpy).toHaveBeenCalled();
+    const matchingCalls = scrollToIndexSpy.mock.calls.filter(
+      (call) =>
+        call[1] != null
+        && typeof call[1] === "object"
+        && (call[1] as { align?: string; behavior?: string }).align === "end"
+        && (call[1] as { align?: string; behavior?: string }).behavior === "auto",
+    );
+    expect(matchingCalls.length).toBeGreaterThanOrEqual(1);
   });
 
   it("restores remembered scrollTop on a cache-hit switch", () => {
