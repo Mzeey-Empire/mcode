@@ -43,7 +43,6 @@ function resetThreadStoreTestState() {
     currentTurnMessageIdByThread: {},
     agentStartTimes: {},
     settingsByThread: {},
-    activeSubagentsByThread: {},
     oldestLoadedSequence: {},
     hasMoreMessages: {},
     isLoadingMore: {},

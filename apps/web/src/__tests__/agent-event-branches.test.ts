@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { useThreadStore } from "@/stores/threadStore";
+import { countActiveSubagentCalls, useThreadStore } from "@/stores/threadStore";
 import { mockTransport, createMockThread } from "./mocks/transport";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useToastStore } from "@/stores/toastStore";
@@ -70,6 +70,22 @@ describe("handleAgentEvent branches", () => {
     expect(calls[0].isComplete).toBe(false);
   });
 
+  it("session.toolUse ignores duplicate toolCallId (defense in depth)", () => {
+    useThreadStore.getState().handleAgentEvent("thread-1", {
+      method: "session.toolUse",
+      params: { toolCallId: "dup", toolName: "Read", toolInput: { path: "/a" } },
+    });
+    useThreadStore.getState().handleAgentEvent("thread-1", {
+      method: "session.toolUse",
+      params: { toolCallId: "dup", toolName: "Read", toolInput: { path: "/b" } },
+    });
+    vi.runAllTimers();
+
+    const calls = useThreadStore.getState().toolCallsByThread["thread-1"];
+    expect(calls).toHaveLength(1);
+    expect(calls[0].toolInput).toEqual({ path: "/a" });
+  });
+
   it("toolResult fallback does not mark an Agent call complete when it has active children", () => {
     useThreadStore.setState({
       toolCallsByThread: {
@@ -80,7 +96,6 @@ describe("handleAgentEvent branches", () => {
           { id: "child-1", toolName: "Read", toolInput: {}, output: null, isError: false, isComplete: false, parentToolCallId: "agent-1" },
         ],
       },
-      activeSubagentsByThread: { "thread-1": 1 },
     });
 
     useThreadStore.getState().handleAgentEvent("thread-1", {
@@ -92,8 +107,10 @@ describe("handleAgentEvent branches", () => {
     const agentCall = calls.find((c) => c.id === "agent-1");
     // The Agent call must NOT be marked complete
     expect(agentCall?.isComplete).toBe(false);
-    // The active subagent count must NOT be decremented
-    expect(useThreadStore.getState().activeSubagentsByThread["thread-1"]).toBe(1);
+    // Derived count stays at 1 while the Agent row stays incomplete
+    expect(countActiveSubagentCalls(useThreadStore.getState().toolCallsByThread["thread-1"])).toBe(
+      1,
+    );
     // The child call MUST be marked complete — fallback resolves to it, not the Agent
     const childCall = calls.find((c) => c.id === "child-1");
     expect(childCall?.isComplete).toBe(true);
@@ -223,7 +240,6 @@ describe("subagent count via markPriorToolCallsComplete", () => {
           { id: "agent-1", toolName: "Agent", toolInput: {}, output: null, isError: false, isComplete: false },
         ],
       },
-      activeSubagentsByThread: { "thread-1": 1 },
       agentStartTimes: {},
       currentThreadId: "thread-1",
     });
@@ -244,8 +260,9 @@ describe("subagent count via markPriorToolCallsComplete", () => {
     const calls = useThreadStore.getState().toolCallsByThread["thread-1"];
     expect(calls.find((c) => c.id === "agent-1")?.isComplete).toBe(false);
 
-    // Counter stays put — Agent completion is owned by session.toolResult.
-    expect(useThreadStore.getState().activeSubagentsByThread["thread-1"]).toBe(1);
+    expect(countActiveSubagentCalls(useThreadStore.getState().toolCallsByThread["thread-1"])).toBe(
+      1,
+    );
   });
 
   it("leaves multiple in-flight Agent calls untouched while sweeping non-Agent peers", () => {
@@ -257,7 +274,6 @@ describe("subagent count via markPriorToolCallsComplete", () => {
           { id: "read-1", toolName: "Read", toolInput: {}, output: null, isError: false, isComplete: false },
         ],
       },
-      activeSubagentsByThread: { "thread-1": 2 },
     });
 
     useThreadStore.getState().handleAgentEvent("thread-1", {
@@ -272,7 +288,8 @@ describe("subagent count via markPriorToolCallsComplete", () => {
     expect(calls.find((c) => c.id === "agent-2")?.isComplete).toBe(false);
     // The non-Agent peer is swept as expected
     expect(calls.find((c) => c.id === "read-1")?.isComplete).toBe(true);
-    // Counter unchanged
-    expect(useThreadStore.getState().activeSubagentsByThread["thread-1"]).toBe(2);
+    expect(countActiveSubagentCalls(useThreadStore.getState().toolCallsByThread["thread-1"])).toBe(
+      2,
+    );
   });
 });
