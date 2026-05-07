@@ -28,6 +28,13 @@ const AUTO_SCROLL_THRESHOLD = 64;
 const OVERSCAN = 8;
 const DEFAULT_ITEM_HEIGHT = 80;
 const PAGINATION_THRESHOLD = 200;
+/**
+ * Keep the list hidden until the scroll container's height stops changing for a few
+ * frames so long threads do not reveal while the virtual spacer is still mostly estimates.
+ */
+const TAIL_SETTLE_MIN_FRAMES = 20;
+const TAIL_SETTLE_STABLE_FRAMES = 3;
+const TAIL_SETTLE_MAX_FRAMES = 180;
 
 /** Renders a single virtual item based on its type discriminant. */
 const VirtualItemRenderer = memo(function VirtualItemRenderer({
@@ -151,8 +158,10 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
    * One-shot skip flags miss follow-up effect runs when stores settle after revisit.
    */
   const suppressPassiveAutoBottomScrollRef = useRef(false);
-  /** Cancels stale double-rAF clears when another navigation starts. */
+  /** Cancels stale triple-rAF clears when another navigation starts. */
   const suppressPassiveAutoBottomGenRef = useRef(0);
+  /** Cancels in-flight tail-settle rAF loops when a new navigation calls `positionAtBottom`. */
+  const tailSettleGenRef = useRef(0);
   /**
    * While true, list height growth snaps the viewport to the tail so virtual rows
    * and async layout cannot leave the thread short of the bottom after open.
@@ -374,43 +383,76 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   );
 
   /**
-   * Positions the list at the bottom synchronously and reveals the container.
-   * Sets the scroll element's `scrollTop` directly instead of calling the
-   * virtualizer's `scrollToIndex`, avoiding TanStack Virtual's multi-frame
-   * scroll reconciliation (that loop retriggers as row heights settle and looks
-   * like motion). Arms passive auto-scroll suppression until
-   * `scheduleEndSuppressPassiveAutoBottomScroll` runs after layout settles.
+   * Positions the list at the bottom and reveals only after {@link scrollHeight}
+   * has been stable across frames (long threads: virtual row measurement and lazy
+   * content). Avoids revealing at the bottom of an underestimated spacer.
+   *
+   * @param options.measureFirst - When true, runs `virtualizer.measure()` first (cache miss
+   *   and first open). Omit on cache-hit switches so the measurement cache stays warm.
    */
-  const positionAtBottom = useCallback(() => {
+  const positionAtBottom = useCallback((options?: { measureFirst?: boolean }) => {
     beginSuppressPassiveAutoBottomScroll();
+    if (options?.measureFirst) {
+      virtualizer.measure();
+    }
+    const settleGen = ++tailSettleGenRef.current;
     pinListTailRef.current = true;
     isInitialLoadRef.current = false;
-    const el = containerRef.current;
-    if (el) {
-      el.scrollTop = el.scrollHeight;
-      pinTailBaselineMaxScrollRef.current = Math.max(0, el.scrollHeight - el.clientHeight);
-    }
-    requestAnimationFrame(() => {
-      const el2 = containerRef.current;
-      if (el2) {
-        el2.scrollTop = el2.scrollHeight;
-        pinTailBaselineMaxScrollRef.current = Math.max(0, el2.scrollHeight - el2.clientHeight);
-      }
-      requestAnimationFrame(() => {
-        const el3 = containerRef.current;
-        if (el3) {
-          el3.scrollTop = el3.scrollHeight;
-          pinTailBaselineMaxScrollRef.current = Math.max(0, el3.scrollHeight - el3.clientHeight);
-        }
+
+    let lastScrollHeight = -1;
+    let stableHeightFrames = 0;
+    let frame = 0;
+
+    const snapAndStep = () => {
+      if (tailSettleGenRef.current !== settleGen) return;
+      if (!pinListTailRef.current) {
         setIsPositioned(true);
         scheduleEndSuppressPassiveAutoBottomScroll();
-      });
-    });
-  }, [beginSuppressPassiveAutoBottomScroll, scheduleEndSuppressPassiveAutoBottomScroll]);
+        return;
+      }
+
+      const el = containerRef.current;
+      if (!el) {
+        setIsPositioned(true);
+        scheduleEndSuppressPassiveAutoBottomScroll();
+        return;
+      }
+
+      el.scrollTop = el.scrollHeight;
+      pinTailBaselineMaxScrollRef.current = Math.max(0, el.scrollHeight - el.clientHeight);
+
+      const h = el.scrollHeight;
+      frame++;
+      if (frame > TAIL_SETTLE_MIN_FRAMES && h === lastScrollHeight) {
+        stableHeightFrames++;
+      } else if (h !== lastScrollHeight) {
+        stableHeightFrames = 0;
+      }
+      lastScrollHeight = h;
+
+      const settled =
+        stableHeightFrames >= TAIL_SETTLE_STABLE_FRAMES
+        || frame >= TAIL_SETTLE_MAX_FRAMES;
+      if (settled) {
+        setIsPositioned(true);
+        scheduleEndSuppressPassiveAutoBottomScroll();
+        return;
+      }
+      requestAnimationFrame(snapAndStep);
+    };
+
+    const el0 = containerRef.current;
+    if (el0) {
+      el0.scrollTop = el0.scrollHeight;
+      pinTailBaselineMaxScrollRef.current = Math.max(0, el0.scrollHeight - el0.clientHeight);
+    }
+    requestAnimationFrame(snapAndStep);
+  }, [beginSuppressPassiveAutoBottomScroll, scheduleEndSuppressPassiveAutoBottomScroll, virtualizer]);
 
   // Clean up pending scroll timer on unmount
   useEffect(() => {
     return () => {
+      tailSettleGenRef.current++;
       if (scrollTimerRef.current) {
         clearTimeout(scrollTimerRef.current);
         scrollTimerRef.current = null;
@@ -503,7 +545,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
       // also hits this branch. Pin the tail here so it tracks the same path as a
       // cache-hit switch (lazy markdown and measured row heights included).
       pendingScrollRestoreRef.current = null;
-      positionAtBottom();
+      positionAtBottom({ measureFirst: true });
     }
   }, [activeThreadId, loading, virtualizer, positionAtBottom, items.length]);
 
