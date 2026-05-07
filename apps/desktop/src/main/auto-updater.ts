@@ -99,21 +99,35 @@ function broadcastStatus(status: UpdateStatus): void {
   }
 }
 
+/** Guards against overlapping check-for-update calls. */
+let isChecking = false;
+
 /**
  * Manually trigger a check for updates.
  * Safe to call from the renderer; resolves once the check completes.
  */
 export async function checkForUpdatesNow(): Promise<UpdateStatus> {
   if (!initialized) {
-    // In dev mode there is nothing to check against.
     return { state: "not-available", version: app.getVersion() };
   }
+  if (isChecking) {
+    return lastStatus;
+  }
+  isChecking = true;
   try {
+    // Re-read settings so toggling "auto-download" in the UI takes
+    // effect without an app restart.
+    const { autoDownload, autoInstallOnQuit } = loadUpdaterSettings();
+    autoUpdater.autoDownload = autoDownload;
+    autoUpdater.autoInstallOnAppQuit = autoInstallOnQuit;
+
     broadcastStatus({ state: "checking" });
     await autoUpdater.checkForUpdates();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     broadcastStatus({ state: "error", message });
+  } finally {
+    isChecking = false;
   }
   return lastStatus;
 }
