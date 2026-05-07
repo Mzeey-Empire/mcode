@@ -41,6 +41,8 @@ const _legacyEncoder = new TextEncoder();
  * - `providers.availability` -- server-pushed provider availability snapshot forwarded to providerAvailabilityStore
  * - `workspace.gitStatusChanged` -- workspace git status changed (e.g. non-git folder became a repo), updates is_git_repo flag
  * - `workspace.orderChanged` -- sidebar project order changed on the server; refreshes workspace list
+ * - `workspace.deleted` -- workspace hard-delete complete; removes it from local state
+ * - `workspace.deleteFailed` -- workspace deletion permanently stuck; reloads workspace list
  */
 export function startPushListeners(): void {
   // Guard against double-init
@@ -292,6 +294,27 @@ export function startPushListeners(): void {
   unsubs.push(
     pushEmitter.on("workspace.orderChanged", () => {
       void useWorkspaceStore.getState().loadWorkspaces();
+    }),
+  );
+
+  // workspace.deleted: remove the workspace from local state when hard-delete completes
+  unsubs.push(
+    pushEmitter.on("workspace.deleted", (data) => {
+      const { workspaceId } = data as { workspaceId: string };
+      const store = useWorkspaceStore.getState();
+      if (store.activeWorkspaceId === workspaceId) {
+        store.setActiveWorkspace(null);
+      }
+      store.removeWorkspaceFromState(workspaceId);
+    }),
+  );
+
+  // workspace.deleteFailed: reload workspaces so stuck state is reflected
+  unsubs.push(
+    pushEmitter.on("workspace.deleteFailed", (data) => {
+      const { workspaceId, reason } = data as { workspaceId: string; reason: string };
+      void useWorkspaceStore.getState().loadWorkspaces();
+      console.error(`Workspace ${workspaceId} deletion failed: ${reason}`);
     }),
   );
 

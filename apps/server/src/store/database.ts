@@ -10,7 +10,7 @@ import { fileURLToPath } from "url";
 import { getMcodeDir, resolveDbPath } from "@mcode/shared";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
-import { bootstrapDrizzle } from "./bootstrap-drizzle.js";
+import { bootstrapDrizzle, reconcileMigrations } from "./bootstrap-drizzle.js";
 import {
   createMigrationBackup,
   pruneMigrationBackups,
@@ -129,11 +129,83 @@ function applyPragmas(db: Database.Database, isFileBacked: boolean): void {
   db.pragma("foreign_keys = ON");
 }
 
+/**
+ * Adds columns that were retrofitted into migration 0000 after some databases
+ * were already created. `bootstrapDrizzle` marks 0000 as done for any DB that
+ * has the `workspaces` sentinel table, so these columns are never applied via
+ * the normal migration path on pre-existing installs.
+ *
+ * Safe to run on fresh databases: the PRAGMA check is a no-op when the column
+ * already exists. Safe under concurrent startup: if two processes both pass the
+ * PRAGMA check and race to ALTER TABLE, the second will receive a
+ * "duplicate column name" error which is swallowed — any other error is
+ * rethrown.
+ */
+export function applySchemaPatches(db: Database.Database): void {
+  const cols = (
+    db.prepare("PRAGMA table_info(workspaces)").all() as Array<{ name: string }>
+  ).map((r) => r.name);
+
+  // cols is empty when the table doesn't exist; nothing to patch in that case
+  if (cols.length > 0 && !cols.includes("sort_order")) {
+    try {
+      db.prepare(
+        "ALTER TABLE workspaces ADD COLUMN sort_order INTEGER DEFAULT 0 NOT NULL",
+      ).run();
+    } catch (err) {
+      if (
+        !(err instanceof Error) ||
+        !err.message.includes("duplicate column name")
+      ) {
+        throw err;
+      }
+    }
+  }
+
+  // Normalize sort_order when duplicates exist (e.g. column added with DEFAULT 0).
+  // Without unique values, reorder operations silently fail.
+  if (cols.length > 0) {
+    const distinctCount = (
+      db
+        .prepare(
+          "SELECT COUNT(DISTINCT sort_order) AS cnt FROM workspaces",
+        )
+        .get() as { cnt: number }
+    ).cnt;
+    const totalCount = (
+      db.prepare("SELECT COUNT(*) AS cnt FROM workspaces").get() as {
+        cnt: number;
+      }
+    ).cnt;
+
+    if (totalCount > 1 && distinctCount < totalCount) {
+      const ids = (
+        db
+          .prepare(
+            "SELECT id FROM workspaces ORDER BY sort_order ASC, created_at DESC, id ASC",
+          )
+          .all() as Array<{ id: string }>
+      ).map((r) => r.id);
+      const stmt = db.prepare(
+        "UPDATE workspaces SET sort_order = ? WHERE id = ?",
+      );
+      const assign = db.transaction(() => {
+        for (let i = 0; i < ids.length; i++) {
+          stmt.run(i, ids[i]);
+        }
+      });
+      assign();
+    }
+  }
+}
+
 function runMigrations(db: Database.Database): void {
   const dir = getDrizzleMigrationsDir();
   bootstrapDrizzle(db, dir);
+  reconcileMigrations(db, dir);
   const d = drizzle(db);
   migrate(d, { migrationsFolder: migrationsFolderForDrizzle(dir) });
+  applySchemaPatches(db);
 }
 
 /**

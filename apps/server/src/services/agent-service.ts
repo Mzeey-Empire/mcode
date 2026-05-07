@@ -51,6 +51,14 @@ import { PlanQuestionSchema } from "@mcode/contracts";
 import { z } from "zod";
 
 /**
+ * Escape special XML characters in a string to prevent injection into
+ * provider XML tags (e.g. the reply-to context block).
+ */
+function escapeXml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
  * Generate a thread title from message content: first line, truncated
  * to 50 characters at a word boundary with "..." appended.
  */
@@ -163,6 +171,10 @@ export class AgentService {
      * the agent without writing it to SQLite.
      */
     providerWireOverride?: string,
+    /** ID of the message being replied to. Stored on the user message row. */
+    replyToMessageId?: string,
+    /** Highlighted text excerpt from the replied-to message. Stored on the user message row. */
+    quotedText?: string,
   ): Promise<void> {
     const thread = this.threadRepo.findById(threadId);
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
@@ -237,6 +249,8 @@ export class AgentService {
         content,
         nextSeq,
         stored.length > 0 ? stored : undefined,
+        replyToMessageId,
+        quotedText,
       );
       if (markPlanAnswerForMessageId) {
         // INSERT OR IGNORE inside the repo skips PK collisions (idempotent
@@ -267,6 +281,19 @@ export class AgentService {
       this.planParsers.set(threadId, new PlanQuestionParser());
       if (providerWireOverride === undefined) {
         content = this.buildPlanPrompt(content);
+      }
+    }
+
+    // When the user is replying to a previous message, wrap the quoted context
+    // in XML tags so the AI provider understands the reference.
+    if (replyToMessageId && providerWireOverride === undefined) {
+      const replyTarget = this.messageRepo.findByIdInThread(threadId, replyToMessageId);
+      if (replyTarget) {
+        const quoteBody = quotedText
+          ? quotedText.slice(0, 2000)
+          : replyTarget.content.slice(0, 2000);
+        const truncated = quoteBody.length < (quotedText ?? replyTarget.content).length ? "..." : "";
+        content = `<reply-to role="${replyTarget.role}" sequence="${replyTarget.sequence}">\n${escapeXml(quoteBody)}${truncated}\n</reply-to>\n\n${content}`;
       }
     }
 
@@ -963,6 +990,16 @@ export class AgentService {
           this.updateBufferedToolCallOutput(event.threadId, event.toolCallId, event.output, event.isError);
         }
 
+        if (event.type === AgentEventType.TurnStarted) {
+          // Re-add to activeSessionIds for auto-resumed turns (ScheduleWakeup/loop).
+          // For sendMessage()-originated turns this is a no-op since sendMessage()
+          // already added the thread before emitting TurnStarted.
+          if (!this.activeSessionIds.has(event.threadId)) {
+            this.activeSessionIds.add(event.threadId);
+            this.memoryPressureService.markActive();
+          }
+        }
+
         if (event.type === AgentEventType.TurnComplete) {
           this.persistTurn(event.threadId).catch((err) => {
             logger.error("persistTurn failed on turnComplete", {
@@ -970,6 +1007,15 @@ export class AgentService {
               error: err instanceof Error ? err.message : String(err),
             });
           });
+
+          // Clear the "running" flag so agent.listRunning no longer reports
+          // this thread and shutdown won't downgrade it to "interrupted."
+          // Skip during compaction: the SDK fires a synthetic TurnComplete
+          // before the compaction API call, but the session continues
+          // automatically.
+          if (!this.compactionInProgressByThread.has(event.threadId)) {
+            this.trackSessionEnded(event.threadId);
+          }
 
           // Persist context usage so the tracker shows immediately on thread reload.
           // Skip during compaction: the compaction API call emits a turnComplete

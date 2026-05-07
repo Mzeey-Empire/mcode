@@ -5,7 +5,7 @@
 
 import { sql } from "drizzle-orm";
 import { asc, desc } from "drizzle-orm";
-import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { type AnySQLiteColumn, index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 const timestampDefault = sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`;
 
@@ -22,6 +22,7 @@ export const workspaces = sqliteTable(
     lastOpenedAt: integer("last_opened_at"),
     sortOrder: integer("sort_order").notNull().default(0),
     isGitRepo: integer("is_git_repo").notNull().default(1),
+    deletedAt: text("deleted_at"),
   },
   (table) => [
     index("idx_workspaces_sort_order").on(asc(table.sortOrder)),
@@ -91,6 +92,8 @@ export const messages = sqliteTable(
     timestamp: text("timestamp").notNull().default(timestampDefault),
     sequence: integer("sequence").notNull(),
     attachments: text("attachments"),
+    replyToMessageId: text("reply_to_message_id").references((): AnySQLiteColumn => messages.id, { onDelete: "set null" }),
+    quotedText: text("quoted_text"),
   },
   (table) => [
     index("idx_messages_thread").on(table.threadId),
@@ -140,6 +143,23 @@ export const turnSnapshots = sqliteTable(
     index("idx_turn_snapshots_message").on(table.messageId),
     index("idx_turn_snapshots_thread").on(table.threadId),
   ],
+);
+
+/** Persisted AI-generated diff summaries, one per thread. */
+export const diffSummaries = sqliteTable(
+  "diff_summaries",
+  {
+    id: text("id").primaryKey().notNull(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    content: text("content").notNull(),
+    turnCount: integer("turn_count").notNull(),
+    lastTurnId: text("last_turn_id"),
+    model: text("model").notNull(),
+    createdAt: text("created_at").notNull().default(timestampDefault),
+  },
+  (table) => [uniqueIndex("idx_diff_summaries_thread").on(table.threadId)],
 );
 
 export const threadTasks = sqliteTable("thread_tasks", {

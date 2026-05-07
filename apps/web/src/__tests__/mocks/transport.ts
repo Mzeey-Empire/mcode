@@ -27,6 +27,7 @@ export function createMockWorkspace(
     pinned: false,
     last_opened_at: null,
     sort_order: 0,
+    deleted_at: null,
     ...overrides,
   };
 }
@@ -98,6 +99,7 @@ export const mockTransport: McodeTransport = {
   createThread: vi.fn(),
   listThreads: vi.fn().mockResolvedValue([]),
   listRecentThreads: vi.fn().mockResolvedValue([]),
+  searchThreads: vi.fn().mockResolvedValue({ threads: [], workspaces: [] }),
   deleteThread: vi.fn().mockResolvedValue(true),
   listBranches: vi.fn().mockResolvedValue([]),
   getCurrentBranch: vi.fn().mockResolvedValue("main"),
@@ -168,4 +170,14 @@ export const mockTransport: McodeTransport = {
     quotaCategories: [],
   }),
   listCopilotAgents: vi.fn().mockResolvedValue([]),
+  getDiffSummary: vi.fn().mockResolvedValue(null),
+  generateDiffSummary: vi.fn().mockResolvedValue({
+    id: "mock-id",
+    threadId: "mock-thread",
+    content: "",
+    turnCount: 0,
+    lastTurnId: null,
+    model: "mock-model",
+    createdAt: new Date().toISOString(),
+  }),
 };

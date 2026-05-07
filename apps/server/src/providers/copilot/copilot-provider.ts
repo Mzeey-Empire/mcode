@@ -256,7 +256,17 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
       return this.modelCache;
     }
 
-    await this.refreshClient();
+    try {
+      await this.refreshClient();
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("Could not find @github/copilot")) {
+        logger.warn("CopilotProvider: @github/copilot not installed, returning empty model list");
+        return [];
+      }
+      throw e;
+    }
+
     const client = this.client;
     if (!client) {
       throw new Error("Copilot client not available");

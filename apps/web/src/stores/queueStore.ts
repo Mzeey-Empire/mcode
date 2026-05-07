@@ -21,6 +21,10 @@ export interface QueuedMessage {
   contextWindow?: ContextWindowMode;
   /** Haiku thinking toggle for this turn; undefined means inherit from thread/settings. */
   thinking?: boolean;
+  /** Reply target message ID, if this message is a reply. */
+  replyToMessageId?: string;
+  /** Quoted text excerpt for the reply. */
+  quotedText?: string;
   /** Unix timestamp (ms) when this message was enqueued. */
   queuedAt: number;
 }

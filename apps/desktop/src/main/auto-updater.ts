@@ -59,10 +59,9 @@ function loadUpdaterSettings(): UpdaterSettings {
   return defaults;
 }
 
-/** Get the configured check interval from settings, or 4 hours if settings cannot be read. */
-function getCheckIntervalMs(): number {
-  const { checkInterval } = loadUpdaterSettings();
-  return INTERVAL_MS_MAP[checkInterval] ?? (4 * 60 * 60 * 1000);
+/** Convert a check-interval name to milliseconds, defaulting to 4 hours. */
+function intervalToMs(interval: string): number {
+  return INTERVAL_MS_MAP[interval] ?? (4 * 60 * 60 * 1000);
 }
 
 /** IPC push channel used to broadcast update status to the renderer. */
@@ -176,7 +175,7 @@ export function initAutoUpdater(): void {
 
   autoUpdater.allowDowngrade = false;
 
-  const { autoDownload, autoInstallOnQuit } = loadUpdaterSettings();
+  const { autoDownload, autoInstallOnQuit, checkInterval } = loadUpdaterSettings();
   autoUpdater.autoDownload = autoDownload;
   autoUpdater.autoInstallOnAppQuit = autoInstallOnQuit;
 
@@ -252,7 +251,7 @@ export function initAutoUpdater(): void {
   }, 10_000);
 
   // Periodic checks using the configured interval
-  const intervalMs = getCheckIntervalMs();
+  const intervalMs = intervalToMs(checkInterval);
   if (isFinite(intervalMs)) {
     checkIntervalId = setInterval(() => {
       void checkForUpdatesNow();

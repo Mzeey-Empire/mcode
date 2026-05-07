@@ -109,6 +109,13 @@ export interface McodeTransport {
   listThreads(workspaceId: string): Promise<Thread[]>;
   /** List the most recently active threads across all workspaces, joined with workspace name + path. */
   listRecentThreads(limit?: number): Promise<RecentThread[]>;
+  /** Search threads across all workspaces by title, with optional status/provider filters. */
+  searchThreads(opts: {
+    query: string;
+    filters?: { status?: string[]; provider?: string[] };
+    sort?: { field: "updated_at" | "created_at" | "title"; direction: "asc" | "desc" };
+    limit?: number;
+  }): Promise<{ threads: Thread[]; workspaces: { id: string; name: string; path: string }[] }>;
   deleteThread(threadId: string, cleanupWorktree: boolean): Promise<boolean>;
 
   // Git branch commands
@@ -118,7 +125,7 @@ export interface McodeTransport {
   listWorktrees(workspaceId: string): Promise<WorktreeInfo[]>;
 
   // Agent commands
-  sendMessage(threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], reasoningLevel?: ReasoningLevel, provider?: string, interactionMode?: InteractionMode, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean): Promise<void>;
+  sendMessage(threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], reasoningLevel?: ReasoningLevel, provider?: string, interactionMode?: InteractionMode, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean, replyToMessageId?: string, quotedText?: string): Promise<void>;
   createAndSendMessage(
     workspaceId: string,
     content: string,
@@ -314,6 +321,28 @@ export interface McodeTransport {
   listCopilotAgents(workspaceId: string): Promise<CopilotSubagent[]>;
   /** Fetch the current availability snapshot for all registered providers. */
   listProviderAvailability(): Promise<ProviderAvailability[]>;
+
+  // Diff summaries
+  /** Fetch the stored diff summary for a thread, or null if none exists. */
+  getDiffSummary(threadId: string): Promise<{
+    id: string;
+    threadId: string;
+    content: string;
+    turnCount: number;
+    lastTurnId: string | null;
+    model: string;
+    createdAt: string;
+  } | null>;
+  /** Generate (or regenerate) an AI-powered diff summary for a thread. */
+  generateDiffSummary(threadId: string): Promise<{
+    id: string;
+    threadId: string;
+    content: string;
+    turnCount: number;
+    lastTurnId: string | null;
+    model: string;
+    createdAt: string;
+  }>;
 
   // Memory pressure
   /** Notify server of window background/foreground state for memory management. */

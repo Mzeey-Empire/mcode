@@ -44,7 +44,7 @@ export class CleanupJobRepo {
   private readonly stmtFindByThreadId: Statement;
   private readonly stmtCount: Statement;
 
-  constructor(@inject("Database") db: Database.Database) {
+  constructor(@inject("Database") private readonly db: Database.Database) {
     this.stmtInsert = db.prepare(
       `INSERT OR IGNORE INTO cleanup_jobs
         (id, thread_id, workspace_path, worktree_path, branch, attempts, next_retry_at, created_at)
@@ -159,5 +159,73 @@ export class CleanupJobRepo {
   count(): number {
     const row = this.stmtCount.get() as { n: number };
     return row.n;
+  }
+
+  /**
+   * Insert multiple cleanup jobs in a single transaction.
+   * Skips any thread_id that already has a pending job (ON CONFLICT IGNORE).
+   */
+  insertBatch(jobs: Array<{ thread_id: string; workspace_path: string; worktree_path: string; branch: string | null }>): number {
+    if (jobs.length === 0) return 0;
+
+    const insert = this.db.prepare(
+      `INSERT OR IGNORE INTO cleanup_jobs (id, thread_id, workspace_path, worktree_path, branch, attempts, next_retry_at, created_at)
+       VALUES (?, ?, ?, ?, ?, 0, 0, ?)`,
+    );
+
+    let inserted = 0;
+    const now = Date.now();
+
+    const tx = this.db.transaction(() => {
+      for (const job of jobs) {
+        const result = insert.run(randomUUID(), job.thread_id, job.workspace_path, job.worktree_path, job.branch, now);
+        if (result.changes > 0) inserted++;
+      }
+    });
+    tx();
+
+    return inserted;
+  }
+
+  /** Count pending cleanup jobs for a given workspace path. */
+  countByWorkspacePath(workspacePath: string): number {
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS count FROM cleanup_jobs WHERE workspace_path = ?")
+      .get(workspacePath) as { count: number };
+    return row.count;
+  }
+
+  /** Find a cleanup job by thread ID. Returns null if no job exists. */
+  findByThreadId(threadId: string): CleanupJob | null {
+    const row = this.stmtFindByThreadId.get(threadId) as CleanupJob | undefined;
+    return row ?? null;
+  }
+
+  /** Delete a cleanup job by its associated thread ID. Returns true if a row was removed. */
+  deleteByThreadId(threadId: string): boolean {
+    const job = this.findByThreadId(threadId);
+    if (!job) return false;
+    return this.delete(job.id);
+  }
+
+  /** Count jobs that still have retries remaining for a workspace path. */
+  countRetriableByWorkspacePath(workspacePath: string): number {
+    const row = this.db
+      .prepare("SELECT COUNT(*) AS count FROM cleanup_jobs WHERE workspace_path = ? AND attempts < 5")
+      .get(workspacePath) as { count: number };
+    return row.count;
+  }
+
+  /** Get the most recent error message from cleanup jobs for a workspace path. */
+  getLastErrorByWorkspacePath(workspacePath: string): string | null {
+    const row = this.db
+      .prepare(
+        `SELECT last_error FROM cleanup_jobs
+          WHERE workspace_path = ? AND last_error IS NOT NULL
+          ORDER BY next_retry_at DESC, created_at DESC
+          LIMIT 1`,
+      )
+      .get(workspacePath) as { last_error: string | null } | undefined;
+    return row?.last_error ?? null;
   }
 }

@@ -49,6 +49,27 @@ vi.mock("@/stores/threadStore", () => ({
   ),
 }));
 
+vi.mock("@/stores/sidebarSearchStore", () => ({
+  useSidebarSearchStore: Object.assign(
+    vi.fn((selector: (s: unknown) => unknown) =>
+      selector({
+        query: "",
+        filters: { status: [], provider: [] },
+        sortField: "updated_at",
+        sortDirection: "desc",
+        isSearching: false,
+        serverResults: [],
+        serverWorkspaces: [],
+        expandedSnapshot: null,
+        setExpandedSnapshot: vi.fn(),
+        setQuery: vi.fn(),
+        clearAll: vi.fn(),
+      })
+    ),
+    { setState: vi.fn(), getState: vi.fn() },
+  ),
+}));
+
 // The virtualizer requires a real scrollable element with measured sizes.
 // In jsdom none of that works, so we replace it with a pass-through that
 // renders every item directly.
@@ -204,8 +225,10 @@ describe("ProjectTree thread interactions", () => {
     // Navigation count stays at 1 — the second click must NOT trigger another navigate.
     expect(setActiveThread).toHaveBeenCalledTimes(1);
 
-    // Inline edit input must be visible.
-    expect(screen.getByRole("textbox")).toBeInTheDocument();
+    // Inline edit input must be visible (search input is also a textbox, so check for 2).
+    const textboxes = screen.getAllByRole("textbox");
+    const renameInput = textboxes.find((el) => !el.hasAttribute("data-testid") || el.getAttribute("data-testid") !== "sidebar-search-input");
+    expect(renameInput).toBeDefined();
   });
 
   it("two clicks beyond the double-click window navigate twice (no rename)", () => {
@@ -221,8 +244,9 @@ describe("ProjectTree thread interactions", () => {
     fireEvent.click(threadButton);
 
     expect(setActiveThread).toHaveBeenCalledTimes(2);
-    // No textbox — rename should not have been triggered.
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    // No rename textbox — only the search input should be present.
+    const textboxes = screen.getAllByRole("textbox");
+    expect(textboxes.every((el) => el.getAttribute("data-testid") === "sidebar-search-input")).toBe(true);
   });
 
   it("clicking while editing does not navigate or re-enter edit", () => {
@@ -239,8 +263,10 @@ describe("ProjectTree thread interactions", () => {
     act(() => { vi.advanceTimersByTime(100); });
     fireEvent.click(threadButton);
 
-    // Confirm we're editing.
-    expect(screen.getByRole("textbox")).toBeInTheDocument();
+    // Confirm we're editing (rename input + search input = 2 textboxes).
+    const textboxes = screen.getAllByRole("textbox");
+    const renameInputs = textboxes.filter((el) => el.getAttribute("data-testid") !== "sidebar-search-input");
+    expect(renameInputs).toHaveLength(1);
     expect(setActiveThread).toHaveBeenCalledTimes(1);
 
     // Click the outer row button again while editing.
@@ -248,8 +274,10 @@ describe("ProjectTree thread interactions", () => {
 
     // No additional navigation.
     expect(setActiveThread).toHaveBeenCalledTimes(1);
-    // Still one textbox (not duplicated).
-    expect(screen.getAllByRole("textbox")).toHaveLength(1);
+    // Still one rename textbox (not duplicated). Search input is separate.
+    const afterTextboxes = screen.getAllByRole("textbox");
+    const afterRenameInputs = afterTextboxes.filter((el) => el.getAttribute("data-testid") !== "sidebar-search-input");
+    expect(afterRenameInputs).toHaveLength(1);
   });
 
   it("pressing Enter on the thread row navigates immediately", () => {

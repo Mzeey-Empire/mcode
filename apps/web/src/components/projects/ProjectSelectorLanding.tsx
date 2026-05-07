@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useMemo, useEffect } from "react";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useProjectSelectorStore } from "@/stores/projectSelectorStore";
@@ -14,8 +14,7 @@ import type { RecentThread } from "@/transport/types";
  * Renders the app wordmark, then pinned and recent projects.
  * Opening a project calls setActiveWorkspace (same as the palette flow).
  * The "+ Add project" button opens the palette in browse mode (input seeded to `~/`).
- * While this screen is mounted, Ctrl/Cmd+Enter runs the same action (mirrors browse
- * mode's confirm shortcut) and is suppressed when an input or contenteditable is focused.
+ * Mod+Enter runs the same action via default keybindings when the landing context is active.
  */
 export function ProjectSelectorLanding() {
   const workspaces = useWorkspaceStore((s) => s.workspaces);
@@ -88,27 +87,6 @@ export function ProjectSelectorLanding() {
   const handleAdd = () =>
     useCommandPaletteStore.getState().open({ intent: "addProject" });
 
-  useEffect(() => {
-    function isInputFocused(): boolean {
-      const el = document.activeElement;
-      if (!el) return false;
-      const tag = el.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA") return true;
-      if (el instanceof HTMLElement && el.isContentEditable) return true;
-      return false;
-    }
-    function onKeyDown(e: KeyboardEvent) {
-      const isEnter =
-        e.key === "Enter" || e.code === "Enter" || e.code === "NumpadEnter";
-      if (!(e.ctrlKey || e.metaKey) || !isEnter) return;
-      if (e.shiftKey || e.altKey) return;
-      if (isInputFocused()) return;
-      e.preventDefault();
-      useCommandPaletteStore.getState().open({ intent: "addProject" });
-    }
-    document.addEventListener("keydown", onKeyDown, true);
-    return () => document.removeEventListener("keydown", onKeyDown, true);
-  }, []);
   /**
    * Open a thread from the recent-threads list. Activate the parent workspace
    * first so downstream selectors (sidebar highlight, breadcrumb, settings) see

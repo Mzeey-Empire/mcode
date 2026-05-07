@@ -136,6 +136,8 @@ interface WorkspaceState {
   loadWorkspaces: () => Promise<void>;
   createWorkspace: (name: string, path: string) => Promise<Workspace>;
   deleteWorkspace: (id: string) => Promise<void>;
+  /** Remove a workspace from local state immediately (used by push channel handlers). */
+  removeWorkspaceFromState: (id: string) => void;
   /**
    * Set the active workspace by ID. Clears the active thread if it belongs to a
    * different workspace, and bumps the workspace's last_opened_at locally so
@@ -405,6 +407,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     }
   },
 
+  removeWorkspaceFromState: (id) => {
+    set((state) => ({
+      workspaces: state.workspaces.filter((w) => w.id !== id),
+      activeWorkspaceId: state.activeWorkspaceId === id ? null : state.activeWorkspaceId,
+    }));
+  },
+
   setActiveWorkspace: (id, call) => {
     if (id === get().activeWorkspaceId) return;
     // Only clear activeThreadId if the current thread belongs to a different workspace
@@ -530,7 +539,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
 
   loadThreads: async (workspaceId) => {
     const epochAtStart = threadListMutationEpochByWorkspace.get(workspaceId) ?? 0;
-    set({ loading: true, error: null });
+    // Stale-while-revalidate: only show loading spinner if there are NO
+    // existing threads for this workspace. If threads are already in state
+    // (from a prior load), keep showing them while the refresh runs.
+    const hasStaleThreads = get().threads.some((t) => t.workspace_id === workspaceId);
+    set({ loading: !hasStaleThreads, error: null });
     try {
       const newThreads = await getTransport().listThreads(workspaceId);
       if ((threadListMutationEpochByWorkspace.get(workspaceId) ?? 0) !== epochAtStart) {

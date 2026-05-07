@@ -12,10 +12,8 @@ import type { GitService } from "./git-service.js";
 import type { MessageRepo } from "../repositories/message-repo.js";
 import type { WorkspaceRepo } from "../repositories/workspace-repo.js";
 import type { ThreadRepo } from "../repositories/thread-repo.js";
-import { SettingsService } from "./settings-service.js";
-import { ProviderAvailabilityService } from "./provider-availability-service.js";
-import { isCompletionCapable } from "@mcode/contracts";
-import type { IProviderRegistry, ProviderId, PrDraft } from "@mcode/contracts";
+import type { PrDraft } from "@mcode/contracts";
+import { UtilityCompletionService } from "./utility-completion-service.js";
 import { parseCompletionDraft } from "./pr-draft-parser.js";
 
 /** Candidate paths for a repo-level PR template, checked in order. */
@@ -49,9 +47,7 @@ export class PrDraftService {
     @inject("MessageRepo") private readonly messageRepo: MessageRepo,
     @inject("WorkspaceRepo") private readonly workspaceRepo: WorkspaceRepo,
     @inject("ThreadRepo") private readonly threadRepo: ThreadRepo,
-    @inject(SettingsService) private readonly settingsService: SettingsService,
-    @inject("IProviderRegistry") private readonly providerRegistry: IProviderRegistry,
-    @inject(ProviderAvailabilityService) private readonly availability: ProviderAvailabilityService,
+    @inject(UtilityCompletionService) private readonly utilityCompletion: UtilityCompletionService,
   ) {}
 
   /**
@@ -82,7 +78,7 @@ export class PrDraftService {
       throw new Error("Cannot generate PR draft: repository is in detached HEAD state or not a git repo");
     }
 
-    const [commits, diffStat, messagesResult, settings] = await Promise.all([
+    const [commits, diffStat, messagesResult] = await Promise.all([
       this.gitService.log(workspaceId, headBranch, 50, baseBranch, repoPath).catch(
         (err: unknown) => {
           logger.warn("git log with base branch failed, retrying without range", {
@@ -104,38 +100,7 @@ export class PrDraftService {
         },
       ),
       Promise.resolve(this.messageRepo.listByThread(threadId, 100)),
-      this.settingsService.get(),
     ]);
-
-    const configuredProvider = settings.prDraft.provider as ProviderId | "";
-    const defaultProvider = settings.model.defaults.provider as ProviderId;
-    const resolvedProvider = configuredProvider || defaultProvider;
-    this.availability.assertUsable(resolvedProvider);
-    const resolvedAgent = this.providerRegistry.resolve(resolvedProvider);
-
-    let provider: ProviderId;
-    if (resolvedAgent.supportsCompletion) {
-      provider = resolvedProvider;
-    } else if (configuredProvider) {
-      // User explicitly chose a provider that does not support completion — fail loudly.
-      throw new Error(
-        `Configured PR draft provider "${configuredProvider}" does not support completion`,
-      );
-    } else {
-      // Auto mode: default provider lacks completion support, fall back to Claude.
-      provider = "claude";
-      logger.info("PR draft Auto mode: default provider did not support completion, fell back to Claude", {
-        defaultProvider: resolvedProvider,
-      });
-    }
-
-    const modelDefaults: Record<string, string> = {
-      claude: "claude-haiku-4-5-20251001",
-      // gpt-4.1 is the recommended fast model on the Copilot backend
-      copilot: "gpt-4.1",
-    };
-    // Fall back to gpt-4.1 so Copilot users in Auto mode get a valid model instead of a Claude ID
-    const model = settings.prDraft.model || modelDefaults[provider] || "gpt-4.1";
 
     const repoTemplate = this.detectPrTemplate(repoPath);
     const conversationSummary = this.buildConversationSummary(
@@ -152,9 +117,8 @@ export class PrDraftService {
 
     const aiContext = { commitLog, diffStat, conversationSummary, repoTemplate, headBranch, baseBranch, repoPath };
 
-    this.availability.assertUsable(provider);
     try {
-      return await this.generateWithAI({ ...aiContext, provider, model });
+      return await this.generateWithAI(aiContext);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
 
@@ -165,20 +129,12 @@ export class PrDraftService {
         message.includes("could not be parsed") ||
         message.includes("failed validation")
       ) {
-        logger.error("PR draft generation failed with a non-recoverable error", {
-          provider,
-          model,
-          error: message,
-        });
+        logger.error("PR draft generation failed with a non-recoverable error", { error: message });
         throw error;
       }
 
       // Provider unavailable (auth, network, CLI missing) — fall back to commit-only draft.
-      logger.warn("AI PR draft generation failed, using commit-only fallback", {
-        provider,
-        model,
-        error: message,
-      });
+      logger.warn("AI PR draft generation failed, using commit-only fallback", { error: message });
       return this.buildFallbackDraft(commits, diffStat);
     }
   }
@@ -192,18 +148,7 @@ export class PrDraftService {
     headBranch: string;
     baseBranch: string;
     repoPath: string;
-    provider: ProviderId;
-    model: string;
   }): Promise<PrDraft> {
-    const agentProvider = this.providerRegistry.resolve(context.provider);
-
-    if (!isCompletionCapable(agentProvider)) {
-      throw new Error(
-        `Provider '${context.provider}' does not support one-shot completion. ` +
-        `Configure 'claude' as the PR draft provider in settings.`,
-      );
-    }
-
     const formatInstruction = context.repoTemplate
       ? `Follow this PR template structure from the repository:\n\n${context.repoTemplate}`
       : `Use this structure:\n\n${DEFAULT_FORMAT}`;
@@ -226,7 +171,7 @@ export class PrDraftService {
       context.conversationSummary || "(no conversation history)",
     ].join("\n\n");
 
-    const text = await agentProvider.complete(prompt, context.model, context.repoPath);
+    const { text } = await this.utilityCompletion.complete(prompt, context.repoPath);
     return parseCompletionDraft(text);
   }
 

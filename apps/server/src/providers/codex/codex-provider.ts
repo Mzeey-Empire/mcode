@@ -24,8 +24,9 @@ import type {
   AttachmentMeta,
   PermissionDecision,
   PermissionRequest,
+  ProviderModelInfo,
 } from "@mcode/contracts";
-import { AgentEventType } from "@mcode/contracts";
+import { AgentEventType, CODEX_STATIC_MODELS } from "@mcode/contracts";
 import { checkCodexVersion, meetsMinVersion } from "./codex-version.js";
 import { CodexAppServer } from "./codex-app-server.js";
 import type { CodexApprovalRequest } from "./codex-app-server.js";
@@ -105,6 +106,11 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
   readonly id: ProviderId = "codex";
   /** Codex CLI is an agentic tool with no one-shot text completion mode. */
   readonly supportsCompletion = false;
+
+  /** Returns the static Codex model catalog. Codex does not support dynamic model discovery. */
+  async listModels(): Promise<ProviderModelInfo[]> {
+    return CODEX_STATIC_MODELS.map((m) => ({ ...m }));
+  }
 
   private sessions = new Map<string, SessionEntry>();
   private sdkSessionIds = new Map<string, string>();

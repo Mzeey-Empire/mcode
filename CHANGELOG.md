@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.9.1](https://github.com/Mzeey-Empire/mcode/compare/mcode-v0.9.0...mcode-v0.9.1) (2026-05-07)
+
+
+### Bug Fixes
+
+* collapse all projects during drag to prevent render distortion ([#419](https://github.com/Mzeey-Empire/mcode/issues/419)) ([55b54e2](https://github.com/Mzeey-Empire/mcode/commit/55b54e29e096eb6754add9dd7957cd21ee74fef7))
+* require Ctrl+highlight to activate reply mode ([#421](https://github.com/Mzeey-Empire/mcode/issues/421)) ([907ba98](https://github.com/Mzeey-Empire/mcode/commit/907ba98c2254320c918048592a5c30e43c8f1d95))
+* **web:** MessageList scroll behavior on thread open and switch ([#420](https://github.com/Mzeey-Empire/mcode/issues/420)) ([b9eb658](https://github.com/Mzeey-Empire/mcode/commit/b9eb6584b2fe97dc32932a2820b3018fb8a8b2ba))
+
+## [0.9.0](https://github.com/Mzeey-Emipre/mcode/compare/mcode-v0.8.2...mcode-v0.9.0) (2026-05-06)
+
+
+### Features
+
+* add AI diff summary tab with shared utility model ([#415](https://github.com/Mzeey-Emipre/mcode/issues/415)) ([0bf4d85](https://github.com/Mzeey-Emipre/mcode/commit/0bf4d85e72560e8e8f6dc4c7e71f45cda5240f0d))
+* add reply-to-message with passage quoting and AI context ([#413](https://github.com/Mzeey-Emipre/mcode/issues/413)) ([1436ffd](https://github.com/Mzeey-Emipre/mcode/commit/1436ffd1a181f7d0f1ceb292af9f3327ae7ab2a6))
+* **server:** two-phase workspace hard-delete with async cleanup ([#412](https://github.com/Mzeey-Emipre/mcode/issues/412)) ([1f698a5](https://github.com/Mzeey-Emipre/mcode/commit/1f698a5e4d7f98e7e7c7931c42dd4b5dab950b03))
+* surface rate limit and API retry events to users ([#411](https://github.com/Mzeey-Emipre/mcode/issues/411)) ([ee6c04a](https://github.com/Mzeey-Emipre/mcode/commit/ee6c04a1edbe5e84c99373cd402fdcd2b0be7155))
+* thread search, filter, and sort in sidebar ([#414](https://github.com/Mzeey-Emipre/mcode/issues/414)) ([2bc55ec](https://github.com/Mzeey-Emipre/mcode/commit/2bc55ec08efdff6b0cfaf084e11e3ae1a021b80a))
+
+
+### Bug Fixes
+
+* eliminate false thread in-progress indicators ([#410](https://github.com/Mzeey-Emipre/mcode/issues/410)) ([09e9edf](https://github.com/Mzeey-Emipre/mcode/commit/09e9edf1e90bfc8f9a0989e10e60f6f8bad77c56))
+* improve search box visibility and fix filter render loop ([#417](https://github.com/Mzeey-Emipre/mcode/issues/417)) ([5052f54](https://github.com/Mzeey-Emipre/mcode/commit/5052f5401e73977edf5721cc001fff51db353211))
+
+
+### Performance Improvements
+
+* optimise thread switching with caching, prefetch, and parallel RPCs ([#416](https://github.com/Mzeey-Emipre/mcode/issues/416)) ([0ca0ea8](https://github.com/Mzeey-Emipre/mcode/commit/0ca0ea8182e72b5ead1bad2d7a7b774bfcc865c7))
+
+## [0.8.2](https://github.com/Mzeey-Emipre/mcode/compare/mcode-v0.8.1...mcode-v0.8.2) (2026-05-05)
+
+
+### Bug Fixes
+
+* **auto-updater:** use IPC return value for check-for-updates feedback ([#408](https://github.com/Mzeey-Emipre/mcode/issues/408)) ([e8808d5](https://github.com/Mzeey-Emipre/mcode/commit/e8808d5616d5ca490bdb22c5b07e006ca16001af))
+* resolve project reorder failing on duplicate sort_order ([#406](https://github.com/Mzeey-Emipre/mcode/issues/406)) ([61517e5](https://github.com/Mzeey-Emipre/mcode/commit/61517e59ff8037812775bf319219c381212362d7))
+* **web:** Ctrl+Enter for new project on landing and in browse palette ([#407](https://github.com/Mzeey-Emipre/mcode/issues/407)) ([f0375a5](https://github.com/Mzeey-Emipre/mcode/commit/f0375a52426f5c504ee8221469aee2d7d5e35810))
+* **web:** landing and palette Ctrl+Enter for new project ([f0375a5](https://github.com/Mzeey-Emipre/mcode/commit/f0375a52426f5c504ee8221469aee2d7d5e35810))
+
+## [0.8.1](https://github.com/Mzeey-Emipre/mcode/compare/mcode-v0.8.0...mcode-v0.8.1) (2026-05-05)
+
+
+### Bug Fixes
+
+* add schema patch for missing sort_order column on existing databases ([#404](https://github.com/Mzeey-Emipre/mcode/issues/404)) ([64cd42d](https://github.com/Mzeey-Emipre/mcode/commit/64cd42d4e3fae318314e190f7030c44b7ca6a498))
+
 ## [0.8.0](https://github.com/Mzeey-Emipre/mcode/compare/mcode-v0.7.0...mcode-v0.8.0) (2026-05-04)
 
 

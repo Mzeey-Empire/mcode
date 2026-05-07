@@ -52,6 +52,7 @@ import {
 } from "../services/provider-availability-errors.js";
 import type { ProviderAvailabilityService } from "../services/provider-availability-service.js";
 import type { ModelCacheService } from "../services/model-cache-service.js";
+import type { DiffSummaryService } from "../services/diff-summary-service.js";
 
 /** Service dependencies for the router. */
 export interface RouterDeps {
@@ -94,6 +95,8 @@ export interface RouterDeps {
   enricher: WorkspaceEnricher;
   /** Browses the host filesystem for the project-selector folder picker. */
   filesystemBrowser: FilesystemBrowser;
+  /** Generates and persists AI-powered diff summaries for threads. */
+  diffSummaryService: DiffSummaryService;
 }
 
 /**
@@ -212,7 +215,19 @@ async function dispatch(
     }
     case "workspace.delete": {
       const result = deps.workspaceService.delete(params.id);
-      deps.gitWatcherService.unwatchWorkspace(params.id);
+      if (result) {
+        deps.gitWatcherService.unwatchWorkspace(params.id);
+        broadcast("workspace.orderChanged", {});
+      }
+      return result;
+    }
+    case "workspace.forceDelete": {
+      const result = deps.workspaceService.forceDelete(params.id);
+      if (result) {
+        deps.gitWatcherService.unwatchWorkspace(params.id);
+        broadcast("workspace.deleted", { workspaceId: params.id });
+        broadcast("workspace.orderChanged", {});
+      }
       return result;
     }
     case "workspace.pin":
@@ -282,6 +297,13 @@ async function dispatch(
     case "thread.markViewed":
       deps.threadService.markViewed(params.threadId);
       return;
+    case "thread.search":
+      return deps.threadService.search({
+        query: params.query,
+        filters: params.filters,
+        sort: params.sort,
+        limit: params.limit,
+      });
     case "thread.syncPrs": {
       const syncWs = deps.workspaceService.findById(params.workspaceId);
       if (!syncWs?.is_git_repo) return [];
@@ -394,6 +416,10 @@ async function dispatch(
         params.copilotAgent,
         params.contextWindow,
         params.thinking,
+        undefined, // markPlanAnswerForMessageId
+        undefined, // providerWireOverride
+        params.replyToMessageId,
+        params.quotedText,
       );
       return;
     case "agent.createAndSend":
@@ -677,6 +703,32 @@ async function dispatch(
       const workspace = deps.workspaceService.findById(params.workspaceId);
       if (!workspace) throw new Error(`Workspace not found: ${params.workspaceId}`);
       return discoverCopilotAgents(workspace.path);
+    }
+
+    // Diff summaries
+    case "diffSummary.get":
+      return deps.diffSummaryService.get(params.threadId);
+    case "diffSummary.generate": {
+      const thread = deps.threadService.findById(params.threadId);
+      if (!thread) throw new Error(`Thread not found: ${params.threadId}`);
+      const ws = deps.workspaceService.findById(thread.workspace_id);
+      if (!ws) throw new Error(`Workspace not found: ${thread.workspace_id}`);
+      const cwd = deps.gitService.resolveWorkingDir(
+        ws.path,
+        thread.mode,
+        thread.worktree_path,
+      );
+      // listByThread returns parsed TurnSnapshot[]; re-serialize files_changed
+      // to the raw JSON string that ThreadDiffSource expects.
+      const snapshots = deps.turnSnapshotRepo.listByThread(params.threadId).map((s) => ({
+        ...s,
+        files_changed: JSON.stringify(s.files_changed),
+      }));
+      return await deps.diffSummaryService.generateFromSnapshots(
+        params.threadId,
+        snapshots,
+        cwd,
+      );
     }
 
     // Memory pressure

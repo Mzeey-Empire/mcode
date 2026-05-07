@@ -58,6 +58,10 @@ export const SendMessageSchema = lazySchema(() =>
     contextWindow: ContextWindowModeSchema.optional(),
     /** Boolean thinking toggle. Honored only by models with a thinking toggle (Haiku 4.5). */
     thinking: z.boolean().optional(),
+    /** ID of the message being replied to. */
+    replyToMessageId: z.string().uuid().optional(),
+    /** Highlighted text excerpt from the original message. Absent for full-message replies. */
+    quotedText: z.string().max(2000).optional(),
   }),
 );
 
@@ -107,6 +111,11 @@ export const WS_METHODS = lazySchema(() => ({
     result: WorkspaceSchema(),
   },
   "workspace.delete": {
+    params: z.object({ id: z.string() }),
+    result: z.boolean(),
+  },
+  /** Hard-delete a workspace and all its data immediately, bypassing the cleanup queue. */
+  "workspace.forceDelete": {
     params: z.object({ id: z.string() }),
     result: z.boolean(),
   },
@@ -209,6 +218,29 @@ export const WS_METHODS = lazySchema(() => ({
       prStatus: z.string().nullable(),
     })),
   },
+  /** Search threads across all workspaces by title substring, with optional status/provider filters and sort order. */
+  "thread.search": {
+    params: z.object({
+      query: z.string().max(500),
+      filters: z.object({
+        status: z.array(z.string()).max(20).optional(),
+        provider: z.array(z.string()).max(20).optional(),
+      }).optional(),
+      sort: z.object({
+        field: z.enum(["updated_at", "created_at", "title"]),
+        direction: z.enum(["asc", "desc"]),
+      }).optional(),
+      limit: z.number().int().positive().max(200).optional(),
+    }),
+    result: z.object({
+      threads: z.array(ThreadSchema()),
+      workspaces: z.array(z.object({
+        id: z.string(),
+        name: z.string(),
+        path: z.string(),
+      })),
+    }),
+  },
   "git.listBranches": {
     params: z.object({ workspaceId: z.string() }),
     result: z.array(GitBranchSchema),
@@ -308,7 +340,7 @@ export const WS_METHODS = lazySchema(() => ({
       limit: z.number().int().min(1).max(1000),
       before: z.number().int().optional(),
     }),
-    result: PaginatedMessagesSchema,
+    result: PaginatedMessagesSchema(),
   },
   "file.list": {
     params: z.object({
@@ -554,6 +586,38 @@ export const WS_METHODS = lazySchema(() => ({
   "providers.listAvailability": {
     params: z.object({}),
     result: z.array(ProviderAvailabilitySchema()),
+  },
+  /** Retrieve the stored diff summary for a thread (null if none exists). */
+  "diffSummary.get": {
+    params: z.object({
+      threadId: z.string(),
+    }),
+    result: z
+      .object({
+        id: z.string(),
+        threadId: z.string(),
+        content: z.string(),
+        turnCount: z.number(),
+        lastTurnId: z.string().nullable(),
+        model: z.string(),
+        createdAt: z.string(),
+      })
+      .nullable(),
+  },
+  /** Generate (or regenerate) an AI-powered diff summary for a thread. */
+  "diffSummary.generate": {
+    params: z.object({
+      threadId: z.string(),
+    }),
+    result: z.object({
+      id: z.string(),
+      threadId: z.string(),
+      content: z.string(),
+      turnCount: z.number(),
+      lastTurnId: z.string().nullable(),
+      model: z.string(),
+      createdAt: z.string(),
+    }),
   },
 } as const));
 
