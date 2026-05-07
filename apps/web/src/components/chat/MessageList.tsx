@@ -457,8 +457,15 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
       // throttled smooth scroll from the discrete-messages effect.
       pendingScrollRestoreRef.current = null;
       positionAtBottom();
+    } else if (isInitialLoadRef.current && items.length > 0) {
+      // Cache miss (or same-thread load): when `loading` becomes false, `prevId`
+      // already matches `activeThreadId`, so `isThreadSwitch` is false. First open
+      // also hits this branch. Pin the tail here so it tracks the same path as a
+      // cache-hit switch (lazy markdown and measured row heights included).
+      pendingScrollRestoreRef.current = null;
+      positionAtBottom();
     }
-  }, [activeThreadId, loading, virtualizer, positionAtBottom]);
+  }, [activeThreadId, loading, virtualizer, positionAtBottom, items.length]);
 
   // Stabilize scroll position when older messages are prepended.
   // Detects real prepends by comparing the first message ID before and after
@@ -492,8 +499,9 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     }
   }, [messages]);
 
-  // Initial load: position at the bottom before paint to avoid top-to-bottom flash.
-  // useLayoutEffect fires after DOM mutations but before the browser paints.
+  // Empty thread: reveal without a tail jump. Non-empty initial tail positioning
+  // runs in the active-thread useLayoutEffect so cache-miss completion (same
+  // `activeThreadId` as `prevId`) is not skipped when `isThreadSwitch` is false.
   useLayoutEffect(() => {
     if (!isInitialLoadRef.current) return;
 
@@ -505,10 +513,8 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     }
 
     if (items.length === 0) return;
-    if (loading) return; // don't position until persisted messages are loaded
-
-    positionAtBottom();
-  }, [items.length, loading, positionAtBottom]);
+    if (loading) return;
+  }, [items.length, loading]);
 
   // Apply the remembered scrollTop after the virtualizer has rendered the
   // restored items. useLayoutEffect runs before paint, so the user never sees
@@ -607,7 +613,10 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     return () => document.removeEventListener("mouseup", handleMouseUp);
   }, []);
 
-  /** While {@link pinListTailRef} is set (open or tail restore), keep the viewport on the tail as row heights stabilize. */
+  /**
+   * While {@link pinListTailRef} is set (open or tail restore), keep the viewport on the tail as row heights stabilize.
+   * Re-run when `loading` clears so the observer attaches after the list inner exists and has non-zero size.
+   */
   useEffect(() => {
     if (typeof ResizeObserver === "undefined") return;
     const outer = containerRef.current;
@@ -619,7 +628,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     });
     ro.observe(inner);
     return () => ro.disconnect();
-  }, [activeThreadId]);
+  }, [activeThreadId, loading]);
 
   return (
     <div className="relative h-full" data-testid="message-list">
