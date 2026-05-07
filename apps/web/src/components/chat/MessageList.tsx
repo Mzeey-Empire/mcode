@@ -497,10 +497,19 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     requestAnimationFrame(tick);
   }, [beginSuppressPassiveAutoBottomScroll, scheduleEndSuppressPassiveAutoBottomScroll, virtualizer]);
 
-  // Clean up pending scroll timer on unmount
+  // Clean up pending scroll timer on unmount.
+  //
+  // Do NOT bump `tailSettleGenRef` here. In React StrictMode dev the unmount
+  // cleanup fires between mount-1 and mount-2 of the initial mount; if we
+  // bumped the gen we would invalidate the in-flight settle rAF scheduled by
+  // mount-1, and mount-2 would not re-call `positionAtBottom` (because
+  // `isInitialLoadRef.current` was already flipped to false). The list would
+  // then sit at opacity:0 forever. A real unmount makes `containerRef.current`
+  // null, which the settle tick already handles by revealing and bailing.
+  // The gen is still bumped by each new `positionAtBottom` call, which is what
+  // we actually need to cancel a stale tick when the user navigates.
   useEffect(() => {
     return () => {
-      tailSettleGenRef.current++;
       if (scrollTimerRef.current) {
         clearTimeout(scrollTimerRef.current);
         scrollTimerRef.current = null;
