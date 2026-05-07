@@ -3,10 +3,15 @@
  * virtualizer measurement optimization, scroll position restoration, and
  * synchronous bottom positioning when a prefetched thread has no saved offset.
  *
+ * Opening the bottom uses direct `scrollTop` assignment so TanStack Virtual's
+ * `scrollToIndex` reconcile loop does not run (that loop causes visible motion
+ * while row heights settle).
+ *
  * A cache hit occurs when threadStore has messages already loaded (loading: false
  * synchronously after activeThreadId changes). On cache hit, we skip virtualizer.measure()
- * to preserve cached row heights. Without a remembered scroll offset, we still call
- * scrollToIndex (instant) on switch so the list does not animate from a stale position.
+ * to preserve cached row heights. Without a remembered scroll offset, we pin
+ * `scrollTop` on switch instead of calling `scrollToIndex`, so no smooth or
+ * reconcile-driven motion runs on open.
  */
 import { render, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -108,11 +113,31 @@ describe("MessageList thread switch", () => {
     expect(measureSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("scrolls to bottom with instant behavior on cache-hit switch without remembered scroll", () => {
+  it("pins scrollTop without virtualizer scrollToIndex on cache-hit switch without remembered scroll", () => {
     loadingValue = false;
     activeThreadIdValue = "thread-A";
     messagesValue = [{ id: "m-a", sequence: 1 }];
-    const { rerender } = render(<MessageList />);
+    const { rerender, container } = render(<MessageList />);
+
+    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement | null;
+    expect(scrollEl).not.toBeNull();
+
+    let scrollTop = 0;
+    Object.defineProperty(scrollEl!, "scrollHeight", {
+      configurable: true,
+      value: 10_000,
+    });
+    Object.defineProperty(scrollEl!, "clientHeight", {
+      configurable: true,
+      value: 400,
+    });
+    Object.defineProperty(scrollEl!, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (v: number) => {
+        scrollTop = v;
+      },
+    });
 
     scrollToIndexSpy.mockClear();
     activeThreadIdValue = "thread-B";
@@ -121,15 +146,8 @@ describe("MessageList thread switch", () => {
       rerender(<MessageList />);
     });
 
-    expect(scrollToIndexSpy).toHaveBeenCalled();
-    const matchingCalls = scrollToIndexSpy.mock.calls.filter(
-      (call) =>
-        call[1] != null
-        && typeof call[1] === "object"
-        && (call[1] as { align?: string; behavior?: string }).align === "end"
-        && (call[1] as { align?: string; behavior?: string }).behavior === "auto",
-    );
-    expect(matchingCalls.length).toBeGreaterThanOrEqual(1);
+    expect(scrollToIndexSpy).not.toHaveBeenCalled();
+    expect(scrollTop).toBe(10_000);
   });
 
   it("does not schedule throttled smooth scroll after cache-hit switch without remembered scroll", () => {

@@ -305,26 +305,26 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
 
   /**
    * Positions the list at the bottom synchronously and reveals the container.
-   * Used for initial layout and cache-hit thread switches. Skips the next
-   * passive auto-scroll effects so they do not schedule a throttled smooth scroll.
+   * Sets the scroll element's `scrollTop` directly instead of calling the
+   * virtualizer's `scrollToIndex`, avoiding TanStack Virtual's multi-frame
+   * scroll reconciliation (that loop retriggers as row heights settle and looks
+   * like motion). Skips the next passive auto-scroll effects so they do not
+   * schedule a throttled smooth scroll.
    */
   const positionAtBottom = useCallback(() => {
     skipDiscreteAutoBottomScrollRef.current = true;
     skipStreamingAutoBottomScrollRef.current = true;
     isInitialLoadRef.current = false;
-    const count = itemsLengthRef.current;
-    if (count > 0) {
-      virtualizer.scrollToIndex(count - 1, {
-        align: "end",
-        behavior: "auto",
-      });
+    const el = containerRef.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight;
     }
     requestAnimationFrame(() => {
-      const el = containerRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
+      const el2 = containerRef.current;
+      if (el2) el2.scrollTop = el2.scrollHeight;
       setIsPositioned(true);
     });
-  }, [virtualizer]);
+  }, []);
 
   // Clean up pending scroll timer on unmount
   useEffect(() => {
@@ -466,7 +466,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     if (loading) return; // don't position until persisted messages are loaded
 
     positionAtBottom();
-  }, [items.length, loading, virtualizer, positionAtBottom]);
+  }, [items.length, loading, positionAtBottom]);
 
   // Apply the remembered scrollTop after the virtualizer has rendered the
   // restored items. useLayoutEffect runs before paint, so the user never sees
