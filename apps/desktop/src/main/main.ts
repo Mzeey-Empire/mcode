@@ -32,6 +32,7 @@ import { ServerManager } from "./server-manager.js";
 import { startIpcRelay } from "./ipc-relay.js";
 import {
   checkForUpdatesNow,
+  downloadUpdate,
   getUpdateStatus,
   initAutoUpdater,
   installUpdate,
@@ -482,6 +483,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle("app:install-update", () => {
     installUpdate();
   });
+  ipcMain.handle("app:download-update", () => downloadUpdate());
 }
 
 // ---------------------------------------------------------------------------

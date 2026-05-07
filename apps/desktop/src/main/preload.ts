@@ -114,6 +114,10 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     installUpdate(): Promise<void> {
       return ipcRenderer.invoke("app:install-update");
     },
+    /** Trigger download of a discovered update (when auto-download is off). */
+    downloadUpdate(): Promise<void> {
+      return ipcRenderer.invoke("app:download-update");
+    },
     /** Subscribe to push updates of update-status. Returns the listener for cleanup. */
     onUpdateStatus(callback: (status: unknown) => void) {
       const listener = (_event: unknown, status: unknown) => callback(status);
