@@ -146,10 +146,13 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   const firstMessageIdRef = useRef<string | null>(null);
   /** True until initial messages are positioned at the bottom after a thread switch. */
   const isInitialLoadRef = useRef(true);
-  /** Drops the next discrete auto bottom-scroll (layout already positioned the list). */
-  const skipDiscreteAutoBottomScrollRef = useRef(false);
-  /** Drops the next streaming auto bottom-scroll (same as discrete, separate effect). */
-  const skipStreamingAutoBottomScrollRef = useRef(false);
+  /**
+   * Blocks discrete/streaming auto bottom-scroll while a navigation applies scroll.
+   * One-shot skip flags miss follow-up effect runs when stores settle after revisit.
+   */
+  const suppressPassiveAutoBottomScrollRef = useRef(false);
+  /** Cancels stale double-rAF clears when another navigation starts. */
+  const suppressPassiveAutoBottomGenRef = useRef(0);
   /** Tracks the previous activeThreadId so we can save its scrollTop before switching. */
   const prevActiveThreadIdRef = useRef<string | null>(null);
   /** Holds the scrollTop value to restore on the next layout effect. */
@@ -202,6 +205,22 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   );
 
   const toolCalls = toolCallsRaw ?? EMPTY_TOOL_CALLS;
+
+  const beginSuppressPassiveAutoBottomScroll = useCallback(() => {
+    suppressPassiveAutoBottomScrollRef.current = true;
+  }, []);
+
+  /** Ends passive auto bottom-scroll suppression after layout settles across frames. */
+  const scheduleEndSuppressPassiveAutoBottomScroll = useCallback(() => {
+    const gen = ++suppressPassiveAutoBottomGenRef.current;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (suppressPassiveAutoBottomGenRef.current === gen) {
+          suppressPassiveAutoBottomScrollRef.current = false;
+        }
+      });
+    });
+  }, []);
 
   /** Track scroll-to-bottom button visibility and trigger upward pagination near the top. */
   const handleScroll = useCallback(() => {
@@ -308,12 +327,11 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
    * Sets the scroll element's `scrollTop` directly instead of calling the
    * virtualizer's `scrollToIndex`, avoiding TanStack Virtual's multi-frame
    * scroll reconciliation (that loop retriggers as row heights settle and looks
-   * like motion). Skips the next passive auto-scroll effects so they do not
-   * schedule a throttled smooth scroll.
+   * like motion). Arms passive auto-scroll suppression until
+   * `scheduleEndSuppressPassiveAutoBottomScroll` runs after layout settles.
    */
   const positionAtBottom = useCallback(() => {
-    skipDiscreteAutoBottomScrollRef.current = true;
-    skipStreamingAutoBottomScrollRef.current = true;
+    beginSuppressPassiveAutoBottomScroll();
     isInitialLoadRef.current = false;
     const el = containerRef.current;
     if (el) {
@@ -323,8 +341,9 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
       const el2 = containerRef.current;
       if (el2) el2.scrollTop = el2.scrollHeight;
       setIsPositioned(true);
+      scheduleEndSuppressPassiveAutoBottomScroll();
     });
-  }, []);
+  }, [beginSuppressPassiveAutoBottomScroll, scheduleEndSuppressPassiveAutoBottomScroll]);
 
   // Clean up pending scroll timer on unmount
   useEffect(() => {
@@ -408,15 +427,14 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
       isInitialLoadRef.current = false;
       setIsPositioned(true);
       pendingScrollRestoreRef.current = rememberedScrollTop;
-      skipDiscreteAutoBottomScrollRef.current = true;
-      skipStreamingAutoBottomScrollRef.current = true;
+      beginSuppressPassiveAutoBottomScroll();
     } else if (isThreadSwitch) {
       // Cache hit on switch with no saved offset: avoid leaving stale scroll and
       // throttled smooth scroll from the discrete-messages effect.
       pendingScrollRestoreRef.current = null;
       positionAtBottom();
     }
-  }, [activeThreadId, loading, virtualizer, positionAtBottom]);
+  }, [activeThreadId, loading, virtualizer, positionAtBottom, beginSuppressPassiveAutoBottomScroll]);
 
   // Stabilize scroll position when older messages are prepended.
   // Detects real prepends by comparing the first message ID before and after
@@ -481,17 +499,25 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     // to be briefly visible. When items load, items.length will change and trigger
     // another effect pass where loading is false.
     if (loading) return;
-    el.scrollTop = target;
+    const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+    // Revisit: scrollHeight can grow after the last visit. A stored "at bottom"
+    // offset would sit high above the new tail and read as drift, and passive
+    // scroll effects may animate to the true bottom.
+    const nearBottom = target >= maxScroll - AUTO_SCROLL_THRESHOLD;
+    el.scrollTop = nearBottom ? el.scrollHeight : target;
     pendingScrollRestoreRef.current = null;
-  }, [activeThreadId, items.length, loading]);
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const scrolledUp = distanceFromBottom > 200;
+    isScrolledUpRef.current = scrolledUp;
+    setShowScrollBtn(scrolledUp);
+    if (!scrolledUp) setHasNewContent(false);
+    scheduleEndSuppressPassiveAutoBottomScroll();
+  }, [activeThreadId, items.length, loading, scheduleEndSuppressPassiveAutoBottomScroll]);
 
   // Discrete events (new message, tool call) -> scroll if at bottom, else highlight button
   useEffect(() => {
     if (isInitialLoadRef.current) return;
-    if (skipDiscreteAutoBottomScrollRef.current) {
-      skipDiscreteAutoBottomScrollRef.current = false;
-      return;
-    }
+    if (suppressPassiveAutoBottomScrollRef.current) return;
     if (isScrolledUpRef.current) {
       setHasNewContent(true);
     } else {
@@ -501,10 +527,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
 
   // Streaming deltas -> scroll if at bottom, else highlight button
   useEffect(() => {
-    if (skipStreamingAutoBottomScrollRef.current) {
-      skipStreamingAutoBottomScrollRef.current = false;
-      return;
-    }
+    if (suppressPassiveAutoBottomScrollRef.current) return;
     if (!streamingText || isInitialLoadRef.current) return;
     if (isScrolledUpRef.current) {
       setHasNewContent(true);

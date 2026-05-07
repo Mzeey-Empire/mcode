@@ -3,9 +3,10 @@
  * virtualizer measurement optimization, scroll position restoration, and
  * synchronous bottom positioning when a prefetched thread has no saved offset.
  *
- * Opening the bottom uses direct `scrollTop` assignment so TanStack Virtual's
- * `scrollToIndex` reconcile loop does not run (that loop causes visible motion
- * while row heights settle).
+ * Revisits use double-requestAnimationFrame suppression so passive effects
+ * that fire again after the store settles do not call smooth scrollToBottom.
+ * Near-bottom remembered offsets clamp to the current max scroll when content
+ * grew so a stale pixel does not sit above the tail.
  *
  * A cache hit occurs when threadStore has messages already loaded (loading: false
  * synchronously after activeThreadId changes). On cache hit, we skip virtualizer.measure()
@@ -186,6 +187,15 @@ describe("MessageList thread switch", () => {
 
     const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement | null;
     expect(scrollEl).not.toBeNull();
+
+    Object.defineProperty(scrollEl!, "scrollHeight", {
+      configurable: true,
+      value: 5000,
+    });
+    Object.defineProperty(scrollEl!, "clientHeight", {
+      configurable: true,
+      value: 400,
+    });
 
     // Mock scrollTop setter to track if it's called with the right value
     let setScrollTopValue: number | null = null;
