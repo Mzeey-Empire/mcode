@@ -212,6 +212,39 @@ describe("MessageList thread switch", () => {
     expect(smoothCalls.length).toBe(0);
   });
 
+  it("keeps scroll container hidden until layout has had a chance to settle on cache-miss hydrate", () => {
+    // Long-thread regression: TanStack Virtual measures rows after mount and
+    // `scrollHeight` keeps growing for several frames. Revealing immediately
+    // (before settle) leaves the user above the true tail. Verify that on a
+    // cache-miss hydrate completion the container is still opacity:0
+    // synchronously after the rerender — settle happens in rAF.
+    loadingValue = false;
+    activeThreadIdValue = "thread-A";
+    messagesValue = [{ id: "m-a", sequence: 1 }];
+    const { rerender, container } = render(<MessageList />);
+
+    // Cache miss begins
+    loadingValue = true;
+    activeThreadIdValue = "thread-B";
+    messagesValue = [];
+    act(() => {
+      rerender(<MessageList />);
+    });
+
+    // Cache miss completes with messages
+    loadingValue = false;
+    messagesValue = [{ id: "m-b", sequence: 1 }];
+    act(() => {
+      rerender(<MessageList />);
+    });
+
+    // Scroll container is the .overflow-y-auto div; settle holds opacity at 0
+    // until the rAF chain stabilizes scrollHeight + getTotalSize.
+    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement | null;
+    expect(scrollEl).not.toBeNull();
+    expect(scrollEl!.style.opacity).toBe("0");
+  });
+
   it("restores remembered scrollTop on a cache-hit switch", () => {
     loadingValue = false;
     activeThreadIdValue = "thread-A";

@@ -28,6 +28,20 @@ const AUTO_SCROLL_THRESHOLD = 64;
 const OVERSCAN = 8;
 const DEFAULT_ITEM_HEIGHT = 80;
 const PAGINATION_THRESHOLD = 200;
+/**
+ * Initial-load reveal is gated on the inner list height stabilizing across frames.
+ * TanStack Virtual measures rows asynchronously after mount, so `scrollHeight`
+ * grows for several frames after we first snap to it. Revealing during that
+ * growth lands on a stale tail (the bug: long threads sit short of the bottom).
+ *
+ * STABLE: number of consecutive identical frames required before revealing.
+ *   4 frames ≈ 67ms — imperceptible on the happy path (short threads).
+ * MAX:    hard cap so a perpetually-growing list (e.g. lazy markdown that
+ *   never settles within a second) cannot leave the user staring at a blank pane.
+ *   60 frames ≈ 1s.
+ */
+const TAIL_SETTLE_STABLE_FRAMES = 4;
+const TAIL_SETTLE_MAX_FRAMES = 60;
 
 /** Renders a single virtual item based on its type discriminant. */
 const VirtualItemRenderer = memo(function VirtualItemRenderer({
@@ -324,8 +338,11 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     overscan: OVERSCAN,
   });
 
-  // Near the tail: allow TanStack scroll compensation when row heights update
-  // so opening or revisiting lands on the true bottom as items measure.
+  // Pinned to tail: always compensate for size changes so the viewport tracks
+  // the bottom as rows measure. Adjusting by +delta when at scrollOffset = oldMaxScroll
+  // gives newScrollOffset = oldMaxScroll + delta = newMaxScroll, exactly the new tail.
+  // Near the tail (not pinned): adjust within AUTO_SCROLL_THRESHOLD so a small
+  // user-induced scroll-up can still settle on the true bottom as items measure.
   // Farther up: keep default above-viewport anchoring so history reading stays stable.
   // Assigned on the stable virtualizer instance (TanStack Virtual v3 API);
   // not available as a useVirtualizer option in the current type definitions.
@@ -334,6 +351,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     _delta,
     instance,
   ) => {
+    if (pinListTailRef.current) return true;
     const viewportHeight = instance.scrollRect?.height ?? 0;
     const scrollOffset = instance.scrollOffset ?? 0;
     const remaining =
@@ -383,13 +401,24 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   );
 
   /**
-   * Pins the scroll element to the list tail, then reveals after layout frames.
-   * Initial hydrate also calls `scrollToIndex` with `behavior: 'auto'` so the virtualizer
-   * anchors the viewport before row heights finish measuring (stable `scrollHeight` alone
-   * can sit on estimates for long threads).
+   * Pins the scroll element to the list tail and reveals only after the inner
+   * list height has been stable for {@link TAIL_SETTLE_STABLE_FRAMES} consecutive
+   * frames (or {@link TAIL_SETTLE_MAX_FRAMES} hard cap, whichever comes first).
    *
-   * @param options.measureFirst - When true, runs `virtualizer.measure()` first (cache miss
-   *   and first open). Omit on cache-hit switches so the measurement cache stays warm.
+   * Why a settle loop: TanStack Virtual measures rows after mount via its
+   * internal ResizeObserver. On long threads the estimated total size can be
+   * significantly less than the measured total. A single (or few) `scrollTop =
+   * scrollHeight` snap revealed before measurements complete leaves the user
+   * sitting *above* the real tail. ResizeObserver-based pinning fires too late
+   * to fix the perceived first paint. Hiding the list (opacity: 0) until both
+   * `scrollHeight` and `virtualizer.getTotalSize()` stop changing means the
+   * very first thing the user sees is already at the true bottom.
+   *
+   * @param options.measureFirst - When true, runs `virtualizer.measure()` and
+   *   `scrollToIndex(n-1, end, auto)` to anchor the virtualizer to the tail
+   *   before rows finish measuring. Used on cache-miss completion and first
+   *   open. Cache-hit switches omit this so the cached measurement state stays
+   *   warm and we land exactly where the cache says the tail is.
    */
   const positionAtBottom = useCallback((options?: { measureFirst?: boolean }) => {
     beginSuppressPassiveAutoBottomScroll();
@@ -407,23 +436,65 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
 
     const snap = () => {
       const el = containerRef.current;
-      if (el) {
-        el.scrollTop = el.scrollHeight;
-        pinTailBaselineMaxScrollRef.current = Math.max(0, el.scrollHeight - el.clientHeight);
-      }
+      if (!el) return;
+      el.scrollTop = el.scrollHeight;
+      pinTailBaselineMaxScrollRef.current = Math.max(0, el.scrollHeight - el.clientHeight);
     };
 
+    // Synchronous first snap so non-rAF environments (jsdom in unit tests)
+    // still see scrollTop applied before the rAF-based settle loop runs.
     snap();
-    requestAnimationFrame(() => {
-      if (tailSettleGenRef.current !== settleGen) return;
+
+    let lastScrollHeight = -1;
+    let lastTotalSize = -1;
+    let stableFrames = 0;
+    let frame = 0;
+
+    const reveal = () => {
       snap();
-      requestAnimationFrame(() => {
-        if (tailSettleGenRef.current !== settleGen) return;
-        snap();
+      setIsPositioned(true);
+      scheduleEndSuppressPassiveAutoBottomScroll();
+    };
+
+    const tick = () => {
+      if (tailSettleGenRef.current !== settleGen) return;
+      // If the user cleared the pin (wheel up, scrollbar drag) during settle,
+      // reveal immediately so they can interact with whatever they've scrolled to.
+      if (!pinListTailRef.current) {
         setIsPositioned(true);
         scheduleEndSuppressPassiveAutoBottomScroll();
-      });
-    });
+        return;
+      }
+      frame++;
+      snap();
+      const el = containerRef.current;
+      if (!el) {
+        setIsPositioned(true);
+        scheduleEndSuppressPassiveAutoBottomScroll();
+        return;
+      }
+      const h = el.scrollHeight;
+      const total = virtualizer.getTotalSize();
+      // Both scrollHeight (DOM) and getTotalSize (virtualizer state) must be
+      // unchanged. They can drift by one frame: the virtualizer updates its
+      // internal total first, then React re-renders the inner div with the new
+      // height. Requiring both to match for STABLE_FRAMES proves no measurement
+      // is in flight.
+      if (h === lastScrollHeight && total === lastTotalSize) {
+        stableFrames++;
+      } else {
+        stableFrames = 0;
+      }
+      lastScrollHeight = h;
+      lastTotalSize = total;
+      if (stableFrames >= TAIL_SETTLE_STABLE_FRAMES || frame >= TAIL_SETTLE_MAX_FRAMES) {
+        reveal();
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+
+    requestAnimationFrame(tick);
   }, [beginSuppressPassiveAutoBottomScroll, scheduleEndSuppressPassiveAutoBottomScroll, virtualizer]);
 
   // Clean up pending scroll timer on unmount
