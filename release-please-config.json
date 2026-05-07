@@ -17,7 +17,9 @@
       "release-type": "node",
       "component": "mcode",
       "extra-files": [
-        "apps/desktop/package.json"
+        "apps/desktop/package.json",
+        "apps/server/package.json",
+        "apps/web/package.json"
       ]
     }
   }
