@@ -103,19 +103,17 @@ export class ShellEnvResolver {
   }
 
   private async resolveWindowsAsync(): Promise<Record<string, string>> {
+    // Each element must be a complete PowerShell statement because they are
+    // joined with "; ". Splitting if/else across elements would orphan the
+    // "else" keyword after the semicolon statement-terminator.
     const script = [
       "$m = [Environment]::GetEnvironmentVariables('Machine')",
       "$u = [Environment]::GetEnvironmentVariables('User')",
       "$r = @{}",
       "foreach ($k in $m.Keys) { $r[$k] = $m[$k] }",
-      "foreach ($k in $u.Keys) {",
-      "  if ($k -eq 'Path') { $r[$k] = $m[$k] + ';' + $u[$k] }",
-      "  else { $r[$k] = $u[$k] }",
-      "}",
+      "foreach ($k in $u.Keys) { if ($k -eq 'Path') { $r[$k] = $m[$k] + ';' + $u[$k] } else { $r[$k] = $u[$k] } }",
       "$sb = New-Object System.Text.StringBuilder",
-      "foreach ($k in $r.Keys) {",
-      "  [void]$sb.Append($k).Append('=').Append($r[$k]).Append([char]0)",
-      "}",
+      "foreach ($k in $r.Keys) { [void]$sb.Append($k).Append('=').Append($r[$k]).Append([char]0) }",
       "$bytes = [System.Text.Encoding]::UTF8.GetBytes($sb.ToString())",
       "[Console]::Out.Write([Convert]::ToBase64String($bytes))",
     ].join("; ");
