@@ -9,7 +9,7 @@
  * scrollToIndex (instant) on switch so the list does not animate from a stale position.
  */
 import { render, act } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const measureSpy = vi.fn();
 const scrollToIndexSpy = vi.fn();
@@ -77,6 +77,10 @@ beforeEach(() => {
   clearScrollMemory();
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("MessageList thread switch", () => {
   it("does not call virtualizer.measure() on a cache-hit switch", () => {
     loadingValue = false;            // cache hit ⇒ loading is false synchronously
@@ -126,6 +130,30 @@ describe("MessageList thread switch", () => {
         && (call[1] as { align?: string; behavior?: string }).behavior === "auto",
     );
     expect(matchingCalls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("does not schedule throttled smooth scroll after cache-hit switch without remembered scroll", () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    loadingValue = false;
+    activeThreadIdValue = "thread-A";
+    messagesValue = [{ id: "m-a", sequence: 1 }];
+    const { rerender } = render(<MessageList />);
+
+    scrollToIndexSpy.mockClear();
+    activeThreadIdValue = "thread-B";
+    messagesValue = [{ id: "m-b", sequence: 1 }];
+    act(() => {
+      rerender(<MessageList />);
+    });
+
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+
+    const smoothCalls = scrollToIndexSpy.mock.calls.filter(
+      (call) => (call[1] as { behavior?: string } | undefined)?.behavior === "smooth",
+    );
+    expect(smoothCalls.length).toBe(0);
   });
 
   it("restores remembered scrollTop on a cache-hit switch", () => {

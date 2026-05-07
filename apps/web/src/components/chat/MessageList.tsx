@@ -146,6 +146,10 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   const firstMessageIdRef = useRef<string | null>(null);
   /** True until initial messages are positioned at the bottom after a thread switch. */
   const isInitialLoadRef = useRef(true);
+  /** Drops the next discrete auto bottom-scroll (layout already positioned the list). */
+  const skipDiscreteAutoBottomScrollRef = useRef(false);
+  /** Drops the next streaming auto bottom-scroll (same as discrete, separate effect). */
+  const skipStreamingAutoBottomScrollRef = useRef(false);
   /** Tracks the previous activeThreadId so we can save its scrollTop before switching. */
   const prevActiveThreadIdRef = useRef<string | null>(null);
   /** Holds the scrollTop value to restore on the next layout effect. */
@@ -301,10 +305,12 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
 
   /**
    * Positions the list at the bottom synchronously and reveals the container.
-   * Used for initial layout and cache-hit thread switches so discrete scroll
-   * effects never show a smooth scroll from the wrong offset.
+   * Used for initial layout and cache-hit thread switches. Skips the next
+   * passive auto-scroll effects so they do not schedule a throttled smooth scroll.
    */
   const positionAtBottom = useCallback(() => {
+    skipDiscreteAutoBottomScrollRef.current = true;
+    skipStreamingAutoBottomScrollRef.current = true;
     isInitialLoadRef.current = false;
     const count = itemsLengthRef.current;
     if (count > 0) {
@@ -367,6 +373,10 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
       // Reset thread-scoped refs and affordance state so the prepend-detection
       // effect, scroll-affordance UI, and turn-expand map don't carry stale
       // measurements from the previous thread into the new one.
+      if (scrollTimerRef.current) {
+        clearTimeout(scrollTimerRef.current);
+        scrollTimerRef.current = null;
+      }
       turnExpandRef.current.clear();
       prevMessageCountRef.current = 0;
       firstMessageIdRef.current = null;
@@ -398,6 +408,8 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
       isInitialLoadRef.current = false;
       setIsPositioned(true);
       pendingScrollRestoreRef.current = rememberedScrollTop;
+      skipDiscreteAutoBottomScrollRef.current = true;
+      skipStreamingAutoBottomScrollRef.current = true;
     } else if (isThreadSwitch) {
       // Cache hit on switch with no saved offset: avoid leaving stale scroll and
       // throttled smooth scroll from the discrete-messages effect.
@@ -476,22 +488,30 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   // Discrete events (new message, tool call) -> scroll if at bottom, else highlight button
   useEffect(() => {
     if (isInitialLoadRef.current) return;
+    if (skipDiscreteAutoBottomScrollRef.current) {
+      skipDiscreteAutoBottomScrollRef.current = false;
+      return;
+    }
     if (isScrolledUpRef.current) {
       setHasNewContent(true);
     } else {
       scrollToBottom(true);
     }
-  }, [messages.length, toolCalls.length, isAgentRunning, scrollToBottom]);
+  }, [activeThreadId, messages.length, toolCalls.length, isAgentRunning, scrollToBottom]);
 
   // Streaming deltas -> scroll if at bottom, else highlight button
   useEffect(() => {
+    if (skipStreamingAutoBottomScrollRef.current) {
+      skipStreamingAutoBottomScrollRef.current = false;
+      return;
+    }
     if (!streamingText || isInitialLoadRef.current) return;
     if (isScrolledUpRef.current) {
       setHasNewContent(true);
     } else {
       scrollToBottom(false);
     }
-  }, [streamingText, scrollToBottom]);
+  }, [streamingText, activeThreadId, scrollToBottom]);
 
   // Capture text selections in message bubbles and activate reply mode for the selected text.
   // Fires on mouseup so the selection is already finalised when we read it.
