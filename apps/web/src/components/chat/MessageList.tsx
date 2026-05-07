@@ -1,4 +1,4 @@
-import { useRef, useEffect, useLayoutEffect, useMemo, useCallback, memo, useState } from "react";
+import { useRef, useEffect, useLayoutEffect, useMemo, useCallback, memo, useState, type WheelEvent } from "react";
 import { useReplyStore } from "@/stores/replyStore";
 import { ArrowDown, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -158,6 +158,12 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
    * and async layout cannot leave the thread short of the bottom after open.
    */
   const pinListTailRef = useRef(false);
+  /**
+   * Last `scrollHeight - clientHeight` when we believed the viewport sat on the pinned
+   * tail. Used to tell virtualizer measurement growth (`scrollTop` stale vs old max)
+   * from the user leaving the tail (`scrollTop` below this baseline).
+   */
+  const pinTailBaselineMaxScrollRef = useRef(0);
   /** Tracks the previous activeThreadId so we can save its scrollTop before switching. */
   const prevActiveThreadIdRef = useRef<string | null>(null);
   /** Holds the scrollTop value to restore on the next layout effect. */
@@ -229,10 +235,32 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     });
   }, []);
 
+  /** Clears tail pin when the user scrolls content upward (wheel / trackpad). */
+  const handleWheel = useCallback((e: WheelEvent<HTMLDivElement>) => {
+    if (e.deltaY < 0) pinListTailRef.current = false;
+  }, []);
+
   /** Track scroll-to-bottom button visibility and trigger upward pagination near the top. */
   const handleScroll = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
+
+    const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+
+    if (pinListTailRef.current) {
+      const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (gap > AUTO_SCROLL_THRESHOLD) {
+        if (el.scrollTop < pinTailBaselineMaxScrollRef.current - 1) {
+          pinListTailRef.current = false;
+        } else {
+          el.scrollTop = el.scrollHeight;
+          pinTailBaselineMaxScrollRef.current = maxScroll;
+        }
+      } else {
+        pinTailBaselineMaxScrollRef.current = maxScroll;
+      }
+    }
+
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     const scrolledUp = distanceFromBottom > 200;
     if (scrolledUp) pinListTailRef.current = false;
@@ -331,9 +359,13 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
         if (el) {
           pinListTailRef.current = true;
           el.scrollTop = el.scrollHeight;
+          pinTailBaselineMaxScrollRef.current = Math.max(0, el.scrollHeight - el.clientHeight);
           requestAnimationFrame(() => {
             const el2 = containerRef.current;
-            if (el2) el2.scrollTop = el2.scrollHeight;
+            if (el2) {
+              el2.scrollTop = el2.scrollHeight;
+              pinTailBaselineMaxScrollRef.current = Math.max(0, el2.scrollHeight - el2.clientHeight);
+            }
           });
         }
       }, delay);
@@ -356,13 +388,20 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     const el = containerRef.current;
     if (el) {
       el.scrollTop = el.scrollHeight;
+      pinTailBaselineMaxScrollRef.current = Math.max(0, el.scrollHeight - el.clientHeight);
     }
     requestAnimationFrame(() => {
       const el2 = containerRef.current;
-      if (el2) el2.scrollTop = el2.scrollHeight;
+      if (el2) {
+        el2.scrollTop = el2.scrollHeight;
+        pinTailBaselineMaxScrollRef.current = Math.max(0, el2.scrollHeight - el2.clientHeight);
+      }
       requestAnimationFrame(() => {
         const el3 = containerRef.current;
-        if (el3) el3.scrollTop = el3.scrollHeight;
+        if (el3) {
+          el3.scrollTop = el3.scrollHeight;
+          pinTailBaselineMaxScrollRef.current = Math.max(0, el3.scrollHeight - el3.clientHeight);
+        }
         setIsPositioned(true);
         scheduleEndSuppressPassiveAutoBottomScroll();
       });
@@ -385,6 +424,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
       (item) => item.type === "message" && item.message.id === messageId,
     );
     if (idx !== -1) {
+      pinListTailRef.current = false;
       virtualizer.scrollToIndex(idx, { align: "center", behavior: "smooth" });
       setTimeout(() => {
         const element = document.querySelector(`[data-message-id="${messageId}"]`);
@@ -537,6 +577,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     if (snapToTail) {
       pinListTailRef.current = true;
       el.scrollTop = el.scrollHeight;
+      pinTailBaselineMaxScrollRef.current = Math.max(0, el.scrollHeight - el.clientHeight);
     } else {
       pinListTailRef.current = false;
       el.scrollTop = target;
@@ -549,7 +590,10 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     if (!scrolledUp) setHasNewContent(false);
     requestAnimationFrame(() => {
       const el2 = containerRef.current;
-      if (el2 && snapToTail) el2.scrollTop = el2.scrollHeight;
+      if (el2 && snapToTail) {
+        el2.scrollTop = el2.scrollHeight;
+        pinTailBaselineMaxScrollRef.current = Math.max(0, el2.scrollHeight - el2.clientHeight);
+      }
       scheduleEndSuppressPassiveAutoBottomScroll();
     });
   }, [activeThreadId, items.length, loading, beginSuppressPassiveAutoBottomScroll, scheduleEndSuppressPassiveAutoBottomScroll]);
@@ -625,6 +669,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     const ro = new ResizeObserver(() => {
       if (!pinListTailRef.current) return;
       outer.scrollTop = outer.scrollHeight;
+      pinTailBaselineMaxScrollRef.current = Math.max(0, outer.scrollHeight - outer.clientHeight);
     });
     ro.observe(inner);
     return () => ro.disconnect();
@@ -635,6 +680,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
       <div
         ref={containerRef}
         onScroll={handleScroll}
+        onWheel={handleWheel}
         className="h-full overflow-y-auto pt-4 transition-opacity duration-75"
         style={{ opacity: isPositioned ? 1 : 0 }}
       >
