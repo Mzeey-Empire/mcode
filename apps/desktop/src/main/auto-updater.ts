@@ -53,8 +53,11 @@ function loadUpdaterSettings(): UpdaterSettings {
       };
     }
     console.warn("[auto-updater] settings.json failed validation, using defaults");
-  } catch {
-    // File missing or unreadable on first launch; expected.
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[auto-updater] settings.json could not be loaded, using defaults: ${message}`);
+    }
   }
   return defaults;
 }
