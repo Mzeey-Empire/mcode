@@ -207,14 +207,15 @@ export class GitService {
 
   /**
    * Create a new git worktree in the mcode data directory.
-   * Returns the worktree metadata including the filesystem path and whether this
-   * call created the branch or attached to an existing one.
+   * Returns the worktree metadata including the filesystem path, whether this
+   * call created the branch or attached to an existing one, and any non-fatal
+   * warnings (e.g. post-checkout hook failures).
    */
   createWorktree(
     repoPath: string,
     name: string,
     branchName?: string,
-  ): WorktreeInfo & { createdBranch: boolean } {
+  ): WorktreeInfo & { createdBranch: boolean; warnings: string[] } {
     validateWorktreeName(name);
 
     if (!existsSync(repoPath)) {
@@ -230,22 +231,43 @@ export class GitService {
     }
 
     const createdBranch = !branchExists(repoPath, branch);
+    const warnings: string[] = [];
 
-    if (!createdBranch) {
-      execFileSync(
-        "git",
-        ["-C", repoPath, "worktree", "add", wtPath, branch],
-        { stdio: "pipe", windowsHide: true },
-      );
-    } else {
-      execFileSync(
-        "git",
-        ["-C", repoPath, "worktree", "add", wtPath, "-b", branch],
-        { stdio: "pipe", windowsHide: true },
-      );
+    try {
+      if (!createdBranch) {
+        execFileSync(
+          "git",
+          ["-C", repoPath, "worktree", "add", wtPath, branch],
+          { stdio: "pipe", windowsHide: true },
+        );
+      } else {
+        execFileSync(
+          "git",
+          ["-C", repoPath, "worktree", "add", wtPath, "-b", branch],
+          { stdio: "pipe", windowsHide: true },
+        );
+      }
+    } catch (err) {
+      // If the worktree directory exists, git completed its work before the
+      // post-checkout hook ran. Treat the hook failure as a warning so the
+      // caller can still use the worktree rather than discarding it.
+      if (existsSync(wtPath)) {
+        const stderr =
+          err instanceof Error && "stderr" in err
+            ? String((err as { stderr: unknown }).stderr)
+            : String(err);
+        warnings.push(stderr || String(err));
+        logger.warn("Worktree created but post-checkout hook failed", {
+          wtPath,
+          branch,
+          error: stderr,
+        });
+      } else {
+        throw err;
+      }
     }
 
-    return { name, path: wtPath, branch, managed: true, createdBranch };
+    return { name, path: wtPath, branch, managed: true, createdBranch, warnings };
   }
 
   /**
