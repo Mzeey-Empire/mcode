@@ -21,7 +21,7 @@ import {
 } from "./virtual-items";
 import type { ChatVirtualItem } from "./virtual-items";
 import type { ToolCall } from "@/transport/types";
-import { rememberScrollTop, recallScrollTop } from "./scrollPositionMemory";
+import { rememberScrollTop, recallScrollTop, forgetScrollTop } from "./scrollPositionMemory";
 
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
 const AUTO_SCROLL_THRESHOLD = 64;
@@ -714,6 +714,10 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     }
     pendingScrollRestoreRef.current = null;
     scrollToTailIntentRef.current = false;
+    // Recall is for one-shot restore when entering a thread. The layout effect
+    // also depends on items.length (initial hydrate); without forgetting, every
+    // new message re-queues the same offset and yanks the viewport off the tail.
+    if (activeThreadId) forgetScrollTop(activeThreadId);
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     const scrolledUp = distanceFromBottom > USER_AWAY_FROM_BOTTOM_PX;
     isScrolledUpRef.current = scrolledUp;
