@@ -139,9 +139,7 @@ export function ModelSection() {
         icon: <Sparkles size={12} className="text-muted-foreground" aria-hidden />,
         title: "Use the default provider above",
       },
-      ...MODEL_PROVIDERS.filter((p) => p.supportsCompletion).map((p) =>
-        buildProviderOption(p, availabilityById.get(p.id)),
-      ),
+      ...MODEL_PROVIDERS.map((p) => buildProviderOption(p, availabilityById.get(p.id))),
     ],
     [availabilityById],
   );
@@ -263,18 +261,36 @@ export function ModelSection() {
     [modelsForFallbackPicker],
   );
 
-  // Utility model options: "Auto" (provider default) + all models for the effective provider.
-  // Dynamic models from the store take priority; static registry is the fallback when the
-  // store hasn't fetched yet (e.g. Copilot not connected).
+  const mergedUtilityCatalogModels = useMemo(
+    () =>
+      pickProviderModelsForSettings(utilityEffectiveProvider?.models ?? [], dynamicUtilityModels),
+    [utilityEffectiveProvider, dynamicUtilityModels],
+  );
+
+  const modelsForUtilityPicker = useMemo(() => {
+    const ids = new Set(mergedUtilityCatalogModels.map((m) => m.id));
+    if (utilityModelId.trim() && !ids.has(utilityModelId)) {
+      const orphan: ModelDefinition = {
+        id: utilityModelId,
+        label: `${utilityModelId} (unlisted)`,
+        providerId: utilityEffectiveId,
+        group: "Saved selection",
+      };
+      return [orphan, ...mergedUtilityCatalogModels];
+    }
+    return mergedUtilityCatalogModels;
+  }, [mergedUtilityCatalogModels, utilityModelId, utilityEffectiveId]);
+
   const utilityModelOptions = useMemo(
     () => [
-      { value: "", label: "Auto" },
-      ...(dynamicUtilityModels ?? utilityEffectiveProvider?.models ?? []).map((m) => ({
+      { value: "", label: "Auto", group: undefined },
+      ...modelsForUtilityPicker.map((m) => ({
         value: m.id,
-        label: m.label,
+        label: m.multiplier != null && m.multiplier !== 1 ? `${m.label} (${m.multiplier}x)` : m.label,
+        group: m.group,
       })),
     ],
-    [dynamicUtilityModels, utilityEffectiveProvider],
+    [modelsForUtilityPicker],
   );
 
   // Gate on provider so Copilot models that share IDs with Codex models
@@ -518,6 +534,7 @@ export function ModelSection() {
                 options={utilityModelOptions.map((o) => ({
                   value: o.value,
                   label: o.label,
+                  group: o.group,
                 }))}
                 emptyTriggerLabel="Auto"
                 searchPlaceholder="Search utility models…"
