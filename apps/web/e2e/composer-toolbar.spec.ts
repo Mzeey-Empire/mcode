@@ -105,8 +105,8 @@ test.describe("Composer toolbar", () => {
     const search = page.getByTestId("model-selector-locked-search");
     await search.fill("Beta");
 
-    await expect(page.getByRole("button", { name: "Beta Model" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Alpha Model" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Select Beta Model", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Select Alpha Model", exact: true })).toHaveCount(0);
 
     await page.screenshot({
       path: "e2e/screenshots/model-selector-search-filter.png",

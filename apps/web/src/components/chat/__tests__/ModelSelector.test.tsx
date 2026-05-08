@@ -23,25 +23,15 @@ vi.mock("@/components/ui/button", () => ({
   ),
 }));
 
-// @base-ui/react (used by Badge) does not work in jsdom; stub as a plain span.
-vi.mock("@/components/ui/badge", () => ({
-  Badge: ({
-    children,
-    "data-testid": testId,
-    ...rest
-  }: {
-    children?: React.ReactNode;
-    "data-testid"?: string;
-    [key: string]: unknown;
-  }) => (
-    <span data-testid={testId} {...rest}>
-      {children}
-    </span>
-  ),
-}));
-
 vi.mock("@/components/ui/input", () => ({
   Input: ({ ...props }: React.ComponentProps<"input">) => <input {...props} />,
+}));
+
+/** Tooltip relies on Base UI and App-level TooltipProvider; unwrap triggers for jsdom. */
+vi.mock("@/components/ui/tooltip", () => ({
+  Tooltip: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  TooltipTrigger: ({ render }: { render?: React.ReactElement }) => <>{render}</>,
+  TooltipContent: () => null,
 }));
 
 // Prevent real RPC calls triggered when a provider rail tab loads models.
@@ -77,7 +67,7 @@ beforeEach(() => {
 });
 
 describe("ModelSelector", () => {
-  it("marks disabled providers with data-disabled='true' on their group container", async () => {
+  it("marks disabled providers with data-disabled='true' on their rail button", async () => {
     render(
       <ModelSelector
         selectedModelId="claude-sonnet-4-6"
@@ -87,16 +77,15 @@ describe("ModelSelector", () => {
       />,
     );
 
-    // Open the dropdown by clicking the trigger button.
     const trigger = screen.getAllByRole("button")[0];
     await userEvent.click(trigger);
 
-    const codexGroup = document.querySelector("[data-testid='model-group-codex']");
-    expect(codexGroup).not.toBeNull();
-    expect(codexGroup).toHaveAttribute("data-disabled", "true");
+    const codexBtn = document.querySelector("[data-testid='model-group-codex']");
+    expect(codexBtn).not.toBeNull();
+    expect(codexBtn).toHaveAttribute("data-disabled", "true");
   });
 
-  it("shows a 'Disabled' badge for the disabled provider", async () => {
+  it("disables the rail button when the provider is disabled in settings", async () => {
     render(
       <ModelSelector
         selectedModelId="claude-sonnet-4-6"
@@ -109,7 +98,9 @@ describe("ModelSelector", () => {
     const trigger = screen.getAllByRole("button")[0];
     await userEvent.click(trigger);
 
-    expect(screen.getByText("Disabled")).toBeInTheDocument();
+    const codexBtn = document.querySelector("[data-testid='model-group-codex']") as HTMLButtonElement | null;
+    expect(codexBtn).not.toBeNull();
+    expect(codexBtn?.disabled).toBe(true);
   });
 
   it("does not mark enabled providers as disabled", async () => {
@@ -125,7 +116,7 @@ describe("ModelSelector", () => {
     const trigger = screen.getAllByRole("button")[0];
     await userEvent.click(trigger);
 
-    const claudeGroup = document.querySelector("[data-testid='model-group-claude']");
-    expect(claudeGroup).toHaveAttribute("data-disabled", "false");
+    const claudeBtn = document.querySelector("[data-testid='model-group-claude']");
+    expect(claudeBtn).toHaveAttribute("data-disabled", "false");
   });
 });

@@ -1,10 +1,14 @@
-import { useState, useEffect, useRef, useCallback, useMemo, type ComponentType } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, useId, type ComponentType } from "react";
 import { ChevronDown, Lock, Check, Loader2, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatContextWindow } from "./format-context-window";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   MODEL_PROVIDERS,
   findModelById,
@@ -36,6 +40,41 @@ const PROVIDER_META: Record<string, { icon: IconComponent; color: string }> = {
   gemini: { icon: GeminiIcon, color: "text-sky-400" },
 };
 
+/** Matches Tailwind `w-[52px]` for header alignment and icon-first rail. */
+const LEFT_RAIL_WIDTH_CLASS = "w-[52px]";
+
+/** Splits a query into lowercase tokens (whitespace). Empty input yields no tokens. */
+function tokenizeSearch(raw: string): string[] {
+  return raw.trim().toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+/** Requires every token to appear as a substring (AND semantics across fields). */
+function matchesAllTokens(parts: string[], tokens: string[]): boolean {
+  if (tokens.length === 0) return true;
+  const haystack = parts.join(" ").toLowerCase();
+  return tokens.every((t) => haystack.includes(t));
+}
+
+/** True when the catalog uses subgroup rows so a provider title above would repeat RPC group labels. */
+function catalogUsesModelGroups(models: ModelProvider["models"]): boolean {
+  return models.some((m) => Boolean(m.group?.trim()));
+}
+
+/** Tooltip copy for the left rail when a row cannot open a catalog. */
+function providerRailUnavailableReason(
+  p: ModelProvider,
+  providerDisabled: boolean,
+): string {
+  if (p.comingSoon && providerDisabled) {
+    return `${p.name} is coming soon and disabled in settings.`;
+  }
+  if (p.comingSoon) return `${p.name} is coming soon.`;
+  if (providerDisabled) {
+    return `${p.name} is disabled. Enable it in Settings under Providers.`;
+  }
+  return `${p.name}`;
+}
+
 /** Left rail segment: browse starred models or a single provider's catalog. */
 type LeftRailSelection = "favorites" | string;
 
@@ -63,6 +102,7 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
   const [rightPanelSearch, setRightPanelSearch] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const prevOpenRef = useRef(false);
+  const panelId = useId();
 
   const favorites = useModelFavoritesStore((s) => s.entries);
   const toggleFavorite = useModelFavoritesStore((s) => s.toggleFavorite);
@@ -128,13 +168,11 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
     [availabilityList],
   );
 
-  const filterModelsBySearch = useCallback((models: ModelProvider["models"], q: string) => {
-    const n = q.trim().toLowerCase();
-    if (!n) return models;
-    return models.filter(
-      (m) =>
-        m.label.toLowerCase().includes(n) ||
-        m.id.toLowerCase().includes(n),
+  const filterModelsBySearchQuery = useCallback((models: ModelProvider["models"], q: string) => {
+    const tokens = tokenizeSearch(q);
+    if (tokens.length === 0) return models;
+    return models.filter((m) =>
+      matchesAllTokens([m.label, m.id, m.group ?? ""], tokens),
     );
   }, []);
 
@@ -174,12 +212,10 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
   }, [favorites, isProviderUsable, providerLocked, displayProvider]);
 
   const favoritesFiltered = useMemo(() => {
-    const n = rightPanelSearch.trim().toLowerCase();
-    if (!n) return favoritesVisible;
-    return favoritesVisible.filter(
-      (f) =>
-        f.label.toLowerCase().includes(n) ||
-        f.modelId.toLowerCase().includes(n),
+    const tokens = tokenizeSearch(rightPanelSearch);
+    if (tokens.length === 0) return favoritesVisible;
+    return favoritesVisible.filter((f) =>
+      matchesAllTokens([f.label, f.modelId], tokens),
     );
   }, [favoritesVisible, rightPanelSearch]);
 
@@ -222,9 +258,9 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
   if (locked) {
     return (
       <span className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground">
-        <Icon size={12} className={iconClass} />
-        {shortLabel}
-        <Lock size={10} className="ml-0.5 opacity-75" />
+        <Icon size={12} className={iconClass} aria-hidden />
+        <span>{shortLabel}</span>
+        <Lock size={10} className="ml-0.5 opacity-75" aria-hidden />
       </span>
     );
   }
@@ -239,11 +275,19 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
     setRightPanelSearch("");
   };
 
+  const searchAriaLabel =
+    leftRailSelection === "favorites"
+      ? "Filter favorites by name. Use multiple words to narrow results."
+      : "Filter models by name or id. Use multiple words to narrow results.";
+
   const renderFavoriteRow = (entry: ModelFavoriteEntry) => {
     const pm = PROVIDER_META[entry.providerId];
     const ProvIcon = pm?.icon ?? ClaudeIcon;
     const provIconClass = pm?.color ?? "";
     const starred = isFavorite(entry.providerId, entry.modelId);
+    const selected =
+      entry.modelId === normalizedSelectedId &&
+      entry.providerId === (selectedProviderId ?? displayProvider?.id);
     return (
       <div
         key={`${entry.providerId}:${entry.modelId}`}
@@ -254,7 +298,7 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
           variant="ghost"
           size="icon-xs"
           className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
-          aria-label={starred ? "Remove from favorites" : "Add to favorites"}
+          aria-label={starred ? `Remove ${entry.label} from favorites` : `Add ${entry.label} to favorites`}
           onClick={(e) => {
             e.stopPropagation();
             toggleFavorite({
@@ -267,19 +311,24 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
           <Star
             size={12}
             className={cn(starred && "fill-amber-400 text-amber-400")}
+            aria-hidden
           />
         </Button>
         <button
           type="button"
+          aria-current={selected ? "true" : undefined}
+          aria-label={
+            selected ? `${entry.label}, selected` : `Select ${entry.label}`
+          }
           onClick={() => handleSelectModel(entry.modelId, entry.providerId)}
           className={cn(
             "flex min-w-0 flex-1 items-center gap-2 rounded px-2 py-1.5 text-xs",
-            entry.modelId === normalizedSelectedId && entry.providerId === (selectedProviderId ?? displayProvider?.id)
+            selected
               ? "bg-accent text-foreground"
               : "text-popover-foreground hover:bg-accent/50 hover:text-foreground",
           )}
         >
-          <ProvIcon size={12} className={provIconClass} />
+          <ProvIcon size={12} className={provIconClass} aria-hidden />
           <span className="truncate text-left">{entry.label}</span>
         </button>
       </div>
@@ -288,11 +337,11 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
 
   /** Groups a provider's models by their `group` field. Returns ungrouped if none use it. */
   const groupModels = (models: ModelProvider["models"]) => {
-    const hasGroups = models.some((m) => m.group);
+    const hasGroups = models.some((m) => m.group?.trim());
     if (!hasGroups) return null;
     const seen = new Map<string, typeof models>();
     for (const m of models) {
-      const g = m.group ?? "";
+      const g = m.group?.trim() ?? "";
       if (!seen.has(g)) seen.set(g, []);
       seen.get(g)!.push(m);
     }
@@ -308,6 +357,7 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
   ) => {
     const ctxLabel = formatContextWindow(m.contextWindow);
     const starred = isFavorite(providerId, m.id);
+    const selected = isSelected(m.id);
     return (
       <div key={m.id} className="flex w-full items-center gap-0.5 rounded px-1">
         <Button
@@ -315,7 +365,7 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
           variant="ghost"
           size="icon-xs"
           className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
-          aria-label={starred ? "Remove from favorites" : "Add to favorites"}
+          aria-label={starred ? `Remove ${m.label} from favorites` : `Add ${m.label} to favorites`}
           onClick={(e) => {
             e.stopPropagation();
             toggleFavorite({ providerId, modelId: m.id, label: m.label });
@@ -324,14 +374,17 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
           <Star
             size={12}
             className={cn(starred && "fill-amber-400 text-amber-400")}
+            aria-hidden
           />
         </Button>
         <button
           type="button"
+          aria-current={selected ? "true" : undefined}
+          aria-label={selected ? `${m.label}, selected` : `Select ${m.label}`}
           onClick={() => handleSelectModel(m.id, providerId)}
           className={cn(
             "flex min-w-0 flex-1 items-center gap-2 rounded px-2 py-1.5 text-xs",
-            isSelected(m.id)
+            selected
               ? "bg-accent text-foreground"
               : "text-popover-foreground hover:bg-accent/50 hover:text-foreground",
           )}
@@ -347,8 +400,8 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
               {m.multiplier}x
             </span>
           )}
-          {isSelected(m.id) && (
-            <Check size={10} className="shrink-0 text-foreground" />
+          {selected && (
+            <Check size={10} className="shrink-0 text-foreground" aria-hidden />
           )}
         </button>
       </div>
@@ -361,19 +414,28 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
     isSelected: (id: string) => boolean,
     searchQuery: string,
   ) => {
-    const filtered = filterModelsBySearch(models, searchQuery);
+    const filtered = filterModelsBySearchQuery(models, searchQuery);
     const groups = groupModels(filtered);
     if (!groups) {
       return filtered.map((m) => renderModelRow(m, providerId, isSelected));
     }
-    return groups.map(({ label, models: gModels }) => (
+    return groups.map(({ label, models: gModels }) => {
+      const groupSlug = label.replace(/\s+/g, "-").replace(/[^a-zA-Z0-9_-]/g, "");
+      const headingId = `${panelId}-g-${providerId}-${groupSlug}`;
+      return (
       <div key={label}>
-        <div className="px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60 select-none">
+        <div
+          className="px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60 select-none"
+          id={headingId}
+        >
           {label}
         </div>
-        {gModels.map((m) => renderModelRow(m, providerId, isSelected))}
+        <div aria-labelledby={headingId}>
+          {gModels.map((m) => renderModelRow(m, providerId, isSelected))}
+        </div>
       </div>
-    ));
+    );
+    });
   };
 
   const panelSearchTestId =
@@ -407,17 +469,25 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
     const isSelected = (modelId: string) =>
       modelId === normalizedSelectedId && p.id === (selectedProviderId ?? displayProvider?.id);
 
+    const loadedModels = getModels(p);
+    const showProviderTitle = !catalogUsesModelGroups(loadedModels);
+
     return (
       <div className="space-y-0.5">
-        <div className="px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60 select-none">
-          {p.name}
-        </div>
         {loadingProviders.has(p.id) ? (
           <div className="flex items-center justify-center py-8">
-            <Loader2 size={14} className="animate-spin text-muted-foreground" />
+            <Loader2 size={14} className="animate-spin text-muted-foreground" aria-hidden />
+            <span className="sr-only">Loading models</span>
           </div>
         ) : (
-          renderGroupedModels(getModels(p), p.id, isSelected, rightPanelSearch)
+          <>
+            {showProviderTitle && (
+              <div className="px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60 select-none">
+                {p.name}
+              </div>
+            )}
+            {renderGroupedModels(loadedModels, p.id, isSelected, rightPanelSearch)}
+          </>
         )}
       </div>
     );
@@ -425,24 +495,35 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
 
   return (
     <div ref={containerRef} className="relative">
-      <Button variant="ghost" size="xs" data-testid="model-selector-trigger" onClick={() => setOpen(!open)} className="text-muted-foreground hover:bg-muted/40 hover:text-foreground transition-colors">
-        <Icon size={14} className={iconClass} />
+      <Button
+        variant="ghost"
+        size="xs"
+        data-testid="model-selector-trigger"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        aria-controls={open ? panelId : undefined}
+        onClick={() => setOpen(!open)}
+        className="text-muted-foreground hover:bg-muted/40 hover:text-foreground transition-colors"
+      >
+        <Icon size={14} className={iconClass} aria-hidden />
         <span className="text-sm">{shortLabel}</span>
-        <ChevronDown size={11} />
+        <ChevronDown size={11} aria-hidden />
       </Button>
 
       {open && (
         <div
+          id={panelId}
+          role="dialog"
+          aria-label="Choose model and provider"
           className={cn(
             "absolute bottom-full left-0 z-20 mb-1 flex max-h-[min(480px,calc(100vh-8rem))] w-[min(92vw,520px)] flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-lg",
           )}
         >
           <div className="flex shrink-0 border-b border-border/40">
-            <div className="flex w-[148px] shrink-0 items-center border-r border-border/40 px-2 py-2">
-              <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70 select-none">
-                {providerLocked ? "Scope" : "Browse"}
-              </span>
-            </div>
+            <div
+              className={cn(LEFT_RAIL_WIDTH_CLASS, "shrink-0 border-r border-border/40")}
+              aria-hidden="true"
+            />
             <div className="min-w-0 flex-1 p-1.5">
               <Input
                 size="xs"
@@ -451,34 +532,47 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
                 onChange={(e) => setRightPanelSearch(e.target.value)}
                 data-testid={panelSearchTestId}
                 className="h-7"
+                aria-label={searchAriaLabel}
               />
             </div>
           </div>
 
           <div className="flex min-h-0 flex-1 divide-x divide-border/40">
-            <div className="flex w-[148px] shrink-0 flex-col gap-0.5 overflow-y-auto bg-muted/15 p-1">
-              <button
-                type="button"
-                data-testid="model-selector-rail-favorites"
-                onClick={() => selectLeftRail("favorites")}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs transition-colors",
-                  leftRailSelection === "favorites"
-                    ? "bg-accent text-foreground shadow-sm"
-                    : "text-popover-foreground hover:bg-accent/40 hover:text-foreground",
-                )}
-              >
-                <Star
-                  size={14}
-                  className={cn(
-                    "shrink-0 text-muted-foreground",
-                    leftRailSelection === "favorites" && "fill-amber-400 text-amber-400",
-                  )}
+            <nav
+              className={cn(
+                LEFT_RAIL_WIDTH_CLASS,
+                "flex shrink-0 flex-col items-center gap-1 overflow-y-auto bg-muted/15 py-1",
+              )}
+              aria-label={providerLocked ? "Scope and favorites" : "Favorites and providers"}
+            >
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      data-testid="model-selector-rail-favorites"
+                      onClick={() => selectLeftRail("favorites")}
+                      aria-current={leftRailSelection === "favorites" ? "true" : undefined}
+                      aria-label="Favorites"
+                      className={cn(
+                        "flex h-10 w-10 items-center justify-center rounded-md transition-colors",
+                        leftRailSelection === "favorites"
+                          ? "bg-accent text-foreground shadow-sm"
+                          : "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
+                      )}
+                    >
+                      <Star
+                        size={18}
+                        className={cn(leftRailSelection === "favorites" && "fill-amber-400 text-amber-400")}
+                        aria-hidden
+                      />
+                    </button>
+                  }
                 />
-                <span className="truncate font-medium">Favorites</span>
-              </button>
+                <TooltipContent side="right">Saved models</TooltipContent>
+              </Tooltip>
 
-              <div className="my-0.5 border-t border-border/40" />
+              <div className="my-0.5 h-px w-8 shrink-0 bg-border/50" aria-hidden />
 
               {providersForLeftRail.map((p) => {
                 const pm = PROVIDER_META[p.id];
@@ -487,46 +581,60 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
                 const providerRecord = availabilityList.find((x) => x.id === p.id);
                 const providerDisabled = providerRecord ? !providerRecord.enabled : false;
                 const singleStaticModel = p.models.length === 1;
+                const unavailable = p.comingSoon || providerDisabled;
+                const tip = unavailable
+                  ? providerRailUnavailableReason(p, providerDisabled)
+                  : singleStaticModel
+                    ? `Select ${p.models[0].label}`
+                    : `Browse ${p.name} models`;
 
                 return (
-                  <button
-                    key={p.id}
-                    type="button"
-                    data-testid={`model-group-${p.id}`}
-                    data-disabled={providerDisabled ? "true" : "false"}
-                    disabled={p.comingSoon || providerDisabled}
-                    onClick={() => {
-                      if (providerDisabled) return;
-                      if (singleStaticModel) {
-                        handleSelectModel(p.models[0].id, p.id);
-                        return;
+                  <Tooltip key={p.id}>
+                    <TooltipTrigger
+                      render={
+                        <button
+                          type="button"
+                          data-testid={`model-group-${p.id}`}
+                          data-disabled={providerDisabled ? "true" : "false"}
+                          disabled={unavailable}
+                          aria-current={leftRailSelection === p.id && !singleStaticModel ? "true" : undefined}
+                          aria-label={unavailable ? tip : p.name}
+                          onClick={() => {
+                            if (unavailable) return;
+                            if (singleStaticModel) {
+                              handleSelectModel(p.models[0].id, p.id);
+                              return;
+                            }
+                            selectLeftRail(p.id);
+                          }}
+                          className={cn(
+                            "relative flex h-10 w-10 shrink-0 items-center justify-center rounded-md transition-colors",
+                            unavailable && "cursor-not-allowed opacity-45",
+                            !unavailable && "text-popover-foreground hover:bg-accent/40 hover:text-foreground",
+                            leftRailSelection === p.id && !singleStaticModel && !unavailable && "bg-accent text-foreground shadow-sm",
+                          )}
+                        >
+                          <ProvIcon size={18} className={p.comingSoon ? "opacity-50" : provIconClass} aria-hidden />
+                          {unavailable && (
+                            <span
+                              className="absolute bottom-1 right-1 h-1.5 w-1.5 rounded-full bg-muted-foreground/80"
+                              aria-hidden
+                            />
+                          )}
+                        </button>
                       }
-                      selectLeftRail(p.id);
-                    }}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs transition-colors",
-                      p.comingSoon || providerDisabled
-                        ? "cursor-not-allowed opacity-50"
-                        : "text-popover-foreground hover:bg-accent/40 hover:text-foreground",
-                      leftRailSelection === p.id && !singleStaticModel && "bg-accent text-foreground shadow-sm",
-                    )}
-                  >
-                    <ProvIcon size={14} className={p.comingSoon ? "opacity-40" : provIconClass} />
-                    <span className="min-w-0 flex-1 truncate font-medium">{p.name}</span>
-                    <span className="flex shrink-0 flex-col items-end gap-0.5">
-                      {p.comingSoon && (
-                        <Badge variant="secondary" size="sm">SOON</Badge>
-                      )}
-                      {providerDisabled && (
-                        <Badge variant="outline" size="sm">Disabled</Badge>
-                      )}
-                    </span>
-                  </button>
+                    />
+                    <TooltipContent side="right">{tip}</TooltipContent>
+                  </Tooltip>
                 );
               })}
-            </div>
+            </nav>
 
-            <div className="min-h-[220px] min-w-0 flex-1 overflow-y-auto bg-popover p-1">
+            <div
+              className="min-h-[220px] min-w-0 flex-1 overflow-y-auto bg-popover p-1"
+              role="region"
+              aria-label="Model list"
+            >
               {renderRightPanel()}
             </div>
           </div>
