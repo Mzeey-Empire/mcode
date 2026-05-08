@@ -551,7 +551,7 @@ export class AgentService {
     copilotAgent?: string,
     contextWindowMode?: ContextWindowMode,
     thinking?: boolean,
-  ): Promise<Thread> {
+  ): Promise<Thread & { warnings?: string[] }> {
     const title = truncateTitle(content);
 
     if (parentThreadId) {
@@ -636,7 +636,8 @@ export class AgentService {
     });
 
     const updated = this.threadRepo.findById(thread.id);
-    return updated ?? thread;
+    const { warnings } = thread as { warnings?: string[] };
+    return { ...(updated ?? thread), ...(warnings?.length ? { warnings } : {}) };
   }
 
   /**
@@ -665,7 +666,7 @@ export class AgentService {
     copilotAgent?: string;
     contextWindowMode?: ContextWindowMode;
     thinking?: boolean;
-  }): Promise<Thread> {
+  }): Promise<Thread & { warnings?: string[] }> {
     const {
       workspaceId, content, model, permissionMode, mode, branch,
       existingWorktreePath, attachments, reasoningLevel, provider,
@@ -850,7 +851,8 @@ export class AgentService {
       });
     });
 
-    return thread;
+    const { warnings } = thread as { warnings?: string[] };
+    return { ...thread, ...(warnings?.length ? { warnings } : {}) };
   }
 
   /** Stop the agent for a given thread, persisting any buffered tool calls first. */
