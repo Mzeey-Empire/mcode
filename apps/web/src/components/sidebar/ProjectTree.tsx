@@ -592,7 +592,7 @@ export function ProjectTree() {
         </Tooltip>
       </div>
 
-      <ScrollArea className="flex-1" viewportRef={scrollViewportRef}>
+      <ScrollArea className="min-h-0 flex-1" viewportRef={scrollViewportRef}>
         <div className="px-1" data-testid="thread-list">
           <DndContext
             sensors={sensors}
