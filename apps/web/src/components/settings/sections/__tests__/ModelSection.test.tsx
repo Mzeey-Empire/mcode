@@ -2,8 +2,14 @@ import { render, screen, within } from "@testing-library/react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 // vi.hoisted ensures these refs are available inside the vi.mock factory below.
-const { mockSettingsSelector } = vi.hoisted(() => ({
+const { mockSettingsSelector, mockPmState } = vi.hoisted(() => ({
   mockSettingsSelector: vi.fn(),
+  mockPmState: {
+    models: {} as Record<string, import("@/lib/model-registry").ModelDefinition[]>,
+    loading: {} as Record<string, boolean>,
+    fetchModels: vi.fn(),
+    initialize: vi.fn(),
+  },
 }));
 
 vi.mock("@/stores/settingsStore", () => {
@@ -16,7 +22,7 @@ vi.mock("@/stores/settingsStore", () => {
             defaults: { provider: "claude", id: "claude-opus-4-7", reasoning: "high", fallbackId: "" },
             utility: { provider: "", id: "" },
           },
-          provider: { cli: { codex: "", claude: "", copilot: "" } },
+          provider: { cli: { codex: "", claude: "", copilot: "", cursor: "" } },
           diffSummary: { enabled: false },
         },
       }),
@@ -25,6 +31,21 @@ vi.mock("@/stores/settingsStore", () => {
   );
   return { useSettingsStore: store };
 });
+
+vi.mock("@/stores/providerModelsStore", () => ({
+  useProviderModelsStore: (fn: (s: typeof mockPmState) => unknown) => fn(mockPmState),
+}));
+
+vi.mock("@/stores/providerAvailabilityStore", () => ({
+  useProviderAvailabilityStore: (fn: (s: { providers: unknown[] }) => unknown) =>
+    fn({ providers: [] }),
+}));
+
+vi.mock("@/stores/toastStore", () => ({
+  useToastStore: Object.assign(vi.fn(), {
+    getState: () => ({ show: vi.fn(), dismiss: vi.fn(), toasts: [] }),
+  }),
+}));
 
 // @base-ui/react (used by Tooltip) does not work in jsdom; stub it out.
 vi.mock("@/components/ui/tooltip", () => ({
@@ -58,7 +79,7 @@ function makeState(provider: string, modelId: string, reasoning = "high") {
         defaults: { provider, id: modelId, reasoning, fallbackId: "" },
         utility: { provider: "", id: "" },
       },
-      provider: { cli: { codex: "", claude: "", copilot: "" } },
+      provider: { cli: { codex: "", claude: "", copilot: "", cursor: "" } },
       diffSummary: { enabled: false },
     },
     update: vi.fn(),

@@ -110,6 +110,16 @@ export class ModelCacheService {
   }
 
   /**
+   * Drops persisted and in-memory entries for a provider so the next model list
+   * fetch runs against the live CLI or SDK again.
+   */
+  invalidate(providerId: string): void {
+    this.memoryCache.delete(providerId);
+    this.fetchedAt.delete(providerId);
+    this.repo.delete(providerId);
+  }
+
+  /**
    * Fetches models from the provider, updates both in-memory and SQLite caches.
    * Coalesces concurrent calls for the same provider so we never issue
    * duplicate requests in flight.

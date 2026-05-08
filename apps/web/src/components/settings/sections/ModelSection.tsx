@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useEffect, useRef, type ReactNode } from "react";
 import { ProviderSection } from "./ProviderSection";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
@@ -13,6 +13,8 @@ import {
   supportsThinkingToggle,
   normalizeReasoningLevelForModel,
   getCodexReasoningLevels,
+  pickProviderModelsForSettings,
+  type ModelDefinition,
 } from "@/lib/model-registry";
 import { SettingRow } from "../SettingRow";
 import { SegControl } from "../SegControl";
@@ -37,6 +39,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useToastStore } from "@/stores/toastStore";
 
 /** Providers with more models than this threshold use a Select dropdown instead of SegControl. */
 const SEG_CONTROL_MAX_MODELS = 6;
@@ -105,6 +108,10 @@ function buildProviderOption(
  * Model settings section: provider, default model, fallback model, reasoning effort,
  * utility model provider/model, diff summary toggle, and CLI paths.
  *
+ * Default and fallback pickers merge live `listProviderModels` results with static
+ * catalog fallbacks (needed for Cursor, Copilot, and Claude API discovery). Stale
+ * saved IDs that disappear from the catalog stay selectable with a warning until the user changes them.
+ *
  * Model options update when the provider changes. Switching provider resets the default
  * model to the new provider's first model and clears the fallback. The reasoning level
  * is normalized down when the new model does not support the current tier.
@@ -153,18 +160,99 @@ export function ModelSection() {
   const utilityEffectiveId = utilityProvider || provider;
   const dynamicUtilityModels = useProviderModelsStore((s) => s.models[utilityEffectiveId]);
 
+  const fetchModels = useProviderModelsStore((s) => s.fetchModels);
+  const dynamicModels = useProviderModelsStore((s) => s.models[provider]);
+  const modelsLoading = useProviderModelsStore((s) => s.loading[provider] ?? false);
+
+  const cliPaths = useSettingsStore((s) => s.settings.provider.cli);
+  const dynamicCliPath =
+    provider === "cursor" ? cliPaths.cursor : provider === "copilot" ? cliPaths.copilot : "";
+
+  useEffect(() => {
+    void fetchModels(provider, { force: true });
+  }, [provider, dynamicCliPath, fetchModels]);
+
+  const mergedCatalogModels = useMemo(
+    () => pickProviderModelsForSettings(activeProvider?.models ?? [], dynamicModels),
+    [activeProvider, dynamicModels],
+  );
+
+  const modelsForDefaultPicker = useMemo(() => {
+    const ids = new Set(mergedCatalogModels.map((m) => m.id));
+    if (modelId.trim() && !ids.has(modelId)) {
+      const orphan: ModelDefinition = {
+        id: modelId,
+        label: `${modelId} (unlisted)`,
+        providerId: provider,
+        group: "Saved selection",
+      };
+      return [orphan, ...mergedCatalogModels];
+    }
+    return mergedCatalogModels;
+  }, [mergedCatalogModels, modelId, provider]);
+
+  const modelsForFallbackPicker = useMemo(() => {
+    const ids = new Set(mergedCatalogModels.map((m) => m.id));
+    if (fallbackId.trim() && !ids.has(fallbackId)) {
+      const orphan: ModelDefinition = {
+        id: fallbackId,
+        label: `${fallbackId} (unlisted)`,
+        providerId: provider,
+        group: "Saved selection",
+      };
+      return [orphan, ...mergedCatalogModels];
+    }
+    return mergedCatalogModels;
+  }, [mergedCatalogModels, fallbackId, provider]);
+
+  const staleDefaultToastSigRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (modelsLoading || mergedCatalogModels.length === 0) return;
+    if (!modelId.trim()) return;
+    if (mergedCatalogModels.some((m) => m.id === modelId)) return;
+    const sig = `${provider}:${modelId}`;
+    if (staleDefaultToastSigRef.current === sig) return;
+    staleDefaultToastSigRef.current = sig;
+    useToastStore.getState().show(
+      "info",
+      "Saved model not in catalog",
+      `'${modelId}' is missing from the latest ${provider} model list. Pick another model in Settings.`,
+      8000,
+    );
+  }, [modelsLoading, mergedCatalogModels, modelId, provider]);
+
+  const defaultModelStale =
+    !modelsLoading &&
+    Boolean(modelId.trim()) &&
+    mergedCatalogModels.length > 0 &&
+    !mergedCatalogModels.some((m) => m.id === modelId);
+
+  const fallbackModelStale =
+    !modelsLoading &&
+    Boolean(fallbackId.trim()) &&
+    mergedCatalogModels.length > 0 &&
+    !mergedCatalogModels.some((m) => m.id === fallbackId);
+
   const modelOptions = useMemo(
-    () => (activeProvider?.models ?? []).map((m) => ({
-      value: m.id,
-      label: m.multiplier != null && m.multiplier !== 1 ? `${m.label} (${m.multiplier}x)` : m.label,
-      group: m.group,
-    })),
-    [activeProvider],
+    () =>
+      modelsForDefaultPicker.map((m) => ({
+        value: m.id,
+        label: m.multiplier != null && m.multiplier !== 1 ? `${m.label} (${m.multiplier}x)` : m.label,
+        group: m.group,
+      })),
+    [modelsForDefaultPicker],
   );
 
   const fallbackOptions = useMemo(
-    () => [{ value: "", label: "Off", group: undefined }, ...modelOptions],
-    [modelOptions],
+    () => [
+      { value: "", label: "Off", group: undefined },
+      ...modelsForFallbackPicker.map((m) => ({
+        value: m.id,
+        label: m.multiplier != null && m.multiplier !== 1 ? `${m.label} (${m.multiplier}x)` : m.label,
+        group: m.group,
+      })),
+    ],
+    [modelsForFallbackPicker],
   );
 
   // Utility model options: "Auto" (provider default) + all models for the effective provider.
@@ -221,27 +309,30 @@ export function ModelSection() {
   }, [codexLevels, provider]);
 
   const handleProviderChange = (v: string) => {
-    const newProvider = MODEL_PROVIDERS.find((p) => p.id === v);
-    const firstModel = newProvider?.models[0];
-    let newReasoning: string = reasoning;
-    if (firstModel) {
-      const codexLevels = getCodexReasoningLevels(firstModel.id);
-      if (codexLevels) {
-        // Switching to Codex: reset to model default if current level isn't valid
-        newReasoning = codexLevels.includes(reasoning as never) ? reasoning : "medium";
-      } else {
-        newReasoning = normalizeReasoningLevelForModel(firstModel.id, reasoning);
+    void (async () => {
+      await useProviderModelsStore.getState().fetchModels(v, { force: true });
+      const newProvider = MODEL_PROVIDERS.find((p) => p.id === v);
+      const dynamicFirst = useProviderModelsStore.getState().models[v]?.[0];
+      const firstModel = dynamicFirst ?? newProvider?.models[0];
+      let newReasoning: string = reasoning;
+      if (firstModel) {
+        const codexLevels = getCodexReasoningLevels(firstModel.id);
+        if (codexLevels) {
+          newReasoning = codexLevels.includes(reasoning as never) ? reasoning : "medium";
+        } else {
+          newReasoning = normalizeReasoningLevelForModel(firstModel.id, reasoning);
+        }
       }
-    }
-    void update({
-      model: {
-        defaults: {
-          provider: v as SettingsProviderId,
-          ...(firstModel && { id: firstModel.id, fallbackId: "" }),
-          reasoning: newReasoning as ReasoningLevel,
+      void update({
+        model: {
+          defaults: {
+            provider: v as SettingsProviderId,
+            ...(firstModel && { id: firstModel.id, fallbackId: "" }),
+            reasoning: newReasoning as ReasoningLevel,
+          },
         },
-      },
-    });
+      });
+    })();
   };
 
   const handleModelChange = (v: string) => {
@@ -285,41 +376,49 @@ export function ModelSection() {
         configKey="model.defaults.id"
         hint="New threads start with this model."
       >
-        {modelOptions.length > SEG_CONTROL_MAX_MODELS ? (
-          <Select value={modelId} onValueChange={(v) => v != null && handleModelChange(v)}>
-            <SelectTrigger size="sm" className="w-56 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {modelOptions.some((m) => m.group)
-                ? (() => {
-                    const groups = new Map<string, typeof modelOptions>();
-                    for (const m of modelOptions) {
-                      const g = m.group ?? "";
-                      if (!groups.has(g)) groups.set(g, []);
-                      groups.get(g)!.push(m);
-                    }
-                    return Array.from(groups.entries()).map(([g, items]) => (
-                      <SelectGroup key={g}>
-                        {g && <SelectLabel>{g}</SelectLabel>}
-                        {items.map((m) => (
-                          <SelectItem key={m.value} value={m.value}>
-                            {m.label}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    ));
-                  })()
-                : modelOptions.map((m) => (
-                    <SelectItem key={m.value} value={m.value}>
-                      {m.label}
-                    </SelectItem>
-                  ))}
-            </SelectContent>
-          </Select>
-        ) : (
-          <SegControl options={modelOptions} value={modelId} onChange={handleModelChange} />
-        )}
+        <div className="flex flex-col items-end gap-2">
+          {modelOptions.length > SEG_CONTROL_MAX_MODELS ? (
+            <Select value={modelId} onValueChange={(v) => v != null && handleModelChange(v)}>
+              <SelectTrigger size="sm" className="w-56 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {modelOptions.some((m) => m.group)
+                  ? (() => {
+                      const groups = new Map<string, typeof modelOptions>();
+                      for (const m of modelOptions) {
+                        const g = m.group ?? "";
+                        if (!groups.has(g)) groups.set(g, []);
+                        groups.get(g)!.push(m);
+                      }
+                      return Array.from(groups.entries()).map(([g, items]) => (
+                        <SelectGroup key={g}>
+                          {g && <SelectLabel>{g}</SelectLabel>}
+                          {items.map((m) => (
+                            <SelectItem key={m.value} value={m.value}>
+                              {m.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      ));
+                    })()
+                  : modelOptions.map((m) => (
+                      <SelectItem key={m.value} value={m.value}>
+                        {m.label}
+                      </SelectItem>
+                    ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <SegControl options={modelOptions} value={modelId} onChange={handleModelChange} />
+          )}
+          {defaultModelStale && (
+            <p className="max-w-xs text-right text-xs text-amber-600 dark:text-amber-500">
+              This model is not in the current catalog. Sending messages may fail until you choose a
+              listed model.
+            </p>
+          )}
+        </div>
       </SettingRow>
 
       <SettingRow
@@ -327,48 +426,56 @@ export function ModelSection() {
         configKey="model.defaults.fallbackId"
         hint="Used when the primary model is unavailable. Off disables fallback."
       >
-        {fallbackOptions.length > SEG_CONTROL_MAX_MODELS ? (
-          <Select
-            value={fallbackId}
-            onValueChange={(v) => v != null && update({ model: { defaults: { fallbackId: v } } })}
-          >
-            <SelectTrigger size="sm" className="w-56 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {fallbackOptions.some((m) => m.group)
-                ? (() => {
-                    const groups = new Map<string, typeof fallbackOptions>();
-                    for (const m of fallbackOptions) {
-                      const g = m.group ?? "";
-                      if (!groups.has(g)) groups.set(g, []);
-                      groups.get(g)!.push(m);
-                    }
-                    return Array.from(groups.entries()).map(([g, items]) => (
-                      <SelectGroup key={g}>
-                        {g && <SelectLabel>{g}</SelectLabel>}
-                        {items.map((m) => (
-                          <SelectItem key={m.value} value={m.value}>
-                            {m.label}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    ));
-                  })()
-                : fallbackOptions.map((m) => (
-                    <SelectItem key={m.value} value={m.value}>
-                      {m.label}
-                    </SelectItem>
-                  ))}
-            </SelectContent>
-          </Select>
-        ) : (
-          <SegControl
-            options={fallbackOptions}
-            value={fallbackId}
-            onChange={(v) => update({ model: { defaults: { fallbackId: v } } })}
-          />
-        )}
+        <div className="flex flex-col items-end gap-2">
+          {fallbackOptions.length > SEG_CONTROL_MAX_MODELS ? (
+            <Select
+              value={fallbackId}
+              onValueChange={(v) => v != null && update({ model: { defaults: { fallbackId: v } } })}
+            >
+              <SelectTrigger size="sm" className="w-56 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {fallbackOptions.some((m) => m.group)
+                  ? (() => {
+                      const groups = new Map<string, typeof fallbackOptions>();
+                      for (const m of fallbackOptions) {
+                        const g = m.group ?? "";
+                        if (!groups.has(g)) groups.set(g, []);
+                        groups.get(g)!.push(m);
+                      }
+                      return Array.from(groups.entries()).map(([g, items]) => (
+                        <SelectGroup key={g}>
+                          {g && <SelectLabel>{g}</SelectLabel>}
+                          {items.map((m) => (
+                            <SelectItem key={m.value} value={m.value}>
+                              {m.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      ));
+                    })()
+                  : fallbackOptions.map((m) => (
+                      <SelectItem key={m.value} value={m.value}>
+                        {m.label}
+                      </SelectItem>
+                    ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <SegControl
+              options={fallbackOptions}
+              value={fallbackId}
+              onChange={(v) => update({ model: { defaults: { fallbackId: v } } })}
+            />
+          )}
+          {fallbackModelStale && (
+            <p className="max-w-xs text-right text-xs text-amber-600 dark:text-amber-500">
+              This fallback model is not in the current catalog. Consider turning fallback off or
+              picking a listed model.
+            </p>
+          )}
+        </div>
       </SettingRow>
 
       {(provider !== "claude" || supportsEffortParameter(modelId)) && (

@@ -184,6 +184,19 @@ const workspaceRepo = container.resolve(WorkspaceRepo); // Used only for startup
 const enricher = container.resolve(WorkspaceEnricher);
 const filesystemBrowser = container.resolve(FilesystemBrowser);
 const modelCacheService = container.resolve(ModelCacheService);
+
+/** Tracks CLI path edits so model catalog caches refresh when a different binary is targeted. */
+let lastCliPathsForModelCache = settingsService.get().provider.cli;
+settingsService.on("change", (next) => {
+  if (next.provider.cli.cursor !== lastCliPathsForModelCache.cursor) {
+    modelCacheService.invalidate("cursor");
+  }
+  if (next.provider.cli.copilot !== lastCliPathsForModelCache.copilot) {
+    modelCacheService.invalidate("copilot");
+  }
+  lastCliPathsForModelCache = next.provider.cli;
+});
+
 const cleanupWorker = container.resolve(CleanupWorker);
 const prDraftService = container.resolve(PrDraftService);
 const diffSummaryService = container.resolve(DiffSummaryService);

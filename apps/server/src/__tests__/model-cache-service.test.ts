@@ -135,6 +135,25 @@ describe("ModelCacheService", () => {
     expect(cached!.models).toEqual(newModels);
   });
 
+  it("invalidate clears memory and SQLite so the next read refetches", async () => {
+    repo.upsert("cursor", [{ id: "c1", name: "Cached" }]);
+    const fresh: ProviderModelInfo[] = [{ id: "c2", name: "Fresh" }];
+    const provider = makeProvider(fresh);
+    const registry = makeRegistry(new Map([["cursor", provider]]));
+    const service = new ModelCacheService(repo, registry);
+
+    expect(service.getCached("cursor")).toEqual([{ id: "c1", name: "Cached" }]);
+
+    service.invalidate("cursor");
+
+    expect(service.getCached("cursor")).toBeUndefined();
+    expect(repo.get("cursor")).toBeNull();
+
+    const result = await service.listModels("cursor");
+    expect(result).toEqual(fresh);
+    expect(provider.listModels).toHaveBeenCalledTimes(1);
+  });
+
   it("throws when fetching from a provider that does not implement listModels", async () => {
     const provider = {
       id: "no-list",

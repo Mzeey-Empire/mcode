@@ -2,8 +2,11 @@ import { create } from "zustand";
 import { MODEL_PROVIDERS, type ModelDefinition } from "@/lib/model-registry";
 import { getTransport } from "@/transport";
 
-/** How long cached models remain valid before a background refresh. */
-const MODEL_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+/**
+ * Client-side TTL aligned with `ModelCacheService` on the server (~1h fresh window).
+ * Repeated `listProviderModels` calls stay cheap while entries remain warm there.
+ */
+const MODEL_CACHE_TTL_MS = 60 * 60 * 1000;
 
 /** State and actions for the provider models Zustand store. */
 interface ProviderModelsState {
@@ -15,9 +18,9 @@ interface ProviderModelsState {
   loading: Record<string, boolean>;
   /**
    * Fetch models for a single provider.
-   * No-ops if a fetch is in-flight or the cache is still fresh.
+   * No-ops if a fetch is in-flight or the cache is still fresh unless `force` is set.
    */
-  fetchModels: (providerId: string) => Promise<void>;
+  fetchModels: (providerId: string, opts?: { force?: boolean }) => Promise<void>;
   /**
    * Eagerly fetch models for all providers that support dynamic listing.
    * Called on WS connection and reconnection.
@@ -31,14 +34,14 @@ export const useProviderModelsStore = create<ProviderModelsState>((set, get) => 
   lastFetched: {},
   loading: {},
 
-  fetchModels: async (providerId: string) => {
+  fetchModels: async (providerId: string, opts?: { force?: boolean }) => {
     // Atomic check-and-set: read loading + TTL inside the updater to avoid a
     // TOCTOU race where two concurrent callers both pass the guard.
     let shouldFetch = false;
     set((s) => {
       if (s.loading[providerId]) return s;
       const lastFetch = s.lastFetched[providerId] ?? 0;
-      if (Date.now() - lastFetch < MODEL_CACHE_TTL_MS) return s;
+      if (!opts?.force && Date.now() - lastFetch < MODEL_CACHE_TTL_MS) return s;
       shouldFetch = true;
       return { loading: { ...s.loading, [providerId]: true } };
     });
