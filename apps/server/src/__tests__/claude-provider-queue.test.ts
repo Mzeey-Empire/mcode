@@ -54,6 +54,7 @@ vi.mock("@mcode/shared", async (importOriginal) => {
 
 import { ClaudeProvider } from "../providers/claude/claude-provider";
 import { stubEnvService } from "./stub-env-service.js";
+import { stubJobObject } from "./stub-job-object.js";
 import { queryMethodStubs } from "./helpers/mock-sdk-query";
 
 describe("ClaudeProvider sendMessage on closed queue (#292)", () => {
@@ -83,7 +84,7 @@ describe("ClaudeProvider sendMessage on closed queue (#292)", () => {
       });
     });
 
-    provider = new ClaudeProvider(stubEnvService());
+    provider = new ClaudeProvider(stubEnvService(), stubJobObject());
     const events: Array<{ type: string; error?: string }> = [];
     provider.on("event", (e: { type: string; error?: string }) => events.push(e));
 
@@ -142,7 +143,7 @@ describe("ClaudeProvider sendMessage on closed queue (#292)", () => {
       });
     });
 
-    provider = new ClaudeProvider(stubEnvService());
+    provider = new ClaudeProvider(stubEnvService(), stubJobObject());
     const events: Array<{ type: string; error?: string }> = [];
     provider.on("event", (e: { type: string; error?: string }) => events.push(e));
 

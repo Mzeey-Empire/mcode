@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { EventEmitter } from "events";
 import { ClaudeProvider } from "../providers/claude/claude-provider.js";
 import { stubEnvService } from "./stub-env-service.js";
+import { stubJobObject } from "./stub-job-object.js";
 
 /**
  * Tests that verify resume listener cleanup in ClaudeProvider.
@@ -16,7 +17,7 @@ describe("ClaudeProvider resume listener cleanup", () => {
   let provider: ClaudeProvider;
 
   beforeEach(() => {
-    provider = new ClaudeProvider(stubEnvService());
+    provider = new ClaudeProvider(stubEnvService(), stubJobObject());
   });
 
   /**

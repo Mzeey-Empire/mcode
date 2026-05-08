@@ -177,6 +177,8 @@ export class TerminalService {
     // so explicit assignment is needed — inheritance alone is not sufficient.
     // Best-effort: no-op on non-Windows or if JobObject failed to init.
     this.jobObject.assign(pty.pid);
+    const shellBasename = shell.split(/[\\/]/).pop() ?? shell;
+    this.jobObject.setDescription(pty.pid, `Mcode Terminal: ${shellBasename}`);
 
     const dataDisposable = pty.onData((data: string) => {
       // Re-encode to bytes so multi-byte sequences that straddle a node-pty

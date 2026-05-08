@@ -53,4 +53,24 @@ describe.runIf(process.platform === "win32")("JobObject (Windows)", () => {
     expect(() => job.assign(999_999_999)).not.toThrow();
     job.close();
   });
+
+  it("setDescription does not throw on a live process", async () => {
+    const job = new JobObject();
+    const child = spawn("ping", ["-n", "10", "127.0.0.1"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    try {
+      expect(() => job.setDescription(child.pid!, "Mcode Test Process")).not.toThrow();
+    } finally {
+      child.kill();
+      job.close();
+    }
+  });
+
+  it("setDescription is a no-op for dead PIDs", () => {
+    const job = new JobObject();
+    expect(() => job.setDescription(999_999_999, "Ghost")).not.toThrow();
+    job.close();
+  });
 });
