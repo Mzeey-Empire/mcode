@@ -37,20 +37,29 @@ interface UpdaterSettings {
 
 /** Read updater settings from settings.json; falls back to safe defaults if the file is missing or invalid. */
 function loadUpdaterSettings(): UpdaterSettings {
+  const defaults: UpdaterSettings = {
+    autoDownload: true,
+    autoInstallOnQuit: true,
+    checkInterval: "4hours",
+  };
   try {
     const raw = readFileSync(join(getMcodeDir(), "settings.json"), "utf-8");
     const result = SettingsSchema().safeParse(JSON.parse(raw));
     if (result.success) {
       return {
-        autoDownload: result.data.updates?.autoDownload ?? true,
-        autoInstallOnQuit: result.data.updates?.autoInstallOnQuit ?? true,
-        checkInterval: result.data.updates?.checkInterval ?? "4hours",
+        autoDownload: result.data.updates?.autoDownload ?? defaults.autoDownload,
+        autoInstallOnQuit: result.data.updates?.autoInstallOnQuit ?? defaults.autoInstallOnQuit,
+        checkInterval: result.data.updates?.checkInterval ?? defaults.checkInterval,
       };
     }
-  } catch {
-    // File missing or unreadable; use defaults
+    console.warn("[auto-updater] settings.json failed validation, using defaults");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(`[auto-updater] settings.json could not be loaded, using defaults: ${message}`);
+    }
   }
-  return { autoDownload: true, autoInstallOnQuit: true, checkInterval: "4hours" };
+  return defaults;
 }
 
 /** Convert a check-interval name to milliseconds, defaulting to 4 hours. */
@@ -98,30 +107,63 @@ function broadcastStatus(status: UpdateStatus): void {
   }
 }
 
+/** Shared promise so concurrent callers wait for the active check to finish. */
+let inFlightCheck: Promise<UpdateStatus> | null = null;
+
 /**
  * Manually trigger a check for updates.
  * Safe to call from the renderer; resolves once the check completes.
+ * Concurrent callers share the same in-flight check.
  */
-export async function checkForUpdatesNow(): Promise<UpdateStatus> {
+export function checkForUpdatesNow(): Promise<UpdateStatus> {
   if (!initialized) {
-    // In dev mode there is nothing to check against.
-    return { state: "not-available", version: app.getVersion() };
+    return Promise.resolve({ state: "not-available", version: app.getVersion() });
   }
+  if (inFlightCheck) {
+    return inFlightCheck;
+  }
+  inFlightCheck = (async () => {
+    try {
+      // Re-read settings so toggling "auto-download" in the UI takes
+      // effect without an app restart.
+      const { autoDownload, autoInstallOnQuit } = loadUpdaterSettings();
+      autoUpdater.autoDownload = autoDownload;
+      autoUpdater.autoInstallOnAppQuit = autoInstallOnQuit;
+
+      broadcastStatus({ state: "checking" });
+      await autoUpdater.checkForUpdates();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      broadcastStatus({ state: "error", message });
+    } finally {
+      inFlightCheck = null;
+    }
+    return lastStatus;
+  })();
+  return inFlightCheck;
+}
+
+/** Quit and install a downloaded update. Returns false in dev or if nothing is downloaded. */
+export function installUpdate(): boolean {
+  if (!app.isPackaged) return false;
+  if (lastStatus.state !== "downloaded") return false;
+  autoUpdater.quitAndInstall();
+  return true;
+}
+
+/**
+ * Trigger a manual download of a discovered update.
+ * Used when autoDownload is off and the user clicks "Download" in the banner.
+ */
+export async function downloadUpdate(): Promise<void> {
+  if (!initialized) return;
+  if (lastStatus.state !== "available") return;
   try {
-    broadcastStatus({ state: "checking" });
-    await autoUpdater.checkForUpdates();
+    await autoUpdater.downloadUpdate();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     broadcastStatus({ state: "error", message });
   }
-  return lastStatus;
-}
-
-/** Quit and install a downloaded update. No-op if nothing is downloaded. */
-export function installUpdate(): void {
-  if (!initialized) return;
-  if (lastStatus.state !== "downloaded") return;
-  autoUpdater.quitAndInstall();
 }
 
 /**
@@ -129,8 +171,16 @@ export function installUpdate(): void {
  * No-op in dev (no packaged app to update).
  */
 export function initAutoUpdater(): void {
-  if (!app.isPackaged) return;
+  if (initialized) return;
   initialized = true;
+
+  // In dev, force electron-updater to read dev-app-update.yml so we can
+  // test the check/download flow without a packaged build.
+  if (!app.isPackaged) {
+    autoUpdater.forceDevUpdateConfig = true;
+  }
+
+  autoUpdater.allowDowngrade = false;
 
   const { autoDownload, autoInstallOnQuit, checkInterval } = loadUpdaterSettings();
   autoUpdater.autoDownload = autoDownload;
@@ -235,7 +285,7 @@ export function cleanupAutoUpdater(): void {
 /** Prompt the user to restart and install a downloaded update. */
 async function promptRestart(version: string): Promise<void> {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
-  if (!win) return;
+  if (!win || win.isDestroyed()) return;
 
   const { response } = await dialog.showMessageBox(win, {
     type: "info",
@@ -245,7 +295,7 @@ async function promptRestart(version: string): Promise<void> {
     defaultId: 0,
   });
 
-  if (response === 0) {
+  if (response === 0 && app.isPackaged) {
     autoUpdater.quitAndInstall();
   }
 }
