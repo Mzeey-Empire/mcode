@@ -134,12 +134,14 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Download arm64 yml
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: latest-mac-yml-arm64
           path: yml-arm64
 
       - name: Download x64 yml
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: latest-mac-yml-x64

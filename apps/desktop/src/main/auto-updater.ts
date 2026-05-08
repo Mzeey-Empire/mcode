@@ -104,44 +104,48 @@ function broadcastStatus(status: UpdateStatus): void {
   }
 }
 
-/** Guards against overlapping check-for-update calls. */
-let isChecking = false;
+/** Shared promise so concurrent callers wait for the active check to finish. */
+let inFlightCheck: Promise<UpdateStatus> | null = null;
 
 /**
  * Manually trigger a check for updates.
  * Safe to call from the renderer; resolves once the check completes.
+ * Concurrent callers share the same in-flight check.
  */
-export async function checkForUpdatesNow(): Promise<UpdateStatus> {
+export function checkForUpdatesNow(): Promise<UpdateStatus> {
   if (!initialized) {
-    return { state: "not-available", version: app.getVersion() };
+    return Promise.resolve({ state: "not-available", version: app.getVersion() });
   }
-  if (isChecking) {
-    return lastStatus;
+  if (inFlightCheck) {
+    return inFlightCheck;
   }
-  isChecking = true;
-  try {
-    // Re-read settings so toggling "auto-download" in the UI takes
-    // effect without an app restart.
-    const { autoDownload, autoInstallOnQuit } = loadUpdaterSettings();
-    autoUpdater.autoDownload = autoDownload;
-    autoUpdater.autoInstallOnAppQuit = autoInstallOnQuit;
+  inFlightCheck = (async () => {
+    try {
+      // Re-read settings so toggling "auto-download" in the UI takes
+      // effect without an app restart.
+      const { autoDownload, autoInstallOnQuit } = loadUpdaterSettings();
+      autoUpdater.autoDownload = autoDownload;
+      autoUpdater.autoInstallOnAppQuit = autoInstallOnQuit;
 
-    broadcastStatus({ state: "checking" });
-    await autoUpdater.checkForUpdates();
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    broadcastStatus({ state: "error", message });
-  } finally {
-    isChecking = false;
-  }
-  return lastStatus;
+      broadcastStatus({ state: "checking" });
+      await autoUpdater.checkForUpdates();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      broadcastStatus({ state: "error", message });
+    } finally {
+      inFlightCheck = null;
+    }
+    return lastStatus;
+  })();
+  return inFlightCheck;
 }
 
-/** Quit and install a downloaded update. No-op in dev or if nothing is downloaded. */
-export function installUpdate(): void {
-  if (!app.isPackaged) return;
-  if (lastStatus.state !== "downloaded") return;
+/** Quit and install a downloaded update. Returns false in dev or if nothing is downloaded. */
+export function installUpdate(): boolean {
+  if (!app.isPackaged) return false;
+  if (lastStatus.state !== "downloaded") return false;
   autoUpdater.quitAndInstall();
+  return true;
 }
 
 /**

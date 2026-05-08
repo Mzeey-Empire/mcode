@@ -480,9 +480,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle("app:get-version", () => app.getVersion());
   ipcMain.handle("app:get-update-status", () => getUpdateStatus());
   ipcMain.handle("app:check-for-updates", () => checkForUpdatesNow());
-  ipcMain.handle("app:install-update", () => {
-    installUpdate();
-  });
+  ipcMain.handle("app:install-update", () => installUpdate());
   ipcMain.handle("app:download-update", () => downloadUpdate());
 }
 

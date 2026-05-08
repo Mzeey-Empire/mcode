@@ -110,7 +110,9 @@ export function UpdateBanner() {
     const handleRestart = async () => {
       setIsRestarting(true);
       try {
-        await window.desktopBridge?.app.installUpdate();
+        const started = await window.desktopBridge?.app.installUpdate();
+        // Clear loading state if the install was a no-op (dev mode, stale state).
+        if (!started) setIsRestarting(false);
       } catch {
         setIsRestarting(false);
       }

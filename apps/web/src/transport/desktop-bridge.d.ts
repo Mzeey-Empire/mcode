@@ -18,8 +18,8 @@ interface AppBridge {
   getUpdateStatus(): Promise<UpdateStatus>;
   /** Manually trigger a check for updates. Resolves with the resulting status. */
   checkForUpdates(): Promise<UpdateStatus>;
-  /** Quit and install a downloaded update. No-op if nothing is downloaded. */
-  installUpdate(): Promise<void>;
+  /** Quit and install a downloaded update. Returns false if nothing to install. */
+  installUpdate(): Promise<boolean>;
   /** Trigger download of a discovered update (when auto-download is off). */
   downloadUpdate(): Promise<void>;
   /** Subscribe to push updates of update-status. Returns the listener for cleanup. */
