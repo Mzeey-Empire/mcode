@@ -52,6 +52,7 @@ import { QueuePopover } from "./QueuePopover";
 import { ContextTracker } from "./ContextTracker";
 import { CompactingBanner } from "./CompactingBanner";
 import { RetryBanner } from "./RetryBanner";
+import { InterruptStopBanner } from "./InterruptStopBanner";
 import { ComposerBranchBar } from "./ComposerBranchBar";
 import { ComposerReplyBar } from "./ComposerReplyBar";
 import { useReplyStore } from "@/stores/replyStore";
@@ -669,6 +670,26 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       editorRef.current.focus();
     }
   }, [pendingPrefill, clearPendingPrefill]);
+
+  const composerRecallFromStop = useThreadStore((s) => s.composerRecallFromStop);
+  const clearComposerRecallFromStop = useThreadStore((s) => s.clearComposerRecallFromStop);
+
+  useEffect(() => {
+    if (!composerRecallFromStop || composerRecallFromStop.threadId !== threadId) return;
+    const text = composerRecallFromStop.text;
+    clearComposerRecallFromStop();
+    setInput(text);
+    if (editorRef.current) {
+      editorRef.current.update(() => {
+        const root = $getRoot();
+        root.clear();
+        const para = $createParagraphNode();
+        para.append($createTextNode(text));
+        root.append(para);
+      });
+      editorRef.current.focus();
+    }
+  }, [composerRecallFromStop, threadId, clearComposerRecallFromStop]);
 
   const fileAutocomplete = useFileAutocomplete({
     workspaceId,
@@ -1561,6 +1582,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         {/* Compacting banner — shown while the SDK is summarising the context window */}
         {isCompacting && <CompactingBanner />}
         {!isCompacting && hasRetryState && threadId && <RetryBanner threadId={threadId} />}
+        {threadId && <InterruptStopBanner threadId={threadId} />}
 
         {/* Drag overlay */}
         {isDragOver && (
