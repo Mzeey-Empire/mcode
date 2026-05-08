@@ -101,10 +101,8 @@ test.describe("Composer toolbar", () => {
 
   test("locked-provider model search filters RPC-backed models", async ({ page }) => {
     await page.getByTestId("model-selector-trigger").click();
-    // Persisted threads lock the provider; models are listed with the locked-panel search,
-    // not the hover submenu used when picking a provider from the full list.
+    await expect(page.getByTestId("model-selector-locked-search")).toBeVisible({ timeout: 10_000 });
     const search = page.getByTestId("model-selector-locked-search");
-    await expect(search).toBeVisible({ timeout: 10_000 });
     await search.fill("Beta");
 
     await expect(page.getByRole("button", { name: "Beta Model" })).toBeVisible();
@@ -114,5 +112,21 @@ test.describe("Composer toolbar", () => {
       path: "e2e/screenshots/model-selector-search-filter.png",
       fullPage: true,
     });
+  });
+
+  test("model selector left rail switches search context", async ({ page }) => {
+    await page.getByTestId("model-selector-trigger").click();
+    await expect(page.getByTestId("model-selector-rail-favorites")).toBeVisible({ timeout: 10_000 });
+    await page.getByTestId("model-selector-rail-favorites").click();
+    await expect(page.getByTestId("model-selector-locked-search")).toHaveAttribute(
+      "placeholder",
+      "Search favorites…",
+    );
+
+    await page.getByTestId("model-group-claude").click();
+    await expect(page.getByTestId("model-selector-locked-search")).toHaveAttribute(
+      "placeholder",
+      "Search models…",
+    );
   });
 });

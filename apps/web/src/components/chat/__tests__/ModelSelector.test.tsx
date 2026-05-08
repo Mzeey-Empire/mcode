@@ -44,7 +44,7 @@ vi.mock("@/components/ui/input", () => ({
   Input: ({ ...props }: React.ComponentProps<"input">) => <input {...props} />,
 }));
 
-// Prevent real RPC calls triggered by fetchProviderModels on hover.
+// Prevent real RPC calls triggered when a provider rail tab loads models.
 vi.mock("@/transport", () => ({
   getTransport: () => ({
     listProviderModels: vi.fn().mockResolvedValue([]),
