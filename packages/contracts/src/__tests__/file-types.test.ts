@@ -5,6 +5,7 @@ import {
   isFileSupported,
   getExtension,
   inferMimeType,
+  attachmentAcceptAttribute,
 } from "../models/file-types.js";
 
 describe("getExtension", () => {
@@ -90,6 +91,14 @@ describe("classifyFile", () => {
     expect(classifyFile("update.patch")).toBe("text");
   });
 
+  it("classifies Office-style documents", () => {
+    expect(classifyFile("spec.docx")).toBe("document");
+    expect(classifyFile("sheet.xlsx")).toBe("document");
+    expect(classifyFile("deck.pptx")).toBe("document");
+    expect(classifyFile("notes.odt")).toBe("document");
+    expect(classifyFile("memo.rtf")).toBe("document");
+  });
+
   it("returns null for unsupported extensions", () => {
     expect(classifyFile("archive.zip")).toBeNull();
     expect(classifyFile("video.mp4")).toBeNull();
@@ -121,6 +130,7 @@ describe("isFileSupported", () => {
     expect(isFileSupported("app.tsx")).toBe(true);
     expect(isFileSupported("photo.png")).toBe(true);
     expect(isFileSupported("doc.pdf")).toBe(true);
+    expect(isFileSupported("notes.docx")).toBe(true);
   });
 
   it("returns false for unsupported extensions", () => {
@@ -140,6 +150,10 @@ describe("getMaxFileSize", () => {
 
   it("returns 10MB for text/code files", () => {
     expect(getMaxFileSize("app.ts")).toBe(10 * 1024 * 1024);
+  });
+
+  it("returns 16MB for document attachments", () => {
+    expect(getMaxFileSize("sheet.xlsx")).toBe(16 * 1024 * 1024);
   });
 
   it("returns 0 for unsupported files", () => {
@@ -166,7 +180,26 @@ describe("inferMimeType", () => {
     expect(inferMimeType("README.md")).toBe("text/plain");
   });
 
+  it("infers Office Open XML MIME types", () => {
+    expect(inferMimeType("file.docx")).toBe(
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    );
+    expect(inferMimeType("grid.xlsx")).toBe(
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+  });
+
   it("returns empty string for unsupported", () => {
     expect(inferMimeType("archive.zip")).toBe("");
+  });
+});
+
+describe("attachmentAcceptAttribute", () => {
+  it("lists dotted extensions for file inputs", () => {
+    const attr = attachmentAcceptAttribute();
+    expect(attr).toContain(".png");
+    expect(attr).toContain(".pdf");
+    expect(attr).toContain(".docx");
+    expect(attr.startsWith(".")).toBe(true);
   });
 });

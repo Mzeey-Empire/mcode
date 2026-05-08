@@ -79,6 +79,7 @@ export {
   inferMimeType,
   MAX_ATTACHMENTS,
   SUPPORTED_EXTENSIONS,
+  attachmentAcceptAttribute,
 } from "./models/file-types.js";
 export type { FileCategory } from "./models/file-types.js";
 
