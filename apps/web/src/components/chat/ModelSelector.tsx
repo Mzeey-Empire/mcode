@@ -499,13 +499,14 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
         <ChevronDown size={11} aria-hidden />
       </Button>
 
+      {/* Fixed shell height keeps layout stable when switching providers; lists scroll inside. */}
       {open && (
         <div
           id={panelId}
           role="dialog"
           aria-label="Choose model and provider"
           className={cn(
-            "absolute bottom-full left-0 z-20 mb-1 flex max-h-[min(480px,calc(100vh-8rem))] w-[min(92vw,520px)] flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-lg",
+            "absolute bottom-full left-0 z-20 mb-1 flex h-[min(440px,calc(100vh-8rem))] w-[min(92vw,520px)] flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-lg",
           )}
         >
           <div className="flex shrink-0 border-b border-border/40">
@@ -620,7 +621,7 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
             </nav>
 
             <div
-              className="min-h-[220px] min-w-0 flex-1 overflow-y-auto bg-popover p-1"
+              className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-popover p-1"
               role="region"
               aria-label="Model list"
             >

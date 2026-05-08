@@ -22,7 +22,7 @@ import {
 /** Matches Tailwind `w-[52px]` for alignment with the composer model picker rail. */
 const LEFT_RAIL_WIDTH_CLASS = "w-[52px]";
 
-/** cmdk rejects empty `value`; utility “Auto” uses an empty provider id. */
+/** cmdk rejects empty `value`; utility "Auto" uses an empty provider id. */
 const EMPTY_PROVIDER_CMDK = "__mcode_provider_auto__";
 
 /** One selectable provider row for {@link SettingsProviderPicker}. */
@@ -112,7 +112,7 @@ export function SettingsProviderPicker({
           <div
             role="dialog"
             aria-label="Choose provider"
-            className="flex h-[min(340px,42vh)] overflow-hidden rounded-lg border border-border bg-popover"
+            className="flex h-[min(340px,calc(100vh-10rem))] overflow-hidden rounded-lg border border-border bg-popover"
           >
             <nav
               className={cn(
@@ -165,14 +165,14 @@ export function SettingsProviderPicker({
               })}
             </nav>
 
-            <Command shouldFilter={false} className="min-w-0 flex-1 rounded-none border-0">
+            <Command shouldFilter={false} className="min-h-0 min-w-0 flex-1 rounded-none border-0">
               <CommandInput
                 placeholder="Search providers…"
                 value={query}
                 onValueChange={setQuery}
                 aria-label="Search providers"
               />
-              <CommandList>
+              <CommandList className="max-h-none min-h-0 flex-1 overflow-y-auto">
                 <CommandEmpty>No matches.</CommandEmpty>
                 <CommandGroup>
                   {filtered.map((opt) => (
