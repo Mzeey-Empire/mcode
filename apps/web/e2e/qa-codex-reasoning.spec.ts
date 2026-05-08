@@ -108,7 +108,7 @@ test.describe("Codex reasoning selector QA", () => {
     // Switch to Codex provider (searchable provider picker)
     await page.getByTestId("settings-default-provider-trigger").click();
     await page.waitForTimeout(200);
-    await page.getByTestId("settings-provider-rail-codex").click();
+    await page.getByTestId("settings-provider-option-codex").click();
     await page.waitForTimeout(1000);
     await page.screenshot({ path: path.join(SCREENSHOT_DIR, "qa-02-codex-selected.png") });
 
@@ -144,7 +144,7 @@ test.describe("Codex reasoning selector QA", () => {
     // Switch back to Claude via provider picker
     await page.getByTestId("settings-default-provider-trigger").click();
     await page.waitForTimeout(200);
-    await page.getByTestId("settings-provider-rail-claude").click();
+    await page.getByTestId("settings-provider-option-claude").click();
     await page.waitForTimeout(1000);
 
     // Verify Max is back and X-High is gone

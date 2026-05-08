@@ -74,8 +74,8 @@ test.describe("Settings visual review", () => {
     await page.waitForTimeout(300);
     await page.getByTestId("settings-default-provider-trigger").click();
     await page.waitForTimeout(200);
-    const codexRail = page.getByTestId("settings-provider-rail-codex");
-    await codexRail.hover();
+    const codexOption = page.getByTestId("settings-provider-option-codex");
+    await codexOption.hover();
     await page.waitForTimeout(500);
     await page.screenshot({
       path: path.join(SCREENSHOT_DIR, "settings-provider-tooltip.png"),
