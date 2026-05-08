@@ -248,9 +248,9 @@ export class GitService {
         );
       }
     } catch (err) {
-      // If the worktree directory exists, git completed its work before the
-      // post-checkout hook ran. Treat the hook failure as a warning so the
-      // caller can still use the worktree rather than discarding it.
+      // If the worktree's .git file exists, git initialized the worktree
+      // successfully. The error likely comes from a post-checkout hook.
+      // Treat it as a warning so the caller can still use the worktree.
       if (existsSync(join(wtPath, ".git"))) {
         const stderr =
           err instanceof Error && "stderr" in err
