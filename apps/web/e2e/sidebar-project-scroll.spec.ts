@@ -58,9 +58,13 @@ test.describe("Sidebar project tree scroll", () => {
 
     await expect(page.getByTestId("project-row-ws-scroll-0")).toBeVisible();
 
-    const metrics = await page.evaluate(() => {
-      const vp = document.querySelector('[data-slot="scroll-area-viewport"]');
-      if (!vp) return { scrollHeight: 0, clientHeight: 0 };
+    const viewport = page
+      .getByTestId("thread-list")
+      .locator('xpath=ancestor::*[@data-slot="scroll-area-viewport"][1]');
+    await expect(viewport).toBeVisible();
+
+    const metrics = await viewport.evaluate((el) => {
+      const vp = el as HTMLElement;
       return {
         scrollHeight: vp.scrollHeight,
         clientHeight: vp.clientHeight,
@@ -71,9 +75,8 @@ test.describe("Sidebar project tree scroll", () => {
     expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight + 50);
 
     // Viewport must be scrollable
-    const scrolled = await page.evaluate(() => {
-      const vp = document.querySelector('[data-slot="scroll-area-viewport"]');
-      if (!vp) return false;
+    const scrolled = await viewport.evaluate((el) => {
+      const vp = el as HTMLElement;
       vp.scrollTop = 200;
       return vp.scrollTop > 0;
     });
