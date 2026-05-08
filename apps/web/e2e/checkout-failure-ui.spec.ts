@@ -112,7 +112,7 @@ test.describe("Thread creation error (CollapsibleError)", () => {
     await page.goto("/");
     await page.waitForLoadState("networkidle");
     await page.waitForFunction(
-      () => (window as any).__mcodeHydrationComplete === true,
+      () => (window as any).__mcodeHydrationComplete === true, // eslint-disable-line @typescript-eslint/no-explicit-any
     );
   });
 
@@ -177,7 +177,7 @@ test.describe("Post-checkout warning banner (ThreadWarningBanner)", () => {
     await page.goto("/");
     await page.waitForLoadState("networkidle");
     await page.waitForFunction(
-      () => (window as any).__mcodeHydrationComplete === true,
+      () => (window as any).__mcodeHydrationComplete === true, // eslint-disable-line @typescript-eslint/no-explicit-any
     );
   });
 
