@@ -204,6 +204,11 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   const isPositionedRef = useRef(false);
   /** Blocks streaming/discrete tail snaps briefly after wheel-up while not at the tail. */
   const streamingFollowPauseUntilRef = useRef(0);
+  /**
+   * True while a smooth jump-to-bottom is in flight so scroll handlers do not
+   * treat mid-animation offsets as "reading history" and re-show the chip.
+   */
+  const scrollToTailIntentRef = useRef(false);
 
   const messages = useThreadStore((s) => s.messages);
   const loading = useThreadStore((s) => s.loading);
@@ -271,6 +276,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   /** Clears tail pin when the user scrolls content upward (wheel / trackpad). */
   const handleWheel = useCallback((e: WheelEvent<HTMLDivElement>) => {
     if (e.deltaY < 0) {
+      scrollToTailIntentRef.current = false;
       pinListTailRef.current = false;
       streamingFollowPauseUntilRef.current = Date.now() + WHEEL_UP_FOLLOW_PAUSE_MS;
     }
@@ -299,15 +305,19 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     }
 
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const scrolledUp = distanceFromBottom > USER_AWAY_FROM_BOTTOM_PX;
-    if (scrolledUp) pinListTailRef.current = false;
+    const awayFromTail = distanceFromBottom > USER_AWAY_FROM_BOTTOM_PX;
+    if (scrollToTailIntentRef.current && !awayFromTail) {
+      scrollToTailIntentRef.current = false;
+    }
+    const scrolledUp = awayFromTail && !scrollToTailIntentRef.current;
+    if (awayFromTail) pinListTailRef.current = false;
     isScrolledUpRef.current = scrolledUp;
     setShowScrollBtn(scrolledUp);
-    if (!scrolledUp) {
+    if (!awayFromTail) {
       streamingFollowPauseUntilRef.current = 0;
     }
     // Clear new-content highlight once the user reaches the bottom
-    if (!scrolledUp) setHasNewContent(false);
+    if (!awayFromTail) setHasNewContent(false);
 
     // Trigger loading older messages when near the top
     if (
@@ -541,6 +551,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     );
     if (idx !== -1) {
       pinListTailRef.current = false;
+      scrollToTailIntentRef.current = false;
       virtualizer.scrollToIndex(idx, { align: "center", behavior: "smooth" });
       setTimeout(() => {
         const element = document.querySelector(`[data-message-id="${messageId}"]`);
@@ -578,6 +589,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
         scrollTimerRef.current = null;
       }
       turnExpandRef.current.clear();
+      scrollToTailIntentRef.current = false;
       prevMessageCountRef.current = 0;
       firstMessageIdRef.current = null;
       prevScrollHeightRef.current = 0;
@@ -701,6 +713,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
       el.scrollTop = target;
     }
     pendingScrollRestoreRef.current = null;
+    scrollToTailIntentRef.current = false;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     const scrolledUp = distanceFromBottom > USER_AWAY_FROM_BOTTOM_PX;
     isScrolledUpRef.current = scrolledUp;
@@ -865,6 +878,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
           onScrollToBottom={() => {
             setHasNewContent(false);
             streamingFollowPauseUntilRef.current = 0;
+            scrollToTailIntentRef.current = true;
             isScrolledUpRef.current = false;
             setShowScrollBtn(false);
             scrollToBottom(true);
