@@ -9,6 +9,8 @@ export type WorkspaceThread = Thread & {
   clientPreparing?: boolean;
   /** Set when creation failed; user can retry or dismiss. */
   clientError?: string | null;
+  /** Non-fatal warnings from thread creation (e.g. worktree checkout issues). */
+  clientWarnings?: string[] | null;
   /** Message body shown in the preparing shell (mirrors cleared composer input). */
   clientQueuedMessage?: string;
   /**

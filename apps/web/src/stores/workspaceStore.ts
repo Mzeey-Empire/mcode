@@ -5,7 +5,7 @@ import {
   buildPlaceholderWorkspaceThread,
   titleFromMessageContent,
 } from "@/lib/workspace-thread";
-import type { ChecksStatus } from "@mcode/contracts";
+import type { ChecksStatus, CreateAndSendResult } from "@mcode/contracts";
 import { getTransport } from "@/transport";
 import { useThreadStore } from "./threadStore";
 import { useTerminalStore } from "./terminalStore";
@@ -74,7 +74,7 @@ interface PendingThreadCreation {
 
 const pendingThreadCreationByPlaceholderId = new Map<string, PendingThreadCreation>();
 
-async function runCreateAndSend(pending: PendingThreadCreation): Promise<Thread> {
+async function runCreateAndSend(pending: PendingThreadCreation): Promise<CreateAndSendResult> {
   return getTransport().createAndSendMessage(
     pending.workspaceId,
     pending.content,
@@ -190,6 +190,8 @@ interface WorkspaceState {
   setActiveThread: (id: string | null) => void;
   setPendingNewThread: (value: boolean) => void;
   updateThreadTitle: (threadId: string, title: string) => Promise<void>;
+  /** Clear non-fatal warnings for a thread (user dismissed the warning banner). */
+  dismissWarnings: (threadId: string) => void;
 
   // Branch actions
   loadBranches: (workspaceId: string) => Promise<void>;
@@ -250,9 +252,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   const applyOptimisticSuccess = (
     placeholderId: string,
     workspaceId: string,
-    thread: Thread,
+    result: CreateAndSendResult,
     transportWasWorktree: boolean,
   ) => {
+    const { warnings, ...thread } = result;
     if (!pendingThreadCreationByPlaceholderId.has(placeholderId)) {
       return;
     }
@@ -276,7 +279,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     set((state) => {
       const without = state.threads.filter((t) => t.id !== placeholderId);
       const deduped = without.filter((t) => t.id !== thread.id);
-      const nextThreads: WorkspaceThread[] = [thread, ...deduped];
+      const wt: WorkspaceThread = warnings?.length
+        ? { ...thread, clientWarnings: warnings }
+        : thread;
+      const nextThreads: WorkspaceThread[] = [wt, ...deduped];
       const stillOnPlaceholder = state.activeThreadId === placeholderId;
       return {
         threads: nextThreads,
@@ -692,9 +698,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     }));
 
     try {
-      const thread = await runCreateAndSend(pending);
-      applyOptimisticSuccess(placeholderId, workspaceId, thread, mode === "worktree");
-      return thread;
+      const result = await runCreateAndSend(pending);
+      applyOptimisticSuccess(placeholderId, workspaceId, result, mode === "worktree");
+      return result;
     } catch (e) {
       applyOptimisticFailure(placeholderId, e);
       throw e;
@@ -774,9 +780,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     }));
 
     try {
-      const thread = await runCreateAndSend(pending);
-      applyOptimisticSuccess(placeholderId, workspaceId, thread, transportMode === "worktree");
-      return thread;
+      const result = await runCreateAndSend(pending);
+      applyOptimisticSuccess(placeholderId, workspaceId, result, transportMode === "worktree");
+      return result;
     } catch (e) {
       applyOptimisticFailure(placeholderId, e);
       throw e;
@@ -805,9 +811,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       agentStartTimes: { ...state.agentStartTimes, [placeholderId]: Date.now() },
     }));
     try {
-      const thread = await runCreateAndSend(pending);
-      applyOptimisticSuccess(placeholderId, pending.workspaceId, thread, pending.transportMode === "worktree");
-      return thread;
+      const result = await runCreateAndSend(pending);
+      applyOptimisticSuccess(placeholderId, pending.workspaceId, result, pending.transportMode === "worktree");
+      return result;
     } catch (e) {
       applyOptimisticFailure(placeholderId, e);
       throw e;
@@ -954,6 +960,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       set({ error: String(e) });
       throw e;
     }
+  },
+
+  dismissWarnings: (threadId) => {
+    set((state) => ({
+      threads: state.threads.map((t) =>
+        t.id === threadId ? { ...t, clientWarnings: null } : t,
+      ),
+    }));
   },
 
   loadBranches: async (workspaceId) => {

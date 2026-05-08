@@ -100,6 +100,16 @@ export const CreateAndSendSchema = lazySchema(() =>
   ),
 );
 
+/** Result schema for agent.createAndSend: a Thread with optional non-fatal warnings. */
+export const CreateAndSendResultSchema = lazySchema(() =>
+  ThreadSchema().extend({
+    warnings: z.array(z.string()).optional(),
+  }),
+);
+
+/** Thread with optional non-fatal warnings from worktree creation. */
+export type CreateAndSendResult = z.infer<ReturnType<typeof CreateAndSendResultSchema>>;
+
 /** All RPC method definitions keyed by method name with params and result schemas. */
 export const WS_METHODS = lazySchema(() => ({
   "workspace.list": {
@@ -297,7 +307,7 @@ export const WS_METHODS = lazySchema(() => ({
   },
   "agent.createAndSend": {
     params: CreateAndSendSchema(),
-    result: ThreadSchema(),
+    result: CreateAndSendResultSchema(),
   },
   "agent.stop": {
     params: z.object({ threadId: z.string() }),
