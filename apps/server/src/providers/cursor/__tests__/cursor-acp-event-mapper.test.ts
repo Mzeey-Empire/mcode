@@ -56,6 +56,56 @@ describe("mapCursorAcpSessionNotification", () => {
     expect(state.accumulator.assistantText).toBe("");
   });
 
+  it("synthesizes ToolUse plus ToolResult when ACP defers lifecycle tool_call with empty rawInput", () => {
+    const state = createCursorAcpTurnState();
+    const start = mapCursorAcpSessionNotification(
+      {
+        sessionId: "s",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "c-read",
+          title: "Read File",
+          kind: "read",
+          status: "in_progress",
+        },
+      },
+      threadId,
+      state,
+    );
+    expect(start).toEqual([]);
+    expect(state.accumulator.toolStartTimes.has("c-read")).toBe(false);
+
+    const done = mapCursorAcpSessionNotification(
+      {
+        sessionId: "s",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "c-read",
+          kind: "read",
+          title: "Read File",
+          status: "completed",
+          rawOutput: { content: "file body" },
+        },
+      },
+      threadId,
+      state,
+    );
+    expect(done.filter((e) => e.type === AgentEventType.ToolUse)).toHaveLength(1);
+    expect(done.filter((e) => e.type === AgentEventType.ToolResult)).toHaveLength(1);
+    expect(done[0]).toMatchObject({
+      type: AgentEventType.ToolUse,
+      threadId,
+      toolCallId: "c-read",
+      toolName: "Read",
+    });
+    expect(done[1]).toMatchObject({
+      type: AgentEventType.ToolResult,
+      threadId,
+      toolCallId: "c-read",
+      isError: false,
+    });
+  });
+
   it("maps tool_call_update to ToolResult", () => {
     const state = createCursorAcpTurnState();
     mapCursorAcpSessionNotification(
