@@ -15,7 +15,7 @@ const MAX_TEXT_SIZE = 10 * 1024 * 1024;
 const MAX_DOCUMENT_SIZE = 16 * 1024 * 1024;
 
 /** Maximum number of attachments per message. */
-export const MAX_ATTACHMENTS = 5;
+export const MAX_ATTACHMENTS = 10;
 
 /** Image extensions mapped to MIME types. */
 const IMAGE_EXTENSIONS: Record<string, string> = {

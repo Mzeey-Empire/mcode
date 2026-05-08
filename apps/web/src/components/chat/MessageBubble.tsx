@@ -59,6 +59,28 @@ function extFromMime(mimeType: string): string {
   return MIME_TO_EXT[mimeType] ?? "";
 }
 
+/** Compact human-readable size for attachment chips in the transcript. */
+function formatAttachmentBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** Icon for non-image attachments in user message chips (matches composer preview semantics). */
+function FileAttachmentGlyph({ mimeType }: { mimeType: string }) {
+  const isOfficeDoc =
+    mimeType.includes("officedocument") ||
+    mimeType.includes("opendocument") ||
+    mimeType === "application/rtf";
+  if (mimeType === "application/pdf") {
+    return <FileText size={16} className="shrink-0 text-red-600 dark:text-red-400" aria-hidden />;
+  }
+  if (isOfficeDoc) {
+    return <FileText size={16} className="shrink-0 text-blue-600 dark:text-blue-400" aria-hidden />;
+  }
+  return <File size={16} className="shrink-0 text-muted-foreground" aria-hidden />;
+}
+
 /** Single image thumbnail with error fallback. */
 function ImageThumbnail({ src, name, single }: { src: string; name: string; single: boolean }) {
   const [failed, setFailed] = useState(false);
@@ -277,28 +299,31 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
             </div>
           )}
 
-          {/* Text bubble — only if there's text or file attachments */}
-          {(textContent.trim() || fileAttachments.length > 0) && (
-            <div className="overflow-hidden break-words rounded-lg rounded-br-md bg-primary px-3 py-1.5 text-sm text-primary-foreground shadow-sm shadow-primary/15">
-              {fileAttachments.length > 0 && (
-                <div className="mb-2 space-y-1">
-                  {fileAttachments.map((file) => (
-                    <div key={file.id} className="flex items-center gap-1.5 rounded-md bg-primary-foreground/10 px-2 py-1">
-                      {file.mimeType === "application/pdf" ? (
-                        <FileText size={14} className="text-primary-foreground/80" />
-                      ) : (
-                        <File size={14} className="text-primary-foreground/80" />
-                      )}
-                      <span className="truncate text-xs text-primary-foreground/90">{file.name}</span>
-                    </div>
-                  ))}
+          {/* Non-image files sit outside the colored bubble so names stay readable on any theme. */}
+          {fileAttachments.length > 0 && (
+            <div className="flex flex-wrap justify-end gap-2">
+              {fileAttachments.map((file) => (
+                <div
+                  key={file.id}
+                  className="flex min-w-0 max-w-[260px] items-start gap-2 rounded-lg border border-border bg-card px-3 py-2 shadow-sm"
+                >
+                  <FileAttachmentGlyph mimeType={file.mimeType} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-medium text-foreground">{file.name}</p>
+                    <p className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
+                      {formatAttachmentBytes(file.sizeBytes)}
+                    </p>
+                  </div>
                 </div>
-              )}
-              {textContent.trim() && (
-                <Suspense fallback={null}>
-                  <LazyMarkdownContent content={textContent} isStreaming={false} variant="user" />
-                </Suspense>
-              )}
+              ))}
+            </div>
+          )}
+
+          {textContent.trim() && (
+            <div className="overflow-hidden break-words rounded-lg rounded-br-md bg-primary px-3 py-1.5 text-sm text-primary-foreground shadow-sm shadow-primary/15">
+              <Suspense fallback={null}>
+                <LazyMarkdownContent content={textContent} isStreaming={false} variant="user" />
+              </Suspense>
             </div>
           )}
 
