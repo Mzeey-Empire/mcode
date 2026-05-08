@@ -801,7 +801,22 @@ export const useThreadStore = create<ThreadState>((set, get) => {
 
     try {
       const { interactionMode } = get().getThreadSettings(threadId);
-      await getTransport().sendMessage(threadId, content, model, permissionMode, attachments, reasoningLevel, provider, interactionMode, copilotAgent, contextWindow, thinking, replyToMessageId, quotedText);
+      await getTransport().sendMessage(
+        threadId,
+        content,
+        model,
+        permissionMode,
+        attachments,
+        displayContent,
+        reasoningLevel,
+        provider,
+        interactionMode,
+        copilotAgent,
+        contextWindow,
+        thinking,
+        replyToMessageId,
+        quotedText,
+      );
     } catch (e) {
       set((state) => {
         const next = new Set(state.runningThreadIds);

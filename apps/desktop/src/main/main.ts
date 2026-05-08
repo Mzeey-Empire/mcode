@@ -38,6 +38,7 @@ import {
   cleanupAutoUpdater,
 } from "./auto-updater.js";
 import { setupSpellcheck } from "./spellcheck.js";
+import { registerPreviewBrowserHandlers, disposePreviewForWindow } from "./preview-browser.js";
 
 // Isolate dev's Electron userData (cache, cookies, localStorage, IndexedDB)
 // from the installed prod build. Without this, both share %APPDATA%/Mcode/
@@ -267,6 +268,10 @@ function createWindow(): void {
 
   mainWindow.setMenuBarVisibility(false);
 
+  mainWindow.on("close", () => {
+    disposePreviewForWindow(mainWindow!);
+  });
+
   // Intercept target="_blank" and window.open() calls.
   // Deny the new window and open the URL in the system browser instead.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -482,6 +487,8 @@ function registerIpcHandlers(): void {
   ipcMain.handle("app:install-update", () => {
     installUpdate();
   });
+
+  registerPreviewBrowserHandlers();
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,8 @@
 import { X, FileText, File } from "lucide-react";
+import type { McodeBrowserCaptureV1 } from "@mcode/contracts";
 import { cn } from "@/lib/utils";
 
+/** Pending attachment queued in the Composer before RPC upload. */
 export interface PendingAttachment {
   id: string;
   name: string;
@@ -8,6 +10,8 @@ export interface PendingAttachment {
   sizeBytes: number;
   previewUrl: string;
   filePath: string | null;
+  /** Structured BrowserView preview context bundled with PNG references from desktop. */
+  browserCapture?: McodeBrowserCaptureV1;
 }
 
 interface AttachmentPreviewProps {

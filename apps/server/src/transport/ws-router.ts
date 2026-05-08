@@ -416,10 +416,11 @@ async function dispatch(
         params.copilotAgent,
         params.contextWindow,
         params.thinking,
-        undefined, // markPlanAnswerForMessageId
-        undefined, // providerWireOverride
+        undefined,
+        undefined,
         params.replyToMessageId,
         params.quotedText,
+        params.displayContent,
       );
       return;
     case "agent.createAndSend":
@@ -442,6 +443,7 @@ async function dispatch(
         params.copilotAgent,
         params.contextWindow,
         params.thinking,
+        params.displayContent,
       );
     case "agent.stop":
       await deps.agentService.stopSession(params.threadId);

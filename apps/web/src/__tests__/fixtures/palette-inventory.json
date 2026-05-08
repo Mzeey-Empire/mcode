@@ -11,6 +11,7 @@
     { "key": "Escape", "commandId": "escape.handle" },
     { "key": "mod+t", "commandId": "tasks.toggle" },
     { "key": "mod+d", "commandId": "changes.toggle" },
+    { "key": "mod+shift+b", "commandId": "preview.toggle" },
     { "key": "mod+shift+c", "commandId": "checks.open" },
     { "key": "mod+1", "commandId": "thread.goTo1" },
     { "key": "mod+2", "commandId": "thread.goTo2" },

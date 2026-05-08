@@ -1,4 +1,5 @@
 import type { AttachmentMeta } from "./types";
+import type { McodeBrowserCaptureV1 } from "@mcode/contracts";
 
 /** Discriminated union describing the auto-updater lifecycle state. */
 export type UpdateStatus =
@@ -24,6 +25,45 @@ interface AppBridge {
   onUpdateStatus(callback: (status: UpdateStatus) => void): (...args: unknown[]) => void;
   /** Remove a previously registered update-status listener. */
   offUpdateStatus(listener: (...args: unknown[]) => void): void;
+}
+
+/** Bounds for aligning the native BrowserView with a DOM region in the React shell. */
+export type PreviewShellBounds = {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+};
+
+/** Result of a preview navigation attempt (http and https only). */
+export type PreviewNavigateResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly error: string };
+
+/** Result of capturing the embedded preview viewport as a PNG for the composer. */
+export type PreviewPictureReferenceResult =
+  | {
+      readonly ok: true;
+      readonly meta: AttachmentMeta;
+      readonly previewBytes: Uint8Array;
+      readonly capture: McodeBrowserCaptureV1;
+    }
+  | { readonly ok: false; readonly error: string };
+
+/** Embedded thread preview backed by an Electron BrowserView. */
+interface PreviewBridge {
+  sync(payload: { visible: boolean; bounds: PreviewShellBounds | null }): Promise<void>;
+  navigate(url: string): Promise<PreviewNavigateResult>;
+  goBack(): Promise<boolean>;
+  goForward(): Promise<boolean>;
+  reload(): Promise<void>;
+  openExternal(): Promise<void>;
+  getNavigationState(): Promise<{ canGoBack: boolean; canGoForward: boolean }>;
+  /** Captures the visible preview as PNG; desktop only. */
+  capturePictureReference(): Promise<PreviewPictureReferenceResult>;
+  /** Drag a rectangle on the preview, then capture that region as PNG; desktop only. */
+  capturePictureReferenceRegion(): Promise<PreviewPictureReferenceResult>;
+  onDidNavigate(callback: (payload: { url: string; title: string }) => void): () => void;
 }
 
 /** IPC push transport relayed from the Electron main process. */
@@ -109,6 +149,8 @@ interface DesktopBridge {
   app: AppBridge;
   /** IPC push transport relayed from the main process. */
   ipc: IpcBridge;
+  /** Embedded site preview (desktop only). */
+  preview: PreviewBridge;
 }
 
 declare global {

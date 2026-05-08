@@ -63,14 +63,41 @@ import {
   inferMimeType,
   MAX_ATTACHMENTS,
 } from "@mcode/contracts";
-import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts";
+import type {
+  AttachedBrowserCaptureV1,
+  ContextWindowMode,
+  ReasoningLevel,
+  ProviderId,
+} from "@mcode/contracts";
 import { getModelContextWindow } from "@mcode/shared/model-context";
-import type { ProviderId } from "@mcode/contracts";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
+import { usePreviewReferenceQueueStore } from "@/stores/previewReferenceQueueStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useToastStore } from "@/stores/toastStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { ProviderUnavailableBanner } from "./ProviderUnavailableBanner";
+import { appendBrowserCaptureFence } from "@/lib/browser-capture-append";
+
+/** Build structured preview metadata payloads paired with outbound attachment IDs. */
+function buildAttachedBrowserCaptures(list: PendingAttachment[]): AttachedBrowserCaptureV1[] {
+  const rows: AttachedBrowserCaptureV1[] = [];
+  for (const row of list) {
+    if (!row.browserCapture) continue;
+    rows.push({ attachmentId: row.id, ...row.browserCapture });
+  }
+  return rows;
+}
+
+/** Decide which caption is stored for the chat bubble vs what is sent over the agent wire. */
+function resolveOutboundDisplayContent(
+  trimmed: string,
+  displayInjected: string | undefined,
+  captureRows: AttachedBrowserCaptureV1[],
+): string | undefined {
+  if (captureRows.length === 0) return displayInjected;
+  return displayInjected ?? trimmed;
+}
 
 /** ReasoningLevel values as a Set for O(1) membership checks in the Codex level filter. */
 const VALID_REASONING_LEVELS_SET = new Set<string>(["low", "medium", "high", "xhigh", "max", "ultrathink"]);
@@ -504,6 +531,48 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       setAccess(settingsDefaultPermission);
     }
   }, [settingsLoaded, settingsDefaultModelId, settingsDefaultProvider, settingsDefaultReasoning, settingsDefaultMode, settingsDefaultPermission, threadId]);
+
+  const previewReferenceQueueSignal = usePreviewReferenceQueueStore((s) => s.signal);
+
+  useEffect(() => {
+    if (!threadId) return;
+    const incoming = usePreviewReferenceQueueStore.getState().drainPreviewReferences(threadId);
+    if (incoming.length === 0) return;
+
+    setAttachments((prev) => {
+      const room = MAX_ATTACHMENTS - prev.length;
+      if (room <= 0) {
+        for (const item of incoming) {
+          URL.revokeObjectURL(item.previewUrl);
+        }
+        queueMicrotask(() =>
+          useToastStore.getState().show(
+            "error",
+            "Composer attachment limit reached",
+            "Remove an attachment before adding a preview picture reference.",
+          ),
+        );
+        return prev;
+      }
+
+      const toAdd = incoming.slice(0, room);
+      const dropped = incoming.slice(room);
+      for (const item of dropped) {
+        URL.revokeObjectURL(item.previewUrl);
+      }
+      if (dropped.length > 0) {
+        queueMicrotask(() =>
+          useToastStore.getState().show(
+            "error",
+            "Composer attachment limit reached",
+            `${dropped.length} preview reference(s) were not added.`,
+          ),
+        );
+      }
+
+      return [...prev, ...toAdd];
+    });
+  }, [threadId, previewReferenceQueueSignal]);
 
   // Reset reasoning when the selected model does not support the current level
   useEffect(() => {
@@ -1237,12 +1306,16 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
 
     // ---- Queue path: agent is running on this thread ----
     if (isAgentRunning && threadId) {
-      const { content, display } = await injectFileContent(trimmed);
+      const captureRows = buildAttachedBrowserCaptures(attachments);
+      const { content: injectedContent, display: displayInjected } = await injectFileContent(trimmed);
+      const content =
+        captureRows.length === 0 ? injectedContent : appendBrowserCaptureFence(injectedContent, captureRows);
+      const displayContentResolved = resolveOutboundDisplayContent(trimmed, displayInjected, captureRows);
       const currentAttachments = collectAndClearAttachments();
 
       useQueueStore.getState().enqueue(threadId, {
         content,
-        displayContent: display,
+        displayContent: displayContentResolved,
         attachments: currentAttachments,
         model: modelId,
         permissionMode: access,
@@ -1269,8 +1342,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       return;
     }
 
-    // ---- Normal send path ----
-    const { content: messageContent, display: displayContent } = await injectFileContent(trimmed);
+    const { content: injectedContent, display: displayInjected } = await injectFileContent(trimmed);
 
     // Validate worktree mode requirements
     if (isNewThread && newThreadMode === "worktree" && namingMode === "custom" && !customBranchName.trim()) {
@@ -1293,6 +1365,13 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       }
     }
 
+    const captureRows = buildAttachedBrowserCaptures(attachments);
+    const messageContent =
+      captureRows.length === 0 ? injectedContent : appendBrowserCaptureFence(injectedContent, captureRows);
+    const outboundDisplay = resolveOutboundDisplayContent(trimmed, displayInjected, captureRows);
+
+    // ---- Normal send path ----
+
     setInput("");
     if (editorRef.current) {
       editorRef.current.update(() => {
@@ -1307,7 +1386,21 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     if (threadId) clearDraftFromStore(threadId);
 
     if (isNewThread && workspaceId) {
-      await useWorkspaceStore.getState().createAndSendMessage(messageContent, modelId, access, currentAttachments.length > 0 ? currentAttachments : undefined, reasoning, provider, mode, provider === "copilot" ? (copilotAgent ?? undefined) : undefined, contextWindow ?? undefined, thinking ?? undefined);
+      await useWorkspaceStore
+        .getState()
+        .createAndSendMessage(
+          messageContent,
+          modelId,
+          access,
+          currentAttachments.length > 0 ? currentAttachments : undefined,
+          reasoning,
+          provider,
+          mode,
+          provider === "copilot" ? (copilotAgent ?? undefined) : undefined,
+          contextWindow ?? undefined,
+          thinking ?? undefined,
+          outboundDisplay,
+        );
     } else if (branchFromMessageId && threadId) {
       // Branch mode: create a child thread from the quoted message instead of sending.
       let branchMode: "direct" | "worktree" | "existing-worktree" = "direct";
@@ -1330,6 +1423,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       await branchThread({
         sourceThreadId: threadId,
         content: messageContent,
+        displayContent: outboundDisplay,
         model: modelId,
         provider,
         permissionMode: access,
@@ -1345,7 +1439,21 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       });
       onBranchModeExit?.();
     } else if (threadId) {
-      await sendMessage(threadId, messageContent, modelId, access, currentAttachments.length > 0 ? currentAttachments : undefined, displayContent, reasoning, provider, provider === "copilot" ? (copilotAgent ?? undefined) : undefined, contextWindow ?? undefined, thinking ?? undefined, replyContext?.messageId, replyContext?.quotedText);
+      await sendMessage(
+        threadId,
+        messageContent,
+        modelId,
+        access,
+        currentAttachments.length > 0 ? currentAttachments : undefined,
+        outboundDisplay,
+        reasoning,
+        provider,
+        provider === "copilot" ? (copilotAgent ?? undefined) : undefined,
+        contextWindow ?? undefined,
+        thinking ?? undefined,
+        replyContext?.messageId,
+        replyContext?.quotedText,
+      );
       if (threadId) clearReply(threadId);
     }
 

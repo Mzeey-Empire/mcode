@@ -82,6 +82,17 @@ export {
 } from "./models/file-types.js";
 export type { FileCategory } from "./models/file-types.js";
 
+export {
+  BrowserPreviewBoundsSchema,
+  McodeBrowserCaptureV1Schema,
+  AttachedBrowserCaptureV1Schema,
+} from "./models/browser-preview.js";
+export type {
+  BrowserPreviewBounds,
+  McodeBrowserCaptureV1,
+  AttachedBrowserCaptureV1,
+} from "./models/browser-preview.js";
+
 // Events
 export { AgentEventSchema, AgentEventType } from "./events/agent-event.js";
 export type { AgentEvent } from "./events/agent-event.js";

@@ -56,6 +56,8 @@ export function __clearPendingThreadCreationsForTests(): void {
 interface PendingThreadCreation {
   workspaceId: string;
   content: string;
+  /** Persisted/UI caption when outbound `content` includes hidden augmentation. */
+  displayContent?: string;
   model: string;
   permissionMode?: PermissionMode;
   transportMode: "direct" | "worktree";
@@ -92,6 +94,7 @@ async function runCreateAndSend(pending: PendingThreadCreation): Promise<Thread>
     pending.copilotAgent,
     pending.contextWindow,
     pending.thinking,
+    pending.displayContent,
   );
 }
 /**
@@ -159,11 +162,24 @@ interface WorkspaceState {
     mode: "direct" | "worktree",
     branch: string,
   ) => Promise<Thread>;
-  createAndSendMessage: (content: string, model: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], reasoningLevel?: ReasoningLevel, provider?: string, interactionMode?: InteractionMode, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean) => Promise<Thread>;
+  createAndSendMessage: (
+    content: string,
+    model: string,
+    permissionMode?: PermissionMode,
+    attachments?: AttachmentMeta[],
+    reasoningLevel?: ReasoningLevel,
+    provider?: string,
+    interactionMode?: InteractionMode,
+    copilotAgent?: string,
+    contextWindow?: ContextWindowMode,
+    thinking?: boolean,
+    displayContent?: string,
+  ) => Promise<Thread>;
   /** Branch an existing thread into a new child with handoff context. */
   branchThread: (params: {
     sourceThreadId: string;
     content: string;
+    displayContent?: string;
     model: string;
     provider?: string;
     mode: "direct" | "worktree" | "existing-worktree";
@@ -621,7 +637,19 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     }
   },
 
-  createAndSendMessage: async (content, model, permissionMode, attachments, reasoningLevel, provider, interactionMode, copilotAgent, contextWindow, thinking) => {
+  createAndSendMessage: async (
+    content,
+    model,
+    permissionMode,
+    attachments,
+    reasoningLevel,
+    provider,
+    interactionMode,
+    copilotAgent,
+    contextWindow,
+    thinking,
+    displayContent,
+  ) => {
     const workspaceId = get().activeWorkspaceId;
     if (!workspaceId) throw new Error("No workspace selected");
 
@@ -652,6 +680,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     const pending: PendingThreadCreation = {
       workspaceId,
       content,
+      displayContent,
       model,
       permissionMode,
       transportMode: mode,
@@ -666,11 +695,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       thinking,
     };
 
+    const captionForUi = displayContent ?? content;
+
     const placeholder = buildPlaceholderWorkspaceThread({
       id: placeholderId,
       workspaceId,
-      title: titleFromMessageContent(content),
-      queuedMessage: content,
+      title: titleFromMessageContent(captionForUi),
+      queuedMessage: captionForUi,
       transportMode: mode,
       branch,
       clientPreparingContext,
@@ -730,6 +761,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     const pending: PendingThreadCreation = {
       workspaceId,
       content: params.content,
+      displayContent: params.displayContent,
       model: params.model,
       permissionMode: params.permissionMode,
       transportMode,
@@ -746,11 +778,13 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       thinking: params.thinking,
     };
 
+    const branchCaptionForUi = params.displayContent ?? params.content;
+
     const placeholder = buildPlaceholderWorkspaceThread({
       id: placeholderId,
       workspaceId,
-      title: titleFromMessageContent(params.content),
-      queuedMessage: params.content,
+      title: titleFromMessageContent(branchCaptionForUi),
+      queuedMessage: branchCaptionForUi,
       transportMode,
       branch,
       clientPreparingContext,
