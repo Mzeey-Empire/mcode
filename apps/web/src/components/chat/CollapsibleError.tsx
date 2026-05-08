@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertCircle, ChevronDown, ChevronRight } from "lucide-react";
+import { AlertCircle, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
@@ -19,9 +19,9 @@ export function CollapsibleError({ error, onRetry, onDismiss }: CollapsibleError
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="mx-auto flex w-full max-w-xl flex-col items-stretch gap-3">
+    <div className="animate-fade-up-in mx-auto flex w-full max-w-xl flex-col items-stretch gap-3">
       <Collapsible open={open} onOpenChange={setOpen}>
-        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 transition-colors duration-150 hover:bg-destructive/8">
           <CollapsibleTrigger asChild>
             <button
               type="button"
@@ -29,14 +29,13 @@ export function CollapsibleError({ error, onRetry, onDismiss }: CollapsibleError
             >
               <AlertCircle className="h-4 w-4 shrink-0" />
               <span className="flex-1">Failed to create thread</span>
-              {open ? (
-                <ChevronDown className="h-4 w-4 shrink-0 text-destructive/60" />
-              ) : (
-                <ChevronRight className="h-4 w-4 shrink-0 text-destructive/60" />
-              )}
+              <ChevronRight
+                className="h-4 w-4 shrink-0 text-destructive/60 transition-transform duration-200"
+                style={{ transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
+              />
             </button>
           </CollapsibleTrigger>
-          <CollapsibleContent>
+          <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
             <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded border border-destructive/20 bg-destructive/5 px-3 py-2 font-mono text-xs text-destructive/80">
               {error}
             </pre>
