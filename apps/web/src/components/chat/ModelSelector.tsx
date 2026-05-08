@@ -20,6 +20,7 @@ import {
   useModelFavoritesStore,
   type ModelFavoriteEntry,
 } from "@/stores/modelFavoritesStore";
+import { tokenizeSearch, matchesAllTokens } from "@/lib/searchTokens";
 import {
   ClaudeIcon,
   CodexIcon,
@@ -42,18 +43,6 @@ const PROVIDER_META: Record<string, { icon: IconComponent; color: string }> = {
 
 /** Matches Tailwind `w-[52px]` for header alignment and icon-first rail. */
 const LEFT_RAIL_WIDTH_CLASS = "w-[52px]";
-
-/** Splits a query into lowercase tokens (whitespace). Empty input yields no tokens. */
-function tokenizeSearch(raw: string): string[] {
-  return raw.trim().toLowerCase().split(/\s+/).filter(Boolean);
-}
-
-/** Requires every token to appear as a substring (AND semantics across fields). */
-function matchesAllTokens(parts: string[], tokens: string[]): boolean {
-  if (tokens.length === 0) return true;
-  const haystack = parts.join(" ").toLowerCase();
-  return tokens.every((t) => haystack.includes(t));
-}
 
 /** True when the catalog uses subgroup rows so a provider title above would repeat RPC group labels. */
 function catalogUsesModelGroups(models: ModelProvider["models"]): boolean {

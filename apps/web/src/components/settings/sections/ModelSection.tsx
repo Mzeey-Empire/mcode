@@ -19,9 +19,11 @@ import {
 import { SettingRow } from "../SettingRow";
 import { SegControl } from "../SegControl";
 import { SectionHeading } from "../SectionHeading";
+import { SearchableGroupedPicker } from "../SearchableGroupedPicker";
+import { SettingsProviderPicker } from "../SettingsProviderPicker";
 import { Switch } from "@/components/ui/switch";
 import type { ContextWindowMode, ProviderAvailability, SettingsProviderId, ReasoningLevel } from "@mcode/contracts";
-import { ChevronDown } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import {
   ClaudeIcon,
   CodexIcon,
@@ -30,19 +32,7 @@ import {
   GeminiIcon,
   CopilotIcon,
 } from "@/components/chat/ProviderIcons";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { useToastStore } from "@/stores/toastStore";
-
-/** Providers with more models than this threshold use a Select dropdown instead of SegControl. */
-const SEG_CONTROL_MAX_MODELS = 6;
 
 /** Maps provider id to its brand icon component. */
 const PROVIDER_ICONS: Record<string, ReactNode> = {
@@ -142,7 +132,13 @@ export function ModelSection() {
 
   const utilityProviderOptions = useMemo(
     () => [
-      { value: "", label: "Auto" },
+      {
+        value: "",
+        label: "Auto",
+        disabled: false,
+        icon: <Sparkles size={12} className="text-muted-foreground" aria-hidden />,
+        title: "Use the default provider above",
+      },
       ...MODEL_PROVIDERS.filter((p) => p.supportsCompletion).map((p) =>
         buildProviderOption(p, availabilityById.get(p.id)),
       ),
@@ -159,6 +155,7 @@ export function ModelSection() {
 
   const utilityEffectiveId = utilityProvider || provider;
   const dynamicUtilityModels = useProviderModelsStore((s) => s.models[utilityEffectiveId]);
+  const utilityModelsLoading = useProviderModelsStore((s) => s.loading[utilityEffectiveId] ?? false);
 
   const fetchModels = useProviderModelsStore((s) => s.fetchModels);
   const dynamicModels = useProviderModelsStore((s) => s.models[provider]);
@@ -167,10 +164,21 @@ export function ModelSection() {
   const cliPaths = useSettingsStore((s) => s.settings.provider.cli);
   const dynamicCliPath =
     provider === "cursor" ? cliPaths.cursor : provider === "copilot" ? cliPaths.copilot : "";
+  const utilityDynamicCliPath =
+    utilityEffectiveId === "cursor"
+      ? cliPaths.cursor
+      : utilityEffectiveId === "copilot"
+        ? cliPaths.copilot
+        : "";
 
   useEffect(() => {
     void fetchModels(provider, { force: true });
   }, [provider, dynamicCliPath, fetchModels]);
+
+  useEffect(() => {
+    if (!utilityProvider) return;
+    void fetchModels(utilityEffectiveId, { force: true });
+  }, [utilityProvider, utilityEffectiveId, utilityDynamicCliPath, fetchModels]);
 
   const mergedCatalogModels = useMemo(
     () => pickProviderModelsForSettings(activeProvider?.models ?? [], dynamicModels),
@@ -368,7 +376,12 @@ export function ModelSection() {
         configKey="model.defaults.provider"
         hint="AI provider for new threads."
       >
-        <SegControl options={providerOptions} value={provider} onChange={handleProviderChange} />
+        <SettingsProviderPicker
+          value={provider}
+          onChange={handleProviderChange}
+          options={providerOptions}
+          data-testid="settings-default-provider-trigger"
+        />
       </SettingRow>
 
       <SettingRow
@@ -377,41 +390,14 @@ export function ModelSection() {
         hint="New threads start with this model."
       >
         <div className="flex flex-col items-end gap-2">
-          {modelOptions.length > SEG_CONTROL_MAX_MODELS ? (
-            <Select value={modelId} onValueChange={(v) => v != null && handleModelChange(v)}>
-              <SelectTrigger size="sm" className="w-56 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {modelOptions.some((m) => m.group)
-                  ? (() => {
-                      const groups = new Map<string, typeof modelOptions>();
-                      for (const m of modelOptions) {
-                        const g = m.group ?? "";
-                        if (!groups.has(g)) groups.set(g, []);
-                        groups.get(g)!.push(m);
-                      }
-                      return Array.from(groups.entries()).map(([g, items]) => (
-                        <SelectGroup key={g}>
-                          {g && <SelectLabel>{g}</SelectLabel>}
-                          {items.map((m) => (
-                            <SelectItem key={m.value} value={m.value}>
-                              {m.label}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      ));
-                    })()
-                  : modelOptions.map((m) => (
-                      <SelectItem key={m.value} value={m.value}>
-                        {m.label}
-                      </SelectItem>
-                    ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <SegControl options={modelOptions} value={modelId} onChange={handleModelChange} />
-          )}
+          <SearchableGroupedPicker
+            value={modelId}
+            onChange={handleModelChange}
+            options={modelOptions}
+            searchPlaceholder="Search models…"
+            loading={modelsLoading}
+            data-testid="settings-default-model-trigger"
+          />
           {defaultModelStale && (
             <p className="max-w-xs text-right text-xs text-amber-600 dark:text-amber-500">
               This model is not in the current catalog. Sending messages may fail until you choose a
@@ -427,48 +413,15 @@ export function ModelSection() {
         hint="Used when the primary model is unavailable. Off disables fallback."
       >
         <div className="flex flex-col items-end gap-2">
-          {fallbackOptions.length > SEG_CONTROL_MAX_MODELS ? (
-            <Select
-              value={fallbackId}
-              onValueChange={(v) => v != null && update({ model: { defaults: { fallbackId: v } } })}
-            >
-              <SelectTrigger size="sm" className="w-56 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {fallbackOptions.some((m) => m.group)
-                  ? (() => {
-                      const groups = new Map<string, typeof fallbackOptions>();
-                      for (const m of fallbackOptions) {
-                        const g = m.group ?? "";
-                        if (!groups.has(g)) groups.set(g, []);
-                        groups.get(g)!.push(m);
-                      }
-                      return Array.from(groups.entries()).map(([g, items]) => (
-                        <SelectGroup key={g}>
-                          {g && <SelectLabel>{g}</SelectLabel>}
-                          {items.map((m) => (
-                            <SelectItem key={m.value} value={m.value}>
-                              {m.label}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      ));
-                    })()
-                  : fallbackOptions.map((m) => (
-                      <SelectItem key={m.value} value={m.value}>
-                        {m.label}
-                      </SelectItem>
-                    ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <SegControl
-              options={fallbackOptions}
-              value={fallbackId}
-              onChange={(v) => update({ model: { defaults: { fallbackId: v } } })}
-            />
-          )}
+          <SearchableGroupedPicker
+            value={fallbackId}
+            onChange={(v) => void update({ model: { defaults: { fallbackId: v } } })}
+            options={fallbackOptions}
+            emptyTriggerLabel="Off"
+            searchPlaceholder="Search models…"
+            loading={modelsLoading}
+            data-testid="settings-fallback-model-trigger"
+          />
           {fallbackModelStale && (
             <p className="max-w-xs text-right text-xs text-amber-600 dark:text-amber-500">
               This fallback model is not in the current catalog. Consider turning fallback off or
@@ -542,10 +495,15 @@ export function ModelSection() {
             configKey="model.utility.provider"
             hint="AI provider for lightweight tasks (PR drafts, diff summaries). Auto inherits from the default provider above."
           >
-            <SegControl
-              options={utilityProviderOptions}
+            <SettingsProviderPicker
               value={utilityProvider}
-              onChange={(v) => void update({ model: { utility: { provider: v as SettingsProviderId | "", id: "" } } })}
+              onChange={(v) =>
+                void update({
+                  model: { utility: { provider: v as SettingsProviderId | "", id: "" } },
+                })
+              }
+              options={utilityProviderOptions}
+              data-testid="settings-utility-provider-trigger"
             />
           </SettingRow>
           <SettingRow
@@ -554,25 +512,20 @@ export function ModelSection() {
             hint="Model for utility tasks. Auto selects a provider-appropriate cheap default."
           >
             {utilityProvider ? (
-              <div className="relative inline-flex w-56">
-                <select
-                  value={utilityModelId}
-                  onChange={(e) => void update({ model: { utility: { id: e.target.value } } })}
-                  className="h-7 w-full appearance-none cursor-pointer rounded-[min(var(--radius-md),12px)] border border-input bg-background pl-2 pr-7 py-0.5 text-xs text-foreground focus-visible:border-ring focus-visible:outline-none"
-                >
-                  {utilityModelOptions.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown
-                  size={12}
-                  className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"
-                />
-              </div>
+              <SearchableGroupedPicker
+                value={utilityModelId}
+                onChange={(v) => void update({ model: { utility: { id: v } } })}
+                options={utilityModelOptions.map((o) => ({
+                  value: o.value,
+                  label: o.label,
+                }))}
+                emptyTriggerLabel="Auto"
+                searchPlaceholder="Search utility models…"
+                loading={utilityModelsLoading}
+                data-testid="settings-utility-model-trigger"
+              />
             ) : (
-              <div className="h-7 w-56 rounded-[min(var(--radius-md),12px)] border border-input bg-background px-2 py-0.5 text-xs text-muted-foreground flex items-center select-none">
+              <div className="flex h-8 min-w-[220px] max-w-[280px] items-center rounded-[min(var(--radius-md),12px)] border border-input bg-background px-2.5 text-xs text-muted-foreground select-none">
                 Auto
               </div>
             )}

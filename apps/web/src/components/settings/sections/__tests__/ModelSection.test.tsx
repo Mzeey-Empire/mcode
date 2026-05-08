@@ -55,20 +55,6 @@ vi.mock("@/components/ui/tooltip", () => ({
   TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-// Select primitives from Radix can be tricky in jsdom; stub them since the
-// reasoning row always uses SegControl (not Select) in the tested scenarios.
-vi.mock("@/components/ui/select", () => ({
-  Select: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SelectTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SelectValue: () => <span />,
-  SelectContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SelectGroup: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SelectLabel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SelectItem: ({ children, value }: { children: React.ReactNode; value: string }) => (
-    <div data-value={value}>{children}</div>
-  ),
-}));
-
 import { ModelSection } from "../ModelSection";
 
 /** Builds the full settings state shape required by ModelSection. */
