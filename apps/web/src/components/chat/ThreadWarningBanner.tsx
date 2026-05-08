@@ -24,7 +24,7 @@ export function ThreadWarningBanner({
   return (
     <div className="animate-fade-up-in mx-auto w-full max-w-3xl px-4">
       <Collapsible open={open} onOpenChange={setOpen}>
-        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 transition-colors duration-150 hover:bg-amber-500/8">
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 transition-colors duration-150 hover:bg-amber-500/10">
           <div className="flex items-center gap-2">
             <CollapsibleTrigger asChild>
               <button

@@ -21,7 +21,7 @@ export function CollapsibleError({ error, onRetry, onDismiss }: CollapsibleError
   return (
     <div className="animate-fade-up-in mx-auto flex w-full max-w-xl flex-col items-stretch gap-3">
       <Collapsible open={open} onOpenChange={setOpen}>
-        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 transition-colors duration-150 hover:bg-destructive/8">
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 transition-colors duration-150 hover:bg-destructive/10">
           <CollapsibleTrigger asChild>
             <button
               type="button"
