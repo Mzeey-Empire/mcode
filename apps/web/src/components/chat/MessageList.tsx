@@ -25,6 +25,15 @@ import { rememberScrollTop, recallScrollTop } from "./scrollPositionMemory";
 
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
 const AUTO_SCROLL_THRESHOLD = 64;
+/**
+ * If the viewport is farther than this from the scroll tail, the user has left
+ * "follow latest" mode: show the down control and do not auto-scroll on new content.
+ * Kept near {@link AUTO_SCROLL_THRESHOLD} so this matches virtualizer tail tracking.
+ */
+const USER_AWAY_FROM_BOTTOM_PX = AUTO_SCROLL_THRESHOLD;
+/** After the user scrolls up with the wheel, block streaming auto-scroll briefly
+ * unless they are still glued to the bottom (avoids fighting a small nudge). */
+const WHEEL_UP_FOLLOW_PAUSE_MS = 750;
 const OVERSCAN = 8;
 const DEFAULT_ITEM_HEIGHT = 80;
 const PAGINATION_THRESHOLD = 200;
@@ -193,6 +202,8 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   const [isPositioned, setIsPositioned] = useState(false);
   /** Mirrors `isPositioned` for `handleScroll` so affordances do not run while the scroller is opacity-0. */
   const isPositionedRef = useRef(false);
+  /** Blocks streaming/discrete tail snaps briefly after wheel-up while not at the tail. */
+  const streamingFollowPauseUntilRef = useRef(0);
 
   const messages = useThreadStore((s) => s.messages);
   const loading = useThreadStore((s) => s.loading);
@@ -259,7 +270,10 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
 
   /** Clears tail pin when the user scrolls content upward (wheel / trackpad). */
   const handleWheel = useCallback((e: WheelEvent<HTMLDivElement>) => {
-    if (e.deltaY < 0) pinListTailRef.current = false;
+    if (e.deltaY < 0) {
+      pinListTailRef.current = false;
+      streamingFollowPauseUntilRef.current = Date.now() + WHEEL_UP_FOLLOW_PAUSE_MS;
+    }
   }, []);
 
   /** Track scroll-to-bottom button visibility and trigger upward pagination near the top. */
@@ -285,10 +299,13 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     }
 
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const scrolledUp = distanceFromBottom > 200;
+    const scrolledUp = distanceFromBottom > USER_AWAY_FROM_BOTTOM_PX;
     if (scrolledUp) pinListTailRef.current = false;
     isScrolledUpRef.current = scrolledUp;
     setShowScrollBtn(scrolledUp);
+    if (!scrolledUp) {
+      streamingFollowPauseUntilRef.current = 0;
+    }
     // Clear new-content highlight once the user reaches the bottom
     if (!scrolledUp) setHasNewContent(false);
 
@@ -685,10 +702,13 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     }
     pendingScrollRestoreRef.current = null;
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const scrolledUp = distanceFromBottom > 200;
+    const scrolledUp = distanceFromBottom > USER_AWAY_FROM_BOTTOM_PX;
     isScrolledUpRef.current = scrolledUp;
     setShowScrollBtn(scrolledUp);
-    if (!scrolledUp) setHasNewContent(false);
+    if (!scrolledUp) {
+      streamingFollowPauseUntilRef.current = 0;
+      setHasNewContent(false);
+    }
     requestAnimationFrame(() => {
       const el2 = containerRef.current;
       if (el2 && snapToTail) {
@@ -705,9 +725,18 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     if (suppressPassiveAutoBottomScrollRef.current) return;
     if (isScrolledUpRef.current) {
       setHasNewContent(true);
-    } else {
-      scrollToBottom(false);
+      return;
     }
+    const el = containerRef.current;
+    const dist = el ? el.scrollHeight - el.scrollTop - el.clientHeight : 0;
+    const nearTailWhilePaused =
+      Date.now() < streamingFollowPauseUntilRef.current
+      && dist <= USER_AWAY_FROM_BOTTOM_PX;
+    if (Date.now() < streamingFollowPauseUntilRef.current && !nearTailWhilePaused) {
+      setHasNewContent(true);
+      return;
+    }
+    scrollToBottom(false);
   }, [activeThreadId, messages.length, toolCalls.length, isAgentRunning, scrollToBottom]);
 
   // Streaming deltas -> scroll if at bottom, else highlight button
@@ -716,9 +745,18 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     if (!streamingText || isInitialLoadRef.current) return;
     if (isScrolledUpRef.current) {
       setHasNewContent(true);
-    } else {
-      scrollToBottom(false);
+      return;
     }
+    const el = containerRef.current;
+    const dist = el ? el.scrollHeight - el.scrollTop - el.clientHeight : 0;
+    const nearTailWhilePaused =
+      Date.now() < streamingFollowPauseUntilRef.current
+      && dist <= USER_AWAY_FROM_BOTTOM_PX;
+    if (Date.now() < streamingFollowPauseUntilRef.current && !nearTailWhilePaused) {
+      setHasNewContent(true);
+      return;
+    }
+    scrollToBottom(false);
   }, [streamingText, activeThreadId, scrollToBottom]);
 
   // Capture text selections in message bubbles and activate reply mode for the selected text.
@@ -826,6 +864,9 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
           hasNewContent={hasNewContent}
           onScrollToBottom={() => {
             setHasNewContent(false);
+            streamingFollowPauseUntilRef.current = 0;
+            isScrolledUpRef.current = false;
+            setShowScrollBtn(false);
             scrollToBottom(true);
           }}
         />
