@@ -40,6 +40,10 @@ vi.mock("@/components/ui/badge", () => ({
   ),
 }));
 
+vi.mock("@/components/ui/input", () => ({
+  Input: ({ ...props }: React.ComponentProps<"input">) => <input {...props} />,
+}));
+
 // Prevent real RPC calls triggered by fetchProviderModels on hover.
 vi.mock("@/transport", () => ({
   getTransport: () => ({

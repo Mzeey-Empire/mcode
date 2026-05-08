@@ -29,6 +29,10 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
       {attachments.map((att) => {
         const isImage = att.mimeType.startsWith("image/");
         const isPdf = att.mimeType === "application/pdf";
+        const isOfficeDoc =
+          att.mimeType.includes("officedocument") ||
+          att.mimeType.includes("opendocument") ||
+          att.mimeType === "application/rtf";
 
         return (
           <div
@@ -54,6 +58,8 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
                 <div className="flex items-center gap-2">
                   {isPdf ? (
                     <FileText size={18} className="shrink-0 text-red-600 dark:text-red-400" />
+                  ) : isOfficeDoc ? (
+                    <FileText size={18} className="shrink-0 text-blue-600 dark:text-blue-400" />
                   ) : (
                     <File size={18} className="shrink-0 text-muted-foreground" />
                   )}

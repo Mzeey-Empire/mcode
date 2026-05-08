@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, useCallback, type ComponentType } from "react";
-import { ChevronDown, ChevronRight, Lock, Check, Loader2 } from "lucide-react";
+import { useState, useEffect, useRef, useCallback, useMemo, type ComponentType } from "react";
+import { ChevronDown, ChevronRight, Lock, Check, Loader2, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatContextWindow } from "./format-context-window";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
   MODEL_PROVIDERS,
@@ -11,6 +12,10 @@ import {
 } from "@/lib/model-registry";
 import { getTransport } from "@/transport";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
+import {
+  useModelFavoritesStore,
+  type ModelFavoriteEntry,
+} from "@/stores/modelFavoritesStore";
 import {
   ClaudeIcon,
   CodexIcon,
@@ -52,8 +57,15 @@ interface ModelSelectorProps {
 export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, locked, providerLocked }: ModelSelectorProps) {
   const [open, setOpen] = useState(false);
   const [hoveredProvider, setHoveredProvider] = useState<string | null>(null);
+  const [favoriteSearch, setFavoriteSearch] = useState("");
+  const [submenuSearch, setSubmenuSearch] = useState("");
+  const [lockedPanelSearch, setLockedPanelSearch] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const favorites = useModelFavoritesStore((s) => s.entries);
+  const toggleFavorite = useModelFavoritesStore((s) => s.toggleFavorite);
+  const isFavorite = useModelFavoritesStore((s) => s.isFavorite);
 
   // Read the full list once at the top level -- hooks cannot be called inside .map().
   const availabilityList = useProviderAvailabilityStore((s) => s.providers);
@@ -116,6 +128,46 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
     return dynamic && dynamic.length > 0 ? dynamic : p.models;
   };
 
+  const isProviderUsable = useCallback(
+    (id: string) => {
+      const r = availabilityList.find((x) => x.id === id);
+      if (!r) return true;
+      return r.enabled && r.hasAdapter && r.cli.status !== "not_found";
+    },
+    [availabilityList],
+  );
+
+  const filterModelsBySearch = useCallback((models: ModelProvider["models"], q: string) => {
+    const n = q.trim().toLowerCase();
+    if (!n) return models;
+    return models.filter(
+      (m) =>
+        m.label.toLowerCase().includes(n) ||
+        m.id.toLowerCase().includes(n),
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      setFavoriteSearch("");
+      setSubmenuSearch("");
+      setLockedPanelSearch("");
+    }
+  }, [open]);
+
+  useEffect(() => {
+    setSubmenuSearch("");
+  }, [hoveredProvider]);
+
+  useEffect(() => {
+    if (!open || locked) return;
+    const ids = new Set<string>();
+    for (const f of favorites) {
+      if (isProviderUsable(f.providerId)) ids.add(f.providerId);
+    }
+    for (const id of ids) void fetchProviderModels(id);
+  }, [open, locked, favorites, fetchProviderModels, isProviderUsable]);
+
   // Delayed hover close so user has time to move to submenu
   const setHoveredWithDelay = (providerId: string | null) => {
     if (hoverTimeoutRef.current) {
@@ -146,6 +198,20 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
   const shortLabel = model && displayProvider
     ? model.label.replace(`${displayProvider.name} `, "")
     : (model?.label ?? selectedModelId);
+
+  const favoriteSearchNorm = favoriteSearch.trim().toLowerCase();
+
+  const filteredFavorites = useMemo(() => {
+    return favorites.filter((f) => {
+      if (!isProviderUsable(f.providerId)) return false;
+      if (providerLocked && displayProvider && f.providerId !== displayProvider.id) return false;
+      if (!favoriteSearchNorm) return true;
+      return (
+        f.label.toLowerCase().includes(favoriteSearchNorm) ||
+        f.modelId.toLowerCase().includes(favoriteSearchNorm)
+      );
+    });
+  }, [favorites, favoriteSearchNorm, isProviderUsable, providerLocked, displayProvider]);
 
   // For a provider-locked thread, fetch immediately so the list is current.
   useEffect(() => {
@@ -184,6 +250,53 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
     setHoveredProvider(null);
   };
 
+  const renderFavoriteRow = (entry: ModelFavoriteEntry) => {
+    const pm = PROVIDER_META[entry.providerId];
+    const ProvIcon = pm?.icon ?? ClaudeIcon;
+    const provIconClass = pm?.color ?? "";
+    const starred = isFavorite(entry.providerId, entry.modelId);
+    return (
+      <div
+        key={`${entry.providerId}:${entry.modelId}`}
+        className="flex w-full items-center gap-0.5 rounded px-1"
+      >
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+          aria-label={starred ? "Remove from favorites" : "Add to favorites"}
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleFavorite({
+              providerId: entry.providerId,
+              modelId: entry.modelId,
+              label: entry.label,
+            });
+          }}
+        >
+          <Star
+            size={12}
+            className={cn(starred && "fill-amber-400 text-amber-400")}
+          />
+        </Button>
+        <button
+          type="button"
+          onClick={() => handleSelectModel(entry.modelId, entry.providerId)}
+          className={cn(
+            "flex min-w-0 flex-1 items-center gap-2 rounded px-2 py-1.5 text-xs",
+            entry.modelId === normalizedSelectedId && entry.providerId === (selectedProviderId ?? displayProvider?.id)
+              ? "bg-accent text-foreground"
+              : "text-popover-foreground hover:bg-accent/50 hover:text-foreground",
+          )}
+        >
+          <ProvIcon size={12} className={provIconClass} />
+          <span className="truncate text-left">{entry.label}</span>
+        </button>
+      </div>
+    );
+  };
+
   /** Groups a provider's models by their `group` field. Returns ungrouped if none use it. */
   const groupModels = (models: ModelProvider["models"]) => {
     const hasGroups = models.some((m) => m.group);
@@ -205,43 +318,64 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
     isSelected: (id: string) => boolean
   ) => {
     const ctxLabel = formatContextWindow(m.contextWindow);
+    const starred = isFavorite(providerId, m.id);
     return (
-      <button
-        key={m.id}
-        onClick={() => handleSelectModel(m.id, providerId)}
-        className={cn(
-          "flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs",
-          isSelected(m.id)
-            ? "bg-accent text-foreground"
-            : "text-popover-foreground hover:bg-accent/50 hover:text-foreground"
-        )}
-      >
-        <span className="flex-1 text-left">{m.label}</span>
-        {ctxLabel && (
-          <span className="text-[10px] text-muted-foreground/60 tabular-nums">
-            {ctxLabel}
-          </span>
-        )}
-        {m.multiplier != null && (
-          <span className="text-[10px] text-muted-foreground/60 tabular-nums">
-            {m.multiplier}x
-          </span>
-        )}
-        {isSelected(m.id) && (
-          <Check size={10} className="shrink-0 text-foreground" />
-        )}
-      </button>
+      <div key={m.id} className="flex w-full items-center gap-0.5 rounded px-1">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+          aria-label={starred ? "Remove from favorites" : "Add to favorites"}
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleFavorite({ providerId, modelId: m.id, label: m.label });
+          }}
+        >
+          <Star
+            size={12}
+            className={cn(starred && "fill-amber-400 text-amber-400")}
+          />
+        </Button>
+        <button
+          type="button"
+          onClick={() => handleSelectModel(m.id, providerId)}
+          className={cn(
+            "flex min-w-0 flex-1 items-center gap-2 rounded px-2 py-1.5 text-xs",
+            isSelected(m.id)
+              ? "bg-accent text-foreground"
+              : "text-popover-foreground hover:bg-accent/50 hover:text-foreground"
+          )}
+        >
+          <span className="flex-1 truncate text-left">{m.label}</span>
+          {ctxLabel && (
+            <span className="text-[10px] text-muted-foreground/60 tabular-nums shrink-0">
+              {ctxLabel}
+            </span>
+          )}
+          {m.multiplier != null && (
+            <span className="text-[10px] text-muted-foreground/60 tabular-nums shrink-0">
+              {m.multiplier}x
+            </span>
+          )}
+          {isSelected(m.id) && (
+            <Check size={10} className="shrink-0 text-foreground" />
+          )}
+        </button>
+      </div>
     );
   };
 
   const renderGroupedModels = (
     models: ModelProvider["models"],
     providerId: string,
-    isSelected: (id: string) => boolean
+    isSelected: (id: string) => boolean,
+    searchQuery: string,
   ) => {
-    const groups = groupModels(models);
+    const filtered = filterModelsBySearch(models, searchQuery);
+    const groups = groupModels(filtered);
     if (!groups) {
-      return models.map((m) => renderModelRow(m, providerId, isSelected));
+      return filtered.map((m) => renderModelRow(m, providerId, isSelected));
     }
     return groups.map(({ label, models: gModels }) => (
       <div key={label}>
@@ -260,18 +394,32 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
 
     return (
       <div
-        className="absolute left-full bottom-0 -ml-1 pl-2 min-w-[180px]"
+        className="absolute left-full bottom-0 z-30 -ml-1 min-w-[220px] pl-2"
         onMouseEnter={() => setHoveredWithDelay(p.id)}
         onMouseLeave={() => setHoveredWithDelay(null)}
       >
-        <div className="max-h-[min(480px,calc(100vh-8rem))] overflow-y-auto rounded-md border border-border bg-popover p-1 shadow-lg">
-          {loadingProviders.has(p.id) ? (
-            <div className="flex items-center justify-center py-6">
-              <Loader2 size={14} className="animate-spin text-muted-foreground" />
-            </div>
-          ) : (
-            renderGroupedModels(getModels(p), p.id, isSelected)
-          )}
+        <div className="flex max-h-[min(480px,calc(100vh-8rem))] flex-col overflow-hidden rounded-md border border-border bg-popover shadow-lg">
+          <div className="border-b border-border/40 p-1.5">
+            <Input
+              size="xs"
+              placeholder="Search models..."
+              value={submenuSearch}
+              onChange={(e) => setSubmenuSearch(e.target.value)}
+              data-testid="model-selector-submenu-search"
+              className="h-7"
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+          <div className="overflow-y-auto p-1">
+            {loadingProviders.has(p.id) ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 size={14} className="animate-spin text-muted-foreground" />
+              </div>
+            ) : (
+              renderGroupedModels(getModels(p), p.id, isSelected, submenuSearch)
+            )}
+          </div>
         </div>
       </div>
     );
@@ -279,30 +427,81 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
 
   return (
     <div ref={containerRef} className="relative">
-      <Button variant="ghost" size="xs" onClick={() => setOpen(!open)} className="text-muted-foreground hover:bg-muted/40 hover:text-foreground transition-colors">
+      <Button variant="ghost" size="xs" data-testid="model-selector-trigger" onClick={() => setOpen(!open)} className="text-muted-foreground hover:bg-muted/40 hover:text-foreground transition-colors">
         <Icon size={14} className={iconClass} />
         <span className="text-sm">{shortLabel}</span>
         <ChevronDown size={11} />
       </Button>
 
       {open && (
-        <div className="absolute bottom-full left-0 z-20 mb-1 min-w-[180px] rounded-md border border-border bg-popover p-1 shadow-lg">
+        <div className="absolute bottom-full left-0 z-20 mb-1 min-w-[240px] rounded-md border border-border bg-popover p-1 shadow-lg">
           {/* When provider is locked, show only that provider's models directly */}
           {providerLocked && displayProvider ? (
-            <div className="max-h-[min(480px,calc(100vh-8rem))] overflow-y-auto">
-              {loadingProviders.has(displayProvider.id) ? (
-                <div className="flex items-center justify-center py-6">
-                  <Loader2 size={14} className="animate-spin text-muted-foreground" />
+            <div className="flex max-h-[min(480px,calc(100vh-8rem))] flex-col overflow-hidden">
+              <div className="border-b border-border/40 p-1.5">
+                <Input
+                  size="xs"
+                  placeholder="Search favorites..."
+                  value={favoriteSearch}
+                  onChange={(e) => setFavoriteSearch(e.target.value)}
+                  data-testid="model-selector-favorite-search"
+                  className="h-7"
+                />
+              </div>
+              {filteredFavorites.length > 0 && (
+                <div className="border-b border-border/40 py-1">
+                  <div className="px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60 select-none">
+                    Favorites
+                  </div>
+                  {filteredFavorites.map((entry) => renderFavoriteRow(entry))}
                 </div>
-              ) : (
-                renderGroupedModels(
-                  getModels(displayProvider),
-                  displayProvider.id,
-                  (id) => id === normalizedSelectedId
-                )
               )}
+              <div className="border-b border-border/40 p-1.5">
+                <Input
+                  size="xs"
+                  placeholder="Search models..."
+                  value={lockedPanelSearch}
+                  onChange={(e) => setLockedPanelSearch(e.target.value)}
+                  data-testid="model-selector-locked-search"
+                  className="h-7"
+                />
+              </div>
+              <div className="overflow-y-auto p-1">
+                {loadingProviders.has(displayProvider.id) ? (
+                  <div className="flex items-center justify-center py-6">
+                    <Loader2 size={14} className="animate-spin text-muted-foreground" />
+                  </div>
+                ) : (
+                  renderGroupedModels(
+                    getModels(displayProvider),
+                    displayProvider.id,
+                    (id) => id === normalizedSelectedId,
+                    lockedPanelSearch,
+                  )
+                )}
+              </div>
             </div>
-          ) : MODEL_PROVIDERS.map((p) => {
+          ) : (
+            <>
+              <div className="border-b border-border/40 p-1.5">
+                <Input
+                  size="xs"
+                  placeholder="Search favorites..."
+                  value={favoriteSearch}
+                  onChange={(e) => setFavoriteSearch(e.target.value)}
+                  data-testid="model-selector-favorite-search"
+                  className="h-7"
+                />
+              </div>
+              {filteredFavorites.length > 0 && (
+                <div className="border-b border-border/40 py-1">
+                  <div className="px-3 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60 select-none">
+                    Favorites
+                  </div>
+                  {filteredFavorites.map((entry) => renderFavoriteRow(entry))}
+                </div>
+              )}
+              {MODEL_PROVIDERS.map((p) => {
             const pm = PROVIDER_META[p.id];
             const ProvIcon = pm?.icon ?? ClaudeIcon;
             const provIconClass = pm?.color ?? "";
@@ -361,6 +560,8 @@ export function ModelSelector({ selectedModelId, selectedProviderId, onSelect, l
               </div>
             );
           })}
+            </>
+          )}
         </div>
       )}
     </div>
