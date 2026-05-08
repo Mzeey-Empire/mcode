@@ -28,6 +28,7 @@ import {
 import { SettingsService } from "../../services/settings-service.js";
 import { SkillService } from "../../services/skill-service.js";
 import { EnvService } from "../../services/env-service.js";
+import { JobObject } from "../../services/job-object.js";
 import {
   AgentEventType,
   CURSOR_STATIC_MODEL_FALLBACK,
@@ -112,6 +113,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     @inject(SettingsService) private readonly settingsService: SettingsService,
     @inject(SkillService) private readonly skillService: SkillService,
     @inject(EnvService) private readonly envService: EnvService,
+    @inject("JobObject") private readonly jobObject: JobObject,
   ) {
     super();
   }
@@ -312,6 +314,11 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
 
     if (!child.stdin || !child.stdout) {
       throw new Error("Failed to spawn cursor-agent: stdio pipes unavailable");
+    }
+
+    if (child.pid) {
+      this.jobObject.assign(child.pid);
+      this.jobObject.setDescription(child.pid, "Mcode Agent: Cursor");
     }
 
     const out = Writable.toWeb(child.stdin) as WritableStream<Uint8Array>;
