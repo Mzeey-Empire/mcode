@@ -831,11 +831,13 @@ export const useThreadStore = create<ThreadState>((set, get) => {
 
   /** Request the agent to stop on a thread. Always marks the thread as not running, even on error. */
   stopAgent: async (threadId) => {
+    let stopSucceeded = false;
     set((state) => ({
       awaitingUserStopPersistByThread: { ...state.awaitingUserStopPersistByThread, [threadId]: true },
     }));
     try {
       await getTransport().stopAgent(threadId);
+      stopSucceeded = true;
     } catch (e) {
       set((state) => {
         const nextAwaiting = { ...state.awaitingUserStopPersistByThread };
@@ -866,7 +868,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       const nextApiRetry = { ...state.apiRetryByThread };
       delete nextApiRetry[threadId];
       const nextRecall =
-        lastUserText !== null && state.currentThreadId === threadId
+        stopSucceeded && lastUserText !== null && state.currentThreadId === threadId
           ? { ...state.composerRecallFromStopByThread, [threadId]: { text: lastUserText } }
           : state.composerRecallFromStopByThread;
       return {
@@ -1500,6 +1502,28 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             last.content === content &&
             last.id !== message.id
           ) {
+            const previousId = last.id;
+            const nextPersistedToolCallCounts = { ...state.persistedToolCallCounts };
+            if (previousId in nextPersistedToolCallCounts) {
+              const tc = nextPersistedToolCallCounts[previousId];
+              nextPersistedToolCallCounts[message.id] = tc;
+              delete nextPersistedToolCallCounts[previousId];
+            }
+
+            const nextPersistedFilesChanged = { ...state.persistedFilesChanged };
+            if (previousId in nextPersistedFilesChanged) {
+              const fc = nextPersistedFilesChanged[previousId];
+              nextPersistedFilesChanged[message.id] = fc;
+              delete nextPersistedFilesChanged[previousId];
+            }
+
+            const nextServerMessageIds = { ...state.serverMessageIds };
+            if (previousId in nextServerMessageIds) {
+              const sid = nextServerMessageIds[previousId];
+              nextServerMessageIds[message.id] = sid;
+              delete nextServerMessageIds[previousId];
+            }
+
             const replaced = state.messages.slice(0, -1).concat({
               ...last,
               id: message.id,
@@ -1509,7 +1533,14 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             const { messages: capped, evicted } = capMessages(replaced);
             return {
               messages: capped,
-              ...(evicted && state.currentThreadId ? { hasMoreMessages: { ...state.hasMoreMessages, [state.currentThreadId]: true } } : {}),
+              persistedToolCallCounts: nextPersistedToolCallCounts,
+              persistedFilesChanged: nextPersistedFilesChanged,
+              serverMessageIds: nextServerMessageIds,
+              latestTurnWithChanges:
+                state.latestTurnWithChanges === previousId ? message.id : state.latestTurnWithChanges,
+              ...(evicted && state.currentThreadId
+                ? { hasMoreMessages: { ...state.hasMoreMessages, [state.currentThreadId]: true } }
+                : {}),
               ...trackTurn,
             };
           }
