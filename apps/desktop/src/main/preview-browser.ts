@@ -91,12 +91,134 @@ function viewportBoundsFallback(viewWidth: number, viewHeight: number): Bounds {
   return { x: 0, y: 0, width: Math.max(1, viewWidth), height: Math.max(1, viewHeight) };
 }
 
-/** Guest DOM hit-test for element-pick; returns JSON string for safe bridge serialization. */
+/** Max length for selector hints after guest + main sanitization (keeps prompts small, bounds CSS injection). */
+const SELECTOR_HINT_MAX_LEN = 512;
+
+/**
+ * Builds guest-executed hit-test script for element pick: bounds, heuristic selector, optional HTML excerpt.
+ * Excerpt cloning strips active content and form state so hostile or instrumented pages leak less into prompts.
+ */
 function buildHitTestJs(x: number, y: number): string {
   const xi = Math.max(0, Math.floor(x));
   const yi = Math.max(0, Math.floor(y));
   return `(function () {
   var x = ${xi}, y = ${yi};
+  var REMOVE_TAGS = { SCRIPT:1, IFRAME:1, OBJECT:1, EMBED:1, LINK:1, NOSCRIPT:1, FRAME:1, META:1, BASE:1 };
+  function classTokens(el) {
+    var raw = "";
+    if (typeof el.className === "string") raw = el.className;
+    else if (el.className && typeof el.className.baseVal === "string") raw = el.className.baseVal;
+    if (!raw || !raw.trim()) return [];
+    return raw.trim().split(/\\s+/).filter(function (c) { return c.length > 0; }).slice(0, 4);
+  }
+  function escCls(t) {
+    if (typeof CSS !== "undefined" && CSS.escape) return CSS.escape(t);
+    return String(t).replace(/[^a-zA-Z0-9_-]/g, "");
+  }
+  function nthOfType(el) {
+    var tag = el.tagName;
+    var p = el.parentElement;
+    if (!p || !tag) return 1;
+    var n = 1;
+    var kids = p.children;
+    for (var i = 0; i < kids.length; i++) {
+      if (kids[i] === el) return n;
+      if (kids[i].tagName === tag) n++;
+    }
+    return n;
+  }
+  function stripRiskyAttrs(el) {
+    if (!el.attributes) return;
+    var rm = [];
+    for (var i = 0; i < el.attributes.length; i++) {
+      var a = el.attributes[i];
+      var low = a.name.toLowerCase();
+      if (low.indexOf("on") === 0) rm.push(a.name);
+      if (low === "srcdoc") rm.push(a.name);
+      if (low === "href" && a.value && /^javascript:/i.test(a.value)) {
+        try { el.setAttribute("href", "#"); } catch (e1) {}
+      }
+      if ((low === "src" || low === "xlink:href") && a.value && /^javascript:/i.test(a.value)) rm.push(a.name);
+    }
+    rm.forEach(function (n) { try { el.removeAttribute(n); } catch (e2) {} });
+  }
+  function sanitizeTree(node) {
+    if (!node || node.nodeType !== 1) return;
+    var tg = node.tagName ? node.tagName.toUpperCase() : "";
+    if (REMOVE_TAGS[tg]) {
+      node.remove();
+      return;
+    }
+    stripRiskyAttrs(node);
+    var tn = node.tagName ? node.tagName.toUpperCase() : "";
+    if (tn === "INPUT") {
+      try {
+        node.value = "";
+        node.setAttribute("value", "");
+      } catch (e3) {}
+    }
+    if (tn === "TEXTAREA") {
+      try { node.textContent = ""; } catch (e4) {}
+    }
+    if (tn === "SELECT") {
+      try {
+        var os = node.querySelectorAll("option");
+        for (var j = 0; j < os.length; j++) {
+          os[j].value = "";
+          os[j].textContent = "";
+        }
+      } catch (e5) {}
+    }
+    var ch = node.firstChild;
+    while (ch) {
+      var nx = ch.nextSibling;
+      if (ch.nodeType === 1) sanitizeTree(ch);
+      ch = nx;
+    }
+  }
+  function selectorHintFor(el) {
+    var tag = (el.tagName && el.tagName.toLowerCase()) || "*";
+    var hint = null;
+    try {
+      if (typeof HTMLInputElement !== "undefined" && el instanceof HTMLInputElement && el.type === "password") {
+        var pn = el.getAttribute("name");
+        return pn ? "input[type=password][name=" + JSON.stringify(String(pn)) + "]" : "input[type=password]";
+      }
+      if (el.id && String(el.id).trim()) {
+        hint = "[id=" + JSON.stringify(String(el.id)) + "]";
+      } else {
+        var tid = el.getAttribute && el.getAttribute("data-testid");
+        if (tid) hint = "[data-testid=" + JSON.stringify(String(tid)) + "]";
+        else {
+          var nm = el.getAttribute && el.getAttribute("name");
+          if (nm && (tag === "input" || tag === "select" || tag === "textarea" || tag === "button")) {
+            hint = tag + "[name=" + JSON.stringify(String(nm)) + "]";
+          } else {
+            var al = el.getAttribute && el.getAttribute("aria-label");
+            if (al && String(al).trim()) {
+              var als = String(al).trim().slice(0, 64);
+              hint = tag + "[aria-label=" + JSON.stringify(als) + "]";
+            } else {
+              var role = el.getAttribute && el.getAttribute("role");
+              if (role && String(role).trim()) {
+                var rls = String(role).trim().slice(0, 32);
+                hint = tag + "[role=" + JSON.stringify(rls) + "]";
+              } else {
+                var parts = classTokens(el).filter(function (c) { return escCls(c).length > 0; }).slice(0, 3);
+                var cls = parts.length ? "." + parts.map(escCls).join(".") : "";
+                var nth = nthOfType(el);
+                hint = tag + cls + ":nth-of-type(" + nth + ")";
+              }
+            }
+          }
+        }
+      }
+    } catch (se) {
+      hint = tag;
+    }
+    if (hint && hint.length > 400) hint = hint.slice(0, 400);
+    return hint;
+  }
   try {
     var doc = document;
     var el = doc.elementFromPoint(x, y);
@@ -104,38 +226,21 @@ function buildHitTestJs(x: number, y: number): string {
       return JSON.stringify({ ok: false, code: "no-hit" });
     }
     var r = el.getBoundingClientRect();
-    var selectorHint = null;
-    try {
-      if (el.id) {
-        selectorHint = "#" + String(el.id);
-      } else {
-        var tid = el.getAttribute && el.getAttribute("data-testid");
-        if (tid) {
-          selectorHint = "[data-testid=" + JSON.stringify(tid) + "]";
-        } else {
-          var tag = el.tagName ? el.tagName.toLowerCase() : "unknown";
-          var cn = el.className && typeof el.className === "string" ? el.className.trim().split(/\\s+/).slice(0, 2).join(".") : "";
-          selectorHint = tag + (cn ? "." + cn : "");
-        }
-      }
-    } catch (selErr) {
-      selectorHint = el.tagName ? el.tagName.toLowerCase() : null;
-    }
+    var selectorHint = selectorHintFor(el);
     var htmlExcerpt = null;
     if (typeof HTMLInputElement !== "undefined" && el instanceof HTMLInputElement && el.type === "password") {
       htmlExcerpt = null;
-      selectorHint = selectorHint || "input[type=password]";
     } else {
       try {
         var clone = el.cloneNode(true);
-        if (clone && clone.querySelectorAll) {
-          clone.querySelectorAll("script").forEach(function (n) { n.remove(); });
+        if (clone && clone.nodeType === 1) {
+          sanitizeTree(clone);
           var html = clone.outerHTML || "";
           var max = 8000;
           if (html.length > max) html = html.slice(0, max) + "\\n...[truncated]";
           htmlExcerpt = html;
         }
-      } catch (htmlErr) {
+      } catch (he) {
         htmlExcerpt = null;
       }
     }
@@ -151,9 +256,68 @@ function buildHitTestJs(x: number, y: number): string {
 })()`;
 }
 
+/** Strips control chars and bounds length; defense in depth if guest output is abnormal. */
+function sanitizeSelectorHintFromGuest(s: string | null | undefined): string | null {
+  if (s == null || typeof s !== "string") return null;
+  const t = s.replace(/[\u0000-\u001F\u007F]/g, "").trim();
+  if (t.length === 0) return null;
+  return t.length > SELECTOR_HINT_MAX_LEN ? t.slice(0, SELECTOR_HINT_MAX_LEN) : t;
+}
+
+/** Removes disallowed characters and nested executable-ish blobs from excerpt text shipped to the model. */
+function scrubHtmlExcerptForOutbound(s: string): string {
+  let t = s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
+  t = t.replace(/<\/script\b[^>]*>[\s\S]*?<\/script>/gi, "<!-- stripped -->");
+  t = t.replace(/<\/iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, "<!-- stripped -->");
+  t = t.replace(/<iframe\b[^>]*\/?>/gi, "<!-- stripped -->");
+  return t;
+}
+
 type HitTestResult =
   | { ok: true; bounds: Bounds; selectorHint: string | null; htmlExcerpt: string | null }
   | { ok: false; code: string };
+
+/** Validates hit-test JSON from the guest so spoofed shapes never become typed results. */
+function parseHitTestPayload(parsed: unknown): HitTestResult | null {
+  if (!parsed || typeof parsed !== "object") return null;
+  const p = parsed as Record<string, unknown>;
+  if (p.ok === false) {
+    return typeof p.code === "string" ? { ok: false, code: p.code } : null;
+  }
+  if (p.ok !== true) return null;
+  const b = p.bounds;
+  if (!b || typeof b !== "object") return null;
+  const bb = b as Record<string, unknown>;
+  const x = bb.x;
+  const y = bb.y;
+  const width = bb.width;
+  const height = bb.height;
+  if (
+    typeof x !== "number" ||
+    typeof y !== "number" ||
+    typeof width !== "number" ||
+    typeof height !== "number" ||
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height)
+  ) {
+    return null;
+  }
+  const selectorHint =
+    p.selectorHint == null ? null : sanitizeSelectorHintFromGuest(String(p.selectorHint));
+  let htmlExcerpt: string | null = null;
+  if (p.htmlExcerpt != null && typeof p.htmlExcerpt === "string" && p.htmlExcerpt.length > 0) {
+    const scrubbed = scrubHtmlExcerptForOutbound(p.htmlExcerpt);
+    htmlExcerpt = scrubbed.length > 0 ? scrubbed : null;
+  }
+  return {
+    ok: true,
+    bounds: { x, y, width, height },
+    selectorHint,
+    htmlExcerpt,
+  };
+}
 
 async function runElementHitTest(
   webContents: BrowserView["webContents"],
@@ -164,9 +328,8 @@ async function runElementHitTest(
   try {
     const raw: unknown = await webContents.executeJavaScript(buildHitTestJs(x, y), true);
     const text = typeof raw === "string" ? raw : JSON.stringify(raw);
-    const parsed = JSON.parse(text) as HitTestResult;
-    if (parsed && typeof parsed === "object" && "ok" in parsed) return parsed;
-    return null;
+    const parsed: unknown = JSON.parse(text);
+    return parseHitTestPayload(parsed);
   } catch {
     return null;
   }
@@ -208,14 +371,17 @@ function buildBrowserCapturePayload(
     pageTitle: webContents.getTitle() ?? "",
     capturedAt: new Date().toISOString(),
     bounds: { ...boundsCss },
-    selectorHint: extras?.selectorHint ?? null,
+    selectorHint:
+      extras?.selectorHint != null ? sanitizeSelectorHintFromGuest(String(extras.selectorHint)) : null,
   };
   if (extras?.captureKind !== undefined) {
     out.captureKind = extras.captureKind;
   }
   if (extras?.htmlExcerpt != null && extras.htmlExcerpt.length > 0) {
-    out.htmlExcerpt =
-      extras.htmlExcerpt.length > 16_000 ? extras.htmlExcerpt.slice(0, 16_000) : extras.htmlExcerpt;
+    const scrubbed = scrubHtmlExcerptForOutbound(extras.htmlExcerpt);
+    if (scrubbed.length > 0) {
+      out.htmlExcerpt = scrubbed.length > 16_000 ? scrubbed.slice(0, 16_000) : scrubbed;
+    }
   }
   return out;
 }
