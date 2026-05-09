@@ -209,6 +209,8 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
    * treat mid-animation offsets as "reading history" and re-show the chip.
    */
   const scrollToTailIntentRef = useRef(false);
+  /** Previous `scrollTop` from the last `onScroll` pass; detects upward interrupts during smooth tail scroll. */
+  const prevScrollTopRef = useRef(0);
 
   const messages = useThreadStore((s) => s.messages);
   const loading = useThreadStore((s) => s.loading);
@@ -288,6 +290,13 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     const el = containerRef.current;
     if (!el) return;
 
+    if (
+      scrollToTailIntentRef.current
+      && el.scrollTop < prevScrollTopRef.current
+    ) {
+      scrollToTailIntentRef.current = false;
+    }
+
     const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
 
     if (pinListTailRef.current) {
@@ -328,6 +337,8 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     ) {
       loadOlderMessages(activeThreadId);
     }
+
+    prevScrollTopRef.current = el.scrollTop;
   }, [activeThreadId, hasMore, isLoadingMore, loadOlderMessages]);
 
   const stableItems = useMemo(
