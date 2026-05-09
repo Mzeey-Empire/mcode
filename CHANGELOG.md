@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.10.0](https://github.com/Mzeey-Empire/mcode/compare/mcode-v0.9.1...mcode-v0.10.0) (2026-05-09)
+
+
+### Features
+
+* **browser-preview:** app data spills, passive cleanup, preview UI ([#433](https://github.com/Mzeey-Empire/mcode/issues/433)) ([375aedf](https://github.com/Mzeey-Empire/mcode/commit/375aedf6968ae8052cfc9c2c1d030ccdfc6c0bed))
+* **cursor:** Cursor ACP reliability, tuning, and prompt hygiene ([#432](https://github.com/Mzeey-Empire/mcode/issues/432)) ([f832b68](https://github.com/Mzeey-Empire/mcode/commit/f832b68ccffc262c5f3acea7c284cdb1bf995520))
+* improve stop/interrupt persistence and UX ([#430](https://github.com/Mzeey-Empire/mcode/issues/430)) ([1764ccc](https://github.com/Mzeey-Empire/mcode/commit/1764ccc45c30ef7a839c89a58d724acd13dc434b))
+* **server:** label child processes in Windows Task Manager ([#426](https://github.com/Mzeey-Empire/mcode/issues/426)) ([05b3ea8](https://github.com/Mzeey-Empire/mcode/commit/05b3ea8bcf3cb1862866e1dc8e4e46dda09f15a7))
+* **web:** settings pickers, attachments cap, and composer model UX ([#429](https://github.com/Mzeey-Empire/mcode/issues/429)) ([31a4612](https://github.com/Mzeey-Empire/mcode/commit/31a4612ed7acad9a55196e5f0cfb51ce3ce882d5))
+
+
+### Bug Fixes
+
+* auto-updater full sweep - 404, UX, dev testing, CI, version sync ([#424](https://github.com/Mzeey-Empire/mcode/issues/424)) ([5010d6a](https://github.com/Mzeey-Empire/mcode/commit/5010d6ab6e1b19f0ecfa0554460cd446f19674e6))
+* dedupe Claude ToolUse events and derive subagent count ([#423](https://github.com/Mzeey-Empire/mcode/issues/423)) ([7e7a1b3](https://github.com/Mzeey-Empire/mcode/commit/7e7a1b34bfe5bb0305e25d48608aac36807e8f3a))
+* interrupted session sidebar label and Resume All RPC accuracy ([#431](https://github.com/Mzeey-Empire/mcode/issues/431)) ([ac4c497](https://github.com/Mzeey-Empire/mcode/commit/ac4c49749d3f63e8f2f93840ae51c15a564a068e))
+* make worktree creation resilient to post-checkout hook errors ([#425](https://github.com/Mzeey-Empire/mcode/issues/425)) ([c5a89c1](https://github.com/Mzeey-Empire/mcode/commit/c5a89c1506dbfa8da61263c105473961c07d3c34))
+* **web:** chat scroll behaviour and thread cache sync ([#428](https://github.com/Mzeey-Empire/mcode/issues/428)) ([05b37d3](https://github.com/Mzeey-Empire/mcode/commit/05b37d38a104bdc6d01b1b0a8386411c64b001d0))
+* **web:** restore project tree scroll when projects overflow ([#427](https://github.com/Mzeey-Empire/mcode/issues/427)) ([8336a01](https://github.com/Mzeey-Empire/mcode/commit/8336a01736509dd5d9104b5edfa9578eb6e9d780))
+
 ## [0.9.1](https://github.com/Mzeey-Empire/mcode/compare/mcode-v0.9.0...mcode-v0.9.1) (2026-05-07)
 
 
