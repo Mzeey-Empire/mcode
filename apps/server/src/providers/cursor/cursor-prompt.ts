@@ -8,6 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { AttachmentMeta } from "@mcode/contracts";
+import { isVirtualBrowserContextAttachment } from "@mcode/contracts";
 
 /**
  * Reads trimmed contents of `~/.cursor/AGENTS.md` when that file exists.
@@ -45,6 +46,7 @@ export function buildCursorPrompt(
     lines.push(`<user-instructions>\n${trimmedInstructions}\n</user-instructions>`);
   }
   for (const att of attachments ?? []) {
+    if (isVirtualBrowserContextAttachment(att.mimeType)) continue;
     if (att.mimeType.startsWith("image/")) {
       lines.push(`[Attached image path: ${att.sourcePath}]`);
     } else {

@@ -491,16 +491,41 @@ export function createWsTransport(
     listWorktrees: (workspaceId) => rpc<WorktreeInfo[]>("git.listWorktrees", { workspaceId }),
 
     // Agent
-    sendMessage: (threadId, content, model?, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], reasoningLevel?: ReasoningLevel, provider?: string, interactionMode?, copilotAgent?: string, contextWindow?, thinking?, replyToMessageId?, quotedText?) => {
+    sendMessage: (
+      threadId,
+      content,
+      model?,
+      permissionMode?: PermissionMode,
+      attachments?: AttachmentMeta[],
+      displayContent?: string,
+      reasoningLevel?: ReasoningLevel,
+      provider?: string,
+      interactionMode?,
+      copilotAgent?: string,
+      contextWindow?,
+      thinking?,
+      replyToMessageId?,
+      quotedText?,
+    ) => {
       const state = useSettingsStore.getState();
       const guardrails = state.loaded
         ? { maxBudgetUsd: state.settings.agent.guardrails.maxBudgetUsd, maxTurns: state.settings.agent.guardrails.maxTurns }
         : {};
       return rpc<void>("agent.send", {
-        threadId, content, model, permissionMode, attachments, reasoningLevel, provider, interactionMode, copilotAgent,
-        contextWindow, thinking,
+        threadId,
+        content,
+        model,
+        permissionMode,
+        attachments,
+        reasoningLevel,
+        provider,
+        interactionMode,
+        copilotAgent,
+        contextWindow,
+        thinking,
         ...(replyToMessageId && { replyToMessageId }),
         ...(quotedText && { quotedText }),
+        ...(displayContent !== undefined && { displayContent }),
         ...guardrails,
       });
     },
@@ -521,6 +546,7 @@ export function createWsTransport(
       copilotAgent?,
       contextWindow?,
       thinking?,
+      displayContent?,
     ) => {
       const state = useSettingsStore.getState();
       const guardrails = state.loaded
@@ -543,6 +569,7 @@ export function createWsTransport(
         copilotAgent,
         contextWindow,
         thinking,
+        ...(displayContent !== undefined && { displayContent }),
         ...guardrails,
       });
     },

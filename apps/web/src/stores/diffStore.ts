@@ -4,7 +4,7 @@ import type { TurnSnapshot, GitCommit } from "@mcode/contracts";
 export type { GitCommit };
 
 /** Active tab in the right panel. */
-export type RightPanelTab = "tasks" | "changes";
+export type RightPanelTab = "tasks" | "changes" | "preview";
 
 /** View mode within the Changes tab. */
 export type DiffViewMode = "by-turn" | "all" | "commits" | "summary";
@@ -49,6 +49,8 @@ export const RIGHT_PANEL_DEFAULTS: RightPanelState = {
 
 /** Zustand state shape for the diff panel. */
 interface DiffState {
+  /** Last preview URL typed or loaded per thread (in-memory only). */
+  readonly previewUrlByThread: Record<string, string>;
   /** Per-thread right panel state keyed by thread ID. */
   readonly rightPanelByThread: Record<string, RightPanelState>;
   /** View mode within the Changes tab. */
@@ -103,11 +105,14 @@ interface DiffState {
   setSummaryRecord: (record: DiffState["summaryRecord"]) => void;
   /** Set summary loading state. */
   setSummaryLoading: (loading: boolean) => void;
+  /** Persist the omnibox URL for a thread's embedded preview. */
+  setPreviewUrlForThread: (threadId: string, url: string) => void;
   clearThread: (threadId: string) => void;
 }
 
 /** Zustand store for diff panel and right panel tab state. */
 export const useDiffStore = create<DiffState>((set, get) => ({
+  previewUrlByThread: {},
   rightPanelByThread: {},
   viewMode: "by-turn",
   renderMode: "unified",
@@ -196,6 +201,10 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   setDiffLoading: (loading) => set({ diffLoading: loading }),
   setSummaryRecord: (record) => set({ summaryRecord: record }),
   setSummaryLoading: (loading) => set({ summaryLoading: loading }),
+  setPreviewUrlForThread: (threadId, url) =>
+    set((s) => ({
+      previewUrlByThread: { ...s.previewUrlByThread, [threadId]: url },
+    })),
   clearThread: (threadId) =>
     set((state) => {
       const snapshots = { ...state.snapshotsByThread };
@@ -208,6 +217,8 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       delete commitsLoading[threadId];
       const rightPanels = { ...state.rightPanelByThread };
       delete rightPanels[threadId];
+      const previewUrls = { ...state.previewUrlByThread };
+      delete previewUrls[threadId];
 
       // Only clear the global selection when it belongs to the deleted thread.
       const selectionBelongsToThread = state.selectedFile?.threadId === threadId;
@@ -219,6 +230,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         commitsByThread: commits,
         commitsLoadingByThread: commitsLoading,
         rightPanelByThread: rightPanels,
+        previewUrlByThread: previewUrls,
         ...(selectionBelongsToThread
           ? { selectedFile: null, diffContent: null, diffLoading: false }
           : {}),

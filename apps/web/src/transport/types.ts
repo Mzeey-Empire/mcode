@@ -126,7 +126,22 @@ export interface McodeTransport {
   listWorktrees(workspaceId: string): Promise<WorktreeInfo[]>;
 
   // Agent commands
-  sendMessage(threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], reasoningLevel?: ReasoningLevel, provider?: string, interactionMode?: InteractionMode, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean, replyToMessageId?: string, quotedText?: string): Promise<void>;
+  sendMessage(
+    threadId: string,
+    content: string,
+    model?: string,
+    permissionMode?: PermissionMode,
+    attachments?: AttachmentMeta[],
+    displayContent?: string,
+    reasoningLevel?: ReasoningLevel,
+    provider?: string,
+    interactionMode?: InteractionMode,
+    copilotAgent?: string,
+    contextWindow?: ContextWindowMode,
+    thinking?: boolean,
+    replyToMessageId?: string,
+    quotedText?: string,
+  ): Promise<void>;
   createAndSendMessage(
     workspaceId: string,
     content: string,
@@ -144,6 +159,7 @@ export interface McodeTransport {
     copilotAgent?: string,
     contextWindow?: ContextWindowMode,
     thinking?: boolean,
+    displayContent?: string,
   ): Promise<CreateAndSendResult>;
   stopAgent(threadId: string): Promise<void>;
   /** Respond to a tool permission request from the agent. */

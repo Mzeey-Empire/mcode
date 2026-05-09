@@ -4,6 +4,7 @@ export { logger, getLogPath, getRecentLogs } from "./logging/index.js";
 // Paths
 export {
   getMcodeDir,
+  spillWorkspaceDirSegment,
   isLinkedGitWorktree,
   resolveDbPath,
 } from "./paths/index.js";
@@ -25,3 +26,5 @@ export {
   supportsThinkingToggle,
   normalizeReasoningLevelForModel,
 } from "./model-effort/index.js";
+
+export { redactMcodeBrowserCaptureV2 } from "./browser-preview/redact.js";

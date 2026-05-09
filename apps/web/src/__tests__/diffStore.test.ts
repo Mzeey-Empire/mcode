@@ -9,6 +9,7 @@ import {
 describe("diffStore", () => {
   beforeEach(() => {
     useDiffStore.setState({
+      previewUrlByThread: {},
       rightPanelByThread: {},
       snapshotsByThread: {},
       snapshotsLoadingByThread: {},
@@ -95,21 +96,49 @@ describe("diffStore", () => {
       expect(getRightPanel("thread-1").activeTab).toBe("changes");
       expect(getRightPanel("thread-2").activeTab).toBe("tasks");
     });
+
+    it("should support preview tab", () => {
+      const { setRightPanelTab, getRightPanel } = useDiffStore.getState();
+      setRightPanelTab("thread-1", "preview");
+      expect(getRightPanel("thread-1").activeTab).toBe("preview");
+    });
+  });
+
+  describe("setPreviewUrlForThread", () => {
+    it("stores url per thread independently", () => {
+      const { setPreviewUrlForThread } = useDiffStore.getState();
+      setPreviewUrlForThread("thread-1", "https://a.test");
+      setPreviewUrlForThread("thread-2", "https://b.test");
+      const state = useDiffStore.getState();
+      expect(state.previewUrlByThread["thread-1"]).toBe("https://a.test");
+      expect(state.previewUrlByThread["thread-2"]).toBe("https://b.test");
+    });
   });
 
   describe("clearThread", () => {
     it("should remove all per-thread entries", () => {
-      const { showRightPanel, setSnapshots, setSnapshotsLoading, setCommits, setCommitsLoading, clearThread, getRightPanel } =
+      const {
+        showRightPanel,
+        setSnapshots,
+        setSnapshotsLoading,
+        setCommits,
+        setCommitsLoading,
+        setPreviewUrlForThread,
+        clearThread,
+        getRightPanel,
+      } =
         useDiffStore.getState();
       showRightPanel("thread-1");
       setSnapshots("thread-1", [{ id: "s1" } as never]);
       setSnapshotsLoading("thread-1", true);
       setCommits("thread-1", [{ sha: "c1" } as never]);
       setCommitsLoading("thread-1", true);
+      setPreviewUrlForThread("thread-1", "https://example.com");
 
       clearThread("thread-1");
 
       const state = useDiffStore.getState();
+      expect(state.previewUrlByThread["thread-1"]).toBeUndefined();
       expect(state.rightPanelByThread["thread-1"]).toBeUndefined();
       expect(getRightPanel("thread-1")).toEqual(RIGHT_PANEL_DEFAULTS);
       expect(state.snapshotsByThread["thread-1"]).toBeUndefined();

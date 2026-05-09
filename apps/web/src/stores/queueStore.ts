@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { AttachmentMeta, PermissionMode } from "@/transport";
 import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts";
+import { releaseBrowserCaptureSpills } from "@/lib/browser-capture-spill";
 
 /** A message waiting to be sent while the thread is busy with another turn. */
 export interface QueuedMessage {
@@ -25,6 +26,8 @@ export interface QueuedMessage {
   replyToMessageId?: string;
   /** Quoted text excerpt for the reply. */
   quotedText?: string;
+  /** Preview spill paths to unlink when this item is removed from the queue or the send path fails after dequeue. */
+  browserCaptureSpillPaths?: string[];
   /** Unix timestamp (ms) when this message was enqueued. */
   queuedAt: number;
 }
@@ -100,17 +103,23 @@ export const useQueueStore = create<QueueState>((set, get) => ({
   },
 
   removeFromQueue: (threadId, messageId) => {
+    const current = get().queues[threadId] ?? [];
+    const msg = current.find((m) => m.id === messageId);
+    if (msg?.browserCaptureSpillPaths?.length) {
+      void releaseBrowserCaptureSpills(msg.browserCaptureSpillPaths);
+    }
     set((state) => ({
       queues: {
         ...state.queues,
-        [threadId]: (state.queues[threadId] ?? []).filter(
-          (m) => m.id !== messageId,
-        ),
+        [threadId]: (state.queues[threadId] ?? []).filter((m) => m.id !== messageId),
       },
     }));
   },
 
   clearQueue: (threadId) => {
+    const list = get().queues[threadId] ?? [];
+    const paths = list.flatMap((m) => m.browserCaptureSpillPaths ?? []);
+    if (paths.length > 0) void releaseBrowserCaptureSpills(paths);
     set((state) => {
       const next = { ...state.queues };
       delete next[threadId];

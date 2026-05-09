@@ -22,6 +22,9 @@ export type {
 export {
   AttachmentMetaSchema,
   StoredAttachmentSchema,
+  MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME,
+  isVirtualBrowserContextAttachment,
+  shouldPersistAttachmentWithoutFile,
 } from "./models/attachment.js";
 export type { AttachmentMeta, StoredAttachment } from "./models/attachment.js";
 
@@ -82,6 +85,35 @@ export {
   attachmentAcceptAttribute,
 } from "./models/file-types.js";
 export type { FileCategory } from "./models/file-types.js";
+
+export {
+  BrowserPreviewBoundsSchema,
+  BrowserPreviewCaptureKindSchema,
+  McodeBrowserCaptureV1Schema,
+  AttachedBrowserCaptureV1Schema,
+  McodeBrowserCaptureV2Schema,
+  AttachedBrowserCaptureV2Schema,
+  AttachedBrowserCaptureSchema,
+  BrowserCaptureSpillFileSchema,
+  MCODE_BROWSER_CAPTURE_V1_STRING_MAX,
+  MCODE_BROWSER_CAPTURE_V2_STRING_MAX,
+  MCODE_BROWSER_CAPTURE_SPILL_APP_DATA_PATH_MAX,
+  MCODE_BROWSER_CAPTURE_SPILL_ABSOLUTE_PATH_MAX,
+  isBrowserCaptureSpillAppDataPath,
+  clampMcodeBrowserCaptureV2,
+  clampAttachedBrowserCaptureForOutbound,
+} from "./models/browser-preview.js";
+export type {
+  BrowserPreviewBounds,
+  BrowserPreviewCaptureKind,
+  McodeBrowserCaptureV1,
+  AttachedBrowserCaptureV1,
+  McodeBrowserCaptureV2,
+  AttachedBrowserCaptureV2,
+  McodeBrowserCapture,
+  AttachedBrowserCapture,
+  BrowserCaptureSpillFile,
+} from "./models/browser-preview.js";
 
 // Events
 export { AgentEventSchema, AgentEventType } from "./events/agent-event.js";

@@ -1,4 +1,6 @@
 import { X, FileText, File } from "lucide-react";
+import type { McodeBrowserCapture } from "@mcode/contracts";
+import { isVirtualBrowserContextAttachment } from "@mcode/contracts";
 import { cn } from "@/lib/utils";
 
 /** Represents a user-selected file staged on the composer before send (preview URL may be an object URL). */
@@ -9,6 +11,10 @@ export interface PendingAttachment {
   sizeBytes: number;
   previewUrl: string;
   filePath: string | null;
+  /** Structured BrowserView preview context bundled with PNG references from desktop. */
+  browserCapture?: McodeBrowserCapture;
+  /** When true, only structured `browserCapture` is sent (no image file). */
+  contextOnly?: boolean;
 }
 
 interface AttachmentPreviewProps {
@@ -22,6 +28,26 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** Spill file hints for v2 preview captures (Mcode app data dir, not the project). */
+function getBrowserCaptureSpillHints(capture: McodeBrowserCapture | undefined): {
+  line: string;
+  title: string;
+} | undefined {
+  if (capture?.schemaVersion !== 2) return undefined;
+  const rel = capture.spillAppDataPath;
+  const abs = capture.spillAbsolutePath;
+  if (!rel && !abs) return undefined;
+  const line = rel ?? abs ?? "";
+  const title = [
+    "Full preview text is stored in the Mcode application data directory (for example ~/.mcode or %USERPROFILE%\\.mcode in production, ~/.mcode-dev in development), not inside your project folder.",
+    abs ? `Open this file:\n${abs}` : null,
+    rel ? `Relative to that folder:\n${rel}` : null,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  return { line, title };
+}
+
 /** Horizontal strip of pending attachment thumbnails or file tiles with per-item remove actions. */
 export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewProps) {
   if (attachments.length === 0) return null;
@@ -31,6 +57,9 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
       {attachments.map((att) => {
         const isImage = att.mimeType.startsWith("image/");
         const isPdf = att.mimeType === "application/pdf";
+        const isContextOnly =
+          att.contextOnly === true || isVirtualBrowserContextAttachment(att.mimeType);
+        const spill = getBrowserCaptureSpillHints(att.browserCapture);
         const isOfficeDoc =
           att.mimeType.includes("officedocument") ||
           att.mimeType.includes("opendocument") ||
@@ -45,9 +74,28 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
               "border border-border/60 bg-muted/60",
               "transition-all duration-150 hover:border-primary/40 hover:bg-muted/80",
             )}
+            title={spill?.title}
           >
-            {isImage ? (
+            {isContextOnly ? (
+              <div className="flex h-[72px] w-[140px] flex-col justify-center gap-0.5 px-3 py-1">
+                <div className="flex min-h-0 items-center gap-2">
+                  <FileText size={18} className="shrink-0 text-cyan-500 dark:text-cyan-400" />
+                  <span className="truncate text-xs font-medium text-foreground">Page context</span>
+                </div>
+                <span className="block max-w-[120px] truncate pl-[26px] text-[10px] leading-tight text-muted-foreground">
+                  {spill ? spill.line : "No image"}
+                </span>
+              </div>
+            ) : isImage ? (
               <div className="relative h-[72px] w-[72px]">
+                {spill ? (
+                  <span
+                    className="absolute bottom-0.5 left-0.5 right-0.5 z-10 truncate rounded bg-background/85 px-0.5 text-center text-[8px] font-medium text-foreground/90 shadow-sm"
+                    title={spill.title}
+                  >
+                    + spill file
+                  </span>
+                ) : null}
                 <img
                   src={att.previewUrl}
                   alt={att.name}

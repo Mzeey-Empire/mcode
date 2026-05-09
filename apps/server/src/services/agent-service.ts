@@ -173,14 +173,21 @@ export class AgentService {
     markPlanAnswerForMessageId?: string,
     /**
      * Provider-only payload for this send (fork continuation, stitched replay).
-     * The persisted user row still uses `content`; this string is forwarded to
-     * the agent without writing it to SQLite.
+     * The persisted user row uses {@link messageDisplayContent} when supplied,
+     * otherwise the original `content` argument; this string is forwarded to
+     * the agent without writing the override text to SQLite when set.
      */
     providerWireOverride?: string,
     /** ID of the message being replied to. Stored on the user message row. */
     replyToMessageId?: string,
     /** Highlighted text excerpt from the replied-to message. Stored on the user message row. */
     quotedText?: string,
+    /**
+     * Transcript stored in SQLite for the user bubble. When omitted, the
+     * original `content` argument is persisted. The `content` argument is
+     * still the base for plan/reply wrapping sent to the provider.
+     */
+    messageDisplayContent?: string,
   ): Promise<void> {
     const thread = this.threadRepo.findById(threadId);
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
@@ -241,6 +248,8 @@ export class AgentService {
         ? existingMessages[existingMessages.length - 1].sequence + 1
         : 1;
 
+    const persistedUserText = messageDisplayContent ?? content;
+
     const { stored, persisted } = await this.attachmentService.persist(
       threadId,
       attachments,
@@ -255,7 +264,7 @@ export class AgentService {
       this.messageRepo.create(
         threadId,
         "user",
-        content,
+        persistedUserText,
         nextSeq,
         stored.length > 0 ? stored : undefined,
         replyToMessageId,
@@ -286,10 +295,12 @@ export class AgentService {
     // whether a provider content override exists. When branching (override present),
     // the override already carries the plan-wrapped stitched content; only wrap the
     // plain content when there is no override.
+    let wirePayload = content;
+
     if (interactionMode === "plan") {
       this.planParsers.set(threadId, new PlanQuestionParser());
       if (providerWireOverride === undefined) {
-        content = this.buildPlanPrompt(content);
+        wirePayload = this.buildPlanPrompt(wirePayload);
       }
     }
 
@@ -302,7 +313,7 @@ export class AgentService {
           ? quotedText.slice(0, 2000)
           : replyTarget.content.slice(0, 2000);
         const truncated = quoteBody.length < (quotedText ?? replyTarget.content).length ? "..." : "";
-        content = `<reply-to role="${replyTarget.role}" sequence="${replyTarget.sequence}">\n${escapeXml(quoteBody)}${truncated}\n</reply-to>\n\n${content}`;
+        wirePayload = `<reply-to role="${replyTarget.role}" sequence="${replyTarget.sequence}">\n${escapeXml(quoteBody)}${truncated}\n</reply-to>\n\n${wirePayload}`;
       }
     }
 
@@ -400,7 +411,7 @@ export class AgentService {
       threadId,
     } satisfies AgentEvent);
 
-    const providerMessage = providerWireOverride ?? content;
+    const providerMessage = providerWireOverride ?? wirePayload;
 
     try {
       await resolvedProvider.sendMessage({
@@ -560,8 +571,9 @@ export class AgentService {
     copilotAgent?: string,
     contextWindowMode?: ContextWindowMode,
     thinking?: boolean,
+    displayContent?: string,
   ): Promise<Thread & { warnings?: string[] }> {
-    const title = truncateTitle(content);
+    const title = truncateTitle(displayContent ?? content);
 
     if (parentThreadId) {
       return this.createBranchedThread({
@@ -572,6 +584,7 @@ export class AgentService {
         copilotAgent,
         contextWindowMode,
         thinking,
+        displayContent,
       });
     }
 
@@ -640,6 +653,11 @@ export class AgentService {
       copilotAgent,
       contextWindowMode,
       thinking,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      displayContent,
     ).catch((err) => {
       logger.error("createAndSend initial send failed", {
         threadId: thread.id,
@@ -677,6 +695,7 @@ export class AgentService {
     copilotAgent?: string;
     contextWindowMode?: ContextWindowMode;
     thinking?: boolean;
+    displayContent?: string;
   }): Promise<Thread & { warnings?: string[] }> {
     const {
       workspaceId, content, model, permissionMode, mode, branch,
@@ -686,6 +705,7 @@ export class AgentService {
       copilotAgent,
       contextWindowMode,
       thinking,
+      displayContent,
     } = params;
 
     // Validate parent
@@ -858,6 +878,9 @@ export class AgentService {
       effectiveThinking,
       undefined,
       providerInput,
+      undefined,
+      undefined,
+      displayContent,
     ).catch((err) => {
       logger.error("createBranchedThread initial send failed", {
         threadId: thread.id,

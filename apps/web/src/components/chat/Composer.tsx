@@ -64,16 +64,50 @@ import {
   getMaxFileSize,
   inferMimeType,
   MAX_ATTACHMENTS,
+  MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME,
+  isVirtualBrowserContextAttachment,
   attachmentAcceptAttribute,
 } from "@mcode/contracts";
-import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts";
+import type {
+  AttachedBrowserCapture,
+  ContextWindowMode,
+  ReasoningLevel,
+  ProviderId,
+} from "@mcode/contracts";
 import { getModelContextWindow } from "@mcode/shared/model-context";
-import type { ProviderId } from "@mcode/contracts";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
+import { usePreviewReferenceQueueStore } from "@/stores/previewReferenceQueueStore";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useToastStore } from "@/stores/toastStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { ProviderUnavailableBanner } from "./ProviderUnavailableBanner";
+import { appendBrowserCaptureFence } from "@/lib/browser-capture-append";
+import {
+  collectBrowserCaptureSpillPaths,
+  collectSpillPathsFromPendingAttachments,
+  releaseBrowserCaptureSpills,
+} from "@/lib/browser-capture-spill";
+
+/** Build structured preview metadata payloads paired with outbound attachment IDs. */
+function buildAttachedBrowserCaptures(list: PendingAttachment[]): AttachedBrowserCapture[] {
+  const rows: AttachedBrowserCapture[] = [];
+  for (const row of list) {
+    if (!row.browserCapture) continue;
+    rows.push({ attachmentId: row.id, ...row.browserCapture });
+  }
+  return rows;
+}
+
+/** Decide which caption is stored for the chat bubble vs what is sent over the agent wire. */
+function resolveOutboundDisplayContent(
+  trimmed: string,
+  displayInjected: string | undefined,
+  captureRows: AttachedBrowserCapture[],
+): string | undefined {
+  if (captureRows.length === 0) return displayInjected;
+  return displayInjected ?? trimmed;
+}
 
 /** `accept` list for the composer's hidden file input (mirrors {@link isFileSupported}). */
 const ATTACHMENT_INPUT_ACCEPT = attachmentAcceptAttribute();
@@ -512,6 +546,48 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     }
   }, [settingsLoaded, settingsDefaultModelId, settingsDefaultProvider, settingsDefaultReasoning, settingsDefaultMode, settingsDefaultPermission, threadId]);
 
+  const previewReferenceQueueSignal = usePreviewReferenceQueueStore((s) => s.signal);
+
+  useEffect(() => {
+    if (!threadId) return;
+    const incoming = usePreviewReferenceQueueStore.getState().drainPreviewReferences(threadId);
+    if (incoming.length === 0) return;
+
+    setAttachments((prev) => {
+      const room = MAX_ATTACHMENTS - prev.length;
+      if (room <= 0) {
+        for (const item of incoming) {
+          URL.revokeObjectURL(item.previewUrl);
+        }
+        queueMicrotask(() =>
+          useToastStore.getState().show(
+            "error",
+            "Composer attachment limit reached",
+            "Remove an attachment before adding a preview picture reference.",
+          ),
+        );
+        return prev;
+      }
+
+      const toAdd = incoming.slice(0, room);
+      const dropped = incoming.slice(room);
+      for (const item of dropped) {
+        URL.revokeObjectURL(item.previewUrl);
+      }
+      if (dropped.length > 0) {
+        queueMicrotask(() =>
+          useToastStore.getState().show(
+            "error",
+            "Composer attachment limit reached",
+            `${dropped.length} preview reference(s) were not added.`,
+          ),
+        );
+      }
+
+      return [...prev, ...toAdd];
+    });
+  }, [threadId, previewReferenceQueueSignal]);
+
   // Reset reasoning when the selected model does not support the current level
   useEffect(() => {
     const normalized = normalizeReasoningLevelForModel(modelId, reasoning);
@@ -534,6 +610,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         for (const att of draftRef.current.attachments) {
           if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
         }
+        const orphanSpills = collectSpillPathsFromPendingAttachments(draftRef.current.attachments);
+        if (orphanSpills.length > 0) void releaseBrowserCaptureSpills(orphanSpills);
       }
     }
 
@@ -1101,6 +1179,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     setAttachments((prev) => {
       const removed = prev.find((a) => a.id === id);
       if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+      const spillPaths = collectSpillPathsFromPendingAttachments(removed ? [removed] : []);
+      if (spillPaths.length > 0) void releaseBrowserCaptureSpills(spillPaths);
       return prev.filter((a) => a.id !== id);
     });
   }, []);
@@ -1273,17 +1353,36 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     return { content: trimmed };
   }, [workspaceId, threadId]);
 
-  /** Collect attachment metadata and revoke preview URLs. */
+  /** Collect attachment metadata for RPC and revoke preview URLs. */
   const collectAndClearAttachments = useCallback((): AttachmentMeta[] => {
-    const metas: AttachmentMeta[] = attachments
-      .filter((a) => a.filePath != null)
-      .map((a) => ({
-        id: a.id,
-        name: a.name,
-        mimeType: a.mimeType,
-        sizeBytes: a.sizeBytes,
-        sourcePath: a.filePath!,
-      }));
+    const metas: AttachmentMeta[] = [];
+    for (const a of attachments) {
+      const fenceOnlyNoFile =
+        !!a.browserCapture &&
+        a.filePath == null &&
+        (a.contextOnly === true ||
+          isVirtualBrowserContextAttachment(a.mimeType) ||
+          a.name === "Page context");
+      if (fenceOnlyNoFile) {
+        metas.push({
+          id: a.id,
+          name: a.name,
+          mimeType: MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME,
+          sizeBytes: 0,
+          sourcePath: "",
+        });
+        continue;
+      }
+      if (a.filePath != null) {
+        metas.push({
+          id: a.id,
+          name: a.name,
+          mimeType: a.mimeType,
+          sizeBytes: a.sizeBytes,
+          sourcePath: a.filePath,
+        });
+      }
+    }
     for (const att of attachments) {
       if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
     }
@@ -1292,19 +1391,31 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   }, [attachments]);
 
   const handleSend = useCallback(async () => {
-    if (!hasContent) return;
+    const trimmed = input.trim();
+    if (trimmed.length === 0 && attachments.length === 0) return;
     // Avoid duplicate submissions while a placeholder thread is still materializing.
     if (isThreadScaffold) return;
-    const trimmed = input.trim();
 
     // ---- Queue path: agent is running on this thread ----
     if (isAgentRunning && threadId) {
-      const { content, display } = await injectFileContent(trimmed);
+      const captureRows = buildAttachedBrowserCaptures(attachments);
+      const { content: injectedContent, display: displayInjected } = await injectFileContent(trimmed);
+      let content: string;
+      try {
+        content =
+          captureRows.length === 0 ? injectedContent : appendBrowserCaptureFence(injectedContent, captureRows);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Invalid page preview payload";
+        useToastStore.getState().show("error", "Could not send message", msg);
+        return;
+      }
+      const displayContentResolved = resolveOutboundDisplayContent(trimmed, displayInjected, captureRows);
       const currentAttachments = collectAndClearAttachments();
+      const browserCaptureSpillPaths = collectBrowserCaptureSpillPaths(captureRows);
 
-      useQueueStore.getState().enqueue(threadId, {
+      const enqueued = useQueueStore.getState().enqueue(threadId, {
         content,
-        displayContent: display,
+        displayContent: displayContentResolved,
         attachments: currentAttachments,
         model: modelId,
         permissionMode: access,
@@ -1315,7 +1426,12 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         thinking: thinking ?? undefined,
         replyToMessageId: replyContext?.messageId,
         quotedText: replyContext?.quotedText,
+        browserCaptureSpillPaths:
+          browserCaptureSpillPaths.length > 0 ? browserCaptureSpillPaths : undefined,
       });
+      if (!enqueued) {
+        void releaseBrowserCaptureSpills(browserCaptureSpillPaths);
+      }
 
       setInput("");
       if (threadId) clearDraftFromStore(threadId);
@@ -1331,8 +1447,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       return;
     }
 
-    // ---- Normal send path ----
-    const { content: messageContent, display: displayContent } = await injectFileContent(trimmed);
+    const { content: injectedContent, display: displayInjected } = await injectFileContent(trimmed);
 
     // Validate worktree mode requirements
     if (isNewThread && newThreadMode === "worktree" && namingMode === "custom" && !customBranchName.trim()) {
@@ -1355,6 +1470,20 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       }
     }
 
+    const captureRows = buildAttachedBrowserCaptures(attachments);
+    let messageContent: string;
+    try {
+      messageContent =
+        captureRows.length === 0 ? injectedContent : appendBrowserCaptureFence(injectedContent, captureRows);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Invalid page preview payload";
+      useToastStore.getState().show("error", "Could not send message", msg);
+      return;
+    }
+    const outboundDisplay = resolveOutboundDisplayContent(trimmed, displayInjected, captureRows);
+
+    // ---- Normal send path ----
+
     setInput("");
     if (editorRef.current) {
       editorRef.current.update(() => {
@@ -1369,7 +1498,21 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     if (threadId) clearDraftFromStore(threadId);
 
     if (isNewThread && workspaceId) {
-      await useWorkspaceStore.getState().createAndSendMessage(messageContent, modelId, access, currentAttachments.length > 0 ? currentAttachments : undefined, reasoning, provider, mode, provider === "copilot" ? (copilotAgent ?? undefined) : undefined, contextWindow ?? undefined, thinking ?? undefined);
+      await useWorkspaceStore
+        .getState()
+        .createAndSendMessage(
+          messageContent,
+          modelId,
+          access,
+          currentAttachments.length > 0 ? currentAttachments : undefined,
+          reasoning,
+          provider,
+          mode,
+          provider === "copilot" ? (copilotAgent ?? undefined) : undefined,
+          contextWindow ?? undefined,
+          thinking ?? undefined,
+          outboundDisplay,
+        );
     } else if (branchFromMessageId && threadId) {
       // Branch mode: create a child thread from the quoted message instead of sending.
       let branchMode: "direct" | "worktree" | "existing-worktree" = "direct";
@@ -1392,6 +1535,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       await branchThread({
         sourceThreadId: threadId,
         content: messageContent,
+        displayContent: outboundDisplay,
         model: modelId,
         provider,
         permissionMode: access,
@@ -1407,7 +1551,21 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       });
       onBranchModeExit?.();
     } else if (threadId) {
-      await sendMessage(threadId, messageContent, modelId, access, currentAttachments.length > 0 ? currentAttachments : undefined, displayContent, reasoning, provider, provider === "copilot" ? (copilotAgent ?? undefined) : undefined, contextWindow ?? undefined, thinking ?? undefined, replyContext?.messageId, replyContext?.quotedText);
+      await sendMessage(
+        threadId,
+        messageContent,
+        modelId,
+        access,
+        currentAttachments.length > 0 ? currentAttachments : undefined,
+        outboundDisplay,
+        reasoning,
+        provider,
+        provider === "copilot" ? (copilotAgent ?? undefined) : undefined,
+        contextWindow ?? undefined,
+        thinking ?? undefined,
+        replyContext?.messageId,
+        replyContext?.quotedText,
+      );
       if (threadId) clearReply(threadId);
     }
 
@@ -1933,12 +2091,27 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
             <QueuePopover
               threadId={threadId}
               isAgentRunning={isAgentRunning}
-              onResume={() => {
+              onResume={async () => {
                 const next = useQueueStore.getState().dequeueNext(threadId);
-                if (next) {
-                  sendMessage(threadId, next.content, next.model, next.permissionMode,
-                    next.attachments.length > 0 ? next.attachments : undefined, next.displayContent, next.reasoningLevel, next.provider,
-                    next.copilotAgent, next.contextWindow, next.thinking, next.replyToMessageId, next.quotedText);
+                if (!next) return;
+                try {
+                  await sendMessage(
+                    threadId,
+                    next.content,
+                    next.model,
+                    next.permissionMode,
+                    next.attachments.length > 0 ? next.attachments : undefined,
+                    next.displayContent,
+                    next.reasoningLevel,
+                    next.provider,
+                    next.copilotAgent,
+                    next.contextWindow,
+                    next.thinking,
+                    next.replyToMessageId,
+                    next.quotedText,
+                  );
+                } catch {
+                  void releaseBrowserCaptureSpills(next.browserCaptureSpillPaths ?? []);
                 }
               }}
             />
@@ -1966,6 +2139,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
 
           {/* Send / Queue / Stop button */}
           <button
+            type="button"
             onClick={
               isThreadScaffold
                 ? undefined

@@ -1,6 +1,6 @@
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ListChecks, Diff, X } from "lucide-react";
+import { ListChecks, Diff, Globe, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useTaskStore } from "@/stores/taskStore";
@@ -8,12 +8,14 @@ import { useDiffStore, PANEL_MIN_WIDTH, PANEL_DEFAULT_WIDTH, PANEL_WIDE_WIDTH, R
 import { TaskPanel } from "@/components/tasks/TaskPanel";
 import { TaskPanelHeader } from "@/components/tasks/TaskPanelHeader";
 import { DiffPanel } from "@/components/diff";
+import { PreviewPanel } from "@/components/panels/PreviewPanel";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";
 
-/** Right-side panel with tabs for Tasks and Changes. */
+/** Right-side panel with tabs for Tasks, Changes, and Preview. */
 export function RightPanel() {
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
 
   // Per-thread panel state
   const panelState = useDiffStore((s) =>
@@ -204,7 +206,7 @@ export function RightPanel() {
             : { width: panelWidth, minWidth: PANEL_MIN_WIDTH, maxWidth: `calc(100vw - ${PANEL_MIN_WIDTH}px)` }
         }
         className={cn(
-          "relative flex flex-col bg-background focus:outline-none",
+          "relative flex h-full min-h-0 min-w-0 flex-col bg-background focus:outline-none",
           isOverlay
             ? "fixed inset-y-0 right-0 z-50 shadow-sm animate-fade-up-in"
             : "rounded-lg shadow-sm overflow-hidden",
@@ -246,7 +248,7 @@ export function RightPanel() {
             <button
               type="button"
               onClick={() => setRightPanelTab(activeThreadId!, "tasks")}
-              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-semibold tracking-[0.1em] uppercase transition-colors ${
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-[10px] font-semibold tracking-[0.16em] uppercase transition-colors ${
                 activeTab === "tasks"
                   ? "text-foreground bg-muted/50"
                   : "text-foreground/70 hover:text-foreground"
@@ -258,7 +260,7 @@ export function RightPanel() {
             <button
               type="button"
               onClick={() => setRightPanelTab(activeThreadId!, "changes")}
-              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-semibold tracking-[0.1em] uppercase transition-colors ${
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-[10px] font-semibold tracking-[0.16em] uppercase transition-colors ${
                 activeTab === "changes"
                   ? "text-foreground bg-muted/50"
                   : "text-foreground/70 hover:text-foreground"
@@ -266,6 +268,18 @@ export function RightPanel() {
             >
               <Diff size={12} />
               Changes
+            </button>
+            <button
+              type="button"
+              onClick={() => setRightPanelTab(activeThreadId!, "preview")}
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-[10px] font-semibold tracking-[0.16em] uppercase transition-colors ${
+                activeTab === "preview"
+                  ? "text-foreground bg-muted/50"
+                  : "text-foreground/70 hover:text-foreground"
+              }`}
+            >
+              <Globe size={12} />
+              Preview
             </button>
           </div>
           <Button
@@ -281,13 +295,18 @@ export function RightPanel() {
       </div>
 
       {/* Tab content */}
-      {activeTab === "tasks" && (
-        <>
-          <TaskPanelHeader tasks={tasks ?? []} />
-          <TaskPanel />
-        </>
-      )}
-      {activeTab === "changes" && <DiffPanel />}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {activeTab === "tasks" && (
+          <>
+            <TaskPanelHeader tasks={tasks ?? []} />
+            <TaskPanel />
+          </>
+        )}
+        {activeTab === "changes" && <DiffPanel />}
+        {activeTab === "preview" && (
+          <PreviewPanel threadId={activeThreadId} workspaceId={activeWorkspaceId} />
+        )}
+      </div>
       </div>
     </>
   );

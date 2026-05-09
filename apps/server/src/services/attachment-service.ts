@@ -10,6 +10,11 @@ import { copyFile, mkdir, unlink } from "fs/promises";
 import { join, resolve, relative } from "path";
 import { getMcodeDir } from "@mcode/shared";
 import type { AttachmentMeta, StoredAttachment } from "@mcode/contracts";
+import {
+  isVirtualBrowserContextAttachment,
+  MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME,
+  shouldPersistAttachmentWithoutFile,
+} from "@mcode/contracts";
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 const MAX_PDF_SIZE = 32 * 1024 * 1024;
@@ -91,6 +96,26 @@ export class AttachmentService {
 
     const results = await Promise.all(
       attachments.map(async (att) => {
+        if (shouldPersistAttachmentWithoutFile(att)) {
+          if (!SAFE_ID_PATTERN.test(att.id)) {
+            throw new Error(
+              `Invalid attachment ID: ${att.id}. Only alphanumerics, hyphens, and underscores are allowed.`,
+            );
+          }
+          const mime = isVirtualBrowserContextAttachment(att.mimeType)
+            ? att.mimeType.trim()
+            : MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME;
+          return {
+            stored: {
+              id: att.id,
+              name: att.name,
+              mimeType: mime,
+              sizeBytes: 0,
+            } as StoredAttachment,
+            persisted: null as AttachmentMeta | null,
+          };
+        }
+
         if (!existsSync(att.sourcePath)) {
           throw new Error(`Attachment file not found: ${att.sourcePath}`);
         }
@@ -151,7 +176,7 @@ export class AttachmentService {
 
     return {
       stored: results.map((r) => r.stored),
-      persisted: results.map((r) => r.persisted),
+      persisted: results.map((r) => r.persisted).filter((p): p is AttachmentMeta => p != null),
     };
   }
 

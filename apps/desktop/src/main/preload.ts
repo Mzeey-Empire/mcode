@@ -130,6 +130,71 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     },
   },
 
+  /**
+   * Embedded thread preview (Electron BrowserView). No-op channels in web builds
+   * without this namespace; the renderer checks `desktopBridge?.preview` before use.
+   */
+  preview: {
+    sync(payload: {
+      visible: boolean;
+      bounds: { x: number; y: number; width: number; height: number } | null;
+      threadId?: string | null;
+      resumeUrlHint?: string | null;
+      workspaceId?: string | null;
+    }): Promise<void> {
+      return ipcRenderer.invoke("preview:sync", payload);
+    },
+    navigate(url: string): Promise<{ ok: true } | { ok: false; error: string }> {
+      return ipcRenderer.invoke("preview:navigate", url);
+    },
+    goBack(): Promise<boolean> {
+      return ipcRenderer.invoke("preview:go-back");
+    },
+    goForward(): Promise<boolean> {
+      return ipcRenderer.invoke("preview:go-forward");
+    },
+    reload(): Promise<void> {
+      return ipcRenderer.invoke("preview:reload");
+    },
+    openExternal(): Promise<void> {
+      return ipcRenderer.invoke("preview:open-external");
+    },
+    getNavigationState(): Promise<{ canGoBack: boolean; canGoForward: boolean }> {
+      return ipcRenderer.invoke("preview:get-navigation-state");
+    },
+    /** Capture the visible preview viewport as a PNG for attaching to the composer. */
+    capturePictureReference(): Promise<unknown> {
+      return ipcRenderer.invoke("preview:capture-picture-reference");
+    },
+    /** Drag to select a region; captures that part of the preview as PNG. */
+    capturePictureReferenceRegion(): Promise<unknown> {
+      return ipcRenderer.invoke("preview:capture-picture-region");
+    },
+    /** Hover to highlight, then click an element; captures its bounds as PNG with DOM context. */
+    capturePictureReferenceElementPick(): Promise<unknown> {
+      return ipcRenderer.invoke("preview:capture-picture-element-pick");
+    },
+    /** Structured page context for the composer fence without capturing a PNG. */
+    capturePageContext(): Promise<unknown> {
+      return ipcRenderer.invoke("preview:capture-context-reference");
+    },
+    releaseBrowserCaptureSpills(paths: readonly string[]): Promise<void> {
+      return ipcRenderer.invoke("preview:release-browser-capture-spill", [...paths]);
+    },
+    onDidNavigate(callback: (payload: { url: string; title: string }) => void) {
+      const listener = (_event: unknown, payload: { url: string; title: string }) =>
+        callback(payload);
+      ipcRenderer.on("preview:did-navigate", listener);
+      return () => ipcRenderer.removeListener("preview:did-navigate", listener);
+    },
+    /** Subscribe to guest webContents loading spin (did-start / did-stop loading). */
+    onLoadingState(callback: (payload: { loading: boolean }) => void) {
+      const listener = (_event: unknown, payload: { loading: boolean }) => callback(payload);
+      ipcRenderer.on("preview:loading-state", listener);
+      return () => ipcRenderer.removeListener("preview:loading-state", listener);
+    },
+  },
+
   /** IPC push transport relayed from the main process. */
   ipc: {
     /** Listen for push messages forwarded by the main process IPC relay. */

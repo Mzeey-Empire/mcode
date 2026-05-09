@@ -42,6 +42,11 @@ export const SendMessageSchema = lazySchema(() =>
   z.object({
     threadId: z.string(),
     content: z.string(),
+    /**
+     * When set, persisted user row uses this transcript while {@link content}
+     * flows to providers (injections and hidden metadata fences).
+     */
+    displayContent: z.string().optional(),
     model: z.string().optional(),
     permissionMode: PermissionModeSchema.optional(),
     attachments: z.array(AttachmentMetaSchema).max(MAX_ATTACHMENTS).optional(),
@@ -71,6 +76,7 @@ export const CreateAndSendSchema = lazySchema(() =>
   z.object({
     workspaceId: z.string(),
     content: z.string(),
+    displayContent: z.string().optional(),
     model: z.string(),
     permissionMode: PermissionModeSchema.optional(),
     mode: ThreadModeSchema.optional(),

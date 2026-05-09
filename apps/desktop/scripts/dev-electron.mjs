@@ -11,7 +11,7 @@
  * 6. Cleans up all child processes on SIGINT/SIGTERM.
  */
 
-import { context } from "esbuild";
+import { context, build } from "esbuild";
 import { spawn } from "child_process";
 import { watch } from "fs";
 import { resolve, dirname } from "path";
@@ -20,6 +20,7 @@ import { createRequire } from "module";
 import {
   rebuildServerDevBundle,
   resolveServerTscBin,
+  copyClaudeSdkCliNextTo,
 } from "../../../scripts/build-server-dev-bundle.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -46,7 +47,8 @@ const shared = {
  *
  * @returns Detached subprocess handle (caller must `.kill()` on shutdown).
  */
-function startServerTscWatch() {  const tscBin = resolveServerTscBin(serverRoot);
+function startServerTscWatch() {
+  const tscBin = resolveServerTscBin(serverRoot);
   return spawn(process.execPath, [
     tscBin,
     "--project",
@@ -78,6 +80,9 @@ const entries = [
 console.log("[dev] Building bundled server entry (apps/desktop/dist/server/server.cjs)...");
 await rebuildServerDevBundle();
 
+/** Must run before server `esbuild` watch so `dist-tsc` emits complete graphs per save. */
+let serverTscWatch = startServerTscWatch();
+
 const serverEsbuildCfg = {
   ...shared,
   entryPoints: [resolve(serverRoot, "dist-tsc/index.js")],
@@ -91,6 +96,23 @@ const serverEsbuildCfg = {
     // Do not bake NODE_ENV — the server child inherits Electron's runtime env.
   },
 };
+
+/** esbuild `watch` races `tsc --watch` when it rebuilds after the first changed file; debounce bundling. */
+let serverBundleRebuildTimer = null;
+let distTscWatcher = null;
+
+function scheduleServerBundleRebuild() {
+  if (serverBundleRebuildTimer) clearTimeout(serverBundleRebuildTimer);
+  serverBundleRebuildTimer = setTimeout(async () => {
+    serverBundleRebuildTimer = null;
+    try {
+      await build({ ...serverEsbuildCfg });
+      copyClaudeSdkCliNextTo(serverOutFile, serverRoot);
+    } catch (err) {
+      console.error("[dev] server bundle rebuild failed:", err);
+    }
+  }, 300);
+}
 
 // -------------------------------------------------------------------------
 // Step 1: Start web dev server + esbuild in parallel
@@ -148,11 +170,11 @@ function startViteDevServer() {
   });
 }
 
-// Run Vite startup and esbuild (main/preload/server) watch in parallel
+// Run Vite startup and esbuild (main/preload) watch in parallel
 const [devServerUrl, watchContexts] = await Promise.all([
   startViteDevServer(),
   Promise.all(
-    [...entries, serverEsbuildCfg].map(async (cfg) => {
+    entries.map(async (cfg) => {
       const ctx = await context(cfg);
       await ctx.rebuild();
       await ctx.watch();
@@ -161,8 +183,13 @@ const [devServerUrl, watchContexts] = await Promise.all([
   ),
 ]);
 
-/** `tsc --watch` subprocess for apps/server → dist-tsc (killed on cleanup). */
-let serverTscWatch = startServerTscWatch();
+try {
+  distTscWatcher = watch(resolve(serverRoot, "dist-tsc"), { recursive: true }, () => {
+    scheduleServerBundleRebuild();
+  });
+} catch (err) {
+  console.warn("[dev] Could not watch apps/server/dist-tsc; server hot-rebuild disabled:", err);
+}
 
 if (!devServerUrl) {
   console.error("[dev] Vite dev server failed to start");
@@ -257,6 +284,19 @@ watch(serverOutFile, () => scheduleElectronRestart("server bundle updated"));
 /** Stop all child processes and esbuild watchers. */
 function cleanup() {
   if (debounceTimer) clearTimeout(debounceTimer);
+  if (serverBundleRebuildTimer) {
+    clearTimeout(serverBundleRebuildTimer);
+    serverBundleRebuildTimer = null;
+  }
+
+  if (distTscWatcher) {
+    try {
+      distTscWatcher.close();
+    } catch {
+      /* ignore */
+    }
+    distTscWatcher = null;
+  }
 
   if (serverTscWatch) {
     serverTscWatch.kill();

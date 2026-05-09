@@ -281,6 +281,26 @@ export function App() {
           }
         },
       }),
+      registerCommand({
+        id: "preview.toggle",
+        title: "Toggle Preview Panel",
+        category: "View",
+        handler: () => {
+          const tid = useWorkspaceStore.getState().activeThreadId;
+          if (!tid) return;
+          const { getRightPanel, showRightPanel, setRightPanelTab, hideRightPanel } =
+            useDiffStore.getState();
+          const panel = getRightPanel(tid);
+          if (!panel.visible) {
+            showRightPanel(tid);
+            setRightPanelTab(tid, "preview");
+          } else if (panel.activeTab !== "preview") {
+            setRightPanelTab(tid, "preview");
+          } else {
+            hideRightPanel(tid);
+          }
+        },
+      }),
       // Thread switching: Cmd+1 through Cmd+9
       ...Array.from({ length: 9 }, (_, i) =>
         registerCommand({

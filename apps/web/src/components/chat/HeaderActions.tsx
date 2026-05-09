@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useState } from "react";
-import { Terminal, Diff } from "lucide-react";
+import { Terminal, Diff, Globe } from "lucide-react";
 import { OpenInEditorMenu } from "./OpenInEditorMenu";
 import { CreatePrDialog } from "./CreatePrDialog";
 import { PrSplitButton } from "./PrSplitButton";
@@ -99,6 +99,27 @@ export function HeaderActions({ thread }: HeaderActionsProps) {
     return (panel?.visible ?? false) && (panel?.activeTab ?? "tasks") === "changes";
   });
 
+  const previewActive = useDiffStore((s) => {
+    if (!thread?.id) return false;
+    const panel = s.rightPanelByThread[thread.id];
+    return (panel?.visible ?? false) && (panel?.activeTab ?? "tasks") === "preview";
+  });
+
+  const togglePreview = useCallback(() => {
+    if (!thread?.id) return;
+    const { getRightPanel, showRightPanel, setRightPanelTab, hideRightPanel } =
+      useDiffStore.getState();
+    const panel = getRightPanel(thread.id);
+    if (!panel.visible) {
+      showRightPanel(thread.id);
+      setRightPanelTab(thread.id, "preview");
+    } else if (panel.activeTab !== "preview") {
+      setRightPanelTab(thread.id, "preview");
+    } else {
+      hideRightPanel(thread.id);
+    }
+  }, [thread?.id]);
+
   const toggleDiff = useCallback(() => {
     if (!thread?.id) return;
     const { getRightPanel, showRightPanel, setRightPanelTab, hideRightPanel } =
@@ -167,6 +188,31 @@ export function HeaderActions({ thread }: HeaderActionsProps) {
         />
         <TooltipContent side="bottom" className="text-xs">
           Toggle terminal (Ctrl+J)
+        </TooltipContent>
+      </Tooltip>
+
+      {/* Preview panel toggle */}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={togglePreview}
+              className={`gap-1 text-xs h-6 ${
+                previewActive
+                  ? "text-foreground bg-muted/40"
+                  : "text-foreground/70 hover:text-foreground hover:bg-muted/40"
+              }`}
+              aria-label="Toggle preview panel"
+              aria-pressed={previewActive}
+            >
+              <Globe size={12} />
+            </Button>
+          }
+        />
+        <TooltipContent side="bottom" className="text-xs">
+          Toggle preview (Ctrl+Shift+B)
         </TooltipContent>
       </Tooltip>
 
