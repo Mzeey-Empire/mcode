@@ -67,6 +67,7 @@ import {
   pickFullAccessAllowOption,
   synthesizeCursorAcpPermissionRequest,
 } from "./cursor-acp-permission-mapper.js";
+import { resolveCursorStickyInstructionBlob } from "./cursor-acp-sticky-instructions.js";
 
 const IDLE_TTL_MS = 10 * 60 * 1000;
 const EVICTION_INTERVAL_MS = 60 * 1000;
@@ -96,6 +97,8 @@ interface CursorAcpSessionEntry {
   todoSnapshot: CursorTodoSnapshot;
   turnChain: Promise<void>;
   activeTurnState: CursorAcpTurnState | null;
+  /** True once a heavy stitched instructions blob (> threshold) shipped on this MCP session. */
+  stickyHeavyInstructionsSent: boolean;
 }
 
 @injectable()
@@ -331,6 +334,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       todoSnapshot: createCursorTodoSnapshot(),
       turnChain: Promise.resolve(),
       activeTurnState: null,
+      stickyHeavyInstructionsSent: false,
     };
 
     entry.connection = new ClientSideConnection(
@@ -602,11 +606,19 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       const instructionParts = [guidance, skillsBlock].filter(
         (s): s is string => typeof s === "string" && s.length > 0,
       );
-      const instructions =
-        instructionParts.length > 0
-          ? instructionParts.join("\n\n---\n\n")
-          : readCursorUserInstructions();
-      const blocks = buildCursorAcpPromptBlocks(message, attachments, instructions);
+      const combined =
+        instructionParts.length > 0 ? instructionParts.join("\n\n---\n\n") : undefined;
+
+      const { instructionMarkdown, markHeavyCommitted } = resolveCursorStickyInstructionBlob({
+        combinedGuidanceAndSkillsMarkdown: combined,
+        readFallbackAgents: readCursorUserInstructions,
+        stickyHeavyCommitted: entry.stickyHeavyInstructionsSent,
+      });
+      if (markHeavyCommitted) {
+        entry.stickyHeavyInstructionsSent = true;
+      }
+
+      const blocks = buildCursorAcpPromptBlocks(message, attachments, instructionMarkdown);
       const promptResponse = await entry.connection.prompt({
         sessionId: entry.acpSessionId,
         prompt: blocks,
