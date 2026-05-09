@@ -44,11 +44,13 @@ interface PreviewSession {
   lastBounds: Bounds | null;
   /** Key from the last insertCSS call; cleared when the guest navigates or the view is destroyed. */
   scrollbarCssKey: string | null;
-  /** Drag-marquee overlay; BrowserView sits above shell HTML while this catches pointer input. */
+  /** Drag-marquee or element-pick overlay; sits above the BrowserView while capturing input. */
   selectionOverlay: BrowserWindow | null;
-  regionCapturePending:
-    | { finish: (r: PreviewPictureReferenceResult) => void; hostWin: BrowserWindow }
+  overlayPending:
+    | { mode: "region" | "element"; finish: (r: PreviewPictureReferenceResult) => void; hostWin: BrowserWindow }
     | null;
+  /** Removes main-frame navigation listener registered during an overlay capture. */
+  navigationAbortDisposable: (() => void) | null;
 }
 
 const sessions = new Map<number, PreviewSession>();
@@ -62,7 +64,8 @@ function getSession(win: BrowserWindow): PreviewSession {
       lastBounds: null,
       scrollbarCssKey: null,
       selectionOverlay: null,
-      regionCapturePending: null,
+      overlayPending: null,
+      navigationAbortDisposable: null,
     };
     sessions.set(win.id, s);
   }
@@ -88,19 +91,149 @@ function viewportBoundsFallback(viewWidth: number, viewHeight: number): Bounds {
   return { x: 0, y: 0, width: Math.max(1, viewWidth), height: Math.max(1, viewHeight) };
 }
 
+/** Guest DOM hit-test for element-pick; returns JSON string for safe bridge serialization. */
+function buildHitTestJs(x: number, y: number): string {
+  const xi = Math.max(0, Math.floor(x));
+  const yi = Math.max(0, Math.floor(y));
+  return `(function () {
+  var x = ${xi}, y = ${yi};
+  try {
+    var doc = document;
+    var el = doc.elementFromPoint(x, y);
+    if (!el || el === doc.documentElement) {
+      return JSON.stringify({ ok: false, code: "no-hit" });
+    }
+    var r = el.getBoundingClientRect();
+    var selectorHint = null;
+    try {
+      if (el.id) {
+        selectorHint = "#" + String(el.id);
+      } else {
+        var tid = el.getAttribute && el.getAttribute("data-testid");
+        if (tid) {
+          selectorHint = "[data-testid=" + JSON.stringify(tid) + "]";
+        } else {
+          var tag = el.tagName ? el.tagName.toLowerCase() : "unknown";
+          var cn = el.className && typeof el.className === "string" ? el.className.trim().split(/\\s+/).slice(0, 2).join(".") : "";
+          selectorHint = tag + (cn ? "." + cn : "");
+        }
+      }
+    } catch (selErr) {
+      selectorHint = el.tagName ? el.tagName.toLowerCase() : null;
+    }
+    var htmlExcerpt = null;
+    if (typeof HTMLInputElement !== "undefined" && el instanceof HTMLInputElement && el.type === "password") {
+      htmlExcerpt = null;
+      selectorHint = selectorHint || "input[type=password]";
+    } else {
+      try {
+        var clone = el.cloneNode(true);
+        if (clone && clone.querySelectorAll) {
+          clone.querySelectorAll("script").forEach(function (n) { n.remove(); });
+          var html = clone.outerHTML || "";
+          var max = 8000;
+          if (html.length > max) html = html.slice(0, max) + "\\n...[truncated]";
+          htmlExcerpt = html;
+        }
+      } catch (htmlErr) {
+        htmlExcerpt = null;
+      }
+    }
+    return JSON.stringify({
+      ok: true,
+      bounds: { x: r.x, y: r.y, width: r.width, height: r.height },
+      selectorHint: selectorHint,
+      htmlExcerpt: htmlExcerpt
+    });
+  } catch (err) {
+    return JSON.stringify({ ok: false, code: "hit-test-error" });
+  }
+})()`;
+}
+
+type HitTestResult =
+  | { ok: true; bounds: Bounds; selectorHint: string | null; htmlExcerpt: string | null }
+  | { ok: false; code: string };
+
+async function runElementHitTest(
+  webContents: BrowserView["webContents"],
+  x: number,
+  y: number,
+): Promise<HitTestResult | null> {
+  if (webContents.isDestroyed()) return null;
+  try {
+    const raw: unknown = await webContents.executeJavaScript(buildHitTestJs(x, y), true);
+    const text = typeof raw === "string" ? raw : JSON.stringify(raw);
+    const parsed = JSON.parse(text) as HitTestResult;
+    if (parsed && typeof parsed === "object" && "ok" in parsed) return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function endOverlaySession(s: PreviewSession): void {
+  if (s.navigationAbortDisposable) {
+    s.navigationAbortDisposable();
+    s.navigationAbortDisposable = null;
+  }
+}
+
+function abortOverlayCapture(s: PreviewSession, error: string): void {
+  endOverlaySession(s);
+  const pending = s.overlayPending;
+  s.overlayPending = null;
+  destroySelectionOverlayOnly(s);
+  if (pending) {
+    if (!pending.hostWin.isDestroyed()) {
+      resetIdle(pending.hostWin, s);
+    }
+    pending.finish({ ok: false, error });
+  }
+}
+
 /** Typed capture envelope aligned with PNG bytes for outbound prompt augmentation. */
 function buildBrowserCapturePayload(
   webContents: BrowserView["webContents"],
   boundsCss: Bounds,
+  extras?: {
+    captureKind?: "viewport" | "region" | "element";
+    selectorHint?: string | null;
+    htmlExcerpt?: string | null;
+  },
 ): McodeBrowserCaptureV1 {
-  return {
+  const out: McodeBrowserCaptureV1 = {
     schemaVersion: 1,
     pageUrl: webContents.getURL(),
     pageTitle: webContents.getTitle() ?? "",
     capturedAt: new Date().toISOString(),
     bounds: { ...boundsCss },
-    selectorHint: null,
+    selectorHint: extras?.selectorHint ?? null,
   };
+  if (extras?.captureKind !== undefined) {
+    out.captureKind = extras.captureKind;
+  }
+  if (extras?.htmlExcerpt != null && extras.htmlExcerpt.length > 0) {
+    out.htmlExcerpt =
+      extras.htmlExcerpt.length > 16_000 ? extras.htmlExcerpt.slice(0, 16_000) : extras.htmlExcerpt;
+  }
+  return out;
+}
+
+function attachMainFrameNavigationAbort(s: PreviewSession, webContents: BrowserView["webContents"]): () => void {
+  const handler = (_event: unknown, _url: string, _isSameDocument: boolean, isMainFrame: boolean): void => {
+    if (isMainFrame) abortOverlayCapture(s, "navigated-away");
+  };
+  webContents.on("did-start-navigation", handler);
+  return () => webContents.removeListener("did-start-navigation", handler);
+}
+
+function beginOverlaySession(s: PreviewSession, webContents: BrowserView["webContents"]): void {
+  if (s.navigationAbortDisposable) {
+    s.navigationAbortDisposable();
+    s.navigationAbortDisposable = null;
+  }
+  s.navigationAbortDisposable = attachMainFrameNavigationAbort(s, webContents);
 }
 
 function detachViewListeners(view: BrowserView): void {
@@ -154,6 +287,81 @@ layer.addEventListener("touchend", (ev) => { ev.preventDefault(); endDrag(); }, 
 window.addEventListener("keydown", (ev) => { if (ev.key === "Escape") void ipcRenderer.invoke("preview:region-overlay-cancel"); });
 </script></body></html>`);
 
+/**
+ * Transparent overlay for element pick: hover highlights the hit target via main-process hit-testing;
+ * click commits a capture of that element's bounds.
+ */
+const ELEMENT_OVERLAY_DATA_URL =
+  "data:text/html;charset=utf-8," +
+  encodeURIComponent(`<!DOCTYPE html><html><head><meta charset="utf-8"/><style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;}
+#layer{position:fixed;inset:0;background:rgba(15,23,42,.22);cursor:crosshair;touch-action:none;}
+#box{position:fixed;border:2px solid #22d3ee;box-sizing:border-box;pointer-events:none;display:none;box-shadow:0 0 0 1px rgba(0,0,0,.35) inset;}
+</style></head><body><div id="layer"></div><div id="box"></div>
+<script>
+const { ipcRenderer } = require("electron");
+const layer = document.getElementById("layer");
+const box = document.getElementById("box");
+let hoverSeq = 0;
+let rafHover = 0;
+let hx = 0, hy = 0;
+function showBox(b) {
+  if (!b || b.width < 1 || b.height < 1) { box.style.display = "none"; return; }
+  box.style.left = b.x + "px";
+  box.style.top = b.y + "px";
+  box.style.width = b.width + "px";
+  box.style.height = b.height + "px";
+  box.style.display = "block";
+}
+function scheduleHover() {
+  if (rafHover) return;
+  rafHover = requestAnimationFrame(async () => {
+    rafHover = 0;
+    const x = hx, y = hy;
+    const seq = ++hoverSeq;
+    try {
+      const res = await ipcRenderer.invoke("preview:element-pick-hover", { x, y });
+      if (seq !== hoverSeq) return;
+      if (res && res.ok && res.bounds) showBox(res.bounds);
+      else showBox(null);
+    } catch (_e) { if (seq === hoverSeq) showBox(null); }
+  });
+}
+function pt(ev) {
+  if (ev.touches && ev.touches[0]) return { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
+  return { x: ev.clientX, y: ev.clientY };
+}
+function ptEnd(ev) {
+  if (ev.changedTouches && ev.changedTouches[0]) {
+    return { x: ev.changedTouches[0].clientX, y: ev.changedTouches[0].clientY };
+  }
+  return pt(ev);
+}
+layer.addEventListener("mousemove", (ev) => { hx = ev.clientX; hy = ev.clientY; scheduleHover(); });
+layer.addEventListener("mouseleave", () => { hoverSeq++; showBox(null); });
+layer.addEventListener("click", async (ev) => {
+  ev.preventDefault();
+  try { await ipcRenderer.invoke("preview:element-pick-commit", pt(ev)); } catch (_e) {}
+});
+layer.addEventListener("touchstart", (ev) => {
+  ev.preventDefault();
+  const p = pt(ev);
+  hx = p.x; hy = p.y;
+  scheduleHover();
+}, { passive: false });
+layer.addEventListener("touchmove", (ev) => {
+  ev.preventDefault();
+  const p = pt(ev);
+  hx = p.x; hy = p.y;
+  scheduleHover();
+}, { passive: false });
+layer.addEventListener("touchend", async (ev) => {
+  ev.preventDefault();
+  try { await ipcRenderer.invoke("preview:element-pick-commit", ptEnd(ev)); } catch (_e) {}
+}, { passive: false });
+window.addEventListener("keydown", (ev) => { if (ev.key === "Escape") void ipcRenderer.invoke("preview:element-pick-cancel"); });
+</script></body></html>`);
+
 function destroySelectionOverlayOnly(s: PreviewSession): void {
   if (!s.selectionOverlay || s.selectionOverlay.isDestroyed()) {
     s.selectionOverlay = null;
@@ -165,18 +373,6 @@ function destroySelectionOverlayOnly(s: PreviewSession): void {
     /* already gone */
   }
   s.selectionOverlay = null;
-}
-
-function abortRegionCapture(s: PreviewSession, error: string): void {
-  const pending = s.regionCapturePending;
-  s.regionCapturePending = null;
-  destroySelectionOverlayOnly(s);
-  if (pending) {
-    if (!pending.hostWin.isDestroyed()) {
-      resetIdle(pending.hostWin, s);
-    }
-    pending.finish({ ok: false, error });
-  }
 }
 
 function clampRectInPlace(rect: Bounds, maxW: number, maxH: number): Bounds {
@@ -191,7 +387,7 @@ function clampRectInPlace(rect: Bounds, maxW: number, maxH: number): Bounds {
 }
 
 function parkPreview(win: BrowserWindow, s: PreviewSession): void {
-  abortRegionCapture(s, "capture-interrupted");
+  abortOverlayCapture(s, "capture-interrupted");
   clearIdle(s);
   if (s.view) {
     if (!win.isDestroyed()) {
@@ -468,7 +664,7 @@ export function registerPreviewBrowserHandlers(): void {
       const pngSize = image.getSize();
       const boundsCss =
         lb !== null ? viewportBoundsFallback(lb.width, lb.height) : viewportBoundsFallback(pngSize.width, pngSize.height);
-      const capture = buildBrowserCapturePayload(s.view.webContents, boundsCss);
+      const capture = buildBrowserCapturePayload(s.view.webContents, boundsCss, { captureKind: "viewport" });
       resetIdle(win, s);
       return { ok: true, meta, previewBytes: Uint8Array.from(buffer), capture };
     } catch {
@@ -483,10 +679,11 @@ export function registerPreviewBrowserHandlers(): void {
 
     const s = getSession(parentWin);
     if (s.selectionOverlay?.id !== overlayWin.id) return;
-    const pending = s.regionCapturePending;
-    if (!pending) return;
+    const pending = s.overlayPending;
+    if (!pending || pending.mode !== "region") return;
 
-    s.regionCapturePending = null;
+    s.overlayPending = null;
+    endOverlaySession(s);
     destroySelectionOverlayOnly(s);
 
     if (!s.view || s.view.webContents.isDestroyed()) {
@@ -534,7 +731,7 @@ export function registerPreviewBrowserHandlers(): void {
         sourcePath: tempPath,
       };
 
-      const capture = buildBrowserCapturePayload(s.view.webContents, r);
+      const capture = buildBrowserCapturePayload(s.view.webContents, r, { captureKind: "region" });
 
       if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
       pending.finish({ ok: true, meta, previewBytes: Uint8Array.from(buffer), capture });
@@ -550,7 +747,129 @@ export function registerPreviewBrowserHandlers(): void {
     if (!overlayWin || overlayWin.isDestroyed() || !parentWin || parentWin.isDestroyed()) return;
     const s = getSession(parentWin);
     if (s.selectionOverlay?.id !== overlayWin.id) return;
-    abortRegionCapture(s, "cancelled");
+    abortOverlayCapture(s, "cancelled");
+  });
+
+  ipcMain.handle(
+    "preview:element-pick-hover",
+    async (event, pt: { x: unknown; y: unknown }): Promise<{ ok: true; bounds: Bounds } | { ok: false }> => {
+      const overlayWin = BrowserWindow.fromWebContents(event.sender);
+      const parentWin = overlayWin?.getParentWindow();
+      if (!overlayWin || overlayWin.isDestroyed() || !parentWin || parentWin.isDestroyed()) {
+        return { ok: false };
+      }
+      const s = getSession(parentWin);
+      if (s.selectionOverlay?.id !== overlayWin.id) return { ok: false };
+      if (!s.overlayPending || s.overlayPending.mode !== "element") return { ok: false };
+      if (!s.view || s.view.webContents.isDestroyed()) return { ok: false };
+
+      const x = typeof pt?.x === "number" && Number.isFinite(pt.x) ? pt.x : NaN;
+      const y = typeof pt?.y === "number" && Number.isFinite(pt.y) ? pt.y : NaN;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return { ok: false };
+
+      const hit = await runElementHitTest(s.view.webContents, x, y);
+      if (!hit || !hit.ok) return { ok: false };
+      return { ok: true, bounds: hit.bounds };
+    },
+  );
+
+  ipcMain.handle(
+    "preview:element-pick-commit",
+    async (event, pt: { x: unknown; y: unknown }): Promise<void> => {
+      const overlayWin = BrowserWindow.fromWebContents(event.sender);
+      const parentWin = overlayWin?.getParentWindow();
+      if (!overlayWin || overlayWin.isDestroyed() || !parentWin || parentWin.isDestroyed()) return;
+
+      const s = getSession(parentWin);
+      if (s.selectionOverlay?.id !== overlayWin.id) return;
+      const pending = s.overlayPending;
+      if (!pending || pending.mode !== "element") return;
+
+      const x = typeof pt?.x === "number" && Number.isFinite(pt.x) ? pt.x : NaN;
+      const y = typeof pt?.y === "number" && Number.isFinite(pt.y) ? pt.y : NaN;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        abortOverlayCapture(s, "no-hit");
+        return;
+      }
+
+      s.overlayPending = null;
+      endOverlaySession(s);
+      destroySelectionOverlayOnly(s);
+
+      if (!s.view || s.view.webContents.isDestroyed()) {
+        if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
+        pending.finish({ ok: false, error: "no-preview" });
+        return;
+      }
+
+      const lb = s.lastBounds;
+      if (!lb) {
+        if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
+        pending.finish({ ok: false, error: "no-bounds" });
+        return;
+      }
+
+      const hit = await runElementHitTest(s.view.webContents, x, y);
+      if (!hit || !hit.ok) {
+        if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
+        pending.finish({ ok: false, error: "no-hit" });
+        return;
+      }
+
+      const r = clampRectInPlace(hit.bounds, lb.width, lb.height);
+      if (r.width < 4 || r.height < 4) {
+        if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
+        pending.finish({ ok: false, error: "region-too-small" });
+        return;
+      }
+
+      try {
+        const image = await s.view.webContents.capturePage(r);
+        const buffer = image.toPNG();
+        if (buffer.length === 0) {
+          if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
+          pending.finish({ ok: false, error: "empty-capture" });
+          return;
+        }
+
+        const id = randomUUID();
+        const stem = previewCaptureFileStem(s.view.webContents.getURL());
+        const name = `preview-element-${stem}-${Date.now()}.png`;
+        const tempDir = join(app.getPath("temp"), "mcode-attachments");
+        await mkdir(tempDir, { recursive: true });
+        const tempPath = join(tempDir, `${id}.png`);
+        await writeFile(tempPath, buffer);
+
+        const meta: AttachmentMeta = {
+          id,
+          name,
+          mimeType: "image/png",
+          sizeBytes: buffer.length,
+          sourcePath: tempPath,
+        };
+
+        const capture = buildBrowserCapturePayload(s.view.webContents, r, {
+          captureKind: "element",
+          selectorHint: hit.selectorHint,
+          htmlExcerpt: hit.htmlExcerpt,
+        });
+
+        if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
+        pending.finish({ ok: true, meta, previewBytes: Uint8Array.from(buffer), capture });
+      } catch {
+        if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
+        pending.finish({ ok: false, error: "capture-failed" });
+      }
+    },
+  );
+
+  ipcMain.handle("preview:element-pick-cancel", (event): void => {
+    const overlayWin = BrowserWindow.fromWebContents(event.sender);
+    const parentWin = overlayWin?.getParentWindow();
+    if (!overlayWin || overlayWin.isDestroyed() || !parentWin || parentWin.isDestroyed()) return;
+    const s = getSession(parentWin);
+    if (s.selectionOverlay?.id !== overlayWin.id) return;
+    abortOverlayCapture(s, "cancelled");
   });
 
   ipcMain.handle(
@@ -560,8 +879,8 @@ export function registerPreviewBrowserHandlers(): void {
       if (!win || win.isDestroyed()) return { ok: false, error: "no-window" };
 
       const s = getSession(win);
-      if (s.regionCapturePending) {
-        abortRegionCapture(s, "cancelled");
+      if (s.overlayPending) {
+        abortOverlayCapture(s, "cancelled");
       }
 
       if (!s.lastBounds) return { ok: false, error: "no-bounds" };
@@ -604,7 +923,8 @@ export function registerPreviewBrowserHandlers(): void {
         });
 
         s.selectionOverlay = ov;
-        s.regionCapturePending = { finish: finishOnce, hostWin: win };
+        s.overlayPending = { mode: "region", finish: finishOnce, hostWin: win };
+        beginOverlaySession(s, s.view!.webContents);
 
         ov.once("ready-to-show", () => {
           ov.show();
@@ -613,9 +933,10 @@ export function registerPreviewBrowserHandlers(): void {
 
         ov.on("closed", () => {
           s.selectionOverlay = null;
-          if (s.regionCapturePending) {
-            const pend = s.regionCapturePending;
-            s.regionCapturePending = null;
+          if (s.overlayPending) {
+            const pend = s.overlayPending;
+            s.overlayPending = null;
+            endOverlaySession(s);
             if (!pend.hostWin.isDestroyed()) {
               resetIdle(pend.hostWin, s);
             }
@@ -624,6 +945,83 @@ export function registerPreviewBrowserHandlers(): void {
         });
 
         void ov.loadURL(REGION_OVERLAY_DATA_URL);
+      });
+    },
+  );
+
+  ipcMain.handle(
+    "preview:capture-picture-element-pick",
+    async (_event): Promise<PreviewPictureReferenceResult> => {
+      const win = BrowserWindow.fromWebContents(_event.sender);
+      if (!win || win.isDestroyed()) return { ok: false, error: "no-window" };
+
+      const s = getSession(win);
+      if (s.overlayPending) {
+        abortOverlayCapture(s, "cancelled");
+      }
+
+      if (!s.lastBounds) return { ok: false, error: "no-bounds" };
+      if (!s.view || s.view.webContents.isDestroyed()) {
+        return { ok: false, error: "no-preview" };
+      }
+
+      return await new Promise<PreviewPictureReferenceResult>((resolve) => {
+        clearIdle(s);
+
+        let settled = false;
+        const finishOnce = (r: PreviewPictureReferenceResult): void => {
+          if (settled) return;
+          settled = true;
+          resolve(r);
+        };
+
+        const b = s.lastBounds!;
+
+        const ov = new BrowserWindow({
+          parent: win,
+          modal: false,
+          x: Math.round(b.x),
+          y: Math.round(b.y),
+          width: Math.max(1, Math.round(b.width)),
+          height: Math.max(1, Math.round(b.height)),
+          frame: false,
+          transparent: true,
+          hasShadow: false,
+          focusable: true,
+          resizable: false,
+          movable: false,
+          skipTaskbar: true,
+          show: false,
+          webPreferences: {
+            nodeIntegration: true,
+            contextIsolation: false,
+            sandbox: false,
+          },
+        });
+
+        s.selectionOverlay = ov;
+        s.overlayPending = { mode: "element", finish: finishOnce, hostWin: win };
+        beginOverlaySession(s, s.view!.webContents);
+
+        ov.once("ready-to-show", () => {
+          ov.show();
+          ov.focus();
+        });
+
+        ov.on("closed", () => {
+          s.selectionOverlay = null;
+          if (s.overlayPending) {
+            const pend = s.overlayPending;
+            s.overlayPending = null;
+            endOverlaySession(s);
+            if (!pend.hostWin.isDestroyed()) {
+              resetIdle(pend.hostWin, s);
+            }
+            finishOnce({ ok: false, error: "cancelled" });
+          }
+        });
+
+        void ov.loadURL(ELEMENT_OVERLAY_DATA_URL);
       });
     },
   );

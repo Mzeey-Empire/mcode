@@ -163,6 +163,10 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     capturePictureReferenceRegion(): Promise<unknown> {
       return ipcRenderer.invoke("preview:capture-picture-region");
     },
+    /** Hover to highlight, then click an element; captures its bounds as PNG with DOM context. */
+    capturePictureReferenceElementPick(): Promise<unknown> {
+      return ipcRenderer.invoke("preview:capture-picture-element-pick");
+    },
     onDidNavigate(callback: (payload: { url: string; title: string }) => void) {
       const listener = (_event: unknown, payload: { url: string; title: string }) =>
         callback(payload);

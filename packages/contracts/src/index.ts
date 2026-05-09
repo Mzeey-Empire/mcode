@@ -84,11 +84,13 @@ export type { FileCategory } from "./models/file-types.js";
 
 export {
   BrowserPreviewBoundsSchema,
+  BrowserPreviewCaptureKindSchema,
   McodeBrowserCaptureV1Schema,
   AttachedBrowserCaptureV1Schema,
 } from "./models/browser-preview.js";
 export type {
   BrowserPreviewBounds,
+  BrowserPreviewCaptureKind,
   McodeBrowserCaptureV1,
   AttachedBrowserCaptureV1,
 } from "./models/browser-preview.js";

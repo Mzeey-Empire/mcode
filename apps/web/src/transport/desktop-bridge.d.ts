@@ -63,6 +63,8 @@ interface PreviewBridge {
   capturePictureReference(): Promise<PreviewPictureReferenceResult>;
   /** Drag a rectangle on the preview, then capture that region as PNG; desktop only. */
   capturePictureReferenceRegion(): Promise<PreviewPictureReferenceResult>;
+  /** Pick an element by hover and click; captures its box as PNG with selector and excerpt; desktop only. */
+  capturePictureReferenceElementPick(): Promise<PreviewPictureReferenceResult>;
   onDidNavigate(callback: (payload: { url: string; title: string }) => void): () => void;
 }
 

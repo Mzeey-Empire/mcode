@@ -16,10 +16,18 @@ export const BrowserPreviewBoundsSchema = lazySchema(() =>
 
 export type BrowserPreviewBounds = z.infer<ReturnType<typeof BrowserPreviewBoundsSchema>>;
 
+/** How the preview capture was produced (viewport, drag region, or DOM element pick). */
+export const BrowserPreviewCaptureKindSchema = lazySchema(() =>
+  z.enum(["viewport", "region", "element"]),
+);
+
+export type BrowserPreviewCaptureKind = z.infer<
+  ReturnType<typeof BrowserPreviewCaptureKindSchema>
+>;
+
 /**
  * Versioned payload for what the user pointed at in the embedded preview.
- * Phase 1 ships the schema only. Phase 2 adds viewport PNG to the composer first;
- * structured fields fill in later from DOM capture and regional screenshot.
+ * Pairs PNG attachments with URL, bounds, and optional DOM context for the agent.
  */
 export const McodeBrowserCaptureV1Schema = lazySchema(() =>
   z.object({
@@ -27,6 +35,7 @@ export const McodeBrowserCaptureV1Schema = lazySchema(() =>
     pageUrl: z.string(),
     pageTitle: z.string(),
     capturedAt: z.string(),
+    captureKind: BrowserPreviewCaptureKindSchema().optional(),
     selectorHint: z.string().nullable().optional(),
     htmlExcerpt: z.string().max(16_000).optional(),
     bounds: BrowserPreviewBoundsSchema(),

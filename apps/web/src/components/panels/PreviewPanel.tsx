@@ -8,6 +8,7 @@ import {
 import {
   ArrowLeft,
   ArrowRight,
+  Crosshair,
   Crop,
   ExternalLink,
   Globe,
@@ -34,7 +35,7 @@ const NAV_ERROR_LABEL: Record<string, string> = {
   "no-window": "Preview is unavailable.",
 };
 
-const CAPTURE_ERROR_SILENT = new Set(["cancelled", "capture-interrupted"]);
+const CAPTURE_ERROR_SILENT = new Set(["cancelled", "capture-interrupted", "navigated-away"]);
 
 const CAPTURE_ERROR_LABEL: Record<string, string> = {
   "no-window": "Preview is unavailable.",
@@ -42,6 +43,7 @@ const CAPTURE_ERROR_LABEL: Record<string, string> = {
   "empty-capture": "Nothing was captured.",
   "capture-failed": "Screenshot failed.",
   "region-too-small": "Drag a larger box (at least a few pixels).",
+  "no-hit": "Click an element on the page.",
 };
 
 function formatCaptureError(code: string): string {
@@ -80,7 +82,7 @@ export interface PreviewPanelProps {
 
 /**
  * Embedded site preview: omnibox and toolbar above a region aligned to an Electron BrowserView.
- * Full viewport or drag-selected region PNGs attach to the composer. Tooltips open upward so they
+ * Full viewport, drag-selected region, or element-pick PNGs attach to the composer. Tooltips open upward so they
  * stay readable: the guest BrowserView is stacked above shell HTML and would hide downward popups.
  * In web-only builds without `desktopBridge.preview`, renders an explanatory empty state.
  */
@@ -93,6 +95,7 @@ export function PreviewPanel({ threadId }: PreviewPanelProps) {
 
   const [captureBusy, setCaptureBusy] = useState(false);
   const [regionBusy, setRegionBusy] = useState(false);
+  const [elementPickBusy, setElementPickBusy] = useState(false);
 
   const storedUrl = useDiffStore(
     (s) => s.previewUrlByThread[threadId] ?? "",
@@ -294,6 +297,43 @@ export function PreviewPanel({ threadId }: PreviewPanelProps) {
     }
   }, [pushSync, threadId]);
 
+  const onAddElementPickPictureReference = useCallback(async () => {
+    const preview = window.desktopBridge?.preview;
+    if (!preview?.capturePictureReferenceElementPick || !threadId) return;
+
+    setElementPickBusy(true);
+    try {
+      await pushSync(true);
+
+      let res: CaptureResult;
+      try {
+        res = (await preview.capturePictureReferenceElementPick()) as CaptureResult;
+      } catch {
+        useToastStore.getState().show("error", "Could not capture preview", "Screenshot failed.");
+        return;
+      }
+
+      showCaptureErrorIfNeeded(res);
+      if (!res.ok) return;
+
+      const copied = Uint8Array.from(res.previewBytes);
+      const blob = new Blob([copied], { type: "image/png" });
+      const previewUrl = URL.createObjectURL(blob);
+      const attachment: PendingAttachment = {
+        id: res.meta.id,
+        name: res.meta.name,
+        mimeType: res.meta.mimeType,
+        sizeBytes: res.meta.sizeBytes,
+        previewUrl,
+        filePath: res.meta.sourcePath,
+        browserCapture: res.capture,
+      };
+      usePreviewReferenceQueueStore.getState().enqueuePreviewReference(threadId, attachment);
+    } finally {
+      setElementPickBusy(false);
+    }
+  }, [pushSync, threadId]);
+
   if (!window.desktopBridge?.preview) {
     return (
       <div
@@ -359,7 +399,7 @@ export function PreviewPanel({ threadId }: PreviewPanelProps) {
                 variant="ghost"
                 size="icon-xs"
                 className="shrink-0"
-                disabled={regionBusy || captureBusy || !threadId}
+                disabled={regionBusy || captureBusy || elementPickBusy || !threadId}
                 onClick={() => void onAddRegionPictureReference()}
                 aria-label="Select region to capture"
               >
@@ -379,7 +419,27 @@ export function PreviewPanel({ threadId }: PreviewPanelProps) {
                 variant="ghost"
                 size="icon-xs"
                 className="shrink-0"
-                disabled={captureBusy || regionBusy || !threadId}
+                disabled={elementPickBusy || regionBusy || captureBusy || !threadId}
+                onClick={() => void onAddElementPickPictureReference()}
+                aria-label="Pick element to capture"
+              >
+                <Crosshair size={14} aria-hidden />
+              </Button>
+            }
+          />
+          <TooltipContent side="top" sideOffset={6} className="max-w-[19rem] text-xs">
+            Hover to highlight an element, then click to attach a crop plus selector and HTML excerpt
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="shrink-0"
+                disabled={captureBusy || regionBusy || elementPickBusy || !threadId}
                 onClick={() => void onAddPictureReference()}
                 aria-label="Add visible preview as image attachment"
               >
