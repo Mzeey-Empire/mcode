@@ -225,20 +225,23 @@ export class SkillWatcherService {
       // A SkillService throw must not poison subsequent debounce cycles.
       try {
         this.skills.invalidate();
-        broadcast("skills.changed", {});
-        try {
-          this.debouncedListener?.();
-        } catch (listenerErr) {
-          logger.debug("SkillWatcherService: debounced listener failed", {
-            dir,
-            message: listenerErr instanceof Error ? listenerErr.message : String(listenerErr),
-          });
-        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        logger.debug("SkillWatcherService: invalidate/broadcast failed", {
+        logger.debug("SkillWatcherService: invalidate failed", { dir, message });
+        return;
+      }
+      try {
+        broadcast("skills.changed", {});
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.debug("SkillWatcherService: broadcast failed", { dir, message });
+      }
+      try {
+        this.debouncedListener?.();
+      } catch (listenerErr) {
+        logger.debug("SkillWatcherService: debounced listener failed", {
           dir,
-          message,
+          message: listenerErr instanceof Error ? listenerErr.message : String(listenerErr),
         });
       }
     }, DEBOUNCE_MS);
