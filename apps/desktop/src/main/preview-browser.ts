@@ -1203,9 +1203,16 @@ export function registerPreviewBrowserHandlers(): void {
         const switchedThread = tid != null && tid !== s.lastPreviewThreadId;
         s.lastPreviewThreadId = tid;
 
-        if (switchedThread && hint) {
-          void wc.loadURL(hint);
-          s.resumePreviewUrl = hint;
+        // One BrowserView is shared across threads; without an explicit navigation on switch,
+        // the previous thread's document (and resumePreviewUrl) would leak into the next thread.
+        if (switchedThread) {
+          if (hint) {
+            void wc.loadURL(hint);
+            s.resumePreviewUrl = hint;
+          } else {
+            s.resumePreviewUrl = null;
+            void wc.loadURL("about:blank");
+          }
         } else if (guestUrlNeedsHttpRestore(current) && hint) {
           void wc.loadURL(hint);
           s.resumePreviewUrl = hint;
