@@ -214,7 +214,7 @@ function hostBoundsForHitTest(s: PreviewSession): Bounds | null {
  * Builds guest-executed hit-test script for element pick: bounds, heuristic selector, optional HTML excerpt.
  * Maps overlay pointer coords to the guest layout viewport using documentElement client metrics
  * (innerWidth/innerHeight can disagree with layout when scrollbars or root overflow differ).
- * Highlight is drawn in-guest so it matches {@link Element#getBoundingClientRect}.
+ * Highlight nodes live on the root document: hit rects must be mapped from subframes by walking the frameElement chain.
  * Excerpt cloning strips active content and form state so hostile pages leak less into prompts.
  */
 function buildHitTestJs(overlayX: number, overlayY: number, hostWidth: number, hostHeight: number): string {
@@ -418,6 +418,26 @@ function buildHitTestJs(overlayX: number, overlayY: number, hostWidth: number, h
     var h0 = Math.max(1, Math.round(r.height));
     return { x: x0, y: y0, width: w0, height: h0 };
   }
+  /** getBoundingClientRect in a subframe is relative to that frame; fixed overlays in the root need root layout coords. */
+  function boundingRectInRootLayoutViewport(el) {
+    var br = el.getBoundingClientRect();
+    var x = br.left;
+    var y = br.top;
+    var w = br.width;
+    var h = br.height;
+    var doc = el.ownerDocument;
+    var win = doc ? doc.defaultView : null;
+    while (win && win !== win.top) {
+      var frame = win.frameElement;
+      if (!frame) break;
+      var fr = frame.getBoundingClientRect();
+      x += fr.left;
+      y += fr.top;
+      doc = frame.ownerDocument;
+      win = doc ? doc.defaultView : null;
+    }
+    return { x: x, y: y, width: w, height: h };
+  }
   try {
     var doc = document;
     var de = doc.documentElement;
@@ -436,7 +456,7 @@ function buildHitTestJs(overlayX: number, overlayY: number, hostWidth: number, h
     if (!el || el === doc.documentElement || el === doc.body) {
       return JSON.stringify({ ok: false, code: "no-hit" });
     }
-    var r = el.getBoundingClientRect();
+    var r = boundingRectInRootLayoutViewport(el);
     var rbGuest = roundBounds(r);
     var selectorHint = selectorHintFor(el);
     var htmlExcerpt = null;
