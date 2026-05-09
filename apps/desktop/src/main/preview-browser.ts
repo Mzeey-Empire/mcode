@@ -96,13 +96,17 @@ const SELECTOR_HINT_MAX_LEN = 512;
 
 /**
  * Builds guest-executed hit-test script for element pick: bounds, heuristic selector, optional HTML excerpt.
- * Excerpt cloning strips active content and form state so hostile or instrumented pages leak less into prompts.
+ * When host W/H are set, maps overlay pointer coords to the guest viewport and returns overlayBounds for the UI.
+ * Excerpt cloning strips active content and form state so hostile pages leak less into prompts.
  */
-function buildHitTestJs(x: number, y: number): string {
-  const xi = Math.max(0, Math.round(x));
-  const yi = Math.max(0, Math.round(y));
+function buildHitTestJs(overlayX: number, overlayY: number, hostWidth: number, hostHeight: number): string {
+  const xi = Math.max(0, Math.round(overlayX));
+  const yi = Math.max(0, Math.round(overlayY));
+  const hw = Math.max(0, Math.round(hostWidth));
+  const hh = Math.max(0, Math.round(hostHeight));
   return `(function () {
-  var x = ${xi}, y = ${yi};
+  var hostW = ${hw}, hostH = ${hh};
+  var ox = ${xi}, oy = ${yi};
   var REMOVE_TAGS = { SCRIPT:1, IFRAME:1, OBJECT:1, EMBED:1, LINK:1, NOSCRIPT:1, FRAME:1, META:1, BASE:1 };
   function classTokens(el) {
     var raw = "";
@@ -296,14 +300,34 @@ function buildHitTestJs(x: number, y: number): string {
   }
   try {
     var doc = document;
-    var px = Math.max(0, Math.min(x, (window.innerWidth || 0) - 0.001));
-    var py = Math.max(0, Math.min(y, (window.innerHeight || 0) - 0.001));
+    var px = ox, py = oy;
+    if (hostW > 0 && hostH > 0) {
+      var gwMap = window.innerWidth || hostW;
+      var ghMap = window.innerHeight || hostH;
+      px = Math.round((ox * gwMap) / hostW);
+      py = Math.round((oy * ghMap) / hostH);
+    }
+    var iw = window.innerWidth || 1;
+    var ih = window.innerHeight || 1;
+    px = Math.max(0, Math.min(px, iw - 0.001));
+    py = Math.max(0, Math.min(py, ih - 0.001));
     var el = pickElementAt(px, py);
     if (!el || el === doc.documentElement || el === doc.body) {
       return JSON.stringify({ ok: false, code: "no-hit" });
     }
     var r = el.getBoundingClientRect();
-    var rb = roundBounds(r);
+    var rbGuest = roundBounds(r);
+    var rbOverlay = rbGuest;
+    if (hostW > 0 && hostH > 0) {
+      var gww = window.innerWidth || hostW;
+      var ghh = window.innerHeight || hostH;
+      rbOverlay = {
+        x: Math.round((r.x * hostW) / gww),
+        y: Math.round((r.y * hostH) / ghh),
+        width: Math.max(1, Math.round((r.width * hostW) / gww)),
+        height: Math.max(1, Math.round((r.height * hostH) / ghh))
+      };
+    }
     var selectorHint = selectorHintFor(el);
     var htmlExcerpt = null;
     if (typeof HTMLInputElement !== "undefined" && el instanceof HTMLInputElement && el.type === "password") {
@@ -324,7 +348,8 @@ function buildHitTestJs(x: number, y: number): string {
     }
     return JSON.stringify({
       ok: true,
-      bounds: rb,
+      bounds: rbGuest,
+      overlayBounds: rbOverlay,
       selectorHint: selectorHint,
       htmlExcerpt: htmlExcerpt
     });
@@ -352,18 +377,18 @@ function scrubHtmlExcerptForOutbound(s: string): string {
 }
 
 type HitTestResult =
-  | { ok: true; bounds: Bounds; selectorHint: string | null; htmlExcerpt: string | null }
+  | {
+      ok: true;
+      /** Guest viewport CSS pixels: used for capturePage. */
+      bounds: Bounds;
+      /** Shell overlay pixels when host size differs from innerWidth/innerHeight; null if same as bounds. */
+      overlayBounds: Bounds | null;
+      selectorHint: string | null;
+      htmlExcerpt: string | null;
+    }
   | { ok: false; code: string };
 
-/** Validates hit-test JSON from the guest so spoofed shapes never become typed results. */
-function parseHitTestPayload(parsed: unknown): HitTestResult | null {
-  if (!parsed || typeof parsed !== "object") return null;
-  const p = parsed as Record<string, unknown>;
-  if (p.ok === false) {
-    return typeof p.code === "string" ? { ok: false, code: p.code } : null;
-  }
-  if (p.ok !== true) return null;
-  const b = p.bounds;
+function parseBoundsRecord(b: unknown): Bounds | null {
   if (!b || typeof b !== "object") return null;
   const bb = b as Record<string, unknown>;
   const x = bb.x;
@@ -382,6 +407,23 @@ function parseHitTestPayload(parsed: unknown): HitTestResult | null {
   ) {
     return null;
   }
+  return { x, y, width, height };
+}
+
+/** Validates hit-test JSON from the guest so spoofed shapes never become typed results. */
+function parseHitTestPayload(parsed: unknown): HitTestResult | null {
+  if (!parsed || typeof parsed !== "object") return null;
+  const p = parsed as Record<string, unknown>;
+  if (p.ok === false) {
+    return typeof p.code === "string" ? { ok: false, code: p.code } : null;
+  }
+  if (p.ok !== true) return null;
+  const bounds = parseBoundsRecord(p.bounds);
+  if (!bounds) return null;
+  let overlayBounds: Bounds | null = null;
+  if (p.overlayBounds != null) {
+    overlayBounds = parseBoundsRecord(p.overlayBounds);
+  }
   const selectorHint =
     p.selectorHint == null ? null : sanitizeSelectorHintFromGuest(String(p.selectorHint));
   let htmlExcerpt: string | null = null;
@@ -391,7 +433,8 @@ function parseHitTestPayload(parsed: unknown): HitTestResult | null {
   }
   return {
     ok: true,
-    bounds: { x, y, width, height },
+    bounds,
+    overlayBounds,
     selectorHint,
     htmlExcerpt,
   };
@@ -399,14 +442,17 @@ function parseHitTestPayload(parsed: unknown): HitTestResult | null {
 
 async function runElementHitTest(
   webContents: BrowserView["webContents"],
-  x: number,
-  y: number,
+  overlayX: number,
+  overlayY: number,
+  hostBounds: Bounds | null,
 ): Promise<HitTestResult | null> {
   if (webContents.isDestroyed()) return null;
-  const rx = Math.round(x);
-  const ry = Math.round(y);
+  const rx = Math.round(overlayX);
+  const ry = Math.round(overlayY);
+  const hw = hostBounds && hostBounds.width > 0 ? hostBounds.width : 0;
+  const hh = hostBounds && hostBounds.height > 0 ? hostBounds.height : 0;
   try {
-    const raw: unknown = await webContents.executeJavaScript(buildHitTestJs(rx, ry), true);
+    const raw: unknown = await webContents.executeJavaScript(buildHitTestJs(rx, ry, hw, hh), true);
     const text = typeof raw === "string" ? raw : JSON.stringify(raw);
     const parsed: unknown = JSON.parse(text);
     return parseHitTestPayload(parsed);
@@ -540,10 +586,10 @@ window.addEventListener("keydown", (ev) => { if (ev.key === "Escape") void ipcRe
 const ELEMENT_OVERLAY_DATA_URL =
   "data:text/html;charset=utf-8," +
   encodeURIComponent(`<!DOCTYPE html><html><head><meta charset="utf-8"/><style>
-html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;}
-#layer{position:fixed;inset:0;background:rgba(15,23,42,.22);cursor:crosshair;touch-action:none;}
-#box{position:fixed;border:2px solid #22d3ee;box-sizing:border-box;pointer-events:none;display:none;box-shadow:0 0 0 1px rgba(0,0,0,.35) inset;}
-#hint{position:fixed;pointer-events:none;display:none;z-index:3;font:11px/1.35 ui-sans-serif,system-ui,sans-serif;color:#e2e8f0;background:rgba(15,23,42,.94);border:1px solid #22d3ee;border-radius:4px;padding:5px 8px;box-shadow:0 2px 10px rgba(0,0,0,.35);word-break:break-all;max-width:min(440px,calc(100vw - 12px));}
+html,body{margin:0;width:100%;height:100%;overflow:visible;background:transparent;}
+#layer{position:fixed;inset:0;z-index:1;background:rgba(15,23,42,.22);cursor:crosshair;touch-action:none;}
+#box{position:fixed;z-index:2;border:2px solid #22d3ee;box-sizing:border-box;pointer-events:none;display:none;box-shadow:0 0 0 1px rgba(0,0,0,.35) inset;}
+#hint{position:fixed;pointer-events:none;display:none;z-index:4;font:11px/1.35 ui-sans-serif,system-ui,sans-serif;color:#e2e8f0;background:rgba(15,23,42,.94);border:1px solid #22d3ee;border-radius:4px;padding:5px 8px;box-shadow:0 2px 10px rgba(0,0,0,.35);word-break:break-all;max-width:min(440px,calc(100vw - 12px));}
 </style></head><body><div id="layer"></div><div id="box"></div><div id="hint" aria-live="polite"></div>
 <script>
 const { ipcRenderer } = require("electron");
@@ -579,6 +625,7 @@ function showBox(b, labelText) {
     box.style.display = "none";
     hintEl.style.display = "none";
     hintEl.textContent = "";
+    box.removeAttribute("title");
     return;
   }
   const rx = Math.round(b.x);
@@ -594,8 +641,10 @@ function showBox(b, labelText) {
   if (!text) {
     hintEl.style.display = "none";
     hintEl.textContent = "";
+    box.removeAttribute("title");
     return;
   }
+  box.title = text;
   hintEl.textContent = text;
   hintEl.style.display = "block";
   layoutHint(rx, ry, rw, rh);
@@ -1057,10 +1106,11 @@ export function registerPreviewBrowserHandlers(): void {
       const y = typeof pt?.y === "number" && Number.isFinite(pt.y) ? pt.y : NaN;
       if (!Number.isFinite(x) || !Number.isFinite(y)) return { ok: false };
 
-      const hit = await runElementHitTest(s.view.webContents, x, y);
+      const hit = await runElementHitTest(s.view.webContents, x, y, s.lastBounds);
       if (!hit || !hit.ok) return { ok: false };
       const label = hit.selectorHint && hit.selectorHint.length > 0 ? hit.selectorHint : "Element";
-      return { ok: true, bounds: hit.bounds, label };
+      const displayBounds = hit.overlayBounds ?? hit.bounds;
+      return { ok: true, bounds: displayBounds, label };
     },
   );
 
@@ -1100,7 +1150,7 @@ export function registerPreviewBrowserHandlers(): void {
         return;
       }
 
-      const hit = await runElementHitTest(s.view.webContents, x, y);
+      const hit = await runElementHitTest(s.view.webContents, x, y, lb);
       if (!hit || !hit.ok) {
         if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
         pending.finish({ ok: false, error: "no-hit" });
