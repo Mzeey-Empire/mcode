@@ -43,6 +43,7 @@ import { PrDraftService } from "./services/pr-draft-service";
 import { CiWatcherService } from "./services/ci-watcher";
 import { ProviderAvailabilityService } from "./services/provider-availability-service";
 import { ProviderRegistry } from "./providers/provider-registry";
+import { CursorProvider } from "./providers/cursor/cursor-provider";
 import { WorkspaceEnricher } from "./services/workspace-enricher";
 import { FilesystemBrowser } from "./services/filesystem-browser";
 import { ModelCacheService } from "./services/model-cache-service";
@@ -167,6 +168,7 @@ const terminalService = container.resolve(TerminalService);
 const messageRepo = container.resolve(MessageRepo);
 const threadRepo = container.resolve(ThreadRepo);
 const providerRegistry = container.resolve(ProviderRegistry);
+const cursorProvider = container.resolve(CursorProvider);
 const providerAvailability = container.resolve(ProviderAvailabilityService);
 const toolCallRecordRepo = container.resolve(ToolCallRecordRepo);
 const turnSnapshotRepo = container.resolve(TurnSnapshotRepo);
@@ -288,6 +290,9 @@ for (const ws of allWorkspaces) {
 // Begin watching the user's Claude skills/commands/plugins directories so the
 // skill registry stays current without a server restart.
 skillWatcherService.start();
+skillWatcherService.registerDebouncedInvalidateListener(() => {
+  cursorProvider.onSkillRegistryDebouncedInvalidation();
+});
 
 // Seed CI check watcher with all threads that have open PRs
 {

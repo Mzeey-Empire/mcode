@@ -68,8 +68,10 @@ import {
   synthesizeCursorAcpPermissionRequest,
 } from "./cursor-acp-permission-mapper.js";
 import { resolveCursorStickyInstructionBlob } from "./cursor-acp-sticky-instructions.js";
+import { buildCursorAskQuestionExtResponse } from "./cursor-acp-ask-question.js";
+import { isLikelyTransientCursorPromptFailure } from "./cursor-acp-transient-retry.js";
 
-const IDLE_TTL_MS = 10 * 60 * 1000;
+const CURSOR_STDERR_TAIL_MAX = 48;
 const EVICTION_INTERVAL_MS = 60 * 1000;
 
 function cursorCliProbeBinaries(settings: Settings): string[] {
@@ -99,6 +101,10 @@ interface CursorAcpSessionEntry {
   activeTurnState: CursorAcpTurnState | null;
   /** True once a heavy stitched instructions blob (> threshold) shipped on this MCP session. */
   stickyHeavyInstructionsSent: boolean;
+  /** Monotonic prompts across the MCP subprocess lifetime (sticky preamble pacing). */
+  cursorPromptOrdinal: number;
+  /** Recent stderr snippets for diagnosing opaque CLI failures. */
+  stderrTailLines: string[];
 }
 
 @injectable()
@@ -249,6 +255,16 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     return out;
   }
 
+  /**
+   * Invoked once the SkillWatcher debouncer finishes flushing filesystem events so
+   * sticky Cursor preambles can pick up regenerated skill inventories.
+   */
+  onSkillRegistryDebouncedInvalidation(): void {
+    for (const e of this.sessions.values()) {
+      e.stickyHeavyInstructionsSent = false;
+    }
+  }
+
   private cancelPendingForThread(mcodeSessionId: string): void {
     for (const [requestId, p] of this.pendingPermissions) {
       if (p.mcodeSessionId !== mcodeSessionId) continue;
@@ -335,6 +351,8 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       turnChain: Promise.resolve(),
       activeTurnState: null,
       stickyHeavyInstructionsSent: false,
+      cursorPromptOrdinal: 0,
+      stderrTailLines: [],
     };
 
     entry.connection = new ClientSideConnection(
@@ -347,7 +365,12 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     child.stderr?.on("data", (chunk: Buffer) => {
       for (const line of chunk.toString().split("\n")) {
         const trimmed = line.trim();
-        if (trimmed) logger.debug("cursor-agent acp stderr", { threadId, line: trimmed });
+        if (trimmed) {
+          logger.debug("cursor-agent acp stderr", { threadId, line: trimmed });
+          const tail = entry.stderrTailLines;
+          tail.push(trimmed.slice(0, 2000));
+          while (tail.length > CURSOR_STDERR_TAIL_MAX) tail.shift();
+        }
       }
     });
 
@@ -389,13 +412,30 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
         return {};
       },
       extMethod: async (method, params) => {
+        const cursorPrefs = this.settingsService.get().provider.cursor;
         if (method === "cursor/ask_question") {
-          return {
-            outcome: {
-              outcome: "skipped",
-              reason: "Mcode ACP client does not surface interactive questions.",
+          const record =
+            params !== null && typeof params === "object" && !Array.isArray(params)
+              ? (params as Record<string, unknown>)
+              : {};
+          return buildCursorAskQuestionExtResponse(
+            record,
+            cursorPrefs.autoAnswerAskQuestions,
+            (summary) => {
+              logger.info("Cursor ask_question resolved automatically", {
+                threadId: entry.threadId,
+                detail: summary.lines,
+              });
+              if (cursorPrefs.echoAskQuestionsToTimeline) {
+                const clip = summary.lines.join(" · ").slice(0, 900);
+                this.emit("event", {
+                  type: AgentEventType.System,
+                  threadId: entry.threadId,
+                  subtype: `cursor:ask_question:auto:${clip}`,
+                } satisfies AgentEvent);
+              }
             },
-          };
+          );
         }
         if (method === "cursor/create_plan") {
           return { outcome: { outcome: "accepted" } };
@@ -594,10 +634,20 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     },
   ): Promise<void> {
     const { message, model, resume, attachments } = opts;
+    const cursorCfg = this.settingsService.get().provider.cursor;
     entry.activeTurnState = createCursorAcpTurnState();
     try {
       await this.openLogicalSession(entry, resume);
       await this.applyModel(entry, model);
+
+      entry.cursorPromptOrdinal += 1;
+      if (
+        !cursorCfg.alwaysSendFullInstructions &&
+        cursorCfg.fullPreambleEveryNTurns > 0 &&
+        entry.cursorPromptOrdinal % cursorCfg.fullPreambleEveryNTurns === 0
+      ) {
+        entry.stickyHeavyInstructionsSent = false;
+      }
 
       const guidance = buildCursorAgentGuidanceMarkdown(entry.cwd);
       const skillsBlock = formatCursorSkillsAndCommandsForPrompt(
@@ -609,20 +659,51 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       const combined =
         instructionParts.length > 0 ? instructionParts.join("\n\n---\n\n") : undefined;
 
-      const { instructionMarkdown, markHeavyCommitted } = resolveCursorStickyInstructionBlob({
-        combinedGuidanceAndSkillsMarkdown: combined,
-        readFallbackAgents: readCursorUserInstructions,
-        stickyHeavyCommitted: entry.stickyHeavyInstructionsSent,
-      });
-      if (markHeavyCommitted) {
-        entry.stickyHeavyInstructionsSent = true;
+      let instructionMarkdown: string | undefined;
+
+      if (cursorCfg.alwaysSendFullInstructions) {
+        instructionMarkdown = combined ?? readCursorUserInstructions();
+      } else {
+        const { instructionMarkdown: blob, markHeavyCommitted } = resolveCursorStickyInstructionBlob({
+          combinedGuidanceAndSkillsMarkdown: combined,
+          readFallbackAgents: readCursorUserInstructions,
+          stickyHeavyCommitted: entry.stickyHeavyInstructionsSent,
+        });
+        instructionMarkdown = blob;
+        if (markHeavyCommitted) {
+          entry.stickyHeavyInstructionsSent = true;
+        }
       }
 
       const blocks = buildCursorAcpPromptBlocks(message, attachments, instructionMarkdown);
-      const promptResponse = await entry.connection.prompt({
-        sessionId: entry.acpSessionId,
-        prompt: blocks,
-      });
+
+      const maxAttempts = cursorCfg.retryTransientFailuresOnce ? 2 : 1;
+      let promptResponse: Awaited<ReturnType<ClientSideConnection["prompt"]>>;
+      let attempt = 0;
+      for (;;) {
+        try {
+          attempt += 1;
+          promptResponse = await entry.connection.prompt({
+            sessionId: entry.acpSessionId,
+            prompt: blocks,
+          });
+          break;
+        } catch (attemptErr) {
+          const raw = attemptErr instanceof Error ? attemptErr.message : String(attemptErr);
+          if (
+            attempt >= maxAttempts ||
+            !cursorCfg.retryTransientFailuresOnce ||
+            !isLikelyTransientCursorPromptFailure(raw)
+          ) {
+            throw attemptErr;
+          }
+          logger.warn("Cursor ACP prompt retry after transient CLI failure", {
+            threadId: entry.threadId,
+            attempt,
+            error: raw,
+          });
+        }
+      }
 
       const text = entry.activeTurnState.accumulator.assistantText.trim();
       if (text.length > 0) {
@@ -648,7 +729,19 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       this.emit("event", { type: AgentEventType.Ended, threadId: entry.threadId } satisfies AgentEvent);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      logger.error("Cursor ACP prompt failed", { threadId: entry.threadId, error: errMsg });
+      const stderrTail =
+        cursorCfg.verboseFailureLogs && entry.stderrTailLines.length > 0
+          ? entry.stderrTailLines.slice(-16)
+          : undefined;
+      logger.error("Cursor ACP prompt failed", {
+        threadId: entry.threadId,
+        stickyHeavyCommitted: entry.stickyHeavyInstructionsSent,
+        promptOrdinal: entry.cursorPromptOrdinal,
+        acpSessionId: entry.acpSessionId,
+        verboseFailureLogs: cursorCfg.verboseFailureLogs,
+        stderrTail,
+        error: errMsg,
+      });
       this.emit("event", {
         type: AgentEventType.Error,
         threadId: entry.threadId,
@@ -693,9 +786,11 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
   }
 
   private evictIdleSessions(): void {
+    const settings = this.settingsService.get();
+    const ttlMs = settings.provider.cursor.idleSessionTtlMinutes * 60 * 1000;
     const now = Date.now();
     for (const [id, entry] of this.sessions) {
-      if (now - entry.lastUsedAt <= IDLE_TTL_MS) continue;
+      if (now - entry.lastUsedAt <= ttlMs) continue;
       if (this.sessionHasPendingPermissions(id)) continue;
       void this.teardownSessionEntry(id, entry, true);
       this.sessions.delete(id);

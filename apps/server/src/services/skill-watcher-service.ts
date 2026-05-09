@@ -33,9 +33,21 @@ export class SkillWatcherService {
   // otherwise leave `watchers.length === 0`, defeating the idempotency guard.
   private started = false;
 
+  /** Fires after SkillService.invalidate() inside the debounced watcher (optional). */
+  private debouncedListener?: () => void;
+
   constructor(
     @inject(SkillService) private readonly skills: SkillService,
   ) {}
+
+  /**
+   * Registers a callback invoked once per debounced filesystem burst after the
+   * skill catalogue cache resets. Providers (e.g. Cursor ACP sticky prompts)
+   * use this to reshuffle deterministic instruction hashing.
+   */
+  registerDebouncedInvalidateListener(listener: () => void): void {
+    this.debouncedListener = listener;
+  }
 
   /**
    * Begin watching skill and plugin roots across all supported providers.
@@ -177,6 +189,7 @@ export class SkillWatcherService {
       clearTimeout(this.timer);
       this.timer = null;
     }
+    this.debouncedListener = undefined;
     this.started = false;
   }
 
@@ -213,6 +226,14 @@ export class SkillWatcherService {
       try {
         this.skills.invalidate();
         broadcast("skills.changed", {});
+        try {
+          this.debouncedListener?.();
+        } catch (listenerErr) {
+          logger.debug("SkillWatcherService: debounced listener failed", {
+            dir,
+            message: listenerErr instanceof Error ? listenerErr.message : String(listenerErr),
+          });
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         logger.debug("SkillWatcherService: invalidate/broadcast failed", {
