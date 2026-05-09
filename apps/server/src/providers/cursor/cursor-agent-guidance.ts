@@ -35,13 +35,6 @@ export function mergeCursorWorkspaceAgentMarkdown(cwd: string): string | undefin
   return chunks.join("\n\n---\n\n");
 }
 
-/**
- * Builds layered agent instructions for Cursor: global user rules (`~/.cursor/AGENTS.md`),
- * then workspace {@link mergeCursorWorkspaceAgentMarkdown}.
- *
- * @param cwd - Session working directory (composer branch or worktree root).
- * @returns Combined Markdown or `undefined` when no files are readable.
- */
 const MAX_AGENT_GUIDANCE_CHARS = 48_000;
 const MAX_SKILL_COMMAND_ROWS = 200;
 const PER_SKILL_DESC_CHARS = 400;
@@ -53,6 +46,13 @@ function capAgentMarkdown(markdown: string): string {
   return `${markdown.slice(0, MAX_AGENT_GUIDANCE_CHARS)}\n\n[AGENTS.md excerpt truncated (${dropped} characters dropped)]`;
 }
 
+/**
+ * Builds layered agent instructions for Cursor: global user rules (`~/.cursor/AGENTS.md`),
+ * then workspace {@link mergeCursorWorkspaceAgentMarkdown}.
+ *
+ * @param cwd - Session working directory (composer branch or worktree root).
+ * @returns Combined Markdown or `undefined` when no files are readable.
+ */
 export function buildCursorAgentGuidanceMarkdown(cwd: string): string | undefined {
   const chunks: string[] = [];
   const user = readOptionalMarkdownFile(join(homedir(), ".cursor", "AGENTS.md"));

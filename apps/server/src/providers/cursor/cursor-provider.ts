@@ -373,10 +373,13 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     const connection = entry.connection;
 
     child.stderr?.on("data", (chunk: Buffer) => {
+      const verboseLogs = this.settingsService.get().provider.cursor.verboseFailureLogs;
       for (const line of chunk.toString().split("\n")) {
         const trimmed = line.trim();
         if (trimmed) {
-          logger.debug("cursor-agent acp stderr", { threadId, line: trimmed });
+          if (verboseLogs) {
+            logger.debug("cursor-agent acp stderr", { threadId, line: trimmed });
+          }
           const tail = entry.stderrTailLines;
           tail.push(trimmed.slice(0, 2000));
           while (tail.length > CURSOR_STDERR_TAIL_MAX) tail.shift();
@@ -657,10 +660,11 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
   ): Promise<void> {
     const { message, model, resume, attachments } = opts;
     const cursorCfg = this.settingsService.get().provider.cursor;
-    entry.activeTurnState = createCursorAcpTurnState();
     try {
       await this.openLogicalSession(entry, resume);
       await this.applyModel(entry, model);
+
+      entry.stderrTailLines.length = 0;
 
       entry.cursorPromptOrdinal += 1;
       if (
@@ -705,6 +709,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       for (;;) {
         try {
           attempt += 1;
+          entry.activeTurnState = createCursorAcpTurnState();
           promptResponse = await entry.connection.prompt({
             sessionId: entry.acpSessionId,
             prompt: blocks,
@@ -812,6 +817,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     const ttlMs = settings.provider.cursor.idleSessionTtlMinutes * 60 * 1000;
     const now = Date.now();
     for (const [id, entry] of this.sessions) {
+      if (entry.activeTurnState) continue;
       if (now - entry.lastUsedAt <= ttlMs) continue;
       if (this.sessionHasPendingPermissions(id)) continue;
       void this.teardownSessionEntry(id, entry, true);
