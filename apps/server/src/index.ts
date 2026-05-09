@@ -51,6 +51,7 @@ import { WebSocket } from "ws";
 import { resolveGracePeriodMs } from "./grace-period-ms";
 import { AgentEventType } from "@mcode/contracts";
 import type { AgentEvent } from "@mcode/contracts";
+import { normalizeAgentProviderError } from "./services/provider-agent-error-normalize.js";
 import type Database from "better-sqlite3";
 import type { JobObject } from "./services/job-object.js";
 
@@ -330,6 +331,18 @@ for (const provider of providerRegistry.resolveAll()) {
       if (parentId) {
         enrichedEvent = { ...event, parentToolCallId: parentId };
       }
+    }
+
+    if (event.type === AgentEventType.Error) {
+      const threadMeta = threadRepo.findById(event.threadId);
+      const providerForThread =
+        typeof threadMeta?.provider === "string" && threadMeta.provider.length > 0
+          ? threadMeta.provider
+          : "claude";
+      enrichedEvent = {
+        ...event,
+        error: normalizeAgentProviderError(providerForThread, event.error ?? ""),
+      };
     }
 
     broadcast("agent.event", enrichedEvent);
