@@ -42,6 +42,11 @@ interface PreviewSession {
   idleTimer: NodeJS.Timeout | null;
   /** Last shell-reported bounds so navigate can attach the view before the next sync tick. */
   lastBounds: Bounds | null;
+  /**
+   * Last loaded http(s) URL before the view was torn down. New BrowserViews start blank;
+   * sync restores this so closing and reopening the preview panel keeps the page.
+   */
+  resumePreviewUrl: string | null;
   /** Key from the last insertCSS call; cleared when the guest navigates or the view is destroyed. */
   scrollbarCssKey: string | null;
   /** Drag-marquee or element-pick overlay; sits above the BrowserView while capturing input. */
@@ -62,6 +67,7 @@ function getSession(win: BrowserWindow): PreviewSession {
       view: null,
       idleTimer: null,
       lastBounds: null,
+      resumePreviewUrl: null,
       scrollbarCssKey: null,
       selectionOverlay: null,
       overlayPending: null,
@@ -807,6 +813,10 @@ function parkPreview(win: BrowserWindow, s: PreviewSession): void {
     try {
       if (!s.view.webContents.isDestroyed()) {
         void removeEpPickHighlighter(s.view.webContents);
+        const parked = s.view.webContents.getURL();
+        if (isAllowedHttpUrl(parked)) {
+          s.resumePreviewUrl = parked;
+        }
       }
       detachViewListeners(s.view);
       s.view.webContents.close();
@@ -855,8 +865,12 @@ function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
 
   const forwardNav = () => {
     if (win.isDestroyed() || view.webContents.isDestroyed()) return;
+    const url = view.webContents.getURL();
+    if (isAllowedHttpUrl(url)) {
+      s.resumePreviewUrl = url;
+    }
     win.webContents.send("preview:did-navigate", {
-      url: view.webContents.getURL(),
+      url,
       title: view.webContents.getTitle(),
     });
   };
@@ -917,6 +931,15 @@ function isAllowedHttpUrl(url: string): boolean {
   }
 }
 
+/** True when the guest has no real document loaded yet (fresh view or error). */
+function guestUrlNeedsHttpRestore(url: string): boolean {
+  if (url.length === 0) return true;
+  if (url === "about:blank") return true;
+  if (url.startsWith("about:")) return true;
+  if (url.startsWith("chrome-error:")) return true;
+  return false;
+}
+
 /** Registers ipcMain handlers for `preview:*` channels (call once at startup). */
 export function registerPreviewBrowserHandlers(): void {
   session.fromPartition("persist:mcode-preview").setPermissionRequestHandler((_wc, _permission, callback) => {
@@ -941,6 +964,17 @@ export function registerPreviewBrowserHandlers(): void {
       view.setBounds(s.lastBounds);
       if (win.getBrowserView() !== view) {
         win.setBrowserView(view);
+      }
+      const wc = view.webContents;
+      if (!wc.isDestroyed()) {
+        const current = wc.getURL();
+        if (
+          guestUrlNeedsHttpRestore(current) &&
+          s.resumePreviewUrl &&
+          isAllowedHttpUrl(s.resumePreviewUrl)
+        ) {
+          void wc.loadURL(s.resumePreviewUrl);
+        }
       }
       resetIdle(win, s);
     },
@@ -974,6 +1008,7 @@ export function registerPreviewBrowserHandlers(): void {
         win.setBrowserView(view);
       }
       void view.webContents.loadURL(target);
+      s.resumePreviewUrl = target;
       resetIdle(win, s);
       return { ok: true };
     },
