@@ -114,6 +114,15 @@ interface ThreadState {
   answeredPlanMessageIdsByThread: Record<string, Set<string>>;
   /** Pending and recently-settled permission requests per thread. */
   permissionsByThread: Record<string, StoredPermission[]>;
+  /**
+   * After `agent.stop`, each thread ID is marked until `turn.persisted` arrives for that
+   * thread, so we can show a one-shot file-change notice without colliding across threads.
+   */
+  awaitingUserStopPersistByThread: Record<string, true>;
+  /** Dismissible notice per thread: stop interrupted a turn that produced workspace file changes. */
+  interruptStopFileNoticeByThread: Record<string, { paths: string[] }>;
+  /** Pre-fill the composer with the last user prompt after Stop, keyed by thread (consumed by Composer). */
+  composerRecallFromStopByThread: Record<string, { text: string }>;
 
   /** Store tool call records in the cache. */
   cacheToolCallRecords: (key: string, records: ToolCallRecord[]) => void;
@@ -157,6 +166,10 @@ interface ThreadState {
 
   /** Handle server-side tool call persistence confirmation. */
   handleTurnPersisted: (payload: { threadId: string; messageId: string; toolCallCount: number; filesChanged: string[] }) => void;
+  /** Clear the interrupt file-notice banner for one thread (user dismissed). */
+  clearInterruptStopFileNotice: (threadId: string) => void;
+  /** Clears composer recall state for one thread after the Composer applies it. */
+  clearComposerRecallFromStop: (threadId: string) => void;
 
   // Per-thread settings
   /** Return current settings for a thread, preferring in-memory overrides over DB-persisted values. */
@@ -337,6 +350,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   planQuestionsStatusByThread: {},
   answeredPlanMessageIdsByThread: {},
   permissionsByThread: {},
+  awaitingUserStopPersistByThread: {},
+  interruptStopFileNoticeByThread: {},
+  composerRecallFromStopByThread: {},
 
   cacheToolCallRecords: (key, records) => {
     get().toolCallRecordCache.set(key, records);
@@ -837,12 +853,35 @@ export const useThreadStore = create<ThreadState>((set, get) => {
 
   /** Request the agent to stop on a thread. Always marks the thread as not running, even on error. */
   stopAgent: async (threadId) => {
+    let stopSucceeded = false;
+    set((state) => ({
+      awaitingUserStopPersistByThread: { ...state.awaitingUserStopPersistByThread, [threadId]: true },
+    }));
     try {
       await getTransport().stopAgent(threadId);
+      stopSucceeded = true;
     } catch (e) {
-      set((state) => ({ errorByThread: { ...state.errorByThread, [threadId]: String(e) } }));
+      set((state) => {
+        const nextAwaiting = { ...state.awaitingUserStopPersistByThread };
+        delete nextAwaiting[threadId];
+        return {
+          errorByThread: { ...state.errorByThread, [threadId]: String(e) },
+          awaitingUserStopPersistByThread: nextAwaiting,
+        };
+      });
     }
-    // Always mark as stopped, even on error
+
+    const snap = get();
+    let lastUserText: string | null = null;
+    if (snap.currentThreadId === threadId) {
+      for (let i = snap.messages.length - 1; i >= 0; i--) {
+        if (snap.messages[i].role === "user") {
+          lastUserText = snap.messages[i].content;
+          break;
+        }
+      }
+    }
+
     set((state) => {
       const next = new Set(state.runningThreadIds);
       next.delete(threadId);
@@ -850,10 +889,15 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       delete nextRateLimit[threadId];
       const nextApiRetry = { ...state.apiRetryByThread };
       delete nextApiRetry[threadId];
+      const nextRecall =
+        stopSucceeded && lastUserText !== null && state.currentThreadId === threadId
+          ? { ...state.composerRecallFromStopByThread, [threadId]: { text: lastUserText } }
+          : state.composerRecallFromStopByThread;
       return {
         runningThreadIds: next,
         rateLimitByThread: nextRateLimit,
         apiRetryByThread: nextApiRetry,
+        composerRecallFromStopByThread: nextRecall,
       };
     });
   },
@@ -1075,6 +1119,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         usageByProvider: Object.fromEntries(
           Object.entries(state.usageByProvider).filter(([k]) => !k.startsWith(`${threadId}:`)),
         ),
+        awaitingUserStopPersistByThread: omitKey(state.awaitingUserStopPersistByThread, threadId),
+        interruptStopFileNoticeByThread: omitKey(state.interruptStopFileNoticeByThread, threadId),
+        composerRecallFromStopByThread: omitKey(state.composerRecallFromStopByThread, threadId),
         // Clear message-keyed globals only when deleting the currently loaded thread.
         // For background threads, message-keyed maps (persistedToolCallCounts, etc.)
         // belong to the active thread's messages and must not be touched.
@@ -1157,6 +1204,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         usageByProvider: Object.fromEntries(
           Object.entries(state.usageByProvider).filter(([k]) => !threadIds.some((tid) => k.startsWith(`${tid}:`))),
         ),
+        awaitingUserStopPersistByThread: pruneAll(state.awaitingUserStopPersistByThread),
+        interruptStopFileNoticeByThread: pruneAll(state.interruptStopFileNoticeByThread),
+        composerRecallFromStopByThread: pruneAll(state.composerRecallFromStopByThread),
         ...(deletingCurrentThread
           ? {
               currentThreadId: null,
@@ -1466,6 +1516,54 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           // with no ordering guarantee. Skip if already in messages to prevent
           // duplicates when both channels deliver the same message.
           if (state.messages.some((m) => m.id === message.id)) return trackTurn;
+          const last = state.messages[state.messages.length - 1];
+          if (
+            last?.role === "assistant" &&
+            last.content === content &&
+            last.id !== message.id
+          ) {
+            const previousId = last.id;
+            const nextPersistedToolCallCounts = { ...state.persistedToolCallCounts };
+            if (previousId in nextPersistedToolCallCounts) {
+              const tc = nextPersistedToolCallCounts[previousId];
+              nextPersistedToolCallCounts[message.id] = tc;
+              delete nextPersistedToolCallCounts[previousId];
+            }
+
+            const nextPersistedFilesChanged = { ...state.persistedFilesChanged };
+            if (previousId in nextPersistedFilesChanged) {
+              const fc = nextPersistedFilesChanged[previousId];
+              nextPersistedFilesChanged[message.id] = fc;
+              delete nextPersistedFilesChanged[previousId];
+            }
+
+            const nextServerMessageIds = { ...state.serverMessageIds };
+            if (previousId in nextServerMessageIds) {
+              const sid = nextServerMessageIds[previousId];
+              nextServerMessageIds[message.id] = sid;
+              delete nextServerMessageIds[previousId];
+            }
+
+            const replaced = state.messages.slice(0, -1).concat({
+              ...last,
+              id: message.id,
+              tokens_used: message.tokens_used,
+              timestamp: message.timestamp,
+            });
+            const { messages: capped, evicted } = capMessages(replaced);
+            return {
+              messages: capped,
+              persistedToolCallCounts: nextPersistedToolCallCounts,
+              persistedFilesChanged: nextPersistedFilesChanged,
+              serverMessageIds: nextServerMessageIds,
+              latestTurnWithChanges:
+                state.latestTurnWithChanges === previousId ? message.id : state.latestTurnWithChanges,
+              ...(evicted && state.currentThreadId
+                ? { hasMoreMessages: { ...state.hasMoreMessages, [state.currentThreadId]: true } }
+                : {}),
+              ...trackTurn,
+            };
+          }
           const { messages: capped, evicted } = capMessages([...state.messages, message]);
           return {
             messages: capped,
@@ -2099,10 +2197,31 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     }
   },
 
+  clearInterruptStopFileNotice: (threadId) => {
+    set((state) => ({
+      interruptStopFileNoticeByThread: omitKey(state.interruptStopFileNoticeByThread, threadId),
+    }));
+  },
+
+  clearComposerRecallFromStop: (threadId) => {
+    set((state) => ({
+      composerRecallFromStopByThread: omitKey(state.composerRecallFromStopByThread, threadId),
+    }));
+  },
+
   handleTurnPersisted: (payload) => {
     evictMessageCache(payload.threadId);
 
     set((state) => {
+      const nextAwaiting = { ...state.awaitingUserStopPersistByThread };
+      const nextNotice = { ...state.interruptStopFileNoticeByThread };
+      if (nextAwaiting[payload.threadId]) {
+        delete nextAwaiting[payload.threadId];
+        if (payload.filesChanged.length > 0) {
+          nextNotice[payload.threadId] = { paths: payload.filesChanged };
+        }
+      }
+
       // Clear in-memory tool calls now that the DB-backed summary takes over
       const nextToolCalls = { ...state.toolCallsByThread };
       delete nextToolCalls[payload.threadId];
@@ -2150,6 +2269,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           [localMsgId]: payload.messageId,
         },
         currentTurnMessageIdByThread: nextTurnMsgIds,
+        interruptStopFileNoticeByThread: nextNotice,
+        awaitingUserStopPersistByThread: nextAwaiting,
       };
     });
 
