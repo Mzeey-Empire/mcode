@@ -36,6 +36,7 @@ export function getMaxSizeForMime(mimeType: string): number {
   if (mimeType === "text/plain") return MAX_TEXT_SIZE;
   if (
     mimeType === "application/rtf" ||
+    mimeType === "text/rtf" ||
     mimeType.startsWith("application/vnd.openxmlformats-officedocument.") ||
     mimeType.startsWith("application/vnd.oasis.opendocument.")
   ) {
@@ -53,6 +54,7 @@ function mimeToExt(mimeType: string): string {
     "application/pdf": ".pdf",
     "text/plain": ".txt",
     "application/rtf": ".rtf",
+    "text/rtf": ".rtf",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
     "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",

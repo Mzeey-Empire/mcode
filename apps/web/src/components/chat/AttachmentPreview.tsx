@@ -34,7 +34,8 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
         const isOfficeDoc =
           att.mimeType.includes("officedocument") ||
           att.mimeType.includes("opendocument") ||
-          att.mimeType === "application/rtf";
+          att.mimeType === "application/rtf" ||
+          att.mimeType === "text/rtf";
 
         return (
           <div

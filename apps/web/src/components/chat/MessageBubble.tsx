@@ -71,7 +71,8 @@ function FileAttachmentGlyph({ mimeType }: { mimeType: string }) {
   const isOfficeDoc =
     mimeType.includes("officedocument") ||
     mimeType.includes("opendocument") ||
-    mimeType === "application/rtf";
+    mimeType === "application/rtf" ||
+    mimeType === "text/rtf";
   if (mimeType === "application/pdf") {
     return <FileText size={16} className="shrink-0 text-red-600 dark:text-red-400" aria-hidden />;
   }
