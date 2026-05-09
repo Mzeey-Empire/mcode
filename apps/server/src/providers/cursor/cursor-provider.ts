@@ -106,6 +106,8 @@ interface CursorAcpSessionEntry {
   cursorPromptOrdinal: number;
   /** Recent stderr snippets for diagnosing opaque CLI failures. */
   stderrTailLines: string[];
+  /** Last stable `modelId` handshake for this MCP session (`acpSessionId` rotation forces re-apply). */
+  cursorModelAppliedPair: { acpSessionId: string; modelId: string } | null;
 }
 
 @injectable()
@@ -360,6 +362,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       stickyHeavyInstructionsSent: false,
       cursorPromptOrdinal: 0,
       stderrTailLines: [],
+      cursorModelAppliedPair: null,
     };
 
     entry.connection = new ClientSideConnection(
@@ -618,17 +621,29 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
   private async applyModel(entry: CursorAcpSessionEntry, model: string): Promise<void> {
     const trimmed = model.trim();
     if (!trimmed || !entry.acpSessionId) return;
-    await entry.connection
-      .unstable_setSessionModel({
+
+    const paired = entry.cursorModelAppliedPair;
+    if (
+      paired &&
+      paired.acpSessionId === entry.acpSessionId &&
+      paired.modelId === trimmed
+    ) {
+      return;
+    }
+
+    try {
+      await entry.connection.unstable_setSessionModel({
         sessionId: entry.acpSessionId,
         modelId: trimmed,
-      })
-      .catch((err: unknown) => {
-        logger.debug("Cursor ACP setSessionModel noop", {
-          threadId: entry.threadId,
-          error: String(err),
-        });
       });
+      entry.cursorModelAppliedPair = { acpSessionId: entry.acpSessionId, modelId: trimmed };
+    } catch (err: unknown) {
+      entry.cursorModelAppliedPair = null;
+      logger.debug("Cursor ACP setSessionModel noop", {
+        threadId: entry.threadId,
+        error: String(err),
+      });
+    }
   }
 
   private async runTurn(
