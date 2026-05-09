@@ -99,8 +99,8 @@ const SELECTOR_HINT_MAX_LEN = 512;
  * Excerpt cloning strips active content and form state so hostile or instrumented pages leak less into prompts.
  */
 function buildHitTestJs(x: number, y: number): string {
-  const xi = Math.max(0, Math.floor(x));
-  const yi = Math.max(0, Math.floor(y));
+  const xi = Math.max(0, Math.round(x));
+  const yi = Math.max(0, Math.round(y));
   return `(function () {
   var x = ${xi}, y = ${yi};
   var REMOVE_TAGS = { SCRIPT:1, IFRAME:1, OBJECT:1, EMBED:1, LINK:1, NOSCRIPT:1, FRAME:1, META:1, BASE:1 };
@@ -219,13 +219,91 @@ function buildHitTestJs(x: number, y: number): string {
     if (hint && hint.length > 400) hint = hint.slice(0, 400);
     return hint;
   }
+  function pointInRect(px, py, r) {
+    return px >= r.left && px <= r.right && py >= r.top && py <= r.bottom;
+  }
+  function isHugeRect(r) {
+    var vw = window.innerWidth || 0, vh = window.innerHeight || 0;
+    if (vw < 1 || vh < 1) return false;
+    return (r.width * r.height) >= (vw * vh * 0.92);
+  }
+  function isInteractive(el) {
+    var tag = (el.tagName || "").toLowerCase();
+    if (tag === "a" || tag === "button" || tag === "input" || tag === "select" || tag === "textarea" || tag === "label" || tag === "summary" || tag === "option") {
+      return true;
+    }
+    var role = el.getAttribute && el.getAttribute("role");
+    if (!role) return false;
+    role = role.toLowerCase();
+    return role === "button" || role === "link" || role === "tab" || role === "menuitem" || role === "option" || role === "checkbox" || role === "radio" || role === "switch";
+  }
+  function pickElementAt(px, py) {
+    var list;
+    try {
+      list = document.elementsFromPoint(px, py);
+    } catch (ept) {
+      list = [];
+    }
+    if (!list || !list.length) {
+      try {
+        return document.elementFromPoint(px, py);
+      } catch (ept2) {
+        return null;
+      }
+    }
+    var docEl = document.documentElement;
+    var body = document.body;
+    var candidates = [];
+    var maxScan = Math.min(list.length, 16);
+    for (var i = 0; i < maxScan; i++) {
+      var c = list[i];
+      if (!c || c.nodeType !== 1) continue;
+      if (c === docEl || c === body) continue;
+      var r = c.getBoundingClientRect();
+      if (r.width < 0.5 || r.height < 0.5) continue;
+      if (!pointInRect(px, py, r)) continue;
+      var area = r.width * r.height;
+      var huge = isHugeRect(r);
+      candidates.push({ el: c, r: r, area: area, huge: huge, interactive: isInteractive(c), depth: i });
+    }
+    var interact = candidates.filter(function (c) { return c.interactive && !c.huge; });
+    if (!interact.length) interact = candidates.filter(function (c) { return c.interactive; });
+    if (interact.length) {
+      interact.sort(function (a, b) {
+        if (a.area !== b.area) return a.area - b.area;
+        return a.depth - b.depth;
+      });
+      return interact[0].el;
+    }
+    var normals = candidates.filter(function (c) { return !c.huge; });
+    if (normals.length) {
+      normals.sort(function (a, b) { return a.area - b.area; });
+      return normals[0].el;
+    }
+    if (candidates.length) return candidates[candidates.length - 1].el;
+    try {
+      return document.elementFromPoint(px, py);
+    } catch (ept3) {
+      return null;
+    }
+  }
+  function roundBounds(r) {
+    var x0 = Math.round(r.x);
+    var y0 = Math.round(r.y);
+    var w0 = Math.max(1, Math.round(r.width));
+    var h0 = Math.max(1, Math.round(r.height));
+    return { x: x0, y: y0, width: w0, height: h0 };
+  }
   try {
     var doc = document;
-    var el = doc.elementFromPoint(x, y);
-    if (!el || el === doc.documentElement) {
+    var px = Math.max(0, Math.min(x, (window.innerWidth || 0) - 0.001));
+    var py = Math.max(0, Math.min(y, (window.innerHeight || 0) - 0.001));
+    var el = pickElementAt(px, py);
+    if (!el || el === doc.documentElement || el === doc.body) {
       return JSON.stringify({ ok: false, code: "no-hit" });
     }
     var r = el.getBoundingClientRect();
+    var rb = roundBounds(r);
     var selectorHint = selectorHintFor(el);
     var htmlExcerpt = null;
     if (typeof HTMLInputElement !== "undefined" && el instanceof HTMLInputElement && el.type === "password") {
@@ -246,7 +324,7 @@ function buildHitTestJs(x: number, y: number): string {
     }
     return JSON.stringify({
       ok: true,
-      bounds: { x: r.x, y: r.y, width: r.width, height: r.height },
+      bounds: rb,
       selectorHint: selectorHint,
       htmlExcerpt: htmlExcerpt
     });
@@ -325,8 +403,10 @@ async function runElementHitTest(
   y: number,
 ): Promise<HitTestResult | null> {
   if (webContents.isDestroyed()) return null;
+  const rx = Math.round(x);
+  const ry = Math.round(y);
   try {
-    const raw: unknown = await webContents.executeJavaScript(buildHitTestJs(x, y), true);
+    const raw: unknown = await webContents.executeJavaScript(buildHitTestJs(rx, ry), true);
     const text = typeof raw === "string" ? raw : JSON.stringify(raw);
     const parsed: unknown = JSON.parse(text);
     return parseHitTestPayload(parsed);
@@ -463,21 +543,62 @@ const ELEMENT_OVERLAY_DATA_URL =
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;}
 #layer{position:fixed;inset:0;background:rgba(15,23,42,.22);cursor:crosshair;touch-action:none;}
 #box{position:fixed;border:2px solid #22d3ee;box-sizing:border-box;pointer-events:none;display:none;box-shadow:0 0 0 1px rgba(0,0,0,.35) inset;}
-</style></head><body><div id="layer"></div><div id="box"></div>
+#hint{position:fixed;pointer-events:none;display:none;z-index:3;font:11px/1.35 ui-sans-serif,system-ui,sans-serif;color:#e2e8f0;background:rgba(15,23,42,.94);border:1px solid #22d3ee;border-radius:4px;padding:5px 8px;box-shadow:0 2px 10px rgba(0,0,0,.35);word-break:break-all;max-width:min(440px,calc(100vw - 12px));}
+</style></head><body><div id="layer"></div><div id="box"></div><div id="hint" aria-live="polite"></div>
 <script>
 const { ipcRenderer } = require("electron");
 const layer = document.getElementById("layer");
 const box = document.getElementById("box");
+const hintEl = document.getElementById("hint");
 let hoverSeq = 0;
 let rafHover = 0;
 let hx = 0, hy = 0;
-function showBox(b) {
-  if (!b || b.width < 1 || b.height < 1) { box.style.display = "none"; return; }
-  box.style.left = b.x + "px";
-  box.style.top = b.y + "px";
-  box.style.width = b.width + "px";
-  box.style.height = b.height + "px";
+function layoutHint(rx, ry, rw, rh) {
+  const pad = 6;
+  const gap = 6;
+  hintEl.style.left = rx + "px";
+  const est = 22;
+  let below = ry + rh + gap;
+  if (below + est > window.innerHeight - pad && ry > est + gap) {
+    hintEl.style.top = Math.round(ry - est - gap) + "px";
+  } else {
+    hintEl.style.top = Math.round(below) + "px";
+  }
+  requestAnimationFrame(function () {
+    const h = hintEl.offsetHeight || est;
+    below = ry + rh + gap;
+    if (below + h > window.innerHeight - pad && ry > h + gap) {
+      hintEl.style.top = Math.round(ry - h - gap) + "px";
+    } else {
+      hintEl.style.top = Math.round(below) + "px";
+    }
+  });
+}
+function showBox(b, labelText) {
+  if (!b || b.width < 1 || b.height < 1) {
+    box.style.display = "none";
+    hintEl.style.display = "none";
+    hintEl.textContent = "";
+    return;
+  }
+  const rx = Math.round(b.x);
+  const ry = Math.round(b.y);
+  const rw = Math.max(1, Math.round(b.width));
+  const rh = Math.max(1, Math.round(b.height));
+  box.style.left = rx + "px";
+  box.style.top = ry + "px";
+  box.style.width = rw + "px";
+  box.style.height = rh + "px";
   box.style.display = "block";
+  const text = labelText != null ? String(labelText).trim() : "";
+  if (!text) {
+    hintEl.style.display = "none";
+    hintEl.textContent = "";
+    return;
+  }
+  hintEl.textContent = text;
+  hintEl.style.display = "block";
+  layoutHint(rx, ry, rw, rh);
 }
 function scheduleHover() {
   if (rafHover) return;
@@ -488,9 +609,9 @@ function scheduleHover() {
     try {
       const res = await ipcRenderer.invoke("preview:element-pick-hover", { x, y });
       if (seq !== hoverSeq) return;
-      if (res && res.ok && res.bounds) showBox(res.bounds);
-      else showBox(null);
-    } catch (_e) { if (seq === hoverSeq) showBox(null); }
+      if (res && res.ok && res.bounds) showBox(res.bounds, res.label);
+      else showBox(null, "");
+    } catch (_e) { if (seq === hoverSeq) showBox(null, ""); }
   });
 }
 function pt(ev) {
@@ -504,7 +625,7 @@ function ptEnd(ev) {
   return pt(ev);
 }
 layer.addEventListener("mousemove", (ev) => { hx = ev.clientX; hy = ev.clientY; scheduleHover(); });
-layer.addEventListener("mouseleave", () => { hoverSeq++; showBox(null); });
+layer.addEventListener("mouseleave", () => { hoverSeq++; showBox(null, ""); });
 layer.addEventListener("click", async (ev) => {
   ev.preventDefault();
   try { await ipcRenderer.invoke("preview:element-pick-commit", pt(ev)); } catch (_e) {}
@@ -918,7 +1039,10 @@ export function registerPreviewBrowserHandlers(): void {
 
   ipcMain.handle(
     "preview:element-pick-hover",
-    async (event, pt: { x: unknown; y: unknown }): Promise<{ ok: true; bounds: Bounds } | { ok: false }> => {
+    async (
+      event,
+      pt: { x: unknown; y: unknown },
+    ): Promise<{ ok: true; bounds: Bounds; label: string } | { ok: false }> => {
       const overlayWin = BrowserWindow.fromWebContents(event.sender);
       const parentWin = overlayWin?.getParentWindow();
       if (!overlayWin || overlayWin.isDestroyed() || !parentWin || parentWin.isDestroyed()) {
@@ -935,7 +1059,8 @@ export function registerPreviewBrowserHandlers(): void {
 
       const hit = await runElementHitTest(s.view.webContents, x, y);
       if (!hit || !hit.ok) return { ok: false };
-      return { ok: true, bounds: hit.bounds };
+      const label = hit.selectorHint && hit.selectorHint.length > 0 ? hit.selectorHint : "Element";
+      return { ok: true, bounds: hit.bounds, label };
     },
   );
 
