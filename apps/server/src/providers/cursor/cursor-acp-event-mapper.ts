@@ -299,7 +299,6 @@ function mapAcpToolCallStarted(
   // data arrives via ext methods. Suppress these lifecycle markers.
   const acpToolName = rawInputRecord?._toolName;
   if (typeof acpToolName === "string") {
-    acc.toolStartTimes.set(update.toolCallId, Date.now());
     state.suppressedToolCallIds.add(update.toolCallId);
     return [];
   }
@@ -342,7 +341,6 @@ function mapAcpToolCallStarted(
     toolInput = normalizeMcodeCursorToolInput(toolName, toolInput);
   }
 
-  acc.toolStartTimes.set(update.toolCallId, Date.now());
   state.toolNameByCallId.set(update.toolCallId, toolName);
 
   // ACP tool_calls with empty rawInput are lifecycle markers; actual data
@@ -351,6 +349,10 @@ function mapAcpToolCallStarted(
   if (Object.keys(toolInput).length === 0) {
     return [];
   }
+
+  // Align with {@link CursorStreamAccumulator}: only set once a ToolUse is emitted
+  // so `tool_call_update` can orphan-synthesize a card like stream-json completions.
+  acc.toolStartTimes.set(update.toolCallId, Date.now());
 
   return [
     {

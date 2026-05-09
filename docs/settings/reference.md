@@ -27,5 +27,12 @@ Per-setting reference for Mcode's `settings.json`. For schema conventions and st
 | `server.memory.heapMb` | integer | `512` | 64-8192 | `MCODE_SERVER_HEAP_MB` | V8 max old space for the server process (MB) |
 | `provider.cli.codex` | string | `""` | - | - | Path to the Codex CLI binary. When empty, mcode looks for `codex` on the system PATH. |
 | `provider.cli.claude` | string | `""` | - | - | Path to the Claude Code CLI binary. When empty, mcode looks for `claude` on the system PATH. |
+| `provider.cursor.alwaysSendFullInstructions` | boolean | `false` | - | - | When true, Cursor ACP sends full stitched workspace guidance and the skill catalogue on every turn instead of sticky shortening (largest prompts). |
+| `provider.cursor.fullPreambleEveryNTurns` | integer | `12` | 0–999 | - | With sticky shortening, force a fresh full preamble every N prompts for that subprocess. `0` turns this off. |
+| `provider.cursor.idleSessionTtlMinutes` | integer | `20` | 5–240 | - | Idle minutes before tearing down an unused `cursor-agent` subprocess. |
+| `provider.cursor.retryTransientFailuresOnce` | boolean | `true` | - | - | Retry `session/prompt` once when the failure looks like a transient CLI or HTTP transport flake. |
+| `provider.cursor.verboseFailureLogs` | boolean | `true` | - | - | On Cursor prompt failure, append recent stderr lines to structured logs when available. |
+| `provider.cursor.autoAnswerAskQuestions` | boolean | `true` | - | - | For blocking `cursor/ask_question`, auto-select recommended or first selectable options. When false, answer as skipped only. |
+| `provider.cursor.echoAskQuestionsToTimeline` | boolean | `false` | - | - | When auto answers run, emit a short synthetic system subtype on the timeline. Server logs always record resolutions. |
 | `prDraft.provider` | string | `""` | `""` \| `"claude"` \| `"codex"` \| `"gemini"` \| `"copilot"` | - | AI provider for PR draft generation. Empty string inherits from `model.defaults.provider`. |
 | `prDraft.model` | string | `""` | - | - | Model for AI PR draft generation. Empty string uses a provider-appropriate default (`claude-haiku-4-5-20251001` for Claude, `gpt-5.1-codex-mini` for Codex). |

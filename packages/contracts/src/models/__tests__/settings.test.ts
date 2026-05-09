@@ -17,3 +17,33 @@ describe("settings.provider.enabled", () => {
     expect(parsed.provider?.enabled?.codex).toBe(false);
   });
 });
+
+describe("settings.provider.cursor", () => {
+  it("fills Cursor ACP tuning defaults", () => {
+    const s = getDefaultSettings();
+    expect(s.provider.cursor).toEqual({
+      alwaysSendFullInstructions: false,
+      fullPreambleEveryNTurns: 12,
+      idleSessionTtlMinutes: 20,
+      retryTransientFailuresOnce: true,
+      verboseFailureLogs: true,
+      autoAnswerAskQuestions: true,
+      echoAskQuestionsToTimeline: false,
+    });
+  });
+
+  it("accepts PartialSettings overrides for Cursor ACP knobs", () => {
+    const parsed = PartialSettingsSchema().parse({
+      provider: {
+        cursor: {
+          alwaysSendFullInstructions: true,
+          fullPreambleEveryNTurns: 0,
+          idleSessionTtlMinutes: 60,
+        },
+      },
+    });
+    expect(parsed.provider?.cursor?.alwaysSendFullInstructions).toBe(true);
+    expect(parsed.provider?.cursor?.fullPreambleEveryNTurns).toBe(0);
+    expect(parsed.provider?.cursor?.idleSessionTtlMinutes).toBe(60);
+  });
+});
