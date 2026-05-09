@@ -1,6 +1,7 @@
 import { X, FileText, File } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+/** Represents a user-selected file staged on the composer before send (preview URL may be an object URL). */
 export interface PendingAttachment {
   id: string;
   name: string;
@@ -21,6 +22,7 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** Horizontal strip of pending attachment thumbnails or file tiles with per-item remove actions. */
 export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewProps) {
   if (attachments.length === 0) return null;
 
