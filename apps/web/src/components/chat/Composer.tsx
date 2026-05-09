@@ -1320,17 +1320,24 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   }, [attachments]);
 
   const handleSend = useCallback(async () => {
-    if (!hasContent) return;
+    const trimmed = input.trim();
+    if (trimmed.length === 0 && attachments.length === 0) return;
     // Avoid duplicate submissions while a placeholder thread is still materializing.
     if (isThreadScaffold) return;
-    const trimmed = input.trim();
 
     // ---- Queue path: agent is running on this thread ----
     if (isAgentRunning && threadId) {
       const captureRows = buildAttachedBrowserCaptures(attachments);
       const { content: injectedContent, display: displayInjected } = await injectFileContent(trimmed);
-      const content =
-        captureRows.length === 0 ? injectedContent : appendBrowserCaptureFence(injectedContent, captureRows);
+      let content: string;
+      try {
+        content =
+          captureRows.length === 0 ? injectedContent : appendBrowserCaptureFence(injectedContent, captureRows);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Invalid page preview payload";
+        useToastStore.getState().show("error", "Could not send message", msg);
+        return;
+      }
       const displayContentResolved = resolveOutboundDisplayContent(trimmed, displayInjected, captureRows);
       const currentAttachments = collectAndClearAttachments();
 
@@ -1387,8 +1394,15 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     }
 
     const captureRows = buildAttachedBrowserCaptures(attachments);
-    const messageContent =
-      captureRows.length === 0 ? injectedContent : appendBrowserCaptureFence(injectedContent, captureRows);
+    let messageContent: string;
+    try {
+      messageContent =
+        captureRows.length === 0 ? injectedContent : appendBrowserCaptureFence(injectedContent, captureRows);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Invalid page preview payload";
+      useToastStore.getState().show("error", "Could not send message", msg);
+      return;
+    }
     const outboundDisplay = resolveOutboundDisplayContent(trimmed, displayInjected, captureRows);
 
     // ---- Normal send path ----
@@ -2004,6 +2018,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
 
           {/* Send / Queue / Stop button */}
           <button
+            type="button"
             onClick={
               isThreadScaffold
                 ? undefined
