@@ -1496,6 +1496,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     setPrDismissed(false);
     const currentAttachments = collectAndClearAttachments();
     if (threadId) clearDraftFromStore(threadId);
+    // Hide the reply bar with the composer reset; sendMessage still receives reply IDs from this render.
+    if (threadId) clearReply(threadId);
 
     if (isNewThread && workspaceId) {
       await useWorkspaceStore
@@ -1566,7 +1568,6 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         replyContext?.messageId,
         replyContext?.quotedText,
       );
-      if (threadId) clearReply(threadId);
     }
 
     // Auto-save last-used mode and access as defaults (model defaults are managed in Settings)
@@ -2110,6 +2111,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
                     next.replyToMessageId,
                     next.quotedText,
                   );
+                  clearReply(threadId);
                 } catch {
                   void releaseBrowserCaptureSpills(next.browserCaptureSpillPaths ?? []);
                 }
