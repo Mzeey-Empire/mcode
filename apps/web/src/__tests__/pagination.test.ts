@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import type { TurnSnapshot } from "@mcode/contracts";
 import { useThreadStore, TOOL_CALL_CACHE_SIZE } from "@/stores/threadStore";
+import { cacheSnapshot, clearMessageCache, getCachedSnapshot } from "@/stores/messageCache";
 import { LruCache } from "@/lib/lru-cache";
 import { mockTransport, createMockMessage } from "./mocks/transport";
 import type { Message } from "@/transport";
@@ -14,6 +16,7 @@ describe("Chat Pagination", () => {
   const threadId = "thread-1";
 
   beforeEach(() => {
+    clearMessageCache();
     useThreadStore.setState({
       messages: [],
       runningThreadIds: new Set(),
@@ -28,11 +31,13 @@ describe("Chat Pagination", () => {
       currentTurnMessageIdByThread: {},
       agentStartTimes: {},
       settingsByThread: {},
-      activeSubagentsByThread: {},
       oldestLoadedSequence: {},
       hasMoreMessages: {},
       isLoadingMore: {},
       loadEpochByThread: {},
+      persistedFilesChanged: {},
+      latestTurnWithChanges: null,
+      answeredPlanMessageIdsByThread: {},
     });
     vi.clearAllMocks();
   });
@@ -180,6 +185,58 @@ describe("Chat Pagination", () => {
     expect(state.messages).toHaveLength(1);
     expect(state.messages[0].id).toBe("m2");
     expect(state.isLoadingMore[threadId]).toBe(false);
+  });
+
+  it("loadOlderMessages writes async snapshot file lists into the message cache", async () => {
+    const mOldId = "m-old";
+    const initialMessages = [
+      createMockMessage({ id: "m3", thread_id: threadId, sequence: 51 }),
+    ];
+    useThreadStore.setState({
+      currentThreadId: threadId,
+      messages: initialMessages,
+      oldestLoadedSequence: { [threadId]: 51 },
+      hasMoreMessages: { [threadId]: true },
+      isLoadingMore: {},
+      persistedFilesChanged: { m3: ["kept.ts"] },
+      latestTurnWithChanges: "m3",
+    });
+    cacheSnapshot(threadId, {
+      messages: initialMessages,
+      oldestLoadedSequence: 51,
+      hasMoreMessages: true,
+      persistedToolCallCounts: {},
+      persistedFilesChanged: { m3: ["kept.ts"] },
+      latestTurnWithChanges: "m3",
+      answeredPlanMessageIds: [],
+    });
+
+    const olderMessages = [
+      createMockMessage({ id: mOldId, thread_id: threadId, sequence: 1 }),
+    ];
+    (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      messages: olderMessages,
+      hasMore: false,
+    });
+
+    const snap: TurnSnapshot = {
+      id: "snap-1",
+      message_id: mOldId,
+      thread_id: threadId,
+      ref_before: "a",
+      ref_after: "b",
+      files_changed: ["legacy.ts"],
+      worktree_path: null,
+      created_at: new Date().toISOString(),
+    };
+    (mockTransport.listSnapshots as ReturnType<typeof vi.fn>).mockResolvedValueOnce([snap]);
+
+    await useThreadStore.getState().loadOlderMessages(threadId);
+    expect(useThreadStore.getState().persistedFilesChanged[mOldId]).toEqual(["legacy.ts"]);
+
+    const cached = getCachedSnapshot(threadId);
+    expect(cached?.persistedFilesChanged[mOldId]).toEqual(["legacy.ts"]);
+    expect(cached?.persistedFilesChanged.m3).toEqual(["kept.ts"]);
   });
 
   it("loadOlderMessages resets isLoadingMore on network error", async () => {

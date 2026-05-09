@@ -3,7 +3,7 @@ import type { McodeBrowserCapture } from "@mcode/contracts";
 import { isVirtualBrowserContextAttachment } from "@mcode/contracts";
 import { cn } from "@/lib/utils";
 
-/** Pending attachment queued in the Composer before RPC upload. */
+/** Represents a user-selected file staged on the composer before send (preview URL may be an object URL). */
 export interface PendingAttachment {
   id: string;
   name: string;
@@ -48,6 +48,7 @@ function getBrowserCaptureSpillHints(capture: McodeBrowserCapture | undefined): 
   return { line, title };
 }
 
+/** Horizontal strip of pending attachment thumbnails or file tiles with per-item remove actions. */
 export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewProps) {
   if (attachments.length === 0) return null;
 
@@ -59,6 +60,11 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
         const isContextOnly =
           att.contextOnly === true || isVirtualBrowserContextAttachment(att.mimeType);
         const spill = getBrowserCaptureSpillHints(att.browserCapture);
+        const isOfficeDoc =
+          att.mimeType.includes("officedocument") ||
+          att.mimeType.includes("opendocument") ||
+          att.mimeType === "application/rtf" ||
+          att.mimeType === "text/rtf";
 
         return (
           <div
@@ -103,6 +109,8 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
                 <div className="flex items-center gap-2">
                   {isPdf ? (
                     <FileText size={18} className="shrink-0 text-red-600 dark:text-red-400" />
+                  ) : isOfficeDoc ? (
+                    <FileText size={18} className="shrink-0 text-blue-600 dark:text-blue-400" />
                   ) : (
                     <File size={18} className="shrink-0 text-muted-foreground" />
                   )}

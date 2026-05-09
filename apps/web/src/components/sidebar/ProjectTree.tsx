@@ -592,7 +592,7 @@ export function ProjectTree() {
         </Tooltip>
       </div>
 
-      <ScrollArea className="flex-1" viewportRef={scrollViewportRef}>
+      <ScrollArea className="min-h-0 flex-1" viewportRef={scrollViewportRef}>
         <div className="px-1" data-testid="thread-list">
           <DndContext
             sensors={sensors}
@@ -1192,7 +1192,7 @@ function VirtualizedThreadList({
                     )}
                   />
                 )}
-                {!thread.pr_number && status.label && (
+                {status.label && (
                   <span className={cn("shrink-0 font-mono text-[9.5px] uppercase tracking-[0.12em]", status.color)}>
                     {status.label}
                   </span>

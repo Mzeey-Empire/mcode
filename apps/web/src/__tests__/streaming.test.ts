@@ -141,7 +141,6 @@ describe("duplicate message prevention", () => {
       streamingPreviewByThread: { "thread-1": "Hello world" },
       toolCallsByThread: {},
       agentStartTimes: { "thread-1": Date.now() },
-      activeSubagentsByThread: {},
       currentThreadId: "thread-1",
     });
   });
@@ -172,6 +171,42 @@ describe("duplicate message prevention", () => {
     const messages = useThreadStore.getState().messages;
     expect(messages).toHaveLength(1);
     expect(messages[0].content).toBe("Hello world");
+  });
+
+  it("session.message replaces trailing optimistic assistant when content matches server message", () => {
+    useThreadStore.setState({
+      messages: [
+        {
+          id: "client-provisional-id",
+          thread_id: "thread-1",
+          role: "assistant",
+          content: "Hello world",
+          tool_calls: null,
+          files_changed: null,
+          cost_usd: null,
+          tokens_used: null,
+          sequence: 1,
+          timestamp: new Date().toISOString(),
+          attachments: null,
+        },
+      ],
+    });
+    const { handleAgentEvent } = useThreadStore.getState();
+    handleAgentEvent("thread-1", {
+      method: "session.message",
+      params: {
+        content: "Hello world",
+        messageId: "persisted-msg-id",
+        tokens: 10,
+      },
+    });
+    vi.runAllTimers();
+
+    const messages = useThreadStore.getState().messages;
+    expect(messages).toHaveLength(1);
+    expect(messages[0].id).toBe("persisted-msg-id");
+    expect(messages[0].content).toBe("Hello world");
+    expect(messages[0].tokens_used).toBe(10);
   });
 });
 

@@ -14,6 +14,7 @@ import {
   Check,
   ListTodo,
   MoreHorizontal,
+  Paperclip,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
@@ -52,6 +53,7 @@ import { QueuePopover } from "./QueuePopover";
 import { ContextTracker } from "./ContextTracker";
 import { CompactingBanner } from "./CompactingBanner";
 import { RetryBanner } from "./RetryBanner";
+import { InterruptStopBanner } from "./InterruptStopBanner";
 import { ComposerBranchBar } from "./ComposerBranchBar";
 import { ComposerReplyBar } from "./ComposerReplyBar";
 import { useReplyStore } from "@/stores/replyStore";
@@ -64,6 +66,7 @@ import {
   MAX_ATTACHMENTS,
   MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME,
   isVirtualBrowserContextAttachment,
+  attachmentAcceptAttribute,
 } from "@mcode/contracts";
 import type {
   AttachedBrowserCapture,
@@ -105,6 +108,9 @@ function resolveOutboundDisplayContent(
   if (captureRows.length === 0) return displayInjected;
   return displayInjected ?? trimmed;
 }
+
+/** `accept` list for the composer's hidden file input (mirrors {@link isFileSupported}). */
+const ATTACHMENT_INPUT_ACCEPT = attachmentAcceptAttribute();
 
 /** ReasoningLevel values as a Set for O(1) membership checks in the Codex level filter. */
 const VALID_REASONING_LEVELS_SET = new Set<string>(["low", "medium", "high", "xhigh", "max", "ultrathink"]);
@@ -474,6 +480,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
 
   const editorRef = useRef<LexicalEditor | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
 
   const prevThreadIdRef = useRef<string | undefined>(threadId);
   const draftRef = useRef<{
@@ -747,6 +754,28 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       editorRef.current.focus();
     }
   }, [pendingPrefill, clearPendingPrefill]);
+
+  const composerRecallFromStop = useThreadStore((s) =>
+    threadId ? s.composerRecallFromStopByThread[threadId] : undefined,
+  );
+  const clearComposerRecallFromStop = useThreadStore((s) => s.clearComposerRecallFromStop);
+
+  useEffect(() => {
+    if (!composerRecallFromStop || !threadId) return;
+    const text = composerRecallFromStop.text;
+    clearComposerRecallFromStop(threadId);
+    setInput(text);
+    if (editorRef.current) {
+      editorRef.current.update(() => {
+        const root = $getRoot();
+        root.clear();
+        const para = $createParagraphNode();
+        para.append($createTextNode(text));
+        root.append(para);
+      });
+      editorRef.current.focus();
+    }
+  }, [composerRecallFromStop, threadId, clearComposerRecallFromStop]);
 
   const fileAutocomplete = useFileAutocomplete({
     workspaceId,
@@ -1123,6 +1152,29 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     });
   }, []);
 
+  const handleAttachmentInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const list = e.target.files;
+      if (!list?.length) return;
+      const files = Array.from(list);
+      const bridge = window.desktopBridge;
+      const paths = files.map((f) => {
+        try {
+          return bridge?.getPathForFile?.(f) ?? null;
+        } catch {
+          return null;
+        }
+      });
+      addFiles(files, paths);
+      e.target.value = "";
+    },
+    [addFiles],
+  );
+
+  const handleAttachPick = useCallback(() => {
+    attachmentInputRef.current?.click();
+  }, []);
+
   const removeAttachment = useCallback((id: string) => {
     setAttachments((prev) => {
       const removed = prev.find((a) => a.id === id);
@@ -1134,8 +1186,18 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   }, []);
 
   const handlePaste = useCallback(async (e: React.ClipboardEvent) => {
-    const files = Array.from(e.clipboardData.files);
-    const supported = files.filter((f) => isFileSupported(f.name));
+    const fromFiles = Array.from(e.clipboardData.files);
+    const fromItems: File[] = [];
+    for (const item of Array.from(e.clipboardData.items)) {
+      if (item.kind !== "file") continue;
+      const f = item.getAsFile();
+      if (!f) continue;
+      if (!fromFiles.some((x) => x.name === f.name && x.size === f.size)) {
+        fromItems.push(f);
+      }
+    }
+    const merged = [...fromFiles, ...fromItems];
+    const supported = merged.filter((f) => isFileSupported(f.name));
     if (supported.length === 0) return;
 
     e.preventDefault();
@@ -1719,6 +1781,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         {/* Compacting banner — shown while the SDK is summarising the context window */}
         {isCompacting && <CompactingBanner />}
         {!isCompacting && hasRetryState && threadId && <RetryBanner threadId={threadId} />}
+        {threadId && <InterruptStopBanner threadId={threadId} />}
 
         {/* Drag overlay */}
         {isDragOver && (
@@ -1731,6 +1794,34 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
             collapses Mode/Permissions/Tasks into a popover before this row would
             need to wrap, so the send button stays anchored on the right. */}
         <div className="flex items-center gap-x-1.5 sm:gap-x-2.5 border-t border-border/20 px-3 py-1.5">
+          <input
+            ref={attachmentInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            accept={ATTACHMENT_INPUT_ACCEPT}
+            data-testid="composer-attachment-input"
+            onChange={handleAttachmentInputChange}
+          />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Attach files"
+                  data-testid="composer-attach"
+                  onClick={handleAttachPick}
+                  className="text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                  disabled={planPending || isStaleWorktree || !!providerReason}
+                >
+                  <Paperclip size={14} />
+                </Button>
+              }
+            />
+            <TooltipContent>Attach files</TooltipContent>
+          </Tooltip>
           {/* Model picker */}
           <ModelSelector
             selectedModelId={modelId}

@@ -48,6 +48,7 @@ import {
 import { PlanQuestionParser } from "./plan-question-parser.js";
 import { buildHandoffContent, buildConversationReplay, replayBudgetChars, resolveForkSnapshot } from "./handoff-builder.js";
 import { PlanQuestionSchema } from "@mcode/contracts";
+import { normalizeAgentProviderError } from "./provider-agent-error-normalize.js";
 import { z } from "zod";
 
 /**
@@ -108,6 +109,11 @@ export class AgentService {
   private turnSortCounters = new Map<string, number>();
   /** Threads currently running persistTurn to prevent concurrent calls. */
   private persistingThreads = new Set<string>();
+  /**
+   * Accumulates `textDelta` chunks per thread so we can persist partial assistant
+   * output when the user stops before the provider emits a final `message` event.
+   */
+  private streamingAssistantTextByThread = new Map<string, string>();
   /** Per-thread streaming parsers active while the model is generating questions in plan mode. */
   private planParsers = new Map<string, PlanQuestionParser>();
   /** Buffered plan questions awaiting broadcast until the turn closes (`ended` event).
@@ -205,7 +211,8 @@ export class AgentService {
           reason: err instanceof ProviderDisabledError ? "disabled" : "cli_missing",
           configuredPath: err instanceof ProviderCliMissingError ? err.configuredPath : undefined,
         });
-        return;
+        // RPC must reject so callers (e.g. batch resume, composer send) roll back optimistic
+        // running state instead of succeeding while nothing was persisted.
       }
       throw err;
     }
@@ -251,6 +258,8 @@ export class AgentService {
     // answered marker in a single transaction. If the marker insert fails
     // (e.g. FK rejects an unknown messageId) the user message is rolled
     // back too, keeping marker durability == answer durability.
+    this.streamingAssistantTextByThread.delete(threadId);
+
     this.db.transaction(() => {
       this.messageRepo.create(
         threadId,
@@ -563,7 +572,7 @@ export class AgentService {
     contextWindowMode?: ContextWindowMode,
     thinking?: boolean,
     displayContent?: string,
-  ): Promise<Thread> {
+  ): Promise<Thread & { warnings?: string[] }> {
     const title = truncateTitle(displayContent ?? content);
 
     if (parentThreadId) {
@@ -580,6 +589,7 @@ export class AgentService {
     }
 
     let thread: Thread;
+    let threadWarnings: string[] | undefined;
     if (existingWorktreePath) {
       // Attach to existing worktree
       const workspace = this.workspaceRepo.findById(workspaceId);
@@ -611,7 +621,9 @@ export class AgentService {
         branch: canonicalBranch,
       };
     } else if (mode === "worktree") {
-      thread = await this.threadService.create(workspaceId, title, "worktree", branch);
+      const createResult = await this.threadService.create(workspaceId, title, "worktree", branch);
+      threadWarnings = createResult.warnings;
+      thread = createResult;
       this.threadRepo.updateProvider(thread.id, provider);
       thread = { ...thread, provider };
     } else {
@@ -654,7 +666,7 @@ export class AgentService {
     });
 
     const updated = this.threadRepo.findById(thread.id);
-    return updated ?? thread;
+    return { ...(updated ?? thread), ...(threadWarnings?.length ? { warnings: threadWarnings } : {}) };
   }
 
   /**
@@ -684,7 +696,7 @@ export class AgentService {
     contextWindowMode?: ContextWindowMode;
     thinking?: boolean;
     displayContent?: string;
-  }): Promise<Thread> {
+  }): Promise<Thread & { warnings?: string[] }> {
     const {
       workspaceId, content, model, permissionMode, mode, branch,
       existingWorktreePath, attachments, reasoningLevel, provider,
@@ -774,6 +786,7 @@ export class AgentService {
     // Create child thread with lineage
     const lineage = { parentThreadId, forkedFromMessageId: resolvedForkMessageId };
     let thread: Thread;
+    let threadWarnings: string[] | undefined;
 
     if (existingWorktreePath) {
       const workspace = this.workspaceRepo.findById(workspaceId);
@@ -788,7 +801,9 @@ export class AgentService {
       this.threadRepo.updateWorktreePath(thread.id, existingWorktreePath);
       thread = { ...thread, worktree_path: existingWorktreePath, branch: matched.branch };
     } else if (mode === "worktree") {
-      thread = await this.threadService.create(workspaceId, title, "worktree", branch);
+      const createResult = await this.threadService.create(workspaceId, title, "worktree", branch);
+      threadWarnings = createResult.warnings;
+      thread = createResult;
       // Patch lineage + provider atomically. If either fails, delete the orphan thread.
       try {
         this.threadRepo.updateLineage(thread.id, parentThreadId, resolvedForkMessageId);
@@ -873,7 +888,7 @@ export class AgentService {
       });
     });
 
-    return thread;
+    return { ...thread, ...(threadWarnings?.length ? { warnings: threadWarnings } : {}) };
   }
 
   /** Stop the agent for a given thread, persisting any buffered tool calls first. */
@@ -887,10 +902,13 @@ export class AgentService {
     } catch {
       // Provider may not be available
     }
+    // Persist partial assistant text before tool rows attach so `messageId` targets the assistant row.
+    this.flushInterruptedAssistantMessage(threadId);
     // Persist buffered tool calls before clearing state so the
     // client receives a turn.persisted event with the correct count.
     await this.persistTurn(threadId, true);
     this.threadRepo.updateStatus(threadId, "paused");
+    broadcast("thread.status", { threadId, status: "paused" });
     if (this.activeSessionIds.has(threadId)) {
       this.activeSessionIds.delete(threadId);
       if (this.activeSessionIds.size === 0) {
@@ -970,6 +988,8 @@ export class AgentService {
         // cannot submit answers against a still-active session, which would
         // risk overlapping sends on the same thread.
         if (event.type === AgentEventType.TextDelta) {
+          const prev = this.streamingAssistantTextByThread.get(event.threadId) ?? "";
+          this.streamingAssistantTextByThread.set(event.threadId, prev + event.delta);
           const parser = this.planParsers.get(event.threadId);
           if (parser) {
             const questions = parser.feed(event.delta);
@@ -997,6 +1017,7 @@ export class AgentService {
             // through to the client. The client uses it for stable message identity
             // (branching, dedup across Electron's dual MessagePort+WebSocket channels).
             event.messageId = msg.id;
+            this.streamingAssistantTextByThread.delete(event.threadId);
           } catch (err) {
             logger.error("Failed to persist assistant message", {
               threadId: event.threadId,
@@ -1165,25 +1186,11 @@ export class AgentService {
   }
 
   /**
-   * Normalize a raw provider error into a user-friendly message.
-   * Converts spawn ENOENT errors (CLI binary not found) into the standardized
-   * "CLI not found" format that the frontend CliErrorBanner can detect.
+   * Normalize a raw provider error into clearer user-facing strings (CLI ENOENT,
+   * opaque Cursor upstream 5xx payloads, etc.).
    */
   private normalizeProviderError(message: string, provider: string): string {
-    // Detect spawn ENOENT: the OS-level error when a binary doesn't exist
-    if (message.includes("ENOENT") || message.includes("spawn") && message.includes("ENOENT")) {
-      if (provider === "claude") {
-        return "Claude CLI not found. Install it with: npm install -g @anthropic-ai/claude-code\n\nOr set a custom path in Settings > Model.";
-      }
-      if (provider === "codex") {
-        return "Codex CLI not found. Install it with: npm install -g @openai/codex\n\nOr set a custom path in Settings > Model.";
-      }
-      if (provider === "copilot") {
-        return "Copilot CLI not found. Install it with: npm install -g @github/copilot\n\nOr set a custom path in Settings > Provider > Copilot CLI path.";
-      }
-      return `${provider} CLI not found. Check the CLI path in Settings > Model.`;
-    }
-    return message;
+    return normalizeAgentProviderError(provider, message);
   }
 
   /**
@@ -1305,6 +1312,45 @@ ${userMessage}`;
         buffer[i].status = isError ? "failed" : "completed";
         break;
       }
+    }
+  }
+
+  /**
+   * Writes accumulated streaming assistant text to SQLite when a turn ends without
+   * a provider-issued `message` row (for example user stop before Claude's `result`).
+   * Broadcasts `agent.event` so clients align in-memory transcripts with the DB.
+   */
+  private flushInterruptedAssistantMessage(threadId: string): void {
+    const raw = this.streamingAssistantTextByThread.get(threadId);
+    const text = raw?.trim();
+    if (!text) {
+      this.streamingAssistantTextByThread.delete(threadId);
+      return;
+    }
+
+    const { messages } = this.messageRepo.listByThread(threadId, 1);
+    const last = messages.length > 0 ? messages[messages.length - 1] : null;
+    if (last?.role === "assistant") {
+      this.streamingAssistantTextByThread.delete(threadId);
+      return;
+    }
+
+    const nextSeq = last ? last.sequence + 1 : 1;
+    try {
+      const msg = this.messageRepo.create(threadId, "assistant", text, nextSeq);
+      this.streamingAssistantTextByThread.delete(threadId);
+      broadcast("agent.event", {
+        type: AgentEventType.Message,
+        threadId,
+        content: text,
+        tokens: null,
+        messageId: msg.id,
+      } satisfies AgentEvent);
+    } catch (err) {
+      logger.error("Failed to persist interrupted assistant message", {
+        threadId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 

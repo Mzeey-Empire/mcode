@@ -6,15 +6,16 @@
  */
 
 /** File categories recognized by the attachment system. */
-export type FileCategory = "image" | "pdf" | "text";
+export type FileCategory = "image" | "pdf" | "text" | "document";
 
 /** Size limits per category. */
 const MAX_IMAGE_SIZE = 20 * 1024 * 1024;
 const MAX_PDF_SIZE = 32 * 1024 * 1024;
 const MAX_TEXT_SIZE = 10 * 1024 * 1024;
+const MAX_DOCUMENT_SIZE = 16 * 1024 * 1024;
 
 /** Maximum number of attachments per message. */
-export const MAX_ATTACHMENTS = 5;
+export const MAX_ATTACHMENTS = 10;
 
 /** Image extensions mapped to MIME types. */
 const IMAGE_EXTENSIONS: Record<string, string> = {
@@ -51,8 +52,19 @@ const TEXT_EXTENSIONS = new Set([
   "lock",
   // Dotfiles (after stripping leading dot)
   "gitignore", "gitattributes", "editorconfig",
-  "eslintrc", "prettierrc", "dockerignore",
+  "eslintrc", "prettierrc",   "dockerignore",
 ]);
+
+/** Office-style attachments (allowed as blobs; providers may still decline exotic formats). */
+const DOCUMENT_EXTENSIONS: Record<string, string> = {
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  rtf: "application/rtf",
+  odt: "application/vnd.oasis.opendocument.text",
+  ods: "application/vnd.oasis.opendocument.spreadsheet",
+  odp: "application/vnd.oasis.opendocument.presentation",
+};
 
 /** Well-known filenames without extensions that are text files (lowercase). */
 const KNOWN_TEXT_FILENAMES = new Set([
@@ -83,6 +95,7 @@ export function classifyFile(fileName: string): FileCategory | null {
 
   if (ext && ext in IMAGE_EXTENSIONS) return "image";
   if (ext === "pdf") return "pdf";
+  if (ext && ext in DOCUMENT_EXTENSIONS) return "document";
   if (ext && TEXT_EXTENSIONS.has(ext)) return "text";
 
   // Check well-known extensionless filenames (case-insensitive)
@@ -108,6 +121,7 @@ export function getMaxFileSize(fileName: string): number {
     case "image": return MAX_IMAGE_SIZE;
     case "pdf": return MAX_PDF_SIZE;
     case "text": return MAX_TEXT_SIZE;
+    case "document": return MAX_DOCUMENT_SIZE;
     default: return 0;
   }
 }
@@ -122,6 +136,7 @@ export function inferMimeType(fileName: string): string {
 
   if (ext && ext in IMAGE_EXTENSIONS) return IMAGE_EXTENSIONS[ext];
   if (ext === "pdf") return "application/pdf";
+  if (ext && ext in DOCUMENT_EXTENSIONS) return DOCUMENT_EXTENSIONS[ext];
 
   // All recognized text-based extensions
   if ((ext && TEXT_EXTENSIONS.has(ext)) || KNOWN_TEXT_FILENAMES.has(fileName.toLowerCase())) {
@@ -135,5 +150,13 @@ export function inferMimeType(fileName: string): string {
 export const SUPPORTED_EXTENSIONS = new Set([
   ...Object.keys(IMAGE_EXTENSIONS),
   "pdf",
+  ...Object.keys(DOCUMENT_EXTENSIONS),
   ...TEXT_EXTENSIONS,
 ]);
+
+/**
+ * Builds the `accept` attribute for a hidden `<input type="file">` in the composer.
+ */
+export function attachmentAcceptAttribute(): string {
+  return [...SUPPORTED_EXTENSIONS].map((ext) => `.${ext}`).join(",");
+}

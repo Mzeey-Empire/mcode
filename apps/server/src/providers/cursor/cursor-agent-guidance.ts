@@ -35,6 +35,17 @@ export function mergeCursorWorkspaceAgentMarkdown(cwd: string): string | undefin
   return chunks.join("\n\n---\n\n");
 }
 
+const MAX_AGENT_GUIDANCE_CHARS = 48_000;
+const MAX_SKILL_COMMAND_ROWS = 200;
+const PER_SKILL_DESC_CHARS = 400;
+
+/** Truncates stitched AGENTS content so catastrophic repo rules files cannot saturate input. */
+function capAgentMarkdown(markdown: string): string {
+  if (markdown.length <= MAX_AGENT_GUIDANCE_CHARS) return markdown;
+  const dropped = markdown.length - MAX_AGENT_GUIDANCE_CHARS;
+  return `${markdown.slice(0, MAX_AGENT_GUIDANCE_CHARS)}\n\n[AGENTS.md excerpt truncated (${dropped} characters dropped)]`;
+}
+
 /**
  * Builds layered agent instructions for Cursor: global user rules (`~/.cursor/AGENTS.md`),
  * then workspace {@link mergeCursorWorkspaceAgentMarkdown}.
@@ -49,12 +60,14 @@ export function buildCursorAgentGuidanceMarkdown(cwd: string): string | undefine
   const workspace = mergeCursorWorkspaceAgentMarkdown(cwd);
   if (workspace) chunks.push(workspace);
   if (chunks.length === 0) return undefined;
-  return chunks.join("\n\n---\n\n");
+  return capAgentMarkdown(chunks.join("\n\n---\n\n"));
 }
 
 /**
  * Formats skill and command metadata into an XML-ish prompt section so the Cursor
  * agent knows which toolbox entries apply for this workspace.
+ *
+ * Keeps prompts bounded because large installs can expose hundreds of skills.
  *
  * @param items - Skills and commands from `SkillService.list(cwd, "cursor")`.
  */
@@ -62,10 +75,21 @@ export function formatCursorSkillsAndCommandsForPrompt(
   items: readonly SkillInfo[],
 ): string | undefined {
   if (items.length === 0) return undefined;
-  const lines = items.map((i) => {
+  const rows = items.slice(0, MAX_SKILL_COMMAND_ROWS);
+  const truncatedCount = items.length - rows.length;
+  const lines = rows.map((i) => {
     const tag = i.kind === "command" ? "command" : "skill";
-    return `- [${tag}] ${i.name}: ${i.description}`;
+    const desc =
+      i.description.length > PER_SKILL_DESC_CHARS
+        ? `${i.description.slice(0, PER_SKILL_DESC_CHARS)}…`
+        : i.description;
+    return `- [${tag}] ${i.name}: ${desc}`;
   });
+  if (truncatedCount > 0) {
+    lines.push(
+      `- … and ${truncatedCount} additional skill/command entries omitted here (browse the Composer skills picker in Mcode)`,
+    );
+  }
   return [
     "<available-skills-and-commands>",
     "Discovered Cursor provider skills and commands (user and project .cursor trees).",

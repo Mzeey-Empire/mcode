@@ -292,6 +292,7 @@ export class CodexAppServer extends EventEmitter {
     // Must happen after spawn succeeds but before any async handshake steps.
     if (this.options.jobObject && child.pid) {
       this.options.jobObject.assign(child.pid);
+      this.options.jobObject.setDescription(child.pid, "Mcode Agent: Codex");
     }
 
     this.child = child;

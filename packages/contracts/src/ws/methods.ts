@@ -4,6 +4,7 @@ import { ThreadSchema, RecentThreadSchema } from "../models/thread.js";
 import { ThreadModeSchema, PermissionModeSchema, InteractionModeSchema } from "../models/enums.js";
 import { PaginatedMessagesSchema } from "../models/message.js";
 import { AttachmentMetaSchema } from "../models/attachment.js";
+import { MAX_ATTACHMENTS } from "../models/file-types.js";
 import { ToolCallRecordSchema } from "../models/tool-call-record.js";
 import { GitBranchSchema, WorktreeSchema } from "../git.js";
 import { GitCommitSchema } from "../models/git-commit.js";
@@ -48,7 +49,7 @@ export const SendMessageSchema = lazySchema(() =>
     displayContent: z.string().optional(),
     model: z.string().optional(),
     permissionMode: PermissionModeSchema.optional(),
-    attachments: z.array(AttachmentMetaSchema).optional(),
+    attachments: z.array(AttachmentMetaSchema).max(MAX_ATTACHMENTS).optional(),
     reasoningLevel: ReasoningLevelSchema.optional(),
     provider: ProviderIdSchema.optional(),
     /** When "plan", the server wraps the message with the plan-mode question prompt. */
@@ -81,7 +82,7 @@ export const CreateAndSendSchema = lazySchema(() =>
     mode: ThreadModeSchema.optional(),
     branch: z.string().optional(),
     existingWorktreePath: z.string().optional(),
-    attachments: z.array(AttachmentMetaSchema).optional(),
+    attachments: z.array(AttachmentMetaSchema).max(MAX_ATTACHMENTS).optional(),
     reasoningLevel: ReasoningLevelSchema.optional(),
     provider: ProviderIdSchema.optional(),
     /** When "plan", the server wraps the message with the plan-mode question prompt. */
@@ -105,6 +106,16 @@ export const CreateAndSendSchema = lazySchema(() =>
   { message: "forkedFromMessageId requires parentThreadId", path: ["forkedFromMessageId"] },
   ),
 );
+
+/** Result schema for agent.createAndSend: a Thread with optional non-fatal warnings. */
+export const CreateAndSendResultSchema = lazySchema(() =>
+  ThreadSchema().extend({
+    warnings: z.array(z.string()).optional(),
+  }),
+);
+
+/** Thread with optional non-fatal warnings from worktree creation. */
+export type CreateAndSendResult = z.infer<ReturnType<typeof CreateAndSendResultSchema>>;
 
 /** All RPC method definitions keyed by method name with params and result schemas. */
 export const WS_METHODS = lazySchema(() => ({
@@ -303,7 +314,7 @@ export const WS_METHODS = lazySchema(() => ({
   },
   "agent.createAndSend": {
     params: CreateAndSendSchema(),
-    result: ThreadSchema(),
+    result: CreateAndSendResultSchema(),
   },
   "agent.stop": {
     params: z.object({ threadId: z.string() }),

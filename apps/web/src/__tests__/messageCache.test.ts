@@ -186,7 +186,6 @@ describe("selective cache eviction in handleAgentEvent", () => {
       toolCallsByThread: {},
       agentStartTimes: { [THREAD_ID]: Date.now() },
       currentThreadId: THREAD_ID,
-      activeSubagentsByThread: {},
       currentTurnMessageIdByThread: {},
       isCompactingByThread: {},
       lastFallbackByThread: {},

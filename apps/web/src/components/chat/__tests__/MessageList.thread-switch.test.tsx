@@ -284,5 +284,59 @@ describe("MessageList thread switch", () => {
 
     // The scroll restoration effect should have called scrollTop setter with 1500
     expect(setScrollTopValue).toBe(1500);
+    expect(recallScrollTop("thread-B")).toBeUndefined();
+  });
+
+  it("does not re-apply remembered scroll when messages append on the same thread", () => {
+    loadingValue = false;
+    activeThreadIdValue = "thread-A";
+    messagesValue = [{ id: "m1", sequence: 1 }];
+    const { rerender, container } = render(<MessageList />);
+
+    rememberScrollTop("thread-B", 1500);
+
+    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement | null;
+    expect(scrollEl).not.toBeNull();
+
+    let scrollHeight = 6000;
+    Object.defineProperty(scrollEl!, "scrollHeight", {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    Object.defineProperty(scrollEl!, "clientHeight", {
+      configurable: true,
+      value: 400,
+    });
+
+    let scrollTop = 0;
+    Object.defineProperty(scrollEl!, "scrollTop", {
+      configurable: true,
+      get: () => scrollTop,
+      set: (v: number) => {
+        scrollTop = v;
+      },
+    });
+
+    activeThreadIdValue = "thread-B";
+    act(() => {
+      rerender(<MessageList />);
+    });
+
+    expect(scrollTop).toBe(1500);
+    expect(recallScrollTop("thread-B")).toBeUndefined();
+
+    // Simulate user pinned at bottom, then a new message arrives.
+    scrollTop = scrollHeight - 400;
+    scrollHeight = 8000;
+
+    messagesValue = [
+      { id: "m1", sequence: 1 },
+      { id: "m2", sequence: 2 },
+    ];
+    act(() => {
+      rerender(<MessageList />);
+    });
+
+    expect(scrollTop).not.toBe(1500);
   });
 });

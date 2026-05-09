@@ -25,6 +25,10 @@ describe("Extension-based file filtering (integration)", () => {
     expect(isFileSupported(name)).toBe(expected);
   });
 
+  it("accepts common Office documents", () => {
+    expect(isFileSupported("report.docx")).toBe(true);
+  });
+
   it("handles browser File objects with empty MIME types", () => {
     const file = createMockFile("app.ts", "", 1024);
     expect(isFileSupported(file.name)).toBe(true);

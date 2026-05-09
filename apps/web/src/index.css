@@ -158,6 +158,23 @@
   animation: fade-up-in 150ms ease-out;
 }
 
+/* Radix Collapsible slide-open / slide-closed using the content's intrinsic
+ * height via --radix-collapsible-content-height. */
+@keyframes collapsible-down {
+  from { height: 0; opacity: 0; }
+  to   { height: var(--radix-collapsible-content-height); opacity: 1; }
+}
+@keyframes collapsible-up {
+  from { height: var(--radix-collapsible-content-height); opacity: 1; }
+  to   { height: 0; opacity: 0; }
+}
+.animate-collapsible-down {
+  animation: collapsible-down 200ms ease-out;
+}
+.animate-collapsible-up {
+  animation: collapsible-up 150ms ease-out;
+}
+
 @keyframes chip-enter {
   from { opacity: 0; transform: translateX(-4px); }
   to   { opacity: 1; transform: translateX(0); }
@@ -166,7 +183,10 @@
   animation: chip-enter 150ms ease-out;
 }
 @media (prefers-reduced-motion: reduce) {
-  .animate-chip-enter {
+  .animate-fade-up-in,
+  .animate-chip-enter,
+  .animate-collapsible-down,
+  .animate-collapsible-up {
     animation: none;
   }
 }

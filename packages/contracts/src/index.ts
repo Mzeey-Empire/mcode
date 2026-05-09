@@ -82,6 +82,7 @@ export {
   inferMimeType,
   MAX_ATTACHMENTS,
   SUPPORTED_EXTENSIONS,
+  attachmentAcceptAttribute,
 } from "./models/file-types.js";
 export type { FileCategory } from "./models/file-types.js";
 
@@ -182,8 +183,9 @@ export {
   CreateThreadSchema,
   SendMessageSchema,
   CreateAndSendSchema,
+  CreateAndSendResultSchema,
 } from "./ws/methods.js";
-export type { WsMethodName } from "./ws/methods.js";
+export type { WsMethodName, CreateAndSendResult } from "./ws/methods.js";
 
 export { WS_CHANNELS } from "./ws/channels.js";
 export type { WsChannelName } from "./ws/channels.js";

@@ -17,6 +17,7 @@ import type {
   ProviderModelInfo,
   CopilotSubagent,
 } from "./types";
+import type { CreateAndSendResult } from "@mcode/contracts";
 import type { PaginatedMessages, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus, ProviderAvailability } from "@mcode/contracts";
 import type { ReasoningLevel } from "@mcode/contracts";
 import {
@@ -551,7 +552,7 @@ export function createWsTransport(
       const guardrails = state.loaded
         ? { maxBudgetUsd: state.settings.agent.guardrails.maxBudgetUsd, maxTurns: state.settings.agent.guardrails.maxTurns }
         : {};
-      return rpc<Thread>("agent.createAndSend", {
+      return rpc<CreateAndSendResult>("agent.createAndSend", {
         workspaceId,
         content,
         model,

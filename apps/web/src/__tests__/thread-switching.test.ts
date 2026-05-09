@@ -28,7 +28,6 @@ describe("Thread Switching", () => {
       currentTurnMessageIdByThread: {},
       agentStartTimes: {},
       settingsByThread: {},
-      activeSubagentsByThread: {},
       oldestLoadedSequence: {},
       hasMoreMessages: {},
       isLoadingMore: {},

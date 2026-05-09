@@ -52,4 +52,21 @@ describe("formatCursorSkillsAndCommandsForPrompt", () => {
     expect(text).toContain("[skill] deploy");
     expect(text).toContain("[command] lint");
   });
+
+  it("truncates excessively long descriptions and caps listing volume", () => {
+    const longDesc = `${"d".repeat(500)}EXTRA`;
+    const items = Array.from({ length: 205 }, (_, i) => ({
+      name: `s${i}`,
+      description: longDesc,
+      kind: "skill" as const,
+      source: "user" as const,
+      providers: ["cursor"] as ["cursor"],
+    }));
+    const text = formatCursorSkillsAndCommandsForPrompt(items);
+    expect(text).not.toContain("EXTRA");
+    expect(text?.includes("additional skill/command entries omitted")).toBe(true);
+    const skillLines =
+      text?.split("\n").filter((l) => l.startsWith("- [skill]")).length ?? 0;
+    expect(skillLines).toBe(200);
+  });
 });
