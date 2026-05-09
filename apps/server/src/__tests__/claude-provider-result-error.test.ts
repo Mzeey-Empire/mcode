@@ -14,6 +14,7 @@ vi.mock("@mcode/shared", async (importOriginal) => {
 
 import { ClaudeProvider } from "../providers/claude/claude-provider";
 import { stubEnvService } from "./stub-env-service.js";
+import { stubJobObject } from "./stub-job-object.js";
 import { queryMethodStubs } from "./helpers/mock-sdk-query";
 import { AgentEventType } from "@mcode/contracts";
 
@@ -47,7 +48,7 @@ describe("ClaudeProvider result is_error handling (#293)", () => {
   let provider: ClaudeProvider;
   beforeEach(() => {
     vi.clearAllMocks();
-    provider = new ClaudeProvider(stubEnvService());
+    provider = new ClaudeProvider(stubEnvService(), stubJobObject());
   });
 
   afterEach(() => {

@@ -31,6 +31,7 @@ import type {
   CopilotSubagent,
   PermissionDecision,
   PermissionRequest,
+  CreateAndSendResult,
 } from "@mcode/contracts";
 
 // Re-export shared types from the contracts package (single source of truth).
@@ -143,7 +144,7 @@ export interface McodeTransport {
     copilotAgent?: string,
     contextWindow?: ContextWindowMode,
     thinking?: boolean,
-  ): Promise<Thread>;
+  ): Promise<CreateAndSendResult>;
   stopAgent(threadId: string): Promise<void>;
   /** Respond to a tool permission request from the agent. */
   respondToPermission(requestId: string, decision: PermissionDecision): Promise<void>;

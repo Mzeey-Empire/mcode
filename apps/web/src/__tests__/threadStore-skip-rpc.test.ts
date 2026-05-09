@@ -52,7 +52,6 @@ function resetState() {
     currentTurnMessageIdByThread: {},
     agentStartTimes: {},
     settingsByThread: {},
-    activeSubagentsByThread: {},
     oldestLoadedSequence: {},
     hasMoreMessages: {},
     isLoadingMore: {},

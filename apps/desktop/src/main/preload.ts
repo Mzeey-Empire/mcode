@@ -110,9 +110,13 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     checkForUpdates(): Promise<unknown> {
       return ipcRenderer.invoke("app:check-for-updates");
     },
-    /** Quit and install a downloaded update. No-op if nothing is downloaded. */
-    installUpdate(): Promise<void> {
+    /** Quit and install a downloaded update. Returns false if nothing to install. */
+    installUpdate(): Promise<boolean> {
       return ipcRenderer.invoke("app:install-update");
+    },
+    /** Trigger download of a discovered update (when auto-download is off). */
+    downloadUpdate(): Promise<void> {
+      return ipcRenderer.invoke("app:download-update");
     },
     /** Subscribe to push updates of update-status. Returns the listener for cleanup. */
     onUpdateStatus(callback: (status: unknown) => void) {

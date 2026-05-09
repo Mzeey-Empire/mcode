@@ -552,7 +552,7 @@ export class AgentService {
     copilotAgent?: string,
     contextWindowMode?: ContextWindowMode,
     thinking?: boolean,
-  ): Promise<Thread> {
+  ): Promise<Thread & { warnings?: string[] }> {
     const title = truncateTitle(content);
 
     if (parentThreadId) {
@@ -568,6 +568,7 @@ export class AgentService {
     }
 
     let thread: Thread;
+    let threadWarnings: string[] | undefined;
     if (existingWorktreePath) {
       // Attach to existing worktree
       const workspace = this.workspaceRepo.findById(workspaceId);
@@ -599,7 +600,9 @@ export class AgentService {
         branch: canonicalBranch,
       };
     } else if (mode === "worktree") {
-      thread = await this.threadService.create(workspaceId, title, "worktree", branch);
+      const createResult = await this.threadService.create(workspaceId, title, "worktree", branch);
+      threadWarnings = createResult.warnings;
+      thread = createResult;
       this.threadRepo.updateProvider(thread.id, provider);
       thread = { ...thread, provider };
     } else {
@@ -637,7 +640,7 @@ export class AgentService {
     });
 
     const updated = this.threadRepo.findById(thread.id);
-    return updated ?? thread;
+    return { ...(updated ?? thread), ...(threadWarnings?.length ? { warnings: threadWarnings } : {}) };
   }
 
   /**
@@ -666,7 +669,7 @@ export class AgentService {
     copilotAgent?: string;
     contextWindowMode?: ContextWindowMode;
     thinking?: boolean;
-  }): Promise<Thread> {
+  }): Promise<Thread & { warnings?: string[] }> {
     const {
       workspaceId, content, model, permissionMode, mode, branch,
       existingWorktreePath, attachments, reasoningLevel, provider,
@@ -755,6 +758,7 @@ export class AgentService {
     // Create child thread with lineage
     const lineage = { parentThreadId, forkedFromMessageId: resolvedForkMessageId };
     let thread: Thread;
+    let threadWarnings: string[] | undefined;
 
     if (existingWorktreePath) {
       const workspace = this.workspaceRepo.findById(workspaceId);
@@ -769,7 +773,9 @@ export class AgentService {
       this.threadRepo.updateWorktreePath(thread.id, existingWorktreePath);
       thread = { ...thread, worktree_path: existingWorktreePath, branch: matched.branch };
     } else if (mode === "worktree") {
-      thread = await this.threadService.create(workspaceId, title, "worktree", branch);
+      const createResult = await this.threadService.create(workspaceId, title, "worktree", branch);
+      threadWarnings = createResult.warnings;
+      thread = createResult;
       // Patch lineage + provider atomically. If either fails, delete the orphan thread.
       try {
         this.threadRepo.updateLineage(thread.id, parentThreadId, resolvedForkMessageId);
@@ -851,7 +857,7 @@ export class AgentService {
       });
     });
 
-    return thread;
+    return { ...thread, ...(threadWarnings?.length ? { warnings: threadWarnings } : {}) };
   }
 
   /** Stop the agent for a given thread, persisting any buffered tool calls first. */

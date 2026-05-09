@@ -32,6 +32,8 @@ import { AnthropicOAuthUsageSource } from "./usage/oauth-usage-source.js";
 import { AnthropicHeaderUsageSource } from "./usage/header-usage-source.js";
 import { CompositeUsageSource } from "./usage/composite-usage-source.js";
 import { EnvService } from "../../services/env-service.js";
+import { JobObject } from "../../services/job-object.js";
+import { listDirectChildren } from "../../services/process-kill.js";
 
 /** Shallow snapshot of `process.env` for temporary Claude SDK subprocess alignment. */
 function snapshotProcessEnv(): Record<string, string | undefined> {
@@ -237,7 +239,10 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     new AnthropicHeaderUsageSource(),
   ]);
 
-  constructor(@inject(EnvService) private readonly envService: EnvService) {
+  constructor(
+    @inject(EnvService) private readonly envService: EnvService,
+    @inject("JobObject") private readonly jobObject: JobObject,
+  ) {
     super();
   }
 
@@ -695,7 +700,21 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       cwd: resolvedCwd,
     });
 
+    let beforePids: Set<number> | undefined;
+    if (this.jobObject.isWindowsJob) {
+      try {
+        const children = await listDirectChildren(process.pid);
+        beforePids = new Set(children.map((c) => c.pid));
+      } catch {
+        // Best-effort
+      }
+    }
+
     const q = this.withSdkSpawnEnv(() => sdkQuery({ prompt: queue.iterable, options }));
+
+    if (beforePids) {
+      void this.labelSdkSubprocess(beforePids);
+    }
 
     const entry: SessionEntry = {
       query: q,
@@ -748,12 +767,26 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
         const freshQueue = createPromptQueue();
         const freshOptions = { ...baseOptions, sessionId: uuid };
 
+        let freshBeforePids: Set<number> | undefined;
+        if (this.jobObject.isWindowsJob) {
+          try {
+            const children = await listDirectChildren(process.pid);
+            freshBeforePids = new Set(children.map((c) => c.pid));
+          } catch {
+            // Best-effort
+          }
+        }
+
         const freshQ = this.withSdkSpawnEnv(() =>
           sdkQuery({
             prompt: freshQueue.iterable,
             options: freshOptions,
           }),
         );
+
+        if (freshBeforePids) {
+          void this.labelSdkSubprocess(freshBeforePids);
+        }
         const freshEntry: SessionEntry = {
           query: freshQ,
           pushMessage: freshQueue.push,
@@ -799,6 +832,9 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
          *  triggers a synthetic TurnStarted so the server and UI know a new
          *  turn has begun without going through sendMessage(). */
         let awaitingResume = false;
+
+        /** Suppresses duplicate ToolUse events when the SDK emits the same id on assistant blocks and tool_use messages. */
+        const emittedToolUseIds = new Set<string>();
 
         /**
          * Emit an Error event with a best-effort message extracted from an SDK
@@ -924,7 +960,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
               for (const block of contentBlocks) {
                 if (block.type === "tool_use") {
                   const toolId = (block.id as string) || "";
+                  if (toolId && emittedToolUseIds.has(toolId)) {
+                    continue;
+                  }
                   if (toolId) {
+                    emittedToolUseIds.add(toolId);
                     const entry = this.sessions.get(sessionId);
                     entry?.pendingToolUses.add(toolId);
                   }
@@ -1130,7 +1170,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
 
             case "tool_use": {
               const toolId = (anyMsg.id as string) || "";
+              if (toolId && emittedToolUseIds.has(toolId)) {
+                break;
+              }
               if (toolId) {
+                emittedToolUseIds.add(toolId);
                 const entry = this.sessions.get(sessionId);
                 entry?.pendingToolUses.add(toolId);
               }
@@ -1329,6 +1373,28 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
         }
       }
     })();
+  }
+
+  /**
+   * Discover and label new child PIDs spawned by sdkQuery().
+   * Compares direct children of the server process before and after the spawn.
+   * Best-effort: races with other concurrent spawns are tolerated because
+   * labelling a wrong process is harmless (the description is overwritten
+   * on the next setDescription call for that PID).
+   */
+  private async labelSdkSubprocess(beforePids: Set<number>): Promise<void> {
+    if (!this.jobObject.isWindowsJob) return;
+    try {
+      const after = await listDirectChildren(process.pid);
+      for (const child of after) {
+        if (!beforePids.has(child.pid)) {
+          this.jobObject.assign(child.pid);
+          this.jobObject.setDescription(child.pid, "Mcode Agent: Claude");
+        }
+      }
+    } catch {
+      // Best-effort: process enumeration can fail transiently
+    }
   }
 
   /** Build a multimodal SDKUserMessage from text and attachments. */

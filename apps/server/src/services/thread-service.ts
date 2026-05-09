@@ -32,7 +32,7 @@ export class ThreadService {
     title: string,
     mode: string,
     branch: string,
-  ): Promise<Thread> {
+  ): Promise<Thread & { warnings?: string[] }> {
     validateBranchName(branch);
 
     const threadMode: ThreadMode =
@@ -105,7 +105,11 @@ export class ThreadService {
           );
         }
 
-        return { ...thread, worktree_path: info.path };
+        return {
+          ...thread,
+          worktree_path: info.path,
+          warnings: info.warnings.length > 0 ? info.warnings : undefined,
+        };
       } catch (err) {
         this.threadRepo.hardDelete(thread.id);
         throw err;

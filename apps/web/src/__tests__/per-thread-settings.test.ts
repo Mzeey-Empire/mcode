@@ -25,7 +25,6 @@ describe("per-thread settings", () => {
       currentTurnMessageIdByThread: {},
       agentStartTimes: {},
       settingsByThread: {},
-      activeSubagentsByThread: {},
       oldestLoadedSequence: {},
       hasMoreMessages: {},
       isLoadingMore: {},

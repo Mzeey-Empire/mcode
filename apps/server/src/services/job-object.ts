@@ -17,6 +17,8 @@ const _require = createRequire(import.meta.url);
 
 const PROCESS_SET_QUOTA = 0x0100;
 const PROCESS_TERMINATE = 0x0001;
+// SetProcessDescription requires only limited-information access, not full terminate rights.
+const PROCESS_SET_LIMITED_INFORMATION = 0x2000;
 const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9;
 const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000;
 // JOBOBJECT_EXTENDED_LIMIT_INFORMATION sizes:
@@ -29,6 +31,8 @@ interface WindowsState {
   CloseHandle: (h: unknown) => number;
   AssignProcessToJobObject: (job: unknown, proc: unknown) => number;
   OpenProcess: (access: number, inherit: number, pid: number) => unknown;
+  // Null when unavailable (not exported on all Windows SKUs/builds).
+  SetProcessDescription: ((proc: unknown, desc: string) => number) | null;
 }
 
 /**
@@ -65,6 +69,12 @@ export class JobObject {
     this.closeWindows();
   }
 
+  /** Set a human-readable description on a process (visible in Task Manager). No-op on non-Windows. */
+  setDescription(pid: number, description: string): void {
+    if (!this.initialized) return;
+    this.setDescriptionWindows(pid, description);
+  }
+
   private initWindows(): void {
     try {
       // Dynamic require so non-Windows builds never load the native binary.
@@ -98,7 +108,17 @@ export class JobObject {
         throw new Error("SetInformationJobObject failed");
       }
 
-      this.windowsState = { jobHandle, CloseHandle, AssignProcessToJobObject, OpenProcess };
+      // Load SetProcessDescription separately: not exported on all Windows SKUs/builds,
+      // so a failure here must not prevent the job object from initializing.
+      // Returns HRESULT (0=S_OK, negative=failure), unlike the BOOL-returning functions above.
+      let SetProcessDescription: WindowsState["SetProcessDescription"] = null;
+      try {
+        SetProcessDescription = kernel32.func("int32 __stdcall SetProcessDescription(void*, str16)");
+      } catch {
+        // Degrade gracefully; setDescription() will be a no-op on this machine.
+      }
+
+      this.windowsState = { jobHandle, CloseHandle, AssignProcessToJobObject, OpenProcess, SetProcessDescription };
       this.initialized = true;
       logger.info("JobObject initialized");
     } catch (err) {
@@ -123,6 +143,33 @@ export class JobObject {
       }
     } catch (err) {
       logger.debug("JobObject: assign threw", {
+        pid,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      if (procHandle) {
+        try { s.CloseHandle(procHandle); } catch { /* ignore */ }
+      }
+    }
+  }
+
+  private setDescriptionWindows(pid: number, description: string): void {
+    const s = this.windowsState!;
+    if (!s.SetProcessDescription) return;
+    let procHandle: unknown = null;
+    try {
+      procHandle = s.OpenProcess(PROCESS_SET_LIMITED_INFORMATION, 0, pid);
+      if (!procHandle) return;
+      const hr = s.SetProcessDescription(procHandle, description);
+      // HRESULT: 0 (S_OK) = success, negative = failure
+      if (hr < 0) {
+        logger.debug("JobObject: SetProcessDescription failed", {
+          pid,
+          hr: `0x${(hr >>> 0).toString(16)}`,
+        });
+      }
+    } catch (err) {
+      logger.debug("JobObject: setDescription threw", {
         pid,
         error: err instanceof Error ? err.message : String(err),
       });

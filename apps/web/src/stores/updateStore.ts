@@ -26,6 +26,12 @@ export const useUpdateStore = create<UpdateState>((set) => ({
   bannerDismissed: false,
   status: { state: "idle" },
   setVersion: (version) => set({ version }),
-  setStatus: (status) => set({ status }),
+  setStatus: (status) => {
+    // Re-show the banner when a significant new state arrives, so the user
+    // does not miss "ready to install" after dismissing "available".
+    const resetStates = new Set(["available", "downloaded", "error"]);
+    const shouldReset = resetStates.has(status.state);
+    set(shouldReset ? { status, bannerDismissed: false } : { status });
+  },
   dismissBanner: () => set({ bannerDismissed: true }),
 }));

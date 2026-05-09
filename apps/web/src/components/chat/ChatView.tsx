@@ -12,11 +12,12 @@ import { PlanQuestionWizard } from "@/components/chat/PlanQuestionWizard";
 import { HeaderActions } from "./HeaderActions";
 import { CliErrorBanner, isCliError } from "./CliErrorBanner";
 import { InterruptedSessionsBanner } from "./InterruptedSessionsBanner";
+import { CollapsibleError } from "./CollapsibleError";
+import { ThreadWarningBanner } from "./ThreadWarningBanner";
 import { ThreadTitleEditor } from "./ThreadTitleEditor";
 import { SidebarRevealButton } from "@/components/sidebar/SidebarRevealButton";
 import { useUiStore } from "@/stores/uiStore";
 import { preparingStatusLabel, type WorkspaceThread } from "@/lib/workspace-thread";
-import { Button } from "@/components/ui/button";
 import { useReplyStore } from "@/stores/replyStore";
 
 /** Entry point suggestions shown in the empty state — each maps to a real Mcode capability. */
@@ -142,17 +143,11 @@ function ThreadPreparingShell({
         </div>
 
         {thread.clientError ? (
-          <div className="mx-auto flex w-full max-w-xl flex-col items-stretch gap-3">
-            <p className="text-center text-sm text-destructive">{thread.clientError}</p>
-            <div className="flex justify-center gap-2">
-              <Button type="button" size="sm" variant="default" onClick={onRetry}>
-                Retry
-              </Button>
-              <Button type="button" size="sm" variant="outline" onClick={onDismiss}>
-                Dismiss
-              </Button>
-            </div>
-          </div>
+          <CollapsibleError
+            error={thread.clientError}
+            onRetry={onRetry}
+            onDismiss={onDismiss}
+          />
         ) : (
           <div className="text-muted-foreground flex items-center justify-center gap-2 text-sm">
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -478,6 +473,16 @@ export function ChatView() {
           />
         </div>
       )}
+
+      {/* Post-checkout warning banner — shown when worktree created but hook failed */}
+      {activeThread.clientWarnings?.length ? (
+        <div className="px-4 pt-2">
+          <ThreadWarningBanner
+            warnings={activeThread.clientWarnings}
+            onDismiss={() => useWorkspaceStore.getState().dismissWarnings(activeThread.id)}
+          />
+        </div>
+      ) : null}
 
       {/* Messages, tool calls, and streaming — all in one scrollable area.
           No `key` here: forcing remount on thread switch would destroy the

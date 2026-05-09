@@ -74,8 +74,6 @@ interface ThreadState {
   latestTurnWithChanges: string | null;
   /** Maps client-generated message IDs to server-persisted message IDs for API calls. */
   serverMessageIds: Record<string, string>;
-  /** Active subagent count per thread (incremented on Agent toolUse, decremented on Agent toolResult). */
-  activeSubagentsByThread: Record<string, number>;
   /** Cache for tool call records to avoid re-fetching from server. */
   toolCallRecordCache: LruCache<string, ToolCallRecord[]>;
   /** Tracks the local message ID for the most recent assistant message per thread, used by handleTurnPersisted to correctly assign tool call counts. */
@@ -195,6 +193,18 @@ function omitKey<V>(rec: Record<string, V>, key: string): Record<string, V> {
   return next;
 }
 
+/**
+ * Returns how many Agent (subagent) tool calls are still in flight for status UI.
+ */
+export function countActiveSubagentCalls(calls: ToolCall[] | undefined): number {
+  if (!calls?.length) return 0;
+  let n = 0;
+  for (const tc of calls) {
+    if (tc.toolName === "Agent" && !tc.isComplete) n++;
+  }
+  return n;
+}
+
 const DEFAULT_THREAD_SETTINGS: ThreadSettings = {
   permissionMode: PERMISSION_MODES.FULL,
   interactionMode: INTERACTION_MODES.CHAT,
@@ -309,7 +319,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   persistedFilesChanged: {},
   latestTurnWithChanges: null,
   serverMessageIds: {},
-  activeSubagentsByThread: {},
   toolCallRecordCache: new LruCache<string, ToolCallRecord[]>(TOOL_CALL_CACHE_SIZE),
   currentTurnMessageIdByThread: {},
   oldestLoadedSequence: {},
@@ -714,6 +723,19 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             }
             return { persistedFilesChanged: nextFilesChanged };
           });
+          // Keep the LRU message cache in sync: the cache was written before this
+          // async merge, so a cache-hit thread switch otherwise drops prepended
+          // turns' file lists until a full reload.
+          const cached = getCachedSnapshot(threadId);
+          if (!cached) return;
+          const mergedFiles = { ...cached.persistedFilesChanged };
+          for (const snap of relevant) {
+            mergedFiles[snap.message_id] = snap.files_changed;
+          }
+          cacheSnapshot(threadId, {
+            ...cached,
+            persistedFilesChanged: mergedFiles,
+          });
         })
         .catch(() => {});
     } catch {
@@ -1034,7 +1056,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         toolCallsByThread: omitKey(state.toolCallsByThread, threadId),
         agentStartTimes: omitKey(state.agentStartTimes, threadId),
         settingsByThread: omitKey(state.settingsByThread, threadId),
-        activeSubagentsByThread: omitKey(state.activeSubagentsByThread, threadId),
         currentTurnMessageIdByThread: omitKey(state.currentTurnMessageIdByThread, threadId),
         oldestLoadedSequence: omitKey(state.oldestLoadedSequence, threadId),
         hasMoreMessages: omitKey(state.hasMoreMessages, threadId),
@@ -1117,7 +1138,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         toolCallsByThread: pruneAll(state.toolCallsByThread),
         agentStartTimes: pruneAll(state.agentStartTimes),
         settingsByThread: pruneAll(state.settingsByThread),
-        activeSubagentsByThread: pruneAll(state.activeSubagentsByThread),
         currentTurnMessageIdByThread: pruneAll(state.currentTurnMessageIdByThread),
         oldestLoadedSequence: pruneAll(state.oldestLoadedSequence),
         hasMoreMessages: pruneAll(state.hasMoreMessages),
@@ -1335,9 +1355,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         const current = state.toolCallsByThread[threadId] ?? [];
         // Agent tool calls represent in-flight subagent runs. Their child tool
         // events keep arriving on the same thread after a peer top-level event,
-        // so completing them here would prematurely zero activeSubagentsByThread
+        // so completing them here would prematurely drop the derived subagent count
         // and hide the live LiveAgentGroup. Agent completion is driven only by
-        // its own session.toolResult event (see isAgentCompletion below).
+        // its own session.toolResult event.
         const updated = current.map((tc) =>
           tc.isComplete || tc.toolName === "Agent" ? tc : { ...tc, isComplete: true }
         );
@@ -1458,6 +1478,12 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     }
 
     if (method === "session.toolUse") {
+      const toolCallId = (params.toolCallId as string) || "";
+      const existingCalls = get().toolCallsByThread[threadId] ?? [];
+      if (toolCallId && existingCalls.some((tc) => tc.id === toolCallId)) {
+        return;
+      }
+
       const parentToolCallId = params.parentToolCallId as string | undefined;
 
       // Only mark prior tool calls complete if this isn't a subagent's tool call
@@ -1465,7 +1491,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       if (!parentToolCallId) {
         markPriorToolCallsComplete();
       }
-      // Track subagent count
       const toolName = (params.toolName as string) || "unknown";
 
       // Intercept TodoWrite calls to populate the task panel
@@ -1484,17 +1509,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         }
       }
 
-      if (toolName === "Agent") {
-        set((state) => ({
-          activeSubagentsByThread: {
-            ...state.activeSubagentsByThread,
-            [threadId]: (state.activeSubagentsByThread[threadId] ?? 0) + 1,
-          },
-        }));
-      }
-
       const toolCall: ToolCall = {
-        id: (params.toolCallId as string) || crypto.randomUUID(),
+        id: toolCallId || crypto.randomUUID(),
         toolName,
         toolInput: (params.toolInput as Record<string, unknown>) || {},
         output: null,
@@ -1522,15 +1538,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         const hasIdMatch = toolCallId && calls.some((tc) => tc.id === toolCallId);
 
         // Fallback: pick the first incomplete call, but never pick an Agent call
-        // that has active children — completing it prematurely would decrement
-        // the subagent count and hide the nested work from the UI.
+        // that has active children — completing it prematurely would hide nested work.
         const hasActiveChildren = (id: string) =>
           calls.some((c) => c.parentToolCallId === id && !c.isComplete);
-        const matchedCall = hasIdMatch
-          ? calls.find((tc) => tc.id === toolCallId)
-          : calls.find((tc) => !tc.isComplete && !(tc.toolName === "Agent" && hasActiveChildren(tc.id)));
-        const isAgentCompletion = matchedCall?.toolName === "Agent";
-
         let matched = false;
         const updated = hasIdMatch
           ? calls.map((tc) =>
@@ -1544,20 +1554,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               return tc;
             });
 
-        const result: Partial<ThreadState> = {
+        return {
           toolCallsByThread: { ...state.toolCallsByThread, [threadId]: updated },
         };
-
-        // Decrement subagent count when an Agent tool call completes
-        if (isAgentCompletion) {
-          const count = (state.activeSubagentsByThread[threadId] ?? 1) - 1;
-          const nextSubagents = { ...state.activeSubagentsByThread };
-          if (count <= 0) delete nextSubagents[threadId];
-          else nextSubagents[threadId] = count;
-          result.activeSubagentsByThread = nextSubagents;
-        }
-
-        return result;
       });
       return;
     }
@@ -1654,8 +1653,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           nextRunning.delete(threadId);
           const nextStartTimes = { ...state.agentStartTimes };
           delete nextStartTimes[threadId];
-          const nextSubagents = { ...state.activeSubagentsByThread };
-          delete nextSubagents[threadId];
           // Mark all tool calls as complete and keep in active slot briefly
           const currentCalls = state.toolCallsByThread[threadId] ?? [];
           const completedCalls = currentCalls.map((tc) =>
@@ -1676,7 +1673,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             streamingPreviewByThread: nextPreview,
             runningThreadIds: nextRunning,
             agentStartTimes: nextStartTimes,
-            activeSubagentsByThread: nextSubagents,
             toolCallsByThread: completedCalls.length > 0
               ? { ...state.toolCallsByThread, [threadId]: completedCalls }
               : state.toolCallsByThread,
@@ -1703,8 +1699,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           delete nextPreview[threadId];
           const nextStartTimes = { ...state.agentStartTimes };
           delete nextStartTimes[threadId];
-          const nextSubagents = { ...state.activeSubagentsByThread };
-          delete nextSubagents[threadId];
           const currentCalls = state.toolCallsByThread[threadId] ?? [];
           const completedCalls = currentCalls.map((tc) =>
             tc.isComplete ? tc : { ...tc, isComplete: true }
@@ -1723,7 +1717,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             streamingByThread: nextStreaming,
             streamingPreviewByThread: nextPreview,
             agentStartTimes: nextStartTimes,
-            activeSubagentsByThread: nextSubagents,
             toolCallsByThread: completedCalls.length > 0
               ? { ...state.toolCallsByThread, [threadId]: completedCalls }
               : state.toolCallsByThread,
@@ -2045,8 +2038,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         delete nextStartTimes[threadId];
         const nextToolCalls = { ...state.toolCallsByThread };
         delete nextToolCalls[threadId];
-        const nextSubagents = { ...state.activeSubagentsByThread };
-        delete nextSubagents[threadId];
         const nextCompacting = { ...state.isCompactingByThread };
         delete nextCompacting[threadId];
         const nextRateLimit = { ...state.rateLimitByThread };
@@ -2060,7 +2051,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           streamingPreviewByThread: nextPreview,
           agentStartTimes: nextStartTimes,
           toolCallsByThread: nextToolCalls,
-          activeSubagentsByThread: nextSubagents,
           isCompactingByThread: nextCompacting,
           rateLimitByThread: nextRateLimit,
           apiRetryByThread: nextApiRetry,

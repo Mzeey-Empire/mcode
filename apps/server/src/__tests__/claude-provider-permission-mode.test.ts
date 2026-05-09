@@ -77,6 +77,7 @@ vi.mock("@mcode/shared", async (importOriginal) => {
 
 import { ClaudeProvider } from "../providers/claude/claude-provider";
 import { stubEnvService } from "./stub-env-service.js";
+import { stubJobObject } from "./stub-job-object.js";
 
 describe("ClaudeProvider permission mode changes", () => {
   let provider: ClaudeProvider;
@@ -85,7 +86,7 @@ describe("ClaudeProvider permission mode changes", () => {
     vi.clearAllMocks();
     sdkCalls.length = 0;
     mockQuery.mockImplementation(makeFakeSdkQuery(sdkCalls));
-    provider = new ClaudeProvider(stubEnvService());
+    provider = new ClaudeProvider(stubEnvService(), stubJobObject());
   });
 
   it("reuses the session when permissionMode is unchanged", async () => {
