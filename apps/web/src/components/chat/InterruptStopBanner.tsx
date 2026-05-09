@@ -7,10 +7,10 @@ import { useThreadStore } from "@/stores/threadStore";
  * snapshot-persisted, reminding them that workspace changes were kept on disk.
  */
 export function InterruptStopBanner({ threadId }: { threadId: string }) {
-  const notice = useThreadStore((s) => s.interruptStopFileNotice);
+  const notice = useThreadStore((s) => s.interruptStopFileNoticeByThread[threadId]);
   const clear = useThreadStore((s) => s.clearInterruptStopFileNotice);
 
-  if (!notice || notice.threadId !== threadId || notice.paths.length === 0) return null;
+  if (!notice || notice.paths.length === 0) return null;
 
   const preview =
     notice.paths.length <= 3
@@ -35,7 +35,7 @@ export function InterruptStopBanner({ threadId }: { threadId: string }) {
         className="h-7 w-7 shrink-0 text-muted-foreground"
         title="Dismiss"
         aria-label="Dismiss"
-        onClick={() => clear()}
+        onClick={() => clear(threadId)}
       >
         <X size={14} />
       </Button>

@@ -671,13 +671,15 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     }
   }, [pendingPrefill, clearPendingPrefill]);
 
-  const composerRecallFromStop = useThreadStore((s) => s.composerRecallFromStop);
+  const composerRecallFromStop = useThreadStore((s) =>
+    threadId ? s.composerRecallFromStopByThread[threadId] : undefined,
+  );
   const clearComposerRecallFromStop = useThreadStore((s) => s.clearComposerRecallFromStop);
 
   useEffect(() => {
-    if (!composerRecallFromStop || composerRecallFromStop.threadId !== threadId) return;
+    if (!composerRecallFromStop || !threadId) return;
     const text = composerRecallFromStop.text;
-    clearComposerRecallFromStop();
+    clearComposerRecallFromStop(threadId);
     setInput(text);
     if (editorRef.current) {
       editorRef.current.update(() => {
