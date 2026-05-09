@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { appendBrowserCaptureFence, MCODE_BROWSER_CAPTURE_FENCE_OPEN } from "@/lib/browser-capture-append";
-import { AttachedBrowserCaptureSchema, type AttachedBrowserCaptureV1, type AttachedBrowserCaptureV2 } from "@mcode/contracts";
+import { appendBrowserCaptureFence, MCODE_BROWSER_CAPTURE_FENCE_CLOSE, MCODE_BROWSER_CAPTURE_FENCE_OPEN } from "@/lib/browser-capture-append";
+import {
+  AttachedBrowserCaptureSchema,
+  MCODE_BROWSER_CAPTURE_V2_STRING_MAX,
+  type AttachedBrowserCaptureV1,
+  type AttachedBrowserCaptureV2,
+} from "@mcode/contracts";
 
 const sampleCaptureV2: AttachedBrowserCaptureV2 = {
   attachmentId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
@@ -42,5 +47,19 @@ describe("appendBrowserCaptureFence", () => {
     expect(parsed.schemaVersion).toBe(1);
     const out = appendBrowserCaptureFence("x", [sampleCaptureV1]);
     expect(out).toContain('"schemaVersion":1');
+  });
+
+  it("clamps oversized v2 headings so the fence still builds", () => {
+    const cap = MCODE_BROWSER_CAPTURE_V2_STRING_MAX.headingOutline;
+    const row: AttachedBrowserCaptureV2 = {
+      ...sampleCaptureV2,
+      headingOutline: "H".repeat(cap + 200),
+    };
+    const out = appendBrowserCaptureFence("user text", [row]);
+    expect(out).toContain(MCODE_BROWSER_CAPTURE_FENCE_OPEN);
+    const start = out.indexOf(MCODE_BROWSER_CAPTURE_FENCE_OPEN) + MCODE_BROWSER_CAPTURE_FENCE_OPEN.length;
+    const end = out.indexOf(MCODE_BROWSER_CAPTURE_FENCE_CLOSE);
+    const parsed = JSON.parse(out.slice(start, end).trim()) as AttachedBrowserCaptureV2[];
+    expect(parsed[0].headingOutline).toHaveLength(cap);
   });
 });

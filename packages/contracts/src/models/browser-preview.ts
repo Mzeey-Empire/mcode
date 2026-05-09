@@ -1,6 +1,25 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
 
+/** Max lengths for {@link McodeBrowserCaptureV1} excerpt fields (matches Zod). */
+export const MCODE_BROWSER_CAPTURE_V1_STRING_MAX = {
+  htmlExcerpt: 16_000,
+} as const;
+
+/**
+ * Max lengths for {@link McodeBrowserCaptureV2} excerpt fields (matches Zod).
+ * Apply {@link clampMcodeBrowserCaptureV2} after redaction so replacements stay within limits.
+ */
+export const MCODE_BROWSER_CAPTURE_V2_STRING_MAX = {
+  htmlExcerpt: 16_000,
+  visibleTextExcerpt: 12_000,
+  headingOutline: 4000,
+  interactiveOutlineExcerpt: 8000,
+  consoleTail: 4000,
+  failedRequestUrl: 2048,
+  failedRequestResourceType: 32,
+} as const;
+
 /**
  * Bounding rectangle for a captured region in CSS pixels (viewport relative).
  * Used by preview capture payloads and future pick-to-reference flows.
@@ -37,7 +56,7 @@ export const McodeBrowserCaptureV1Schema = lazySchema(() =>
     capturedAt: z.string(),
     captureKind: BrowserPreviewCaptureKindSchema().optional(),
     selectorHint: z.string().nullable().optional(),
-    htmlExcerpt: z.string().max(16_000).optional(),
+    htmlExcerpt: z.string().max(MCODE_BROWSER_CAPTURE_V1_STRING_MAX.htmlExcerpt).optional(),
     bounds: BrowserPreviewBoundsSchema(),
   }),
 );
@@ -73,9 +92,9 @@ const layoutViewportSchema = z.object({
 });
 
 const failedRequestEntrySchema = z.object({
-  url: z.string().max(2048),
+  url: z.string().max(MCODE_BROWSER_CAPTURE_V2_STRING_MAX.failedRequestUrl),
   statusCode: z.number().int(),
-  resourceType: z.string().max(32).optional(),
+  resourceType: z.string().max(MCODE_BROWSER_CAPTURE_V2_STRING_MAX.failedRequestResourceType).optional(),
 });
 
 /**
@@ -90,12 +109,18 @@ export const McodeBrowserCaptureV2Schema = lazySchema(() =>
     capturedAt: z.string(),
     captureKind: BrowserPreviewCaptureKindSchema().optional(),
     selectorHint: z.string().nullable().optional(),
-    htmlExcerpt: z.string().max(16_000).optional(),
+    htmlExcerpt: z.string().max(MCODE_BROWSER_CAPTURE_V2_STRING_MAX.htmlExcerpt).optional(),
     bounds: BrowserPreviewBoundsSchema(),
-    visibleTextExcerpt: z.string().max(12_000).optional(),
-    headingOutline: z.string().max(4000).optional(),
-    interactiveOutlineExcerpt: z.string().max(8000).optional(),
-    consoleTail: z.string().max(4000).optional(),
+    visibleTextExcerpt: z
+      .string()
+      .max(MCODE_BROWSER_CAPTURE_V2_STRING_MAX.visibleTextExcerpt)
+      .optional(),
+    headingOutline: z.string().max(MCODE_BROWSER_CAPTURE_V2_STRING_MAX.headingOutline).optional(),
+    interactiveOutlineExcerpt: z
+      .string()
+      .max(MCODE_BROWSER_CAPTURE_V2_STRING_MAX.interactiveOutlineExcerpt)
+      .optional(),
+    consoleTail: z.string().max(MCODE_BROWSER_CAPTURE_V2_STRING_MAX.consoleTail).optional(),
     viewportScroll: viewportScrollSchema.optional(),
     layoutViewport: layoutViewportSchema.optional(),
     /** Recent HTTP subresource failures observed in the preview session (capped, best-effort). */
@@ -124,5 +149,65 @@ export const AttachedBrowserCaptureSchema = lazySchema(() =>
 );
 
 export type AttachedBrowserCapture = z.infer<ReturnType<typeof AttachedBrowserCaptureSchema>>;
+
+function clampStrLen(s: string, max: number): string {
+  return s.length <= max ? s : s.slice(0, max);
+}
+
+function clampOptStr(s: string | undefined, max: number): string | undefined {
+  if (s === undefined) return undefined;
+  return clampStrLen(s, max);
+}
+
+/**
+ * Truncates v2 excerpt strings and failed-request fields to schema caps. Run after PII redaction
+ * so expanded placeholders still fit {@link McodeBrowserCaptureV2Schema}.
+ */
+export function clampMcodeBrowserCaptureV2<T extends McodeBrowserCaptureV2>(capture: T): T {
+  const m = MCODE_BROWSER_CAPTURE_V2_STRING_MAX;
+  const next = { ...capture } as T;
+  if (next.htmlExcerpt !== undefined) {
+    next.htmlExcerpt = clampStrLen(next.htmlExcerpt, m.htmlExcerpt);
+  }
+  if (next.visibleTextExcerpt !== undefined) {
+    next.visibleTextExcerpt = clampStrLen(next.visibleTextExcerpt, m.visibleTextExcerpt);
+  }
+  if (next.headingOutline !== undefined) {
+    next.headingOutline = clampStrLen(next.headingOutline, m.headingOutline);
+  }
+  if (next.interactiveOutlineExcerpt !== undefined) {
+    next.interactiveOutlineExcerpt = clampStrLen(next.interactiveOutlineExcerpt, m.interactiveOutlineExcerpt);
+  }
+  if (next.consoleTail !== undefined) {
+    next.consoleTail = clampStrLen(next.consoleTail, m.consoleTail);
+  }
+  if (next.failedRequests !== undefined && next.failedRequests.length > 0) {
+    next.failedRequests = next.failedRequests.map((e) => ({
+      ...e,
+      url: clampStrLen(e.url, m.failedRequestUrl),
+      resourceType: clampOptStr(e.resourceType, m.failedRequestResourceType),
+    }));
+  }
+  return next;
+}
+
+/**
+ * Ensures an attached row fits {@link AttachedBrowserCaptureSchema} before fence validation.
+ */
+export function clampAttachedBrowserCaptureForOutbound(att: AttachedBrowserCapture): AttachedBrowserCapture {
+  if (att.schemaVersion === 1) {
+    const m = MCODE_BROWSER_CAPTURE_V1_STRING_MAX;
+    return {
+      ...att,
+      htmlExcerpt:
+        att.htmlExcerpt !== undefined ? clampStrLen(att.htmlExcerpt, m.htmlExcerpt) : undefined,
+    };
+  }
+  const { attachmentId, ...rest } = att;
+  return {
+    attachmentId,
+    ...clampMcodeBrowserCaptureV2(rest),
+  };
+}
 
 export type McodeBrowserCapture = McodeBrowserCaptureV1 | McodeBrowserCaptureV2;

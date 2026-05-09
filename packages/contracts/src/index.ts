@@ -93,6 +93,10 @@ export {
   McodeBrowserCaptureV2Schema,
   AttachedBrowserCaptureV2Schema,
   AttachedBrowserCaptureSchema,
+  MCODE_BROWSER_CAPTURE_V1_STRING_MAX,
+  MCODE_BROWSER_CAPTURE_V2_STRING_MAX,
+  clampMcodeBrowserCaptureV2,
+  clampAttachedBrowserCaptureForOutbound,
 } from "./models/browser-preview.js";
 export type {
   BrowserPreviewBounds,

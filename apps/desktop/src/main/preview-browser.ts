@@ -6,7 +6,11 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { BrowserView, BrowserWindow, app, ipcMain, session, shell } from "electron";
-import type { AttachmentMeta, McodeBrowserCaptureV2 } from "@mcode/contracts";
+import {
+  clampMcodeBrowserCaptureV2,
+  type AttachmentMeta,
+  type McodeBrowserCaptureV2,
+} from "@mcode/contracts";
 import { redactMcodeBrowserCaptureV2 } from "@mcode/shared";
 
 const IDLE_MS = 120_000;
@@ -850,7 +854,7 @@ async function buildBrowserCapturePayload(
   if (failedRequests && failedRequests.length > 0) {
     out.failedRequests = failedRequests;
   }
-  return redactMcodeBrowserCaptureV2(out);
+  return clampMcodeBrowserCaptureV2(redactMcodeBrowserCaptureV2(out));
 }
 
 function attachMainFrameNavigationAbort(s: PreviewSession, webContents: BrowserView["webContents"]): () => void {
