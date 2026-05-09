@@ -158,6 +158,20 @@ export const MODEL_PROVIDERS: readonly ModelProvider[] = [
 ];
 
 /**
+ * Chooses model definitions for Settings pickers: prefers a non-empty live list
+ * from the server; otherwise keeps static catalog entries when discovery fails or returns nothing.
+ */
+export function pickProviderModelsForSettings(
+  staticModels: readonly ModelDefinition[],
+  dynamicModels: readonly ModelDefinition[] | undefined,
+): ModelDefinition[] {
+  if (dynamicModels != null && dynamicModels.length > 0) {
+    return [...dynamicModels];
+  }
+  return [...staticModels];
+}
+
+/**
  * Flat model list sorted longest-ID-first, precomputed once at module load.
  * Used by `matchDatedVariant` to avoid reallocating and sorting on every call.
  */

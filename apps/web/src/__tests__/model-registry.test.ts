@@ -13,7 +13,25 @@ import {
   normalizeReasoningLevelForModel,
   resolveThreadModelId,
   supportsEffortParameter,
+  pickProviderModelsForSettings,
 } from "@/lib/model-registry";
+
+describe("pickProviderModelsForSettings", () => {
+  const staticModels = [{ id: "a", label: "A", providerId: "cursor" }];
+
+  it("prefers a non-empty dynamic list", () => {
+    const dynamic = [{ id: "b", label: "B", providerId: "cursor" }];
+    expect(pickProviderModelsForSettings(staticModels, dynamic)).toEqual(dynamic);
+  });
+
+  it("falls back to static models when dynamic is undefined", () => {
+    expect(pickProviderModelsForSettings(staticModels, undefined)).toEqual(staticModels);
+  });
+
+  it("falls back to static models when dynamic is empty", () => {
+    expect(pickProviderModelsForSettings(staticModels, [])).toEqual(staticModels);
+  });
+});
 
 describe("ModelRegistry", () => {
   it("MODEL_PROVIDERS contains Claude with 4 models", () => {

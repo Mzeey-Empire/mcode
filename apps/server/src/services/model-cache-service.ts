@@ -45,6 +45,12 @@ export class ModelCacheService {
   /** In-flight refresh promises to coalesce concurrent fetches. */
   private inflight = new Map<string, Promise<ProviderModelInfo[]>>();
 
+  /**
+   * Increments when `invalidate` runs so a refresh that started earlier cannot
+   * repopulate SQLite or memory after the cache was cleared.
+   */
+  private generation = new Map<string, number>();
+
   constructor(
     @inject(ModelCacheRepo) private repo: ModelCacheRepo,
     @inject("IProviderRegistry") private registry: IProviderRegistry,
@@ -110,6 +116,18 @@ export class ModelCacheService {
   }
 
   /**
+   * Drops persisted and in-memory entries for a provider so the next model list
+   * fetch runs against the live CLI or SDK again.
+   */
+  invalidate(providerId: string): void {
+    this.generation.set(providerId, (this.generation.get(providerId) ?? 0) + 1);
+    this.inflight.delete(providerId);
+    this.memoryCache.delete(providerId);
+    this.fetchedAt.delete(providerId);
+    this.repo.delete(providerId);
+  }
+
+  /**
    * Fetches models from the provider, updates both in-memory and SQLite caches.
    * Coalesces concurrent calls for the same provider so we never issue
    * duplicate requests in flight.
@@ -143,8 +161,14 @@ export class ModelCacheService {
   }
 
   private async doRefresh(providerId: string): Promise<ProviderModelInfo[]> {
+    const genAtStart = this.generation.get(providerId) ?? 0;
     const provider = this.registry.resolve(providerId as never);
     const models = await provider.listModels();
+
+    if ((this.generation.get(providerId) ?? 0) !== genAtStart) {
+      return models;
+    }
+
     const now = Date.now();
 
     // Compare ID sets: the model array is rewritten by providers (ordering and

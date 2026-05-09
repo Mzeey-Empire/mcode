@@ -14,6 +14,7 @@ import type { AttachmentMeta, StoredAttachment } from "@mcode/contracts";
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 const MAX_PDF_SIZE = 32 * 1024 * 1024;
 const MAX_TEXT_SIZE = 1 * 1024 * 1024;
+const MAX_DOCUMENT_SIZE = 16 * 1024 * 1024;
 
 /**
  * Pattern matching safe attachment IDs: alphanumerics, hyphens, and underscores only.
@@ -21,11 +22,26 @@ const MAX_TEXT_SIZE = 1 * 1024 * 1024;
  */
 const SAFE_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
-/** Size limits per MIME category. Shared with binary upload handler. */
+/**
+ * Returns the maximum allowed size in bytes for a MIME type used by attachments.
+ *
+ * Shared with binary upload validation. Unknown categories fall back to the image cap for safety.
+ *
+ * @param mimeType - MIME type string for the upload (for example `image/png` or `application/pdf`).
+ * @returns Maximum permitted bytes for that category.
+ */
 export function getMaxSizeForMime(mimeType: string): number {
   if (mimeType.startsWith("image/")) return MAX_IMAGE_SIZE;
   if (mimeType === "application/pdf") return MAX_PDF_SIZE;
   if (mimeType === "text/plain") return MAX_TEXT_SIZE;
+  if (
+    mimeType === "application/rtf" ||
+    mimeType === "text/rtf" ||
+    mimeType.startsWith("application/vnd.openxmlformats-officedocument.") ||
+    mimeType.startsWith("application/vnd.oasis.opendocument.")
+  ) {
+    return MAX_DOCUMENT_SIZE;
+  }
   return MAX_IMAGE_SIZE; // conservative fallback
 }
 
@@ -37,6 +53,14 @@ function mimeToExt(mimeType: string): string {
     "image/webp": ".webp",
     "application/pdf": ".pdf",
     "text/plain": ".txt",
+    "application/rtf": ".rtf",
+    "text/rtf": ".rtf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "application/vnd.oasis.opendocument.text": ".odt",
+    "application/vnd.oasis.opendocument.spreadsheet": ".ods",
+    "application/vnd.oasis.opendocument.presentation": ".odp",
   };
   return map[mimeType] ?? "";
 }

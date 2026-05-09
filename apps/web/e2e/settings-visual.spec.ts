@@ -72,8 +72,10 @@ test.describe("Settings visual review", () => {
     const modelNav = page.getByRole("button", { name: "Model", exact: true });
     await modelNav.click();
     await page.waitForTimeout(300);
-    const codexBtn = page.getByRole("radio", { name: /Codex/ });
-    await codexBtn.hover();
+    await page.getByTestId("settings-default-provider-trigger").click();
+    await page.waitForTimeout(200);
+    const codexOption = page.getByTestId("settings-provider-option-codex");
+    await codexOption.hover();
     await page.waitForTimeout(500);
     await page.screenshot({
       path: path.join(SCREENSHOT_DIR, "settings-provider-tooltip.png"),

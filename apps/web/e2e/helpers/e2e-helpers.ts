@@ -93,7 +93,19 @@ export async function mockWebSocketServer(
       }
       // Default responses
       let result: unknown;
-      if (method?.endsWith(".list") || method === "provider.listModels") result = [];
+      // `message.list` matches the generic *.list branch below but must return a
+      // paginated shape; returning [] leaves loadMessages in an error state.
+      if (method === "message.list") {
+        result = { messages: [], hasMore: false, answeredPlanMessageIds: [] };
+      } else if (method === "permission.listPending") {
+        result = [];
+      } else if (method === "thread.getTasks") {
+        result = [];
+      } else if (method === "snapshot.listByThread") {
+        result = [];
+      } else if (method === "providers.listAvailability") {
+        result = [];
+      } else if (method?.endsWith(".list") || method === "provider.listModels") result = [];
       else if (method === "git.currentBranch") result = "main";
       else if (method === "agent.activeCount") result = 0;
       else if (method === "agent.listRunning") result = [];

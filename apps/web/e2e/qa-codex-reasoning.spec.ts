@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { mockWebSocketServer } from "./helpers/e2e-helpers";
 import { fileURLToPath } from "url";
 import path from "path";
@@ -25,6 +25,15 @@ function makeDefaultSettings(provider: string, modelId: string, reasoning: strin
 }
 
 test.describe("Codex reasoning selector QA", () => {
+  /** SegControl for reasoning lives inside the "Reasoning effort" settings row. */
+  function reasoningEffortRadiogroup(page: Page) {
+    return page
+      .locator('[class*="flex-wrap"][class*="justify-between"]')
+      .filter({ has: page.getByText("Reasoning effort", { exact: true }) })
+      .first()
+      .getByRole("radiogroup");
+  }
+
   test.beforeEach(async ({ page }) => {
     currentSettings = makeDefaultSettings("claude", "claude-sonnet-4-6", "high");
 
@@ -90,27 +99,30 @@ test.describe("Codex reasoning selector QA", () => {
     await page.waitForTimeout(500);
 
     // Verify Claude default: reasoning shows Low, Medium, High, Max
-    const reasoningGroup = () => page.locator('[role="radiogroup"]').nth(3);
-    const claudeOptions = await reasoningGroup().locator('[role="radio"]').allInnerTexts();
+    const claudeOptions = await reasoningEffortRadiogroup(page).locator('[role="radio"]').allInnerTexts();
     console.log(`Claude reasoning: ${claudeOptions.join(", ")}`);
     expect(claudeOptions).toContain("Max");
     expect(claudeOptions).not.toContain("X-High");
     await page.screenshot({ path: path.join(SCREENSHOT_DIR, "qa-01-claude-reasoning.png") });
 
-    // Switch to Codex provider
-    const codexRadio = page.getByRole("radio", { name: "Codex" });
-    await codexRadio.click();
+    // Switch to Codex provider (searchable provider picker)
+    await page.getByTestId("settings-default-provider-trigger").click();
+    await page.waitForTimeout(200);
+    await page.getByTestId("settings-provider-option-codex").click();
     await page.waitForTimeout(1000);
     await page.screenshot({ path: path.join(SCREENSHOT_DIR, "qa-02-codex-selected.png") });
 
-    // Verify model list changed to Codex models
-    const modelGroup = page.locator('[role="radiogroup"]').nth(1);
-    const modelTexts = await modelGroup.locator('[role="radio"]').allInnerTexts();
-    console.log(`Codex models: ${modelTexts.join(", ")}`);
-    expect(modelTexts.some((t: string) => t.includes("GPT"))).toBeTruthy();
+    // Verify model picker lists Codex-style models
+    await page.getByTestId("settings-default-model-trigger").click();
+    await page.waitForTimeout(300);
+    const modelItems = await page.locator('[data-slot="command-item"]').allInnerTexts();
+    console.log(`Codex models: ${modelItems.join(", ")}`);
+    expect(modelItems.some((t: string) => t.includes("GPT"))).toBeTruthy();
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(200);
 
     // Verify reasoning options now show X-High instead of Max
-    const codexOptions = await reasoningGroup().locator('[role="radio"]').allInnerTexts();
+    const codexOptions = await reasoningEffortRadiogroup(page).locator('[role="radio"]').allInnerTexts();
     console.log(`Codex reasoning: ${codexOptions.join(", ")}`);
     expect(codexOptions).toContain("X-High");
     expect(codexOptions).not.toContain("Max");
@@ -123,20 +135,20 @@ test.describe("Codex reasoning selector QA", () => {
     await expect(codexHint).toBeVisible();
 
     // Click X-High and verify it's checked
-    const xhighRadio = page.getByRole("radio", { name: "X-High" });
+    const xhighRadio = reasoningEffortRadiogroup(page).getByRole("radio", { name: "X-High" });
     await xhighRadio.click();
     await page.waitForTimeout(300);
     await expect(xhighRadio).toHaveAttribute("aria-checked", "true");
     await page.screenshot({ path: path.join(SCREENSHOT_DIR, "qa-03-xhigh-selected.png") });
 
-    // Switch back to Claude (scoped to the first Provider radiogroup to avoid
-    // ambiguity with the PR Draft provider row which also contains "Claude")
-    const claudeRadio = page.locator('[role="radiogroup"]').first().getByRole("radio", { name: "Claude" });
-    await claudeRadio.click();
+    // Switch back to Claude via provider picker
+    await page.getByTestId("settings-default-provider-trigger").click();
+    await page.waitForTimeout(200);
+    await page.getByTestId("settings-provider-option-claude").click();
     await page.waitForTimeout(1000);
 
     // Verify Max is back and X-High is gone
-    const restoredOptions = await reasoningGroup().locator('[role="radio"]').allInnerTexts();
+    const restoredOptions = await reasoningEffortRadiogroup(page).locator('[role="radio"]').allInnerTexts();
     console.log(`Claude restored: ${restoredOptions.join(", ")}`);
     expect(restoredOptions).toContain("Max");
     expect(restoredOptions).not.toContain("X-High");
