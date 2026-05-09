@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.1](https://github.com/Mzeey-Empire/mcode/compare/mcode-v0.10.0...mcode-v0.10.1) (2026-05-09)
+
+
+### Bug Fixes
+
+* **ci:** pass --repo to gh release upload in merge-mac-yml job ([9185bb7](https://github.com/Mzeey-Empire/mcode/commit/9185bb7573526e45932b773ae69dba2ca4daf803))
+* **ci:** pass --repo to gh upload in merge-mac-yml job ([#435](https://github.com/Mzeey-Empire/mcode/issues/435)) ([9185bb7](https://github.com/Mzeey-Empire/mcode/commit/9185bb7573526e45932b773ae69dba2ca4daf803))
+
 ## [0.10.0](https://github.com/Mzeey-Empire/mcode/compare/mcode-v0.9.1...mcode-v0.10.0) (2026-05-09)
 
 
