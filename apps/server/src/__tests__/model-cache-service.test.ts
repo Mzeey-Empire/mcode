@@ -154,6 +154,40 @@ describe("ModelCacheService", () => {
     expect(provider.listModels).toHaveBeenCalledTimes(1);
   });
 
+  it("invalidate during in-flight refresh does not repopulate cache", async () => {
+    let resolveList!: (value: ProviderModelInfo[]) => void;
+    const listPromise = new Promise<ProviderModelInfo[]>((resolve) => {
+      resolveList = resolve;
+    });
+    const stale: ProviderModelInfo[] = [{ id: "stale", name: "Stale" }];
+    const provider = {
+      id: "cursor",
+      listModels: vi.fn().mockReturnValue(listPromise),
+      sendMessage: vi.fn(),
+      cancelSession: vi.fn(),
+      shutdown: vi.fn(),
+    };
+    repo.upsert("cursor", [{ id: "seed", name: "Seed" }]);
+    const registry = makeRegistry(new Map([["cursor", provider]]));
+    const service = new ModelCacheService(repo, registry);
+
+    expect(service.getCached("cursor")).toEqual([{ id: "seed", name: "Seed" }]);
+
+    const refreshDone = service.refreshProvider("cursor");
+
+    service.invalidate("cursor");
+
+    expect(service.getCached("cursor")).toBeUndefined();
+    expect(repo.get("cursor")).toBeNull();
+
+    resolveList(stale);
+    await refreshDone;
+
+    expect(service.getCached("cursor")).toBeUndefined();
+    expect(repo.get("cursor")).toBeNull();
+    expect(provider.listModels).toHaveBeenCalledTimes(1);
+  });
+
   it("throws when fetching from a provider that does not implement listModels", async () => {
     const provider = {
       id: "no-list",
