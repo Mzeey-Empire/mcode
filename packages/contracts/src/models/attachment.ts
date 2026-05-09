@@ -8,7 +8,17 @@ export const MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME = "application/x-mcode-browse
 
 /** True when attachment metadata denotes a fence-only preview context row (no disk file). */
 export function isVirtualBrowserContextAttachment(mimeType: string): boolean {
-  return mimeType === MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME;
+  return mimeType.trim() === MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME;
+}
+
+/**
+ * True when this metadata row must never touch the filesystem (structured browser capture only).
+ * Handles clients that omit or mis-send {@link MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME}.
+ */
+export function shouldPersistAttachmentWithoutFile(att: AttachmentMeta): boolean {
+  if (isVirtualBrowserContextAttachment(att.mimeType)) return true;
+  const pathEmpty = !att.sourcePath || att.sourcePath.trim() === "";
+  return att.sizeBytes === 0 && pathEmpty && att.name === "Page context";
 }
 
 /** Metadata for an image or file attachment. No binary data, just a pointer. */

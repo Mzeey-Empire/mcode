@@ -63,6 +63,7 @@ import {
   inferMimeType,
   MAX_ATTACHMENTS,
   MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME,
+  isVirtualBrowserContextAttachment,
 } from "@mcode/contracts";
 import type {
   AttachedBrowserCapture,
@@ -1285,7 +1286,13 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const collectAndClearAttachments = useCallback((): AttachmentMeta[] => {
     const metas: AttachmentMeta[] = [];
     for (const a of attachments) {
-      if (a.contextOnly === true && a.browserCapture) {
+      const fenceOnlyNoFile =
+        !!a.browserCapture &&
+        a.filePath == null &&
+        (a.contextOnly === true ||
+          isVirtualBrowserContextAttachment(a.mimeType) ||
+          a.name === "Page context");
+      if (fenceOnlyNoFile) {
         metas.push({
           id: a.id,
           name: a.name,

@@ -22,4 +22,19 @@ describe("AttachmentService.persist virtual browser context", () => {
     expect(stored[0]?.sizeBytes).toBe(0);
     expect(persisted).toHaveLength(0);
   });
+
+  it("normalizes Page context fence-only rows when MIME is missing", async () => {
+    const svc = new AttachmentService();
+    const att: AttachmentMeta = {
+      id: "ctx-fallback-002",
+      name: "Page context",
+      mimeType: "application/octet-stream",
+      sizeBytes: 0,
+      sourcePath: "",
+    };
+    const { stored, persisted } = await svc.persist("thread-unit-test-virtual-fallback", [att]);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.mimeType).toBe(MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME);
+    expect(persisted).toHaveLength(0);
+  });
 });
