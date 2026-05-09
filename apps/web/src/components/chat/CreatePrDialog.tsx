@@ -125,7 +125,9 @@ export function CreatePrDialog({
   workspaceId,
   branch,
 }: CreatePrDialogProps) {
-  const { branches, branchesLoading, loadBranches } = useWorkspaceStore();
+  const branches = useWorkspaceStore((s) => s.branches);
+  const branchesLoading = useWorkspaceStore((s) => s.branchesLoading);
+  const loadBranches = useWorkspaceStore((s) => s.loadBranches);
 
   const [state, setState] = useState<DialogState>("ready");
   const [error, setError] = useState<string | null>(null);

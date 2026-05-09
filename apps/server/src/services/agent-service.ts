@@ -742,6 +742,14 @@ export class AgentService {
       throw new Error(`Fork message not found in parent thread: ${resolvedForkMessageId}`);
     }
 
+    /** Guards fork handoff against loading unbounded history into memory. */
+    const FORK_HISTORY_MAX_SEQUENCE = 10_000;
+    if (forkMessage.sequence > FORK_HISTORY_MAX_SEQUENCE) {
+      throw new Error(
+        `Fork point is too far back in this thread (sequence ${forkMessage.sequence}; max ${FORK_HISTORY_MAX_SEQUENCE}). Choose a more recent message to branch from.`,
+      );
+    }
+
     // Load all messages up to and including the fork point — no row cap.
     const forkedMessages = this.messageRepo.listByThreadUpToSequence(
       parentThreadId,
