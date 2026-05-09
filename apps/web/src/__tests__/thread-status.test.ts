@@ -98,8 +98,10 @@ describe("getStatusDisplay", () => {
     expect(result.shape).toBe("solid");
   });
 
-  it("interrupted status returns amber dot with pulse", () => {
+  it("interrupted status returns Interrupted label and amber dot with pulse", () => {
     const result = getStatusDisplay(makeThread({ status: "interrupted" }), false);
+    expect(result.label).toBe("Interrupted");
+    expect(result.color).toContain("amber");
     expect(result.dotClass).toContain("amber");
     expect(result.dotClass).toContain("animate-pulse");
     expect(result.shape).toBe("solid");
@@ -132,6 +134,13 @@ describe("getNotificationDot", () => {
     expect(result).not.toBeNull();
     expect(result!.dotClass).toContain("--diff-remove-strong");
     expect(result!.animate).toBe(false);
+  });
+
+  it("returns amber pulse for interrupted thread (including PR rows)", () => {
+    const result = getNotificationDot(makeThread({ status: "interrupted", pr_number: 42 }), false);
+    expect(result).not.toBeNull();
+    expect(result!.dotClass).toContain("amber");
+    expect(result!.animate).toBe(true);
   });
 
   it("returns null for idle thread", () => {

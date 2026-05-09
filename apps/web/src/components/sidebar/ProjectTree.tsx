@@ -1192,7 +1192,7 @@ function VirtualizedThreadList({
                     )}
                   />
                 )}
-                {!thread.pr_number && status.label && (
+                {status.label && (
                   <span className={cn("shrink-0 font-mono text-[9.5px] uppercase tracking-[0.12em]", status.color)}>
                     {status.label}
                   </span>

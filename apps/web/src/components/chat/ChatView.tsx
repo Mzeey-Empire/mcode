@@ -250,7 +250,10 @@ export function ChatView() {
       for (const threadId of threadIds) {
         try {
           const thread = currentThreads.find((t) => t.id === threadId);
-          if (!thread) continue;
+          if (!thread) {
+            failedIds.push(threadId);
+            continue;
+          }
           await sendMessage(
             threadId,
             "Continue where you left off. The server was restarted.",

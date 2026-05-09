@@ -21,6 +21,8 @@ export interface NotificationDot {
 /**
  * Returns notification dot info for threads with PRs, or null if idle.
  * Used to overlay a small colored dot on the PR icon in the sidebar.
+ * Terminal states `completed`, `errored`, and `interrupted` each get a distinct dot;
+ * `interrupted` uses amber (not red) so restart cut-off reads differently from failure.
  * @param thread - The thread whose PR notification dot is being computed.
  * @param isActuallyRunning - True when the agent process is currently live.
  * @param hasPendingPermission - True when the thread has at least one unsettled permission request; renders an amber ring.
@@ -48,6 +50,8 @@ export function getNotificationDot(
       return { dotClass: "bg-[var(--diff-add-strong)]/85", animate: false, shape: "solid" };
     case "errored":
       return { dotClass: "bg-[var(--diff-remove-strong)]/90", animate: false, shape: "solid" };
+    case "interrupted":
+      return { dotClass: "bg-amber-500/85", animate: true, shape: "solid" };
     default:
       return null;
   }
@@ -103,7 +107,7 @@ export function getStatusDisplay(
       };
     case "interrupted":
       return {
-        label: "",
+        label: "Interrupted",
         color: "text-amber-500/90",
         dotClass: "bg-amber-500/85 animate-pulse",
         shape: "solid",

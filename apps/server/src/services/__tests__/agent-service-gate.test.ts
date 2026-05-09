@@ -195,15 +195,17 @@ describe("AgentService.sendMessage — provider availability gate", () => {
 
     const svc = buildService({ assertUsable, resolveProvider });
 
-    await svc.sendMessage(
-      THREAD_ID,
-      "Hello",
-      "default",
-      "claude-sonnet-4-6",
-      [],
-      undefined,
-      "codex",
-    );
+    await expect(
+      svc.sendMessage(
+        THREAD_ID,
+        "Hello",
+        "default",
+        "claude-sonnet-4-6",
+        [],
+        undefined,
+        "codex",
+      ),
+    ).rejects.toThrow(ProviderDisabledError);
 
     // Provider must NOT be resolved — no agent session started
     expect(resolveProvider).not.toHaveBeenCalled();

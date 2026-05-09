@@ -203,7 +203,8 @@ export class AgentService {
           reason: err instanceof ProviderDisabledError ? "disabled" : "cli_missing",
           configuredPath: err instanceof ProviderCliMissingError ? err.configuredPath : undefined,
         });
-        return;
+        // RPC must reject so callers (e.g. batch resume, composer send) roll back optimistic
+        // running state instead of succeeding while nothing was persisted.
       }
       throw err;
     }
