@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { BrowserView, BrowserWindow, app, ipcMain, session, shell } from "electron";
 import type { AttachmentMeta, McodeBrowserCaptureV2 } from "@mcode/contracts";
+import { redactMcodeBrowserCaptureV2 } from "@mcode/shared";
 
 const IDLE_MS = 120_000;
 
@@ -37,6 +38,11 @@ export type PreviewPictureReferenceResult =
     }
   | { ok: false; error: string };
 
+/** Structured preview context without PNG bytes (fence-only composer attachment). */
+export type PreviewContextReferenceResult =
+  | { ok: true; capture: McodeBrowserCaptureV2 }
+  | { ok: false; error: string };
+
 interface PreviewSession {
   view: BrowserView | null;
   idleTimer: NodeJS.Timeout | null;
@@ -58,6 +64,10 @@ interface PreviewSession {
   navigationAbortDisposable: (() => void) | null;
   /** Recent guest console lines for capture v2 diagnostics (cleared when the view is destroyed). */
   consoleBuffer: string[];
+  /** Failed guest subresource responses for v2 capture (best-effort, capped). */
+  failedRequestBuffer: Array<{ url: string; statusCode: number; resourceType: string }>;
+  /** Last thread id synced from the renderer; used to load the correct resume URL per thread. */
+  lastPreviewThreadId: string | null;
 }
 
 const sessions = new Map<number, PreviewSession>();
@@ -75,6 +85,8 @@ function getSession(win: BrowserWindow): PreviewSession {
       overlayPending: null,
       navigationAbortDisposable: null,
       consoleBuffer: [],
+      failedRequestBuffer: [],
+      lastPreviewThreadId: null,
     };
     sessions.set(win.id, s);
   }
@@ -102,14 +114,34 @@ function viewportBoundsFallback(viewWidth: number, viewHeight: number): Bounds {
 
 const PREVIEW_CONSOLE_BUFFER_MAX = 48;
 const PREVIEW_CONSOLE_LINE_MAX = 480;
+const PREVIEW_FAILED_REQUEST_MAX = 24;
 
 function pushPreviewConsoleLine(s: PreviewSession, level: number, message: string): void {
+  if (s.consoleBuffer.length >= PREVIEW_CONSOLE_BUFFER_MAX) {
+    s.consoleBuffer.shift();
+  }
   const kind = level >= 3 ? "error" : level === 2 ? "warning" : "log";
   const line = `${kind}: ${message.replace(/[\u0000-\u001F\u007F]/g, " ")}`.slice(0, PREVIEW_CONSOLE_LINE_MAX);
   s.consoleBuffer.push(line);
-  if (s.consoleBuffer.length > PREVIEW_CONSOLE_BUFFER_MAX) {
-    s.consoleBuffer.splice(0, s.consoleBuffer.length - PREVIEW_CONSOLE_BUFFER_MAX);
+}
+
+function pushFailedRequest(
+  s: PreviewSession,
+  entry: { url: string; statusCode: number; resourceType: string },
+): void {
+  if (s.failedRequestBuffer.length >= PREVIEW_FAILED_REQUEST_MAX) {
+    s.failedRequestBuffer.shift();
   }
+  s.failedRequestBuffer.push(entry);
+}
+
+function snapshotFailedRequestsForCapture(s: PreviewSession): McodeBrowserCaptureV2["failedRequests"] {
+  if (s.failedRequestBuffer.length === 0) return undefined;
+  return s.failedRequestBuffer.map((e) => ({
+    url: e.url.length > 2048 ? e.url.slice(0, 2048) : e.url,
+    statusCode: e.statusCode,
+    resourceType: e.resourceType,
+  }));
 }
 
 /** Joins recent main-process console lines for v2 capture (last chars if very long). */
@@ -738,6 +770,7 @@ async function buildBrowserCapturePayload(
   webContents: BrowserView["webContents"],
   boundsCss: Bounds,
   consoleBuffer: readonly string[],
+  failedRequests: McodeBrowserCaptureV2["failedRequests"],
   extras?: {
     captureKind?: "viewport" | "region" | "element";
     selectorHint?: string | null;
@@ -800,7 +833,10 @@ async function buildBrowserCapturePayload(
       out.layoutViewport = { width: Math.max(0, ctx.layoutWidth), height: Math.max(0, ctx.layoutHeight) };
     }
   }
-  return out;
+  if (failedRequests && failedRequests.length > 0) {
+    out.failedRequests = failedRequests;
+  }
+  return redactMcodeBrowserCaptureV2(out);
 }
 
 function attachMainFrameNavigationAbort(s: PreviewSession, webContents: BrowserView["webContents"]): () => void {
@@ -987,6 +1023,7 @@ function parkPreview(win: BrowserWindow, s: PreviewSession): void {
     s.view = null;
     s.scrollbarCssKey = null;
     s.consoleBuffer.length = 0;
+    s.failedRequestBuffer.length = 0;
   }
 }
 
@@ -1108,13 +1145,39 @@ function guestUrlNeedsHttpRestore(url: string): boolean {
 
 /** Registers ipcMain handlers for `preview:*` channels (call once at startup). */
 export function registerPreviewBrowserHandlers(): void {
-  session.fromPartition("persist:mcode-preview").setPermissionRequestHandler((_wc, _permission, callback) => {
+  const previewPartition = session.fromPartition("persist:mcode-preview");
+  previewPartition.setPermissionRequestHandler((_wc, _permission, callback) => {
     callback(false);
+  });
+
+  previewPartition.webRequest.onCompleted({ urls: ["http://*/*", "https://*/*"] }, (details) => {
+    const code = details.statusCode ?? 0;
+    if (code > 0 && code < 400) return;
+    const wcId = details.webContentsId;
+    if (wcId == null) return;
+    const url = details.url;
+    if (!url.startsWith("http://") && !url.startsWith("https://")) return;
+    const rt = String(details.resourceType ?? "other").slice(0, 32);
+    const safeUrl = url.length > 2048 ? url.slice(0, 2048) : url;
+    for (const s of sessions.values()) {
+      if (!s.view || s.view.webContents.isDestroyed()) continue;
+      if (s.view.webContents.id !== wcId) continue;
+      pushFailedRequest(s, { url: safeUrl, statusCode: code, resourceType: rt });
+      return;
+    }
   });
 
   ipcMain.handle(
     "preview:sync",
-    (_event, payload: { visible: boolean; bounds: Bounds | null }) => {
+    (
+      _event,
+      payload: {
+        visible: boolean;
+        bounds: Bounds | null;
+        threadId?: string | null;
+        resumeUrlHint?: string | null;
+      },
+    ) => {
       const win = BrowserWindow.fromWebContents(_event.sender);
       if (!win || win.isDestroyed()) return;
 
@@ -1134,7 +1197,19 @@ export function registerPreviewBrowserHandlers(): void {
       const wc = view.webContents;
       if (!wc.isDestroyed()) {
         const current = wc.getURL();
-        if (
+        const hintRaw = payload.resumeUrlHint?.trim() ?? "";
+        const hint = hintRaw.length > 0 && isAllowedHttpUrl(hintRaw) ? hintRaw : null;
+        const tid = payload.threadId ?? null;
+        const switchedThread = tid != null && tid !== s.lastPreviewThreadId;
+        s.lastPreviewThreadId = tid;
+
+        if (switchedThread && hint) {
+          void wc.loadURL(hint);
+          s.resumePreviewUrl = hint;
+        } else if (guestUrlNeedsHttpRestore(current) && hint) {
+          void wc.loadURL(hint);
+          s.resumePreviewUrl = hint;
+        } else if (
           guestUrlNeedsHttpRestore(current) &&
           s.resumePreviewUrl &&
           isAllowedHttpUrl(s.resumePreviewUrl)
@@ -1275,11 +1350,47 @@ export function registerPreviewBrowserHandlers(): void {
       const pngSize = image.getSize();
       const boundsCss =
         lb !== null ? viewportBoundsFallback(lb.width, lb.height) : viewportBoundsFallback(pngSize.width, pngSize.height);
-      const capture = await buildBrowserCapturePayload(s.view.webContents, boundsCss, s.consoleBuffer, {
-        captureKind: "viewport",
-      });
+      const capture = await buildBrowserCapturePayload(
+        s.view.webContents,
+        boundsCss,
+        s.consoleBuffer,
+        snapshotFailedRequestsForCapture(s),
+        {
+          captureKind: "viewport",
+        },
+      );
       resetIdle(win, s);
       return { ok: true, meta, previewBytes: Uint8Array.from(buffer), capture };
+    } catch {
+      return { ok: false, error: "capture-failed" };
+    }
+  });
+
+  ipcMain.handle("preview:capture-context-reference", async (_event): Promise<PreviewContextReferenceResult> => {
+    const win = BrowserWindow.fromWebContents(_event.sender);
+    if (!win || win.isDestroyed()) return { ok: false, error: "no-window" };
+
+    const s = getSession(win);
+    if (!s.view || s.view.webContents.isDestroyed()) {
+      return { ok: false, error: "no-preview" };
+    }
+
+    const lb = s.lastBounds;
+    if (!lb) {
+      return { ok: false, error: "no-bounds" };
+    }
+
+    try {
+      const boundsCss = viewportBoundsFallback(lb.width, lb.height);
+      const capture = await buildBrowserCapturePayload(
+        s.view.webContents,
+        boundsCss,
+        s.consoleBuffer,
+        snapshotFailedRequestsForCapture(s),
+        { captureKind: "viewport" },
+      );
+      resetIdle(win, s);
+      return { ok: true, capture };
     } catch {
       return { ok: false, error: "capture-failed" };
     }
@@ -1344,9 +1455,15 @@ export function registerPreviewBrowserHandlers(): void {
         sourcePath: tempPath,
       };
 
-      const capture = await buildBrowserCapturePayload(s.view.webContents, r, s.consoleBuffer, {
-        captureKind: "region",
-      });
+      const capture = await buildBrowserCapturePayload(
+        s.view.webContents,
+        r,
+        s.consoleBuffer,
+        snapshotFailedRequestsForCapture(s),
+        {
+          captureKind: "region",
+        },
+      );
 
       if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
       pending.finish({ ok: true, meta, previewBytes: Uint8Array.from(buffer), capture });
@@ -1478,11 +1595,17 @@ export function registerPreviewBrowserHandlers(): void {
           sourcePath: tempPath,
         };
 
-        const capture = await buildBrowserCapturePayload(s.view.webContents, r, s.consoleBuffer, {
-          captureKind: "element",
-          selectorHint: hit.selectorHint,
-          htmlExcerpt: hit.htmlExcerpt,
-        });
+        const capture = await buildBrowserCapturePayload(
+          s.view.webContents,
+          r,
+          s.consoleBuffer,
+          snapshotFailedRequestsForCapture(s),
+          {
+            captureKind: "element",
+            selectorHint: hit.selectorHint,
+            htmlExcerpt: hit.htmlExcerpt,
+          },
+        );
 
         if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
         pending.finish({ ok: true, meta, previewBytes: Uint8Array.from(buffer), capture });

@@ -50,9 +50,19 @@ export type PreviewPictureReferenceResult =
     }
   | { readonly ok: false; readonly error: string };
 
+/** Result of capturing preview page context without a PNG (desktop only). */
+export type PreviewContextReferenceResult =
+  | { readonly ok: true; readonly capture: McodeBrowserCapture }
+  | { readonly ok: false; readonly error: string };
+
 /** Embedded thread preview backed by an Electron BrowserView. */
 interface PreviewBridge {
-  sync(payload: { visible: boolean; bounds: PreviewShellBounds | null }): Promise<void>;
+  sync(payload: {
+    visible: boolean;
+    bounds: PreviewShellBounds | null;
+    threadId?: string | null;
+    resumeUrlHint?: string | null;
+  }): Promise<void>;
   navigate(url: string): Promise<PreviewNavigateResult>;
   goBack(): Promise<boolean>;
   goForward(): Promise<boolean>;
@@ -65,6 +75,10 @@ interface PreviewBridge {
   capturePictureReferenceRegion(): Promise<PreviewPictureReferenceResult>;
   /** Pick an element by hover and click; captures its box as PNG with selector and excerpt; desktop only. */
   capturePictureReferenceElementPick(): Promise<PreviewPictureReferenceResult>;
+  /**
+   * Captures structured page context (v2) without a screenshot. Desktop only.
+   */
+  capturePageContext(): Promise<PreviewContextReferenceResult>;
   onDidNavigate(callback: (payload: { url: string; title: string }) => void): () => void;
 }
 

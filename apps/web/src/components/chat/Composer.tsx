@@ -62,6 +62,7 @@ import {
   getMaxFileSize,
   inferMimeType,
   MAX_ATTACHMENTS,
+  MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME,
 } from "@mcode/contracts";
 import type {
   AttachedBrowserCapture,
@@ -1280,17 +1281,30 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     return { content: trimmed };
   }, [workspaceId, threadId]);
 
-  /** Collect attachment metadata and revoke preview URLs. */
+  /** Collect attachment metadata for RPC and revoke preview URLs. */
   const collectAndClearAttachments = useCallback((): AttachmentMeta[] => {
-    const metas: AttachmentMeta[] = attachments
-      .filter((a) => a.filePath != null)
-      .map((a) => ({
-        id: a.id,
-        name: a.name,
-        mimeType: a.mimeType,
-        sizeBytes: a.sizeBytes,
-        sourcePath: a.filePath!,
-      }));
+    const metas: AttachmentMeta[] = [];
+    for (const a of attachments) {
+      if (a.contextOnly === true && a.browserCapture) {
+        metas.push({
+          id: a.id,
+          name: a.name,
+          mimeType: MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME,
+          sizeBytes: 0,
+          sourcePath: "",
+        });
+        continue;
+      }
+      if (a.filePath != null) {
+        metas.push({
+          id: a.id,
+          name: a.name,
+          mimeType: a.mimeType,
+          sizeBytes: a.sizeBytes,
+          sourcePath: a.filePath,
+        });
+      }
+    }
     for (const att of attachments) {
       if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
     }

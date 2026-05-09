@@ -22,6 +22,8 @@ export type {
 export {
   AttachmentMetaSchema,
   StoredAttachmentSchema,
+  MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME,
+  isVirtualBrowserContextAttachment,
 } from "./models/attachment.js";
 export type { AttachmentMeta, StoredAttachment } from "./models/attachment.js";
 

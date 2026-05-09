@@ -25,3 +25,5 @@ export {
   supportsThinkingToggle,
   normalizeReasoningLevelForModel,
 } from "./model-effort/index.js";
+
+export { redactMcodeBrowserCaptureV2 } from "./browser-preview/redact.js";

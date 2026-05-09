@@ -1,5 +1,16 @@
 import { z } from "zod";
 
+/**
+ * MIME marker for composer rows that carry only structured browser capture JSON in the
+ * outbound fence without a persisted image file.
+ */
+export const MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME = "application/x-mcode-browser-context";
+
+/** True when attachment metadata denotes a fence-only preview context row (no disk file). */
+export function isVirtualBrowserContextAttachment(mimeType: string): boolean {
+  return mimeType === MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME;
+}
+
 /** Metadata for an image or file attachment. No binary data, just a pointer. */
 export const AttachmentMetaSchema = z.object({
   id: z.string(),

@@ -1,5 +1,6 @@
 import { X, FileText, File } from "lucide-react";
 import type { McodeBrowserCapture } from "@mcode/contracts";
+import { isVirtualBrowserContextAttachment } from "@mcode/contracts";
 import { cn } from "@/lib/utils";
 
 /** Pending attachment queued in the Composer before RPC upload. */
@@ -12,6 +13,8 @@ export interface PendingAttachment {
   filePath: string | null;
   /** Structured BrowserView preview context bundled with PNG references from desktop. */
   browserCapture?: McodeBrowserCapture;
+  /** When true, only structured `browserCapture` is sent (no image file). */
+  contextOnly?: boolean;
 }
 
 interface AttachmentPreviewProps {
@@ -33,6 +36,8 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
       {attachments.map((att) => {
         const isImage = att.mimeType.startsWith("image/");
         const isPdf = att.mimeType === "application/pdf";
+        const isContextOnly =
+          att.contextOnly === true || isVirtualBrowserContextAttachment(att.mimeType);
 
         return (
           <div
@@ -43,7 +48,15 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
               "transition-all duration-150 hover:border-primary/40 hover:bg-muted/80",
             )}
           >
-            {isImage ? (
+            {isContextOnly ? (
+              <div className="flex h-[72px] w-[140px] flex-col justify-center gap-1 px-3">
+                <div className="flex items-center gap-2">
+                  <FileText size={18} className="shrink-0 text-cyan-500 dark:text-cyan-400" />
+                  <span className="truncate text-xs font-medium text-foreground">Page context</span>
+                </div>
+                <span className="pl-[26px] text-[10px] text-muted-foreground">No image</span>
+              </div>
+            ) : isImage ? (
               <div className="relative h-[72px] w-[72px]">
                 <img
                   src={att.previewUrl}

@@ -10,7 +10,7 @@ import { readFile } from "fs/promises";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import type { Query, SDKUserMessage, PostCompactHookInput, CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { logger } from "@mcode/shared";
-import { AgentEventType } from "@mcode/contracts";
+import { AgentEventType, isVirtualBrowserContextAttachment } from "@mcode/contracts";
 import type {
   IAgentProvider,
   ProviderId,
@@ -1340,6 +1340,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     const contentBlocks: Array<Record<string, unknown>> = [];
 
     for (const att of attachments) {
+      if (isVirtualBrowserContextAttachment(att.mimeType)) continue;
       try {
         const data = await readFile(att.sourcePath);
 

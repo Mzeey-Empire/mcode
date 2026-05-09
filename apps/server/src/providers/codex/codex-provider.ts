@@ -26,7 +26,7 @@ import type {
   PermissionRequest,
   ProviderModelInfo,
 } from "@mcode/contracts";
-import { AgentEventType, CODEX_STATIC_MODELS } from "@mcode/contracts";
+import { AgentEventType, CODEX_STATIC_MODELS, isVirtualBrowserContextAttachment } from "@mcode/contracts";
 import { checkCodexVersion, meetsMinVersion } from "./codex-version.js";
 import { CodexAppServer } from "./codex-app-server.js";
 import type { CodexApprovalRequest } from "./codex-app-server.js";
@@ -76,6 +76,7 @@ function buildCodexInput(
   const inputs: TurnInputPart[] = [];
 
   for (const att of attachments ?? []) {
+    if (isVirtualBrowserContextAttachment(att.mimeType)) continue;
     if (att.mimeType.startsWith("image/")) {
       inputs.push({ type: "local_image", path: att.sourcePath });
     } else {

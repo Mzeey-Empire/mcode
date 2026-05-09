@@ -11,6 +11,7 @@ const sampleCaptureV2: AttachedBrowserCaptureV2 = {
   bounds: { x: 0, y: 0, width: 1280, height: 720 },
   visibleTextExcerpt: "Hello world",
   headingOutline: "H1: Title",
+  failedRequests: [{ url: "https://example.com/missing.css", statusCode: 404, resourceType: "stylesheet" }],
 };
 
 const sampleCaptureV1: AttachedBrowserCaptureV1 = {
@@ -33,6 +34,7 @@ describe("appendBrowserCaptureFence", () => {
     expect(out).toContain('"schemaVersion":2');
     expect(out).toContain("https://example.com/path");
     expect(out).toContain("visibleTextExcerpt");
+    expect(out).toContain("failedRequests");
   });
 
   it("accepts legacy v1 rows through the shared schema", () => {

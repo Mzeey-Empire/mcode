@@ -134,6 +134,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     sync(payload: {
       visible: boolean;
       bounds: { x: number; y: number; width: number; height: number } | null;
+      threadId?: string | null;
+      resumeUrlHint?: string | null;
     }): Promise<void> {
       return ipcRenderer.invoke("preview:sync", payload);
     },
@@ -166,6 +168,10 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     /** Hover to highlight, then click an element; captures its bounds as PNG with DOM context. */
     capturePictureReferenceElementPick(): Promise<unknown> {
       return ipcRenderer.invoke("preview:capture-picture-element-pick");
+    },
+    /** Structured page context for the composer fence without capturing a PNG. */
+    capturePageContext(): Promise<unknown> {
+      return ipcRenderer.invoke("preview:capture-context-reference");
     },
     onDidNavigate(callback: (payload: { url: string; title: string }) => void) {
       const listener = (_event: unknown, payload: { url: string; title: string }) =>

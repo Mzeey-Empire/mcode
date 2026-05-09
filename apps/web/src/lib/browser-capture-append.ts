@@ -11,7 +11,10 @@ export const MCODE_BROWSER_CAPTURE_FENCE_CLOSE = "<!-- /mcode-browser-capture-v2
 
 /**
  * Appends a stable HTML-comment fence describing preview screenshot metadata
- * (URL, bounds, v2 text outlines, console tail) keyed by attachment UUID. Omit when `captures` is empty.
+ * (URL, bounds, v2 text outlines, console tail, optional failed request list)
+ * keyed by attachment UUID. Omit when `captures` is empty.
+ * Integrators outside this repo should parse `MCODE_BROWSER_CAPTURE_FENCE_OPEN`
+ * and validate JSON with `AttachedBrowserCaptureSchema` from `@mcode/contracts` (v1 and v2 unions).
  */
 export function appendBrowserCaptureFence(prompt: string, captures: AttachedBrowserCapture[]): string {
   if (captures.length === 0) return prompt;

@@ -72,6 +72,12 @@ const layoutViewportSchema = z.object({
   height: z.number(),
 });
 
+const failedRequestEntrySchema = z.object({
+  url: z.string().max(2048),
+  statusCode: z.number().int(),
+  resourceType: z.string().max(32).optional(),
+});
+
 /**
  * V2 adds agent-oriented text and diagnostics on top of V1: visible copy, headings,
  * a compact interactive outline, scroll and layout viewport, plus a recent console tail.
@@ -92,6 +98,8 @@ export const McodeBrowserCaptureV2Schema = lazySchema(() =>
     consoleTail: z.string().max(4000).optional(),
     viewportScroll: viewportScrollSchema.optional(),
     layoutViewport: layoutViewportSchema.optional(),
+    /** Recent HTTP subresource failures observed in the preview session (capped, best-effort). */
+    failedRequests: z.array(failedRequestEntrySchema).max(24).optional(),
   }),
 );
 

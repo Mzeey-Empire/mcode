@@ -5,6 +5,7 @@
 
 import { readFileSync } from "node:fs";
 import type { AttachmentMeta } from "@mcode/contracts";
+import { isVirtualBrowserContextAttachment } from "@mcode/contracts";
 import type { ContentBlock } from "@agentclientprotocol/sdk";
 import {
   buildCursorPrompt,
@@ -30,9 +31,13 @@ export function buildCursorAcpPromptBlocks(
   const unreadableNotes: string[] = [];
 
   const nonImageAttachments =
-    attachments?.filter((att) => !att.mimeType.startsWith("image/")) ?? [];
+    attachments?.filter(
+      (att) =>
+        !att.mimeType.startsWith("image/") && !isVirtualBrowserContextAttachment(att.mimeType),
+    ) ?? [];
 
   for (const att of attachments ?? []) {
+    if (isVirtualBrowserContextAttachment(att.mimeType)) continue;
     if (!att.mimeType.startsWith("image/")) continue;
     try {
       const buf = readFileSync(att.sourcePath);
