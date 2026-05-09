@@ -2,18 +2,27 @@
  * Embedded preview BrowserView: navigation, bounds sync from the React shell, and idle teardown.
  */
 
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, readdir, stat, unlink } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { dirname, join, normalize, resolve } from "node:path";
 import { BrowserView, BrowserWindow, app, ipcMain, session, shell } from "electron";
 import {
   clampMcodeBrowserCaptureV2,
+  isBrowserCaptureSpillRelativePath,
+  MCODE_BROWSER_CAPTURE_V2_STRING_MAX,
   type AttachmentMeta,
   type McodeBrowserCaptureV2,
 } from "@mcode/contracts";
 import { redactMcodeBrowserCaptureV2 } from "@mcode/shared";
 
 const IDLE_MS = 120_000;
+
+/** Hard cap per guest-derived string before redaction so hostile pages cannot exhaust memory. */
+const GUEST_TEXT_SAFETY_MAX = 500_000;
+
+/** Delete spill files older than this under `.mcode-local/mcode-browser-capture/`. */
+const SPILL_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * Injected into every guest document so preview scrollbars match the app shell on Windows
@@ -86,6 +95,8 @@ interface PreviewSession {
   failedRequestBuffer: Array<{ url: string; statusCode: number; resourceType: string }>;
   /** Last thread id synced from the renderer; used to load the correct resume URL per thread. */
   lastPreviewThreadId: string | null;
+  /** Workspace root from the renderer; used to write preview spill files the agent can read. */
+  workspaceRootPath: string | null;
 }
 
 const sessions = new Map<number, PreviewSession>();
@@ -105,6 +116,7 @@ function getSession(win: BrowserWindow): PreviewSession {
       consoleBuffer: [],
       failedRequestBuffer: [],
       lastPreviewThreadId: null,
+      workspaceRootPath: null,
     };
     sessions.set(win.id, s);
   }
@@ -783,12 +795,87 @@ function abortOverlayCapture(s: PreviewSession, error: string): void {
   }
 }
 
+function safetyCapGuestText(s: string): string {
+  return s.length <= GUEST_TEXT_SAFETY_MAX ? s : s.slice(0, GUEST_TEXT_SAFETY_MAX);
+}
+
+function captureNeedsSpillPostRedact(c: McodeBrowserCaptureV2): boolean {
+  const m = MCODE_BROWSER_CAPTURE_V2_STRING_MAX;
+  return (
+    (!!c.htmlExcerpt && c.htmlExcerpt.length > m.htmlExcerpt) ||
+    (!!c.visibleTextExcerpt && c.visibleTextExcerpt.length > m.visibleTextExcerpt) ||
+    (!!c.headingOutline && c.headingOutline.length > m.headingOutline) ||
+    (!!c.interactiveOutlineExcerpt && c.interactiveOutlineExcerpt.length > m.interactiveOutlineExcerpt) ||
+    (!!c.consoleTail && c.consoleTail.length > m.consoleTail)
+  );
+}
+
+function resolveValidatedSpillAbsolutePath(workspaceRoot: string, rel: string): string | null {
+  if (!isBrowserCaptureSpillRelativePath(rel)) return null;
+  const fileName = rel.slice(rel.lastIndexOf("/") + 1);
+  const dir = resolve(workspaceRoot, ".mcode-local", "mcode-browser-capture");
+  const abs = resolve(dir, fileName);
+  if (normalize(dirname(abs)) !== normalize(dir)) return null;
+  return abs;
+}
+
+async function pruneStaleBrowserCaptureSpills(dir: string): Promise<void> {
+  try {
+    const now = Date.now();
+    const entries = await readdir(dir);
+    for (const name of entries) {
+      if (!name.endsWith(".json")) continue;
+      const p = join(dir, name);
+      const st = await stat(p);
+      if (now - st.mtimeMs > SPILL_MAX_AGE_MS) {
+        await unlink(p).catch(() => {});
+      }
+    }
+  } catch {
+    /* missing dir or race */
+  }
+}
+
+/**
+ * Writes full redacted excerpts next to the workspace so agents can read_file the overflow
+ * while the inline fence stays within token caps.
+ */
+async function persistBrowserCaptureSpill(
+  workspaceRoot: string,
+  redacted: McodeBrowserCaptureV2,
+): Promise<string | null> {
+  if (!existsSync(workspaceRoot)) return null;
+  const id = randomUUID();
+  const spillDir = join(workspaceRoot, ".mcode-local", "mcode-browser-capture");
+  await mkdir(spillDir, { recursive: true });
+  const fields: Record<string, string> = {};
+  if (redacted.htmlExcerpt) fields.htmlExcerpt = redacted.htmlExcerpt;
+  if (redacted.visibleTextExcerpt) fields.visibleTextExcerpt = redacted.visibleTextExcerpt;
+  if (redacted.headingOutline) fields.headingOutline = redacted.headingOutline;
+  if (redacted.interactiveOutlineExcerpt) {
+    fields.interactiveOutlineExcerpt = redacted.interactiveOutlineExcerpt;
+  }
+  if (redacted.consoleTail) fields.consoleTail = redacted.consoleTail;
+  const body = {
+    schemaVersion: 1 as const,
+    capturedAt: redacted.capturedAt,
+    pageUrl: redacted.pageUrl,
+    pageTitle: redacted.pageTitle,
+    fields,
+  };
+  const fileName = `${id}.json`;
+  await writeFile(join(spillDir, fileName), JSON.stringify(body), "utf8");
+  void pruneStaleBrowserCaptureSpills(spillDir);
+  return `.mcode-local/mcode-browser-capture/${fileName}`;
+}
+
 /** Typed capture envelope aligned with PNG bytes for outbound prompt augmentation (v2 adds text outline and console tail). */
 async function buildBrowserCapturePayload(
   webContents: BrowserView["webContents"],
   boundsCss: Bounds,
   consoleBuffer: readonly string[],
   failedRequests: McodeBrowserCaptureV2["failedRequests"],
+  workspaceRootPath: string | null,
   extras?: {
     captureKind?: "viewport" | "region" | "element";
     selectorHint?: string | null;
@@ -813,7 +900,7 @@ async function buildBrowserCapturePayload(
   if (extras?.htmlExcerpt != null && extras.htmlExcerpt.length > 0) {
     const scrubbed = scrubHtmlExcerptForOutbound(extras.htmlExcerpt);
     if (scrubbed.length > 0) {
-      out.htmlExcerpt = scrubbed.length > 16_000 ? scrubbed.slice(0, 16_000) : scrubbed;
+      out.htmlExcerpt = safetyCapGuestText(scrubbed);
     }
   }
   if (tail) {
@@ -823,19 +910,19 @@ async function buildBrowserCapturePayload(
     if (ctx.visibleText != null && ctx.visibleText.length > 0) {
       const scrubbed = scrubVisibleTextForOutbound(ctx.visibleText);
       if (scrubbed.length > 0) {
-        out.visibleTextExcerpt = scrubbed.length > 12_000 ? scrubbed.slice(0, 12_000) : scrubbed;
+        out.visibleTextExcerpt = safetyCapGuestText(scrubbed);
       }
     }
     if (ctx.headingOutline != null && ctx.headingOutline.length > 0) {
       const ho = scrubVisibleTextForOutbound(ctx.headingOutline);
       if (ho.length > 0) {
-        out.headingOutline = ho.length > 4000 ? ho.slice(0, 4000) : ho;
+        out.headingOutline = safetyCapGuestText(ho);
       }
     }
     if (ctx.interactiveOutline != null && ctx.interactiveOutline.length > 0) {
       const io = scrubVisibleTextForOutbound(ctx.interactiveOutline);
       if (io.length > 0) {
-        out.interactiveOutlineExcerpt = io.length > 8000 ? io.slice(0, 8000) : io;
+        out.interactiveOutlineExcerpt = safetyCapGuestText(io);
       }
     }
     if (typeof ctx.scrollX === "number" && Number.isFinite(ctx.scrollX)) {
@@ -854,7 +941,16 @@ async function buildBrowserCapturePayload(
   if (failedRequests && failedRequests.length > 0) {
     out.failedRequests = failedRequests;
   }
-  return clampMcodeBrowserCaptureV2(redactMcodeBrowserCaptureV2(out));
+  const redacted = redactMcodeBrowserCaptureV2(out);
+  let spillRelativePath: string | null = null;
+  if (workspaceRootPath && captureNeedsSpillPostRedact(redacted)) {
+    spillRelativePath = await persistBrowserCaptureSpill(workspaceRootPath, redacted);
+  }
+  const clamped = clampMcodeBrowserCaptureV2(redacted);
+  if (spillRelativePath) {
+    clamped.spillRelativePath = spillRelativePath;
+  }
+  return clamped;
 }
 
 function attachMainFrameNavigationAbort(s: PreviewSession, webContents: BrowserView["webContents"]): () => void {
@@ -1210,12 +1306,15 @@ export function registerPreviewBrowserHandlers(): void {
         bounds: Bounds | null;
         threadId?: string | null;
         resumeUrlHint?: string | null;
+        workspaceRootPath?: string | null;
       },
     ) => {
       const win = BrowserWindow.fromWebContents(_event.sender);
       if (!win || win.isDestroyed()) return;
 
       const s = getSession(win);
+      const wr = payload.workspaceRootPath;
+      s.workspaceRootPath = typeof wr === "string" && wr.trim().length > 0 ? wr.trim() : null;
       const b = payload.bounds;
       if (!payload.visible || !b || b.width < 4 || b.height < 4) {
         parkPreview(win, s);
@@ -1404,6 +1503,7 @@ export function registerPreviewBrowserHandlers(): void {
         boundsCss,
         s.consoleBuffer,
         snapshotFailedRequestsForCapture(s),
+        s.workspaceRootPath,
         {
           captureKind: "viewport",
         },
@@ -1436,6 +1536,7 @@ export function registerPreviewBrowserHandlers(): void {
         boundsCss,
         s.consoleBuffer,
         snapshotFailedRequestsForCapture(s),
+        s.workspaceRootPath,
         { captureKind: "viewport" },
       );
       resetIdle(win, s);
@@ -1509,6 +1610,7 @@ export function registerPreviewBrowserHandlers(): void {
         r,
         s.consoleBuffer,
         snapshotFailedRequestsForCapture(s),
+        s.workspaceRootPath,
         {
           captureKind: "region",
         },
@@ -1649,6 +1751,7 @@ export function registerPreviewBrowserHandlers(): void {
           r,
           s.consoleBuffer,
           snapshotFailedRequestsForCapture(s),
+          s.workspaceRootPath,
           {
             captureKind: "element",
             selectorHint: hit.selectorHint,
@@ -1830,4 +1933,18 @@ export function registerPreviewBrowserHandlers(): void {
       });
     },
   );
+
+  ipcMain.handle("preview:release-browser-capture-spill", async (_event, relPaths: unknown) => {
+    const win = BrowserWindow.fromWebContents(_event.sender);
+    if (!win || win.isDestroyed()) return;
+    const s = getSession(win);
+    const root = s.workspaceRootPath;
+    if (!root) return;
+    const list = Array.isArray(relPaths) ? relPaths : [];
+    for (const p of list) {
+      if (typeof p !== "string") continue;
+      const abs = resolveValidatedSpillAbsolutePath(root, p);
+      if (abs) await unlink(abs).catch(() => {});
+    }
+  });
 }

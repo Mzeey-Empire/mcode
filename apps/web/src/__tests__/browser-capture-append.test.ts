@@ -62,4 +62,11 @@ describe("appendBrowserCaptureFence", () => {
     const parsed = JSON.parse(out.slice(start, end).trim()) as AttachedBrowserCaptureV2[];
     expect(parsed[0].headingOutline).toHaveLength(cap);
   });
+
+  it("passes through spillRelativePath for agent read_file hints", () => {
+    const spill = ".mcode-local/mcode-browser-capture/550e8400-e29b-41d4-b716-446655440000.json";
+    const row: AttachedBrowserCaptureV2 = { ...sampleCaptureV2, spillRelativePath: spill };
+    const out = appendBrowserCaptureFence("x", [row]);
+    expect(out).toContain(spill);
+  });
 });

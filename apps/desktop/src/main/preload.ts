@@ -136,6 +136,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       bounds: { x: number; y: number; width: number; height: number } | null;
       threadId?: string | null;
       resumeUrlHint?: string | null;
+      workspaceRootPath?: string | null;
     }): Promise<void> {
       return ipcRenderer.invoke("preview:sync", payload);
     },
@@ -172,6 +173,9 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     /** Structured page context for the composer fence without capturing a PNG. */
     capturePageContext(): Promise<unknown> {
       return ipcRenderer.invoke("preview:capture-context-reference");
+    },
+    releaseBrowserCaptureSpills(paths: readonly string[]): Promise<void> {
+      return ipcRenderer.invoke("preview:release-browser-capture-spill", [...paths]);
     },
     onDidNavigate(callback: (payload: { url: string; title: string }) => void) {
       const listener = (_event: unknown, payload: { url: string; title: string }) =>

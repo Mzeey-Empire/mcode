@@ -80,6 +80,10 @@ import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { ProviderUnavailableBanner } from "./ProviderUnavailableBanner";
 import { appendBrowserCaptureFence } from "@/lib/browser-capture-append";
+import {
+  collectBrowserCaptureSpillPaths,
+  releaseBrowserCaptureSpills,
+} from "@/lib/browser-capture-spill";
 
 /** Build structured preview metadata payloads paired with outbound attachment IDs. */
 function buildAttachedBrowserCaptures(list: PendingAttachment[]): AttachedBrowserCapture[] {
@@ -1340,8 +1344,9 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       }
       const displayContentResolved = resolveOutboundDisplayContent(trimmed, displayInjected, captureRows);
       const currentAttachments = collectAndClearAttachments();
+      const browserCaptureSpillPaths = collectBrowserCaptureSpillPaths(captureRows);
 
-      useQueueStore.getState().enqueue(threadId, {
+      const enqueued = useQueueStore.getState().enqueue(threadId, {
         content,
         displayContent: displayContentResolved,
         attachments: currentAttachments,
@@ -1354,7 +1359,12 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         thinking: thinking ?? undefined,
         replyToMessageId: replyContext?.messageId,
         quotedText: replyContext?.quotedText,
+        browserCaptureSpillPaths:
+          browserCaptureSpillPaths.length > 0 ? browserCaptureSpillPaths : undefined,
       });
+      if (!enqueued) {
+        void releaseBrowserCaptureSpills(browserCaptureSpillPaths);
+      }
 
       setInput("");
       if (threadId) clearDraftFromStore(threadId);
@@ -1404,6 +1414,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       return;
     }
     const outboundDisplay = resolveOutboundDisplayContent(trimmed, displayInjected, captureRows);
+    const browserCaptureSpillPaths = collectBrowserCaptureSpillPaths(captureRows);
 
     // ---- Normal send path ----
 
@@ -1436,6 +1447,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
           thinking ?? undefined,
           outboundDisplay,
         );
+      void releaseBrowserCaptureSpills(browserCaptureSpillPaths);
     } else if (branchFromMessageId && threadId) {
       // Branch mode: create a child thread from the quoted message instead of sending.
       let branchMode: "direct" | "worktree" | "existing-worktree" = "direct";
@@ -1473,6 +1485,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         thinking: thinking ?? undefined,
       });
       onBranchModeExit?.();
+      void releaseBrowserCaptureSpills(browserCaptureSpillPaths);
     } else if (threadId) {
       await sendMessage(
         threadId,
@@ -1490,6 +1503,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         replyContext?.quotedText,
       );
       if (threadId) clearReply(threadId);
+      void releaseBrowserCaptureSpills(browserCaptureSpillPaths);
     }
 
     // Auto-save last-used mode and access as defaults (model defaults are managed in Settings)
@@ -1985,12 +1999,28 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
             <QueuePopover
               threadId={threadId}
               isAgentRunning={isAgentRunning}
-              onResume={() => {
+              onResume={async () => {
                 const next = useQueueStore.getState().dequeueNext(threadId);
-                if (next) {
-                  sendMessage(threadId, next.content, next.model, next.permissionMode,
-                    next.attachments.length > 0 ? next.attachments : undefined, next.displayContent, next.reasoningLevel, next.provider,
-                    next.copilotAgent, next.contextWindow, next.thinking, next.replyToMessageId, next.quotedText);
+                if (!next) return;
+                try {
+                  await sendMessage(
+                    threadId,
+                    next.content,
+                    next.model,
+                    next.permissionMode,
+                    next.attachments.length > 0 ? next.attachments : undefined,
+                    next.displayContent,
+                    next.reasoningLevel,
+                    next.provider,
+                    next.copilotAgent,
+                    next.contextWindow,
+                    next.thinking,
+                    next.replyToMessageId,
+                    next.quotedText,
+                  );
+                  await releaseBrowserCaptureSpills(next.browserCaptureSpillPaths ?? []);
+                } catch {
+                  /* Leave spill files if the send fails. */
                 }
               }}
             />

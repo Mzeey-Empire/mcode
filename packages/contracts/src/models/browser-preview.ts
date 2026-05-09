@@ -20,6 +20,42 @@ export const MCODE_BROWSER_CAPTURE_V2_STRING_MAX = {
   failedRequestResourceType: 32,
 } as const;
 
+/** Max length for {@link McodeBrowserCaptureV2.spillRelativePath} (workspace-relative POSIX path). */
+export const MCODE_BROWSER_CAPTURE_SPILL_RELATIVE_PATH_MAX = 200;
+
+const SPILL_RELATIVE_PATH_RE =
+  /^\.mcode-local\/mcode-browser-capture\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/i;
+
+/**
+ * Returns true when `value` is the allowed workspace-relative spill artifact path shape
+ * (under `.mcode-local/mcode-browser-capture/`, uuid file name). Used by desktop path validation.
+ */
+export function isBrowserCaptureSpillRelativePath(value: string): boolean {
+  return value.length <= MCODE_BROWSER_CAPTURE_SPILL_RELATIVE_PATH_MAX && SPILL_RELATIVE_PATH_RE.test(value);
+}
+
+/**
+ * On-disk JSON next to the workspace when preview text exceeds inline fence caps.
+ * Agents should read this file for full redacted excerpts; the fence stays clamped for token economy.
+ */
+export const BrowserCaptureSpillFileSchema = lazySchema(() =>
+  z.object({
+    schemaVersion: z.literal(1),
+    capturedAt: z.string(),
+    pageUrl: z.string(),
+    pageTitle: z.string(),
+    fields: z.object({
+      htmlExcerpt: z.string().optional(),
+      visibleTextExcerpt: z.string().optional(),
+      headingOutline: z.string().optional(),
+      interactiveOutlineExcerpt: z.string().optional(),
+      consoleTail: z.string().optional(),
+    }),
+  }),
+);
+
+export type BrowserCaptureSpillFile = z.infer<ReturnType<typeof BrowserCaptureSpillFileSchema>>;
+
 /**
  * Bounding rectangle for a captured region in CSS pixels (viewport relative).
  * Used by preview capture payloads and future pick-to-reference flows.
@@ -125,6 +161,15 @@ export const McodeBrowserCaptureV2Schema = lazySchema(() =>
     layoutViewport: layoutViewportSchema.optional(),
     /** Recent HTTP subresource failures observed in the preview session (capped, best-effort). */
     failedRequests: z.array(failedRequestEntrySchema).max(24).optional(),
+    /**
+     * Workspace-relative path to {@link BrowserCaptureSpillFile} with full (redacted, pre-clamp) excerpts.
+     * Present only when inline fields were truncated for the fence; agents should read the file from disk.
+     */
+    spillRelativePath: z
+      .string()
+      .max(MCODE_BROWSER_CAPTURE_SPILL_RELATIVE_PATH_MAX)
+      .regex(SPILL_RELATIVE_PATH_RE)
+      .optional(),
   }),
 );
 

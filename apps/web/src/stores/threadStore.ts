@@ -20,6 +20,7 @@ import {
 } from "./messageCache";
 import { shallowEqualBy } from "@/lib/shallowEqualBy";
 import { forgetScrollTop } from "@/components/chat/scrollPositionMemory";
+import { releaseBrowserCaptureSpills } from "@/lib/browser-capture-spill";
 
 /** A permission request with its current resolution state. */
 interface StoredPermission extends PermissionRequest {
@@ -1842,21 +1843,28 @@ export const useThreadStore = create<ThreadState>((set, get) => {
 
           const next = useQueueStore.getState().dequeueNext(threadId);
           if (next) {
-            get().sendMessage(
-              threadId,
-              next.content,
-              next.model,
-              next.permissionMode,
-              next.attachments.length > 0 ? next.attachments : undefined,
-              next.displayContent,
-              next.reasoningLevel,
-              next.provider,
-              next.copilotAgent,
-              next.contextWindow,
-              next.thinking,
-              next.replyToMessageId,
-              next.quotedText,
-            );
+            void (async (): Promise<void> => {
+              try {
+                await get().sendMessage(
+                  threadId,
+                  next.content,
+                  next.model,
+                  next.permissionMode,
+                  next.attachments.length > 0 ? next.attachments : undefined,
+                  next.displayContent,
+                  next.reasoningLevel,
+                  next.provider,
+                  next.copilotAgent,
+                  next.contextWindow,
+                  next.thinking,
+                  next.replyToMessageId,
+                  next.quotedText,
+                );
+                await releaseBrowserCaptureSpills(next.browserCaptureSpillPaths ?? []);
+              } catch {
+                /* If the send fails, keep spill files until prune or manual cleanup. */
+              }
+            })();
           }
         }, 400);
         dequeueTimers.set(threadId, timer);

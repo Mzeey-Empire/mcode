@@ -15,6 +15,11 @@ import { cn } from "@/lib/utils";
 /** Right-side panel with tabs for Tasks, Changes, and Preview. */
 export function RightPanel() {
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
+  const workspaceRootPath = useWorkspaceStore((s) => {
+    const id = s.activeWorkspaceId;
+    if (!id) return null;
+    return s.workspaces.find((w) => w.id === id)?.path ?? null;
+  });
 
   // Per-thread panel state
   const panelState = useDiffStore((s) =>
@@ -302,7 +307,9 @@ export function RightPanel() {
           </>
         )}
         {activeTab === "changes" && <DiffPanel />}
-        {activeTab === "preview" && <PreviewPanel threadId={activeThreadId} />}
+        {activeTab === "preview" && (
+          <PreviewPanel threadId={activeThreadId} workspaceRootPath={workspaceRootPath} />
+        )}
       </div>
       </div>
     </>

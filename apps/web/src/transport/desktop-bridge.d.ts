@@ -62,6 +62,8 @@ interface PreviewBridge {
     bounds: PreviewShellBounds | null;
     threadId?: string | null;
     resumeUrlHint?: string | null;
+    /** Checkout root for the active workspace; enables spill files under `.mcode-local/`. */
+    workspaceRootPath?: string | null;
   }): Promise<void>;
   navigate(url: string): Promise<PreviewNavigateResult>;
   goBack(): Promise<boolean>;
@@ -79,6 +81,8 @@ interface PreviewBridge {
    * Captures structured page context (v2) without a screenshot. Desktop only.
    */
   capturePageContext(): Promise<PreviewContextReferenceResult>;
+  /** Deletes workspace-relative preview spill files after the message was sent or the queue dropped them. */
+  releaseBrowserCaptureSpills(paths: readonly string[]): Promise<void>;
   onDidNavigate(callback: (payload: { url: string; title: string }) => void): () => void;
   /** Guest load lifecycle for shell chrome (BrowserView covers the surface div). */
   onLoadingState(callback: (payload: { loading: boolean }) => void): () => void;

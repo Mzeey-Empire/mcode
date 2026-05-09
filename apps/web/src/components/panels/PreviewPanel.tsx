@@ -85,6 +85,8 @@ function formatNavError(code: string): string {
 export interface PreviewPanelProps {
   /** Thread that owns preview state (URL memory and future captures). */
   readonly threadId: string;
+  /** Active workspace checkout root; enables large preview text spill files under `.mcode-local/`. */
+  readonly workspaceRootPath?: string | null;
 }
 
 /**
@@ -94,7 +96,7 @@ export interface PreviewPanelProps {
  * readable: the guest BrowserView is stacked above shell HTML and would hide downward popups.
  * In web-only builds without `desktopBridge.preview`, renders an explanatory empty state.
  */
-export function PreviewPanel({ threadId }: PreviewPanelProps) {
+export function PreviewPanel({ threadId, workspaceRootPath }: PreviewPanelProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const [inputUrl, setInputUrl] = useState("");
   const [navError, setNavError] = useState<string | null>(null);
@@ -131,7 +133,13 @@ export function PreviewPanel({ threadId }: PreviewPanelProps) {
       const el = surfaceRef.current;
       const hint = storedUrl.trim() || null;
       if (!visible || !el) {
-        await preview.sync({ visible: false, bounds: null, threadId, resumeUrlHint: hint });
+        await preview.sync({
+          visible: false,
+          bounds: null,
+          threadId,
+          resumeUrlHint: hint,
+          workspaceRootPath: workspaceRootPath ?? null,
+        });
         return;
       }
       const r = el.getBoundingClientRect();
@@ -145,9 +153,10 @@ export function PreviewPanel({ threadId }: PreviewPanelProps) {
         },
         threadId,
         resumeUrlHint: hint,
+        workspaceRootPath: workspaceRootPath ?? null,
       });
     },
-    [threadId, storedUrl],
+    [threadId, storedUrl, workspaceRootPath],
   );
 
   useEffect(() => {

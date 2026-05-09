@@ -93,8 +93,11 @@ export {
   McodeBrowserCaptureV2Schema,
   AttachedBrowserCaptureV2Schema,
   AttachedBrowserCaptureSchema,
+  BrowserCaptureSpillFileSchema,
   MCODE_BROWSER_CAPTURE_V1_STRING_MAX,
   MCODE_BROWSER_CAPTURE_V2_STRING_MAX,
+  MCODE_BROWSER_CAPTURE_SPILL_RELATIVE_PATH_MAX,
+  isBrowserCaptureSpillRelativePath,
   clampMcodeBrowserCaptureV2,
   clampAttachedBrowserCaptureForOutbound,
 } from "./models/browser-preview.js";
@@ -107,6 +110,7 @@ export type {
   AttachedBrowserCaptureV2,
   McodeBrowserCapture,
   AttachedBrowserCapture,
+  BrowserCaptureSpillFile,
 } from "./models/browser-preview.js";
 
 // Events
