@@ -714,6 +714,19 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             }
             return { persistedFilesChanged: nextFilesChanged };
           });
+          // Keep the LRU message cache in sync: the cache was written before this
+          // async merge, so a cache-hit thread switch otherwise drops prepended
+          // turns' file lists until a full reload.
+          const cached = getCachedSnapshot(threadId);
+          if (!cached) return;
+          const mergedFiles = { ...cached.persistedFilesChanged };
+          for (const snap of relevant) {
+            mergedFiles[snap.message_id] = snap.files_changed;
+          }
+          cacheSnapshot(threadId, {
+            ...cached,
+            persistedFilesChanged: mergedFiles,
+          });
         })
         .catch(() => {});
     } catch {
