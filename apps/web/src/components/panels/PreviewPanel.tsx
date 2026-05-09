@@ -82,8 +82,9 @@ export interface PreviewPanelProps {
 
 /**
  * Embedded site preview: omnibox and toolbar above a region aligned to an Electron BrowserView.
- * Full viewport, drag-selected region, or element-pick PNGs attach to the composer. Tooltips open upward so they
- * stay readable: the guest BrowserView is stacked above shell HTML and would hide downward popups.
+ * Full viewport, drag-selected region, or element-pick PNGs attach to the composer. The chrome uses a
+ * two-row header so the omnibox keeps usable width on narrow panels. Tooltips open upward so they stay
+ * readable: the guest BrowserView is stacked above shell HTML and would hide downward popups.
  * In web-only builds without `desktopBridge.preview`, renders an explanatory empty state.
  */
 export function PreviewPanel({ threadId }: PreviewPanelProps) {
@@ -352,149 +353,152 @@ export function PreviewPanel({ threadId }: PreviewPanelProps) {
   return (
     <div
       data-testid="preview-panel"
-      className="flex min-h-0 flex-1 flex-col"
+      className="flex min-h-0 min-w-[20rem] flex-1 flex-col"
     >
-    <form
-      onSubmit={(e) => void onSubmit(e)}
-      className="flex-none space-y-2 border-b border-border/40 p-2"
-    >
-      <div className="flex min-w-0 flex-wrap items-center gap-1">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          className="shrink-0"
-          disabled={!canBack}
-          onClick={() => void onGoBack()}
-          aria-label="Back"
-        >
-          <ArrowLeft size={14} />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          className="shrink-0"
-          disabled={!canFwd}
-          onClick={() => void onGoForward()}
-          aria-label="Forward"
-        >
-          <ArrowRight size={14} />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          className="shrink-0"
-          onClick={() => void onReload()}
-          aria-label="Reload"
-        >
-          <RotateCw size={14} />
-        </Button>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                className="shrink-0"
-                disabled={regionBusy || captureBusy || elementPickBusy || !threadId}
-                onClick={() => void onAddRegionPictureReference()}
-                aria-label="Select region to capture"
-              >
-                <Crop size={14} aria-hidden />
-              </Button>
-            }
+      <form
+        onSubmit={(e) => void onSubmit(e)}
+        className="flex-none space-y-2 border-b border-border/40 p-2"
+      >
+        <div className="flex min-w-0 flex-wrap items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="shrink-0"
+            disabled={!canBack}
+            onClick={() => void onGoBack()}
+            aria-label="Back"
+          >
+            <ArrowLeft size={14} />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="shrink-0"
+            disabled={!canFwd}
+            onClick={() => void onGoForward()}
+            aria-label="Forward"
+          >
+            <ArrowRight size={14} />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="shrink-0"
+            onClick={() => void onReload()}
+            aria-label="Reload"
+          >
+            <RotateCw size={14} />
+          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="shrink-0"
+                  disabled={regionBusy || captureBusy || elementPickBusy || !threadId}
+                  onClick={() => void onAddRegionPictureReference()}
+                  aria-label="Select region to capture"
+                >
+                  <Crop size={14} aria-hidden />
+                </Button>
+              }
+            />
+            <TooltipContent side="top" sideOffset={6} className="max-w-[18rem] text-xs">
+              Drag on the page to choose a rectangle, then release to attach that crop
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="shrink-0"
+                  disabled={elementPickBusy || regionBusy || captureBusy || !threadId}
+                  onClick={() => void onAddElementPickPictureReference()}
+                  aria-label="Pick element to capture"
+                >
+                  <Crosshair size={14} aria-hidden />
+                </Button>
+              }
+            />
+            <TooltipContent side="top" sideOffset={6} className="max-w-[19rem] text-xs">
+              Hover to highlight an element, then click to attach a crop plus selector and HTML excerpt
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="shrink-0"
+                  disabled={captureBusy || regionBusy || elementPickBusy || !threadId}
+                  onClick={() => void onAddPictureReference()}
+                  aria-label="Add visible preview as image attachment"
+                >
+                  <ImagePlus size={14} aria-hidden />
+                </Button>
+              }
+            />
+            <TooltipContent side="top" sideOffset={6} className="max-w-[16rem] text-xs">
+              Capture the full preview viewport as a PNG and attach it to the composer
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="shrink-0"
+                  onClick={() => void onOpenExternal()}
+                  aria-label="Open in system browser"
+                >
+                  <ExternalLink size={14} aria-hidden />
+                </Button>
+              }
+            />
+            <TooltipContent side="top" sideOffset={6} className="max-w-[14rem] text-xs">
+              Open this URL in your default browser
+            </TooltipContent>
+          </Tooltip>
+        </div>
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:flex-nowrap">
+          <Input
+            value={inputUrl}
+            onChange={(e) => setInputUrl(e.target.value)}
+            placeholder="https://example.com"
+            className="h-8 min-w-[12rem] flex-1 font-mono text-xs sm:min-w-[16rem]"
+            aria-label="Preview URL"
+            title={inputUrl.trim() ? inputUrl : undefined}
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
           />
-          <TooltipContent side="top" sideOffset={6} className="max-w-[18rem] text-xs">
-            Drag on the page to choose a rectangle, then release to attach that crop
-          </TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                className="shrink-0"
-                disabled={elementPickBusy || regionBusy || captureBusy || !threadId}
-                onClick={() => void onAddElementPickPictureReference()}
-                aria-label="Pick element to capture"
-              >
-                <Crosshair size={14} aria-hidden />
-              </Button>
-            }
-          />
-          <TooltipContent side="top" sideOffset={6} className="max-w-[19rem] text-xs">
-            Hover to highlight an element, then click to attach a crop plus selector and HTML excerpt
-          </TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                className="shrink-0"
-                disabled={captureBusy || regionBusy || elementPickBusy || !threadId}
-                onClick={() => void onAddPictureReference()}
-                aria-label="Add visible preview as image attachment"
-              >
-                <ImagePlus size={14} aria-hidden />
-              </Button>
-            }
-          />
-          <TooltipContent side="top" sideOffset={6} className="max-w-[16rem] text-xs">
-            Capture the full preview viewport as a PNG and attach it to the composer
-          </TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                className="shrink-0"
-                onClick={() => void onOpenExternal()}
-                aria-label="Open in system browser"
-              >
-                <ExternalLink size={14} aria-hidden />
-              </Button>
-            }
-          />
-          <TooltipContent side="top" sideOffset={6} className="max-w-[14rem] text-xs">
-            Open this URL in your default browser
-          </TooltipContent>
-        </Tooltip>
-        <Input
-          value={inputUrl}
-          onChange={(e) => setInputUrl(e.target.value)}
-          placeholder="https://example.com"
-          className="min-w-[8rem] flex-1 font-mono text-xs h-8"
-          aria-label="Preview URL"
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
-        />
-        <Button type="submit" size="sm" className="shrink-0 h-8 text-xs">
-          Go
-        </Button>
-      </div>
-      {navError ? (
-        <p className="text-xs text-destructive" role="status">
-          {navError}
-        </p>
-      ) : null}
-    </form>
-    <div
-      ref={surfaceRef}
-      className="min-h-[160px] flex-1 min-w-0 mx-2 mb-2 mt-1 rounded-md border border-dashed border-border/50 bg-muted/10"
-      aria-hidden
-    />
+          <Button type="submit" size="sm" className="h-8 shrink-0 text-xs">
+            Go
+          </Button>
+        </div>
+        {navError ? (
+          <p className="text-xs text-destructive" role="status">
+            {navError}
+          </p>
+        ) : null}
+      </form>
+      <div
+        ref={surfaceRef}
+        className="mx-2 mb-2 mt-1 min-h-[min(40vh,20rem)] min-w-0 flex-1 rounded-md border border-dashed border-border/50 bg-muted/10"
+        aria-hidden
+      />
     </div>
   );
 }

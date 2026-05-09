@@ -94,9 +94,127 @@ function viewportBoundsFallback(viewWidth: number, viewHeight: number): Bounds {
 /** Max length for selector hints after guest + main sanitization (keeps prompts small, bounds CSS injection). */
 const SELECTOR_HINT_MAX_LEN = 512;
 
+/** Injected into the guest so the highlight shares the page coordinate system (layout viewport). */
+const EP_INJECT_JS = `(function(){
+  var id="__mcode_ep_hl", tid="__mcode_ep_tip";
+  if (document.getElementById(id)) return;
+  var s = document.createElement("style");
+  s.setAttribute("data-mcode-ep", "1");
+  s.textContent = "#__mcode_ep_hl{position:fixed;left:0;top:0;width:0;height:0;pointer-events:none;border:2px solid #22d3ee;box-sizing:border-box;z-index:2147483646;display:none;box-shadow:0 0 0 1px rgba(0,0,0,.35) inset;border-radius:2px}#__mcode_ep_tip{position:fixed;left:0;top:0;pointer-events:none;z-index:2147483647;display:none;max-width:min(440px,calc(100vw - 12px));font:11px/1.35 ui-sans-serif,system-ui,sans-serif;color:#e2e8f0;background:rgba(15,23,42,.94);border:1px solid #22d3ee;border-radius:4px;padding:5px 8px;box-shadow:0 2px 10px rgba(0,0,0,.35);word-break:break-all}";
+  (document.head || document.documentElement).appendChild(s);
+  var box = document.createElement("div");
+  box.id = id;
+  box.setAttribute("aria-hidden", "true");
+  var tip = document.createElement("div");
+  tip.id = tid;
+  tip.setAttribute("aria-live", "polite");
+  var root = document.body || document.documentElement;
+  root.appendChild(box);
+  root.appendChild(tip);
+})()`;
+
+const EP_REMOVE_JS = `(function(){
+  var h = document.getElementById("__mcode_ep_hl");
+  var t = document.getElementById("__mcode_ep_tip");
+  if (h) h.remove();
+  if (t) t.remove();
+  document.querySelectorAll('style[data-mcode-ep="1"]').forEach(function (n) { n.remove(); });
+})()`;
+
+/**
+ * Draws the element-pick highlight inside the guest page (not the shell overlay), matching layout viewport coords.
+ * Must run removeEpPickHighlighter before capturePage so the cyan frame is not in the PNG.
+ */
+async function injectEpPickHighlighter(wc: BrowserView["webContents"]): Promise<void> {
+  if (wc.isDestroyed()) return;
+  try {
+    await wc.executeJavaScript(EP_INJECT_JS, true);
+  } catch {
+    /* guest mid-navigation */
+  }
+}
+
+/** Updates or clears the guest highlight box and selector tooltip. */
+async function updateEpPickHighlighter(
+  wc: BrowserView["webContents"],
+  bounds: Bounds | null,
+  label: string,
+): Promise<void> {
+  if (wc.isDestroyed()) return;
+  const bJson = bounds === null ? "null" : JSON.stringify(bounds);
+  const lJson = JSON.stringify(label);
+  const js = `(function(b,label){
+  var el = document.getElementById("__mcode_ep_hl");
+  var tip = document.getElementById("__mcode_ep_tip");
+  if (!el || !tip) return;
+  if (!b || b.width < 1 || b.height < 1) {
+    el.style.display = "none";
+    tip.style.display = "none";
+    return;
+  }
+  el.style.display = "block";
+  el.style.left = b.x + "px";
+  el.style.top = b.y + "px";
+  el.style.width = b.width + "px";
+  el.style.height = b.height + "px";
+  tip.textContent = label || "";
+  tip.style.display = label ? "block" : "none";
+  if (!label) return;
+  var gap = 6, pad = 6;
+  var below = b.y + b.height + gap;
+  var vw = window.innerWidth || 1;
+  var vh = window.innerHeight || 1;
+  var ty = below;
+  var est = 22;
+  if (below + est > vh - pad && b.y > est + pad) ty = b.y - est - gap;
+  tip.style.left = Math.min(b.x, Math.max(0, vw - 420)) + "px";
+  tip.style.top = Math.round(ty) + "px";
+  requestAnimationFrame(function () {
+    var h = tip.offsetHeight || est;
+    var b2 = below;
+    if (b2 + h > vh - pad && b.y > h + pad) ty = b.y - h - gap;
+    else ty = b2;
+    var tw = tip.offsetWidth || 200;
+    tip.style.left = Math.max(pad, Math.min(b.x, vw - tw - pad)) + "px";
+    tip.style.top = Math.round(ty) + "px";
+  });
+})(${bJson}, ${lJson})`;
+  try {
+    await wc.executeJavaScript(js, true);
+  } catch {
+    /* guest torn down */
+  }
+}
+
+async function removeEpPickHighlighter(wc: BrowserView["webContents"]): Promise<void> {
+  if (wc.isDestroyed()) return;
+  try {
+    await wc.executeJavaScript(EP_REMOVE_JS, true);
+  } catch {
+    /* already destroyed */
+  }
+}
+
+/** Prefer BrowserView bounds; shell-reported rect can lag ResizeObserver. */
+function hostBoundsForHitTest(s: PreviewSession): Bounds | null {
+  if (s.view && !s.view.webContents.isDestroyed()) {
+    try {
+      const b = s.view.getBounds();
+      if (b.width > 0 && b.height > 0) {
+        return { x: b.x, y: b.y, width: b.width, height: b.height };
+      }
+    } catch {
+      /* use lastBounds */
+    }
+  }
+  return s.lastBounds;
+}
+
 /**
  * Builds guest-executed hit-test script for element pick: bounds, heuristic selector, optional HTML excerpt.
- * When host W/H are set, maps overlay pointer coords to the guest viewport and returns overlayBounds for the UI.
+ * Maps overlay pointer coords to the guest layout viewport using documentElement client metrics
+ * (innerWidth/innerHeight can disagree with layout when scrollbars or root overflow differ).
+ * Highlight is drawn in-guest so it matches {@link Element#getBoundingClientRect}.
  * Excerpt cloning strips active content and form state so hostile pages leak less into prompts.
  */
 function buildHitTestJs(overlayX: number, overlayY: number, hostWidth: number, hostHeight: number): string {
@@ -227,7 +345,9 @@ function buildHitTestJs(overlayX: number, overlayY: number, hostWidth: number, h
     return px >= r.left && px <= r.right && py >= r.top && py <= r.bottom;
   }
   function isHugeRect(r) {
-    var vw = window.innerWidth || 0, vh = window.innerHeight || 0;
+    var de = document.documentElement;
+    var vw = Math.max(0, de.clientWidth || window.innerWidth || 0);
+    var vh = Math.max(0, de.clientHeight || window.innerHeight || 0);
     if (vw < 1 || vh < 1) return false;
     return (r.width * r.height) >= (vw * vh * 0.92);
   }
@@ -300,15 +420,16 @@ function buildHitTestJs(overlayX: number, overlayY: number, hostWidth: number, h
   }
   try {
     var doc = document;
+    var de = doc.documentElement;
     var px = ox, py = oy;
     if (hostW > 0 && hostH > 0) {
-      var gwMap = window.innerWidth || hostW;
-      var ghMap = window.innerHeight || hostH;
-      px = Math.round((ox * gwMap) / hostW);
-      py = Math.round((oy * ghMap) / hostH);
+      var gww = Math.max(1, de.clientWidth || window.innerWidth || hostW);
+      var ghh = Math.max(1, de.clientHeight || window.innerHeight || hostH);
+      px = Math.round((ox * gww) / hostW);
+      py = Math.round((oy * ghh) / hostH);
     }
-    var iw = window.innerWidth || 1;
-    var ih = window.innerHeight || 1;
+    var iw = Math.max(1, de.clientWidth || window.innerWidth);
+    var ih = Math.max(1, de.clientHeight || window.innerHeight);
     px = Math.max(0, Math.min(px, iw - 0.001));
     py = Math.max(0, Math.min(py, ih - 0.001));
     var el = pickElementAt(px, py);
@@ -317,17 +438,6 @@ function buildHitTestJs(overlayX: number, overlayY: number, hostWidth: number, h
     }
     var r = el.getBoundingClientRect();
     var rbGuest = roundBounds(r);
-    var rbOverlay = rbGuest;
-    if (hostW > 0 && hostH > 0) {
-      var gww = window.innerWidth || hostW;
-      var ghh = window.innerHeight || hostH;
-      rbOverlay = {
-        x: Math.round((r.x * hostW) / gww),
-        y: Math.round((r.y * hostH) / ghh),
-        width: Math.max(1, Math.round((r.width * hostW) / gww)),
-        height: Math.max(1, Math.round((r.height * hostH) / ghh))
-      };
-    }
     var selectorHint = selectorHintFor(el);
     var htmlExcerpt = null;
     if (typeof HTMLInputElement !== "undefined" && el instanceof HTMLInputElement && el.type === "password") {
@@ -349,7 +459,6 @@ function buildHitTestJs(overlayX: number, overlayY: number, hostWidth: number, h
     return JSON.stringify({
       ok: true,
       bounds: rbGuest,
-      overlayBounds: rbOverlay,
       selectorHint: selectorHint,
       htmlExcerpt: htmlExcerpt
     });
@@ -379,10 +488,8 @@ function scrubHtmlExcerptForOutbound(s: string): string {
 type HitTestResult =
   | {
       ok: true;
-      /** Guest viewport CSS pixels: used for capturePage. */
+      /** Guest viewport CSS pixels: used for capturePage and in-page highlight. */
       bounds: Bounds;
-      /** Shell overlay pixels when host size differs from innerWidth/innerHeight; null if same as bounds. */
-      overlayBounds: Bounds | null;
       selectorHint: string | null;
       htmlExcerpt: string | null;
     }
@@ -420,10 +527,6 @@ function parseHitTestPayload(parsed: unknown): HitTestResult | null {
   if (p.ok !== true) return null;
   const bounds = parseBoundsRecord(p.bounds);
   if (!bounds) return null;
-  let overlayBounds: Bounds | null = null;
-  if (p.overlayBounds != null) {
-    overlayBounds = parseBoundsRecord(p.overlayBounds);
-  }
   const selectorHint =
     p.selectorHint == null ? null : sanitizeSelectorHintFromGuest(String(p.selectorHint));
   let htmlExcerpt: string | null = null;
@@ -434,7 +537,6 @@ function parseHitTestPayload(parsed: unknown): HitTestResult | null {
   return {
     ok: true,
     bounds,
-    overlayBounds,
     selectorHint,
     htmlExcerpt,
   };
@@ -472,6 +574,9 @@ function abortOverlayCapture(s: PreviewSession, error: string): void {
   endOverlaySession(s);
   const pending = s.overlayPending;
   s.overlayPending = null;
+  if (s.view && !s.view.webContents.isDestroyed()) {
+    void removeEpPickHighlighter(s.view.webContents);
+  }
   destroySelectionOverlayOnly(s);
   if (pending) {
     if (!pending.hostWin.isDestroyed()) {
@@ -580,87 +685,27 @@ window.addEventListener("keydown", (ev) => { if (ev.key === "Escape") void ipcRe
 </script></body></html>`);
 
 /**
- * Transparent overlay for element pick: hover highlights the hit target via main-process hit-testing;
- * click commits a capture of that element's bounds.
+ * Pointer-capture overlay for element pick: hit-testing and highlight run in the guest page
+ * so rects match {@link Element#getBoundingClientRect}; this layer only forwards pointer events.
  */
 const ELEMENT_OVERLAY_DATA_URL =
   "data:text/html;charset=utf-8," +
   encodeURIComponent(`<!DOCTYPE html><html><head><meta charset="utf-8"/><style>
-html,body{margin:0;width:100%;height:100%;overflow:visible;background:transparent;}
-#layer{position:fixed;inset:0;z-index:1;background:rgba(15,23,42,.22);cursor:crosshair;touch-action:none;}
-#box{position:fixed;z-index:2;border:2px solid #22d3ee;box-sizing:border-box;pointer-events:none;display:none;box-shadow:0 0 0 1px rgba(0,0,0,.35) inset;}
-#hint{position:fixed;pointer-events:none;display:none;z-index:4;font:11px/1.35 ui-sans-serif,system-ui,sans-serif;color:#e2e8f0;background:rgba(15,23,42,.94);border:1px solid #22d3ee;border-radius:4px;padding:5px 8px;box-shadow:0 2px 10px rgba(0,0,0,.35);word-break:break-all;max-width:min(440px,calc(100vw - 12px));}
-</style></head><body><div id="layer"></div><div id="box"></div><div id="hint" aria-live="polite"></div>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;}
+#layer{position:fixed;inset:0;background:rgba(15,23,42,.18);cursor:crosshair;touch-action:none;}
+</style></head><body><div id="layer"></div>
 <script>
 const { ipcRenderer } = require("electron");
 const layer = document.getElementById("layer");
-const box = document.getElementById("box");
-const hintEl = document.getElementById("hint");
-let hoverSeq = 0;
 let rafHover = 0;
 let hx = 0, hy = 0;
-function layoutHint(rx, ry, rw, rh) {
-  const pad = 6;
-  const gap = 6;
-  hintEl.style.left = rx + "px";
-  const est = 22;
-  let below = ry + rh + gap;
-  if (below + est > window.innerHeight - pad && ry > est + gap) {
-    hintEl.style.top = Math.round(ry - est - gap) + "px";
-  } else {
-    hintEl.style.top = Math.round(below) + "px";
-  }
-  requestAnimationFrame(function () {
-    const h = hintEl.offsetHeight || est;
-    below = ry + rh + gap;
-    if (below + h > window.innerHeight - pad && ry > h + gap) {
-      hintEl.style.top = Math.round(ry - h - gap) + "px";
-    } else {
-      hintEl.style.top = Math.round(below) + "px";
-    }
-  });
-}
-function showBox(b, labelText) {
-  if (!b || b.width < 1 || b.height < 1) {
-    box.style.display = "none";
-    hintEl.style.display = "none";
-    hintEl.textContent = "";
-    box.removeAttribute("title");
-    return;
-  }
-  const rx = Math.round(b.x);
-  const ry = Math.round(b.y);
-  const rw = Math.max(1, Math.round(b.width));
-  const rh = Math.max(1, Math.round(b.height));
-  box.style.left = rx + "px";
-  box.style.top = ry + "px";
-  box.style.width = rw + "px";
-  box.style.height = rh + "px";
-  box.style.display = "block";
-  const text = labelText != null ? String(labelText).trim() : "";
-  if (!text) {
-    hintEl.style.display = "none";
-    hintEl.textContent = "";
-    box.removeAttribute("title");
-    return;
-  }
-  box.title = text;
-  hintEl.textContent = text;
-  hintEl.style.display = "block";
-  layoutHint(rx, ry, rw, rh);
-}
 function scheduleHover() {
   if (rafHover) return;
   rafHover = requestAnimationFrame(async () => {
     rafHover = 0;
-    const x = hx, y = hy;
-    const seq = ++hoverSeq;
     try {
-      const res = await ipcRenderer.invoke("preview:element-pick-hover", { x, y });
-      if (seq !== hoverSeq) return;
-      if (res && res.ok && res.bounds) showBox(res.bounds, res.label);
-      else showBox(null, "");
-    } catch (_e) { if (seq === hoverSeq) showBox(null, ""); }
+      await ipcRenderer.invoke("preview:element-pick-hover", { x: hx, y: hy });
+    } catch (_e) {}
   });
 }
 function pt(ev) {
@@ -674,7 +719,13 @@ function ptEnd(ev) {
   return pt(ev);
 }
 layer.addEventListener("mousemove", (ev) => { hx = ev.clientX; hy = ev.clientY; scheduleHover(); });
-layer.addEventListener("mouseleave", () => { hoverSeq++; showBox(null, ""); });
+layer.addEventListener("mouseleave", () => {
+  if (rafHover) {
+    cancelAnimationFrame(rafHover);
+    rafHover = 0;
+  }
+  void ipcRenderer.invoke("preview:element-pick-hover", { x: -1, y: -1 });
+});
 layer.addEventListener("click", async (ev) => {
   ev.preventDefault();
   try { await ipcRenderer.invoke("preview:element-pick-commit", pt(ev)); } catch (_e) {}
@@ -734,6 +785,9 @@ function parkPreview(win: BrowserWindow, s: PreviewSession): void {
       }
     }
     try {
+      if (!s.view.webContents.isDestroyed()) {
+        void removeEpPickHighlighter(s.view.webContents);
+      }
       detachViewListeners(s.view);
       s.view.webContents.close();
     } catch {
@@ -1088,10 +1142,7 @@ export function registerPreviewBrowserHandlers(): void {
 
   ipcMain.handle(
     "preview:element-pick-hover",
-    async (
-      event,
-      pt: { x: unknown; y: unknown },
-    ): Promise<{ ok: true; bounds: Bounds; label: string } | { ok: false }> => {
+    async (event, pt: { x: unknown; y: unknown }): Promise<{ ok: true } | { ok: false }> => {
       const overlayWin = BrowserWindow.fromWebContents(event.sender);
       const parentWin = overlayWin?.getParentWindow();
       if (!overlayWin || overlayWin.isDestroyed() || !parentWin || parentWin.isDestroyed()) {
@@ -1106,11 +1157,20 @@ export function registerPreviewBrowserHandlers(): void {
       const y = typeof pt?.y === "number" && Number.isFinite(pt.y) ? pt.y : NaN;
       if (!Number.isFinite(x) || !Number.isFinite(y)) return { ok: false };
 
-      const hit = await runElementHitTest(s.view.webContents, x, y, s.lastBounds);
-      if (!hit || !hit.ok) return { ok: false };
+      if (x < 0 || y < 0) {
+        await updateEpPickHighlighter(s.view.webContents, null, "");
+        return { ok: false };
+      }
+
+      const host = hostBoundsForHitTest(s);
+      const hit = await runElementHitTest(s.view.webContents, x, y, host);
+      if (!hit || !hit.ok) {
+        await updateEpPickHighlighter(s.view.webContents, null, "");
+        return { ok: false };
+      }
       const label = hit.selectorHint && hit.selectorHint.length > 0 ? hit.selectorHint : "Element";
-      const displayBounds = hit.overlayBounds ?? hit.bounds;
-      return { ok: true, bounds: displayBounds, label };
+      await updateEpPickHighlighter(s.view.webContents, hit.bounds, label);
+      return { ok: true };
     },
   );
 
@@ -1145,13 +1205,15 @@ export function registerPreviewBrowserHandlers(): void {
 
       const lb = s.lastBounds;
       if (!lb) {
+        await removeEpPickHighlighter(s.view.webContents);
         if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
         pending.finish({ ok: false, error: "no-bounds" });
         return;
       }
 
-      const hit = await runElementHitTest(s.view.webContents, x, y, lb);
+      const hit = await runElementHitTest(s.view.webContents, x, y, hostBoundsForHitTest(s));
       if (!hit || !hit.ok) {
+        await removeEpPickHighlighter(s.view.webContents);
         if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
         pending.finish({ ok: false, error: "no-hit" });
         return;
@@ -1159,12 +1221,14 @@ export function registerPreviewBrowserHandlers(): void {
 
       const r = clampRectInPlace(hit.bounds, lb.width, lb.height);
       if (r.width < 4 || r.height < 4) {
+        await removeEpPickHighlighter(s.view.webContents);
         if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
         pending.finish({ ok: false, error: "region-too-small" });
         return;
       }
 
       try {
+        await removeEpPickHighlighter(s.view.webContents);
         const image = await s.view.webContents.capturePage(r);
         const buffer = image.toPNG();
         if (buffer.length === 0) {
@@ -1362,7 +1426,10 @@ export function registerPreviewBrowserHandlers(): void {
           }
         });
 
-        void ov.loadURL(ELEMENT_OVERLAY_DATA_URL);
+        void (async (): Promise<void> => {
+          await injectEpPickHighlighter(s.view!.webContents);
+          void ov.loadURL(ELEMENT_OVERLAY_DATA_URL);
+        })();
       });
     },
   );
