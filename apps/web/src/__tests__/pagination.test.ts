@@ -31,7 +31,6 @@ describe("Chat Pagination", () => {
       currentTurnMessageIdByThread: {},
       agentStartTimes: {},
       settingsByThread: {},
-      activeSubagentsByThread: {},
       oldestLoadedSequence: {},
       hasMoreMessages: {},
       isLoadingMore: {},

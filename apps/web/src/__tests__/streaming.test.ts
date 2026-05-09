@@ -141,7 +141,6 @@ describe("duplicate message prevention", () => {
       streamingPreviewByThread: { "thread-1": "Hello world" },
       toolCallsByThread: {},
       agentStartTimes: { "thread-1": Date.now() },
-      activeSubagentsByThread: {},
       currentThreadId: "thread-1",
     });
   });

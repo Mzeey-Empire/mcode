@@ -1,5 +1,5 @@
 import { Bot } from "lucide-react";
-import { useThreadStore } from "@/stores/threadStore";
+import { countActiveSubagentCalls, useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 
 const SLOW_SPIN_STYLE = { animationDuration: "2s" } as const;
@@ -8,7 +8,7 @@ const SLOW_SPIN_STYLE = { animationDuration: "2s" } as const;
 export function AgentStatusBar() {
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
   const count = useThreadStore((s) =>
-    activeThreadId ? s.activeSubagentsByThread[activeThreadId] ?? 0 : 0,
+    activeThreadId ? countActiveSubagentCalls(s.toolCallsByThread[activeThreadId]) : 0,
   );
 
   if (count <= 0) return null;
