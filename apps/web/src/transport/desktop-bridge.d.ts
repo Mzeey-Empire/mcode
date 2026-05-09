@@ -62,8 +62,8 @@ interface PreviewBridge {
     bounds: PreviewShellBounds | null;
     threadId?: string | null;
     resumeUrlHint?: string | null;
-    /** Checkout root for the active workspace; enables spill files under `.mcode-local/`. */
-    workspaceRootPath?: string | null;
+    /** Active workspace id; scopes preview spill files under the Mcode app data directory. */
+    workspaceId?: string | null;
   }): Promise<void>;
   navigate(url: string): Promise<PreviewNavigateResult>;
   goBack(): Promise<boolean>;

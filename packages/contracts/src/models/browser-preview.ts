@@ -20,23 +20,26 @@ export const MCODE_BROWSER_CAPTURE_V2_STRING_MAX = {
   failedRequestResourceType: 32,
 } as const;
 
-/** Max length for {@link McodeBrowserCaptureV2.spillRelativePath} (workspace-relative POSIX path). */
-export const MCODE_BROWSER_CAPTURE_SPILL_RELATIVE_PATH_MAX = 200;
+/** Max length for spillAppDataPath (POSIX path segments under the Mcode app data directory). */
+export const MCODE_BROWSER_CAPTURE_SPILL_APP_DATA_PATH_MAX = 200;
 
-const SPILL_RELATIVE_PATH_RE =
-  /^\.mcode-local\/mcode-browser-capture\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/i;
+/** Max length for {@link McodeBrowserCaptureV2.spillAbsolutePath} (native absolute path for tools). */
+export const MCODE_BROWSER_CAPTURE_SPILL_ABSOLUTE_PATH_MAX = 640;
+
+/** App-data-relative POSIX path: `browser-capture-spill/<workspaceDir>/<uuid>.json`. */
+const SPILL_APP_DATA_PATH_RE =
+  /^browser-capture-spill\/[a-zA-Z0-9_-]{1,80}\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/i;
 
 /**
- * Returns true when `value` is the allowed workspace-relative spill artifact path shape
- * (under `.mcode-local/mcode-browser-capture/`, uuid file name). Used by desktop path validation.
+ * Returns true when `value` is a validated spill path under the Mcode app data directory
+ * (`getMcodeDir()`), used for IPC unlink validation.
  */
-export function isBrowserCaptureSpillRelativePath(value: string): boolean {
-  return value.length <= MCODE_BROWSER_CAPTURE_SPILL_RELATIVE_PATH_MAX && SPILL_RELATIVE_PATH_RE.test(value);
+export function isBrowserCaptureSpillAppDataPath(value: string): boolean {
+  return value.length <= MCODE_BROWSER_CAPTURE_SPILL_APP_DATA_PATH_MAX && SPILL_APP_DATA_PATH_RE.test(value);
 }
 
 /**
- * On-disk JSON next to the workspace when preview text exceeds inline fence caps.
- * Agents should read this file for full redacted excerpts; the fence stays clamped for token economy.
+ * Spill JSON file under the Mcode app data directory when preview text exceeds inline fence caps.
  */
 export const BrowserCaptureSpillFileSchema = lazySchema(() =>
   z.object({
@@ -162,14 +165,16 @@ export const McodeBrowserCaptureV2Schema = lazySchema(() =>
     /** Recent HTTP subresource failures observed in the preview session (capped, best-effort). */
     failedRequests: z.array(failedRequestEntrySchema).max(24).optional(),
     /**
-     * Workspace-relative path to {@link BrowserCaptureSpillFile} with full (redacted, pre-clamp) excerpts.
-     * Present only when inline fields were truncated for the fence; agents should read the file from disk.
+     * Path under the Mcode app data directory (`getMcodeDir()`), POSIX segments, for spill JSON.
+     * Present when excerpts were truncated for the fence; use with {@link spillAbsolutePath} for tools.
      */
-    spillRelativePath: z
+    spillAppDataPath: z
       .string()
-      .max(MCODE_BROWSER_CAPTURE_SPILL_RELATIVE_PATH_MAX)
-      .regex(SPILL_RELATIVE_PATH_RE)
+      .max(MCODE_BROWSER_CAPTURE_SPILL_APP_DATA_PATH_MAX)
+      .regex(SPILL_APP_DATA_PATH_RE)
       .optional(),
+    /** Native absolute path to the same spill file (convenience for read_file style tools). */
+    spillAbsolutePath: z.string().max(MCODE_BROWSER_CAPTURE_SPILL_ABSOLUTE_PATH_MAX).optional(),
   }),
 );
 
@@ -232,6 +237,9 @@ export function clampMcodeBrowserCaptureV2<T extends McodeBrowserCaptureV2>(capt
       url: clampStrLen(e.url, m.failedRequestUrl),
       resourceType: clampOptStr(e.resourceType, m.failedRequestResourceType),
     }));
+  }
+  if (next.spillAbsolutePath !== undefined) {
+    next.spillAbsolutePath = clampStrLen(next.spillAbsolutePath, MCODE_BROWSER_CAPTURE_SPILL_ABSOLUTE_PATH_MAX);
   }
   return next;
 }

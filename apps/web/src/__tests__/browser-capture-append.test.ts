@@ -63,10 +63,21 @@ describe("appendBrowserCaptureFence", () => {
     expect(parsed[0].headingOutline).toHaveLength(cap);
   });
 
-  it("passes through spillRelativePath for agent read_file hints", () => {
-    const spill = ".mcode-local/mcode-browser-capture/550e8400-e29b-41d4-b716-446655440000.json";
-    const row: AttachedBrowserCaptureV2 = { ...sampleCaptureV2, spillRelativePath: spill };
+  it("passes through spillAppDataPath and spillAbsolutePath for agent read_file hints", () => {
+    const spillAppData =
+      "browser-capture-spill/ws-default/550e8400-e29b-41d4-b716-446655440000.json";
+    const spillAbs =
+      "C:\\Users\\me\\.mcode-dev\\browser-capture-spill\\ws-default\\550e8400-e29b-41d4-b716-446655440000.json";
+    const row: AttachedBrowserCaptureV2 = {
+      ...sampleCaptureV2,
+      spillAppDataPath: spillAppData,
+      spillAbsolutePath: spillAbs,
+    };
     const out = appendBrowserCaptureFence("x", [row]);
-    expect(out).toContain(spill);
+    const start = out.indexOf(MCODE_BROWSER_CAPTURE_FENCE_OPEN) + MCODE_BROWSER_CAPTURE_FENCE_OPEN.length;
+    const end = out.indexOf(MCODE_BROWSER_CAPTURE_FENCE_CLOSE);
+    const parsed = JSON.parse(out.slice(start, end).trim()) as AttachedBrowserCaptureV2[];
+    expect(parsed[0].spillAppDataPath).toBe(spillAppData);
+    expect(parsed[0].spillAbsolutePath).toBe(spillAbs);
   });
 });

@@ -136,7 +136,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       bounds: { x: number; y: number; width: number; height: number } | null;
       threadId?: string | null;
       resumeUrlHint?: string | null;
-      workspaceRootPath?: string | null;
+      workspaceId?: string | null;
     }): Promise<void> {
       return ipcRenderer.invoke("preview:sync", payload);
     },

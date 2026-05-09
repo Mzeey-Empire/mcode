@@ -82,6 +82,7 @@ import { ProviderUnavailableBanner } from "./ProviderUnavailableBanner";
 import { appendBrowserCaptureFence } from "@/lib/browser-capture-append";
 import {
   collectBrowserCaptureSpillPaths,
+  collectSpillPathsFromPendingAttachments,
   releaseBrowserCaptureSpills,
 } from "@/lib/browser-capture-spill";
 
@@ -602,6 +603,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         for (const att of draftRef.current.attachments) {
           if (att.previewUrl) URL.revokeObjectURL(att.previewUrl);
         }
+        const orphanSpills = collectSpillPathsFromPendingAttachments(draftRef.current.attachments);
+        if (orphanSpills.length > 0) void releaseBrowserCaptureSpills(orphanSpills);
       }
     }
 
@@ -1124,6 +1127,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     setAttachments((prev) => {
       const removed = prev.find((a) => a.id === id);
       if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+      const spillPaths = collectSpillPathsFromPendingAttachments(removed ? [removed] : []);
+      if (spillPaths.length > 0) void releaseBrowserCaptureSpills(spillPaths);
       return prev.filter((a) => a.id !== id);
     });
   }, []);
@@ -1414,7 +1419,6 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       return;
     }
     const outboundDisplay = resolveOutboundDisplayContent(trimmed, displayInjected, captureRows);
-    const browserCaptureSpillPaths = collectBrowserCaptureSpillPaths(captureRows);
 
     // ---- Normal send path ----
 
@@ -1447,7 +1451,6 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
           thinking ?? undefined,
           outboundDisplay,
         );
-      void releaseBrowserCaptureSpills(browserCaptureSpillPaths);
     } else if (branchFromMessageId && threadId) {
       // Branch mode: create a child thread from the quoted message instead of sending.
       let branchMode: "direct" | "worktree" | "existing-worktree" = "direct";
@@ -1485,7 +1488,6 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         thinking: thinking ?? undefined,
       });
       onBranchModeExit?.();
-      void releaseBrowserCaptureSpills(browserCaptureSpillPaths);
     } else if (threadId) {
       await sendMessage(
         threadId,
@@ -1503,7 +1505,6 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         replyContext?.quotedText,
       );
       if (threadId) clearReply(threadId);
-      void releaseBrowserCaptureSpills(browserCaptureSpillPaths);
     }
 
     // Auto-save last-used mode and access as defaults (model defaults are managed in Settings)
@@ -2018,9 +2019,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
                     next.replyToMessageId,
                     next.quotedText,
                   );
-                  await releaseBrowserCaptureSpills(next.browserCaptureSpillPaths ?? []);
                 } catch {
-                  /* Leave spill files if the send fails. */
+                  void releaseBrowserCaptureSpills(next.browserCaptureSpillPaths ?? []);
                 }
               }}
             />

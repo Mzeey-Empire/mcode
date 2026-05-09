@@ -219,6 +219,21 @@
   50% { opacity: 0.55; }
 }
 
+@keyframes preview-loading {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+.animate-preview-loading {
+  animation: preview-loading 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-preview-loading {
+    animation: none;
+    width: 100% !important;
+    opacity: 0.5;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

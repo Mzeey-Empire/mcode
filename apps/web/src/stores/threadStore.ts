@@ -1860,9 +1860,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
                   next.replyToMessageId,
                   next.quotedText,
                 );
-                await releaseBrowserCaptureSpills(next.browserCaptureSpillPaths ?? []);
               } catch {
-                /* If the send fails, keep spill files until prune or manual cleanup. */
+                void releaseBrowserCaptureSpills(next.browserCaptureSpillPaths ?? []);
               }
             })();
           }

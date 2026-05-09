@@ -25,6 +25,17 @@ export function getMcodeDir(): string {
 }
 
 /**
+ * Safe single path segment under `browser-capture-spill/` derived from a workspace id.
+ * Falls back to a short hash when the id contains characters unsafe for directory names.
+ */
+export function spillWorkspaceDirSegment(workspaceId: string): string {
+  const t = workspaceId.trim();
+  if (t.length === 0) return "unknown";
+  if (/^[a-zA-Z0-9_-]{1,80}$/.test(t)) return t;
+  return createHash("sha256").update(t).digest("hex").slice(0, 24);
+}
+
+/**
  * Returns true when `repoRoot/.git` is a file, meaning this checkout is a linked git worktree
  * rather than the primary repository directory.
  */

@@ -15,11 +15,7 @@ import { cn } from "@/lib/utils";
 /** Right-side panel with tabs for Tasks, Changes, and Preview. */
 export function RightPanel() {
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
-  const workspaceRootPath = useWorkspaceStore((s) => {
-    const id = s.activeWorkspaceId;
-    if (!id) return null;
-    return s.workspaces.find((w) => w.id === id)?.path ?? null;
-  });
+  const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
 
   // Per-thread panel state
   const panelState = useDiffStore((s) =>
@@ -252,7 +248,7 @@ export function RightPanel() {
             <button
               type="button"
               onClick={() => setRightPanelTab(activeThreadId!, "tasks")}
-              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-semibold tracking-[0.1em] uppercase transition-colors ${
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-[10px] font-semibold tracking-[0.16em] uppercase transition-colors ${
                 activeTab === "tasks"
                   ? "text-foreground bg-muted/50"
                   : "text-foreground/70 hover:text-foreground"
@@ -264,7 +260,7 @@ export function RightPanel() {
             <button
               type="button"
               onClick={() => setRightPanelTab(activeThreadId!, "changes")}
-              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-semibold tracking-[0.1em] uppercase transition-colors ${
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-[10px] font-semibold tracking-[0.16em] uppercase transition-colors ${
                 activeTab === "changes"
                   ? "text-foreground bg-muted/50"
                   : "text-foreground/70 hover:text-foreground"
@@ -276,7 +272,7 @@ export function RightPanel() {
             <button
               type="button"
               onClick={() => setRightPanelTab(activeThreadId!, "preview")}
-              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-semibold tracking-[0.1em] uppercase transition-colors ${
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-[10px] font-semibold tracking-[0.16em] uppercase transition-colors ${
                 activeTab === "preview"
                   ? "text-foreground bg-muted/50"
                   : "text-foreground/70 hover:text-foreground"
@@ -308,7 +304,7 @@ export function RightPanel() {
         )}
         {activeTab === "changes" && <DiffPanel />}
         {activeTab === "preview" && (
-          <PreviewPanel threadId={activeThreadId} workspaceRootPath={workspaceRootPath} />
+          <PreviewPanel threadId={activeThreadId} workspaceId={activeWorkspaceId} />
         )}
       </div>
       </div>

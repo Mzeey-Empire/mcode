@@ -1,20 +1,37 @@
-import type { AttachedBrowserCapture } from "@mcode/contracts";
+import type { AttachedBrowserCapture, McodeBrowserCapture } from "@mcode/contracts";
 
 /**
- * Collects `spillRelativePath` values from browser capture rows for cleanup after send or queue drop.
+ * Collects `spillAppDataPath` values from browser capture rows for cleanup when queued
+ * messages are removed or similar explicit discard paths.
  */
 export function collectBrowserCaptureSpillPaths(rows: readonly AttachedBrowserCapture[]): string[] {
   const out: string[] = [];
   for (const row of rows) {
-    if (row.schemaVersion === 2 && row.spillRelativePath) {
-      out.push(row.spillRelativePath);
+    if (row.schemaVersion === 2 && row.spillAppDataPath) {
+      out.push(row.spillAppDataPath);
     }
   }
   return out;
 }
 
 /**
- * Removes spill JSON files written under `.mcode-local/mcode-browser-capture/` (desktop only).
+ * Collects spill paths from composer `PendingAttachment` rows (v2 captures with `spillAppDataPath`).
+ */
+export function collectSpillPathsFromPendingAttachments(
+  attachments: readonly { browserCapture?: McodeBrowserCapture }[],
+): string[] {
+  const out: string[] = [];
+  for (const att of attachments) {
+    const c = att.browserCapture;
+    if (c?.schemaVersion === 2 && c.spillAppDataPath) {
+      out.push(c.spillAppDataPath);
+    }
+  }
+  return out;
+}
+
+/**
+ * Removes spill JSON files under the Mcode app data directory (`browser-capture-spill/`).
  */
 export async function releaseBrowserCaptureSpills(paths: readonly string[]): Promise<void> {
   if (paths.length === 0) return;

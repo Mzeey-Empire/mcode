@@ -96,8 +96,9 @@ export {
   BrowserCaptureSpillFileSchema,
   MCODE_BROWSER_CAPTURE_V1_STRING_MAX,
   MCODE_BROWSER_CAPTURE_V2_STRING_MAX,
-  MCODE_BROWSER_CAPTURE_SPILL_RELATIVE_PATH_MAX,
-  isBrowserCaptureSpillRelativePath,
+  MCODE_BROWSER_CAPTURE_SPILL_APP_DATA_PATH_MAX,
+  MCODE_BROWSER_CAPTURE_SPILL_ABSOLUTE_PATH_MAX,
+  isBrowserCaptureSpillAppDataPath,
   clampMcodeBrowserCaptureV2,
   clampAttachedBrowserCaptureForOutbound,
 } from "./models/browser-preview.js";

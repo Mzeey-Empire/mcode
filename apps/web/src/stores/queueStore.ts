@@ -26,7 +26,7 @@ export interface QueuedMessage {
   replyToMessageId?: string;
   /** Quoted text excerpt for the reply. */
   quotedText?: string;
-  /** Preview spill paths to unlink when this item is sent or removed from the queue. */
+  /** Preview spill paths to unlink when this item is removed from the queue or the send path fails after dequeue. */
   browserCaptureSpillPaths?: string[];
   /** Unix timestamp (ms) when this message was enqueued. */
   queuedAt: number;
