@@ -28,6 +28,11 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/** Relative workspace path to full-text preview spill, when present on a v2 capture. */
+function getBrowserCaptureSpillRelativePath(capture: McodeBrowserCapture | undefined): string | undefined {
+  return capture?.schemaVersion === 2 ? capture.spillRelativePath : undefined;
+}
+
 export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewProps) {
   if (attachments.length === 0) return null;
 
@@ -38,6 +43,10 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
         const isPdf = att.mimeType === "application/pdf";
         const isContextOnly =
           att.contextOnly === true || isVirtualBrowserContextAttachment(att.mimeType);
+        const spillRel = getBrowserCaptureSpillRelativePath(att.browserCapture);
+        const spillTitle = spillRel
+          ? `Full preview text is also saved under your project at this path (relative to the workspace root):\n${spillRel}`
+          : undefined;
 
         return (
           <div
@@ -47,17 +56,28 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
               "border border-border/60 bg-muted/60",
               "transition-all duration-150 hover:border-primary/40 hover:bg-muted/80",
             )}
+            title={spillTitle}
           >
             {isContextOnly ? (
-              <div className="flex h-[72px] w-[140px] flex-col justify-center gap-1 px-3">
-                <div className="flex items-center gap-2">
+              <div className="flex h-[72px] w-[140px] flex-col justify-center gap-0.5 px-3 py-1">
+                <div className="flex min-h-0 items-center gap-2">
                   <FileText size={18} className="shrink-0 text-cyan-500 dark:text-cyan-400" />
                   <span className="truncate text-xs font-medium text-foreground">Page context</span>
                 </div>
-                <span className="pl-[26px] text-[10px] text-muted-foreground">No image</span>
+                <span className="block max-w-[120px] truncate pl-[26px] text-[10px] leading-tight text-muted-foreground">
+                  {spillRel ? spillRel : "No image"}
+                </span>
               </div>
             ) : isImage ? (
               <div className="relative h-[72px] w-[72px]">
+                {spillRel ? (
+                  <span
+                    className="absolute bottom-0.5 left-0.5 right-0.5 z-10 truncate rounded bg-background/85 px-0.5 text-center text-[8px] font-medium text-foreground/90 shadow-sm"
+                    title={spillTitle}
+                  >
+                    + spill file
+                  </span>
+                ) : null}
                 <img
                   src={att.previewUrl}
                   alt={att.name}
