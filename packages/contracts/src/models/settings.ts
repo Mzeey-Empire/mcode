@@ -288,6 +288,40 @@ export const SettingsSchema = lazySchema(() =>
             cursor: z.string().default(""),
           })
           .default({}),
+        /** Cursor ACP-only tuning (`provider` + `cursor` keeps nesting depth ≤ 3). */
+        cursor: z
+          .object({
+            /**
+             * When true, omit sticky preamble shortening and ship the stitched
+             * instructions/skills catalogue on every prompt (highest fidelity,
+             * largest token footprint).
+             */
+            alwaysSendFullInstructions: z.boolean().default(false),
+            /**
+             * When sticky shortening is enabled, force a full preamble again every N
+             * prompts across the MCP subprocess lifecycle. Zero disables.
+             */
+            fullPreambleEveryNTurns: z.number().int().min(0).max(999).default(12),
+            /** Idle minutes before an unused cursor-agent subprocess is torn down (5–240). */
+            idleSessionTtlMinutes: z.number().int().min(5).max(240).default(20),
+            /**
+             * Retry a failed `session/prompt` RPC once when the CLI error looks transient
+             * (timeouts, opaque 502/503, etc.).
+             */
+            retryTransientFailuresOnce: z.boolean().default(true),
+            /** Attach stderr tail excerpts to Cursor failure logs (debugging only). */
+            verboseFailureLogs: z.boolean().default(true),
+            /**
+             * Respond to blocking `cursor/ask_question` with automatic option picks derived
+             * from prompts (recommended-first). When false, answer `skipped`.
+             */
+            autoAnswerAskQuestions: z.boolean().default(true),
+            /**
+             * Emit synthetic `cursor:ask_question:auto` agent system events summarizing picks.
+             */
+            echoAskQuestionsToTimeline: z.boolean().default(false),
+          })
+          .default({}),
       })
       .default({}),
 
@@ -461,6 +495,17 @@ export const PartialSettingsSchema = lazySchema(() =>
             claude: z.string().optional(),
             copilot: z.string().optional(),
             cursor: z.string().optional(),
+          })
+          .optional(),
+        cursor: z
+          .object({
+            alwaysSendFullInstructions: z.boolean().optional(),
+            fullPreambleEveryNTurns: z.number().int().min(0).max(999).optional(),
+            idleSessionTtlMinutes: z.number().int().min(5).max(240).optional(),
+            retryTransientFailuresOnce: z.boolean().optional(),
+            verboseFailureLogs: z.boolean().optional(),
+            autoAnswerAskQuestions: z.boolean().optional(),
+            echoAskQuestionsToTimeline: z.boolean().optional(),
           })
           .optional(),
       })
