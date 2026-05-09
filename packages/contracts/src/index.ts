@@ -87,12 +87,19 @@ export {
   BrowserPreviewCaptureKindSchema,
   McodeBrowserCaptureV1Schema,
   AttachedBrowserCaptureV1Schema,
+  McodeBrowserCaptureV2Schema,
+  AttachedBrowserCaptureV2Schema,
+  AttachedBrowserCaptureSchema,
 } from "./models/browser-preview.js";
 export type {
   BrowserPreviewBounds,
   BrowserPreviewCaptureKind,
   McodeBrowserCaptureV1,
   AttachedBrowserCaptureV1,
+  McodeBrowserCaptureV2,
+  AttachedBrowserCaptureV2,
+  McodeBrowserCapture,
+  AttachedBrowserCapture,
 } from "./models/browser-preview.js";
 
 // Events

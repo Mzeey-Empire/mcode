@@ -26,7 +26,7 @@ import { useDiffStore } from "@/stores/diffStore";
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
 import { useToastStore } from "@/stores/toastStore";
 import { usePreviewReferenceQueueStore } from "@/stores/previewReferenceQueueStore";
-import type { McodeBrowserCaptureV1 } from "@mcode/contracts";
+import type { McodeBrowserCapture } from "@mcode/contracts";
 
 const NAV_ERROR_LABEL: Record<string, string> = {
   "no-bounds": "Wait for the panel to finish layout, then try again.",
@@ -61,7 +61,7 @@ type CaptureResult =
         sourcePath: string;
       };
       previewBytes: Uint8Array;
-      capture: McodeBrowserCaptureV1;
+      capture: McodeBrowserCapture;
     }
   | { ok: false; error: string };
 

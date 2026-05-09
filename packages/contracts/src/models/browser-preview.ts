@@ -61,3 +61,60 @@ export const AttachedBrowserCaptureV1Schema = lazySchema(() =>
 export type AttachedBrowserCaptureV1 = z.infer<
   ReturnType<typeof AttachedBrowserCaptureV1Schema>
 >;
+
+const viewportScrollSchema = z.object({
+  scrollX: z.number(),
+  scrollY: z.number(),
+});
+
+const layoutViewportSchema = z.object({
+  width: z.number(),
+  height: z.number(),
+});
+
+/**
+ * V2 adds agent-oriented text and diagnostics on top of V1: visible copy, headings,
+ * a compact interactive outline, scroll and layout viewport, plus a recent console tail.
+ */
+export const McodeBrowserCaptureV2Schema = lazySchema(() =>
+  z.object({
+    schemaVersion: z.literal(2),
+    pageUrl: z.string(),
+    pageTitle: z.string(),
+    capturedAt: z.string(),
+    captureKind: BrowserPreviewCaptureKindSchema().optional(),
+    selectorHint: z.string().nullable().optional(),
+    htmlExcerpt: z.string().max(16_000).optional(),
+    bounds: BrowserPreviewBoundsSchema(),
+    visibleTextExcerpt: z.string().max(12_000).optional(),
+    headingOutline: z.string().max(4000).optional(),
+    interactiveOutlineExcerpt: z.string().max(8000).optional(),
+    consoleTail: z.string().max(4000).optional(),
+    viewportScroll: viewportScrollSchema.optional(),
+    layoutViewport: layoutViewportSchema.optional(),
+  }),
+);
+
+export type McodeBrowserCaptureV2 = z.infer<ReturnType<typeof McodeBrowserCaptureV2Schema>>;
+
+export const AttachedBrowserCaptureV2Schema = lazySchema(() =>
+  z.intersection(
+    z.object({
+      attachmentId: z.string(),
+    }),
+    McodeBrowserCaptureV2Schema(),
+  ),
+);
+
+export type AttachedBrowserCaptureV2 = z.infer<
+  ReturnType<typeof AttachedBrowserCaptureV2Schema>
+>;
+
+/** Either capture schema version (outbound fence JSON may mix during migrations). */
+export const AttachedBrowserCaptureSchema = lazySchema(() =>
+  z.union([AttachedBrowserCaptureV1Schema(), AttachedBrowserCaptureV2Schema()]),
+);
+
+export type AttachedBrowserCapture = z.infer<ReturnType<typeof AttachedBrowserCaptureSchema>>;
+
+export type McodeBrowserCapture = McodeBrowserCaptureV1 | McodeBrowserCaptureV2;

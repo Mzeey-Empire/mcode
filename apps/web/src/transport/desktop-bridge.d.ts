@@ -1,5 +1,5 @@
 import type { AttachmentMeta } from "./types";
-import type { McodeBrowserCaptureV1 } from "@mcode/contracts";
+import type { McodeBrowserCapture } from "@mcode/contracts";
 
 /** Discriminated union describing the auto-updater lifecycle state. */
 export type UpdateStatus =
@@ -46,7 +46,7 @@ export type PreviewPictureReferenceResult =
       readonly ok: true;
       readonly meta: AttachmentMeta;
       readonly previewBytes: Uint8Array;
-      readonly capture: McodeBrowserCaptureV1;
+      readonly capture: McodeBrowserCapture;
     }
   | { readonly ok: false; readonly error: string };
 

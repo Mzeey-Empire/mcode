@@ -6,7 +6,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { BrowserView, BrowserWindow, app, ipcMain, session, shell } from "electron";
-import type { AttachmentMeta, McodeBrowserCaptureV1 } from "@mcode/contracts";
+import type { AttachmentMeta, McodeBrowserCaptureV2 } from "@mcode/contracts";
 
 const IDLE_MS = 120_000;
 
@@ -33,7 +33,7 @@ export type PreviewPictureReferenceResult =
       meta: AttachmentMeta;
       previewBytes: Uint8Array;
       /** Structured page context paired with {@link meta} for outbound prompts. */
-      capture: McodeBrowserCaptureV1;
+      capture: McodeBrowserCaptureV2;
     }
   | { ok: false; error: string };
 
@@ -56,6 +56,8 @@ interface PreviewSession {
     | null;
   /** Removes main-frame navigation listener registered during an overlay capture. */
   navigationAbortDisposable: (() => void) | null;
+  /** Recent guest console lines for capture v2 diagnostics (cleared when the view is destroyed). */
+  consoleBuffer: string[];
 }
 
 const sessions = new Map<number, PreviewSession>();
@@ -72,6 +74,7 @@ function getSession(win: BrowserWindow): PreviewSession {
       selectionOverlay: null,
       overlayPending: null,
       navigationAbortDisposable: null,
+      consoleBuffer: [],
     };
     sessions.set(win.id, s);
   }
@@ -95,6 +98,124 @@ function resetIdle(win: BrowserWindow, s: PreviewSession): void {
 /** Full viewport bounds in BrowserView-relative CSS pixels. */
 function viewportBoundsFallback(viewWidth: number, viewHeight: number): Bounds {
   return { x: 0, y: 0, width: Math.max(1, viewWidth), height: Math.max(1, viewHeight) };
+}
+
+const PREVIEW_CONSOLE_BUFFER_MAX = 48;
+const PREVIEW_CONSOLE_LINE_MAX = 480;
+
+function pushPreviewConsoleLine(s: PreviewSession, level: number, message: string): void {
+  const kind = level >= 3 ? "error" : level === 2 ? "warning" : "log";
+  const line = `${kind}: ${message.replace(/[\u0000-\u001F\u007F]/g, " ")}`.slice(0, PREVIEW_CONSOLE_LINE_MAX);
+  s.consoleBuffer.push(line);
+  if (s.consoleBuffer.length > PREVIEW_CONSOLE_BUFFER_MAX) {
+    s.consoleBuffer.splice(0, s.consoleBuffer.length - PREVIEW_CONSOLE_BUFFER_MAX);
+  }
+}
+
+/** Joins recent main-process console lines for v2 capture (last chars if very long). */
+function formatConsoleTail(buffer: readonly string[]): string | undefined {
+  if (buffer.length === 0) return undefined;
+  const joined = buffer.join("\n").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
+  if (joined.length === 0) return undefined;
+  return joined.length > 4000 ? joined.slice(-4000) : joined;
+}
+
+/** Guest-run: visible text, headings, interactive outline, scroll and layout viewport metrics. */
+const CAPTURE_PAGE_CONTEXT_JS = `(function () {
+  try {
+    var de = document.documentElement;
+    var body = document.body;
+    var vw = Math.max(0, de.clientWidth || 0);
+    var vh = Math.max(0, de.clientHeight || 0);
+    var sx = window.scrollX || 0;
+    var sy = window.scrollY || 0;
+    var vt = "";
+    if (body) {
+      vt = (body.innerText || "").replace(/\\s+/g, " ").trim();
+    }
+    if (vt.length > 12000) vt = vt.slice(0, 12000) + String.fromCharCode(10) + "...[truncated]";
+    var ho = [];
+    var hs = document.querySelectorAll("h1,h2,h3,h4,h5,h6");
+    for (var i = 0; i < hs.length && i < 80; i++) {
+      var t = (hs[i].textContent || "").trim().replace(/\\s+/g, " ");
+      if (!t) continue;
+      ho.push(hs[i].tagName.toUpperCase() + ": " + t.slice(0, 200));
+    }
+    var headingOutline = ho.slice(0, 60).join(String.fromCharCode(10));
+    if (headingOutline.length > 4000) headingOutline = headingOutline.slice(0, 4000) + String.fromCharCode(10) + "...[truncated]";
+    var io = [];
+    var els = document.querySelectorAll('a[href],button,input:not([type=hidden]),select,textarea,[role=button],[role=link],[role=tab]');
+    function isVisible(el) {
+      var r = el.getBoundingClientRect();
+      if (r.width < 1 && r.height < 1) return false;
+      var st = window.getComputedStyle(el);
+      if (st.visibility === "hidden" || st.display === "none") return false;
+      return true;
+    }
+    function visibleLabel(el) {
+      var lab = el.getAttribute("aria-label");
+      if (lab && lab.trim()) return lab.trim();
+      var tag = el.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") {
+        var ph = el.placeholder || "";
+        if (ph.trim()) return ph.trim();
+        return String(el.name || el.type || "input");
+      }
+      var tx = (el.textContent || "").trim().replace(/\\s+/g, " ");
+      if (tx) return tx.slice(0, 80);
+      return String(el.getAttribute("href") || "");
+    }
+    for (var j = 0, seen = 0; j < els.length && seen < 120; j++) {
+      var el = els[j];
+      if (!isVisible(el)) continue;
+      seen++;
+      io.push("- [" + (el.getAttribute("role") || el.tagName.toLowerCase()) + "] " + visibleLabel(el).slice(0, 120));
+    }
+    var interactiveOutline = io.join(String.fromCharCode(10));
+    if (interactiveOutline.length > 8000) interactiveOutline = interactiveOutline.slice(0, 8000) + String.fromCharCode(10) + "...[truncated]";
+    return JSON.stringify({
+      visibleText: vt,
+      headingOutline: headingOutline,
+      interactiveOutline: interactiveOutline,
+      scrollX: sx,
+      scrollY: sy,
+      layoutWidth: vw,
+      layoutHeight: vh
+    });
+  } catch (e) {
+    return JSON.stringify({ error: "context-failed" });
+  }
+})()`;
+
+type GuestPageContextPayload = {
+  visibleText?: string;
+  headingOutline?: string;
+  interactiveOutline?: string;
+  scrollX?: number;
+  scrollY?: number;
+  layoutWidth?: number;
+  layoutHeight?: number;
+  error?: string;
+};
+
+async function captureGuestPageContextForCapture(
+  webContents: BrowserView["webContents"],
+): Promise<GuestPageContextPayload | null> {
+  if (webContents.isDestroyed()) return null;
+  try {
+    const raw: unknown = await webContents.executeJavaScript(CAPTURE_PAGE_CONTEXT_JS, true);
+    const text = typeof raw === "string" ? raw : JSON.stringify(raw);
+    const parsed: unknown = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object") return null;
+    return parsed as GuestPageContextPayload;
+  } catch {
+    return null;
+  }
+}
+
+/** Strips control chars from visible text shipped to the model (guest innerText). */
+function scrubVisibleTextForOutbound(s: string): string {
+  return s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
 }
 
 /** Max length for selector hints after guest + main sanitization (keeps prompts small, bounds CSS injection). */
@@ -612,18 +733,22 @@ function abortOverlayCapture(s: PreviewSession, error: string): void {
   }
 }
 
-/** Typed capture envelope aligned with PNG bytes for outbound prompt augmentation. */
-function buildBrowserCapturePayload(
+/** Typed capture envelope aligned with PNG bytes for outbound prompt augmentation (v2 adds text outline and console tail). */
+async function buildBrowserCapturePayload(
   webContents: BrowserView["webContents"],
   boundsCss: Bounds,
+  consoleBuffer: readonly string[],
   extras?: {
     captureKind?: "viewport" | "region" | "element";
     selectorHint?: string | null;
     htmlExcerpt?: string | null;
   },
-): McodeBrowserCaptureV1 {
-  const out: McodeBrowserCaptureV1 = {
-    schemaVersion: 1,
+): Promise<McodeBrowserCaptureV2> {
+  const ctx = await captureGuestPageContextForCapture(webContents);
+  const tail = formatConsoleTail(consoleBuffer);
+
+  const out: McodeBrowserCaptureV2 = {
+    schemaVersion: 2,
     pageUrl: webContents.getURL(),
     pageTitle: webContents.getTitle() ?? "",
     capturedAt: new Date().toISOString(),
@@ -638,6 +763,41 @@ function buildBrowserCapturePayload(
     const scrubbed = scrubHtmlExcerptForOutbound(extras.htmlExcerpt);
     if (scrubbed.length > 0) {
       out.htmlExcerpt = scrubbed.length > 16_000 ? scrubbed.slice(0, 16_000) : scrubbed;
+    }
+  }
+  if (tail) {
+    out.consoleTail = tail;
+  }
+  if (ctx && !ctx.error) {
+    if (ctx.visibleText != null && ctx.visibleText.length > 0) {
+      const scrubbed = scrubVisibleTextForOutbound(ctx.visibleText);
+      if (scrubbed.length > 0) {
+        out.visibleTextExcerpt = scrubbed.length > 12_000 ? scrubbed.slice(0, 12_000) : scrubbed;
+      }
+    }
+    if (ctx.headingOutline != null && ctx.headingOutline.length > 0) {
+      const ho = scrubVisibleTextForOutbound(ctx.headingOutline);
+      if (ho.length > 0) {
+        out.headingOutline = ho.length > 4000 ? ho.slice(0, 4000) : ho;
+      }
+    }
+    if (ctx.interactiveOutline != null && ctx.interactiveOutline.length > 0) {
+      const io = scrubVisibleTextForOutbound(ctx.interactiveOutline);
+      if (io.length > 0) {
+        out.interactiveOutlineExcerpt = io.length > 8000 ? io.slice(0, 8000) : io;
+      }
+    }
+    if (typeof ctx.scrollX === "number" && Number.isFinite(ctx.scrollX)) {
+      const sy = typeof ctx.scrollY === "number" && Number.isFinite(ctx.scrollY) ? ctx.scrollY : 0;
+      out.viewportScroll = { scrollX: ctx.scrollX, scrollY: sy };
+    }
+    if (
+      typeof ctx.layoutWidth === "number" &&
+      Number.isFinite(ctx.layoutWidth) &&
+      typeof ctx.layoutHeight === "number" &&
+      Number.isFinite(ctx.layoutHeight)
+    ) {
+      out.layoutViewport = { width: Math.max(0, ctx.layoutWidth), height: Math.max(0, ctx.layoutHeight) };
     }
   }
   return out;
@@ -664,6 +824,7 @@ function detachViewListeners(view: BrowserView): void {
   view.webContents.removeAllListeners("did-navigate-in-page");
   view.webContents.removeAllListeners("page-title-updated");
   view.webContents.removeAllListeners("did-finish-load");
+  view.webContents.removeAllListeners("console-message");
 }
 
 /**
@@ -825,6 +986,7 @@ function parkPreview(win: BrowserWindow, s: PreviewSession): void {
     }
     s.view = null;
     s.scrollbarCssKey = null;
+    s.consoleBuffer.length = 0;
   }
 }
 
@@ -880,6 +1042,10 @@ function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
   view.webContents.on("page-title-updated", forwardNav);
   view.webContents.on("did-finish-load", () => {
     void injectPreviewScrollbarStyles(s);
+  });
+
+  view.webContents.on("console-message", (_event, level, message) => {
+    pushPreviewConsoleLine(s, level, message);
   });
 
   s.view = view;
@@ -1109,7 +1275,9 @@ export function registerPreviewBrowserHandlers(): void {
       const pngSize = image.getSize();
       const boundsCss =
         lb !== null ? viewportBoundsFallback(lb.width, lb.height) : viewportBoundsFallback(pngSize.width, pngSize.height);
-      const capture = buildBrowserCapturePayload(s.view.webContents, boundsCss, { captureKind: "viewport" });
+      const capture = await buildBrowserCapturePayload(s.view.webContents, boundsCss, s.consoleBuffer, {
+        captureKind: "viewport",
+      });
       resetIdle(win, s);
       return { ok: true, meta, previewBytes: Uint8Array.from(buffer), capture };
     } catch {
@@ -1176,7 +1344,9 @@ export function registerPreviewBrowserHandlers(): void {
         sourcePath: tempPath,
       };
 
-      const capture = buildBrowserCapturePayload(s.view.webContents, r, { captureKind: "region" });
+      const capture = await buildBrowserCapturePayload(s.view.webContents, r, s.consoleBuffer, {
+        captureKind: "region",
+      });
 
       if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
       pending.finish({ ok: true, meta, previewBytes: Uint8Array.from(buffer), capture });
@@ -1308,7 +1478,7 @@ export function registerPreviewBrowserHandlers(): void {
           sourcePath: tempPath,
         };
 
-        const capture = buildBrowserCapturePayload(s.view.webContents, r, {
+        const capture = await buildBrowserCapturePayload(s.view.webContents, r, s.consoleBuffer, {
           captureKind: "element",
           selectorHint: hit.selectorHint,
           htmlExcerpt: hit.htmlExcerpt,

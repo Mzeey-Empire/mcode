@@ -64,7 +64,7 @@ import {
   MAX_ATTACHMENTS,
 } from "@mcode/contracts";
 import type {
-  AttachedBrowserCaptureV1,
+  AttachedBrowserCapture,
   ContextWindowMode,
   ReasoningLevel,
   ProviderId,
@@ -80,8 +80,8 @@ import { ProviderUnavailableBanner } from "./ProviderUnavailableBanner";
 import { appendBrowserCaptureFence } from "@/lib/browser-capture-append";
 
 /** Build structured preview metadata payloads paired with outbound attachment IDs. */
-function buildAttachedBrowserCaptures(list: PendingAttachment[]): AttachedBrowserCaptureV1[] {
-  const rows: AttachedBrowserCaptureV1[] = [];
+function buildAttachedBrowserCaptures(list: PendingAttachment[]): AttachedBrowserCapture[] {
+  const rows: AttachedBrowserCapture[] = [];
   for (const row of list) {
     if (!row.browserCapture) continue;
     rows.push({ attachmentId: row.id, ...row.browserCapture });
@@ -93,7 +93,7 @@ function buildAttachedBrowserCaptures(list: PendingAttachment[]): AttachedBrowse
 function resolveOutboundDisplayContent(
   trimmed: string,
   displayInjected: string | undefined,
-  captureRows: AttachedBrowserCaptureV1[],
+  captureRows: AttachedBrowserCapture[],
 ): string | undefined {
   if (captureRows.length === 0) return displayInjected;
   return displayInjected ?? trimmed;
