@@ -80,6 +80,8 @@ interface PreviewBridge {
    */
   capturePageContext(): Promise<PreviewContextReferenceResult>;
   onDidNavigate(callback: (payload: { url: string; title: string }) => void): () => void;
+  /** Guest load lifecycle for shell chrome (BrowserView covers the surface div). */
+  onLoadingState(callback: (payload: { loading: boolean }) => void): () => void;
 }
 
 /** IPC push transport relayed from the Electron main process. */

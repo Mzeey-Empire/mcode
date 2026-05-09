@@ -179,6 +179,12 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.on("preview:did-navigate", listener);
       return () => ipcRenderer.removeListener("preview:did-navigate", listener);
     },
+    /** Subscribe to guest webContents loading spin (did-start / did-stop loading). */
+    onLoadingState(callback: (payload: { loading: boolean }) => void) {
+      const listener = (_event: unknown, payload: { loading: boolean }) => callback(payload);
+      ipcRenderer.on("preview:loading-state", listener);
+      return () => ipcRenderer.removeListener("preview:loading-state", listener);
+    },
   },
 
   /** IPC push transport relayed from the main process. */

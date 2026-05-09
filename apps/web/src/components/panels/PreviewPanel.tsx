@@ -14,6 +14,7 @@ import {
   FileText,
   Globe,
   ImagePlus,
+  Loader2,
   RotateCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -88,7 +89,7 @@ export interface PreviewPanelProps {
 
 /**
  * Embedded site preview: omnibox and toolbar above a region aligned to an Electron BrowserView.
- * Full viewport, drag-selected region, element-pick PNGs, or fence-only page context attach to the composer. The chrome uses a
+ * A loading banner sits between the form and guest region because the BrowserView stacks above HTML and would hide in-surface overlays. Full viewport, drag-selected region, element-pick PNGs, or fence-only page context attach to the composer. The chrome uses a
  * two-row header so the omnibox keeps usable width on narrow panels. Tooltips open upward so they stay
  * readable: the guest BrowserView is stacked above shell HTML and would hide downward popups.
  * In web-only builds without `desktopBridge.preview`, renders an explanatory empty state.
@@ -104,6 +105,7 @@ export function PreviewPanel({ threadId }: PreviewPanelProps) {
   const [regionBusy, setRegionBusy] = useState(false);
   const [elementPickBusy, setElementPickBusy] = useState(false);
   const [contextBusy, setContextBusy] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   const storedUrl = useDiffStore(
     (s) => s.previewUrlByThread[threadId] ?? "",
@@ -164,6 +166,12 @@ export function PreviewPanel({ threadId }: PreviewPanelProps) {
     });
     return unsub;
   }, [threadId, refreshNav]);
+
+  useEffect(() => {
+    const preview = window.desktopBridge?.preview;
+    if (!preview) return;
+    return preview.onLoadingState((p) => setPreviewLoading(p.loading));
+  }, []);
 
   useEffect(() => {
     const preview = window.desktopBridge?.preview;
@@ -564,6 +572,17 @@ export function PreviewPanel({ threadId }: PreviewPanelProps) {
           </p>
         ) : null}
       </form>
+      {previewLoading ? (
+        <div
+          data-testid="preview-loading-banner"
+          className="mx-2 mt-1 flex min-h-9 items-center gap-2 rounded-md border border-border/40 bg-muted/50 px-3 py-2 text-xs text-muted-foreground"
+          role="status"
+          aria-live="polite"
+        >
+          <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" aria-hidden />
+          <span>Loading page…</span>
+        </div>
+      ) : null}
       <div
         ref={surfaceRef}
         className="mx-2 mb-2 mt-1 min-h-[min(40vh,20rem)] min-w-0 flex-1 rounded-md border border-dashed border-border/50 bg-muted/10"

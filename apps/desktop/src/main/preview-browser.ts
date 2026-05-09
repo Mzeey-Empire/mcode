@@ -27,6 +27,20 @@ const PREVIEW_SCROLLBAR_CSS = [
 
 type Bounds = { x: number; y: number; width: number; height: number };
 
+/**
+ * Tells the React shell to show or hide the loading affordance. The native
+ * BrowserView stacks above HTML, so the indicator lives in chrome above the
+ * guest bounds rather than inside the surface div.
+ */
+function sendPreviewLoading(win: BrowserWindow, loading: boolean): void {
+  if (win.isDestroyed()) return;
+  try {
+    win.webContents.send("preview:loading-state", { loading });
+  } catch {
+    /* sender may be gone */
+  }
+}
+
 /** Outcome of capturing the visible preview viewport as a PNG attachment. */
 export type PreviewPictureReferenceResult =
   | {
@@ -860,6 +874,8 @@ function detachViewListeners(view: BrowserView): void {
   view.webContents.removeAllListeners("did-navigate-in-page");
   view.webContents.removeAllListeners("page-title-updated");
   view.webContents.removeAllListeners("did-finish-load");
+  view.webContents.removeAllListeners("did-start-loading");
+  view.webContents.removeAllListeners("did-stop-loading");
   view.webContents.removeAllListeners("console-message");
 }
 
@@ -1025,6 +1041,9 @@ function parkPreview(win: BrowserWindow, s: PreviewSession): void {
     s.consoleBuffer.length = 0;
     s.failedRequestBuffer.length = 0;
   }
+  if (!win.isDestroyed()) {
+    sendPreviewLoading(win, false);
+  }
 }
 
 /**
@@ -1080,6 +1099,17 @@ function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
   view.webContents.on("did-finish-load", () => {
     void injectPreviewScrollbarStyles(s);
   });
+
+  const forwardLoadingStart = () => {
+    if (win.isDestroyed() || view.webContents.isDestroyed()) return;
+    sendPreviewLoading(win, true);
+  };
+  const forwardLoadingStop = () => {
+    if (win.isDestroyed() || view.webContents.isDestroyed()) return;
+    sendPreviewLoading(win, false);
+  };
+  view.webContents.on("did-start-loading", forwardLoadingStart);
+  view.webContents.on("did-stop-loading", forwardLoadingStop);
 
   view.webContents.on("console-message", (_event, level, message) => {
     pushPreviewConsoleLine(s, level, message);
@@ -1207,13 +1237,16 @@ export function registerPreviewBrowserHandlers(): void {
         // the previous thread's document (and resumePreviewUrl) would leak into the next thread.
         if (switchedThread) {
           if (hint) {
+            sendPreviewLoading(win, true);
             void wc.loadURL(hint);
             s.resumePreviewUrl = hint;
           } else {
             s.resumePreviewUrl = null;
+            sendPreviewLoading(win, true);
             void wc.loadURL("about:blank");
           }
         } else if (guestUrlNeedsHttpRestore(current) && hint) {
+          sendPreviewLoading(win, true);
           void wc.loadURL(hint);
           s.resumePreviewUrl = hint;
         } else if (
@@ -1221,6 +1254,7 @@ export function registerPreviewBrowserHandlers(): void {
           s.resumePreviewUrl &&
           isAllowedHttpUrl(s.resumePreviewUrl)
         ) {
+          sendPreviewLoading(win, true);
           void wc.loadURL(s.resumePreviewUrl);
         }
       }
@@ -1255,6 +1289,7 @@ export function registerPreviewBrowserHandlers(): void {
       if (win.getBrowserView() !== view) {
         win.setBrowserView(view);
       }
+      sendPreviewLoading(win, true);
       void view.webContents.loadURL(target);
       s.resumePreviewUrl = target;
       resetIdle(win, s);
@@ -1268,6 +1303,7 @@ export function registerPreviewBrowserHandlers(): void {
     const s = getSession(win);
     if (!s.view || s.view.webContents.isDestroyed()) return false;
     if (s.view.webContents.canGoBack()) {
+      sendPreviewLoading(win, true);
       s.view.webContents.goBack();
       resetIdle(win, s);
       return true;
@@ -1281,6 +1317,7 @@ export function registerPreviewBrowserHandlers(): void {
     const s = getSession(win);
     if (!s.view || s.view.webContents.isDestroyed()) return false;
     if (s.view.webContents.canGoForward()) {
+      sendPreviewLoading(win, true);
       s.view.webContents.goForward();
       resetIdle(win, s);
       return true;
@@ -1293,6 +1330,7 @@ export function registerPreviewBrowserHandlers(): void {
     if (!win || win.isDestroyed()) return;
     const s = getSession(win);
     if (!s.view || s.view.webContents.isDestroyed()) return;
+    sendPreviewLoading(win, true);
     s.view.webContents.reload();
     resetIdle(win, s);
   });
