@@ -746,7 +746,7 @@ export class AgentService {
     const FORK_HISTORY_MAX_SEQUENCE = 10_000;
     if (forkMessage.sequence > FORK_HISTORY_MAX_SEQUENCE) {
       throw new Error(
-        `Fork point is too far back in this thread (sequence ${forkMessage.sequence}; max ${FORK_HISTORY_MAX_SEQUENCE}). Choose a more recent message to branch from.`,
+        `Fork point includes too much prior history (sequence ${forkMessage.sequence}; max ${FORK_HISTORY_MAX_SEQUENCE}). Choose an earlier message (lower sequence) to branch from.`,
       );
     }
 

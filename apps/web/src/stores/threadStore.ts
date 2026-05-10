@@ -317,12 +317,17 @@ export function extractPendingPlanQuestions(
   }
 }
 
+/** Zustand store for thread-scoped messages, streaming session state, and agent event handling. */
 export const useThreadStore = create<ThreadState>((set, get) => {
   let textDeltaFlushRaf: number | null = null;
   const pendingTextDeltaByThread = new Map<string, string>();
 
   /** Applies coalesced `session.textDelta` strings batched on `requestAnimationFrame`. */
   const flushPendingTextDeltas = () => {
+    if (textDeltaFlushRaf != null) {
+      cancelAnimationFrame(textDeltaFlushRaf);
+      textDeltaFlushRaf = null;
+    }
     if (pendingTextDeltaByThread.size === 0) return;
     const batch = new Map(pendingTextDeltaByThread);
     pendingTextDeltaByThread.clear();

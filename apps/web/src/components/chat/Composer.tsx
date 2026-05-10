@@ -2111,7 +2111,13 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
                     next.replyToMessageId,
                     next.quotedText,
                   );
-                  clearReply(threadId);
+                  const activeReply = useReplyStore.getState().getReply(threadId);
+                  if (
+                    next.replyToMessageId &&
+                    activeReply?.messageId === next.replyToMessageId
+                  ) {
+                    clearReply(threadId);
+                  }
                 } catch {
                   void releaseBrowserCaptureSpills(next.browserCaptureSpillPaths ?? []);
                 }
