@@ -317,9 +317,47 @@ export function extractPendingPlanQuestions(
   }
 }
 
+/** Zustand store for thread-scoped messages, streaming session state, and agent event handling. */
 export const useThreadStore = create<ThreadState>((set, get) => {
+  let textDeltaFlushRaf: number | null = null;
+  const pendingTextDeltaByThread = new Map<string, string>();
+
+  /** Applies coalesced `session.textDelta` strings batched on `requestAnimationFrame`. */
+  const flushPendingTextDeltas = () => {
+    if (textDeltaFlushRaf != null) {
+      cancelAnimationFrame(textDeltaFlushRaf);
+      textDeltaFlushRaf = null;
+    }
+    if (pendingTextDeltaByThread.size === 0) return;
+    const batch = new Map(pendingTextDeltaByThread);
+    pendingTextDeltaByThread.clear();
+    set((state) => {
+      const nextStreaming = { ...state.streamingByThread };
+      const nextPreview = { ...state.streamingPreviewByThread };
+      for (const [tid, acc] of batch) {
+        if (!acc) continue;
+        const cur = nextStreaming[tid] ?? "";
+        const combined = cur + acc;
+        nextStreaming[tid] = combined;
+        nextPreview[tid] = combined.length > 200 ? combined.slice(-200) : combined;
+      }
+      return {
+        streamingByThread: nextStreaming,
+        streamingPreviewByThread: nextPreview,
+      };
+    });
+  };
+
+  const scheduleTextDeltaFlush = () => {
+    if (textDeltaFlushRaf != null) return;
+    textDeltaFlushRaf = requestAnimationFrame(() => {
+      textDeltaFlushRaf = null;
+      flushPendingTextDeltas();
+    });
+  };
+
   return {
-  messages: [],
+    messages: [],
   runningThreadIds: new Set<string>(),
   loading: false,
   errorByThread: {},
@@ -376,6 +414,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
    * real-time state intact to avoid disrupting live tool call rendering.
    */
   loadMessages: async (threadId) => {
+    flushPendingTextDeltas();
     // Cache-hit fast path. Restores message-loading state synchronously,
     // skipping the getMessages RPC and avoiding the blank-flash transition.
     const cached = getCachedSnapshot(threadId);
@@ -959,6 +998,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
    * Does NOT reset runningThreadIds since agents may still be executing.
    */
   clearMessages: () => {
+    flushPendingTextDeltas();
     const current = get().currentThreadId;
     if (current) evictMessageCache(current);
 
@@ -1397,6 +1437,10 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     const method = (event.method as string) || "";
     const params = (event.params as Record<string, unknown>) || event;
 
+    if (method !== "session.textDelta") {
+      flushPendingTextDeltas();
+    }
+
     // Only evict the message cache on structural changes that add or modify
     // persisted messages. Streaming deltas (textDelta, toolProgress) are
     // ephemeral and don't change what loadMessages would return from the DB.
@@ -1679,17 +1723,15 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     if (method === "session.textDelta") {
       const delta = (params.delta as string) || "";
       if (!delta) return;
-      // Text deltas signal Claude is responding — mark prior tool calls complete.
-      markPriorToolCallsComplete();
-      set((state) => {
-        const current = state.streamingByThread[threadId] ?? "";
-        const combined = current + delta;
-        const preview = combined.length > 200 ? combined.slice(-200) : combined;
-        return {
-          streamingByThread: { ...state.streamingByThread, [threadId]: combined },
-          streamingPreviewByThread: { ...state.streamingPreviewByThread, [threadId]: preview },
-        };
-      });
+      const hadPending = pendingTextDeltaByThread.has(threadId);
+      pendingTextDeltaByThread.set(
+        threadId,
+        (pendingTextDeltaByThread.get(threadId) ?? "") + delta,
+      );
+      if (!hadPending) {
+        markPriorToolCallsComplete();
+      }
+      scheduleTextDeltaFlush();
       return;
     }
 
@@ -2232,6 +2274,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   },
 
   handleTurnPersisted: (payload) => {
+    flushPendingTextDeltas();
     evictMessageCache(payload.threadId);
 
     set((state) => {

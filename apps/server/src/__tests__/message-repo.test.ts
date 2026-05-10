@@ -28,6 +28,7 @@ function createTestDb(): Database.Database {
       arguments TEXT,
       result TEXT
     );
+    CREATE INDEX idx_tool_call_records_message ON tool_call_records(message_id);
   `);
   return db;
 }
@@ -39,6 +40,44 @@ describe("MessageRepo", () => {
   beforeEach(() => {
     db = createTestDb();
     repo = new MessageRepo(db);
+  });
+
+  describe("listByThread", () => {
+    it("returns tool_call_count per message via indexed lookup", () => {
+      const m1 = repo.create("thread-1", "user", "a", 1);
+      const m2 = repo.create("thread-1", "assistant", "b", 2);
+      db.prepare(
+        "INSERT INTO tool_call_records (id, message_id, name) VALUES (?, ?, ?)",
+      ).run("tc1", m2.id, "Bash");
+      db.prepare(
+        "INSERT INTO tool_call_records (id, message_id, name) VALUES (?, ?, ?)",
+      ).run("tc2", m2.id, "Read");
+
+      const { messages } = repo.listByThread("thread-1", 10);
+      expect(messages).toHaveLength(2);
+      expect(messages[0].tool_call_count).toBeUndefined();
+      expect(messages[1].tool_call_count).toBe(2);
+    });
+
+    it("EXPLAIN avoids full-table scan on tool_call_records", () => {
+      repo.create("thread-1", "user", "x", 1);
+      const stmt = db.prepare(
+        `EXPLAIN QUERY PLAN 
+SELECT id, thread_id, role, content, tool_calls, files_changed, cost_usd, tokens_used, timestamp, sequence, attachments, reply_to_message_id, quoted_text,
+(SELECT COUNT(*) FROM tool_call_records WHERE message_id = m.id) AS tool_call_count
+FROM (
+  SELECT m.id, m.thread_id, m.role, m.content, m.tool_calls, m.files_changed, m.cost_usd, m.tokens_used, m.timestamp, m.sequence, m.attachments, m.reply_to_message_id, m.quoted_text
+  FROM messages m
+  WHERE m.thread_id = ?
+  ORDER BY m.sequence DESC
+  LIMIT ?
+) m
+ORDER BY m.sequence ASC`,
+      );
+      const plan = stmt.all("thread-1", 11) as Array<{ detail?: string }>;
+      const text = plan.map((r) => r.detail ?? "").join("\n").toUpperCase();
+      expect(text).not.toContain("SCAN TOOL_CALL_RECORDS");
+    });
   });
 
   describe("listByThreadUpToSequence", () => {

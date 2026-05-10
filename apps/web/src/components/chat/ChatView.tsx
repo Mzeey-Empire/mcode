@@ -177,7 +177,7 @@ export function ChatView() {
   const loadMessages = useThreadStore((s) => s.loadMessages);
   const clearMessages = useThreadStore((s) => s.clearMessages);
   const runningThreadIds = useThreadStore((s) => s.runningThreadIds);
-  const messages = useThreadStore((s) => s.messages);
+  const messageCount = useThreadStore((s) => s.messages.length);
   const setPendingPrefill = useComposerDraftStore((s) => s.setPendingPrefill);
 
   const isAgentRunning = activeThreadId ? runningThreadIds.has(activeThreadId) : false;
@@ -415,7 +415,7 @@ export function ChatView() {
     );
   }
 
-  const hasMessages = messages.length > 0;
+  const hasMessages = messageCount > 0;
   const showEmptyState = !hasMessages && !isAgentRunning;
 
   return (

@@ -72,6 +72,13 @@ const MESSAGE_COLUMNS =
 const MESSAGE_COLUMNS_PREFIXED =
   "m.id, m.thread_id, m.role, m.content, m.tool_calls, m.files_changed, m.cost_usd, m.tokens_used, m.timestamp, m.sequence, m.attachments, m.reply_to_message_id, m.quoted_text";
 
+/**
+ * Per-row tool call counts via index on `message_id`.
+ * Avoids a full-table `GROUP BY` over `tool_call_records` for each list query.
+ */
+const TOOL_CALL_COUNT_SQL =
+  "(SELECT COUNT(*) FROM tool_call_records WHERE message_id = m.id) AS tool_call_count";
+
 /** Repository for message creation and retrieval against SQLite. */
 @injectable()
 export class MessageRepo {
@@ -146,7 +153,7 @@ export class MessageRepo {
 
     let rows = this.db
       .prepare(
-        `SELECT ${MESSAGE_COLUMNS}, tc_count.cnt as tool_call_count
+        `SELECT ${MESSAGE_COLUMNS}, ${TOOL_CALL_COUNT_SQL}
 FROM (
   SELECT ${MESSAGE_COLUMNS_PREFIXED}
   FROM messages m
@@ -154,11 +161,6 @@ FROM (
   ORDER BY m.sequence DESC
   LIMIT ?
 ) m
-LEFT JOIN (
-  SELECT message_id, COUNT(*) as cnt
-  FROM tool_call_records
-  GROUP BY message_id
-) tc_count ON tc_count.message_id = m.id
 ORDER BY m.sequence ASC`,
       )
       .all(...queryParams) as MessageRow[];
@@ -175,6 +177,9 @@ ORDER BY m.sequence ASC`,
    * Return ALL messages for a thread with sequence <= maxSequence,
    * in ascending sequence order. No row limit — used for fork resolution
    * where the full history up to the fork point is needed.
+   *
+   * Callers must enforce an upper bound on `maxSequence` or total rows
+   * (see `AgentService` fork guard) so pathological threads cannot OOM the server.
    */
   listByThreadUpToSequence(
     threadId: string,
@@ -182,13 +187,8 @@ ORDER BY m.sequence ASC`,
   ): Message[] {
     const rows = this.db
       .prepare(
-        `SELECT ${MESSAGE_COLUMNS_PREFIXED}, tc_count.cnt as tool_call_count
+        `SELECT ${MESSAGE_COLUMNS_PREFIXED}, ${TOOL_CALL_COUNT_SQL}
 FROM messages m
-LEFT JOIN (
-  SELECT message_id, COUNT(*) as cnt
-  FROM tool_call_records
-  GROUP BY message_id
-) tc_count ON tc_count.message_id = m.id
 WHERE m.thread_id = ? AND m.sequence <= ?
 ORDER BY m.sequence ASC`,
       )

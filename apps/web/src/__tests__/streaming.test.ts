@@ -211,8 +211,22 @@ describe("duplicate message prevention", () => {
 });
 
 describe("session.textDelta", () => {
+  /** Drain microtasks for mocked requestAnimationFrame (matches store assign-then-callback ordering). */
+  async function flushRafChain(): Promise<void> {
+    for (let i = 0; i < 8; i++) {
+      await Promise.resolve();
+    }
+  }
+
   beforeEach(() => {
-    vi.useFakeTimers();
+    // Thread store coalesces deltas on rAF; fake timers don't run those frames,
+    // and a stuck frame leaves pending state that leaks across examples.
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb: FrameRequestCallback): number => {
+      queueMicrotask(() => {
+        cb(0);
+      });
+      return 1;
+    });
     useWorkspaceStore.setState({ threads: [createMockThread({ id: "thread-1" })] });
     useThreadStore.setState({
       messages: [],
@@ -226,23 +240,27 @@ describe("session.textDelta", () => {
     });
   });
 
-  afterEach(() => { vi.useRealTimers(); });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
-  it("appends delta to streamingByThread", () => {
+  it("appends delta to streamingByThread", async () => {
     const { handleAgentEvent } = useThreadStore.getState();
     handleAgentEvent("thread-1", { method: "session.textDelta", params: { delta: "Hello" } });
     handleAgentEvent("thread-1", { method: "session.textDelta", params: { delta: " world" } });
 
+    await flushRafChain();
     expect(useThreadStore.getState().streamingByThread["thread-1"]).toBe("Hello world");
   });
 
-  it("stores full text in streamingByThread and truncated preview in streamingPreviewByThread", () => {
+  it("stores full text in streamingByThread and truncated preview in streamingPreviewByThread", async () => {
     const longText = "x".repeat(250);
     useThreadStore.setState({ streamingByThread: { "thread-1": longText } });
     const { handleAgentEvent } = useThreadStore.getState();
 
     handleAgentEvent("thread-1", { method: "session.textDelta", params: { delta: "end" } });
 
+    await flushRafChain();
     const state = useThreadStore.getState();
     // Full buffer is preserved
     expect(state.streamingByThread["thread-1"]).toBe(longText + "end");
@@ -253,7 +271,7 @@ describe("session.textDelta", () => {
     expect(preview.endsWith("end")).toBe(true);
   });
 
-  it("marks prior tool calls complete on first textDelta", () => {
+  it("marks prior tool calls complete on first textDelta", async () => {
     useThreadStore.setState({
       toolCallsByThread: {
         "thread-1": [
@@ -264,14 +282,16 @@ describe("session.textDelta", () => {
     const { handleAgentEvent } = useThreadStore.getState();
     handleAgentEvent("thread-1", { method: "session.textDelta", params: { delta: "Hi" } });
 
+    await flushRafChain();
     const calls = useThreadStore.getState().toolCallsByThread["thread-1"];
     expect(calls[0].isComplete).toBe(true);
   });
 
-  it("does not affect other threads", () => {
+  it("does not affect other threads", async () => {
     const { handleAgentEvent } = useThreadStore.getState();
     handleAgentEvent("thread-1", { method: "session.textDelta", params: { delta: "ping" } });
 
+    await flushRafChain();
     expect(useThreadStore.getState().streamingByThread["thread-2"]).toBeUndefined();
   });
 });
