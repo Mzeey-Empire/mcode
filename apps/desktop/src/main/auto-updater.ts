@@ -87,6 +87,34 @@ let initialCheckTimeoutId: NodeJS.Timeout | null = null;
 /** Guards against promptRestart being invoked twice concurrently (notification click + direct call). */
 let isPrompting = false;
 
+/** Hook called before quitAndInstall to allow cleanup (e.g., stopping the server). */
+let beforeInstallHook: (() => Promise<void>) | null = null;
+
+/**
+ * Register a callback that runs before every quitAndInstall.
+ * Used by main.ts to inject server shutdown so the installer
+ * does not hit locked files from the detached server process.
+ */
+export function setBeforeInstallHook(hook: () => Promise<void>): void {
+  beforeInstallHook = hook;
+}
+
+/**
+ * Stop the server (if hook registered), then run the installer.
+ * All code paths that previously called autoUpdater.quitAndInstall()
+ * must use this instead.
+ */
+async function quitAndInstallSafely(): Promise<void> {
+  if (beforeInstallHook) {
+    try {
+      await beforeInstallHook();
+    } catch (err) {
+      console.error("[auto-updater] beforeInstallHook failed, proceeding with install:", err);
+    }
+  }
+  autoUpdater.quitAndInstall();
+}
+
 /** Returns the most recently observed update status (for renderer hydration). */
 export function getUpdateStatus(): UpdateStatus {
   return lastStatus;
@@ -144,10 +172,10 @@ export function checkForUpdatesNow(): Promise<UpdateStatus> {
 }
 
 /** Quit and install a downloaded update. Returns false in dev or if nothing is downloaded. */
-export function installUpdate(): boolean {
+export async function installUpdate(): Promise<boolean> {
   if (!app.isPackaged) return false;
   if (lastStatus.state !== "downloaded") return false;
-  autoUpdater.quitAndInstall();
+  await quitAndInstallSafely();
   return true;
 }
 
@@ -296,7 +324,7 @@ async function promptRestart(version: string): Promise<void> {
   });
 
   if (response === 0 && app.isPackaged) {
-    autoUpdater.quitAndInstall();
+    await quitAndInstallSafely();
   }
 }
 
