@@ -9,18 +9,18 @@ function run(cmd, opts = {}) {
   execSync(cmd, { stdio: "inherit", ...opts });
 }
 
-/** Returns true when there are uncommitted .ts/.tsx/.js/.jsx changes. */
+/** Returns true when there are uncommitted code changes. */
 function hasCodeChanges() {
   try {
     // Check unstaged + staged changes
-    execSync('git diff --quiet HEAD -- "*.ts" "*.tsx" "*.js" "*.jsx"', { stdio: "ignore" });
+    execSync('git diff --quiet HEAD -- "*.ts" "*.tsx" "*.js" "*.jsx" "*.mts" "*.cts" "*.mjs" "*.cjs"', { stdio: "ignore" });
   } catch {
     return true; // non-zero exit = changes exist
   }
   try {
     // Check untracked files
     const untracked = execSync(
-      'git ls-files --others --exclude-standard -- "*.ts" "*.tsx" "*.js" "*.jsx"',
+      'git ls-files --others --exclude-standard -- "*.ts" "*.tsx" "*.js" "*.jsx" "*.mts" "*.cts" "*.mjs" "*.cjs"',
       { encoding: "utf-8" },
     ).trim();
     if (untracked.length > 0) return true;
