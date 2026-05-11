@@ -1,75 +1,77 @@
-# Agent Development Workflow
+# Agent Workflow: Implement, Verify, Deliver
 
-When implementing features, follow this workflow. Steps 1-2 are interactive
-with the developer. Steps 3-7 are autonomous.
+Use this workflow after a plan has been approved. Every step below is
+autonomous; do not pause for human input unless you are blocked.
 
-## 1. Understand
-Read AGENTS.md, ARCHITECTURE.md, and any relevant code before proposing
-changes. Ask clarifying questions if the scope is unclear.
+## Implement
 
-## 2. Plan
-Write an implementation plan listing files to create/modify. Include test
-files in the plan. Get developer approval before proceeding.
+Write code and tests per the approved plan. Follow existing patterns in the
+codebase. Do not restructure files outside your task scope.
 
-## 3. Implement
-Write code and tests per the plan.
+## Verify (mandatory, enforced by Stop hooks)
 
-## 4. Verify (mandatory)
-Run `scripts/agent/verify-tests.mjs` (or `bun run verify`) and fix all failures:
-- Typecheck must pass with zero errors
-- Lint must pass with zero errors
-- Unit tests must pass
+Run verification and fix every failure before moving on:
 
-## 5. Visual Verify (when Playwright MCP is available)
+```
+node scripts/agent/verify-tests.mjs   # or: bun run verify
+```
+
+This runs typecheck, lint, and unit tests. All three must pass with zero
+errors. The Stop hook runs this automatically when you try to finish a turn,
+so you cannot skip it.
+
+If a check fails: read the error output, fix the issue, re-run. Do not
+declare a task complete until verification passes.
+
+## Visual Verify (when Playwright MCP is available)
+
 If the change has UI impact and Playwright MCP is connected:
+
 1. Ensure dev server is running (`bun run dev:web` or check localhost:5173)
-2. Use `browser_navigate` to open the affected page
-3. Use `browser_snapshot` to read the accessibility tree
-4. Use `browser_take_screenshot` to capture visual state
-5. Check `browser_console_messages` for errors
-6. Verify: feature renders, interactive elements work, no regressions
+2. `browser_navigate` to the affected page
+3. `browser_snapshot` to read the accessibility tree
+4. `browser_take_screenshot` to capture visual state
+5. `browser_console_messages` to check for errors
+6. Confirm: feature renders correctly, interactive elements work, no regressions
 
-If visual issues are found, fix and re-run from step 4.
+If visual issues are found, fix and re-run from the Verify step.
 
-## 6. E2E Tests (when applicable)
+If Playwright MCP is not connected, skip this step and note it.
+
+## E2E Tests (when applicable)
+
 If the change warrants E2E coverage:
+
 1. Write a Playwright spec in `apps/web/e2e/`
-2. Run `scripts/agent/verify-e2e.mjs` (or `bun run verify:e2e`)
+2. Run `node scripts/agent/verify-e2e.mjs` (or `bun run verify:e2e`)
 3. Fix any failures
 
-## 7. Deliver
-Commit with a conventional commit message. Show verification results.
+## Deliver
 
-## Verification Checklist
-Before declaring any task complete:
-- [ ] `scripts/agent/verify-tests.mjs` passes
-- [ ] No TypeScript errors
-- [ ] No ESLint errors
-- [ ] All unit tests pass
+Commit with a conventional commit message. Show verification output as
+evidence that all checks passed.
+
+## Before You Declare Done
+
+- [ ] `bun run verify` passes (typecheck + lint + unit tests)
 - [ ] UI changes verified visually (if Playwright MCP available)
 - [ ] E2E tests pass (if applicable)
 - [ ] No browser console errors on affected pages
 
-## Enforcement Hooks
+## Enforcement
 
-Each agent has a Stop hook that runs `verify-tests.sh` before the agent can
-finish a conversation turn. If verification fails, the agent must fix the
-errors before it can stop.
+Stop hooks run `verify-tests.mjs` before the agent can finish a turn. If
+verification fails, the agent receives the error output and must fix it.
 
-| Agent | Config file | How it blocks |
-|-------|------------|---------------|
-| **Claude Code** | `.claude/settings.json` | exit code 2 |
-| **Cursor** | `.cursor/hooks.json` | exit code 2 via `scripts/agent/hooks/cursor-stop.mjs` |
-| **Codex** | `.codex/hooks.json` | JSON `{"decision":"block"}` via `scripts/agent/hooks/codex-stop.mjs` |
+| Agent | Config | Block mechanism |
+|-------|--------|-----------------|
+| Claude Code | `.claude/settings.json` | exit code 2 |
+| Cursor | `.cursor/hooks.json` | exit code 2 via `scripts/agent/hooks/cursor-stop.mjs` |
+| Codex | `.codex/hooks.json` | JSON `{"decision":"block"}` via `scripts/agent/hooks/codex-stop.mjs` |
 
-Each agent also has a PreToolUse hook that blocks direct `.env` file edits.
+PreToolUse hooks also block direct `.env` file edits across all agents.
 
-The wrapper scripts in `scripts/agent/hooks/` translate the exit code from
-`verify-tests.sh` into each agent's expected response format.
-
-## Playwright MCP Setup
-
-The project uses Playwright MCP for visual verification during development.
+## Playwright MCP
 
 - **Claude Code:** reads `.mcp.json` automatically
 - **Cursor:** reads `.cursor/mcp.json` automatically

@@ -205,7 +205,7 @@ separate non-transactional step or applied manually outside `migrate()`.
 
 ## Agent Development Workflow
 
-Follow the agent development workflow in **[docs/guides/agent-workflow.md](docs/guides/agent-workflow.md)** when implementing features. It covers the full implement/verify/deliver cycle, including verification scripts, Playwright MCP visual checks, and the verification checklist.
+@docs/guides/agent-workflow.md
 
 ## Worktrees
 
