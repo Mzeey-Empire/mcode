@@ -712,11 +712,17 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
           root.append($createParagraphNode());
         });
       }
+      if (isNewThread) {
+        // Focus after the palette closes and Lexical has applied the empty root.
+        queueMicrotask(() => {
+          editorRef.current?.focus();
+        });
+      }
     }
 
     threadSwitchRef.current = true;
     prevThreadIdRef.current = threadId;
-  }, [threadId, saveDraft, getDraft]);
+  }, [threadId, isNewThread, saveDraft, getDraft]);
 
   // Selectors needed by the branch-mode effect below — must be declared before the effect
   // to avoid temporal dead zone errors in the dependency array.
