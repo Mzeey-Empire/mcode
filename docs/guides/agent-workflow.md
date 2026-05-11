@@ -1,67 +1,99 @@
-# Agent Workflow: Implement, Verify, Deliver
+---
+name: agent-workflow
+description: Use when implementing code changes autonomously after a plan is approved. Covers the mandatory verify/visual-check/deliver cycle enforced by Stop hooks.
+---
 
-Use this workflow after a plan has been approved. Every step below is
-autonomous; do not pause for human input unless you are blocked.
+# Agent Workflow
 
-## Implement
+Mandatory workflow for autonomous code implementation. Stop hooks enforce
+verification; you cannot finish a turn with failing checks.
 
-Write code and tests per the approved plan. Follow existing patterns in the
-codebase. Do not restructure files outside your task scope.
+## Workflow
 
-## Verify (mandatory, enforced by Stop hooks)
+```dot
+digraph workflow {
+    rankdir=TB;
+    "Implement per plan" [shape=box];
+    "Run bun run verify" [shape=box];
+    "Passes?" [shape=diamond];
+    "Fix errors" [shape=box];
+    "UI change?" [shape=diamond];
+    "Visual verify with Playwright MCP" [shape=box];
+    "Visual OK?" [shape=diamond];
+    "E2E needed?" [shape=diamond];
+    "Write spec + run bun run verify:e2e" [shape=box];
+    "Commit + show results" [shape=box];
 
-Run verification and fix every failure before moving on:
+    "Implement per plan" -> "Run bun run verify";
+    "Run bun run verify" -> "Passes?";
+    "Passes?" -> "Fix errors" [label="no"];
+    "Fix errors" -> "Run bun run verify";
+    "Passes?" -> "UI change?" [label="yes"];
+    "UI change?" -> "Visual verify with Playwright MCP" [label="yes"];
+    "UI change?" -> "E2E needed?" [label="no"];
+    "Visual verify with Playwright MCP" -> "Visual OK?";
+    "Visual OK?" -> "Fix errors" [label="no"];
+    "Visual OK?" -> "E2E needed?" [label="yes"];
+    "E2E needed?" -> "Write spec + run bun run verify:e2e" [label="yes"];
+    "E2E needed?" -> "Commit + show results" [label="no"];
+    "Write spec + run bun run verify:e2e" -> "Commit + show results";
+}
+```
+
+## Verify (mandatory, enforced)
 
 ```
-node scripts/agent/verify-tests.mjs   # or: bun run verify
+bun run verify
 ```
 
-This runs typecheck, lint, and unit tests. All three must pass with zero
-errors. The Stop hook runs this automatically when you try to finish a turn,
-so you cannot skip it.
+Runs typecheck, lint, and unit tests. All three must pass with zero errors.
+The Stop hook runs this automatically when you try to finish a turn. If it
+fails, you get the error output and must fix before you can stop.
 
-If a check fails: read the error output, fix the issue, re-run. Do not
-declare a task complete until verification passes.
+Do not run `tsc --noEmit` or test commands individually. Use `bun run verify`.
 
-## Visual Verify (when Playwright MCP is available)
+## Visual Verify (when UI changes + Playwright MCP available)
 
-If the change has UI impact and Playwright MCP is connected:
+If Playwright MCP is connected and the change affects UI:
 
-1. Ensure dev server is running (`bun run dev:web` or check localhost:5173)
-2. `browser_navigate` to the affected page
-3. `browser_snapshot` to read the accessibility tree
-4. `browser_take_screenshot` to capture visual state
-5. `browser_console_messages` to check for errors
-6. Confirm: feature renders correctly, interactive elements work, no regressions
+| Step | Tool | Purpose |
+|------|------|---------|
+| 1 | Check `localhost:5173` is up (or run `bun run dev:web`) | Dev server |
+| 2 | `browser_navigate` | Open affected page |
+| 3 | `browser_snapshot` | Read accessibility tree |
+| 4 | `browser_take_screenshot` | Capture visual state |
+| 5 | `browser_console_messages` | Check for errors |
 
-If visual issues are found, fix and re-run from the Verify step.
+If visual issues found, fix and re-run `bun run verify` before retrying.
 
-If Playwright MCP is not connected, skip this step and note it.
+If Playwright MCP is not connected, skip and note it.
 
-## E2E Tests (when applicable)
+## E2E Tests
 
-If the change warrants E2E coverage:
+Write E2E tests when the change involves any of these triggers:
+interactive components, keyboard navigation, focus trapping, responsive
+layout, accessibility semantics, floating overlays, or persisted state.
+
+"If applicable" is not a loophole. A dropdown with keyboard navigation
+needs an E2E spec. A color change does not. When in doubt, write the spec.
 
 1. Write a Playwright spec in `apps/web/e2e/`
-2. Run `node scripts/agent/verify-e2e.mjs` (or `bun run verify:e2e`)
+2. Run `bun run verify:e2e`
 3. Fix any failures
 
 ## Deliver
 
-Commit with a conventional commit message. Show verification output as
-evidence that all checks passed.
+Commit with a conventional commit message. Show `bun run verify` output as
+evidence that checks passed.
 
 ## Before You Declare Done
 
-- [ ] `bun run verify` passes (typecheck + lint + unit tests)
+- [ ] `bun run verify` passes
 - [ ] UI changes verified visually (if Playwright MCP available)
 - [ ] E2E tests pass (if applicable)
 - [ ] No browser console errors on affected pages
 
 ## Enforcement
-
-Stop hooks run `verify-tests.mjs` before the agent can finish a turn. If
-verification fails, the agent receives the error output and must fix it.
 
 | Agent | Config | Block mechanism |
 |-------|--------|-----------------|
