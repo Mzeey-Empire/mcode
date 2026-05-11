@@ -60,6 +60,9 @@ Phase 6: DELIVER (autonomous)
 
 #### 1. Shared Verification Scripts
 
+> **Note:** The examples below show bash pseudocode for clarity. The actual
+> implementation uses cross-platform Node.js `.mjs` scripts (see `scripts/agent/`).
+
 Location: `scripts/agent/`
 
 **`scripts/agent/verify-tests.mjs`** -- runs static analysis and unit tests:

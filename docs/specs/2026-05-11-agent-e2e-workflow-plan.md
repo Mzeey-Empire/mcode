@@ -25,6 +25,11 @@
 
 ---
 
+> **Note:** This plan was originally written with bash scripts. The implementation
+> was converted to cross-platform Node.js `.mjs` files. The code examples below
+> show bash pseudocode; see the actual `.mjs` files in `scripts/agent/` for the
+> Node.js implementations.
+
 ### Task 1: Create verification scripts
 
 **Files:**

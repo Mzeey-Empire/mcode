@@ -497,21 +497,23 @@ describe("ServerManager", () => {
       .mockImplementationOnce(() => true as never) // poll: alive
       .mockImplementationOnce(() => { throw new Error("ESRCH"); }); // poll: dead, breaks loop
 
-    await manager.forceReplace();
+    try {
+      await manager.forceReplace();
 
-    // Verify POST was sent
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      "http://localhost:19600/shutdown",
-      expect.objectContaining({
-        method: "POST",
-        headers: { Authorization: "Bearer test-auth-token" },
-      }),
-    );
+      // Verify POST was sent
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "http://localhost:19600/shutdown",
+        expect.objectContaining({
+          method: "POST",
+          headers: { Authorization: "Bearer test-auth-token" },
+        }),
+      );
 
-    // Verify PID was polled
-    expect(killSpy).toHaveBeenCalledWith(12345, 0);
-
-    killSpy.mockRestore();
+      // Verify PID was polled
+      expect(killSpy).toHaveBeenCalledWith(12345, 0);
+    } finally {
+      killSpy.mockRestore();
+    }
   });
 
   it("forceReplace force-kills server if it does not exit within timeout", async () => {
@@ -527,13 +529,15 @@ describe("ServerManager", () => {
       return now;
     });
 
-    await manager.forceReplace();
+    try {
+      await manager.forceReplace();
 
-    // Should have attempted SIGKILL
-    expect(killSpy).toHaveBeenCalledWith(12345, "SIGKILL");
-
-    killSpy.mockRestore();
-    dateSpy.mockRestore();
+      // Should have attempted SIGKILL
+      expect(killSpy).toHaveBeenCalledWith(12345, "SIGKILL");
+    } finally {
+      killSpy.mockRestore();
+      dateSpy.mockRestore();
+    }
   });
 
   // -----------------------------------------------------------------------
