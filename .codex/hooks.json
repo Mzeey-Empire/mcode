@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'if echo \"$TOOL_INPUT\" | grep -qE \"\\.env$\"; then echo \"{\\\"decision\\\":\\\"block\\\",\\\"reason\\\":\\\"Do not edit .env files directly. Update .env.example instead.\\\"}\"; fi'"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/agent/hooks/codex-stop.sh",
+            "timeout": 120
+          }
+        ]
+      }
+    ]
+  }
+}

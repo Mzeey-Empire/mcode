@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "bash -c 'if echo \"$TOOL_INPUT\" | grep -qE \"\\.env$\"; then echo \"BLOCK: Do not edit .env files directly. Update .env.example instead.\"; exit 2; fi'",
+        "matcher": "edit_file|create_file"
+      }
+    ],
+    "stop": [
+      {
+        "command": "bash scripts/agent/hooks/cursor-stop.sh",
+        "timeout": 120
+      }
+    ]
+  }
+}
