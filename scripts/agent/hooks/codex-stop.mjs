@@ -15,7 +15,7 @@ try {
   execSync(`node "${verifyScript}"`, { stdio: "pipe" });
   console.log(JSON.stringify({ decision: "approve" }));
 } catch (err) {
-  const output = (err.stderr || err.stdout || "").toString().slice(-500);
+  const output = ((err?.stderr ?? err?.stdout) || "").toString().slice(-500);
   console.log(JSON.stringify({
     decision: "block",
     reason: `verify-tests failed: ${output.replace(/\n/g, " ").trim()}`,

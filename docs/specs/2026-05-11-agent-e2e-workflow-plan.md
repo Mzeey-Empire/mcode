@@ -14,12 +14,12 @@
 
 | File | Action | Responsibility |
 |------|--------|----------------|
-| `scripts/agent/verify-tests.sh` | Create | Run typecheck + lint + unit tests; skip if no code changes |
-| `scripts/agent/verify-e2e.sh` | Create | Run Playwright E2E test suite |
-| `scripts/agent/verify-all.sh` | Create | Orchestrate full verification pipeline (tests + e2e) |
+| `scripts/agent/verify-tests.mjs` | Create | Run typecheck + lint + unit tests; skip if no code changes |
+| `scripts/agent/verify-e2e.mjs` | Create | Run Playwright E2E test suite |
+| `scripts/agent/verify-all.mjs` | Create | Orchestrate full verification pipeline (tests + e2e) |
 | `.mcp.json` | Create | Shared Playwright MCP config for all agents |
 | `.cursor/mcp.json` | Create | Cursor-specific MCP bridge (same config) |
-| `.claude/settings.json` | Modify | Add Stop hook that runs verify-tests.sh |
+| `.claude/settings.json` | Modify | Add Stop hook that runs verify-tests.mjs |
 | `AGENTS.md` | Modify | Add Agent Development Workflow section |
 | `package.json` | Modify | Add `verify`, `verify:e2e`, `verify:all` script aliases |
 
@@ -28,17 +28,17 @@
 ### Task 1: Create verification scripts
 
 **Files:**
-- Create: `scripts/agent/verify-tests.sh`
-- Create: `scripts/agent/verify-e2e.sh`
-- Create: `scripts/agent/verify-all.sh`
+- Create: `scripts/agent/verify-tests.mjs`
+- Create: `scripts/agent/verify-e2e.mjs`
+- Create: `scripts/agent/verify-all.mjs`
 
 - [ ] **Step 1: Create the scripts/agent/ directory**
 
 Run: `mkdir -p scripts/agent`
 
-- [ ] **Step 2: Create verify-tests.sh**
+- [ ] **Step 2: Create verify-tests.mjs**
 
-Create `scripts/agent/verify-tests.sh`:
+Create `scripts/agent/verify-tests.mjs`:
 
 ```bash
 #!/bin/bash
@@ -66,9 +66,9 @@ echo ""
 echo "=== All checks passed ==="
 ```
 
-- [ ] **Step 3: Create verify-e2e.sh**
+- [ ] **Step 3: Create verify-e2e.mjs**
 
-Create `scripts/agent/verify-e2e.sh`:
+Create `scripts/agent/verify-e2e.mjs`:
 
 ```bash
 #!/bin/bash
@@ -78,9 +78,9 @@ echo "=== E2E Tests ==="
 cd apps/web && bun run e2e
 ```
 
-- [ ] **Step 4: Create verify-all.sh**
+- [ ] **Step 4: Create verify-all.mjs**
 
-Create `scripts/agent/verify-all.sh`:
+Create `scripts/agent/verify-all.mjs`:
 
 ```bash
 #!/bin/bash
@@ -88,8 +88,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-"$SCRIPT_DIR/verify-tests.sh"
-"$SCRIPT_DIR/verify-e2e.sh"
+"$SCRIPT_DIR/verify-tests.mjs"
+"$SCRIPT_DIR/verify-e2e.mjs"
 
 echo ""
 echo "=== All verification passed ==="
@@ -97,20 +97,20 @@ echo "=== All verification passed ==="
 
 - [ ] **Step 5: Make all scripts executable**
 
-Run: `chmod +x scripts/agent/verify-tests.sh scripts/agent/verify-e2e.sh scripts/agent/verify-all.sh`
+Run: `chmod +x scripts/agent/verify-tests.mjs scripts/agent/verify-e2e.mjs scripts/agent/verify-all.mjs`
 
-- [ ] **Step 6: Test verify-tests.sh with no changes**
+- [ ] **Step 6: Test verify-tests.mjs with no changes**
 
-Run: `bash scripts/agent/verify-tests.sh`
+Run: `node scripts/agent/verify-tests.mjs`
 Expected: "No code changes detected, skipping verification" (exit 0, since we have no uncommitted code changes)
 
-- [ ] **Step 7: Test verify-tests.sh with a dummy change**
+- [ ] **Step 7: Test verify-tests.mjs with a dummy change**
 
 Create a temporary change, run the script, then revert:
 
 ```bash
 echo "// temp" >> apps/web/src/app/App.tsx
-bash scripts/agent/verify-tests.sh
+node scripts/agent/verify-tests.mjs
 git checkout apps/web/src/app/App.tsx
 ```
 
@@ -121,9 +121,9 @@ Expected: Script runs typecheck, lint, and unit tests. All pass.
 Add these scripts to the `"scripts"` section of `package.json`:
 
 ```json
-"verify": "bash scripts/agent/verify-tests.sh",
-"verify:e2e": "bash scripts/agent/verify-e2e.sh",
-"verify:all": "bash scripts/agent/verify-all.sh"
+"verify": "node scripts/agent/verify-tests.mjs",
+"verify:e2e": "node scripts/agent/verify-e2e.mjs",
+"verify:all": "node scripts/agent/verify-all.mjs"
 ```
 
 - [ ] **Step 9: Commit**
@@ -133,9 +133,9 @@ git add scripts/agent/ package.json
 git commit -m "feat: add agent verification scripts
 
 Shared shell scripts that any AI agent can call to verify code changes:
-- verify-tests.sh: typecheck + lint + unit tests (skips if no changes)
-- verify-e2e.sh: Playwright E2E test suite
-- verify-all.sh: full pipeline combining both"
+- verify-tests.mjs: typecheck + lint + unit tests (skips if no changes)
+- verify-e2e.mjs: Playwright E2E test suite
+- verify-all.mjs: full pipeline combining both"
 ```
 
 ---
@@ -214,7 +214,7 @@ Read `.claude/settings.json` to confirm current state. It currently has a `PreTo
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'if echo \"$TOOL_INPUT\" | grep -qE \"\\.env$\"; then echo \"BLOCK: Do not edit .env files directly. Update .env.example instead.\"; exit 2; fi'"
+            "command": "bash -c 'if echo \"$TOOL_INPUT\" | grep -qE \"\\.env(\\.|$)\"; then echo \"BLOCK: Do not edit .env files directly. Update .env.example instead.\"; exit 2; fi'"
           }
         ]
       }
@@ -236,7 +236,7 @@ Update `.claude/settings.json` to add the `Stop` hook alongside the existing `Pr
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'if echo \"$TOOL_INPUT\" | grep -qE \"\\.env$\"; then echo \"BLOCK: Do not edit .env files directly. Update .env.example instead.\"; exit 2; fi'"
+            "command": "bash -c 'if echo \"$TOOL_INPUT\" | grep -qE \"\\.env(\\.|$)\"; then echo \"BLOCK: Do not edit .env files directly. Update .env.example instead.\"; exit 2; fi'"
           }
         ]
       }
@@ -247,7 +247,7 @@ Update `.claude/settings.json` to add the `Stop` hook alongside the existing `Pr
         "hooks": [
           {
             "type": "command",
-            "command": "bash scripts/agent/verify-tests.sh"
+            "command": "node scripts/agent/verify-tests.mjs"
           }
         ]
       }
@@ -269,7 +269,7 @@ Expected: "Valid JSON"
 git add .claude/settings.json
 git commit -m "feat: add Stop hook to enforce verification before completion
 
-Claude Code cannot finish a conversation turn without verify-tests.sh
+Claude Code cannot finish a conversation turn without verify-tests.mjs
 passing. The script skips verification when no code changes are
 detected, so brainstorming-only sessions are unaffected."
 ```
@@ -307,7 +307,7 @@ files in the plan. Get developer approval before proceeding.
 Write code and tests per the plan.
 
 ### 4. Verify (mandatory)
-Run `scripts/agent/verify-tests.sh` (or `bun run verify`) and fix all failures:
+Run `scripts/agent/verify-tests.mjs` (or `bun run verify`) and fix all failures:
 - Typecheck must pass with zero errors
 - Lint must pass with zero errors
 - Unit tests must pass
@@ -326,7 +326,7 @@ If visual issues are found, fix and re-run from step 4.
 ### 6. E2E Tests (when applicable)
 If the change warrants E2E coverage:
 1. Write a Playwright spec in `apps/web/e2e/`
-2. Run `scripts/agent/verify-e2e.sh` (or `bun run verify:e2e`)
+2. Run `scripts/agent/verify-e2e.mjs` (or `bun run verify:e2e`)
 3. Fix any failures
 
 ### 7. Deliver
@@ -334,7 +334,7 @@ Commit with a conventional commit message. Show verification results.
 
 ### Verification Checklist
 Before declaring any task complete:
-- [ ] `scripts/agent/verify-tests.sh` passes
+- [ ] `scripts/agent/verify-tests.mjs` passes
 - [ ] No TypeScript errors
 - [ ] No ESLint errors
 - [ ] All unit tests pass
@@ -379,7 +379,7 @@ This task proves the system works by running the full workflow on a real change.
 
 Run:
 ```bash
-ls -la scripts/agent/verify-tests.sh scripts/agent/verify-e2e.sh scripts/agent/verify-all.sh
+ls -la scripts/agent/verify-tests.mjs scripts/agent/verify-e2e.mjs scripts/agent/verify-all.mjs
 ```
 Expected: All three files listed with execute permissions.
 
@@ -398,29 +398,29 @@ Expected: JSON with both `PreToolUse` and `Stop` hooks.
 Run: `grep -c "Agent Development Workflow" AGENTS.md`
 Expected: `1`
 
-- [ ] **Step 5: Run verify-tests.sh on clean state**
+- [ ] **Step 5: Run verify-tests.mjs on clean state**
 
-Run: `bash scripts/agent/verify-tests.sh`
+Run: `node scripts/agent/verify-tests.mjs`
 Expected: "No code changes detected, skipping verification" (clean working tree).
 
-- [ ] **Step 6: Run verify-tests.sh with a real change**
+- [ ] **Step 6: Run verify-tests.mjs with a real change**
 
 Make a trivial code change (add a blank line to a file), run the script, confirm all checks pass, then revert:
 
 ```bash
 echo "" >> apps/web/src/app/App.tsx
-bash scripts/agent/verify-tests.sh
+node scripts/agent/verify-tests.mjs
 git checkout apps/web/src/app/App.tsx
 ```
 
 Expected: Typecheck, lint, and unit tests all pass.
 
-- [ ] **Step 7: Run verify-e2e.sh**
+- [ ] **Step 7: Run verify-e2e.mjs**
 
 Start the dev server if not already running, then run:
 
 ```bash
-bash scripts/agent/verify-e2e.sh
+node scripts/agent/verify-e2e.mjs
 ```
 
 Expected: All Playwright E2E tests pass.
@@ -437,14 +437,14 @@ If MCP is not connected, note this as expected -- the MCP tools are available wh
 
 - [ ] **Step 9: Run the full pipeline**
 
-Run: `bash scripts/agent/verify-all.sh`
+Run: `node scripts/agent/verify-all.mjs`
 Expected: All checks pass (or "no changes detected" followed by E2E pass).
 
 - [ ] **Step 10: Document results**
 
 Report the verification results:
-- verify-tests.sh: PASS/FAIL
-- verify-e2e.sh: PASS/FAIL (with test count)
+- verify-tests.mjs: PASS/FAIL
+- verify-e2e.mjs: PASS/FAIL (with test count)
 - Playwright MCP: CONNECTED/NOT AVAILABLE
 - Stop hook: CONFIGURED (verified via settings.json)
 - AGENTS.md workflow section: PRESENT

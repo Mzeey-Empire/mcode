@@ -24,7 +24,7 @@ Today, AGENTS.md tells agents to run tests and typecheck, but nothing enforces i
 
 ### Workflow Phases
 
-```
+```text
 Phase 1: BRAINSTORM (interactive)
   Developer describes feature
   Agent reads AGENTS.md, ARCHITECTURE.md, relevant code
@@ -40,7 +40,7 @@ Phase 3: IMPLEMENT (autonomous)
   Agent writes tests alongside implementation
 
 Phase 4: TEST (autonomous, enforced)
-  Agent runs scripts/verify-tests.sh
+  Agent runs scripts/agent/verify-tests.mjs
   Pipeline: typecheck -> lint -> unit tests
   On failure: agent reads error output, fixes, re-runs
 
@@ -62,7 +62,7 @@ Phase 6: DELIVER (autonomous)
 
 Location: `scripts/agent/`
 
-**`scripts/agent/verify-tests.sh`** -- runs static analysis and unit tests:
+**`scripts/agent/verify-tests.mjs`** -- runs static analysis and unit tests:
 ```bash
 #!/bin/bash
 set -euo pipefail
@@ -85,7 +85,7 @@ echo "=== Unit Tests ==="
 bun run test
 ```
 
-**`scripts/agent/verify-e2e.sh`** -- runs Playwright E2E tests:
+**`scripts/agent/verify-e2e.mjs`** -- runs Playwright E2E tests:
 ```bash
 #!/bin/bash
 set -euo pipefail
@@ -94,15 +94,15 @@ echo "=== E2E Tests ==="
 cd apps/web && bun run e2e
 ```
 
-**`scripts/agent/verify-all.sh`** -- runs the full pipeline:
+**`scripts/agent/verify-all.mjs`** -- runs the full pipeline:
 ```bash
 #!/bin/bash
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-"$SCRIPT_DIR/verify-tests.sh"
-"$SCRIPT_DIR/verify-e2e.sh"
+"$SCRIPT_DIR/verify-tests.mjs"
+"$SCRIPT_DIR/verify-e2e.mjs"
 
 echo ""
 echo "=== All verification passed ==="
@@ -151,7 +151,7 @@ Agents use these to open `http://localhost:5173`, interact with the UI, and veri
         "hooks": [
           {
             "type": "command",
-            "command": "bash scripts/agent/verify-tests.sh"
+            "command": "node scripts/agent/verify-tests.mjs"
           }
         ]
       }
@@ -160,9 +160,9 @@ Agents use these to open `http://localhost:5173`, interact with the UI, and veri
 }
 ```
 
-When Claude tries to stop (finish a conversation turn), the hook runs `verify-tests.sh`. If it fails, Claude receives the error output and must fix the issue before it can stop. This is a hard gate -- the agent cannot declare "done" with failing tests.
+When Claude tries to stop (finish a conversation turn), the hook runs `verify-tests.mjs`. If it fails, Claude receives the error output and must fix the issue before it can stop. This is a hard gate -- the agent cannot declare "done" with failing tests.
 
-The hook runs `verify-tests.sh` (typecheck + lint + unit tests) rather than `verify-all.sh` because E2E tests require the dev server running and take longer. E2E verification is guided by AGENTS.md instructions rather than enforced by hook.
+The hook runs `verify-tests.mjs` (typecheck + lint + unit tests) rather than `verify-all.mjs` because E2E tests require the dev server running and take longer. E2E verification is guided by AGENTS.md instructions rather than enforced by hook.
 
 #### 4. AGENTS.md Workflow Section
 
@@ -186,7 +186,7 @@ Include test files in the plan. Get developer approval before proceeding.
 Write code and tests per the plan.
 
 ### 4. Verify (mandatory)
-Run `scripts/agent/verify-tests.sh` and fix all failures:
+Run `scripts/agent/verify-tests.mjs` and fix all failures:
 - Typecheck must pass with zero errors
 - Lint must pass with zero errors
 - Unit tests must pass
@@ -205,7 +205,7 @@ If visual issues are found, fix and re-run from step 4.
 ### 6. E2E Tests (when applicable)
 If the change warrants E2E coverage:
 1. Write a Playwright spec in `apps/web/e2e/`
-2. Run `scripts/agent/verify-e2e.sh`
+2. Run `scripts/agent/verify-e2e.mjs`
 3. Fix any failures
 
 ### 7. Deliver
@@ -213,7 +213,7 @@ Commit with a conventional commit message. Show verification results.
 
 ### Verification Checklist
 Before declaring any task complete:
-- [ ] `scripts/agent/verify-tests.sh` passes
+- [ ] `scripts/agent/verify-tests.mjs` passes
 - [ ] No TypeScript errors
 - [ ] No ESLint errors
 - [ ] All unit tests pass
@@ -253,9 +253,9 @@ Other agents: run `npx @playwright/mcp@latest` and connect via MCP.
 
 | File | Action | Purpose |
 |------|--------|---------|
-| `scripts/agent/verify-tests.sh` | Create | Typecheck + lint + unit tests |
-| `scripts/agent/verify-e2e.sh` | Create | Playwright E2E runner |
-| `scripts/agent/verify-all.sh` | Create | Full verification pipeline |
+| `scripts/agent/verify-tests.mjs` | Create | Typecheck + lint + unit tests |
+| `scripts/agent/verify-e2e.mjs` | Create | Playwright E2E runner |
+| `scripts/agent/verify-all.mjs` | Create | Full verification pipeline |
 | `.mcp.json` | Create | Shared Playwright MCP config |
 | `.cursor/mcp.json` | Create | Cursor-specific MCP bridge |
 | `.claude/settings.json` | Modify | Add Stop hook for test enforcement |
@@ -274,7 +274,7 @@ Other agents: run `npx @playwright/mcp@latest` and connect via MCP.
    - `apps/web/src/components/chat/ChatLayout.tsx` (modified)
    - `apps/web/src/components/ui/ResizeHandle.tsx`
    - `apps/web/e2e/browser-preview.spec.ts`
-7. Agent runs `scripts/agent/verify-tests.sh`:
+7. Agent runs `scripts/agent/verify-tests.mjs`:
    - Typecheck passes
    - Lint fails (unused import) -- agent fixes, re-runs -- passes
    - Unit tests pass
@@ -283,7 +283,7 @@ Other agents: run `npx @playwright/mcp@latest` and connect via MCP.
    - Screenshots show preview panel renders correctly
    - Drag handle is visible and interactive
    - No console errors
-9. Agent runs `scripts/agent/verify-e2e.sh` -- all specs pass
+9. Agent runs `scripts/agent/verify-e2e.mjs` -- all specs pass
 10. Agent commits: `feat(chat): add resizable browser preview panel`
 
 ## Smoke Test: Simulate the Workflow
@@ -307,7 +307,7 @@ This is a good smoke test because it:
 3. Agent asks clarifying questions (color, position, animation)
 4. Agent writes implementation plan, developer approves
 5. Agent implements the component change
-6. Agent runs `scripts/agent/verify-tests.sh` -- typecheck, lint, tests pass
+6. Agent runs `scripts/agent/verify-tests.mjs` -- typecheck, lint, tests pass
 7. Agent uses Playwright MCP:
    - Opens `http://localhost:5173`
    - Navigates to the sidebar
@@ -315,13 +315,13 @@ This is a good smoke test because it:
    - Reads accessibility tree to confirm the dot is present
    - Checks console for errors
 8. Agent writes a Playwright E2E spec for the indicator
-9. Agent runs `scripts/agent/verify-e2e.sh` -- passes
+9. Agent runs `scripts/agent/verify-e2e.mjs` -- passes
 10. Agent commits with conventional message
 
 ### Success Criteria
 
 - [ ] Agent followed all workflow phases without skipping
-- [ ] Stop hook fired and `verify-tests.sh` passed
+- [ ] Stop hook fired and `verify-tests.mjs` passed
 - [ ] Playwright MCP was used for visual verification
 - [ ] Screenshot shows the feature working
 - [ ] No manual intervention was needed after "go"
@@ -339,7 +339,7 @@ If the simulation fails at any step, that step's infrastructure needs fixing bef
 
 | Risk | Mitigation |
 |------|-----------|
-| Stop hook slows down every conversation turn | Script skips verification when no code changes detected; runs only `verify-tests.sh` (fast), not full E2E |
+| Stop hook slows down every conversation turn | Script skips verification when no code changes detected; runs only `verify-tests.mjs` (fast), not full E2E |
 | Playwright MCP not available for all agents | Graceful degradation: visual verify is "best-effort" per AGENTS.md |
 | Agent ignores AGENTS.md workflow instructions | Claude Code has hard enforcement via hooks; other agents rely on docs |
 | Dev server not running when agent tries visual verify | AGENTS.md instructs agent to check/start dev server first |

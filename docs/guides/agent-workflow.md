@@ -42,7 +42,7 @@ digraph workflow {
 
 ## Verify (mandatory, enforced)
 
-```
+```bash
 bun run verify
 ```
 

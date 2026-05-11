@@ -277,7 +277,7 @@ when the server does not exit within the timeout."
 
 - [ ] **Step 1: Run full verification pipeline**
 
-Run: `bash scripts/agent/verify-tests.mjs`
+Run: `node scripts/agent/verify-tests.mjs`
 
 Expected: Typecheck, lint, and all unit tests pass.
 
@@ -292,6 +292,6 @@ The IPC handler `ipcMain.handle("app:install-update", () => installUpdate())` re
 - [ ] **Step 3: Report results**
 
 Document:
-- verify-tests.sh: PASS/FAIL
+- verify-tests.mjs: PASS/FAIL
 - Typecheck: PASS/FAIL
 - Unit test count and results
