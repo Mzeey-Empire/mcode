@@ -24,7 +24,10 @@
     "logs:tail": "node scripts/logs-tail.mjs",
     "state:paths": "bun scripts/state-paths.mjs",
     "state:reset": "node scripts/state-reset.mjs",
-    "db:info": "bun scripts/db-info.mjs"
+    "db:info": "bun scripts/db-info.mjs",
+    "verify": "bash scripts/agent/verify-tests.sh",
+    "verify:e2e": "bash scripts/agent/verify-e2e.sh",
+    "verify:all": "bash scripts/agent/verify-all.sh"
   },
   "devDependencies": {
     "@types/node": "^22.19.17",
