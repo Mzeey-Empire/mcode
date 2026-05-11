@@ -277,7 +277,7 @@ when the server does not exit within the timeout."
 
 - [ ] **Step 1: Run full verification pipeline**
 
-Run: `bash scripts/agent/verify-tests.sh`
+Run: `bash scripts/agent/verify-tests.mjs`
 
 Expected: Typecheck, lint, and all unit tests pass.
 

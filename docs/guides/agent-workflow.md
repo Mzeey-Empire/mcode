@@ -15,7 +15,7 @@ files in the plan. Get developer approval before proceeding.
 Write code and tests per the plan.
 
 ## 4. Verify (mandatory)
-Run `scripts/agent/verify-tests.sh` (or `bun run verify`) and fix all failures:
+Run `scripts/agent/verify-tests.mjs` (or `bun run verify`) and fix all failures:
 - Typecheck must pass with zero errors
 - Lint must pass with zero errors
 - Unit tests must pass
@@ -34,7 +34,7 @@ If visual issues are found, fix and re-run from step 4.
 ## 6. E2E Tests (when applicable)
 If the change warrants E2E coverage:
 1. Write a Playwright spec in `apps/web/e2e/`
-2. Run `scripts/agent/verify-e2e.sh` (or `bun run verify:e2e`)
+2. Run `scripts/agent/verify-e2e.mjs` (or `bun run verify:e2e`)
 3. Fix any failures
 
 ## 7. Deliver
@@ -42,7 +42,7 @@ Commit with a conventional commit message. Show verification results.
 
 ## Verification Checklist
 Before declaring any task complete:
-- [ ] `scripts/agent/verify-tests.sh` passes
+- [ ] `scripts/agent/verify-tests.mjs` passes
 - [ ] No TypeScript errors
 - [ ] No ESLint errors
 - [ ] All unit tests pass
@@ -59,8 +59,8 @@ errors before it can stop.
 | Agent | Config file | How it blocks |
 |-------|------------|---------------|
 | **Claude Code** | `.claude/settings.json` | exit code 2 |
-| **Cursor** | `.cursor/hooks.json` | exit code 2 via `scripts/agent/hooks/cursor-stop.sh` |
-| **Codex** | `.codex/hooks.json` | JSON `{"decision":"block"}` via `scripts/agent/hooks/codex-stop.sh` |
+| **Cursor** | `.cursor/hooks.json` | exit code 2 via `scripts/agent/hooks/cursor-stop.mjs` |
+| **Codex** | `.codex/hooks.json` | JSON `{"decision":"block"}` via `scripts/agent/hooks/codex-stop.mjs` |
 
 Each agent also has a PreToolUse hook that blocks direct `.env` file edits.
 

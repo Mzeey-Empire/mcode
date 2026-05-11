@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash scripts/agent/hooks/codex-stop.sh",
+            "command": "node scripts/agent/hooks/codex-stop.mjs",
             "timeout": 120
           }
         ]

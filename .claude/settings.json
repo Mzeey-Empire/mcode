@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash scripts/agent/verify-tests.sh"
+            "command": "node scripts/agent/verify-tests.mjs"
           }
         ]
       }

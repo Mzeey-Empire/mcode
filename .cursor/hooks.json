@@ -9,7 +9,7 @@
     ],
     "stop": [
       {
-        "command": "bash scripts/agent/hooks/cursor-stop.sh",
+        "command": "node scripts/agent/hooks/cursor-stop.mjs",
         "timeout": 120
       }
     ]

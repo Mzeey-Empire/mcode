@@ -25,9 +25,9 @@
     "state:paths": "bun scripts/state-paths.mjs",
     "state:reset": "node scripts/state-reset.mjs",
     "db:info": "bun scripts/db-info.mjs",
-    "verify": "bash scripts/agent/verify-tests.sh",
-    "verify:e2e": "bash scripts/agent/verify-e2e.sh",
-    "verify:all": "bash scripts/agent/verify-all.sh"
+    "verify": "node scripts/agent/verify-tests.mjs",
+    "verify:e2e": "node scripts/agent/verify-e2e.mjs",
+    "verify:all": "node scripts/agent/verify-all.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.19.17",
