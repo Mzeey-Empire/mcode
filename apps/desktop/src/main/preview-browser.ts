@@ -15,7 +15,10 @@ import {
 } from "@mcode/contracts";
 import { getMcodeDir, redactMcodeBrowserCaptureV2, spillWorkspaceDirSegment } from "@mcode/shared";
 
-const IDLE_MS = 120_000;
+// Idle teardown removed: the React shell already parks the view on unmount/tab-switch
+// via pushSync(false), so a timer-based teardown is redundant and caused the view to
+// go blank while the user was still looking at it.
+// const IDLE_MS = 120_000;
 
 /** Hard cap per guest-derived string before redaction so hostile pages cannot exhaust memory. */
 const GUEST_TEXT_SAFETY_MAX = 500_000;
@@ -141,11 +144,9 @@ function clearIdle(s: PreviewSession): void {
   }
 }
 
-function resetIdle(win: BrowserWindow, s: PreviewSession): void {
+/** No-op: idle teardown removed (the React shell parks the view on unmount). */
+function resetIdle(_win: BrowserWindow, s: PreviewSession): void {
   clearIdle(s);
-  s.idleTimer = setTimeout(() => {
-    parkPreview(win, s);
-  }, IDLE_MS);
 }
 
 /** Full viewport bounds in BrowserView-relative CSS pixels. */
