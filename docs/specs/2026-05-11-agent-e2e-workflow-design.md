@@ -286,6 +286,49 @@ Other agents: run `npx @playwright/mcp@latest` and connect via MCP.
 9. Agent runs `scripts/agent/verify-e2e.sh` -- all specs pass
 10. Agent commits: `feat(chat): add resizable browser preview panel`
 
+## Smoke Test: Simulate the Workflow
+
+After all infrastructure is in place, run a live simulation to prove the system works end-to-end. Pick a small, real UI change and execute the full workflow:
+
+### Test Scenario
+
+**Feature:** Add a subtle visual indicator (e.g., a colored dot or icon) to the sidebar thread list showing which threads have active agents.
+
+This is a good smoke test because it:
+- Touches a UI component (tests visual verification via Playwright MCP)
+- Requires reading existing code (tests the "Understand" phase)
+- Is small enough to complete in one session
+- Has clear success criteria (dot visible, correct color, no regressions)
+
+### Expected Simulation Steps
+
+1. Developer prompts: "Add an active-agent indicator dot to the sidebar thread list"
+2. Agent reads AGENTS.md workflow, explores sidebar components
+3. Agent asks clarifying questions (color, position, animation)
+4. Agent writes implementation plan, developer approves
+5. Agent implements the component change
+6. Agent runs `scripts/agent/verify-tests.sh` -- typecheck, lint, tests pass
+7. Agent uses Playwright MCP:
+   - Opens `http://localhost:5173`
+   - Navigates to the sidebar
+   - Takes screenshot showing the indicator
+   - Reads accessibility tree to confirm the dot is present
+   - Checks console for errors
+8. Agent writes a Playwright E2E spec for the indicator
+9. Agent runs `scripts/agent/verify-e2e.sh` -- passes
+10. Agent commits with conventional message
+
+### Success Criteria
+
+- [ ] Agent followed all workflow phases without skipping
+- [ ] Stop hook fired and `verify-tests.sh` passed
+- [ ] Playwright MCP was used for visual verification
+- [ ] Screenshot shows the feature working
+- [ ] No manual intervention was needed after "go"
+- [ ] Commit follows conventional format
+
+If the simulation fails at any step, that step's infrastructure needs fixing before the system is considered ready.
+
 ## Dependencies
 
 - `@playwright/mcp` (npm, devDependency) -- Playwright MCP server
