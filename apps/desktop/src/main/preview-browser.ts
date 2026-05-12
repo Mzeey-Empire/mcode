@@ -108,6 +108,8 @@ interface PreviewSession {
   lastPreviewThreadId: string | null;
   /** Active workspace id from the renderer; scopes spill files under getMcodeDir(). */
   workspaceId: string | null;
+  /** Favicon URLs from the last page-favicon-updated event. */
+  lastFavicons: string[];
 }
 
 const sessions = new Map<number, PreviewSession>();
@@ -128,6 +130,7 @@ function getSession(win: BrowserWindow): PreviewSession {
       failedRequestBuffer: [],
       lastPreviewThreadId: null,
       workspaceId: null,
+      lastFavicons: [],
     };
     sessions.set(win.id, s);
   }
@@ -1011,6 +1014,7 @@ function detachViewListeners(view: BrowserView): void {
   view.webContents.removeAllListeners("did-navigate");
   view.webContents.removeAllListeners("did-navigate-in-page");
   view.webContents.removeAllListeners("page-title-updated");
+  view.webContents.removeAllListeners("page-favicon-updated");
   view.webContents.removeAllListeners("did-finish-load");
   view.webContents.removeAllListeners("did-start-loading");
   view.webContents.removeAllListeners("did-stop-loading");
@@ -1228,12 +1232,24 @@ function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
     win.webContents.send("preview:did-navigate", {
       url,
       title: view.webContents.getTitle(),
+      // Best-effort: lastFavicons is populated by page-favicon-updated which fires
+      // after did-navigate, so this is often null on initial load. The dedicated
+      // preview:did-update-favicon push (Step 3) is the canonical delivery path.
+      favicon: s.lastFavicons[0] ?? null,
     });
   };
 
   view.webContents.on("did-navigate", forwardNav);
   view.webContents.on("did-navigate-in-page", forwardNav);
   view.webContents.on("page-title-updated", forwardNav);
+  view.webContents.on("page-favicon-updated", (_e, urls: string[]) => {
+    s.lastFavicons = urls;
+    if (!win.isDestroyed()) {
+      win.webContents.send("preview:did-update-favicon", {
+        favicon: urls[0] ?? null,
+      });
+    }
+  });
   view.webContents.on("did-finish-load", () => {
     void injectPreviewScrollbarStyles(s);
   });
