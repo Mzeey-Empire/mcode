@@ -58,6 +58,7 @@ import { ShellEnvResolver } from "./services/shell-env-resolver";
 import { EnvService } from "./services/env-service";
 import { UtilityCompletionService } from "./services/utility-completion-service";
 import { DiffSummaryService } from "./services/diff-summary-service";
+import { ActionService } from "./services/action-service";
 
 /** Initialize the DI container with all server dependencies. */
 export function setupContainer(mcodeDir: string): typeof container {
@@ -333,6 +334,11 @@ export function setupContainer(mcodeDir: string): typeof container {
   container.register(
     DiffSummaryService,
     { useClass: DiffSummaryService },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register(
+    ActionService,
+    { useClass: ActionService },
     { lifecycle: Lifecycle.Singleton },
   );
 

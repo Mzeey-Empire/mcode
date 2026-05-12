@@ -53,6 +53,7 @@ import {
 import type { ProviderAvailabilityService } from "../services/provider-availability-service.js";
 import type { ModelCacheService } from "../services/model-cache-service.js";
 import type { DiffSummaryService } from "../services/diff-summary-service.js";
+import type { ActionService } from "../services/action-service";
 
 /** Service dependencies for the router. */
 export interface RouterDeps {
@@ -97,6 +98,8 @@ export interface RouterDeps {
   filesystemBrowser: FilesystemBrowser;
   /** Generates and persists AI-powered diff summaries for threads. */
   diffSummaryService: DiffSummaryService;
+  /** Manages project actions (list, save, delete, run, reorder) per workspace. */
+  actionService: ActionService;
 }
 
 /**
@@ -838,6 +841,22 @@ async function dispatch(
     }
     case "permission.listPending":
       return deps.agentService.listPendingPermissions(params.threadId);
+
+    // Actions
+    case "action.list":
+      return deps.actionService.list(params.workspaceId);
+    case "action.save":
+      return deps.actionService.save(params.workspaceId, params.action);
+    case "action.delete":
+      return deps.actionService.delete(params.workspaceId, params.actionId);
+    case "action.run":
+      return deps.actionService.run(
+        params.workspaceId,
+        params.actionId,
+        params.threadId,
+      );
+    case "action.reorder":
+      return deps.actionService.reorder(params.workspaceId, params.orderedIds);
 
     default:
       throw new Error(`Unhandled method: ${method}`);
