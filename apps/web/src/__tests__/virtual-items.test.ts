@@ -7,7 +7,7 @@ import {
   STREAMING_CARD_COLLAPSED_HEIGHT,
 } from "@/components/chat/virtual-items";
 import type { ChatVirtualItem } from "@/components/chat/virtual-items";
-import type { Message, ToolCall } from "@/transport/types";
+import type { Message, ToolCall, HookExecution } from "@/transport/types";
 
 function makeMessage(overrides: Partial<Message> = {}): Message {
   return {
@@ -233,6 +233,49 @@ describe("buildVirtualItems (combined)", () => {
     // along with the assistant message, but it's still present since stable
     // items include it. The key behavior is active-tools is present.
     expect(types).toContain("active-tools");
+  });
+});
+
+function makeHook(overrides: Partial<HookExecution> = {}): HookExecution {
+  return {
+    hookName: "pre-commit",
+    hookType: "permission",
+    status: "running",
+    outputLines: [],
+    fullOutput: [],
+    startedAt: 1000,
+    ...overrides,
+  };
+}
+
+describe("buildVolatileItems with hooks", () => {
+  it("includes hook-activity item when hooks are present", () => {
+    const hooks = [makeHook()];
+    const items = buildVolatileItems([], false, undefined, undefined, undefined, hooks);
+    expect(items.some((i) => i.type === "hook-activity")).toBe(true);
+  });
+
+  it("omits hook-activity item when hooks array is empty", () => {
+    const items = buildVolatileItems([], false, undefined, undefined, undefined, []);
+    expect(items.some((i) => i.type === "hook-activity")).toBe(false);
+  });
+
+  it("places hook-activity after permission-request items", () => {
+    const hooks = [makeHook()];
+    const permissions = [{ requestId: "p1", toolName: "Edit", settled: false }];
+    const items = buildVolatileItems([], true, 1000, undefined, permissions, hooks);
+    const types = items.map((i) => i.type);
+    const permIdx = types.indexOf("permission-request");
+    const hookIdx = types.indexOf("hook-activity");
+    expect(hookIdx).toBeGreaterThan(permIdx);
+  });
+
+  it("hook-activity item carries the hooks array", () => {
+    const hooks = [makeHook({ hookName: "lint" }), makeHook({ hookName: "test", status: "completed", exitCode: 0, durationMs: 150 })];
+    const items = buildVolatileItems([], false, undefined, undefined, undefined, hooks);
+    const hookItem = items.find((i) => i.type === "hook-activity") as Extract<(typeof items)[number], { type: "hook-activity" }>;
+    expect(hookItem.hooks).toHaveLength(2);
+    expect(hookItem.hooks[0].hookName).toBe("lint");
   });
 });
 
