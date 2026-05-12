@@ -7,6 +7,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
 } from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 import { useActionStore } from "@/stores/actionStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { ActionDropdown } from "./ActionDropdown";
@@ -26,9 +27,13 @@ export function ActionTrigger() {
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
 
+  const actions = useActionStore(
+    (s) => s.actionsByWorkspace[activeWorkspaceId ?? ""] ?? [],
+  );
+  const lastUsedId = useActionStore(
+    (s) => s.lastUsedByWorkspace[activeWorkspaceId ?? ""],
+  );
   const loadActions = useActionStore((s) => s.loadActions);
-  const getActions = useActionStore((s) => s.getActions);
-  const getLastUsed = useActionStore((s) => s.getLastUsed);
   const runAction = useActionStore((s) => s.runAction);
 
   const [running, setRunning] = useState(false);
@@ -48,13 +53,11 @@ export function ActionTrigger() {
     };
   }, []);
 
-  if (!activeWorkspaceId) return null;
+  if (!activeWorkspaceId || actions.length === 0) return null;
 
-  const actions = getActions(activeWorkspaceId);
-  if (actions.length === 0) return null;
-
-  const lastUsed = getLastUsed(activeWorkspaceId);
-  // getLastUsed falls back to actions[0], which is always defined here since length > 0.
+  const lastUsed = lastUsedId
+    ? actions.find((a) => a.id === lastUsedId)
+    : undefined;
   const action = lastUsed ?? actions[0]!;
 
   const hasThread = activeThreadId != null;
@@ -74,8 +77,11 @@ export function ActionTrigger() {
       variant="ghost"
       size="xs"
       onClick={handleRun}
-      disabled={!hasThread}
-      className="gap-1 text-xs h-6 rounded-r-none text-foreground/70 hover:text-foreground hover:bg-muted/40"
+      aria-disabled={!hasThread}
+      className={cn(
+        "gap-1 text-xs h-6 rounded-r-none text-foreground/70 hover:text-foreground hover:bg-muted/40",
+        !hasThread && "opacity-50 pointer-events-auto cursor-not-allowed",
+      )}
       aria-label={`Run ${action.name}`}
     >
       {running ? (
@@ -91,16 +97,12 @@ export function ActionTrigger() {
   return (
     <div className="flex items-center gap-0.5 bg-muted/20 rounded-md px-1 py-0.5">
       <div className="inline-flex">
-        {disabledReason ? (
-          <Tooltip>
-            <TooltipTrigger render={bodyButton} />
-            <TooltipContent side="bottom" className="text-xs">
-              {disabledReason}
-            </TooltipContent>
-          </Tooltip>
-        ) : (
-          bodyButton
-        )}
+        <Tooltip>
+          <TooltipTrigger render={bodyButton} />
+          <TooltipContent side="bottom" className="text-xs">
+            {disabledReason ?? `Run ${action.name}`}
+          </TooltipContent>
+        </Tooltip>
 
         <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
           <DropdownMenuTrigger
@@ -109,7 +111,7 @@ export function ActionTrigger() {
           >
             <ChevronDown
               size={10}
-              className={`transition-transform duration-150 ${dropdownOpen ? "rotate-180" : ""}`}
+              className={cn("transition-transform duration-150", dropdownOpen && "rotate-180")}
             />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" sideOffset={4}>
