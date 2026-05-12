@@ -50,6 +50,14 @@ export { TurnSnapshotSchema } from "./models/turn-snapshot.js";
 export type { TurnSnapshot } from "./models/turn-snapshot.js";
 
 export {
+  ActionSchema,
+  ActionsFileSchema,
+  ActionIconSchema,
+  ACTION_ICONS,
+} from "./models/action.js";
+export type { Action, ActionsFile, ActionIcon } from "./models/action.js";
+
+export {
   SettingsSchema,
   PartialSettingsSchema,
   getDefaultSettings,
