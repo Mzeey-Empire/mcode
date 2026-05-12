@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, memo } from "react";
 import { ChevronRight } from "lucide-react";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import type { HookExecution } from "@/transport/types";
 
@@ -18,34 +19,37 @@ export function HookActivitySection({ hooks }: { hooks: readonly HookExecution[]
   }, [hasError, hasRunning]);
 
   return (
-    <div className="mx-3 my-1">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-1.5 py-1 group cursor-pointer"
-      >
-        <ChevronRight
-          className={cn(
-            "size-3 text-muted-foreground/50 transition-transform duration-150",
-            expanded && "rotate-90",
-          )}
-        />
-        <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-muted-foreground/60">
-          Hooks
-        </span>
-        <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground/40">
-          {hooks.length}
-        </span>
-        <StatusDot hasError={hasError} hasRunning={hasRunning} />
-      </button>
-      {expanded && (
-        <div className="ml-[18px] flex flex-col gap-0.5">
-          {hooks.map((hook, i) => (
-            <HookRow key={`${hook.hookName}-${i}`} hook={hook} />
-          ))}
-        </div>
-      )}
-    </div>
+    <Collapsible open={expanded} onOpenChange={setExpanded} asChild>
+      <div className="mx-3 my-1">
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="flex items-center gap-1.5 py-1 group cursor-pointer"
+          >
+            <ChevronRight
+              className={cn(
+                "size-3 text-muted-foreground/50 transition-transform duration-150",
+                expanded && "rotate-90",
+              )}
+            />
+            <span className="font-mono text-[10.5px] tracking-[0.18em] uppercase text-muted-foreground/60">
+              Hooks
+            </span>
+            <span className="font-mono text-[10.5px] tabular-nums text-muted-foreground/40">
+              {hooks.length}
+            </span>
+            <StatusDot hasError={hasError} hasRunning={hasRunning} />
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="ml-[18px] flex flex-col gap-0.5">
+            {hooks.map((hook, i) => (
+              <HookRow key={`${hook.hookName}-${i}`} hook={hook} />
+            ))}
+          </div>
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
   );
 }
 
@@ -70,70 +74,73 @@ const HookRow = memo(function HookRow({ hook }: { hook: HookExecution }) {
   const outputText = useMemo(() => displayLines.join("\n"), [displayLines]);
 
   return (
-    <div>
-      <button
-        type="button"
-        onClick={() => hasOutput && setDetailOpen((v) => !v)}
-        className={cn(
-          "flex items-center gap-2 py-0.5 w-full text-left",
-          hasOutput && "cursor-pointer hover:bg-muted/30 rounded-sm",
-        )}
-      >
-        {hasOutput && (
-          <ChevronRight
-            className={cn(
-              "size-2.5 text-muted-foreground/40 transition-transform duration-150 shrink-0",
-              detailOpen && "rotate-90",
-            )}
-          />
-        )}
-        {!hasOutput && <span className="w-2.5 shrink-0" />}
-        <span className="font-mono text-xs text-foreground truncate">
-          {hook.hookName}
-        </span>
-        {hook.toolName && (
-          <span className="text-xs text-muted-foreground/50 truncate shrink-0">
-            triggered by {hook.toolName}
+    <Collapsible open={detailOpen} onOpenChange={hasOutput ? setDetailOpen : undefined}>
+      <CollapsibleTrigger asChild>
+        <button
+          type="button"
+          className={cn(
+            "flex items-center gap-2 py-0.5 w-full text-left",
+            hasOutput && "cursor-pointer hover:bg-muted/30 rounded-sm",
+          )}
+        >
+          {hasOutput && (
+            <ChevronRight
+              className={cn(
+                "size-2.5 text-muted-foreground/40 transition-transform duration-150 shrink-0",
+                detailOpen && "rotate-90",
+              )}
+            />
+          )}
+          {!hasOutput && <span className="w-2.5 shrink-0" />}
+          <span className="font-mono text-xs text-foreground truncate">
+            {hook.hookName}
           </span>
-        )}
-        <span className="ml-auto flex items-center gap-1.5 shrink-0">
-          {hook.status === "running" && (
-            <ElapsedTimer startedAt={hook.startedAt} />
-          )}
-          {hook.status === "completed" && hook.durationMs != null && (
-            <span className="font-mono tabular-nums text-xs text-muted-foreground">
-              {formatDuration(hook.durationMs)}
+          {hook.toolName && (
+            <span className="text-xs text-muted-foreground/50 truncate shrink-0">
+              triggered by {hook.toolName}
             </span>
           )}
-          {hook.status === "completed" && hook.exitCode != null && hook.exitCode !== 0 && (
-            <span className="font-mono text-[10px] px-1 rounded bg-diff-remove-strong/15 text-diff-remove-strong">
-              exit {hook.exitCode}
-            </span>
-          )}
-          {hook.didBlock && (
-            <span className="font-mono text-[10px] tracking-[0.12em] uppercase text-diff-remove-strong">
-              blocked
-            </span>
-          )}
-        </span>
-      </button>
-      {detailOpen && displayLines.length > 0 && (
-        <div className="ml-2.5 mt-0.5 mb-1">
-          <pre className="font-mono text-xs bg-muted/50 rounded-sm p-2 overflow-x-auto max-h-[300px] overflow-y-auto text-muted-foreground whitespace-pre-wrap break-all">
-            {outputText}
-          </pre>
-          {hasMore && !showAll && (
-            <button
-              type="button"
-              onClick={() => setShowAll(true)}
-              className="text-xs text-primary hover:underline mt-0.5 cursor-pointer"
-            >
-              Show all ({hook.fullOutput.length} lines)
-            </button>
-          )}
-        </div>
+          <span className="ml-auto flex items-center gap-1.5 shrink-0">
+            {hook.status === "running" && (
+              <ElapsedTimer startedAt={hook.startedAt} />
+            )}
+            {hook.status === "completed" && hook.durationMs != null && (
+              <span className="font-mono tabular-nums text-xs text-muted-foreground">
+                {formatDuration(hook.durationMs)}
+              </span>
+            )}
+            {hook.status === "completed" && hook.exitCode != null && hook.exitCode !== 0 && (
+              <span className="font-mono text-[10px] px-1 rounded bg-diff-remove-strong/15 text-diff-remove-strong">
+                exit {hook.exitCode}
+              </span>
+            )}
+            {hook.didBlock && (
+              <span className="font-mono text-[10px] tracking-[0.12em] uppercase text-diff-remove-strong">
+                blocked
+              </span>
+            )}
+          </span>
+        </button>
+      </CollapsibleTrigger>
+      {displayLines.length > 0 && (
+        <CollapsibleContent>
+          <div className="ml-2.5 mt-0.5 mb-1">
+            <pre className="font-mono text-xs bg-muted/50 rounded-sm p-2 overflow-x-auto max-h-[300px] overflow-y-auto text-muted-foreground whitespace-pre-wrap break-all">
+              {outputText}
+            </pre>
+            {hasMore && !showAll && (
+              <button
+                type="button"
+                onClick={() => setShowAll(true)}
+                className="text-xs text-primary hover:underline mt-0.5 cursor-pointer"
+              >
+                Show all ({hook.fullOutput.length} lines)
+              </button>
+            )}
+          </div>
+        </CollapsibleContent>
       )}
-    </div>
+    </Collapsible>
   );
 });
 

@@ -1749,23 +1749,25 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       if (!hookName || !output) return;
       set((state) => {
         const hooks = state.hooksByThread[threadId] ?? [];
-        let changed = false;
-        const updated = hooks.map((h) => {
-          if (h.hookName === hookName && h.status === "running") {
-            changed = true;
-            const nextFull = [...h.fullOutput, output];
-            return {
-              ...h,
-              fullOutput: nextFull,
-              outputLines: nextFull.length > 20 ? nextFull.slice(-20) : nextFull,
-            };
+        // Target the last running hook with this name (not all same-name runs)
+        let idx = -1;
+        for (let i = hooks.length - 1; i >= 0; i--) {
+          if (hooks[i]!.hookName === hookName && hooks[i]!.status === "running") {
+            idx = i;
+            break;
           }
-          return h;
-        });
-        if (!changed) return state;
-        return {
-          hooksByThread: { ...state.hooksByThread, [threadId]: updated },
-        };
+        }
+        if (idx < 0) return state;
+        // Split chunk into actual lines so the 20-line cap is line-based
+        const addedLines = output
+          .split(/\r?\n/)
+          .filter((line, i, arr) => !(i === arr.length - 1 && line === ""));
+        if (addedLines.length === 0) return state;
+        const next = [...hooks];
+        const target = next[idx]!;
+        const fullOutput = [...target.fullOutput, ...addedLines];
+        next[idx] = { ...target, fullOutput, outputLines: fullOutput.slice(-20) };
+        return { hooksByThread: { ...state.hooksByThread, [threadId]: next } };
       });
       return;
     }
@@ -1778,18 +1780,18 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       if (!hookName) return;
       set((state) => {
         const hooks = state.hooksByThread[threadId] ?? [];
-        let changed = false;
-        const updated = hooks.map((h) => {
-          if (h.hookName === hookName && h.status === "running") {
-            changed = true;
-            return { ...h, status: "completed" as const, exitCode, durationMs, didBlock };
+        // Target the last running hook with this name
+        let idx = -1;
+        for (let i = hooks.length - 1; i >= 0; i--) {
+          if (hooks[i]!.hookName === hookName && hooks[i]!.status === "running") {
+            idx = i;
+            break;
           }
-          return h;
-        });
-        if (!changed) return state;
-        return {
-          hooksByThread: { ...state.hooksByThread, [threadId]: updated },
-        };
+        }
+        if (idx < 0) return state;
+        const next = [...hooks];
+        next[idx] = { ...next[idx]!, status: "completed" as const, exitCode, durationMs, didBlock };
+        return { hooksByThread: { ...state.hooksByThread, [threadId]: next } };
       });
       return;
     }
