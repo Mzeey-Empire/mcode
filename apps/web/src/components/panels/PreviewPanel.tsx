@@ -24,6 +24,7 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip";
 import { useDiffStore } from "@/stores/diffStore";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
 import { useToastStore } from "@/stores/toastStore";
 import { usePreviewReferenceQueueStore } from "@/stores/previewReferenceQueueStore";
@@ -33,9 +34,14 @@ import { MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME } from "@mcode/contracts";
 
 const NAV_ERROR_LABEL: Record<string, string> = {
   "no-bounds": "Wait for the panel to finish layout, then try again.",
-  "invalid-url": "Only http and https URLs are allowed.",
-  "empty-url": "Enter a URL.",
+  "invalid-url": "Only http, https URLs and local file paths are supported.",
+  "empty-url": "Enter a URL or file path.",
   "no-window": "Preview is unavailable.",
+  "file-not-found": "File not found.",
+  "not-a-file": "Path is not a regular file.",
+  "is-directory": "Path is a directory (no index.html found).",
+  "sensitive-file": "Cannot preview sensitive files (.env, .git, keys, etc.).",
+  "no-workspace": "Open a workspace to use relative file paths.",
 };
 
 const CAPTURE_ERROR_SILENT = new Set(["cancelled", "capture-interrupted", "navigated-away"]);
@@ -113,6 +119,9 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
 
   const storedUrl = useDiffStore(
     (s) => s.previewUrlByThread[threadId] ?? "",
+  );
+  const workspacePath = useWorkspaceStore(
+    (s) => s.workspaces.find((w) => w.id === workspaceId)?.path ?? null,
   );
 
   useEffect(() => {
@@ -258,116 +267,65 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
     await preview.openExternal();
   };
 
-  const onAddPictureReference = useCallback(async () => {
-    const preview = window.desktopBridge?.preview;
-    if (!preview?.capturePictureReference || !threadId) return;
-
-    setCaptureBusy(true);
-    try {
-      await pushSync(true);
-
-      let res: CaptureResult;
+  /** Shared capture-to-attachment pipeline: sync bounds, call IPC, build blob, enqueue. */
+  const runPictureCapture = useCallback(
+    async (
+      captureFn: () => Promise<unknown>,
+      setBusy: (v: boolean) => void,
+    ) => {
+      if (!threadId) return;
+      setBusy(true);
       try {
-        res = (await preview.capturePictureReference()) as CaptureResult;
-      } catch {
-        useToastStore.getState().show("error", "Could not capture preview", "Screenshot failed.");
-        return;
+        await pushSync(true);
+
+        let res: CaptureResult;
+        try {
+          res = (await captureFn()) as CaptureResult;
+        } catch {
+          useToastStore.getState().show("error", "Could not capture preview", "Screenshot failed.");
+          return;
+        }
+
+        showCaptureErrorIfNeeded(res);
+        if (!res.ok) return;
+
+        const copied = Uint8Array.from(res.previewBytes);
+        const blob = new Blob([copied], { type: "image/png" });
+        const previewUrl = URL.createObjectURL(blob);
+        const attachment: PendingAttachment = {
+          id: res.meta.id,
+          name: res.meta.name,
+          mimeType: res.meta.mimeType,
+          sizeBytes: res.meta.sizeBytes,
+          previewUrl,
+          filePath: res.meta.sourcePath,
+          browserCapture: res.capture,
+        };
+        usePreviewReferenceQueueStore.getState().enqueuePreviewReference(threadId, attachment);
+      } finally {
+        setBusy(false);
       }
+    },
+    [pushSync, threadId],
+  );
 
-      showCaptureErrorIfNeeded(res);
-      if (!res.ok) return;
+  const onAddPictureReference = useCallback(() => {
+    const fn = window.desktopBridge?.preview?.capturePictureReference;
+    if (!fn) return;
+    void runPictureCapture(() => fn.call(window.desktopBridge!.preview), setCaptureBusy);
+  }, [runPictureCapture]);
 
-      const copied = Uint8Array.from(res.previewBytes);
-      const blob = new Blob([copied], { type: "image/png" });
-      const previewUrl = URL.createObjectURL(blob);
-      const attachment: PendingAttachment = {
-        id: res.meta.id,
-        name: res.meta.name,
-        mimeType: res.meta.mimeType,
-        sizeBytes: res.meta.sizeBytes,
-        previewUrl,
-        filePath: res.meta.sourcePath,
-        browserCapture: res.capture,
-      };
-      usePreviewReferenceQueueStore.getState().enqueuePreviewReference(threadId, attachment);
-    } finally {
-      setCaptureBusy(false);
-    }
-  }, [pushSync, threadId]);
+  const onAddRegionPictureReference = useCallback(() => {
+    const fn = window.desktopBridge?.preview?.capturePictureReferenceRegion;
+    if (!fn) return;
+    void runPictureCapture(() => fn.call(window.desktopBridge!.preview), setRegionBusy);
+  }, [runPictureCapture]);
 
-  const onAddRegionPictureReference = useCallback(async () => {
-    const preview = window.desktopBridge?.preview;
-    if (!preview?.capturePictureReferenceRegion || !threadId) return;
-
-    setRegionBusy(true);
-    try {
-      await pushSync(true);
-
-      let res: CaptureResult;
-      try {
-        res = (await preview.capturePictureReferenceRegion()) as CaptureResult;
-      } catch {
-        useToastStore.getState().show("error", "Could not capture preview", "Screenshot failed.");
-        return;
-      }
-
-      showCaptureErrorIfNeeded(res);
-      if (!res.ok) return;
-
-      const copied = Uint8Array.from(res.previewBytes);
-      const blob = new Blob([copied], { type: "image/png" });
-      const previewUrl = URL.createObjectURL(blob);
-      const attachment: PendingAttachment = {
-        id: res.meta.id,
-        name: res.meta.name,
-        mimeType: res.meta.mimeType,
-        sizeBytes: res.meta.sizeBytes,
-        previewUrl,
-        filePath: res.meta.sourcePath,
-        browserCapture: res.capture,
-      };
-      usePreviewReferenceQueueStore.getState().enqueuePreviewReference(threadId, attachment);
-    } finally {
-      setRegionBusy(false);
-    }
-  }, [pushSync, threadId]);
-
-  const onAddElementPickPictureReference = useCallback(async () => {
-    const preview = window.desktopBridge?.preview;
-    if (!preview?.capturePictureReferenceElementPick || !threadId) return;
-
-    setElementPickBusy(true);
-    try {
-      await pushSync(true);
-
-      let res: CaptureResult;
-      try {
-        res = (await preview.capturePictureReferenceElementPick()) as CaptureResult;
-      } catch {
-        useToastStore.getState().show("error", "Could not capture preview", "Screenshot failed.");
-        return;
-      }
-
-      showCaptureErrorIfNeeded(res);
-      if (!res.ok) return;
-
-      const copied = Uint8Array.from(res.previewBytes);
-      const blob = new Blob([copied], { type: "image/png" });
-      const previewUrl = URL.createObjectURL(blob);
-      const attachment: PendingAttachment = {
-        id: res.meta.id,
-        name: res.meta.name,
-        mimeType: res.meta.mimeType,
-        sizeBytes: res.meta.sizeBytes,
-        previewUrl,
-        filePath: res.meta.sourcePath,
-        browserCapture: res.capture,
-      };
-      usePreviewReferenceQueueStore.getState().enqueuePreviewReference(threadId, attachment);
-    } finally {
-      setElementPickBusy(false);
-    }
-  }, [pushSync, threadId]);
+  const onAddElementPickPictureReference = useCallback(() => {
+    const fn = window.desktopBridge?.preview?.capturePictureReferenceElementPick;
+    if (!fn) return;
+    void runPictureCapture(() => fn.call(window.desktopBridge!.preview), setElementPickBusy);
+  }, [runPictureCapture]);
 
   const onAddPageContextOnly = useCallback(async () => {
     const preview = window.desktopBridge?.preview;
@@ -439,7 +397,8 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
           faviconUrl={faviconUrl}
           onNavigate={(target) => {
             setInputUrl(target);
-            void window.desktopBridge?.preview.navigate(target).then((r) => {
+            setNavError(null);
+            void window.desktopBridge?.preview.navigate(target, workspacePath).then((r) => {
               if (!r.ok) setNavError(formatNavError(r.error));
             });
           }}

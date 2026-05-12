@@ -37,7 +37,7 @@ export type PreviewShellBounds = {
   readonly height: number;
 };
 
-/** Result of a preview navigation attempt (http and https only). */
+/** Result of a preview navigation attempt (http, https, and local file paths). */
 export type PreviewNavigateResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly error: string };
@@ -67,7 +67,7 @@ interface PreviewBridge {
     /** Active workspace id; scopes preview spill files under the Mcode app data directory. */
     workspaceId?: string | null;
   }): Promise<void>;
-  navigate(url: string): Promise<PreviewNavigateResult>;
+  navigate(url: string, workspacePath?: string | null): Promise<PreviewNavigateResult>;
   goBack(): Promise<boolean>;
   goForward(): Promise<boolean>;
   reload(): Promise<void>;
