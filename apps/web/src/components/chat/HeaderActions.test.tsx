@@ -52,6 +52,10 @@ vi.mock("./CreatePrDialog", () => ({
   CreatePrDialog: () => <div data-testid="create-pr-dialog" />,
 }));
 
+vi.mock("./ActionTrigger", () => ({
+  ActionTrigger: () => <div data-testid="action-trigger" />,
+}));
+
 vi.mock("@/hooks/useBranchPr", () => ({
   useBranchPr: (...args: unknown[]) => mockUseBranchPr(...args),
 }));

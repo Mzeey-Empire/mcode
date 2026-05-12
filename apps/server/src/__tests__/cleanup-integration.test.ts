@@ -19,6 +19,7 @@ import type { GitService } from "../services/git-service";
 import { AttachmentService } from "../services/attachment-service";
 import { WorkspaceService } from "../services/workspace-service";
 import type { AgentService } from "../services/agent-service";
+import type { ActionService } from "../services/action-service";
 import { killDescendantsByName } from "../services/process-kill.js";
 import { getMcodeDir } from "@mcode/shared";
 
@@ -71,7 +72,7 @@ describe("Cleanup integration", () => {
       isRegisteredWorktreePath: vi.fn().mockReturnValue(true),
     } as unknown as GitService;
 
-    threadService = new ThreadService(threadRepo, workspaceRepo, mockGitService, cleanupJobRepo);
+    threadService = new ThreadService(threadRepo, workspaceRepo, mockGitService, cleanupJobRepo, { runSetupAction: vi.fn().mockResolvedValue(undefined) } as unknown as ActionService);
 
     worker = new CleanupWorker(
       db,
@@ -92,6 +93,7 @@ describe("Cleanup integration", () => {
       cleanupJobRepo,
       mockAttachmentService,
       mockAgentService,
+      { removeDataDir: vi.fn().mockResolvedValue(undefined) } as unknown as ActionService,
     );
   });
 

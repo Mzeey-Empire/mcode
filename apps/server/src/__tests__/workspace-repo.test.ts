@@ -8,6 +8,7 @@ import { CleanupJobRepo } from "../repositories/cleanup-job-repo";
 import { WorkspaceService } from "../services/workspace-service";
 import { AttachmentService } from "../services/attachment-service";
 import type { AgentService } from "../services/agent-service";
+import type { ActionService } from "../services/action-service";
 
 describe("WorkspaceRepo", () => {
   let db: Database.Database;
@@ -90,7 +91,7 @@ describe("WorkspaceService", () => {
     const threadRepo = new ThreadRepo(db);
     const cleanupJobRepo = new CleanupJobRepo(db);
     const mockAttachmentService = { removeForThread: vi.fn() } as unknown as AttachmentService;
-    service = new WorkspaceService(repo, threadRepo, cleanupJobRepo, mockAttachmentService, { stopSession: vi.fn().mockResolvedValue(undefined) } as unknown as AgentService);
+    service = new WorkspaceService(repo, threadRepo, cleanupJobRepo, mockAttachmentService, { stopSession: vi.fn().mockResolvedValue(undefined) } as unknown as AgentService, { removeDataDir: vi.fn().mockResolvedValue(undefined) } as unknown as ActionService);
   });
 
   it("create() returns existing workspace when path already exists", () => {

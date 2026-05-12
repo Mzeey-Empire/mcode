@@ -7,6 +7,7 @@ import { WorkspaceRepo } from "../repositories/workspace-repo";
 import { CleanupJobRepo } from "../repositories/cleanup-job-repo";
 import { ThreadService } from "../services/thread-service";
 import type { GitService } from "../services/git-service";
+import type { ActionService } from "../services/action-service";
 
 describe("ThreadService.delete", () => {
   let db: Database.Database;
@@ -36,6 +37,7 @@ describe("ThreadService.delete", () => {
       workspaceRepo,
       mockGitService,
       cleanupJobRepo,
+      { runSetupAction: vi.fn().mockResolvedValue(undefined) } as unknown as ActionService,
     );
   });
 

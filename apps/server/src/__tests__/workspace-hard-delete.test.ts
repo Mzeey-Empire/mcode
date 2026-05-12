@@ -10,6 +10,7 @@ import { WorkspaceService } from "../services/workspace-service";
 import { AttachmentService } from "../services/attachment-service";
 import { CleanupWorker } from "../services/cleanup-worker";
 import type { AgentService } from "../services/agent-service";
+import type { ActionService } from "../services/action-service";
 import type { ClaudeProvider } from "../providers/claude/claude-provider";
 import type { TerminalService } from "../services/terminal-service";
 import type { GitService } from "../services/git-service";
@@ -226,6 +227,7 @@ describe("WorkspaceService.delete - two-phase orchestration", () => {
       cleanupJobRepo,
       mockAttachmentService,
       { stopSession: vi.fn().mockResolvedValue(undefined) } as unknown as AgentService,
+      { removeDataDir: vi.fn().mockResolvedValue(undefined) } as unknown as ActionService,
     );
   });
 
@@ -639,6 +641,7 @@ describe("WorkspaceService.delete - active session handling", () => {
       cleanupJobRepo,
       mockAttachmentService,
       mockAgentService as unknown as AgentService,
+      { removeDataDir: vi.fn().mockResolvedValue(undefined) } as unknown as ActionService,
     );
   });
 
@@ -685,6 +688,7 @@ describe("Workspace delete - cross-workspace fork lineage", () => {
       cleanupJobRepo,
       mockAttachmentService,
       { stopSession: vi.fn().mockResolvedValue(undefined) } as unknown as AgentService,
+      { removeDataDir: vi.fn().mockResolvedValue(undefined) } as unknown as ActionService,
     );
   });
 
@@ -937,6 +941,7 @@ describe("Workspace delete - zero-worktree fast path", () => {
       cleanupJobRepo,
       mockAttachmentService,
       { stopSession: vi.fn().mockResolvedValue(undefined) } as unknown as AgentService,
+      { removeDataDir: vi.fn().mockResolvedValue(undefined) } as unknown as ActionService,
     );
   });
 
