@@ -181,8 +181,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     releaseBrowserCaptureSpills(paths: readonly string[]): Promise<void> {
       return ipcRenderer.invoke("preview:release-browser-capture-spill", [...paths]);
     },
-    onDidNavigate(callback: (payload: { url: string; title: string }) => void) {
-      const listener = (_event: unknown, payload: { url: string; title: string }) =>
+    onDidNavigate(callback: (payload: { url: string; title: string; favicon?: string | null }) => void) {
+      const listener = (_event: unknown, payload: { url: string; title: string; favicon?: string | null }) =>
         callback(payload);
       ipcRenderer.on("preview:did-navigate", listener);
       return () => ipcRenderer.removeListener("preview:did-navigate", listener);
@@ -192,6 +192,17 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       const listener = (_event: unknown, payload: { loading: boolean }) => callback(payload);
       ipcRenderer.on("preview:loading-state", listener);
       return () => ipcRenderer.removeListener("preview:loading-state", listener);
+    },
+    /** Subscribe to favicon updates from the guest webContents. */
+    onDidUpdateFavicon(callback: (payload: { favicon: string | null }) => void) {
+      const listener = (_event: unknown, payload: { favicon: string | null }) =>
+        callback(payload);
+      ipcRenderer.on("preview:did-update-favicon", listener);
+      return () => ipcRenderer.removeListener("preview:did-update-favicon", listener);
+    },
+    /** Cancel any in-progress capture operation (region or element-pick). */
+    cancelCapture(): Promise<void> {
+      return ipcRenderer.invoke("preview:cancel-capture");
     },
   },
 
