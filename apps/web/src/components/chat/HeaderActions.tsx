@@ -147,7 +147,7 @@ export function HeaderActions({ thread }: HeaderActionsProps) {
   }, []);
 
   return (
-    <div className="flex items-center justify-between gap-0.5">
+    <div className="flex items-center justify-between gap-2">
       {dirPath && (
         <div className="flex items-center gap-0.5 bg-muted/20 rounded-md px-1 py-0.5">
           {shouldPollPr && (
@@ -166,80 +166,84 @@ export function HeaderActions({ thread }: HeaderActionsProps) {
         </div>
       )}
 
-      {/* Terminal toggle */}
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={toggleTerminal}
-              className={`gap-1 text-xs h-6 ${
-                terminalVisible
-                  ? "text-foreground bg-muted/40"
-                  : "text-foreground/70 hover:text-foreground hover:bg-muted/40"
-              }`}
-              aria-label="Toggle terminal"
-              aria-pressed={terminalVisible}
-            >
-              <Terminal size={12} />
-            </Button>
-          }
-        />
-        <TooltipContent side="bottom" className="text-xs">
-          Toggle terminal (Ctrl+J)
-        </TooltipContent>
-      </Tooltip>
+      {/* Action trigger will be inserted here by Task 11 */}
 
-      {/* Preview panel toggle */}
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={togglePreview}
-              className={`gap-1 text-xs h-6 ${
-                previewActive
-                  ? "text-foreground bg-muted/40"
-                  : "text-foreground/70 hover:text-foreground hover:bg-muted/40"
-              }`}
-              aria-label="Toggle preview panel"
-              aria-pressed={previewActive}
-            >
-              <Globe size={12} />
-            </Button>
-          }
-        />
-        <TooltipContent side="bottom" className="text-xs">
-          Toggle preview (Ctrl+Shift+B)
-        </TooltipContent>
-      </Tooltip>
+      <div className="flex items-center gap-0.5 rounded-md bg-muted/10 px-1 py-0.5">
+        {/* Terminal toggle */}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={toggleTerminal}
+                className={`gap-1 text-xs h-6 ${
+                  terminalVisible
+                    ? "text-foreground bg-muted/40"
+                    : "text-foreground/70 hover:text-foreground hover:bg-muted/40"
+                }`}
+                aria-label="Toggle terminal"
+                aria-pressed={terminalVisible}
+              >
+                <Terminal size={12} />
+              </Button>
+            }
+          />
+          <TooltipContent side="bottom" className="text-xs">
+            Toggle terminal (Ctrl+J)
+          </TooltipContent>
+        </Tooltip>
 
-      {/* Diff panel toggle */}
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={toggleDiff}
-              className={`gap-1 text-xs h-6 ${
-                diffActive
-                  ? "text-foreground bg-muted/40"
-                  : "text-foreground/70 hover:text-foreground hover:bg-muted/40"
-              }`}
-              aria-label="Toggle changes panel"
-              aria-pressed={diffActive}
-            >
-              <Diff size={12} />
-            </Button>
-          }
-        />
-        <TooltipContent side="bottom" className="text-xs">
-          Toggle changes (Ctrl+D)
-        </TooltipContent>
-      </Tooltip>
+        {/* Preview panel toggle */}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={togglePreview}
+                className={`gap-1 text-xs h-6 ${
+                  previewActive
+                    ? "text-foreground bg-muted/40"
+                    : "text-foreground/70 hover:text-foreground hover:bg-muted/40"
+                }`}
+                aria-label="Toggle preview panel"
+                aria-pressed={previewActive}
+              >
+                <Globe size={12} />
+              </Button>
+            }
+          />
+          <TooltipContent side="bottom" className="text-xs">
+            Toggle preview (Ctrl+Shift+B)
+          </TooltipContent>
+        </Tooltip>
+
+        {/* Diff panel toggle */}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={toggleDiff}
+                className={`gap-1 text-xs h-6 ${
+                  diffActive
+                    ? "text-foreground bg-muted/40"
+                    : "text-foreground/70 hover:text-foreground hover:bg-muted/40"
+                }`}
+                aria-label="Toggle changes panel"
+                aria-pressed={diffActive}
+              >
+                <Diff size={12} />
+              </Button>
+            }
+          />
+          <TooltipContent side="bottom" className="text-xs">
+            Toggle changes (Ctrl+D)
+          </TooltipContent>
+        </Tooltip>
+      </div>
 
       {shouldPollPr && (
         <CreatePrDialog
