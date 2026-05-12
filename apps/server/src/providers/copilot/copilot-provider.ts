@@ -147,6 +147,11 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
   private cachedNodePath: string | null | undefined;
   private sessions = new Map<string, SessionEntry>();
   private sdkSessionIds = new Map<string, string>();
+  /**
+   * Session IDs for which a stop was requested before the session was created.
+   * Checked after session creation; if found the session is torn down immediately.
+   */
+  private pendingStops = new Set<string>();
   private evictionTimer: ReturnType<typeof setInterval> | null = null;
   /** Serialises concurrent refreshClient() calls so only one rebuild runs at a time. */
   private clientStartLock: Promise<void> = Promise.resolve();
@@ -644,6 +649,14 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
     };
     this.sessions.set(sessionId, entry);
 
+    if (this.pendingStops.delete(sessionId)) {
+      logger.info("Pending stop consumed, tearing down new Copilot session", { sessionId });
+      entry.session.disconnect().catch(() => {});
+      this.sessions.delete(sessionId);
+      this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
+      return;
+    }
+
     void this.runTurn(sessionId, threadId, session, message);
   }
 
@@ -944,6 +957,9 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
         }),
       );
       this.sessions.delete(sessionId);
+    } else {
+      this.pendingStops.add(sessionId);
+      setTimeout(() => this.pendingStops.delete(sessionId), 10_000);
     }
   }
 

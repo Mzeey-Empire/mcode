@@ -115,6 +115,11 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
 
   private sessions = new Map<string, SessionEntry>();
   private sdkSessionIds = new Map<string, string>();
+  /**
+   * Session IDs for which a stop was requested before the session was created.
+   * Checked after session creation; if found the session is torn down immediately.
+   */
+  private pendingStops = new Set<string>();
   private evictionTimer: ReturnType<typeof setInterval> | null = null;
   /** Pending host-side permission approvals keyed by requestId. */
   private pendingPermissions = new Map<string, PendingPermissionEntry>();
@@ -301,6 +306,15 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
     }
 
     this.sessions.set(sessionId, { server, mapper, lastUsedAt: Date.now(), sandboxMode: sandbox });
+
+    if (this.pendingStops.delete(sessionId)) {
+      logger.info("Pending stop consumed, tearing down new Codex session", { sessionId });
+      void server.kill();
+      this.sessions.delete(sessionId);
+      this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
+      return;
+    }
+
     void this.runTurn(sessionId, threadId, server, input, turnOptions);
   }
 
@@ -500,6 +514,9 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
     if (entry) {
       void entry.server.kill();
       this.sessions.delete(sessionId);
+    } else {
+      this.pendingStops.add(sessionId);
+      setTimeout(() => this.pendingStops.delete(sessionId), 10_000);
     }
   }
 

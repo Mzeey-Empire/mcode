@@ -117,6 +117,11 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
 
   private sessions = new Map<string, CursorAcpSessionEntry>();
   private sdkSessionIds = new Map<string, string>();
+  /**
+   * Session IDs for which a stop was requested before the session was created.
+   * Checked after session creation; if found the session is torn down immediately.
+   */
+  private pendingStops = new Set<string>();
   private pendingPermissions = new Map<string, PendingAcpPermission>();
   private evictionTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -193,6 +198,13 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       try {
         entry = await this.spawnChild(sessionId, threadId, cwd, pm, settings);
         this.sessions.set(sessionId, entry);
+
+        if (this.pendingStops.delete(sessionId)) {
+          logger.info("Pending stop consumed, tearing down new Cursor session", { sessionId });
+          await this.teardownSessionEntry(sessionId, entry, false);
+          this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
+          return;
+        }
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         logger.error("Cursor ACP spawn failed", { sessionId, error: errMsg });
@@ -220,8 +232,12 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
   stopSession(sessionId: string): void {
     const entry = this.sessions.get(sessionId);
     this.cancelPendingForThread(sessionId);
-    if (!entry?.acpSessionId) return;
-    void entry.connection.cancel({ sessionId: entry.acpSessionId }).catch(() => {});
+    if (entry?.acpSessionId) {
+      void entry.connection.cancel({ sessionId: entry.acpSessionId }).catch(() => {});
+    } else if (!entry) {
+      this.pendingStops.add(sessionId);
+      setTimeout(() => this.pendingStops.delete(sessionId), 10_000);
+    }
   }
 
   shutdown(): void {
