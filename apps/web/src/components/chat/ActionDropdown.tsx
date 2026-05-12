@@ -99,7 +99,7 @@ export function ActionDropdown({ onClose }: ActionDropdownProps) {
             onClick={() => handleRunAction(action.id)}
           >
             <span className="flex items-center gap-2 min-w-0">
-              <Icon size={13} className="shrink-0 text-muted-foreground" />
+              <Icon size={14} className="shrink-0 text-muted-foreground" />
               <span className="truncate">{action.name}</span>
               {action.setup && (
                 <span
