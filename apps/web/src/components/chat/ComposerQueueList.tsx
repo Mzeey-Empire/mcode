@@ -268,7 +268,7 @@ const QueueRow = memo(function QueueRow({
         {canSendNow && onSendNow && (
           <RowAction
             label={`Send queued message ${index + 1} now`}
-            hint="Send now (interrupt current turn)"
+            hint="Send now (queued next)"
             tone="primary"
             onClick={onSendNow}
           >
