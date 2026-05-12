@@ -1687,6 +1687,14 @@ export function registerPreviewBrowserHandlers(): void {
     abortOverlayCapture(s, "cancelled");
   });
 
+  ipcMain.handle("preview:cancel-capture", (event): void => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed()) return;
+    const s = getSession(win);
+    if (!s.selectionOverlay) return;
+    abortOverlayCapture(s, "cancelled");
+  });
+
   ipcMain.handle(
     "preview:element-pick-hover",
     async (event, pt: { x: unknown; y: unknown }): Promise<{ ok: true } | { ok: false }> => {
