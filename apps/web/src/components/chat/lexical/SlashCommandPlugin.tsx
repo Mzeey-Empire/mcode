@@ -74,8 +74,8 @@ export function SlashCommandPlugin({
           return;
         }
 
-        // Pass full text content to the existing hook's input handler
-        onTriggerRef.current(textContent);
+        // Pass only text before the cursor so the regex $ anchor matches
+        onTriggerRef.current(textBeforeCursor);
       });
     });
   }, [editor]);
