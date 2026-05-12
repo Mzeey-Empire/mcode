@@ -121,7 +121,6 @@ vi.mock("node:fs/promises", async () => {
     mkdir: vi.fn().mockResolvedValue(undefined),
     writeFile: vi.fn().mockResolvedValue(undefined),
     readdir: vi.fn().mockResolvedValue([]),
-    stat: vi.fn().mockResolvedValue({ mtimeMs: 0 }),
     unlink: vi.fn().mockResolvedValue(undefined),
   };
 });
@@ -539,6 +538,45 @@ describe("preview-browser", () => {
       // Should resolve through the symlink target directory's index.html.
       expect(view.webContents.loadURL).toHaveBeenCalledWith(
         pathToFileURL(join(tempDir, "hasindex", "index.html")).href,
+      );
+    });
+
+    it("blocks hosted file:// URLs with a non-local hostname", async () => {
+      const win = createWindow();
+      await showPreview(win);
+
+      const result = await navigate(win, "file://evil-host/C:/Windows/not-real.ini");
+
+      expect(result).toEqual({ ok: false, error: "sensitive-file" });
+    });
+
+    it("blocks UNC paths when entered as a Windows share path", async () => {
+      const win = createWindow();
+      await showPreview(win);
+
+      const result = await navigate(win, "\\\\fake-server\\share\\page.html");
+
+      expect(result).toEqual({ ok: false, error: "sensitive-file" });
+    });
+
+    it("resolves directory index when index.html is a symlink to a file", async () => {
+      const dirWithSymlinkIndex = join(tempDir, "symlink-index-dir");
+      mkdirSync(dirWithSymlinkIndex);
+      try {
+        symlinkSync(join(tempDir, "hasindex", "index.html"), join(dirWithSymlinkIndex, "index.html"));
+      } catch {
+        return;
+      }
+
+      const win = createWindow();
+      await showPreview(win);
+
+      const result = await navigate(win, dirWithSymlinkIndex);
+
+      expect(result).toEqual({ ok: true });
+      const view = createdViews[0]!;
+      expect(view.webContents.loadURL).toHaveBeenCalledWith(
+        pathToFileURL(join(dirWithSymlinkIndex, "index.html")).href,
       );
     });
 

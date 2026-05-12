@@ -115,6 +115,11 @@ interface PreviewSession {
   workspaceId: string | null;
   /** Favicon URLs from the last page-favicon-updated event. */
   lastFavicons: string[];
+  /**
+   * Lets the next main-process `file:` navigation skip {@link ensureView}'s will-navigate gate,
+   * since those loads already passed {@link resolveLocalFileUrl}.
+   */
+  trustedFileNavigationBudget: number;
 }
 
 const sessions = new Map<number, PreviewSession>();
@@ -136,6 +141,7 @@ function getSession(win: BrowserWindow): PreviewSession {
       lastPreviewThreadId: null,
       workspaceId: null,
       lastFavicons: [],
+      trustedFileNavigationBudget: 0,
     };
     sessions.set(win.id, s);
   }
@@ -1014,6 +1020,7 @@ function beginOverlaySession(s: PreviewSession, webContents: BrowserView["webCon
 }
 
 function detachViewListeners(view: BrowserView): void {
+  view.webContents.removeAllListeners("will-navigate");
   view.webContents.removeAllListeners("did-navigate");
   view.webContents.removeAllListeners("did-navigate-in-page");
   view.webContents.removeAllListeners("page-title-updated");
@@ -1189,9 +1196,11 @@ function parkPreview(win: BrowserWindow, s: PreviewSession): void {
       if (!s.view.webContents.isDestroyed()) {
         void removeEpPickHighlighter(s.view.webContents);
         const parked = s.view.webContents.getURL();
-        if (isAllowedPreviewUrl(parked)) {
-          s.resumePreviewUrl = parked;
-        }
+        void validateResumeUrl(isAllowedPreviewUrl(parked) ? parked : null).then((safe) => {
+          if (!win.isDestroyed()) {
+            s.resumePreviewUrl = safe;
+          }
+        });
       }
       detachViewListeners(s.view);
       s.view.webContents.close();
@@ -1240,20 +1249,65 @@ function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
     return { action: "deny" };
   });
 
+  view.webContents.on("will-navigate", (event, navigationUrl) => {
+    if (win.isDestroyed() || view.webContents.isDestroyed()) return;
+    let parsed: URL;
+    try {
+      parsed = new URL(navigationUrl);
+    } catch {
+      return;
+    }
+    if (parsed.protocol !== "file:") return;
+    if (s.trustedFileNavigationBudget > 0) {
+      s.trustedFileNavigationBudget--;
+      return;
+    }
+    event.preventDefault();
+    void (async () => {
+      if (win.isDestroyed() || view.webContents.isDestroyed()) return;
+      const safe = await validateResumeUrl(navigationUrl);
+      if (safe) {
+        trustMainProcessFileNavigation(s, safe);
+        sendPreviewLoading(win, true);
+        try {
+          await view.webContents.loadURL(safe);
+        } catch {
+          /* guest may be tearing down */
+        }
+      } else {
+        s.resumePreviewUrl = null;
+        sendPreviewLoading(win, true);
+        try {
+          await view.webContents.loadURL("about:blank");
+        } catch {
+          /* guest may be tearing down */
+        }
+      }
+    })();
+  });
+
   const forwardNav = () => {
     if (win.isDestroyed() || view.webContents.isDestroyed()) return;
     const url = view.webContents.getURL();
-    if (isAllowedPreviewUrl(url)) {
-      s.resumePreviewUrl = url;
-    }
-    win.webContents.send("preview:did-navigate", {
-      url,
-      title: view.webContents.getTitle(),
-      // Best-effort: lastFavicons is populated by page-favicon-updated which fires
-      // after did-navigate, so this is often null on initial load. The dedicated
-      // preview:did-update-favicon push (Step 3) is the canonical delivery path.
-      favicon: s.lastFavicons[0] ?? null,
-    });
+    void (async () => {
+      if (win.isDestroyed() || view.webContents.isDestroyed()) return;
+      const persisted = await validateResumeUrl(isAllowedPreviewUrl(url) ? url : null);
+      if (persisted) {
+        s.resumePreviewUrl = persisted;
+      } else {
+        s.resumePreviewUrl = null;
+      }
+      if (!win.isDestroyed()) {
+        win.webContents.send("preview:did-navigate", {
+          url,
+          title: view.webContents.getTitle(),
+          // Best-effort: lastFavicons is populated by page-favicon-updated which fires
+          // after did-navigate, so this is often null on initial load. The dedicated
+          // preview:did-update-favicon push (Step 3) is the canonical delivery path.
+          favicon: s.lastFavicons[0] ?? null,
+        });
+      }
+    })();
   };
 
   view.webContents.on("did-navigate", forwardNav);
@@ -1376,29 +1430,74 @@ function isSensitivePath(filePath: string): boolean {
 }
 
 /**
+ * Detects Windows UNC paths so SMB targets never reach `lstat` / `realpath`.
+ * Keeps `\\?\` and `\\.\` prefixes (local extended/device paths) allowed.
+ */
+function isUncPath(filePath: string): boolean {
+  const n = normalize(filePath);
+  if (!n.startsWith("\\\\")) return false;
+  if (n.startsWith("\\\\?\\") || n.startsWith("\\\\.\\")) return false;
+  return true;
+}
+
+/** Marks the next main-process `file:` navigation as trusted for the will-navigate gate. */
+function trustMainProcessFileNavigation(s: PreviewSession, url: string): void {
+  try {
+    if (new URL(url).protocol === "file:") {
+      s.trustedFileNavigationBudget++;
+    }
+  } catch {
+    /* malformed URLs do not consume budget */
+  }
+}
+
+/**
  * Resolve user input into a `file://` URL.
  *
- * Handles tilde expansion (`~/...`), absolute paths, and paths relative to
- * `workspacePath`. Returns `null` when the input is not a local file path
- * or the resolved file does not exist / is a directory / is sensitive.
+ * Handles tilde expansion (`~/...`), absolute paths, paths relative to
+ * `workspacePath`, and raw `file://` inputs (rejecting non-local hosts).
+ * Returns an error result when the path is not previewable, blocked, or missing.
  */
 async function resolveLocalFileUrl(
   input: string,
   workspacePath: string | null,
 ): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  const trimmed = input.trim();
+
+  if (trimmed.startsWith("\\\\")) {
+    return { ok: false, error: "sensitive-file" };
+  }
+
   let resolved: string;
 
-  if (input.startsWith("~")) {
-    resolved = resolve(homedir(), input.slice(input.startsWith("~/") || input.startsWith("~\\") ? 2 : 1));
-  } else if (isAbsolute(input)) {
-    resolved = resolve(input);
+  if (/^file:\/\//i.test(trimmed)) {
+    try {
+      const u = new URL(trimmed);
+      if (u.protocol !== "file:") {
+        return { ok: false, error: "invalid-url" };
+      }
+      const host = u.hostname.toLowerCase();
+      if (host !== "" && host !== "localhost") {
+        return { ok: false, error: "sensitive-file" };
+      }
+      resolved = normalize(fileURLToPath(trimmed));
+    } catch {
+      return { ok: false, error: "invalid-url" };
+    }
+  } else if (trimmed.startsWith("~")) {
+    resolved = resolve(homedir(), trimmed.slice(trimmed.startsWith("~/") || trimmed.startsWith("~\\") ? 2 : 1));
+    resolved = normalize(resolved);
+  } else if (isAbsolute(trimmed)) {
+    resolved = normalize(resolve(trimmed));
   } else if (workspacePath) {
-    resolved = resolve(workspacePath, input);
+    resolved = normalize(resolve(workspacePath, trimmed));
   } else {
     return { ok: false, error: "no-workspace" };
   }
 
-  resolved = normalize(resolved);
+  if (isUncPath(resolved)) {
+    return { ok: false, error: "sensitive-file" };
+  }
 
   if (isSensitivePath(resolved)) {
     return { ok: false, error: "sensitive-file" };
@@ -1418,7 +1517,7 @@ async function resolveLocalFileUrl(
     if (info.isDirectory()) {
       const indexPath = join(resolved, "index.html");
       try {
-        const indexInfo = await lstat(indexPath);
+        const indexInfo = await stat(indexPath);
         if (indexInfo.isFile()) {
           return { ok: true, url: pathToFileURL(indexPath).href };
         }
@@ -1481,6 +1580,8 @@ async function validateResumeUrl(url: string | null): Promise<string | null> {
   try {
     const u = new URL(url);
     if (u.protocol === "file:") {
+      const host = u.hostname.toLowerCase();
+      if (host !== "" && host !== "localhost") return null;
       const filePath = fileURLToPath(url);
       const result = await resolveLocalFileUrl(filePath, null);
       return result.ok ? result.url : null;
@@ -1560,6 +1661,7 @@ export function registerPreviewBrowserHandlers(): void {
         if (switchedThread) {
           if (safeHint) {
             sendPreviewLoading(win, true);
+            trustMainProcessFileNavigation(s, safeHint);
             void wc.loadURL(safeHint);
             s.resumePreviewUrl = safeHint;
           } else {
@@ -1569,12 +1671,14 @@ export function registerPreviewBrowserHandlers(): void {
           }
         } else if (guestUrlNeedsHttpRestore(current) && safeHint) {
           sendPreviewLoading(win, true);
+          trustMainProcessFileNavigation(s, safeHint);
           void wc.loadURL(safeHint);
           s.resumePreviewUrl = safeHint;
         } else if (guestUrlNeedsHttpRestore(current) && s.resumePreviewUrl) {
           const safeResume = await validateResumeUrl(s.resumePreviewUrl);
           if (safeResume) {
             sendPreviewLoading(win, true);
+            trustMainProcessFileNavigation(s, safeResume);
             void wc.loadURL(safeResume);
           } else {
             s.resumePreviewUrl = null;
@@ -1604,15 +1708,9 @@ export function registerPreviewBrowserHandlers(): void {
         // Explicit http(s) URL - use as-is.
         target = trimmed;
       } else if (/^file:\/\//i.test(trimmed)) {
-        // Explicit file URL - parse back to a path and run through security checks.
-        try {
-          const filePath = fileURLToPath(trimmed);
-          const resolved = await resolveLocalFileUrl(filePath, workspacePath?.trim() ?? null);
-          if (!resolved.ok) return resolved;
-          target = resolved.url;
-        } catch {
-          return { ok: false, error: "invalid-url" };
-        }
+        const resolved = await resolveLocalFileUrl(trimmed, workspacePath?.trim() ?? null);
+        if (!resolved.ok) return resolved;
+        target = resolved.url;
       } else if (looksLikeFilePath(trimmed)) {
         // Resolve file path (relative, absolute, or tilde-prefixed).
         const resolved = await resolveLocalFileUrl(trimmed, workspacePath?.trim() ?? null);
@@ -1638,6 +1736,7 @@ export function registerPreviewBrowserHandlers(): void {
         win.setBrowserView(view);
       }
       sendPreviewLoading(win, true);
+      trustMainProcessFileNavigation(s, target);
       void view.webContents.loadURL(target);
       s.resumePreviewUrl = target;
       resetIdle(win, s);
