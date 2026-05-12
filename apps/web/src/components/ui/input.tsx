@@ -24,10 +24,15 @@ function Input({
   className,
   type,
   size = "default",
+  ref,
   ...props
-}: Omit<React.ComponentProps<"input">, "size"> & VariantProps<typeof inputVariants>) {
+}: Omit<React.ComponentProps<"input">, "size"> &
+  VariantProps<typeof inputVariants> & {
+    ref?: React.Ref<HTMLInputElement>;
+  }) {
   return (
     <input
+      ref={ref}
       type={type}
       data-slot="input"
       className={cn(inputVariants({ size, className }))}

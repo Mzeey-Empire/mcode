@@ -3,7 +3,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type FormEvent,
 } from "react";
 import {
   ArrowLeft,
@@ -19,7 +18,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Tooltip,
   TooltipTrigger,
@@ -30,6 +28,7 @@ import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
 import { useToastStore } from "@/stores/toastStore";
 import { usePreviewReferenceQueueStore } from "@/stores/previewReferenceQueueStore";
 import type { McodeBrowserCapture } from "@mcode/contracts";
+import { SmartOmnibox } from "./SmartOmnibox";
 import { MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME } from "@mcode/contracts";
 
 const NAV_ERROR_LABEL: Record<string, string> = {
@@ -110,6 +109,7 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
   const [contextBusy, setContextBusy] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [pageTitle, setPageTitle] = useState<string | null>(null);
+  const [faviconUrl, setFaviconUrl] = useState<string | null>(null);
 
   const storedUrl = useDiffStore(
     (s) => s.previewUrlByThread[threadId] ?? "",
@@ -117,6 +117,8 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
 
   useEffect(() => {
     setInputUrl(storedUrl);
+    setPageTitle(null);
+    setFaviconUrl(null);
     setNavError(null);
   }, [threadId, storedUrl]);
 
@@ -173,11 +175,23 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
         useDiffStore.getState().setPreviewUrlForThread(threadId, p.url);
         setInputUrl(p.url);
         setPageTitle(p.title ?? null);
+        setFaviconUrl(p.favicon ?? null);
+      } else {
+        setPageTitle(null);
+        setFaviconUrl(null);
       }
       void refreshNav();
     });
     return unsub;
   }, [threadId, refreshNav]);
+
+  useEffect(() => {
+    const preview = window.desktopBridge?.preview;
+    if (!preview?.onDidUpdateFavicon) return;
+    return preview.onDidUpdateFavicon((p) => {
+      setFaviconUrl(p.favicon);
+    });
+  }, []);
 
   useEffect(() => {
     const preview = window.desktopBridge?.preview;
@@ -213,19 +227,6 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
       void pushSync(false);
     };
   }, [pushSync, refreshNav]);
-
-  const onSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    const preview = window.desktopBridge?.preview;
-    if (!preview) return;
-    setNavError(null);
-    await pushSync(true);
-    const res = await preview.navigate(inputUrl);
-    if (!res.ok) {
-      setNavError(formatNavError(res.error));
-    }
-    await refreshNav();
-  };
 
   const onGoBack = async () => {
     const preview = window.desktopBridge?.preview;
@@ -429,26 +430,20 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
       className="flex min-h-0 min-w-[20rem] flex-1 flex-col"
     >
       <form
-        onSubmit={(e) => void onSubmit(e)}
+        onSubmit={(e) => e.preventDefault()}
         className="flex-none space-y-1.5 border-b border-border/40 px-2 pt-2 pb-1.5"
       >
-        {/* URL bar */}
-        <div className="flex min-w-0 items-center gap-1.5">
-          <Input
-            value={inputUrl}
-            onChange={(e) => setInputUrl(e.target.value)}
-            placeholder="https://example.com"
-            className="h-7 min-w-0 flex-1 font-mono text-xs"
-            aria-label="Preview URL"
-            title={inputUrl.trim() ? inputUrl : undefined}
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-          />
-          <Button type="submit" variant="outline" size="sm" className="h-7 shrink-0 px-2.5 text-xs">
-            Go
-          </Button>
-        </div>
+        <SmartOmnibox
+          url={inputUrl}
+          pageTitle={pageTitle}
+          faviconUrl={faviconUrl}
+          onNavigate={(target) => {
+            setInputUrl(target);
+            void window.desktopBridge?.preview.navigate(target).then((r) => {
+              if (!r.ok) setNavError(formatNavError(r.error));
+            });
+          }}
+        />
 
         {/* Toolbar: nav | capture | external */}
         <div className="flex min-w-0 items-center">
@@ -589,14 +584,25 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
               Open in system browser
             </TooltipContent>
           </Tooltip>
-        </div>
 
-        {/* Page title */}
-        {pageTitle ? (
-          <p className="truncate px-0.5 font-mono text-[10px] tracking-wide text-muted-foreground/60" title={pageTitle}>
-            {pageTitle}
-          </p>
-        ) : null}
+          {/* Cancel capture pill (visible during region/element-pick capture) */}
+          {(regionBusy || elementPickBusy) ? (
+            <>
+              <div className="flex-1" />
+              <button
+                type="button"
+                aria-label="Cancel capture"
+                className="flex shrink-0 items-center gap-1 rounded border border-destructive/20 bg-destructive/10 px-2 py-0.5 text-[11px] text-destructive/80 transition-colors hover:bg-destructive/15"
+                onClick={() => void window.desktopBridge?.preview.cancelCapture()}
+              >
+                <kbd className="rounded border border-destructive/15 bg-destructive/5 px-1 py-px text-[10px] font-medium">
+                  Esc
+                </kbd>
+                Cancel
+              </button>
+            </>
+          ) : null}
+        </div>
 
         {navError ? (
           <p className="text-xs text-destructive" role="status">

@@ -111,6 +111,8 @@ interface PreviewSession {
   lastPreviewThreadId: string | null;
   /** Active workspace id from the renderer; scopes spill files under getMcodeDir(). */
   workspaceId: string | null;
+  /** Favicon URLs from the last page-favicon-updated event. */
+  lastFavicons: string[];
 }
 
 const sessions = new Map<number, PreviewSession>();
@@ -131,6 +133,7 @@ function getSession(win: BrowserWindow): PreviewSession {
       failedRequestBuffer: [],
       lastPreviewThreadId: null,
       workspaceId: null,
+      lastFavicons: [],
     };
     sessions.set(win.id, s);
   }
@@ -1012,31 +1015,12 @@ function detachViewListeners(view: BrowserView): void {
   view.webContents.removeAllListeners("did-navigate");
   view.webContents.removeAllListeners("did-navigate-in-page");
   view.webContents.removeAllListeners("page-title-updated");
+  view.webContents.removeAllListeners("page-favicon-updated");
   view.webContents.removeAllListeners("did-finish-load");
   view.webContents.removeAllListeners("did-start-loading");
   view.webContents.removeAllListeners("did-stop-loading");
   view.webContents.removeAllListeners("console-message");
 }
-
-/** Height in px of the cancel-pill bar above the overlay's interactive area. */
-const OVERLAY_PILL_HEIGHT = 28;
-
-/** Shared CSS + HTML for the cancel-pill bar used by both region and element-pick overlays. */
-const OVERLAY_PILL_STYLES = `
-#pill-bar{position:fixed;top:0;left:0;right:0;height:${OVERLAY_PILL_HEIGHT}px;display:flex;align-items:center;justify-content:center;background:rgb(15,23,42);}
-@media(prefers-color-scheme:light){#pill-bar{background:rgb(238,236,232);}}
-#esc-pill{display:flex;align-items:center;gap:4px;min-height:28px;padding:8px 10px 8px 8px;border:1px solid rgba(255,255,255,.18);border-radius:6px;background:rgba(15,23,42,.72);backdrop-filter:blur(8px);color:rgba(255,255,255,.85);font:500 11px/1 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:.04em;cursor:pointer;user-select:none;transition:background .12s,border-color .12s;}
-#esc-pill:hover{background:rgba(15,23,42,.88);border-color:rgba(255,255,255,.32);}
-#esc-pill:focus-visible{outline:2px solid rgba(255,255,255,.6);outline-offset:2px;}
-#esc-pill kbd{display:inline-block;padding:1px 5px;border:1px solid rgba(255,255,255,.22);border-radius:3px;background:rgba(255,255,255,.08);font:inherit;font-size:10px;line-height:14px;}
-@media(prefers-color-scheme:light){
-#esc-pill{border-color:rgba(0,0,0,.12);background:rgba(255,255,255,.82);color:rgba(15,23,42,.85);}
-#esc-pill:hover{background:rgba(255,255,255,.95);border-color:rgba(0,0,0,.2);}
-#esc-pill:focus-visible{outline-color:rgba(15,23,42,.5);}
-#esc-pill kbd{border-color:rgba(0,0,0,.15);background:rgba(0,0,0,.06);}
-}`.trim();
-
-const OVERLAY_PILL_HTML = `<div id="pill-bar"><div id="esc-pill" role="button" tabindex="0" aria-label="Cancel capture"><kbd aria-hidden="true">Esc</kbd> Cancel</div></div>`;
 
 /**
  * Drag-marquee overlay: nodeIntegration is limited to this inline page string so OS-level
@@ -1046,15 +1030,13 @@ const REGION_OVERLAY_DATA_URL =
   "data:text/html;charset=utf-8," +
   encodeURIComponent(`<!DOCTYPE html><html><head><meta charset="utf-8"/><style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;}
-${OVERLAY_PILL_STYLES}
-#layer{position:fixed;top:${OVERLAY_PILL_HEIGHT}px;left:0;right:0;bottom:0;background:rgba(15,23,42,.35);cursor:crosshair;touch-action:none;}
+#layer{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(15,23,42,.35);cursor:crosshair;touch-action:none;}
 #box{position:fixed;border:2px dashed #fff;box-sizing:border-box;pointer-events:none;display:none;box-shadow:0 0 0 1px rgba(0,0,0,.4) inset;}
-</style></head><body>${OVERLAY_PILL_HTML}<div id="layer"></div><div id="box"></div>
+</style></head><body><div id="layer"></div><div id="box"></div>
 <script>
 const { ipcRenderer } = require("electron");
 const layer = document.getElementById("layer");
 const box = document.getElementById("box");
-const PILL_H = ${OVERLAY_PILL_HEIGHT};
 let start = null, drag = false, cx = 0, cy = 0;
 function lay() {
   if (!start) { box.style.display = "none"; return; }
@@ -1072,8 +1054,7 @@ function endDrag() {
   const x = Math.min(start.x, cx), y = Math.min(start.y, cy), w = Math.abs(cx - start.x), h = Math.abs(cy - start.y);
   start = null;
   box.style.display = "none";
-  /* y offset compensates for pill-bar height above the BrowserView */
-  if (w >= 4 && h >= 4) void ipcRenderer.invoke("preview:region-overlay-submit", { x, y: y - PILL_H, width: w, height: h });
+  if (w >= 4 && h >= 4) void ipcRenderer.invoke("preview:region-overlay-submit", { x, y, width: w, height: h });
   else void ipcRenderer.invoke("preview:region-overlay-cancel");
 }
 layer.addEventListener("mousedown", (ev) => { drag = true; start = pt(ev); cx = start.x; cy = start.y; lay(); });
@@ -1083,9 +1064,6 @@ layer.addEventListener("touchstart", (ev) => { ev.preventDefault(); drag = true;
 layer.addEventListener("touchmove", (ev) => { ev.preventDefault(); if (!drag) return; const p = pt(ev); cx = p.x; cy = p.y; lay(); }, { passive: false });
 layer.addEventListener("touchend", (ev) => { ev.preventDefault(); endDrag(); }, { passive: false });
 window.addEventListener("keydown", (ev) => { if (ev.key === "Escape") void ipcRenderer.invoke("preview:region-overlay-cancel"); });
-const pill = document.getElementById("esc-pill");
-pill.addEventListener("click", (ev) => { ev.stopPropagation(); void ipcRenderer.invoke("preview:region-overlay-cancel"); });
-pill.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); void ipcRenderer.invoke("preview:region-overlay-cancel"); } });
 </script></body></html>`);
 
 /**
@@ -1096,13 +1074,11 @@ const ELEMENT_OVERLAY_DATA_URL =
   "data:text/html;charset=utf-8," +
   encodeURIComponent(`<!DOCTYPE html><html><head><meta charset="utf-8"/><style>
 html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;}
-${OVERLAY_PILL_STYLES}
-#layer{position:fixed;top:${OVERLAY_PILL_HEIGHT}px;left:0;right:0;bottom:0;background:rgba(15,23,42,.18);cursor:crosshair;touch-action:none;}
-</style></head><body>${OVERLAY_PILL_HTML}<div id="layer"></div>
+#layer{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(15,23,42,.18);cursor:crosshair;touch-action:none;}
+</style></head><body><div id="layer"></div>
 <script>
 const { ipcRenderer } = require("electron");
 const layer = document.getElementById("layer");
-const PILL_H = ${OVERLAY_PILL_HEIGHT};
 let rafHover = 0;
 let hx = 0, hy = 0;
 function scheduleHover() {
@@ -1110,17 +1086,17 @@ function scheduleHover() {
   rafHover = requestAnimationFrame(async () => {
     rafHover = 0;
     try {
-      await ipcRenderer.invoke("preview:element-pick-hover", { x: hx, y: hy - PILL_H });
+      await ipcRenderer.invoke("preview:element-pick-hover", { x: hx, y: hy });
     } catch (_e) {}
   });
 }
 function pt(ev) {
-  if (ev.touches && ev.touches[0]) return { x: ev.touches[0].clientX, y: ev.touches[0].clientY - PILL_H };
-  return { x: ev.clientX, y: ev.clientY - PILL_H };
+  if (ev.touches && ev.touches[0]) return { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
+  return { x: ev.clientX, y: ev.clientY };
 }
 function ptEnd(ev) {
   if (ev.changedTouches && ev.changedTouches[0]) {
-    return { x: ev.changedTouches[0].clientX, y: ev.changedTouches[0].clientY - PILL_H };
+    return { x: ev.changedTouches[0].clientX, y: ev.changedTouches[0].clientY };
   }
   return pt(ev);
 }
@@ -1153,9 +1129,6 @@ layer.addEventListener("touchend", async (ev) => {
   try { await ipcRenderer.invoke("preview:element-pick-commit", ptEnd(ev)); } catch (_e) {}
 }, { passive: false });
 window.addEventListener("keydown", (ev) => { if (ev.key === "Escape") void ipcRenderer.invoke("preview:element-pick-cancel"); });
-const pill = document.getElementById("esc-pill");
-pill.addEventListener("click", (ev) => { ev.stopPropagation(); void ipcRenderer.invoke("preview:element-pick-cancel"); });
-pill.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); void ipcRenderer.invoke("preview:element-pick-cancel"); } });
 </script></body></html>`);
 
 function destroySelectionOverlayOnly(s: PreviewSession): void {
@@ -1260,18 +1233,34 @@ function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
     win.webContents.send("preview:did-navigate", {
       url,
       title: view.webContents.getTitle(),
+      // Best-effort: lastFavicons is populated by page-favicon-updated which fires
+      // after did-navigate, so this is often null on initial load. The dedicated
+      // preview:did-update-favicon push (Step 3) is the canonical delivery path.
+      favicon: s.lastFavicons[0] ?? null,
     });
   };
 
   view.webContents.on("did-navigate", forwardNav);
   view.webContents.on("did-navigate-in-page", forwardNav);
   view.webContents.on("page-title-updated", forwardNav);
+  view.webContents.on("page-favicon-updated", (_e, urls: string[]) => {
+    s.lastFavicons = urls;
+    if (!win.isDestroyed()) {
+      win.webContents.send("preview:did-update-favicon", {
+        favicon: urls[0] ?? null,
+      });
+    }
+  });
   view.webContents.on("did-finish-load", () => {
     void injectPreviewScrollbarStyles(s);
   });
 
   const forwardLoadingStart = () => {
     if (win.isDestroyed() || view.webContents.isDestroyed()) return;
+    s.lastFavicons = [];
+    if (!win.isDestroyed()) {
+      win.webContents.send("preview:did-update-favicon", { favicon: null });
+    }
     sendPreviewLoading(win, true);
   };
   const forwardLoadingStop = () => {
@@ -1703,6 +1692,14 @@ export function registerPreviewBrowserHandlers(): void {
     abortOverlayCapture(s, "cancelled");
   });
 
+  ipcMain.handle("preview:cancel-capture", (event): void => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed()) return;
+    const s = getSession(win);
+    if (!s.selectionOverlay) return;
+    abortOverlayCapture(s, "cancelled");
+  });
+
   ipcMain.handle(
     "preview:element-pick-hover",
     async (event, pt: { x: unknown; y: unknown }): Promise<{ ok: true } | { ok: false }> => {
@@ -1879,9 +1876,9 @@ export function registerPreviewBrowserHandlers(): void {
           parent: win,
           modal: false,
           x: Math.round(cb.x + b.x),
-          y: Math.round(cb.y + b.y - OVERLAY_PILL_HEIGHT),
+          y: Math.round(cb.y + b.y),
           width: Math.max(1, Math.round(b.width)),
-          height: Math.max(1, Math.round(b.height + OVERLAY_PILL_HEIGHT)),
+          height: Math.max(1, Math.round(b.height)),
           frame: false,
           transparent: true,
           hasShadow: false,
@@ -1956,9 +1953,9 @@ export function registerPreviewBrowserHandlers(): void {
           parent: win,
           modal: false,
           x: Math.round(cb.x + b.x),
-          y: Math.round(cb.y + b.y - OVERLAY_PILL_HEIGHT),
+          y: Math.round(cb.y + b.y),
           width: Math.max(1, Math.round(b.width)),
-          height: Math.max(1, Math.round(b.height + OVERLAY_PILL_HEIGHT)),
+          height: Math.max(1, Math.round(b.height)),
           frame: false,
           transparent: true,
           hasShadow: false,
