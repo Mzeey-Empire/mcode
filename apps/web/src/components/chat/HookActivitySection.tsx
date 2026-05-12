@@ -64,6 +64,51 @@ function StatusDot({ hasError, hasRunning }: { hasError: boolean; hasRunning: bo
   return <span className="size-1.5 rounded-full bg-diff-add-strong" />;
 }
 
+/** Shared row content for a single hook execution (name, trigger, status badges). */
+function HookRowContent({ hook, hasOutput, detailOpen }: { hook: HookExecution; hasOutput: boolean; detailOpen: boolean }) {
+  return (
+    <>
+      {hasOutput && (
+        <ChevronRight
+          className={cn(
+            "size-2.5 text-muted-foreground/40 transition-transform duration-150 shrink-0",
+            detailOpen && "rotate-90",
+          )}
+        />
+      )}
+      {!hasOutput && <span className="w-2.5 shrink-0" />}
+      <span className="font-mono text-xs text-foreground truncate">
+        {hook.hookName}
+      </span>
+      {hook.toolName && (
+        <span className="text-xs text-muted-foreground/50 truncate shrink-0">
+          triggered by {hook.toolName}
+        </span>
+      )}
+      <span className="ml-auto flex items-center gap-1.5 shrink-0">
+        {hook.status === "running" && (
+          <ElapsedTimer startedAt={hook.startedAt} />
+        )}
+        {hook.status === "completed" && hook.durationMs != null && (
+          <span className="font-mono tabular-nums text-xs text-muted-foreground">
+            {formatDuration(hook.durationMs)}
+          </span>
+        )}
+        {hook.status === "completed" && hook.exitCode != null && hook.exitCode !== 0 && (
+          <span className="font-mono text-[10px] px-1 rounded bg-diff-remove-strong/15 text-diff-remove-strong">
+            exit {hook.exitCode}
+          </span>
+        )}
+        {hook.didBlock && (
+          <span className="font-mono text-[10px] tracking-[0.12em] uppercase text-diff-remove-strong">
+            blocked
+          </span>
+        )}
+      </span>
+    </>
+  );
+}
+
 /** Row showing a single hook execution with optional expandable output. */
 const HookRow = memo(function HookRow({ hook }: { hook: HookExecution }) {
   const [detailOpen, setDetailOpen] = useState(false);
@@ -73,53 +118,25 @@ const HookRow = memo(function HookRow({ hook }: { hook: HookExecution }) {
   const hasMore = hook.fullOutput.length > OUTPUT_LINE_CAP;
   const outputText = useMemo(() => displayLines.join("\n"), [displayLines]);
 
+  const rowClasses = "flex items-center gap-2 py-0.5 w-full text-left";
+
+  // Hooks without output render as a static row (not focusable)
+  if (!hasOutput) {
+    return (
+      <div className={rowClasses}>
+        <HookRowContent hook={hook} hasOutput={false} detailOpen={false} />
+      </div>
+    );
+  }
+
   return (
-    <Collapsible open={detailOpen} onOpenChange={hasOutput ? setDetailOpen : undefined}>
+    <Collapsible open={detailOpen} onOpenChange={setDetailOpen}>
       <CollapsibleTrigger asChild>
         <button
           type="button"
-          className={cn(
-            "flex items-center gap-2 py-0.5 w-full text-left",
-            hasOutput && "cursor-pointer hover:bg-muted/30 rounded-sm",
-          )}
+          className={cn(rowClasses, "cursor-pointer hover:bg-muted/30 rounded-sm")}
         >
-          {hasOutput && (
-            <ChevronRight
-              className={cn(
-                "size-2.5 text-muted-foreground/40 transition-transform duration-150 shrink-0",
-                detailOpen && "rotate-90",
-              )}
-            />
-          )}
-          {!hasOutput && <span className="w-2.5 shrink-0" />}
-          <span className="font-mono text-xs text-foreground truncate">
-            {hook.hookName}
-          </span>
-          {hook.toolName && (
-            <span className="text-xs text-muted-foreground/50 truncate shrink-0">
-              triggered by {hook.toolName}
-            </span>
-          )}
-          <span className="ml-auto flex items-center gap-1.5 shrink-0">
-            {hook.status === "running" && (
-              <ElapsedTimer startedAt={hook.startedAt} />
-            )}
-            {hook.status === "completed" && hook.durationMs != null && (
-              <span className="font-mono tabular-nums text-xs text-muted-foreground">
-                {formatDuration(hook.durationMs)}
-              </span>
-            )}
-            {hook.status === "completed" && hook.exitCode != null && hook.exitCode !== 0 && (
-              <span className="font-mono text-[10px] px-1 rounded bg-diff-remove-strong/15 text-diff-remove-strong">
-                exit {hook.exitCode}
-              </span>
-            )}
-            {hook.didBlock && (
-              <span className="font-mono text-[10px] tracking-[0.12em] uppercase text-diff-remove-strong">
-                blocked
-              </span>
-            )}
-          </span>
+          <HookRowContent hook={hook} hasOutput detailOpen={detailOpen} />
         </button>
       </CollapsibleTrigger>
       {displayLines.length > 0 && (
@@ -128,13 +145,13 @@ const HookRow = memo(function HookRow({ hook }: { hook: HookExecution }) {
             <pre className="font-mono text-xs bg-muted/50 rounded-sm p-2 overflow-x-auto max-h-[300px] overflow-y-auto text-muted-foreground whitespace-pre-wrap break-all">
               {outputText}
             </pre>
-            {hasMore && !showAll && (
+            {hasMore && (
               <button
                 type="button"
-                onClick={() => setShowAll(true)}
+                onClick={() => setShowAll((v) => !v)}
                 className="text-xs text-primary hover:underline mt-0.5 cursor-pointer"
               >
-                Show all ({hook.fullOutput.length} lines)
+                {showAll ? `Show preview (${OUTPUT_LINE_CAP} lines)` : `Show all (${hook.fullOutput.length} lines)`}
               </button>
             )}
           </div>
