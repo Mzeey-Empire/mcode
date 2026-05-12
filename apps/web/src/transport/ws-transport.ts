@@ -738,7 +738,7 @@ export function createWsTransport(
 
     // Project actions
     /** List actions for a workspace. */
-    actionList: (workspaceId) => rpc<Action[]>("action.list", { workspaceId }),
+    actionList: (workspaceId) => rpc<{ actions: Action[]; lastActionId: string | null }>("action.list", { workspaceId }),
     /** Save (create/update) an action. */
     actionSave: (workspaceId, action) => rpc<Action>("action.save", { workspaceId, action }),
     /** Delete an action. */

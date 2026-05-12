@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { useActionStore } from "@/stores/actionStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { ActionDropdown } from "./ActionDropdown";
+import { ActionEditorDialog } from "./ActionEditorDialog";
 import { getLucideIcon } from "@/lib/action-icons";
 
 /** Duration in ms that the spinner replaces the action icon after a run is triggered. */
@@ -38,6 +39,7 @@ export function ActionTrigger() {
 
   const [running, setRunning] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [editorOpen, setEditorOpen] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Load actions whenever the active workspace changes.
@@ -115,10 +117,17 @@ export function ActionTrigger() {
             />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" sideOffset={4}>
-            <ActionDropdown onClose={() => setDropdownOpen(false)} />
+            <ActionDropdown
+              onClose={() => setDropdownOpen(false)}
+              onOpenEditor={() => setEditorOpen(true)}
+            />
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      {editorOpen && (
+        <ActionEditorDialog open={editorOpen} onOpenChange={setEditorOpen} />
+      )}
     </div>
   );
 }

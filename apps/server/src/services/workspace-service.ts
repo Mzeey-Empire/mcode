@@ -166,6 +166,12 @@ export class WorkspaceService {
       this.cleanupJobRepo.deleteByThreadId(t.id);
       this.attachmentService.removeForThread(t.id);
     }
+
+    // Clean up actions directory (best-effort; must not block force-delete)
+    this.actionService.removeDataDir(id).catch((err) =>
+      logger.warn("Failed to remove actions directory during force-delete", { workspaceId: id, err }),
+    );
+
     return this.workspaceRepo.hardDelete(id);
   }
 

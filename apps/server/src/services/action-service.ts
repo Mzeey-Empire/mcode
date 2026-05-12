@@ -1,12 +1,12 @@
 /**
  * Project action management service.
- * Reads, writes, watches, and runs workspace actions stored as JSON on disk.
+ * Reads, writes, and runs workspace actions stored as JSON on disk.
  * Follows the SettingsService pattern: file-based storage with in-memory cache,
- * atomic writes (temp + rename), debounced file watcher, and push broadcasts on change.
+ * atomic writes (temp + rename), and push broadcasts on change.
  */
 
 import { join } from "path";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, watch } from "fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "fs";
 import { rm } from "fs/promises";
 import { injectable, inject } from "tsyringe";
 import { type Action, type ActionsFile, ActionsFileSchema } from "@mcode/contracts";
@@ -28,15 +28,10 @@ function workspaceDataDir(workspaceId: string): string {
 /**
  * Manages project actions for workspaces.
  * Actions are stored in per-workspace JSON files and cached in memory.
- * External file edits are detected via fs.watch and broadcast to clients.
  */
 @injectable()
 export class ActionService {
   private cache = new Map<string, Action[]>();
-  private watchers = new Map<string, ReturnType<typeof watch>>();
-  private debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  /** Workspace IDs whose next watch event should be ignored (self-write). */
-  private selfWriteFlags = new Set<string>();
 
   constructor(
     @inject("WorkspaceRepo") private readonly workspaceRepo: WorkspaceRepo,
@@ -171,63 +166,8 @@ export class ActionService {
     }
   }
 
-  /**
-   * Start watching the actions file for external changes.
-   * Lazy: only activates for workspaces that have been accessed.
-   * Debounces watch events at 100ms to tolerate editor write+rename patterns.
-   */
-  startWatching(workspaceId: string): void {
-    if (this.watchers.has(workspaceId)) return;
-
-    const filePath = actionsFilePath(workspaceId);
-    const dir = workspaceDataDir(workspaceId);
-
-    // Watch the file if it exists, otherwise watch the directory so we can
-    // detect when the file is first created.
-    const target = existsSync(filePath) ? filePath : dir;
-    if (!existsSync(target)) return;
-
-    try {
-      const watcher = watch(target, () => {
-        if (this.selfWriteFlags.has(workspaceId)) {
-          this.selfWriteFlags.delete(workspaceId);
-          return;
-        }
-
-        const existing = this.debounceTimers.get(workspaceId);
-        if (existing) clearTimeout(existing);
-        this.debounceTimers.set(
-          workspaceId,
-          setTimeout(() => {
-            this.cache.delete(workspaceId);
-            this.list(workspaceId);
-            broadcast("action.changed", { workspaceId });
-          }, 100),
-        );
-      });
-      this.watchers.set(workspaceId, watcher);
-    } catch {
-      // Directory may not yet exist; caller can retry after creation.
-    }
-  }
-
-  /** Stop watching the actions file for a workspace. */
-  stopWatching(workspaceId: string): void {
-    const watcher = this.watchers.get(workspaceId);
-    if (watcher) {
-      watcher.close();
-      this.watchers.delete(workspaceId);
-    }
-    const timer = this.debounceTimers.get(workspaceId);
-    if (timer) {
-      clearTimeout(timer);
-      this.debounceTimers.delete(workspaceId);
-    }
-  }
-
   /** Remove the workspace data directory. Called during workspace deletion. */
   async removeDataDir(workspaceId: string): Promise<void> {
-    this.stopWatching(workspaceId);
     this.cache.delete(workspaceId);
     const dir = workspaceDataDir(workspaceId);
     if (existsSync(dir)) {
@@ -235,11 +175,8 @@ export class ActionService {
     }
   }
 
-  /** Stop all watchers and clear caches on server shutdown. */
+  /** Clear caches on server shutdown. */
   dispose(): void {
-    for (const [id] of this.watchers) {
-      this.stopWatching(id);
-    }
     this.cache.clear();
   }
 
@@ -252,13 +189,8 @@ export class ActionService {
     const json = JSON.stringify(data, null, 2);
     const tmpPath = filePath + ".tmp";
 
-    // Flag the next watch event as self-triggered to avoid re-reading our own write.
-    this.selfWriteFlags.add(workspaceId);
     writeFileSync(tmpPath, json, "utf-8");
     renameSync(tmpPath, filePath);
-
-    // Safety net: clear the flag after a window in case fs.watch never fires.
-    setTimeout(() => this.selfWriteFlags.delete(workspaceId), 500);
 
     this.cache.set(workspaceId, actions);
     broadcast("action.changed", { workspaceId });

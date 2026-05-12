@@ -367,8 +367,8 @@ export interface McodeTransport {
   setBackground(background: boolean): Promise<void>;
 
   // Project actions
-  /** List all actions for a workspace. */
-  actionList(workspaceId: string): Promise<Action[]>;
+  /** List all actions for a workspace, including the last-used action ID. */
+  actionList(workspaceId: string): Promise<{ actions: Action[]; lastActionId: string | null }>;
   /** Create or update an action for a workspace. */
   actionSave(workspaceId: string, action: Action): Promise<Action>;
   /** Delete an action from a workspace. */

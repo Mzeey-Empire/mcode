@@ -639,7 +639,10 @@ export const WS_METHODS = lazySchema(() => ({
   },
   "action.list": {
     params: z.object({ workspaceId: z.string() }),
-    result: z.array(ActionSchema()),
+    result: z.object({
+      actions: z.array(ActionSchema()),
+      lastActionId: z.string().nullable(),
+    }),
   },
   "action.save": {
     params: z.object({

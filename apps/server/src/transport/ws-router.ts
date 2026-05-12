@@ -844,7 +844,10 @@ async function dispatch(
 
     // Actions
     case "action.list":
-      return deps.actionService.list(params.workspaceId);
+      return {
+        actions: deps.actionService.list(params.workspaceId),
+        lastActionId: deps.workspaceRepo.getLastActionId(params.workspaceId),
+      };
     case "action.save":
       return deps.actionService.save(params.workspaceId, params.action);
     case "action.delete":

@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Settings } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
@@ -7,12 +6,13 @@ import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { getLucideIcon } from "@/lib/action-icons";
 import { getKeybindingForCommand, formatKeybinding } from "@/lib/keybinding-manager";
 import { isMac } from "@/lib/platform";
-import { ActionEditorDialog } from "./ActionEditorDialog";
 
 /** Props for the ActionDropdown component. */
 interface ActionDropdownProps {
   /** Called after an action is run or the editor dialog is opened to close the dropdown. */
   onClose: () => void;
+  /** Called when the user requests to open the action editor dialog. */
+  onOpenEditor: () => void;
 }
 
 /**
@@ -23,9 +23,7 @@ interface ActionDropdownProps {
  * item opens the action editor dialog. When no actions exist, an empty state with an
  * "Add Action..." link is shown instead.
  */
-export function ActionDropdown({ onClose }: ActionDropdownProps) {
-  const [editorOpen, setEditorOpen] = useState(false);
-
+export function ActionDropdown({ onClose, onOpenEditor }: ActionDropdownProps) {
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
 
@@ -45,7 +43,7 @@ export function ActionDropdown({ onClose }: ActionDropdownProps) {
 
   function handleOpenEditor() {
     onClose();
-    setEditorOpen(true);
+    onOpenEditor();
   }
 
   if (actions.length === 0) {
@@ -73,10 +71,6 @@ export function ActionDropdown({ onClose }: ActionDropdownProps) {
             Add Action...
           </button>
         </div>
-
-        {editorOpen && (
-          <ActionEditorDialog open={editorOpen} onOpenChange={setEditorOpen} />
-        )}
       </>
     );
   }
@@ -132,10 +126,6 @@ export function ActionDropdown({ onClose }: ActionDropdownProps) {
         <Settings size={13} className="shrink-0" />
         <span>Manage Actions...</span>
       </DropdownMenuItem>
-
-      {editorOpen && (
-        <ActionEditorDialog open={editorOpen} onOpenChange={setEditorOpen} />
-      )}
     </>
   );
 }
