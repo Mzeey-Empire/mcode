@@ -17,7 +17,7 @@ import type {
   ProviderModelInfo,
   CopilotSubagent,
 } from "./types";
-import type { CreateAndSendResult } from "@mcode/contracts";
+import type { CreateAndSendResult, Action } from "@mcode/contracts";
 import type { PaginatedMessages, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus, ProviderAvailability } from "@mcode/contracts";
 import type { ReasoningLevel } from "@mcode/contracts";
 import {
@@ -735,6 +735,18 @@ export function createWsTransport(
 
     // Memory pressure
     setBackground: (background) => rpc<void>("memory.setBackground", { background }),
+
+    // Project actions
+    /** List actions for a workspace. */
+    actionList: (workspaceId) => rpc<Action[]>("action.list", { workspaceId }),
+    /** Save (create/update) an action. */
+    actionSave: (workspaceId, action) => rpc<Action>("action.save", { workspaceId, action }),
+    /** Delete an action. */
+    actionDelete: (workspaceId, actionId) => rpc<boolean>("action.delete", { workspaceId, actionId }),
+    /** Run an action in a thread's terminal. */
+    actionRun: (workspaceId, actionId, threadId) => rpc<void>("action.run", { workspaceId, actionId, threadId }),
+    /** Reorder actions. */
+    actionReorder: (workspaceId, orderedIds) => rpc<boolean>("action.reorder", { workspaceId, orderedIds }),
 
     // Lifecycle
     close: () => {

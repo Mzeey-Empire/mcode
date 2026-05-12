@@ -32,6 +32,7 @@ import type {
   PermissionDecision,
   PermissionRequest,
   CreateAndSendResult,
+  Action,
 } from "@mcode/contracts";
 
 // Re-export shared types from the contracts package (single source of truth).
@@ -59,7 +60,7 @@ export type {
   ProviderModelInfo,
 } from "@mcode/contracts";
 
-export type { PaginatedMessages, ToolCallRecord, TurnSnapshot, CopilotSubagent } from "@mcode/contracts";
+export type { PaginatedMessages, ToolCallRecord, TurnSnapshot, CopilotSubagent, Action } from "@mcode/contracts";
 
 export { PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts";
 
@@ -364,4 +365,16 @@ export interface McodeTransport {
   // Memory pressure
   /** Notify server of window background/foreground state for memory management. */
   setBackground(background: boolean): Promise<void>;
+
+  // Project actions
+  /** List all actions for a workspace. */
+  actionList(workspaceId: string): Promise<Action[]>;
+  /** Create or update an action for a workspace. */
+  actionSave(workspaceId: string, action: Action): Promise<Action>;
+  /** Delete an action from a workspace. */
+  actionDelete(workspaceId: string, actionId: string): Promise<boolean>;
+  /** Run an action in a thread's terminal. */
+  actionRun(workspaceId: string, actionId: string, threadId: string): Promise<void>;
+  /** Persist a new display order for all actions in a workspace. */
+  actionReorder(workspaceId: string, orderedIds: string[]): Promise<boolean>;
 }

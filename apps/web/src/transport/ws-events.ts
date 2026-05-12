@@ -10,6 +10,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import { useSkillsStore } from "@/stores/skillsStore";
 import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
+import { useActionStore } from "@/stores/actionStore";
 
 /** Unsubscribe handles for all push listeners. */
 let unsubs: (() => void)[] = [];
@@ -43,6 +44,8 @@ const _legacyEncoder = new TextEncoder();
  * - `workspace.orderChanged` -- sidebar project order changed on the server; refreshes workspace list
  * - `workspace.deleted` -- workspace hard-delete complete; removes it from local state
  * - `workspace.deleteFailed` -- workspace deletion permanently stuck; reloads workspace list
+ * - `action.changed` -- actions file was modified (external edit or server save); re-fetches for the workspace
+ * - `action.ran` -- an action was executed; updates last-used metadata in actionStore
  */
 export function startPushListeners(): void {
   // Guard against double-init
@@ -369,6 +372,29 @@ export function startPushListeners(): void {
       // Reject malformed payloads rather than overwriting the store with garbage.
       if (!Array.isArray(data)) return;
       useProviderAvailabilityStore.getState().replace(data as ProviderAvailability[]);
+    }),
+  );
+
+  // action.changed: actions file was modified (external edit or server save)
+  unsubs.push(
+    pushEmitter.on("action.changed", (data) => {
+      const { workspaceId } = data as { workspaceId: string };
+      if (workspaceId) {
+        useActionStore.getState().handleActionsChanged(workspaceId);
+      }
+    }),
+  );
+
+  // action.ran: an action was executed, update last-used
+  unsubs.push(
+    pushEmitter.on("action.ran", (data) => {
+      const { workspaceId, actionId } = data as {
+        workspaceId: string;
+        actionId: string;
+      };
+      if (workspaceId && actionId) {
+        useActionStore.getState().handleActionRan(workspaceId, actionId);
+      }
     }),
   );
 

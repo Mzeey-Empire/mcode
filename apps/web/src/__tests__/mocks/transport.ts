@@ -180,4 +180,9 @@ export const mockTransport: McodeTransport = {
     model: "mock-model",
     createdAt: new Date().toISOString(),
   }),
+  actionList: vi.fn().mockResolvedValue([]),
+  actionSave: vi.fn().mockResolvedValue(undefined),
+  actionDelete: vi.fn().mockResolvedValue(true),
+  actionRun: vi.fn().mockResolvedValue(undefined),
+  actionReorder: vi.fn().mockResolvedValue(true),
 };
