@@ -1765,7 +1765,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         if (addedLines.length === 0) return state;
         const next = [...hooks];
         const target = next[idx]!;
-        const fullOutput = [...target.fullOutput, ...addedLines];
+        // Cap retained output to prevent unbounded memory growth from verbose hooks
+        const raw = [...target.fullOutput, ...addedLines];
+        const fullOutput = raw.length > 500 ? raw.slice(-500) : raw;
         next[idx] = { ...target, fullOutput, outputLines: fullOutput.slice(-20) };
         return { hooksByThread: { ...state.hooksByThread, [threadId]: next } };
       });
