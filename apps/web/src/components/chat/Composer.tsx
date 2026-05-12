@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo, lazy, Suspense } from "react";
-import { useThreadStore } from "@/stores/threadStore";
+import { useThreadStore, scheduleDrainAfterEdit } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import type { PermissionMode, InteractionMode, AttachmentMeta } from "@/transport";
 import { PERMISSION_MODES, INTERACTION_MODES, getTransport } from "@/transport";
@@ -1195,6 +1195,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
 
       editingOriginalRef.current = popped;
       setEditingFromQueue({ messageId: popped.id, originalIndex: targetIndex });
+      useQueueStore.getState().setEditingThreadId(threadId);
 
       const text = popped.displayContent || popped.content;
       setInput(text);
@@ -1285,6 +1286,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     }
     editingOriginalRef.current = null;
     setEditingFromQueue(null);
+    useQueueStore.getState().setEditingThreadId(null);
+    scheduleDrainAfterEdit(threadId);
     setInput("");
     setAttachments([]);
     if (editorRef.current) {
@@ -1605,6 +1608,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         const slot = editingFromQueue.originalIndex;
         editingOriginalRef.current = null;
         setEditingFromQueue(null);
+        useQueueStore.getState().setEditingThreadId(null);
+        if (threadId) scheduleDrainAfterEdit(threadId);
         useToastStore
           .getState()
           .show("info", "Removed from queue", `Slot ${String(slot + 1).padStart(2, "0")}`);
@@ -1671,6 +1676,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       }
       editingOriginalRef.current = null;
       setEditingFromQueue(null);
+      useQueueStore.getState().setEditingThreadId(null);
 
       setInput("");
       if (threadId) clearDraftFromStore(threadId);
@@ -1736,6 +1742,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     // Edit mode ends on send regardless of which path we took.
     editingOriginalRef.current = null;
     setEditingFromQueue(null);
+    useQueueStore.getState().setEditingThreadId(null);
     const currentAttachments = collectAndClearAttachments();
     if (threadId) clearDraftFromStore(threadId);
     // Hide the reply bar with the composer reset; sendMessage still receives reply IDs from this render.
@@ -1976,23 +1983,6 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
           onSendNow={async (msg) => {
             const popped = useQueueStore.getState().popMessage(threadId, msg.id);
             if (!popped) return;
-            stopAgent(threadId);
-            if (useThreadStore.getState().runningThreadIds.has(threadId)) {
-              await new Promise<void>((resolve) => {
-                let settled = false;
-                const finish = () => {
-                  if (settled) return;
-                  settled = true;
-                  clearTimeout(timer);
-                  unsub();
-                  resolve();
-                };
-                const timer = setTimeout(finish, 1500);
-                const unsub = useThreadStore.subscribe((state) => {
-                  if (!state.runningThreadIds.has(threadId)) finish();
-                });
-              });
-            }
             try {
               await sendMessage(
                 threadId,

@@ -39,7 +39,15 @@ interface QueueState {
   queues: Record<string, QueuedMessage[]>;
   /** Toast text shown briefly after enqueue. Null when hidden. */
   toast: string | null;
+  /**
+   * Thread ID whose queue is currently frozen because the user is editing
+   * a message in the composer. Auto-drain skips this thread until the edit
+   * is saved or cancelled.
+   */
+  editingThreadId: string | null;
 
+  /** Mark a thread as having an in-progress queue edit (or clear it). */
+  setEditingThreadId: (threadId: string | null) => void;
   enqueue: (
     threadId: string,
     message: Omit<QueuedMessage, "id" | "queuedAt">,
@@ -95,6 +103,9 @@ function showToast(set: (partial: Partial<QueueState>) => void, text: string) {
 export const useQueueStore = create<QueueState>((set, get) => ({
   queues: {},
   toast: null,
+  editingThreadId: null,
+
+  setEditingThreadId: (threadId) => set({ editingThreadId: threadId }),
 
   enqueue: (threadId, message) => {
     const current = get().queues[threadId] ?? [];
