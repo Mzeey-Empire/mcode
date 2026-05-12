@@ -203,6 +203,10 @@ separate non-transactional step or applied manually outside `migrate()`.
 - **E2E headed:** `cd apps/web && bun run e2e:headed` (opens browser to watch)
 - **Screenshots:** E2E tests save screenshots to `apps/web/e2e/screenshots/` for visual verification
 
+## Agent Development Workflow
+
+@docs/guides/agent-workflow.md
+
 ## Worktrees
 
 Feature work uses git worktrees for isolation. Create them with:
