@@ -97,6 +97,13 @@ export const WS_CHANNELS = {
     workspacePath: z.string(),
     reason: z.string(),
   }),
+  /** Emitted when the actions file changes (external edit, save, delete, reorder). */
+  "action.changed": z.object({ workspaceId: z.string() }),
+  /** Emitted after an action is executed, so UI can update last-used indicator. */
+  "action.ran": z.object({
+    workspaceId: z.string(),
+    actionId: z.string(),
+  }),
 } as const;
 
 /** Union of all push channel names. */

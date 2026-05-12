@@ -26,6 +26,7 @@ import { ProviderUsageInfoSchema } from "../providers/usage.js";
 import { ProviderAvailabilitySchema } from "../providers/availability.js";
 import { CopilotSubagentSchema, CopilotAgentNameSchema } from "../providers/copilot-agent.js";
 import { PermissionDecisionSchema, PermissionRequestSchema } from "../models/permission.js";
+import { ActionSchema } from "../models/action.js";
 
 /** Schema for creating a new thread. */
 export const CreateThreadSchema = lazySchema(() =>
@@ -635,6 +636,39 @@ export const WS_METHODS = lazySchema(() => ({
       model: z.string(),
       createdAt: z.string(),
     }),
+  },
+  "action.list": {
+    params: z.object({ workspaceId: z.string() }),
+    result: z.array(ActionSchema()),
+  },
+  "action.save": {
+    params: z.object({
+      workspaceId: z.string(),
+      action: ActionSchema(),
+    }),
+    result: ActionSchema(),
+  },
+  "action.delete": {
+    params: z.object({
+      workspaceId: z.string(),
+      actionId: z.string(),
+    }),
+    result: z.boolean(),
+  },
+  "action.run": {
+    params: z.object({
+      workspaceId: z.string(),
+      actionId: z.string(),
+      threadId: z.string(),
+    }),
+    result: z.void(),
+  },
+  "action.reorder": {
+    params: z.object({
+      workspaceId: z.string(),
+      orderedIds: z.array(z.string()),
+    }),
+    result: z.boolean(),
   },
 } as const));
 
