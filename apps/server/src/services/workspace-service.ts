@@ -13,6 +13,7 @@ import { ThreadRepo } from "../repositories/thread-repo";
 import { CleanupJobRepo } from "../repositories/cleanup-job-repo";
 import { AttachmentService } from "./attachment-service";
 import { AgentService } from "./agent-service.js";
+import { ActionService } from "./action-service.js";
 import { logger } from "@mcode/shared";
 
 /** Handles workspace creation, listing, and two-phase deletion. */
@@ -24,6 +25,7 @@ export class WorkspaceService {
     @inject(CleanupJobRepo) private readonly cleanupJobRepo: CleanupJobRepo,
     @inject(AttachmentService) private readonly attachmentService: AttachmentService,
     @inject(AgentService) private readonly agentService: AgentService,
+    @inject(ActionService) private readonly actionService: ActionService,
   ) {}
 
   /**
@@ -135,6 +137,11 @@ export class WorkspaceService {
     if (pendingJobs === 0) {
       this.workspaceRepo.hardDelete(id);
     }
+
+    // Clean up actions data directory
+    this.actionService.removeDataDir(id).catch((err) =>
+      logger.warn("Failed to remove actions directory", { workspaceId: id, err }),
+    );
 
     return true;
   }
