@@ -66,17 +66,20 @@ function makeStaticComponents(variant: "assistant" | "user") {
             if (!safeHref) return;
             e.preventDefault();
 
-            // Ctrl+click (Cmd+click on Mac) opens in the browser preview panel
+            // Ctrl+click (Cmd+click on Mac) opens HTTP(S) links in the browser preview panel
             const isModifierClick = e.ctrlKey || e.metaKey;
-            if (isModifierClick && window.desktopBridge?.preview) {
+            const isPreviewable = safeHref.startsWith("http:") || safeHref.startsWith("https:");
+            if (isModifierClick && isPreviewable && window.desktopBridge?.preview) {
               const threadId = useWorkspaceStore.getState().activeThreadId;
               if (threadId) {
                 const { showRightPanel, setRightPanelTab } = useDiffStore.getState();
                 showRightPanel(threadId);
                 setRightPanelTab(threadId, "preview");
-                window.desktopBridge.preview.navigate(safeHref);
+                // Defer navigation so React can re-render and sync BrowserView bounds
+                setTimeout(() => window.desktopBridge!.preview!.navigate(safeHref), 0);
+                return;
               }
-              return;
+              // No active thread; fall through to open externally
             }
 
             if (window.desktopBridge?.openExternalUrl) {
