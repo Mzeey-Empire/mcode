@@ -331,6 +331,15 @@ export class TerminalService {
     }));
   }
 
+  /** List active PTY session IDs for a thread. Used by ActionService to find an existing terminal. */
+  listByThread(threadId: string): Array<{ ptyId: string }> {
+    const ptyIds = this.threadIndex.get(threadId);
+    if (!ptyIds) return [];
+    return [...ptyIds]
+      .filter((id) => this.sessions.has(id))
+      .map((ptyId) => ({ ptyId }));
+  }
+
   /**
    * Returns whether a PTY has non-shell child processes running.
    * Used by the optional kill confirmation feature (#315).

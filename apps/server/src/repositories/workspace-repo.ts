@@ -246,4 +246,19 @@ export class WorkspaceRepo {
       .prepare("UPDATE workspaces SET is_git_repo = ? WHERE id = ?")
       .run(isGitRepo ? 1 : 0, id);
   }
+
+  /** Update the last-used action ID for a workspace. */
+  updateLastActionId(workspaceId: string, actionId: string): void {
+    this.db
+      .prepare("UPDATE workspaces SET last_action_id = ? WHERE id = ?")
+      .run(actionId, workspaceId);
+  }
+
+  /** Get the last-used action ID for a workspace. Returns null if not set. */
+  getLastActionId(workspaceId: string): string | null {
+    const row = this.db
+      .prepare("SELECT last_action_id FROM workspaces WHERE id = ?")
+      .get(workspaceId) as { last_action_id: string | null } | undefined;
+    return row?.last_action_id ?? null;
+  }
 }
