@@ -7,6 +7,8 @@ import {
 import {
   ArrowLeft,
   ArrowRight,
+  Check,
+  ChevronsUpDown,
   Crosshair,
   Crop,
   ExternalLink,
@@ -14,7 +16,12 @@ import {
   Globe,
   ImagePlus,
   Loader2,
+  MonitorSmartphone,
+  Pencil,
+  Repeat2,
   RotateCw,
+  Settings2,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -23,14 +30,44 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import {
+  Command,
+  CommandInput,
+  CommandList,
+  CommandGroup,
+  CommandItem,
+  CommandSeparator,
+  CommandEmpty,
+} from "@/components/ui/command";
 import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
 import { useToastStore } from "@/stores/toastStore";
 import { usePreviewReferenceQueueStore } from "@/stores/previewReferenceQueueStore";
 import type { McodeBrowserCapture } from "@mcode/contracts";
+import {
+  BROWSER_PREVIEW_DEVICE_PRESETS,
+  findBrowserPreviewDevicePreset,
+  MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME,
+  PREVIEW_DEVICE_EMULATION_OFF,
+  type PreviewDeviceEmulationConfig,
+} from "@mcode/contracts";
 import { SmartOmnibox } from "./SmartOmnibox";
-import { MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME } from "@mcode/contracts";
+
+/**
+ * Returns a short human-readable label for the current device emulation config.
+ * Used in the picker trigger button to show what's currently selected.
+ */
+function previewDeviceDisplayLabel(cfg: PreviewDeviceEmulationConfig): string {
+  if (cfg.kind === "off") return "Desktop";
+  if (cfg.kind === "custom") return `${cfg.width}×${cfg.height}`;
+  const p = findBrowserPreviewDevicePreset(cfg.presetId);
+  if (!p) return cfg.presetId;
+  const w = cfg.orientation === "landscape" ? p.height : p.width;
+  const h = cfg.orientation === "landscape" ? p.width : p.height;
+  return `${p.label} ${w}×${h}`;
+}
 
 const NAV_ERROR_LABEL: Record<string, string> = {
   "no-bounds": "Wait for the panel to finish layout, then try again.",
@@ -120,6 +157,15 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
   const storedUrl = useDiffStore(
     (s) => s.previewUrlByThread[threadId] ?? "",
   );
+  const deviceEmu = useDiffStore(
+    (s) => s.previewDeviceEmulationByThread[threadId] ?? PREVIEW_DEVICE_EMULATION_OFF,
+  );
+  const setDeviceEmu = useDiffStore((s) => s.setPreviewDeviceEmulationForThread);
+  const [devicePickerOpen, setDevicePickerOpen] = useState(false);
+  const [customEditing, setCustomEditing] = useState(false);
+  const [customW, setCustomW] = useState("390");
+  const [customH, setCustomH] = useState("844");
+  const customWRef = useRef<HTMLInputElement>(null);
   const workspacePath = useWorkspaceStore(
     (s) => s.workspaces.find((w) => w.id === workspaceId)?.path ?? null,
   );
@@ -152,6 +198,7 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
           threadId,
           resumeUrlHint: hint,
           workspaceId: workspaceId ?? null,
+          deviceEmulation: deviceEmu,
         });
         return;
       }
@@ -167,9 +214,10 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
         threadId,
         resumeUrlHint: hint,
         workspaceId: workspaceId ?? null,
+        deviceEmulation: deviceEmu,
       });
     },
-    [threadId, storedUrl, workspaceId],
+    [threadId, storedUrl, workspaceId, deviceEmu],
   );
 
   useEffect(() => {
@@ -406,6 +454,182 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
 
         {/* Toolbar: nav | capture | external */}
         <div className="flex min-w-0 items-center">
+          {/* Device emulation group */}
+          <div className="flex items-center gap-0.5">
+            {customEditing ? (
+              <div className="flex h-7 items-center gap-1 rounded-md border border-primary/50 bg-background px-1.5 font-mono text-xs text-primary animate-fade-up-in">
+                <MonitorSmartphone className="size-3 shrink-0" aria-hidden />
+                <input
+                  ref={customWRef}
+                  type="text"
+                  inputMode="numeric"
+                  className="h-5 w-12 rounded border-none bg-muted px-1 text-center text-xs outline-none focus:ring-1 focus:ring-primary/50"
+                  value={customW}
+                  onChange={(e) => setCustomW(e.target.value.replace(/\D/g, ""))}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      const w = Number.parseInt(customW, 10);
+                      const h = Number.parseInt(customH, 10);
+                      if (w >= 100 && h >= 100) {
+                        setDeviceEmu(threadId, { kind: "custom", width: Math.min(w, 8192), height: Math.min(h, 8192), deviceScaleFactor: 2 });
+                        setCustomEditing(false);
+                      }
+                    }
+                    if (e.key === "Escape") setCustomEditing(false);
+                  }}
+                  aria-label="Viewport width"
+                />
+                <span className="text-muted-foreground">×</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  className="h-5 w-12 rounded border-none bg-muted px-1 text-center text-xs outline-none focus:ring-1 focus:ring-primary/50"
+                  value={customH}
+                  onChange={(e) => setCustomH(e.target.value.replace(/\D/g, ""))}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      const w = Number.parseInt(customW, 10);
+                      const h = Number.parseInt(customH, 10);
+                      if (w >= 100 && h >= 100) {
+                        setDeviceEmu(threadId, { kind: "custom", width: Math.min(w, 8192), height: Math.min(h, 8192), deviceScaleFactor: 2 });
+                        setCustomEditing(false);
+                      }
+                    }
+                    if (e.key === "Escape") setCustomEditing(false);
+                  }}
+                  aria-label="Viewport height"
+                />
+                <Button type="button" variant="ghost" size="icon-xs" className="shrink-0 text-primary"
+                  onClick={() => {
+                    const w = Number.parseInt(customW, 10);
+                    const h = Number.parseInt(customH, 10);
+                    if (w >= 100 && h >= 100) {
+                      setDeviceEmu(threadId, { kind: "custom", width: Math.min(w, 8192), height: Math.min(h, 8192), deviceScaleFactor: 2 });
+                      setCustomEditing(false);
+                    }
+                  }}
+                  aria-label="Apply custom dimensions"
+                >
+                  <Check size={14} aria-hidden />
+                </Button>
+                <Button type="button" variant="ghost" size="icon-xs" className="shrink-0 text-muted-foreground"
+                  onClick={() => setCustomEditing(false)} aria-label="Cancel"
+                >
+                  <X size={14} aria-hidden />
+                </Button>
+              </div>
+            ) : (
+              <>
+                <Popover open={devicePickerOpen} onOpenChange={setDevicePickerOpen}>
+                  <PopoverTrigger
+                    render={
+                      <Button type="button" variant="outline" size="sm"
+                        className={cn(
+                          "h-7 max-w-[13rem] justify-between gap-1 px-2 font-mono text-xs",
+                          deviceEmu.kind !== "off" && "border-primary/50 text-primary glow-primary",
+                        )}
+                        aria-label="Preview device frame"
+                      >
+                        <MonitorSmartphone className="size-3 shrink-0" aria-hidden />
+                        <span className="truncate">{previewDeviceDisplayLabel(deviceEmu)}</span>
+                        <ChevronsUpDown className="size-3 shrink-0 opacity-50" aria-hidden />
+                      </Button>
+                    }
+                  />
+                  <PopoverContent side="bottom" sideOffset={6} className="w-[15rem] p-0 font-mono text-xs">
+                    <Command>
+                      <CommandInput placeholder="Search devices..." className="h-8 text-xs" />
+                      <CommandList>
+                        <CommandEmpty>No device found.</CommandEmpty>
+                        <CommandGroup>
+                          <CommandItem onSelect={() => {
+                            setDeviceEmu(threadId, { kind: "off" });
+                            setDevicePickerOpen(false);
+                          }}>
+                            <Check className={cn("size-3", deviceEmu.kind === "off" ? "opacity-100" : "opacity-0")} />
+                            Desktop
+                          </CommandItem>
+                          {BROWSER_PREVIEW_DEVICE_PRESETS.map((p) => {
+                            const active = deviceEmu.kind === "preset" && deviceEmu.presetId === p.id;
+                            return (
+                              <CommandItem key={p.id} onSelect={() => {
+                                const orientation = deviceEmu.kind === "preset" && deviceEmu.presetId === p.id
+                                  ? deviceEmu.orientation : "portrait";
+                                setDeviceEmu(threadId, { kind: "preset", presetId: p.id, orientation });
+                                setDevicePickerOpen(false);
+                              }}>
+                                <Check className={cn("size-3", active ? "opacity-100" : "opacity-0")} />
+                                <span className="flex-1 truncate">{p.label}</span>
+                                <span className="text-muted-foreground">{p.width}×{p.height}</span>
+                              </CommandItem>
+                            );
+                          })}
+                        </CommandGroup>
+                        <CommandSeparator />
+                        <CommandGroup>
+                          <CommandItem onSelect={() => {
+                            setDevicePickerOpen(false);
+                            if (deviceEmu.kind === "custom") {
+                              setCustomW(String(deviceEmu.width));
+                              setCustomH(String(deviceEmu.height));
+                            } else {
+                              setCustomW("390");
+                              setCustomH("844");
+                            }
+                            setCustomEditing(true);
+                            requestAnimationFrame(() => customWRef.current?.select());
+                          }}>
+                            <Settings2 className="size-3" />
+                            Custom...
+                          </CommandItem>
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+                {deviceEmu.kind === "preset" && (
+                  <Tooltip>
+                    <TooltipTrigger render={
+                      <Button type="button" variant="ghost" size="icon-xs" className="shrink-0 text-primary"
+                        onClick={() => {
+                          setDeviceEmu(threadId, {
+                            kind: "preset", presetId: deviceEmu.presetId,
+                            orientation: deviceEmu.orientation === "portrait" ? "landscape" : "portrait",
+                          });
+                        }}
+                        aria-label="Rotate device frame"
+                      >
+                        <Repeat2 size={14} aria-hidden />
+                      </Button>
+                    } />
+                    <TooltipContent side="bottom" sideOffset={6} className="text-xs">Toggle portrait / landscape</TooltipContent>
+                  </Tooltip>
+                )}
+                {deviceEmu.kind === "custom" && (
+                  <Tooltip>
+                    <TooltipTrigger render={
+                      <Button type="button" variant="ghost" size="icon-xs" className="shrink-0 text-primary"
+                        onClick={() => {
+                          setCustomW(String(deviceEmu.width));
+                          setCustomH(String(deviceEmu.height));
+                          setCustomEditing(true);
+                          requestAnimationFrame(() => customWRef.current?.select());
+                        }}
+                        aria-label="Edit custom dimensions"
+                      >
+                        <Pencil size={14} aria-hidden />
+                      </Button>
+                    } />
+                    <TooltipContent side="bottom" sideOffset={6} className="text-xs">Edit dimensions</TooltipContent>
+                  </Tooltip>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Separator: device | nav */}
+          <div className="mx-1 h-4 w-px bg-border/40" aria-hidden />
+
           {/* Navigation group */}
           <div className="flex items-center gap-0.5">
             <Tooltip>
@@ -573,7 +797,10 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
       {/* BrowserView placeholder / empty state */}
       <div
         ref={surfaceRef}
-        className="relative mx-2 mb-2 mt-1 min-h-[min(40vh,20rem)] min-w-0 flex-1 rounded-md border border-dashed border-border/50 bg-muted/10"
+        className={cn(
+          "relative mx-2 mb-2 mt-1 min-h-[min(40vh,20rem)] min-w-0 flex-1 rounded-md border border-dashed border-border/50 bg-muted/10",
+          deviceEmu.kind !== "off" && "bg-muted",
+        )}
         aria-hidden
       >
         {/* Loading: thin indeterminate progress bar at top of content area */}
