@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, memo } from "react";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { HookExecution } from "@/transport/types";
@@ -61,12 +61,13 @@ function StatusDot({ hasError, hasRunning }: { hasError: boolean; hasRunning: bo
 }
 
 /** Row showing a single hook execution with optional expandable output. */
-function HookRow({ hook }: { hook: HookExecution }) {
+const HookRow = memo(function HookRow({ hook }: { hook: HookExecution }) {
   const [detailOpen, setDetailOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const hasOutput = hook.fullOutput.length > 0;
   const displayLines = showAll ? hook.fullOutput : hook.outputLines;
   const hasMore = hook.fullOutput.length > OUTPUT_LINE_CAP;
+  const outputText = useMemo(() => displayLines.join("\n"), [displayLines]);
 
   return (
     <div>
@@ -119,7 +120,7 @@ function HookRow({ hook }: { hook: HookExecution }) {
       {detailOpen && displayLines.length > 0 && (
         <div className="ml-2.5 mt-0.5 mb-1">
           <pre className="font-mono text-xs bg-muted/50 rounded-sm p-2 overflow-x-auto max-h-[300px] overflow-y-auto text-muted-foreground whitespace-pre-wrap break-all">
-            {displayLines.join("\n")}
+            {outputText}
           </pre>
           {hasMore && !showAll && (
             <button
@@ -134,7 +135,7 @@ function HookRow({ hook }: { hook: HookExecution }) {
       )}
     </div>
   );
-}
+});
 
 /** Live-updating elapsed time display for a running hook. */
 function ElapsedTimer({ startedAt }: { startedAt: number }) {
