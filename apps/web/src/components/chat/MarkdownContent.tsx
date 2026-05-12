@@ -24,6 +24,9 @@ const plugins = [remarkGfm];
 /** Lazy-loaded MermaidBlock - only fetched when a mermaid fence is encountered. */
 const LazyMermaidBlock = lazy(() => import("./MermaidBlock"));
 
+/** Whether the current platform is macOS (for modifier key labels). */
+const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+
 /**
  * Builds the static component overrides that depend on `variant`.
  * Elements whose colors differ between assistant and user bubble are variant-conditional.
@@ -62,6 +65,11 @@ function makeStaticComponents(variant: "assistant" | "user") {
           className={linkClass}
           target="_blank"
           rel="noopener noreferrer"
+          title={
+            window.desktopBridge?.preview
+              ? `${isMac ? "\u2318" : "Ctrl"}+click to open in preview`
+              : undefined
+          }
           onClick={(e) => {
             if (!safeHref) return;
             e.preventDefault();
