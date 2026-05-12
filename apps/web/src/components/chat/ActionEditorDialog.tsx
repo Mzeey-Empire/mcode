@@ -450,6 +450,7 @@ function EditView({
           placeholder="e.g. Run Tests"
           value={draft.name}
           onChange={(e) => onDraftChange({ ...draft, name: e.target.value })}
+          required
           autoFocus
         />
       </div>
@@ -465,6 +466,7 @@ function EditView({
           placeholder="e.g. bun run test"
           value={draft.command}
           onChange={(e) => onDraftChange({ ...draft, command: e.target.value })}
+          required
           className="font-mono"
         />
       </div>
