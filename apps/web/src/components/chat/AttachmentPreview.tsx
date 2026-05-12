@@ -55,7 +55,11 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
   return (
     <div className="flex gap-2 overflow-x-auto px-3 py-2">
       {attachments.map((att) => {
-        const isImage = att.mimeType.startsWith("image/");
+        // Image tiles need a blob preview URL. Attachments rehydrated from
+        // disk-side metadata (e.g. restored from the message queue) have no
+        // blob URL, so they fall through to the generic file tile instead of
+        // rendering a broken <img>.
+        const isImage = att.mimeType.startsWith("image/") && !!att.previewUrl;
         const isPdf = att.mimeType === "application/pdf";
         const isContextOnly =
           att.contextOnly === true || isVirtualBrowserContextAttachment(att.mimeType);

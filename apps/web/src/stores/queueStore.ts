@@ -47,6 +47,41 @@ interface QueueState {
   dequeueNext: (threadId: string) => QueuedMessage | undefined;
   removeFromQueue: (threadId: string, messageId: string) => void;
   clearQueue: (threadId: string) => void;
+  /**
+   * Rewrite the content (and optional display variant) of a queued message
+   * without changing its position or other metadata. No-op if the message
+   * is no longer in the queue.
+   */
+  editMessage: (
+    threadId: string,
+    messageId: string,
+    content: string,
+    displayContent?: string,
+  ) => void;
+  /**
+   * Move a queued message to a new index (0-based). Indices are clamped to the
+   * queue length. No-op if the message is no longer in the queue.
+   */
+  moveMessage: (threadId: string, messageId: string, toIndex: number) => void;
+  /**
+   * Remove a specific queued message and return it. Used by "Send now" to
+   * extract a message before promoting it past the running turn.
+   * Does NOT release browser-capture spills (the caller is sending the
+   * message and still owns them).
+   */
+  popMessage: (threadId: string, messageId: string) => QueuedMessage | undefined;
+  /**
+   * Insert a message at a specific index (clamped). Used when the user
+   * saves an edit pulled out via `popMessage` - the edited message goes
+   * back to the same slot it was extracted from, instead of being appended
+   * to the tail by `enqueue`. Honours the {@link MAX_QUEUE_DEPTH} cap.
+   * Returns false when the queue is full (caller may release spills).
+   */
+  insertAt: (
+    threadId: string,
+    index: number,
+    message: Omit<QueuedMessage, "id" | "queuedAt">,
+  ) => boolean;
 }
 
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
@@ -125,5 +160,71 @@ export const useQueueStore = create<QueueState>((set, get) => ({
       delete next[threadId];
       return { queues: next };
     });
+  },
+
+  editMessage: (threadId, messageId, content, displayContent) => {
+    set((state) => {
+      const current = state.queues[threadId];
+      if (!current) return state;
+      const idx = current.findIndex((m) => m.id === messageId);
+      if (idx === -1) return state;
+      const updated: QueuedMessage = {
+        ...current[idx],
+        content,
+        displayContent: displayContent ?? content,
+      };
+      const nextList = [...current];
+      nextList[idx] = updated;
+      return { queues: { ...state.queues, [threadId]: nextList } };
+    });
+  },
+
+  moveMessage: (threadId, messageId, toIndex) => {
+    set((state) => {
+      const current = state.queues[threadId];
+      if (!current || current.length < 2) return state;
+      const fromIndex = current.findIndex((m) => m.id === messageId);
+      if (fromIndex === -1) return state;
+      const clamped = Math.max(0, Math.min(toIndex, current.length - 1));
+      if (clamped === fromIndex) return state;
+      const nextList = [...current];
+      const [item] = nextList.splice(fromIndex, 1);
+      nextList.splice(clamped, 0, item);
+      return { queues: { ...state.queues, [threadId]: nextList } };
+    });
+  },
+
+  popMessage: (threadId, messageId) => {
+    const current = get().queues[threadId];
+    if (!current) return undefined;
+    const msg = current.find((m) => m.id === messageId);
+    if (!msg) return undefined;
+    set((state) => ({
+      queues: {
+        ...state.queues,
+        [threadId]: (state.queues[threadId] ?? []).filter((m) => m.id !== messageId),
+      },
+    }));
+    return msg;
+  },
+
+  insertAt: (threadId, index, message) => {
+    const current = get().queues[threadId] ?? [];
+    if (current.length >= MAX_QUEUE_DEPTH) {
+      showToast(set, "Queue full");
+      return false;
+    }
+    const clamped = Math.max(0, Math.min(index, current.length));
+    const entry: QueuedMessage = {
+      ...message,
+      id: crypto.randomUUID(),
+      queuedAt: Date.now(),
+    };
+    const nextList = [...current];
+    nextList.splice(clamped, 0, entry);
+    set((state) => ({
+      queues: { ...state.queues, [threadId]: nextList },
+    }));
+    return true;
   },
 }));

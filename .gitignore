@@ -50,6 +50,7 @@ Thumbs.db
 playwright-report/
 test-results/
 apps/web/e2e/screenshots/
+.playwright-mcp/
 
 # Plans and superpowers (local working docs)
 docs/plans/
