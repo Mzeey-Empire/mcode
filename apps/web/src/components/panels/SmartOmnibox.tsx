@@ -7,6 +7,7 @@ import {
   type UseOmniboxStateOptions,
 } from "./useOmniboxState";
 
+/** Props for the hybrid title-or-URL omnibox, including navigate callback from the preview panel. */
 export interface SmartOmniboxProps extends UseOmniboxStateOptions {
   /** Called when user submits a URL (Enter or Go button). */
   onNavigate: (url: string) => void;

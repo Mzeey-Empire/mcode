@@ -1257,6 +1257,10 @@ function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
 
   const forwardLoadingStart = () => {
     if (win.isDestroyed() || view.webContents.isDestroyed()) return;
+    s.lastFavicons = [];
+    if (!win.isDestroyed()) {
+      win.webContents.send("preview:did-update-favicon", { favicon: null });
+    }
     sendPreviewLoading(win, true);
   };
   const forwardLoadingStop = () => {

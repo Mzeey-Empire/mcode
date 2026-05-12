@@ -1,5 +1,6 @@
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 
+/** Values from the preview session used to derive smart omnibox display state. */
 export interface UseOmniboxStateOptions {
   /** Current URL from last navigation. */
   url: string;
@@ -9,6 +10,7 @@ export interface UseOmniboxStateOptions {
   faviconUrl: string | null;
 }
 
+/** Derived smart omnibox UI state plus input event handlers for `SmartOmnibox`. */
 export interface OmniboxState {
   /** Value to display in the input. */
   displayValue: string;
@@ -36,6 +38,9 @@ export interface OmniboxState {
  * Blurred + clean: shows page title (or URL if no title).
  * Blurred + dirty: shows the user's draft URL.
  * Focused: shows the editable URL with text selected.
+ *
+ * Dirty state clears when the synced `url` prop changes after navigation - not at submit -
+ * so a failed or ignored navigate keeps the typed draft visible.
  */
 export function useOmniboxState({
   url,
@@ -75,7 +80,6 @@ export function useOmniboxState({
   }, []);
 
   const onSubmit = useCallback((): string => {
-    setIsDirty(false);
     return draftUrl;
   }, [draftUrl]);
 

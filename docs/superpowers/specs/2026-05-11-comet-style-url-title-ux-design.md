@@ -36,7 +36,7 @@ interface SmartOmniboxProps {
 
 ### Component tree
 
-```
+```text
 PreviewPanel
 ├── <form>
 │   ├── SmartOmnibox            ← NEW (replaces URL input + Go button)
@@ -80,11 +80,11 @@ The page title `<p>` row is removed entirely.
 - `onFocus` - set `isFocused`, populate `draftUrl` from `url`, select all text
 - `onBlur` - clear `isFocused` (keep `draftUrl` as-is)
 - `onChange` - update `draftUrl`, mark dirty
-- `onSubmit` - call `onNavigate(draftUrl)`, clear dirty flag
+- `onSubmit` - returns `draftUrl` for navigation; dirty clears when the `url` prop updates from IPC
 
 ### State transitions
 
-```
+```text
 Empty (no page)          ──navigate──>  Blurred (page loaded)
 "Search or enter URL"                   favicon + "Page Title"
 no icon, editable                       read-only appearance
@@ -116,7 +116,7 @@ Add `lastFavicons: string[]` to the `PreviewSession` interface. Also add `page-f
 
 **Separate IPC channel for favicon:** Electron's `page-favicon-updated` fires after `did-navigate`. If we piggyback on `forwardNav`, the first `did-navigate` call sends `favicon: null` (favicons not yet loaded), and the favicon only arrives on a second call. Instead, use a dedicated `preview:did-update-favicon` IPC push:
 
-```
+```ts
 view.webContents.on("page-favicon-updated", (_e, urls) => {
   s.lastFavicons = urls;
   if (!win.isDestroyed()) {

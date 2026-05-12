@@ -117,6 +117,8 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
 
   useEffect(() => {
     setInputUrl(storedUrl);
+    setPageTitle(null);
+    setFaviconUrl(null);
     setNavError(null);
   }, [threadId, storedUrl]);
 
@@ -174,6 +176,9 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
         setInputUrl(p.url);
         setPageTitle(p.title ?? null);
         setFaviconUrl(p.favicon ?? null);
+      } else {
+        setPageTitle(null);
+        setFaviconUrl(null);
       }
       void refreshNav();
     });
