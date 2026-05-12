@@ -502,7 +502,13 @@ describe("ServerManager", () => {
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
       "http://localhost:19600/shutdown",
-      expect.objectContaining({ method: "POST" }),
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer test-auth-token",
+          "X-Mcode-Shutdown-Reason": "desktop-update-exit",
+        }),
+      }),
     );
     killSpy.mockRestore();
   });

@@ -154,7 +154,12 @@ export function checkForUpdatesNow(): Promise<UpdateStatus> {
 /** Runs HTTP shutdown plus OS fallback so `quitAndInstall` does not overlap a live server PID. */
 async function quitAndInstallAfterStoppingServer(): Promise<void> {
   isCompletingStoppedServerQuit = true;
-  await invokeBeforeQuitAndInstall();
+  try {
+    await invokeBeforeQuitAndInstall();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[auto-updater] server stop failed before quit-and-install:", message);
+  }
   autoUpdater.quitAndInstall();
 }
 
@@ -215,6 +220,7 @@ function onBeforeQuitForPendingInstall(event: Event): void {
   })();
 }
 
+/** Options for {@link initAutoUpdater}, wiring desktop lifecycle hooks into the update flow. */
 export interface InitAutoUpdaterOptions {
   /** Stops the detached ServerManager server via `POST /shutdown` before the updater replaces binaries. */
   readonly beforeQuitAndInstall?: () => Promise<void>;

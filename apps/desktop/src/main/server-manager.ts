@@ -486,12 +486,13 @@ export class ServerManager {
     try {
       await fetch(`http://localhost:${lock.port}/shutdown`, {
         method: "POST",
+        signal: AbortSignal.timeout(5_000),
         headers: {
           Authorization: `Bearer ${lock.authToken}`,
           "X-Mcode-Shutdown-Reason": "desktop-update-exit",
         },
       });
-    } catch { /* server may already be down */ }
+    } catch { /* server may already be down or hung */ }
 
     const deadline = Date.now() + 10_000;
     while (Date.now() < deadline) {
