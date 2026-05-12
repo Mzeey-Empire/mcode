@@ -1,0 +1,1 @@
+ALTER TABLE `workspaces` ADD `last_action_id` text;
