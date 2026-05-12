@@ -202,6 +202,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
 
         if (this.pendingStops.delete(sessionId)) {
           logger.info("Pending stop consumed, tearing down new Cursor session", { sessionId });
+          this.sessions.delete(sessionId);
           await this.teardownSessionEntry(sessionId, entry, false);
           this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
           return;
@@ -237,7 +238,13 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     this.cancelPendingForThread(sessionId);
     if (entry?.acpSessionId) {
       void entry.connection.cancel({ sessionId: entry.acpSessionId }).catch(() => {});
-    } else if (!entry) {
+    } else if (entry) {
+      // Entry exists but ACP session hasn't opened yet; tear down immediately.
+      const threadId = sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;
+      this.sessions.delete(sessionId);
+      void this.teardownSessionEntry(sessionId, entry, false);
+      this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
+    } else {
       this.pendingStops.add(sessionId);
       setTimeout(() => this.pendingStops.delete(sessionId), 10_000);
     }

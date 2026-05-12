@@ -309,7 +309,9 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
 
     if (this.pendingStops.delete(sessionId)) {
       logger.info("Pending stop consumed, tearing down new Codex session", { sessionId });
-      void server.kill();
+      void server.kill().catch((err: unknown) => {
+        logger.warn("Codex pending-stop kill failed", { sessionId, error: String(err) });
+      });
       this.sessions.delete(sessionId);
       this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
       return;
