@@ -24,15 +24,23 @@ let transport: (McodeTransport & { close(): void; waitForConnection(timeoutMs: n
  * Resolve the WebSocket server URL and IPC path.
  *
  * In Electron, `window.desktopBridge.getServerUrl()` returns the URL and IPC
- * path of the server spawned by the main process. In standalone / dev mode we
- * fall back to an environment variable or the default localhost URL.
+ * path of the server spawned by the main process. Retries the IPC call to
+ * avoid falling back to the standalone port when the production app is also
+ * running. In standalone / dev mode we fall back to an environment variable
+ * or the default localhost URL.
  */
 async function resolveServerUrl(): Promise<{ url: string; ipcPath: string }> {
   if (window.desktopBridge?.getServerUrl) {
-    try {
-      return await window.desktopBridge.getServerUrl();
-    } catch {
-      // fall through
+    // Retry the IPC call a few times; during shell refresh the handler may
+    // not be ready on the first attempt. Without retries the renderer falls
+    // through to DEFAULT_SERVER_URL (port 19400) and connects to the
+    // production server instead of the dev server.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        return await window.desktopBridge.getServerUrl();
+      } catch {
+        await new Promise((r) => setTimeout(r, 200));
+      }
     }
   }
 
@@ -74,13 +82,23 @@ export async function initTransport(): Promise<McodeTransport> {
         }
       },
       discoverServerUrl: async () => {
-        // In Electron, ask the desktop bridge for the current server URL
+        // In Electron, retry the desktop bridge IPC to get the server URL
+        // from the main process. Avoid falling through to the port scan
+        // which can find a production server running on a different port.
         if (window.desktopBridge?.getServerUrl) {
-          const info = await window.desktopBridge.getServerUrl();
-          return info.url;
+          for (let attempt = 0; attempt < 5; attempt++) {
+            try {
+              const info = await window.desktopBridge.getServerUrl();
+              return info.url;
+            } catch {
+              await new Promise((r) => setTimeout(r, 300));
+            }
+          }
+          throw new Error("Desktop bridge IPC failed after retries");
         }
-        // In browser, scan the port range. Use the last-known token from
-        // localStorage so the reconnect URL includes valid auth.
+        // In browser (no Electron shell), scan the port range. Use the
+        // last-known token from localStorage so the reconnect URL includes
+        // valid auth.
         const savedToken = localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) ?? "";
         const found = await scanPortRange(19400, 19800, savedToken);
         if (found) return found;

@@ -338,6 +338,22 @@ export const SettingsSchema = lazySchema(() =>
       })
       .default({}),
 
+    /** Embedded site preview (Electron BrowserView) in the desktop shell. */
+    browserPreview: z
+      .object({
+        /**
+         * When true, allow sites in the embedded preview to receive standard permission
+         * grants (camera, microphone, notifications, etc.). When false, all requests are denied.
+         */
+        allowSitePermissions: z.boolean().default(false),
+        /**
+         * When true, use a separate Chromium storage partition per workspace. When false,
+         * every workspace shares one global preview session (cookies and storage leak across workspaces).
+         */
+        isolateStorageByWorkspace: z.boolean().default(false),
+      })
+      .default({}),
+
     /** Runtime performance and resource-usage settings. */
     performance: z
       .object({
@@ -514,6 +530,12 @@ export const PartialSettingsSchema = lazySchema(() =>
     diffSummary: z
       .object({
         enabled: z.boolean().optional(),
+      })
+      .optional(),
+    browserPreview: z
+      .object({
+        allowSitePermissions: z.boolean().optional(),
+        isolateStorageByWorkspace: z.boolean().optional(),
       })
       .optional(),
     performance: z

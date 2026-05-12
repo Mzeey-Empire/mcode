@@ -19,4 +19,22 @@ describe("redactMcodeBrowserCaptureV2", () => {
     expect(capture.headingOutline).toContain("[redacted-email]");
     expect(capture.pageUrl).toBe("https://example.com");
   });
+
+  it("redacts emails inside emulation userAgent snippets", () => {
+    const capture = redactMcodeBrowserCaptureV2({
+      schemaVersion: 2,
+      pageUrl: "https://example.com",
+      pageTitle: "t",
+      capturedAt: "2026-01-01T00:00:00.000Z",
+      bounds: { x: 0, y: 0, width: 100, height: 100 },
+      emulation: {
+        mode: "preset",
+        label: "Phone",
+        cssViewport: { width: 360, height: 800 },
+        deviceScaleFactor: 2,
+        userAgent: "Mozilla/5.0 Mobile dev@example.com",
+      },
+    });
+    expect(capture.emulation?.userAgent).toContain("[redacted-email]");
+  });
 });

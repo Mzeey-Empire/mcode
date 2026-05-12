@@ -13,7 +13,9 @@ import {
   isBrowserCaptureSpillAppDataPath,
   MCODE_BROWSER_CAPTURE_V2_STRING_MAX,
   type AttachmentMeta,
+  type McodeBrowserCaptureEmulation,
   type McodeBrowserCaptureV2,
+  type PreviewDeviceEmulationConfig,
 } from "@mcode/contracts";
 import { getMcodeDir, redactMcodeBrowserCaptureV2, spillWorkspaceDirSegment } from "@mcode/shared";
 
@@ -120,6 +122,14 @@ interface PreviewSession {
    * since those loads already passed {@link resolveLocalFileUrl}.
    */
   trustedFileNavigationBudget: number;
+  /** Per-thread device emulation config from the renderer (synced on each preview:sync). */
+  deviceEmulationConfig: PreviewDeviceEmulationConfig;
+  /** Full shell surface rect for emulation layout (the panel bounds before centering). */
+  shellBounds: Bounds | null;
+  /** Default Chromium user agent captured when the view was created (restored when emulation turns off). */
+  defaultGuestUserAgent: string;
+  /** Structured emulation metadata included on v2 captures (null when emulation is off). */
+  captureEmulationSnapshot: McodeBrowserCaptureEmulation | null;
 }
 
 const sessions = new Map<number, PreviewSession>();
@@ -142,6 +152,10 @@ function getSession(win: BrowserWindow): PreviewSession {
       workspaceId: null,
       lastFavicons: [],
       trustedFileNavigationBudget: 0,
+      deviceEmulationConfig: { kind: "off" },
+      shellBounds: null,
+      defaultGuestUserAgent: "",
+      captureEmulationSnapshot: null,
     };
     sessions.set(win.id, s);
   }
@@ -1211,11 +1225,24 @@ function parkPreview(win: BrowserWindow, s: PreviewSession): void {
     s.scrollbarCssKey = null;
     s.consoleBuffer.length = 0;
     s.failedRequestBuffer.length = 0;
+    s.captureEmulationSnapshot = null;
   }
 }
 
 /**
- * Removes the preview BrowserView and timers when a window is closing.
+ * Tears down the preview BrowserView without deleting the session.
+ * Called when the shell renderer refreshes so the native overlay does not
+ * linger on top of the fresh page; the next `preview:sync` from the
+ * re-mounted React tree will recreate the view.
+ */
+export function parkPreviewForWindow(win: BrowserWindow): void {
+  const s = sessions.get(win.id);
+  if (!s) return;
+  parkPreview(win, s);
+}
+
+/**
+ * Removes the preview BrowserView and session when a window is closing.
  */
 export function disposePreviewForWindow(win: BrowserWindow): void {
   const s = sessions.get(win.id);
@@ -1338,11 +1365,17 @@ function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
   view.webContents.on("did-start-loading", forwardLoadingStart);
   view.webContents.on("did-stop-loading", forwardLoadingStop);
 
-  view.webContents.on("console-message", (_event, level, message) => {
-    pushPreviewConsoleLine(s, level, message);
+  view.webContents.on("console-message", (event) => {
+    const lvl = typeof event.level === "number" ? event.level : 0;
+    pushPreviewConsoleLine(s, lvl, event.message);
   });
 
   s.view = view;
+  try {
+    s.defaultGuestUserAgent = view.webContents.getUserAgent();
+  } catch {
+    s.defaultGuestUserAgent = "";
+  }
   return view;
 }
 
@@ -1749,9 +1782,9 @@ export function registerPreviewBrowserHandlers(): void {
     if (!win || win.isDestroyed()) return false;
     const s = getSession(win);
     if (!s.view || s.view.webContents.isDestroyed()) return false;
-    if (s.view.webContents.canGoBack()) {
+    if (s.view.webContents.navigationHistory.canGoBack()) {
       sendPreviewLoading(win, true);
-      s.view.webContents.goBack();
+      s.view.webContents.navigationHistory.goBack();
       resetIdle(win, s);
       return true;
     }
@@ -1763,9 +1796,9 @@ export function registerPreviewBrowserHandlers(): void {
     if (!win || win.isDestroyed()) return false;
     const s = getSession(win);
     if (!s.view || s.view.webContents.isDestroyed()) return false;
-    if (s.view.webContents.canGoForward()) {
+    if (s.view.webContents.navigationHistory.canGoForward()) {
       sendPreviewLoading(win, true);
-      s.view.webContents.goForward();
+      s.view.webContents.navigationHistory.goForward();
       resetIdle(win, s);
       return true;
     }
@@ -1801,8 +1834,8 @@ export function registerPreviewBrowserHandlers(): void {
       return { canGoBack: false, canGoForward: false };
     }
     return {
-      canGoBack: s.view.webContents.canGoBack(),
-      canGoForward: s.view.webContents.canGoForward(),
+      canGoBack: s.view.webContents.navigationHistory.canGoBack(),
+      canGoForward: s.view.webContents.navigationHistory.canGoForward(),
     };
   });
 

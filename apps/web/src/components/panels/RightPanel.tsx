@@ -304,7 +304,11 @@ export function RightPanel() {
         )}
         {activeTab === "changes" && <DiffPanel />}
         {activeTab === "preview" && (
-          <PreviewPanel threadId={activeThreadId} workspaceId={activeWorkspaceId} />
+          <PreviewPanel
+            threadId={activeThreadId}
+            workspaceId={activeWorkspaceId}
+            isPreviewActive={activeTab === "preview"}
+          />
         )}
       </div>
       </div>

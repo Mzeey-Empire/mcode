@@ -32,5 +32,8 @@ export function redactMcodeBrowserCaptureV2<T extends McodeBrowserCaptureV2>(cap
   if (next.htmlExcerpt) {
     next.htmlExcerpt = redactSegment(next.htmlExcerpt);
   }
+  if (next.emulation?.userAgent) {
+    next.emulation = { ...next.emulation, userAgent: redactSegment(next.emulation.userAgent) };
+  }
   return next;
 }

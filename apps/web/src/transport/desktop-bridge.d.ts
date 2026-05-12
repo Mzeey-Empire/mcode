@@ -1,5 +1,5 @@
 import type { AttachmentMeta } from "./types";
-import type { McodeBrowserCapture } from "@mcode/contracts";
+import type { McodeBrowserCapture, PreviewDeviceEmulationConfig } from "@mcode/contracts";
 
 /** Discriminated union describing the auto-updater lifecycle state. */
 export type UpdateStatus =
@@ -66,6 +66,8 @@ interface PreviewBridge {
     resumeUrlHint?: string | null;
     /** Active workspace id; scopes preview spill files under the Mcode app data directory. */
     workspaceId?: string | null;
+    /** Mobile or custom viewport emulation for this thread's guest surface. */
+    deviceEmulation?: PreviewDeviceEmulationConfig;
   }): Promise<void>;
   navigate(url: string, workspacePath?: string | null): Promise<PreviewNavigateResult>;
   goBack(): Promise<boolean>;
@@ -73,6 +75,8 @@ interface PreviewBridge {
   reload(): Promise<void>;
   openExternal(): Promise<void>;
   getNavigationState(): Promise<{ canGoBack: boolean; canGoForward: boolean }>;
+  /** Moves keyboard focus into the guest page (desktop only). */
+  focusGuest(): Promise<void>;
   /** Captures the visible preview as PNG; desktop only. */
   capturePictureReference(): Promise<PreviewPictureReferenceResult>;
   /** Drag a rectangle on the preview, then capture that region as PNG; desktop only. */

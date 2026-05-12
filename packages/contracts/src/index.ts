@@ -115,6 +115,21 @@ export type {
   BrowserCaptureSpillFile,
 } from "./models/browser-preview.js";
 
+export {
+  BROWSER_PREVIEW_DEVICE_PRESETS,
+  PREVIEW_DEVICE_EMULATION_OFF,
+  PreviewDeviceOrientationSchema,
+  PreviewDeviceEmulationConfigSchema,
+  McodeBrowserCaptureEmulationSchema,
+  findBrowserPreviewDevicePreset,
+} from "./models/preview-device-emulation.js";
+export type {
+  BrowserPreviewDevicePresetId,
+  PreviewDeviceOrientation,
+  PreviewDeviceEmulationConfig,
+  McodeBrowserCaptureEmulation,
+} from "./models/preview-device-emulation.js";
+
 // Events
 export { AgentEventSchema, AgentEventType } from "./events/agent-event.js";
 export type { AgentEvent } from "./events/agent-event.js";

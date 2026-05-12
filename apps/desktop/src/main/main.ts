@@ -40,7 +40,7 @@ import {
   setBeforeInstallHook,
 } from "./auto-updater.js";
 import { setupSpellcheck } from "./spellcheck.js";
-import { registerPreviewBrowserHandlers, disposePreviewForWindow } from "./preview-browser.js";
+import { registerPreviewBrowserHandlers, disposePreviewForWindow, parkPreviewForWindow } from "./preview-browser.js";
 
 // Isolate dev's Electron userData (cache, cookies, localStorage, IndexedDB)
 // from the installed prod build. Without this, both share %APPDATA%/Mcode/
@@ -279,6 +279,13 @@ function createWindow(): void {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     openIfAllowed(url);
     return { action: "deny" };
+  });
+
+  // Park the preview BrowserView when the shell renderer refreshes (F5 / Ctrl+R)
+  // so the native overlay does not linger on top of the fresh page.
+  mainWindow.webContents.on("did-start-navigation", (_event, _url, isInPlace, isMainFrame) => {
+    if (!isMainFrame || isInPlace) return;
+    parkPreviewForWindow(mainWindow!);
   });
 
   // Prevent the main window from navigating away from the app.

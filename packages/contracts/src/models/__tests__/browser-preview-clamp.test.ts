@@ -26,6 +26,29 @@ describe("browser capture clamp", () => {
     expect(() => McodeBrowserCaptureV2Schema().parse(clamped)).not.toThrow();
   });
 
+  it("truncates emulation label and userAgent on clamp", () => {
+    const lbl = MCODE_BROWSER_CAPTURE_V2_STRING_MAX.emulationLabel;
+    const ua = MCODE_BROWSER_CAPTURE_V2_STRING_MAX.emulationUserAgent;
+    const row: McodeBrowserCaptureV2 = {
+      schemaVersion: 2,
+      pageUrl: "https://example.com/",
+      pageTitle: "Example",
+      capturedAt: "2026-05-08T12:00:00.000Z",
+      bounds: { x: 0, y: 0, width: 1, height: 1 },
+      emulation: {
+        mode: "custom",
+        label: "x".repeat(lbl + 10),
+        cssViewport: { width: 390, height: 844 },
+        deviceScaleFactor: 2,
+        userAgent: "z".repeat(ua + 10),
+      },
+    };
+    const clamped = clampMcodeBrowserCaptureV2(row);
+    expect(clamped.emulation?.label).toHaveLength(lbl);
+    expect(clamped.emulation?.userAgent).toHaveLength(ua);
+    expect(() => McodeBrowserCaptureV2Schema().parse(clamped)).not.toThrow();
+  });
+
   it("clampAttachedBrowserCaptureForOutbound makes oversized outbound rows parseable", () => {
     const cap = MCODE_BROWSER_CAPTURE_V2_STRING_MAX.consoleTail;
     const row: AttachedBrowserCaptureV2 = {

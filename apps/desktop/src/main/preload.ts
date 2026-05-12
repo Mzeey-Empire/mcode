@@ -141,6 +141,7 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       threadId?: string | null;
       resumeUrlHint?: string | null;
       workspaceId?: string | null;
+      deviceEmulation?: unknown;
     }): Promise<void> {
       return ipcRenderer.invoke("preview:sync", payload);
     },
@@ -161,6 +162,9 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     },
     getNavigationState(): Promise<{ canGoBack: boolean; canGoForward: boolean }> {
       return ipcRenderer.invoke("preview:get-navigation-state");
+    },
+    focusGuest(): Promise<void> {
+      return ipcRenderer.invoke("preview:focus-guest");
     },
     /** Capture the visible preview viewport as a PNG for attaching to the composer. */
     capturePictureReference(): Promise<unknown> {

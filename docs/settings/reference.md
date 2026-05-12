@@ -21,6 +21,8 @@ Per-setting reference for Mcode's `settings.json`. For schema conventions and st
 | `model.defaults.contextWindow` | integer | - | > 0, ≤ 2,000,000 | - | Override the context window (tokens) for the default model. When set, takes priority over API-fetched and SDK-reported values. Useful when the SDK reports stale data (e.g. 200K instead of 1M). Omit to use the automatically detected value. Claude only. |
 | `terminal.scrollback` | integer | `250` | >= 0 | - | Number of scrollback lines to retain |
 | `notifications.enabled` | boolean | `true` | - | - | Whether desktop notifications are enabled |
+| `browserPreview.allowSitePermissions` | boolean | `false` | - | - | When true, grant site permission prompts in the embedded preview (camera, mic, notifications, etc.). When false, all are denied. |
+| `browserPreview.isolateStorageByWorkspace` | boolean | `false` | - | - | When true, use a separate Chromium storage partition per workspace for the preview. When false, all workspaces share one preview partition. |
 | `worktree.naming.mode` | enum | `"auto"` | `"auto"` \| `"custom"` \| `"ai"` | - | Naming strategy for new worktree branches |
 | `worktree.naming.aiConfirmation` | boolean | `true` | - | - | Prompt before using AI-generated branch names |
 | `performance.threadCacheSize` | integer | `10` | 1-25 | - | Number of threads to keep in memory for instant switching. Lower values reduce memory use; values ≤ 3 mean most thread switches reload from the server. Takes effect immediately. |

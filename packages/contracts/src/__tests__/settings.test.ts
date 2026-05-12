@@ -169,4 +169,23 @@ describe("SettingsSchema", () => {
       ).toThrow();
     });
   });
+
+  describe("browserPreview", () => {
+    it("defaults allowSitePermissions and isolateStorageByWorkspace to false", () => {
+      const result = SettingsSchema().parse({});
+      expect(result.browserPreview.allowSitePermissions).toBe(false);
+      expect(result.browserPreview.isolateStorageByWorkspace).toBe(false);
+    });
+
+    it("accepts true for both flags", () => {
+      const result = SettingsSchema().parse({
+        browserPreview: {
+          allowSitePermissions: true,
+          isolateStorageByWorkspace: true,
+        },
+      });
+      expect(result.browserPreview.allowSitePermissions).toBe(true);
+      expect(result.browserPreview.isolateStorageByWorkspace).toBe(true);
+    });
+  });
 });

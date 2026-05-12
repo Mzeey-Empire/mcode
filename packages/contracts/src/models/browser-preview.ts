@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
+import { McodeBrowserCaptureEmulationSchema } from "./preview-device-emulation.js";
 
 /** Max lengths for {@link McodeBrowserCaptureV1} excerpt fields (matches Zod). */
 export const MCODE_BROWSER_CAPTURE_V1_STRING_MAX = {
@@ -18,6 +19,8 @@ export const MCODE_BROWSER_CAPTURE_V2_STRING_MAX = {
   consoleTail: 4000,
   failedRequestUrl: 2048,
   failedRequestResourceType: 32,
+  emulationLabel: 80,
+  emulationUserAgent: 512,
 } as const;
 
 /** Max length for spillAppDataPath (POSIX path segments under the Mcode app data directory). */
@@ -175,6 +178,8 @@ export const McodeBrowserCaptureV2Schema = lazySchema(() =>
       .optional(),
     /** Native absolute path to the same spill file (convenience for read_file style tools). */
     spillAbsolutePath: z.string().max(MCODE_BROWSER_CAPTURE_SPILL_ABSOLUTE_PATH_MAX).optional(),
+    /** Device emulation snapshot when the capture used a mobile or custom viewport frame. */
+    emulation: McodeBrowserCaptureEmulationSchema().optional(),
   }),
 );
 
@@ -237,6 +242,15 @@ export function clampMcodeBrowserCaptureV2<T extends McodeBrowserCaptureV2>(capt
       url: clampStrLen(e.url, m.failedRequestUrl),
       resourceType: clampOptStr(e.resourceType, m.failedRequestResourceType),
     }));
+  }
+  if (next.emulation !== undefined) {
+    const e = next.emulation;
+    next.emulation = {
+      ...e,
+      label: clampStrLen(e.label, m.emulationLabel),
+      presetId: clampOptStr(e.presetId, 64),
+      userAgent: clampOptStr(e.userAgent, m.emulationUserAgent),
+    };
   }
   if (next.spillAbsolutePath !== undefined) {
     next.spillAbsolutePath = clampStrLen(next.spillAbsolutePath, MCODE_BROWSER_CAPTURE_SPILL_ABSOLUTE_PATH_MAX);
