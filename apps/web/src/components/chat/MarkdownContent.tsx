@@ -41,7 +41,7 @@ function hasPreview(): boolean {
  * Handles a click on a previewable URL. Opens in the browser preview panel on
  * Ctrl/Cmd+click, otherwise opens externally.
  */
-function handleLinkClick(e: React.MouseEvent, url: string): void {
+function handleLinkClick(e: React.MouseEvent | React.KeyboardEvent, url: string): void {
   e.preventDefault();
 
   const isModifierClick = e.ctrlKey || e.metaKey;
@@ -218,7 +218,7 @@ function makeComponents(isStreaming: boolean, variant: "assistant" | "user") {
               tabIndex={0}
               className={`${codeClass} ${linkClass}`}
               onClick={(e) => handleLinkClick(e, text)}
-              onKeyDown={(e) => { if (e.key === "Enter") handleLinkClick(e as unknown as React.MouseEvent, text); }}
+              onKeyDown={(e) => { if (e.key === "Enter") handleLinkClick(e, text); }}
             >
               {children}
             </code>
