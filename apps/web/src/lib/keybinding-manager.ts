@@ -171,3 +171,32 @@ export function clearKeybindings(): void {
   keybindings = [];
   parsedCache = [];
 }
+
+/**
+ * Add a dynamic keybinding at runtime (e.g., for project action shortcuts).
+ * Returns a dispose function that removes the binding.
+ */
+export function addDynamicKeybinding(binding: Keybinding): () => void {
+  keybindings.push(binding);
+  parsedCache.push(parseKeybinding(binding.key));
+  return () => {
+    const idx = keybindings.indexOf(binding);
+    if (idx >= 0) {
+      keybindings.splice(idx, 1);
+      parsedCache.splice(idx, 1);
+    }
+  };
+}
+
+/**
+ * Remove all dynamic keybindings whose command ID starts with the given prefix.
+ * Used to clear project action keybindings when the workspace changes.
+ */
+export function removeDynamicKeybindings(prefix: string): void {
+  for (let i = keybindings.length - 1; i >= 0; i--) {
+    if (keybindings[i].command.startsWith(prefix)) {
+      keybindings.splice(i, 1);
+      parsedCache.splice(i, 1);
+    }
+  }
+}
