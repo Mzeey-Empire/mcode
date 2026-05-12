@@ -951,6 +951,7 @@ async function buildBrowserCapturePayload(
     captureKind?: "viewport" | "region" | "element";
     selectorHint?: string | null;
     htmlExcerpt?: string | null;
+    emulation?: McodeBrowserCaptureEmulation;
   },
 ): Promise<McodeBrowserCaptureV2> {
   const ctx = await captureGuestPageContextForCapture(webContents);
@@ -967,6 +968,9 @@ async function buildBrowserCapturePayload(
   };
   if (extras?.captureKind !== undefined) {
     out.captureKind = extras.captureKind;
+  }
+  if (extras?.emulation) {
+    out.emulation = { ...extras.emulation };
   }
   if (extras?.htmlExcerpt != null && extras.htmlExcerpt.length > 0) {
     const scrubbed = scrubHtmlExcerptForOutbound(extras.htmlExcerpt);
@@ -1954,6 +1958,7 @@ export function registerPreviewBrowserHandlers(): void {
         s.workspaceId,
         {
           captureKind: "viewport",
+          emulation: s.captureEmulationSnapshot ?? undefined,
         },
       );
       resetIdle(win, s);
@@ -1985,7 +1990,7 @@ export function registerPreviewBrowserHandlers(): void {
         s.consoleBuffer,
         snapshotFailedRequestsForCapture(s),
         s.workspaceId,
-        { captureKind: "viewport" },
+        { captureKind: "viewport", emulation: s.captureEmulationSnapshot ?? undefined },
       );
       resetIdle(win, s);
       return { ok: true, capture };
@@ -2061,6 +2066,7 @@ export function registerPreviewBrowserHandlers(): void {
         s.workspaceId,
         {
           captureKind: "region",
+          emulation: s.captureEmulationSnapshot ?? undefined,
         },
       );
 
@@ -2212,6 +2218,7 @@ export function registerPreviewBrowserHandlers(): void {
             captureKind: "element",
             selectorHint: hit.selectorHint,
             htmlExcerpt: hit.htmlExcerpt,
+            emulation: s.captureEmulationSnapshot ?? undefined,
           },
         );
 
