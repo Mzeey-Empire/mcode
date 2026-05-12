@@ -218,6 +218,12 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
 
   private sessions = new Map<string, SessionEntry>();
   private sdkSessionIds = new Map<string, string>();
+  /**
+   * Session IDs for which a stop was requested before the session was created.
+   * Checked by doSendMessage after session creation; if found the session is
+   * torn down immediately so the agent never starts.
+   */
+  private pendingStops = new Set<string>();
   /** Pending permission requests awaiting user decision, keyed by requestId. */
   private pendingPermissions = new Map<
     string,
@@ -731,6 +737,26 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     };
     this.sessions.set(sessionId, entry);
 
+    // A stop was requested while sendMessage was still in flight (race
+    // between concurrent agent.send and agent.stop RPCs). Tear down
+    // immediately so the agent never starts.
+    if (this.pendingStops.delete(sessionId)) {
+      logger.info("Pending stop consumed, tearing down new session", {
+        sessionId,
+      });
+      this.sessions.delete(sessionId);
+      entry.closeQueue();
+      entry.query.close();
+      // TurnStarted was already emitted by AgentService before calling the
+      // provider, so the frontend thinks the agent is running. Emit Ended
+      // to clear that state.
+      this.emit("event", {
+        type: AgentEventType.Ended,
+        threadId: tid,
+      } satisfies AgentEvent);
+      return;
+    }
+
     if (resume) {
       const failedEvent = `_resumeFailed:${sessionId}`;
       const doneEvent = `_streamDone:${sessionId}`;
@@ -798,6 +824,21 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
           pendingToolUses: new Set<string>(),
         };
         this.sessions.set(sessionId, freshEntry);
+
+        if (this.pendingStops.delete(sessionId)) {
+          logger.info("Pending stop consumed on resume fallback", {
+            sessionId,
+          });
+          this.sessions.delete(sessionId);
+          freshEntry.closeQueue();
+          freshEntry.query.close();
+          this.emit("event", {
+            type: AgentEventType.Ended,
+            threadId: tid,
+          } satisfies AgentEvent);
+          return;
+        }
+
         this.startStreamLoop(sessionId, freshQ);
         freshQueue.push(prompt);
       }
@@ -1504,7 +1545,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     this.sdkSessionIds.set(sessionId, sdkSessionId);
   }
 
-  /** Abort a running session. */
+  /** Abort a running session, or record a pending stop if the session hasn't been created yet. */
   stopSession(sessionId: string): void {
     // Normalize to the raw UUID that canUseTool stores as threadId.
     const tid = sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;
@@ -1521,6 +1562,14 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       this.sessions.delete(sessionId);
       entry.closeQueue();
       entry.query.close();
+    } else {
+      // Session not yet created (sendMessage still in flight). Record the
+      // stop so doSendMessage tears the session down immediately after
+      // creation, preventing the agent from ever starting.
+      this.pendingStops.add(sessionId);
+      // Auto-expire after 10s in case the send never arrives (network
+      // error, client disconnect, etc.) so the set doesn't leak.
+      setTimeout(() => this.pendingStops.delete(sessionId), 10_000);
     }
   }
 

@@ -110,6 +110,7 @@ interface CursorAcpSessionEntry {
   cursorModelAppliedPair: { acpSessionId: string; modelId: string } | null;
 }
 
+/** Cursor ACP (Agent Communication Protocol) adapter implementing IAgentProvider via a MCP subprocess per session. */
 @injectable()
 export class CursorProvider extends EventEmitter implements IAgentProvider {
   readonly id: ProviderId = "cursor";
@@ -117,6 +118,11 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
 
   private sessions = new Map<string, CursorAcpSessionEntry>();
   private sdkSessionIds = new Map<string, string>();
+  /**
+   * Session IDs for which a stop was requested before the session was created.
+   * Checked after session creation; if found the session is torn down immediately.
+   */
+  private pendingStops = new Set<string>();
   private pendingPermissions = new Map<string, PendingAcpPermission>();
   private evictionTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -193,6 +199,14 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       try {
         entry = await this.spawnChild(sessionId, threadId, cwd, pm, settings);
         this.sessions.set(sessionId, entry);
+
+        if (this.pendingStops.delete(sessionId)) {
+          logger.info("Pending stop consumed, tearing down new Cursor session", { sessionId });
+          this.sessions.delete(sessionId);
+          await this.teardownSessionEntry(sessionId, entry, false);
+          this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
+          return;
+        }
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         logger.error("Cursor ACP spawn failed", { sessionId, error: errMsg });
@@ -213,17 +227,30 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     await scheduled;
   }
 
+  /** Pre-load an SDK session ID mapping (e.g. from the database on startup). */
   setSdkSessionId(sessionId: string, sdkSessionId: string): void {
     this.sdkSessionIds.set(sessionId, sdkSessionId);
   }
 
+  /** Cancel the active ACP session. Records a pending stop if the session hasn't been created yet. */
   stopSession(sessionId: string): void {
     const entry = this.sessions.get(sessionId);
     this.cancelPendingForThread(sessionId);
-    if (!entry?.acpSessionId) return;
-    void entry.connection.cancel({ sessionId: entry.acpSessionId }).catch(() => {});
+    if (entry?.acpSessionId) {
+      void entry.connection.cancel({ sessionId: entry.acpSessionId }).catch(() => {});
+    } else if (entry) {
+      // Entry exists but ACP session hasn't opened yet; tear down immediately.
+      const threadId = sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;
+      this.sessions.delete(sessionId);
+      void this.teardownSessionEntry(sessionId, entry, false);
+      this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
+    } else {
+      this.pendingStops.add(sessionId);
+      setTimeout(() => this.pendingStops.delete(sessionId), 10_000);
+    }
   }
 
+  /** Tear down all sessions, cancel pending permissions, and stop the eviction timer. */
   shutdown(): void {
     if (this.evictionTimer) {
       clearInterval(this.evictionTimer);

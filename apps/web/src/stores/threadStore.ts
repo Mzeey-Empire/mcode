@@ -198,6 +198,50 @@ function clearDequeueTimer(threadId: string) {
 }
 
 /**
+ * Resume auto-drain for a thread that was paused while the user edited a
+ * queued message. Schedules the same 400ms-delayed check used by the
+ * turnComplete handler. No-op when the thread is busy or the queue is empty.
+ */
+export function scheduleDrainAfterEdit(threadId: string): void {
+  clearDequeueTimer(threadId);
+  const timer = setTimeout(() => {
+    dequeueTimers.delete(threadId);
+    const threadExists = useWorkspaceStore.getState().threads.some(
+      (t) => t.id === threadId && t.deleted_at == null,
+    );
+    if (!threadExists) return;
+    if (useThreadStore.getState().runningThreadIds.has(threadId)) return;
+    if (useQueueStore.getState().editingThreadId === threadId) return;
+
+    const next = useQueueStore.getState().dequeueNext(threadId);
+    if (next) {
+      void (async (): Promise<void> => {
+        try {
+          await useThreadStore.getState().sendMessage(
+            threadId,
+            next.content,
+            next.model,
+            next.permissionMode,
+            next.attachments.length > 0 ? next.attachments : undefined,
+            next.displayContent,
+            next.reasoningLevel,
+            next.provider,
+            next.copilotAgent,
+            next.contextWindow,
+            next.thinking,
+            next.replyToMessageId,
+            next.quotedText,
+          );
+        } catch {
+          void releaseBrowserCaptureSpills(next.browserCaptureSpillPaths ?? []);
+        }
+      })();
+    }
+  }, 400);
+  dequeueTimers.set(threadId, timer);
+}
+
+/**
  * Shallow-clone `rec` and omit `key`. Returns a new object.
  * Used by clearThreadState and clearMessages to prune per-thread maps without mutating state.
  */
@@ -1973,6 +2017,10 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           );
           if (!threadExists) return;
           if (get().runningThreadIds.has(threadId)) return;
+
+          // Skip auto-drain while the user is editing a queued message.
+          // The queue will resume when the edit is saved or cancelled.
+          if (useQueueStore.getState().editingThreadId === threadId) return;
 
           const next = useQueueStore.getState().dequeueNext(threadId);
           if (next) {
