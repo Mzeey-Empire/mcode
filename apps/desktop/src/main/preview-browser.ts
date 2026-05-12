@@ -1405,15 +1405,17 @@ async function resolveLocalFileUrl(
   }
 
   try {
-    const info = await lstat(resolved);
+    let info = await lstat(resolved);
     if (info.isSymbolicLink()) {
       const real = await realpath(resolved);
       if (isSensitivePath(real)) {
         return { ok: false, error: "sensitive-file" };
       }
+      // Follow the symlink so subsequent checks use the target's type.
+      resolved = real;
+      info = await lstat(real);
     }
     if (info.isDirectory()) {
-      // Try index.html inside the directory.
       const indexPath = join(resolved, "index.html");
       try {
         const indexInfo = await lstat(indexPath);
@@ -1424,7 +1426,7 @@ async function resolveLocalFileUrl(
         return { ok: false, error: "is-directory" };
       }
     }
-    if (!info.isFile() && !info.isSymbolicLink()) {
+    if (!info.isFile()) {
       return { ok: false, error: "not-a-file" };
     }
   } catch {
@@ -1469,6 +1471,26 @@ function guestUrlNeedsHttpRestore(url: string): boolean {
   return false;
 }
 
+/**
+ * Validates a resume/hint URL before loading. HTTP(S) URLs pass through;
+ * file:// URLs are re-checked through resolveLocalFileUrl to prevent
+ * renderer-supplied hints from bypassing sensitive-path guards.
+ */
+async function validateResumeUrl(url: string | null): Promise<string | null> {
+  if (!url || !isAllowedPreviewUrl(url)) return null;
+  try {
+    const u = new URL(url);
+    if (u.protocol === "file:") {
+      const filePath = fileURLToPath(url);
+      const result = await resolveLocalFileUrl(filePath, null);
+      return result.ok ? result.url : null;
+    }
+  } catch {
+    return null;
+  }
+  return url;
+}
+
 /** Registers ipcMain handlers for `preview:*` channels (call once at startup). */
 export function registerPreviewBrowserHandlers(): void {
   const previewPartition = session.fromPartition("persist:mcode-preview");
@@ -1495,7 +1517,7 @@ export function registerPreviewBrowserHandlers(): void {
 
   ipcMain.handle(
     "preview:sync",
-    (
+    async (
       _event,
       payload: {
         visible: boolean;
@@ -1534,27 +1556,29 @@ export function registerPreviewBrowserHandlers(): void {
 
         // One BrowserView is shared across threads; without an explicit navigation on switch,
         // the previous thread's document (and resumePreviewUrl) would leak into the next thread.
+        const safeHint = await validateResumeUrl(hint);
         if (switchedThread) {
-          if (hint) {
+          if (safeHint) {
             sendPreviewLoading(win, true);
-            void wc.loadURL(hint);
-            s.resumePreviewUrl = hint;
+            void wc.loadURL(safeHint);
+            s.resumePreviewUrl = safeHint;
           } else {
             s.resumePreviewUrl = null;
             sendPreviewLoading(win, true);
             void wc.loadURL("about:blank");
           }
-        } else if (guestUrlNeedsHttpRestore(current) && hint) {
+        } else if (guestUrlNeedsHttpRestore(current) && safeHint) {
           sendPreviewLoading(win, true);
-          void wc.loadURL(hint);
-          s.resumePreviewUrl = hint;
-        } else if (
-          guestUrlNeedsHttpRestore(current) &&
-          s.resumePreviewUrl &&
-          isAllowedPreviewUrl(s.resumePreviewUrl)
-        ) {
-          sendPreviewLoading(win, true);
-          void wc.loadURL(s.resumePreviewUrl);
+          void wc.loadURL(safeHint);
+          s.resumePreviewUrl = safeHint;
+        } else if (guestUrlNeedsHttpRestore(current) && s.resumePreviewUrl) {
+          const safeResume = await validateResumeUrl(s.resumePreviewUrl);
+          if (safeResume) {
+            sendPreviewLoading(win, true);
+            void wc.loadURL(safeResume);
+          } else {
+            s.resumePreviewUrl = null;
+          }
         }
       }
       resetIdle(win, s);

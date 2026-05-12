@@ -519,6 +519,29 @@ describe("preview-browser", () => {
       expect(view.webContents.loadURL).toHaveBeenCalledWith(htmlUrl);
     });
 
+    it("follows symlink to directory and returns index.html", async () => {
+      // Create a symlink to the "hasindex" directory.
+      const linkPath = join(tempDir, "link-to-dir");
+      try {
+        symlinkSync(join(tempDir, "hasindex"), linkPath, "junction");
+      } catch {
+        // Symlink creation may require elevated privileges on Windows; skip.
+        return;
+      }
+
+      const win = createWindow();
+      await showPreview(win);
+
+      const result = await navigate(win, linkPath);
+
+      expect(result).toEqual({ ok: true });
+      const view = createdViews[0]!;
+      // Should resolve through the symlink target directory's index.html.
+      expect(view.webContents.loadURL).toHaveBeenCalledWith(
+        pathToFileURL(join(tempDir, "hasindex", "index.html")).href,
+      );
+    });
+
     it("treats domain-like input with file extension as URL, not file path", async () => {
       const win = createWindow();
       await showPreview(win);
