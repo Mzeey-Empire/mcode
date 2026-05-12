@@ -579,6 +579,23 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
               Open in system browser
             </TooltipContent>
           </Tooltip>
+
+          {/* Cancel capture pill (visible during region/element-pick capture) */}
+          {(regionBusy || elementPickBusy) ? (
+            <>
+              <div className="flex-1" />
+              <button
+                type="button"
+                className="flex shrink-0 items-center gap-1 rounded border border-destructive/20 bg-destructive/10 px-2 py-0.5 text-[11px] text-destructive/80 transition-colors hover:bg-destructive/15"
+                onClick={() => void window.desktopBridge?.preview.cancelCapture()}
+              >
+                <kbd className="rounded border border-destructive/15 bg-destructive/5 px-1 py-px text-[10px] font-medium">
+                  Esc
+                </kbd>
+                Cancel
+              </button>
+            </>
+          ) : null}
         </div>
 
         {navError ? (
