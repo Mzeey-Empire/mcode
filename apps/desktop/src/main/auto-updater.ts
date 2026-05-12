@@ -12,6 +12,7 @@
 
 import { autoUpdater } from "electron-updater";
 import { app, BrowserWindow, dialog, Notification } from "electron";
+import type { Event } from "electron";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { getMcodeDir } from "@mcode/shared";
@@ -86,6 +87,13 @@ let checkIntervalId: NodeJS.Timeout | null = null;
 let initialCheckTimeoutId: NodeJS.Timeout | null = null;
 /** Guards against promptRestart being invoked twice concurrently (notification click + direct call). */
 let isPrompting = false;
+/** Passed from main so the detached server exits before installers replace files under resources. */
+let beforeQuitAndInstallHook: (() => Promise<void>) | null = null;
+/**
+ * Skips redundant server-stop work once we have deferred quit to wait for teardown.
+ * Matches our own before-quit handler on the synthetic second quit().
+ */
+let isCompletingStoppedServerQuit = false;
 
 /** Returns the most recently observed update status (for renderer hydration). */
 export function getUpdateStatus(): UpdateStatus {
@@ -143,12 +151,28 @@ export function checkForUpdatesNow(): Promise<UpdateStatus> {
   return inFlightCheck;
 }
 
-/** Quit and install a downloaded update. Returns false in dev or if nothing is downloaded. */
-export function installUpdate(): boolean {
+/** Runs HTTP shutdown plus OS fallback so `quitAndInstall` does not overlap a live server PID. */
+async function quitAndInstallAfterStoppingServer(): Promise<void> {
+  isCompletingStoppedServerQuit = true;
+  await invokeBeforeQuitAndInstall();
+  autoUpdater.quitAndInstall();
+}
+
+/**
+ * Sends the shutdown signal to the standalone server when needed, then quits into the installer.
+ * Returns false in dev or if nothing is downloaded.
+ */
+export async function installUpdate(): Promise<boolean> {
   if (!app.isPackaged) return false;
   if (lastStatus.state !== "downloaded") return false;
-  autoUpdater.quitAndInstall();
+  await quitAndInstallAfterStoppingServer();
   return true;
+}
+
+/** Runs the desktop hook before any path that invokes `quitAndInstall` or defers quit for teardown. */
+async function invokeBeforeQuitAndInstall(): Promise<void> {
+  if (!beforeQuitAndInstallHook) return;
+  await beforeQuitAndInstallHook();
 }
 
 /**
@@ -167,12 +191,44 @@ export async function downloadUpdate(): Promise<void> {
 }
 
 /**
+ * When `electron-updater` will install on quit, Electron may exit while the detached server
+ * still holds DLLs inside the install prefix. Deferred quit frees those handles first.
+ */
+function onBeforeQuitForPendingInstall(event: Event): void {
+  if (isCompletingStoppedServerQuit) return;
+  if (!app.isPackaged) return;
+  if (!initialized) return;
+  const { autoInstallOnQuit } = loadUpdaterSettings();
+  if (!autoInstallOnQuit || lastStatus.state !== "downloaded") return;
+
+  event.preventDefault();
+  isCompletingStoppedServerQuit = true;
+  void (async () => {
+    try {
+      await invokeBeforeQuitAndInstall();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[auto-updater] server stop failed before silent install on quit:", message);
+    } finally {
+      app.quit();
+    }
+  })();
+}
+
+export interface InitAutoUpdaterOptions {
+  /** Stops the detached ServerManager server via `POST /shutdown` before the updater replaces binaries. */
+  readonly beforeQuitAndInstall?: () => Promise<void>;
+}
+
+/**
  * Initializes auto-update checks. Call once after app "ready" fires.
  * No-op in dev (no packaged app to update).
  */
-export function initAutoUpdater(): void {
+export function initAutoUpdater(options?: InitAutoUpdaterOptions): void {
   if (initialized) return;
   initialized = true;
+  beforeQuitAndInstallHook = options?.beforeQuitAndInstall ?? null;
+  app.on("before-quit", onBeforeQuitForPendingInstall);
 
   // In dev, force electron-updater to read dev-app-update.yml so we can
   // test the check/download flow without a packaged build.
@@ -271,6 +327,7 @@ export function initAutoUpdater(): void {
  * Call from app "quit" or "will-quit" event.
  */
 export function cleanupAutoUpdater(): void {
+  app.removeListener("before-quit", onBeforeQuitForPendingInstall);
   if (initialCheckTimeoutId) {
     clearTimeout(initialCheckTimeoutId);
     initialCheckTimeoutId = null;
@@ -296,7 +353,7 @@ async function promptRestart(version: string): Promise<void> {
   });
 
   if (response === 0 && app.isPackaged) {
-    autoUpdater.quitAndInstall();
+    void quitAndInstallAfterStoppingServer();
   }
 }
 

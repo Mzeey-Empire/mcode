@@ -460,10 +460,11 @@ export class ServerManager {
   }
 
   /**
-   * Force-stop the server for version replacement.
-   * Sends POST /shutdown for graceful teardown, falls back to SIGKILL.
+   * Gracefully tear down whoever holds {@link lockFilePath} for this app's port
+   * band (either our detached child or a reused instance), release native file
+   * locks before the NSIS updater replaces binaries.
    */
-  async forceReplace(): Promise<void> {
+  async stopServerHeldByLock(): Promise<void> {
     const lockPath = lockFilePath();
     if (!existsSync(lockPath)) return;
 
@@ -477,38 +478,45 @@ export class ServerManager {
     // Validate lock port is within this mode's range to prevent sending
     // auth tokens to arbitrary localhost ports from a crafted lock file.
     if (lock.port < PORT_MIN || lock.port >= PORT_MAX) {
-      console.warn(`[server-manager] forceReplace: port ${lock.port} outside allowed range, skipping`);
+      console.warn(`[server-manager] stopServerHeldByLock: port ${lock.port} outside allowed range, skipping`);
       try { unlinkSync(lockPath); } catch { /* ok */ }
       return;
     }
 
-    // 1. Graceful HTTP shutdown
     try {
       await fetch(`http://localhost:${lock.port}/shutdown`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${lock.authToken}` },
+        headers: {
+          Authorization: `Bearer ${lock.authToken}`,
+          "X-Mcode-Shutdown-Reason": "desktop-update-exit",
+        },
       });
     } catch { /* server may already be down */ }
 
-    // 2. Poll for exit (200ms intervals, 10s timeout)
     const deadline = Date.now() + 10_000;
     while (Date.now() < deadline) {
       try {
-        process.kill(lock.pid, 0); // throws if dead
+        process.kill(lock.pid, 0);
         await new Promise((r) => setTimeout(r, 200));
       } catch {
-        break; // process exited
+        break;
       }
     }
 
-    // 3. Force kill if still alive
     try {
       process.kill(lock.pid, 0);
       process.kill(lock.pid, "SIGKILL");
     } catch { /* already dead */ }
 
-    // 4. Clean up stale lock
     try { unlinkSync(lockPath); } catch { /* ok */ }
+  }
+
+  /**
+   * Force-stop the server for version replacement before spawning anew.
+   * Delegates to {@link stopServerHeldByLock}.
+   */
+  async forceReplace(): Promise<void> {
+    await this.stopServerHeldByLock();
   }
 
   /**

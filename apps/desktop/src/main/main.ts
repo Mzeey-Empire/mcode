@@ -681,8 +681,10 @@ app.whenReady().then(async () => {
       }
     });
 
-    // Initialize auto-updater (no-op in dev — guarded by app.isPackaged)
-    initAutoUpdater();
+    // Initialize auto-updater (checks still run in dev; install hooks are packaged-only paths)
+    initAutoUpdater({
+      beforeQuitAndInstall: () => serverManager.stopServerHeldByLock(),
+    });
 
     console.log(`[perf] Startup complete: ${(performance.now() - STARTUP_TIME).toFixed(1)}ms`);
   } catch (error) {

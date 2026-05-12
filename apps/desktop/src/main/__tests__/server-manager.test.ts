@@ -478,9 +478,32 @@ describe("ServerManager", () => {
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
       "http://localhost:19600/shutdown",
-      expect.objectContaining({ method: "POST" }),
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer test-auth-token",
+          "X-Mcode-Shutdown-Reason": "desktop-update-exit",
+        }),
+      }),
     );
 
+    killSpy.mockRestore();
+  });
+
+  it("stopServerHeldByLock matches forceReplace shutdown behavior", async () => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReset().mockReturnValue(LOCK_FILE_JSON);
+    const killSpy = vi.spyOn(process, "kill").mockImplementationOnce(() => true as never);
+    killSpy.mockImplementationOnce(() => {
+      throw new Error("ESRCH");
+    });
+
+    await manager.stopServerHeldByLock();
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "http://localhost:19600/shutdown",
+      expect.objectContaining({ method: "POST" }),
+    );
     killSpy.mockRestore();
   });
 
