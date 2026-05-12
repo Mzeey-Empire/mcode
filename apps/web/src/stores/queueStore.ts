@@ -100,6 +100,13 @@ function showToast(set: (partial: Partial<QueueState>) => void, text: string) {
   toastTimer = setTimeout(() => set({ toast: null }), 1800);
 }
 
+/**
+ * Zustand store managing per-thread message queues.
+ *
+ * Messages are enqueued when the agent is busy and drained FIFO when the
+ * turn completes. Supports reorder, edit-in-place, pop-for-send-now, and
+ * an editing lock that pauses auto-drain while a message is open in the composer.
+ */
 export const useQueueStore = create<QueueState>((set, get) => ({
   queues: {},
   toast: null,

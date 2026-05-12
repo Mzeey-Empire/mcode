@@ -110,6 +110,7 @@ interface CursorAcpSessionEntry {
   cursorModelAppliedPair: { acpSessionId: string; modelId: string } | null;
 }
 
+/** Cursor ACP (Agent Communication Protocol) adapter implementing IAgentProvider via a MCP subprocess per session. */
 @injectable()
 export class CursorProvider extends EventEmitter implements IAgentProvider {
   readonly id: ProviderId = "cursor";
@@ -225,10 +226,12 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     await scheduled;
   }
 
+  /** Pre-load an SDK session ID mapping (e.g. from the database on startup). */
   setSdkSessionId(sessionId: string, sdkSessionId: string): void {
     this.sdkSessionIds.set(sessionId, sdkSessionId);
   }
 
+  /** Cancel the active ACP session. Records a pending stop if the session hasn't been created yet. */
   stopSession(sessionId: string): void {
     const entry = this.sessions.get(sessionId);
     this.cancelPendingForThread(sessionId);
@@ -240,6 +243,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     }
   }
 
+  /** Tear down all sessions, cancel pending permissions, and stop the eviction timer. */
   shutdown(): void {
     if (this.evictionTimer) {
       clearInterval(this.evictionTimer);

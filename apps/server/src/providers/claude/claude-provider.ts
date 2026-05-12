@@ -1545,7 +1545,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     this.sdkSessionIds.set(sessionId, sdkSessionId);
   }
 
-  /** Abort a running session. */
+  /** Abort a running session, or record a pending stop if the session hasn't been created yet. */
   stopSession(sessionId: string): void {
     // Normalize to the raw UUID that canUseTool stores as threadId.
     const tid = sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;

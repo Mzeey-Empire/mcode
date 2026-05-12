@@ -945,7 +945,7 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
     this.sdkSessionIds.set(sessionId, sdkSessionId);
   }
 
-  /** Disconnect and remove an active session. */
+  /** Disconnect and remove an active session, or record a pending stop if the session hasn't been created yet. */
   stopSession(sessionId: string): void {
     this.contextWindowBySession.delete(sessionId);
     const entry = this.sessions.get(sessionId);
