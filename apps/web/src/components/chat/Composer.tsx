@@ -1402,8 +1402,11 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     // Avoid duplicate submissions while a placeholder thread is still materializing.
     if (isThreadScaffold) return;
 
-    // ---- Queue path: agent is running on this thread ----
-    if (isAgentRunning && threadId) {
+    // ---- Queue path: agent is running on THIS thread ----
+    // Skip when composing a branch (`branchFromMessageId`) or a brand-new thread
+    // (`isNewThread`) - both target a *different* thread and must not enqueue
+    // on the parent thread that happens to be currently running.
+    if (isAgentRunning && threadId && !branchFromMessageId && !isNewThread) {
       const captureRows = buildAttachedBrowserCaptures(attachments);
       const { content: injectedContent, display: displayInjected } = await injectFileContent(trimmed);
       let content: string;
