@@ -1,14 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { ChatView } from "@/components/chat/ChatView";
-import { SettingsView } from "@/components/settings/SettingsView";
 import { ConnectionBanner } from "@/components/ConnectionBanner";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { useUpdateStore } from "@/stores/updateStore";
 import type { UpdateStatus } from "@/transport/desktop-bridge";
-import { TerminalPanel } from "@/components/terminal";
-import { RightPanel } from "@/components/panels/RightPanel";
-import { CommandPalette } from "@/components/palette/CommandPalette";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { ProjectSelectorLanding } from "@/components/projects/ProjectSelectorLanding";
 import { SidebarRevealButton } from "@/components/sidebar/SidebarRevealButton";
@@ -28,6 +24,26 @@ import { useIdleReclamation } from "@/hooks/useIdleReclamation";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ToastContainer } from "@/components/Toast";
 import type { SettingsSection } from "@/components/settings/settings-nav";
+
+const LazySettingsView = lazy(async () => {
+  const m = await import("@/components/settings/SettingsView");
+  return { default: m.SettingsView };
+});
+
+const LazyTerminalPanel = lazy(async () => {
+  const m = await import("@/components/terminal");
+  return { default: m.TerminalPanel };
+});
+
+const LazyRightPanel = lazy(async () => {
+  const m = await import("@/components/panels/RightPanel");
+  return { default: m.RightPanel };
+});
+
+const LazyCommandPalette = lazy(async () => {
+  const m = await import("@/components/palette/CommandPalette");
+  return { default: m.CommandPalette };
+});
 
 /**
  * Tracks threads for which a PTY creation RPC is already in flight.
@@ -366,7 +382,9 @@ export function App() {
             <div className="flex flex-1 gap-1.5 overflow-hidden">
               <main className="flex-1 overflow-hidden rounded-lg bg-background shadow-sm">
                 {settingsOpen ? (
-                  <SettingsView section={settingsSection} />
+                  <Suspense fallback={null}>
+                    <LazySettingsView section={settingsSection} />
+                  </Suspense>
                 ) : showLanding ? (
                   <div className="flex h-full flex-col">
                     {/* When the sidebar is collapsed, show the reveal button so the
@@ -382,13 +400,23 @@ export function App() {
                   <ChatView />
                 )}
               </main>
-              {!settingsOpen && !showLanding && <RightPanel />}
+              {!settingsOpen && !showLanding && (
+                <Suspense fallback={null}>
+                  <LazyRightPanel />
+                </Suspense>
+              )}
             </div>
-            {!settingsOpen && !showLanding && <TerminalPanel />}
+            {!settingsOpen && !showLanding && (
+              <Suspense fallback={null}>
+                <LazyTerminalPanel />
+              </Suspense>
+            )}
           </div>
         </div>
       </div>
-      <CommandPalette />
+      <Suspense fallback={null}>
+        <LazyCommandPalette />
+      </Suspense>
       <ShortcutHelpDialog />
       <ToastContainer />
     </TooltipProvider>

@@ -37,7 +37,7 @@ export type PreviewShellBounds = {
   readonly height: number;
 };
 
-/** Result of a preview navigation attempt (http and https only). */
+/** Result of a preview navigation attempt (http, https, and local file paths). */
 export type PreviewNavigateResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly error: string };
@@ -67,7 +67,7 @@ interface PreviewBridge {
     /** Active workspace id; scopes preview spill files under the Mcode app data directory. */
     workspaceId?: string | null;
   }): Promise<void>;
-  navigate(url: string): Promise<PreviewNavigateResult>;
+  navigate(url: string, workspacePath?: string | null): Promise<PreviewNavigateResult>;
   goBack(): Promise<boolean>;
   goForward(): Promise<boolean>;
   reload(): Promise<void>;
@@ -85,9 +85,13 @@ interface PreviewBridge {
   capturePageContext(): Promise<PreviewContextReferenceResult>;
   /** Deletes workspace-relative preview spill files after the message was sent or the queue dropped them. */
   releaseBrowserCaptureSpills(paths: readonly string[]): Promise<void>;
-  onDidNavigate(callback: (payload: { url: string; title: string }) => void): () => void;
+  onDidNavigate(callback: (payload: { url: string; title: string; favicon?: string | null }) => void): () => void;
   /** Guest load lifecycle for shell chrome (BrowserView covers the surface div). */
   onLoadingState(callback: (payload: { loading: boolean }) => void): () => void;
+  /** Subscribe to favicon updates from the guest webContents. */
+  onDidUpdateFavicon(callback: (payload: { favicon: string | null }) => void): () => void;
+  /** Cancel any in-progress capture operation (region or element-pick). */
+  cancelCapture(): Promise<void>;
 }
 
 /** IPC push transport relayed from the Electron main process. */

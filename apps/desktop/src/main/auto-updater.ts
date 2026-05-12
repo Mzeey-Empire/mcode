@@ -87,13 +87,41 @@ let checkIntervalId: NodeJS.Timeout | null = null;
 let initialCheckTimeoutId: NodeJS.Timeout | null = null;
 /** Guards against promptRestart being invoked twice concurrently (notification click + direct call). */
 let isPrompting = false;
-/** Passed from main so the detached server exits before installers replace files under resources. */
-let beforeQuitAndInstallHook: (() => Promise<void>) | null = null;
+
+/** Hook called before quitAndInstall to allow cleanup (e.g., stopping the server). */
+let beforeInstallHook: (() => Promise<void>) | null = null;
+
 /**
  * Skips redundant server-stop work once we have deferred quit to wait for teardown.
  * Matches our own before-quit handler on the synthetic second quit().
  */
 let isCompletingStoppedServerQuit = false;
+
+/**
+ * Register a callback that runs before every quitAndInstall.
+ * Used by main.ts to inject server shutdown so the installer
+ * does not hit locked files from the detached server process.
+ */
+export function setBeforeInstallHook(hook: () => Promise<void>): void {
+  beforeInstallHook = hook;
+}
+
+/**
+ * Stop the server (if hook registered), then run the installer.
+ * All code paths that previously called autoUpdater.quitAndInstall()
+ * must use this instead.
+ */
+async function quitAndInstallSafely(): Promise<void> {
+  isCompletingStoppedServerQuit = true;
+  if (beforeInstallHook) {
+    try {
+      await beforeInstallHook();
+    } catch (err) {
+      console.error("[auto-updater] beforeInstallHook failed, proceeding with install:", err);
+    }
+  }
+  autoUpdater.quitAndInstall();
+}
 
 /** Returns the most recently observed update status (for renderer hydration). */
 export function getUpdateStatus(): UpdateStatus {
@@ -151,33 +179,12 @@ export function checkForUpdatesNow(): Promise<UpdateStatus> {
   return inFlightCheck;
 }
 
-/** Runs HTTP shutdown plus OS fallback so `quitAndInstall` does not overlap a live server PID. */
-async function quitAndInstallAfterStoppingServer(): Promise<void> {
-  isCompletingStoppedServerQuit = true;
-  try {
-    await invokeBeforeQuitAndInstall();
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[auto-updater] server stop failed before quit-and-install:", message);
-  }
-  autoUpdater.quitAndInstall();
-}
-
-/**
- * Sends the shutdown signal to the standalone server when needed, then quits into the installer.
- * Returns false in dev or if nothing is downloaded.
- */
+/** Quit and install a downloaded update. Returns false in dev or if nothing is downloaded. */
 export async function installUpdate(): Promise<boolean> {
   if (!app.isPackaged) return false;
   if (lastStatus.state !== "downloaded") return false;
-  await quitAndInstallAfterStoppingServer();
+  await quitAndInstallSafely();
   return true;
-}
-
-/** Runs the desktop hook before any path that invokes `quitAndInstall` or defers quit for teardown. */
-async function invokeBeforeQuitAndInstall(): Promise<void> {
-  if (!beforeQuitAndInstallHook) return;
-  await beforeQuitAndInstallHook();
 }
 
 /**
@@ -210,7 +217,7 @@ function onBeforeQuitForPendingInstall(event: Event): void {
   isCompletingStoppedServerQuit = true;
   void (async () => {
     try {
-      await invokeBeforeQuitAndInstall();
+      if (beforeInstallHook) await beforeInstallHook();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("[auto-updater] server stop failed before silent install on quit:", message);
@@ -220,20 +227,13 @@ function onBeforeQuitForPendingInstall(event: Event): void {
   })();
 }
 
-/** Options for {@link initAutoUpdater}, wiring desktop lifecycle hooks into the update flow. */
-export interface InitAutoUpdaterOptions {
-  /** Stops the detached ServerManager server via `POST /shutdown` before the updater replaces binaries. */
-  readonly beforeQuitAndInstall?: () => Promise<void>;
-}
-
 /**
  * Initializes auto-update checks. Call once after app "ready" fires.
  * No-op in dev (no packaged app to update).
  */
-export function initAutoUpdater(options?: InitAutoUpdaterOptions): void {
+export function initAutoUpdater(): void {
   if (initialized) return;
   initialized = true;
-  beforeQuitAndInstallHook = options?.beforeQuitAndInstall ?? null;
   app.on("before-quit", onBeforeQuitForPendingInstall);
 
   // In dev, force electron-updater to read dev-app-update.yml so we can
@@ -359,7 +359,7 @@ async function promptRestart(version: string): Promise<void> {
   });
 
   if (response === 0 && app.isPackaged) {
-    void quitAndInstallAfterStoppingServer();
+    await quitAndInstallSafely();
   }
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "mcode",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "private": true,
   "workspaces": [
     "packages/*",
@@ -24,7 +24,10 @@
     "logs:tail": "node scripts/logs-tail.mjs",
     "state:paths": "bun scripts/state-paths.mjs",
     "state:reset": "node scripts/state-reset.mjs",
-    "db:info": "bun scripts/db-info.mjs"
+    "db:info": "bun scripts/db-info.mjs",
+    "verify": "node scripts/agent/verify-tests.mjs",
+    "verify:e2e": "node scripts/agent/verify-e2e.mjs",
+    "verify:all": "node scripts/agent/verify-all.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.19.17",

@@ -47,9 +47,16 @@ describe("Agent event thread isolation", () => {
     });
     useToastStore.setState({ toasts: [] });
     vi.clearAllMocks();
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb: FrameRequestCallback): number => {
+      queueMicrotask(() => {
+        cb(0);
+      });
+      return 1;
+    });
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
@@ -195,7 +202,7 @@ describe("Agent event thread isolation", () => {
   // ── Streaming isolation ──────────────────────────────────────────────
 
   describe("streaming text isolation", () => {
-    it("textDelta for background thread does not appear in active thread's streaming", () => {
+    it("textDelta for background thread does not appear in active thread's streaming", async () => {
       const { handleAgentEvent } = useThreadStore.getState();
 
       handleAgentEvent(THREAD_B, {
@@ -203,6 +210,9 @@ describe("Agent event thread isolation", () => {
         delta: "background text",
       });
 
+      for (let i = 0; i < 8; i++) {
+        await Promise.resolve();
+      }
       const state = useThreadStore.getState();
       expect(state.streamingByThread[THREAD_A]).toBeUndefined();
       expect(state.streamingByThread[THREAD_B]).toBe("background text");

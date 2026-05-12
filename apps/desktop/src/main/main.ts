@@ -37,6 +37,7 @@ import {
   initAutoUpdater,
   installUpdate,
   cleanupAutoUpdater,
+  setBeforeInstallHook,
 } from "./auto-updater.js";
 import { setupSpellcheck } from "./spellcheck.js";
 import { registerPreviewBrowserHandlers, disposePreviewForWindow } from "./preview-browser.js";
@@ -617,6 +618,10 @@ app.whenReady().then(async () => {
     console.log(`[perf] Server ready: ${(performance.now() - STARTUP_TIME).toFixed(1)}ms`);
     console.log(`Server started on port ${port}`);
 
+    // Stop the detached server before any quitAndInstall so the NSIS
+    // installer does not hit locked files under the install directory.
+    setBeforeInstallHook(() => serverManager.forceReplace());
+
     // Show a Restart / Quit dialog if the server crashes unexpectedly
     serverManager.onUnexpectedExit = async (code) => {
       if (!mainWindow) return;
@@ -682,9 +687,7 @@ app.whenReady().then(async () => {
     });
 
     // Initialize auto-updater (checks still run in dev; install hooks are packaged-only paths)
-    initAutoUpdater({
-      beforeQuitAndInstall: () => serverManager.stopServerHeldByLock(),
-    });
+    initAutoUpdater();
 
     console.log(`[perf] Startup complete: ${(performance.now() - STARTUP_TIME).toFixed(1)}ms`);
   } catch (error) {
@@ -697,6 +700,25 @@ app.whenReady().then(async () => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
+    app.quit();
+  }
+});
+
+// When autoInstallOnAppQuit is true, electron-updater runs the installer
+// during the quit sequence. Stop the server first so the installer can
+// replace files without hitting locks from the detached process.
+let isQuittingForUpdate = false;
+app.on("before-quit", async (e) => {
+  if (isQuittingForUpdate) return; // re-entrant guard after we call app.quit()
+  const status = getUpdateStatus();
+  if (status.state === "downloaded") {
+    e.preventDefault();
+    isQuittingForUpdate = true;
+    try {
+      await serverManager.forceReplace();
+    } catch (err) {
+      console.error("[main] Failed to stop server before update install:", err);
+    }
     app.quit();
   }
 });

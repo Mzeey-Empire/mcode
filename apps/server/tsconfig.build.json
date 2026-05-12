@@ -4,7 +4,10 @@
     "noEmit": false,
     "outDir": "dist-tsc",
     "declaration": false,
-    "declarationMap": false
+    "declarationMap": false,
+    // dist-tsc is only an esbuild input. Per-file .source maps race `tsc --watch` on Windows
+    // (esbuild can read an empty .map mid-write) and break the desktop dev bundle.
+    "sourceMap": false
   },
   "exclude": ["node_modules", "dist", "dist-tsc", "src/__tests__"]
 }

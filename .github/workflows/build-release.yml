@@ -248,5 +248,5 @@ jobs:
           tag="${{ github.event.release.tag_name || inputs.tag }}"
           if [ -f latest-mac.yml ]; then
             echo "Uploading merged latest-mac.yml"
-            gh release upload "$tag" latest-mac.yml --clobber
+            gh release upload "$tag" latest-mac.yml --clobber --repo "${{ github.repository }}"
           fi

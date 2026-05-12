@@ -3,7 +3,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type FormEvent,
 } from "react";
 import {
   ArrowLeft,
@@ -19,24 +18,30 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Tooltip,
   TooltipTrigger,
   TooltipContent,
 } from "@/components/ui/tooltip";
 import { useDiffStore } from "@/stores/diffStore";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
 import { useToastStore } from "@/stores/toastStore";
 import { usePreviewReferenceQueueStore } from "@/stores/previewReferenceQueueStore";
 import type { McodeBrowserCapture } from "@mcode/contracts";
+import { SmartOmnibox } from "./SmartOmnibox";
 import { MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME } from "@mcode/contracts";
 
 const NAV_ERROR_LABEL: Record<string, string> = {
   "no-bounds": "Wait for the panel to finish layout, then try again.",
-  "invalid-url": "Only http and https URLs are allowed.",
-  "empty-url": "Enter a URL.",
+  "invalid-url": "Only http, https URLs and local file paths are supported.",
+  "empty-url": "Enter a URL or file path.",
   "no-window": "Preview is unavailable.",
+  "file-not-found": "File not found.",
+  "not-a-file": "Path is not a regular file.",
+  "is-directory": "Path is a directory (no index.html found).",
+  "sensitive-file": "Cannot preview sensitive files (.env, .git, keys, etc.).",
+  "no-workspace": "Open a workspace to use relative file paths.",
 };
 
 const CAPTURE_ERROR_SILENT = new Set(["cancelled", "capture-interrupted", "navigated-away"]);
@@ -110,13 +115,19 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
   const [contextBusy, setContextBusy] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [pageTitle, setPageTitle] = useState<string | null>(null);
+  const [faviconUrl, setFaviconUrl] = useState<string | null>(null);
 
   const storedUrl = useDiffStore(
     (s) => s.previewUrlByThread[threadId] ?? "",
   );
+  const workspacePath = useWorkspaceStore(
+    (s) => s.workspaces.find((w) => w.id === workspaceId)?.path ?? null,
+  );
 
   useEffect(() => {
     setInputUrl(storedUrl);
+    setPageTitle(null);
+    setFaviconUrl(null);
     setNavError(null);
   }, [threadId, storedUrl]);
 
@@ -173,11 +184,23 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
         useDiffStore.getState().setPreviewUrlForThread(threadId, p.url);
         setInputUrl(p.url);
         setPageTitle(p.title ?? null);
+        setFaviconUrl(p.favicon ?? null);
+      } else {
+        setPageTitle(null);
+        setFaviconUrl(null);
       }
       void refreshNav();
     });
     return unsub;
   }, [threadId, refreshNav]);
+
+  useEffect(() => {
+    const preview = window.desktopBridge?.preview;
+    if (!preview?.onDidUpdateFavicon) return;
+    return preview.onDidUpdateFavicon((p) => {
+      setFaviconUrl(p.favicon);
+    });
+  }, []);
 
   useEffect(() => {
     const preview = window.desktopBridge?.preview;
@@ -214,19 +237,6 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
     };
   }, [pushSync, refreshNav]);
 
-  const onSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    const preview = window.desktopBridge?.preview;
-    if (!preview) return;
-    setNavError(null);
-    await pushSync(true);
-    const res = await preview.navigate(inputUrl);
-    if (!res.ok) {
-      setNavError(formatNavError(res.error));
-    }
-    await refreshNav();
-  };
-
   const onGoBack = async () => {
     const preview = window.desktopBridge?.preview;
     if (!preview) return;
@@ -257,116 +267,65 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
     await preview.openExternal();
   };
 
-  const onAddPictureReference = useCallback(async () => {
-    const preview = window.desktopBridge?.preview;
-    if (!preview?.capturePictureReference || !threadId) return;
-
-    setCaptureBusy(true);
-    try {
-      await pushSync(true);
-
-      let res: CaptureResult;
+  /** Shared capture-to-attachment pipeline: sync bounds, call IPC, build blob, enqueue. */
+  const runPictureCapture = useCallback(
+    async (
+      captureFn: () => Promise<unknown>,
+      setBusy: (v: boolean) => void,
+    ) => {
+      if (!threadId) return;
+      setBusy(true);
       try {
-        res = (await preview.capturePictureReference()) as CaptureResult;
-      } catch {
-        useToastStore.getState().show("error", "Could not capture preview", "Screenshot failed.");
-        return;
+        await pushSync(true);
+
+        let res: CaptureResult;
+        try {
+          res = (await captureFn()) as CaptureResult;
+        } catch {
+          useToastStore.getState().show("error", "Could not capture preview", "Screenshot failed.");
+          return;
+        }
+
+        showCaptureErrorIfNeeded(res);
+        if (!res.ok) return;
+
+        const copied = Uint8Array.from(res.previewBytes);
+        const blob = new Blob([copied], { type: "image/png" });
+        const previewUrl = URL.createObjectURL(blob);
+        const attachment: PendingAttachment = {
+          id: res.meta.id,
+          name: res.meta.name,
+          mimeType: res.meta.mimeType,
+          sizeBytes: res.meta.sizeBytes,
+          previewUrl,
+          filePath: res.meta.sourcePath,
+          browserCapture: res.capture,
+        };
+        usePreviewReferenceQueueStore.getState().enqueuePreviewReference(threadId, attachment);
+      } finally {
+        setBusy(false);
       }
+    },
+    [pushSync, threadId],
+  );
 
-      showCaptureErrorIfNeeded(res);
-      if (!res.ok) return;
+  const onAddPictureReference = useCallback(() => {
+    const fn = window.desktopBridge?.preview?.capturePictureReference;
+    if (!fn) return;
+    void runPictureCapture(() => fn.call(window.desktopBridge!.preview), setCaptureBusy);
+  }, [runPictureCapture]);
 
-      const copied = Uint8Array.from(res.previewBytes);
-      const blob = new Blob([copied], { type: "image/png" });
-      const previewUrl = URL.createObjectURL(blob);
-      const attachment: PendingAttachment = {
-        id: res.meta.id,
-        name: res.meta.name,
-        mimeType: res.meta.mimeType,
-        sizeBytes: res.meta.sizeBytes,
-        previewUrl,
-        filePath: res.meta.sourcePath,
-        browserCapture: res.capture,
-      };
-      usePreviewReferenceQueueStore.getState().enqueuePreviewReference(threadId, attachment);
-    } finally {
-      setCaptureBusy(false);
-    }
-  }, [pushSync, threadId]);
+  const onAddRegionPictureReference = useCallback(() => {
+    const fn = window.desktopBridge?.preview?.capturePictureReferenceRegion;
+    if (!fn) return;
+    void runPictureCapture(() => fn.call(window.desktopBridge!.preview), setRegionBusy);
+  }, [runPictureCapture]);
 
-  const onAddRegionPictureReference = useCallback(async () => {
-    const preview = window.desktopBridge?.preview;
-    if (!preview?.capturePictureReferenceRegion || !threadId) return;
-
-    setRegionBusy(true);
-    try {
-      await pushSync(true);
-
-      let res: CaptureResult;
-      try {
-        res = (await preview.capturePictureReferenceRegion()) as CaptureResult;
-      } catch {
-        useToastStore.getState().show("error", "Could not capture preview", "Screenshot failed.");
-        return;
-      }
-
-      showCaptureErrorIfNeeded(res);
-      if (!res.ok) return;
-
-      const copied = Uint8Array.from(res.previewBytes);
-      const blob = new Blob([copied], { type: "image/png" });
-      const previewUrl = URL.createObjectURL(blob);
-      const attachment: PendingAttachment = {
-        id: res.meta.id,
-        name: res.meta.name,
-        mimeType: res.meta.mimeType,
-        sizeBytes: res.meta.sizeBytes,
-        previewUrl,
-        filePath: res.meta.sourcePath,
-        browserCapture: res.capture,
-      };
-      usePreviewReferenceQueueStore.getState().enqueuePreviewReference(threadId, attachment);
-    } finally {
-      setRegionBusy(false);
-    }
-  }, [pushSync, threadId]);
-
-  const onAddElementPickPictureReference = useCallback(async () => {
-    const preview = window.desktopBridge?.preview;
-    if (!preview?.capturePictureReferenceElementPick || !threadId) return;
-
-    setElementPickBusy(true);
-    try {
-      await pushSync(true);
-
-      let res: CaptureResult;
-      try {
-        res = (await preview.capturePictureReferenceElementPick()) as CaptureResult;
-      } catch {
-        useToastStore.getState().show("error", "Could not capture preview", "Screenshot failed.");
-        return;
-      }
-
-      showCaptureErrorIfNeeded(res);
-      if (!res.ok) return;
-
-      const copied = Uint8Array.from(res.previewBytes);
-      const blob = new Blob([copied], { type: "image/png" });
-      const previewUrl = URL.createObjectURL(blob);
-      const attachment: PendingAttachment = {
-        id: res.meta.id,
-        name: res.meta.name,
-        mimeType: res.meta.mimeType,
-        sizeBytes: res.meta.sizeBytes,
-        previewUrl,
-        filePath: res.meta.sourcePath,
-        browserCapture: res.capture,
-      };
-      usePreviewReferenceQueueStore.getState().enqueuePreviewReference(threadId, attachment);
-    } finally {
-      setElementPickBusy(false);
-    }
-  }, [pushSync, threadId]);
+  const onAddElementPickPictureReference = useCallback(() => {
+    const fn = window.desktopBridge?.preview?.capturePictureReferenceElementPick;
+    if (!fn) return;
+    void runPictureCapture(() => fn.call(window.desktopBridge!.preview), setElementPickBusy);
+  }, [runPictureCapture]);
 
   const onAddPageContextOnly = useCallback(async () => {
     const preview = window.desktopBridge?.preview;
@@ -429,26 +388,21 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
       className="flex min-h-0 min-w-[20rem] flex-1 flex-col"
     >
       <form
-        onSubmit={(e) => void onSubmit(e)}
+        onSubmit={(e) => e.preventDefault()}
         className="flex-none space-y-1.5 border-b border-border/40 px-2 pt-2 pb-1.5"
       >
-        {/* URL bar */}
-        <div className="flex min-w-0 items-center gap-1.5">
-          <Input
-            value={inputUrl}
-            onChange={(e) => setInputUrl(e.target.value)}
-            placeholder="https://example.com"
-            className="h-7 min-w-0 flex-1 font-mono text-xs"
-            aria-label="Preview URL"
-            title={inputUrl.trim() ? inputUrl : undefined}
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-          />
-          <Button type="submit" variant="outline" size="sm" className="h-7 shrink-0 px-2.5 text-xs">
-            Go
-          </Button>
-        </div>
+        <SmartOmnibox
+          url={inputUrl}
+          pageTitle={pageTitle}
+          faviconUrl={faviconUrl}
+          onNavigate={(target) => {
+            setInputUrl(target);
+            setNavError(null);
+            void window.desktopBridge?.preview.navigate(target, workspacePath).then((r) => {
+              if (!r.ok) setNavError(formatNavError(r.error));
+            });
+          }}
+        />
 
         {/* Toolbar: nav | capture | external */}
         <div className="flex min-w-0 items-center">
@@ -589,14 +543,25 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
               Open in system browser
             </TooltipContent>
           </Tooltip>
-        </div>
 
-        {/* Page title */}
-        {pageTitle ? (
-          <p className="truncate px-0.5 font-mono text-[10px] tracking-wide text-muted-foreground/60" title={pageTitle}>
-            {pageTitle}
-          </p>
-        ) : null}
+          {/* Cancel capture pill (visible during region/element-pick capture) */}
+          {(regionBusy || elementPickBusy) ? (
+            <>
+              <div className="flex-1" />
+              <button
+                type="button"
+                aria-label="Cancel capture"
+                className="flex shrink-0 items-center gap-1 rounded border border-destructive/20 bg-destructive/10 px-2 py-0.5 text-[11px] text-destructive/80 transition-colors hover:bg-destructive/15"
+                onClick={() => void window.desktopBridge?.preview.cancelCapture()}
+              >
+                <kbd className="rounded border border-destructive/15 bg-destructive/5 px-1 py-px text-[10px] font-medium">
+                  Esc
+                </kbd>
+                Cancel
+              </button>
+            </>
+          ) : null}
+        </div>
 
         {navError ? (
           <p className="text-xs text-destructive" role="status">

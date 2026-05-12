@@ -5,6 +5,7 @@ import {
   useState,
   useRef,
   useMemo,
+  memo,
   type CSSProperties,
 } from "react";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
@@ -72,6 +73,26 @@ function setExpandedState(state: Record<string, boolean>) {
 
 /** Maximum threads shown per workspace before "Show more" appears. */
 const THREAD_LIST_CAP = 6;
+
+/** Stable empty array used as default when a workspace has no threads. */
+const EMPTY_THREADS: WorkspaceThread[] = [];
+
+/** Stable empty Set used as a sentinel when status filters don't need running/permission state. */
+const EMPTY_ID_SET = new Set<string>();
+
+/**
+ * Returns `prev` if it contains the same elements in the same order as `next`
+ * (by reference equality). Avoids new array references when content hasn't changed,
+ * which preserves React.memo effectiveness on child components.
+ */
+function stableArray<T>(prev: T[] | undefined, next: T[]): T[] {
+  if (prev === next) return prev;
+  if (!prev || prev.length !== next.length) return next;
+  for (let i = 0; i < next.length; i++) {
+    if (prev[i] !== next[i]) return next;
+  }
+  return prev;
+}
 
 /** Time window in ms during which a second click on the same thread row is treated as a double-click. */
 const DOUBLE_CLICK_THRESHOLD_MS = 250;
@@ -287,19 +308,45 @@ export function ProjectTree() {
     [threads],
   );
 
-  const filteredThreadsByWorkspace = useMemo(() => {
+  // Pre-group threads by workspace in one pass instead of filtering all threads per workspace.
+  const threadsByWorkspace = useMemo(() => {
     const map = new Map<string, WorkspaceThread[]>();
-    for (const ws of workspaces) {
-      const wsThreads = threads.filter((t) => t.workspace_id === ws.id);
-      const filtered = isSearchActive
-        ? filterAndSortThreads(wsThreads, searchQuery, searchFilters, sortField, sortDirection, runningThreadIds, pendingPermissionThreadIds)
-        : sortField !== "updated_at" || sortDirection !== "desc"
-          ? filterAndSortThreads(wsThreads, "", { status: [], provider: [] }, sortField, sortDirection, runningThreadIds, pendingPermissionThreadIds)
-          : wsThreads;
-      map.set(ws.id, filtered);
+    for (const t of threads) {
+      const arr = map.get(t.workspace_id);
+      if (arr) arr.push(t);
+      else map.set(t.workspace_id, [t]);
     }
     return map;
-  }, [workspaces, threads, isSearchActive, searchQuery, searchFilters, sortField, sortDirection, runningThreadIds, pendingPermissionThreadIds]);
+  }, [threads]);
+
+  // Only include running/permission IDs as dependencies when status filters actually
+  // consult them. This prevents the entire filteredThreadsByWorkspace map from being
+  // recomputed every time an agent starts/stops (which creates new Set references).
+  const statusNeedsRunning = searchFilters.status.length > 0
+    && searchFilters.status.some((s) => s === "active" || s === "paused" || s === "action_required");
+  const effectiveRunning = statusNeedsRunning ? runningThreadIds : EMPTY_ID_SET;
+  const effectivePending = statusNeedsRunning ? pendingPermissionThreadIds : EMPTY_ID_SET;
+
+  const prevFilteredRef = useRef<Map<string, WorkspaceThread[]>>(new Map());
+
+  const filteredThreadsByWorkspace = useMemo(() => {
+    const map = new Map<string, WorkspaceThread[]>();
+    const prev = prevFilteredRef.current;
+    for (const ws of workspaces) {
+      const wsThreads = threadsByWorkspace.get(ws.id) ?? EMPTY_THREADS;
+      const filtered = isSearchActive
+        ? filterAndSortThreads(wsThreads, searchQuery, searchFilters, sortField, sortDirection, effectiveRunning, effectivePending)
+        : sortField !== "updated_at" || sortDirection !== "desc"
+          ? filterAndSortThreads(wsThreads, "", { status: [], provider: [] }, sortField, sortDirection, effectiveRunning, effectivePending)
+          : wsThreads;
+      // Reuse the previous array reference when elements haven't changed.
+      // Prevents downstream React.memo children from re-rendering when the
+      // map recomputes but a workspace's thread list is structurally identical.
+      map.set(ws.id, stableArray(prev.get(ws.id), filtered));
+    }
+    prevFilteredRef.current = map;
+    return map;
+  }, [workspaces, threadsByWorkspace, isSearchActive, searchQuery, searchFilters, sortField, sortDirection, effectiveRunning, effectivePending]);
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>(getExpandedState);
   /** Ref mirror of `expanded` so effects can read current state without re-triggering. */
@@ -397,6 +444,8 @@ export function ProjectTree() {
     }
   }, [isSearchActive, filteredThreadsByWorkspace, serverResults, workspaces, loadThreads]);
 
+  const checksById = useWorkspaceStore(useShallow((s) => s.checksById));
+
   const toggleThreadList = useCallback((wsId: string) => {
     setThreadListExpandedState((prev) => ({ ...prev, [wsId]: !prev[wsId] }));
   }, []);
@@ -479,6 +528,33 @@ export function ProjectTree() {
     },
     []
   );
+
+  // Stable callbacks that accept wsId to avoid per-workspace closures in the render loop.
+  const handleSelectThread = useCallback((wsId: string, threadId: string) => {
+    setActiveWorkspace(wsId);
+    setActiveThread(threadId);
+  }, [setActiveWorkspace, setActiveThread]);
+
+  const handleCreateThread = useCallback((wsId: string) => {
+    setActiveWorkspace(wsId);
+    setPendingNewThread(true);
+    setActiveThread(null);
+  }, [setActiveWorkspace, setPendingNewThread, setActiveThread]);
+
+  const handleDeleteWorkspace = useCallback((wsId: string) => {
+    const ws = useWorkspaceStore.getState().workspaces.find((w) => w.id === wsId);
+    if (ws) {
+      setWsDeleteDialog({ workspaceId: ws.id, workspaceName: ws.name });
+    }
+  }, []);
+
+  const handleInlineEditChange = useCallback((title: string) => {
+    setInlineEdit((prev) => prev ? { ...prev, title } : null);
+  }, []);
+
+  const handleInlineEditCancel = useCallback(() => {
+    setInlineEdit(null);
+  }, []);
 
   const handleInlineEditCommit = useCallback(async () => {
     if (!inlineEdit) return;
@@ -623,34 +699,19 @@ export function ProjectTree() {
                   runningThreadIds={runningThreadIds}
                   pendingPermissionThreadIds={pendingPermissionThreadIds}
                   isThreadListExpanded={threadListExpanded[ws.id] ?? false}
-                  onToggleThreadList={() => toggleThreadList(ws.id)}
+                  checksById={checksById}
+                  onToggleThreadList={toggleThreadList}
                   scrollElementRef={scrollViewportRef}
                   inlineEdit={inlineEdit}
-                  onInlineEditChange={(title) =>
-                    setInlineEdit((prev) => prev ? { ...prev, title } : null)
-                  }
+                  onInlineEditChange={handleInlineEditChange}
                   onInlineEditCommit={handleInlineEditCommit}
-                  onInlineEditCancel={() => setInlineEdit(null)}
+                  onInlineEditCancel={handleInlineEditCancel}
                   onStartInlineEdit={handleStartInlineEdit}
-                  onToggle={() => toggleExpand(ws.id)}
-                  onSelectThread={(id) => {
-                    setActiveWorkspace(ws.id);
-                    setActiveThread(id);
-                  }}
-                  onCreateThread={() => {
-                    setActiveWorkspace(ws.id);
-                    setPendingNewThread(true);
-                    setActiveThread(null);
-                  }}
-                  onDelete={() => {
-                    setWsDeleteDialog({
-                      workspaceId: ws.id,
-                      workspaceName: ws.name,
-                    });
-                  }}
-                  onThreadContextMenu={(e, thread) =>
-                    handleThreadContextMenu(e, thread, ws.path)
-                  }
+                  onToggle={toggleExpand}
+                  onSelectThread={handleSelectThread}
+                  onCreateThread={handleCreateThread}
+                  onDelete={handleDeleteWorkspace}
+                  onThreadContextMenu={handleThreadContextMenu}
                 />
                 );
               })}
@@ -860,13 +921,16 @@ export function ProjectTree() {
 
 /** Props for the virtualized thread list rendered inside an expanded workspace. */
 interface VirtualizedThreadListProps {
-  threads: WorkspaceThread[];
+  /** Pre-computed tree items from the parent to avoid duplicate buildThreadTree calls. */
+  treeItems: ThreadTreeItem[];
   /** Maximum number of tree rows to render. Used by the parent to enforce the THREAD_LIST_CAP. */
   maxVisible: number;
   activeThreadId: string | null;
   runningThreadIds: Set<string>;
   /** Thread IDs with at least one unsettled permission request. */
   pendingPermissionThreadIds: Set<string>;
+  /** Per-thread CI check status. Passed from parent to avoid duplicate store subscriptions. */
+  checksById: Record<string, ChecksStatus>;
   scrollElementRef: React.RefObject<HTMLDivElement | null>;
   inlineEdit: InlineEditState | null;
   onInlineEditChange: (title: string) => void;
@@ -888,7 +952,7 @@ interface VirtualizedThreadListProps {
  * Chrome + icon + strokeWidth all come from the shared `getCiVisual()` so the
  * chip stays in lockstep with the chat-header button and the popover.
  */
-function CiChip({ checks }: { checks: ChecksStatus }) {
+const CiChip = memo(function CiChip({ checks }: { checks: ChecksStatus }) {
   const b = getBreakdown(checks);
   if (checks.aggregate === "no_checks" || b.total === 0) return null;
 
@@ -931,7 +995,7 @@ function CiChip({ checks }: { checks: ChecksStatus }) {
       <span>{text}</span>
     </span>
   );
-}
+});
 
 /**
  * Workspace-row CI roll-up chip.
@@ -942,7 +1006,7 @@ function CiChip({ checks }: { checks: ChecksStatus }) {
  * nothing does. Same chrome + glyphs as the per-thread `CiChip`, so the CI
  * language stays consistent between zoom levels.
  */
-function WorkspaceCiRollupChip({
+const WorkspaceCiRollupChip = memo(function WorkspaceCiRollupChip({
   threads,
   checksById,
 }: {
@@ -988,15 +1052,16 @@ function WorkspaceCiRollupChip({
       <span>{count}</span>
     </span>
   );
-}
+});
 
 /** Renders a virtualized, scrollable list of threads for a single workspace. */
 function VirtualizedThreadList({
-  threads,
+  treeItems: allTreeItems,
   maxVisible,
   activeThreadId,
   runningThreadIds,
   pendingPermissionThreadIds,
+  checksById,
   scrollElementRef,
   inlineEdit,
   onInlineEditChange,
@@ -1009,9 +1074,7 @@ function VirtualizedThreadList({
   const containerRef = useRef<HTMLDivElement>(null);
   const [scrollMargin, setScrollMargin] = useState(0);
 
-  // Build nested tree from flat thread list, then cap to `maxVisible` so the
-  // sidebar isn't dominated by a single busy workspace.
-  const allTreeItems = useMemo(() => buildThreadTree(threads), [threads]);
+  // Cap to `maxVisible` so the sidebar isn't dominated by a single busy workspace.
   const treeItems = useMemo(
     () => (Number.isFinite(maxVisible) ? allTreeItems.slice(0, maxVisible) : allTreeItems),
     [allTreeItems, maxVisible],
@@ -1020,7 +1083,6 @@ function VirtualizedThreadList({
   // Normalized set of existing worktree paths for stale detection.
   const worktrees = useWorkspaceStore((s) => s.worktrees);
   const worktreesLoadedFor = useWorkspaceStore((s) => s.worktreesLoadedForWorkspace);
-  const checksById = useWorkspaceStore(useShallow((s) => s.checksById));
   // Subscribe once at the list level so we can derive unusable state per-thread
   // inside the map without violating Rules of Hooks.
   const availableProviders = useProviderAvailabilityStore((s) => s.providers);
@@ -1279,8 +1341,10 @@ interface ProjectNodeProps {
   pendingPermissionThreadIds: Set<string>;
   /** Whether the thread list is fully expanded (persisted by parent). */
   isThreadListExpanded: boolean;
+  /** Per-thread CI check status. Passed from parent to avoid duplicate store subscriptions. */
+  checksById: Record<string, ChecksStatus>;
   /** Callback to toggle the thread list expanded state (persisted by parent). */
-  onToggleThreadList: () => void;
+  onToggleThreadList: (wsId: string) => void;
   scrollElementRef: React.RefObject<HTMLDivElement | null>;
   inlineEdit: InlineEditState | null;
   onInlineEditChange: (title: string) => void;
@@ -1288,11 +1352,11 @@ interface ProjectNodeProps {
   onInlineEditCancel: () => void;
   /** Start an inline rename for the given thread. */
   onStartInlineEdit: (threadId: string, title: string) => void;
-  onToggle: () => void;
-  onSelectThread: (id: string) => void;
-  onCreateThread: () => void;
-  onDelete: () => void;
-  onThreadContextMenu: (e: React.MouseEvent, thread: Thread) => void;
+  onToggle: (wsId: string) => void;
+  onSelectThread: (wsId: string, threadId: string) => void;
+  onCreateThread: (wsId: string) => void;
+  onDelete: (wsId: string) => void;
+  onThreadContextMenu: (e: React.MouseEvent, thread: Thread, workspacePath: string) => void;
   /** When set, forwards drag-handle listeners from `@dnd-kit/sortable` onto the project row. */
   sortableListeners?: DraggableSyntheticListeners;
   /** True while this project row is the item being dragged. */
@@ -1300,7 +1364,7 @@ interface ProjectNodeProps {
 }
 
 /** Renders a collapsible workspace row with its virtualized thread list. */
-function ProjectNode({
+const ProjectNode = memo(function ProjectNode({
   workspace,
   isExpanded,
   isActive,
@@ -1309,6 +1373,7 @@ function ProjectNode({
   runningThreadIds,
   pendingPermissionThreadIds,
   isThreadListExpanded,
+  checksById,
   onToggleThreadList,
   scrollElementRef,
   inlineEdit,
@@ -1324,7 +1389,6 @@ function ProjectNode({
   sortableListeners,
   isProjectDragging = false,
 }: ProjectNodeProps) {
-  const checksById = useWorkspaceStore(useShallow((s) => s.checksById));
   const parentDir = useMemo(() => parentDirName(workspace.path), [workspace.path]);
   const hasRunning = useMemo(
     () => threads.some((t) => runningThreadIds.has(t.id)),
@@ -1339,6 +1403,20 @@ function ProjectNode({
   const activeIndex = activeThreadId ? treeItems.findIndex((item) => item.thread.id === activeThreadId) : -1;
   const forceExpand = activeIndex >= THREAD_LIST_CAP;
   const maxVisible = !needsCap || isThreadListExpanded || forceExpand ? Infinity : THREAD_LIST_CAP;
+
+  const wsId = workspace.id;
+  const handleToggle = useCallback(() => onToggle(wsId), [onToggle, wsId]);
+  const handleToggleThreadList = useCallback(() => onToggleThreadList(wsId), [onToggleThreadList, wsId]);
+  const handleCreateThread = useCallback(() => onCreateThread(wsId), [onCreateThread, wsId]);
+  const handleDelete = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    onDelete(wsId);
+  }, [onDelete, wsId]);
+  const handleSelectThread = useCallback((threadId: string) => onSelectThread(wsId, threadId), [onSelectThread, wsId]);
+  const handleThreadContextMenu = useCallback(
+    (e: React.MouseEvent, thread: Thread) => onThreadContextMenu(e, thread, workspace.path),
+    [onThreadContextMenu, workspace.path],
+  );
 
   return (
     <div>
@@ -1361,12 +1439,10 @@ function ProjectNode({
           if (e.defaultPrevented) return;
           if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
             e.preventDefault();
-            onToggle();
+            handleToggle();
           }
         }}
-        onClick={() => {
-          onToggle();
-        }}
+        onClick={handleToggle}
       >
         {isExpanded ? (
           <ChevronDown size={12} className="shrink-0 text-muted-foreground/55 transition-transform" />
@@ -1434,10 +1510,7 @@ function ProjectNode({
           variant="ghost"
           size="icon-xs"
           aria-label={`Delete ${workspace.name}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
+          onClick={handleDelete}
           className="opacity-0 text-muted-foreground/60 hover:text-destructive group-hover/ws:opacity-100 focus:opacity-100"
         >
           <Trash2 size={11} />
@@ -1458,19 +1531,20 @@ function ProjectNode({
             </div>
           ) : (
             <VirtualizedThreadList
-              threads={threads}
+              treeItems={treeItems}
               maxVisible={maxVisible}
               activeThreadId={activeThreadId}
               runningThreadIds={runningThreadIds}
               pendingPermissionThreadIds={pendingPermissionThreadIds}
+              checksById={checksById}
               scrollElementRef={scrollElementRef}
               inlineEdit={inlineEdit}
               onInlineEditChange={onInlineEditChange}
               onInlineEditCommit={onInlineEditCommit}
               onInlineEditCancel={onInlineEditCancel}
               onStartInlineEdit={onStartInlineEdit}
-              onSelectThread={onSelectThread}
-              onThreadContextMenu={onThreadContextMenu}
+              onSelectThread={handleSelectThread}
+              onThreadContextMenu={handleThreadContextMenu}
             />
           )}
 
@@ -1478,7 +1552,7 @@ function ProjectNode({
             <Button
               variant="ghost"
               size="xs"
-              onClick={onToggleThreadList}
+              onClick={handleToggleThreadList}
               className="mt-0.5 h-auto w-full justify-start rounded-md px-2 py-1 text-[11px] font-normal text-muted-foreground/55 hover:bg-accent/40 hover:text-foreground"
             >
               {isThreadListExpanded
@@ -1491,7 +1565,7 @@ function ProjectNode({
           <Button
             variant="ghost"
             size="xs"
-            onClick={onCreateThread}
+            onClick={handleCreateThread}
             className="mt-0.5 h-auto w-full justify-start gap-1.5 rounded-md px-2 py-1 text-[11.5px] font-normal text-muted-foreground/55 hover:bg-accent/40 hover:text-foreground"
           >
             <Plus size={11} className="opacity-70" />
@@ -1501,13 +1575,13 @@ function ProjectNode({
       )}
     </div>
   );
-}
+});
 
 /**
  * Wraps {@link ProjectNode} with `@dnd-kit/sortable` transforms and collapses
  * thread children while the user is dragging this project.
  */
-function SortableProjectShell(
+const SortableProjectShell = memo(function SortableProjectShell(
   props: ProjectNodeProps & { sortableId: string; activeDragId: string | null },
 ) {
   const { sortableId, activeDragId, ...nodeProps } = props;
@@ -1543,4 +1617,4 @@ function SortableProjectShell(
       />
     </div>
   );
-}
+});

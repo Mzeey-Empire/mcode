@@ -513,6 +513,62 @@ describe("ServerManager", () => {
     killSpy.mockRestore();
   });
 
+  it("forceReplace polls PID until process exits", async () => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReset().mockReturnValue(LOCK_FILE_JSON);
+
+    // process.kill sequence during poll loop and force-kill check:
+    // call 1 = alive (poll continues), call 2 = alive (poll continues),
+    // call 3 = throws ESRCH (poll breaks), subsequent = throws (dead)
+    const killSpy = vi.spyOn(process, "kill")
+      .mockImplementation(() => { throw new Error("ESRCH"); }) // default: dead
+      .mockImplementationOnce(() => true as never) // poll: alive
+      .mockImplementationOnce(() => true as never) // poll: alive
+      .mockImplementationOnce(() => { throw new Error("ESRCH"); }); // poll: dead, breaks loop
+
+    try {
+      await manager.forceReplace();
+
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "http://localhost:19600/shutdown",
+        expect.objectContaining({
+          method: "POST",
+          headers: expect.objectContaining({
+            Authorization: "Bearer test-auth-token",
+            "X-Mcode-Shutdown-Reason": "desktop-update-exit",
+          }),
+        }),
+      );
+
+      expect(killSpy).toHaveBeenCalledWith(12345, 0);
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
+  it("forceReplace force-kills server if it does not exit within timeout", async () => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReset().mockReturnValue(LOCK_FILE_JSON);
+
+    // Always report alive so we hit the SIGKILL fallback.
+    // Mock Date.now to fast-forward past the 10s deadline.
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true as never);
+    let now = 1000;
+    const dateSpy = vi.spyOn(Date, "now").mockImplementation(() => {
+      now += 5000; // jump 5s each call to exceed 10s deadline quickly
+      return now;
+    });
+
+    try {
+      await manager.forceReplace();
+
+      expect(killSpy).toHaveBeenCalledWith(12345, "SIGKILL");
+    } finally {
+      killSpy.mockRestore();
+      dateSpy.mockRestore();
+    }
+  });
+
   // -----------------------------------------------------------------------
   // Reuse existing server from lock file
   // -----------------------------------------------------------------------

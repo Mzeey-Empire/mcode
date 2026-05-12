@@ -36,7 +36,8 @@ export function BrowseView() {
   const setQuery = useCommandPaletteStore((s) => s.setQuery);
   const setPendingConfirm = useCommandPaletteStore((s) => s.setPendingConfirm);
   const close = useCommandPaletteStore((s) => s.close);
-  const { createWorkspace, setActiveWorkspace } = useWorkspaceStore();
+  const createWorkspace = useWorkspaceStore((s) => s.createWorkspace);
+  const setActiveWorkspace = useWorkspaceStore((s) => s.setActiveWorkspace);
 
   const mode = getPaletteMode(query);
   const isDrivesMode = mode === "drives";
