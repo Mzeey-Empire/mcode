@@ -586,6 +586,7 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
               <div className="flex-1" />
               <button
                 type="button"
+                aria-label="Cancel capture"
                 className="flex shrink-0 items-center gap-1 rounded border border-destructive/20 bg-destructive/10 px-2 py-0.5 text-[11px] text-destructive/80 transition-colors hover:bg-destructive/15"
                 onClick={() => void window.desktopBridge?.preview.cancelCapture()}
               >

@@ -46,9 +46,9 @@ export function SmartOmnibox({
   return (
     <div className="flex min-w-0 items-center gap-1.5">
       <div className="relative min-w-0 flex-1">
-        {faviconVisible && faviconUrl ? (
+        {faviconVisible ? (
           <img
-            src={faviconUrl}
+            src={faviconUrl!}
             alt=""
             width={14}
             height={14}
@@ -73,7 +73,8 @@ export function SmartOmnibox({
           placeholder={placeholder}
           size="sm"
           className={cn(
-            "min-w-0 font-mono",
+            "min-w-0",
+            !showAsTitle && "font-mono",
             faviconVisible && "pl-7",
             showAsTitle && "cursor-default font-medium",
           )}
