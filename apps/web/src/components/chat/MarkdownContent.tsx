@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CodeBlock } from "./CodeBlock";
 import { useDiffStore } from "@/stores/diffStore";
+import { isMac } from "@/lib/platform";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 
 /** Props for {@link MarkdownContent}. */
@@ -23,9 +24,6 @@ const plugins = [remarkGfm];
 
 /** Lazy-loaded MermaidBlock - only fetched when a mermaid fence is encountered. */
 const LazyMermaidBlock = lazy(() => import("./MermaidBlock"));
-
-/** Whether the current platform is macOS (for modifier key labels). */
-const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
 /**
  * Builds the static component overrides that depend on `variant`.
@@ -66,7 +64,7 @@ function makeStaticComponents(variant: "assistant" | "user") {
           target="_blank"
           rel="noopener noreferrer"
           title={
-            window.desktopBridge?.preview
+            window.desktopBridge?.preview && safeHref && (safeHref.startsWith("http:") || safeHref.startsWith("https:"))
               ? `${isMac ? "\u2318" : "Ctrl"}+click to open in preview`
               : undefined
           }
@@ -84,7 +82,11 @@ function makeStaticComponents(variant: "assistant" | "user") {
                 showRightPanel(threadId);
                 setRightPanelTab(threadId, "preview");
                 // Defer navigation so React can re-render and sync BrowserView bounds
-                setTimeout(() => window.desktopBridge!.preview!.navigate(safeHref), 0);
+                setTimeout(() => {
+                  window.desktopBridge?.preview?.navigate(safeHref).then((r) => {
+                    if (!r?.ok) window.desktopBridge?.openExternalUrl?.(safeHref);
+                  });
+                }, 0);
                 return;
               }
               // No active thread; fall through to open externally
