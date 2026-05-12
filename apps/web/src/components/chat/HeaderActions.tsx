@@ -3,6 +3,7 @@ import { Terminal, Diff, Globe } from "lucide-react";
 import { OpenInEditorMenu } from "./OpenInEditorMenu";
 import { CreatePrDialog } from "./CreatePrDialog";
 import { PrSplitButton } from "./PrSplitButton";
+import { ActionTrigger } from "./ActionTrigger";
 import { useBranchPr } from "@/hooks/useBranchPr";
 import { useHasCommitsAhead } from "@/hooks/useHasCommitsAhead";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
@@ -166,7 +167,7 @@ export function HeaderActions({ thread }: HeaderActionsProps) {
         </div>
       )}
 
-      {/* Action trigger will be inserted here by Task 11 */}
+      <ActionTrigger />
 
       <div className="flex items-center gap-0.5 rounded-md bg-muted/10 px-1 py-0.5">
         {/* Terminal toggle */}
