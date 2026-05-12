@@ -11,6 +11,7 @@ import { ThreadRepo } from "../repositories/thread-repo";
 import { WorkspaceRepo } from "../repositories/workspace-repo";
 import { GitService } from "./git-service";
 import { CleanupJobRepo } from "../repositories/cleanup-job-repo";
+import { ActionService } from "./action-service.js";
 
 /** Handles thread creation, deletion, worktree provisioning, and lifecycle. */
 @injectable()
@@ -20,6 +21,7 @@ export class ThreadService {
     @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
     @inject(GitService) private readonly gitService: GitService,
     @inject(CleanupJobRepo) private readonly cleanupJobRepo: CleanupJobRepo,
+    @inject(ActionService) private readonly actionService: ActionService,
   ) {}
 
   /**
@@ -103,6 +105,18 @@ export class ThreadService {
           throw new Error(
             `Failed to persist worktree path for thread ${thread.id}`,
           );
+        }
+
+        // Fire setup action if defined (non-blocking)
+        if (thread.mode === "worktree" && info.path) {
+          this.actionService
+            .runSetupAction(workspaceId, thread.id)
+            .catch((err) =>
+              logger.warn("Setup action failed after worktree creation", {
+                threadId: thread.id,
+                err,
+              }),
+            );
         }
 
         return {
