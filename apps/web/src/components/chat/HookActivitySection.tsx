@@ -12,9 +12,9 @@ export function HookActivitySection({ hooks }: { hooks: readonly HookExecution[]
   const hasRunning = hooks.some((h) => h.status === "running");
   const [expanded, setExpanded] = useState(hasError || hasRunning);
 
-  // Auto-expand when an error appears
+  // Auto-expand on error/running, auto-collapse when all hooks pass
   useEffect(() => {
-    if (hasError || hasRunning) setExpanded(true);
+    setExpanded(hasError || hasRunning);
   }, [hasError, hasRunning]);
 
   return (

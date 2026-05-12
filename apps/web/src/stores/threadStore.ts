@@ -1135,6 +1135,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         planQuestionsStatusByThread: omitKey(state.planQuestionsStatusByThread, threadId),
         answeredPlanMessageIdsByThread: omitKey(state.answeredPlanMessageIdsByThread, threadId),
         permissionsByThread: omitKey(state.permissionsByThread, threadId),
+        hooksByThread: omitKey(state.hooksByThread, threadId),
         usageByProvider: Object.fromEntries(
           Object.entries(state.usageByProvider).filter(([k]) => !k.startsWith(`${threadId}:`)),
         ),
@@ -1220,6 +1221,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         planQuestionsStatusByThread: pruneAll(state.planQuestionsStatusByThread),
         answeredPlanMessageIdsByThread: pruneAll(state.answeredPlanMessageIdsByThread),
         permissionsByThread: pruneAll(state.permissionsByThread),
+        hooksByThread: pruneAll(state.hooksByThread),
         usageByProvider: Object.fromEntries(
           Object.entries(state.usageByProvider).filter(([k]) => !threadIds.some((tid) => k.startsWith(`${tid}:`))),
         ),
