@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Message, ToolCall, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
+import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
 import type { ContextWindowMode, ReasoningLevel, PlanQuestion, PlanAnswer, ProviderUsageInfo, QuotaCategory, TurnSnapshot } from "@mcode/contracts";
 import type { PermissionRequest, PermissionDecision } from "@mcode/contracts";
 import { PlanQuestionSchema, PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts";
@@ -115,6 +115,8 @@ interface ThreadState {
   answeredPlanMessageIdsByThread: Record<string, Set<string>>;
   /** Pending and recently-settled permission requests per thread. */
   permissionsByThread: Record<string, StoredPermission[]>;
+  /** Ephemeral hook execution state per thread. Cleared on page reload, not persisted to DB. */
+  hooksByThread: Record<string, HookExecution[]>;
   /**
    * After `agent.stop`, each thread ID is marked until `turn.persisted` arrives for that
    * thread, so we can show a one-shot file-change notice without colliding across threads.
@@ -433,6 +435,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   planQuestionsStatusByThread: {},
   answeredPlanMessageIdsByThread: {},
   permissionsByThread: {},
+  hooksByThread: {},
   awaitingUserStopPersistByThread: {},
   interruptStopFileNoticeByThread: {},
   composerRecallFromStopByThread: {},
@@ -1216,6 +1219,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         planQuestionsStatusByThread: omitKey(state.planQuestionsStatusByThread, threadId),
         answeredPlanMessageIdsByThread: omitKey(state.answeredPlanMessageIdsByThread, threadId),
         permissionsByThread: omitKey(state.permissionsByThread, threadId),
+        hooksByThread: omitKey(state.hooksByThread, threadId),
         usageByProvider: Object.fromEntries(
           Object.entries(state.usageByProvider).filter(([k]) => !k.startsWith(`${threadId}:`)),
         ),
@@ -1301,6 +1305,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         planQuestionsStatusByThread: pruneAll(state.planQuestionsStatusByThread),
         answeredPlanMessageIdsByThread: pruneAll(state.answeredPlanMessageIdsByThread),
         permissionsByThread: pruneAll(state.permissionsByThread),
+        hooksByThread: pruneAll(state.hooksByThread),
         usageByProvider: Object.fromEntries(
           Object.entries(state.usageByProvider).filter(([k]) => !threadIds.some((tid) => k.startsWith(`${tid}:`))),
         ),
@@ -1798,6 +1803,83 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         return {
           toolCallsByThread: { ...state.toolCallsByThread, [threadId]: updated },
         };
+      });
+      return;
+    }
+
+    if (method === "session.hookStarted") {
+      const hookName = (params.hookName as string) || "unknown";
+      const hookType = (params.hookType as "permission" | "stop") || "stop";
+      const toolName = params.toolName as string | undefined;
+      const hook: HookExecution = {
+        hookName,
+        hookType,
+        toolName,
+        status: "running",
+        outputLines: [],
+        fullOutput: [],
+        startedAt: Date.now(),
+      };
+      set((state) => ({
+        hooksByThread: {
+          ...state.hooksByThread,
+          [threadId]: [...(state.hooksByThread[threadId] ?? []), hook],
+        },
+      }));
+      return;
+    }
+
+    if (method === "session.hookProgress") {
+      const hookName = (params.hookName as string) || "";
+      const output = (params.output as string) || "";
+      if (!hookName || !output) return;
+      set((state) => {
+        const hooks = state.hooksByThread[threadId] ?? [];
+        // Target the last running hook with this name (not all same-name runs)
+        let idx = -1;
+        for (let i = hooks.length - 1; i >= 0; i--) {
+          if (hooks[i]!.hookName === hookName && hooks[i]!.status === "running") {
+            idx = i;
+            break;
+          }
+        }
+        if (idx < 0) return state;
+        // Split chunk into actual lines so the 20-line cap is line-based
+        const addedLines = output
+          .split(/\r?\n/)
+          .filter((line, i, arr) => !(i === arr.length - 1 && line === ""));
+        if (addedLines.length === 0) return state;
+        const next = [...hooks];
+        const target = next[idx]!;
+        // Cap retained output to prevent unbounded memory growth from verbose hooks
+        const raw = [...target.fullOutput, ...addedLines];
+        const fullOutput = raw.length > 500 ? raw.slice(-500) : raw;
+        next[idx] = { ...target, fullOutput, outputLines: fullOutput.slice(-20) };
+        return { hooksByThread: { ...state.hooksByThread, [threadId]: next } };
+      });
+      return;
+    }
+
+    if (method === "session.hookCompleted") {
+      const hookName = (params.hookName as string) || "";
+      const exitCode = (params.exitCode as number) ?? 1;
+      const durationMs = (params.durationMs as number) ?? 0;
+      const didBlock = (params.didBlock as boolean) ?? false;
+      if (!hookName) return;
+      set((state) => {
+        const hooks = state.hooksByThread[threadId] ?? [];
+        // Target the last running hook with this name
+        let idx = -1;
+        for (let i = hooks.length - 1; i >= 0; i--) {
+          if (hooks[i]!.hookName === hookName && hooks[i]!.status === "running") {
+            idx = i;
+            break;
+          }
+        }
+        if (idx < 0) return state;
+        const next = [...hooks];
+        next[idx] = { ...next[idx]!, status: "completed" as const, exitCode, durationMs, didBlock };
+        return { hooksByThread: { ...state.hooksByThread, [threadId]: next } };
       });
       return;
     }

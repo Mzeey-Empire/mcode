@@ -59,6 +59,7 @@ vi.mock("@/stores/threadStore", () => ({
       isLoadingMore: {},
       loadOlderMessages: vi.fn(),
       permissionsByThread: {},
+      hooksByThread: {},
     }),
   ),
 }));
@@ -77,6 +78,7 @@ vi.mock("../StreamingCard", () => ({ StreamingCard: () => null }));
 vi.mock("../ToolCallSummary", () => ({ ToolCallSummary: () => null }));
 vi.mock("../TurnChangeSummary", () => ({ TurnChangeSummary: () => null }));
 vi.mock("../PermissionRequestCard", () => ({ PermissionRequestCard: () => null }));
+vi.mock("../HookActivitySection", () => ({ HookActivitySection: () => null }));
 
 import { MessageList } from "../MessageList";
 import { rememberScrollTop, recallScrollTop, clearScrollMemory } from "../scrollPositionMemory";

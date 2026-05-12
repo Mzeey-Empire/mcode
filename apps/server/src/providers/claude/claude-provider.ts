@@ -1199,6 +1199,30 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                   delayMs: anyMsg.retry_delay_ms as number | undefined,
                   errorStatus: (anyMsg.error_status as number | undefined) ?? undefined,
                 } satisfies AgentEvent);
+              } else if ((anyMsg.subtype as string) === "hook_started") {
+                this.emit("event", {
+                  type: AgentEventType.HookStarted,
+                  threadId,
+                  hookName: (anyMsg.hook_name as string) || "unknown",
+                  hookType: anyMsg.tool_name ? "permission" : "stop",
+                  ...(anyMsg.tool_name ? { toolName: anyMsg.tool_name as string } : {}),
+                } satisfies AgentEvent);
+              } else if ((anyMsg.subtype as string) === "hook_progress") {
+                this.emit("event", {
+                  type: AgentEventType.HookProgress,
+                  threadId,
+                  hookName: (anyMsg.hook_name as string) || "unknown",
+                  output: (anyMsg.output as string) || "",
+                } satisfies AgentEvent);
+              } else if ((anyMsg.subtype as string) === "hook_response") {
+                this.emit("event", {
+                  type: AgentEventType.HookCompleted,
+                  threadId,
+                  hookName: (anyMsg.hook_name as string) || "unknown",
+                  exitCode: (anyMsg.exit_code as number) ?? 1,
+                  durationMs: (anyMsg.duration_ms as number) ?? 0,
+                  didBlock: (anyMsg.did_block as boolean) ?? false,
+                } satisfies AgentEvent);
               } else {
                 this.emit("event", {
                   type: AgentEventType.System,
