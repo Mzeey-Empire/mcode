@@ -12,12 +12,20 @@ import {
   clampMcodeBrowserCaptureV2,
   isBrowserCaptureSpillAppDataPath,
   MCODE_BROWSER_CAPTURE_V2_STRING_MAX,
+  PreviewDeviceEmulationConfigSchema,
   type AttachmentMeta,
   type McodeBrowserCaptureEmulation,
   type McodeBrowserCaptureV2,
   type PreviewDeviceEmulationConfig,
 } from "@mcode/contracts";
 import { getMcodeDir, redactMcodeBrowserCaptureV2, spillWorkspaceDirSegment } from "@mcode/shared";
+import {
+  applyPreviewDeviceEmulation,
+  buildCaptureEmulationSnapshot,
+  buildPreviewMobileUserAgent,
+  layoutGuestBoundsForEmulation,
+  resolvePreviewDeviceEmulation,
+} from "./preview-device-emulation.js";
 
 // Idle teardown removed: the React shell already hides the view on unmount/tab-switch
 // via pushSync(false), so a timer-based teardown is redundant and caused the view to
@@ -1350,6 +1358,10 @@ function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
   });
   view.webContents.on("did-finish-load", () => {
     void injectPreviewScrollbarStyles(s);
+    // Re-apply deferred emulation after the guest loads a real document
+    if (s.deviceEmulationConfig.kind !== "off" && !s.captureEmulationSnapshot) {
+      layoutPreviewGuest(s);
+    }
   });
 
   const forwardLoadingStart = () => {
@@ -1625,6 +1637,61 @@ async function validateResumeUrl(url: string | null): Promise<string | null> {
   return url;
 }
 
+/**
+ * Centers the guest BrowserView inside the shell surface and applies device emulation when enabled.
+ */
+function layoutPreviewGuest(s: PreviewSession): void {
+  if (!s.view || s.view.webContents.isDestroyed() || !s.shellBounds) return;
+  const sh = s.shellBounds;
+  const wc = s.view.webContents;
+
+  const resolved = resolvePreviewDeviceEmulation(s.deviceEmulationConfig);
+
+  if (!resolved) {
+    // Desktop mode: fill the panel, disable any prior emulation
+    s.view.setBounds(sh);
+    s.lastBounds = { ...sh };
+    s.captureEmulationSnapshot = null;
+    if (s.defaultGuestUserAgent) {
+      try {
+        wc.disableDeviceEmulation();
+        wc.setUserAgent(s.defaultGuestUserAgent);
+      } catch { /* view tearing down */ }
+    }
+    return;
+  }
+
+  try {
+    const { guest, scaleToFit } = layoutGuestBoundsForEmulation(sh, resolved.cssWidth, resolved.cssHeight);
+    const safeScale = Number.isFinite(scaleToFit) && scaleToFit > 0 ? Math.min(scaleToFit, 1) : 1;
+    s.view.setBounds(guest);
+    s.lastBounds = { ...guest };
+
+    const chromeV = process.versions.chrome ?? "120.0.0.0";
+    const mobileUa = buildPreviewMobileUserAgent(chromeV);
+    applyPreviewDeviceEmulation(wc, {
+      active: true,
+      cssViewport: { width: resolved.cssWidth, height: resolved.cssHeight },
+      deviceScaleFactor: resolved.deviceScaleFactor,
+      scaleToFit: safeScale,
+      mobileUserAgent: mobileUa,
+      defaultUserAgent: s.defaultGuestUserAgent,
+    });
+
+    s.captureEmulationSnapshot = buildCaptureEmulationSnapshot(
+      s.deviceEmulationConfig,
+      resolved,
+      safeScale,
+      mobileUa,
+    );
+  } catch (err) {
+    console.warn("[preview-browser] device emulation failed; falling back to desktop layout:", err);
+    s.view.setBounds(sh);
+    s.lastBounds = { ...sh };
+    s.captureEmulationSnapshot = null;
+  }
+}
+
 /** Registers ipcMain handlers for `preview:*` channels (call once at startup). */
 export function registerPreviewBrowserHandlers(): void {
   const previewPartition = session.fromPartition("persist:mcode-preview");
@@ -1659,6 +1726,7 @@ export function registerPreviewBrowserHandlers(): void {
         threadId?: string | null;
         resumeUrlHint?: string | null;
         workspaceId?: string | null;
+        deviceEmulation?: unknown;
       },
     ) => {
       const win = BrowserWindow.fromWebContents(_event.sender);
@@ -1667,15 +1735,18 @@ export function registerPreviewBrowserHandlers(): void {
       const s = getSession(win);
       const ws = payload.workspaceId;
       s.workspaceId = typeof ws === "string" && ws.trim().length > 0 ? ws.trim() : null;
+      const rawEmu = payload.deviceEmulation ?? { kind: "off" };
+      const emParsed = PreviewDeviceEmulationConfigSchema().safeParse(rawEmu);
+      s.deviceEmulationConfig = emParsed.success ? emParsed.data : { kind: "off" };
       const b = payload.bounds;
       if (!payload.visible || !b || b.width < 4 || b.height < 4) {
         hidePreview(win, s);
         return;
       }
 
-      s.lastBounds = { x: b.x, y: b.y, width: b.width, height: b.height };
+      s.shellBounds = { x: b.x, y: b.y, width: b.width, height: b.height };
       const view = ensureView(win, s);
-      view.setBounds(s.lastBounds);
+      layoutPreviewGuest(s);
       if (win.getBrowserView() !== view) {
         win.setBrowserView(view);
       }
