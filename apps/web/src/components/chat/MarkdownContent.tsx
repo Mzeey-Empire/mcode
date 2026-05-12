@@ -2,6 +2,8 @@ import { memo, useMemo, lazy, Suspense } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CodeBlock } from "./CodeBlock";
+import { useDiffStore } from "@/stores/diffStore";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
 
 /** Props for {@link MarkdownContent}. */
 interface MarkdownContentProps {
@@ -63,6 +65,20 @@ function makeStaticComponents(variant: "assistant" | "user") {
           onClick={(e) => {
             if (!safeHref) return;
             e.preventDefault();
+
+            // Ctrl+click (Cmd+click on Mac) opens in the browser preview panel
+            const isModifierClick = e.ctrlKey || e.metaKey;
+            if (isModifierClick && window.desktopBridge?.preview) {
+              const threadId = useWorkspaceStore.getState().activeThreadId;
+              if (threadId) {
+                const { showRightPanel, setRightPanelTab } = useDiffStore.getState();
+                showRightPanel(threadId);
+                setRightPanelTab(threadId, "preview");
+                window.desktopBridge.preview.navigate(safeHref);
+              }
+              return;
+            }
+
             if (window.desktopBridge?.openExternalUrl) {
               window.desktopBridge.openExternalUrl(safeHref);
             } else {
