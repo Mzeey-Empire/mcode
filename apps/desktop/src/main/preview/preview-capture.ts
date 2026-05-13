@@ -1,0 +1,492 @@
+/**
+ * Screenshot capture, guest page context extraction, and capture payload construction
+ * for the embedded preview BrowserView.
+ */
+
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { BrowserView, BrowserWindow, app, ipcMain } from "electron";
+import {
+  clampMcodeBrowserCaptureV2,
+  MCODE_BROWSER_CAPTURE_V2_STRING_MAX,
+  type AttachmentMeta,
+  type McodeBrowserCaptureV2,
+} from "@mcode/contracts";
+import { redactMcodeBrowserCaptureV2 } from "@mcode/shared";
+import { type Bounds, type PreviewSession, type CaptureFinishResult, sessions, getSession, resetIdle } from "./preview-session.js";
+import { persistBrowserCaptureSpill } from "./preview-spill.js";
+
+/**
+ * Outcome of capturing the visible preview viewport as a PNG attachment.
+ * Alias of {@link CaptureFinishResult} for public export; the type is defined in
+ * preview-session to avoid a circular dependency.
+ */
+export type PreviewPictureReferenceResult = CaptureFinishResult;
+
+/** Structured preview context without PNG bytes (fence-only composer attachment). */
+export type PreviewContextReferenceResult =
+  | { ok: true; capture: McodeBrowserCaptureV2 }
+  | { ok: false; error: string };
+
+/** Hard cap per guest-derived string before redaction so hostile pages cannot exhaust memory. */
+const GUEST_TEXT_SAFETY_MAX = 500_000;
+
+/** Maximum number of console lines buffered per session. */
+export const PREVIEW_CONSOLE_BUFFER_MAX = 48;
+
+/** Maximum length of a single console line stored in the buffer. */
+export const PREVIEW_CONSOLE_LINE_MAX = 480;
+
+/** Maximum number of failed request entries buffered per session. */
+export const PREVIEW_FAILED_REQUEST_MAX = 24;
+
+/** Max length for selector hints after guest + main sanitization (keeps prompts small, bounds CSS injection). */
+export const SELECTOR_HINT_MAX_LEN = 512;
+
+/** Guest-run: visible text, headings, interactive outline, scroll and layout viewport metrics. */
+const CAPTURE_PAGE_CONTEXT_JS = `(function () {
+  try {
+    var de = document.documentElement;
+    var body = document.body;
+    var vw = Math.max(0, de.clientWidth || 0);
+    var vh = Math.max(0, de.clientHeight || 0);
+    var sx = window.scrollX || 0;
+    var sy = window.scrollY || 0;
+    var vt = "";
+    if (body) {
+      vt = (body.innerText || "").replace(/\\s+/g, " ").trim();
+    }
+    if (vt.length > 12000) vt = vt.slice(0, 12000) + String.fromCharCode(10) + "...[truncated]";
+    var ho = [];
+    var hs = document.querySelectorAll("h1,h2,h3,h4,h5,h6");
+    for (var i = 0; i < hs.length && i < 80; i++) {
+      var t = (hs[i].textContent || "").trim().replace(/\\s+/g, " ");
+      if (!t) continue;
+      ho.push(hs[i].tagName.toUpperCase() + ": " + t.slice(0, 200));
+    }
+    var headingOutline = ho.slice(0, 60).join(String.fromCharCode(10));
+    if (headingOutline.length > 4000) headingOutline = headingOutline.slice(0, 4000) + String.fromCharCode(10) + "...[truncated]";
+    var io = [];
+    var els = document.querySelectorAll('a[href],button,input:not([type=hidden]),select,textarea,[role=button],[role=link],[role=tab]');
+    function isVisible(el) {
+      var r = el.getBoundingClientRect();
+      if (r.width < 1 && r.height < 1) return false;
+      var st = window.getComputedStyle(el);
+      if (st.visibility === "hidden" || st.display === "none") return false;
+      return true;
+    }
+    function visibleLabel(el) {
+      var lab = el.getAttribute("aria-label");
+      if (lab && lab.trim()) return lab.trim();
+      var tag = el.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") {
+        var ph = el.placeholder || "";
+        if (ph.trim()) return ph.trim();
+        return String(el.name || el.type || "input");
+      }
+      var tx = (el.textContent || "").trim().replace(/\\s+/g, " ");
+      if (tx) return tx.slice(0, 80);
+      return String(el.getAttribute("href") || "");
+    }
+    for (var j = 0, seen = 0; j < els.length && seen < 120; j++) {
+      var el = els[j];
+      if (!isVisible(el)) continue;
+      seen++;
+      io.push("- [" + (el.getAttribute("role") || el.tagName.toLowerCase()) + "] " + visibleLabel(el).slice(0, 120));
+    }
+    var interactiveOutline = io.join(String.fromCharCode(10));
+    if (interactiveOutline.length > 8000) interactiveOutline = interactiveOutline.slice(0, 8000) + String.fromCharCode(10) + "...[truncated]";
+    return JSON.stringify({
+      visibleText: vt,
+      headingOutline: headingOutline,
+      interactiveOutline: interactiveOutline,
+      scrollX: sx,
+      scrollY: sy,
+      layoutWidth: vw,
+      layoutHeight: vh
+    });
+  } catch (e) {
+    return JSON.stringify({ error: "context-failed" });
+  }
+})()`;
+
+type GuestPageContextPayload = {
+  visibleText?: string;
+  headingOutline?: string;
+  interactiveOutline?: string;
+  scrollX?: number;
+  scrollY?: number;
+  layoutWidth?: number;
+  layoutHeight?: number;
+  error?: string;
+};
+
+/**
+ * Executes CAPTURE_PAGE_CONTEXT_JS in the guest and returns the parsed result,
+ * or null if the webContents is gone or the script throws.
+ */
+async function captureGuestPageContextForCapture(
+  webContents: BrowserView["webContents"],
+): Promise<GuestPageContextPayload | null> {
+  if (webContents.isDestroyed()) return null;
+  try {
+    const raw: unknown = await webContents.executeJavaScript(CAPTURE_PAGE_CONTEXT_JS, true);
+    const text = typeof raw === "string" ? raw : JSON.stringify(raw);
+    const parsed: unknown = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object") return null;
+    return parsed as GuestPageContextPayload;
+  } catch {
+    return null;
+  }
+}
+
+/** Strips control chars from visible text shipped to the model (guest innerText). */
+function scrubVisibleTextForOutbound(s: string): string {
+  return s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
+}
+
+/** Removes disallowed characters and nested executable-ish blobs from excerpt text shipped to the model. */
+export function scrubHtmlExcerptForOutbound(s: string): string {
+  let t = s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
+  t = t.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "<!-- stripped -->");
+  t = t.replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, "<!-- stripped -->");
+  t = t.replace(/<iframe\b[^>]*\/?>/gi, "<!-- stripped -->");
+  return t;
+}
+
+/** Strips control chars and bounds length; defense in depth if guest output is abnormal. */
+export function sanitizeSelectorHintFromGuest(s: string | null | undefined): string | null {
+  if (s == null || typeof s !== "string") return null;
+  const t = s.replace(/[\u0000-\u001F\u007F]/g, "").trim();
+  if (t.length === 0) return null;
+  return t.length > SELECTOR_HINT_MAX_LEN ? t.slice(0, SELECTOR_HINT_MAX_LEN) : t;
+}
+
+/**
+ * Appends a console message from the guest to the session buffer, capping at PREVIEW_CONSOLE_BUFFER_MAX.
+ */
+export function pushPreviewConsoleLine(s: PreviewSession, level: number, message: string): void {
+  if (s.consoleBuffer.length >= PREVIEW_CONSOLE_BUFFER_MAX) {
+    s.consoleBuffer.shift();
+  }
+  const kind = level >= 3 ? "error" : level === 2 ? "warning" : "log";
+  const line = `${kind}: ${message.replace(/[\u0000-\u001F\u007F]/g, " ")}`.slice(0, PREVIEW_CONSOLE_LINE_MAX);
+  s.consoleBuffer.push(line);
+}
+
+/**
+ * Appends a failed network request entry to the session buffer, capping at PREVIEW_FAILED_REQUEST_MAX.
+ */
+export function pushFailedRequest(
+  s: PreviewSession,
+  entry: { url: string; statusCode: number; resourceType: string },
+): void {
+  if (s.failedRequestBuffer.length >= PREVIEW_FAILED_REQUEST_MAX) {
+    s.failedRequestBuffer.shift();
+  }
+  s.failedRequestBuffer.push(entry);
+}
+
+/**
+ * Returns a snapshot of the failed request buffer formatted for McodeBrowserCaptureV2,
+ * or undefined when the buffer is empty.
+ */
+export function snapshotFailedRequestsForCapture(s: PreviewSession): McodeBrowserCaptureV2["failedRequests"] {
+  if (s.failedRequestBuffer.length === 0) return undefined;
+  return s.failedRequestBuffer.map((e) => ({
+    url: e.url.length > 2048 ? e.url.slice(0, 2048) : e.url,
+    statusCode: e.statusCode,
+    resourceType: e.resourceType,
+  }));
+}
+
+/** Joins recent main-process console lines for v2 capture (last chars if very long). */
+export function formatConsoleTail(buffer: readonly string[]): string | undefined {
+  if (buffer.length === 0) return undefined;
+  const joined = buffer.join("\n").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
+  if (joined.length === 0) return undefined;
+  return joined.length > 4000 ? joined.slice(-4000) : joined;
+}
+
+/**
+ * Caps a guest-derived string at GUEST_TEXT_SAFETY_MAX to prevent hostile pages
+ * from exhausting memory before redaction.
+ */
+function safetyCapGuestText(s: string): string {
+  return s.length <= GUEST_TEXT_SAFETY_MAX ? s : s.slice(0, GUEST_TEXT_SAFETY_MAX);
+}
+
+/**
+ * Returns true when any redacted text field exceeds the clamp threshold,
+ * meaning a spill file is needed to carry the full content.
+ */
+function captureNeedsSpillPostRedact(c: McodeBrowserCaptureV2): boolean {
+  const m = MCODE_BROWSER_CAPTURE_V2_STRING_MAX;
+  return (
+    (!!c.htmlExcerpt && c.htmlExcerpt.length > m.htmlExcerpt) ||
+    (!!c.visibleTextExcerpt && c.visibleTextExcerpt.length > m.visibleTextExcerpt) ||
+    (!!c.headingOutline && c.headingOutline.length > m.headingOutline) ||
+    (!!c.interactiveOutlineExcerpt && c.interactiveOutlineExcerpt.length > m.interactiveOutlineExcerpt) ||
+    (!!c.consoleTail && c.consoleTail.length > m.consoleTail)
+  );
+}
+
+/** Full viewport bounds in BrowserView-relative CSS pixels. */
+export function viewportBoundsFallback(viewWidth: number, viewHeight: number): Bounds {
+  return { x: 0, y: 0, width: Math.max(1, viewWidth), height: Math.max(1, viewHeight) };
+}
+
+/**
+ * Parses an unknown value as a Bounds record, returning null if any field is missing or non-finite.
+ */
+export function parseBoundsRecord(b: unknown): Bounds | null {
+  if (!b || typeof b !== "object") return null;
+  const bb = b as Record<string, unknown>;
+  const x = bb.x;
+  const y = bb.y;
+  const width = bb.width;
+  const height = bb.height;
+  if (
+    typeof x !== "number" ||
+    typeof y !== "number" ||
+    typeof width !== "number" ||
+    typeof height !== "number" ||
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height)
+  ) {
+    return null;
+  }
+  return { x, y, width, height };
+}
+
+/**
+ * Clamps a rect so it fits within (0,0,maxW,maxH), flooring all coordinates.
+ */
+export function clampRectInPlace(rect: Bounds, maxW: number, maxH: number): Bounds {
+  let { x, y, width, height } = rect;
+  x = Math.max(0, Math.floor(x));
+  y = Math.max(0, Math.floor(y));
+  width = Math.floor(width);
+  height = Math.floor(height);
+  width = Math.min(width, Math.max(0, maxW - x));
+  height = Math.min(height, Math.max(0, maxH - y));
+  return { x, y, width, height };
+}
+
+/** Sanitized hostname (or fallback) used in capture filenames for the preview tab. */
+export function previewCaptureFileStem(pageUrl: string): string {
+  try {
+    const u = new URL(pageUrl);
+    if (u.protocol === "http:" || u.protocol === "https:") {
+      const host = u.hostname
+        .replace(/[^\w.-]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .slice(0, 48);
+      if (host) return host;
+    }
+  } catch {
+    /* use fallback stem */
+  }
+  return "page";
+}
+
+/** Typed capture envelope aligned with PNG bytes for outbound prompt augmentation (v2 adds text outline and console tail). */
+export async function buildBrowserCapturePayload(
+  webContents: BrowserView["webContents"],
+  boundsCss: Bounds,
+  consoleBuffer: readonly string[],
+  failedRequests: McodeBrowserCaptureV2["failedRequests"],
+  workspaceId: string | null,
+  extras?: {
+    captureKind?: "viewport" | "region" | "element";
+    selectorHint?: string | null;
+    htmlExcerpt?: string | null;
+  },
+): Promise<McodeBrowserCaptureV2> {
+  const ctx = await captureGuestPageContextForCapture(webContents);
+  const tail = formatConsoleTail(consoleBuffer);
+
+  const out: McodeBrowserCaptureV2 = {
+    schemaVersion: 2,
+    pageUrl: webContents.getURL(),
+    pageTitle: webContents.getTitle() ?? "",
+    capturedAt: new Date().toISOString(),
+    bounds: { ...boundsCss },
+    selectorHint:
+      extras?.selectorHint != null ? sanitizeSelectorHintFromGuest(String(extras.selectorHint)) : null,
+  };
+  if (extras?.captureKind !== undefined) {
+    out.captureKind = extras.captureKind;
+  }
+  if (extras?.htmlExcerpt != null && extras.htmlExcerpt.length > 0) {
+    const scrubbed = scrubHtmlExcerptForOutbound(extras.htmlExcerpt);
+    if (scrubbed.length > 0) {
+      out.htmlExcerpt = safetyCapGuestText(scrubbed);
+    }
+  }
+  if (tail) {
+    out.consoleTail = tail;
+  }
+  if (ctx && !ctx.error) {
+    if (ctx.visibleText != null && ctx.visibleText.length > 0) {
+      const scrubbed = scrubVisibleTextForOutbound(ctx.visibleText);
+      if (scrubbed.length > 0) {
+        out.visibleTextExcerpt = safetyCapGuestText(scrubbed);
+      }
+    }
+    if (ctx.headingOutline != null && ctx.headingOutline.length > 0) {
+      const ho = scrubVisibleTextForOutbound(ctx.headingOutline);
+      if (ho.length > 0) {
+        out.headingOutline = safetyCapGuestText(ho);
+      }
+    }
+    if (ctx.interactiveOutline != null && ctx.interactiveOutline.length > 0) {
+      const io = scrubVisibleTextForOutbound(ctx.interactiveOutline);
+      if (io.length > 0) {
+        out.interactiveOutlineExcerpt = safetyCapGuestText(io);
+      }
+    }
+    if (typeof ctx.scrollX === "number" && Number.isFinite(ctx.scrollX)) {
+      const sy = typeof ctx.scrollY === "number" && Number.isFinite(ctx.scrollY) ? ctx.scrollY : 0;
+      out.viewportScroll = { scrollX: ctx.scrollX, scrollY: sy };
+    }
+    if (
+      typeof ctx.layoutWidth === "number" &&
+      Number.isFinite(ctx.layoutWidth) &&
+      typeof ctx.layoutHeight === "number" &&
+      Number.isFinite(ctx.layoutHeight)
+    ) {
+      out.layoutViewport = { width: Math.max(0, ctx.layoutWidth), height: Math.max(0, ctx.layoutHeight) };
+    }
+  }
+  if (failedRequests && failedRequests.length > 0) {
+    out.failedRequests = failedRequests;
+  }
+  const redacted = redactMcodeBrowserCaptureV2(out);
+  const clamped = clampMcodeBrowserCaptureV2(redacted);
+  const wid = workspaceId?.trim() ?? "";
+  if (wid && captureNeedsSpillPostRedact(redacted)) {
+    const sp = await persistBrowserCaptureSpill(wid, redacted);
+    if (sp) {
+      clamped.spillAppDataPath = sp.appDataPath;
+      clamped.spillAbsolutePath = sp.absolutePath;
+    }
+  }
+  return clamped;
+}
+
+/**
+ * Registers the webRequest.onCompleted interceptor for the given Electron session
+ * to track failed HTTP/HTTPS responses per-session.
+ */
+export function registerWebRequestInterceptor(partition: Electron.Session): void {
+  partition.webRequest.onCompleted({ urls: ["http://*/*", "https://*/*"] }, (details) => {
+    const code = details.statusCode ?? 0;
+    if (code > 0 && code < 400) return;
+    const wcId = details.webContentsId;
+    if (wcId == null) return;
+    const url = details.url;
+    if (!url.startsWith("http://") && !url.startsWith("https://")) return;
+    const rt = String(details.resourceType ?? "other").slice(0, 32);
+    const safeUrl = url.length > 2048 ? url.slice(0, 2048) : url;
+    for (const s of sessions.values()) {
+      if (!s.view || s.view.webContents.isDestroyed()) continue;
+      if (s.view.webContents.id !== wcId) continue;
+      pushFailedRequest(s, { url: safeUrl, statusCode: code, resourceType: rt });
+      return;
+    }
+  });
+}
+
+/**
+ * Registers the `preview:capture-picture-reference` and `preview:capture-context-reference`
+ * IPC handlers. Call once at app startup.
+ */
+export function registerCaptureHandlers(): void {
+  ipcMain.handle("preview:capture-picture-reference", async (_event): Promise<PreviewPictureReferenceResult> => {
+    const win = BrowserWindow.fromWebContents(_event.sender);
+    if (!win || win.isDestroyed()) return { ok: false, error: "no-window" };
+
+    const s = getSession(win);
+    if (!s.view || s.view.webContents.isDestroyed()) {
+      return { ok: false, error: "no-preview" };
+    }
+
+    try {
+      const image = await s.view.webContents.capturePage();
+      const buffer = image.toPNG();
+      if (buffer.length === 0) {
+        return { ok: false, error: "empty-capture" };
+      }
+
+      const id = randomUUID();
+      const stem = previewCaptureFileStem(s.view.webContents.getURL());
+      const name = `preview-${stem}-${Date.now()}.png`;
+      const tempDir = join(app.getPath("temp"), "mcode-attachments");
+      await mkdir(tempDir, { recursive: true });
+      const tempPath = join(tempDir, `${id}.png`);
+      await writeFile(tempPath, buffer);
+
+      const meta: AttachmentMeta = {
+        id,
+        name,
+        mimeType: "image/png",
+        sizeBytes: buffer.length,
+        sourcePath: tempPath,
+      };
+
+      const lb = s.lastBounds;
+      const pngSize = image.getSize();
+      const boundsCss =
+        lb !== null ? viewportBoundsFallback(lb.width, lb.height) : viewportBoundsFallback(pngSize.width, pngSize.height);
+      const capture = await buildBrowserCapturePayload(
+        s.view.webContents,
+        boundsCss,
+        s.consoleBuffer,
+        snapshotFailedRequestsForCapture(s),
+        s.workspaceId,
+        {
+          captureKind: "viewport",
+        },
+      );
+      resetIdle(win, s);
+      return { ok: true, meta, previewBytes: Uint8Array.from(buffer), capture };
+    } catch {
+      return { ok: false, error: "capture-failed" };
+    }
+  });
+
+  ipcMain.handle("preview:capture-context-reference", async (_event): Promise<PreviewContextReferenceResult> => {
+    const win = BrowserWindow.fromWebContents(_event.sender);
+    if (!win || win.isDestroyed()) return { ok: false, error: "no-window" };
+
+    const s = getSession(win);
+    if (!s.view || s.view.webContents.isDestroyed()) {
+      return { ok: false, error: "no-preview" };
+    }
+
+    const lb = s.lastBounds;
+    if (!lb) {
+      return { ok: false, error: "no-bounds" };
+    }
+
+    try {
+      const boundsCss = viewportBoundsFallback(lb.width, lb.height);
+      const capture = await buildBrowserCapturePayload(
+        s.view.webContents,
+        boundsCss,
+        s.consoleBuffer,
+        snapshotFailedRequestsForCapture(s),
+        s.workspaceId,
+        { captureKind: "viewport" },
+      );
+      resetIdle(win, s);
+      return { ok: true, capture };
+    } catch {
+      return { ok: false, error: "capture-failed" };
+    }
+  });
+}

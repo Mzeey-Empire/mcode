@@ -9,25 +9,43 @@ function run(cmd, opts = {}) {
   execSync(cmd, { stdio: "inherit", ...opts });
 }
 
-/** Returns true when there are uncommitted code changes. */
+/** Returns true when the branch has code changes (committed or uncommitted). */
 function hasCodeChanges() {
+  const codeGlob = '"*.ts" "*.tsx" "*.js" "*.jsx" "*.mts" "*.cts" "*.mjs" "*.cjs"';
+
+  // Check uncommitted changes (staged + unstaged)
   try {
-    // Check unstaged + staged changes
-    execSync('git diff --quiet HEAD -- "*.ts" "*.tsx" "*.js" "*.jsx" "*.mts" "*.cts" "*.mjs" "*.cjs"', { stdio: "ignore" });
+    execSync(`git diff --quiet HEAD -- ${codeGlob}`, { stdio: "ignore" });
   } catch {
-    return true; // non-zero exit = changes exist
+    return true;
   }
+
+  // Check untracked files
   try {
-    // Check untracked files
     const untracked = execSync(
-      'git ls-files --others --exclude-standard -- "*.ts" "*.tsx" "*.js" "*.jsx" "*.mts" "*.cts" "*.mjs" "*.cjs"',
+      `git ls-files --others --exclude-standard -- ${codeGlob}`,
       { encoding: "utf-8" },
     ).trim();
     if (untracked.length > 0) return true;
   } catch {
-    // git not available or not a repo; run verification to be safe
     return true;
   }
+
+  // Check committed changes on this branch vs main
+  try {
+    const mergeBase = execSync("git merge-base HEAD main", {
+      encoding: "utf-8",
+    }).trim();
+    const diff = execSync(
+      `git diff --name-only ${mergeBase} HEAD -- ${codeGlob}`,
+      { encoding: "utf-8" },
+    ).trim();
+    if (diff.length > 0) return true;
+  } catch {
+    // Not on a branch or no main; run verification to be safe
+    return true;
+  }
+
   return false;
 }
 

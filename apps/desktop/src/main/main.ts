@@ -40,7 +40,7 @@ import {
   setBeforeInstallHook,
 } from "./auto-updater.js";
 import { setupSpellcheck } from "./spellcheck.js";
-import { registerPreviewBrowserHandlers, disposePreviewForWindow } from "./preview-browser.js";
+import { registerPreviewBrowserHandlers, disposePreviewForWindow } from "./preview/index.js";
 
 // Isolate dev's Electron userData (cache, cookies, localStorage, IndexedDB)
 // from the installed prod build. Without this, both share %APPDATA%/Mcode/
@@ -600,11 +600,12 @@ app.commandLine.appendSwitch("aggressive-cache-discard");
 // worth persisting to disk. Remove the disk cache overhead.
 app.commandLine.appendSwitch("disable-disk-cache");
 
-// Cap renderer V8 heap at 128 MB and young-generation semi-space at 2 MB
-// to prevent over-allocation during markdown rendering and syntax highlighting.
+// Cap renderer V8 heap. The preview BrowserView loads arbitrary third-party
+// pages that can exceed 128 MB, so the limit is raised to 2 GB. The main
+// renderer still benefits from young-generation capping (2 MB semi-space).
 app.commandLine.appendSwitch(
   "js-flags",
-  "--max-old-space-size=128 --max-semi-space-size=2",
+  "--max-old-space-size=2048 --max-semi-space-size=2",
 );
 
 app.whenReady().then(async () => {

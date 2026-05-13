@@ -1,0 +1,247 @@
+import { useCallback, useState } from "react";
+import { useToastStore } from "@/stores/toastStore";
+import { usePreviewReferenceQueueStore } from "@/stores/previewReferenceQueueStore";
+import { MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME } from "@mcode/contracts";
+import type { McodeBrowserCapture } from "@mcode/contracts";
+import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
+
+type CaptureResult =
+  | {
+      ok: true;
+      meta: {
+        id: string;
+        name: string;
+        mimeType: string;
+        sizeBytes: number;
+        sourcePath: string;
+      };
+      previewBytes: Uint8Array;
+      capture: McodeBrowserCapture;
+    }
+  | { ok: false; error: string };
+
+type ContextCaptureResult =
+  | { ok: true; capture: McodeBrowserCapture }
+  | { ok: false; error: string };
+
+const CAPTURE_ERROR_SILENT = new Set(["cancelled", "capture-interrupted", "navigated-away"]);
+
+const CAPTURE_ERROR_LABEL: Record<string, string> = {
+  "no-window": "Preview is unavailable.",
+  "no-preview": "Keep the preview visible and load a page first.",
+  "empty-capture": "Nothing was captured.",
+  "capture-failed": "Screenshot failed.",
+  "region-too-small": "Drag a larger box (at least a few pixels).",
+  "no-hit": "Click an element on the page.",
+};
+
+function formatCaptureError(code: string): string {
+  return CAPTURE_ERROR_LABEL[code] ?? code;
+}
+
+function showCaptureErrorIfNeeded(res: CaptureResult | ContextCaptureResult): void {
+  if (res.ok || CAPTURE_ERROR_SILENT.has(res.error)) return;
+  useToastStore.getState().show("error", "Could not capture preview", formatCaptureError(res.error));
+}
+
+/** Options for the {@link usePreviewCapture} hook. */
+export interface UsePreviewCaptureOptions {
+  /** Thread id that owns this capture session. */
+  readonly threadId: string;
+  /** Callback to push bounds sync before capturing. */
+  readonly pushSync: (visible: boolean) => Promise<void>;
+}
+
+/** State and callbacks returned by {@link usePreviewCapture}. */
+export interface PreviewCaptureState {
+  /** True while a full-viewport capture is in progress. */
+  readonly captureBusy: boolean;
+  /** True while a region drag-crop capture is in progress. */
+  readonly regionBusy: boolean;
+  /** True while an element-pick capture is in progress. */
+  readonly elementPickBusy: boolean;
+  /** True while a context-only capture is in progress. */
+  readonly contextBusy: boolean;
+  /** True when any capture mode is active (disables other capture buttons). */
+  readonly anyCaptureActive: boolean;
+  readonly onAddPictureReference: () => Promise<void>;
+  readonly onAddRegionPictureReference: () => Promise<void>;
+  readonly onAddElementPickPictureReference: () => Promise<void>;
+  readonly onAddPageContextOnly: () => Promise<void>;
+}
+
+/**
+ * Manages capture handlers and busy states for the browser preview:
+ * full-viewport screenshot, region crop, element pick, and context-only capture.
+ */
+export function usePreviewCapture({
+  threadId,
+  pushSync,
+}: UsePreviewCaptureOptions): PreviewCaptureState {
+  const [captureBusy, setCaptureBusy] = useState(false);
+  const [regionBusy, setRegionBusy] = useState(false);
+  const [elementPickBusy, setElementPickBusy] = useState(false);
+  const [contextBusy, setContextBusy] = useState(false);
+
+  const anyCaptureActive = captureBusy || regionBusy || elementPickBusy || contextBusy;
+
+  const onAddPictureReference = useCallback(async () => {
+    const preview = window.desktopBridge?.preview;
+    if (!preview?.capturePictureReference || !threadId) return;
+
+    setCaptureBusy(true);
+    try {
+      await pushSync(true);
+
+      let res: CaptureResult;
+      try {
+        res = (await preview.capturePictureReference()) as CaptureResult;
+      } catch {
+        useToastStore.getState().show("error", "Could not capture preview", "Screenshot failed.");
+        return;
+      }
+
+      showCaptureErrorIfNeeded(res);
+      if (!res.ok) return;
+
+      const copied = Uint8Array.from(res.previewBytes);
+      const blob = new Blob([copied], { type: "image/png" });
+      const previewUrl = URL.createObjectURL(blob);
+      const attachment: PendingAttachment = {
+        id: res.meta.id,
+        name: res.meta.name,
+        mimeType: res.meta.mimeType,
+        sizeBytes: res.meta.sizeBytes,
+        previewUrl,
+        filePath: res.meta.sourcePath,
+        browserCapture: res.capture,
+      };
+      usePreviewReferenceQueueStore.getState().enqueuePreviewReference(threadId, attachment);
+    } finally {
+      setCaptureBusy(false);
+    }
+  }, [pushSync, threadId]);
+
+  const onAddRegionPictureReference = useCallback(async () => {
+    const preview = window.desktopBridge?.preview;
+    if (!preview?.capturePictureReferenceRegion || !threadId) return;
+
+    setRegionBusy(true);
+    try {
+      await pushSync(true);
+
+      let res: CaptureResult;
+      try {
+        res = (await preview.capturePictureReferenceRegion()) as CaptureResult;
+      } catch {
+        useToastStore.getState().show("error", "Could not capture preview", "Screenshot failed.");
+        return;
+      }
+
+      showCaptureErrorIfNeeded(res);
+      if (!res.ok) return;
+
+      const copied = Uint8Array.from(res.previewBytes);
+      const blob = new Blob([copied], { type: "image/png" });
+      const previewUrl = URL.createObjectURL(blob);
+      const attachment: PendingAttachment = {
+        id: res.meta.id,
+        name: res.meta.name,
+        mimeType: res.meta.mimeType,
+        sizeBytes: res.meta.sizeBytes,
+        previewUrl,
+        filePath: res.meta.sourcePath,
+        browserCapture: res.capture,
+      };
+      usePreviewReferenceQueueStore.getState().enqueuePreviewReference(threadId, attachment);
+    } finally {
+      setRegionBusy(false);
+    }
+  }, [pushSync, threadId]);
+
+  const onAddElementPickPictureReference = useCallback(async () => {
+    const preview = window.desktopBridge?.preview;
+    if (!preview?.capturePictureReferenceElementPick || !threadId) return;
+
+    setElementPickBusy(true);
+    try {
+      await pushSync(true);
+
+      let res: CaptureResult;
+      try {
+        res = (await preview.capturePictureReferenceElementPick()) as CaptureResult;
+      } catch {
+        useToastStore.getState().show("error", "Could not capture preview", "Screenshot failed.");
+        return;
+      }
+
+      showCaptureErrorIfNeeded(res);
+      if (!res.ok) return;
+
+      const copied = Uint8Array.from(res.previewBytes);
+      const blob = new Blob([copied], { type: "image/png" });
+      const previewUrl = URL.createObjectURL(blob);
+      const attachment: PendingAttachment = {
+        id: res.meta.id,
+        name: res.meta.name,
+        mimeType: res.meta.mimeType,
+        sizeBytes: res.meta.sizeBytes,
+        previewUrl,
+        filePath: res.meta.sourcePath,
+        browserCapture: res.capture,
+      };
+      usePreviewReferenceQueueStore.getState().enqueuePreviewReference(threadId, attachment);
+    } finally {
+      setElementPickBusy(false);
+    }
+  }, [pushSync, threadId]);
+
+  const onAddPageContextOnly = useCallback(async () => {
+    const preview = window.desktopBridge?.preview;
+    if (!preview?.capturePageContext || !threadId) return;
+
+    setContextBusy(true);
+    try {
+      await pushSync(true);
+
+      let res: ContextCaptureResult;
+      try {
+        res = (await preview.capturePageContext()) as ContextCaptureResult;
+      } catch {
+        useToastStore.getState().show("error", "Could not capture preview", "Context capture failed.");
+        return;
+      }
+
+      if (!res.ok) {
+        showCaptureErrorIfNeeded(res);
+        return;
+      }
+
+      const attachment: PendingAttachment = {
+        id: crypto.randomUUID(),
+        name: "Page context",
+        mimeType: MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME,
+        sizeBytes: 0,
+        previewUrl: "",
+        filePath: null,
+        browserCapture: res.capture,
+        contextOnly: true,
+      };
+      usePreviewReferenceQueueStore.getState().enqueuePreviewReference(threadId, attachment);
+    } finally {
+      setContextBusy(false);
+    }
+  }, [pushSync, threadId]);
+
+  return {
+    captureBusy,
+    regionBusy,
+    elementPickBusy,
+    contextBusy,
+    anyCaptureActive,
+    onAddPictureReference,
+    onAddRegionPictureReference,
+    onAddElementPickPictureReference,
+    onAddPageContextOnly,
+  };
+}

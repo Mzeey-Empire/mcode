@@ -112,6 +112,7 @@ vi.mock("@mcode/shared", () => ({
   getMcodeDir: vi.fn().mockReturnValue("/tmp/mcode"),
   redactMcodeBrowserCaptureV2: vi.fn(),
   spillWorkspaceDirSegment: vi.fn().mockReturnValue("ws"),
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
 vi.mock("node:fs/promises", async () => {
@@ -126,7 +127,7 @@ vi.mock("node:fs/promises", async () => {
 });
 
 import { BrowserWindow } from "electron";
-import { registerPreviewBrowserHandlers, disposePreviewForWindow } from "../preview-browser.js";
+import { registerPreviewBrowserHandlers, disposePreviewForWindow } from "../preview/index.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
