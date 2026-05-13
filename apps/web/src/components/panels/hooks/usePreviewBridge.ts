@@ -191,7 +191,6 @@ export function usePreviewBridge({
       if (raf) cancelAnimationFrame(raf);
       void pushSyncRef.current(false);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onGoBack = useCallback(async () => {
