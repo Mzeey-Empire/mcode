@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.11.0](https://github.com/Mzeey-Empire/mcode/compare/mcode-v0.10.1...mcode-v0.11.0) (2026-05-13)
+
+
+### Features
+
+* agent end-to-end workflow + server shutdown before install ([#441](https://github.com/Mzeey-Empire/mcode/issues/441)) ([f69a1b4](https://github.com/Mzeey-Empire/mcode/commit/f69a1b4a6ca0580659b2570a6fb8b9270bb8ba06))
+* Comet-style smart omnibox with favicon and inline cancel pill ([#442](https://github.com/Mzeey-Empire/mcode/issues/442)) ([3977005](https://github.com/Mzeey-Empire/mcode/commit/3977005d0b7c4bae177e26665d41d536fbe93e4b))
+* **preview:** Ctrl+click on links opens in browser preview ([#450](https://github.com/Mzeey-Empire/mcode/issues/450)) ([7de81ba](https://github.com/Mzeey-Empire/mcode/commit/7de81ba618e8632aac8f00f125909af359d8e0f3))
+* **queue:** inline queue list with edit, reorder, remove, send-now ([#445](https://github.com/Mzeey-Empire/mcode/issues/445)) ([16c7636](https://github.com/Mzeey-Empire/mcode/commit/16c763691af26bd32352b159f8d294e2a89ae417))
+* surface hook execution events in chat UI ([#447](https://github.com/Mzeey-Empire/mcode/issues/447)) ([4898f8b](https://github.com/Mzeey-Empire/mcode/commit/4898f8b8c800141b423b23eea3e3d52fb63b1c5c))
+
+
+### Bug Fixes
+
+* **browser-preview:** remove idle timer that blanked the view ([#439](https://github.com/Mzeey-Empire/mcode/issues/439)) ([65355e4](https://github.com/Mzeey-Empire/mcode/commit/65355e47e11739292965f5fb28cbee923b06285a))
+* **browser-preview:** remove idle timer that blanked the view after 2 minutes ([65355e4](https://github.com/Mzeey-Empire/mcode/commit/65355e47e11739292965f5fb28cbee923b06285a))
+* **composer:** show slash command autocomplete when trigger is mid-text ([04e9d60](https://github.com/Mzeey-Empire/mcode/commit/04e9d606f70c2fe8a3a150a77d2cf897d4eaf968))
+* **composer:** slash command autocomplete when trigger is mid-text ([#443](https://github.com/Mzeey-Empire/mcode/issues/443)) ([04e9d60](https://github.com/Mzeey-Empire/mcode/commit/04e9d606f70c2fe8a3a150a77d2cf897d4eaf968))
+* **desktop:** stop detached server before auto-updater quit ([#449](https://github.com/Mzeey-Empire/mcode/issues/449)) ([c6ae90c](https://github.com/Mzeey-Empire/mcode/commit/c6ae90cd36d7c97c7c0875635ac639813423cbf5))
+* **preview:** add cancel button to capture overlays ([#440](https://github.com/Mzeey-Empire/mcode/issues/440)) ([e53d464](https://github.com/Mzeey-Empire/mcode/commit/e53d464fc3c87d3cd872b5fb8aa699ce4ca27ccc))
+* **preview:** add cancel button to capture overlays and fix overlay positioning ([e53d464](https://github.com/Mzeey-Empire/mcode/commit/e53d464fc3c87d3cd872b5fb8aa699ce4ca27ccc))
+* **preview:** preserve BrowserView on tab switch and add local file preview ([#444](https://github.com/Mzeey-Empire/mcode/issues/444)) ([2b4517c](https://github.com/Mzeey-Empire/mcode/commit/2b4517c616267f37800942cacd8061d1fea6ebbc))
+
+
+### Performance Improvements
+
+* optimisations scan (server, web, desktop) ([#437](https://github.com/Mzeey-Empire/mcode/issues/437)) ([7a61aac](https://github.com/Mzeey-Empire/mcode/commit/7a61aaca69f60615ece886533ee89f3ebad22446))
+* **web:** optimise ProjectTree rendering and search filtering ([#446](https://github.com/Mzeey-Empire/mcode/issues/446)) ([c7c66f5](https://github.com/Mzeey-Empire/mcode/commit/c7c66f5dba2e12ce8f02c7b7b977a1be98114ace))
+
 ## [0.10.1](https://github.com/Mzeey-Empire/mcode/compare/mcode-v0.10.0...mcode-v0.10.1) (2026-05-09)
 
 
