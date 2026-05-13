@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/Mzeey-Empire/mcode/compare/mcode-v0.11.0...mcode-v0.11.1) (2026-05-13)
+
+
+### Bug Fixes
+
+* **preview:** browser crashes on heavy pages + modular refactor ([#454](https://github.com/Mzeey-Empire/mcode/issues/454)) ([72ee2a5](https://github.com/Mzeey-Empire/mcode/commit/72ee2a51f0bcc5d4ba30130bb80996b5c37e2f7d))
+
 ## [0.11.0](https://github.com/Mzeey-Empire/mcode/compare/mcode-v0.10.1...mcode-v0.11.0) (2026-05-13)
 
 
