@@ -40,7 +40,7 @@ import {
   setBeforeInstallHook,
 } from "./auto-updater.js";
 import { setupSpellcheck } from "./spellcheck.js";
-import { registerPreviewBrowserHandlers, disposePreviewForWindow } from "./preview-browser.js";
+import { registerPreviewBrowserHandlers, disposePreviewForWindow } from "./preview/index.js";
 
 // Isolate dev's Electron userData (cache, cookies, localStorage, IndexedDB)
 // from the installed prod build. Without this, both share %APPDATA%/Mcode/
