@@ -1652,11 +1652,15 @@ function layoutPreviewGuest(s: PreviewSession): void {
   const resolved = resolvePreviewDeviceEmulation(s.deviceEmulationConfig);
 
   if (!resolved) {
-    // Desktop mode: fill the panel, disable any prior emulation
+    // Desktop mode: fill the panel, disable any prior emulation.
+    // Only call disableDeviceEmulation when emulation was previously active;
+    // calling it on a fresh BrowserView that never had emulation enabled
+    // crashes the Chromium compositor on Windows.
+    const hadEmulation = s.captureEmulationSnapshot !== null;
     s.view.setBounds(sh);
     s.lastBounds = { ...sh };
     s.captureEmulationSnapshot = null;
-    if (s.defaultGuestUserAgent) {
+    if (hadEmulation && s.defaultGuestUserAgent) {
       try {
         wc.disableDeviceEmulation();
         wc.setUserAgent(s.defaultGuestUserAgent);
