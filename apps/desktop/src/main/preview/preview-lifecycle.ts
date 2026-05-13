@@ -4,6 +4,7 @@
  */
 
 import { BrowserView, BrowserWindow, shell } from "electron";
+import { logger } from "@mcode/shared";
 import {
   type PreviewSession,
   sessions,
@@ -50,6 +51,7 @@ export function detachViewListeners(view: BrowserView): void {
  */
 export function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
   if (s.view) return s.view;
+  logger.info("Preview: BrowserView created");
   const view = new BrowserView({
     webPreferences: {
       nodeIntegration: false,
@@ -123,8 +125,9 @@ export function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
     pushPreviewConsoleLine(s, level, message);
   });
 
-  view.webContents.on("render-process-gone", (_event, _details) => {
+  view.webContents.on("render-process-gone", (_event, details) => {
     const url = s.resumePreviewUrl;
+    logger.warn("Preview: renderer crashed", { reason: details.reason, exitCode: details.exitCode, url });
 
     // Tear down the dead view so ensureView creates a fresh one on next sync.
     if (s.view === view) {
@@ -147,6 +150,7 @@ export function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
     const now = Date.now();
     const CRASH_COOLDOWN_MS = 30_000;
     if (now - s.lastCrashRecoveryAt < CRASH_COOLDOWN_MS) {
+      logger.warn("Preview: crash recovery skipped (cooldown active)");
       if (!win.isDestroyed()) {
         sendPreviewLoading(win, false);
       }
@@ -155,6 +159,7 @@ export function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
 
     // Auto-recover once: recreate the view and reload the page that crashed.
     if (!win.isDestroyed() && url) {
+      logger.info("Preview: auto-recovering after crash", { url });
       s.lastCrashRecoveryAt = now;
       const fresh = ensureView(win, s);
       if (s.lastBounds) {
@@ -203,6 +208,7 @@ async function injectPreviewScrollbarStyles(s: PreviewSession): Promise<void> {
  */
 export function hidePreview(win: BrowserWindow, s: PreviewSession): void {
   if (s.view && !win.isDestroyed()) {
+    logger.info("Preview: view hidden (detached, kept alive)");
     try {
       win.removeBrowserView(s.view);
     } catch {
@@ -216,6 +222,7 @@ export function hidePreview(win: BrowserWindow, s: PreviewSession): void {
  * Saves the current URL as the resume URL so the next ensureView call can reload it.
  */
 export function parkPreview(win: BrowserWindow, s: PreviewSession): void {
+  logger.info("Preview: view parked (destroyed)", { url: s.resumePreviewUrl });
   abortOverlayCapture(s, "capture-interrupted");
   clearIdle(s);
   if (s.view) {

@@ -4,6 +4,7 @@
  */
 
 import { BrowserWindow, ipcMain, shell } from "electron";
+import { logger } from "@mcode/shared";
 import {
   getSession,
   sendPreviewLoading,
@@ -64,15 +65,18 @@ export function registerNavigationHandlers(): void {
         // the previous thread's document (and resumePreviewUrl) would leak into the next thread.
         if (switchedThread) {
           if (hint) {
+            logger.info("Preview: navigating (thread switch)", { url: hint });
             sendPreviewLoading(win, true);
             void wc.loadURL(hint);
             s.resumePreviewUrl = hint;
           } else {
+            logger.info("Preview: navigating to blank (thread switch, no hint)");
             s.resumePreviewUrl = null;
             sendPreviewLoading(win, true);
             void wc.loadURL("about:blank");
           }
         } else if (guestUrlNeedsHttpRestore(current) && hint) {
+          logger.info("Preview: restoring URL from hint", { url: hint });
           sendPreviewLoading(win, true);
           void wc.loadURL(hint);
           s.resumePreviewUrl = hint;
@@ -81,6 +85,7 @@ export function registerNavigationHandlers(): void {
           s.resumePreviewUrl &&
           isAllowedHttpUrl(s.resumePreviewUrl)
         ) {
+          logger.info("Preview: restoring URL from resume", { url: s.resumePreviewUrl });
           sendPreviewLoading(win, true);
           void wc.loadURL(s.resumePreviewUrl);
         }
@@ -116,6 +121,7 @@ export function registerNavigationHandlers(): void {
       if (win.getBrowserView() !== view) {
         win.setBrowserView(view);
       }
+      logger.info("Preview: user navigated", { url: target });
       sendPreviewLoading(win, true);
       void view.webContents.loadURL(target);
       s.resumePreviewUrl = target;
