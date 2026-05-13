@@ -58,6 +58,7 @@ export function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
       contextIsolation: true,
       sandbox: true,
       partition: "persist:mcode-preview",
+      additionalArguments: ["--js-flags=--max-old-space-size=2048"],
     },
   });
 
