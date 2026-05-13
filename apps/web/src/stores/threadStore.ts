@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Message, ToolCall, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
+import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
 import type { ContextWindowMode, ReasoningLevel, PlanQuestion, PlanAnswer, ProviderUsageInfo, QuotaCategory, TurnSnapshot } from "@mcode/contracts";
 import type { PermissionRequest, PermissionDecision } from "@mcode/contracts";
 import { PlanQuestionSchema, PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts";
@@ -115,6 +115,8 @@ interface ThreadState {
   answeredPlanMessageIdsByThread: Record<string, Set<string>>;
   /** Pending and recently-settled permission requests per thread. */
   permissionsByThread: Record<string, StoredPermission[]>;
+  /** Ephemeral hook execution state per thread. Cleared on page reload, not persisted to DB. */
+  hooksByThread: Record<string, HookExecution[]>;
   /**
    * After `agent.stop`, each thread ID is marked until `turn.persisted` arrives for that
    * thread, so we can show a one-shot file-change notice without colliding across threads.
@@ -195,6 +197,50 @@ function clearDequeueTimer(threadId: string) {
     clearTimeout(timer);
     dequeueTimers.delete(threadId);
   }
+}
+
+/**
+ * Resume auto-drain for a thread that was paused while the user edited a
+ * queued message. Schedules the same 400ms-delayed check used by the
+ * turnComplete handler. No-op when the thread is busy or the queue is empty.
+ */
+export function scheduleDrainAfterEdit(threadId: string): void {
+  clearDequeueTimer(threadId);
+  const timer = setTimeout(() => {
+    dequeueTimers.delete(threadId);
+    const threadExists = useWorkspaceStore.getState().threads.some(
+      (t) => t.id === threadId && t.deleted_at == null,
+    );
+    if (!threadExists) return;
+    if (useThreadStore.getState().runningThreadIds.has(threadId)) return;
+    if (useQueueStore.getState().editingThreadId === threadId) return;
+
+    const next = useQueueStore.getState().dequeueNext(threadId);
+    if (next) {
+      void (async (): Promise<void> => {
+        try {
+          await useThreadStore.getState().sendMessage(
+            threadId,
+            next.content,
+            next.model,
+            next.permissionMode,
+            next.attachments.length > 0 ? next.attachments : undefined,
+            next.displayContent,
+            next.reasoningLevel,
+            next.provider,
+            next.copilotAgent,
+            next.contextWindow,
+            next.thinking,
+            next.replyToMessageId,
+            next.quotedText,
+          );
+        } catch {
+          void releaseBrowserCaptureSpills(next.browserCaptureSpillPaths ?? []);
+        }
+      })();
+    }
+  }, 400);
+  dequeueTimers.set(threadId, timer);
 }
 
 /**
@@ -389,6 +435,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   planQuestionsStatusByThread: {},
   answeredPlanMessageIdsByThread: {},
   permissionsByThread: {},
+  hooksByThread: {},
   awaitingUserStopPersistByThread: {},
   interruptStopFileNoticeByThread: {},
   composerRecallFromStopByThread: {},
@@ -1172,6 +1219,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         planQuestionsStatusByThread: omitKey(state.planQuestionsStatusByThread, threadId),
         answeredPlanMessageIdsByThread: omitKey(state.answeredPlanMessageIdsByThread, threadId),
         permissionsByThread: omitKey(state.permissionsByThread, threadId),
+        hooksByThread: omitKey(state.hooksByThread, threadId),
         usageByProvider: Object.fromEntries(
           Object.entries(state.usageByProvider).filter(([k]) => !k.startsWith(`${threadId}:`)),
         ),
@@ -1257,6 +1305,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         planQuestionsStatusByThread: pruneAll(state.planQuestionsStatusByThread),
         answeredPlanMessageIdsByThread: pruneAll(state.answeredPlanMessageIdsByThread),
         permissionsByThread: pruneAll(state.permissionsByThread),
+        hooksByThread: pruneAll(state.hooksByThread),
         usageByProvider: Object.fromEntries(
           Object.entries(state.usageByProvider).filter(([k]) => !threadIds.some((tid) => k.startsWith(`${tid}:`))),
         ),
@@ -1758,6 +1807,83 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       return;
     }
 
+    if (method === "session.hookStarted") {
+      const hookName = (params.hookName as string) || "unknown";
+      const hookType = (params.hookType as "permission" | "stop") || "stop";
+      const toolName = params.toolName as string | undefined;
+      const hook: HookExecution = {
+        hookName,
+        hookType,
+        toolName,
+        status: "running",
+        outputLines: [],
+        fullOutput: [],
+        startedAt: Date.now(),
+      };
+      set((state) => ({
+        hooksByThread: {
+          ...state.hooksByThread,
+          [threadId]: [...(state.hooksByThread[threadId] ?? []), hook],
+        },
+      }));
+      return;
+    }
+
+    if (method === "session.hookProgress") {
+      const hookName = (params.hookName as string) || "";
+      const output = (params.output as string) || "";
+      if (!hookName || !output) return;
+      set((state) => {
+        const hooks = state.hooksByThread[threadId] ?? [];
+        // Target the last running hook with this name (not all same-name runs)
+        let idx = -1;
+        for (let i = hooks.length - 1; i >= 0; i--) {
+          if (hooks[i]!.hookName === hookName && hooks[i]!.status === "running") {
+            idx = i;
+            break;
+          }
+        }
+        if (idx < 0) return state;
+        // Split chunk into actual lines so the 20-line cap is line-based
+        const addedLines = output
+          .split(/\r?\n/)
+          .filter((line, i, arr) => !(i === arr.length - 1 && line === ""));
+        if (addedLines.length === 0) return state;
+        const next = [...hooks];
+        const target = next[idx]!;
+        // Cap retained output to prevent unbounded memory growth from verbose hooks
+        const raw = [...target.fullOutput, ...addedLines];
+        const fullOutput = raw.length > 500 ? raw.slice(-500) : raw;
+        next[idx] = { ...target, fullOutput, outputLines: fullOutput.slice(-20) };
+        return { hooksByThread: { ...state.hooksByThread, [threadId]: next } };
+      });
+      return;
+    }
+
+    if (method === "session.hookCompleted") {
+      const hookName = (params.hookName as string) || "";
+      const exitCode = (params.exitCode as number) ?? 1;
+      const durationMs = (params.durationMs as number) ?? 0;
+      const didBlock = (params.didBlock as boolean) ?? false;
+      if (!hookName) return;
+      set((state) => {
+        const hooks = state.hooksByThread[threadId] ?? [];
+        // Target the last running hook with this name
+        let idx = -1;
+        for (let i = hooks.length - 1; i >= 0; i--) {
+          if (hooks[i]!.hookName === hookName && hooks[i]!.status === "running") {
+            idx = i;
+            break;
+          }
+        }
+        if (idx < 0) return state;
+        const next = [...hooks];
+        next[idx] = { ...next[idx]!, status: "completed" as const, exitCode, durationMs, didBlock };
+        return { hooksByThread: { ...state.hooksByThread, [threadId]: next } };
+      });
+      return;
+    }
+
     if (method === "session.turnComplete" || method === "session.ended") {
       const costUsd = (params.costUsd as number) ?? null;
       const tokensIn = ((params.tokensIn as number) ?? (params.totalTokensIn as number)) ?? 0;
@@ -1973,6 +2099,10 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           );
           if (!threadExists) return;
           if (get().runningThreadIds.has(threadId)) return;
+
+          // Skip auto-drain while the user is editing a queued message.
+          // The queue will resume when the edit is saved or cancelled.
+          if (useQueueStore.getState().editingThreadId === threadId) return;
 
           const next = useQueueStore.getState().dequeueNext(threadId);
           if (next) {

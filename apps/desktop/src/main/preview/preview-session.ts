@@ -52,6 +52,11 @@ export interface PreviewSession {
   lastFavicons: string[];
   /** Timestamp of the last renderer crash auto-recovery; used to rate-limit retries. */
   lastCrashRecoveryAt: number;
+  /**
+   * Lets the next main-process `file:` navigation skip {@link ensureView}'s will-navigate gate,
+   * since those loads already passed {@link resolveLocalFileUrl}.
+   */
+  trustedFileNavigationBudget: number;
 }
 
 /** Global map of window id -> preview session state. */
@@ -78,6 +83,7 @@ export function getSession(win: BrowserWindow): PreviewSession {
       workspaceId: null,
       lastFavicons: [],
       lastCrashRecoveryAt: 0,
+      trustedFileNavigationBudget: 0,
     };
     sessions.set(win.id, s);
   }
@@ -122,6 +128,16 @@ export function isAllowedHttpUrl(url: string): boolean {
   try {
     const u = new URL(url);
     return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/** Accepts http, https, and file URLs for the preview BrowserView. */
+export function isAllowedPreviewUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.protocol === "http:" || u.protocol === "https:" || u.protocol === "file:";
   } catch {
     return false;
   }

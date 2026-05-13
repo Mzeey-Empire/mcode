@@ -1,6 +1,6 @@
 {
   "name": "mcode-desktop",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "description": "Mcode AI agent orchestration desktop app",
   "author": {
     "name": "Mzeey Empire",
@@ -17,7 +17,7 @@
     "rebuild": "electron-rebuild -f",
     "dist": "bun run build && bun scripts/generate-snapshot.mjs && electron-builder --publish never",
     "dist:no-snapshot": "bun run build && electron-builder --publish never",
-    "test": "vitest run"
+    "test": "bunx vitest run"
   },
   "dependencies": {
     "@electron/rebuild": "^3.7.1",

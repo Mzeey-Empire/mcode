@@ -6,12 +6,18 @@ import {
   type RefObject,
 } from "react";
 import { useDiffStore } from "@/stores/diffStore";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
 
 const NAV_ERROR_LABEL: Record<string, string> = {
   "no-bounds": "Wait for the panel to finish layout, then try again.",
-  "invalid-url": "Only http and https URLs are allowed.",
-  "empty-url": "Enter a URL.",
+  "invalid-url": "Only http, https URLs and local file paths are supported.",
+  "empty-url": "Enter a URL or file path.",
   "no-window": "Preview is unavailable.",
+  "file-not-found": "File not found.",
+  "not-a-file": "Path is not a regular file.",
+  "is-directory": "Path is a directory (no index.html found).",
+  "sensitive-file": "Cannot preview sensitive files (.env, .git, keys, etc.).",
+  "no-workspace": "Open a workspace to use relative file paths.",
 };
 
 /** Resolves an IPC error code to a short user-visible hint. */
@@ -19,15 +25,22 @@ export function formatNavError(code: string): string {
   return NAV_ERROR_LABEL[code] ?? code;
 }
 
+/** Options for the {@link usePreviewBridge} hook. */
 export interface UsePreviewBridgeOptions {
+  /** Thread id that owns this preview session. */
   readonly threadId: string;
+  /** Active workspace id; used to resolve relative file paths and scope spill files. */
   readonly workspaceId?: string | null;
+  /** Ref to the DOM element whose bounds are synced to the native BrowserView. */
   readonly surfaceRef: RefObject<HTMLDivElement | null>;
 }
 
+/** State and callbacks returned by {@link usePreviewBridge}. */
 export interface PreviewBridgeState {
+  /** Current value of the omnibox input. */
   readonly inputUrl: string;
   readonly setInputUrl: (url: string) => void;
+  /** User-visible navigation error, or null when no error. */
   readonly navError: string | null;
   readonly setNavError: (err: string | null) => void;
   readonly canBack: boolean;
@@ -35,13 +48,17 @@ export interface PreviewBridgeState {
   readonly previewLoading: boolean;
   readonly pageTitle: string | null;
   readonly faviconUrl: string | null;
+  /** Persisted URL for the current thread (Zustand store). */
   readonly storedUrl: string;
+  /** Push current bounds and visibility to the native BrowserView. */
   readonly pushSync: (visible: boolean) => Promise<void>;
+  /** Refresh navigation state (canGoBack / canGoForward) from IPC. */
   readonly refreshNav: () => Promise<void>;
   readonly onGoBack: () => Promise<void>;
   readonly onGoForward: () => Promise<void>;
   readonly onReload: () => Promise<void>;
   readonly onOpenExternal: () => Promise<void>;
+  /** Navigate the preview to the given URL or file path. */
   readonly onNavigate: (url: string) => void;
 }
 
@@ -61,6 +78,10 @@ export function usePreviewBridge({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [pageTitle, setPageTitle] = useState<string | null>(null);
   const [faviconUrl, setFaviconUrl] = useState<string | null>(null);
+
+  const workspacePath = useWorkspaceStore(
+    (s) => s.workspaces.find((w) => w.id === workspaceId)?.path ?? null,
+  );
 
   const storedUrl = useDiffStore(
     (s) => s.previewUrlByThread[threadId] ?? "",
@@ -225,12 +246,17 @@ export function usePreviewBridge({
 
   const onNavigate = useCallback(
     (url: string) => {
+      const preview = window.desktopBridge?.preview;
+      if (!preview) return;
       setInputUrl(url);
-      void window.desktopBridge?.preview.navigate(url).then((r) => {
+      setNavError(null);
+      void preview.navigate(url, workspacePath).then((r) => {
         if (!r.ok) setNavError(formatNavError(r.error));
+      }).catch(() => {
+        setNavError("Navigation failed.");
       });
     },
-    [],
+    [workspacePath],
   );
 
   return {

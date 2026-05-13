@@ -30,6 +30,9 @@ export const AgentEventType = {
   ProviderUnavailable: "providerUnavailable",
   RateLimited: "rateLimited",
   ApiRetry: "apiRetry",
+  HookStarted: "hookStarted",
+  HookProgress: "hookProgress",
+  HookCompleted: "hookCompleted",
 } as const;
 
 /** Union of all valid `AgentEvent` type discriminants. */
@@ -210,6 +213,37 @@ export const AgentEventSchema = lazySchema(() =>
       delayMs: z.number().optional(),
       /** HTTP status code that triggered the retry, if available. Omitted for connection errors. */
       errorStatus: z.number().optional(),
+    }),
+    z.object({
+      /** Emitted when a hook begins executing (permission or stop hook). */
+      type: z.literal(AgentEventType.HookStarted),
+      threadId: z.string(),
+      /** Name of the hook as configured in settings. */
+      hookName: z.string(),
+      /** Whether this is a permission hook (fires before a tool) or a stop hook (fires after the turn). */
+      hookType: z.enum(["permission", "stop"]),
+      /** Tool that triggered a permission hook. Absent for stop hooks. */
+      toolName: z.string().optional(),
+    }),
+    z.object({
+      /** Incremental stdout output from a running hook. */
+      type: z.literal(AgentEventType.HookProgress),
+      threadId: z.string(),
+      hookName: z.string(),
+      /** One or more lines of stdout output from the hook process. */
+      output: z.string(),
+    }),
+    z.object({
+      /** Emitted when a hook finishes executing. */
+      type: z.literal(AgentEventType.HookCompleted),
+      threadId: z.string(),
+      hookName: z.string(),
+      /** Process exit code. 0 = success. */
+      exitCode: z.number(),
+      /** Wall-clock execution time in milliseconds. */
+      durationMs: z.number(),
+      /** Whether the hook blocked the tool call or agent turn from proceeding. */
+      didBlock: z.boolean(),
     }),
   ]),
 );

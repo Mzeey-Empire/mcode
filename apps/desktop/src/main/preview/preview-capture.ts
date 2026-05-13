@@ -149,8 +149,8 @@ function scrubVisibleTextForOutbound(s: string): string {
 /** Removes disallowed characters and nested executable-ish blobs from excerpt text shipped to the model. */
 export function scrubHtmlExcerptForOutbound(s: string): string {
   let t = s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
-  t = t.replace(/<\/script\b[^>]*>[\s\S]*?<\/script>/gi, "<!-- stripped -->");
-  t = t.replace(/<\/iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, "<!-- stripped -->");
+  t = t.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "<!-- stripped -->");
+  t = t.replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, "<!-- stripped -->");
   t = t.replace(/<iframe\b[^>]*\/?>/gi, "<!-- stripped -->");
   return t;
 }

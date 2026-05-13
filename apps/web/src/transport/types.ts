@@ -77,6 +77,23 @@ export interface ToolCall {
   elapsedSeconds?: number;
 }
 
+/** Ephemeral hook execution state tracked during a session. Not persisted to DB. */
+export interface HookExecution {
+  hookName: string;
+  hookType: "permission" | "stop";
+  toolName?: string;
+  status: "running" | "completed";
+  /** Last 20 lines of hook output, shown by default in the UI. */
+  outputLines: string[];
+  /** Full hook output buffer, available via "show all" toggle. */
+  fullOutput: string[];
+  exitCode?: number;
+  durationMs?: number;
+  didBlock?: boolean;
+  /** Timestamp when the hook started, used to derive an elapsed timer. */
+  startedAt: number;
+}
+
 /** Transport interface consumed by the web app to communicate with the backend. */
 export interface McodeTransport {
   // Workspace commands

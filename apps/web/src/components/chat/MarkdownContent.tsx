@@ -2,6 +2,10 @@ import { memo, useMemo, lazy, Suspense } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CodeBlock } from "./CodeBlock";
+import { useDiffStore } from "@/stores/diffStore";
+import { isMac } from "@/lib/platform";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 
 /** Props for {@link MarkdownContent}. */
 interface MarkdownContentProps {
@@ -21,6 +25,49 @@ const plugins = [remarkGfm];
 
 /** Lazy-loaded MermaidBlock - only fetched when a mermaid fence is encountered. */
 const LazyMermaidBlock = lazy(() => import("./MermaidBlock"));
+
+/** Matches a standalone HTTP(S) URL (used to detect URLs inside inline code spans). */
+const HTTP_URL_RE = /^https?:\/\/\S+$/;
+
+/** Tooltip label for the Ctrl/Cmd+click preview hint. */
+const previewHint = `${isMac ? "\u2318" : "Ctrl"}+click to open in preview`;
+
+/** Whether the desktop preview bridge is available. */
+function hasPreview(): boolean {
+  return !!window.desktopBridge?.preview;
+}
+
+/**
+ * Handles a click on a previewable URL. Opens in the browser preview panel on
+ * Ctrl/Cmd+click, otherwise opens externally.
+ */
+function handleLinkClick(e: React.MouseEvent | React.KeyboardEvent, url: string): void {
+  e.preventDefault();
+
+  const isModifierClick = e.ctrlKey || e.metaKey;
+  if (isModifierClick && hasPreview()) {
+    const threadId = useWorkspaceStore.getState().activeThreadId;
+    if (threadId) {
+      const { showRightPanel, setRightPanelTab } = useDiffStore.getState();
+      showRightPanel(threadId);
+      setRightPanelTab(threadId, "preview");
+      // Defer navigation so React can re-render and sync BrowserView bounds
+      setTimeout(() => {
+        window.desktopBridge?.preview?.navigate(url).then((r) => {
+          if (!r?.ok) window.desktopBridge?.openExternalUrl?.(url);
+        });
+      }, 0);
+      return;
+    }
+    // No active thread; fall through to open externally
+  }
+
+  if (window.desktopBridge?.openExternalUrl) {
+    window.desktopBridge.openExternalUrl(url);
+  } else {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
 
 /**
  * Builds the static component overrides that depend on `variant`.
@@ -54,7 +101,9 @@ function makeStaticComponents(variant: "assistant" | "user") {
       const linkClass = isUser
         ? "text-primary-foreground underline hover:opacity-80"
         : "text-primary underline hover:text-primary";
-      return (
+      const isPreviewable = safeHref && (safeHref.startsWith("http:") || safeHref.startsWith("https:"));
+      const showHint = isPreviewable && hasPreview();
+      const anchor = (
         <a
           href={safeHref}
           className={linkClass}
@@ -62,6 +111,7 @@ function makeStaticComponents(variant: "assistant" | "user") {
           rel="noopener noreferrer"
           onClick={(e) => {
             if (!safeHref) return;
+            if (isPreviewable) return handleLinkClick(e, safeHref);
             e.preventDefault();
             if (window.desktopBridge?.openExternalUrl) {
               window.desktopBridge.openExternalUrl(safeHref);
@@ -72,6 +122,13 @@ function makeStaticComponents(variant: "assistant" | "user") {
         >
           {children}
         </a>
+      );
+      if (!showHint) return anchor;
+      return (
+        <Tooltip>
+          <TooltipTrigger render={anchor} />
+          <TooltipContent side="top" className="text-xs">{previewHint}</TooltipContent>
+        </Tooltip>
       );
     },
     blockquote: ({ children }: { children?: React.ReactNode }) => (
@@ -145,17 +202,37 @@ function makeComponents(isStreaming: boolean, variant: "assistant" | "user") {
       const isInline = !className && !rawContent.includes("\n");
 
       if (isInline) {
-        return (
-          <code
-            className={
-              isUser
-                ? "bg-primary-foreground/15 rounded px-1.5 py-0.5 text-sm font-mono"
-                : "bg-muted rounded px-1.5 py-0.5 text-sm font-mono"
-            }
-          >
-            {children}
-          </code>
-        );
+        const codeClass = isUser
+          ? "bg-primary-foreground/15 rounded px-1.5 py-0.5 text-sm font-mono"
+          : "bg-muted rounded px-1.5 py-0.5 text-sm font-mono";
+
+        // Detect URLs inside inline code and make them clickable
+        const text = rawContent.trim();
+        if (HTTP_URL_RE.test(text)) {
+          const linkClass = isUser
+            ? "text-primary-foreground underline decoration-dotted hover:opacity-80 cursor-pointer"
+            : "text-primary underline decoration-dotted hover:text-primary cursor-pointer";
+          const codeLink = (
+            <code
+              role="link"
+              tabIndex={0}
+              className={`${codeClass} ${linkClass}`}
+              onClick={(e) => handleLinkClick(e, text)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleLinkClick(e, text); }}
+            >
+              {children}
+            </code>
+          );
+          if (!hasPreview()) return codeLink;
+          return (
+            <Tooltip>
+              <TooltipTrigger render={codeLink} />
+              <TooltipContent side="top" className="text-xs">{previewHint}</TooltipContent>
+            </Tooltip>
+          );
+        }
+
+        return <code className={codeClass}>{children}</code>;
       }
 
       const langMatch = className?.match(/language-(\S+)/);

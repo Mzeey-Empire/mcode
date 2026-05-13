@@ -44,16 +44,25 @@ function showCaptureErrorIfNeeded(res: CaptureResult | ContextCaptureResult): vo
   useToastStore.getState().show("error", "Could not capture preview", formatCaptureError(res.error));
 }
 
+/** Options for the {@link usePreviewCapture} hook. */
 export interface UsePreviewCaptureOptions {
+  /** Thread id that owns this capture session. */
   readonly threadId: string;
+  /** Callback to push bounds sync before capturing. */
   readonly pushSync: (visible: boolean) => Promise<void>;
 }
 
+/** State and callbacks returned by {@link usePreviewCapture}. */
 export interface PreviewCaptureState {
+  /** True while a full-viewport capture is in progress. */
   readonly captureBusy: boolean;
+  /** True while a region drag-crop capture is in progress. */
   readonly regionBusy: boolean;
+  /** True while an element-pick capture is in progress. */
   readonly elementPickBusy: boolean;
+  /** True while a context-only capture is in progress. */
   readonly contextBusy: boolean;
+  /** True when any capture mode is active (disables other capture buttons). */
   readonly anyCaptureActive: boolean;
   readonly onAddPictureReference: () => Promise<void>;
   readonly onAddRegionPictureReference: () => Promise<void>;

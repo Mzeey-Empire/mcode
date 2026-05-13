@@ -34,8 +34,9 @@ function ToastItem({ toast }: { toast: ToastData }) {
         "group pointer-events-auto flex w-80 items-start gap-2.5 rounded-lg px-3 py-2.5",
         "bg-popover/95 shadow-lg shadow-black/20 ring-1 backdrop-blur-md",
         config.ring,
-        // entrance animation
-        "animate-in fade-in-0 slide-in-from-right-4 duration-200",
+        // entrance animation - toasts rise from below the stack, matching
+        // the bottom-right anchor on the container.
+        "animate-in fade-in-0 slide-in-from-bottom-2 duration-200",
       ].join(" ")}
     >
       {/* Accent icon */}
@@ -67,7 +68,15 @@ function ToastItem({ toast }: { toast: ToastData }) {
   );
 }
 
-/** Toast container. Renders all active toasts in the top-right corner. */
+/**
+ * Toast container. Anchored to the bottom-right of the viewport in the
+ * page-chrome strip (outside the floating panels) so notifications don't
+ * collide with the chat header's icon row (Open / terminal / browser / +).
+ * The 1.5 (6px) inset matches the app's outer panel grid padding so the
+ * stack reads as part of the same grid system, not a floating overlay.
+ * `flex-col-reverse` keeps the newest toast nearest the corner, where the
+ * user's attention naturally lands after a composer action.
+ */
 export function ToastContainer() {
   const toasts = useToastStore((s) => s.toasts);
 
@@ -76,7 +85,7 @@ export function ToastContainer() {
   return (
     <div
       aria-live="polite"
-      className="pointer-events-none fixed inset-0 z-50 flex flex-col items-end gap-2 p-4"
+      className="pointer-events-none fixed bottom-1.5 right-1.5 z-50 flex max-h-[calc(100vh-12px)] flex-col-reverse items-end gap-2 overflow-hidden"
     >
       {toasts.map((toast) => (
         <ToastItem key={toast.id} toast={toast} />

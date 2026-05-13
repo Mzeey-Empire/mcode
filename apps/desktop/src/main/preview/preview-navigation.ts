@@ -10,10 +10,17 @@ import {
   sendPreviewLoading,
   resetIdle,
   isAllowedHttpUrl,
+  isAllowedPreviewUrl,
   guestUrlNeedsHttpRestore,
 } from "./preview-session.js";
 import { hidePreview, ensureView } from "./preview-lifecycle.js";
 import { type Bounds } from "./preview-session.js";
+import {
+  resolveLocalFileUrl,
+  looksLikeFilePath,
+  validateResumeUrl,
+  trustMainProcessFileNavigation,
+} from "./preview-local-file.js";
 
 /**
  * Registers all navigation-related IPC handlers:
@@ -24,7 +31,7 @@ import { type Bounds } from "./preview-session.js";
 export function registerNavigationHandlers(): void {
   ipcMain.handle(
     "preview:sync",
-    (
+    async (
       _event,
       payload: {
         visible: boolean;
@@ -56,38 +63,43 @@ export function registerNavigationHandlers(): void {
       if (!wc.isDestroyed()) {
         const current = wc.getURL();
         const hintRaw = payload.resumeUrlHint?.trim() ?? "";
-        const hint = hintRaw.length > 0 && isAllowedHttpUrl(hintRaw) ? hintRaw : null;
+        const hint = hintRaw.length > 0 && isAllowedPreviewUrl(hintRaw) ? hintRaw : null;
         const tid = payload.threadId ?? null;
         const switchedThread = tid != null && tid !== s.lastPreviewThreadId;
         s.lastPreviewThreadId = tid;
 
         // One BrowserView is shared across threads; without an explicit navigation on switch,
         // the previous thread's document (and resumePreviewUrl) would leak into the next thread.
+        const safeHint = await validateResumeUrl(hint);
         if (switchedThread) {
-          if (hint) {
-            logger.info("Preview: navigating (thread switch)", { url: hint });
+          if (safeHint) {
+            logger.info("Preview: navigating (thread switch)", { url: safeHint });
             sendPreviewLoading(win, true);
-            void wc.loadURL(hint);
-            s.resumePreviewUrl = hint;
+            trustMainProcessFileNavigation(s, safeHint);
+            void wc.loadURL(safeHint);
+            s.resumePreviewUrl = safeHint;
           } else {
             logger.info("Preview: navigating to blank (thread switch, no hint)");
             s.resumePreviewUrl = null;
             sendPreviewLoading(win, true);
             void wc.loadURL("about:blank");
           }
-        } else if (guestUrlNeedsHttpRestore(current) && hint) {
-          logger.info("Preview: restoring URL from hint", { url: hint });
+        } else if (guestUrlNeedsHttpRestore(current) && safeHint) {
+          logger.info("Preview: restoring URL from hint", { url: safeHint });
           sendPreviewLoading(win, true);
-          void wc.loadURL(hint);
-          s.resumePreviewUrl = hint;
-        } else if (
-          guestUrlNeedsHttpRestore(current) &&
-          s.resumePreviewUrl &&
-          isAllowedHttpUrl(s.resumePreviewUrl)
-        ) {
-          logger.info("Preview: restoring URL from resume", { url: s.resumePreviewUrl });
-          sendPreviewLoading(win, true);
-          void wc.loadURL(s.resumePreviewUrl);
+          trustMainProcessFileNavigation(s, safeHint);
+          void wc.loadURL(safeHint);
+          s.resumePreviewUrl = safeHint;
+        } else if (guestUrlNeedsHttpRestore(current) && s.resumePreviewUrl) {
+          const safeResume = await validateResumeUrl(s.resumePreviewUrl);
+          if (safeResume) {
+            logger.info("Preview: restoring URL from resume", { url: safeResume });
+            sendPreviewLoading(win, true);
+            trustMainProcessFileNavigation(s, safeResume);
+            void wc.loadURL(safeResume);
+          } else {
+            s.resumePreviewUrl = null;
+          }
         }
       }
       resetIdle(win, s);
@@ -96,18 +108,34 @@ export function registerNavigationHandlers(): void {
 
   ipcMain.handle(
     "preview:navigate",
-    (_event, url: string): { ok: true } | { ok: false; error: string } => {
+    async (
+      _event,
+      url: string,
+      workspacePath?: string | null,
+    ): Promise<{ ok: true } | { ok: false; error: string }> => {
       const win = BrowserWindow.fromWebContents(_event.sender);
       if (!win || win.isDestroyed()) return { ok: false, error: "no-window" };
 
       const trimmed = url.trim();
       if (!trimmed) return { ok: false, error: "empty-url" };
 
-      let target = trimmed;
-      if (!/^https?:\/\//i.test(target)) {
-        target = `https://${target}`;
+      let target: string;
+
+      if (/^https?:\/\//i.test(trimmed)) {
+        target = trimmed;
+      } else if (/^file:\/\//i.test(trimmed)) {
+        const resolved = await resolveLocalFileUrl(trimmed, workspacePath?.trim() ?? null);
+        if (!resolved.ok) return resolved;
+        target = resolved.url;
+      } else if (looksLikeFilePath(trimmed)) {
+        const resolved = await resolveLocalFileUrl(trimmed, workspacePath?.trim() ?? null);
+        if (!resolved.ok) return resolved;
+        target = resolved.url;
+      } else {
+        target = `https://${trimmed}`;
       }
-      if (!isAllowedHttpUrl(target)) {
+
+      if (!isAllowedPreviewUrl(target)) {
         return { ok: false, error: "invalid-url" };
       }
 
@@ -123,6 +151,7 @@ export function registerNavigationHandlers(): void {
       }
       logger.info("Preview: user navigated", { url: target });
       sendPreviewLoading(win, true);
+      trustMainProcessFileNavigation(s, target);
       void view.webContents.loadURL(target);
       s.resumePreviewUrl = target;
       resetIdle(win, s);
@@ -175,7 +204,9 @@ export function registerNavigationHandlers(): void {
     if (!s.view || s.view.webContents.isDestroyed()) return;
     const current = s.view.webContents.getURL();
     if (isAllowedHttpUrl(current)) {
-      void shell.openExternal(current);
+      void shell.openExternal(current).catch(() => {
+        /* shell may reject the URL */
+      });
     }
   });
 

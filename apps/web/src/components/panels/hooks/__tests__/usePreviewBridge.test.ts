@@ -22,6 +22,13 @@ vi.mock("@/stores/diffStore", () => ({
   ),
 }));
 
+vi.mock("@/stores/workspaceStore", () => ({
+  useWorkspaceStore: vi.fn(
+    (selector: (s: { workspaces: Array<{ id: string; path: string }> }) => unknown) =>
+      selector({ workspaces: [] }),
+  ),
+}));
+
 // Make useDiffStore.getState() available for the onDidNavigate handler.
 import { useDiffStore } from "@/stores/diffStore";
 (useDiffStore as unknown as { getState: () => unknown }).getState = () => ({
@@ -95,9 +102,9 @@ describe("formatNavError", () => {
       "Wait for the panel to finish layout, then try again.",
     );
     expect(formatNavError("invalid-url")).toBe(
-      "Only http and https URLs are allowed.",
+      "Only http, https URLs and local file paths are supported.",
     );
-    expect(formatNavError("empty-url")).toBe("Enter a URL.");
+    expect(formatNavError("empty-url")).toBe("Enter a URL or file path.");
     expect(formatNavError("no-window")).toBe("Preview is unavailable.");
   });
 
@@ -274,7 +281,7 @@ describe("usePreviewBridge", () => {
         await Promise.resolve();
       });
 
-      expect(mockPreview.navigate).toHaveBeenCalledWith("https://example.com");
+      expect(mockPreview.navigate).toHaveBeenCalledWith("https://example.com", null);
     });
 
     it("sets navError when navigate returns ok:false", async () => {
@@ -295,7 +302,7 @@ describe("usePreviewBridge", () => {
         await Promise.resolve();
       });
 
-      expect(result.current.navError).toBe("Only http and https URLs are allowed.");
+      expect(result.current.navError).toBe("Only http, https URLs and local file paths are supported.");
     });
 
     it("does not set navError when navigate succeeds", async () => {

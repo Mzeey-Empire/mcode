@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo, lazy, Suspense } from "react";
-import { useThreadStore } from "@/stores/threadStore";
+import { useThreadStore, scheduleDrainAfterEdit } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import type { PermissionMode, InteractionMode, AttachmentMeta } from "@/transport";
 import { PERMISSION_MODES, INTERACTION_MODES, getTransport } from "@/transport";
@@ -15,6 +15,7 @@ import {
   ListTodo,
   MoreHorizontal,
   Paperclip,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
@@ -49,7 +50,7 @@ import { SlashCommandPopup } from "./SlashCommandPopup";
 import { type LexicalEditor, $getRoot, $createParagraphNode, $createTextNode } from "lexical";
 import { PrDetectedCard } from "./PrDetectedCard";
 import type { PrDetail } from "@/transport/types";
-import { QueuePopover } from "./QueuePopover";
+import { ComposerQueueList } from "./ComposerQueueList";
 import { ContextTracker } from "./ContextTracker";
 import { CompactingBanner } from "./CompactingBanner";
 import { RetryBanner } from "./RetryBanner";
@@ -57,7 +58,7 @@ import { InterruptStopBanner } from "./InterruptStopBanner";
 import { ComposerBranchBar } from "./ComposerBranchBar";
 import { ComposerReplyBar } from "./ComposerReplyBar";
 import { useReplyStore } from "@/stores/replyStore";
-import { useQueueStore } from "@/stores/queueStore";
+import { useQueueStore, type QueuedMessage } from "@/stores/queueStore";
 import {
   classifyFile,
   isFileSupported,
@@ -472,6 +473,23 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const [showReasoningPicker, setShowReasoningPicker] = useState(false);
   const [composerMode, setComposerModeLocal] = useState<ComposerMode>("direct");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  /**
+   * When the user pulls a queued message back into the composer to edit, we
+   * remember which message it was and what slot it held. Saving (send) and
+   * cancel both use this to restore the message at its original index instead
+   * of appending to the tail. Cleared on successful send, on cancel, or when
+   * the user starts a totally fresh draft.
+   */
+  const [editingFromQueue, setEditingFromQueue] = useState<
+    { messageId: string; originalIndex: number } | null
+  >(null);
+  /**
+   * Snapshot of the original popped queued message, retained for the duration
+   * of an edit so Cancel can restore the EXACT original payload (not the
+   * user's in-progress edits). Cleared on save, cancel, swap, and on any
+   * code path that ends edit mode.
+   */
+  const editingOriginalRef = useRef<QueuedMessage | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const dragDepthRef = useRef(0);
   const [detectedPr, setDetectedPr] = useState<PrDetail | null>(null);
@@ -1097,6 +1115,190 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     }
   }, [threadId, stopAgent]);
 
+  /**
+   * Build a fresh queue payload from the current composer state. Mirrors the
+   * shape that `handleSend`'s queue path constructs - used by the edit-swap
+   * code paths so an in-progress edit can be put back into the queue without
+   * traversing the full send pipeline.
+   */
+  const captureComposerForRequeue = useCallback(
+    (
+      attachmentsSnapshot: PendingAttachment[],
+      inputSnapshot: string,
+    ): Omit<QueuedMessage, "id" | "queuedAt"> => {
+      const cleaned = inputSnapshot.trim();
+      const attachmentMetas: AttachmentMeta[] = attachmentsSnapshot.map((att) => ({
+        id: att.id,
+        name: att.name,
+        mimeType: att.mimeType,
+        sizeBytes: att.sizeBytes,
+        sourcePath: att.filePath ?? "",
+      }));
+      return {
+        content: cleaned,
+        displayContent: cleaned,
+        attachments: attachmentMetas,
+        model: modelId,
+        permissionMode: access,
+        reasoningLevel: reasoning,
+        provider,
+        copilotAgent: provider === "copilot" ? (copilotAgent ?? undefined) : undefined,
+        contextWindow: contextWindow ?? undefined,
+        thinking: thinking ?? undefined,
+        replyToMessageId: replyContext?.messageId,
+        quotedText: replyContext?.quotedText,
+      };
+    },
+    [modelId, access, reasoning, provider, copilotAgent, contextWindow, thinking, replyContext],
+  );
+
+  /**
+   * Move a queued message back into the live composer so the user can edit it
+   * (text + attachments + per-turn settings) using the full Lexical editor.
+   * Pops the message from the queue; the next submit re-queues at the same
+   * slot if the agent is still running, or sends normally if it has gone idle.
+   *
+   * Swap semantics: if the composer is already editing a different queued
+   * message (or just holds non-empty content from a prior edit), the
+   * in-progress content is put BACK into the queue at its original slot
+   * before the new message is loaded. Nothing is silently destroyed.
+   *
+   * Attachments are rehydrated AttachmentMeta -> PendingAttachment best-effort:
+   * blob preview URLs are not reconstructed (the file still lives at
+   * `sourcePath`), and the AttachmentPreview falls through to the file tile.
+   * Browser-capture spill JSON is released here - users re-capture if needed.
+   */
+  const loadIntoComposer = useCallback(
+    (msg: QueuedMessage) => {
+      if (!threadId) return;
+
+      // Capture the new target's index BEFORE we mutate the queue, so the
+      // edited version goes back to the same slot on save.
+      const beforeQueue = useQueueStore.getState().queues[threadId] ?? [];
+      const targetIndex = beforeQueue.findIndex((m) => m.id === msg.id);
+      if (targetIndex === -1) return;
+
+      // If we were already editing a queued message, hand the in-progress
+      // content back to the queue at its original slot before swapping in
+      // the new one.
+      if (editingFromQueue && (input.trim().length > 0 || attachments.length > 0)) {
+        const payload = captureComposerForRequeue(attachments, input);
+        useQueueStore.getState().insertAt(
+          threadId,
+          editingFromQueue.originalIndex,
+          payload,
+        );
+      }
+
+      const popped = useQueueStore.getState().popMessage(threadId, msg.id);
+      if (!popped) return;
+
+      editingOriginalRef.current = popped;
+      setEditingFromQueue({ messageId: popped.id, originalIndex: targetIndex });
+      useQueueStore.getState().setEditingThreadId(threadId);
+
+      const text = popped.displayContent || popped.content;
+      setInput(text);
+      if (editorRef.current) {
+        editorRef.current.update(() => {
+          const root = $getRoot();
+          root.clear();
+          const para = $createParagraphNode();
+          if (text) para.append($createTextNode(text));
+          root.append(para);
+        });
+      }
+
+      if (popped.attachments.length > 0) {
+        const pending: PendingAttachment[] = popped.attachments.map((meta) => ({
+          id: meta.id,
+          name: meta.name,
+          mimeType: meta.mimeType,
+          sizeBytes: meta.sizeBytes,
+          previewUrl: "",
+          filePath: meta.sourcePath || null,
+          contextOnly: isVirtualBrowserContextAttachment(meta.mimeType),
+        }));
+        setAttachments(pending);
+      } else {
+        setAttachments([]);
+      }
+
+      if (popped.model) setModelId(popped.model);
+      if (popped.provider) setProvider(popped.provider);
+      if (popped.reasoningLevel) setReasoning(popped.reasoningLevel);
+      if (popped.permissionMode) setAccess(popped.permissionMode);
+      setCopilotAgent(popped.copilotAgent ?? null);
+      setContextWindow(popped.contextWindow ?? null);
+      setThinking(popped.thinking ?? null);
+
+      if (popped.browserCaptureSpillPaths?.length) {
+        void releaseBrowserCaptureSpills(popped.browserCaptureSpillPaths);
+      }
+
+      editorRef.current?.focus();
+    },
+    [
+      threadId,
+      editingFromQueue,
+      input,
+      attachments,
+      captureComposerForRequeue,
+      setInput,
+      setAttachments,
+      setModelId,
+      setProvider,
+      setReasoning,
+      setAccess,
+      setCopilotAgent,
+      setContextWindow,
+      setThinking,
+    ],
+  );
+
+  /**
+   * Exit edit mode without saving changes: restore the ORIGINAL queued
+   * message (discarding any in-progress edits) at its original slot and
+   * clear the composer. Matches the typical "Cancel = discard changes"
+   * affordance. The snapshot of the original payload was captured by
+   * loadIntoComposer; if it is missing we degrade to a no-op rather than
+   * persisting the user's half-written edits as if they were authoritative.
+   */
+  const cancelEditFromQueue = useCallback(() => {
+    if (!threadId || !editingFromQueue) return;
+    const original = editingOriginalRef.current;
+    if (original) {
+      useQueueStore.getState().insertAt(threadId, editingFromQueue.originalIndex, {
+        content: original.content,
+        displayContent: original.displayContent,
+        attachments: original.attachments,
+        model: original.model,
+        permissionMode: original.permissionMode,
+        reasoningLevel: original.reasoningLevel,
+        provider: original.provider,
+        copilotAgent: original.copilotAgent,
+        contextWindow: original.contextWindow,
+        thinking: original.thinking,
+        replyToMessageId: original.replyToMessageId,
+        quotedText: original.quotedText,
+        browserCaptureSpillPaths: original.browserCaptureSpillPaths,
+      });
+    }
+    editingOriginalRef.current = null;
+    setEditingFromQueue(null);
+    useQueueStore.getState().setEditingThreadId(null);
+    scheduleDrainAfterEdit(threadId);
+    setInput("");
+    setAttachments([]);
+    if (editorRef.current) {
+      editorRef.current.update(() => {
+        const root = $getRoot();
+        root.clear();
+        root.append($createParagraphNode());
+      });
+    }
+  }, [threadId, editingFromQueue, setInput, setAttachments]);
+
   const handleFetchAndSelect = useCallback(async (branch: string, prNumber: number) => {
     if (!workspaceId) return;
     await fetchBranch(workspaceId, branch, prNumber);
@@ -1398,12 +1600,30 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
 
   const handleSend = useCallback(async () => {
     const trimmed = input.trim();
-    if (trimmed.length === 0 && attachments.length === 0) return;
+    if (trimmed.length === 0 && attachments.length === 0) {
+      // Empty submit while editing a queued message = the user emptied it
+      // intentionally. Treat as "remove from queue" instead of silently
+      // doing nothing (the message has already been popped on edit start).
+      if (editingFromQueue) {
+        const slot = editingFromQueue.originalIndex;
+        editingOriginalRef.current = null;
+        setEditingFromQueue(null);
+        useQueueStore.getState().setEditingThreadId(null);
+        if (threadId) scheduleDrainAfterEdit(threadId);
+        useToastStore
+          .getState()
+          .show("info", "Removed from queue", `Slot ${String(slot + 1).padStart(2, "0")}`);
+      }
+      return;
+    }
     // Avoid duplicate submissions while a placeholder thread is still materializing.
     if (isThreadScaffold) return;
 
-    // ---- Queue path: agent is running on this thread ----
-    if (isAgentRunning && threadId) {
+    // ---- Queue path: agent is running on THIS thread ----
+    // Skip when composing a branch (`branchFromMessageId`) or a brand-new thread
+    // (`isNewThread`) - both target a *different* thread and must not enqueue
+    // on the parent thread that happens to be currently running.
+    if (isAgentRunning && threadId && !branchFromMessageId && !isNewThread) {
       const captureRows = buildAttachedBrowserCaptures(attachments);
       const { content: injectedContent, display: displayInjected } = await injectFileContent(trimmed);
       let content: string;
@@ -1419,7 +1639,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       const currentAttachments = collectAndClearAttachments();
       const browserCaptureSpillPaths = collectBrowserCaptureSpillPaths(captureRows);
 
-      const enqueued = useQueueStore.getState().enqueue(threadId, {
+      const payload = {
         content,
         displayContent: displayContentResolved,
         attachments: currentAttachments,
@@ -1434,10 +1654,29 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         quotedText: replyContext?.quotedText,
         browserCaptureSpillPaths:
           browserCaptureSpillPaths.length > 0 ? browserCaptureSpillPaths : undefined,
-      });
+      };
+      // When saving an edit of a previously queued message, put it back at
+      // the same slot instead of appending to the tail. Show a toast so the
+      // user sees that the save took effect - without it the composer just
+      // clears silently and the queue list looks like nothing changed.
+      const enqueued = editingFromQueue
+        ? useQueueStore.getState().insertAt(threadId, editingFromQueue.originalIndex, payload)
+        : useQueueStore.getState().enqueue(threadId, payload);
       if (!enqueued) {
         void releaseBrowserCaptureSpills(browserCaptureSpillPaths);
       }
+      if (editingFromQueue && enqueued) {
+        useToastStore
+          .getState()
+          .show(
+            "info",
+            "Saved to queue",
+            `Slot ${String(editingFromQueue.originalIndex + 1).padStart(2, "0")}`,
+          );
+      }
+      editingOriginalRef.current = null;
+      setEditingFromQueue(null);
+      useQueueStore.getState().setEditingThreadId(null);
 
       setInput("");
       if (threadId) clearDraftFromStore(threadId);
@@ -1500,6 +1739,10 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     }
     setDetectedPr(null);
     setPrDismissed(false);
+    // Edit mode ends on send regardless of which path we took.
+    editingOriginalRef.current = null;
+    setEditingFromQueue(null);
+    useQueueStore.getState().setEditingThreadId(null);
     const currentAttachments = collectAndClearAttachments();
     if (threadId) clearDraftFromStore(threadId);
     // Hide the reply bar with the composer reset; sendMessage still receives reply IDs from this render.
@@ -1590,7 +1833,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     }
 
     editorRef.current?.focus();
-  }, [input, attachments, isAgentRunning, isNewThread, newThreadMode, newThreadBranch, workspaceId, threadId, sendMessage, modelId, provider, reasoning, mode, access, copilotAgent, contextWindow, thinking, namingMode, customBranchName, selectedWorktree, injectFileContent, collectAndClearAttachments, clearDraftFromStore, isThreadScaffold, branchFromMessageId, branchExecMode, branchTargetBranch, branchNamingMode, branchCustomName, branchWorktreePath, activeThread, branchThread, branchAutoPreview, onBranchModeExit, replyContext, clearReply]);
+  }, [input, attachments, isAgentRunning, isNewThread, newThreadMode, newThreadBranch, workspaceId, threadId, sendMessage, modelId, provider, reasoning, mode, access, copilotAgent, contextWindow, thinking, namingMode, customBranchName, selectedWorktree, injectFileContent, collectAndClearAttachments, clearDraftFromStore, isThreadScaffold, branchFromMessageId, branchExecMode, branchTargetBranch, branchNamingMode, branchCustomName, branchWorktreePath, activeThread, branchThread, branchAutoPreview, onBranchModeExit, replyContext, clearReply, editingFromQueue]);
 
   const handleEditorChange = useCallback((text: string) => {
     setInput(text);
@@ -1697,6 +1940,79 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       {/* Max-width wrapper to align with message list column */}
       <div className="mx-auto w-full max-w-4xl">
 
+      {/* Inline queued-message stack (above the composer; Cursor-style).
+          Auto-hides when the queue is empty. Editing a row pops the message
+          and rehydrates it into this composer via loadIntoComposer. */}
+      {threadId && !branchFromMessageId && !isNewThread && (
+        <ComposerQueueList
+          threadId={threadId}
+          isAgentRunning={isAgentRunning}
+          provider={provider}
+          isEditing={!!editingFromQueue}
+          onLoadIntoComposer={loadIntoComposer}
+          onResume={async () => {
+            const next = useQueueStore.getState().dequeueNext(threadId);
+            if (!next) return;
+            try {
+              await sendMessage(
+                threadId,
+                next.content,
+                next.model,
+                next.permissionMode,
+                next.attachments.length > 0 ? next.attachments : undefined,
+                next.displayContent,
+                next.reasoningLevel,
+                next.provider,
+                next.copilotAgent,
+                next.contextWindow,
+                next.thinking,
+                next.replyToMessageId,
+                next.quotedText,
+              );
+              const activeReply = useReplyStore.getState().getReply(threadId);
+              if (
+                next.replyToMessageId &&
+                activeReply?.messageId === next.replyToMessageId
+              ) {
+                clearReply(threadId);
+              }
+            } catch {
+              void releaseBrowserCaptureSpills(next.browserCaptureSpillPaths ?? []);
+            }
+          }}
+          onSendNow={async (msg) => {
+            const popped = useQueueStore.getState().popMessage(threadId, msg.id);
+            if (!popped) return;
+            try {
+              await sendMessage(
+                threadId,
+                popped.content,
+                popped.model,
+                popped.permissionMode,
+                popped.attachments.length > 0 ? popped.attachments : undefined,
+                popped.displayContent,
+                popped.reasoningLevel,
+                popped.provider,
+                popped.copilotAgent,
+                popped.contextWindow,
+                popped.thinking,
+                popped.replyToMessageId,
+                popped.quotedText,
+              );
+              const activeReply = useReplyStore.getState().getReply(threadId);
+              if (
+                popped.replyToMessageId &&
+                activeReply?.messageId === popped.replyToMessageId
+              ) {
+                clearReply(threadId);
+              }
+            } catch {
+              void releaseBrowserCaptureSpills(popped.browserCaptureSpillPaths ?? []);
+            }
+          }}
+        />
+      )}
+
       {/* Main composer container - dark bg, rounded */}
       <div
         ref={composerContainerRef}
@@ -1755,6 +2071,31 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
           />
         )}
 
+        {/* Inline indicator that the composer holds a queued message pulled
+            out for editing. Cancel returns it to its original slot. */}
+        {editingFromQueue && (
+          <div className="flex items-center justify-between gap-2 border-b border-primary/20 bg-primary/5 px-3 py-1.5">
+            <span className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-primary/85">
+              Editing
+              <span className="ml-1.5 tabular-nums text-primary/55">
+                {String(editingFromQueue.originalIndex + 1).padStart(2, "0")}
+              </span>
+              <span className="ml-2 normal-case tracking-normal text-primary/55">
+                Send to save - changes return to the same slot.
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={cancelEditFromQueue}
+              aria-label="Discard edits and restore the original queued message"
+              title="Discard changes (restores the original message at its slot)"
+              className="rounded-sm p-1 text-primary/55 transition-colors hover:bg-primary/10 hover:text-primary"
+            >
+              <X size={11} strokeWidth={1.75} />
+            </button>
+          </div>
+        )}
+
         {/* Lexical editor with file tag popup */}
         <div className="relative" ref={editorContainerRef} onPaste={handlePaste}>
           <ComposerEditor
@@ -1770,7 +2111,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
             disabled={planPending || isStaleWorktree || !!providerReason}
             isPopupOpen={isAnyPopupOpen}
             onPopupKeyDown={handlePopupKeyDown}
-            placeholder={isStaleWorktree ? "Worktree directory no longer exists. This thread is read-only." : planPending ? "Answer the planning questions above" : branchFromMessageId ? "What should the branch work on?" : replyContext ? "Type your reply..." : isAgentRunning ? "Queue a follow-up..." : "Message Mcode..."}
+            placeholder={isStaleWorktree ? "Worktree directory no longer exists. This thread is read-only." : planPending ? "Answer the planning questions above" : branchFromMessageId ? "What should the branch work on?" : editingFromQueue ? "Edit the queued message - send to save." : replyContext ? "Type your reply..." : isAgentRunning ? "Queue a follow-up..." : "Message Mcode..."}
           />
           <FileTagPopup
             files={fileAutocomplete.filteredFiles}
@@ -2091,44 +2432,6 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
             >
               <div className="h-2.5 w-2.5 rounded-sm bg-current" />
             </Button>
-          )}
-
-          {/* Queue badge + popover */}
-          {threadId && (
-            <QueuePopover
-              threadId={threadId}
-              isAgentRunning={isAgentRunning}
-              onResume={async () => {
-                const next = useQueueStore.getState().dequeueNext(threadId);
-                if (!next) return;
-                try {
-                  await sendMessage(
-                    threadId,
-                    next.content,
-                    next.model,
-                    next.permissionMode,
-                    next.attachments.length > 0 ? next.attachments : undefined,
-                    next.displayContent,
-                    next.reasoningLevel,
-                    next.provider,
-                    next.copilotAgent,
-                    next.contextWindow,
-                    next.thinking,
-                    next.replyToMessageId,
-                    next.quotedText,
-                  );
-                  const activeReply = useReplyStore.getState().getReply(threadId);
-                  if (
-                    next.replyToMessageId &&
-                    activeReply?.messageId === next.replyToMessageId
-                  ) {
-                    clearReply(threadId);
-                  }
-                } catch {
-                  void releaseBrowserCaptureSpills(next.browserCaptureSpillPaths ?? []);
-                }
-              }}
-            />
           )}
 
           {/* Context window tracker — live data from turnComplete, fallback to persisted thread record.

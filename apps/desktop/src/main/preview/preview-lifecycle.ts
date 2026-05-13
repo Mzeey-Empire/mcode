@@ -10,10 +10,11 @@ import {
   sessions,
   clearIdle,
   sendPreviewLoading,
-  isAllowedHttpUrl,
+  isAllowedPreviewUrl,
 } from "./preview-session.js";
 import { removeEpPickHighlighter, abortOverlayCapture } from "./preview-overlay.js";
 import { pushPreviewConsoleLine } from "./preview-capture.js";
+import { validateResumeUrl, trustMainProcessFileNavigation } from "./preview-local-file.js";
 
 /**
  * Injected into every guest document so preview scrollbars match the app shell on Windows
@@ -43,11 +44,12 @@ export function detachViewListeners(view: BrowserView): void {
   view.webContents.removeAllListeners("did-stop-loading");
   view.webContents.removeAllListeners("console-message");
   view.webContents.removeAllListeners("render-process-gone");
+  view.webContents.removeAllListeners("will-navigate");
 }
 
 /**
  * Returns the existing BrowserView for the session, or creates and wires a new one.
- * Attaches navigation, loading, console, and crash recovery listeners.
+ * Attaches navigation, loading, console, crash recovery, and file-URL gate listeners.
  */
 export function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
   if (s.view) return s.view;
@@ -58,7 +60,6 @@ export function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
       contextIsolation: true,
       sandbox: true,
       partition: "persist:mcode-preview",
-      additionalArguments: ["--js-flags=--max-old-space-size=2048"],
     },
   });
 
@@ -76,20 +77,62 @@ export function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
     return { action: "deny" };
   });
 
+  view.webContents.on("will-navigate", (event, navigationUrl) => {
+    if (win.isDestroyed() || view.webContents.isDestroyed()) return;
+    let parsed: URL;
+    try {
+      parsed = new URL(navigationUrl);
+    } catch {
+      return;
+    }
+    if (parsed.protocol !== "file:") return;
+    if (s.trustedFileNavigationBudget > 0) {
+      s.trustedFileNavigationBudget--;
+      return;
+    }
+    event.preventDefault();
+    void (async () => {
+      if (win.isDestroyed() || view.webContents.isDestroyed()) return;
+      const safe = await validateResumeUrl(navigationUrl);
+      if (safe) {
+        trustMainProcessFileNavigation(s, safe);
+        sendPreviewLoading(win, true);
+        try {
+          await view.webContents.loadURL(safe);
+        } catch {
+          /* guest may be tearing down */
+        }
+      } else {
+        s.resumePreviewUrl = null;
+        sendPreviewLoading(win, true);
+        try {
+          await view.webContents.loadURL("about:blank");
+        } catch {
+          /* guest may be tearing down */
+        }
+      }
+    })();
+  });
+
   const forwardNav = () => {
     if (win.isDestroyed() || view.webContents.isDestroyed()) return;
     const url = view.webContents.getURL();
-    if (isAllowedHttpUrl(url)) {
-      s.resumePreviewUrl = url;
-    }
-    win.webContents.send("preview:did-navigate", {
-      url,
-      title: view.webContents.getTitle(),
-      // Best-effort: lastFavicons is populated by page-favicon-updated which fires
-      // after did-navigate, so this is often null on initial load. The dedicated
-      // preview:did-update-favicon push (Step 3) is the canonical delivery path.
-      favicon: s.lastFavicons[0] ?? null,
-    });
+    void (async () => {
+      if (win.isDestroyed() || view.webContents.isDestroyed()) return;
+      const persisted = await validateResumeUrl(isAllowedPreviewUrl(url) ? url : null);
+      if (persisted) {
+        s.resumePreviewUrl = persisted;
+      } else {
+        s.resumePreviewUrl = null;
+      }
+      if (!win.isDestroyed()) {
+        win.webContents.send("preview:did-navigate", {
+          url,
+          title: view.webContents.getTitle(),
+          favicon: s.lastFavicons[0] ?? null,
+        });
+      }
+    })();
   };
 
   view.webContents.on("did-navigate", forwardNav);
@@ -110,9 +153,7 @@ export function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
   const forwardLoadingStart = () => {
     if (win.isDestroyed() || view.webContents.isDestroyed()) return;
     s.lastFavicons = [];
-    if (!win.isDestroyed()) {
-      win.webContents.send("preview:did-update-favicon", { favicon: null });
-    }
+    win.webContents.send("preview:did-update-favicon", { favicon: null });
     sendPreviewLoading(win, true);
   };
   const forwardLoadingStop = () => {
@@ -170,6 +211,7 @@ export function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
         win.setBrowserView(fresh);
       }
       sendPreviewLoading(win, true);
+      trustMainProcessFileNavigation(s, url);
       void fresh.webContents.loadURL(url);
     }
   });
@@ -202,12 +244,15 @@ async function injectPreviewScrollbarStyles(s: PreviewSession): Promise<void> {
 }
 
 /**
- * Detaches the BrowserView from the window without destroying it.
- * Used by preview:sync when visibility toggles off temporarily (e.g. React
- * effect cleanup during in-page navigations). The webContents stays alive
- * so the page isn't reloaded when the view is re-attached moments later.
+ * Detaches the BrowserView from the window without destroying it, and aborts
+ * any in-progress overlay capture. Used by preview:sync when visibility toggles
+ * off temporarily (e.g. React effect cleanup during in-page navigations).
+ * The webContents stays alive so the page isn't reloaded when the view is
+ * re-attached moments later.
  */
 export function hidePreview(win: BrowserWindow, s: PreviewSession): void {
+  abortOverlayCapture(s, "capture-interrupted");
+  clearIdle(s);
   if (s.view && !win.isDestroyed()) {
     logger.info("Preview: view hidden (detached, kept alive)");
     try {
@@ -215,6 +260,9 @@ export function hidePreview(win: BrowserWindow, s: PreviewSession): void {
     } catch {
       // Window may already be detaching the view.
     }
+  }
+  if (!win.isDestroyed()) {
+    sendPreviewLoading(win, false);
   }
 }
 
@@ -224,23 +272,17 @@ export function hidePreview(win: BrowserWindow, s: PreviewSession): void {
  */
 export function parkPreview(win: BrowserWindow, s: PreviewSession): void {
   logger.info("Preview: view parked (destroyed)", { url: s.resumePreviewUrl });
-  abortOverlayCapture(s, "capture-interrupted");
-  clearIdle(s);
+  hidePreview(win, s);
   if (s.view) {
-    if (!win.isDestroyed()) {
-      try {
-        win.removeBrowserView(s.view);
-      } catch {
-        // Window may already be detaching the view.
-      }
-    }
     try {
       if (!s.view.webContents.isDestroyed()) {
         void removeEpPickHighlighter(s.view.webContents);
         const parked = s.view.webContents.getURL();
-        if (isAllowedHttpUrl(parked)) {
-          s.resumePreviewUrl = parked;
-        }
+        void validateResumeUrl(isAllowedPreviewUrl(parked) ? parked : null).then((safe) => {
+          if (!win.isDestroyed()) {
+            s.resumePreviewUrl = safe;
+          }
+        });
       }
       detachViewListeners(s.view);
       s.view.webContents.close();
@@ -251,9 +293,6 @@ export function parkPreview(win: BrowserWindow, s: PreviewSession): void {
     s.scrollbarCssKey = null;
     s.consoleBuffer.length = 0;
     s.failedRequestBuffer.length = 0;
-  }
-  if (!win.isDestroyed()) {
-    sendPreviewLoading(win, false);
   }
 }
 

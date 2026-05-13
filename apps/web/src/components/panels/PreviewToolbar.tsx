@@ -17,6 +17,7 @@ import {
   TooltipContent,
 } from "@/components/ui/tooltip";
 
+/** Props for the presentational preview toolbar row. */
 export interface PreviewToolbarProps {
   readonly canBack: boolean;
   readonly canFwd: boolean;

@@ -1,5 +1,5 @@
 import type { PermissionDecision } from "@mcode/contracts";
-import type { Message, ToolCall } from "@/transport/types";
+import type { Message, ToolCall, HookExecution } from "@/transport/types";
 
 /** Compile-time exhaustive check; throws at runtime for unhandled discriminants. */
 function assertNever(value: never): never {
@@ -37,6 +37,11 @@ export type ChatVirtualItem =
       title?: string;
       settled: boolean;
       decision?: PermissionDecision;
+    }
+  | {
+      key: string;
+      type: "hook-activity";
+      hooks: readonly HookExecution[];
     };
 
 /**
@@ -101,6 +106,7 @@ export function buildVolatileItems(
     settled: boolean;
     decision?: PermissionDecision;
   }[],
+  hooks?: readonly HookExecution[],
 ): ChatVirtualItem[] {
   const items: ChatVirtualItem[] = [];
 
@@ -127,6 +133,11 @@ export function buildVolatileItems(
         decision: p.decision,
       });
     }
+  }
+
+  // Hook activity section — grouped below permissions, above indicator.
+  if (hooks && hooks.length > 0) {
+    items.push({ key: "hook-activity", type: "hook-activity", hooks });
   }
 
   if (isAgentRunning) {
@@ -299,6 +310,9 @@ export function estimateItemHeight(item: ChatVirtualItem): number {
     }
     case "permission-request":
       return item.settled ? 36 : 120;
+    case "hook-activity":
+      // Header (28px) + one row (28px) per hook, capped at 300px
+      return Math.min(28 + item.hooks.length * 28, 300);
     default:
       return assertNever(item);
   }

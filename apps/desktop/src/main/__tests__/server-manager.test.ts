@@ -478,9 +478,38 @@ describe("ServerManager", () => {
 
     expect(globalThis.fetch).toHaveBeenCalledWith(
       "http://localhost:19600/shutdown",
-      expect.objectContaining({ method: "POST" }),
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer test-auth-token",
+          "X-Mcode-Shutdown-Reason": "desktop-update-exit",
+        }),
+      }),
     );
 
+    killSpy.mockRestore();
+  });
+
+  it("stopServerHeldByLock matches forceReplace shutdown behavior", async () => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReset().mockReturnValue(LOCK_FILE_JSON);
+    const killSpy = vi.spyOn(process, "kill").mockImplementationOnce(() => true as never);
+    killSpy.mockImplementationOnce(() => {
+      throw new Error("ESRCH");
+    });
+
+    await manager.stopServerHeldByLock();
+
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      "http://localhost:19600/shutdown",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: "Bearer test-auth-token",
+          "X-Mcode-Shutdown-Reason": "desktop-update-exit",
+        }),
+      }),
+    );
     killSpy.mockRestore();
   });
 
@@ -500,16 +529,17 @@ describe("ServerManager", () => {
     try {
       await manager.forceReplace();
 
-      // Verify POST was sent
       expect(globalThis.fetch).toHaveBeenCalledWith(
         "http://localhost:19600/shutdown",
         expect.objectContaining({
           method: "POST",
-          headers: { Authorization: "Bearer test-auth-token" },
+          headers: expect.objectContaining({
+            Authorization: "Bearer test-auth-token",
+            "X-Mcode-Shutdown-Reason": "desktop-update-exit",
+          }),
         }),
       );
 
-      // Verify PID was polled
       expect(killSpy).toHaveBeenCalledWith(12345, 0);
     } finally {
       killSpy.mockRestore();
@@ -532,7 +562,6 @@ describe("ServerManager", () => {
     try {
       await manager.forceReplace();
 
-      // Should have attempted SIGKILL
       expect(killSpy).toHaveBeenCalledWith(12345, "SIGKILL");
     } finally {
       killSpy.mockRestore();

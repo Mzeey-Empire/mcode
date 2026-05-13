@@ -13,6 +13,7 @@ import { StreamingCard } from "./StreamingCard";
 import { ToolCallSummary } from "./ToolCallSummary";
 import { TurnChangeSummary } from "./TurnChangeSummary";
 import { PermissionRequestCard } from "./PermissionRequestCard";
+import { HookActivitySection } from "./HookActivitySection";
 import {
   buildStableItems,
   buildVolatileItems,
@@ -107,6 +108,8 @@ const VirtualItemRenderer = memo(function VirtualItemRenderer({
           decision={item.decision}
         />
       );
+    case "hook-activity":
+      return <HookActivitySection hooks={item.hooks} />;
   }
 }, (prev, next) =>
   prev.item.key === next.item.key
@@ -250,6 +253,9 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   const permissions = useThreadStore(
     useShallow((s) => currentThreadId ? (s.permissionsByThread[currentThreadId] ?? []) : []),
   );
+  const hooks = useThreadStore(
+    useShallow((s) => currentThreadId ? (s.hooksByThread[currentThreadId] ?? []) : []),
+  );
 
   const toolCalls = toolCallsRaw ?? EMPTY_TOOL_CALLS;
 
@@ -347,8 +353,8 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   );
 
   const volatileItems = useMemo(
-    () => buildVolatileItems(toolCalls, isAgentRunning, agentStartTime, streamingText, permissions),
-    [toolCalls, isAgentRunning, agentStartTime, streamingText, permissions],
+    () => buildVolatileItems(toolCalls, isAgentRunning, agentStartTime, streamingText, permissions, hooks),
+    [toolCalls, isAgentRunning, agentStartTime, streamingText, permissions, hooks],
   );
 
   const hasToolCalls = toolCalls.length > 0;

@@ -338,6 +338,26 @@ export function providerSupportsReasoningLevels(provider: ProviderId | string | 
 }
 
 /**
+ * Providers that support promoting a queued message past the current turn
+ * via a clean SDK interrupt + resume. Claude's Agent SDK closes its prompt
+ * queue cleanly via `stopSession`, so the next message can flow immediately.
+ * Other providers (Codex JSON-RPC, Copilot, Cursor, Gemini) do not yet expose
+ * a deterministic mid-turn interrupt - "Send now" stays hidden for them
+ * rather than risk a half-aborted turn.
+ */
+const PROVIDERS_WITH_SEND_NOW: ReadonlySet<ProviderId> = new Set(["claude"]);
+
+/**
+ * Returns true when the given provider supports the queue's "Send now"
+ * affordance: stop the current turn, then immediately dispatch a queued
+ * message instead of waiting for the running turn to finish.
+ */
+export function providerSupportsSendNow(provider: ProviderId | string | undefined): boolean {
+  if (!provider) return false;
+  return PROVIDERS_WITH_SEND_NOW.has(provider as ProviderId);
+}
+
+/**
  * Returns the Codex-specific reasoning levels for a model, or null if the model
  * uses mcode's standard reasoning levels (i.e. is not a Codex model).
  */

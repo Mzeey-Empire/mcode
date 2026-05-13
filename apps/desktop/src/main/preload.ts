@@ -144,8 +144,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     }): Promise<void> {
       return ipcRenderer.invoke("preview:sync", payload);
     },
-    navigate(url: string): Promise<{ ok: true } | { ok: false; error: string }> {
-      return ipcRenderer.invoke("preview:navigate", url);
+    navigate(url: string, workspacePath?: string | null): Promise<{ ok: true } | { ok: false; error: string }> {
+      return ipcRenderer.invoke("preview:navigate", url, workspacePath ?? null);
     },
     goBack(): Promise<boolean> {
       return ipcRenderer.invoke("preview:go-back");
