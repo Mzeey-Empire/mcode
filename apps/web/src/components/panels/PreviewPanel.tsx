@@ -115,6 +115,11 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
     (s) => s.previewUrlByThread[threadId] ?? "",
   );
 
+  /** Stable ref to the current storedUrl, read inside pushSync to avoid
+   *  adding storedUrl to pushSync's dependency array. */
+  const storedUrlRef = useRef(storedUrl);
+  storedUrlRef.current = storedUrl;
+
   useEffect(() => {
     setInputUrl(storedUrl);
     setPageTitle(null);
@@ -135,7 +140,7 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
       const preview = window.desktopBridge?.preview;
       if (!preview) return;
       const el = surfaceRef.current;
-      const hint = storedUrl.trim() || null;
+      const hint = storedUrlRef.current.trim() || null;
       if (!visible || !el) {
         await preview.sync({
           visible: false,
@@ -160,8 +165,13 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
         workspaceId: workspaceId ?? null,
       });
     },
-    [threadId, storedUrl, workspaceId],
+    [threadId, workspaceId],
   );
+
+  const pushSyncRef = useRef(pushSync);
+  pushSyncRef.current = pushSync;
+  const refreshNavRef = useRef(refreshNav);
+  refreshNavRef.current = refreshNav;
 
   useEffect(() => {
     const preview = window.desktopBridge?.preview;
@@ -205,13 +215,16 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
     const el = surfaceRef.current;
     if (!el) return;
 
+    let mounted = true;
     let raf = 0;
     const schedule = () => {
+      if (!mounted) return;
       if (raf) cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
         raf = 0;
-        void pushSync(true);
-        void refreshNav();
+        if (!mounted) return;
+        void pushSyncRef.current(true);
+        void refreshNavRef.current();
       });
     };
 
@@ -221,12 +234,14 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
 
     window.addEventListener("resize", schedule);
     return () => {
+      mounted = false;
       ro.disconnect();
       window.removeEventListener("resize", schedule);
       if (raf) cancelAnimationFrame(raf);
-      void pushSync(false);
+      void pushSyncRef.current(false);
     };
-  }, [pushSync, refreshNav]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const onGoBack = async () => {
     const preview = window.desktopBridge?.preview;
