@@ -8,7 +8,6 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
-  ChevronsUpDown,
   Crosshair,
   Crop,
   ExternalLink,
@@ -523,20 +522,24 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
                 <Popover open={devicePickerOpen} onOpenChange={setDevicePickerOpen}>
                   <PopoverTrigger
                     render={
-                      <Button type="button" variant="outline" size="sm"
-                        className={cn(
-                          "h-7 max-w-[13rem] justify-between gap-1 px-2 font-mono text-xs",
-                          deviceEmu.kind !== "off" && "border-primary/50 text-primary glow-primary",
-                        )}
-                        aria-label="Preview device frame"
-                      >
-                        <MonitorSmartphone className="size-3 shrink-0" aria-hidden />
-                        <span className="truncate">{previewDeviceDisplayLabel(deviceEmu)}</span>
-                        <ChevronsUpDown className="size-3 shrink-0 opacity-50" aria-hidden />
-                      </Button>
+                      deviceEmu.kind === "off" ? (
+                        <Button type="button" variant="ghost" size="icon-xs" className="shrink-0"
+                          aria-label="Device emulation"
+                        >
+                          <MonitorSmartphone size={14} aria-hidden />
+                        </Button>
+                      ) : (
+                        <Button type="button" variant="ghost" size="sm"
+                          className="h-7 gap-1 px-1.5 font-mono text-xs text-primary"
+                          aria-label="Preview device frame"
+                        >
+                          <MonitorSmartphone className="size-3.5 shrink-0" aria-hidden />
+                          <span className="truncate">{previewDeviceDisplayLabel(deviceEmu)}</span>
+                        </Button>
+                      )
                     }
                   />
-                  <PopoverContent side="bottom" sideOffset={6} className="w-[15rem] p-0 font-mono text-xs">
+                  <PopoverContent side="bottom" sideOffset={6} className="w-[17rem] p-0 font-mono text-xs">
                     <Command>
                       <CommandInput placeholder="Search devices..." className="h-8 text-xs" />
                       <CommandList>
