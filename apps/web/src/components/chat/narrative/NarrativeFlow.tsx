@@ -214,15 +214,22 @@ export function NarrativeFlow({
     return bestId;
   }, [items]);
 
+  // Split items: timeline (thoughts, tools, etc.) renders inside the
+  // padded/lined column. Delta (final streaming response) renders outside
+  // as a standalone message-style block so it matches the eventual
+  // MessageBubble that replaces it on turnComplete.
+  const timelineItems = items.filter((it) => it.type !== "delta");
+  const deltaItem = items.find((it) => it.type === "delta") as Extract<NarrativeItem, { type: "delta" }> | undefined;
+
   return (
     <div>
       {/* Timeline flow - only renders when there are items to show */}
-      {items.length > 0 && (
+      {timelineItems.length > 0 && (
         <div className="relative flex flex-col pl-[18px]">
           {/* Vertical timeline line - connects the dots between items */}
           <div className="absolute left-[7.5px] top-3 bottom-3 w-px bg-border pointer-events-none" />
 
-          {items.map((item, i) => {
+          {timelineItems.map((item, i) => {
             const margin = marginClassForItem(item, i);
             const dot = dotClassForItem(item);
 
@@ -245,7 +252,7 @@ export function NarrativeFlow({
         </div>
       )}
 
-      {/* Indicator bar sits outside the timeline flow, matching the prototype */}
+      {/* Indicator bar sits between the timeline and the response. */}
       {isAgentRunning && (
         <NarrativeIndicator
           stepCount={stepCount}
@@ -253,6 +260,15 @@ export function NarrativeFlow({
           activeToolCalls={activeToolCalls}
           startTime={startTime}
         />
+      )}
+
+      {/* Final streaming response - rendered as a standalone message-style
+          block so the visual transition to the persisted MessageBubble at
+          turnComplete is seamless. */}
+      {deltaItem && (
+        <div className="mt-3">
+          <DeltaBlock text={deltaItem.text} />
+        </div>
       )}
     </div>
   );

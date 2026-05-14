@@ -119,9 +119,22 @@ export function buildNarrativeItems(params: {
     if (evt.kind === "thought") {
       flushGroup();
       const isLatest = evt.segment.startedAt === lastSegmentStartedAt;
-      // Only highlight as "active" if this is the latest segment, it hasn't
-      // been ended, AND nothing else is currently running.
-      const isActive = isLatest && evt.segment.endedAt == null && !anyToolRunning;
+      const isStreaming = evt.segment.endedAt == null;
+
+      // The latest segment that's streaming AFTER all tool calls completed
+      // is the final response - render it as a delta (message-style) instead
+      // of a thought. This makes the turn-complete swap visually seamless.
+      const isFinalResponse = isLatest && isStreaming && !anyToolRunning;
+      if (isFinalResponse) {
+        items.push({ type: "delta", text: evt.segment.text });
+        continue;
+      }
+
+      // Regular thinking segment - render as a quiet thought block.
+      // isActive (highlighted background) only when streaming AND nothing
+      // else is running. Since isFinalResponse covers that case, this is
+      // effectively always false here - but kept for explicitness.
+      const isActive = isLatest && isStreaming && !anyToolRunning;
       items.push({ type: "thought", segment: evt.segment, isActive });
       continue;
     }

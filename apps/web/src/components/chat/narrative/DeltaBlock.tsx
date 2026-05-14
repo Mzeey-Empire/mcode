@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { ChevronRight, Star } from "lucide-react";
-import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
+import { lazy, Suspense } from "react";
+
+const LazyMarkdownContent = lazy(() => import("../MarkdownContent"));
 
 interface DeltaBlockProps {
   /** The streamed response text to display. */
@@ -8,52 +8,29 @@ interface DeltaBlockProps {
 }
 
 /**
- * Renders a streaming response delta block in the narrative timeline.
+ * Renders the streaming agent response - the final answer being composed
+ * after all tool calls have completed.
  *
- * Visually distinct from thought blocks - uses a primary-tinted background
- * and a pulsing star icon to signal an active response. The block is
- * collapsible via the chevron and open by default. A typing cursor is
- * appended to the text while the block is being streamed.
+ * Uses the same `MarkdownContent` renderer as the final `MessageBubble`,
+ * so when `turnComplete` fires and the real message replaces this block,
+ * the visual swap is seamless (only the typing cursor disappears).
+ *
+ * The text shows with markdown formatting (bullets, bold, code blocks)
+ * exactly as the final message will - not as a flat single paragraph.
  */
 export function DeltaBlock({ text }: DeltaBlockProps) {
-  const [open, setOpen] = useState(true);
-
   return (
-    <div className="bg-primary/7 rounded-md">
-      {/* Header row */}
-      <button
-        type="button"
-        onClick={() => setOpen((prev) => !prev)}
-        className="flex w-full items-center gap-2 px-2 py-1 text-[0.8125rem] cursor-pointer"
-        aria-expanded={open}
+    <div className="relative">
+      <Suspense
+        fallback={
+          <p className="whitespace-pre-wrap text-[0.9375rem] leading-relaxed">
+            {text}
+          </p>
+        }
       >
-        {/* Pulsing star icon */}
-        <span className="flex w-[15px] h-[15px] items-center justify-center shrink-0 relative">
-          <span className="absolute inset-0 rounded-full bg-primary/15" />
-          <Star className="w-[11px] h-[11px] text-primary animate-pulse relative z-10" />
-        </span>
-
-        {/* Responding label */}
-        <span className="font-semibold text-foreground flex-1 text-left">
-          Responding
-        </span>
-
-        {/* Chevron */}
-        <ChevronRight
-          className={`h-3.5 w-3.5 text-muted-foreground/60 shrink-0 transition-transform duration-200 ${
-            open ? "rotate-90" : ""
-          }`}
-        />
-      </button>
-
-      {/* Body content */}
-      <AnimatedCollapsible open={open}>
-        <p className="px-2 pb-2 text-[0.8125rem] leading-relaxed text-foreground">
-          {text}
-          {/* Typing cursor */}
-          <span aria-hidden="true" className="typing-cursor" />
-        </p>
-      </AnimatedCollapsible>
+        <LazyMarkdownContent content={text} isStreaming={true} />
+      </Suspense>
+      <span aria-hidden="true" className="typing-cursor" />
     </div>
   );
 }
