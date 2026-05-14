@@ -1,13 +1,13 @@
 import type { LucideIcon } from "lucide-react";
-import type { SVGProps } from "react";
-
-/** Accepts both Lucide icons and plain SVG function components. */
-type IconComponent = LucideIcon | React.ComponentType<SVGProps<SVGSVGElement> & { size?: number }>;
+import type { ComponentType, SVGProps } from "react";
 import {
   FileText, FilePen, FolderSearch, Globe,
   Pencil, Search, Terminal, Wrench,
 } from "lucide-react";
 import { StackedLayersIcon } from "../narrative/StackedLayersIcon";
+
+/** Accepts both Lucide icons and plain SVG function components. */
+export type IconComponent = LucideIcon | ComponentType<SVGProps<SVGSVGElement> & { size?: number }>;
 
 export const TOOL_LABELS: Record<string, string> = {
   Glob: "Listed directory",
@@ -33,7 +33,7 @@ export const TOOL_ICONS: Record<string, IconComponent> = {
   WebFetch: Globe,
 };
 
-export const DEFAULT_ICON = Wrench;
+export const DEFAULT_ICON: IconComponent = Wrench;
 
 /** Present-tense phase labels shown in the streaming indicator. */
 export const TOOL_PHASE_LABELS: Record<string, string> = {

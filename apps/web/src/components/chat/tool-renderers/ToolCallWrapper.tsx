@@ -1,9 +1,6 @@
-import { useState, type ReactNode, Component, type ErrorInfo, type SVGProps } from "react";
-import type { LucideIcon } from "lucide-react";
+import { useState, type ReactNode, Component, type ErrorInfo } from "react";
 import { ChevronRight } from "lucide-react";
-
-/** Accepts both Lucide icons and plain SVG function components. */
-type IconComponent = LucideIcon | React.ComponentType<SVGProps<SVGSVGElement> & { size?: number }>;
+import type { IconComponent } from "./constants";
 
 /** Extracted to avoid re-creating inline style objects each render. */
 const SLOW_SPIN_STYLE = { animationDuration: "2s" } as const;
