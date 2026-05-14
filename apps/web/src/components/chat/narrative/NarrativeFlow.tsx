@@ -105,7 +105,7 @@ function keyForItem(item: NarrativeItem, index: number): string {
  * `mostActiveSubagentId` is the tool call ID of the running subagent with the
  * most recent child activity - only that one receives the primary tint.
  */
-function renderItem(item: NarrativeItem, mostActiveSubagentId: string | null): React.ReactNode {
+function renderItem(item: NarrativeItem, _mostActiveSubagentId: string | null, allToolCalls: readonly ToolCall[]): React.ReactNode {
   switch (item.type) {
     case "thought":
       return <ThoughtBlock segment={item.segment} isActive={item.isActive} />;
@@ -125,7 +125,7 @@ function renderItem(item: NarrativeItem, mostActiveSubagentId: string | null): R
           toolCall={item.toolCall}
           children={item.children}
           hooks={item.hooks}
-          isMostActive={item.toolCall.id === mostActiveSubagentId}
+          allToolCalls={allToolCalls}
         />
       );
     case "active-tool":
@@ -238,7 +238,7 @@ export function NarrativeFlow({
                   dot,
                 ].join(" ")}
               >
-                {renderItem(item, mostActiveSubagentId)}
+                {renderItem(item, mostActiveSubagentId, toolCalls)}
               </div>
             );
           })}

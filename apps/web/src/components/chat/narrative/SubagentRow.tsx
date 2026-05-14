@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Bot, ChevronRight, ChevronDown } from "lucide-react";
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import {
@@ -11,9 +11,16 @@ import type { ToolCall, HookExecution } from "@/transport/types";
 
 interface SubagentRowProps {
   toolCall: ToolCall;
+  /** Direct children of this subagent. */
   children: readonly ToolCall[];
   hooks: readonly HookExecution[];
-  isMostActive?: boolean;
+  /**
+   * All tool calls in the current turn, used to find grandchildren when a
+   * direct child is itself an Agent (nested subagent).
+   */
+  allToolCalls?: readonly ToolCall[];
+  /** Nesting depth - increases left indentation for nested subagents. */
+  depth?: number;
 }
 
 function extractDetail(tc: ToolCall): string {
@@ -40,19 +47,21 @@ function extractDescription(toolCall: ToolCall): string {
 }
 
 const CHILD_CAP = 8;
+const MAX_DEPTH = 4;
 
 /**
  * Renders a subagent as a collapsible row in the narrative timeline.
- * Distilled: no colored backgrounds, no redundant "running" badge (spinning icon is enough),
- * flat indented child list with cap.
+ * Recursively renders Agent children as nested SubagentRows.
  */
-export function SubagentRow({ toolCall, children }: SubagentRowProps) {
+export function SubagentRow({ toolCall, children, hooks, allToolCalls, depth = 0 }: SubagentRowProps) {
   const isRunning = !toolCall.isComplete;
   const isErrored = toolCall.isComplete && toolCall.isError;
   const [open, setOpen] = useState(isRunning);
   const [showAll, setShowAll] = useState(false);
 
   const description = extractDescription(toolCall);
+
+  // Count direct children only (Agents count as one item, not as their grandchildren).
   const metaText = !isRunning && children.length > 0
     ? buildToolSummaryText(children)
     : children.length > 0
@@ -60,6 +69,21 @@ export function SubagentRow({ toolCall, children }: SubagentRowProps) {
     : null;
 
   const lastIncompleteIdx = children.reduce<number>((acc, tc, idx) => (!tc.isComplete ? idx : acc), -1);
+
+  // Build a grandchildren map: for each Agent child, find its own children in allToolCalls.
+  const grandchildrenMap = useMemo(() => {
+    const map = new Map<string, ToolCall[]>();
+    if (!allToolCalls) return map;
+    for (const tc of allToolCalls) {
+      if (tc.parentToolCallId == null) continue;
+      const arr = map.get(tc.parentToolCallId) ?? [];
+      arr.push(tc);
+      map.set(tc.parentToolCallId, arr);
+    }
+    return map;
+  }, [allToolCalls]);
+
+  const visibleChildren = showAll ? children : children.slice(0, CHILD_CAP);
 
   return (
     <div>
@@ -73,18 +97,16 @@ export function SubagentRow({ toolCall, children }: SubagentRowProps) {
 
         <span className="text-foreground/80 truncate flex-1 min-w-0">{description}</span>
 
-        {/* Pulsing dot for running state - the established alive signal */}
-        {isRunning && (
-          <span className="size-1.5 shrink-0 rounded-full bg-primary animate-pulse" />
-        )}
-
         {metaText && (
           <span className="font-mono text-[0.6875rem] text-muted-foreground/50 shrink-0">
             {!isRunning ? `· ${metaText}` : metaText}
           </span>
         )}
 
-        {/* Badge only for error/completed - not running (icon spin is enough) */}
+        {isRunning && (
+          <span className="size-1.5 shrink-0 rounded-full bg-primary animate-pulse" />
+        )}
+
         {isErrored && (
           <span className="font-mono text-[0.625rem] font-medium px-1 py-px rounded-sm bg-[var(--diff-remove)]/15 text-[var(--diff-remove)] shrink-0">
             errored
@@ -97,18 +119,37 @@ export function SubagentRow({ toolCall, children }: SubagentRowProps) {
       </button>
 
       <AnimatedCollapsible open={open}>
-        <ul className="pl-7 mt-0.5 space-y-px pb-1 max-h-48 overflow-y-auto">
-          {(showAll ? children : children.slice(0, CHILD_CAP)).map((tc, idx) => {
+        <ul className="pl-7 mt-0.5 space-y-px pb-1 max-h-64 overflow-y-auto">
+          {visibleChildren.map((tc, idx) => {
+            const isActive = idx === lastIncompleteIdx;
+
+            // Nested Agent - recursively render as a SubagentRow
+            if (tc.toolName === "Agent" && depth < MAX_DEPTH) {
+              return (
+                <li key={tc.id} className="list-none">
+                  <SubagentRow
+                    toolCall={tc}
+                    children={grandchildrenMap.get(tc.id) ?? []}
+                    hooks={hooks}
+                    allToolCalls={allToolCalls}
+                    depth={depth + 1}
+                  />
+                </li>
+              );
+            }
+
             const Icon = TOOL_ICONS[tc.toolName] ?? DEFAULT_ICON;
             const label = TOOL_LABELS[tc.toolName] ?? tc.toolName;
             const detail = extractDetail(tc);
-            const isActive = idx === lastIncompleteIdx;
 
             return (
               <li key={tc.id} className="flex items-center gap-1.5 py-px text-[0.8125rem]">
                 <Icon className={`w-3 h-3 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground/50"}`} />
                 <span className={`shrink-0 ${isActive ? "text-foreground" : "text-muted-foreground/70"}`}>{label}</span>
                 <span className="font-mono text-[0.6875rem] text-muted-foreground/50 truncate flex-1 min-w-0">{detail}</span>
+                {isActive && (
+                  <span className="size-1.5 shrink-0 rounded-full bg-primary animate-pulse" />
+                )}
               </li>
             );
           })}
