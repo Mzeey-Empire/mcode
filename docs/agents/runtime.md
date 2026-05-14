@@ -184,6 +184,23 @@ issue #290-class restarts.
 
 ---
 
+## Common Workflows
+
+Slash commands are first-class in Claude Code. Other harnesses (Cursor, Codex, OpenCode) run the underlying script directly.
+
+| Workflow | Claude command | Equivalent shell |
+|----------|----------------|------------------|
+| Typecheck + lint + unit tests | `/verify` | `bun run verify` |
+| Playwright E2E run | `/verify-e2e` | `bun run verify:e2e` |
+| Boot dev app for live demo | `/demo <feature>` | `node scripts/agent/demo.mjs` |
+| 4-parallel-subagent PR review | `/review-pr <ref>` | (Claude Code only — see `.claude/commands/review-pr.md`) |
+
+## Demoing a Feature
+
+The `/demo` flow (or `node scripts/agent/demo.mjs` from other harnesses) boots `bun run dev:web`, waits for the Vite dev URL, then prints a Playwright MCP entry point. See [docs/agents/demo.md](demo.md) for the full runbook — driving the app via Playwright MCP, capturing screenshots, and reporting back.
+
+---
+
 ## Bootstrap from Scratch
 
 ```sh
