@@ -1,8 +1,13 @@
 import type { LucideIcon } from "lucide-react";
+import type { SVGProps } from "react";
+
+/** Accepts both Lucide icons and plain SVG function components. */
+type IconComponent = LucideIcon | React.ComponentType<SVGProps<SVGSVGElement> & { size?: number }>;
 import {
-  Bot, FileText, FilePen, FolderSearch, Globe,
+  FileText, FilePen, FolderSearch, Globe,
   Pencil, Search, Terminal, Wrench,
 } from "lucide-react";
+import { StackedLayersIcon } from "../narrative/StackedLayersIcon";
 
 export const TOOL_LABELS: Record<string, string> = {
   Glob: "Listed directory",
@@ -16,14 +21,14 @@ export const TOOL_LABELS: Record<string, string> = {
   WebFetch: "Fetched page",
 };
 
-export const TOOL_ICONS: Record<string, LucideIcon> = {
+export const TOOL_ICONS: Record<string, IconComponent> = {
   Glob: FolderSearch,
   Grep: Search,
   Read: FileText,
   Write: FilePen,
   Edit: Pencil,
   Bash: Terminal,
-  Agent: Bot,
+  Agent: StackedLayersIcon,
   WebSearch: Globe,
   WebFetch: Globe,
 };

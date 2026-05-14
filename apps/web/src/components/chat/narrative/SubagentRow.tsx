@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
-import { Bot, ChevronRight, ChevronDown } from "lucide-react";
+import { ChevronRight, ChevronDown } from "lucide-react";
+import { StackedLayersIcon } from "./StackedLayersIcon";
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import {
   TOOL_ICONS,
@@ -93,7 +94,7 @@ export function SubagentRow({ toolCall, children, hooks, allToolCalls, depth = 0
         className="flex w-full items-center gap-1.5 px-2 py-1 text-left rounded-md hover:bg-muted/30 transition-colors duration-100 text-[0.8125rem]"
         aria-expanded={open}
       >
-        <Bot className="w-3.5 h-3.5 shrink-0 text-muted-foreground/60" />
+        <StackedLayersIcon className="w-3.5 h-3.5 shrink-0 text-muted-foreground/60" />
 
         <span className="text-foreground/80 truncate flex-1 min-w-0">{description}</span>
 
