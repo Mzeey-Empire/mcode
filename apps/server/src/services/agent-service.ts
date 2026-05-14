@@ -1006,6 +1006,14 @@ export class AgentService {
               this.planParsers.delete(event.threadId);
             }
           }
+          // Parent-level text implies all subagent (Agent) calls on the stack
+          // are implicitly done. The Claude Agent SDK does not always emit a
+          // toolResult for Agent calls, so clear the stack here to prevent
+          // subsequent tool calls from being incorrectly parented.
+          const stackOnDelta = this.agentCallStack.get(event.threadId);
+          if (stackOnDelta && stackOnDelta.length > 0) {
+            stackOnDelta.length = 0;
+          }
         }
 
         if (event.type === AgentEventType.Message) {
@@ -1031,6 +1039,13 @@ export class AgentService {
               threadId: event.threadId,
               error: err instanceof Error ? err.message : String(err),
             });
+          }
+          // A Message event marks the end of the turn. Any Agent calls still
+          // on the stack are implicitly done - clear the stack so the next turn
+          // starts clean.
+          const stackOnMessage = this.agentCallStack.get(event.threadId);
+          if (stackOnMessage && stackOnMessage.length > 0) {
+            stackOnMessage.length = 0;
           }
         }
 

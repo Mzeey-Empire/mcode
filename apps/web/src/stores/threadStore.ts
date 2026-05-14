@@ -1529,17 +1529,29 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     // delta, or turnComplete), we mark prior calls as done.
     const markPriorToolCallsComplete = () => {
       const calls = get().toolCallsByThread[threadId];
-      if (!calls || !calls.some((tc) => !tc.isComplete && tc.toolName !== "Agent")) return;
+      if (!calls || !calls.some((tc) => !tc.isComplete)) return;
       set((state) => {
         const current = state.toolCallsByThread[threadId] ?? [];
-        // Agent tool calls represent in-flight subagent runs. Their child tool
-        // events keep arriving on the same thread after a peer top-level event,
-        // so completing them here would prematurely drop the derived subagent count
-        // and hide the live LiveAgentGroup. Agent completion is driven only by
-        // its own session.toolResult event.
-        const updated = current.map((tc) =>
-          tc.isComplete || tc.toolName === "Agent" ? tc : { ...tc, isComplete: true }
-        );
+        // Agent calls complete only when they have at least one child and all
+        // children are done. An Agent with no children yet is still in-flight -
+        // leaving it incomplete preserves the live subagent UI. An Agent whose
+        // children have all finished is implicitly done when a new top-level
+        // event arrives (text, new tool, or message), because the Claude Agent
+        // SDK does not always emit a toolResult for Agent calls.
+        const children = (agentId: string) =>
+          current.filter((c) => c.parentToolCallId === agentId);
+        const isAgentDone = (agentId: string) => {
+          const kids = children(agentId);
+          return kids.length > 0 && !kids.some((c) => !c.isComplete);
+        };
+
+        const updated = current.map((tc) => {
+          if (tc.isComplete) return tc;
+          if (tc.toolName === "Agent") {
+            return isAgentDone(tc.id) ? { ...tc, isComplete: true } : tc;
+          }
+          return { ...tc, isComplete: true };
+        });
         return {
           toolCallsByThread: { ...state.toolCallsByThread, [threadId]: updated },
         };
