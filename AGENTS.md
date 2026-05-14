@@ -17,14 +17,14 @@ Run `bun run doctor` to verify all prerequisites are installed.
 
 This repo is configured for four agent harnesses. All four read `AGENTS.md` (Claude Code via `CLAUDE.md` which re-exports it), share the same `.env`-edit block and Stop-hook verify, and load the Playwright MCP for visual verification.
 
-| Harness | Config | Stop hook | MCP |
-|---------|--------|-----------|-----|
-| Claude Code | `.claude/settings.json`, `.claude/agents/`, `.claude/commands/`, `CLAUDE.md` | `scripts/agent/verify-tests.mjs` | `.mcp.json` |
-| Cursor | `.cursor/hooks.json`, `AGENTS.md` | `scripts/agent/hooks/cursor-stop.mjs` | `.cursor/mcp.json` |
-| Codex | `.codex/hooks.json`, `AGENTS.md` | `scripts/agent/hooks/codex-stop.mjs` | `.mcp.json` |
-| OpenCode | `.opencode/opencode.json`, `AGENTS.md` | `scripts/agent/hooks/codex-stop.mjs` (shared; Codex-compatible JSON contract) | `.opencode/opencode.json` |
+| Harness | Config | Stop hook | MCP | Slash commands |
+|---------|--------|-----------|-----|----------------|
+| Claude Code | `.claude/settings.json`, `.claude/agents/`, `.claude/commands/`, `CLAUDE.md` | `scripts/agent/verify-tests.mjs` | `.mcp.json` | `.claude/commands/` (auto) |
+| Cursor | `.cursor/hooks.json`, `AGENTS.md` | `scripts/agent/hooks/cursor-stop.mjs` | `.cursor/mcp.json` | `.cursor/commands/` (auto) |
+| Codex | `.codex/hooks.json`, `AGENTS.md` | `scripts/agent/hooks/codex-stop.mjs` | `.mcp.json` | `.codex/prompts/` → install once with `node scripts/agent/install-codex-prompts.mjs` (copies to `~/.codex/prompts/`) |
+| OpenCode | `.opencode/opencode.json`, `AGENTS.md` | `scripts/agent/hooks/codex-stop.mjs` (shared; Codex-compatible JSON contract) | `.opencode/opencode.json` | `.opencode/command/` (auto) |
 
-Claude Code additionally exposes slash commands under `.claude/commands/` (`/verify`, `/verify-e2e`, `/verify-e2e-desktop`, `/demo`, `/demo-desktop`, `/review-pr`) and specialized subagents under `.claude/agents/` (`frontend-engineer`, `backend-engineer`, `qa-engineer`, `security-reviewer`). Other harnesses run the underlying `bun run …` commands directly — see `docs/agents/runtime.md` § Common Workflows.
+All four harnesses expose the same six commands: `/verify`, `/verify-e2e`, `/verify-e2e-desktop`, `/demo`, `/demo-desktop`, `/review-pr`. Claude Code additionally has specialized subagents under `.claude/agents/` (`frontend-engineer`, `backend-engineer`, `qa-engineer`, `security-reviewer`). The shell equivalents are documented in `docs/agents/runtime.md` § Common Workflows.
 
 ## Directory Structure
 
