@@ -396,11 +396,15 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         const last = segments[segments.length - 1];
         if (!last || last.endedAt !== undefined) {
           nextSegments[tid] = [...segments, { text: acc, startedAt: Date.now() }];
+          // eslint-disable-next-line no-console
+          console.debug("[narrative:flush] new segment", { tid, segCount: segments.length + 1, textLen: acc.length });
         } else {
           nextSegments[tid] = [
             ...segments.slice(0, -1),
             { ...last, text: last.text + acc },
           ];
+          // eslint-disable-next-line no-console
+          console.debug("[narrative:flush] append segment", { tid, segIdx: segments.length - 1, totalLen: last.text.length + acc.length });
         }
       }
       return {
@@ -1548,8 +1552,13 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         const updated = current.map((tc) => {
           if (tc.isComplete) return tc;
           if (tc.toolName === "Agent") {
-            return isAgentDone(tc.id) ? { ...tc, isComplete: true } : tc;
+            const done = isAgentDone(tc.id);
+            // eslint-disable-next-line no-console
+            if (done) console.debug("[narrative:markComplete] Agent done", { id: tc.id, childCount: children(tc.id).length });
+            return done ? { ...tc, isComplete: true } : tc;
           }
+          // eslint-disable-next-line no-console
+          console.debug("[narrative:markComplete]", { id: tc.id, toolName: tc.toolName, parentToolCallId: tc.parentToolCallId });
           return { ...tc, isComplete: true };
         });
         return {
@@ -1720,6 +1729,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       const toolCallId = (params.toolCallId as string) || "";
       const existingCalls = get().toolCallsByThread[threadId] ?? [];
       if (toolCallId && existingCalls.some((tc) => tc.id === toolCallId)) {
+        // eslint-disable-next-line no-console
+        console.debug("[narrative:toolUse] DEDUP skip", { toolCallId });
         return;
       }
 
@@ -1758,12 +1769,15 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         parentToolCallId: parentToolCallId || undefined,
         startedAt: Date.now(),
       };
+      // eslint-disable-next-line no-console
+      console.debug("[narrative:toolUse]", { threadId, toolName, toolCallId, parentToolCallId, isAgent: toolName === "Agent" });
       set((state) => {
         // Freeze the active thought segment so it has a definite end time.
         const segments = state.thoughtSegmentsByThread[threadId] ?? [];
         const last = segments[segments.length - 1];
+        const froze = last && last.endedAt === undefined;
         const nextSegments =
-          last && last.endedAt === undefined
+          froze
             ? {
                 ...state.thoughtSegmentsByThread,
                 [threadId]: [
@@ -1772,6 +1786,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
                 ],
               }
             : state.thoughtSegmentsByThread;
+        // eslint-disable-next-line no-console
+        console.debug("[narrative:toolUse] segments", { froze, segCount: segments.length, lastEndedAt: last?.endedAt });
         return {
           toolCallsByThread: {
             ...state.toolCallsByThread,
@@ -1787,6 +1803,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       const toolCallId = (params.toolCallId as string) || "";
       const output = (params.output as string) || "";
       const isError = (params.isError as boolean) || false;
+      // eslint-disable-next-line no-console
+      console.debug("[narrative:toolResult]", { threadId, toolCallId, isError, outputLen: output.length });
       set((state) => {
         const calls = state.toolCallsByThread[threadId] ?? [];
         // Try matching by ID first; fall back to the first incomplete tool call

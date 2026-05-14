@@ -1006,14 +1006,12 @@ export class AgentService {
               this.planParsers.delete(event.threadId);
             }
           }
-          // Parent-level text implies all subagent (Agent) calls on the stack
-          // are implicitly done. The Claude Agent SDK does not always emit a
-          // toolResult for Agent calls, so clear the stack here to prevent
-          // subsequent tool calls from being incorrectly parented.
-          const stackOnDelta = this.agentCallStack.get(event.threadId);
-          if (stackOnDelta && stackOnDelta.length > 0) {
-            stackOnDelta.length = 0;
-          }
+          // NOTE: Do NOT clear agentCallStack on textDelta. The Claude SDK
+          // emits textDelta from subagents while they are still running child
+          // tool calls. Clearing the stack here would cause subsequent child
+          // toolUse events to lose their parentToolCallId enrichment. The stack
+          // is cleaned up on turnComplete/ended and when toolResult arrives for
+          // Agent calls via updateBufferedToolCallOutput.
         }
 
         if (event.type === AgentEventType.Message) {

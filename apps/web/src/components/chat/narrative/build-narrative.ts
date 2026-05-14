@@ -81,6 +81,17 @@ export function buildNarrativeItems(params: {
     }
   }
 
+  // eslint-disable-next-line no-console
+  const agents = topLevel.filter((tc) => tc.toolName === "Agent");
+  if (agents.length > 0) {
+    console.debug("[narrative:build] agent mapping", agents.map((a) => ({
+      id: a.id,
+      desc: String((a.toolInput as Record<string, unknown>).description ?? "").slice(0, 40),
+      children: (childrenMap.get(a.id) ?? []).length,
+      complete: a.isComplete,
+    })));
+  }
+
   // Sort top-level calls chronologically. Calls without startedAt go last.
   const sortedTopLevel = [...topLevel].sort((a, b) => {
     if (a.startedAt == null && b.startedAt == null) return 0;
@@ -88,6 +99,13 @@ export function buildNarrativeItems(params: {
     if (b.startedAt == null) return -1;
     return a.startedAt - b.startedAt;
   });
+
+  // eslint-disable-next-line no-console
+  if (hooks.length > 0) {
+    console.debug("[narrative:build] hooks input", hooks.map((h) => ({
+      name: h.hookName, type: h.hookType, toolName: h.toolName, status: h.status, didBlock: h.didBlock,
+    })));
+  }
 
   // Track which hooks have been placed so we can append unmatched ones at the end.
   const placedHookIndices = new Set<number>();
