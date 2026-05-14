@@ -8,14 +8,13 @@ interface DeltaBlockProps {
 }
 
 /**
- * Finds the deepest last text-bearing element inside `root`.
- *
- * "Text-bearing" means an Element that has at least one descendant Text node
- * with non-whitespace content. We walk text nodes back-to-front and return
- * the parent of the last one with visible characters — across paragraphs,
- * list items, headings, code blocks, etc.
+ * Walks all text nodes inside `root` back-to-front and returns the last one
+ * with non-whitespace content. Returning the Text node itself (not its
+ * parent element) lets the caller position a Range at the exact end offset
+ * — yielding a precise caret-shaped rect rather than the bounding box of
+ * the surrounding element.
  */
-function findLastTextElement(root: HTMLElement): HTMLElement | null {
+function findLastTextNode(root: HTMLElement): Text | null {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let last: Text | null = null;
   let node = walker.nextNode() as Text | null;
@@ -25,21 +24,50 @@ function findLastTextElement(root: HTMLElement): HTMLElement | null {
     }
     node = walker.nextNode() as Text | null;
   }
-  return last?.parentElement ?? null;
+  return last;
 }
 
 /**
- * Streaming agent response with a typing cursor that trails the last word.
+ * Returns the caret rect at the END of the given text node.
  *
- * The cursor stays a permanent child of the root `<div>` (React-owned, never
- * re-parented), and is positioned absolutely on top of the end of the last
- * text-bearing element via a layout effect. Earlier attempts that moved the
- * cursor into the markdown subtree broke React's reconciliation — when the
- * markdown tree changed mid-stream, `insertBefore` on the root's children
- * list threw because the cursor was no longer where the fiber tree expected.
+ * Uses `getClientRects()` on a zero-length Range positioned at the node's
+ * end offset. For multi-line text this returns one rect per line; we take
+ * the last (where the caret would actually sit). Returns `null` when no
+ * meaningful rect can be measured.
+ */
+function getCaretRectAtEnd(node: Text): DOMRect | null {
+  const len = node.textContent?.length ?? 0;
+  if (len === 0) return null;
+  const range = document.createRange();
+  range.setStart(node, len);
+  range.setEnd(node, len);
+  let rects = range.getClientRects();
+  if (rects.length === 0) {
+    // Collapsed range across line/box boundary — measure the last character
+    // and synthesise a zero-width rect anchored at its right edge.
+    range.setStart(node, len - 1);
+    range.setEnd(node, len);
+    rects = range.getClientRects();
+    if (rects.length === 0) return null;
+    const last = rects[rects.length - 1];
+    return new DOMRect(last.right, last.top, 0, last.height);
+  }
+  return rects[rects.length - 1];
+}
+
+/**
+ * Streaming agent response with a typing cursor anchored at the end of the
+ * last visible character.
  *
- * Uses the same MarkdownContent renderer as the final MessageBubble so the
- * visual swap on turnComplete is seamless (only the cursor disappears).
+ * Positioning uses `transform: translate3d()` with a short CSS transition so
+ * the cursor glides smoothly as new text streams in, rather than jumping
+ * discretely between layouts. The cursor stays a permanent child of the
+ * root <div> (React-owned, never re-parented) — re-parenting mid-stream
+ * corrupts React's fiber tree and crashes the commit phase.
+ *
+ * Visibility is controlled via inline opacity with its own transition, so
+ * the cursor fades out cleanly when there's no measurable caret position
+ * (empty markdown, mid-render, after final delta).
  */
 export function DeltaBlock({ text }: DeltaBlockProps) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -50,33 +78,28 @@ export function DeltaBlock({ text }: DeltaBlockProps) {
     const cursor = cursorRef.current;
     if (!root || !cursor) return;
 
-    const target = findLastTextElement(root);
-    if (!target) {
-      cursor.style.visibility = "hidden";
+    const lastTextNode = findLastTextNode(root);
+    if (!lastTextNode) {
+      cursor.style.opacity = "0";
       return;
     }
 
-    // Collapse a range to the END of the target's last text content.
-    // getBoundingClientRect on a collapsed range yields a zero-width box
-    // positioned exactly after the last character — perfect for a cursor anchor.
-    const range = document.createRange();
-    range.selectNodeContents(target);
-    range.collapse(false);
-    let rect = range.getBoundingClientRect();
-
-    // Some browsers return a zero-sized rect for a collapsed range across
-    // certain element boundaries. Fall back to the target's full rect anchored
-    // at its right edge so the cursor still trails the last visible content.
-    if (rect.width === 0 && rect.height === 0) {
-      const fallback = target.getBoundingClientRect();
-      rect = new DOMRect(fallback.right, fallback.top, 0, fallback.height || 16);
+    const caretRect = getCaretRectAtEnd(lastTextNode);
+    if (!caretRect) {
+      cursor.style.opacity = "0";
+      return;
     }
 
     const rootRect = root.getBoundingClientRect();
-    cursor.style.visibility = "visible";
-    cursor.style.left = `${rect.right - rootRect.left}px`;
-    cursor.style.top = `${rect.top - rootRect.top}px`;
-    cursor.style.height = `${rect.height || 16}px`;
+    const x = caretRect.right - rootRect.left;
+    const y = caretRect.top - rootRect.top;
+    // Clamp height to a sane line-height upper bound so a glitched
+    // measurement (e.g. a full block rect) never paints a giant bar.
+    const h = Math.min(Math.max(caretRect.height || 16, 12), 28);
+
+    cursor.style.opacity = "1";
+    cursor.style.height = `${h}px`;
+    cursor.style.transform = `translate3d(${x}px, ${y}px, 0)`;
   });
 
   return (
@@ -96,9 +119,15 @@ export function DeltaBlock({ text }: DeltaBlockProps) {
         className="typing-cursor"
         style={{
           position: "absolute",
+          top: 0,
+          left: 0,
+          width: "1.5px",
           margin: 0,
-          visibility: "hidden",
+          opacity: 0,
           pointerEvents: "none",
+          willChange: "transform, opacity",
+          transition:
+            "transform 90ms cubic-bezier(0.33, 1, 0.68, 1), opacity 140ms ease-out",
         }}
       />
     </div>
