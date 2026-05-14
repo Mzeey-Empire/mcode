@@ -17,7 +17,8 @@
     "rebuild": "electron-rebuild -f",
     "dist": "bun run build && bun scripts/generate-snapshot.mjs && electron-builder --publish never",
     "dist:no-snapshot": "bun run build && electron-builder --publish never",
-    "test": "bunx vitest run"
+    "test": "bunx vitest run",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "@electron/rebuild": "^3.7.1",
@@ -31,6 +32,7 @@
   },
   "devDependencies": {
     "@electron/fuses": "^2.1.1",
+    "@playwright/test": "^1.58.2",
     "@types/uuid": "^10.0.0",
     "@types/which": "^3.0.4",
     "@vitest/coverage-v8": "^4.1.0",

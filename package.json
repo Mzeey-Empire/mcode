@@ -38,7 +38,6 @@
   "trustedDependencies": [
     "electron",
     "electron-mksnapshot",
-    "better-sqlite3",
     "node-pty",
     "@electron/rebuild"
   ],
