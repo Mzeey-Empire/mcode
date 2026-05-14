@@ -20,14 +20,14 @@ Playwright MCP must be connected (configured in `.mcp.json`, `.cursor/mcp.json`,
 
 Both ultimately run `scripts/agent/demo.mjs`, which:
 
-1. Checks whether `http://127.0.0.1:5173` already responds
+1. Checks whether `http://localhost:5173` already responds
 2. If not, spawns `bun run dev:web` detached and polls (default 60s timeout)
 3. Prints the URL, the screenshot directory, and a copy-pasteable Playwright MCP entry point
 
 Override defaults with env vars:
 
 ```sh
-MCODE_DEMO_URL=http://127.0.0.1:5174 MCODE_DEMO_TIMEOUT_MS=120000 node scripts/agent/demo.mjs
+MCODE_DEMO_URL=http://localhost:5174 MCODE_DEMO_TIMEOUT_MS=120000 node scripts/agent/demo.mjs
 ```
 
 ## Driving the app
@@ -35,7 +35,7 @@ MCODE_DEMO_URL=http://127.0.0.1:5174 MCODE_DEMO_TIMEOUT_MS=120000 node scripts/a
 Once the script exits 0, drive the app via Playwright MCP tools:
 
 ```ts
-mcp__playwright__browser_navigate({ url: "http://127.0.0.1:5173" })
+mcp__playwright__browser_navigate({ url: "http://localhost:5173" })
 mcp__playwright__browser_snapshot()       // a11y tree — readable state
 mcp__playwright__browser_click({ ref: "<from-snapshot>" })
 mcp__playwright__browser_take_screenshot({ filename: "apps/web/e2e/screenshots/demo/<step>.png" })

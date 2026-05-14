@@ -6,9 +6,10 @@
  * Future Electron-only features (native menus, tray, BrowserView, deep links)
  * should be appended to this suite as additional specs in this directory.
  *
- * Requires `apps/desktop/dist/main/main.cjs` to exist — the Playwright config
- * runs `bun run build` first via the `webServer`/`globalSetup` hook, but you
- * can also build manually with `cd apps/desktop && bun run build`.
+ * Requires `apps/desktop/dist/main/main.cjs` to exist. The Playwright config
+ * does not run a build step automatically; build the bundles first with
+ * `cd apps/desktop && bun run build` (CI should do the same before invoking
+ * `bun run e2e`).
  */
 import { test, expect, _electron as electron } from "@playwright/test";
 import { existsSync } from "node:fs";

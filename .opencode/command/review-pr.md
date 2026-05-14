@@ -2,7 +2,7 @@
 description: Review changes across four dimensions — security, performance, quality, correctness
 ---
 
-Review the changes in the current branch / PR / argument-supplied ref across four dimensions. In Cursor, run them as four sequential focused passes (or parallel chats if you have multiple agents):
+Review the changes in the current branch / PR / argument-supplied ref across four dimensions. In OpenCode, run them as four sequential focused passes (or parallel chats if you have multiple agents):
 
 1. **Security** — Electron contextBridge surface, child-process spawning, SQLite parameterization, XSS, secrets, log content. Reference `.claude/agents/security-reviewer.md` for the full checklist.
 2. **Performance** — bundle size, render hot paths, DB query patterns, the memory/startup targets in `AGENTS.md`.
