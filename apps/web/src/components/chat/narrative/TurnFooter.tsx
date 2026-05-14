@@ -10,7 +10,8 @@ interface TurnFooterProps {
 /**
  * Formats an elapsed duration as a compact human string.
  *
- * Examples: `0.4s`, `12.7s`, `1m 04s`. Returns `—` if duration is null.
+ * Examples: `342ms` (sub-second), `12.7s` (single seconds), `1m 04s` (longer).
+ * Returns `—` if duration is null or negative.
  */
 function formatDuration(ms: number | null): string {
   if (ms == null || ms < 0) return "—";

@@ -152,9 +152,7 @@ export function NarrativeFlow({
   isAgentRunning,
   startTime,
 }: NarrativeFlowProps) {
-  // `counts` is bound but unused here — Task 8 wires it into the TurnFooter.
-  // Kept on this signature so the consumer rename is a one-line change.
-  const { items, counts: _counts } = useMemo(
+  const { items } = useMemo(
     () =>
       buildNarrativeItems({
         toolCalls,
