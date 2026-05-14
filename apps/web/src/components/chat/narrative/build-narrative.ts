@@ -1,5 +1,5 @@
 import type { ToolCall, HookExecution } from "@/transport/types";
-import type { ThoughtSegment, NarrativeItem } from "./types";
+import type { ThoughtSegment, NarrativeItem, NarrativeBuildResult } from "./types";
 
 const AGENT_TOOL_NAME = "Agent";
 
@@ -31,7 +31,7 @@ export function buildNarrativeItems(params: {
   thoughtSegments: readonly ThoughtSegment[];
   streamingText: string;
   isAgentRunning: boolean;
-}): NarrativeItem[] {
+}): NarrativeBuildResult {
   const { toolCalls, hooks, thoughtSegments, streamingText, isAgentRunning } = params;
 
   // eslint-disable-next-line no-console
@@ -46,9 +46,12 @@ export function buildNarrativeItems(params: {
   if (thoughtSegments.length === 0 && toolCalls.length === 0 && hooks.length === 0) {
     if (isAgentRunning && streamingText.length > 0) {
       const syntheticSegment: ThoughtSegment = { text: streamingText, startedAt: Date.now() };
-      return [{ type: "thought", segment: syntheticSegment, isActive: true }];
+      return {
+        items: [{ type: "thought", segment: syntheticSegment, isActive: true }],
+        counts: { steps: 0, thoughts: 1, subagents: 0 },
+      };
     }
-    return [];
+    return { items: [], counts: { steps: 0, thoughts: 0, subagents: 0 } };
   }
 
   // Separate top-level from child tool calls.
@@ -177,5 +180,8 @@ export function buildNarrativeItems(params: {
     ...(i.type === "thought" ? { active: i.isActive } : {}),
     ...(i.type === "subagent" ? { name: i.toolCall.toolName, children: i.children.length } : {}),
   })));
-  return items;
+  const subagents = topLevel.filter((tc) => tc.toolName === AGENT_TOOL_NAME).length;
+  const steps = topLevel.length;
+  const thoughts = items.filter((it) => it.type === "thought").length;
+  return { items, counts: { steps, thoughts, subagents } };
 }

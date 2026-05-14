@@ -23,3 +23,23 @@ export type NarrativeItem =
   | { type: "subagent"; toolCall: ToolCall; children: readonly ToolCall[]; hooks: readonly HookExecution[] }
   | { type: "active-tool"; toolCall: ToolCall }
   | { type: "delta"; text: string };
+
+/**
+ * Aggregate counts for the timeline, derived during `buildNarrativeItems`.
+ * Powers the per-turn footer that appears between the timeline and the final
+ * assistant message when the agent is no longer running.
+ */
+export interface NarrativeCounts {
+  /** Top-level non-Agent tool calls + completed Agent calls. */
+  steps: number;
+  /** Number of thought segments rendered inline (not counting the final delta). */
+  thoughts: number;
+  /** Number of top-level Agent tool calls. */
+  subagents: number;
+}
+
+/** Return value of `buildNarrativeItems` — items plus aggregate counts. */
+export interface NarrativeBuildResult {
+  items: NarrativeItem[];
+  counts: NarrativeCounts;
+}

@@ -152,7 +152,7 @@ export function NarrativeFlow({
   isAgentRunning,
   startTime,
 }: NarrativeFlowProps) {
-  const items = useMemo(
+  const { items, counts: _counts } = useMemo(
     () =>
       buildNarrativeItems({
         toolCalls,
