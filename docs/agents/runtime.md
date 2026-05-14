@@ -191,8 +191,10 @@ Slash commands are first-class in Claude Code. Other harnesses (Cursor, Codex, O
 | Workflow | Claude command | Equivalent shell |
 |----------|----------------|------------------|
 | Typecheck + lint + unit tests | `/verify` | `bun run verify` |
-| Playwright E2E run | `/verify-e2e` | `bun run verify:e2e` |
-| Boot dev app for live demo | `/demo <feature>` | `node scripts/agent/demo.mjs` |
+| Playwright E2E (web) | `/verify-e2e` | `bun run verify:e2e` |
+| Playwright E2E (Electron) | `/verify-e2e-desktop` | `cd apps/desktop && bun run e2e` |
+| Boot dev web app for live demo | `/demo <feature>` | `node scripts/agent/demo.mjs` |
+| Launch Electron app for live demo | `/demo-desktop <feature>` | `node scripts/agent/demo-desktop.mjs` |
 | 4-parallel-subagent PR review | `/review-pr <ref>` | (Claude Code only — see `.claude/commands/review-pr.md`) |
 
 ## Demoing a Feature

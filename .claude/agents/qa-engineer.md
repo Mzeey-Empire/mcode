@@ -29,9 +29,13 @@ Write or extend a Playwright spec when the change touches any of:
 
 ## Write boundaries
 
-- Primary: `apps/web/e2e/**`, `apps/web/playwright.config.*`, test fixtures
+- Primary: `apps/web/e2e/**`, `apps/web/playwright.config.*`, `apps/desktop/e2e/**`, `apps/desktop/playwright.config.*`, test fixtures
 - Allowed: small `data-testid` additions to `apps/web/src/**` to make a component testable (flag these to the user)
-- Forbidden without explicit user approval: production logic in `apps/web/src/**`, anything in `apps/server/**` or `apps/desktop/**`
+- Forbidden without explicit user approval: production logic in `apps/web/src/**`, anything in `apps/server/**` or `apps/desktop/src/**`
+
+## Web vs Electron specs
+
+Default to web E2E (`apps/web/e2e/`, runs under Vite) — it covers the same React tree an order of magnitude faster than Electron. Use Electron E2E (`apps/desktop/e2e/`, drives the real Electron process via `_electron.launch()`) **only** for surfaces that don't exist in the browser: native menus, tray, BrowserView, contextBridge IPC, window chrome, deep links, auto-updater.
 
 ## Verification workflow
 
