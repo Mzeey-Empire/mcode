@@ -55,6 +55,7 @@ export function ThoughtBlock({ segment, isActive }: ThoughtBlockProps) {
           <button
             type="button"
             onClick={() => setExpanded((e) => !e)}
+            aria-expanded={expanded}
             className="mt-1 font-mono text-[0.625rem] tracking-[0.1em] text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors"
           >
             {expanded ? "show less" : "show more"}
