@@ -14,7 +14,9 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-const DEV_URL = process.env.MCODE_DEMO_URL ?? "http://127.0.0.1:5173";
+// `localhost` (not `127.0.0.1`) — Vite's default bind is IPv6-only on Windows,
+// so an IPv4 literal won't reach it. `localhost` resolves to both families.
+const DEV_URL = process.env.MCODE_DEMO_URL ?? "http://localhost:5173";
 const TIMEOUT_MS = Number(process.env.MCODE_DEMO_TIMEOUT_MS ?? 60_000);
 const POLL_INTERVAL_MS = 1_000;
 const SCREENSHOT_DIR = join("apps", "web", "e2e", "screenshots", "demo");
@@ -63,7 +65,9 @@ async function main() {
         `  mcp__playwright__browser_take_screenshot({ filename: "${SCREENSHOT_DIR}/<step>.png" })`,
       );
       console.log("  mcp__playwright__browser_console_messages()");
-      process.exit(0);
+      // `process.exit(0)` after a fetch on Windows can trip a libuv async-handle
+      // assertion. The work is already done, so we let the event loop drain.
+      return;
     }
     await sleep(POLL_INTERVAL_MS);
   }
@@ -71,7 +75,7 @@ async function main() {
   console.error(
     `[demo] timed out after ${TIMEOUT_MS}ms waiting for ${DEV_URL}`,
   );
-  process.exit(1);
+  process.exitCode = 1;
 }
 
 main().catch((err) => {
