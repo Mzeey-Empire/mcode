@@ -31,11 +31,11 @@ export interface NarrativeFlowProps {
  * Hook items use a smaller dot; blocked hooks use a destructive color.
  */
 function dotClassForItem(item: NarrativeItem): string {
-  // Distilled: one muted color for all dots. Only active thought gets primary.
+  // One muted color for completed items. Active items get primary + pulse.
   // Errors get diff-remove. Hooks get smaller dots.
   switch (item.type) {
     case "thought":
-      return item.isActive ? "before:bg-primary" : "before:bg-muted-foreground/30";
+      return item.isActive ? "before:bg-primary before:animate-pulse" : "before:bg-muted-foreground/30";
 
     case "hook":
       return item.hook.didBlock
@@ -43,9 +43,11 @@ function dotClassForItem(item: NarrativeItem): string {
         : "before:w-[3px] before:h-[3px] before:top-[9px] before:bg-muted-foreground/25";
 
     case "subagent":
-      return item.toolCall.isError
-        ? "before:bg-[var(--diff-remove)]"
-        : "before:bg-muted-foreground/30";
+      if (item.toolCall.isError) return "before:bg-[var(--diff-remove)]";
+      return item.toolCall.isComplete ? "before:bg-muted-foreground/30" : "before:bg-primary before:animate-pulse";
+
+    case "active-tool":
+      return "before:bg-primary before:animate-pulse";
 
     default:
       return "before:bg-muted-foreground/30";

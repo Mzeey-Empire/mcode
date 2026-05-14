@@ -35,7 +35,8 @@ export function ActiveToolRow({ toolCall }: ActiveToolRowProps) {
 
   return (
     <div className="flex items-center gap-1.5 px-2 py-1 text-[0.8125rem]">
-      <Icon className="w-3.5 h-3.5 shrink-0 text-primary animate-spin" />
+      <span className="size-1.5 shrink-0 rounded-full bg-primary animate-pulse" />
+      <Icon className="w-3.5 h-3.5 shrink-0 text-muted-foreground/60" />
       <span className="font-medium text-foreground shrink-0">{label}</span>
       <span className="font-mono text-[0.6875rem] text-muted-foreground/50 truncate flex-1 min-w-0">{detail}</span>
     </div>

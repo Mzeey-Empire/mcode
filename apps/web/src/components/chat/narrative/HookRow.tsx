@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Check, Clock, X, ChevronRight } from "lucide-react";
+import { Check, X, ChevronRight } from "lucide-react";
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import type { HookExecution } from "@/transport/types";
 
@@ -74,8 +74,8 @@ export function HookRow({ hook }: HookRowProps) {
       >
         {/* Status icon */}
         {isRunning ? (
-          <span aria-label="running" className="flex w-[13px] h-[13px] items-center justify-center shrink-0">
-            <Clock className="w-[13px] h-[13px] text-primary animate-spin" />
+          <span aria-label="running" className="flex items-center justify-center shrink-0">
+            <span className="size-1.5 rounded-full bg-primary animate-pulse" />
           </span>
         ) : isBlocked ? (
           <span aria-label="blocked" className="flex w-[13px] h-[13px] items-center justify-center shrink-0">

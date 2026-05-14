@@ -69,9 +69,14 @@ export function SubagentRow({ toolCall, children }: SubagentRowProps) {
         className="flex w-full items-center gap-1.5 px-2 py-1 text-left rounded-md hover:bg-muted/30 transition-colors duration-100 text-[0.8125rem]"
         aria-expanded={open}
       >
-        <Bot className={`w-3.5 h-3.5 shrink-0 text-muted-foreground/60 ${isRunning ? "animate-spin" : ""}`} />
+        <Bot className="w-3.5 h-3.5 shrink-0 text-muted-foreground/60" />
 
         <span className="text-foreground/80 truncate flex-1 min-w-0">{description}</span>
+
+        {/* Pulsing dot for running state - the established alive signal */}
+        {isRunning && (
+          <span className="size-1.5 shrink-0 rounded-full bg-primary animate-pulse" />
+        )}
 
         {metaText && (
           <span className="font-mono text-[0.6875rem] text-muted-foreground/50 shrink-0">
@@ -101,7 +106,7 @@ export function SubagentRow({ toolCall, children }: SubagentRowProps) {
 
             return (
               <li key={tc.id} className="flex items-center gap-1.5 py-px text-[0.8125rem]">
-                <Icon className={`w-3 h-3 shrink-0 ${isActive ? "text-primary animate-spin" : "text-muted-foreground/50"}`} />
+                <Icon className={`w-3 h-3 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground/50"}`} />
                 <span className={`shrink-0 ${isActive ? "text-foreground" : "text-muted-foreground/70"}`}>{label}</span>
                 <span className="font-mono text-[0.6875rem] text-muted-foreground/50 truncate flex-1 min-w-0">{detail}</span>
               </li>
