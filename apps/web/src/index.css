@@ -384,3 +384,8 @@ input[type="range"].settings-range::-moz-range-thumb {
 .dark .scrollbar-on-hover:hover::-webkit-scrollbar-thumb {
   background: oklch(0.35 0.005 260);
 }
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
