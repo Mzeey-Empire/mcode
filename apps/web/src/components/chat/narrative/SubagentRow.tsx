@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { ChevronRight, ChevronDown } from "lucide-react";
 import { StackedLayersIcon } from "./StackedLayersIcon";
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
@@ -58,6 +58,16 @@ export function SubagentRow({ toolCall, children, hooks, allToolCalls, depth = 0
   const isRunning = !toolCall.isComplete;
   const isErrored = toolCall.isComplete && toolCall.isError;
   const [open, setOpen] = useState(isRunning);
+  const userToggledRef = useRef(false);
+
+  // Auto-collapse when the sub-agent finishes, unless the user manually
+  // toggled it open during the run. Manual interactions win.
+  useEffect(() => {
+    if (!isRunning && !userToggledRef.current) {
+      setOpen(false);
+    }
+  }, [isRunning]);
+
   const [showAll, setShowAll] = useState(false);
 
   const description = extractDescription(toolCall);
@@ -90,7 +100,10 @@ export function SubagentRow({ toolCall, children, hooks, allToolCalls, depth = 0
     <div>
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          userToggledRef.current = true;
+          setOpen((o) => !o);
+        }}
         className="flex w-full items-center gap-1.5 px-2 py-1 text-left rounded-md hover:bg-muted/30 transition-colors duration-100 text-[0.8125rem]"
         aria-expanded={open}
       >
