@@ -31,37 +31,24 @@ export interface NarrativeFlowProps {
  * Hook items use a smaller dot; blocked hooks use a destructive color.
  */
 function dotClassForItem(item: NarrativeItem): string {
+  // Distilled: one muted color for all dots. Only active thought gets primary.
+  // Errors get diff-remove. Hooks get smaller dots.
   switch (item.type) {
     case "thought":
-      return item.isActive
-        ? "before:bg-primary"
-        : "before:bg-muted-foreground/60";
+      return item.isActive ? "before:bg-primary" : "before:bg-muted-foreground/30";
 
-    case "tool-group":
-      return "before:bg-muted-foreground/60";
-
-    case "hook": {
-      const isBlocked = item.hook.didBlock === true;
-      if (isBlocked) {
-        return "before:w-[3px] before:h-[3px] before:top-[9px] before:bg-[var(--diff-remove)]";
-      }
-      return "before:w-[3px] before:h-[3px] before:top-[9px] before:bg-muted-foreground/45";
-    }
+    case "hook":
+      return item.hook.didBlock
+        ? "before:w-[3px] before:h-[3px] before:top-[9px] before:bg-[var(--diff-remove)]"
+        : "before:w-[3px] before:h-[3px] before:top-[9px] before:bg-muted-foreground/25";
 
     case "subagent":
-      // Use a red dot when the subagent tool call ended with an error.
       return item.toolCall.isError
         ? "before:bg-[var(--diff-remove)]"
-        : "before:bg-[var(--ring)]/70";
-
-    case "active-tool":
-      return "before:bg-primary";
-
-    case "delta":
-      return "before:bg-primary before:animate-pulse";
+        : "before:bg-muted-foreground/30";
 
     default:
-      return "before:bg-muted-foreground/60";
+      return "before:bg-muted-foreground/30";
   }
 }
 

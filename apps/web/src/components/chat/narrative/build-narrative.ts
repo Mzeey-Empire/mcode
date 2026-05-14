@@ -47,6 +47,15 @@ export function buildNarrativeItems(params: {
 }): NarrativeItem[] {
   const { toolCalls, hooks, thoughtSegments, streamingText, isAgentRunning } = params;
 
+  // eslint-disable-next-line no-console
+  console.debug("[narrative:build]", {
+    segments: thoughtSegments.length,
+    tools: toolCalls.length,
+    hooks: hooks.length,
+    streamLen: streamingText.length,
+    running: isAgentRunning,
+  });
+
   // Edge case: nothing at all.
   if (thoughtSegments.length === 0 && toolCalls.length === 0) {
     // Synthetic active thought when the agent just started streaming but no
@@ -161,6 +170,8 @@ export function buildNarrativeItems(params: {
   // The active thought segment already renders the streaming response with a
   // typing cursor, so a separate delta item would duplicate the text. Omit it.
 
+  // eslint-disable-next-line no-console
+  console.debug("[narrative:build] output", items.map((i) => ({ type: i.type, ...(i.type === "thought" ? { active: i.isActive, textLen: i.segment.text.length } : {}), ...(i.type === "tool-group" ? { count: i.group.calls.length } : {}), ...(i.type === "subagent" ? { name: i.toolCall.toolName, children: i.children.length, complete: i.toolCall.isComplete } : {}), ...(i.type === "active-tool" ? { name: i.toolCall.toolName, parent: i.toolCall.parentToolCallId } : {}) })));
   return items;
 }
 

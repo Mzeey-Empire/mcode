@@ -113,22 +113,16 @@ export function ToolSummaryLine({
         className="flex w-full items-center gap-1.5 px-2 py-1 text-left hover:bg-muted/30 rounded-md transition-colors duration-100 text-[0.8125rem]"
         aria-expanded={open}
       >
-        {/* Leading icon */}
-        <span className="flex w-[15px] h-[15px] items-center justify-center shrink-0">
-          <LeadingIcon className="w-[13px] h-[13px] text-muted-foreground/75" />
-        </span>
+        <LeadingIcon className="w-3 h-3 shrink-0 text-muted-foreground/40" />
 
-        {/* Summary text */}
-        <span className="font-medium text-foreground/65 flex-1 min-w-0 truncate">
+        <span className="text-muted-foreground/60 flex-1 min-w-0 truncate">
           {summaryText}
         </span>
 
-        {/* Worst-status badge */}
         {worstBadge && <StatusBadge status={worstBadge} />}
 
-        {/* Chevron */}
         <ChevronRight
-          className={`h-3.5 w-3.5 text-muted-foreground/60 shrink-0 transition-transform duration-200 ${
+          className={`h-3 w-3 text-muted-foreground/30 shrink-0 transition-transform duration-150 ${
             open ? "rotate-90" : ""
           }`}
         />
