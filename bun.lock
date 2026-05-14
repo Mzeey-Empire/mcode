@@ -159,9 +159,8 @@
   },
   "trustedDependencies": [
     "electron",
-    "better-sqlite3",
-    "node-pty",
     "@electron/rebuild",
+    "node-pty",
     "electron-mksnapshot",
   ],
   "packages": {
