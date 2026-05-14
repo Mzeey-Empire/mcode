@@ -75,6 +75,8 @@ export interface ToolCall {
   parentToolCallId?: string;
   /** Elapsed wall-clock seconds reported by the most recent toolProgress event. */
   elapsedSeconds?: number;
+  /** Epoch ms when the toolUse event was received, used for duration display. */
+  startedAt?: number;
 }
 
 /** Ephemeral hook execution state tracked during a session. Not persisted to DB. */

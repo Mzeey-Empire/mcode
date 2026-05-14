@@ -1724,6 +1724,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         isError: false,
         isComplete: false,
         parentToolCallId: parentToolCallId || undefined,
+        startedAt: Date.now(),
       };
       set((state) => ({
         toolCallsByThread: {
