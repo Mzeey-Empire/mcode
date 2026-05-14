@@ -84,4 +84,20 @@ describe("buildNarrativeItems counts", () => {
     expect(items.find((it) => it.type === "delta")).toBeDefined();
     expect(counts.thoughts).toBe(0);
   });
+
+  it("counts an in-progress Agent as both a step and a sub-agent", () => {
+    const tools: ToolCall[] = [
+      mkTool({ id: "1", toolName: "Read", startedAt: 1000 }),
+      mkTool({ id: "2", toolName: "Agent", startedAt: 2000, isComplete: false }),
+    ];
+    const { counts } = buildNarrativeItems({
+      toolCalls: tools,
+      hooks: [],
+      thoughtSegments: [],
+      streamingText: "",
+      isAgentRunning: true,
+    });
+    expect(counts.steps).toBe(2);
+    expect(counts.subagents).toBe(1);
+  });
 });

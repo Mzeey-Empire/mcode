@@ -30,11 +30,22 @@ export type NarrativeItem =
  * assistant message when the agent is no longer running.
  */
 export interface NarrativeCounts {
-  /** Top-level non-Agent tool calls + completed Agent calls. */
+  /**
+   * Total number of top-level timeline rows (one per top-level tool call).
+   * Includes Agent calls — those are also surfaced separately as `subagents`.
+   * Read alongside `subagents` as: "N steps, of which K were sub-agents".
+   */
   steps: number;
-  /** Number of thought segments rendered inline (not counting the final delta). */
+  /**
+   * Number of thought segments rendered as inline timeline rows.
+   * The final streaming response is rendered as `delta`, not `thought`,
+   * so it is intentionally excluded here.
+   */
   thoughts: number;
-  /** Number of top-level Agent tool calls. */
+  /**
+   * Number of top-level Agent tool calls (delegated sub-agents).
+   * Subset of `steps`.
+   */
   subagents: number;
 }
 

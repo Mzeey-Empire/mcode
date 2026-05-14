@@ -46,6 +46,7 @@ export function buildNarrativeItems(params: {
   if (thoughtSegments.length === 0 && toolCalls.length === 0 && hooks.length === 0) {
     if (isAgentRunning && streamingText.length > 0) {
       const syntheticSegment: ThoughtSegment = { text: streamingText, startedAt: Date.now() };
+      // We just constructed exactly one synthetic thought segment — count it.
       return {
         items: [{ type: "thought", segment: syntheticSegment, isActive: true }],
         counts: { steps: 0, thoughts: 1, subagents: 0 },
