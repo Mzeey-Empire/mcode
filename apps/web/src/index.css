@@ -389,3 +389,13 @@ input[type="range"].settings-range::-moz-range-thumb {
   0%, 50% { opacity: 1; }
   51%, 100% { opacity: 0; }
 }
+
+.typing-cursor {
+  display: inline-block;
+  width: 1.5px;
+  height: 0.875em;
+  background: var(--primary);
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  animation: blink 0.8s steps(1) infinite;
+}

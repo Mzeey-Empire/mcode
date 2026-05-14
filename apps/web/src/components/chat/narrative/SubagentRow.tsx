@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bot, ChevronRight } from "lucide-react";
+import { Bot, ChevronRight, ChevronDown } from "lucide-react";
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import {
   TOOL_ICONS,
@@ -16,6 +16,11 @@ interface SubagentRowProps {
   children: readonly ToolCall[];
   /** Hook executions associated with this subagent. */
   hooks: readonly HookExecution[];
+  /**
+   * Whether this subagent is the most recently active one.
+   * Only the most active running subagent receives the primary background tint.
+   */
+  isMostActive?: boolean;
 }
 
 /**
@@ -85,11 +90,15 @@ function SubagentStatusBadge({ status }: SubagentStatusBadgeProps) {
  * summary, and status badge. Expands to reveal a flat indented list of child
  * tool calls. Active subagents start expanded automatically.
  */
-export function SubagentRow({ toolCall, children }: SubagentRowProps) {
+/** Maximum number of child tool calls shown before a "Show all" toggle appears. */
+const CHILD_CAP = 8;
+
+export function SubagentRow({ toolCall, children, isMostActive = false }: SubagentRowProps) {
   const isRunning = !toolCall.isComplete;
   const isErrored = toolCall.isComplete && toolCall.isError;
 
   const [open, setOpen] = useState(isRunning);
+  const [showAll, setShowAll] = useState(false);
 
   const description = extractDescription(toolCall);
 
@@ -114,15 +123,16 @@ export function SubagentRow({ toolCall, children }: SubagentRowProps) {
     -1,
   );
 
+  // Apply the primary tint only to the most recently active running subagent.
+  const rowBg = isRunning && isMostActive ? "bg-primary/8" : "hover:bg-muted/30";
+
   return (
     <div className="rounded-md">
       {/* Summary row */}
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className={`flex w-full items-center gap-1.5 px-2 py-1 text-left rounded-md transition-colors duration-100 text-[0.8125rem] ${
-          isRunning ? "bg-primary/8" : "hover:bg-muted/30"
-        }`}
+        className={`flex w-full items-center gap-1.5 px-2 py-1 text-left rounded-md transition-colors duration-100 text-[0.8125rem] ${rowBg}`}
         aria-expanded={open}
       >
         {/* Subagent icon */}
@@ -142,7 +152,7 @@ export function SubagentRow({ toolCall, children }: SubagentRowProps) {
         {/* Child count/summary */}
         {metaText && (
           <span className="font-mono text-[0.75rem] text-muted-foreground/70 truncate shrink-0">
-            {isRunning ? metaText : `- ${metaText}`}
+            {isRunning ? metaText : ` · ${metaText}`}
           </span>
         )}
 
@@ -159,8 +169,8 @@ export function SubagentRow({ toolCall, children }: SubagentRowProps) {
 
       {/* Expanded child list */}
       <AnimatedCollapsible open={open}>
-        <ul className="pl-7 mt-0.5 space-y-0.5 pb-1">
-          {children.map((tc, idx) => {
+        <ul className="pl-7 mt-0.5 space-y-0.5 pb-1 max-h-48 overflow-y-auto">
+          {(showAll ? children : children.slice(0, CHILD_CAP)).map((tc, idx) => {
             const Icon = TOOL_ICONS[tc.toolName] ?? DEFAULT_ICON;
             const label = TOOL_LABELS[tc.toolName] ?? tc.toolName;
             const detail = extractDetail(tc);
@@ -194,6 +204,19 @@ export function SubagentRow({ toolCall, children }: SubagentRowProps) {
             );
           })}
         </ul>
+        {/* Show all toggle - only when there are more than CHILD_CAP children */}
+        {children.length > CHILD_CAP && (
+          <button
+            type="button"
+            onClick={() => setShowAll((prev) => !prev)}
+            className="flex items-center gap-1 pl-7 pb-1 text-[0.75rem] text-muted-foreground/60 hover:text-muted-foreground transition-colors duration-100"
+          >
+            <ChevronDown
+              className={`h-3 w-3 shrink-0 transition-transform duration-150 ${showAll ? "rotate-180" : ""}`}
+            />
+            {showAll ? "Show less" : `Show all ${children.length}`}
+          </button>
+        )}
       </AnimatedCollapsible>
     </div>
   );

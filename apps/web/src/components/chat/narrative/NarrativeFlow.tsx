@@ -43,13 +43,16 @@ function dotClassForItem(item: NarrativeItem): string {
     case "hook": {
       const isBlocked = item.hook.didBlock === true;
       if (isBlocked) {
-        return "before:w-[3px] before:h-[3px] before:bg-[var(--diff-remove)]";
+        return "before:w-[3px] before:h-[3px] before:top-[9px] before:bg-[var(--diff-remove)]";
       }
-      return "before:w-[3px] before:h-[3px] before:bg-muted-foreground/45";
+      return "before:w-[3px] before:h-[3px] before:top-[9px] before:bg-muted-foreground/45";
     }
 
     case "subagent":
-      return "before:bg-[var(--ring)]/70";
+      // Use a red dot when the subagent tool call ended with an error.
+      return item.toolCall.isError
+        ? "before:bg-[var(--diff-remove)]"
+        : "before:bg-[var(--ring)]/70";
 
     case "active-tool":
       return "before:bg-primary";
@@ -110,8 +113,10 @@ function keyForItem(item: NarrativeItem, index: number): string {
 
 /**
  * Renders the correct child component for a given narrative item type.
+ * `mostActiveSubagentId` is the tool call ID of the running subagent with the
+ * most recent child activity - only that one receives the primary tint.
  */
-function renderItem(item: NarrativeItem): React.ReactNode {
+function renderItem(item: NarrativeItem, mostActiveSubagentId: string | null): React.ReactNode {
   switch (item.type) {
     case "thought":
       return <ThoughtBlock segment={item.segment} isActive={item.isActive} />;
@@ -131,6 +136,7 @@ function renderItem(item: NarrativeItem): React.ReactNode {
           toolCall={item.toolCall}
           children={item.children}
           hooks={item.hooks}
+          isMostActive={item.toolCall.id === mostActiveSubagentId}
         />
       );
     case "active-tool":
@@ -190,6 +196,35 @@ export function NarrativeFlow({
     [toolCalls],
   );
 
+  /**
+   * ID of the running subagent with the most recent child tool call `startedAt`.
+   * Only this subagent receives the primary-tinted background.
+   */
+  const mostActiveSubagentId = useMemo<string | null>(() => {
+    const runningSubagents = items.filter(
+      (item): item is Extract<NarrativeItem, { type: "subagent" }> =>
+        item.type === "subagent" && !item.toolCall.isComplete,
+    );
+    if (runningSubagents.length === 0) return null;
+
+    let bestId: string | null = null;
+    let bestTime = -Infinity;
+    for (const sa of runningSubagents) {
+      // Find the most recent child startedAt within this subagent.
+      // Fall back to 0 when startedAt is absent (optional field on ToolCall).
+      const saStartedAt = sa.toolCall.startedAt ?? 0;
+      const latestChild = sa.children.reduce<number>(
+        (max, tc) => ((tc.startedAt ?? 0) > max ? (tc.startedAt ?? 0) : max),
+        saStartedAt,
+      );
+      if (latestChild > bestTime) {
+        bestTime = latestChild;
+        bestId = sa.toolCall.id;
+      }
+    }
+    return bestId;
+  }, [items]);
+
   return (
     <div className="relative flex flex-col pl-[18px]">
       {/* Vertical timeline line */}
@@ -211,7 +246,7 @@ export function NarrativeFlow({
               dot,
             ].join(" ")}
           >
-            {renderItem(item)}
+            {renderItem(item, mostActiveSubagentId)}
           </div>
         );
       })}

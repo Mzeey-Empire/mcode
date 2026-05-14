@@ -51,10 +51,7 @@ export function DeltaBlock({ text }: DeltaBlockProps) {
         <p className="px-2 pb-2 text-[0.8125rem] leading-relaxed text-foreground">
           {text}
           {/* Typing cursor */}
-          <span
-            aria-hidden="true"
-            className="ml-px inline-block h-[0.875em] w-[1.5px] align-text-bottom bg-primary animate-[blink_0.8s_steps(1)_infinite]"
-          />
+          <span aria-hidden="true" className="typing-cursor" />
         </p>
       </AnimatedCollapsible>
     </div>

@@ -73,15 +73,19 @@ export function HookRow({ hook }: HookRowProps) {
         aria-expanded={hasOutput ? open : undefined}
       >
         {/* Status icon */}
-        <span className="flex w-[13px] h-[13px] items-center justify-center shrink-0">
-          {isRunning ? (
+        {isRunning ? (
+          <span aria-label="running" className="flex w-[13px] h-[13px] items-center justify-center shrink-0">
             <Clock className="w-[13px] h-[13px] text-primary animate-spin" />
-          ) : isBlocked ? (
+          </span>
+        ) : isBlocked ? (
+          <span aria-label="blocked" className="flex w-[13px] h-[13px] items-center justify-center shrink-0">
             <X className="w-[13px] h-[13px] text-[var(--diff-remove)]" />
-          ) : (
+          </span>
+        ) : (
+          <span aria-label="passed" className="flex w-[13px] h-[13px] items-center justify-center shrink-0">
             <Check className="w-[13px] h-[13px] text-[var(--diff-add)]" />
-          )}
-        </span>
+          </span>
+        )}
 
         {/* Hook name */}
         <span className="font-medium text-foreground/60 shrink-0">
@@ -143,7 +147,7 @@ export function HookRow({ hook }: HookRowProps) {
               {isRunning ? (
                 <>
                   {outputText}
-                  <span className="animate-pulse">▋</span>
+                  <span aria-hidden="true" className="typing-cursor" />
                 </>
               ) : (
                 outputText
