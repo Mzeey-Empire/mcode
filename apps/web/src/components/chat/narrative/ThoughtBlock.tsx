@@ -45,31 +45,25 @@ export function ThoughtBlock({ segment, isActive }: ThoughtBlockProps) {
 
   return (
     <div className={containerClass}>
-      {/* Header row */}
+      {/* Header row - shows duration and chevron only; no "Thought" label */}
       <button
         type="button"
         onClick={handleToggle}
         disabled={isActive}
-        className="flex w-full items-center gap-1.5 text-left"
+        className="flex w-full items-center gap-1.5 text-left select-none"
         aria-expanded={isActive ? true : open}
       >
-        <span className="text-xs font-medium text-muted-foreground">
-          Thought
-        </span>
-
         {showDuration && (
-          <span className="font-mono text-[0.6875rem] tabular-nums text-muted-foreground/60">
-            for {durationSeconds}s
+          <span className="font-mono text-[0.6875rem] tabular-nums text-muted-foreground/50">
+            {durationSeconds}s
           </span>
         )}
 
-        <span className="ml-auto">
-          <ChevronRight
-            className={`h-3.5 w-3.5 text-muted-foreground/60 transition-transform duration-200 ${
-              isActive || open ? "rotate-90" : ""
-            }`}
-          />
-        </span>
+        <ChevronRight
+          className={`ml-auto h-2.5 w-2.5 text-muted-foreground/40 transition-transform duration-150 ${
+            isActive || open ? "rotate-90" : ""
+          }`}
+        />
       </button>
 
       {/* Collapsed long-thought preview (rendered outside the collapsible so

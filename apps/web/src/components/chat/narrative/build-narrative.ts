@@ -150,18 +150,16 @@ export function buildNarrativeItems(params: {
     }
   }
 
-  // Append any hooks that couldn't be matched to a specific tool call.
+  // Append any unmatched hooks that have a toolName (skip session-level hooks
+  // such as SessionStart:startup which have no associated tool call).
   hooks.forEach((hook, idx) => {
-    if (!placedHookIndices.has(idx)) {
+    if (!placedHookIndices.has(idx) && hook.toolName != null) {
       items.push({ type: "hook", hook });
     }
   });
 
-  // Emit delta if streaming text is present and no active thought segment exists.
-  const hasActiveThought = thoughtSegments.length > 0 && thoughtSegments[thoughtSegments.length - 1].endedAt == null;
-  if (streamingText.length > 0 && !hasActiveThought) {
-    items.push({ type: "delta", text: streamingText });
-  }
+  // The active thought segment already renders the streaming response with a
+  // typing cursor, so a separate delta item would duplicate the text. Omit it.
 
   return items;
 }
