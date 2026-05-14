@@ -13,14 +13,26 @@ export type DiffViewMode = "by-turn" | "all" | "commits" | "summary";
 export type DiffRenderMode = "unified" | "side-by-side";
 
 /** Minimum right panel width in pixels. */
-export const PANEL_MIN_WIDTH = 300;
-/** Default right panel width in pixels. */
+export const PANEL_MIN_WIDTH = 384;
+/**
+ * Fallback width when the viewport is unavailable (tests, SSR). Live UI uses half the
+ * viewport via {@link getDefaultPanelWidthPx}.
+ */
 export const PANEL_DEFAULT_WIDTH = 380;
 /** Wide snap target for the right panel (double-click drag handle). */
 export const PANEL_WIDE_WIDTH = 680;
 
 function clampWidth(w: number): number {
   return Math.max(PANEL_MIN_WIDTH, w);
+}
+
+/**
+ * Returns the default panel width for the current window (50% of the viewport, clamped
+ * to {@link PANEL_MIN_WIDTH}). Used when a thread has no stored width yet.
+ */
+export function getDefaultPanelWidthPx(): number {
+  if (typeof globalThis.window === "undefined") return clampWidth(PANEL_DEFAULT_WIDTH);
+  return clampWidth(Math.round(globalThis.window.innerWidth * 0.5));
 }
 
 /** Currently selected file for diff viewing. */
@@ -40,7 +52,21 @@ export type RightPanelState = {
   readonly activeTab: RightPanelTab;
 };
 
-/** Default state for threads with no panel record. Panels start closed. */
+/**
+ * Baseline right-panel state for a thread that has no persisted row (50% viewport width).
+ */
+export function createDefaultRightPanelState(): RightPanelState {
+  return {
+    visible: false,
+    width: getDefaultPanelWidthPx(),
+    activeTab: "tasks",
+  };
+}
+
+/**
+ * Static defaults for threads with no panel store row; live width uses
+ * {@link getDefaultPanelWidthPx} through {@link createDefaultRightPanelState}.
+ */
 export const RIGHT_PANEL_DEFAULTS: RightPanelState = {
   visible: false,
   width: PANEL_DEFAULT_WIDTH,
@@ -128,11 +154,11 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   summaryLoading: false,
 
   getRightPanel: (threadId) =>
-    get().rightPanelByThread[threadId] ?? RIGHT_PANEL_DEFAULTS,
+    get().rightPanelByThread[threadId] ?? createDefaultRightPanelState(),
 
   toggleRightPanel: (threadId) =>
     set((state) => {
-      const current = state.rightPanelByThread[threadId] ?? RIGHT_PANEL_DEFAULTS;
+      const current = state.rightPanelByThread[threadId] ?? createDefaultRightPanelState();
       return {
         rightPanelByThread: {
           ...state.rightPanelByThread,
@@ -143,7 +169,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
 
   showRightPanel: (threadId) =>
     set((state) => {
-      const current = state.rightPanelByThread[threadId] ?? RIGHT_PANEL_DEFAULTS;
+      const current = state.rightPanelByThread[threadId] ?? createDefaultRightPanelState();
       return {
         rightPanelByThread: {
           ...state.rightPanelByThread,
@@ -154,7 +180,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
 
   hideRightPanel: (threadId) =>
     set((state) => {
-      const current = state.rightPanelByThread[threadId] ?? RIGHT_PANEL_DEFAULTS;
+      const current = state.rightPanelByThread[threadId] ?? createDefaultRightPanelState();
       return {
         rightPanelByThread: {
           ...state.rightPanelByThread,
@@ -165,7 +191,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
 
   setRightPanelWidth: (threadId, width) =>
     set((state) => {
-      const current = state.rightPanelByThread[threadId] ?? RIGHT_PANEL_DEFAULTS;
+      const current = state.rightPanelByThread[threadId] ?? createDefaultRightPanelState();
       return {
         rightPanelByThread: {
           ...state.rightPanelByThread,
@@ -176,7 +202,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
 
   setRightPanelTab: (threadId, tab) =>
     set((state) => {
-      const current = state.rightPanelByThread[threadId] ?? RIGHT_PANEL_DEFAULTS;
+      const current = state.rightPanelByThread[threadId] ?? createDefaultRightPanelState();
       return {
         rightPanelByThread: {
           ...state.rightPanelByThread,
