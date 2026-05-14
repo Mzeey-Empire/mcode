@@ -1,4 +1,4 @@
-import { lazy, Suspense, useLayoutEffect, useRef } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 const LazyMarkdownContent = lazy(() => import("../MarkdownContent"));
 
@@ -10,9 +10,7 @@ interface DeltaBlockProps {
 /**
  * Walks all text nodes inside `root` back-to-front and returns the last one
  * with non-whitespace content. Returning the Text node itself (not its
- * parent element) lets the caller position a Range at the exact end offset
- * — yielding a precise caret-shaped rect rather than the bounding box of
- * the surrounding element.
+ * parent element) lets the caller position a Range at the exact end offset.
  */
 function findLastTextNode(root: HTMLElement): Text | null {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -28,12 +26,8 @@ function findLastTextNode(root: HTMLElement): Text | null {
 }
 
 /**
- * Returns the caret rect at the END of the given text node.
- *
- * Uses `getClientRects()` on a zero-length Range positioned at the node's
- * end offset. For multi-line text this returns one rect per line; we take
- * the last (where the caret would actually sit). Returns `null` when no
- * meaningful rect can be measured.
+ * Returns the caret rect at the END of the given text node, or null when
+ * no meaningful rect can be measured.
  */
 function getCaretRectAtEnd(node: Text): DOMRect | null {
   const len = node.textContent?.length ?? 0;
@@ -43,8 +37,6 @@ function getCaretRectAtEnd(node: Text): DOMRect | null {
   range.setEnd(node, len);
   let rects = range.getClientRects();
   if (rects.length === 0) {
-    // Collapsed range across line/box boundary — measure the last character
-    // and synthesise a zero-width rect anchored at its right edge.
     range.setStart(node, len - 1);
     range.setEnd(node, len);
     rects = range.getClientRects();
@@ -56,20 +48,86 @@ function getCaretRectAtEnd(node: Text): DOMRect | null {
 }
 
 /**
- * Streaming agent response with a typing cursor anchored at the end of the
- * last visible character.
+ * Reveals `target` character-by-character at a steady rate, with adaptive
+ * catch-up when the target races ahead of the displayed text.
  *
- * Positioning uses `transform: translate3d()` with a short CSS transition so
- * the cursor glides smoothly as new text streams in, rather than jumping
- * discretely between layouts. The cursor stays a permanent child of the
- * root <div> (React-owned, never re-parented) — re-parenting mid-stream
- * corrupts React's fiber tree and crashes the commit phase.
+ * Idle rate: ~3 chars per animation frame (≈180 chars/sec at 60fps).
+ * Catch-up: `step = max(3, ceil(behind / 10))` — each frame closes 1/10 of
+ * the gap, so a 1000-char buffer drains in well under a second.
  *
- * Visibility is controlled via inline opacity with its own transition, so
- * the cursor fades out cleanly when there's no measurable caret position
- * (empty markdown, mid-render, after final delta).
+ * When `target` shrinks (e.g., the parent reset for a new turn), the
+ * displayed value resets immediately and the animation cancels.
+ */
+function useTypewriter(target: string): string {
+  const [displayed, setDisplayed] = useState(target);
+  const targetRef = useRef(target);
+  const displayedRef = useRef(target);
+  const rafRef = useRef<number | null>(null);
+
+  // Mirror current target / displayed into refs so the rAF tick (which
+  // closes over the first render only) always reads fresh values.
+  targetRef.current = target;
+  displayedRef.current = displayed;
+
+  useEffect(() => {
+    // New turn (or any shrink): snap to target, kill the loop.
+    if (target.length < displayedRef.current.length) {
+      if (rafRef.current != null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      setDisplayed(target);
+      return;
+    }
+    // Already caught up: nothing to animate.
+    if (target === displayedRef.current) return;
+    // Loop already in flight: it'll see the new target via the ref.
+    if (rafRef.current != null) return;
+
+    const tick = (): void => {
+      const t = targetRef.current;
+      const d = displayedRef.current;
+      if (d.length >= t.length) {
+        rafRef.current = null;
+        return;
+      }
+      const behind = t.length - d.length;
+      const step = Math.max(3, Math.ceil(behind / 10));
+      const next = t.slice(0, d.length + step);
+      displayedRef.current = next;
+      setDisplayed(next);
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+  }, [target]);
+
+  // Cancel any in-flight frame on unmount.
+  useEffect(() => () => {
+    if (rafRef.current != null) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+  }, []);
+
+  return displayed;
+}
+
+/**
+ * Streaming agent response with a typewriter reveal and a typing cursor.
+ *
+ * Incoming `text` deltas are buffered by `useTypewriter`, which advances the
+ * displayed text at a steady rate (≈180 chars/sec when idle, scaling up to
+ * close any backlog). The markdown renderer always receives the typewriter
+ * output, so users see characters form rather than whole chunks pop in.
+ *
+ * The cursor is anchored at the end of whatever is currently rendered via
+ * a layout effect that measures `Range.getClientRects()` and positions the
+ * cursor with `transform: translate3d()` plus a CSS transition. The cursor
+ * stays a permanent child of the root <div> (React-owned, never re-parented)
+ * to avoid corrupting React's fiber tree.
  */
 export function DeltaBlock({ text }: DeltaBlockProps) {
+  const displayed = useTypewriter(text);
   const rootRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef<HTMLSpanElement>(null);
 
@@ -83,7 +141,6 @@ export function DeltaBlock({ text }: DeltaBlockProps) {
       cursor.style.opacity = "0";
       return;
     }
-
     const caretRect = getCaretRectAtEnd(lastTextNode);
     if (!caretRect) {
       cursor.style.opacity = "0";
@@ -93,8 +150,6 @@ export function DeltaBlock({ text }: DeltaBlockProps) {
     const rootRect = root.getBoundingClientRect();
     const x = caretRect.right - rootRect.left;
     const y = caretRect.top - rootRect.top;
-    // Clamp height to a sane line-height upper bound so a glitched
-    // measurement (e.g. a full block rect) never paints a giant bar.
     const h = Math.min(Math.max(caretRect.height || 16, 12), 28);
 
     cursor.style.opacity = "1";
@@ -107,11 +162,11 @@ export function DeltaBlock({ text }: DeltaBlockProps) {
       <Suspense
         fallback={
           <p className="whitespace-pre-wrap text-[0.9375rem] leading-relaxed">
-            {text}
+            {displayed}
           </p>
         }
       >
-        <LazyMarkdownContent content={text} isStreaming={true} />
+        <LazyMarkdownContent content={displayed} isStreaming={true} />
       </Suspense>
       <span
         ref={cursorRef}
