@@ -3,22 +3,27 @@ import type { ThoughtSegment, NarrativeItem } from "./types";
 
 const AGENT_TOOL_NAME = "Agent";
 
-/** Determines whether any call in a group was cancelled. */
+/** Returns true if any call in a group has output containing "cancelled". */
 function hasCancelledCall(calls: readonly ToolCall[]): boolean {
   return calls.some((tc) => typeof tc.output === "string" && tc.output.toLowerCase().includes("cancelled"));
 }
 
-/** A unified timeline event used to interleave tool calls and hooks chronologically. */
+/** A unified timeline event - everything that happens during a turn, sorted by startedAt. */
 type TimelineEvent =
+  | { kind: "thought"; segment: ThoughtSegment; startedAt: number }
   | { kind: "tool"; call: ToolCall; startedAt: number }
-  | { kind: "hook"; hook: HookExecution; index: number; startedAt: number };
+  | { kind: "hook"; hook: HookExecution; startedAt: number };
 
 /**
  * Transforms raw live state into an ordered NarrativeItem[] for the timeline.
  *
- * Interleaves thoughts, tool groups, hooks, and sub-agents chronologically based
- * on their startedAt timestamps. Hooks appear inline with tool calls in the
- * order they fired, not grouped at the end.
+ * All events (thoughts, tool calls, hooks) are placed in a single chronological
+ * timeline sorted by startedAt. Consecutive completed non-Agent tool calls are
+ * grouped into tool-group items.
+ *
+ * A thought is rendered as "active" only when it is the latest segment AND
+ * there are no running tool calls - if subagents are running, the parent
+ * is waiting, not actively streaming.
  */
 export function buildNarrativeItems(params: {
   toolCalls: readonly ToolCall[];
@@ -49,7 +54,6 @@ export function buildNarrativeItems(params: {
   // Separate top-level from child tool calls.
   const topLevel: ToolCall[] = [];
   const childrenMap = new Map<string, ToolCall[]>();
-
   for (const tc of toolCalls) {
     if (tc.parentToolCallId == null) {
       topLevel.push(tc);
@@ -60,114 +64,105 @@ export function buildNarrativeItems(params: {
     }
   }
 
+  // Determine the active tool (in-progress non-Agent top-level call).
+  const activeTc = [...topLevel].reverse().find(
+    (tc) => !tc.isComplete && tc.toolName !== AGENT_TOOL_NAME,
+  ) ?? null;
+
+  // Check whether any tool call is running. If yes, no thought should appear "active"
+  // because the parent agent is waiting on the tool, not actively streaming.
+  const anyToolRunning = topLevel.some((tc) => !tc.isComplete);
   // eslint-disable-next-line no-console
-  const agents = topLevel.filter((tc) => tc.toolName === "Agent");
-  if (agents.length > 0) {
-    console.debug("[narrative:build] agent mapping", agents.map((a) => ({
-      id: a.id,
-      desc: String((a.toolInput as Record<string, unknown>).description ?? "").slice(0, 40),
-      children: (childrenMap.get(a.id) ?? []).length,
-      complete: a.isComplete,
-    })));
-  }
+  console.debug("[narrative:build] running state", { anyToolRunning, activeTcId: activeTc?.id });
 
-  // Build a chronologically sorted timeline of top-level tool calls AND hooks.
-  // Hooks that are children of a subagent (matched by toolName to a child call)
-  // are NOT placed at the top level - they belong inside the SubagentRow.
-  const childToolNames = new Set<string>();
-  for (const kids of childrenMap.values()) {
-    for (const k of kids) childToolNames.add(k.toolName);
-  }
-
+  // Build a unified timeline of everything sorted by startedAt.
   const timeline: TimelineEvent[] = [];
-  for (const tc of topLevel) {
-    timeline.push({ kind: "tool", call: tc, startedAt: tc.startedAt ?? 0 });
+  for (const seg of thoughtSegments) {
+    timeline.push({ kind: "thought", segment: seg, startedAt: seg.startedAt });
   }
-  hooks.forEach((hook, index) => {
-    timeline.push({ kind: "hook", hook, index, startedAt: hook.startedAt });
-  });
+  for (const tc of topLevel) {
+    if (tc === activeTc) continue; // Active tool emitted at the end
+    timeline.push({ kind: "tool", call: tc, startedAt: tc.startedAt ?? Date.now() });
+  }
+  for (const hook of hooks) {
+    timeline.push({ kind: "hook", hook, startedAt: hook.startedAt });
+  }
   timeline.sort((a, b) => a.startedAt - b.startedAt);
 
-  // Determine the active (in-progress non-Agent) top-level call.
-  const activeTc =
-    [...topLevel].reverse().find((tc) => !tc.isComplete && tc.toolName !== AGENT_TOOL_NAME) ?? null;
+  // eslint-disable-next-line no-console
+  console.debug("[narrative:build] timeline order",
+    timeline.map((e) => ({ kind: e.kind, t: e.startedAt, label:
+      e.kind === "thought" ? `thought(${e.segment.text.slice(0, 20)})` :
+      e.kind === "tool" ? `${e.call.toolName}` :
+      `${e.hook.hookName}` })));
 
   const items: NarrativeItem[] = [];
+  const pendingGroup: ToolCall[] = [];
 
-  // Walk thought segments, emitting thoughts and the timeline events between them.
-  let timelineIdx = 0;
-  const flushTimelineUntil = (boundary: number) => {
-    let i = timelineIdx;
-    const pendingCompletedTools: ToolCall[] = [];
-    const flushPendingGroup = () => {
-      if (pendingCompletedTools.length === 0) return;
-      items.push({
-        type: "tool-group",
-        group: { calls: pendingCompletedTools.slice() },
-        hasError: pendingCompletedTools.some((c) => c.isError),
-        hasCancelled: hasCancelledCall(pendingCompletedTools),
-      });
-      pendingCompletedTools.length = 0;
-    };
-
-    while (i < timeline.length && timeline[i].startedAt < boundary) {
-      const evt = timeline[i];
-
-      if (evt.kind === "hook") {
-        flushPendingGroup();
-        items.push({ type: "hook", hook: evt.hook });
-        i++;
-        continue;
-      }
-
-      const tc = evt.call;
-      if (tc === activeTc) {
-        // Skip the active tool here - emitted at the end.
-        i++;
-        continue;
-      }
-
-      if (tc.toolName === AGENT_TOOL_NAME) {
-        flushPendingGroup();
-        items.push({
-          type: "subagent",
-          toolCall: tc,
-          children: childrenMap.get(tc.id) ?? [],
-          hooks: hooks.filter((h) => h.toolName === AGENT_TOOL_NAME),
-        });
-        i++;
-        continue;
-      }
-
-      if (tc.isComplete) {
-        pendingCompletedTools.push(tc);
-        i++;
-        continue;
-      }
-
-      // Incomplete non-Agent calls that aren't the activeTc - rare, skip.
-      i++;
-    }
-    flushPendingGroup();
-    timelineIdx = i;
+  const flushGroup = () => {
+    if (pendingGroup.length === 0) return;
+    items.push({
+      type: "tool-group",
+      group: { calls: pendingGroup.slice() },
+      hasError: pendingGroup.some((c) => c.isError),
+      hasCancelled: hasCancelledCall(pendingGroup),
+    });
+    pendingGroup.length = 0;
   };
 
-  for (let segIdx = 0; segIdx < thoughtSegments.length; segIdx++) {
-    const segment = thoughtSegments[segIdx];
-    items.push({ type: "thought", segment, isActive: segment.endedAt == null });
-    const nextStart = thoughtSegments[segIdx + 1]?.startedAt ?? Infinity;
-    flushTimelineUntil(nextStart);
+  // Find the index of the last thought segment for active-state detection.
+  const lastSegmentStartedAt = thoughtSegments.length > 0
+    ? thoughtSegments[thoughtSegments.length - 1].startedAt
+    : -1;
+
+  for (const evt of timeline) {
+    if (evt.kind === "thought") {
+      flushGroup();
+      const isLatest = evt.segment.startedAt === lastSegmentStartedAt;
+      // Only highlight as "active" if this is the latest segment, it hasn't
+      // been ended, AND nothing else is currently running.
+      const isActive = isLatest && evt.segment.endedAt == null && !anyToolRunning;
+      items.push({ type: "thought", segment: evt.segment, isActive });
+      continue;
+    }
+
+    if (evt.kind === "hook") {
+      flushGroup();
+      items.push({ type: "hook", hook: evt.hook });
+      continue;
+    }
+
+    // Tool call
+    const tc = evt.call;
+    if (tc.toolName === AGENT_TOOL_NAME) {
+      flushGroup();
+      items.push({
+        type: "subagent",
+        toolCall: tc,
+        children: childrenMap.get(tc.id) ?? [],
+        hooks: hooks.filter((h) => h.toolName === AGENT_TOOL_NAME),
+      });
+      continue;
+    }
+
+    if (tc.isComplete) {
+      pendingGroup.push(tc);
+      continue;
+    }
+
+    // Incomplete non-Agent call that isn't the activeTc - rare, skip.
   }
+  flushGroup();
 
-  // Flush any remaining timeline events (no thought segments, or events after the last thought).
-  flushTimelineUntil(Infinity);
-
-  // Emit the active (in-progress) tool call last.
   if (activeTc != null) {
     items.push({ type: "active-tool", toolCall: activeTc });
   }
 
   // eslint-disable-next-line no-console
-  console.debug("[narrative:build] output", items.map((i) => ({ type: i.type })));
+  console.debug("[narrative:build] output", items.map((i) => ({
+    type: i.type,
+    ...(i.type === "thought" ? { active: i.isActive } : {}),
+    ...(i.type === "subagent" ? { name: i.toolCall.toolName, children: i.children.length } : {}),
+  })));
   return items;
 }

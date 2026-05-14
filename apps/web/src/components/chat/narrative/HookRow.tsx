@@ -102,14 +102,12 @@ export function HookRow({ hook }: HookRowProps) {
         {/* Spacer */}
         <span className="flex-1" />
 
-        {/* Duration or elapsed timer */}
-        <span className="font-mono text-[0.6875rem] tabular-nums text-muted-foreground/60 shrink-0">
-          {isRunning
-            ? `${elapsedSeconds}s`
-            : hook.durationMs != null
-            ? formatDuration(hook.durationMs)
-            : null}
-        </span>
+        {/* Duration or elapsed timer - hide for sub-5ms instant hooks */}
+        {(isRunning || (hook.durationMs != null && hook.durationMs >= 5)) && (
+          <span className="font-mono text-[0.6875rem] tabular-nums text-muted-foreground/60 shrink-0">
+            {isRunning ? `${elapsedSeconds}s` : formatDuration(hook.durationMs!)}
+          </span>
+        )}
 
         {/* Status badge */}
         {isRunning && (
