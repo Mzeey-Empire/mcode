@@ -1,10 +1,16 @@
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ListChecks, Diff, Globe, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useTaskStore } from "@/stores/taskStore";
-import { useDiffStore, PANEL_MIN_WIDTH, PANEL_DEFAULT_WIDTH, PANEL_WIDE_WIDTH, RIGHT_PANEL_DEFAULTS } from "@/stores/diffStore";
+import {
+  useDiffStore,
+  PANEL_MIN_WIDTH,
+  PANEL_WIDE_WIDTH,
+  createDefaultRightPanelState,
+  getDefaultPanelWidthPx,
+} from "@/stores/diffStore";
 import { TaskPanel } from "@/components/tasks/TaskPanel";
 import { TaskPanelHeader } from "@/components/tasks/TaskPanelHeader";
 import { DiffPanel } from "@/components/diff";
@@ -16,23 +22,6 @@ import { cn } from "@/lib/utils";
 export function RightPanel() {
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
-
-  // Per-thread panel state
-  const panelState = useDiffStore((s) =>
-    activeThreadId
-      ? (s.rightPanelByThread[activeThreadId] ?? RIGHT_PANEL_DEFAULTS)
-      : RIGHT_PANEL_DEFAULTS,
-  );
-  const { visible: panelVisible, width: panelWidth, activeTab } = panelState;
-
-  // Zustand action refs are stable (same identity for the store's lifetime),
-  // so destructuring from getState() at render time is safe and avoids
-  // adding actions to useCallback/useEffect dependency arrays.
-  const { setRightPanelWidth, setRightPanelTab, hideRightPanel } = useDiffStore.getState();
-
-  const tasks = useTaskStore(
-    (s) => (activeThreadId ? s.tasksByThread[activeThreadId] : undefined),
-  );
 
   // Render the panel as a modal overlay anchored to the right edge with a
   // backdrop covering the chat whenever side-by-side layout would leave the
@@ -64,6 +53,25 @@ export function RightPanel() {
       if (rafId !== null) cancelAnimationFrame(rafId);
     };
   }, []);
+
+  const storedPanel = useDiffStore((s) =>
+    activeThreadId ? s.rightPanelByThread[activeThreadId] : undefined,
+  );
+  /** Avoid a Zustand selector that allocates a fresh default object every evaluation. */
+  const panelState = useMemo(
+    () => storedPanel ?? createDefaultRightPanelState(),
+    [storedPanel, viewportWidth],
+  );
+  const { visible: panelVisible, width: panelWidth, activeTab } = panelState;
+
+  // Zustand action refs are stable (same identity for the store's lifetime),
+  // so destructuring from getState() at render time is safe and avoids
+  // adding actions to useCallback/useEffect dependency arrays.
+  const { setRightPanelWidth, setRightPanelTab, hideRightPanel } = useDiffStore.getState();
+
+  const tasks = useTaskStore(
+    (s) => (activeThreadId ? s.tasksByThread[activeThreadId] : undefined),
+  );
 
   // Thresholds tuned for a readable chat column next to an expanded sidebar.
   const CHAT_COMFORT_MIN = 520;
@@ -200,8 +208,8 @@ export function RightPanel() {
         tabIndex={isOverlay ? -1 : undefined}
         style={
           isOverlay
-            // Drop minWidth entirely on overlay: on sub-300px viewports the
-            // 90vw cap would still be exceeded by a 300px minimum.
+            // Drop minWidth entirely on overlay: on narrow viewports the
+            // 90vw cap would still exceed a large pixel minimum.
             ? { width: overlayWidth }
             : { width: panelWidth, minWidth: PANEL_MIN_WIDTH, maxWidth: `calc(100vw - ${PANEL_MIN_WIDTH}px)` }
         }
@@ -219,27 +227,35 @@ export function RightPanel() {
         role="separator"
         aria-orientation="vertical"
         tabIndex={0}
-        className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize z-10
-                   hover:bg-primary/25 active:bg-primary/40 focus-visible:bg-primary/25 transition-colors duration-150"
+        className="absolute left-0 top-0 bottom-0 z-10 flex w-3 cursor-col-resize justify-center bg-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         onMouseDown={onDragStart}
         onDoubleClick={() => {
           const viewportCap = window.innerWidth - PANEL_MIN_WIDTH;
-          const target = panelWidth >= PANEL_WIDE_WIDTH
-            ? PANEL_DEFAULT_WIDTH
-            : Math.min(PANEL_WIDE_WIDTH, viewportCap);
+          const narrow = getDefaultPanelWidthPx();
+          const target =
+            panelWidth >= PANEL_WIDE_WIDTH
+              ? narrow
+              : Math.min(PANEL_WIDE_WIDTH, viewportCap);
           setRightPanelWidth(activeThreadId!, Math.max(PANEL_MIN_WIDTH, target));
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             const viewportCap = window.innerWidth - PANEL_MIN_WIDTH;
-            const target = panelWidth >= PANEL_WIDE_WIDTH
-              ? PANEL_DEFAULT_WIDTH
-              : Math.min(PANEL_WIDE_WIDTH, viewportCap);
+            const narrow = getDefaultPanelWidthPx();
+            const target =
+              panelWidth >= PANEL_WIDE_WIDTH
+                ? narrow
+                : Math.min(PANEL_WIDE_WIDTH, viewportCap);
             setRightPanelWidth(activeThreadId!, Math.max(PANEL_MIN_WIDTH, target));
           }
         }}
-      />
+      >
+        <span
+          className="pointer-events-none h-full w-px shrink-0 rounded-none bg-border/45"
+          aria-hidden
+        />
+      </div>
 
       {/* Tab header */}
       <div className="flex-none border-b border-border/40">
