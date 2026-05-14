@@ -1,12 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
+import { formatDuration } from "@/lib/time";
 import type { ToolCall } from "@/transport/types";
 import { TOOL_PHASE_LABELS } from "../tool-renderers/constants";
-
-/** Format elapsed seconds as M:SS (e.g. 0:07, 1:23). */
-function formatElapsed(totalSeconds: number): string {
-  const m = Math.floor(totalSeconds / 60);
-  return m + ":" + String(totalSeconds % 60).padStart(2, "0");
-}
 
 /** Derive the current phase label from active tool calls. */
 function derivePhaseLabel(toolCalls: readonly ToolCall[]): string {
@@ -18,7 +13,7 @@ function derivePhaseLabel(toolCalls: readonly ToolCall[]): string {
     return TOOL_PHASE_LABELS[latest.toolName] ?? "Working...";
   }
 
-  return "Pulling the next step together...";
+  return "Preparing...";
 }
 
 interface NarrativeIndicatorProps {
@@ -67,24 +62,22 @@ export function NarrativeIndicator({
     subagentCount === 1 ? "1 subagent" : `${subagentCount} subagents`;
 
   return (
-    <div className="flex items-center gap-2 px-2 py-2 mt-1.5 text-[0.8125rem]">
-      <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse shrink-0" />
-      <span className="font-mono text-[0.6875rem] tabular-nums text-muted-foreground">
+    <div className="flex items-center gap-2 px-4 py-2 mt-1.5">
+      <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+        <span className="size-1.5 shrink-0 rounded-full bg-primary animate-pulse" />
         {stepCount} {stepCount === 1 ? "step" : "steps"}
-      </span>
-      {subagentCount > 0 && (
-        <>
-          <span className="text-muted-foreground/45 text-[0.6875rem]">·</span>
-          <span className="font-mono text-[0.6875rem] tabular-nums text-muted-foreground">
+        {subagentCount > 0 && (
+          <>
+            <span className="text-muted-foreground/45">·</span>
             {subagentLabel}
-          </span>
-        </>
-      )}
-      <span className="text-muted-foreground/45 text-[0.6875rem]">·</span>
-      <span className="text-muted-foreground">{phaseLabel}</span>
+          </>
+        )}
+        <span className="text-muted-foreground/45">·</span>
+        {phaseLabel}
+      </span>
       {startTime !== undefined && (
-        <span className="font-mono text-[0.6875rem] tabular-nums text-muted-foreground/50">
-          ({formatElapsed(elapsed)})
+        <span className="text-xs text-muted-foreground/50">
+          ({formatDuration(elapsed)})
         </span>
       )}
     </div>
