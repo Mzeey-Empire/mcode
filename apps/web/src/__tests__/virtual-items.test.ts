@@ -45,21 +45,19 @@ function buildAll(
   streamingText: string | undefined,
   isAgentRunning: boolean,
   agentStartTime: number | undefined,
-  persistedToolCallCounts?: Record<string, number>,
 ): ChatVirtualItem[] {
-  const stable = buildStableItems(messages, persistedToolCallCounts);
+  const stable = buildStableItems(messages);
   const volatile = buildVolatileItems(toolCalls, isAgentRunning, agentStartTime, streamingText);
   return buildVirtualItems(stable, volatile, toolCalls.length > 0);
 }
 
 describe("buildStableItems", () => {
-  it("returns only message items even when persisted counts are provided", () => {
+  it("returns only message items even when no extra options are provided", () => {
     const messages: Message[] = [
       makeMessage({ id: "u1", role: "user", content: "hi" }),
       makeMessage({ id: "a1", role: "assistant", content: "hello" }),
     ];
-    const counts = { a1: 5 };
-    const items = buildStableItems(messages, counts);
+    const items = buildStableItems(messages);
     expect(items).toHaveLength(2);
     expect(items.every((i) => i.type === "message")).toBe(true);
   });
@@ -166,8 +164,7 @@ describe("buildVirtualItems (combined)", () => {
       makeMessage({ id: "msg-1", sequence: 1, role: "user", content: "hi" }),
       makeMessage({ id: "msg-2", sequence: 2, role: "assistant", content: "done" }),
     ];
-    const counts = { "msg-2": 5 };
-    const result = buildAll(messages, [], undefined, false, undefined, counts);
+    const result = buildAll(messages, [], undefined, false, undefined);
     const types = result.map((item) => item.type);
     expect(types).toEqual(["message", "message"]);
   });
@@ -218,13 +215,12 @@ describe("buildVirtualItems (combined)", () => {
     expect(narrativeItem.isAgentRunning).toBe(true);
   });
 
-  it("narrative-flow is present when live tool calls exist alongside persisted counts", () => {
+  it("narrative-flow is present when live tool calls exist", () => {
     const messages = [
       makeMessage({ id: "msg-1", sequence: 1, role: "assistant", content: "done" }),
     ];
     const toolCalls = [makeToolCall({ id: "tc-1" })];
-    const counts = { "msg-1": 3 };
-    const result = buildAll(messages, toolCalls, undefined, false, undefined, counts);
+    const result = buildAll(messages, toolCalls, undefined, false, undefined);
 
     expect(result.map((item) => item.type)).toContain("narrative-flow");
   });

@@ -236,12 +236,6 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   const toolCallsRaw = useThreadStore((s) =>
     activeThreadId ? s.toolCallsByThread[activeThreadId] : undefined,
   );
-  const persistedToolCallCounts = useThreadStore(
-    useShallow((s) => s.persistedToolCallCounts),
-  );
-  const serverMessageIds = useThreadStore(
-    useShallow((s) => s.serverMessageIds),
-  );
   const persistedFilesChanged = useThreadStore(
     useShallow((s) => s.persistedFilesChanged),
   );
@@ -357,8 +351,8 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   }, [activeThreadId, hasMore, isLoadingMore, loadOlderMessages]);
 
   const stableItems = useMemo(
-    () => buildStableItems(messages, persistedToolCallCounts, serverMessageIds, persistedFilesChanged, latestTurnWithChanges),
-    [messages, persistedToolCallCounts, serverMessageIds, persistedFilesChanged, latestTurnWithChanges],
+    () => buildStableItems(messages, persistedFilesChanged, latestTurnWithChanges),
+    [messages, persistedFilesChanged, latestTurnWithChanges],
   );
 
   const volatileItems = useMemo(

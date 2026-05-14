@@ -60,8 +60,6 @@ export type ChatVirtualItem =
  */
 export function buildStableItems(
   messages: readonly Message[],
-  _persistedToolCallCounts?: Record<string, number>,
-  _serverMessageIds?: Record<string, string>,
   persistedFilesChanged?: Record<string, string[]>,
   latestTurnWithChanges?: string | null,
 ): ChatVirtualItem[] {
