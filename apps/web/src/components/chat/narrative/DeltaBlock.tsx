@@ -55,6 +55,14 @@ export function DeltaBlock({ text }: DeltaBlockProps) {
     if (target && cursor.parentElement !== target) {
       target.appendChild(cursor);
     }
+    // Restore cursor to root before the next reconciliation. React expects
+    // the cursor span to be a direct child of the root <div> (where it was
+    // originally rendered). Without this, removeChild throws on unmount.
+    return () => {
+      if (cursor.parentElement !== root) {
+        root.appendChild(cursor);
+      }
+    };
   });
 
   return (
