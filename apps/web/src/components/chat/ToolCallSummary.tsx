@@ -89,7 +89,7 @@ function StepRow({ step }: { step: Step }) {
       <SubagentContainer
         toolCallId={r.id}
         description={r.input_summary}
-        status={r.status as "completed" | "failed" | "running"}
+        status={r.status as "completed" | "failed" | "running" | "cancelled"}
       />
     );
   }

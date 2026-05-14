@@ -1399,7 +1399,10 @@ ${userMessage}`;
 
       for (const tc of buffer) {
         if (tc.status === "running") {
-          tc.status = isError ? "failed" : "completed";
+          // Tools still running when the turn ends were interrupted, not failed.
+          // A tool that actually errored already has status "failed" from
+          // updateBufferedToolCallOutput.
+          tc.status = isError ? "cancelled" : "completed";
         }
         tc.messageId = messageId;
 

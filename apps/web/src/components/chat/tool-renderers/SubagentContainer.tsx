@@ -8,6 +8,7 @@ import type { ToolCallRecord } from "@/transport/types";
 const STATUS_COLORS = {
   completed: "text-primary",
   failed: "text-destructive",
+  cancelled: "text-muted-foreground",
   running: "text-yellow-600 dark:text-yellow-500",
 } as const;
 
@@ -15,7 +16,7 @@ const STATUS_COLORS = {
 interface SubagentContainerProps {
   toolCallId: string;
   description: string;
-  status: "completed" | "failed" | "running";
+  status: "completed" | "failed" | "running" | "cancelled";
   defaultExpanded?: boolean;
 }
 
