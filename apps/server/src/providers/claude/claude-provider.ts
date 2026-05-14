@@ -998,6 +998,14 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                 lastAssistantText = text;
               }
 
+              // Read parent_tool_use_id from the SDK message top-level.
+              // When subagents run in parallel, this is the ONLY reliable way
+              // to determine which Agent owns a given child tool call - the
+              // server-side agentCallStack approach fails for parallel dispatch
+              // because LIFO returns only the most recent Agent.
+              const sdkParentToolUseId =
+                (anyMsg.parent_tool_use_id as string | null | undefined) ?? undefined;
+
               for (const block of contentBlocks) {
                 if (block.type === "tool_use") {
                   const toolId = (block.id as string) || "";
@@ -1009,17 +1017,21 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                     const entry = this.sessions.get(sessionId);
                     entry?.pendingToolUses.add(toolId);
                   }
+                  const toolName = (block.name as string) || "unknown";
+                  logger.debug("Claude ToolUse from assistant block", {
+                    toolId, toolName, parent_tool_use_id: sdkParentToolUseId ?? null,
+                  });
                   this.emit("event", {
                     type: AgentEventType.ToolUse,
                     threadId,
                     toolCallId: toolId,
-                    toolName:
-                      (block.name as string) || "unknown",
+                    toolName,
                     toolInput:
                       (block.input as Record<
                         string,
                         unknown
                       >) || {},
+                    parentToolCallId: sdkParentToolUseId,
                   } satisfies AgentEvent);
                 }
               }
@@ -1243,14 +1255,20 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                 const entry = this.sessions.get(sessionId);
                 entry?.pendingToolUses.add(toolId);
               }
+              const parentToolCallId =
+                (anyMsg.parent_tool_use_id as string | null | undefined) ?? undefined;
+              const toolName =
+                (anyMsg.tool_name as string) ||
+                (anyMsg.name as string) ||
+                "unknown";
+              logger.debug("Claude ToolUse from tool_use message", {
+                toolId, toolName, parent_tool_use_id: parentToolCallId ?? null,
+              });
               this.emit("event", {
                 type: AgentEventType.ToolUse,
                 threadId,
                 toolCallId: toolId,
-                toolName:
-                  (anyMsg.tool_name as string) ||
-                  (anyMsg.name as string) ||
-                  "unknown",
+                toolName,
                 toolInput:
                   (anyMsg.tool_input as Record<
                     string,
@@ -1261,6 +1279,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                     unknown
                   >) ||
                   {},
+                parentToolCallId,
               } satisfies AgentEvent);
               break;
             }

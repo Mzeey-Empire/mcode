@@ -343,11 +343,20 @@ for (const provider of providerRegistry.resolveAll()) {
   provider.on("event", (event: AgentEvent) => {
     let enrichedEvent = event;
 
-    // Enrich non-Agent tool calls with parent ID from the canonical stack in AgentService
+    // Enrich non-Agent tool calls with their parent Agent ID.
+    // Prefer the SDK-provided parent_tool_use_id on the event (set by the
+    // provider when the SDK message carries it). This is the only correct
+    // source for parallel subagents - the agentCallStack LIFO fallback only
+    // works for sequential dispatch and would misattribute parallel children
+    // to whichever Agent was pushed last.
     if (event.type === AgentEventType.ToolUse && event.toolName !== "Agent") {
-      const parentId = agentService.getCurrentParentToolCallId(event.threadId);
-      if (parentId) {
-        enrichedEvent = { ...event, parentToolCallId: parentId };
+      if (event.parentToolCallId) {
+        // SDK already told us the parent - use it as-is.
+      } else {
+        const parentId = agentService.getCurrentParentToolCallId(event.threadId);
+        if (parentId) {
+          enrichedEvent = { ...event, parentToolCallId: parentId };
+        }
       }
     }
 

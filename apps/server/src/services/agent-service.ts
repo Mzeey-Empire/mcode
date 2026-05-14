@@ -1246,14 +1246,26 @@ ${userMessage}`;
   /** Buffer a tool call event for later persistence. */
   private bufferToolCall(
     threadId: string,
-    event: { toolCallId: string; toolName: string; toolInput: Record<string, unknown> },
+    event: {
+      toolCallId: string;
+      toolName: string;
+      toolInput: Record<string, unknown>;
+      parentToolCallId?: string;
+    },
   ): void {
     const buffer = this.turnToolCalls.get(threadId) ?? [];
     const sortOrder = this.turnSortCounters.get(threadId) ?? 0;
     this.turnSortCounters.set(threadId, sortOrder + 1);
 
     const stack = this.agentCallStack.get(threadId) ?? [];
-    const parentToolCallId = event.toolName === "Agent" ? undefined : stack[stack.length - 1];
+    // Prefer the SDK-provided parent_tool_use_id on the event (set by the
+    // provider). For parallel subagents this is the only correct source -
+    // the agentCallStack LIFO returns only the most recent Agent and would
+    // misattribute children. Stack is used as fallback for older paths.
+    const parentToolCallId =
+      event.toolName === "Agent"
+        ? undefined
+        : event.parentToolCallId ?? stack[stack.length - 1];
     if (event.toolName === "Agent") {
       stack.push(event.toolCallId);
       this.agentCallStack.set(threadId, stack);
