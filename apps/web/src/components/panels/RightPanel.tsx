@@ -220,7 +220,7 @@ export function RightPanel() {
         aria-orientation="vertical"
         tabIndex={0}
         className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize z-10
-                   hover:bg-primary/25 active:bg-primary/40 focus-visible:bg-primary/25 transition-colors duration-150"
+                   hover:bg-border/60 active:bg-primary/40 focus-visible:bg-border/60 transition-colors duration-150"
         onMouseDown={onDragStart}
         onDoubleClick={() => {
           const viewportCap = window.innerWidth - PANEL_MIN_WIDTH;
@@ -307,7 +307,6 @@ export function RightPanel() {
           <PreviewPanel
             threadId={activeThreadId}
             workspaceId={activeWorkspaceId}
-            isPreviewActive={activeTab === "preview"}
           />
         )}
       </div>
