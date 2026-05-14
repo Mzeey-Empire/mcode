@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import type { ToolCall, HookExecution } from "@/transport/types";
 import type { ThoughtSegment, NarrativeItem } from "./types";
 import { buildNarrativeItems } from "./build-narrative";
@@ -216,23 +216,30 @@ export function NarrativeFlow({
   }, [items]);
 
   /**
-   * Total elapsed time for this turn, used by the post-turn footer.
-   * Frozen at the moment the agent stops running so the number doesn't
-   * tick further once the turn is complete.
+   * Wall-clock moment when this turn finished, snapshotted once via an
+   * effect so the `TurnFooter` shows a stable duration. Reset to `null`
+   * if the agent starts again (e.g. follow-up turn) so the next end
+   * timestamp is captured fresh.
+   */
+  const [completedAt, setCompletedAt] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (isAgentRunning) {
+      setCompletedAt(null);
+    } else if (completedAt == null) {
+      setCompletedAt(Date.now());
+    }
+  }, [isAgentRunning, completedAt]);
+
+  /**
+   * Total elapsed time for this turn — `Date.now()` at end minus `startTime`.
+   * Returns `null` while running, before the snapshot is taken, or when
+   * `startTime` is unknown.
    */
   const completedDurationMs = useMemo<number | null>(() => {
-    if (isAgentRunning || startTime == null) return null;
-    // Use the largest endedAt across all completed events as the upper bound.
-    let latest = startTime;
-    for (const tc of toolCalls) {
-      const ended = (tc.startedAt ?? 0) + 0; // ToolCall has no endedAt field
-      if (ended > latest) latest = ended;
-    }
-    for (const seg of thoughtSegments) {
-      if (seg.endedAt != null && seg.endedAt > latest) latest = seg.endedAt;
-    }
-    return Math.max(0, latest - startTime);
-  }, [isAgentRunning, startTime, toolCalls, thoughtSegments]);
+    if (isAgentRunning || startTime == null || completedAt == null) return null;
+    return Math.max(0, completedAt - startTime);
+  }, [isAgentRunning, startTime, completedAt]);
 
   // Split items: timeline (thoughts, tools, etc.) renders inside the
   // padded/lined column. Delta (final streaming response) renders outside
