@@ -10,7 +10,6 @@ import { MessageBubble } from "./MessageBubble";
 import { ToolCallCard } from "./ToolCallCard";
 import { StreamingIndicator } from "./StreamingIndicator";
 import { StreamingCard } from "./StreamingCard";
-import { ToolCallSummary } from "./ToolCallSummary";
 import { TurnChangeSummary } from "./TurnChangeSummary";
 import { PermissionRequestCard } from "./PermissionRequestCard";
 import { HookActivitySection } from "./HookActivitySection";
@@ -84,13 +83,6 @@ const VirtualItemRenderer = memo(function VirtualItemRenderer({
       );
     case "streaming":
       return <StreamingCard text={item.text} />;
-    case "tool-summary":
-      return (
-        <ToolCallSummary
-          messageId={item.serverMessageId}
-          toolCallCount={item.toolCallCount}
-        />
-      );
     case "turn-changes":
       return (
         <TurnChangeSummary

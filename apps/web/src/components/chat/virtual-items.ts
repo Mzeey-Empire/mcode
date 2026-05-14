@@ -21,7 +21,6 @@ export type ChatVirtualItem =
       activeToolCalls: readonly ToolCall[];
     }
   | { key: string; type: "streaming"; text: string }
-  | { key: string; type: "tool-summary"; messageId: string; serverMessageId: string; toolCallCount: number }
   | {
       key: string;
       type: "turn-changes";
@@ -56,31 +55,19 @@ export type ChatVirtualItem =
     };
 
 /**
- * Build the stable segment: messages interleaved with persisted tool summaries.
- * This only changes when messages or persistedToolCallCounts change (infrequent).
+ * Build the stable segment: messages with optional turn-change summaries.
+ * This only changes when messages or persistedFilesChanged change (infrequent).
  */
 export function buildStableItems(
   messages: readonly Message[],
-  persistedToolCallCounts?: Record<string, number>,
-  serverMessageIds?: Record<string, string>,
+  _persistedToolCallCounts?: Record<string, number>,
+  _serverMessageIds?: Record<string, string>,
   persistedFilesChanged?: Record<string, string[]>,
   latestTurnWithChanges?: string | null,
 ): ChatVirtualItem[] {
   const items: ChatVirtualItem[] = [];
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
-    if (msg.role === "assistant") {
-      const count = persistedToolCallCounts?.[msg.id];
-      if (count && count > 0) {
-        items.push({
-          key: `tool-summary-${msg.id}`,
-          type: "tool-summary",
-          messageId: msg.id,
-          serverMessageId: serverMessageIds?.[msg.id] ?? msg.id,
-          toolCallCount: count,
-        });
-      }
-    }
     items.push({ key: msg.id, type: "message", message: msg });
 
     // File change summary appears after the assistant message
@@ -179,11 +166,11 @@ export function buildVirtualItems(
   // Split volatile items: narrative-flow goes before the last assistant
   // message; permission requests go after it.
 
-  // Find the last assistant message, skipping any trailing turn-changes and tool-summary items
+  // Find the last assistant message, skipping any trailing turn-changes items
   let lastAssistantIdx = stableItems.length - 1;
   while (lastAssistantIdx >= 0) {
     const item = stableItems[lastAssistantIdx];
-    if (item.type === "turn-changes" || item.type === "tool-summary") {
+    if (item.type === "turn-changes") {
       lastAssistantIdx--;
       continue;
     }
@@ -195,19 +182,10 @@ export function buildVirtualItems(
     const narrativeIdx = volatileItems.findIndex((i) => i.type === "narrative-flow");
     const narrativeItems = narrativeIdx !== -1 ? [volatileItems[narrativeIdx]] : [];
     const tailItems = volatileItems.filter((v) => v.type !== "narrative-flow");
-    // Also skip the tool-summary that precedes the message
-    let cutAt = lastAssistantIdx;
-    const preceding = stableItems[lastAssistantIdx - 1];
-    if (
-      preceding?.type === "tool-summary" &&
-      preceding.messageId === lastItem.message.id
-    ) {
-      cutAt = lastAssistantIdx - 1;
-    }
     return [
-      ...stableItems.slice(0, cutAt),
+      ...stableItems.slice(0, lastAssistantIdx),
       ...narrativeItems,
-      ...stableItems.slice(cutAt),
+      ...stableItems.slice(lastAssistantIdx),
       ...tailItems,
     ];
   }
@@ -306,8 +284,6 @@ export function estimateItemHeight(item: ChatVirtualItem): number {
       return 48;
     case "streaming":
       return STREAMING_CARD_COLLAPSED_HEIGHT;
-    case "tool-summary":
-      return 36;
     case "turn-changes": {
       // Collapsed: ~44px. Expanded: 44px header + 32px per file row (capped at 50) + overflow link.
       const visibleFiles = Math.min(item.filesChanged.length, 50);

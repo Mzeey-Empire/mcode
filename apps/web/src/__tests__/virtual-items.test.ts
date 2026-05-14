@@ -53,17 +53,15 @@ function buildAll(
 }
 
 describe("buildStableItems", () => {
-  it("returns message items with tool summaries interleaved", () => {
+  it("returns only message items even when persisted counts are provided", () => {
     const messages: Message[] = [
       makeMessage({ id: "u1", role: "user", content: "hi" }),
       makeMessage({ id: "a1", role: "assistant", content: "hello" }),
     ];
     const counts = { a1: 5 };
     const items = buildStableItems(messages, counts);
-    expect(items).toHaveLength(3);
-    expect(items[0].type).toBe("message");
-    expect(items[1].type).toBe("tool-summary");
-    expect(items[2].type).toBe("message");
+    expect(items).toHaveLength(2);
+    expect(items.every((i) => i.type === "message")).toBe(true);
   });
 
   it("returns only message items when no persisted counts", () => {
@@ -163,7 +161,7 @@ describe("buildVirtualItems (combined)", () => {
     expect(narrativeItem.isAgentRunning).toBe(true);
   });
 
-  it("tool-summary item appears before assistant messages with persisted counts", () => {
+  it("persisted tool call counts do not produce extra items", () => {
     const messages = [
       makeMessage({ id: "msg-1", sequence: 1, role: "user", content: "hi" }),
       makeMessage({ id: "msg-2", sequence: 2, role: "assistant", content: "done" }),
@@ -171,11 +169,7 @@ describe("buildVirtualItems (combined)", () => {
     const counts = { "msg-2": 5 };
     const result = buildAll(messages, [], undefined, false, undefined, counts);
     const types = result.map((item) => item.type);
-    // tool-summary appears BEFORE its assistant message
-    expect(types).toEqual(["message", "tool-summary", "message"]);
-    const summary = result[1] as { type: "tool-summary"; messageId: string; serverMessageId: string; toolCallCount: number };
-    expect(summary.messageId).toBe("msg-2");
-    expect(summary.toolCallCount).toBe(5);
+    expect(types).toEqual(["message", "message"]);
   });
 
   it("includes narrative-flow with both streaming and running state when agent running and streaming", () => {
@@ -224,7 +218,7 @@ describe("buildVirtualItems (combined)", () => {
     expect(narrativeItem.isAgentRunning).toBe(true);
   });
 
-  it("suppresses tool-summary for last message when live tool calls exist", () => {
+  it("narrative-flow is present when live tool calls exist alongside persisted counts", () => {
     const messages = [
       makeMessage({ id: "msg-1", sequence: 1, role: "assistant", content: "done" }),
     ];
@@ -232,11 +226,7 @@ describe("buildVirtualItems (combined)", () => {
     const counts = { "msg-1": 3 };
     const result = buildAll(messages, toolCalls, undefined, false, undefined, counts);
 
-    const types = result.map((item) => item.type);
-    // The tool-summary from stable items gets repositioned after volatile items
-    // along with the assistant message, but it's still present since stable
-    // items include it. The key behavior is narrative-flow is present.
-    expect(types).toContain("narrative-flow");
+    expect(result.map((item) => item.type)).toContain("narrative-flow");
   });
 });
 
@@ -350,14 +340,4 @@ describe("estimateItemHeight", () => {
     expect(estimateItemHeight(item)).toBe(STREAMING_CARD_COLLAPSED_HEIGHT);
   });
 
-  it("tool-summary returns 36", () => {
-    const item: ChatVirtualItem = {
-      key: "tool-summary-msg-1",
-      type: "tool-summary",
-      messageId: "msg-1",
-      serverMessageId: "msg-1",
-      toolCallCount: 3,
-    };
-    expect(estimateItemHeight(item)).toBe(36);
-  });
 });
