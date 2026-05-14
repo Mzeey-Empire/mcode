@@ -1,11 +1,10 @@
 import { useState, lazy, Suspense } from "react";
-import { ChevronRight } from "lucide-react";
-import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import type { ThoughtSegment } from "./types";
 
 const LazyMarkdownContent = lazy(() => import("../MarkdownContent"));
 
-const LONG_THRESHOLD = 200;
+/** Character threshold above which the body clamps and exposes `show more`. */
+const CLAMP_THRESHOLD = 220;
 
 interface ThoughtBlockProps {
   segment: ThoughtSegment;
@@ -13,75 +12,55 @@ interface ThoughtBlockProps {
 }
 
 /**
- * Renders a thought segment in the narrative timeline.
+ * Renders a single thought segment as an inline row in the narrative timeline.
  *
- * Reasoning text is rendered with markdown formatting (bullets, bold, lists,
- * code blocks) using the same MarkdownContent component as message bubbles.
- * Short thoughts start open. Long thoughts collapse to a single truncated line.
- * Active thoughts show a typing cursor.
+ * Layout: a 2-column grid with a mono small-cap `THOUGHT` label in the left
+ * column and the italic reasoning text on the right. Long thoughts clamp to
+ * 2 lines and expose a `show more` button. Active thoughts brighten the label
+ * and body colors; the dot pulse is rendered by `NarrativeFlow`.
  */
 export function ThoughtBlock({ segment, isActive }: ThoughtBlockProps) {
-  const isLong = segment.text.length >= LONG_THRESHOLD;
-  const [open, setOpen] = useState(!isLong);
-
-  const durationSec =
-    segment.endedAt != null
-      ? Math.round((segment.endedAt - segment.startedAt) / 1000)
-      : null;
-
-  const handleToggle = () => { if (!isActive) setOpen((o) => !o); };
+  const isLong = segment.text.length >= CLAMP_THRESHOLD;
+  const [expanded, setExpanded] = useState(false);
+  const shouldClamp = !isActive && isLong && !expanded;
 
   return (
-    <div className={isActive ? "bg-primary/7 rounded-md" : ""}>
-      {/* Clickable header - just duration + chevron, no label */}
-      <button
-        type="button"
-        onClick={handleToggle}
-        disabled={isActive}
-        className="flex w-full items-center gap-1.5 px-2 py-0.5 text-left select-none"
-        aria-expanded={isActive || open}
+    <div className="grid grid-cols-[auto_1fr] gap-x-3 items-start px-2 py-1">
+      <span
+        className={[
+          "font-mono uppercase select-none pt-[2px]",
+          "text-[0.59375rem] tracking-[0.18em]",
+          isActive ? "text-primary" : "text-muted-foreground/40",
+        ].join(" ")}
       >
-        {durationSec != null && (
-          <span className="font-mono text-[0.6875rem] tabular-nums text-muted-foreground/40">
-            {durationSec}s
-          </span>
-        )}
-        <ChevronRight
-          className={`ml-auto h-3 w-3 text-muted-foreground/30 transition-transform duration-150 ${
-            isActive || open ? "rotate-90" : ""
-          }`}
-        />
-      </button>
+        thought
+      </span>
 
-      {/* Collapsed preview for long thoughts - raw text, single line */}
-      {!isActive && isLong && !open && (
-        <p className="px-2 pb-1 line-clamp-1 text-[0.8125rem] leading-relaxed text-muted-foreground/70">
-          {segment.text}
-        </p>
-      )}
-
-      {/* Full text rendered with markdown */}
-      <AnimatedCollapsible open={isActive || open}>
+      <div className="min-w-0">
         <div
-          className={`px-2 pb-2 text-[0.8125rem] ${
-            isActive ? "text-foreground" : "text-foreground/85"
-          }`}
+          className={[
+            "text-[0.78125rem] leading-relaxed italic",
+            isActive ? "text-foreground/90" : "text-muted-foreground/85",
+            shouldClamp ? "line-clamp-2" : "",
+          ].join(" ")}
         >
           <Suspense
-            fallback={
-              <p className="whitespace-pre-wrap leading-relaxed">
-                {segment.text}
-              </p>
-            }
+            fallback={<span className="whitespace-pre-wrap">{segment.text}</span>}
           >
-            <LazyMarkdownContent
-              content={segment.text}
-              isStreaming={isActive}
-            />
+            <LazyMarkdownContent content={segment.text} isStreaming={isActive} />
           </Suspense>
-          {isActive && <span aria-hidden="true" className="typing-cursor" />}
         </div>
-      </AnimatedCollapsible>
+
+        {!isActive && isLong && (
+          <button
+            type="button"
+            onClick={() => setExpanded((e) => !e)}
+            className="mt-1 font-mono text-[0.625rem] tracking-[0.1em] text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors"
+          >
+            {expanded ? "show less" : "show more"}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
