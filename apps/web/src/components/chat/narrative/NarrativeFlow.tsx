@@ -9,6 +9,7 @@ import { SubagentRow } from "./SubagentRow";
 import { ActiveToolRow } from "./ActiveToolRow";
 import { DeltaBlock } from "./DeltaBlock";
 import { NarrativeIndicator } from "./NarrativeIndicator";
+import { TurnFooter } from "./TurnFooter";
 
 /** Props for the NarrativeFlow container component. */
 export interface NarrativeFlowProps {
@@ -152,7 +153,7 @@ export function NarrativeFlow({
   isAgentRunning,
   startTime,
 }: NarrativeFlowProps) {
-  const { items } = useMemo(
+  const { items, counts } = useMemo(
     () =>
       buildNarrativeItems({
         toolCalls,
@@ -214,6 +215,25 @@ export function NarrativeFlow({
     return bestId;
   }, [items]);
 
+  /**
+   * Total elapsed time for this turn, used by the post-turn footer.
+   * Frozen at the moment the agent stops running so the number doesn't
+   * tick further once the turn is complete.
+   */
+  const completedDurationMs = useMemo<number | null>(() => {
+    if (isAgentRunning || startTime == null) return null;
+    // Use the largest endedAt across all completed events as the upper bound.
+    let latest = startTime;
+    for (const tc of toolCalls) {
+      const ended = (tc.startedAt ?? 0) + 0; // ToolCall has no endedAt field
+      if (ended > latest) latest = ended;
+    }
+    for (const seg of thoughtSegments) {
+      if (seg.endedAt != null && seg.endedAt > latest) latest = seg.endedAt;
+    }
+    return Math.max(0, latest - startTime);
+  }, [isAgentRunning, startTime, toolCalls, thoughtSegments]);
+
   // Split items: timeline (thoughts, tools, etc.) renders inside the
   // padded/lined column. Delta (final streaming response) renders outside
   // as a standalone message-style block so it matches the eventual
@@ -252,7 +272,7 @@ export function NarrativeFlow({
         </div>
       )}
 
-      {/* Indicator bar sits between the timeline and the response. */}
+      {/* While running: show the live indicator bar. */}
       {isAgentRunning && (
         <NarrativeIndicator
           stepCount={stepCount}
@@ -260,6 +280,14 @@ export function NarrativeFlow({
           activeToolCalls={activeToolCalls}
           startTime={startTime}
         />
+      )}
+
+      {/* After completion: show the audit-trail footer. Hidden when running,
+          when there's no timeline content, or when there's a delta still
+          streaming (the delta means we haven't actually transitioned to a
+          completed-turn state yet). */}
+      {!isAgentRunning && timelineItems.length > 0 && !deltaItem && (
+        <TurnFooter counts={counts} durationMs={completedDurationMs} />
       )}
 
       {/* Final streaming response - rendered as a standalone message-style
