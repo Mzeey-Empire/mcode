@@ -911,6 +911,11 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         : {}),
       runningThreadIds: new Set([...state.runningThreadIds, threadId]),
       agentStartTimes: { ...state.agentStartTimes, [threadId]: Date.now() },
+      // Clear previous turn's audit trail when the user submits a new message. Belt-and-suspenders
+      // guard for cases where session.turnStarted doesn't fire (e.g. error before agent boots).
+      toolCallsByThread: omitKey(state.toolCallsByThread, threadId),
+      thoughtSegmentsByThread: omitKey(state.thoughtSegmentsByThread, threadId),
+      hooksByThread: omitKey(state.hooksByThread, threadId),
       // Persist composer-side overrides so the post-wizard answer turn forwards them
       settingsByThread: (reasoningLevel !== undefined || contextWindow !== undefined || thinking !== undefined)
         ? {
@@ -1614,7 +1619,16 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         if (state.runningThreadIds.has(threadId)) return {};
         const next = new Set(state.runningThreadIds);
         next.add(threadId);
-        return { runningThreadIds: next, agentStartTimes: { ...state.agentStartTimes, [threadId]: Date.now() } };
+        return {
+          runningThreadIds: next,
+          agentStartTimes: { ...state.agentStartTimes, [threadId]: Date.now() },
+          // Clear the previous turn's audit trail when a new turn begins. The
+          // trail stays visible from turnComplete through turn.persisted so the
+          // user can read what just happened; we only reset on the next turn.
+          toolCallsByThread: omitKey(state.toolCallsByThread, threadId),
+          thoughtSegmentsByThread: omitKey(state.thoughtSegmentsByThread, threadId),
+          hooksByThread: omitKey(state.hooksByThread, threadId),
+        };
       });
       // Clear interrupted status so the resume banner no longer lists this
       // thread while the agent processes the continuation message.
@@ -2000,8 +2014,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           delete nextPreview[threadId];
           const nextRunning = new Set(state.runningThreadIds);
           nextRunning.delete(threadId);
-          const nextStartTimes = { ...state.agentStartTimes };
-          delete nextStartTimes[threadId];
           // Mark all tool calls as complete and keep in active slot briefly
           const currentCalls = state.toolCallsByThread[threadId] ?? [];
           const completedCalls = currentCalls.map((tc) =>
@@ -2021,12 +2033,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             streamingByThread: nextStreaming,
             streamingPreviewByThread: nextPreview,
             runningThreadIds: nextRunning,
-            agentStartTimes: nextStartTimes,
             toolCallsByThread: completedCalls.length > 0
               ? { ...state.toolCallsByThread, [threadId]: completedCalls }
               : state.toolCallsByThread,
-            // Clear thought segments now that the turn is complete.
-            thoughtSegmentsByThread: omitKey(state.thoughtSegmentsByThread, threadId),
             // Clear permission cards now that the agent has responded.
             permissionsByThread: (() => {
               const next = { ...state.permissionsByThread };
@@ -2048,8 +2057,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           delete nextStreaming[threadId];
           const nextPreview = { ...state.streamingPreviewByThread };
           delete nextPreview[threadId];
-          const nextStartTimes = { ...state.agentStartTimes };
-          delete nextStartTimes[threadId];
           const currentCalls = state.toolCallsByThread[threadId] ?? [];
           const completedCalls = currentCalls.map((tc) =>
             tc.isComplete ? tc : { ...tc, isComplete: true }
@@ -2067,12 +2074,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             runningThreadIds: nextRunning,
             streamingByThread: nextStreaming,
             streamingPreviewByThread: nextPreview,
-            agentStartTimes: nextStartTimes,
             toolCallsByThread: completedCalls.length > 0
               ? { ...state.toolCallsByThread, [threadId]: completedCalls }
               : state.toolCallsByThread,
-            // Clear thought segments now that the turn is complete.
-            thoughtSegmentsByThread: omitKey(state.thoughtSegmentsByThread, threadId),
             // Clear permission cards now that the agent has responded.
             permissionsByThread: (() => {
               const next = { ...state.permissionsByThread };
@@ -2488,10 +2492,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         }
       }
 
-      // Clear in-memory tool calls now that the DB-backed summary takes over
-      const nextToolCalls = { ...state.toolCallsByThread };
-      delete nextToolCalls[payload.threadId];
-
       // The server's messageId may differ from the client's in-memory UUID
       // (client generates its own via crypto.randomUUID()). Prefer the ID
       // tracked during the active turn; fall back to the last assistant message
@@ -2515,7 +2515,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       const nextTurnMsgIds = { ...state.currentTurnMessageIdByThread };
       delete nextTurnMsgIds[payload.threadId];
       return {
-        toolCallsByThread: nextToolCalls,
         persistedToolCallCounts: {
           ...state.persistedToolCallCounts,
           [localMsgId]: payload.toolCallCount,
