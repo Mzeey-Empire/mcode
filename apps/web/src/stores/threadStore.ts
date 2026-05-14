@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
+import type { ThoughtSegment } from "@/components/chat/narrative/types";
 import type { ContextWindowMode, ReasoningLevel, PlanQuestion, PlanAnswer, ProviderUsageInfo, QuotaCategory, TurnSnapshot } from "@mcode/contracts";
 import type { PermissionRequest, PermissionDecision } from "@mcode/contracts";
 import { PlanQuestionSchema, PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts";
@@ -117,6 +118,8 @@ interface ThreadState {
   permissionsByThread: Record<string, StoredPermission[]>;
   /** Ephemeral hook execution state per thread. Cleared on page reload, not persisted to DB. */
   hooksByThread: Record<string, HookExecution[]>;
+  /** Ephemeral thought segments for the current turn per thread. Cleared on turnComplete/ended. */
+  thoughtSegmentsByThread: Record<string, ThoughtSegment[]>;
   /**
    * After `agent.stop`, each thread ID is marked until `turn.persisted` arrives for that
    * thread, so we can show a one-shot file-change notice without colliding across threads.
@@ -380,16 +383,30 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     set((state) => {
       const nextStreaming = { ...state.streamingByThread };
       const nextPreview = { ...state.streamingPreviewByThread };
+      const nextSegments = { ...state.thoughtSegmentsByThread };
       for (const [tid, acc] of batch) {
         if (!acc) continue;
         const cur = nextStreaming[tid] ?? "";
         const combined = cur + acc;
         nextStreaming[tid] = combined;
         nextPreview[tid] = combined.length > 200 ? combined.slice(-200) : combined;
+
+        // Manage thought segments: append to the active segment or start a new one.
+        const segments = nextSegments[tid] ?? [];
+        const last = segments[segments.length - 1];
+        if (!last || last.endedAt !== undefined) {
+          nextSegments[tid] = [...segments, { text: acc, startedAt: Date.now() }];
+        } else {
+          nextSegments[tid] = [
+            ...segments.slice(0, -1),
+            { ...last, text: last.text + acc },
+          ];
+        }
       }
       return {
         streamingByThread: nextStreaming,
         streamingPreviewByThread: nextPreview,
+        thoughtSegmentsByThread: nextSegments,
       };
     });
   };
@@ -436,6 +453,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   answeredPlanMessageIdsByThread: {},
   permissionsByThread: {},
   hooksByThread: {},
+  thoughtSegmentsByThread: {},
   awaitingUserStopPersistByThread: {},
   interruptStopFileNoticeByThread: {},
   composerRecallFromStopByThread: {},
@@ -1220,6 +1238,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         answeredPlanMessageIdsByThread: omitKey(state.answeredPlanMessageIdsByThread, threadId),
         permissionsByThread: omitKey(state.permissionsByThread, threadId),
         hooksByThread: omitKey(state.hooksByThread, threadId),
+        thoughtSegmentsByThread: omitKey(state.thoughtSegmentsByThread, threadId),
         usageByProvider: Object.fromEntries(
           Object.entries(state.usageByProvider).filter(([k]) => !k.startsWith(`${threadId}:`)),
         ),
@@ -1306,6 +1325,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         answeredPlanMessageIdsByThread: pruneAll(state.answeredPlanMessageIdsByThread),
         permissionsByThread: pruneAll(state.permissionsByThread),
         hooksByThread: pruneAll(state.hooksByThread),
+        thoughtSegmentsByThread: pruneAll(state.thoughtSegmentsByThread),
         usageByProvider: Object.fromEntries(
           Object.entries(state.usageByProvider).filter(([k]) => !threadIds.some((tid) => k.startsWith(`${tid}:`))),
         ),
@@ -1726,12 +1746,28 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         parentToolCallId: parentToolCallId || undefined,
         startedAt: Date.now(),
       };
-      set((state) => ({
-        toolCallsByThread: {
-          ...state.toolCallsByThread,
-          [threadId]: [...(state.toolCallsByThread[threadId] ?? []), toolCall],
-        },
-      }));
+      set((state) => {
+        // Freeze the active thought segment so it has a definite end time.
+        const segments = state.thoughtSegmentsByThread[threadId] ?? [];
+        const last = segments[segments.length - 1];
+        const nextSegments =
+          last && last.endedAt === undefined
+            ? {
+                ...state.thoughtSegmentsByThread,
+                [threadId]: [
+                  ...segments.slice(0, -1),
+                  { ...last, endedAt: Date.now() },
+                ],
+              }
+            : state.thoughtSegmentsByThread;
+        return {
+          toolCallsByThread: {
+            ...state.toolCallsByThread,
+            [threadId]: [...(state.toolCallsByThread[threadId] ?? []), toolCall],
+          },
+          thoughtSegmentsByThread: nextSegments,
+        };
+      });
       return;
     }
 
@@ -1959,6 +1995,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             toolCallsByThread: completedCalls.length > 0
               ? { ...state.toolCallsByThread, [threadId]: completedCalls }
               : state.toolCallsByThread,
+            // Clear thought segments now that the turn is complete.
+            thoughtSegmentsByThread: omitKey(state.thoughtSegmentsByThread, threadId),
             // Clear permission cards now that the agent has responded.
             permissionsByThread: (() => {
               const next = { ...state.permissionsByThread };
@@ -2003,6 +2041,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             toolCallsByThread: completedCalls.length > 0
               ? { ...state.toolCallsByThread, [threadId]: completedCalls }
               : state.toolCallsByThread,
+            // Clear thought segments now that the turn is complete.
+            thoughtSegmentsByThread: omitKey(state.thoughtSegmentsByThread, threadId),
             // Clear permission cards now that the agent has responded.
             permissionsByThread: (() => {
               const next = { ...state.permissionsByThread };
