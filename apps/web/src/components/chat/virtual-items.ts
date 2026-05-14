@@ -1,5 +1,6 @@
 import type { PermissionDecision } from "@mcode/contracts";
 import type { Message, ToolCall, HookExecution } from "@/transport/types";
+import type { ThoughtSegment } from "./narrative/types";
 
 /** Compile-time exhaustive check; throws at runtime for unhandled discriminants. */
 function assertNever(value: never): never {
@@ -42,6 +43,16 @@ export type ChatVirtualItem =
       key: string;
       type: "hook-activity";
       hooks: readonly HookExecution[];
+    }
+  | {
+      key: string;
+      type: "narrative-flow";
+      toolCalls: readonly ToolCall[];
+      hooks: readonly HookExecution[];
+      thoughtSegments: readonly ThoughtSegment[];
+      streamingText: string;
+      isAgentRunning: boolean;
+      startTime: number | undefined;
     };
 
 /**
@@ -90,7 +101,8 @@ export function buildStableItems(
 }
 
 /**
- * Build the volatile segment: permission requests, active tool calls, streaming text, and indicator.
+ * Build the volatile segment: permission requests and a single narrative-flow item
+ * that consolidates tool calls, hooks, thought segments, streaming text, and indicator.
  * This changes on every tool call event but doesn't depend on messages.
  */
 export function buildVolatileItems(
@@ -107,12 +119,24 @@ export function buildVolatileItems(
     decision?: PermissionDecision;
   }[],
   hooks?: readonly HookExecution[],
+  thoughtSegments?: readonly ThoughtSegment[],
 ): ChatVirtualItem[] {
   const items: ChatVirtualItem[] = [];
 
-  // Tool calls first — the agent invoked a tool before the permission gate fires.
-  if (toolCalls.length > 0) {
-    items.push({ key: "active-tools", type: "active-tools", toolCalls });
+  // Emit the narrative flow item when agent is running or has tool calls.
+  // This replaces the separate "active-tools", "hook-activity", "indicator",
+  // and "streaming" items with a single unified item.
+  if (isAgentRunning || toolCalls.length > 0) {
+    items.push({
+      key: "narrative-flow",
+      type: "narrative-flow",
+      toolCalls,
+      hooks: hooks ?? [],
+      thoughtSegments: thoughtSegments ?? [],
+      streamingText: streamingText ?? "",
+      isAgentRunning,
+      startTime: agentStartTime,
+    });
   }
 
   // Show all permission requests (settled and unsettled) so the user gets
@@ -135,32 +159,13 @@ export function buildVolatileItems(
     }
   }
 
-  // Hook activity section — grouped below permissions, above indicator.
-  if (hooks && hooks.length > 0) {
-    items.push({ key: "hook-activity", type: "hook-activity", hooks });
-  }
-
-  if (isAgentRunning) {
-    const activeOnly = toolCalls.filter((tc) => !tc.isComplete);
-    items.push({
-      key: "indicator",
-      type: "indicator",
-      startTime: agentStartTime,
-      activeToolCalls: activeOnly,
-    });
-  }
-
-  if (streamingText) {
-    items.push({ key: "streaming", type: "streaming", text: streamingText });
-  }
-
   return items;
 }
 
 /**
  * Combine stable and volatile segments into the final virtual item array.
- * When tool calls exist, the active-tools item is placed before the last
- * assistant message while streaming/indicator items remain after it.
+ * When tool calls exist, the narrative-flow item is placed before the last
+ * assistant message while permission-request items remain after it.
  */
 export function buildVirtualItems(
   stableItems: readonly ChatVirtualItem[],
@@ -171,8 +176,8 @@ export function buildVirtualItems(
     return [...stableItems, ...volatileItems];
   }
 
-  // Split volatile items: active-tools goes before the last assistant
-  // message; streaming and indicator go after it.
+  // Split volatile items: narrative-flow goes before the last assistant
+  // message; permission requests go after it.
 
   // Find the last assistant message, skipping any trailing turn-changes and tool-summary items
   let lastAssistantIdx = stableItems.length - 1;
@@ -187,8 +192,9 @@ export function buildVirtualItems(
 
   const lastItem = stableItems[lastAssistantIdx];
   if (lastItem?.type === "message" && lastItem.message.role === "assistant") {
-    const toolItems = volatileItems.filter((v) => v.type === "active-tools");
-    const tailItems = volatileItems.filter((v) => v.type !== "active-tools");
+    const narrativeIdx = volatileItems.findIndex((i) => i.type === "narrative-flow");
+    const narrativeItems = narrativeIdx !== -1 ? [volatileItems[narrativeIdx]] : [];
+    const tailItems = volatileItems.filter((v) => v.type !== "narrative-flow");
     // Also skip the tool-summary that precedes the message
     let cutAt = lastAssistantIdx;
     const preceding = stableItems[lastAssistantIdx - 1];
@@ -200,7 +206,7 @@ export function buildVirtualItems(
     }
     return [
       ...stableItems.slice(0, cutAt),
-      ...toolItems,
+      ...narrativeItems,
       ...stableItems.slice(cutAt),
       ...tailItems,
     ];
@@ -313,6 +319,12 @@ export function estimateItemHeight(item: ChatVirtualItem): number {
     case "hook-activity":
       // Header (28px) + one row (28px) per hook, capped at 300px
       return Math.min(28 + item.hooks.length * 28, 300);
+    case "narrative-flow": {
+      const segCount = item.thoughtSegments.length;
+      const toolCount = item.toolCalls.length;
+      const hookCount = item.hooks.length;
+      return Math.min(segCount * 60 + toolCount * 32 + hookCount * 28 + 48, 600);
+    }
     default:
       return assertNever(item);
   }

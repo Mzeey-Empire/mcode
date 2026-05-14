@@ -110,6 +110,9 @@ const VirtualItemRenderer = memo(function VirtualItemRenderer({
       );
     case "hook-activity":
       return <HookActivitySection hooks={item.hooks} />;
+    case "narrative-flow":
+      // Temporary: rendered by NarrativeFlow component (to be wired in a follow-up task)
+      return null;
   }
 }, (prev, next) =>
   prev.item.key === next.item.key

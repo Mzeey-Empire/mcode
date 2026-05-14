@@ -78,11 +78,13 @@ describe("buildStableItems", () => {
 });
 
 describe("buildVolatileItems", () => {
-  it("returns active-tools and indicator items", () => {
+  it("returns narrative-flow item when agent is running with tool calls", () => {
     const toolCalls = [makeToolCall({ id: "t1" })];
     const items = buildVolatileItems(toolCalls, true, 1000, undefined);
-    expect(items.some((i) => i.type === "active-tools")).toBe(true);
-    expect(items.some((i) => i.type === "indicator")).toBe(true);
+    const narrativeItem = items.find((i) => i.type === "narrative-flow") as Extract<(typeof items)[number], { type: "narrative-flow" }> | undefined;
+    expect(narrativeItem).toBeDefined();
+    expect(narrativeItem?.isAgentRunning).toBe(true);
+    expect(narrativeItem?.toolCalls).toHaveLength(1);
   });
 
   it("returns empty array when no tool calls and agent not running", () => {
@@ -90,21 +92,19 @@ describe("buildVolatileItems", () => {
     expect(items).toHaveLength(0);
   });
 
-  it("returns streaming item when streaming text is present but agent not running", () => {
+  it("returns empty array when streaming text is present but agent not running and no tool calls", () => {
+    // With the narrative-flow consolidation, streaming text alone (no active agent, no tool calls)
+    // does not produce a volatile item.
     const items = buildVolatileItems([], false, undefined, "partial...");
-    expect(items).toHaveLength(1);
-    expect(items[0].type).toBe("streaming");
-    const streaming = items[0] as ChatVirtualItem & { type: "streaming" };
-    expect(streaming.text).toBe("partial...");
+    expect(items).toHaveLength(0);
   });
 
-  it("includes both indicator and streaming items when agent is running and streaming", () => {
+  it("returns narrative-flow with streamingText when agent is running and streaming", () => {
     const items = buildVolatileItems([], true, 1000, "streaming...");
-    const indicator = items.find((i) => i.type === "indicator");
-    const streaming = items.find((i) => i.type === "streaming") as (ChatVirtualItem & { type: "streaming" }) | undefined;
-    expect(indicator).toBeDefined();
-    expect(streaming).toBeDefined();
-    expect(streaming?.text).toBe("streaming...");
+    const narrativeItem = items.find((i) => i.type === "narrative-flow") as Extract<(typeof items)[number], { type: "narrative-flow" }> | undefined;
+    expect(narrativeItem).toBeDefined();
+    expect(narrativeItem?.streamingText).toBe("streaming...");
+    expect(narrativeItem?.isAgentRunning).toBe(true);
   });
 });
 
@@ -125,7 +125,7 @@ describe("buildVirtualItems (combined)", () => {
     expect(result[1]).toMatchObject({ type: "message", key: "msg-2" });
   });
 
-  it("active tool calls split the last assistant message after the tool call card", () => {
+  it("active tool calls split the last assistant message after the narrative-flow item", () => {
     const messages = [
       makeMessage({ id: "msg-1", sequence: 1, role: "user", content: "start" }),
       makeMessage({ id: "msg-2", sequence: 2, role: "assistant", content: "thinking" }),
@@ -134,31 +134,33 @@ describe("buildVirtualItems (combined)", () => {
     const result = buildAll(messages, toolCalls, undefined, false, undefined);
 
     const types = result.map((item) => item.type);
-    // msg-1, active-tools, msg-2 (split last assistant after tool card)
-    expect(types).toEqual(["message", "active-tools", "message"]);
+    // msg-1, narrative-flow, msg-2 (split last assistant after narrative-flow item)
+    expect(types).toEqual(["message", "narrative-flow", "message"]);
     expect(result[0]).toMatchObject({ type: "message", key: "msg-1" });
-    expect(result[1]).toMatchObject({ type: "active-tools" });
+    expect(result[1]).toMatchObject({ type: "narrative-flow" });
     expect(result[2]).toMatchObject({ type: "message", key: "msg-2" });
   });
 
-  it("streaming text adds a 'streaming' item at the end", () => {
+  it("streaming text with agent running adds a 'narrative-flow' item at the end", () => {
     const messages = [makeMessage({ id: "msg-1" })];
-    const result = buildAll(messages, [], "partial response...", false, undefined);
+    const result = buildAll(messages, [], "partial response...", true, undefined);
 
     const last = result[result.length - 1];
-    expect(last.type).toBe("streaming");
-    expect((last as ChatVirtualItem & { type: "streaming" }).text).toBe("partial response...");
+    expect(last.type).toBe("narrative-flow");
+    const narrativeItem = last as ChatVirtualItem & { type: "narrative-flow" };
+    expect(narrativeItem.streamingText).toBe("partial response...");
   });
 
-  it("indicator (running, no streaming) adds an 'indicator' item", () => {
+  it("indicator (running, no streaming) adds a 'narrative-flow' item", () => {
     const messages = [makeMessage({ id: "msg-1" })];
     const startTime = 12345;
     const result = buildAll(messages, [], undefined, true, startTime);
 
     const last = result[result.length - 1];
-    expect(last.type).toBe("indicator");
-    const indicatorItem = last as ChatVirtualItem & { type: "indicator" };
-    expect(indicatorItem.startTime).toBe(startTime);
+    expect(last.type).toBe("narrative-flow");
+    const narrativeItem = last as ChatVirtualItem & { type: "narrative-flow" };
+    expect(narrativeItem.startTime).toBe(startTime);
+    expect(narrativeItem.isAgentRunning).toBe(true);
   });
 
   it("tool-summary item appears before assistant messages with persisted counts", () => {
@@ -176,15 +178,15 @@ describe("buildVirtualItems (combined)", () => {
     expect(summary.toolCallCount).toBe(5);
   });
 
-  it("includes both indicator and streaming items when both running and streaming", () => {
+  it("includes narrative-flow with both streaming and running state when agent running and streaming", () => {
     const messages = [makeMessage({ id: "msg-1" })];
     const result = buildAll(messages, [], "streaming...", true, undefined);
 
     const types = result.map((item) => item.type);
-    expect(types).toContain("indicator");
-    expect(types).toContain("streaming");
-    const streaming = result.find((i) => i.type === "streaming") as (ChatVirtualItem & { type: "streaming" }) | undefined;
-    expect(streaming?.text).toBe("streaming...");
+    expect(types).toContain("narrative-flow");
+    const narrative = result.find((i) => i.type === "narrative-flow") as (ChatVirtualItem & { type: "narrative-flow" }) | undefined;
+    expect(narrative?.streamingText).toBe("streaming...");
+    expect(narrative?.isAgentRunning).toBe(true);
   });
 
   it("does not split when last message is not assistant role", () => {
@@ -195,9 +197,9 @@ describe("buildVirtualItems (combined)", () => {
     const toolCalls = [makeToolCall({ id: "tc-1" })];
     const result = buildAll(messages, toolCalls, undefined, false, undefined);
 
-    // Both messages appear before active-tools, no split of last user message
+    // Both messages appear before narrative-flow, no split of last user message
     const types = result.map((item) => item.type);
-    expect(types).toEqual(["message", "message", "active-tools"]);
+    expect(types).toEqual(["message", "message", "narrative-flow"]);
   });
 
   it("full scenario: messages + tools + streaming", () => {
@@ -212,12 +214,14 @@ describe("buildVirtualItems (combined)", () => {
     const result = buildAll(messages, toolCalls, "Here is my answer...", true, 99999);
 
     const types = result.map((item) => item.type);
-    // user msg, active-tools, split assistant msg, indicator, streaming
-    expect(types).toEqual(["message", "active-tools", "message", "indicator", "streaming"]);
+    // user msg, narrative-flow (before split assistant msg), split assistant msg
+    expect(types).toEqual(["message", "narrative-flow", "message"]);
     expect(result[0]).toMatchObject({ key: "msg-1" });
     expect(result[2]).toMatchObject({ key: "msg-2" });
-    const activeItem = result[1] as ChatVirtualItem & { type: "active-tools" };
-    expect(activeItem.toolCalls).toHaveLength(2);
+    const narrativeItem = result[1] as ChatVirtualItem & { type: "narrative-flow" };
+    expect(narrativeItem.toolCalls).toHaveLength(2);
+    expect(narrativeItem.streamingText).toBe("Here is my answer...");
+    expect(narrativeItem.isAgentRunning).toBe(true);
   });
 
   it("suppresses tool-summary for last message when live tool calls exist", () => {
@@ -231,8 +235,8 @@ describe("buildVirtualItems (combined)", () => {
     const types = result.map((item) => item.type);
     // The tool-summary from stable items gets repositioned after volatile items
     // along with the assistant message, but it's still present since stable
-    // items include it. The key behavior is active-tools is present.
-    expect(types).toContain("active-tools");
+    // items include it. The key behavior is narrative-flow is present.
+    expect(types).toContain("narrative-flow");
   });
 });
 
@@ -249,33 +253,37 @@ function makeHook(overrides: Partial<HookExecution> = {}): HookExecution {
 }
 
 describe("buildVolatileItems with hooks", () => {
-  it("includes hook-activity item when hooks are present", () => {
+  it("includes hooks inside narrative-flow when agent is running and hooks are present", () => {
+    const hooks = [makeHook()];
+    const items = buildVolatileItems([], true, 1000, undefined, undefined, hooks);
+    const narrativeItem = items.find((i) => i.type === "narrative-flow") as Extract<(typeof items)[number], { type: "narrative-flow" }> | undefined;
+    expect(narrativeItem).toBeDefined();
+    expect(narrativeItem?.hooks).toHaveLength(1);
+  });
+
+  it("omits narrative-flow when no tool calls and agent not running (even with hooks)", () => {
+    // Hooks alone (without agent running or tool calls) do not trigger a narrative-flow item.
     const hooks = [makeHook()];
     const items = buildVolatileItems([], false, undefined, undefined, undefined, hooks);
-    expect(items.some((i) => i.type === "hook-activity")).toBe(true);
+    expect(items.some((i) => i.type === "narrative-flow")).toBe(false);
   });
 
-  it("omits hook-activity item when hooks array is empty", () => {
-    const items = buildVolatileItems([], false, undefined, undefined, undefined, []);
-    expect(items.some((i) => i.type === "hook-activity")).toBe(false);
-  });
-
-  it("places hook-activity after permission-request items", () => {
+  it("narrative-flow appears before permission-request items", () => {
     const hooks = [makeHook()];
     const permissions = [{ requestId: "p1", toolName: "Edit", settled: false }];
     const items = buildVolatileItems([], true, 1000, undefined, permissions, hooks);
     const types = items.map((i) => i.type);
+    const narrativeIdx = types.indexOf("narrative-flow");
     const permIdx = types.indexOf("permission-request");
-    const hookIdx = types.indexOf("hook-activity");
-    expect(hookIdx).toBeGreaterThan(permIdx);
+    expect(narrativeIdx).toBeLessThan(permIdx);
   });
 
-  it("hook-activity item carries the hooks array", () => {
+  it("narrative-flow item carries the hooks array", () => {
     const hooks = [makeHook({ hookName: "lint" }), makeHook({ hookName: "test", status: "completed", exitCode: 0, durationMs: 150 })];
-    const items = buildVolatileItems([], false, undefined, undefined, undefined, hooks);
-    const hookItem = items.find((i) => i.type === "hook-activity") as Extract<(typeof items)[number], { type: "hook-activity" }>;
-    expect(hookItem.hooks).toHaveLength(2);
-    expect(hookItem.hooks[0].hookName).toBe("lint");
+    const items = buildVolatileItems([], true, 1000, undefined, undefined, hooks);
+    const narrativeItem = items.find((i) => i.type === "narrative-flow") as Extract<(typeof items)[number], { type: "narrative-flow" }>;
+    expect(narrativeItem.hooks).toHaveLength(2);
+    expect(narrativeItem.hooks[0].hookName).toBe("lint");
   });
 });
 
