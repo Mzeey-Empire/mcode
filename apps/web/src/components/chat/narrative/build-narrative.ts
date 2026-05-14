@@ -177,10 +177,9 @@ export function buildNarrativeItems(params: {
     }
   }
 
-  // Append any unmatched hooks that have a toolName (skip session-level hooks
-  // such as SessionStart:startup which have no associated tool call).
+  // Append any hooks not yet placed near a tool group.
   hooks.forEach((hook, idx) => {
-    if (!placedHookIndices.has(idx) && hook.toolName != null) {
+    if (!placedHookIndices.has(idx)) {
       items.push({ type: "hook", hook });
     }
   });
