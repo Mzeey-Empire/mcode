@@ -60,6 +60,7 @@ vi.mock("@/stores/threadStore", () => ({
       loadOlderMessages: vi.fn(),
       permissionsByThread: {},
       hooksByThread: {},
+      thoughtSegmentsByThread: {},
     }),
   ),
 }));
@@ -79,6 +80,7 @@ vi.mock("../ToolCallSummary", () => ({ ToolCallSummary: () => null }));
 vi.mock("../TurnChangeSummary", () => ({ TurnChangeSummary: () => null }));
 vi.mock("../PermissionRequestCard", () => ({ PermissionRequestCard: () => null }));
 vi.mock("../HookActivitySection", () => ({ HookActivitySection: () => null }));
+vi.mock("../narrative", () => ({ NarrativeFlow: () => null }));
 
 import { MessageList } from "../MessageList";
 import { rememberScrollTop, recallScrollTop, clearScrollMemory } from "../scrollPositionMemory";

@@ -23,8 +23,11 @@ import {
 import type { ChatVirtualItem } from "./virtual-items";
 import type { ToolCall } from "@/transport/types";
 import { rememberScrollTop, recallScrollTop, forgetScrollTop } from "./scrollPositionMemory";
+import { NarrativeFlow } from "./narrative";
+import type { ThoughtSegment } from "./narrative";
 
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
+const EMPTY_THOUGHT_SEGMENTS: readonly ThoughtSegment[] = [];
 const AUTO_SCROLL_THRESHOLD = 64;
 /**
  * If the viewport is farther than this from the scroll tail, the user has left
@@ -111,8 +114,16 @@ const VirtualItemRenderer = memo(function VirtualItemRenderer({
     case "hook-activity":
       return <HookActivitySection hooks={item.hooks} />;
     case "narrative-flow":
-      // Temporary: rendered by NarrativeFlow component (to be wired in a follow-up task)
-      return null;
+      return (
+        <NarrativeFlow
+          toolCalls={item.toolCalls}
+          hooks={item.hooks}
+          thoughtSegments={item.thoughtSegments}
+          streamingText={item.streamingText}
+          isAgentRunning={item.isAgentRunning}
+          startTime={item.startTime}
+        />
+      );
   }
 }, (prev, next) =>
   prev.item.key === next.item.key
@@ -259,6 +270,9 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   const hooks = useThreadStore(
     useShallow((s) => currentThreadId ? (s.hooksByThread[currentThreadId] ?? []) : []),
   );
+  const thoughtSegments = useThreadStore(
+    (s) => s.thoughtSegmentsByThread[currentThreadId ?? ""] ?? EMPTY_THOUGHT_SEGMENTS,
+  );
 
   const toolCalls = toolCallsRaw ?? EMPTY_TOOL_CALLS;
 
@@ -356,8 +370,8 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   );
 
   const volatileItems = useMemo(
-    () => buildVolatileItems(toolCalls, isAgentRunning, agentStartTime, streamingText, permissions, hooks),
-    [toolCalls, isAgentRunning, agentStartTime, streamingText, permissions, hooks],
+    () => buildVolatileItems(toolCalls, isAgentRunning, agentStartTime, streamingText, permissions, hooks, thoughtSegments),
+    [toolCalls, isAgentRunning, agentStartTime, streamingText, permissions, hooks, thoughtSegments],
   );
 
   const hasToolCalls = toolCalls.length > 0;
