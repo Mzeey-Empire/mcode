@@ -32,64 +32,64 @@ export function ThoughtBlock({ segment, isActive }: ThoughtBlockProps) {
 
   const showDuration = !isActive && durationSeconds != null;
 
-  /** Toggle open state — disabled while actively streaming. */
+  /** Toggle open state - disabled while actively streaming. */
   function handleToggle() {
     if (!isActive) {
       setOpen((prev) => !prev);
     }
   }
 
-  const containerClass = isActive
-    ? "rounded-md bg-primary/7 px-3 py-2"
-    : "rounded-md px-3 py-2 hover:bg-muted/30 transition-colors duration-100";
-
   return (
-    <div className={containerClass}>
-      {/* Header row - shows "Thought" label, optional duration, and chevron */}
+    <div
+      className={`rounded-md transition-colors duration-120 ${
+        isActive ? "bg-primary/7" : "hover:bg-muted/30"
+      }`}
+    >
+      {/* Header row */}
       <button
         type="button"
         onClick={handleToggle}
         disabled={isActive}
-        className="flex w-full items-center gap-1.5 text-left select-none"
+        className="flex w-full items-center gap-1.5 px-2 py-1 text-xs text-left select-none"
         aria-expanded={isActive ? true : open}
       >
-        {/* Quiet "Thought" label - slightly brighter while active */}
         <span
-          className={`text-xs ${
-            isActive ? "text-muted-foreground" : "text-muted-foreground/50"
+          className={`font-semibold ${
+            isActive ? "text-foreground" : "text-muted-foreground"
           }`}
         >
           Thought
         </span>
 
         {showDuration && (
-          <span className="font-mono text-[0.6875rem] tabular-nums text-muted-foreground/50">
-            {durationSeconds}s
+          <span className="font-mono text-[0.6875rem] tabular-nums text-muted-foreground/60">
+            for {durationSeconds}s
           </span>
         )}
 
         <ChevronRight
-          className={`ml-auto h-3.5 w-3.5 text-muted-foreground/40 transition-transform duration-150 ${
+          className={`ml-auto h-3.5 w-3.5 text-muted-foreground/50 transition-transform duration-150 ${
             isActive || open ? "rotate-90" : ""
           }`}
         />
       </button>
 
-      {/* Collapsed long-thought preview (rendered outside the collapsible so
-          the truncated line remains visible when closed) */}
+      {/* Collapsed long-thought preview */}
       {!isActive && isLong && !open && (
-        <p className="mt-1 line-clamp-1 text-[0.8125rem] leading-relaxed text-muted-foreground">
+        <p className="px-2 pb-1 line-clamp-1 text-[0.8125rem] leading-relaxed text-muted-foreground/85">
           {segment.text}
         </p>
       )}
 
       {/* Expanded content */}
       <AnimatedCollapsible open={isActive || open}>
-        <p className="mt-1 text-[0.8125rem] leading-relaxed text-muted-foreground">
+        <p
+          className={`px-2 pt-0.5 pb-2 text-[0.8125rem] leading-relaxed ${
+            isActive ? "text-foreground" : "text-foreground/85"
+          }`}
+        >
           {segment.text}
-          {isActive && (
-            <span aria-hidden="true" className="typing-cursor" />
-          )}
+          {isActive && <span aria-hidden="true" className="typing-cursor" />}
         </p>
       </AnimatedCollapsible>
     </div>

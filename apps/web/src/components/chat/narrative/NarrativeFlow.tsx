@@ -226,31 +226,37 @@ export function NarrativeFlow({
   }, [items]);
 
   return (
-    <div className="relative flex flex-col pl-[18px]">
-      {/* Vertical timeline line */}
-      <div className="absolute left-[7.5px] top-3 bottom-3 w-px bg-border pointer-events-none" />
+    <div>
+      {/* Timeline flow - only renders when there are items to show */}
+      {items.length > 0 && (
+        <div className="relative flex flex-col pl-[18px]">
+          {/* Vertical timeline line - connects the dots between items */}
+          <div className="absolute left-[7.5px] top-3 bottom-3 w-px bg-border pointer-events-none" />
 
-      {items.map((item, i) => {
-        const margin = marginClassForItem(item, i);
-        const dot = dotClassForItem(item);
+          {items.map((item, i) => {
+            const margin = marginClassForItem(item, i);
+            const dot = dotClassForItem(item);
 
-        return (
-          <div
-            key={keyForItem(item, i)}
-            className={[
-              "relative",
-              margin,
-              // Shared dot pseudo-element base styles.
-              "before:content-[''] before:absolute before:w-1 before:h-1 before:rounded-full before:z-[1]",
-              "before:left-[-12px] before:top-[11px]",
-              dot,
-            ].join(" ")}
-          >
-            {renderItem(item, mostActiveSubagentId)}
-          </div>
-        );
-      })}
+            return (
+              <div
+                key={keyForItem(item, i)}
+                className={[
+                  "relative",
+                  margin,
+                  // Shared dot pseudo-element base styles.
+                  "before:content-[''] before:absolute before:w-1 before:h-1 before:rounded-full before:z-[1]",
+                  "before:left-[-12px] before:top-[11px]",
+                  dot,
+                ].join(" ")}
+              >
+                {renderItem(item, mostActiveSubagentId)}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
+      {/* Indicator bar sits outside the timeline flow, matching the prototype */}
       {isAgentRunning && (
         <NarrativeIndicator
           stepCount={stepCount}
