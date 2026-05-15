@@ -1747,11 +1747,39 @@ ${userMessage}`;
         openHookMap.clear();
       }
 
-      const thoughts = (this.turnThoughts.get(threadId) ?? []).map((t) => ({
+      const rawThoughts = (this.turnThoughts.get(threadId) ?? []).map((t) => ({
         ...t,
         messageId,
       }));
+      const thoughts = rawThoughts;
       if (thoughts.length > 0) {
+        // Suffix-match safeguard: the last chronological thought segment whose
+        // text (trimmed) is a suffix of the assistant message body is the
+        // final user-facing response — tag it so the client doesn't render it
+        // as a ThoughtBlock.  This catches provider edge cases and tool-free
+        // turns where the provider cannot set isFinalResponse at stream time.
+        const msgContent = messages[messages.length - 1].content ?? "";
+        const msgTrimmed = msgContent.trim();
+        if (msgTrimmed.length > 0) {
+          // Identify the last segment by sortOrder.
+          let maxSortOrder = -Infinity;
+          for (const t of thoughts) {
+            if (t.sortOrder > maxSortOrder) maxSortOrder = t.sortOrder;
+          }
+          for (const t of thoughts) {
+            if (t.sortOrder === maxSortOrder) {
+              const segTrimmed = t.text.trim();
+              // Skip empty segments to avoid false positives on empty thoughts.
+              if (
+                segTrimmed.length > 0 &&
+                (t.isFinalResponse === 1 || msgTrimmed.endsWith(segTrimmed))
+              ) {
+                t.isFinalResponse = 1;
+              }
+            }
+          }
+        }
+
         try {
           this.thoughtSegmentRepo.bulkCreate(thoughts);
         } catch (err) {
