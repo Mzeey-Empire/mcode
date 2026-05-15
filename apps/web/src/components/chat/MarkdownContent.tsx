@@ -2,6 +2,7 @@ import { memo, useMemo, lazy, Suspense } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CodeBlock } from "./CodeBlock";
+import { resolveCodeBlockLanguage } from "@/lib/resolve-code-block-language";
 import { useDiffStore } from "@/stores/diffStore";
 import { isMac } from "@/lib/platform";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
@@ -236,15 +237,15 @@ function makeComponents(isStreaming: boolean, variant: "assistant" | "user") {
       }
 
       const langMatch = className?.match(/language-(\S+)/);
-      const language = langMatch ? langMatch[1] : "";
+      const rawFence = langMatch ? langMatch[1] : "";
 
       // Suppress the fenced block the model emits to signal plan questions —
       // the wizard renders from the parsed payload, not from raw markdown.
-      if (language === "plan-questions") return null;
+      if (rawFence === "plan-questions") return null;
 
       const code = String(children).replace(/\n$/, "");
 
-      if (language === "mermaid") {
+      if (rawFence === "mermaid") {
         return (
           <Suspense fallback={
             <pre className="bg-muted/30 rounded-lg p-4 overflow-x-auto"><code>{code}</code></pre>
@@ -254,10 +255,13 @@ function makeComponents(isStreaming: boolean, variant: "assistant" | "user") {
         );
       }
 
+      const { language, label } = resolveCodeBlockLanguage(rawFence, code);
+
       return (
         <CodeBlock
           code={code}
           language={language}
+          languageLabel={label}
           isStreaming={isStreaming}
           disableHighlighting={isUser}
         />
