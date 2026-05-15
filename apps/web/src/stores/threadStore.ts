@@ -424,15 +424,11 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         const last = segments[segments.length - 1];
         if (!last || last.endedAt !== undefined) {
           nextSegments[tid] = [...segments, { text: acc, startedAt: Date.now() }];
-          // eslint-disable-next-line no-console
-          console.debug("[narrative:flush] new segment", { tid, segCount: segments.length + 1, textLen: acc.length });
         } else {
           nextSegments[tid] = [
             ...segments.slice(0, -1),
             { ...last, text: last.text + acc },
           ];
-          // eslint-disable-next-line no-console
-          console.debug("[narrative:flush] append segment", { tid, segIdx: segments.length - 1, totalLen: last.text.length + acc.length });
         }
       }
       return {

@@ -34,15 +34,6 @@ export function buildNarrativeItems(params: {
 }): NarrativeBuildResult {
   const { toolCalls, hooks, thoughtSegments, streamingText, isAgentRunning } = params;
 
-  // eslint-disable-next-line no-console
-  console.debug("[narrative:build]", {
-    segments: thoughtSegments.length,
-    tools: toolCalls.length,
-    hooks: hooks.length,
-    streamLen: streamingText.length,
-    running: isAgentRunning,
-  });
-
   if (thoughtSegments.length === 0 && toolCalls.length === 0 && hooks.length === 0) {
     if (isAgentRunning && streamingText.length > 0) {
       // The agent is streaming its final (and only) response — no tools were
@@ -77,9 +68,6 @@ export function buildNarrativeItems(params: {
   // Check whether any tool call is running. If yes, no thought should appear "active"
   // because the parent agent is waiting on the tool, not actively streaming.
   const anyToolRunning = topLevel.some((tc) => !tc.isComplete);
-  // eslint-disable-next-line no-console
-  console.debug("[narrative:build] running state", { anyToolRunning, activeTcId: activeTc?.id });
-
   // Build a unified timeline of everything sorted by startedAt.
   const timeline: TimelineEvent[] = [];
   for (const seg of thoughtSegments) {
@@ -93,13 +81,6 @@ export function buildNarrativeItems(params: {
     timeline.push({ kind: "hook", hook, startedAt: hook.startedAt });
   }
   timeline.sort((a, b) => a.startedAt - b.startedAt);
-
-  // eslint-disable-next-line no-console
-  console.debug("[narrative:build] timeline order",
-    timeline.map((e) => ({ kind: e.kind, t: e.startedAt, label:
-      e.kind === "thought" ? `thought(${e.segment.text.slice(0, 20)})` :
-      e.kind === "tool" ? `${e.call.toolName}` :
-      `${e.hook.hookName}` })));
 
   const items: NarrativeItem[] = [];
   const pendingGroup: ToolCall[] = [];
@@ -176,12 +157,6 @@ export function buildNarrativeItems(params: {
     items.push({ type: "active-tool", toolCall: activeTc });
   }
 
-  // eslint-disable-next-line no-console
-  console.debug("[narrative:build] output", items.map((i) => ({
-    type: i.type,
-    ...(i.type === "thought" ? { active: i.isActive } : {}),
-    ...(i.type === "subagent" ? { name: i.toolCall.toolName, children: i.children.length } : {}),
-  })));
   const subagents = topLevel.filter((tc) => tc.toolName === AGENT_TOOL_NAME).length;
   const steps = topLevel.length;
   const thoughts = items.filter((it) => it.type === "thought").length;
