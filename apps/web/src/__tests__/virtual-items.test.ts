@@ -58,11 +58,12 @@ describe("buildStableItems", () => {
       makeMessage({ id: "a1", role: "assistant", content: "hello" }),
     ];
     const items = buildStableItems(messages);
-    // user msg, persisted-narrative(a1), assistant msg
+    // user msg, persisted-narrative(a1), assistant msg, persisted-late-hooks(a1)
     expect(items.map((i) => i.type)).toEqual([
       "message",
       "persisted-narrative",
       "message",
+      "persisted-late-hooks",
     ]);
   });
 
@@ -119,10 +120,10 @@ describe("buildVirtualItems (combined)", () => {
       makeMessage({ id: "msg-2", sequence: 2, role: "user", content: "Hi" }),
     ];
     const result = buildAll(messages, [], undefined, false, undefined);
-    // persisted-narrative(msg-1), msg-1, msg-2
-    expect(result.map((i) => i.type)).toEqual(["persisted-narrative", "message", "message"]);
+    // persisted-narrative(msg-1), msg-1, persisted-late-hooks(msg-1), msg-2
+    expect(result.map((i) => i.type)).toEqual(["persisted-narrative", "message", "persisted-late-hooks", "message"]);
     expect(result[1]).toMatchObject({ type: "message", key: "msg-1" });
-    expect(result[2]).toMatchObject({ type: "message", key: "msg-2" });
+    expect(result[3]).toMatchObject({ type: "message", key: "msg-2" });
   });
 
   it("active tool calls split the last assistant message after the narrative-flow item", () => {
@@ -134,8 +135,9 @@ describe("buildVirtualItems (combined)", () => {
     const result = buildAll(messages, toolCalls, undefined, false, undefined);
 
     const types = result.map((item) => item.type);
-    // msg-1, narrative-flow, msg-2 (split last assistant after narrative-flow item)
-    expect(types).toEqual(["message", "narrative-flow", "message"]);
+    // msg-1, narrative-flow, msg-2, persisted-late-hooks(msg-2)
+    // (persisted-narrative for msg-2 is filtered out because live narrative-flow is present)
+    expect(types).toEqual(["message", "narrative-flow", "message", "persisted-late-hooks"]);
     expect(result[0]).toMatchObject({ type: "message", key: "msg-1" });
     expect(result[1]).toMatchObject({ type: "narrative-flow" });
     expect(result[2]).toMatchObject({ type: "message", key: "msg-2" });
@@ -169,11 +171,12 @@ describe("buildVirtualItems (combined)", () => {
       makeMessage({ id: "msg-2", sequence: 2, role: "assistant", content: "done" }),
     ];
     const result = buildAll(messages, [], undefined, false, undefined);
-    // user, persisted-narrative(msg-2), assistant
+    // user, persisted-narrative(msg-2), assistant, persisted-late-hooks(msg-2)
     expect(result.map((item) => item.type)).toEqual([
       "message",
       "persisted-narrative",
       "message",
+      "persisted-late-hooks",
     ]);
   });
 
@@ -196,10 +199,11 @@ describe("buildVirtualItems (combined)", () => {
     const toolCalls = [makeToolCall({ id: "tc-1" })];
     const result = buildAll(messages, toolCalls, undefined, false, undefined);
 
-    // Persisted-narrative(msg-1) precedes the assistant message, then user,
-    // then narrative-flow (no split because the tail isn't an assistant).
+    // Persisted-narrative(msg-1) precedes the assistant message, then
+    // persisted-late-hooks(msg-1) follows it, then user, then narrative-flow
+    // (no split because the tail isn't an assistant).
     const types = result.map((item) => item.type);
-    expect(types).toEqual(["persisted-narrative", "message", "message", "narrative-flow"]);
+    expect(types).toEqual(["persisted-narrative", "message", "persisted-late-hooks", "message", "narrative-flow"]);
   });
 
   it("full scenario: messages + tools + streaming", () => {
@@ -214,8 +218,9 @@ describe("buildVirtualItems (combined)", () => {
     const result = buildAll(messages, toolCalls, "Here is my answer...", true, 99999);
 
     const types = result.map((item) => item.type);
-    // user msg, narrative-flow (before split assistant msg), split assistant msg
-    expect(types).toEqual(["message", "narrative-flow", "message"]);
+    // user msg, narrative-flow (before split assistant msg), split assistant msg,
+    // persisted-late-hooks(msg-2) after the assistant bubble
+    expect(types).toEqual(["message", "narrative-flow", "message", "persisted-late-hooks"]);
     expect(result[0]).toMatchObject({ key: "msg-1" });
     expect(result[2]).toMatchObject({ key: "msg-2" });
     const narrativeItem = result[1] as ChatVirtualItem & { type: "narrative-flow" };

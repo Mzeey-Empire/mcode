@@ -24,6 +24,7 @@ import type { ToolCall } from "@/transport/types";
 import { rememberScrollTop, recallScrollTop, forgetScrollTop } from "./scrollPositionMemory";
 import { NarrativeFlow } from "./narrative";
 import { PersistedNarrative } from "./narrative/PersistedNarrative";
+import { PersistedLateHooks } from "./PersistedLateHooks";
 import type { ThoughtSegment } from "./narrative";
 
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
@@ -119,6 +120,8 @@ const VirtualItemRenderer = memo(function VirtualItemRenderer({
       );
     case "persisted-narrative":
       return <PersistedNarrative messageId={item.messageId} />;
+    case "persisted-late-hooks":
+      return <PersistedLateHooks messageId={item.messageId} />;
   }
 }, (prev, next) =>
   prev.item.key === next.item.key

@@ -2050,7 +2050,49 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       const exitCode = (params.exitCode as number) ?? 1;
       const durationMs = (params.durationMs as number) ?? 0;
       const didBlock = (params.didBlock as boolean) ?? false;
+      const persistedMessageId = params.persistedMessageId as string | undefined;
       if (!hookName) return;
+
+      // Late hooks (Stop/SessionEnd/PreCompact) arrive with persistedMessageId
+      // set by the server after `persistTurn` already ran. Route them into the
+      // persisted narrative cache so they render below the assistant bubble
+      // rather than appending to the volatile hooksByThread list (which is
+      // cleared on turn end and would not be visible).
+      if (persistedMessageId) {
+        set((state) => {
+          const existing = state.narrativeByMessage[persistedMessageId];
+          // If this message's narrative hasn't been loaded yet, there is nothing
+          // to append to. The next eager prefetch will fetch the full set from
+          // the server, so we can no-op safely here.
+          if (!existing) return state;
+          const record = {
+            id: crypto.randomUUID(),
+            message_id: persistedMessageId,
+            hook_name: hookName,
+            tool_name: null,
+            phase: "stop" as const,
+            payload: JSON.stringify({ hookType: "stop", toolName: null }),
+            duration_ms: durationMs,
+            did_block: didBlock,
+            started_at: new Date().toISOString(),
+            ended_at: new Date().toISOString(),
+            sort_order: (existing.hooks.length > 0
+              ? Math.max(...existing.hooks.map((h) => h.sort_order)) + 1
+              : 1000),
+          };
+          return {
+            narrativeByMessage: {
+              ...state.narrativeByMessage,
+              [persistedMessageId]: {
+                ...existing,
+                hooks: [...existing.hooks, record],
+              },
+            },
+          };
+        });
+        return;
+      }
+
       set((state) => {
         const hooks = state.hooksByThread[threadId] ?? [];
         // Target the last running hook with this name

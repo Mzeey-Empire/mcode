@@ -58,6 +58,17 @@ export type ChatVirtualItem =
       type: "persisted-narrative";
       /** Assistant message id this persisted timeline belongs to. */
       messageId: string;
+    }
+  | {
+      key: string;
+      type: "persisted-late-hooks";
+      /**
+       * Assistant message id whose late hooks (Stop / SessionEnd / PreCompact)
+       * are rendered here -- i.e. between the assistant bubble and the
+       * files-changed summary, giving the render order:
+       *   narrative timeline → assistant text → stop hooks → files summary
+       */
+      messageId: string;
     };
 
 /**
@@ -86,8 +97,18 @@ export function buildStableItems(
     }
     items.push({ key: msg.id, type: "message", message: msg });
 
-    // File change summary appears after the assistant message
     if (msg.role === "assistant") {
+      // Late stop hooks (Stop / SessionEnd / PreCompact) render immediately
+      // after the assistant bubble, before the files-changed summary.
+      // The component renders null when no late hooks are present, so this
+      // placeholder costs nothing for turns without stop hooks.
+      items.push({
+        key: `persisted-late-hooks-${msg.id}`,
+        type: "persisted-late-hooks",
+        messageId: msg.id,
+      });
+
+      // File change summary appears after the late hook rows
       const files = persistedFilesChanged?.[msg.id];
       if (files && files.length > 0) {
         items.push({
@@ -182,11 +203,12 @@ export function buildVirtualItems(
   // Split volatile items: narrative-flow goes before the last assistant
   // message; permission requests go after it.
 
-  // Find the last assistant message, skipping any trailing turn-changes items
+  // Find the last assistant message, skipping any trailing items that appear
+  // after the message bubble (turn-changes, persisted-late-hooks).
   let lastAssistantIdx = stableItems.length - 1;
   while (lastAssistantIdx >= 0) {
     const item = stableItems[lastAssistantIdx];
-    if (item.type === "turn-changes") {
+    if (item.type === "turn-changes" || item.type === "persisted-late-hooks") {
       lastAssistantIdx--;
       continue;
     }
@@ -347,6 +369,11 @@ export function estimateItemHeight(item: ChatVirtualItem): number {
       // initial sizing. Setting too small causes scroll-jump on settle;
       // setting too large wastes pre-allocated space.
       return 120;
+    case "persisted-late-hooks":
+      // Most turns have zero late hooks; the component renders null in that
+      // case. The virtualizer will re-measure on mount, so a small default
+      // keeps pre-allocated space tight for the common (no-late-hooks) path.
+      return 0;
     default:
       return assertNever(item);
   }
