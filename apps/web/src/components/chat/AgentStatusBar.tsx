@@ -1,8 +1,6 @@
-import { Bot } from "lucide-react";
+import { StackedLayersIcon } from "./narrative/StackedLayersIcon";
 import { countActiveSubagentCalls, useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
-
-const SLOW_SPIN_STYLE = { animationDuration: "2s" } as const;
 
 /** Shows "N subagents running" badge when subagents are active on the current thread. */
 export function AgentStatusBar() {
@@ -15,7 +13,7 @@ export function AgentStatusBar() {
 
   return (
     <div className="flex items-center gap-1.5 text-[11px]">
-      <Bot className="h-3 w-3 animate-spin text-muted-foreground" style={SLOW_SPIN_STYLE} />
+      <StackedLayersIcon animated className="h-3 w-3 text-muted-foreground" />
       <span className="flex items-center gap-1.5 text-muted-foreground font-medium">
         <span className="size-1.5 rounded-full bg-primary animate-pulse" />
         {count} subagent{count !== 1 ? "s" : ""} running
