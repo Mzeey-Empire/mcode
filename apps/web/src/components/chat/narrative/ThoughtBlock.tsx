@@ -1,4 +1,4 @@
-import { useState, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, lazy, Suspense } from "react";
 import type { ThoughtSegment } from "./types";
 
 const LazyMarkdownContent = lazy(() => import("../MarkdownContent"));
@@ -24,8 +24,25 @@ export function ThoughtBlock({ segment, isActive }: ThoughtBlockProps) {
   const [expanded, setExpanded] = useState(false);
   const shouldClamp = !isActive && isLong && !expanded;
 
+  const [settling, setSettling] = useState(false);
+  const prevActiveRef = useRef(isActive);
+
+  useEffect(() => {
+    if (prevActiveRef.current && !isActive) {
+      setSettling(true);
+      const timer = window.setTimeout(() => setSettling(false), 360);
+      return () => window.clearTimeout(timer);
+    }
+    prevActiveRef.current = isActive;
+  }, [isActive]);
+
   return (
-    <div className="grid grid-cols-[auto_1fr] gap-x-3 items-start px-2 py-1 thought-row">
+    <div
+      className={[
+        "grid grid-cols-[auto_1fr] gap-x-3 items-start px-2 py-1 thought-row",
+        settling ? "thought-settling" : "",
+      ].join(" ")}
+    >
       <span
         className={[
           "font-mono uppercase select-none pt-[2px]",

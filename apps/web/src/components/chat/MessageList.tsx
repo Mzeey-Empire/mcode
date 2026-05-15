@@ -64,16 +64,26 @@ const VirtualItemRenderer = memo(function VirtualItemRenderer({
   onBranch,
   onReply,
   onScrollToMessage,
+  currentTurnMessageIdByThread,
 }: {
   item: ChatVirtualItem;
   turnExpandRef?: React.RefObject<Map<string, boolean>>;
   onBranch?: (messageId: string) => void;
   onReply?: (messageId: string, content: string, role: "user" | "assistant") => void;
   onScrollToMessage?: (messageId: string) => void;
+  currentTurnMessageIdByThread: Record<string, string>;
 }) {
   switch (item.type) {
-    case "message":
-      return <MessageBubble message={item.message} onBranch={onBranch} onReply={onReply} onScrollToMessage={onScrollToMessage} />;
+    case "message": {
+      const isJustPersisted =
+        item.message.role === "assistant" &&
+        currentTurnMessageIdByThread[item.message.thread_id] === item.message.id;
+      return (
+        <div className={isJustPersisted ? "assistant-just-persisted" : ""}>
+          <MessageBubble message={item.message} onBranch={onBranch} onReply={onReply} onScrollToMessage={onScrollToMessage} />
+        </div>
+      );
+    }
     case "active-tools":
       return <ToolCallCard toolCalls={item.toolCalls} />;
     case "indicator":
@@ -129,7 +139,8 @@ const VirtualItemRenderer = memo(function VirtualItemRenderer({
   && prev.turnExpandRef === next.turnExpandRef
   && prev.onBranch === next.onBranch
   && prev.onReply === next.onReply
-  && prev.onScrollToMessage === next.onScrollToMessage,
+  && prev.onScrollToMessage === next.onScrollToMessage
+  && prev.currentTurnMessageIdByThread === next.currentTurnMessageIdByThread,
 );
 
 /** Props for {@link ScrollToBottomButton}. */
@@ -264,6 +275,9 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   );
   const thoughtSegments = useThreadStore(
     (s) => s.thoughtSegmentsByThread[currentThreadId ?? ""] ?? EMPTY_THOUGHT_SEGMENTS,
+  );
+  const currentTurnMessageIdByThread = useThreadStore(
+    (s) => s.currentTurnMessageIdByThread,
   );
 
   const toolCalls = toolCallsRaw ?? EMPTY_TOOL_CALLS;
@@ -884,7 +898,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
                 style={{ transform: `translateY(${vi.start}px)` }}
               >
                 <div className="mx-auto w-full max-w-4xl">
-                  <VirtualItemRenderer item={item} turnExpandRef={turnExpandRef} onBranch={onBranch} onReply={onReply} onScrollToMessage={scrollToMessage} />
+                  <VirtualItemRenderer item={item} turnExpandRef={turnExpandRef} onBranch={onBranch} onReply={onReply} onScrollToMessage={scrollToMessage} currentTurnMessageIdByThread={currentTurnMessageIdByThread} />
                 </div>
               </div>
             );
