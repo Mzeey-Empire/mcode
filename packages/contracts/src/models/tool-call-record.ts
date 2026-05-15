@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /** Status of a persisted tool call record. */
-export const ToolCallStatusSchema = z.enum(["running", "completed", "failed"]);
+export const ToolCallStatusSchema = z.enum(["running", "completed", "failed", "cancelled"]);
 
 /** Status of a persisted tool call record. */
 export type ToolCallStatus = z.infer<typeof ToolCallStatusSchema>;

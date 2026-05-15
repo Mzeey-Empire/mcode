@@ -29,6 +29,8 @@ import { TerminalService } from "./services/terminal-service";
 import { MessageRepo } from "./repositories/message-repo";
 import { ThreadRepo } from "./repositories/thread-repo";
 import { ToolCallRecordRepo } from "./repositories/tool-call-record-repo";
+import { ThoughtSegmentRepo } from "./repositories/thought-segment-repo";
+import { HookExecutionRepo } from "./repositories/hook-execution-repo";
 import { TurnSnapshotRepo } from "./repositories/turn-snapshot-repo";
 import { TaskRepo } from "./repositories/task-repo";
 import { PlanQuestionAnswersRepo } from "./repositories/plan-question-answers-repo";
@@ -171,6 +173,8 @@ const providerRegistry = container.resolve(ProviderRegistry);
 const cursorProvider = container.resolve(CursorProvider);
 const providerAvailability = container.resolve(ProviderAvailabilityService);
 const toolCallRecordRepo = container.resolve(ToolCallRecordRepo);
+const thoughtSegmentRepo = container.resolve(ThoughtSegmentRepo);
+const hookExecutionRepo = container.resolve(HookExecutionRepo);
 const turnSnapshotRepo = container.resolve(TurnSnapshotRepo);
 const snapshotService = container.resolve(SnapshotService);
 const settingsService = container.resolve(SettingsService);
@@ -343,11 +347,19 @@ for (const provider of providerRegistry.resolveAll()) {
   provider.on("event", (event: AgentEvent) => {
     let enrichedEvent = event;
 
-    // Enrich non-Agent tool calls with parent ID from the canonical stack in AgentService
+    // Enrich non-Agent tool calls with their parent Agent ID.
+    // Prefer the SDK-provided parent_tool_use_id on the event (set by the
+    // provider when the SDK message carries it). This is the only correct
+    // source for parallel subagents. `getCurrentParentToolCallId` only fills
+    // gaps when exactly one Agent on the stack is still running in the turn
+    // buffer; never use a raw LIFO peek (see narrative-pipeline.md trap 1).
     if (event.type === AgentEventType.ToolUse && event.toolName !== "Agent") {
-      const parentId = agentService.getCurrentParentToolCallId(event.threadId);
-      if (parentId) {
-        enrichedEvent = { ...event, parentToolCallId: parentId };
+      // SDK omitted parent_tool_use_id; fill from turn buffer fallback when unique running Agent (see narrative-pipeline.md).
+      if (!event.parentToolCallId) {
+        const parentId = agentService.getCurrentParentToolCallId(event.threadId);
+        if (parentId) {
+          enrichedEvent = { ...event, parentToolCallId: parentId };
+        }
       }
     }
 
@@ -430,6 +442,8 @@ const { httpServer, wss } = createWsServer({
   terminalService,
   messageRepo,
   toolCallRecordRepo,
+  thoughtSegmentRepo,
+  hookExecutionRepo,
   turnSnapshotRepo,
   snapshotService,
   settingsService,

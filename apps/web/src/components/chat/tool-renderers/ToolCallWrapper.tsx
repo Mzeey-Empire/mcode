@@ -1,12 +1,12 @@
 import { useState, type ReactNode, Component, type ErrorInfo } from "react";
-import type { LucideIcon } from "lucide-react";
 import { ChevronRight } from "lucide-react";
+import type { IconComponent } from "./constants";
 
 /** Extracted to avoid re-creating inline style objects each render. */
 const SLOW_SPIN_STYLE = { animationDuration: "2s" } as const;
 
 interface ToolCallWrapperProps {
-  icon: LucideIcon;
+  icon: IconComponent;
   label: string;
   badge?: string;
   isActive?: boolean;

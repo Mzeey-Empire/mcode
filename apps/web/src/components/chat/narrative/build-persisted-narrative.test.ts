@@ -1,0 +1,165 @@
+import { describe, it, expect } from "vitest";
+import { buildPersistedNarrativeItems } from "./build-persisted-narrative";
+import type {
+  ToolCallRecord,
+  ThoughtSegmentRecord,
+  HookExecutionRecord,
+} from "@/transport/types";
+
+function makeTool(over: Partial<ToolCallRecord> = {}): ToolCallRecord {
+  return {
+    id: "t-1",
+    message_id: "m-1",
+    parent_tool_call_id: null,
+    tool_name: "Read",
+    input_summary: "",
+    output_summary: "",
+    status: "completed",
+    started_at: "2026-05-15T10:00:00Z",
+    completed_at: "2026-05-15T10:00:01Z",
+    sort_order: 1,
+    ...over,
+  };
+}
+
+function makeThought(over: Partial<ThoughtSegmentRecord> = {}): ThoughtSegmentRecord {
+  return {
+    id: "th-1",
+    message_id: "m-1",
+    text: "thought",
+    started_at: "2026-05-15T10:00:00Z",
+    ended_at: "2026-05-15T10:00:00.500Z",
+    sort_order: 1,
+    ...over,
+  };
+}
+
+function makeHook(over: Partial<HookExecutionRecord> = {}): HookExecutionRecord {
+  return {
+    id: "hk-1",
+    message_id: "m-1",
+    hook_name: "PreToolUse",
+    tool_name: "Bash",
+    phase: "permission",
+    payload: "{}",
+    duration_ms: 12,
+    did_block: false,
+    started_at: "2026-05-15T10:00:00Z",
+    ended_at: "2026-05-15T10:00:00.012Z",
+    sort_order: 2,
+    ...over,
+  };
+}
+
+describe("buildPersistedNarrativeItems", () => {
+  it("empty input returns no items", () => {
+    expect(buildPersistedNarrativeItems({ tools: [], thoughts: [], hooks: [] })).toEqual([]);
+  });
+
+  it("thoughts-only: emits a thought row per record", () => {
+    const items = buildPersistedNarrativeItems({
+      tools: [],
+      thoughts: [makeThought({ id: "th-1", text: "a", sort_order: 1 })],
+      hooks: [],
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0].type).toBe("thought");
+  });
+
+  it("tools-only flat: groups consecutive completed non-Agent calls into a tool-group", () => {
+    const items = buildPersistedNarrativeItems({
+      tools: [
+        makeTool({ id: "t-1", tool_name: "Read", sort_order: 1 }),
+        makeTool({ id: "t-2", tool_name: "Write", sort_order: 2 }),
+      ],
+      thoughts: [],
+      hooks: [],
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0].type).toBe("tool-group");
+    if (items[0].type === "tool-group") {
+      expect(items[0].group.calls).toHaveLength(2);
+    }
+  });
+
+  it("hooks-only: emits a hook row per record", () => {
+    const items = buildPersistedNarrativeItems({
+      tools: [],
+      thoughts: [],
+      hooks: [makeHook({ id: "hk-1" })],
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0].type).toBe("hook");
+  });
+
+  it("nests child tool calls under their parent Agent as a subagent row", () => {
+    const items = buildPersistedNarrativeItems({
+      tools: [
+        makeTool({ id: "agent-1", tool_name: "Agent", sort_order: 1 }),
+        makeTool({ id: "child-1", tool_name: "Read", sort_order: 2, parent_tool_call_id: "agent-1" }),
+      ],
+      thoughts: [],
+      hooks: [],
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0].type).toBe("subagent");
+    if (items[0].type === "subagent") {
+      expect(items[0].children).toHaveLength(1);
+      expect(items[0].toolCall.id).toBe("agent-1");
+    }
+  });
+
+  it("parallel sub-agents render as separate subagent rows", () => {
+    const items = buildPersistedNarrativeItems({
+      tools: [
+        makeTool({ id: "agent-1", tool_name: "Agent", sort_order: 1 }),
+        makeTool({ id: "agent-2", tool_name: "Agent", sort_order: 2 }),
+        makeTool({ id: "c-1a", tool_name: "Read", sort_order: 3, parent_tool_call_id: "agent-1" }),
+        makeTool({ id: "c-2a", tool_name: "Read", sort_order: 4, parent_tool_call_id: "agent-2" }),
+      ],
+      thoughts: [],
+      hooks: [],
+    });
+    expect(items.filter((i) => i.type === "subagent")).toHaveLength(2);
+  });
+
+  it("interleaves all streams by sort_order", () => {
+    const items = buildPersistedNarrativeItems({
+      tools: [
+        makeTool({ id: "t-1", tool_name: "Read", sort_order: 2 }),
+        makeTool({ id: "t-2", tool_name: "Write", sort_order: 5 }),
+      ],
+      thoughts: [
+        makeThought({ id: "th-1", sort_order: 1 }),
+        makeThought({ id: "th-2", sort_order: 3 }),
+      ],
+      hooks: [makeHook({ id: "hk-1", sort_order: 4 })],
+    });
+    // sort: thought(1), tool(2), thought(3), hook(4), tool(5)
+    // tool-group breaks on each non-tool, so: thought, tool-group(1), thought, hook, tool-group(1)
+    expect(items.map((i) => i.type)).toEqual([
+      "thought",
+      "tool-group",
+      "thought",
+      "hook",
+      "tool-group",
+    ]);
+  });
+
+  it("hides a thought that exactly matches messageContent even when sort_order is not last", () => {
+    const dup = "ENTIRE ASSISTANT BODY";
+    const items = buildPersistedNarrativeItems({
+      tools: [],
+      thoughts: [
+        makeThought({ id: "th-dup", text: dup, sort_order: 1 }),
+        makeThought({ id: "th-tail", text: "short note", sort_order: 9 }),
+      ],
+      hooks: [],
+      messageContent: dup,
+    });
+    const thoughtTexts = items
+      .filter((i): i is Extract<typeof i, { type: "thought" }> => i.type === "thought")
+      .map((i) => i.segment.text);
+    expect(thoughtTexts).toEqual(["short note"]);
+  });
+});

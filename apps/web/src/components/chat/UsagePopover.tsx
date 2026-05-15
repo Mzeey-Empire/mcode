@@ -103,7 +103,7 @@ export function UsagePopover({ threadId, children, onOpenChange, side = "top", a
 
   // Earliest reset date across quota categories
   const resetDays = categories
-    .map((c) => daysUntil(c.resetDate))
+    .map((c) => daysUntil(c.resetDate ?? undefined))
     .filter((d): d is number => d !== undefined)
     .sort((a, b) => a - b)[0];
 

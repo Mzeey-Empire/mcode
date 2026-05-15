@@ -52,8 +52,11 @@ export function compileServerWithTsc(serverRoot = resolve(repoRootFromScript(), 
  */
 export function copyClaudeSdkCliNextTo(serverCjsOut, serverPackageRoot) {
   const serverRequire = createRequire(resolve(serverPackageRoot, "package.json"));
-  const sdkPkgPath = serverRequire.resolve("@anthropic-ai/claude-agent-sdk/package.json");
-  const sdkCliSrc = resolve(dirname(sdkPkgPath), "cli.js");
+  // The SDK no longer exposes "./package.json" in its package exports, so
+  // resolve the main entry instead and walk up to the package root. cli.js
+  // sits alongside sdk.mjs at the package root.
+  const sdkEntry = serverRequire.resolve("@anthropic-ai/claude-agent-sdk");
+  const sdkCliSrc = resolve(dirname(sdkEntry), "cli.js");
   copyFileSync(sdkCliSrc, resolve(dirname(serverCjsOut), "cli.js"));
 }
 

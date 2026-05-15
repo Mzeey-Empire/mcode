@@ -46,6 +46,12 @@ export type {
   ToolCallStatus,
 } from "./models/tool-call-record.js";
 
+export { ThoughtSegmentRecordSchema } from "./models/thought-segment.js";
+export type { ThoughtSegmentRecord } from "./models/thought-segment.js";
+
+export { HookExecutionRecordSchema } from "./models/hook-execution.js";
+export type { HookExecutionRecord } from "./models/hook-execution.js";
+
 export { TurnSnapshotSchema } from "./models/turn-snapshot.js";
 export type { TurnSnapshot } from "./models/turn-snapshot.js";
 

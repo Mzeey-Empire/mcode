@@ -89,6 +89,14 @@ interface SessionEntry {
    *  While this set is non-empty, evictIdleSessions() must skip the session
    *  regardless of how long it has been since an SDK message arrived. */
   pendingToolUses: Set<string>;
+  /**
+   * True once the first tool call for this sendMessage query has been registered.
+   * Distinguishes pre-tool preamble text (pendingToolUses=0, no tool fired yet)
+   * from post-tool assistant text. Intentionally survives SDK `result` events
+   * because the Claude SDK can emit `result` between internal rounds while the
+   * same user turn continues.
+   */
+  hasFiredToolThisTurn: boolean;
 }
 
 /**
@@ -734,6 +742,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       contextWindowMode,
       lastUsedAt: Date.now(),
       pendingToolUses: new Set<string>(),
+      hasFiredToolThisTurn: false,
     };
     this.sessions.set(sessionId, entry);
 
@@ -822,6 +831,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
           contextWindowMode,
           lastUsedAt: Date.now(),
           pendingToolUses: new Set<string>(),
+          hasFiredToolThisTurn: false,
         };
         this.sessions.set(sessionId, freshEntry);
 
@@ -998,6 +1008,14 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                 lastAssistantText = text;
               }
 
+              // Read parent_tool_use_id from the SDK message top-level.
+              // When subagents run in parallel, this is the ONLY reliable way
+              // to determine which Agent owns a given child tool call - the
+              // server-side agentCallStack approach fails for parallel dispatch
+              // because LIFO returns only the most recent Agent.
+              const sdkParentToolUseId =
+                (anyMsg.parent_tool_use_id as string | null | undefined) ?? undefined;
+
               for (const block of contentBlocks) {
                 if (block.type === "tool_use") {
                   const toolId = (block.id as string) || "";
@@ -1007,19 +1025,26 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                   if (toolId) {
                     emittedToolUseIds.add(toolId);
                     const entry = this.sessions.get(sessionId);
-                    entry?.pendingToolUses.add(toolId);
+                    if (entry) {
+                      entry.pendingToolUses.add(toolId);
+                      entry.hasFiredToolThisTurn = true;
+                    }
                   }
+                  const toolName = (block.name as string) || "unknown";
+                  logger.debug("Claude ToolUse from assistant block", {
+                    toolId, toolName, parent_tool_use_id: sdkParentToolUseId ?? null,
+                  });
                   this.emit("event", {
                     type: AgentEventType.ToolUse,
                     threadId,
                     toolCallId: toolId,
-                    toolName:
-                      (block.name as string) || "unknown",
+                    toolName,
                     toolInput:
                       (block.input as Record<
                         string,
                         unknown
                       >) || {},
+                    parentToolCallId: sdkParentToolUseId,
                   } satisfies AgentEvent);
                 }
               }
@@ -1152,6 +1177,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
 
               lastAssistantText = "";
               awaitingResume = true;
+              // Keep `hasFiredToolThisTurn` for the lifetime of this `sendMessage`
+              // query. The SDK emits `result` between internal API rounds while the
+              // same user turn continues; clearing the flag there made every
+              // post-`result` textDelta look like pre-tool preamble so
+              // `isFinalResponse` never fired and the reply duplicated THOUGHT rows.
               break;
             }
 
@@ -1241,16 +1271,25 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
               if (toolId) {
                 emittedToolUseIds.add(toolId);
                 const entry = this.sessions.get(sessionId);
-                entry?.pendingToolUses.add(toolId);
+                if (entry) {
+                  entry.pendingToolUses.add(toolId);
+                  entry.hasFiredToolThisTurn = true;
+                }
               }
+              const parentToolCallId =
+                (anyMsg.parent_tool_use_id as string | null | undefined) ?? undefined;
+              const toolName =
+                (anyMsg.tool_name as string) ||
+                (anyMsg.name as string) ||
+                "unknown";
+              logger.debug("Claude ToolUse from tool_use message", {
+                toolId, toolName, parent_tool_use_id: parentToolCallId ?? null,
+              });
               this.emit("event", {
                 type: AgentEventType.ToolUse,
                 threadId,
                 toolCallId: toolId,
-                toolName:
-                  (anyMsg.tool_name as string) ||
-                  (anyMsg.name as string) ||
-                  "unknown",
+                toolName,
                 toolInput:
                   (anyMsg.tool_input as Record<
                     string,
@@ -1261,6 +1300,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                     unknown
                   >) ||
                   {},
+                parentToolCallId,
               } satisfies AgentEvent);
               break;
             }
@@ -1324,10 +1364,21 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                   typeof streamEvent.delta.text === "string" &&
                   streamEvent.delta.text
                 ) {
+                  // Determine whether this delta is part of the final user-facing
+                  // response. The condition holds when all tool calls have resolved
+                  // (pendingToolUses empty) AND at least one tool has fired this
+                  // turn — distinguishing post-tool final-response text from
+                  // pre-tool preamble, both of which have pendingToolUses===0.
+                  const sessionEntry = this.sessions.get(sessionId);
+                  const isFinalResponse =
+                    sessionEntry !== undefined &&
+                    sessionEntry.pendingToolUses.size === 0 &&
+                    sessionEntry.hasFiredToolThisTurn === true;
                   this.emit("event", {
                     type: AgentEventType.TextDelta,
                     threadId,
                     delta: streamEvent.delta.text,
+                    ...(isFinalResponse && { isFinalResponse: true }),
                   } satisfies AgentEvent);
                 } else if (
                   streamEvent.delta?.type === "input_json_delta" &&

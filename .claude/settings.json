@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node scripts/agent/verify-tests.mjs"
+            "command": "node ${CLAUDE_PROJECT_DIR}/scripts/agent/verify-tests.mjs"
           }
         ]
       }

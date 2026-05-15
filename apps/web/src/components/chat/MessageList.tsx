@@ -10,7 +10,6 @@ import { MessageBubble } from "./MessageBubble";
 import { ToolCallCard } from "./ToolCallCard";
 import { StreamingIndicator } from "./StreamingIndicator";
 import { StreamingCard } from "./StreamingCard";
-import { ToolCallSummary } from "./ToolCallSummary";
 import { TurnChangeSummary } from "./TurnChangeSummary";
 import { PermissionRequestCard } from "./PermissionRequestCard";
 import { HookActivitySection } from "./HookActivitySection";
@@ -23,8 +22,13 @@ import {
 import type { ChatVirtualItem } from "./virtual-items";
 import type { ToolCall } from "@/transport/types";
 import { rememberScrollTop, recallScrollTop, forgetScrollTop } from "./scrollPositionMemory";
+import { NarrativeFlow } from "./narrative";
+import { PersistedNarrative } from "./narrative/PersistedNarrative";
+import { PersistedLateHooks } from "./PersistedLateHooks";
+import type { ThoughtSegment } from "./narrative";
 
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
+const EMPTY_THOUGHT_SEGMENTS: readonly ThoughtSegment[] = [];
 const AUTO_SCROLL_THRESHOLD = 64;
 /**
  * If the viewport is farther than this from the scroll tail, the user has left
@@ -60,16 +64,26 @@ const VirtualItemRenderer = memo(function VirtualItemRenderer({
   onBranch,
   onReply,
   onScrollToMessage,
+  currentTurnMessageIdByThread,
 }: {
   item: ChatVirtualItem;
   turnExpandRef?: React.RefObject<Map<string, boolean>>;
   onBranch?: (messageId: string) => void;
   onReply?: (messageId: string, content: string, role: "user" | "assistant") => void;
   onScrollToMessage?: (messageId: string) => void;
+  currentTurnMessageIdByThread: Record<string, string>;
 }) {
   switch (item.type) {
-    case "message":
-      return <MessageBubble message={item.message} onBranch={onBranch} onReply={onReply} onScrollToMessage={onScrollToMessage} />;
+    case "message": {
+      const isJustPersisted =
+        item.message.role === "assistant" &&
+        currentTurnMessageIdByThread[item.message.thread_id] === item.message.id;
+      return (
+        <div className={isJustPersisted ? "assistant-just-persisted" : ""}>
+          <MessageBubble message={item.message} onBranch={onBranch} onReply={onReply} onScrollToMessage={onScrollToMessage} />
+        </div>
+      );
+    }
     case "active-tools":
       return <ToolCallCard toolCalls={item.toolCalls} />;
     case "indicator":
@@ -81,13 +95,6 @@ const VirtualItemRenderer = memo(function VirtualItemRenderer({
       );
     case "streaming":
       return <StreamingCard text={item.text} />;
-    case "tool-summary":
-      return (
-        <ToolCallSummary
-          messageId={item.serverMessageId}
-          toolCallCount={item.toolCallCount}
-        />
-      );
     case "turn-changes":
       return (
         <TurnChangeSummary
@@ -110,6 +117,22 @@ const VirtualItemRenderer = memo(function VirtualItemRenderer({
       );
     case "hook-activity":
       return <HookActivitySection hooks={item.hooks} />;
+    case "narrative-flow":
+      return (
+        <NarrativeFlow
+          toolCalls={item.toolCalls}
+          hooks={item.hooks}
+          thoughtSegments={item.thoughtSegments}
+          streamingText={item.streamingText}
+          isAgentRunning={item.isAgentRunning}
+          startTime={item.startTime}
+          committedAssistantBody={item.committedAssistantBody}
+        />
+      );
+    case "persisted-narrative":
+      return <PersistedNarrative messageId={item.messageId} messageContent={item.messageContent} />;
+    case "persisted-late-hooks":
+      return <PersistedLateHooks messageId={item.messageId} />;
   }
 }, (prev, next) =>
   prev.item.key === next.item.key
@@ -117,7 +140,8 @@ const VirtualItemRenderer = memo(function VirtualItemRenderer({
   && prev.turnExpandRef === next.turnExpandRef
   && prev.onBranch === next.onBranch
   && prev.onReply === next.onReply
-  && prev.onScrollToMessage === next.onScrollToMessage,
+  && prev.onScrollToMessage === next.onScrollToMessage
+  && prev.currentTurnMessageIdByThread === next.currentTurnMessageIdByThread,
 );
 
 /** Props for {@link ScrollToBottomButton}. */
@@ -230,12 +254,6 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   const toolCallsRaw = useThreadStore((s) =>
     activeThreadId ? s.toolCallsByThread[activeThreadId] : undefined,
   );
-  const persistedToolCallCounts = useThreadStore(
-    useShallow((s) => s.persistedToolCallCounts),
-  );
-  const serverMessageIds = useThreadStore(
-    useShallow((s) => s.serverMessageIds),
-  );
   const persistedFilesChanged = useThreadStore(
     useShallow((s) => s.persistedFilesChanged),
   );
@@ -255,6 +273,12 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   );
   const hooks = useThreadStore(
     useShallow((s) => currentThreadId ? (s.hooksByThread[currentThreadId] ?? []) : []),
+  );
+  const thoughtSegments = useThreadStore(
+    (s) => s.thoughtSegmentsByThread[currentThreadId ?? ""] ?? EMPTY_THOUGHT_SEGMENTS,
+  );
+  const currentTurnMessageIdByThread = useThreadStore(
+    (s) => s.currentTurnMessageIdByThread,
   );
 
   const toolCalls = toolCallsRaw ?? EMPTY_TOOL_CALLS;
@@ -348,14 +372,44 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   }, [activeThreadId, hasMore, isLoadingMore, loadOlderMessages]);
 
   const stableItems = useMemo(
-    () => buildStableItems(messages, persistedToolCallCounts, serverMessageIds, persistedFilesChanged, latestTurnWithChanges),
-    [messages, persistedToolCallCounts, serverMessageIds, persistedFilesChanged, latestTurnWithChanges],
+    () => buildStableItems(messages, persistedFilesChanged, latestTurnWithChanges),
+    [messages, persistedFilesChanged, latestTurnWithChanges],
   );
 
-  const volatileItems = useMemo(
-    () => buildVolatileItems(toolCalls, isAgentRunning, agentStartTime, streamingText, permissions, hooks),
-    [toolCalls, isAgentRunning, agentStartTime, streamingText, permissions, hooks],
-  );
+  const volatileItems = useMemo(() => {
+    const base = buildVolatileItems(
+      toolCalls,
+      isAgentRunning,
+      agentStartTime,
+      streamingText,
+      permissions,
+      hooks,
+      thoughtSegments,
+    );
+    const lastMsg = messages[messages.length - 1];
+    const committedAssistantBody =
+      currentThreadId && !isAgentRunning && lastMsg?.role === "assistant"
+        ? lastMsg.content
+        : undefined;
+    if (!committedAssistantBody) {
+      return base;
+    }
+    return base.map((item) =>
+      item.type === "narrative-flow"
+        ? { ...item, committedAssistantBody }
+        : item,
+    );
+  }, [
+    toolCalls,
+    isAgentRunning,
+    agentStartTime,
+    streamingText,
+    permissions,
+    hooks,
+    thoughtSegments,
+    messages,
+    currentThreadId,
+  ]);
 
   const hasToolCalls = toolCalls.length > 0;
   const items = useMemo(
@@ -875,7 +929,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
                 style={{ transform: `translateY(${vi.start}px)` }}
               >
                 <div className="mx-auto w-full max-w-4xl">
-                  <VirtualItemRenderer item={item} turnExpandRef={turnExpandRef} onBranch={onBranch} onReply={onReply} onScrollToMessage={scrollToMessage} />
+                  <VirtualItemRenderer item={item} turnExpandRef={turnExpandRef} onBranch={onBranch} onReply={onReply} onScrollToMessage={scrollToMessage} currentTurnMessageIdByThread={currentTurnMessageIdByThread} />
                 </div>
               </div>
             );

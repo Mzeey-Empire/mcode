@@ -99,6 +99,10 @@ When working on frontend code, follow the component registry and rules in **[doc
 
 That guide's **Testing UI Changes** section lists the triggers that require a Playwright run (interactive components, responsive layout, accessibility semantics, theme tokens, `data-testid` changes, floating overlays, persisted first-paint state). Run `cd apps/web && bun run e2e` and report pass counts before claiming a UI change is done.
 
+## Narrative Timeline
+
+Before touching the Claude provider event pipeline, the agent-service, the `threadStore` tool-call lifecycle, or anything under `apps/web/src/components/chat/narrative/`, read **[docs/guides/narrative-pipeline.md](docs/guides/narrative-pipeline.md)**. It documents the end-to-end event flow and six specific traps (parent-id attribution for parallel sub-agents, `agentCallStack` lifecycle, volatile-state lifetime through `turn.persisted`, the DOM-mutation anti-pattern for the typing cursor, wall-clock snapshots in React, and the intentional step/sub-agent count overlap) that have already caused regressions on this codebase.
+
 ## Code Style
 
 Always add JSDoc/TSDoc docstrings to all exported functions, components, types, and interfaces. AI-powered code reviews depend on these for context. At minimum include a one-line summary of what the symbol does.

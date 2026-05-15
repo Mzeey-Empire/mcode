@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
+import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport";
+import type { ThoughtSegment } from "@/components/chat/narrative/types";
 import type { ContextWindowMode, ReasoningLevel, PlanQuestion, PlanAnswer, ProviderUsageInfo, QuotaCategory, TurnSnapshot } from "@mcode/contracts";
 import type { PermissionRequest, PermissionDecision } from "@mcode/contracts";
 import { PlanQuestionSchema, PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts";
@@ -117,6 +118,19 @@ interface ThreadState {
   permissionsByThread: Record<string, StoredPermission[]>;
   /** Ephemeral hook execution state per thread. Cleared on page reload, not persisted to DB. */
   hooksByThread: Record<string, HookExecution[]>;
+  /** Ephemeral thought segments for the current turn per thread. Cleared on turnComplete/ended. */
+  thoughtSegmentsByThread: Record<string, ThoughtSegment[]>;
+  /**
+   * Persisted narrative records keyed by assistant message id. Populated by
+   * `loadNarrativeForMessage` (eager prefetch on thread load, lazy fetch on
+   * scroll). Used by `PersistedNarrative` to render the timeline for
+   * completed turns from earlier in the conversation.
+   */
+  narrativeByMessage: Record<string, {
+    tools: ToolCallRecord[];
+    thoughts: ThoughtSegmentRecord[];
+    hooks: HookExecutionRecord[];
+  } | undefined>;
   /**
    * After `agent.stop`, each thread ID is marked until `turn.persisted` arrives for that
    * thread, so we can show a one-shot file-change notice without colliding across threads.
@@ -167,6 +181,16 @@ interface ThreadState {
   resolvePermissionRequest: (requestId: string, decision: PermissionDecision) => void;
   handleAgentEvent: (threadId: string, event: Record<string, unknown>) => void;
 
+  /**
+   * Fetch the persisted narrative (tools, thoughts, hooks) for an assistant
+   * message and cache it under `narrativeByMessage[messageId]`. Returns the
+   * existing in-flight promise on concurrent calls to avoid duplicate RPCs.
+   * Idempotent: returns immediately if the message is already cached.
+   */
+  loadNarrativeForMessage: (messageId: string) => Promise<void>;
+  /** Drop the cached narrative for a message - call from edit/delete paths. */
+  evictNarrativeForMessage: (messageId: string) => void;
+
   /** Handle server-side tool call persistence confirmation. */
   handleTurnPersisted: (payload: { threadId: string; messageId: string; toolCallCount: number; filesChanged: string[] }) => void;
   /** Clear the interrupt file-notice banner for one thread (user dismissed). */
@@ -190,6 +214,13 @@ interface ThreadState {
 
 /** Pending dequeue timers per thread, so duplicate turnComplete events don't double-dequeue. */
 const dequeueTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * Module-level dedup map for in-flight `narrative.list` RPCs. Held outside the
+ * store so concurrent `loadNarrativeForMessage` calls share a single promise
+ * without triggering re-renders for the inflight bookkeeping.
+ */
+const narrativeInflight = new Map<string, Promise<void>>();
 
 function clearDequeueTimer(threadId: string) {
   const timer = dequeueTimers.get(threadId);
@@ -364,32 +395,62 @@ export function extractPendingPlanQuestions(
 }
 
 /** Zustand store for thread-scoped messages, streaming session state, and agent event handling. */
+/** One coalesced `session.textDelta` span for rAF flushing; merges adjacent chunks with same `isFinalResponse`. */
+type PendingTextChunk = { delta: string; isFinalResponse: boolean };
+
 export const useThreadStore = create<ThreadState>((set, get) => {
   let textDeltaFlushRaf: number | null = null;
-  const pendingTextDeltaByThread = new Map<string, string>();
+  const pendingTextDeltaByThread = new Map<string, PendingTextChunk[]>();
 
-  /** Applies coalesced `session.textDelta` strings batched on `requestAnimationFrame`. */
+  /**
+   * Applies coalesced `session.textDelta` chunks batched on `requestAnimationFrame`.
+   * `isFinalResponse` spans update streaming buffers only so they stay out of `thoughtSegmentsByThread`.
+   */
   const flushPendingTextDeltas = () => {
     if (textDeltaFlushRaf != null) {
       cancelAnimationFrame(textDeltaFlushRaf);
       textDeltaFlushRaf = null;
     }
     if (pendingTextDeltaByThread.size === 0) return;
-    const batch = new Map(pendingTextDeltaByThread);
+    const batch = new Map<string, PendingTextChunk[]>();
+    for (const [tid, chunks] of pendingTextDeltaByThread) {
+      batch.set(tid, chunks.map((c) => ({ delta: c.delta, isFinalResponse: c.isFinalResponse })));
+    }
     pendingTextDeltaByThread.clear();
     set((state) => {
       const nextStreaming = { ...state.streamingByThread };
       const nextPreview = { ...state.streamingPreviewByThread };
-      for (const [tid, acc] of batch) {
-        if (!acc) continue;
-        const cur = nextStreaming[tid] ?? "";
-        const combined = cur + acc;
-        nextStreaming[tid] = combined;
-        nextPreview[tid] = combined.length > 200 ? combined.slice(-200) : combined;
+      const nextSegments = { ...state.thoughtSegmentsByThread };
+      for (const [tid, chunks] of batch) {
+        for (const chunk of chunks) {
+          const acc = chunk.delta;
+          if (!acc) continue;
+          const cur = nextStreaming[tid] ?? "";
+          const combined = cur + acc;
+          nextStreaming[tid] = combined;
+          nextPreview[tid] = combined.length > 200 ? combined.slice(-200) : combined;
+
+          if (chunk.isFinalResponse) {
+            continue;
+          }
+
+          // Manage thought segments: append to the active segment or start a new one.
+          const segments = nextSegments[tid] ?? [];
+          const last = segments[segments.length - 1];
+          if (!last || last.endedAt !== undefined) {
+            nextSegments[tid] = [...segments, { text: acc, startedAt: Date.now() }];
+          } else {
+            nextSegments[tid] = [
+              ...segments.slice(0, -1),
+              { ...last, text: last.text + acc },
+            ];
+          }
+        }
       }
       return {
         streamingByThread: nextStreaming,
         streamingPreviewByThread: nextPreview,
+        thoughtSegmentsByThread: nextSegments,
       };
     });
   };
@@ -436,6 +497,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   answeredPlanMessageIdsByThread: {},
   permissionsByThread: {},
   hooksByThread: {},
+  thoughtSegmentsByThread: {},
+  narrativeByMessage: {},
   awaitingUserStopPersistByThread: {},
   interruptStopFileNoticeByThread: {},
   composerRecallFromStopByThread: {},
@@ -663,6 +726,42 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           },
         }));
 
+        // Eager-prefetch persisted narrative for the last 20 assistant
+        // messages. Driven from the store on `loadMessages` (and on
+        // `turn.persisted` for newly-completed turns), NOT from a
+        // `[messages.length]` effect - that would fire on every streaming
+        // append (false positives) and miss thread-switches that happen to
+        // land on the same length (false negatives). The 20-message window
+        // covers the immediate scrollback viewport; older entries lazy-fetch
+        // via IntersectionObserver in `PersistedNarrative`.
+        const PREFETCH_BATCH = 20;
+        const lastAssistants = messages
+          .filter((m) => m.role === "assistant")
+          .slice(-PREFETCH_BATCH);
+        // Use the batch RPC to fetch all narratives in a single round-trip
+        // instead of 20 individual narrative.list calls. Significant win on
+        // slow WebSocket connections where RTT dominates prefetch latency.
+        const idsToFetch = lastAssistants
+          .map((m) => m.id)
+          .filter((id) => !get().narrativeByMessage[id]);
+        if (idsToFetch.length > 0) {
+          void getTransport()
+            .listNarrativeBatch(idsToFetch)
+            .then((batchRes) => {
+              set((state) => ({
+                narrativeByMessage: { ...state.narrativeByMessage, ...batchRes },
+              }));
+            })
+            .catch((err) => {
+              // Fall back to individual fetches on batch failure (e.g. server
+              // doesn't support the new RPC yet — during rolling deploys).
+              console.warn("[narrative] listNarrativeBatch failed, falling back", err);
+              for (const m of lastAssistants) {
+                void get().loadNarrativeForMessage(m.id);
+              }
+            });
+        }
+
         // Re-hydrate pending permissions (covers reconnect and thread switch)
         void getTransport().listPendingPermissions(threadId).then((pending) => {
           const mapped = pending.map((p) => ({ ...p, settled: false }));
@@ -889,6 +988,11 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         : {}),
       runningThreadIds: new Set([...state.runningThreadIds, threadId]),
       agentStartTimes: { ...state.agentStartTimes, [threadId]: Date.now() },
+      // Clear previous turn's audit trail when the user submits a new message. Belt-and-suspenders
+      // guard for cases where session.turnStarted doesn't fire (e.g. error before agent boots).
+      toolCallsByThread: omitKey(state.toolCallsByThread, threadId),
+      thoughtSegmentsByThread: omitKey(state.thoughtSegmentsByThread, threadId),
+      hooksByThread: omitKey(state.hooksByThread, threadId),
       // Persist composer-side overrides so the post-wizard answer turn forwards them
       settingsByThread: (reasoningLevel !== undefined || contextWindow !== undefined || thinking !== undefined)
         ? {
@@ -1220,6 +1324,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         answeredPlanMessageIdsByThread: omitKey(state.answeredPlanMessageIdsByThread, threadId),
         permissionsByThread: omitKey(state.permissionsByThread, threadId),
         hooksByThread: omitKey(state.hooksByThread, threadId),
+        thoughtSegmentsByThread: omitKey(state.thoughtSegmentsByThread, threadId),
         usageByProvider: Object.fromEntries(
           Object.entries(state.usageByProvider).filter(([k]) => !k.startsWith(`${threadId}:`)),
         ),
@@ -1237,6 +1342,10 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               persistedFilesChanged: {},
               serverMessageIds: {},
               latestTurnWithChanges: null,
+              // Narrative cache is message-keyed; flushing alongside the
+              // current-thread message wipe keeps memory in check on thread
+              // delete. Worst case: harmless refetch on revisit.
+              narrativeByMessage: {},
             }
           : {}),
       };
@@ -1306,6 +1415,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         answeredPlanMessageIdsByThread: pruneAll(state.answeredPlanMessageIdsByThread),
         permissionsByThread: pruneAll(state.permissionsByThread),
         hooksByThread: pruneAll(state.hooksByThread),
+        thoughtSegmentsByThread: pruneAll(state.thoughtSegmentsByThread),
         usageByProvider: Object.fromEntries(
           Object.entries(state.usageByProvider).filter(([k]) => !threadIds.some((tid) => k.startsWith(`${tid}:`))),
         ),
@@ -1477,6 +1587,41 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   },
 
   /**
+   * Fetch the persisted narrative for an assistant message, dedup across
+   * concurrent callers via a module-level inflight map. No-op if already
+   * cached. Swallows errors so a single bad message doesn't break the UI.
+   */
+  loadNarrativeForMessage: async (messageId) => {
+    if (get().narrativeByMessage[messageId]) return;
+    const existing = narrativeInflight.get(messageId);
+    if (existing) return existing;
+    const p = getTransport()
+      .listNarrative(messageId)
+      .then((res) => {
+        set((state) => ({
+          narrativeByMessage: { ...state.narrativeByMessage, [messageId]: res },
+        }));
+      })
+      .catch((err) => {
+        console.warn("[narrative] listNarrative failed", { messageId, err });
+      })
+      .finally(() => {
+        narrativeInflight.delete(messageId);
+      });
+    narrativeInflight.set(messageId, p);
+    return p;
+  },
+
+  evictNarrativeForMessage: (messageId) => {
+    set((state) => {
+      if (!(messageId in state.narrativeByMessage)) return state;
+      const next = { ...state.narrativeByMessage };
+      delete next[messageId];
+      return { narrativeByMessage: next };
+    });
+  },
+
+  /**
    * Process a real-time agent event (sidecar or legacy CLI format).
    * Updates per-thread streaming text, tool calls, and running state.
    * On turn completion, commits any buffered streaming content as a
@@ -1509,17 +1654,32 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     // delta, or turnComplete), we mark prior calls as done.
     const markPriorToolCallsComplete = () => {
       const calls = get().toolCallsByThread[threadId];
-      if (!calls || !calls.some((tc) => !tc.isComplete && tc.toolName !== "Agent")) return;
+      if (!calls || !calls.some((tc) => !tc.isComplete)) return;
       set((state) => {
         const current = state.toolCallsByThread[threadId] ?? [];
-        // Agent tool calls represent in-flight subagent runs. Their child tool
-        // events keep arriving on the same thread after a peer top-level event,
-        // so completing them here would prematurely drop the derived subagent count
-        // and hide the live LiveAgentGroup. Agent completion is driven only by
-        // its own session.toolResult event.
-        const updated = current.map((tc) =>
-          tc.isComplete || tc.toolName === "Agent" ? tc : { ...tc, isComplete: true }
-        );
+        // Agent calls complete only when they have at least one child and all
+        // children are done. An Agent with no children yet is still in-flight -
+        // leaving it incomplete preserves the live subagent UI. An Agent whose
+        // children have all finished is implicitly done when a new top-level
+        // event arrives (text, new tool, or message), because the Claude Agent
+        // SDK does not always emit a toolResult for Agent calls.
+        const children = (agentId: string) =>
+          current.filter((c) => c.parentToolCallId === agentId);
+        const isAgentDone = (agentId: string) => {
+          const kids = children(agentId);
+          return kids.length > 0 && !kids.some((c) => !c.isComplete);
+        };
+
+        const updated = current.map((tc) => {
+          if (tc.isComplete) return tc;
+          if (tc.toolName === "Agent") {
+            const done = isAgentDone(tc.id);
+            if (done) console.debug("[narrative:markComplete] Agent done", { id: tc.id, childCount: children(tc.id).length });
+            return done ? { ...tc, isComplete: true } : tc;
+          }
+          console.debug("[narrative:markComplete]", { id: tc.id, toolName: tc.toolName, parentToolCallId: tc.parentToolCallId });
+          return { ...tc, isComplete: true };
+        });
         return {
           toolCallsByThread: { ...state.toolCallsByThread, [threadId]: updated },
         };
@@ -1573,7 +1733,16 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         if (state.runningThreadIds.has(threadId)) return {};
         const next = new Set(state.runningThreadIds);
         next.add(threadId);
-        return { runningThreadIds: next, agentStartTimes: { ...state.agentStartTimes, [threadId]: Date.now() } };
+        return {
+          runningThreadIds: next,
+          agentStartTimes: { ...state.agentStartTimes, [threadId]: Date.now() },
+          // Clear the previous turn's audit trail when a new turn begins. The
+          // trail stays visible from turnComplete through turn.persisted so the
+          // user can read what just happened; we only reset on the next turn.
+          toolCallsByThread: omitKey(state.toolCallsByThread, threadId),
+          thoughtSegmentsByThread: omitKey(state.thoughtSegmentsByThread, threadId),
+          hooksByThread: omitKey(state.hooksByThread, threadId),
+        };
       });
       // Clear interrupted status so the resume banner no longer lists this
       // thread while the agent processes the continuation message.
@@ -1612,6 +1781,24 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           delete nextStreaming[threadId];
           const nextPreview = { ...state.streamingPreviewByThread };
           delete nextPreview[threadId];
+          // Freeze any open thought segment. Without this, the open segment
+          // (endedAt undefined) keeps satisfying `isFinalResponse` in
+          // build-narrative, so the DeltaBlock keeps rendering alongside the
+          // newly-persisted MessageBubble for one or more frames - the visible
+          // flash. Closing the segment here makes the swap atomic with the
+          // streamingByThread clear.
+          const segments = state.thoughtSegmentsByThread[threadId] ?? [];
+          const lastSeg = segments[segments.length - 1];
+          const nextThoughtSegments =
+            lastSeg && lastSeg.endedAt === undefined
+              ? {
+                  ...state.thoughtSegmentsByThread,
+                  [threadId]: [
+                    ...segments.slice(0, -1),
+                    { ...lastSeg, endedAt: Date.now() },
+                  ],
+                }
+              : state.thoughtSegmentsByThread;
           const trackTurn = {
             currentTurnMessageIdByThread: {
               ...state.currentTurnMessageIdByThread,
@@ -1619,6 +1806,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             },
             streamingByThread: nextStreaming,
             streamingPreviewByThread: nextPreview,
+            thoughtSegmentsByThread: nextThoughtSegments,
           };
           if (state.currentThreadId !== threadId) return trackTurn;
           // In Electron, MessagePort and WebSocket are independent channels
@@ -1688,6 +1876,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       const toolCallId = (params.toolCallId as string) || "";
       const existingCalls = get().toolCallsByThread[threadId] ?? [];
       if (toolCallId && existingCalls.some((tc) => tc.id === toolCallId)) {
+        console.debug("[narrative:toolUse] DEDUP skip", { toolCallId });
         return;
       }
 
@@ -1724,13 +1913,33 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         isError: false,
         isComplete: false,
         parentToolCallId: parentToolCallId || undefined,
+        startedAt: Date.now(),
       };
-      set((state) => ({
-        toolCallsByThread: {
-          ...state.toolCallsByThread,
-          [threadId]: [...(state.toolCallsByThread[threadId] ?? []), toolCall],
-        },
-      }));
+      console.debug("[narrative:toolUse]", { threadId, toolName, toolCallId, parentToolCallId, isAgent: toolName === "Agent" });
+      set((state) => {
+        // Freeze the active thought segment so it has a definite end time.
+        const segments = state.thoughtSegmentsByThread[threadId] ?? [];
+        const last = segments[segments.length - 1];
+        const froze = last && last.endedAt === undefined;
+        const nextSegments =
+          froze
+            ? {
+                ...state.thoughtSegmentsByThread,
+                [threadId]: [
+                  ...segments.slice(0, -1),
+                  { ...last, endedAt: Date.now() },
+                ],
+              }
+            : state.thoughtSegmentsByThread;
+        console.debug("[narrative:toolUse] segments", { froze, segCount: segments.length, lastEndedAt: last?.endedAt });
+        return {
+          toolCallsByThread: {
+            ...state.toolCallsByThread,
+            [threadId]: [...(state.toolCallsByThread[threadId] ?? []), toolCall],
+          },
+          thoughtSegmentsByThread: nextSegments,
+        };
+      });
       return;
     }
 
@@ -1738,6 +1947,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       const toolCallId = (params.toolCallId as string) || "";
       const output = (params.output as string) || "";
       const isError = (params.isError as boolean) || false;
+      console.debug("[narrative:toolResult]", { threadId, toolCallId, isError, outputLen: output.length });
       set((state) => {
         const calls = state.toolCallsByThread[threadId] ?? [];
         // Try matching by ID first; fall back to the first incomplete tool call
@@ -1772,11 +1982,17 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     if (method === "session.textDelta") {
       const delta = (params.delta as string) || "";
       if (!delta) return;
+      const isFinalResponse = params.isFinalResponse === true;
       const hadPending = pendingTextDeltaByThread.has(threadId);
-      pendingTextDeltaByThread.set(
-        threadId,
-        (pendingTextDeltaByThread.get(threadId) ?? "") + delta,
-      );
+      const existing = pendingTextDeltaByThread.get(threadId) ?? [];
+      const next = [...existing];
+      const tail = next[next.length - 1];
+      if (tail && tail.isFinalResponse === isFinalResponse) {
+        next[next.length - 1] = { delta: tail.delta + delta, isFinalResponse };
+      } else {
+        next.push({ delta, isFinalResponse });
+      }
+      pendingTextDeltaByThread.set(threadId, next);
       if (!hadPending) {
         markPriorToolCallsComplete();
       }
@@ -1865,7 +2081,49 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       const exitCode = (params.exitCode as number) ?? 1;
       const durationMs = (params.durationMs as number) ?? 0;
       const didBlock = (params.didBlock as boolean) ?? false;
+      const persistedMessageId = params.persistedMessageId as string | undefined;
       if (!hookName) return;
+
+      // Late hooks (Stop/SessionEnd/PreCompact) arrive with persistedMessageId
+      // set by the server after `persistTurn` already ran. Route them into the
+      // persisted narrative cache so they render below the assistant bubble
+      // rather than appending to the volatile hooksByThread list (which is
+      // cleared on turn end and would not be visible).
+      if (persistedMessageId) {
+        set((state) => {
+          const existing = state.narrativeByMessage[persistedMessageId];
+          // If this message's narrative hasn't been loaded yet, there is nothing
+          // to append to. The next eager prefetch will fetch the full set from
+          // the server, so we can no-op safely here.
+          if (!existing) return state;
+          const record = {
+            id: crypto.randomUUID(),
+            message_id: persistedMessageId,
+            hook_name: hookName,
+            tool_name: null,
+            phase: "stop" as const,
+            payload: JSON.stringify({ hookType: "stop", toolName: null }),
+            duration_ms: durationMs,
+            did_block: didBlock,
+            started_at: new Date().toISOString(),
+            ended_at: new Date().toISOString(),
+            sort_order: (existing.hooks.length > 0
+              ? Math.max(...existing.hooks.map((h) => h.sort_order)) + 1
+              : 1000),
+          };
+          return {
+            narrativeByMessage: {
+              ...state.narrativeByMessage,
+              [persistedMessageId]: {
+                ...existing,
+                hooks: [...existing.hooks, record],
+              },
+            },
+          };
+        });
+        return;
+      }
+
       set((state) => {
         const hooks = state.hooksByThread[threadId] ?? [];
         // Target the last running hook with this name
@@ -1933,8 +2191,21 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           delete nextPreview[threadId];
           const nextRunning = new Set(state.runningThreadIds);
           nextRunning.delete(threadId);
-          const nextStartTimes = { ...state.agentStartTimes };
-          delete nextStartTimes[threadId];
+          // Freeze any open thought segment alongside the streaming clear so
+          // the persisted MessageBubble takes over cleanly without a DeltaBlock
+          // shadow. See the matching block in session.message handler.
+          const segments = state.thoughtSegmentsByThread[threadId] ?? [];
+          const lastSeg = segments[segments.length - 1];
+          const nextThoughtSegments =
+            lastSeg && lastSeg.endedAt === undefined
+              ? {
+                  ...state.thoughtSegmentsByThread,
+                  [threadId]: [
+                    ...segments.slice(0, -1),
+                    { ...lastSeg, endedAt: Date.now() },
+                  ],
+                }
+              : state.thoughtSegmentsByThread;
           // Mark all tool calls as complete and keep in active slot briefly
           const currentCalls = state.toolCallsByThread[threadId] ?? [];
           const completedCalls = currentCalls.map((tc) =>
@@ -1953,8 +2224,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               : {}),
             streamingByThread: nextStreaming,
             streamingPreviewByThread: nextPreview,
+            thoughtSegmentsByThread: nextThoughtSegments,
             runningThreadIds: nextRunning,
-            agentStartTimes: nextStartTimes,
             toolCallsByThread: completedCalls.length > 0
               ? { ...state.toolCallsByThread, [threadId]: completedCalls }
               : state.toolCallsByThread,
@@ -1979,8 +2250,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           delete nextStreaming[threadId];
           const nextPreview = { ...state.streamingPreviewByThread };
           delete nextPreview[threadId];
-          const nextStartTimes = { ...state.agentStartTimes };
-          delete nextStartTimes[threadId];
           const currentCalls = state.toolCallsByThread[threadId] ?? [];
           const completedCalls = currentCalls.map((tc) =>
             tc.isComplete ? tc : { ...tc, isComplete: true }
@@ -1998,7 +2267,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             runningThreadIds: nextRunning,
             streamingByThread: nextStreaming,
             streamingPreviewByThread: nextPreview,
-            agentStartTimes: nextStartTimes,
             toolCallsByThread: completedCalls.length > 0
               ? { ...state.toolCallsByThread, [threadId]: completedCalls }
               : state.toolCallsByThread,
@@ -2417,10 +2685,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         }
       }
 
-      // Clear in-memory tool calls now that the DB-backed summary takes over
-      const nextToolCalls = { ...state.toolCallsByThread };
-      delete nextToolCalls[payload.threadId];
-
       // The server's messageId may differ from the client's in-memory UUID
       // (client generates its own via crypto.randomUUID()). Prefer the ID
       // tracked during the active turn; fall back to the last assistant message
@@ -2444,7 +2708,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       const nextTurnMsgIds = { ...state.currentTurnMessageIdByThread };
       delete nextTurnMsgIds[payload.threadId];
       return {
-        toolCallsByThread: nextToolCalls,
         persistedToolCallCounts: {
           ...state.persistedToolCallCounts,
           [localMsgId]: payload.toolCallCount,
@@ -2478,6 +2741,30 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         ),
       }));
     }
+
+    // Prefetch the newly-persisted narrative. listNarrative is keyed on the
+    // server-side messageId. Mirror the result into the local-id slot too so
+    // `PersistedNarrative` lookups by the React render key (`message.id`)
+    // work without going through the serverMessageIds map.
+    const localIdForBackfill = (() => {
+      const reverse = Object.entries(get().serverMessageIds).find(
+        ([, sid]) => sid === payload.messageId,
+      );
+      return reverse?.[0] ?? null;
+    })();
+    void get()
+      .loadNarrativeForMessage(payload.messageId)
+      .then(() => {
+        const serverRes = get().narrativeByMessage[payload.messageId];
+        if (!serverRes || !localIdForBackfill) return;
+        if (localIdForBackfill === payload.messageId) return;
+        set((state) => ({
+          narrativeByMessage: {
+            ...state.narrativeByMessage,
+            [localIdForBackfill]: serverRes,
+          },
+        }));
+      });
   },
   };
 });

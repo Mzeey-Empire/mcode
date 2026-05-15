@@ -32,6 +32,8 @@ import type { SkillService } from "../services/skill-service";
 import type { TerminalService } from "../services/terminal-service";
 import type { MessageRepo } from "../repositories/message-repo";
 import type { ToolCallRecordRepo } from "../repositories/tool-call-record-repo";
+import type { ThoughtSegmentRepo } from "../repositories/thought-segment-repo";
+import type { HookExecutionRepo } from "../repositories/hook-execution-repo";
 import type { TurnSnapshotRepo } from "../repositories/turn-snapshot-repo";
 import type { TaskRepo } from "../repositories/task-repo";
 import type { PlanQuestionAnswersRepo } from "../repositories/plan-question-answers-repo";
@@ -67,6 +69,8 @@ export interface RouterDeps {
   terminalService: TerminalService;
   messageRepo: MessageRepo;
   toolCallRecordRepo: ToolCallRecordRepo;
+  thoughtSegmentRepo: ThoughtSegmentRepo;
+  hookExecutionRepo: HookExecutionRepo;
   turnSnapshotRepo: TurnSnapshotRepo;
   snapshotService: SnapshotService;
   settingsService: SettingsService;
@@ -589,6 +593,27 @@ async function dispatch(
       return deps.toolCallRecordRepo.listByMessage(params.messageId);
     case "toolCallRecord.listByParent":
       return deps.toolCallRecordRepo.listByParent(params.parentToolCallId);
+    case "narrative.list":
+      return {
+        tools: deps.toolCallRecordRepo.listByMessage(params.messageId),
+        thoughts: deps.thoughtSegmentRepo.listByMessage(params.messageId),
+        hooks: deps.hookExecutionRepo.listByMessage(params.messageId),
+      };
+    case "narrative.listBatch": {
+      // Resolve each messageId in a single synchronous loop (SQLite is
+      // single-threaded; parallelism here would context-switch the event loop
+      // without any actual concurrency benefit). The result is a plain object
+      // keyed by messageId so the client can index directly.
+      const batchResult: Record<string, { tools: unknown[]; thoughts: unknown[]; hooks: unknown[] }> = {};
+      for (const mid of params.messageIds) {
+        batchResult[mid] = {
+          tools: deps.toolCallRecordRepo.listByMessage(mid),
+          thoughts: deps.thoughtSegmentRepo.listByMessage(mid),
+          hooks: deps.hookExecutionRepo.listByMessage(mid),
+        };
+      }
+      return batchResult;
+    }
 
     // Thread tasks
     case "thread.getTasks":

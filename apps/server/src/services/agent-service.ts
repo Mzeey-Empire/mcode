@@ -6,6 +6,7 @@
  */
 
 import { injectable, inject, delay } from "tsyringe";
+import { randomUUID } from "crypto";
 import { existsSync, statSync } from "fs";
 import { isAbsolute } from "path";
 import { logger } from "@mcode/shared";
@@ -26,6 +27,8 @@ import { ThreadRepo } from "../repositories/thread-repo";
 import { WorkspaceRepo } from "../repositories/workspace-repo";
 import { MessageRepo } from "../repositories/message-repo";
 import { ToolCallRecordRepo, type CreateToolCallRecordInput } from "../repositories/tool-call-record-repo";
+import { ThoughtSegmentRepo, type CreateThoughtSegmentInput } from "../repositories/thought-segment-repo";
+import { HookExecutionRepo, type CreateHookExecutionInput } from "../repositories/hook-execution-repo";
 import { TurnSnapshotRepo } from "../repositories/turn-snapshot-repo";
 import type Database from "better-sqlite3";
 import { TaskRepo } from "../repositories/task-repo";
@@ -105,10 +108,51 @@ export class AgentService {
   private turnRefBefore = new Map<string, { ref: string; cwd: string }>();
   /** Stack of active Agent tool call IDs per thread (for nesting inference). */
   private agentCallStack = new Map<string, string[]>();
-  /** Per-thread sort counter for tool calls. */
+  /** Per-thread sort counter shared across tool calls, thought segments, and hook executions. */
   private turnSortCounters = new Map<string, number>();
+  /** In-flight thought segment being accumulated from consecutive textDelta events, per thread. */
+  private turnOpenThought = new Map<
+    string,
+    { id: string; text: string; startedAt: string; sortOrder: number } | null
+  >();
+  /** Closed thought segments awaiting persistence at turn end, per thread. */
+  private turnThoughts = new Map<string, CreateThoughtSegmentInput[]>();
+  /** In-flight hook executions keyed by hookName, per thread. HookCompleted carries no toolName, so hookName alone matches. */
+  private turnOpenHooks = new Map<
+    string,
+    Map<
+      string,
+      {
+        id: string;
+        hookName: string;
+        toolName: string | null;
+        phase: string;
+        payload: string;
+        startedAt: string;
+        sortOrder: number;
+      }
+    >
+  >();
+  /** Closed hook executions awaiting persistence at turn end, per thread. */
+  private turnHooks = new Map<string, CreateHookExecutionInput[]>();
   /** Threads currently running persistTurn to prevent concurrent calls. */
   private persistingThreads = new Set<string>();
+  /**
+   * Message ID of the last persisted assistant turn per thread.
+   * Populated inside `persistTurn` after the message row is resolved.
+   * Used to attach late hooks (Stop/SessionEnd) that arrive after `persistTurn`
+   * has already cleared the in-turn buffers.
+   */
+  private lastPersistedMessageIdByThread = new Map<string, string>();
+  /**
+   * Threads whose `TurnComplete` event has already been processed but whose
+   * `persistTurn` may still be in-flight or have already finished.
+   * Set when `TurnComplete` is handled; cleared on `TurnStarted` so the
+   * per-thread flag resets between turns.
+   * Hooks that arrive while this flag is set are treated as post-turn (Stop /
+   * SessionEnd / PreCompact) and flushed directly via `flushLateHook`.
+   */
+  private turnCompleteSeenByThread = new Set<string>();
   /**
    * Accumulates `textDelta` chunks per thread so we can persist partial assistant
    * output when the user stops before the provider emits a final `message` event.
@@ -132,6 +176,8 @@ export class AgentService {
     @inject(delay(() => ThreadService))
     private readonly threadService: ThreadService,
     @inject(ToolCallRecordRepo) private readonly toolCallRecordRepo: ToolCallRecordRepo,
+    @inject(ThoughtSegmentRepo) private readonly thoughtSegmentRepo: ThoughtSegmentRepo,
+    @inject(HookExecutionRepo) private readonly hookExecutionRepo: HookExecutionRepo,
     @inject(TurnSnapshotRepo) private readonly turnSnapshotRepo: TurnSnapshotRepo,
     @inject(SnapshotService) private readonly snapshotService: SnapshotService,
     @inject("Database") private readonly db: Database.Database,
@@ -332,6 +378,10 @@ export class AgentService {
     this.turnToolCalls.set(threadId, []);
     this.turnSortCounters.set(threadId, 0);
     this.agentCallStack.set(threadId, []);
+    this.turnOpenThought.set(threadId, null);
+    this.turnThoughts.set(threadId, []);
+    this.turnOpenHooks.set(threadId, new Map());
+    this.turnHooks.set(threadId, []);
 
     // Initialize context tracking from the previous turn's final count.
     // For resume turns, last_context_tokens is the authoritative count from
@@ -928,8 +978,32 @@ export class AgentService {
 
   /** Get the current parent tool call ID for a thread's active Agent nesting. */
   getCurrentParentToolCallId(threadId: string): string | undefined {
-    const stack = this.agentCallStack.get(threadId);
-    return stack && stack.length > 0 ? stack[stack.length - 1] : undefined;
+    return this.getStackDerivedParentFallback(threadId);
+  }
+
+  /**
+   * Single running Agent on the stack (buffer `status === "running"`) can
+   * serve as a parent fallback when the SDK omits `parent_tool_use_id`.
+   * Zero or multiple running Agents means the fallback is ambiguous (parallel
+   * dispatch, nested agents, or coordinator work after children); return
+   * undefined so tools do not attach under the wrong subagent row.
+   */
+  private getStackDerivedParentFallback(threadId: string): string | undefined {
+    const stack = this.agentCallStack.get(threadId) ?? [];
+    if (stack.length === 0) return undefined;
+
+    const buffer = this.turnToolCalls.get(threadId) ?? [];
+    const runningAgentIds: string[] = [];
+    for (const agentId of stack) {
+      const row = buffer.find(
+        (b) => b.toolCallId === agentId && b.toolName === "Agent",
+      );
+      if (row?.status === "running") {
+        runningAgentIds.push(agentId);
+      }
+    }
+
+    return runningAgentIds.length === 1 ? runningAgentIds[0] : undefined;
   }
 
   /** Number of currently active sessions. */
@@ -998,6 +1072,28 @@ export class AgentService {
         if (event.type === AgentEventType.TextDelta) {
           const prev = this.streamingAssistantTextByThread.get(event.threadId) ?? "";
           this.streamingAssistantTextByThread.set(event.threadId, prev + event.delta);
+          // Final-response deltas are the assistant's user-facing reply — they will
+          // be stored as the message body when the Message event arrives. Do not
+          // open a ThoughtSegment for them: that would cause the text to appear
+          // twice (once as a dimmed thought block, once as the assistant message).
+          if (!event.isFinalResponse) {
+            // Open or extend the current thought segment. Sort order is allocated lazily
+            // on first delta so consecutive deltas keep the same slot; the slot is taken
+            // BEFORE any following tool call's sort order, matching the live client builder.
+            const open = this.turnOpenThought.get(event.threadId);
+            if (!open) {
+              const sortOrder = this.turnSortCounters.get(event.threadId) ?? 0;
+              this.turnSortCounters.set(event.threadId, sortOrder + 1);
+              this.turnOpenThought.set(event.threadId, {
+                id: randomUUID(),
+                text: event.delta,
+                startedAt: new Date().toISOString(),
+                sortOrder,
+              });
+            } else {
+              open.text += event.delta;
+            }
+          }
           const parser = this.planParsers.get(event.threadId);
           if (parser) {
             const questions = parser.feed(event.delta);
@@ -1006,6 +1102,12 @@ export class AgentService {
               this.planParsers.delete(event.threadId);
             }
           }
+          // NOTE: Do NOT clear agentCallStack on textDelta. The Claude SDK
+          // emits textDelta from subagents while they are still running child
+          // tool calls. Clearing the stack here would cause subsequent child
+          // toolUse events to lose their parentToolCallId enrichment. The stack
+          // is cleaned up on turnComplete/ended and when toolResult arrives for
+          // Agent calls via updateBufferedToolCallOutput.
         }
 
         if (event.type === AgentEventType.Message) {
@@ -1032,10 +1134,128 @@ export class AgentService {
               error: err instanceof Error ? err.message : String(err),
             });
           }
+          // A Message event marks the end of the turn. Any Agent calls still
+          // on the stack are implicitly done - clear the stack so the next turn
+          // starts clean.
+          const stackOnMessage = this.agentCallStack.get(event.threadId);
+          if (stackOnMessage && stackOnMessage.length > 0) {
+            stackOnMessage.length = 0;
+          }
         }
 
         if (event.type === AgentEventType.ToolUse) {
+          this.closeOpenThought(event.threadId);
           this.bufferToolCall(event.threadId, event);
+        }
+
+        if (event.type === AgentEventType.HookStarted) {
+          // Late hooks (TurnComplete already seen) bypass the in-turn buffer.
+          // They will be persisted directly in the paired HookCompleted handler.
+          if (this.turnCompleteSeenByThread.has(event.threadId)) {
+            const sortOrder = this.turnSortCounters.get(event.threadId) ?? 0;
+            this.turnSortCounters.set(event.threadId, sortOrder + 1);
+            // Use turnOpenHooks as a scratch pad so HookCompleted can still pair
+            // with the HookStarted record even for late hooks.
+            const lateMap =
+              this.turnOpenHooks.get(event.threadId) ??
+              new Map<
+                string,
+                {
+                  id: string;
+                  hookName: string;
+                  toolName: string | null;
+                  phase: string;
+                  payload: string;
+                  startedAt: string;
+                  sortOrder: number;
+                }
+              >();
+            lateMap.set(event.hookName, {
+              id: randomUUID(),
+              hookName: event.hookName,
+              toolName: event.toolName ?? null,
+              // Post-turn hooks are always tagged "stop" regardless of hookType
+              // because they fire after the SDK result message.
+              phase: "stop",
+              payload: JSON.stringify({ hookType: "stop", toolName: null }),
+              startedAt: new Date().toISOString(),
+              sortOrder,
+            });
+            this.turnOpenHooks.set(event.threadId, lateMap);
+          } else {
+            const sortOrder = this.turnSortCounters.get(event.threadId) ?? 0;
+            this.turnSortCounters.set(event.threadId, sortOrder + 1);
+            // Close any open thought so the hook sorts after the text that preceded it,
+            // mirroring the tool-call branch.
+            this.closeOpenThought(event.threadId);
+            const map =
+              this.turnOpenHooks.get(event.threadId) ??
+              new Map<
+                string,
+                {
+                  id: string;
+                  hookName: string;
+                  toolName: string | null;
+                  phase: string;
+                  payload: string;
+                  startedAt: string;
+                  sortOrder: number;
+                }
+              >();
+            map.set(event.hookName, {
+              id: randomUUID(),
+              hookName: event.hookName,
+              toolName: event.toolName ?? null,
+              phase: event.hookType,
+              payload: JSON.stringify({ hookType: event.hookType, toolName: event.toolName ?? null }),
+              startedAt: new Date().toISOString(),
+              sortOrder,
+            });
+            this.turnOpenHooks.set(event.threadId, map);
+          }
+        }
+
+        if (event.type === AgentEventType.HookCompleted) {
+          const map = this.turnOpenHooks.get(event.threadId);
+          const open = map?.get(event.hookName);
+          if (open && map) {
+            // Late hook: persist immediately to the last message row and
+            // broadcast a HookCompleted event with persistedMessageId.
+            if (this.turnCompleteSeenByThread.has(event.threadId)) {
+              const endedAt = new Date().toISOString();
+              this.flushLateHook(event.threadId, {
+                id: open.id,
+                hookName: open.hookName,
+                toolName: open.toolName,
+                phase: open.phase,
+                payload: open.payload,
+                durationMs: event.durationMs,
+                didBlock: event.didBlock,
+                startedAt: open.startedAt,
+                endedAt,
+                sortOrder: open.sortOrder,
+              });
+              map.delete(event.hookName);
+            } else {
+              const endedAt = new Date().toISOString();
+              const list = this.turnHooks.get(event.threadId) ?? [];
+              list.push({
+                id: open.id,
+                messageId: "",
+                hookName: open.hookName,
+                toolName: open.toolName,
+                phase: open.phase,
+                payload: open.payload,
+                durationMs: event.durationMs,
+                didBlock: event.didBlock,
+                startedAt: open.startedAt,
+                endedAt,
+                sortOrder: open.sortOrder,
+              });
+              this.turnHooks.set(event.threadId, list);
+              map.delete(event.hookName);
+            }
+          }
         }
 
         if (event.type === AgentEventType.ToolResult) {
@@ -1050,9 +1270,21 @@ export class AgentService {
             this.activeSessionIds.add(event.threadId);
             this.memoryPressureService.markActive();
           }
+          // Reset per-turn state that must survive past clearTurnState so late
+          // hooks can attach to the previous turn. Re-seeding them here rather
+          // than in clearTurnState ensures a fresh counter for each new turn
+          // while late hooks from the prior turn can still increment the old one.
+          this.turnSortCounters.set(event.threadId, 0);
+          this.agentCallStack.set(event.threadId, []);
+          this.turnCompleteSeenByThread.delete(event.threadId);
         }
 
         if (event.type === AgentEventType.TurnComplete) {
+          // Mark that the turn result has been seen so any hooks that arrive
+          // after this point (Stop / SessionEnd / PreCompact) are routed through
+          // flushLateHook instead of the normal mid-turn buffer.
+          this.turnCompleteSeenByThread.add(event.threadId);
+
           this.persistTurn(event.threadId).catch((err) => {
             logger.error("persistTurn failed on turnComplete", {
               threadId: event.threadId,
@@ -1230,17 +1462,61 @@ Output ONLY the plan-questions block, then stop. Do not generate the plan until 
 ${userMessage}`;
   }
 
+  /**
+   * Close any in-flight thought segment for the thread and push it onto the
+   * closed-thoughts list. Called before a tool call begins (so the thought
+   * sorts strictly before the tool) and during turn-end drain.
+   */
+  private closeOpenThought(threadId: string): void {
+    const open = this.turnOpenThought.get(threadId);
+    if (!open) return;
+    const list = this.turnThoughts.get(threadId) ?? [];
+    list.push({
+      id: open.id,
+      messageId: "",
+      text: open.text,
+      startedAt: open.startedAt,
+      endedAt: new Date().toISOString(),
+      sortOrder: open.sortOrder,
+    });
+    this.turnThoughts.set(threadId, list);
+    this.turnOpenThought.set(threadId, null);
+  }
+
   /** Buffer a tool call event for later persistence. */
   private bufferToolCall(
     threadId: string,
-    event: { toolCallId: string; toolName: string; toolInput: Record<string, unknown> },
+    event: {
+      toolCallId: string;
+      toolName: string;
+      toolInput: Record<string, unknown>;
+      parentToolCallId?: string;
+    },
   ): void {
     const buffer = this.turnToolCalls.get(threadId) ?? [];
     const sortOrder = this.turnSortCounters.get(threadId) ?? 0;
     this.turnSortCounters.set(threadId, sortOrder + 1);
 
     const stack = this.agentCallStack.get(threadId) ?? [];
-    const parentToolCallId = event.toolName === "Agent" ? undefined : stack[stack.length - 1];
+    // Prefer the SDK-provided parent_tool_use_id on the event (set by the
+    // provider). Parallel subagents require it; stack fallback aligns with
+    // `getCurrentParentToolCallId` / index.ts enrichment.
+    const parentToolCallId =
+      event.toolName === "Agent"
+        ? undefined
+        : event.parentToolCallId ?? this.getStackDerivedParentFallback(threadId);
+    // Diagnostic: trace parent attribution when a mismatch is suspected.
+    if (event.toolName !== "Agent" && parentToolCallId) {
+      logger.debug("bufferToolCall: parent attribution", {
+        threadId,
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        sdkParent: event.parentToolCallId ?? null,
+        stackDepth: stack.length,
+        attributed: parentToolCallId,
+        source: event.parentToolCallId ? "sdk" : "stack-fallback",
+      });
+    }
     if (event.toolName === "Agent") {
       stack.push(event.toolCallId);
       this.agentCallStack.set(threadId, stack);
@@ -1311,6 +1587,11 @@ ${userMessage}`;
     if (stackIdx >= 0) {
       stack.splice(stackIdx, 1);
       this.agentCallStack.set(threadId, stack);
+      logger.debug("updateBufferedToolCallOutput: popped Agent from stack", {
+        threadId,
+        toolCallId,
+        remainingDepth: stack.length,
+      });
     }
 
     const buffer = this.turnToolCalls.get(threadId) ?? [];
@@ -1362,6 +1643,53 @@ ${userMessage}`;
     }
   }
 
+  /**
+   * Persist a single late hook (Stop / SessionEnd / PreCompact) that arrived
+   * after `persistTurn` has already run and cleared the in-turn buffers.
+   * Writes the row directly to SQLite and broadcasts a `HookCompleted` event
+   * with `persistedMessageId` set so the client can route it into the correct
+   * persisted narrative cache entry rather than the volatile hook list.
+   *
+   * If `lastPersistedMessageIdByThread` is empty (e.g. the turn never produced
+   * an assistant message), the hook is silently discarded — there is no row to
+   * attach it to.
+   */
+  private flushLateHook(
+    threadId: string,
+    hook: Omit<CreateHookExecutionInput, "messageId">,
+  ): void {
+    const messageId = this.lastPersistedMessageIdByThread.get(threadId);
+    if (!messageId) {
+      logger.warn("flushLateHook: no persisted message id for thread; discarding late hook", {
+        threadId,
+        hookName: hook.hookName,
+      });
+      return;
+    }
+    try {
+      this.hookExecutionRepo.bulkCreate([{ ...hook, messageId }]);
+    } catch (err) {
+      logger.error("flushLateHook: failed to persist late hook", {
+        threadId,
+        hookName: hook.hookName,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+    // Broadcast with persistedMessageId so the client can attach this hook
+    // to the already-persisted narrative cache entry instead of appending it
+    // to the volatile hooksByThread list (which is cleared on turn end).
+    broadcast("agent.event", {
+      type: AgentEventType.HookCompleted,
+      threadId,
+      hookName: hook.hookName,
+      exitCode: 0,
+      durationMs: hook.durationMs ?? 0,
+      didBlock: hook.didBlock,
+      persistedMessageId: messageId,
+    } satisfies AgentEvent);
+  }
+
   /** Persist buffered tool calls and snapshot to DB, then push turn.persisted. */
   private async persistTurn(threadId: string, isError = false): Promise<void> {
     if (this.persistingThreads.has(threadId)) return;
@@ -1381,10 +1709,16 @@ ${userMessage}`;
         return;
       }
       const messageId = messages[messages.length - 1].id;
+      // Record the message ID so late hooks (Stop/SessionEnd) arriving after
+      // this point can attach to the correct persisted row.
+      this.lastPersistedMessageIdByThread.set(threadId, messageId);
 
       for (const tc of buffer) {
         if (tc.status === "running") {
-          tc.status = isError ? "failed" : "completed";
+          // Tools still running when the turn ends were interrupted, not failed.
+          // A tool that actually errored already has status "failed" from
+          // updateBufferedToolCallOutput.
+          tc.status = isError ? "cancelled" : "completed";
         }
         tc.messageId = messageId;
 
@@ -1400,6 +1734,92 @@ ${userMessage}`;
           this.toolCallRecordRepo.bulkCreate(buffer);
         } catch (err) {
           logger.error("Failed to persist tool call records", {
+            threadId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      // Drain any in-flight thought / hook before persisting so a turn that ends
+      // without a trailing tool call still records its tail thought + hook.
+      this.closeOpenThought(threadId);
+      const openHookMap = this.turnOpenHooks.get(threadId);
+      if (openHookMap && openHookMap.size > 0) {
+        const list = this.turnHooks.get(threadId) ?? [];
+        const endedAt = new Date().toISOString();
+        for (const open of openHookMap.values()) {
+          list.push({
+            id: open.id,
+            messageId: "",
+            hookName: open.hookName,
+            toolName: open.toolName,
+            phase: open.phase,
+            payload: open.payload,
+            durationMs: Date.parse(endedAt) - Date.parse(open.startedAt),
+            didBlock: false,
+            startedAt: open.startedAt,
+            endedAt,
+            sortOrder: open.sortOrder,
+          });
+        }
+        this.turnHooks.set(threadId, list);
+        openHookMap.clear();
+      }
+
+      const rawThoughts = (this.turnThoughts.get(threadId) ?? []).map((t) => ({
+        ...t,
+        messageId,
+      }));
+      const thoughts = rawThoughts;
+      if (thoughts.length > 0) {
+        // Suffix-match safeguard: the last chronological thought segment whose
+        // text (trimmed) is a suffix of the assistant message body is the
+        // final user-facing response — tag it so the client doesn't render it
+        // as a ThoughtBlock.  This catches provider edge cases and tool-free
+        // turns where the provider cannot set isFinalResponse at stream time.
+        const msgContent = messages[messages.length - 1].content ?? "";
+        const msgTrimmed = msgContent.trim();
+        if (msgTrimmed.length > 0) {
+          // Identify the last segment by sortOrder (suffix guard targets the tail).
+          let maxSortOrder = -Infinity;
+          for (const t of thoughts) {
+            if (t.sortOrder > maxSortOrder) maxSortOrder = t.sortOrder;
+          }
+          for (const t of thoughts) {
+            const segTrimmed = t.text.trim();
+            if (segTrimmed.length === 0) continue;
+            if (segTrimmed === msgTrimmed) {
+              t.isFinalResponse = 1;
+              continue;
+            }
+            if (
+              t.sortOrder === maxSortOrder &&
+              (t.isFinalResponse === 1 || msgTrimmed.endsWith(segTrimmed))
+            ) {
+              t.isFinalResponse = 1;
+            }
+          }
+        }
+
+        try {
+          this.thoughtSegmentRepo.bulkCreate(thoughts);
+        } catch (err) {
+          logger.error("Failed to persist thought segments", {
+            threadId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      const hooks = (this.turnHooks.get(threadId) ?? []).map((h) => ({
+        ...h,
+        messageId,
+      }));
+      if (hooks.length > 0) {
+        try {
+          this.hookExecutionRepo.bulkCreate(hooks);
+        } catch (err) {
+          logger.error("Failed to persist hook executions", {
             threadId,
             error: err instanceof Error ? err.message : String(err),
           });
@@ -1458,8 +1878,13 @@ ${userMessage}`;
   private clearTurnState(threadId: string): void {
     this.turnToolCalls.delete(threadId);
     this.turnRefBefore.delete(threadId);
-    this.turnSortCounters.delete(threadId);
-    this.agentCallStack.delete(threadId);
+    // turnSortCounters and agentCallStack are reset in the TurnStarted handler
+    // so late hooks that arrive after clearTurnState can still increment the
+    // sort counter for the completed turn.
+    this.turnOpenThought.delete(threadId);
+    this.turnThoughts.delete(threadId);
+    this.turnOpenHooks.delete(threadId);
+    this.turnHooks.delete(threadId);
     this.persistingThreads.delete(threadId);
   }
 

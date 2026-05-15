@@ -27,7 +27,7 @@ export const QuotaCategorySchema = lazySchema(() =>
     /** Fraction remaining in [0, 1]. 1 means fully available, 0 means exhausted. */
     remainingPercent: z.number().min(0).max(1),
     /** ISO 8601 timestamp when this quota resets. */
-    resetDate: z.string().optional(),
+    resetDate: z.string().nullish(),
     /** True when the provider reports no cap on this category. */
     isUnlimited: z.boolean(),
   }),
