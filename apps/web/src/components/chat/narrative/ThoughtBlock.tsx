@@ -25,11 +25,15 @@ export function ThoughtBlock({ segment, isActive }: ThoughtBlockProps) {
   const shouldClamp = !isActive && isLong && !expanded;
 
   return (
-    <div className="grid grid-cols-[auto_1fr] gap-x-3 items-start px-2 py-1">
+    <div className="grid grid-cols-[auto_1fr] gap-x-3 items-start px-2 py-1 thought-row">
       <span
         className={[
           "font-mono uppercase select-none pt-[2px]",
           "text-[0.59375rem] tracking-[0.18em]",
+          // Color transitions on active->settled so the label dims smoothly
+          // instead of popping. Same easing as the body text below for a
+          // single coordinated settle motion.
+          "transition-colors duration-300 ease-out",
           isActive ? "text-primary" : "text-muted-foreground/40",
         ].join(" ")}
       >
@@ -40,6 +44,7 @@ export function ThoughtBlock({ segment, isActive }: ThoughtBlockProps) {
         <div
           className={[
             "text-[0.78125rem] leading-relaxed italic",
+            "transition-colors duration-300 ease-out",
             isActive ? "text-foreground/90" : "text-muted-foreground/85",
             shouldClamp ? "line-clamp-2" : "",
           ].join(" ")}

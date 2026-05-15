@@ -416,8 +416,32 @@ input[type="range"].settings-range::-moz-range-thumb {
   will-change: opacity, transform;
 }
 
+/* Thought rows get a slightly longer, softer enter so the segment "opens"
+   into place rather than snapping in. Pair with the color transitions in
+   ThoughtBlock for a coordinated settle motion when the segment closes. */
+@keyframes thought-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+    /* Grid items use max-height so the row reveals as it grows; the value
+       just needs to exceed any thought row's natural height. */
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    max-height: 600px;
+  }
+}
+
+.thought-row.narrative-row-enter {
+  animation: thought-row-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  overflow: hidden;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .narrative-row-enter {
+  .narrative-row-enter,
+  .thought-row.narrative-row-enter {
     animation: none;
   }
 
