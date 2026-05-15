@@ -11,13 +11,20 @@ vi.mock("../components/chat/MermaidBlock", () => ({
 }));
 
 vi.mock("../components/chat/CodeBlock", () => ({
-  CodeBlock: vi.fn(({ code, language, disableHighlighting, isStreaming }: {
+  CodeBlock: vi.fn(({ code, language, languageLabel, disableHighlighting, isStreaming }: {
     code: string;
     language: string;
+    languageLabel?: string;
     disableHighlighting?: boolean;
     isStreaming?: boolean;
   }) => (
-    <pre data-testid="code-block" data-language={language} data-disable-highlighting={String(disableHighlighting)} data-streaming={String(isStreaming)}>
+    <pre
+      data-testid="code-block"
+      data-language={language}
+      data-language-label={languageLabel ?? ""}
+      data-disable-highlighting={String(disableHighlighting)}
+      data-streaming={String(isStreaming)}
+    >
       {code}
     </pre>
   )),
@@ -149,6 +156,17 @@ describe("MarkdownContent variant styling", () => {
         undefined,
       );
     });
+  });
+});
+
+describe("MarkdownContent path-based fence language", () => {
+  it("resolves GitHub-style start:end:path fences to Shiki language and basename label", () => {
+    render(
+      <MarkdownContent content={'```1:20:apps/web/foo.ts\nconst a = 1;\n```'} />,
+    );
+    const block = screen.getByTestId("code-block");
+    expect(block).toHaveAttribute("data-language", "typescript");
+    expect(block).toHaveAttribute("data-language-label", "foo.ts");
   });
 });
 

@@ -29,6 +29,14 @@ describe("CodeBlock", () => {
     expect(screen.getByText("python")).toBeInTheDocument();
   });
 
+  it("shows languageLabel in the header when provided", () => {
+    mockUseHighlighter.mockReturnValue({ html: null });
+    render(
+      <CodeBlock code="const x = 1;" language="typescript" languageLabel="foo.ts" isStreaming={false} />,
+    );
+    expect(screen.getByText("foo.ts")).toBeInTheDocument();
+  });
+
   it("renders highlighted html when available", () => {
     mockUseHighlighter.mockReturnValue({
       html: '<pre class="shiki github-dark"><code><span>const x = 1;</span></code></pre>',
