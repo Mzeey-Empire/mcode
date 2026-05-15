@@ -12,6 +12,8 @@ import type {
   PrDetail,
   PermissionMode,
   ToolCallRecord,
+  ThoughtSegmentRecord,
+  HookExecutionRecord,
   Settings,
   GitCommit,
   ProviderModelInfo,
@@ -647,6 +649,12 @@ export function createWsTransport(
       rpc<ToolCallRecord[]>("toolCallRecord.list", { messageId }),
     listToolCallRecordsByParent: (parentToolCallId) =>
       rpc<ToolCallRecord[]>("toolCallRecord.listByParent", { parentToolCallId }),
+    listNarrative: (messageId) =>
+      rpc<{
+        tools: ToolCallRecord[];
+        thoughts: ThoughtSegmentRecord[];
+        hooks: HookExecutionRecord[];
+      }>("narrative.list", { messageId }),
 
     // Thread tasks
     getThreadTasks: (threadId: string) =>

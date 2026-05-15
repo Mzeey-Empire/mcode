@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
+import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport";
 import type { ThoughtSegment } from "@/components/chat/narrative/types";
 import type { ContextWindowMode, ReasoningLevel, PlanQuestion, PlanAnswer, ProviderUsageInfo, QuotaCategory, TurnSnapshot } from "@mcode/contracts";
 import type { PermissionRequest, PermissionDecision } from "@mcode/contracts";
@@ -121,6 +121,17 @@ interface ThreadState {
   /** Ephemeral thought segments for the current turn per thread. Cleared on turnComplete/ended. */
   thoughtSegmentsByThread: Record<string, ThoughtSegment[]>;
   /**
+   * Persisted narrative records keyed by assistant message id. Populated by
+   * `loadNarrativeForMessage` (eager prefetch on thread load, lazy fetch on
+   * scroll). Used by `PersistedNarrative` to render the timeline for
+   * completed turns from earlier in the conversation.
+   */
+  narrativeByMessage: Record<string, {
+    tools: ToolCallRecord[];
+    thoughts: ThoughtSegmentRecord[];
+    hooks: HookExecutionRecord[];
+  } | undefined>;
+  /**
    * After `agent.stop`, each thread ID is marked until `turn.persisted` arrives for that
    * thread, so we can show a one-shot file-change notice without colliding across threads.
    */
@@ -170,6 +181,16 @@ interface ThreadState {
   resolvePermissionRequest: (requestId: string, decision: PermissionDecision) => void;
   handleAgentEvent: (threadId: string, event: Record<string, unknown>) => void;
 
+  /**
+   * Fetch the persisted narrative (tools, thoughts, hooks) for an assistant
+   * message and cache it under `narrativeByMessage[messageId]`. Returns the
+   * existing in-flight promise on concurrent calls to avoid duplicate RPCs.
+   * Idempotent: returns immediately if the message is already cached.
+   */
+  loadNarrativeForMessage: (messageId: string) => Promise<void>;
+  /** Drop the cached narrative for a message - call from edit/delete paths. */
+  evictNarrativeForMessage: (messageId: string) => void;
+
   /** Handle server-side tool call persistence confirmation. */
   handleTurnPersisted: (payload: { threadId: string; messageId: string; toolCallCount: number; filesChanged: string[] }) => void;
   /** Clear the interrupt file-notice banner for one thread (user dismissed). */
@@ -193,6 +214,13 @@ interface ThreadState {
 
 /** Pending dequeue timers per thread, so duplicate turnComplete events don't double-dequeue. */
 const dequeueTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * Module-level dedup map for in-flight `narrative.list` RPCs. Held outside the
+ * store so concurrent `loadNarrativeForMessage` calls share a single promise
+ * without triggering re-renders for the inflight bookkeeping.
+ */
+const narrativeInflight = new Map<string, Promise<void>>();
 
 function clearDequeueTimer(threadId: string) {
   const timer = dequeueTimers.get(threadId);
@@ -458,6 +486,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   permissionsByThread: {},
   hooksByThread: {},
   thoughtSegmentsByThread: {},
+  narrativeByMessage: {},
   awaitingUserStopPersistByThread: {},
   interruptStopFileNoticeByThread: {},
   composerRecallFromStopByThread: {},
@@ -684,6 +713,22 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             [threadId]: answeredSet,
           },
         }));
+
+        // Eager-prefetch persisted narrative for the last 20 assistant
+        // messages. Driven from the store on `loadMessages` (and on
+        // `turn.persisted` for newly-completed turns), NOT from a
+        // `[messages.length]` effect - that would fire on every streaming
+        // append (false positives) and miss thread-switches that happen to
+        // land on the same length (false negatives). The 20-message window
+        // covers the immediate scrollback viewport; older entries lazy-fetch
+        // via IntersectionObserver in `PersistedNarrative`.
+        const PREFETCH_BATCH = 20;
+        const lastAssistants = messages
+          .filter((m) => m.role === "assistant")
+          .slice(-PREFETCH_BATCH);
+        for (const m of lastAssistants) {
+          void get().loadNarrativeForMessage(m.id);
+        }
 
         // Re-hydrate pending permissions (covers reconnect and thread switch)
         void getTransport().listPendingPermissions(threadId).then((pending) => {
@@ -1265,6 +1310,10 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               persistedFilesChanged: {},
               serverMessageIds: {},
               latestTurnWithChanges: null,
+              // Narrative cache is message-keyed; flushing alongside the
+              // current-thread message wipe keeps memory in check on thread
+              // delete. Worst case: harmless refetch on revisit.
+              narrativeByMessage: {},
             }
           : {}),
       };
@@ -1502,6 +1551,42 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         }
       }
       return { permissionsByThread: updated };
+    });
+  },
+
+  /**
+   * Fetch the persisted narrative for an assistant message, dedup across
+   * concurrent callers via a module-level inflight map. No-op if already
+   * cached. Swallows errors so a single bad message doesn't break the UI.
+   */
+  loadNarrativeForMessage: async (messageId) => {
+    if (get().narrativeByMessage[messageId]) return;
+    const existing = narrativeInflight.get(messageId);
+    if (existing) return existing;
+    const p = getTransport()
+      .listNarrative(messageId)
+      .then((res) => {
+        set((state) => ({
+          narrativeByMessage: { ...state.narrativeByMessage, [messageId]: res },
+        }));
+      })
+      .catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn("[narrative] listNarrative failed", { messageId, err });
+      })
+      .finally(() => {
+        narrativeInflight.delete(messageId);
+      });
+    narrativeInflight.set(messageId, p);
+    return p;
+  },
+
+  evictNarrativeForMessage: (messageId) => {
+    set((state) => {
+      if (!(messageId in state.narrativeByMessage)) return state;
+      const next = { ...state.narrativeByMessage };
+      delete next[messageId];
+      return { narrativeByMessage: next };
     });
   },
 
@@ -2583,6 +2668,30 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         ),
       }));
     }
+
+    // Prefetch the newly-persisted narrative. listNarrative is keyed on the
+    // server-side messageId. Mirror the result into the local-id slot too so
+    // `PersistedNarrative` lookups by the React render key (`message.id`)
+    // work without going through the serverMessageIds map.
+    const localIdForBackfill = (() => {
+      const reverse = Object.entries(get().serverMessageIds).find(
+        ([, sid]) => sid === payload.messageId,
+      );
+      return reverse?.[0] ?? null;
+    })();
+    void get()
+      .loadNarrativeForMessage(payload.messageId)
+      .then(() => {
+        const serverRes = get().narrativeByMessage[payload.messageId];
+        if (!serverRes || !localIdForBackfill) return;
+        if (localIdForBackfill === payload.messageId) return;
+        set((state) => ({
+          narrativeByMessage: {
+            ...state.narrativeByMessage,
+            [localIdForBackfill]: serverRes,
+          },
+        }));
+      });
   },
   };
 });
