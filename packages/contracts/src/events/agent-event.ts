@@ -244,6 +244,13 @@ export const AgentEventSchema = lazySchema(() =>
       durationMs: z.number(),
       /** Whether the hook blocked the tool call or agent turn from proceeding. */
       didBlock: z.boolean(),
+      /**
+       * Set only for late hooks (Stop/SessionEnd/PreCompact) that arrived after
+       * `persistTurn` had already run. Carries the message ID the hook was
+       * attached to so the client can route it into the persisted narrative cache
+       * rather than the volatile `hooksByThread` list.
+       */
+      persistedMessageId: z.string().optional(),
     }),
   ]),
 );

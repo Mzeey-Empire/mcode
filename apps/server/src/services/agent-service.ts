@@ -138,6 +138,22 @@ export class AgentService {
   /** Threads currently running persistTurn to prevent concurrent calls. */
   private persistingThreads = new Set<string>();
   /**
+   * Message ID of the last persisted assistant turn per thread.
+   * Populated inside `persistTurn` after the message row is resolved.
+   * Used to attach late hooks (Stop/SessionEnd) that arrive after `persistTurn`
+   * has already cleared the in-turn buffers.
+   */
+  private lastPersistedMessageIdByThread = new Map<string, string>();
+  /**
+   * Threads whose `TurnComplete` event has already been processed but whose
+   * `persistTurn` may still be in-flight or have already finished.
+   * Set when `TurnComplete` is handled; cleared on `TurnStarted` so the
+   * per-thread flag resets between turns.
+   * Hooks that arrive while this flag is set are treated as post-turn (Stop /
+   * SessionEnd / PreCompact) and flushed directly via `flushLateHook`.
+   */
+  private turnCompleteSeenByThread = new Set<string>();
+  /**
    * Accumulates `textDelta` chunks per thread so we can persist partial assistant
    * output when the user stops before the provider emits a final `message` event.
    */
@@ -1103,58 +1119,112 @@ export class AgentService {
         }
 
         if (event.type === AgentEventType.HookStarted) {
-          const sortOrder = this.turnSortCounters.get(event.threadId) ?? 0;
-          this.turnSortCounters.set(event.threadId, sortOrder + 1);
-          // Close any open thought so the hook sorts after the text that preceded it,
-          // mirroring the tool-call branch.
-          this.closeOpenThought(event.threadId);
-          const map =
-            this.turnOpenHooks.get(event.threadId) ??
-            new Map<
-              string,
-              {
-                id: string;
-                hookName: string;
-                toolName: string | null;
-                phase: string;
-                payload: string;
-                startedAt: string;
-                sortOrder: number;
-              }
-            >();
-          map.set(event.hookName, {
-            id: randomUUID(),
-            hookName: event.hookName,
-            toolName: event.toolName ?? null,
-            phase: event.hookType,
-            payload: JSON.stringify({ hookType: event.hookType, toolName: event.toolName ?? null }),
-            startedAt: new Date().toISOString(),
-            sortOrder,
-          });
-          this.turnOpenHooks.set(event.threadId, map);
+          // Late hooks (TurnComplete already seen) bypass the in-turn buffer.
+          // They will be persisted directly in the paired HookCompleted handler.
+          if (this.turnCompleteSeenByThread.has(event.threadId)) {
+            const sortOrder = this.turnSortCounters.get(event.threadId) ?? 0;
+            this.turnSortCounters.set(event.threadId, sortOrder + 1);
+            // Use turnOpenHooks as a scratch pad so HookCompleted can still pair
+            // with the HookStarted record even for late hooks.
+            const lateMap =
+              this.turnOpenHooks.get(event.threadId) ??
+              new Map<
+                string,
+                {
+                  id: string;
+                  hookName: string;
+                  toolName: string | null;
+                  phase: string;
+                  payload: string;
+                  startedAt: string;
+                  sortOrder: number;
+                }
+              >();
+            lateMap.set(event.hookName, {
+              id: randomUUID(),
+              hookName: event.hookName,
+              toolName: event.toolName ?? null,
+              // Post-turn hooks are always tagged "stop" regardless of hookType
+              // because they fire after the SDK result message.
+              phase: "stop",
+              payload: JSON.stringify({ hookType: "stop", toolName: null }),
+              startedAt: new Date().toISOString(),
+              sortOrder,
+            });
+            this.turnOpenHooks.set(event.threadId, lateMap);
+          } else {
+            const sortOrder = this.turnSortCounters.get(event.threadId) ?? 0;
+            this.turnSortCounters.set(event.threadId, sortOrder + 1);
+            // Close any open thought so the hook sorts after the text that preceded it,
+            // mirroring the tool-call branch.
+            this.closeOpenThought(event.threadId);
+            const map =
+              this.turnOpenHooks.get(event.threadId) ??
+              new Map<
+                string,
+                {
+                  id: string;
+                  hookName: string;
+                  toolName: string | null;
+                  phase: string;
+                  payload: string;
+                  startedAt: string;
+                  sortOrder: number;
+                }
+              >();
+            map.set(event.hookName, {
+              id: randomUUID(),
+              hookName: event.hookName,
+              toolName: event.toolName ?? null,
+              phase: event.hookType,
+              payload: JSON.stringify({ hookType: event.hookType, toolName: event.toolName ?? null }),
+              startedAt: new Date().toISOString(),
+              sortOrder,
+            });
+            this.turnOpenHooks.set(event.threadId, map);
+          }
         }
 
         if (event.type === AgentEventType.HookCompleted) {
           const map = this.turnOpenHooks.get(event.threadId);
           const open = map?.get(event.hookName);
           if (open && map) {
-            const endedAt = new Date().toISOString();
-            const list = this.turnHooks.get(event.threadId) ?? [];
-            list.push({
-              id: open.id,
-              messageId: "",
-              hookName: open.hookName,
-              toolName: open.toolName,
-              phase: open.phase,
-              payload: open.payload,
-              durationMs: event.durationMs,
-              didBlock: event.didBlock,
-              startedAt: open.startedAt,
-              endedAt,
-              sortOrder: open.sortOrder,
-            });
-            this.turnHooks.set(event.threadId, list);
-            map.delete(event.hookName);
+            // Late hook: persist immediately to the last message row and
+            // broadcast a HookCompleted event with persistedMessageId.
+            if (this.turnCompleteSeenByThread.has(event.threadId)) {
+              const endedAt = new Date().toISOString();
+              this.flushLateHook(event.threadId, {
+                id: open.id,
+                hookName: open.hookName,
+                toolName: open.toolName,
+                phase: open.phase,
+                payload: open.payload,
+                durationMs: event.durationMs,
+                didBlock: event.didBlock,
+                startedAt: open.startedAt,
+                endedAt,
+                sortOrder: open.sortOrder,
+              });
+              map.delete(event.hookName);
+            } else {
+              const endedAt = new Date().toISOString();
+              const list = this.turnHooks.get(event.threadId) ?? [];
+              list.push({
+                id: open.id,
+                messageId: "",
+                hookName: open.hookName,
+                toolName: open.toolName,
+                phase: open.phase,
+                payload: open.payload,
+                durationMs: event.durationMs,
+                didBlock: event.didBlock,
+                startedAt: open.startedAt,
+                endedAt,
+                sortOrder: open.sortOrder,
+              });
+              this.turnHooks.set(event.threadId, list);
+              map.delete(event.hookName);
+            }
           }
         }
 
@@ -1170,9 +1240,21 @@ export class AgentService {
             this.activeSessionIds.add(event.threadId);
             this.memoryPressureService.markActive();
           }
+          // Reset per-turn state that must survive past clearTurnState so late
+          // hooks can attach to the previous turn. Re-seeding them here rather
+          // than in clearTurnState ensures a fresh counter for each new turn
+          // while late hooks from the prior turn can still increment the old one.
+          this.turnSortCounters.set(event.threadId, 0);
+          this.agentCallStack.set(event.threadId, []);
+          this.turnCompleteSeenByThread.delete(event.threadId);
         }
 
         if (event.type === AgentEventType.TurnComplete) {
+          // Mark that the turn result has been seen so any hooks that arrive
+          // after this point (Stop / SessionEnd / PreCompact) are routed through
+          // flushLateHook instead of the normal mid-turn buffer.
+          this.turnCompleteSeenByThread.add(event.threadId);
+
           this.persistTurn(event.threadId).catch((err) => {
             logger.error("persistTurn failed on turnComplete", {
               threadId: event.threadId,
@@ -1536,6 +1618,53 @@ ${userMessage}`;
     }
   }
 
+  /**
+   * Persist a single late hook (Stop / SessionEnd / PreCompact) that arrived
+   * after `persistTurn` has already run and cleared the in-turn buffers.
+   * Writes the row directly to SQLite and broadcasts a `HookCompleted` event
+   * with `persistedMessageId` set so the client can route it into the correct
+   * persisted narrative cache entry rather than the volatile hook list.
+   *
+   * If `lastPersistedMessageIdByThread` is empty (e.g. the turn never produced
+   * an assistant message), the hook is silently discarded — there is no row to
+   * attach it to.
+   */
+  private flushLateHook(
+    threadId: string,
+    hook: Omit<CreateHookExecutionInput, "messageId">,
+  ): void {
+    const messageId = this.lastPersistedMessageIdByThread.get(threadId);
+    if (!messageId) {
+      logger.warn("flushLateHook: no persisted message id for thread; discarding late hook", {
+        threadId,
+        hookName: hook.hookName,
+      });
+      return;
+    }
+    try {
+      this.hookExecutionRepo.bulkCreate([{ ...hook, messageId }]);
+    } catch (err) {
+      logger.error("flushLateHook: failed to persist late hook", {
+        threadId,
+        hookName: hook.hookName,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+    // Broadcast with persistedMessageId so the client can attach this hook
+    // to the already-persisted narrative cache entry instead of appending it
+    // to the volatile hooksByThread list (which is cleared on turn end).
+    broadcast("agent.event", {
+      type: AgentEventType.HookCompleted,
+      threadId,
+      hookName: hook.hookName,
+      exitCode: 0,
+      durationMs: hook.durationMs ?? 0,
+      didBlock: hook.didBlock,
+      persistedMessageId: messageId,
+    } satisfies AgentEvent);
+  }
+
   /** Persist buffered tool calls and snapshot to DB, then push turn.persisted. */
   private async persistTurn(threadId: string, isError = false): Promise<void> {
     if (this.persistingThreads.has(threadId)) return;
@@ -1555,6 +1684,9 @@ ${userMessage}`;
         return;
       }
       const messageId = messages[messages.length - 1].id;
+      // Record the message ID so late hooks (Stop/SessionEnd) arriving after
+      // this point can attach to the correct persisted row.
+      this.lastPersistedMessageIdByThread.set(threadId, messageId);
 
       for (const tc of buffer) {
         if (tc.status === "running") {
@@ -1691,8 +1823,9 @@ ${userMessage}`;
   private clearTurnState(threadId: string): void {
     this.turnToolCalls.delete(threadId);
     this.turnRefBefore.delete(threadId);
-    this.turnSortCounters.delete(threadId);
-    this.agentCallStack.delete(threadId);
+    // turnSortCounters and agentCallStack are reset in the TurnStarted handler
+    // so late hooks that arrive after clearTurnState can still increment the
+    // sort counter for the completed turn.
     this.turnOpenThought.delete(threadId);
     this.turnThoughts.delete(threadId);
     this.turnOpenHooks.delete(threadId);

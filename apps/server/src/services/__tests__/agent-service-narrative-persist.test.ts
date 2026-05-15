@@ -276,4 +276,49 @@ describe("AgentService narrative persistence", () => {
     expect(hooks[0].sortOrder).toBe(1);
     expect(hooks[0].messageId).toBe(MSG_ID);
   });
+
+  it("persists late hooks (arriving after persistTurn) attached to the last message id", async () => {
+    const { providerEmitter, hookBulk } = build();
+
+    // Emit TurnComplete first to simulate the SDK result arriving before hooks.
+    providerEmitter.emit("event", {
+      type: AgentEventType.TurnComplete,
+      threadId: THREAD_ID,
+      tokensIn: 0,
+      tokensOut: 0,
+      contextWindow: 0,
+    });
+
+    // Let persistTurn settle so lastPersistedMessageIdByThread is populated.
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    // Now emit Stop hook events (as the SDK would after the result).
+    providerEmitter.emit("event", {
+      type: AgentEventType.HookStarted,
+      threadId: THREAD_ID,
+      hookName: "Stop",
+      hookType: "stop",
+    });
+    providerEmitter.emit("event", {
+      type: AgentEventType.HookCompleted,
+      threadId: THREAD_ID,
+      hookName: "Stop",
+      exitCode: 0,
+      durationMs: 42,
+      didBlock: false,
+    });
+
+    // bulkCreate should have been called twice: once for mid-turn (empty array
+    // skipped) and once for the late hook flush.
+    // persistTurn's bulkCreate call is skipped because hooks list was empty.
+    // The late hook flush calls bulkCreate with one item.
+    expect(hookBulk).toHaveBeenCalledOnce();
+    const lateHooks: CreateHookExecutionInput[] = hookBulk.mock.calls[0][0];
+    expect(lateHooks).toHaveLength(1);
+    expect(lateHooks[0].hookName).toBe("Stop");
+    expect(lateHooks[0].messageId).toBe(MSG_ID);
+    expect(lateHooks[0].phase).toBe("stop");
+    expect(lateHooks[0].durationMs).toBe(42);
+  });
 });
