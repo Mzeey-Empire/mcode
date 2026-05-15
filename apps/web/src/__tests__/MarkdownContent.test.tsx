@@ -188,6 +188,56 @@ describe("MarkdownContent workspace preview navigation", () => {
       );
     });
   });
+
+  it("falls back to openExternalUrl when preview.navigate is missing after ctrl+click", async () => {
+    const mockOpenExternal = vi.fn();
+    const ws = createMockWorkspace({ id: "ws-fallback", path: "/tmp/ws-fallback" });
+    useWorkspaceStore.setState({
+      workspaces: [ws],
+      activeWorkspaceId: ws.id,
+      activeThreadId: "thread-fallback",
+    });
+    window.desktopBridge = {
+      openExternalUrl: mockOpenExternal,
+      preview: {},
+    } as unknown as typeof window.desktopBridge;
+
+    const { container } = render(<MarkdownContent content="[doc](mcode-workspace:///page.html)" />);
+    const link = container.querySelector("a");
+    expect(link).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(link!, { ctrlKey: true });
+    });
+    await waitFor(() => {
+      expect(mockOpenExternal).toHaveBeenCalledWith("mcode-workspace:///page.html", "/tmp/ws-fallback");
+    });
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it("falls back to openExternalUrl when preview.navigate rejects", async () => {
+    const mockOpenExternal = vi.fn();
+    const nav = vi.fn().mockRejectedValue(new Error("nav failed"));
+    const ws = createMockWorkspace({ id: "ws-rej", path: "/tmp/ws-rej" });
+    useWorkspaceStore.setState({
+      workspaces: [ws],
+      activeWorkspaceId: ws.id,
+      activeThreadId: "thread-rej",
+    });
+    window.desktopBridge = {
+      openExternalUrl: mockOpenExternal,
+      preview: { navigate: nav },
+    } as unknown as typeof window.desktopBridge;
+
+    const { container } = render(<MarkdownContent content="[doc](https://example.com/x)" />);
+    const link = container.querySelector("a");
+    expect(link).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(link!, { ctrlKey: true });
+    });
+    await waitFor(() => {
+      expect(mockOpenExternal).toHaveBeenCalledWith("https://example.com/x");
+    });
+  });
 });
 
 describe("MarkdownContent variant styling", () => {

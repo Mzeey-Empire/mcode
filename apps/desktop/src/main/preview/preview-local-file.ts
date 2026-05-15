@@ -83,10 +83,35 @@ export async function resolveMcodeWorkspacePreviewUrl(
   }
   const raw = pathname.replace(/^\/+/, "");
   if (!raw) return { ok: false, error: "empty-url" };
-  const rel = raw
-    .split("/")
-    .map((seg) => decodeURIComponent(seg))
-    .join("/");
+  const decodedSegments: string[] = [];
+  for (const urlSeg of raw.split("/")) {
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(urlSeg);
+    } catch {
+      return { ok: false, error: "invalid-url" };
+    }
+    if (decoded.includes("\0")) {
+      return { ok: false, error: "invalid-url" };
+    }
+    for (const piece of decoded.split(/[/\\]/)) {
+      if (piece === "..") {
+        return { ok: false, error: "invalid-url" };
+      }
+    }
+    decodedSegments.push(decoded.replace(/\\/g, "/"));
+  }
+  const rel = decodedSegments.join("/");
+  const normalizedRel = normalize(rel);
+  if (
+    isAbsolute(normalizedRel) ||
+    normalizedRel === ".." ||
+    normalizedRel.startsWith(`..${sep}`) ||
+    normalizedRel.startsWith("../") ||
+    normalizedRel.startsWith("..\\")
+  ) {
+    return { ok: false, error: "invalid-url" };
+  }
   return resolveLocalFileUrl(rel, workspacePath);
 }
 

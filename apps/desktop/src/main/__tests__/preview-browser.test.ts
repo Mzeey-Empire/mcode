@@ -439,6 +439,33 @@ describe("preview-browser", () => {
       expect(result).toEqual({ ok: false, error: "no-workspace" });
     });
 
+    it("returns invalid-url for mcode-workspace path with encoded absolute root", async () => {
+      const win = createWindow();
+      await showPreview(win);
+
+      const result = await navigate(win, "mcode-workspace:///%2Ftmp%2Foutside.html", tempDir);
+
+      expect(result).toEqual({ ok: false, error: "invalid-url" });
+    });
+
+    it("returns invalid-url for mcode-workspace path with encoded parent segments", async () => {
+      const win = createWindow();
+      await showPreview(win);
+
+      const result = await navigate(win, "mcode-workspace:///%2e%2e%2Fescape.html", tempDir);
+
+      expect(result).toEqual({ ok: false, error: "invalid-url" });
+    });
+
+    it("returns invalid-url for malformed percent escapes in mcode-workspace path", async () => {
+      const win = createWindow();
+      await showPreview(win);
+
+      const result = await navigate(win, "mcode-workspace:///bad%ZZ/x.html", tempDir);
+
+      expect(result).toEqual({ ok: false, error: "invalid-url" });
+    });
+
     it("returns error for relative path without workspace", async () => {
       const win = createWindow();
       await showPreview(win);

@@ -75,15 +75,25 @@ function handleLinkClick(e: React.MouseEvent | React.KeyboardEvent, url: string)
       setRightPanelTab(threadId, "preview");
       // Defer navigation so React can re-render and sync BrowserView bounds
       setTimeout(() => {
-        window.desktopBridge?.preview?.navigate(url, workspacePath).then((r) => {
-          if (!r?.ok) {
-            if (isMcodeWorkspacePreviewUrl(url)) {
-              void window.desktopBridge?.openExternalUrl?.(url, workspacePath ?? undefined);
-            } else {
-              window.desktopBridge?.openExternalUrl?.(url);
-            }
+        const fallback = (): void => {
+          if (isMcodeWorkspacePreviewUrl(url)) {
+            void window.desktopBridge?.openExternalUrl?.(url, workspacePath ?? undefined);
+          } else {
+            window.desktopBridge?.openExternalUrl?.(url);
           }
-        });
+        };
+        const navigatePromise = window.desktopBridge?.preview?.navigate?.(url, workspacePath);
+        if (!navigatePromise) {
+          fallback();
+          return;
+        }
+        void navigatePromise
+          .then((r) => {
+            if (!r?.ok) fallback();
+          })
+          .catch(() => {
+            fallback();
+          });
       }, 0);
       return;
     }

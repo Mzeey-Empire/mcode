@@ -35,4 +35,8 @@ describe("workspace preview URI helpers", () => {
     expect(looksLikeWorkspaceRelativeFileRef("example.com")).toBe(false);
     expect(looksLikeWorkspaceRelativeFileRef("https://a/b.html")).toBe(false);
   });
+
+  it("looksLikeWorkspaceRelativeFileRef rejects domain-like hosts with a path", () => {
+    expect(looksLikeWorkspaceRelativeFileRef("example.com/page.html")).toBe(false);
+  });
 });

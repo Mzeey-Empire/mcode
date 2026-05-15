@@ -45,8 +45,10 @@ export function looksLikeWorkspaceRelativeFileRef(text: string): boolean {
   if (!WORKSPACE_MARKDOWN_PREVIEW_EXT_RE.test(t)) return false;
   if (t.startsWith("/")) return true;
   if (t.startsWith("./") || t.startsWith("../")) return true;
-  if (t.includes("/") || t.includes("\\")) return true;
   const firstSeg = t.split(/[/\\]/)[0] ?? "";
+  const looksDomainLike = /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(firstSeg);
+  if ((t.includes("/") || t.includes("\\")) && looksDomainLike) return false;
+  if (t.includes("/") || t.includes("\\")) return true;
   if (!firstSeg.includes(".")) return false;
   return WORKSPACE_MARKDOWN_PREVIEW_EXT_RE.test(firstSeg);
 }
