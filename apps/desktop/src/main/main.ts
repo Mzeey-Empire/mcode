@@ -24,7 +24,7 @@ import { isAbsolute, join } from "path";
 import { randomUUID } from "crypto";
 import { Readable } from "stream";
 import { getLogPath, getMcodeDir, getRecentLogs } from "@mcode/shared";
-import { getExtension as bundledGetExtension } from "@mcode/contracts";
+import { getExtension as bundledGetExtension, isMcodeWorkspacePreviewUrl } from "@mcode/contracts";
 
 /** Use snapshot-provided module when available (V8 snapshot skips re-init). */
 const getExtension = globalThis.__v8Snapshot?.contracts?.getExtension ?? bundledGetExtension;
@@ -41,6 +41,7 @@ import {
 } from "./auto-updater.js";
 import { setupSpellcheck } from "./spellcheck.js";
 import { registerPreviewBrowserHandlers, disposePreviewForWindow } from "./preview/index.js";
+import { resolveMcodeWorkspacePreviewUrl } from "./preview/preview-local-file.js";
 
 // Isolate dev's Electron userData (cache, cookies, localStorage, IndexedDB)
 // from the installed prod build. Without this, both share %APPDATA%/Mcode/
@@ -377,10 +378,27 @@ function registerIpcHandlers(): void {
     return shell.openPath(dirPath);
   });
 
-  // Open external URL (https, http, mailto)
-  ipcMain.handle("open-external-url", (_event, url: string) => {
-    openIfAllowed(url);
-  });
+  // Open external URL (https, http, mailto), or workspace-relative preview targets in the default browser.
+  ipcMain.handle(
+    "open-external-url",
+    async (_event, url: string, workspacePath?: string | null) => {
+      const trimmed = typeof url === "string" ? url.trim() : "";
+      if (!trimmed) return;
+      if (isMcodeWorkspacePreviewUrl(trimmed)) {
+        const ws =
+          typeof workspacePath === "string" && workspacePath.trim().length > 0
+            ? workspacePath.trim()
+            : null;
+        const resolved = await resolveMcodeWorkspacePreviewUrl(trimmed, ws);
+        if (!resolved.ok) return;
+        void shell.openExternal(resolved.url).catch((err: unknown) => {
+          console.error(`[open-external-url] Failed to open file URL: ${resolved.url}`, err);
+        });
+        return;
+      }
+      openIfAllowed(trimmed);
+    },
+  );
 
   // Read clipboard image and save to temp JPEG
   ipcMain.handle("read-clipboard-image", async () => {

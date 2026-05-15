@@ -8,6 +8,8 @@ import { homedir } from "node:os";
 import { isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { isMcodeWorkspacePreviewUrl } from "@mcode/contracts";
+
 import { type PreviewSession, isAllowedPreviewUrl } from "./preview-session.js";
 
 /** Pre-compiled regex for browser-viewable file extensions (hoisted to avoid recompilation per navigate). */
@@ -59,6 +61,33 @@ export function trustMainProcessFileNavigation(s: PreviewSession, url: string): 
   } catch {
     /* malformed URLs do not consume budget */
   }
+}
+
+/**
+ * Resolves an `mcode-workspace:` navigation string to a local `file:` URL using
+ * the active workspace root (same rules as relative paths in {@link resolveLocalFileUrl}).
+ */
+export async function resolveMcodeWorkspacePreviewUrl(
+  input: string,
+  workspacePath: string | null,
+): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  const trimmed = input.trim();
+  if (!isMcodeWorkspacePreviewUrl(trimmed)) {
+    return { ok: false, error: "invalid-url" };
+  }
+  let pathname: string;
+  try {
+    pathname = new URL(trimmed).pathname;
+  } catch {
+    return { ok: false, error: "invalid-url" };
+  }
+  const raw = pathname.replace(/^\/+/, "");
+  if (!raw) return { ok: false, error: "empty-url" };
+  const rel = raw
+    .split("/")
+    .map((seg) => decodeURIComponent(seg))
+    .join("/");
+  return resolveLocalFileUrl(rel, workspacePath);
 }
 
 /**
