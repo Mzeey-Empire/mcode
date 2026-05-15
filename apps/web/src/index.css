@@ -424,7 +424,6 @@ input[type="range"].settings-range::-moz-range-thumb {
 
 .narrative-row-enter {
   animation: narrative-row-in 180ms cubic-bezier(0.25, 1, 0.5, 1) both;
-  will-change: opacity, transform;
 }
 
 /* Thought rows get a slightly longer, softer enter so the segment "opens"
@@ -467,7 +466,6 @@ input[type="range"].settings-range::-moz-range-thumb {
 
 .delta-row-enter {
   animation: delta-row-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  will-change: opacity, transform;
 }
 
 @media (prefers-reduced-motion: reduce) {
