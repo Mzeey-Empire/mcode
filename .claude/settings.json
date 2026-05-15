@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/agent/verify-tests.mjs\""
+            "command": "bash -c 'node \"$CLAUDE_PROJECT_DIR/scripts/agent/verify-tests.mjs\"'"
           }
         ]
       }
