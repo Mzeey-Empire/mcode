@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Check, X, ChevronRight } from "lucide-react";
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import type { HookExecution } from "@/transport/types";
@@ -30,6 +30,9 @@ function formatDuration(ms: number): string {
 export function HookRow({ hook }: HookRowProps) {
   const [open, setOpen] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  /** Keeps interval closure off `hook` identity while still tracking the latest start time. */
+  const startedAtMsRef = useRef(hook.startedAt);
+  startedAtMsRef.current = hook.startedAt;
 
   const isRunning = hook.status === "running";
   const isBlocked = hook.didBlock === true;
@@ -43,19 +46,16 @@ export function HookRow({ hook }: HookRowProps) {
       ? hook.fullOutput.join("\n")
       : hook.outputLines.join("\n");
 
-  // Elapsed timer for running hooks. Omit hook.startedAt from deps so a fresh
-  // hook object identity from the parent does not reset the interval.
   useEffect(() => {
     if (!isRunning) return;
 
     const update = () => {
-      setElapsedSeconds(Math.round((Date.now() - hook.startedAt) / 1000));
+      setElapsedSeconds(Math.round((Date.now() - startedAtMsRef.current) / 1000));
     };
 
     update();
     const id = setInterval(update, 1000);
     return () => clearInterval(id);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- hook.startedAt read in closure; stable for this running row
   }, [isRunning]);
 
   const handleClick = () => {

@@ -755,7 +755,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             .catch((err) => {
               // Fall back to individual fetches on batch failure (e.g. server
               // doesn't support the new RPC yet — during rolling deploys).
-              // eslint-disable-next-line no-console
               console.warn("[narrative] listNarrativeBatch failed, falling back", err);
               for (const m of lastAssistants) {
                 void get().loadNarrativeForMessage(m.id);
@@ -1604,7 +1603,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         }));
       })
       .catch((err) => {
-        // eslint-disable-next-line no-console
         console.warn("[narrative] listNarrative failed", { messageId, err });
       })
       .finally(() => {
@@ -1676,11 +1674,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           if (tc.isComplete) return tc;
           if (tc.toolName === "Agent") {
             const done = isAgentDone(tc.id);
-            // eslint-disable-next-line no-console
             if (done) console.debug("[narrative:markComplete] Agent done", { id: tc.id, childCount: children(tc.id).length });
             return done ? { ...tc, isComplete: true } : tc;
           }
-          // eslint-disable-next-line no-console
           console.debug("[narrative:markComplete]", { id: tc.id, toolName: tc.toolName, parentToolCallId: tc.parentToolCallId });
           return { ...tc, isComplete: true };
         });
@@ -1880,7 +1876,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       const toolCallId = (params.toolCallId as string) || "";
       const existingCalls = get().toolCallsByThread[threadId] ?? [];
       if (toolCallId && existingCalls.some((tc) => tc.id === toolCallId)) {
-        // eslint-disable-next-line no-console
         console.debug("[narrative:toolUse] DEDUP skip", { toolCallId });
         return;
       }
@@ -1920,7 +1915,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         parentToolCallId: parentToolCallId || undefined,
         startedAt: Date.now(),
       };
-      // eslint-disable-next-line no-console
       console.debug("[narrative:toolUse]", { threadId, toolName, toolCallId, parentToolCallId, isAgent: toolName === "Agent" });
       set((state) => {
         // Freeze the active thought segment so it has a definite end time.
@@ -1937,7 +1931,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
                 ],
               }
             : state.thoughtSegmentsByThread;
-        // eslint-disable-next-line no-console
         console.debug("[narrative:toolUse] segments", { froze, segCount: segments.length, lastEndedAt: last?.endedAt });
         return {
           toolCallsByThread: {
@@ -1954,7 +1947,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       const toolCallId = (params.toolCallId as string) || "";
       const output = (params.output as string) || "";
       const isError = (params.isError as boolean) || false;
-      // eslint-disable-next-line no-console
       console.debug("[narrative:toolResult]", { threadId, toolCallId, isError, outputLen: output.length });
       set((state) => {
         const calls = state.toolCallsByThread[threadId] ?? [];
