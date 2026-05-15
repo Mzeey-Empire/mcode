@@ -149,7 +149,7 @@ interface DesktopBridge {
   /** Open the OS file explorer at the given directory. */
   openInExplorer(dirPath: string): Promise<void>;
   /** Open a URL in the default browser. */
-  openExternalUrl(url: string): Promise<void>;
+  openExternalUrl(url: string, workspacePath?: string | null): Promise<void>;
   /** Return a list of detected editor names on the system. */
   detectEditors(): Promise<string[]>;
   /** Read an image from the system clipboard. Returns metadata or null. */

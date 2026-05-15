@@ -17,10 +17,12 @@ import { hidePreview, ensureView } from "./preview-lifecycle.js";
 import { type Bounds } from "./preview-session.js";
 import {
   resolveLocalFileUrl,
+  resolveMcodeWorkspacePreviewUrl,
   looksLikeFilePath,
   validateResumeUrl,
   trustMainProcessFileNavigation,
 } from "./preview-local-file.js";
+import { isMcodeWorkspacePreviewUrl } from "@mcode/contracts";
 
 /**
  * Registers all navigation-related IPC handlers:
@@ -121,7 +123,14 @@ export function registerNavigationHandlers(): void {
 
       let target: string;
 
-      if (/^https?:\/\//i.test(trimmed)) {
+      if (isMcodeWorkspacePreviewUrl(trimmed)) {
+        const resolved = await resolveMcodeWorkspacePreviewUrl(
+          trimmed,
+          workspacePath?.trim() ?? null,
+        );
+        if (!resolved.ok) return resolved;
+        target = resolved.url;
+      } else if (/^https?:\/\//i.test(trimmed)) {
         target = trimmed;
       } else if (/^file:\/\//i.test(trimmed)) {
         const resolved = await resolveLocalFileUrl(trimmed, workspacePath?.trim() ?? null);
