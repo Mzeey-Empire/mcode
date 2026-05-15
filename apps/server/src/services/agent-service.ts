@@ -6,6 +6,7 @@
  */
 
 import { injectable, inject, delay } from "tsyringe";
+import { randomUUID } from "crypto";
 import { existsSync, statSync } from "fs";
 import { isAbsolute } from "path";
 import { logger } from "@mcode/shared";
@@ -26,6 +27,8 @@ import { ThreadRepo } from "../repositories/thread-repo";
 import { WorkspaceRepo } from "../repositories/workspace-repo";
 import { MessageRepo } from "../repositories/message-repo";
 import { ToolCallRecordRepo, type CreateToolCallRecordInput } from "../repositories/tool-call-record-repo";
+import { ThoughtSegmentRepo, type CreateThoughtSegmentInput } from "../repositories/thought-segment-repo";
+import { HookExecutionRepo, type CreateHookExecutionInput } from "../repositories/hook-execution-repo";
 import { TurnSnapshotRepo } from "../repositories/turn-snapshot-repo";
 import type Database from "better-sqlite3";
 import { TaskRepo } from "../repositories/task-repo";
@@ -105,8 +108,33 @@ export class AgentService {
   private turnRefBefore = new Map<string, { ref: string; cwd: string }>();
   /** Stack of active Agent tool call IDs per thread (for nesting inference). */
   private agentCallStack = new Map<string, string[]>();
-  /** Per-thread sort counter for tool calls. */
+  /** Per-thread sort counter shared across tool calls, thought segments, and hook executions. */
   private turnSortCounters = new Map<string, number>();
+  /** In-flight thought segment being accumulated from consecutive textDelta events, per thread. */
+  private turnOpenThought = new Map<
+    string,
+    { id: string; text: string; startedAt: string; sortOrder: number } | null
+  >();
+  /** Closed thought segments awaiting persistence at turn end, per thread. */
+  private turnThoughts = new Map<string, CreateThoughtSegmentInput[]>();
+  /** In-flight hook executions keyed by hookName, per thread. HookCompleted carries no toolName, so hookName alone matches. */
+  private turnOpenHooks = new Map<
+    string,
+    Map<
+      string,
+      {
+        id: string;
+        hookName: string;
+        toolName: string | null;
+        phase: string;
+        payload: string;
+        startedAt: string;
+        sortOrder: number;
+      }
+    >
+  >();
+  /** Closed hook executions awaiting persistence at turn end, per thread. */
+  private turnHooks = new Map<string, CreateHookExecutionInput[]>();
   /** Threads currently running persistTurn to prevent concurrent calls. */
   private persistingThreads = new Set<string>();
   /**
@@ -132,6 +160,8 @@ export class AgentService {
     @inject(delay(() => ThreadService))
     private readonly threadService: ThreadService,
     @inject(ToolCallRecordRepo) private readonly toolCallRecordRepo: ToolCallRecordRepo,
+    @inject(ThoughtSegmentRepo) private readonly thoughtSegmentRepo: ThoughtSegmentRepo,
+    @inject(HookExecutionRepo) private readonly hookExecutionRepo: HookExecutionRepo,
     @inject(TurnSnapshotRepo) private readonly turnSnapshotRepo: TurnSnapshotRepo,
     @inject(SnapshotService) private readonly snapshotService: SnapshotService,
     @inject("Database") private readonly db: Database.Database,
@@ -332,6 +362,10 @@ export class AgentService {
     this.turnToolCalls.set(threadId, []);
     this.turnSortCounters.set(threadId, 0);
     this.agentCallStack.set(threadId, []);
+    this.turnOpenThought.set(threadId, null);
+    this.turnThoughts.set(threadId, []);
+    this.turnOpenHooks.set(threadId, new Map());
+    this.turnHooks.set(threadId, []);
 
     // Initialize context tracking from the previous turn's final count.
     // For resume turns, last_context_tokens is the authoritative count from
@@ -998,6 +1032,22 @@ export class AgentService {
         if (event.type === AgentEventType.TextDelta) {
           const prev = this.streamingAssistantTextByThread.get(event.threadId) ?? "";
           this.streamingAssistantTextByThread.set(event.threadId, prev + event.delta);
+          // Open or extend the current thought segment. Sort order is allocated lazily
+          // on first delta so consecutive deltas keep the same slot; the slot is taken
+          // BEFORE any following tool call's sort order, matching the live client builder.
+          const open = this.turnOpenThought.get(event.threadId);
+          if (!open) {
+            const sortOrder = this.turnSortCounters.get(event.threadId) ?? 0;
+            this.turnSortCounters.set(event.threadId, sortOrder + 1);
+            this.turnOpenThought.set(event.threadId, {
+              id: randomUUID(),
+              text: event.delta,
+              startedAt: new Date().toISOString(),
+              sortOrder,
+            });
+          } else {
+            open.text += event.delta;
+          }
           const parser = this.planParsers.get(event.threadId);
           if (parser) {
             const questions = parser.feed(event.delta);
@@ -1048,7 +1098,64 @@ export class AgentService {
         }
 
         if (event.type === AgentEventType.ToolUse) {
+          this.closeOpenThought(event.threadId);
           this.bufferToolCall(event.threadId, event);
+        }
+
+        if (event.type === AgentEventType.HookStarted) {
+          const sortOrder = this.turnSortCounters.get(event.threadId) ?? 0;
+          this.turnSortCounters.set(event.threadId, sortOrder + 1);
+          // Close any open thought so the hook sorts after the text that preceded it,
+          // mirroring the tool-call branch.
+          this.closeOpenThought(event.threadId);
+          const map =
+            this.turnOpenHooks.get(event.threadId) ??
+            new Map<
+              string,
+              {
+                id: string;
+                hookName: string;
+                toolName: string | null;
+                phase: string;
+                payload: string;
+                startedAt: string;
+                sortOrder: number;
+              }
+            >();
+          map.set(event.hookName, {
+            id: randomUUID(),
+            hookName: event.hookName,
+            toolName: event.toolName ?? null,
+            phase: event.hookType,
+            payload: JSON.stringify({ hookType: event.hookType, toolName: event.toolName ?? null }),
+            startedAt: new Date().toISOString(),
+            sortOrder,
+          });
+          this.turnOpenHooks.set(event.threadId, map);
+        }
+
+        if (event.type === AgentEventType.HookCompleted) {
+          const map = this.turnOpenHooks.get(event.threadId);
+          const open = map?.get(event.hookName);
+          if (open && map) {
+            const endedAt = new Date().toISOString();
+            const list = this.turnHooks.get(event.threadId) ?? [];
+            list.push({
+              id: open.id,
+              messageId: "",
+              hookName: open.hookName,
+              toolName: open.toolName,
+              phase: open.phase,
+              payload: open.payload,
+              durationMs: event.durationMs,
+              didBlock: event.didBlock,
+              startedAt: open.startedAt,
+              endedAt,
+              sortOrder: open.sortOrder,
+            });
+            this.turnHooks.set(event.threadId, list);
+            map.delete(event.hookName);
+          }
         }
 
         if (event.type === AgentEventType.ToolResult) {
@@ -1243,6 +1350,27 @@ Output ONLY the plan-questions block, then stop. Do not generate the plan until 
 ${userMessage}`;
   }
 
+  /**
+   * Close any in-flight thought segment for the thread and push it onto the
+   * closed-thoughts list. Called before a tool call begins (so the thought
+   * sorts strictly before the tool) and during turn-end drain.
+   */
+  private closeOpenThought(threadId: string): void {
+    const open = this.turnOpenThought.get(threadId);
+    if (!open) return;
+    const list = this.turnThoughts.get(threadId) ?? [];
+    list.push({
+      id: open.id,
+      messageId: "",
+      text: open.text,
+      startedAt: open.startedAt,
+      endedAt: new Date().toISOString(),
+      sortOrder: open.sortOrder,
+    });
+    this.turnThoughts.set(threadId, list);
+    this.turnOpenThought.set(threadId, null);
+  }
+
   /** Buffer a tool call event for later persistence. */
   private bufferToolCall(
     threadId: string,
@@ -1434,6 +1562,62 @@ ${userMessage}`;
         }
       }
 
+      // Drain any in-flight thought / hook before persisting so a turn that ends
+      // without a trailing tool call still records its tail thought + hook.
+      this.closeOpenThought(threadId);
+      const openHookMap = this.turnOpenHooks.get(threadId);
+      if (openHookMap && openHookMap.size > 0) {
+        const list = this.turnHooks.get(threadId) ?? [];
+        const endedAt = new Date().toISOString();
+        for (const open of openHookMap.values()) {
+          list.push({
+            id: open.id,
+            messageId: "",
+            hookName: open.hookName,
+            toolName: open.toolName,
+            phase: open.phase,
+            payload: open.payload,
+            durationMs: Date.parse(endedAt) - Date.parse(open.startedAt),
+            didBlock: false,
+            startedAt: open.startedAt,
+            endedAt,
+            sortOrder: open.sortOrder,
+          });
+        }
+        this.turnHooks.set(threadId, list);
+        openHookMap.clear();
+      }
+
+      const thoughts = (this.turnThoughts.get(threadId) ?? []).map((t) => ({
+        ...t,
+        messageId,
+      }));
+      if (thoughts.length > 0) {
+        try {
+          this.thoughtSegmentRepo.bulkCreate(thoughts);
+        } catch (err) {
+          logger.error("Failed to persist thought segments", {
+            threadId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      const hooks = (this.turnHooks.get(threadId) ?? []).map((h) => ({
+        ...h,
+        messageId,
+      }));
+      if (hooks.length > 0) {
+        try {
+          this.hookExecutionRepo.bulkCreate(hooks);
+        } catch (err) {
+          logger.error("Failed to persist hook executions", {
+            threadId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
       let filesChanged: string[] = [];
       const refData = this.turnRefBefore.get(threadId);
       if (refData) {
@@ -1488,6 +1672,10 @@ ${userMessage}`;
     this.turnRefBefore.delete(threadId);
     this.turnSortCounters.delete(threadId);
     this.agentCallStack.delete(threadId);
+    this.turnOpenThought.delete(threadId);
+    this.turnThoughts.delete(threadId);
+    this.turnOpenHooks.delete(threadId);
+    this.turnHooks.delete(threadId);
     this.persistingThreads.delete(threadId);
   }
 

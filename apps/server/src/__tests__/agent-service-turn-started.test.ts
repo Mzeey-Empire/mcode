@@ -128,6 +128,8 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
       registryStub,
       threadServiceStub,
       toolCallRecordRepo,
+      { bulkCreate: () => {}, create: () => ({}), listByMessage: () => [], countByMessage: () => 0 } as unknown as import("../repositories/thought-segment-repo.js").ThoughtSegmentRepo,
+      { bulkCreate: () => {}, create: () => ({}), listByMessage: () => [], countByMessage: () => 0 } as unknown as import("../repositories/hook-execution-repo.js").HookExecutionRepo,
       turnSnapshotRepo,
       snapshotServiceStub,
       db,
@@ -135,6 +137,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
       taskRepo,
       settingsServiceStub,
       availabilityStub,
+      { markAnswered: vi.fn(), isAnswered: vi.fn(() => false), listAnsweredForThread: vi.fn(() => []) } as unknown as import("../repositories/plan-question-answers-repo.js").PlanQuestionAnswersRepo,
     );
   });
 

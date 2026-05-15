@@ -1,0 +1,279 @@
+import "reflect-metadata";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { EventEmitter } from "events";
+import { AgentEventType } from "@mcode/contracts";
+import type { Thread, IProviderRegistry } from "@mcode/contracts";
+import { AgentService } from "../agent-service.js";
+import type { ThreadRepo } from "../../repositories/thread-repo.js";
+import type { WorkspaceRepo } from "../../repositories/workspace-repo.js";
+import type { MessageRepo } from "../../repositories/message-repo.js";
+import type { GitService } from "../git-service.js";
+import type { AttachmentService } from "../attachment-service.js";
+import type { ToolCallRecordRepo } from "../../repositories/tool-call-record-repo.js";
+import type { ThoughtSegmentRepo, CreateThoughtSegmentInput } from "../../repositories/thought-segment-repo.js";
+import type { HookExecutionRepo, CreateHookExecutionInput } from "../../repositories/hook-execution-repo.js";
+import type { TurnSnapshotRepo } from "../../repositories/turn-snapshot-repo.js";
+import type { SnapshotService } from "../snapshot-service.js";
+import type { MemoryPressureService } from "../memory-pressure-service.js";
+import type { TaskRepo } from "../../repositories/task-repo.js";
+import type { SettingsService } from "../settings-service.js";
+import type { ThreadService } from "../thread-service.js";
+import type { ProviderAvailabilityService } from "../provider-availability-service.js";
+import type { PlanQuestionAnswersRepo } from "../../repositories/plan-question-answers-repo.js";
+
+vi.mock("../../transport/push.js", () => ({ broadcast: vi.fn() }));
+vi.mock("fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("fs")>();
+  return {
+    ...actual,
+    existsSync: vi.fn(() => true),
+    statSync: vi.fn(() => ({ isDirectory: () => true })),
+  };
+});
+
+const THREAD_ID = "t-narr";
+const MSG_ID = "msg-narr";
+
+function makeThread(overrides: Partial<Thread> = {}): Thread {
+  return {
+    id: THREAD_ID,
+    workspace_id: "ws-1",
+    title: "x",
+    status: "idle",
+    mode: "direct",
+    branch: "main",
+    worktree_path: null,
+    model: "claude-sonnet-4-6",
+    provider: "claude",
+    sdk_session_id: null,
+    last_context_tokens: null,
+    context_window: null,
+    reasoning_level: null,
+    interaction_mode: null,
+    permission_mode: null,
+    copilot_agent: null,
+    last_compact_summary: null,
+    parent_thread_id: null,
+    forked_from_message_id: null,
+    deleted_at: null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    ...overrides,
+  } as Thread;
+}
+
+interface Built {
+  service: AgentService;
+  providerEmitter: EventEmitter;
+  thoughtBulk: ReturnType<typeof vi.fn>;
+  hookBulk: ReturnType<typeof vi.fn>;
+  toolBulk: ReturnType<typeof vi.fn>;
+}
+
+function build(): Built {
+  const thread = makeThread();
+  const providerEmitter = new EventEmitter();
+  (providerEmitter as any).sendMessage = vi.fn(() => Promise.resolve());
+  (providerEmitter as any).setSdkSessionId = vi.fn();
+
+  const threadRepo = {
+    findById: vi.fn(() => thread),
+    updateStatus: vi.fn(),
+    updateModel: vi.fn(),
+    updateProvider: vi.fn(),
+    updateSettings: vi.fn(),
+    updateContextUsage: vi.fn(),
+    updateSdkSessionId: vi.fn(),
+    updateCompactSummary: vi.fn(),
+  } as unknown as ThreadRepo;
+  const workspaceRepo = {
+    findById: vi.fn(() => ({ id: "ws-1", path: "/workspace" })),
+  } as unknown as WorkspaceRepo;
+  const messageRepo = {
+    listByThread: vi.fn(() => ({ messages: [{ id: MSG_ID, role: "assistant", sequence: 2 }] })),
+    create: vi.fn(() => ({ id: MSG_ID, sequence: 2 })),
+    findByIdInThread: vi.fn(),
+    listByThreadUpToSequence: vi.fn(() => []),
+  } as unknown as MessageRepo;
+  const gitService = {
+    resolveWorkingDir: vi.fn(() => "/workspace"),
+    listWorktrees: vi.fn(() => []),
+  } as unknown as GitService;
+  const attachmentService = {
+    persist: vi.fn(() => Promise.resolve({ stored: [], persisted: [] })),
+  } as unknown as AttachmentService;
+  const providerRegistry = {
+    resolve: vi.fn(() => providerEmitter),
+    resolveAll: vi.fn(() => [providerEmitter]),
+    shutdown: vi.fn(),
+  } as unknown as IProviderRegistry;
+  const threadService = { create: vi.fn() } as unknown as ThreadService;
+  const toolBulk = vi.fn();
+  const toolCallRecordRepo = { bulkCreate: toolBulk } as unknown as ToolCallRecordRepo;
+  const thoughtBulk = vi.fn();
+  const thoughtSegmentRepo = { bulkCreate: thoughtBulk } as unknown as ThoughtSegmentRepo;
+  const hookBulk = vi.fn();
+  const hookExecutionRepo = { bulkCreate: hookBulk } as unknown as HookExecutionRepo;
+  const turnSnapshotRepo = {
+    listByThread: vi.fn(() => []),
+    create: vi.fn(),
+  } as unknown as TurnSnapshotRepo;
+  const snapshotService = {
+    captureRef: vi.fn(() => Promise.resolve("abc")),
+    getFilesChanged: vi.fn(() => Promise.resolve([])),
+  } as unknown as SnapshotService;
+  const memoryPressureService = {
+    markActive: vi.fn(),
+    markIdle: vi.fn(),
+  } as unknown as MemoryPressureService;
+  const taskRepo = { get: vi.fn(() => []), upsert: vi.fn() } as unknown as TaskRepo;
+  const settingsService = {
+    get: vi.fn(() => ({
+      model: { defaults: { fallbackId: undefined } },
+      agent: { guardrails: { maxBudgetUsd: 0, maxTurns: 0 } },
+      provider: { enabled: {}, cli: {} },
+    })),
+    on: vi.fn(),
+  } as unknown as SettingsService;
+  const availability = { assertUsable: vi.fn() } as unknown as ProviderAvailabilityService;
+  const planQuestionAnswersRepo = {
+    markAnswered: vi.fn(),
+    isAnswered: vi.fn(() => false),
+    listAnsweredForThread: vi.fn(() => []),
+  } as unknown as PlanQuestionAnswersRepo;
+  const db = {
+    transaction: vi.fn((fn: Function) => fn),
+    prepare: vi.fn(() => ({ run: vi.fn() })),
+  } as unknown as import("better-sqlite3").Database;
+
+  const service = new AgentService(
+    threadRepo,
+    workspaceRepo,
+    messageRepo,
+    gitService,
+    attachmentService,
+    providerRegistry,
+    threadService,
+    toolCallRecordRepo,
+    thoughtSegmentRepo,
+    hookExecutionRepo,
+    turnSnapshotRepo,
+    snapshotService,
+    db,
+    memoryPressureService,
+    taskRepo,
+    settingsService,
+    availability,
+    planQuestionAnswersRepo,
+  );
+  service.init();
+  // Prime per-thread state without running sendMessage's full path.
+  (service as any).turnToolCalls.set(THREAD_ID, []);
+  (service as any).turnSortCounters.set(THREAD_ID, 0);
+  (service as any).agentCallStack.set(THREAD_ID, []);
+  (service as any).turnOpenThought.set(THREAD_ID, null);
+  (service as any).turnThoughts.set(THREAD_ID, []);
+  (service as any).turnOpenHooks.set(THREAD_ID, new Map());
+  (service as any).turnHooks.set(THREAD_ID, []);
+  return { service, providerEmitter, thoughtBulk, hookBulk, toolBulk };
+}
+
+describe("AgentService narrative persistence", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("segments thoughts split by tool calls with strictly-ordered sortOrder", async () => {
+    const { providerEmitter, thoughtBulk, toolBulk } = build();
+
+    providerEmitter.emit("event", { type: AgentEventType.TextDelta, threadId: THREAD_ID, delta: "I will " });
+    providerEmitter.emit("event", { type: AgentEventType.TextDelta, threadId: THREAD_ID, delta: "read." });
+    providerEmitter.emit("event", {
+      type: AgentEventType.ToolUse,
+      threadId: THREAD_ID,
+      toolCallId: "tc-1",
+      toolName: "Read",
+      toolInput: { file_path: "/a" },
+    });
+    providerEmitter.emit("event", { type: AgentEventType.TextDelta, threadId: THREAD_ID, delta: "Now respond." });
+    providerEmitter.emit("event", {
+      type: AgentEventType.TurnComplete,
+      threadId: THREAD_ID,
+      tokensIn: 0,
+      tokensOut: 0,
+      contextWindow: 0,
+    });
+
+    // Wait for the persistTurn promise chain to settle.
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    expect(toolBulk).toHaveBeenCalledOnce();
+    expect(thoughtBulk).toHaveBeenCalledOnce();
+    const thoughts: CreateThoughtSegmentInput[] = thoughtBulk.mock.calls[0][0];
+    expect(thoughts).toHaveLength(2);
+    expect(thoughts[0].text).toBe("I will read.");
+    expect(thoughts[0].sortOrder).toBe(0);
+    expect(thoughts[1].text).toBe("Now respond.");
+    expect(thoughts[1].sortOrder).toBe(2);
+    expect(thoughts.every((t) => t.messageId === MSG_ID)).toBe(true);
+
+    const toolCalls = toolBulk.mock.calls[0][0];
+    expect(toolCalls[0].sortOrder).toBe(1);
+  });
+
+  it("records a hook execution between two tool calls with didBlock round-trip", async () => {
+    const { providerEmitter, hookBulk } = build();
+
+    providerEmitter.emit("event", {
+      type: AgentEventType.ToolUse,
+      threadId: THREAD_ID,
+      toolCallId: "tc-1",
+      toolName: "Bash",
+      toolInput: { command: "ls" },
+    });
+    providerEmitter.emit("event", {
+      type: AgentEventType.HookStarted,
+      threadId: THREAD_ID,
+      hookName: "PreToolUse",
+      hookType: "permission",
+      toolName: "Bash",
+    });
+    providerEmitter.emit("event", {
+      type: AgentEventType.HookCompleted,
+      threadId: THREAD_ID,
+      hookName: "PreToolUse",
+      exitCode: 0,
+      durationMs: 17,
+      didBlock: true,
+    });
+    providerEmitter.emit("event", {
+      type: AgentEventType.ToolUse,
+      threadId: THREAD_ID,
+      toolCallId: "tc-2",
+      toolName: "Read",
+      toolInput: { file_path: "/x" },
+    });
+    providerEmitter.emit("event", {
+      type: AgentEventType.TurnComplete,
+      threadId: THREAD_ID,
+      tokensIn: 0,
+      tokensOut: 0,
+      contextWindow: 0,
+    });
+
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    expect(hookBulk).toHaveBeenCalledOnce();
+    const hooks: CreateHookExecutionInput[] = hookBulk.mock.calls[0][0];
+    expect(hooks).toHaveLength(1);
+    expect(hooks[0].hookName).toBe("PreToolUse");
+    expect(hooks[0].toolName).toBe("Bash");
+    expect(hooks[0].didBlock).toBe(true);
+    expect(hooks[0].durationMs).toBe(17);
+    // Tool#1 took sortOrder 0; hook 1; tool#2 2.
+    expect(hooks[0].sortOrder).toBe(1);
+    expect(hooks[0].messageId).toBe(MSG_ID);
+  });
+});
