@@ -114,8 +114,9 @@ export function buildPersistedNarrativeItems(
 
   // Filter out thought segments that are the assistant's final response to
   // prevent them appearing as ThoughtBlock rows alongside the message body.
-  // Two conditions suffice: the server-set flag (primary) or a client-side
-  // suffix match against messageContent (fallback for older rows or edge cases).
+  // Server `is_final_response` is primary; client fallbacks cover older rows:
+  // exact trimmed body match (any segment order) plus suffix match on the last
+  // segment by sort_order.
   const msgTrimmed = (messageContent ?? "").trim();
   let filteredThoughts = thoughts;
 
@@ -127,10 +128,11 @@ export function buildPersistedNarrativeItems(
     }
     filteredThoughts = thoughts.filter((t) => {
       if (t.is_final_response) return false;
-      // Client-side suffix match as a second-layer safeguard.
-      if (t.sort_order === maxSortOrder && msgTrimmed.length > 0) {
-        const segTrimmed = t.text.trim();
-        if (segTrimmed.length > 0 && msgTrimmed.endsWith(segTrimmed)) return false;
+      const segTrimmed = t.text.trim();
+      if (msgTrimmed.length > 0 && segTrimmed === msgTrimmed) return false;
+      // Client-side suffix match on the chronologically last segment only.
+      if (t.sort_order === maxSortOrder && segTrimmed.length > 0 && msgTrimmed.endsWith(segTrimmed)) {
+        return false;
       }
       return true;
     });

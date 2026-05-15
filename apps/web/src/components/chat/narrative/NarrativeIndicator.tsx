@@ -16,6 +16,7 @@ function derivePhaseLabel(toolCalls: readonly ToolCall[]): string {
   return "Preparing...";
 }
 
+/** Props for {@link NarrativeIndicator}: step counts, active tools, and turn start time. */
 interface NarrativeIndicatorProps {
   /** Total number of steps executed so far in this agent turn. */
   stepCount: number;

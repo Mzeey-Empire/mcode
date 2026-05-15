@@ -7,6 +7,7 @@ import {
   STREAMING_CARD_COLLAPSED_HEIGHT,
 } from "@/components/chat/virtual-items";
 import type { ChatVirtualItem } from "@/components/chat/virtual-items";
+import type { ThoughtSegment } from "@/components/chat/narrative/types";
 import type { Message, ToolCall, HookExecution } from "@/transport/types";
 
 function makeMessage(overrides: Partial<Message> = {}): Message {
@@ -105,6 +106,16 @@ describe("buildVolatileItems", () => {
     expect(narrativeItem).toBeDefined();
     expect(narrativeItem?.streamingText).toBe("streaming...");
     expect(narrativeItem?.isAgentRunning).toBe(true);
+  });
+
+  it("passes thoughtSegments through on narrative-flow items", () => {
+    const thoughtSegments: ThoughtSegment[] = [{ text: "planning", startedAt: 42, endedAt: 100 }];
+    const items = buildVolatileItems([makeToolCall({ id: "t1" })], true, 1000, undefined, undefined, [], thoughtSegments);
+    const narrativeItem = items.find((i) => i.type === "narrative-flow") as Extract<
+      (typeof items)[number],
+      { type: "narrative-flow" }
+    >;
+    expect(narrativeItem?.thoughtSegments).toEqual(thoughtSegments);
   });
 });
 

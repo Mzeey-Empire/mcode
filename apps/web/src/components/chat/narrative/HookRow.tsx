@@ -43,7 +43,8 @@ export function HookRow({ hook }: HookRowProps) {
       ? hook.fullOutput.join("\n")
       : hook.outputLines.join("\n");
 
-  // Elapsed timer for running hooks - updates every second.
+  // Elapsed timer for running hooks. Omit hook.startedAt from deps so a fresh
+  // hook object identity from the parent does not reset the interval.
   useEffect(() => {
     if (!isRunning) return;
 
@@ -54,7 +55,8 @@ export function HookRow({ hook }: HookRowProps) {
     update();
     const id = setInterval(update, 1000);
     return () => clearInterval(id);
-  }, [isRunning, hook.startedAt]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- hook.startedAt read in closure; stable for this running row
+  }, [isRunning]);
 
   const handleClick = () => {
     if (hasOutput) setOpen((prev) => !prev);

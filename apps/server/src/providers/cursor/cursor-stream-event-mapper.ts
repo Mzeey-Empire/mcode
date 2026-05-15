@@ -40,6 +40,13 @@ export interface CursorStreamAccumulator {
   /** Concatenated assistant text seen so far this turn. */
   assistantText: string;
   /**
+   * Text from {@link AgentEventType.TextDelta} chunks tagged
+   * `isFinalResponse` (post-tool user-facing reply). Used to persist the
+   * assistant message without repeating pre-tool text that Mcode already
+   * records as thought segments.
+   */
+  assistantFinalText: string;
+  /**
    * Tool start times keyed by call_id. Presence of a key also signals a
    * `ToolUse` has already been emitted, so a downstream `completed` event
    * does not need to synthesize one. Used for ToolProgress elapsed metrics
@@ -67,11 +74,23 @@ export interface CursorStreamAccumulator {
 export function createCursorStreamAccumulator(): CursorStreamAccumulator {
   return {
     assistantText: "",
+    assistantFinalText: "",
     toolStartTimes: new Map(),
     chatId: null,
     pendingToolCalls: new Set(),
     hasFiredToolThisTurn: false,
   };
+}
+
+/**
+ * Returns the assistant message body to persist for Cursor: final-response
+ * slices when present, otherwise the full streamed transcript (tool-free
+ * turns and other cases where nothing was tagged final).
+ */
+export function resolveCursorAssistantMessageContent(acc: CursorStreamAccumulator): string {
+  const trimmedFinal = acc.assistantFinalText.trim();
+  if (trimmedFinal.length > 0) return trimmedFinal;
+  return acc.assistantText.trim();
 }
 
 /**
@@ -170,6 +189,7 @@ function mapAssistantEvent(
   // Per-token delta: emit immediately and remember the running total.
   if (typeof event.timestamp_ms === "number") {
     acc.assistantText += text;
+    if (isFinalResponse) acc.assistantFinalText += text;
     return [{
       type: AgentEventType.TextDelta,
       threadId,
@@ -185,9 +205,12 @@ function mapAssistantEvent(
   // lost.
   if (acc.assistantText.length > 0) {
     acc.assistantText = text;
+    // Do not append to assistantFinalText: streaming should already have
+    // captured final-response slices; the echo is the full transcript.
     return [];
   }
   acc.assistantText = text;
+  if (isFinalResponse) acc.assistantFinalText += text;
   return [{
     type: AgentEventType.TextDelta,
     threadId,

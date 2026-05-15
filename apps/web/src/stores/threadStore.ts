@@ -395,40 +395,56 @@ export function extractPendingPlanQuestions(
 }
 
 /** Zustand store for thread-scoped messages, streaming session state, and agent event handling. */
+/** One coalesced `session.textDelta` span for rAF flushing; merges adjacent chunks with same `isFinalResponse`. */
+type PendingTextChunk = { delta: string; isFinalResponse: boolean };
+
 export const useThreadStore = create<ThreadState>((set, get) => {
   let textDeltaFlushRaf: number | null = null;
-  const pendingTextDeltaByThread = new Map<string, string>();
+  const pendingTextDeltaByThread = new Map<string, PendingTextChunk[]>();
 
-  /** Applies coalesced `session.textDelta` strings batched on `requestAnimationFrame`. */
+  /**
+   * Applies coalesced `session.textDelta` chunks batched on `requestAnimationFrame`.
+   * `isFinalResponse` spans update streaming buffers only so they stay out of `thoughtSegmentsByThread`.
+   */
   const flushPendingTextDeltas = () => {
     if (textDeltaFlushRaf != null) {
       cancelAnimationFrame(textDeltaFlushRaf);
       textDeltaFlushRaf = null;
     }
     if (pendingTextDeltaByThread.size === 0) return;
-    const batch = new Map(pendingTextDeltaByThread);
+    const batch = new Map<string, PendingTextChunk[]>();
+    for (const [tid, chunks] of pendingTextDeltaByThread) {
+      batch.set(tid, chunks.map((c) => ({ delta: c.delta, isFinalResponse: c.isFinalResponse })));
+    }
     pendingTextDeltaByThread.clear();
     set((state) => {
       const nextStreaming = { ...state.streamingByThread };
       const nextPreview = { ...state.streamingPreviewByThread };
       const nextSegments = { ...state.thoughtSegmentsByThread };
-      for (const [tid, acc] of batch) {
-        if (!acc) continue;
-        const cur = nextStreaming[tid] ?? "";
-        const combined = cur + acc;
-        nextStreaming[tid] = combined;
-        nextPreview[tid] = combined.length > 200 ? combined.slice(-200) : combined;
+      for (const [tid, chunks] of batch) {
+        for (const chunk of chunks) {
+          const acc = chunk.delta;
+          if (!acc) continue;
+          const cur = nextStreaming[tid] ?? "";
+          const combined = cur + acc;
+          nextStreaming[tid] = combined;
+          nextPreview[tid] = combined.length > 200 ? combined.slice(-200) : combined;
 
-        // Manage thought segments: append to the active segment or start a new one.
-        const segments = nextSegments[tid] ?? [];
-        const last = segments[segments.length - 1];
-        if (!last || last.endedAt !== undefined) {
-          nextSegments[tid] = [...segments, { text: acc, startedAt: Date.now() }];
-        } else {
-          nextSegments[tid] = [
-            ...segments.slice(0, -1),
-            { ...last, text: last.text + acc },
-          ];
+          if (chunk.isFinalResponse) {
+            continue;
+          }
+
+          // Manage thought segments: append to the active segment or start a new one.
+          const segments = nextSegments[tid] ?? [];
+          const last = segments[segments.length - 1];
+          if (!last || last.endedAt !== undefined) {
+            nextSegments[tid] = [...segments, { text: acc, startedAt: Date.now() }];
+          } else {
+            nextSegments[tid] = [
+              ...segments.slice(0, -1),
+              { ...last, text: last.text + acc },
+            ];
+          }
         }
       }
       return {
@@ -1974,11 +1990,17 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     if (method === "session.textDelta") {
       const delta = (params.delta as string) || "";
       if (!delta) return;
+      const isFinalResponse = params.isFinalResponse === true;
       const hadPending = pendingTextDeltaByThread.has(threadId);
-      pendingTextDeltaByThread.set(
-        threadId,
-        (pendingTextDeltaByThread.get(threadId) ?? "") + delta,
-      );
+      const existing = pendingTextDeltaByThread.get(threadId) ?? [];
+      const next = [...existing];
+      const tail = next[next.length - 1];
+      if (tail && tail.isFinalResponse === isFinalResponse) {
+        next[next.length - 1] = { delta: tail.delta + delta, isFinalResponse };
+      } else {
+        next.push({ delta, isFinalResponse });
+      }
+      pendingTextDeltaByThread.set(threadId, next);
       if (!hadPending) {
         markPriorToolCallsComplete();
       }

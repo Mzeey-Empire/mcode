@@ -9,6 +9,7 @@ import {
   buildToolSummaryText,
 } from "../tool-renderers/constants";
 import type { ToolCall, HookExecution } from "@/transport/types";
+import { extractToolInputDetail } from "./tool-detail";
 
 interface SubagentRowProps {
   toolCall: ToolCall;
@@ -22,20 +23,6 @@ interface SubagentRowProps {
   allToolCalls?: readonly ToolCall[];
   /** Nesting depth - increases left indentation for nested subagents. */
   depth?: number;
-}
-
-function extractDetail(tc: ToolCall): string {
-  const input = tc.toolInput;
-  if (typeof input.file_path === "string") return input.file_path.split("/").pop() ?? input.file_path;
-  if (typeof input.path === "string") return input.path.split("/").pop() ?? input.path;
-  if (typeof input.pattern === "string") return `"${input.pattern}"`;
-  if (typeof input.query === "string") return `"${input.query}"`;
-  if (typeof input.command === "string") return input.command;
-  if (typeof input.description === "string") return input.description;
-  for (const v of Object.values(input)) {
-    if (typeof v === "string" && v.length < 100) return v;
-  }
-  return tc.toolName;
 }
 
 function extractDescription(toolCall: ToolCall): string {
@@ -154,7 +141,7 @@ export function SubagentRow({ toolCall, children, hooks, allToolCalls, depth = 0
 
             const Icon = TOOL_ICONS[tc.toolName] ?? DEFAULT_ICON;
             const label = TOOL_LABELS[tc.toolName] ?? tc.toolName;
-            const detail = extractDetail(tc);
+            const detail = extractToolInputDetail(tc);
 
             return (
               <li key={tc.id} className="flex items-center gap-1.5 py-px text-[0.8125rem]">

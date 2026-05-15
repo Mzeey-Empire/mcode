@@ -90,10 +90,11 @@ interface SessionEntry {
    *  regardless of how long it has been since an SDK message arrived. */
   pendingToolUses: Set<string>;
   /**
-   * True once the first tool call for this turn has been registered.
+   * True once the first tool call for this sendMessage query has been registered.
    * Distinguishes pre-tool preamble text (pendingToolUses=0, no tool fired yet)
-   * from final-response text (pendingToolUses=0, tools have all resolved).
-   * Reset to false on each `result` event.
+   * from post-tool assistant text. Intentionally survives SDK `result` events
+   * because the Claude SDK can emit `result` between internal rounds while the
+   * same user turn continues.
    */
   hasFiredToolThisTurn: boolean;
 }
@@ -1176,12 +1177,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
 
               lastAssistantText = "";
               awaitingResume = true;
-              // Reset the per-turn tool-firing flag so the next auto-resumed
-              // turn starts clean without inheriting the previous turn's state.
-              const sessionEntryOnResult = this.sessions.get(sessionId);
-              if (sessionEntryOnResult) {
-                sessionEntryOnResult.hasFiredToolThisTurn = false;
-              }
+              // Keep `hasFiredToolThisTurn` for the lifetime of this `sendMessage`
+              // query. The SDK emits `result` between internal API rounds while the
+              // same user turn continues; clearing the flag there made every
+              // post-`result` textDelta look like pre-tool preamble so
+              // `isFinalResponse` never fired and the reply duplicated THOUGHT rows.
               break;
             }
 

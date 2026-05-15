@@ -3,6 +3,38 @@ import type { ThoughtSegment, NarrativeItem, NarrativeBuildResult } from "./type
 
 const AGENT_TOOL_NAME = "Agent";
 
+/**
+ * Removes thought segments that duplicate the committed assistant message body.
+ * Mirrors the client fallbacks in `buildPersistedNarrativeItems` so the live
+ * trail does not repeat the bubble after `session.turnComplete` while tool rows
+ * are still in volatile state (cleared on `session.turnStarted`).
+ */
+export function filterThoughtsMatchingAssistantBody(
+  segments: readonly ThoughtSegment[],
+  messageBodyTrimmed: string,
+): ThoughtSegment[] {
+  if (messageBodyTrimmed.length === 0 || segments.length === 0) {
+    return [...segments];
+  }
+  let latestStartedAt = -Infinity;
+  for (const s of segments) {
+    if (s.startedAt > latestStartedAt) latestStartedAt = s.startedAt;
+  }
+  return segments.filter((s) => {
+    const segTrimmed = s.text.trim();
+    if (segTrimmed.length > 0 && segTrimmed === messageBodyTrimmed) return false;
+    // Suffix on chronologically latest segment only (streaming tail split across bubble).
+    if (
+      s.startedAt === latestStartedAt &&
+      segTrimmed.length > 0 &&
+      messageBodyTrimmed.endsWith(segTrimmed)
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
+
 /** Returns true if any call in a group has output containing "cancelled". */
 function hasCancelledCall(calls: readonly ToolCall[]): boolean {
   return calls.some((tc) => typeof tc.output === "string" && tc.output.toLowerCase().includes("cancelled"));
@@ -24,6 +56,17 @@ type TimelineEvent =
  * A thought is rendered as "active" only when it is the latest segment AND
  * there are no running tool calls - if subagents are running, the parent
  * is waiting, not actively streaming.
+ *
+ * When the provider sends `textDelta.isFinalResponse`, final reply text stays
+ * in `streamingText` but not in `thoughtSegments`; the surplus over the joined
+ * segment texts is appended as a `delta` row. When `isFinalResponse` is omitted
+ * (legacy tool-free turns), the last open segment is still elevated to `delta`.
+ *
+ * When `committedAssistantBody` is set (typically the last assistant bubble after
+ * `session.turnComplete`), thought rows that only repeat that body are omitted so
+ * they do not stack above the message while volatile tool rows are still shown.
+ *
+ * @returns Ordered timeline items plus aggregate counts for `TurnFooter` and the indicator.
  */
 export function buildNarrativeItems(params: {
   toolCalls: readonly ToolCall[];
@@ -31,8 +74,15 @@ export function buildNarrativeItems(params: {
   thoughtSegments: readonly ThoughtSegment[];
   streamingText: string;
   isAgentRunning: boolean;
+  /** Trimmed comparison text: duplicate thought segments are hidden when non-empty. */
+  committedAssistantBody?: string;
 }): NarrativeBuildResult {
-  const { toolCalls, hooks, thoughtSegments, streamingText, isAgentRunning } = params;
+  const { toolCalls, hooks, streamingText, isAgentRunning, committedAssistantBody } = params;
+  const assistantTrimmed = (committedAssistantBody ?? "").trim();
+  const thoughtSegments =
+    assistantTrimmed.length > 0
+      ? filterThoughtsMatchingAssistantBody(params.thoughtSegments, assistantTrimmed)
+      : params.thoughtSegments;
 
   if (thoughtSegments.length === 0 && toolCalls.length === 0 && hooks.length === 0) {
     if (isAgentRunning && streamingText.length > 0) {
@@ -101,25 +151,30 @@ export function buildNarrativeItems(params: {
     ? thoughtSegments[thoughtSegments.length - 1].startedAt
     : -1;
 
+  const thoughtTape = thoughtSegments.map((s) => s.text).join("");
+  const streamingSuffix =
+    isAgentRunning && !anyToolRunning && streamingText.startsWith(thoughtTape)
+      ? streamingText.slice(thoughtTape.length)
+      : "";
+
+  let emittedFinalDeltaFromTape = false;
+
   for (const evt of timeline) {
     if (evt.kind === "thought") {
       flushGroup();
       const isLatest = evt.segment.startedAt === lastSegmentStartedAt;
       const isStreaming = evt.segment.endedAt == null;
 
-      // The latest segment that's streaming AFTER all tool calls completed
-      // is the final response - render it as a delta (message-style) instead
-      // of a thought. This makes the turn-complete swap visually seamless.
-      const isFinalResponse = isLatest && isStreaming && !anyToolRunning;
-      if (isFinalResponse) {
+      // Fallback when `isFinalResponse` never arrived: streamed text lives in the
+      // latest open segment (`streamingSuffix` is empty).
+      const useLegacyTapeFinalDelta =
+        streamingSuffix === "" && isLatest && isStreaming && !anyToolRunning;
+      if (useLegacyTapeFinalDelta) {
         items.push({ type: "delta", text: evt.segment.text });
+        emittedFinalDeltaFromTape = true;
         continue;
       }
 
-      // Regular thinking segment - render as a quiet thought block.
-      // isActive (highlighted background) only when streaming AND nothing
-      // else is running. Since isFinalResponse covers that case, this is
-      // effectively always false here - but kept for explicitness.
       const isActive = isLatest && isStreaming && !anyToolRunning;
       items.push({ type: "thought", segment: evt.segment, isActive });
       continue;
@@ -155,6 +210,14 @@ export function buildNarrativeItems(params: {
 
   if (activeTc != null) {
     items.push({ type: "active-tool", toolCall: activeTc });
+  }
+
+  if (
+    !emittedFinalDeltaFromTape &&
+    streamingSuffix.length > 0 &&
+    isAgentRunning
+  ) {
+    items.push({ type: "delta", text: streamingSuffix });
   }
 
   const subagents = topLevel.filter((tc) => tc.toolName === AGENT_TOOL_NAME).length;

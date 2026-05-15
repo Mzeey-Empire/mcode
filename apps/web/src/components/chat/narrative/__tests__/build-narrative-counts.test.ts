@@ -85,6 +85,31 @@ describe("buildNarrativeItems counts", () => {
     expect(counts.thoughts).toBe(0);
   });
 
+  it("appends isFinal surplus as delta after thoughts when streaming extends past segment tape", () => {
+    const thoughts: ThoughtSegment[] = [
+      mkThought("pre-tool reasoning", 100, 700),
+    ];
+    const tools: ToolCall[] = [
+      mkTool({
+        id: "r1",
+        toolName: "Read",
+        startedAt: 800,
+      }),
+    ];
+    const fullStream = `${thoughts[0]!.text}Here is the answer.`;
+    const { items, counts } = buildNarrativeItems({
+      toolCalls: tools,
+      hooks: [],
+      thoughtSegments: thoughts,
+      streamingText: fullStream,
+      isAgentRunning: true,
+    });
+    expect(items.find((it) => it.type === "thought")?.type).toBe("thought");
+    const deltaItem = items.find((it) => it.type === "delta");
+    expect(deltaItem?.type === "delta" ? deltaItem.text : "").toBe("Here is the answer.");
+    expect(counts.thoughts).toBe(1);
+  });
+
   it("counts an in-progress Agent as both a step and a sub-agent", () => {
     const tools: ToolCall[] = [
       mkTool({ id: "1", toolName: "Read", startedAt: 1000 }),
@@ -99,5 +124,44 @@ describe("buildNarrativeItems counts", () => {
     });
     expect(counts.steps).toBe(2);
     expect(counts.subagents).toBe(1);
+  });
+
+  it("hides thoughts that duplicate the committed assistant bubble (post-turn live trail)", () => {
+    const body = "README updated. Same paragraphs in thought and bubble.";
+    const thoughts: ThoughtSegment[] = [
+      mkThought("earlier reasoning", 100, 200),
+      mkThought(body, 300, 400),
+    ];
+    const tools: ToolCall[] = [mkTool({ id: "1", toolName: "Read", startedAt: 500 })];
+    const { items, counts } = buildNarrativeItems({
+      toolCalls: tools,
+      hooks: [],
+      thoughtSegments: thoughts,
+      streamingText: "",
+      isAgentRunning: false,
+      committedAssistantBody: body,
+    });
+    expect(items.filter((it) => it.type === "thought")).toHaveLength(1);
+    expect(counts.thoughts).toBe(1);
+  });
+
+  it("hides latest thought segment when bubble ends with that segment text (suffix fallback)", () => {
+    const tail = "tail of final reply";
+    const body = `Prefix context…${tail}`;
+    const thoughts: ThoughtSegment[] = [
+      mkThought("plan", 100, 200),
+      mkThought(tail, 300, 400),
+    ];
+    const tools: ToolCall[] = [mkTool({ id: "1", toolName: "Read", startedAt: 500 })];
+    const { items, counts } = buildNarrativeItems({
+      toolCalls: tools,
+      hooks: [],
+      thoughtSegments: thoughts,
+      streamingText: "",
+      isAgentRunning: false,
+      committedAssistantBody: body,
+    });
+    expect(items.filter((it) => it.type === "thought")).toHaveLength(1);
+    expect(counts.thoughts).toBe(1);
   });
 });

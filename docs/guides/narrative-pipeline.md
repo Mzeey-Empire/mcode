@@ -70,10 +70,18 @@ SDK doesn't surface this field (older paths, edge cases).
 
 - `claude-provider.ts` reads `anyMsg.parent_tool_use_id` and forwards it as
   `parentToolCallId` on the `ToolUse` event.
-- `index.ts:352` checks `if (event.parentToolCallId)` first — if set,
-  leave it. Only falls back to `agentCallStack` when the SDK omitted it.
+- `index.ts` checks `if (event.parentToolCallId)` first — if set,
+  leave it. Only falls back to `agentService.getCurrentParentToolCallId`
+  when the SDK omitted it.
 - `agent-service.ts bufferToolCall` does the same dance for the persistence
   buffer: SDK value wins, stack is a fallback.
+
+**Stack fallback contract:** `getCurrentParentToolCallId` does **not** return
+`stack[stack.length - 1]`. It only returns a parent when **exactly one** Agent
+ID on `agentCallStack` still has `status: "running"` in the in-memory turn
+buffer. Otherwise it returns `undefined` so coordinator tool calls after
+parallel subagents do not inherit the last subagent as their parent. Nested
+agents with two running Agent rows rely on the SDK field (as they should).
 
 **Don't break this:** any new code path that emits `ToolUse` events must
 read `parent_tool_use_id` from the SDK message and propagate it as

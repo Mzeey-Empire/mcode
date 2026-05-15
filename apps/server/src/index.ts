@@ -350,13 +350,12 @@ for (const provider of providerRegistry.resolveAll()) {
     // Enrich non-Agent tool calls with their parent Agent ID.
     // Prefer the SDK-provided parent_tool_use_id on the event (set by the
     // provider when the SDK message carries it). This is the only correct
-    // source for parallel subagents - the agentCallStack LIFO fallback only
-    // works for sequential dispatch and would misattribute parallel children
-    // to whichever Agent was pushed last.
+    // source for parallel subagents. `getCurrentParentToolCallId` only fills
+    // gaps when exactly one Agent on the stack is still running in the turn
+    // buffer; never use a raw LIFO peek (see narrative-pipeline.md trap 1).
     if (event.type === AgentEventType.ToolUse && event.toolName !== "Agent") {
-      if (event.parentToolCallId) {
-        // SDK already told us the parent - use it as-is.
-      } else {
+      // SDK omitted parent_tool_use_id; fill from turn buffer fallback when unique running Agent (see narrative-pipeline.md).
+      if (!event.parentToolCallId) {
         const parentId = agentService.getCurrentParentToolCallId(event.threadId);
         if (parentId) {
           enrichedEvent = { ...event, parentToolCallId: parentId };

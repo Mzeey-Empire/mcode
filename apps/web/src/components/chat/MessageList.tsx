@@ -126,6 +126,7 @@ const VirtualItemRenderer = memo(function VirtualItemRenderer({
           streamingText={item.streamingText}
           isAgentRunning={item.isAgentRunning}
           startTime={item.startTime}
+          committedAssistantBody={item.committedAssistantBody}
         />
       );
     case "persisted-narrative":
@@ -375,10 +376,40 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     [messages, persistedFilesChanged, latestTurnWithChanges],
   );
 
-  const volatileItems = useMemo(
-    () => buildVolatileItems(toolCalls, isAgentRunning, agentStartTime, streamingText, permissions, hooks, thoughtSegments),
-    [toolCalls, isAgentRunning, agentStartTime, streamingText, permissions, hooks, thoughtSegments],
-  );
+  const volatileItems = useMemo(() => {
+    const base = buildVolatileItems(
+      toolCalls,
+      isAgentRunning,
+      agentStartTime,
+      streamingText,
+      permissions,
+      hooks,
+      thoughtSegments,
+    );
+    const lastMsg = messages[messages.length - 1];
+    const committedAssistantBody =
+      currentThreadId && !isAgentRunning && lastMsg?.role === "assistant"
+        ? lastMsg.content
+        : undefined;
+    if (!committedAssistantBody) {
+      return base;
+    }
+    return base.map((item) =>
+      item.type === "narrative-flow"
+        ? { ...item, committedAssistantBody }
+        : item,
+    );
+  }, [
+    toolCalls,
+    isAgentRunning,
+    agentStartTime,
+    streamingText,
+    permissions,
+    hooks,
+    thoughtSegments,
+    messages,
+    currentThreadId,
+  ]);
 
   const hasToolCalls = toolCalls.length > 0;
   const items = useMemo(

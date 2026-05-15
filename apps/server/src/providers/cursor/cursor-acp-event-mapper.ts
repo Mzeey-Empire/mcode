@@ -76,6 +76,7 @@ export function createCursorAcpTurnState(): CursorAcpTurnState {
   return {
     accumulator: {
       assistantText: "",
+      assistantFinalText: "",
       toolStartTimes: new Map(),
       chatId: null,
       pendingToolCalls: new Set(),
@@ -136,6 +137,7 @@ function mapAgentLanguageChunk(
   acc.assistantText += text;
   // Tag as final-response when all tools have resolved and at least one fired.
   const isFinalResponse = acc.pendingToolCalls.size === 0 && acc.hasFiredToolThisTurn;
+  if (isFinalResponse) acc.assistantFinalText += text;
   return [{
     type: AgentEventType.TextDelta,
     threadId,

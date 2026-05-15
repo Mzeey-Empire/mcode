@@ -6,6 +6,7 @@ const LazyMarkdownContent = lazy(() => import("../MarkdownContent"));
 /** Character threshold above which the body clamps and exposes `show more`. */
 const CLAMP_THRESHOLD = 220;
 
+/** Props for {@link ThoughtBlock}. */
 interface ThoughtBlockProps {
   segment: ThoughtSegment;
   isActive: boolean;

@@ -28,8 +28,8 @@ function dotClassForItem(item: NarrativeItem): string {
   switch (item.type) {
     case "hook":
       return item.hook.didBlock
-        ? "before:w-[3px] before:h-[3px] before:top-[9px] before:bg-[var(--diff-remove)]"
-        : "before:w-[3px] before:h-[3px] before:top-[9px] before:bg-muted-foreground/25";
+        ? "before:w-[3px] before:h-[3px] before:top-[9px] before:left-[-10px] before:-translate-x-1/2 before:bg-[var(--diff-remove)]"
+        : "before:w-[3px] before:h-[3px] before:top-[9px] before:left-[-10px] before:-translate-x-1/2 before:bg-muted-foreground/25";
     case "subagent":
       return item.toolCall.isError
         ? "before:bg-[var(--diff-remove)]"
@@ -186,8 +186,11 @@ export function PersistedNarrative({ messageId, messageContent }: PersistedNarra
 
   return (
     <div className="relative">
-      <div className="absolute left-[7.5px] top-3 bottom-3 w-px bg-border pointer-events-none" />
-      <div className="relative flex flex-col pl-[18px]">
+      <div className="relative flex flex-col pl-5">
+        <div
+          className="absolute left-[10px] top-3 bottom-3 w-px -translate-x-1/2 bg-border pointer-events-none"
+          aria-hidden
+        />
         {items.map((item, i) => (
           <div
             key={keyForItem(item, i)}
@@ -195,8 +198,9 @@ export function PersistedNarrative({ messageId, messageContent }: PersistedNarra
               "relative",
               marginClassForItem(item, i),
               "before:content-[''] before:absolute before:w-1 before:h-1 before:rounded-full before:z-[1]",
-              "before:left-[-12px] before:top-[11px]",
+              "before:left-[-10px] before:top-[11px] before:-translate-x-1/2",
               dotClassForItem(item),
+              "narrative-timeline-row",
             ].join(" ")}
           >
             {renderItem(item, allToolCalls)}

@@ -978,8 +978,32 @@ export class AgentService {
 
   /** Get the current parent tool call ID for a thread's active Agent nesting. */
   getCurrentParentToolCallId(threadId: string): string | undefined {
-    const stack = this.agentCallStack.get(threadId);
-    return stack && stack.length > 0 ? stack[stack.length - 1] : undefined;
+    return this.getStackDerivedParentFallback(threadId);
+  }
+
+  /**
+   * Single running Agent on the stack (buffer `status === "running"`) can
+   * serve as a parent fallback when the SDK omits `parent_tool_use_id`.
+   * Zero or multiple running Agents means the fallback is ambiguous (parallel
+   * dispatch, nested agents, or coordinator work after children); return
+   * undefined so tools do not attach under the wrong subagent row.
+   */
+  private getStackDerivedParentFallback(threadId: string): string | undefined {
+    const stack = this.agentCallStack.get(threadId) ?? [];
+    if (stack.length === 0) return undefined;
+
+    const buffer = this.turnToolCalls.get(threadId) ?? [];
+    const runningAgentIds: string[] = [];
+    for (const agentId of stack) {
+      const row = buffer.find(
+        (b) => b.toolCallId === agentId && b.toolName === "Agent",
+      );
+      if (row?.status === "running") {
+        runningAgentIds.push(agentId);
+      }
+    }
+
+    return runningAgentIds.length === 1 ? runningAgentIds[0] : undefined;
   }
 
   /** Number of currently active sessions. */
@@ -1475,24 +1499,19 @@ ${userMessage}`;
 
     const stack = this.agentCallStack.get(threadId) ?? [];
     // Prefer the SDK-provided parent_tool_use_id on the event (set by the
-    // provider). For parallel subagents this is the only correct source -
-    // the agentCallStack LIFO returns only the most recent Agent and would
-    // misattribute children. Stack is used as fallback for older paths.
+    // provider). Parallel subagents require it; stack fallback aligns with
+    // `getCurrentParentToolCallId` / index.ts enrichment.
     const parentToolCallId =
       event.toolName === "Agent"
         ? undefined
-        : event.parentToolCallId ?? stack[stack.length - 1];
-    // Diagnostic: trace parent attribution to chase reported leaks where a
-    // main-agent tool call inherits a completed sub-agent's id as its parent.
-    // The SDK-provided event.parentToolCallId should always win; the stack
-    // fallback should only see action when the SDK omitted the field.
+        : event.parentToolCallId ?? this.getStackDerivedParentFallback(threadId);
+    // Diagnostic: trace parent attribution when a mismatch is suspected.
     if (event.toolName !== "Agent" && parentToolCallId) {
       logger.debug("bufferToolCall: parent attribution", {
         threadId,
         toolCallId: event.toolCallId,
         toolName: event.toolName,
         sdkParent: event.parentToolCallId ?? null,
-        stackTop: stack[stack.length - 1] ?? null,
         stackDepth: stack.length,
         attributed: parentToolCallId,
         source: event.parentToolCallId ? "sdk" : "stack-fallback",
@@ -1761,21 +1780,23 @@ ${userMessage}`;
         const msgContent = messages[messages.length - 1].content ?? "";
         const msgTrimmed = msgContent.trim();
         if (msgTrimmed.length > 0) {
-          // Identify the last segment by sortOrder.
+          // Identify the last segment by sortOrder (suffix guard targets the tail).
           let maxSortOrder = -Infinity;
           for (const t of thoughts) {
             if (t.sortOrder > maxSortOrder) maxSortOrder = t.sortOrder;
           }
           for (const t of thoughts) {
-            if (t.sortOrder === maxSortOrder) {
-              const segTrimmed = t.text.trim();
-              // Skip empty segments to avoid false positives on empty thoughts.
-              if (
-                segTrimmed.length > 0 &&
-                (t.isFinalResponse === 1 || msgTrimmed.endsWith(segTrimmed))
-              ) {
-                t.isFinalResponse = 1;
-              }
+            const segTrimmed = t.text.trim();
+            if (segTrimmed.length === 0) continue;
+            if (segTrimmed === msgTrimmed) {
+              t.isFinalResponse = 1;
+              continue;
+            }
+            if (
+              t.sortOrder === maxSortOrder &&
+              (t.isFinalResponse === 1 || msgTrimmed.endsWith(segTrimmed))
+            ) {
+              t.isFinalResponse = 1;
             }
           }
         }

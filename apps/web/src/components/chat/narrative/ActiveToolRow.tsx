@@ -5,23 +5,10 @@ import {
   DEFAULT_ICON,
 } from "../tool-renderers/constants";
 import type { ToolCall } from "@/transport/types";
+import { extractToolInputDetail } from "./tool-detail";
 
 interface ActiveToolRowProps {
   toolCall: ToolCall;
-}
-
-function extractDetail(tc: ToolCall): string {
-  const input = tc.toolInput;
-  if (typeof input.file_path === "string") return input.file_path.split("/").pop() ?? input.file_path;
-  if (typeof input.path === "string") return input.path.split("/").pop() ?? input.path;
-  if (typeof input.pattern === "string") return `"${input.pattern}"`;
-  if (typeof input.query === "string") return `"${input.query}"`;
-  if (typeof input.command === "string") return input.command;
-  if (typeof input.description === "string") return input.description;
-  for (const v of Object.values(input)) {
-    if (typeof v === "string" && v.length < 100) return v;
-  }
-  return tc.toolName;
 }
 
 /**
@@ -31,7 +18,7 @@ function extractDetail(tc: ToolCall): string {
 export function ActiveToolRow({ toolCall }: ActiveToolRowProps) {
   const Icon = TOOL_ICONS[toolCall.toolName] ?? DEFAULT_ICON;
   const label = TOOL_PHASE_LABELS[toolCall.toolName] ?? TOOL_LABELS[toolCall.toolName] ?? toolCall.toolName;
-  const detail = extractDetail(toolCall);
+  const detail = extractToolInputDetail(toolCall);
 
   return (
     <div className="flex items-center gap-1.5 px-2 py-1 text-[0.8125rem]">

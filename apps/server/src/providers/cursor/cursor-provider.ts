@@ -63,6 +63,7 @@ import {
   mapCursorAcpSessionNotification,
   type CursorAcpTurnState,
 } from "./cursor-acp-event-mapper.js";
+import { resolveCursorAssistantMessageContent } from "./cursor-stream-event-mapper.js";
 import {
   mapDecisionToAcpOutcome,
   pickFullAccessAllowOption,
@@ -759,7 +760,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
         }
       }
 
-      const text = entry.activeTurnState.accumulator.assistantText.trim();
+      const text = resolveCursorAssistantMessageContent(entry.activeTurnState.accumulator);
       if (text.length > 0) {
         this.emit("event", {
           type: AgentEventType.Message,

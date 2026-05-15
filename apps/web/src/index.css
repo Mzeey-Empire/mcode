@@ -400,15 +400,17 @@ input[type="range"].settings-range::-moz-range-thumb {
   animation: blink 0.8s steps(1) infinite;
 }
 
-/* Timeline dot polish — punches each dot out of the vertical line with a
-   2px halo in the surface background color. Without this, the dot and line
-   bleed together because the line is `bg-border` (fully opaque) and the dot
-   is `bg-muted-foreground/30` (transparent), making the line show through.
-   The box-shadow ring creates a clean separation: dot → halo → line.
-   `box-shadow: 0 0 0 2px var(--background)` works for all dot sizes and
-   colors without needing per-variant overrides. */
+@media (prefers-reduced-motion: reduce) {
+  .typing-cursor {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+/* Timeline dot polish — faint 1px halo in surface color so translucent dots do
+   not show the spine through them, without carving a thick notch in the line. */
 .narrative-timeline-row::before {
-  box-shadow: 0 0 0 2px var(--background);
+  box-shadow: 0 0 0 1px var(--background);
 }
 
 @keyframes narrative-row-in {

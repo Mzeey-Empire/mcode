@@ -9,6 +9,7 @@ import {
 } from "../tool-renderers/constants";
 import type { ToolCall } from "@/transport/types";
 import type { ToolGroup } from "./types";
+import { extractToolInputDetail } from "./tool-detail";
 
 interface ToolSummaryLineProps {
   /** The group of consecutive tool calls to summarize. */
@@ -17,27 +18,6 @@ interface ToolSummaryLineProps {
   hasError: boolean;
   /** Whether any call in the group was cancelled. */
   hasCancelled: boolean;
-}
-
-/**
- * Extracts a short display string from a tool call's input for use in detail rows.
- * Prefers specific known fields (file paths, patterns, commands) before falling
- * back to the first short string value found in the input object.
- */
-function extractDetail(tc: ToolCall): string {
-  const input = tc.toolInput;
-  if (typeof input.file_path === "string")
-    return input.file_path.split("/").pop() ?? input.file_path;
-  if (typeof input.path === "string")
-    return input.path.split("/").pop() ?? input.path;
-  if (typeof input.pattern === "string") return `"${input.pattern}"`;
-  if (typeof input.query === "string") return `"${input.query}"`;
-  if (typeof input.command === "string") return input.command;
-  if (typeof input.description === "string") return input.description;
-  for (const v of Object.values(input)) {
-    if (typeof v === "string" && v.length < 100) return v;
-  }
-  return tc.toolName;
 }
 
 /**
@@ -134,7 +114,7 @@ export function ToolSummaryLine({
           {group.calls.map((tc) => {
             const Icon = TOOL_ICONS[tc.toolName] ?? DEFAULT_ICON;
             const label = TOOL_LABELS[tc.toolName] ?? tc.toolName;
-            const detail = extractDetail(tc);
+            const detail = extractToolInputDetail(tc);
             const status = getCallStatus(tc);
 
             return (
@@ -156,12 +136,6 @@ export function ToolSummaryLine({
                   <pre className="text-[0.75rem] font-mono rounded px-2 py-1 bg-[var(--code-bg)] text-foreground/80 overflow-x-auto whitespace-pre-wrap break-words max-h-40">
                     {tc.output}
                   </pre>
-                )}
-
-                {tc.isComplete && !tc.isError && tc.toolName === "Edit" && (
-                  <span className="font-mono text-[0.75rem] text-muted-foreground/70">
-                    {detail}
-                  </span>
                 )}
 
                 {tc.isError && tc.output && (

@@ -52,6 +52,8 @@ export type ChatVirtualItem =
       streamingText: string;
       isAgentRunning: boolean;
       startTime: number | undefined;
+      /** Last assistant bubble text when the turn finished; duplicate thoughts are hidden. */
+      committedAssistantBody?: string;
     }
   | {
       key: string;

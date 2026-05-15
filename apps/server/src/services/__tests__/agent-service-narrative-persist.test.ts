@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EventEmitter } from "events";
 import { AgentEventType } from "@mcode/contracts";
-import type { Thread, IProviderRegistry } from "@mcode/contracts";
+import type { Thread, IProviderRegistry, Message } from "@mcode/contracts";
 import { AgentService } from "../agent-service.js";
 import type { ThreadRepo } from "../../repositories/thread-repo.js";
 import type { WorkspaceRepo } from "../../repositories/workspace-repo.js";
@@ -320,5 +320,45 @@ describe("AgentService narrative persistence", () => {
     expect(lateHooks[0].messageId).toBe(MSG_ID);
     expect(lateHooks[0].phase).toBe("stop");
     expect(lateHooks[0].durationMs).toBe(42);
+  });
+
+  it("marks a non-final thought as isFinalResponse when its text equals the assistant message body", async () => {
+    const { providerEmitter, thoughtBulk, service } = build();
+    const body = "FULL USER-FACING REPLY";
+    const mockMsg: Message = {
+      id: MSG_ID,
+      thread_id: THREAD_ID,
+      role: "assistant",
+      content: body,
+      tool_calls: null,
+      files_changed: null,
+      cost_usd: null,
+      tokens_used: null,
+      timestamp: new Date().toISOString(),
+      sequence: 2,
+      attachments: null,
+    };
+    (service as unknown as { messageRepo: MessageRepo }).messageRepo.listByThread = vi.fn(() => ({
+      messages: [mockMsg],
+      hasMore: false,
+    }));
+
+    providerEmitter.emit("event", { type: AgentEventType.TextDelta, threadId: THREAD_ID, delta: body });
+    providerEmitter.emit("event", {
+      type: AgentEventType.TurnComplete,
+      threadId: THREAD_ID,
+      tokensIn: 0,
+      tokensOut: 0,
+      contextWindow: 0,
+    });
+
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    expect(thoughtBulk).toHaveBeenCalledOnce();
+    const thoughts: CreateThoughtSegmentInput[] = thoughtBulk.mock.calls[0][0];
+    expect(thoughts).toHaveLength(1);
+    expect(thoughts[0].text).toBe(body);
+    expect(thoughts[0].isFinalResponse).toBe(1);
   });
 });

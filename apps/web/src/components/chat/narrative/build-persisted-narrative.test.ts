@@ -145,4 +145,21 @@ describe("buildPersistedNarrativeItems", () => {
       "tool-group",
     ]);
   });
+
+  it("hides a thought that exactly matches messageContent even when sort_order is not last", () => {
+    const dup = "ENTIRE ASSISTANT BODY";
+    const items = buildPersistedNarrativeItems({
+      tools: [],
+      thoughts: [
+        makeThought({ id: "th-dup", text: dup, sort_order: 1 }),
+        makeThought({ id: "th-tail", text: "short note", sort_order: 9 }),
+      ],
+      hooks: [],
+      messageContent: dup,
+    });
+    const thoughtTexts = items
+      .filter((i): i is Extract<typeof i, { type: "thought" }> => i.type === "thought")
+      .map((i) => i.segment.text);
+    expect(thoughtTexts).toEqual(["short note"]);
+  });
 });

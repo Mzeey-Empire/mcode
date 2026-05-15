@@ -1,6 +1,8 @@
 import type { ToolCall, HookExecution } from "@/transport/types";
 
-/** A segment of agent thinking text between tool calls. */
+/**
+ * Contiguous streamed reasoning text for one timeline row, bounded by tool use or turn end.
+ */
 export interface ThoughtSegment {
   /** Accumulated textDelta content for this segment. */
   text: string;
@@ -10,12 +12,17 @@ export interface ThoughtSegment {
   endedAt?: number;
 }
 
-/** A group of consecutive completed tool calls between two thoughts. */
+/**
+ * Coalesced consecutive tool calls rendered as one expandable summary row.
+ */
 export interface ToolGroup {
+  /** Ordered calls in this group. */
   calls: readonly ToolCall[];
 }
 
-/** Discriminated union for items in the narrative flow. */
+/**
+ * One row in the live narrative timeline: thought, tool group, hook, subagent, active tool, or final delta.
+ */
 export type NarrativeItem =
   | { type: "thought"; segment: ThoughtSegment; isActive: boolean }
   | { type: "tool-group"; group: ToolGroup; hasError: boolean; hasCancelled: boolean }

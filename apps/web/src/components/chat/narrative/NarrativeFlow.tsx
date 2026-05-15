@@ -25,6 +25,11 @@ export interface NarrativeFlowProps {
   isAgentRunning: boolean;
   /** Epoch ms when the agent turn started, used to derive elapsed time. */
   startTime?: number;
+  /**
+   * When the turn ended, the rendered assistant bubble text — duplicate thought
+   * segments matching this body are suppressed until volatile state resets.
+   */
+  committedAssistantBody?: string;
 }
 
 /**
@@ -152,6 +157,7 @@ export function NarrativeFlow({
   streamingText,
   isAgentRunning,
   startTime,
+  committedAssistantBody,
 }: NarrativeFlowProps) {
   const { items, counts } = useMemo(
     () =>
@@ -161,8 +167,16 @@ export function NarrativeFlow({
         thoughtSegments,
         streamingText,
         isAgentRunning,
+        committedAssistantBody,
       }),
-    [toolCalls, hooks, thoughtSegments, streamingText, isAgentRunning],
+    [
+      toolCalls,
+      hooks,
+      thoughtSegments,
+      streamingText,
+      isAgentRunning,
+      committedAssistantBody,
+    ],
   );
 
   // stepCount: top-level tool calls (no parentToolCallId) + thought segments.
@@ -189,6 +203,7 @@ export function NarrativeFlow({
   /**
    * ID of the running subagent with the most recent child tool call `startedAt`.
    * Only this subagent receives the primary-tinted background.
+   * Subagents with no defined timestamps are skipped so we never pick a false winner via `0` fallbacks.
    */
   const mostActiveSubagentId = useMemo<string | null>(() => {
     const runningSubagents = items.filter(
@@ -197,18 +212,24 @@ export function NarrativeFlow({
     );
     if (runningSubagents.length === 0) return null;
 
+    const latestKnownActivity = (
+      sa: Extract<NarrativeItem, { type: "subagent" }>,
+    ): number | null => {
+      const stamps: number[] = [];
+      if (sa.toolCall.startedAt != null) stamps.push(sa.toolCall.startedAt);
+      for (const tc of sa.children) {
+        if (tc.startedAt != null) stamps.push(tc.startedAt);
+      }
+      return stamps.length === 0 ? null : Math.max(...stamps);
+    };
+
     let bestId: string | null = null;
     let bestTime = -Infinity;
     for (const sa of runningSubagents) {
-      // Find the most recent child startedAt within this subagent.
-      // Fall back to 0 when startedAt is absent (optional field on ToolCall).
-      const saStartedAt = sa.toolCall.startedAt ?? 0;
-      const latestChild = sa.children.reduce<number>(
-        (max, tc) => ((tc.startedAt ?? 0) > max ? (tc.startedAt ?? 0) : max),
-        saStartedAt,
-      );
-      if (latestChild > bestTime) {
-        bestTime = latestChild;
+      const latest = latestKnownActivity(sa);
+      if (latest == null) continue;
+      if (latest > bestTime) {
+        bestTime = latest;
         bestId = sa.toolCall.id;
       }
     }
@@ -252,11 +273,12 @@ export function NarrativeFlow({
     <div className="relative">
       {/* Timeline flow - only renders when there are items to show */}
       {timelineItems.length > 0 && (
-        <div className="relative flex flex-col pl-[18px]">
-          {/* Vertical timeline line scoped to this column only — constrained
-              by the inner div so it terminates at the last audit row and
-              never bleeds into the delta (final response) block below. */}
-          <div className="absolute left-[7.5px] top-3 bottom-3 w-px bg-border pointer-events-none" />
+        <div className="relative flex flex-col pl-5">
+          {/* Vertical spine centered in the gutter: line and row dots share x = 10px. */}
+          <div
+            className="absolute left-[10px] top-3 bottom-3 w-px -translate-x-1/2 bg-border pointer-events-none"
+            aria-hidden
+          />
           {timelineItems.map((item, i) => {
             const margin = marginClassForItem(item, i);
             const dot = dotClassForItem(item);
@@ -267,12 +289,11 @@ export function NarrativeFlow({
                 className={[
                   "relative",
                   margin,
-                  // Shared dot pseudo-element base styles.
+                  // Dot centered on spine via left offset + translate.
                   "before:content-[''] before:absolute before:w-1 before:h-1 before:rounded-full before:z-[1]",
-                  "before:left-[-12px] before:top-[11px]",
+                  "before:left-[-10px] before:top-[11px] before:-translate-x-1/2",
                   dot,
-                  // narrative-timeline-row adds box-shadow ring so each dot punches
-                  // cleanly out of the vertical line (see index.css).
+                  // Halo masks line under semi-transparent fills (see index.css).
                   "narrative-timeline-row",
                   "narrative-row-enter",
                 ].join(" ")}
