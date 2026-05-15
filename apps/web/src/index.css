@@ -400,6 +400,17 @@ input[type="range"].settings-range::-moz-range-thumb {
   animation: blink 0.8s steps(1) infinite;
 }
 
+/* Timeline dot polish — punches each dot out of the vertical line with a
+   2px halo in the surface background color. Without this, the dot and line
+   bleed together because the line is `bg-border` (fully opaque) and the dot
+   is `bg-muted-foreground/30` (transparent), making the line show through.
+   The box-shadow ring creates a clean separation: dot → halo → line.
+   `box-shadow: 0 0 0 2px var(--background)` works for all dot sizes and
+   colors without needing per-variant overrides. */
+.narrative-timeline-row::before {
+  box-shadow: 0 0 0 2px var(--background);
+}
+
 @keyframes narrative-row-in {
   from {
     opacity: 0;
@@ -439,9 +450,30 @@ input[type="range"].settings-range::-moz-range-thumb {
   overflow: hidden;
 }
 
+/* Delta (final streaming response) enters with a gentle fade-up — slightly
+   more relaxed than the default 180ms row-in so the transition from the
+   audit-trail above feels like a natural "breath" into the reply body.
+   Respects prefers-reduced-motion below. */
+@keyframes delta-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.delta-row-enter {
+  animation: delta-row-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: opacity, transform;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .narrative-row-enter,
-  .thought-row.narrative-row-enter {
+  .thought-row.narrative-row-enter,
+  .delta-row-enter {
     animation: none;
   }
 
