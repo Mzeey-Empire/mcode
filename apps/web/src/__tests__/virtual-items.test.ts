@@ -52,24 +52,27 @@ function buildAll(
 }
 
 describe("buildStableItems", () => {
-  it("returns only message items even when no extra options are provided", () => {
+  it("returns message items plus a persisted-narrative placeholder before each assistant message", () => {
     const messages: Message[] = [
       makeMessage({ id: "u1", role: "user", content: "hi" }),
       makeMessage({ id: "a1", role: "assistant", content: "hello" }),
     ];
     const items = buildStableItems(messages);
-    expect(items).toHaveLength(2);
-    expect(items.every((i) => i.type === "message")).toBe(true);
+    // user msg, persisted-narrative(a1), assistant msg
+    expect(items.map((i) => i.type)).toEqual([
+      "message",
+      "persisted-narrative",
+      "message",
+    ]);
   });
 
-  it("returns only message items when no persisted counts", () => {
+  it("includes one persisted-narrative placeholder per assistant message", () => {
     const messages: Message[] = [
       makeMessage({ id: "u1", role: "user", content: "hi" }),
       makeMessage({ id: "a1", role: "assistant", content: "hello" }),
     ];
     const items = buildStableItems(messages);
-    expect(items).toHaveLength(2);
-    expect(items.every((i) => i.type === "message")).toBe(true);
+    expect(items.filter((i) => i.type === "persisted-narrative")).toHaveLength(1);
   });
 });
 
@@ -110,15 +113,16 @@ describe("buildVirtualItems (combined)", () => {
     expect(result).toEqual([]);
   });
 
-  it("messages only: one 'message' item per message", () => {
+  it("messages only: one 'message' item per message, plus persisted-narrative before each assistant", () => {
     const messages = [
-      makeMessage({ id: "msg-1", sequence: 1 }),
+      makeMessage({ id: "msg-1", sequence: 1 }), // assistant by default
       makeMessage({ id: "msg-2", sequence: 2, role: "user", content: "Hi" }),
     ];
     const result = buildAll(messages, [], undefined, false, undefined);
-    expect(result).toHaveLength(2);
-    expect(result[0]).toMatchObject({ type: "message", key: "msg-1" });
-    expect(result[1]).toMatchObject({ type: "message", key: "msg-2" });
+    // persisted-narrative(msg-1), msg-1, msg-2
+    expect(result.map((i) => i.type)).toEqual(["persisted-narrative", "message", "message"]);
+    expect(result[1]).toMatchObject({ type: "message", key: "msg-1" });
+    expect(result[2]).toMatchObject({ type: "message", key: "msg-2" });
   });
 
   it("active tool calls split the last assistant message after the narrative-flow item", () => {
@@ -159,14 +163,18 @@ describe("buildVirtualItems (combined)", () => {
     expect(narrativeItem.isAgentRunning).toBe(true);
   });
 
-  it("persisted tool call counts do not produce extra items", () => {
+  it("emits persisted-narrative placeholder before each assistant message", () => {
     const messages = [
       makeMessage({ id: "msg-1", sequence: 1, role: "user", content: "hi" }),
       makeMessage({ id: "msg-2", sequence: 2, role: "assistant", content: "done" }),
     ];
     const result = buildAll(messages, [], undefined, false, undefined);
-    const types = result.map((item) => item.type);
-    expect(types).toEqual(["message", "message"]);
+    // user, persisted-narrative(msg-2), assistant
+    expect(result.map((item) => item.type)).toEqual([
+      "message",
+      "persisted-narrative",
+      "message",
+    ]);
   });
 
   it("includes narrative-flow with both streaming and running state when agent running and streaming", () => {
@@ -188,9 +196,10 @@ describe("buildVirtualItems (combined)", () => {
     const toolCalls = [makeToolCall({ id: "tc-1" })];
     const result = buildAll(messages, toolCalls, undefined, false, undefined);
 
-    // Both messages appear before narrative-flow, no split of last user message
+    // Persisted-narrative(msg-1) precedes the assistant message, then user,
+    // then narrative-flow (no split because the tail isn't an assistant).
     const types = result.map((item) => item.type);
-    expect(types).toEqual(["message", "message", "narrative-flow"]);
+    expect(types).toEqual(["persisted-narrative", "message", "message", "narrative-flow"]);
   });
 
   it("full scenario: messages + tools + streaming", () => {

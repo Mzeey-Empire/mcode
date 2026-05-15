@@ -23,6 +23,7 @@ import type { ChatVirtualItem } from "./virtual-items";
 import type { ToolCall } from "@/transport/types";
 import { rememberScrollTop, recallScrollTop, forgetScrollTop } from "./scrollPositionMemory";
 import { NarrativeFlow } from "./narrative";
+import { PersistedNarrative } from "./narrative/PersistedNarrative";
 import type { ThoughtSegment } from "./narrative";
 
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
@@ -116,6 +117,8 @@ const VirtualItemRenderer = memo(function VirtualItemRenderer({
           startTime={item.startTime}
         />
       );
+    case "persisted-narrative":
+      return <PersistedNarrative messageId={item.messageId} />;
   }
 }, (prev, next) =>
   prev.item.key === next.item.key

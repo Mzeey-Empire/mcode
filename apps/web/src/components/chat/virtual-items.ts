@@ -52,6 +52,12 @@ export type ChatVirtualItem =
       streamingText: string;
       isAgentRunning: boolean;
       startTime: number | undefined;
+    }
+  | {
+      key: string;
+      type: "persisted-narrative";
+      /** Assistant message id this persisted timeline belongs to. */
+      messageId: string;
     };
 
 /**
@@ -66,6 +72,18 @@ export function buildStableItems(
   const items: ChatVirtualItem[] = [];
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
+    // Persisted narrative timeline appears immediately BEFORE each
+    // assistant message so the audit trail visually precedes the response
+    // text - matching the live narrative-flow placement. The component
+    // renders `null` until records are fetched, so emitting a placeholder
+    // here doesn't cause layout jitter once records land.
+    if (msg.role === "assistant") {
+      items.push({
+        key: `persisted-narrative-${msg.id}`,
+        type: "persisted-narrative",
+        messageId: msg.id,
+      });
+    }
     items.push({ key: msg.id, type: "message", message: msg });
 
     // File change summary appears after the assistant message
@@ -180,10 +198,34 @@ export function buildVirtualItems(
     const narrativeIdx = volatileItems.findIndex((i) => i.type === "narrative-flow");
     const narrativeItems = narrativeIdx !== -1 ? [volatileItems[narrativeIdx]] : [];
     const tailItems = volatileItems.filter((v) => v.type !== "narrative-flow");
+    // Drop the persisted-narrative placeholder for the message that has
+    // live narrative-flow above it, to avoid double-rendering the same
+    // timeline while volatile records are still in-memory.
+    const lastAssistantMessageId = lastItem.message.id;
+    const filteredStable = stableItems.filter(
+      (it, idx) =>
+        !(
+          it.type === "persisted-narrative" &&
+          it.messageId === lastAssistantMessageId &&
+          // Only filter the one immediately preceding the message - older
+          // persisted narratives for prior turns must still render.
+          idx === lastAssistantIdx - 1
+        ),
+    );
+    // Recompute index after the filter.
+    const newLastAssistantIdx = filteredStable.findIndex(
+      (it, idx) =>
+        it.type === "message" &&
+        it.message.id === lastAssistantMessageId &&
+        idx >= 0,
+    );
+    if (newLastAssistantIdx === -1) {
+      return [...stableItems, ...volatileItems];
+    }
     return [
-      ...stableItems.slice(0, lastAssistantIdx),
+      ...filteredStable.slice(0, newLastAssistantIdx),
       ...narrativeItems,
-      ...stableItems.slice(lastAssistantIdx),
+      ...filteredStable.slice(newLastAssistantIdx),
       ...tailItems,
     ];
   }
@@ -299,6 +341,12 @@ export function estimateItemHeight(item: ChatVirtualItem): number {
       const hookCount = item.hooks.length;
       return Math.min(segCount * 60 + toolCount * 32 + hookCount * 28 + 48, 600);
     }
+    case "persisted-narrative":
+      // Conservative estimate: most turns produce a handful of rows. The
+      // virtualizer re-measures once mounted, so this only affects scrollbar
+      // initial sizing. Setting too small causes scroll-jump on settle;
+      // setting too large wastes pre-allocated space.
+      return 120;
     default:
       return assertNever(item);
   }
