@@ -1667,6 +1667,24 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           delete nextStreaming[threadId];
           const nextPreview = { ...state.streamingPreviewByThread };
           delete nextPreview[threadId];
+          // Freeze any open thought segment. Without this, the open segment
+          // (endedAt undefined) keeps satisfying `isFinalResponse` in
+          // build-narrative, so the DeltaBlock keeps rendering alongside the
+          // newly-persisted MessageBubble for one or more frames - the visible
+          // flash. Closing the segment here makes the swap atomic with the
+          // streamingByThread clear.
+          const segments = state.thoughtSegmentsByThread[threadId] ?? [];
+          const lastSeg = segments[segments.length - 1];
+          const nextThoughtSegments =
+            lastSeg && lastSeg.endedAt === undefined
+              ? {
+                  ...state.thoughtSegmentsByThread,
+                  [threadId]: [
+                    ...segments.slice(0, -1),
+                    { ...lastSeg, endedAt: Date.now() },
+                  ],
+                }
+              : state.thoughtSegmentsByThread;
           const trackTurn = {
             currentTurnMessageIdByThread: {
               ...state.currentTurnMessageIdByThread,
@@ -1674,6 +1692,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             },
             streamingByThread: nextStreaming,
             streamingPreviewByThread: nextPreview,
+            thoughtSegmentsByThread: nextThoughtSegments,
           };
           if (state.currentThreadId !== threadId) return trackTurn;
           // In Electron, MessagePort and WebSocket are independent channels
@@ -2014,6 +2033,21 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           delete nextPreview[threadId];
           const nextRunning = new Set(state.runningThreadIds);
           nextRunning.delete(threadId);
+          // Freeze any open thought segment alongside the streaming clear so
+          // the persisted MessageBubble takes over cleanly without a DeltaBlock
+          // shadow. See the matching block in session.message handler.
+          const segments = state.thoughtSegmentsByThread[threadId] ?? [];
+          const lastSeg = segments[segments.length - 1];
+          const nextThoughtSegments =
+            lastSeg && lastSeg.endedAt === undefined
+              ? {
+                  ...state.thoughtSegmentsByThread,
+                  [threadId]: [
+                    ...segments.slice(0, -1),
+                    { ...lastSeg, endedAt: Date.now() },
+                  ],
+                }
+              : state.thoughtSegmentsByThread;
           // Mark all tool calls as complete and keep in active slot briefly
           const currentCalls = state.toolCallsByThread[threadId] ?? [];
           const completedCalls = currentCalls.map((tc) =>
@@ -2032,6 +2066,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               : {}),
             streamingByThread: nextStreaming,
             streamingPreviewByThread: nextPreview,
+            thoughtSegmentsByThread: nextThoughtSegments,
             runningThreadIds: nextRunning,
             toolCallsByThread: completedCalls.length > 0
               ? { ...state.toolCallsByThread, [threadId]: completedCalls }
