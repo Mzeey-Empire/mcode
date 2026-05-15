@@ -130,6 +130,8 @@ export function DeltaBlock({ text }: DeltaBlockProps) {
   const displayed = useTypewriter(text);
   const rootRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef<HTMLSpanElement>(null);
+  /** Tracks whether the first-paint entry flight animation has already played. */
+  const hasFlownInRef = useRef<boolean>(false);
 
   useLayoutEffect(() => {
     const root = rootRef.current;
@@ -151,6 +153,29 @@ export function DeltaBlock({ text }: DeltaBlockProps) {
     const x = caretRect.right - rootRect.left;
     const y = caretRect.top - rootRect.top;
     const h = Math.min(Math.max(caretRect.height || 16, 12), 28);
+
+    // First time visible text appears: play the entry flight animation.
+    // We place the cursor at an offset (above-right of the caret) with no
+    // transition, then force a reflow and enable the slow entry transition.
+    // Subsequent per-character moves use the fast 90ms default transition.
+    if (!hasFlownInRef.current && (cursor.style.opacity === "0" || cursor.style.opacity === "")) {
+      cursor.style.transition = "none";
+      cursor.style.transform = `translate3d(${x + 24}px, ${y - 28}px, 0)`;
+      cursor.style.opacity = "0";
+      // Force reflow so the browser registers the starting position before
+      // we switch on the entry transition.
+      void cursor.offsetHeight;
+      cursor.style.transition =
+        "transform 280ms cubic-bezier(0.22, 1, 0.36, 1), opacity 220ms ease-out 60ms";
+      hasFlownInRef.current = true;
+      // After the entry flight completes, restore the fast per-character transition.
+      const restoreFastTransition = (): void => {
+        cursor.style.transition =
+          "transform 90ms cubic-bezier(0.33, 1, 0.68, 1), opacity 140ms ease-out";
+        cursor.removeEventListener("transitionend", restoreFastTransition);
+      };
+      cursor.addEventListener("transitionend", restoreFastTransition);
+    }
 
     cursor.style.opacity = "1";
     cursor.style.height = `${h}px`;

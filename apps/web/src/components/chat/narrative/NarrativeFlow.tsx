@@ -249,13 +249,16 @@ export function NarrativeFlow({
   const deltaItem = items.find((it) => it.type === "delta") as Extract<NarrativeItem, { type: "delta" }> | undefined;
 
   return (
-    <div>
+    <div className="relative">
+      {/* Continuous vertical timeline line spanning the full component height,
+          including the gap between timeline items and the delta block below. */}
+      {timelineItems.length > 0 && (
+        <div className="absolute left-[7.5px] top-3 bottom-3 w-px bg-border pointer-events-none" />
+      )}
+
       {/* Timeline flow - only renders when there are items to show */}
       {timelineItems.length > 0 && (
         <div className="relative flex flex-col pl-[18px]">
-          {/* Vertical timeline line - connects the dots between items */}
-          <div className="absolute left-[7.5px] top-3 bottom-3 w-px bg-border pointer-events-none" />
-
           {timelineItems.map((item, i) => {
             const margin = marginClassForItem(item, i);
             const dot = dotClassForItem(item);
@@ -270,6 +273,7 @@ export function NarrativeFlow({
                   "before:content-[''] before:absolute before:w-1 before:h-1 before:rounded-full before:z-[1]",
                   "before:left-[-12px] before:top-[11px]",
                   dot,
+                  "narrative-row-enter",
                 ].join(" ")}
               >
                 {renderItem(item, mostActiveSubagentId, toolCalls)}
@@ -301,7 +305,7 @@ export function NarrativeFlow({
           block so the visual transition to the persisted MessageBubble at
           turnComplete is seamless. */}
       {deltaItem && (
-        <div className="mt-3">
+        <div className="mt-2">
           <DeltaBlock text={deltaItem.text} />
         </div>
       )}
