@@ -9,6 +9,12 @@ export const ThoughtSegmentRecordSchema = z.object({
   started_at: z.string(),
   ended_at: z.string().nullable(),
   sort_order: z.number(),
+  /**
+   * Non-zero when this segment is the assistant's final user-facing response.
+   * The client suppresses rendering these as ThoughtBlock rows to avoid
+   * duplicating text already visible in the assistant message body.
+   */
+  is_final_response: z.number().optional(),
 });
 
 /** Persisted thought segment linked to an assistant message. */

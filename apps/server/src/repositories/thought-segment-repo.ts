@@ -16,6 +16,7 @@ interface ThoughtSegmentRow {
   started_at: string;
   ended_at: string | null;
   sort_order: number;
+  is_final_response: number;
 }
 
 /** Input for creating a new thought segment record. */
@@ -27,6 +28,8 @@ export interface CreateThoughtSegmentInput {
   startedAt: string;
   endedAt: string | null;
   sortOrder: number;
+  /** Non-zero when this segment is the assistant's final user-facing response. */
+  isFinalResponse?: number;
 }
 
 function rowToRecord(row: ThoughtSegmentRow): ThoughtSegmentRecord {
@@ -37,10 +40,11 @@ function rowToRecord(row: ThoughtSegmentRow): ThoughtSegmentRecord {
     started_at: row.started_at,
     ended_at: row.ended_at,
     sort_order: row.sort_order,
+    is_final_response: row.is_final_response,
   };
 }
 
-const COLUMNS = "id, message_id, text, started_at, ended_at, sort_order";
+const COLUMNS = "id, message_id, text, started_at, ended_at, sort_order, is_final_response";
 
 /** Repository for thought segment creation and retrieval against SQLite. */
 @injectable()
@@ -51,7 +55,7 @@ export class ThoughtSegmentRepo {
 
   constructor(@inject("Database") private readonly db: Database.Database) {
     this.stmtInsert = db.prepare(
-      "INSERT OR IGNORE INTO thought_segments (id, message_id, text, started_at, ended_at, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT OR IGNORE INTO thought_segments (id, message_id, text, started_at, ended_at, sort_order, is_final_response) VALUES (?, ?, ?, ?, ?, ?, ?)",
     );
     this.stmtListByMessage = db.prepare(
       `SELECT ${COLUMNS} FROM thought_segments WHERE message_id = ? ORDER BY sort_order ASC`,
@@ -64,6 +68,7 @@ export class ThoughtSegmentRepo {
   /** Create a single thought segment record and return the fully-populated record. */
   create(input: CreateThoughtSegmentInput): ThoughtSegmentRecord {
     const id = input.id ?? randomUUID();
+    const isFinalResponse = input.isFinalResponse ?? 0;
     this.stmtInsert.run(
       id,
       input.messageId,
@@ -71,6 +76,7 @@ export class ThoughtSegmentRepo {
       input.startedAt,
       input.endedAt,
       input.sortOrder,
+      isFinalResponse,
     );
     return {
       id,
@@ -79,6 +85,7 @@ export class ThoughtSegmentRepo {
       started_at: input.startedAt,
       ended_at: input.endedAt,
       sort_order: input.sortOrder,
+      is_final_response: isFinalResponse,
     };
   }
 
@@ -94,6 +101,7 @@ export class ThoughtSegmentRepo {
           item.startedAt,
           item.endedAt,
           item.sortOrder,
+          item.isFinalResponse ?? 0,
         );
       }
     });

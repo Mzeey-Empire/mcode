@@ -134,6 +134,13 @@ export const thoughtSegments = sqliteTable(
     startedAt: text("started_at").notNull().default(timestampDefault),
     endedAt: text("ended_at"),
     sortOrder: integer("sort_order").notNull().default(0),
+    /**
+     * Non-zero when this segment is the assistant's final user-facing response
+     * (set by the provider stream tag or the persistTurn suffix-match safeguard).
+     * The client suppresses rendering these as ThoughtBlock rows to avoid
+     * duplicating text that already appears in the assistant message body.
+     */
+    isFinalResponse: integer("is_final_response").notNull().default(0),
   },
   (table) => [
     index("idx_thought_segments_message").on(table.messageId),
