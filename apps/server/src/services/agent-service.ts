@@ -1048,21 +1048,27 @@ export class AgentService {
         if (event.type === AgentEventType.TextDelta) {
           const prev = this.streamingAssistantTextByThread.get(event.threadId) ?? "";
           this.streamingAssistantTextByThread.set(event.threadId, prev + event.delta);
-          // Open or extend the current thought segment. Sort order is allocated lazily
-          // on first delta so consecutive deltas keep the same slot; the slot is taken
-          // BEFORE any following tool call's sort order, matching the live client builder.
-          const open = this.turnOpenThought.get(event.threadId);
-          if (!open) {
-            const sortOrder = this.turnSortCounters.get(event.threadId) ?? 0;
-            this.turnSortCounters.set(event.threadId, sortOrder + 1);
-            this.turnOpenThought.set(event.threadId, {
-              id: randomUUID(),
-              text: event.delta,
-              startedAt: new Date().toISOString(),
-              sortOrder,
-            });
-          } else {
-            open.text += event.delta;
+          // Final-response deltas are the assistant's user-facing reply — they will
+          // be stored as the message body when the Message event arrives. Do not
+          // open a ThoughtSegment for them: that would cause the text to appear
+          // twice (once as a dimmed thought block, once as the assistant message).
+          if (!event.isFinalResponse) {
+            // Open or extend the current thought segment. Sort order is allocated lazily
+            // on first delta so consecutive deltas keep the same slot; the slot is taken
+            // BEFORE any following tool call's sort order, matching the live client builder.
+            const open = this.turnOpenThought.get(event.threadId);
+            if (!open) {
+              const sortOrder = this.turnSortCounters.get(event.threadId) ?? 0;
+              this.turnSortCounters.set(event.threadId, sortOrder + 1);
+              this.turnOpenThought.set(event.threadId, {
+                id: randomUUID(),
+                text: event.delta,
+                startedAt: new Date().toISOString(),
+                sortOrder,
+              });
+            } else {
+              open.text += event.delta;
+            }
           }
           const parser = this.planParsers.get(event.threadId);
           if (parser) {

@@ -89,6 +89,13 @@ interface SessionEntry {
    *  While this set is non-empty, evictIdleSessions() must skip the session
    *  regardless of how long it has been since an SDK message arrived. */
   pendingToolUses: Set<string>;
+  /**
+   * True once the first tool call for this turn has been registered.
+   * Distinguishes pre-tool preamble text (pendingToolUses=0, no tool fired yet)
+   * from final-response text (pendingToolUses=0, tools have all resolved).
+   * Reset to false on each `result` event.
+   */
+  hasFiredToolThisTurn: boolean;
 }
 
 /**
@@ -734,6 +741,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       contextWindowMode,
       lastUsedAt: Date.now(),
       pendingToolUses: new Set<string>(),
+      hasFiredToolThisTurn: false,
     };
     this.sessions.set(sessionId, entry);
 
@@ -822,6 +830,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
           contextWindowMode,
           lastUsedAt: Date.now(),
           pendingToolUses: new Set<string>(),
+          hasFiredToolThisTurn: false,
         };
         this.sessions.set(sessionId, freshEntry);
 
@@ -1015,7 +1024,10 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                   if (toolId) {
                     emittedToolUseIds.add(toolId);
                     const entry = this.sessions.get(sessionId);
-                    entry?.pendingToolUses.add(toolId);
+                    if (entry) {
+                      entry.pendingToolUses.add(toolId);
+                      entry.hasFiredToolThisTurn = true;
+                    }
                   }
                   const toolName = (block.name as string) || "unknown";
                   logger.debug("Claude ToolUse from assistant block", {
@@ -1164,6 +1176,12 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
 
               lastAssistantText = "";
               awaitingResume = true;
+              // Reset the per-turn tool-firing flag so the next auto-resumed
+              // turn starts clean without inheriting the previous turn's state.
+              const sessionEntryOnResult = this.sessions.get(sessionId);
+              if (sessionEntryOnResult) {
+                sessionEntryOnResult.hasFiredToolThisTurn = false;
+              }
               break;
             }
 
@@ -1253,7 +1271,10 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
               if (toolId) {
                 emittedToolUseIds.add(toolId);
                 const entry = this.sessions.get(sessionId);
-                entry?.pendingToolUses.add(toolId);
+                if (entry) {
+                  entry.pendingToolUses.add(toolId);
+                  entry.hasFiredToolThisTurn = true;
+                }
               }
               const parentToolCallId =
                 (anyMsg.parent_tool_use_id as string | null | undefined) ?? undefined;
@@ -1343,10 +1364,21 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                   typeof streamEvent.delta.text === "string" &&
                   streamEvent.delta.text
                 ) {
+                  // Determine whether this delta is part of the final user-facing
+                  // response. The condition holds when all tool calls have resolved
+                  // (pendingToolUses empty) AND at least one tool has fired this
+                  // turn — distinguishing post-tool final-response text from
+                  // pre-tool preamble, both of which have pendingToolUses===0.
+                  const sessionEntry = this.sessions.get(sessionId);
+                  const isFinalResponse =
+                    sessionEntry !== undefined &&
+                    sessionEntry.pendingToolUses.size === 0 &&
+                    sessionEntry.hasFiredToolThisTurn === true;
                   this.emit("event", {
                     type: AgentEventType.TextDelta,
                     threadId,
                     delta: streamEvent.delta.text,
+                    ...(isFinalResponse && { isFinalResponse: true }),
                   } satisfies AgentEvent);
                 } else if (
                   streamEvent.delta?.type === "input_json_delta" &&
