@@ -311,6 +311,12 @@ export interface McodeTransport {
     thoughts: ThoughtSegmentRecord[];
     hooks: HookExecutionRecord[];
   }>;
+  /** Batch fetch narratives for multiple messages in one round-trip. */
+  listNarrativeBatch(messageIds: string[]): Promise<Record<string, {
+    tools: ToolCallRecord[];
+    thoughts: ThoughtSegmentRecord[];
+    hooks: HookExecutionRecord[];
+  }>>;
 
   /** Fetch persisted task list for a thread (from last TodoWrite). */
   getThreadTasks(threadId: string): Promise<Array<{ content: string; status: "pending" | "in_progress" | "completed" | "cancelled" }> | null>;

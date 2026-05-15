@@ -726,8 +726,29 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         const lastAssistants = messages
           .filter((m) => m.role === "assistant")
           .slice(-PREFETCH_BATCH);
-        for (const m of lastAssistants) {
-          void get().loadNarrativeForMessage(m.id);
+        // Use the batch RPC to fetch all narratives in a single round-trip
+        // instead of 20 individual narrative.list calls. Significant win on
+        // slow WebSocket connections where RTT dominates prefetch latency.
+        const idsToFetch = lastAssistants
+          .map((m) => m.id)
+          .filter((id) => !get().narrativeByMessage[id]);
+        if (idsToFetch.length > 0) {
+          void getTransport()
+            .listNarrativeBatch(idsToFetch)
+            .then((batchRes) => {
+              set((state) => ({
+                narrativeByMessage: { ...state.narrativeByMessage, ...batchRes },
+              }));
+            })
+            .catch((err) => {
+              // Fall back to individual fetches on batch failure (e.g. server
+              // doesn't support the new RPC yet — during rolling deploys).
+              // eslint-disable-next-line no-console
+              console.warn("[narrative] listNarrativeBatch failed, falling back", err);
+              for (const m of lastAssistants) {
+                void get().loadNarrativeForMessage(m.id);
+              }
+            });
         }
 
         // Re-hydrate pending permissions (covers reconnect and thread switch)
