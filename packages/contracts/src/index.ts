@@ -31,6 +31,14 @@ export type { AttachmentMeta, StoredAttachment } from "./models/attachment.js";
 export { WorkspaceSchema, WorkspaceEnrichmentSchema } from "./models/workspace.js";
 export type { Workspace, WorkspaceEnrichment } from "./models/workspace.js";
 
+export {
+  MCODE_WORKSPACE_PREVIEW_PROTOCOL,
+  isMcodeWorkspacePreviewUrl,
+  mcodeWorkspacePreviewHref,
+  markdownWorkspaceRefToPreviewPath,
+  looksLikeWorkspaceRelativeFileRef,
+} from "./models/workspace-preview-uri.js";
+
 export { ThreadSchema, RecentThreadSchema } from "./models/thread.js";
 export type { Thread, RecentThread } from "./models/thread.js";
 
