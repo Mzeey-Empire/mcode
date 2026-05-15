@@ -58,6 +58,8 @@ export type ChatVirtualItem =
       type: "persisted-narrative";
       /** Assistant message id this persisted timeline belongs to. */
       messageId: string;
+      /** Assistant message body — passed to the safety net that suppresses final-response thoughts. */
+      messageContent: string;
     }
   | {
       key: string;
@@ -93,6 +95,7 @@ export function buildStableItems(
         key: `persisted-narrative-${msg.id}`,
         type: "persisted-narrative",
         messageId: msg.id,
+        messageContent: msg.content,
       });
     }
     items.push({ key: msg.id, type: "message", message: msg });

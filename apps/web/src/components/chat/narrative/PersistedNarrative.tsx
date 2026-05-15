@@ -13,6 +13,11 @@ import { buildPersistedNarrativeItems } from "./build-persisted-narrative";
 export interface PersistedNarrativeProps {
   /** Assistant message id (server-side or local) whose narrative to render. */
   messageId: string;
+  /**
+   * Body of the assistant message. Used by the client-side suffix-match
+   * safety net to suppress thought segments that duplicate the message body.
+   */
+  messageContent?: string;
 }
 
 /**
@@ -105,7 +110,7 @@ function renderItem(item: NarrativeItem, allToolCalls: readonly ToolCall[]): Rea
  *   - Sub-agents render via the same `SubagentRow` but lack the "active"
  *     visual treatment (no pulse, no primary tint)
  */
-export function PersistedNarrative({ messageId }: PersistedNarrativeProps) {
+export function PersistedNarrative({ messageId, messageContent }: PersistedNarrativeProps) {
   const records = useThreadStore((s) => s.narrativeByMessage[messageId]);
   const load = useThreadStore((s) => s.loadNarrativeForMessage);
   const triggered = useRef(false);
@@ -125,7 +130,7 @@ export function PersistedNarrative({ messageId }: PersistedNarrativeProps) {
         durationMs: null as number | null,
       };
     }
-    const built = buildPersistedNarrativeItems(records);
+    const built = buildPersistedNarrativeItems({ ...records, messageContent });
     const topLevel = records.tools.filter((t) => t.parent_tool_call_id == null);
     const subagents = topLevel.filter((t) => t.tool_name === "Agent").length;
     const computedCounts: NarrativeCounts = {

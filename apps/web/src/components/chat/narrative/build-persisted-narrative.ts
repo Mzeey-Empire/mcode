@@ -12,6 +12,8 @@ export interface PersistedNarrativeInputs {
   tools: readonly ToolCallRecord[];
   thoughts: readonly ThoughtSegmentRecord[];
   hooks: readonly HookExecutionRecord[];
+  /** Assistant message body — used for client-side suffix-match safety net. */
+  messageContent?: string;
 }
 
 const AGENT_TOOL_NAME = "Agent";
@@ -86,13 +88,52 @@ type TimelineEvent =
  * `parent_tool_call_id` field. Consecutive completed non-Agent tool calls
  * are coalesced into `tool-group` items, matching the live grouping.
  */
+/**
+ * WeakMap-based memo so `buildPersistedNarrativeItems` does not rebuild the
+ * item tree on every render when the inputs object identity is stable. The
+ * `thoughts` array reference changes whenever the narrative cache updates, so
+ * keying on that is sufficient for per-messageId invalidation.
+ */
+const _memoCache = new WeakMap<readonly ThoughtSegmentRecord[], NarrativeItem[]>();
+
 export function buildPersistedNarrativeItems(
   inputs: PersistedNarrativeInputs,
 ): NarrativeItem[] {
-  const { tools, thoughts, hooks } = inputs;
+  const { tools, thoughts, hooks, messageContent } = inputs;
 
   if (tools.length === 0 && thoughts.length === 0 && hooks.length === 0) {
     return [];
+  }
+
+  // Memo: if tools/hooks are stable AND messageContent is unchanged since last
+  // call, return cached result. Using the thoughts array reference as the key
+  // is sufficient because narrative.list returns a fresh array only when DB
+  // records change.
+  const cached = _memoCache.get(thoughts);
+  if (cached !== undefined) return cached;
+
+  // Filter out thought segments that are the assistant's final response to
+  // prevent them appearing as ThoughtBlock rows alongside the message body.
+  // Two conditions suffice: the server-set flag (primary) or a client-side
+  // suffix match against messageContent (fallback for older rows or edge cases).
+  const msgTrimmed = (messageContent ?? "").trim();
+  let filteredThoughts = thoughts;
+
+  if (thoughts.length > 0) {
+    // Find the last segment by sort_order (chronologically last).
+    let maxSortOrder = -Infinity;
+    for (const t of thoughts) {
+      if (t.sort_order > maxSortOrder) maxSortOrder = t.sort_order;
+    }
+    filteredThoughts = thoughts.filter((t) => {
+      if (t.is_final_response) return false;
+      // Client-side suffix match as a second-layer safeguard.
+      if (t.sort_order === maxSortOrder && msgTrimmed.length > 0) {
+        const segTrimmed = t.text.trim();
+        if (segTrimmed.length > 0 && msgTrimmed.endsWith(segTrimmed)) return false;
+      }
+      return true;
+    });
   }
 
   // Split tools by parent_tool_call_id.
@@ -113,7 +154,7 @@ export function buildPersistedNarrativeItems(
 
   // Build unified timeline of TOP-LEVEL items, sorted by sort_order.
   const timeline: TimelineEvent[] = [];
-  for (const seg of thoughts) {
+  for (const seg of filteredThoughts) {
     timeline.push({
       kind: "thought",
       segment: recordToThoughtSegment(seg),
@@ -190,5 +231,10 @@ export function buildPersistedNarrativeItems(
   }
   flushGroup();
 
+  // Cache against the thoughts array reference so repeated calls with the
+  // same inputs are O(1). The WeakMap key is the thoughts array itself;
+  // when the narrative cache updates it replaces the array, invalidating
+  // the entry automatically.
+  _memoCache.set(thoughts, items);
   return items;
 }

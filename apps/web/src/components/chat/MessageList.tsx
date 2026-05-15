@@ -119,7 +119,7 @@ const VirtualItemRenderer = memo(function VirtualItemRenderer({
         />
       );
     case "persisted-narrative":
-      return <PersistedNarrative messageId={item.messageId} />;
+      return <PersistedNarrative messageId={item.messageId} messageContent={item.messageContent} />;
     case "persisted-late-hooks":
       return <PersistedLateHooks messageId={item.messageId} />;
   }
