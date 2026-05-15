@@ -1394,6 +1394,22 @@ ${userMessage}`;
       event.toolName === "Agent"
         ? undefined
         : event.parentToolCallId ?? stack[stack.length - 1];
+    // Diagnostic: trace parent attribution to chase reported leaks where a
+    // main-agent tool call inherits a completed sub-agent's id as its parent.
+    // The SDK-provided event.parentToolCallId should always win; the stack
+    // fallback should only see action when the SDK omitted the field.
+    if (event.toolName !== "Agent" && parentToolCallId) {
+      logger.debug("bufferToolCall: parent attribution", {
+        threadId,
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        sdkParent: event.parentToolCallId ?? null,
+        stackTop: stack[stack.length - 1] ?? null,
+        stackDepth: stack.length,
+        attributed: parentToolCallId,
+        source: event.parentToolCallId ? "sdk" : "stack-fallback",
+      });
+    }
     if (event.toolName === "Agent") {
       stack.push(event.toolCallId);
       this.agentCallStack.set(threadId, stack);
@@ -1464,6 +1480,11 @@ ${userMessage}`;
     if (stackIdx >= 0) {
       stack.splice(stackIdx, 1);
       this.agentCallStack.set(threadId, stack);
+      logger.debug("updateBufferedToolCallOutput: popped Agent from stack", {
+        threadId,
+        toolCallId,
+        remainingDepth: stack.length,
+      });
     }
 
     const buffer = this.turnToolCalls.get(threadId) ?? [];
