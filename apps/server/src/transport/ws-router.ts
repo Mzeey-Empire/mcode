@@ -32,6 +32,8 @@ import type { SkillService } from "../services/skill-service";
 import type { TerminalService } from "../services/terminal-service";
 import type { MessageRepo } from "../repositories/message-repo";
 import type { ToolCallRecordRepo } from "../repositories/tool-call-record-repo";
+import type { ThoughtSegmentRepo } from "../repositories/thought-segment-repo";
+import type { HookExecutionRepo } from "../repositories/hook-execution-repo";
 import type { TurnSnapshotRepo } from "../repositories/turn-snapshot-repo";
 import type { TaskRepo } from "../repositories/task-repo";
 import type { PlanQuestionAnswersRepo } from "../repositories/plan-question-answers-repo";
@@ -67,6 +69,8 @@ export interface RouterDeps {
   terminalService: TerminalService;
   messageRepo: MessageRepo;
   toolCallRecordRepo: ToolCallRecordRepo;
+  thoughtSegmentRepo: ThoughtSegmentRepo;
+  hookExecutionRepo: HookExecutionRepo;
   turnSnapshotRepo: TurnSnapshotRepo;
   snapshotService: SnapshotService;
   settingsService: SettingsService;
@@ -589,6 +593,12 @@ async function dispatch(
       return deps.toolCallRecordRepo.listByMessage(params.messageId);
     case "toolCallRecord.listByParent":
       return deps.toolCallRecordRepo.listByParent(params.parentToolCallId);
+    case "narrative.list":
+      return {
+        tools: deps.toolCallRecordRepo.listByMessage(params.messageId),
+        thoughts: deps.thoughtSegmentRepo.listByMessage(params.messageId),
+        hooks: deps.hookExecutionRepo.listByMessage(params.messageId),
+      };
 
     // Thread tasks
     case "thread.getTasks":
