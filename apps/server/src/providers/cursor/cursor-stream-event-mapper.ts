@@ -48,6 +48,19 @@ export interface CursorStreamAccumulator {
   toolStartTimes: Map<string, number>;
   /** Captured persistent chat id from the system/init event, used for resume. */
   chatId: string | null;
+  /**
+   * call_ids for tool calls that have started but not yet completed.
+   * Mirrors ClaudeProvider's pendingToolUses for the same purpose: detecting
+   * when all tools have resolved so subsequent text deltas can be tagged
+   * isFinalResponse.
+   */
+  pendingToolCalls: Set<string>;
+  /**
+   * True once the first tool call for this turn has been registered.
+   * Distinguishes pre-tool preamble text from final-response text, both of
+   * which have pendingToolCalls empty.
+   */
+  hasFiredToolThisTurn: boolean;
 }
 
 /** Factory for a fresh per-turn accumulator. */
@@ -56,6 +69,8 @@ export function createCursorStreamAccumulator(): CursorStreamAccumulator {
     assistantText: "",
     toolStartTimes: new Map(),
     chatId: null,
+    pendingToolCalls: new Set(),
+    hasFiredToolThisTurn: false,
   };
 }
 
@@ -146,10 +161,21 @@ function mapAssistantEvent(
   const text = concatTextBlocks(blocks);
   if (!text) return [];
 
+  // Determine whether this text is the final user-facing response. All pending
+  // tool calls must have resolved AND at least one tool must have fired this
+  // turn (to distinguish post-tool final-response from pre-tool preamble).
+  const isFinalResponse =
+    acc.pendingToolCalls.size === 0 && acc.hasFiredToolThisTurn;
+
   // Per-token delta: emit immediately and remember the running total.
   if (typeof event.timestamp_ms === "number") {
     acc.assistantText += text;
-    return [{ type: AgentEventType.TextDelta, threadId, delta: text }];
+    return [{
+      type: AgentEventType.TextDelta,
+      threadId,
+      delta: text,
+      ...(isFinalResponse && { isFinalResponse: true }),
+    }];
   }
 
   // Terminal full-message echo. If we already accumulated deltas this turn,
@@ -162,7 +188,12 @@ function mapAssistantEvent(
     return [];
   }
   acc.assistantText = text;
-  return [{ type: AgentEventType.TextDelta, threadId, delta: text }];
+  return [{
+    type: AgentEventType.TextDelta,
+    threadId,
+    delta: text,
+    ...(isFinalResponse && { isFinalResponse: true }),
+  }];
 }
 
 function concatTextBlocks(blocks: CursorStreamContentBlock[]): string {
@@ -231,6 +262,8 @@ function mapToolCallStarted(
 
   const toolName = TOOL_NAME_BY_DISCRIMINATOR[discriminator] ?? discriminator;
   acc.toolStartTimes.set(callId, Date.now());
+  acc.pendingToolCalls.add(callId);
+  acc.hasFiredToolThisTurn = true;
   const toolInput =
     toolName === "Edit" || toolName === "Write"
       ? normalizeMcodeCursorToolInput(toolName, args ?? {})
@@ -260,6 +293,8 @@ function mapUpdateTodosStarted(
   const incoming = entries.map((entry, index) => normalizeCursorTodoEntry(entry, index));
   const todos = reconcileCursorTodos(incoming, merge, todoSnapshot);
   acc.toolStartTimes.set(callId, Date.now());
+  acc.pendingToolCalls.add(callId);
+  acc.hasFiredToolThisTurn = true;
   return [
     {
       type: AgentEventType.ToolUse,
@@ -306,6 +341,7 @@ function mapToolCallCompleted(
   }
 
   acc.toolStartTimes.delete(callId);
+  acc.pendingToolCalls.delete(callId);
 
   if (discriminator === "updateTodosToolCall") {
     // Reuse the same one-line result format as ACP for parity.
