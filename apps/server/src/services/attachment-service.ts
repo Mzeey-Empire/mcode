@@ -14,6 +14,7 @@ import {
   isVirtualBrowserContextAttachment,
   MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME,
   shouldPersistAttachmentWithoutFile,
+  storedAttachmentSuffix,
 } from "@mcode/contracts";
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
@@ -48,26 +49,6 @@ export function getMaxSizeForMime(mimeType: string): number {
     return MAX_DOCUMENT_SIZE;
   }
   return MAX_IMAGE_SIZE; // conservative fallback
-}
-
-function mimeToExt(mimeType: string): string {
-  const map: Record<string, string> = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/gif": ".gif",
-    "image/webp": ".webp",
-    "application/pdf": ".pdf",
-    "text/plain": ".txt",
-    "application/rtf": ".rtf",
-    "text/rtf": ".rtf",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
-    "application/vnd.oasis.opendocument.text": ".odt",
-    "application/vnd.oasis.opendocument.spreadsheet": ".ods",
-    "application/vnd.oasis.opendocument.presentation": ".odp",
-  };
-  return map[mimeType] ?? "";
 }
 
 /** Resolve the base directory for attachment storage. */
@@ -135,7 +116,7 @@ export class AttachmentService {
           );
         }
 
-        const ext = mimeToExt(att.mimeType);
+        const ext = storedAttachmentSuffix(att.mimeType);
         const destPath = resolve(baseDir, `${att.id}${ext}`);
 
         // Verify destination stays within the thread attachment directory
