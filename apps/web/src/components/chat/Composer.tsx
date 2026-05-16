@@ -1439,11 +1439,27 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     // Files without paths need fallback handling
     for (const file of withoutPaths) {
       if (classifyFile(file.name) === "image") {
-        // Images: use existing clipboard image reader
         try {
-          const meta = bridge?.readClipboardImage
+          let meta: AttachmentMeta | null = bridge?.readClipboardImage
             ? await bridge.readClipboardImage()
             : await getTransport().readClipboardImage();
+          if (!meta) {
+            const arrayBuffer = await file.arrayBuffer();
+            const safeName =
+              file.name && isFileSupported(file.name)
+                ? file.name
+                : `clipboard-${Date.now()}.png`;
+            const mimeType = file.type || inferMimeType(safeName);
+            if (bridge?.saveClipboardFile) {
+              meta = await bridge.saveClipboardFile(
+                new Uint8Array(arrayBuffer),
+                mimeType,
+                safeName,
+              );
+            } else {
+              meta = await getTransport().saveClipboardFile(arrayBuffer, mimeType, safeName);
+            }
+          }
           if (meta) {
             setAttachments((prev) => {
               if (prev.length >= MAX_ATTACHMENTS) return prev;
