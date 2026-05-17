@@ -48,8 +48,12 @@ export const CodeBlock = memo(function CodeBlock({ code, language, isStreaming, 
 
   const isReady = html !== null && html !== "";
 
+  /** Body layout: muted fill lives on the scrollport so horizontally overflowed glyphs stay on the tinted surface. Inner `pre` sizes to `max(content, 100%)`. */
+  const codeScrollBody = "overflow-x-auto bg-muted text-foreground text-sm font-mono leading-relaxed";
+  const codePreInner = "m-0 min-w-full w-max bg-transparent p-3";
+
   return (
-    <div className="my-2 rounded-lg overflow-hidden border border-border">
+    <div className="my-2 min-w-0 rounded-lg overflow-hidden border border-border">
       <div className="flex items-center justify-between bg-background px-3 py-1 border-b border-border">
         <span className="text-xs text-muted-foreground">{language || "text"}</span>
         {!isStreaming && (
@@ -64,28 +68,33 @@ export const CodeBlock = memo(function CodeBlock({ code, language, isStreaming, 
         )}
       </div>
       {isStreaming ? (
-        <pre className="bg-muted text-foreground p-3 overflow-x-auto text-sm font-mono leading-relaxed">
-          <code>{code}</code>
-        </pre>
+        <div className={codeScrollBody}>
+          <pre className={`${codePreInner} text-foreground`}>
+            <code>{code}</code>
+          </pre>
+        </div>
       ) : (
         <div
           data-code-block
-          className={`grid ${isReady ? "ready" : ""}`}
+          className={`grid min-w-0 ${isReady ? "ready" : ""}`}
         >
           {/* Plain text layer */}
-          <pre
-            className={`bg-muted text-foreground p-3 overflow-x-auto text-sm font-mono leading-relaxed
-              [grid-row:1/2] [grid-column:1/2]
-              ${isReady ? "invisible opacity-0" : "visible opacity-100"}`}
+          <div
+            className={`${codeScrollBody} [grid-row:1/2] [grid-column:1/2] ${
+              isReady ? "invisible opacity-0" : "visible opacity-100"
+            }`}
           >
-            <code>{code}</code>
-          </pre>
+            <pre className={codePreInner}>
+              <code>{code}</code>
+            </pre>
+          </div>
           {/* Highlighted layer */}
           {html && (
             <div
-              className="[grid-row:1/2] [grid-column:1/2] overflow-x-auto transition-opacity duration-150 ease-in
-                [&_pre]:p-3 [&_pre]:text-sm [&_pre]:leading-relaxed [&_pre]:!bg-muted [&_pre]:m-0 [&_pre]:text-foreground
-                [&_code]:text-sm [&_code]:font-mono"
+              className={`${codeScrollBody} [grid-row:1/2] [grid-column:1/2] transition-opacity duration-150 ease-in
+                [&_pre]:m-0 [&_pre]:min-w-full [&_pre]:w-max [&_pre]:bg-transparent [&_pre]:!bg-transparent [&_pre]:p-3
+                [&_pre]:text-sm [&_pre]:leading-relaxed [&_pre]:text-foreground
+                [&_code]:text-sm [&_code]:font-mono`}
               dangerouslySetInnerHTML={{ __html: html }}
             />
           )}
