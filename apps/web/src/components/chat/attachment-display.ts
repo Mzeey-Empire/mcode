@@ -16,12 +16,13 @@ export type AttachmentIconKind = "pdf" | "office" | "generic";
  * Maps a MIME type to an {@link AttachmentIconKind} for predictable tile icons.
  */
 export function attachmentIconKindFromMime(mimeType: string): AttachmentIconKind {
-  if (mimeType === "application/pdf") return "pdf";
+  const normalizedMime = mimeType.split(";")[0]?.trim().toLowerCase() ?? "";
+  if (normalizedMime === "application/pdf") return "pdf";
   const isOffice =
-    mimeType.includes("officedocument") ||
-    mimeType.includes("opendocument") ||
-    mimeType === "application/rtf" ||
-    mimeType === "text/rtf";
+    normalizedMime.includes("officedocument") ||
+    normalizedMime.includes("opendocument") ||
+    normalizedMime === "application/rtf" ||
+    normalizedMime === "text/rtf";
   if (isOffice) return "office";
   return "generic";
 }

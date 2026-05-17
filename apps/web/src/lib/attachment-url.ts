@@ -24,21 +24,35 @@ export function getAttachmentTransportWsUrl(): string | null {
  */
 export function clearAttachmentTransportWsUrlCache(): void {
   transportWsUrl = null;
+  if (typeof window !== "undefined") {
+    delete (window as unknown as { __mcodeE2EAttachmentTransportWsUrl?: string })
+      .__mcodeE2EAttachmentTransportWsUrl;
+  }
+}
+
+/**
+ * Playwright E2E sets `window.__mcodeE2EAttachmentTransportWsUrl` so
+ * {@link buildStoredAttachmentImageSrc} can use an HTTP origin before the real WebSocket opens.
+ * Read only in the browser; production code never sets this property.
+ */
+function readE2EAttachmentTransportWsOverride(): string | null {
+  if (typeof window === "undefined") return null;
+  const v = (window as unknown as { __mcodeE2EAttachmentTransportWsUrl?: unknown })
+    .__mcodeE2EAttachmentTransportWsUrl;
+  return typeof v === "string" ? v : null;
 }
 
 function wsUrlToHttpOrigin(wsUrl: string): string {
   const u = new URL(wsUrl);
   const proto = u.protocol === "wss:" ? "https:" : "http:";
-  if (u.port) {
-    return `${proto}//${u.hostname}:${u.port}`;
-  }
-  return `${proto}//${u.hostname}`;
+  return `${proto}//${u.host}`;
 }
 
 /**
  * Builds a URL for loading a persisted attachment image (thumbnail or lightbox).
- * Electron continues to use `mcode-attachment:`; the standalone web app uses the local
- * HTTP server so `<img>` can load bytes without a custom protocol handler.
+ * Playwright can set `window.__mcodeE2EAttachmentTransportWsUrl` so `/attachments/` HTTP is used
+ * even when a stray `desktopBridge` stub exists. Otherwise Electron uses `mcode-attachment:` and
+ * the standalone web app uses the local HTTP server.
  */
 export function buildStoredAttachmentImageSrc(
   threadId: string,
@@ -47,9 +61,20 @@ export function buildStoredAttachmentImageSrc(
 ): string {
   const ext = storedAttachmentSuffix(mimeType);
   const filename = `${id}${ext}`;
+
+  const e2eWs = readE2EAttachmentTransportWsOverride();
+  if (e2eWs) {
+    const base = wsUrlToHttpOrigin(e2eWs);
+    const token =
+      typeof localStorage !== "undefined" ? localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) ?? "" : "";
+    const q = token ? `?token=${encodeURIComponent(token)}` : "";
+    return `${base}/attachments/${threadId}/${filename}${q}`;
+  }
+
   if (typeof window !== "undefined" && window.desktopBridge) {
     return `mcode-attachment://${threadId}/${filename}`;
   }
+
   const ws = transportWsUrl;
   if (ws) {
     const base = wsUrlToHttpOrigin(ws);

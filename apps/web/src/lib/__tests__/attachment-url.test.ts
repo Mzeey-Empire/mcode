@@ -38,9 +38,32 @@ describe("buildStoredAttachmentImageSrc", () => {
     );
   });
 
+  it("preserves bracketed IPv6 host in HTTP origins", () => {
+    setAttachmentTransportWsUrl("ws://[::1]:19400");
+    const url = buildStoredAttachmentImageSrc(threadId, id, "image/png");
+    expect(url).toContain(`http://[::1]:19400/attachments/${threadId}/${id}.png`);
+  });
+
   it("falls back to mcode-attachment when no transport URL and no desktop", () => {
     expect(buildStoredAttachmentImageSrc(threadId, id, "image/gif")).toBe(
       `mcode-attachment://${threadId}/${id}.gif`,
     );
+  });
+
+  it("uses window.__mcodeE2EAttachmentTransportWsUrl when set (Playwright harness)", () => {
+    (
+      window as unknown as { __mcodeE2EAttachmentTransportWsUrl?: string }
+    ).__mcodeE2EAttachmentTransportWsUrl = "ws://localhost:19400";
+    const url = buildStoredAttachmentImageSrc(threadId, id, "image/png");
+    expect(url).toContain("http://localhost:19400/attachments/");
+  });
+
+  it("prefers E2E attachment WS override over desktopBridge (Playwright stub)", () => {
+    vi.stubGlobal("desktopBridge", {});
+    (
+      window as unknown as { __mcodeE2EAttachmentTransportWsUrl?: string }
+    ).__mcodeE2EAttachmentTransportWsUrl = "ws://localhost:19400";
+    const url = buildStoredAttachmentImageSrc(threadId, id, "image/png");
+    expect(url).toContain("http://localhost:19400/attachments/");
   });
 });

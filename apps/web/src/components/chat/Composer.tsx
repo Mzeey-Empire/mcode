@@ -64,6 +64,7 @@ import {
   isFileSupported,
   getMaxFileSize,
   inferMimeType,
+  storedAttachmentSuffix,
   MAX_ATTACHMENTS,
   MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME,
   isVirtualBrowserContextAttachment,
@@ -1445,11 +1446,12 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
             : await getTransport().readClipboardImage();
           if (!meta) {
             const arrayBuffer = await file.arrayBuffer();
+            const mimeType = file.type || inferMimeType(file.name || "image/png");
+            const ext = storedAttachmentSuffix(mimeType) || ".bin";
             const safeName =
               file.name && isFileSupported(file.name)
                 ? file.name
-                : `clipboard-${Date.now()}.png`;
-            const mimeType = file.type || inferMimeType(safeName);
+                : `clipboard-${Date.now()}${ext}`;
             if (bridge?.saveClipboardFile) {
               meta = await bridge.saveClipboardFile(
                 new Uint8Array(arrayBuffer),

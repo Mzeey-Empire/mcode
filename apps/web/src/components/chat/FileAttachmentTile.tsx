@@ -11,6 +11,7 @@ import {
 /** Layout presets for attachment tiles in composer vs transcript. */
 export type FileAttachmentTileVariant = "composer" | "transcript";
 
+/** Props for {@link FileAttachmentTile}. */
 export interface FileAttachmentTileProps {
   /** Original filename for display. */
   name: string;
