@@ -14,12 +14,38 @@ import { addClient, removeClient } from "./push";
 import { handleBinaryUpload } from "./binary-upload";
 import { timingSafeEqual } from "crypto";
 import { extractToken, buildAuthCookie } from "./auth";
+import { createReadStream, existsSync } from "fs";
+import { join } from "path";
+import { getMcodeDir } from "@mcode/shared";
 
 /** Constant-time string comparison to prevent timing attacks on token validation. */
 function safeTokenEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   return timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
+
+/** Match stored thread IDs used for the custom attachment protocol (UUID, lowercase hex). */
+const ATTACHMENT_THREAD_SEGMENT = /^[a-f0-9-]+$/;
+/** Filename is `{attachmentUuid}.{ext}` under the thread directory. */
+const ATTACHMENT_FILE_SEGMENT = /^[a-f0-9-]+\.\w+$/;
+
+/** Extension to MIME for persisted attachment files (aligned with desktop shell protocol). */
+const ATTACHMENT_EXT_MIME: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  webp: "image/webp",
+  pdf: "application/pdf",
+  txt: "text/plain",
+  rtf: "application/rtf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  odt: "application/vnd.oasis.opendocument.text",
+  ods: "application/vnd.oasis.opendocument.spreadsheet",
+  odp: "application/vnd.oasis.opendocument.presentation",
+};
 
 /** Create and configure the HTTP + WebSocket server. */
 export function createWsServer(deps: RouterDeps & { authToken: string }): {
@@ -56,6 +82,54 @@ export function createWsServer(deps: RouterDeps & { authToken: string }): {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "shutting_down" }));
       process.kill(process.pid, "SIGTERM");
+      return;
+    }
+
+    if (req.method === "GET" && req.url?.startsWith("/attachments/")) {
+      const attachmentToken = extractToken(req);
+      if (!attachmentToken || !safeTokenEqual(attachmentToken, deps.authToken)) {
+        res.writeHead(401);
+        res.end("Unauthorized");
+        return;
+      }
+
+      const parsedUrl = new URL(req.url, "http://localhost");
+      const segments = parsedUrl.pathname.split("/").filter(Boolean);
+      if (segments.length !== 3 || segments[0] !== "attachments") {
+        res.writeHead(404);
+        res.end("Not found");
+        return;
+      }
+
+      const threadId = segments[1]!;
+      const filename = segments[2]!;
+      if (!ATTACHMENT_THREAD_SEGMENT.test(threadId) || !ATTACHMENT_FILE_SEGMENT.test(filename)) {
+        res.writeHead(400);
+        res.end("Invalid path");
+        return;
+      }
+
+      const filePath = join(getMcodeDir(), "attachments", threadId, filename);
+      if (!existsSync(filePath)) {
+        res.writeHead(404);
+        res.end("Not found");
+        return;
+      }
+
+      const ext = filename.split(".").pop() ?? "";
+      const stream = createReadStream(filePath);
+      stream.on("error", () => {
+        if (!res.headersSent) {
+          res.writeHead(404);
+        }
+        res.end();
+      });
+      res.writeHead(200, {
+        "Content-Type": ATTACHMENT_EXT_MIME[ext] ?? "application/octet-stream",
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "Content-Security-Policy": "default-src 'none'",
+      });
+      stream.pipe(res);
       return;
     }
 

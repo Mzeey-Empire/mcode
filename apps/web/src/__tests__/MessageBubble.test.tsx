@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { Message, StoredAttachment } from "@/transport";
 import { MessageBubble } from "../components/chat/MessageBubble";
 
 // Mock MarkdownContent to detect when it's used
@@ -13,17 +15,42 @@ vi.mock("../components/chat/MarkdownContent", () => ({
   ),
 }));
 
-const makeMessage = (content: string) => ({
-  id: "msg-1",
-  thread_id: "thread-1",
-  role: "user" as const,
-  content,
-  timestamp: new Date().toISOString(),
-  attachments: [],
-  cost_usd: null,
-  tokens_used: null,
-  sequence: 1,
-});
+vi.mock("../components/chat/ImageAttachmentLightbox", () => ({
+  ImageAttachmentLightbox: ({
+    open,
+    items,
+    initialIndex = 0,
+  }: {
+    open: boolean;
+    items: { src: string; title: string }[];
+    initialIndex?: number;
+  }) =>
+    open ? (
+      <div
+        data-testid="mock-lightbox"
+        data-slide-count={String(items.length)}
+        data-initial-index={String(initialIndex)}
+        data-active-src={items[initialIndex]?.src ?? ""}
+        data-active-title={items[initialIndex]?.title ?? ""}
+      />
+    ) : null,
+}));
+
+function makeMessage(content: string): Message {
+  return {
+    id: "msg-1",
+    thread_id: "thread-1",
+    role: "user",
+    content,
+    timestamp: new Date().toISOString(),
+    attachments: [] as StoredAttachment[],
+    cost_usd: null,
+    tokens_used: null,
+    sequence: 1,
+    tool_calls: null,
+    files_changed: null,
+  };
+}
 
 describe("MessageBubble user messages", () => {
   it("renders user message through MarkdownContent with variant='user'", async () => {
@@ -46,19 +73,84 @@ describe("MessageBubble user messages", () => {
       expect(plainP).not.toBeInTheDocument();
     });
   });
+
+  it("opens image preview when user activates an image attachment control", async () => {
+    const user = userEvent.setup();
+    const threadUuid = "550e8400-e29b-41d4-a716-446655440000";
+    const message: Message = {
+      ...makeMessage(""),
+      thread_id: threadUuid,
+      attachments: [
+        {
+          id: "a1",
+          name: "shot.png",
+          mimeType: "image/png",
+          sizeBytes: 128,
+        },
+      ],
+    };
+    const { container } = render(<MessageBubble message={message} />);
+    const btn = container.querySelector('[aria-label="Preview image shot.png"]');
+    expect(btn).toBeTruthy();
+    await user.click(btn!);
+    const lb = container.querySelector("[data-testid='mock-lightbox']");
+    expect(lb).toBeTruthy();
+    expect(lb?.getAttribute("data-slide-count")).toBe("1");
+    expect(lb?.getAttribute("data-initial-index")).toBe("0");
+    expect(lb?.getAttribute("data-active-src")).toBe(
+      `mcode-attachment://${threadUuid}/a1.png`,
+    );
+    expect(lb?.getAttribute("data-active-title")).toBe("shot.png");
+  });
+
+  it("passes full slide tray and clicked index when several images attach", async () => {
+    const user = userEvent.setup();
+    const threadUuid = "550e8400-e29b-41d4-a716-446655440000";
+    const message: Message = {
+      ...makeMessage(""),
+      thread_id: threadUuid,
+      attachments: [
+        {
+          id: "a1",
+          name: "one.png",
+          mimeType: "image/png",
+          sizeBytes: 1,
+        },
+        {
+          id: "a2",
+          name: "two.png",
+          mimeType: "image/png",
+          sizeBytes: 1,
+        },
+      ],
+    };
+    const { container } = render(<MessageBubble message={message} />);
+    const btn = container.querySelector('[aria-label="Preview image two.png"]');
+    expect(btn).toBeTruthy();
+    await user.click(btn!);
+    const lb = container.querySelector("[data-testid='mock-lightbox']");
+    expect(lb?.getAttribute("data-slide-count")).toBe("2");
+    expect(lb?.getAttribute("data-initial-index")).toBe("1");
+    expect(lb?.getAttribute("data-active-src")).toBe(
+      `mcode-attachment://${threadUuid}/a2.png`,
+    );
+    expect(lb?.getAttribute("data-active-title")).toBe("two.png");
+  });
 });
 
 describe("MessageBubble assistant plan-questions suppression", () => {
-  const makeAssistantMessage = (content: string) => ({
+  const makeAssistantMessage = (content: string): Message => ({
     id: "msg-asst",
     thread_id: "thread-1",
-    role: "assistant" as const,
+    role: "assistant",
     content,
     timestamp: new Date().toISOString(),
-    attachments: [],
+    attachments: [] as StoredAttachment[],
     cost_usd: null,
     tokens_used: null,
     sequence: 2,
+    tool_calls: null,
+    files_changed: null,
   });
 
   it("renders nothing when the assistant body is exclusively a plan-questions block", () => {
