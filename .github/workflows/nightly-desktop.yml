@@ -17,29 +17,46 @@ permissions:
   contents: write
 
 jobs:
-  prepare:
-    runs-on: ubuntu-22.04
+  preflight:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      last_nightly_tag: ${{ steps.check.outputs.last_nightly_tag }}
     steps:
-      - name: Generate bot token
-        id: bot-token
-        uses: actions/create-github-app-token@v1
+      - uses: actions/checkout@v4
         with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          fetch-depth: 0
+          fetch-tags: true
 
-      - name: Ensure nightly prerelease exists
-        env:
-          GH_TOKEN: ${{ steps.bot-token.outputs.token }}
+      - id: check
+        name: Compare HEAD to last nightly tag
+        shell: bash
         run: |
-          set -e
-          if ! gh release view nightly --repo "${{ github.repository }}" &>/dev/null; then
-            gh release create nightly --prerelease --title "Mcode nightly" \
-              --notes "Automated desktop builds from the default branch. Assets are replaced on each successful run." \
-              --repo "${{ github.repository }}"
+          set -euo pipefail
+          # Find the most recent tag matching our nightly pattern. If none
+          # exists yet, force a build so we bootstrap the first nightly.
+          last_tag=$(git tag --list "v*-nightly.*" --sort=-creatordate | head -n 1)
+          if [ -z "$last_tag" ]; then
+            echo "No prior nightly tag found; will build."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "last_nightly_tag=" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          last_sha=$(git rev-parse "${last_tag}^{commit}")
+          head_sha=$(git rev-parse HEAD)
+          echo "last nightly tag: $last_tag ($last_sha)"
+          echo "HEAD: $head_sha"
+          if [ "$last_sha" = "$head_sha" ]; then
+            echo "No new commits since last nightly; skipping."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "last_nightly_tag=$last_tag" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: [prepare]
+    needs: [preflight]
+    if: needs.preflight.outputs.should_build == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -178,7 +195,8 @@ jobs:
           done < artifact-list.txt
 
   merge-mac-yml-nightly:
-    needs: build
+    needs: [preflight, build]
+    if: needs.preflight.outputs.should_build == 'true'
     runs-on: ubuntu-22.04
     steps:
       - name: Download arm64 yml
