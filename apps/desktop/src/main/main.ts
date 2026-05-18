@@ -651,6 +651,15 @@ app.whenReady().then(async () => {
     console.log(`[perf] V8 snapshot: ${globalThis.__v8Snapshot ? "loaded" : "not available"}`);
     console.log(`Mcode v${app.getVersion()} starting`);
 
+    // Boot the Codex browser-use pipe BEFORE the server child spawns so the
+    // server inherits MCODE_BROWSER_USE_PIPE_PATH and can pass it to every
+    // child it spawns later (Codex provider, terminals, automation tools).
+    // Failures here are non-fatal: the bridge module logs and returns null.
+    const pipePathEarly = await startBrowserUseBridge();
+    if (pipePathEarly) {
+      process.env["MCODE_BROWSER_USE_PIPE_PATH"] = pipePathEarly;
+    }
+
     // Start the server child process
     const { port } = await serverManager.start();
     console.log(`[perf] Server ready: ${(performance.now() - STARTUP_TIME).toFixed(1)}ms`);
@@ -726,17 +735,6 @@ app.whenReady().then(async () => {
 
     // Initialize auto-updater (checks still run in dev; install hooks are packaged-only paths)
     initAutoUpdater();
-
-    // Boot the Codex browser-use pipe server. Failures are logged inside the
-    // module; do not block app startup if the pipe cannot bind (e.g. stale
-    // socket the user lacks permission to remove).
-    const pipePath = await startBrowserUseBridge();
-    if (pipePath) {
-      // Expose the path to child processes spawned later (Codex provider,
-      // OpenCode automation tools). The MCODE_ prefix is already protected
-      // by ProtectedEnvStore on the server side.
-      process.env["MCODE_BROWSER_USE_PIPE_PATH"] = pipePath;
-    }
 
     console.log(`[perf] Startup complete: ${(performance.now() - STARTUP_TIME).toFixed(1)}ms`);
   } catch (error) {
