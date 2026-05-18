@@ -905,6 +905,31 @@ describe("preview-browser", () => {
       }
     });
 
+    it("activating a brand-new blank tab pushes did-navigate with empty URL", async () => {
+      // Regression: a blank new tab must emit a did-navigate event with url=''
+      // so the renderer clears its omnibox; otherwise the previous tab's URL
+      // bleeds visually into the new tab.
+      const win = createWindow();
+      await showPreview(win, { threadId: "thread-A", url: "https://prev.test" });
+      const firstView = createdViews[0]!;
+      firstView.webContents.getURL.mockReturnValue("https://prev.test");
+      win.webContents.send.mockClear();
+
+      const created = callTabs<{ tabId: string }>(win, "preview:tabs.create", {
+        threadId: "thread-A",
+        activate: true,
+      });
+      expect(created.ok).toBe(true);
+
+      // Find the preview:did-navigate emission for the brand-new tab.
+      const navCalls = win.webContents.send.mock.calls.filter(
+        ([channel]) => channel === "preview:did-navigate",
+      );
+      expect(navCalls.length).toBeGreaterThan(0);
+      const lastNav = navCalls[navCalls.length - 1]![1] as { url: string };
+      expect(lastNav.url).toBe("");
+    });
+
     it("activating a brand-new tab uses its own fresh WebContentsView (no reload of old)", async () => {
       const win = createWindow();
       await showPreview(win, { threadId: "thread-A", url: "https://first.test" });

@@ -159,6 +159,11 @@ export function usePreviewBridge({
         setPageTitle(p.title ?? null);
         setFaviconUrl(p.favicon ?? null);
       } else {
+        // Empty URL or about:blank => brand-new / blank tab. Clear the
+        // omnibox AND the per-thread URL store so the previous tab's URL
+        // does not bleed into a freshly-activated blank tab.
+        useDiffStore.getState().setPreviewUrlForThread(threadId, "");
+        setInputUrl("");
         setPageTitle(null);
         setFaviconUrl(null);
       }
