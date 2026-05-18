@@ -225,6 +225,26 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       return ipcRenderer.invoke("preview:release-webview", payload);
     },
     /**
+     * Phase G design mode: stretch the panel to one of the named viewport
+     * presets ("phone" | "tablet" | "desktop") or pass explicit dimensions.
+     * Use design.reset() to restore the bounds the React shell last synced.
+     */
+    design: {
+      setViewport(payload: {
+        presetId?: string;
+        widthOverride?: number;
+        heightOverride?: number;
+      }): Promise<unknown> {
+        return ipcRenderer.invoke("preview:design.set-viewport", payload);
+      },
+      resetViewport(): Promise<unknown> {
+        return ipcRenderer.invoke("preview:design.reset-viewport");
+      },
+      setInspect(enabled: boolean): Promise<unknown> {
+        return ipcRenderer.invoke("preview:design.set-inspect", { enabled });
+      },
+    },
+    /**
      * Multi-tab control surface (Phase A of the in-app browser rewrite).
      * Phase A keeps a single backing BrowserView per window; these methods
      * give the renderer a stable contract for tab list / mutations so the UI

@@ -802,4 +802,78 @@ describe("preview-browser", () => {
       expect(r2.ok).toBe(false);
     });
   });
+
+  describe("design mode (Phase G)", () => {
+    it("setViewport applies a named preset and centers within panel bounds", async () => {
+      const win = createWindow();
+      await showPreview(win);
+      const view = createdViews[0]!;
+      view.setBounds.mockClear();
+
+      const ev = fakeEvent(win);
+      const result = await ipcHandlers["preview:design.set-viewport"]!(ev, {
+        presetId: "phone",
+      });
+      expect(result).toMatchObject({ ok: true, data: { width: 390, height: 844 } });
+      expect(view.setBounds).toHaveBeenCalledWith(
+        expect.objectContaining({ width: 390, height: 844 }),
+      );
+    });
+
+    it("setViewport rejects unknown preset", async () => {
+      const win = createWindow();
+      await showPreview(win);
+      const result = await ipcHandlers["preview:design.set-viewport"]!(fakeEvent(win), {
+        presetId: "fridge",
+      });
+      expect(result).toMatchObject({ ok: false, error: "unknown-preset" });
+    });
+
+    it("setViewport with explicit dimensions clamps to panel bounds", async () => {
+      const win = createWindow();
+      await showPreview(win);
+      const view = createdViews[0]!;
+      view.setBounds.mockClear();
+      // VALID_BOUNDS is 800x600; ask for 10000x10000 -> should clamp.
+      const result = await ipcHandlers["preview:design.set-viewport"]!(fakeEvent(win), {
+        widthOverride: 10_000,
+        heightOverride: 10_000,
+      });
+      expect(result).toMatchObject({ ok: true, data: { width: 800, height: 600 } });
+    });
+
+    it("resetViewport restores the panel bounds", async () => {
+      const win = createWindow();
+      await showPreview(win);
+      const view = createdViews[0]!;
+      await ipcHandlers["preview:design.set-viewport"]!(fakeEvent(win), {
+        presetId: "phone",
+      });
+      view.setBounds.mockClear();
+      const reset = await ipcHandlers["preview:design.reset-viewport"]!(fakeEvent(win), {});
+      expect(reset).toEqual({ ok: true });
+      expect(view.setBounds).toHaveBeenCalledWith(VALID_BOUNDS);
+    });
+
+    it("setInspect runs executeJavaScript on the guest", async () => {
+      const win = createWindow();
+      await showPreview(win);
+      const view = createdViews[0]!;
+      view.webContents.executeJavaScript.mockClear();
+      const r1 = await ipcHandlers["preview:design.set-inspect"]!(fakeEvent(win), {
+        enabled: true,
+      });
+      expect(r1).toEqual({ ok: true });
+      expect(view.webContents.executeJavaScript).toHaveBeenCalledTimes(1);
+      const arg1 = view.webContents.executeJavaScript.mock.calls[0]![0] as string;
+      expect(arg1).toContain("__mcodeInspectActive");
+
+      const r2 = await ipcHandlers["preview:design.set-inspect"]!(fakeEvent(win), {
+        enabled: false,
+      });
+      expect(r2).toEqual({ ok: true });
+      const arg2 = view.webContents.executeJavaScript.mock.calls[1]![0] as string;
+      expect(arg2).toContain("__mcodeInspectTeardown");
+    });
+  });
 });

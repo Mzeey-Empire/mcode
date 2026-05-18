@@ -106,6 +106,21 @@ interface PreviewBridge {
     threadId: string;
     tabId: string;
   }): Promise<{ ok: true } | { ok: false; error: string }>;
+  /** Phase G: design-mode surface. */
+  design: PreviewDesignBridge;
+}
+
+/** Built-in viewport presets exposed by Phase G. */
+export type DesignViewportPresetId = "phone" | "tablet" | "desktop";
+
+interface PreviewDesignBridge {
+  setViewport(payload: {
+    presetId?: DesignViewportPresetId;
+    widthOverride?: number;
+    heightOverride?: number;
+  }): Promise<{ ok: true; data: { width: number; height: number } } | { ok: false; error: string }>;
+  resetViewport(): Promise<{ ok: true } | { ok: false; error: string }>;
+  setInspect(enabled: boolean): Promise<{ ok: true } | { ok: false; error: string }>;
 }
 
 /** Wire-side result of a tab IPC call. */
