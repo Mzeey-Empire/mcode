@@ -79,6 +79,17 @@ export function FileEntry({ filePath, source, id, threadId, depth = 0, defaultEx
   // fresh, non-cancelled fetch (the first is cancelled by cleanup).
   const loadStartedRef = useRef(false);
 
+  // Reset local state when the cache identity changes so a reused component
+  // instance doesn't show stale content from a previous identity.
+  const cacheKey = `${threadId}:${source}:${id}:${filePath}`;
+  useEffect(() => {
+    const cached = useDiffStore.getState().inlineDiffCache[cacheKey];
+    setDiffState(cached !== undefined ? { loading: false, data: cached } : null);
+    setShowAllLines(false);
+    setPreviewMode(false);
+    loadStartedRef.current = false;
+  }, [cacheKey]);
+
   const { basename, parent, ext, language, isMarkdown } = useMemo(() => {
     const bn = getFileBasename(filePath);
     const pr = getParentDir(filePath);
