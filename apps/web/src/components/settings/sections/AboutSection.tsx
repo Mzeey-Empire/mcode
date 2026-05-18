@@ -8,6 +8,8 @@ import { Switch } from "@/components/ui/switch";
 import { SegControl } from "../SegControl";
 import type { UpdateStatus } from "@/transport/desktop-bridge";
 import type { UpdateCheckInterval, UpdateReleaseLine } from "@mcode/contracts";
+import { ConfirmChannelDowngradeDialog } from "./ConfirmChannelDowngradeDialog";
+import { semverGt } from "@/lib/semver";
 
 /** Segmented control options for update release line (electron-updater publish channel). */
 const RELEASE_LINE_OPTIONS: { value: UpdateReleaseLine; label: string }[] = [
@@ -45,6 +47,13 @@ export function AboutSection() {
   /** Transient label shown for UP_TO_DATE_HOLD_MS after "no update" resolves. */
   const [upToDateLabel, setUpToDateLabel] = useState(false);
   const upToDateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Latest stable version on GitHub, used to decide if nightly→stable is a downgrade. */
+  const [latestStable, setLatestStable] = useState<string | null>(null);
+  /** When non-null, the dialog is shown for the pending downgrade. */
+  const [pendingDowngrade, setPendingDowngrade] = useState<null | {
+    currentVersion: string;
+    latestStable: string;
+  }>(null);
 
   const bridge = typeof window !== "undefined" ? window.desktopBridge?.app : undefined;
 
@@ -72,6 +81,31 @@ export function AboutSection() {
   // Clean up timer on unmount.
   useEffect(() => () => {
     if (upToDateTimer.current) clearTimeout(upToDateTimer.current);
+  }, []);
+
+  // Fetch the latest stable version once on mount. Used only to decide
+  // whether nightly → stable is a downgrade. Failure is non-fatal — the
+  // downgrade prompt simply won't appear.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("https://api.github.com/repos/mzeey-empire/mcode/releases/latest", {
+      headers: { Accept: "application/vnd.github+json" },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        const tag = typeof data.tag_name === "string" ? data.tag_name : null;
+        if (!tag) return;
+        // Strip leading "v" or "mcode-v" prefix from release-please tags.
+        const cleaned = tag.replace(/^mcode-v?/, "").replace(/^v/, "");
+        setLatestStable(cleaned);
+      })
+      .catch(() => {
+        // Silent — no downgrade prompt is the only consequence.
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleCheck = async (): Promise<void> => {
@@ -105,6 +139,49 @@ export function AboutSection() {
   const checkInterval = settings.updates?.checkInterval ?? "4hours";
   const releaseLine = settings.updates?.channel ?? "stable";
 
+  /**
+   * Persist the new channel AND tell the main process to switch the running
+   * updater. Persistence MUST happen first because the main process's next
+   * periodic check re-reads settings.json — see auto-updater.ts.
+   */
+  const applyChannelSwitch = async (
+    next: UpdateReleaseLine,
+    allowDowngrade: boolean,
+  ): Promise<void> => {
+    await updateSettings({ updates: { channel: next } });
+    if (bridge?.applyReleaseLine) {
+      await bridge.applyReleaseLine({ releaseLine: next, allowDowngrade });
+    }
+  };
+
+  /**
+   * Handle a release-line change from the SegControl. Confirms with the user
+   * when switching nightly → stable while running a newer-than-stable build,
+   * because that path requires a downgrade install.
+   */
+  const handleChannelChange = async (next: UpdateReleaseLine): Promise<void> => {
+    if (next === releaseLine) return;
+
+    // Conservative: when nightly → stable and we don't yet know latestStable
+    // (fetch pending or failed), assume the switch would be a downgrade so the
+    // dialog still gates the change. Prevents a fast click from sliding past
+    // the confirmation while the network call is in flight.
+    const wouldDowngrade =
+      releaseLine === "nightly" && next === "stable" && version
+        ? !latestStable || semverGt(version, latestStable)
+        : false;
+
+    if (wouldDowngrade) {
+      setPendingDowngrade({
+        currentVersion: version!,
+        latestStable: latestStable ?? "the latest stable release",
+      });
+      return;
+    }
+
+    await applyChannelSwitch(next, false);
+  };
+
   const isBusy = checking || status.state === "checking" || status.state === "downloading";
 
   let updatesHint = "Checks for new releases on the configured interval.";
@@ -112,7 +189,7 @@ export function AboutSection() {
     updatesHint = "Automatic checks disabled.";
   } else if (releaseLine === "nightly") {
     updatesHint =
-      "Nightly uses prerelease builds. They may be unstable. Switching back to Stable with a newer nightly installed can require a reinstall from the website if no stable update appears.";
+      "Nightly uses prerelease builds. They may be unstable. Switching back to Stable while running a newer nightly will reinstall the latest stable after confirming.";
   }
 
   // Derive the inline status label shown beside the button.
@@ -173,11 +250,7 @@ export function AboutSection() {
           <SegControl
             options={RELEASE_LINE_OPTIONS}
             value={releaseLine}
-            onChange={(v) =>
-              void updateSettings({
-                updates: { channel: v as UpdateReleaseLine },
-              })
-            }
+            onChange={(v) => void handleChannelChange(v as UpdateReleaseLine)}
           />
         </SettingRow>
 
@@ -220,6 +293,17 @@ export function AboutSection() {
           />
         </SettingRow>
       </div>
+      {pendingDowngrade && (
+        <ConfirmChannelDowngradeDialog
+          currentVersion={pendingDowngrade.currentVersion}
+          latestStable={pendingDowngrade.latestStable}
+          onCancel={() => setPendingDowngrade(null)}
+          onConfirm={async () => {
+            await applyChannelSwitch("stable", true);
+            setPendingDowngrade(null);
+          }}
+        />
+      )}
     </div>
   );
 }
