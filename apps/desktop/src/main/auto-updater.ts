@@ -56,6 +56,49 @@ export function applyChannelConfig(releaseLine: "stable" | "nightly"): void {
   autoUpdater.allowPrerelease = releaseLine === "nightly";
 }
 
+/** Shared promise so concurrent callers of applyReleaseLineSwitch await the same switch. */
+let inFlightReleaseLineSwitch: Promise<UpdateStatus> | null = null;
+
+/**
+ * Switch the running updater to a new release line and trigger an immediate
+ * check. When `allowDowngrade` is true, the underlying autoUpdater is
+ * temporarily allowed to install an older build (used when the user has
+ * confirmed a nightly → stable rollback). The flag is reset after the check
+ * resolves so subsequent in-channel checks behave normally.
+ *
+ * **Precondition:** the caller MUST persist `updates.channel` to settings.json
+ * BEFORE invoking this. `checkForUpdatesNow` internally re-reads settings and
+ * re-applies the channel, so an unpersisted switch would be silently reverted
+ * by the next periodic check.
+ *
+ * Concurrent calls share the same in-flight switch via `inFlightReleaseLineSwitch`.
+ */
+export async function applyReleaseLineSwitch(
+  releaseLine: "stable" | "nightly",
+  options: { allowDowngrade?: boolean } = {},
+): Promise<UpdateStatus> {
+  if (inFlightReleaseLineSwitch) {
+    return inFlightReleaseLineSwitch;
+  }
+  inFlightReleaseLineSwitch = (async () => {
+    applyChannelConfig(releaseLine);
+    const previousAllowDowngrade = autoUpdater.allowDowngrade;
+    if (options.allowDowngrade) {
+      autoUpdater.allowDowngrade = true;
+    }
+    try {
+      return await checkForUpdatesNow();
+    } finally {
+      autoUpdater.allowDowngrade = previousAllowDowngrade;
+    }
+  })();
+  try {
+    return await inFlightReleaseLineSwitch;
+  } finally {
+    inFlightReleaseLineSwitch = null;
+  }
+}
+
 /**
  * Compare a major.minor.patch[-prerelease] string against another using semver
  * precedence rules (numeric segments compared numerically; prerelease present

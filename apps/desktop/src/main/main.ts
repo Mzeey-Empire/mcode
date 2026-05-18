@@ -31,6 +31,7 @@ const getExtension = globalThis.__v8Snapshot?.contracts?.getExtension ?? bundled
 import { ServerManager } from "./server-manager.js";
 import { startIpcRelay } from "./ipc-relay.js";
 import {
+  applyReleaseLineSwitch,
   checkForUpdatesNow,
   downloadUpdate,
   getUpdateStatus,
@@ -525,6 +526,17 @@ function registerIpcHandlers(): void {
   ipcMain.handle("app:check-for-updates", () => checkForUpdatesNow());
   ipcMain.handle("app:install-update", () => installUpdate());
   ipcMain.handle("app:download-update", () => downloadUpdate());
+  ipcMain.handle(
+    "app:apply-release-line",
+    async (_e, payload: { releaseLine: "stable" | "nightly"; allowDowngrade?: boolean }) => {
+      if (payload?.releaseLine !== "stable" && payload?.releaseLine !== "nightly") {
+        throw new Error(`Invalid releaseLine: ${String(payload?.releaseLine)}`);
+      }
+      return applyReleaseLineSwitch(payload.releaseLine, {
+        allowDowngrade: payload.allowDowngrade === true,
+      });
+    },
+  );
 
   registerPreviewBrowserHandlers();
 }

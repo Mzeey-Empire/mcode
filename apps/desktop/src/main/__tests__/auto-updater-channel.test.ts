@@ -7,6 +7,14 @@ const { updaterMock } = vi.hoisted(() => ({
     channel: "",
     allowPrerelease: false,
     allowDowngrade: false,
+    autoDownload: true,
+    autoInstallOnAppQuit: true,
+    forceDevUpdateConfig: false,
+    checkForUpdates: vi.fn().mockResolvedValue({ updateInfo: { version: "0.0.0" } }),
+    on: vi.fn(),
+    removeAllListeners: vi.fn(),
+    downloadUpdate: vi.fn(),
+    quitAndInstall: vi.fn(),
   },
 }));
 
@@ -30,7 +38,7 @@ vi.mock("@mcode/shared", () => ({
   getMcodeDir: vi.fn().mockReturnValue("/tmp/mcode"),
 }));
 
-import { applyChannelConfig, isCrossChannelDowngrade } from "../auto-updater";
+import { applyChannelConfig, applyReleaseLineSwitch, isCrossChannelDowngrade } from "../auto-updater";
 
 describe("applyChannelConfig", () => {
   beforeEach(() => {
@@ -155,5 +163,21 @@ describe("isCrossChannelDowngrade", () => {
         latestStable: "0.11.1",
       }),
     ).toBe(false);
+  });
+});
+
+describe("applyReleaseLineSwitch concurrency", () => {
+  beforeEach(() => {
+    updaterMock.channel = "";
+    updaterMock.allowPrerelease = false;
+    updaterMock.allowDowngrade = false;
+  });
+
+  it("concurrent calls share the same in-flight switch", async () => {
+    // Both calls should resolve to the same promise (the second is de-duped).
+    const a = applyReleaseLineSwitch("nightly");
+    const b = applyReleaseLineSwitch("stable"); // would otherwise interleave
+    const [resA, resB] = await Promise.all([a, b]);
+    expect(resA).toBe(resB);
   });
 });
