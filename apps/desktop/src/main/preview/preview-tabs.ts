@@ -21,8 +21,15 @@ import {
 } from "./preview-session.js";
 import { bumpPerf } from "./preview-perf.js";
 import {
+  disposeTabView,
+  ensureTabView,
+  mountView,
+  unmountView,
+} from "./preview-lifecycle.js";
+import {
   isAllowedPreviewUrl,
   sendPreviewLoading,
+  type TabState,
 } from "./preview-session.js";
 import { trustMainProcessFileNavigation } from "./preview-local-file.js";
 
@@ -51,34 +58,41 @@ function sendTabsUpdated(win: BrowserWindow, set: BrowserTabSet): void {
 }
 
 /**
- * Drive the single backing view to the new active tab's URL. Phase A keeps a
- * single WebContentsView per window (Slice 2 lifts this); after `tabs.activate`
- * or `tabs.create` we navigate that view so what the user sees matches the
- * activated tab. When no view is mounted yet, the next `preview:sync` will
- * create one and restore from `s.resumePreviewUrl`, so we still update that.
+ * Mount `tab`'s WebContentsView in the window, unmounting whichever tab is
+ * currently active. Each tab keeps its own live webContents across switches,
+ * so this is purely a swap - no reload. The view is created on first mount
+ * and the tab's `resumeUrl` (if any) is loaded ONCE at that point.
  */
-function navigateActiveBackingViewToTab(
+function activateTabView(
   win: BrowserWindow,
   s: PreviewSession,
-  resumeUrl: string | null,
+  tab: TabState,
 ): void {
-  s.resumePreviewUrl = resumeUrl;
-  if (!s.view || s.view.webContents.isDestroyed()) {
-    return; // sync will recreate and restore from resumeUrl
+  // Unmount whatever's currently mounted for this session (the prior active
+  // tab's view). Keep its webContents alive so switching back is instant.
+  if (s.view && s.view !== tab.view) {
+    unmountView(win, s.view);
   }
-  const target = resumeUrl ?? "about:blank";
-  const wc = s.view.webContents;
-  if (wc.getURL() === target) return;
-  if (resumeUrl && !isAllowedPreviewUrl(resumeUrl)) {
-    // Defensive: should not happen because resumeUrl came from a vetted path,
-    // but never navigate to a non-whitelisted protocol.
-    return;
+
+  const isFirstMount = !tab.view || tab.view.webContents.isDestroyed();
+  const view = ensureTabView(win, s, tab);
+  s.view = view;
+  s.resumePreviewUrl = tab.resumeUrl;
+  s.lastFavicons = tab.faviconUrl ? [tab.faviconUrl] : [];
+
+  if (s.lastBounds) view.setBounds(s.lastBounds);
+  mountView(win, view);
+
+  if (isFirstMount && tab.resumeUrl && isAllowedPreviewUrl(tab.resumeUrl)) {
+    // Brand-new view for a tab that already had a saved URL (e.g. thread
+    // restore). Load it once; subsequent activates of the same tab skip this
+    // entirely so the user keeps their scroll / form state.
+    sendPreviewLoading(win, true);
+    if (tab.resumeUrl.startsWith("file:")) {
+      trustMainProcessFileNavigation(s, tab.resumeUrl);
+    }
+    void view.webContents.loadURL(tab.resumeUrl);
   }
-  sendPreviewLoading(win, true);
-  if (resumeUrl && resumeUrl.startsWith("file:")) {
-    trustMainProcessFileNavigation(s, resumeUrl);
-  }
-  void wc.loadURL(target);
 }
 
 /**
@@ -132,11 +146,13 @@ export function registerTabHandlers(): void {
       });
 
       if (activate && tid === s.lastPreviewThreadId) {
-        // Activating a brand-new blank tab on the current thread: navigate
-        // the backing view to about:blank so the user sees a clean slate.
+        // Brand-new tab on the active thread: build its own view and swap
+        // it in. ensureTabView starts at about:blank so the user sees a
+        // clean slate without disturbing the previously-active tab's
+        // webContents.
         set.activeTabId = tabId;
-        s.lastFavicons = [];
-        navigateActiveBackingViewToTab(win, s, null);
+        const newTab = set.tabs[set.tabs.length - 1]!;
+        activateTabView(win, s, newTab);
       } else if (activate) {
         set.activeTabId = tabId;
       }
@@ -169,11 +185,10 @@ export function registerTabHandlers(): void {
       if (set.activeTabId !== tabId) {
         set.activeTabId = tabId;
         if (tid === s.lastPreviewThreadId) {
-          // Drive the single backing view to the activated tab's URL so the
-          // user sees the right page immediately. Slice 2 swaps per-tab
-          // webContents here instead of navigating one shared view.
-          s.lastFavicons = tab.faviconUrl ? [tab.faviconUrl] : [];
-          navigateActiveBackingViewToTab(win, s, tab.resumeUrl);
+          // Swap which per-tab WebContentsView is mounted. No reload - the
+          // target tab's webContents is already alive with its own URL,
+          // scroll, and form state preserved across the switch.
+          activateTabView(win, s, tab);
         }
       }
 
@@ -203,30 +218,33 @@ export function registerTabHandlers(): void {
       if (idx === -1) return { ok: false, error: "tab-not-found" };
 
       const wasActive = set.activeTabId === tabId;
+      const removedTab = set.tabs[idx]!;
       set.tabs.splice(idx, 1);
+
+      // Always dispose the closed tab's webContents so memory comes back.
+      disposeTabView(win, s, removedTab);
 
       if (set.tabs.length === 0) {
         // Always keep at least one tab so the renderer never sees an empty bar.
         const fallbackId = randomUUID();
-        set.tabs.push({
+        const fallback: TabState = {
           id: fallbackId,
           threadId: tid,
           view: null,
           resumeUrl: null,
           title: null,
           faviconUrl: null,
-        });
+        };
+        set.tabs.push(fallback);
         set.activeTabId = fallbackId;
         if (tid === s.lastPreviewThreadId) {
-          s.lastFavicons = [];
-          navigateActiveBackingViewToTab(win, s, null);
+          activateTabView(win, s, fallback);
         }
       } else if (wasActive) {
         const nextActive = set.tabs[Math.min(idx, set.tabs.length - 1)]!;
         set.activeTabId = nextActive.id;
         if (tid === s.lastPreviewThreadId) {
-          s.lastFavicons = nextActive.faviconUrl ? [nextActive.faviconUrl] : [];
-          navigateActiveBackingViewToTab(win, s, nextActive.resumeUrl);
+          activateTabView(win, s, nextActive);
         }
       }
 

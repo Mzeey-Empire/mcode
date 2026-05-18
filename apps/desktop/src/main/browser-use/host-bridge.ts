@@ -95,15 +95,13 @@ function locateTab(threadId: string, tabId: string): {
     if (!set) continue;
     const tab = set.tabs.find((t) => t.id === tabId);
     if (!tab) continue;
-    // Phase A: only the active tab of the active thread has a live view.
-    const isActiveOfActiveThread =
-      s.lastPreviewThreadId === threadId && set.activeTabId === tabId && s.view !== null;
+    // Slice 2: every warm tab carries its own WebContentsView, so the bridge
+    // can target inactive tabs too. Returns null only when the tab is cold
+    // (never mounted) or its webContents has been destroyed.
+    const view = tab.view;
     return {
       win,
-      webContents:
-        isActiveOfActiveThread && s.view && !s.view.webContents.isDestroyed()
-          ? s.view.webContents
-          : null,
+      webContents: view && !view.webContents.isDestroyed() ? view.webContents : null,
     };
   }
   return null;

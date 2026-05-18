@@ -7,6 +7,7 @@ import { BrowserWindow, ipcMain, shell } from "electron";
 import { logger } from "@mcode/shared";
 import {
   ensureThreadTabSet,
+  getActiveTab,
   getSession,
   guestUrlNeedsHttpRestore,
   isAllowedHttpUrl,
@@ -15,7 +16,7 @@ import {
   sendPreviewLoading,
   syncActiveTabFromSession,
 } from "./preview-session.js";
-import { ensureView, hidePreview, mountView } from "./preview-lifecycle.js";
+import { ensureView, hidePreview, mountView, unmountView } from "./preview-lifecycle.js";
 import { type Bounds } from "./preview-session.js";
 import { bumpPerf } from "./preview-perf.js";
 import {
@@ -94,54 +95,68 @@ export function registerNavigationHandlers(): void {
       }
 
       s.lastBounds = { x: b.x, y: b.y, width: b.width, height: b.height };
+
+      const hintRaw = payload.resumeUrlHint?.trim() ?? "";
+      const hint = hintRaw.length > 0 && isAllowedPreviewUrl(hintRaw) ? hintRaw : null;
+      const tid = payload.threadId ?? null;
+      const switchedThread = tid != null && tid !== s.lastPreviewThreadId;
+      const safeHint = await validateResumeUrl(hint);
+
+      // Detach the prior thread's active view BEFORE picking the new one so
+      // we never have two views mounted simultaneously.
+      if (switchedThread && s.view) {
+        unmountView(win, s.view);
+      }
+      if (tid != null) {
+        ensureThreadTabSet(s, tid);
+      }
+      s.lastPreviewThreadId = tid;
+
+      // ensureView resolves the (now-current) thread's active tab and either
+      // returns its existing webContents or creates a fresh one. On a thread
+      // switch this picks up the warm WebContentsView the user left behind,
+      // so their scroll/form state survives.
       const view = ensureView(win, s);
       view.setBounds(s.lastBounds);
       mountView(win, view);
+
       const wc = view.webContents;
       if (!wc.isDestroyed()) {
         const current = wc.getURL();
-        const hintRaw = payload.resumeUrlHint?.trim() ?? "";
-        const hint = hintRaw.length > 0 && isAllowedPreviewUrl(hintRaw) ? hintRaw : null;
-        const tid = payload.threadId ?? null;
-        const switchedThread = tid != null && tid !== s.lastPreviewThreadId;
-        s.lastPreviewThreadId = tid;
-        // Phase A: ensure the active thread always has a tab set materialised so
-        // tab IPC and "tabs-updated" pushes have something to reference.
-        if (tid != null) {
-          ensureThreadTabSet(s, tid);
-        }
+        const activeTab = tid != null ? getActiveTab(s, tid) : null;
 
-        // One WebContentsView is shared across threads; without an explicit navigation on switch,
-        // the previous thread's document (and resumePreviewUrl) would leak into the next thread.
-        const safeHint = await validateResumeUrl(hint);
-        if (switchedThread) {
-          if (safeHint) {
-            logger.info("Preview: navigating (thread switch)", { url: safeHint });
-            sendPreviewLoading(win, true);
-            trustMainProcessFileNavigation(s, safeHint);
-            void wc.loadURL(safeHint);
-            s.resumePreviewUrl = safeHint;
-          } else {
-            logger.info("Preview: navigating to blank (thread switch, no hint)");
-            s.resumePreviewUrl = null;
-            sendPreviewLoading(win, true);
-            void wc.loadURL("about:blank");
-          }
-        } else if (guestUrlNeedsHttpRestore(current) && safeHint) {
-          logger.info("Preview: restoring URL from hint", { url: safeHint });
+        // Decide whether to navigate. The principle: only navigate when the
+        // view is blank/error (just created) and we have a URL worth loading.
+        // A warm tab that already has its document loaded must NOT be touched.
+        const needsRestore = guestUrlNeedsHttpRestore(current);
+        const restoreTarget = needsRestore
+          ? (safeHint ?? activeTab?.resumeUrl ?? null)
+          : null;
+
+        if (restoreTarget) {
+          logger.info("Preview: restoring URL", {
+            url: restoreTarget,
+            switchedThread,
+            threadId: tid,
+          });
           sendPreviewLoading(win, true);
-          trustMainProcessFileNavigation(s, safeHint);
-          void wc.loadURL(safeHint);
-          s.resumePreviewUrl = safeHint;
-        } else if (guestUrlNeedsHttpRestore(current) && s.resumePreviewUrl) {
-          const safeResume = await validateResumeUrl(s.resumePreviewUrl);
-          if (safeResume) {
-            logger.info("Preview: restoring URL from resume", { url: safeResume });
-            sendPreviewLoading(win, true);
-            trustMainProcessFileNavigation(s, safeResume);
-            void wc.loadURL(safeResume);
-          } else {
-            s.resumePreviewUrl = null;
+          if (restoreTarget.startsWith("file:")) {
+            trustMainProcessFileNavigation(s, restoreTarget);
+          }
+          void wc.loadURL(restoreTarget);
+          if (activeTab) activeTab.resumeUrl = restoreTarget;
+          s.resumePreviewUrl = restoreTarget;
+        } else if (switchedThread && activeTab) {
+          // Warm tab on the new thread: just mirror its state onto the session
+          // so the omnibox shows the right URL without a network round-trip.
+          s.resumePreviewUrl = activeTab.resumeUrl;
+          s.lastFavicons = activeTab.faviconUrl ? [activeTab.faviconUrl] : [];
+          if (!win.isDestroyed()) {
+            win.webContents.send("preview:did-navigate", {
+              url: wc.getURL(),
+              title: wc.getTitle(),
+              favicon: activeTab.faviconUrl ?? null,
+            });
           }
         }
       }

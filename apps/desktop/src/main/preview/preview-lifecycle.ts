@@ -11,6 +11,9 @@ import { BrowserWindow, WebContentsView, shell } from "electron";
 import { logger } from "@mcode/shared";
 import {
   type PreviewSession,
+  type TabState,
+  ensureThreadTabSet,
+  getActiveTab,
   sessions,
   clearIdle,
   sendPreviewLoading,
@@ -83,13 +86,23 @@ export function detachViewListeners(view: WebContentsView): void {
 }
 
 /**
- * Returns the existing WebContentsView for the session, or creates and wires
- * a new one. Attaches navigation, loading, console, crash recovery, and
- * file-URL gate listeners.
+ * Returns the WebContentsView already owned by `tab`, or creates and wires
+ * a fresh one. Each tab keeps its own webContents alive across tab/thread
+ * switches so activating a tab swaps which view is mounted in the window
+ * rather than reloading a single shared guest.
+ *
+ * Listeners gate on `s.view === view` (am I the active view?) before
+ * publishing to the renderer or mutating session-mirror buffers, so events
+ * from background tabs (favicons resolving, pages finishing load) do not
+ * overwrite the active tab's chrome.
  */
-export function ensureView(win: BrowserWindow, s: PreviewSession): WebContentsView {
-  if (s.view) return s.view;
-  logger.info("Preview: WebContentsView created");
+export function ensureTabView(
+  win: BrowserWindow,
+  s: PreviewSession,
+  tab: TabState,
+): WebContentsView {
+  if (tab.view && !tab.view.webContents.isDestroyed()) return tab.view;
+  logger.info("Preview: WebContentsView created", { threadId: tab.threadId, tabId: tab.id });
   const view = new WebContentsView({
     webPreferences: {
       nodeIntegration: false,
@@ -98,6 +111,7 @@ export function ensureView(win: BrowserWindow, s: PreviewSession): WebContentsVi
       partition: "persist:mcode-preview",
     },
   });
+  const isActiveView = (): boolean => s.view === view;
 
   view.webContents.setBackgroundThrottling(true);
 
@@ -132,15 +146,18 @@ export function ensureView(win: BrowserWindow, s: PreviewSession): WebContentsVi
       const safe = await validateResumeUrl(navigationUrl);
       if (safe) {
         trustMainProcessFileNavigation(s, safe);
-        sendPreviewLoading(win, true);
+        if (isActiveView()) sendPreviewLoading(win, true);
         try {
           await view.webContents.loadURL(safe);
         } catch {
           /* guest may be tearing down */
         }
       } else {
-        s.resumePreviewUrl = null;
-        sendPreviewLoading(win, true);
+        tab.resumeUrl = null;
+        if (isActiveView()) {
+          s.resumePreviewUrl = null;
+          sendPreviewLoading(win, true);
+        }
         try {
           await view.webContents.loadURL("about:blank");
         } catch {
@@ -156,24 +173,28 @@ export function ensureView(win: BrowserWindow, s: PreviewSession): WebContentsVi
     void (async () => {
       if (win.isDestroyed() || view.webContents.isDestroyed()) return;
       const persisted = await validateResumeUrl(isAllowedPreviewUrl(url) ? url : null);
-      if (persisted) {
+      // Always record on the owning tab so background tabs keep their own URL.
+      tab.resumeUrl = persisted;
+      const title = view.webContents.getTitle();
+      tab.title = title && title.length > 0 ? title : tab.title;
+      if (win.isDestroyed()) return;
+      // Only the active view drives the shell omnibox + session mirror.
+      if (isActiveView()) {
         s.resumePreviewUrl = persisted;
-      } else {
-        s.resumePreviewUrl = null;
-      }
-      if (!win.isDestroyed()) {
         win.webContents.send("preview:did-navigate", {
           url,
-          title: view.webContents.getTitle(),
+          title,
           favicon: s.lastFavicons[0] ?? null,
         });
         syncActiveTabFromSession(s);
-        if (s.lastPreviewThreadId) {
-          win.webContents.send(
-            "preview:tabs-updated",
-            toBrowserTabSet(s, s.lastPreviewThreadId),
-          );
-        }
+      }
+      // Tab list pushes are cheap; emit so the bar refreshes title/url
+      // for inactive tabs too.
+      if (s.lastPreviewThreadId) {
+        win.webContents.send(
+          "preview:tabs-updated",
+          toBrowserTabSet(s, s.lastPreviewThreadId),
+        );
       }
     })();
   };
@@ -182,55 +203,74 @@ export function ensureView(win: BrowserWindow, s: PreviewSession): WebContentsVi
   view.webContents.on("did-navigate-in-page", forwardNav);
   view.webContents.on("page-title-updated", forwardNav);
   view.webContents.on("page-favicon-updated", (_e, urls: string[]) => {
-    s.lastFavicons = urls;
-    if (!win.isDestroyed()) {
+    tab.faviconUrl = urls[0] ?? null;
+    if (win.isDestroyed()) return;
+    if (isActiveView()) {
+      s.lastFavicons = urls;
       win.webContents.send("preview:did-update-favicon", {
         favicon: urls[0] ?? null,
       });
       syncActiveTabFromSession(s);
-      if (s.lastPreviewThreadId) {
-        win.webContents.send(
-          "preview:tabs-updated",
-          toBrowserTabSet(s, s.lastPreviewThreadId),
-        );
-      }
+    }
+    if (s.lastPreviewThreadId) {
+      win.webContents.send(
+        "preview:tabs-updated",
+        toBrowserTabSet(s, s.lastPreviewThreadId),
+      );
     }
   });
   view.webContents.on("did-finish-load", () => {
-    void injectPreviewScrollbarStyles(s);
+    if (isActiveView()) {
+      void injectPreviewScrollbarStyles(s);
+    }
   });
 
   const forwardLoadingStart = () => {
     if (win.isDestroyed() || view.webContents.isDestroyed()) return;
+    if (!isActiveView()) return;
     s.lastFavicons = [];
     win.webContents.send("preview:did-update-favicon", { favicon: null });
     sendPreviewLoading(win, true);
   };
   const forwardLoadingStop = () => {
     if (win.isDestroyed() || view.webContents.isDestroyed()) return;
+    if (!isActiveView()) return;
     sendPreviewLoading(win, false);
   };
   view.webContents.on("did-start-loading", forwardLoadingStart);
   view.webContents.on("did-stop-loading", forwardLoadingStop);
 
   view.webContents.on("console-message", (_event, level, message) => {
-    pushPreviewConsoleLine(s, level, message);
+    // Console buffers only matter for capture, which targets the active tab.
+    if (isActiveView()) pushPreviewConsoleLine(s, level, message);
   });
 
   view.webContents.on("render-process-gone", (_event, details) => {
-    const url = s.resumePreviewUrl;
-    logger.warn("Preview: renderer crashed", { reason: details.reason, exitCode: details.exitCode, url });
+    const url = tab.resumeUrl;
+    const wasActive = isActiveView();
+    logger.warn("Preview: renderer crashed", {
+      reason: details.reason,
+      exitCode: details.exitCode,
+      url,
+      threadId: tab.threadId,
+      tabId: tab.id,
+    });
 
-    // Tear down the dead view so ensureView creates a fresh one on next sync.
-    if (s.view === view) {
-      detachViewListeners(view);
-      if (!win.isDestroyed()) {
-        unmountView(win, view);
-      }
+    // Tear down the dead view so ensureTabView creates a fresh one on next mount.
+    detachViewListeners(view);
+    if (!win.isDestroyed()) unmountView(win, view);
+    tab.view = null;
+    if (wasActive) {
       s.view = null;
       s.scrollbarCssKey = null;
       s.consoleBuffer.length = 0;
       s.failedRequestBuffer.length = 0;
+    }
+
+    if (!wasActive) {
+      // A background tab crashed; do not auto-recover (no live bounds to set).
+      // It will recover lazily on next activate.
+      return;
     }
 
     // Rate-limit auto-recovery: if we already recovered within the last 30 s
@@ -249,10 +289,9 @@ export function ensureView(win: BrowserWindow, s: PreviewSession): WebContentsVi
     if (!win.isDestroyed() && url) {
       logger.info("Preview: auto-recovering after crash", { url });
       s.lastCrashRecoveryAt = now;
-      const fresh = ensureView(win, s);
-      if (s.lastBounds) {
-        fresh.setBounds(s.lastBounds);
-      }
+      const fresh = ensureTabView(win, s, tab);
+      s.view = fresh;
+      if (s.lastBounds) fresh.setBounds(s.lastBounds);
       mountView(win, fresh);
       sendPreviewLoading(win, true);
       trustMainProcessFileNavigation(s, url);
@@ -260,8 +299,63 @@ export function ensureView(win: BrowserWindow, s: PreviewSession): WebContentsVi
     }
   });
 
+  tab.view = view;
+  return view;
+}
+
+/**
+ * Back-compat shim: callers that don't yet know about per-tab views (e.g.
+ * preview:sync, preview:navigate) resolve the active tab here and delegate.
+ * Mirrors the returned view onto `s.view` so the legacy single-view fields
+ * keep tracking the mounted tab.
+ */
+export function ensureView(win: BrowserWindow, s: PreviewSession): WebContentsView {
+  const threadId = s.lastPreviewThreadId;
+  if (threadId) {
+    ensureThreadTabSet(s, threadId);
+    const tab = getActiveTab(s, threadId);
+    const view = ensureTabView(win, s, tab);
+    s.view = view;
+    return view;
+  }
+  // Defensive fallback: no thread bound yet (shouldn't happen because the
+  // renderer always sends threadId in preview:sync before any other call).
+  // Reuse s.view if alive, else synthesise a parentless tab.
+  if (s.view && !s.view.webContents.isDestroyed()) return s.view;
+  const synthetic: TabState = {
+    id: "__detached__",
+    threadId: "__detached__",
+    view: null,
+    resumeUrl: null,
+    title: null,
+    faviconUrl: null,
+  };
+  const view = ensureTabView(win, s, synthetic);
   s.view = view;
   return view;
+}
+
+/**
+ * Dispose a single tab's WebContentsView. Idempotent. Used by tabs.close and
+ * by parkPreview when walking the full tab set.
+ */
+export function disposeTabView(win: BrowserWindow, s: PreviewSession, tab: TabState): void {
+  const v = tab.view;
+  if (!v) return;
+  try {
+    detachViewListeners(v);
+    if (!win.isDestroyed()) unmountView(win, v);
+    if (!v.webContents.isDestroyed()) v.webContents.close();
+  } catch {
+    /* guest may already be torn down */
+  }
+  tab.view = null;
+  if (s.view === v) {
+    s.view = null;
+    s.scrollbarCssKey = null;
+    s.consoleBuffer.length = 0;
+    s.failedRequestBuffer.length = 0;
+  }
 }
 
 /**
@@ -307,34 +401,36 @@ export function hidePreview(win: BrowserWindow, s: PreviewSession): void {
 }
 
 /**
- * Detaches the WebContentsView from the window and closes its underlying
- * WebContents, clearing all buffers and stopping the idle timer. Saves the
- * current URL as the resume URL so the next ensureView call can reload it.
+ * Detaches every per-tab WebContentsView from the window and closes their
+ * underlying WebContents, clearing session buffers and stopping the idle
+ * timer. Saves the active tab's URL as the resume URL so the next ensureView
+ * call can reload it.
  */
 export function parkPreview(win: BrowserWindow, s: PreviewSession): void {
   logger.info("Preview: view parked (destroyed)", { url: s.resumePreviewUrl });
   hidePreview(win, s);
-  if (s.view) {
+  // Save the active tab's URL before disposing so a later restore can reload.
+  if (s.view && !s.view.webContents.isDestroyed()) {
     try {
-      if (!s.view.webContents.isDestroyed()) {
-        void removeEpPickHighlighter(s.view.webContents);
-        const parked = s.view.webContents.getURL();
-        void validateResumeUrl(isAllowedPreviewUrl(parked) ? parked : null).then((safe) => {
-          if (!win.isDestroyed()) {
-            s.resumePreviewUrl = safe;
-          }
-        });
-      }
-      detachViewListeners(s.view);
-      s.view.webContents.close();
+      void removeEpPickHighlighter(s.view.webContents);
+      const parked = s.view.webContents.getURL();
+      void validateResumeUrl(isAllowedPreviewUrl(parked) ? parked : null).then((safe) => {
+        if (!win.isDestroyed()) s.resumePreviewUrl = safe;
+      });
     } catch {
-      // Guest contents may already be destroyed.
+      /* guest may already be destroyed */
     }
-    s.view = null;
-    s.scrollbarCssKey = null;
-    s.consoleBuffer.length = 0;
-    s.failedRequestBuffer.length = 0;
   }
+  // Dispose every per-tab view across every thread.
+  for (const set of s.tabsByThread.values()) {
+    for (const tab of set.tabs) {
+      disposeTabView(win, s, tab);
+    }
+  }
+  s.view = null;
+  s.scrollbarCssKey = null;
+  s.consoleBuffer.length = 0;
+  s.failedRequestBuffer.length = 0;
 }
 
 /**
