@@ -47,10 +47,22 @@ function releaseLineToUpdaterChannel(releaseLine: "stable" | "nightly"): string 
 }
 
 /**
- * Applies `autoUpdater.channel` from user settings so checks target stable or nightly feeds.
+ * Apply both `autoUpdater.channel` and `autoUpdater.allowPrerelease` from the
+ * persisted release line. Nightly per-build releases are GitHub prereleases,
+ * so the updater must opt in via `allowPrerelease` to discover them.
+ */
+export function applyChannelConfig(releaseLine: "stable" | "nightly"): void {
+  autoUpdater.channel = releaseLineToUpdaterChannel(releaseLine);
+  autoUpdater.allowPrerelease = releaseLine === "nightly";
+}
+
+/**
+ * Applies the updater channel configuration (`channel` and `allowPrerelease`)
+ * from user settings via `applyChannelConfig`, so checks target the stable or
+ * nightly feed correctly.
  */
 function applyUpdaterChannelFromSettings(settings: UpdaterSettings): void {
-  autoUpdater.channel = releaseLineToUpdaterChannel(settings.releaseLine);
+  applyChannelConfig(settings.releaseLine);
 }
 
 /**
@@ -201,7 +213,6 @@ export function checkForUpdatesNow(): Promise<UpdateStatus> {
       // without an app restart.
       const settings = loadUpdaterSettings();
       applyUpdaterChannelFromSettings(settings);
-      autoUpdater.allowPrerelease = settings.releaseLine === "nightly";
       autoUpdater.autoDownload = settings.autoDownload;
       autoUpdater.autoInstallOnAppQuit = settings.autoInstallOnQuit;
 
@@ -284,7 +295,6 @@ export function initAutoUpdater(): void {
   autoUpdater.allowDowngrade = false;
 
   const updaterSettings = loadUpdaterSettings();
-  autoUpdater.allowPrerelease = updaterSettings.releaseLine === "nightly";
   applyUpdaterChannelFromSettings(updaterSettings);
   autoUpdater.autoDownload = updaterSettings.autoDownload;
   autoUpdater.autoInstallOnAppQuit = updaterSettings.autoInstallOnQuit;
