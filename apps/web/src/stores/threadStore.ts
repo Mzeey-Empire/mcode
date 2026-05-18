@@ -2086,6 +2086,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       const durationMs = (params.durationMs as number) ?? 0;
       const didBlock = (params.didBlock as boolean) ?? false;
       const persistedMessageId = params.persistedMessageId as string | undefined;
+      const persistedHookId = params.persistedHookId as string | undefined;
       if (!hookName) return;
 
       // Late hooks (Stop/SessionEnd/PreCompact) arrive with persistedMessageId
@@ -2100,8 +2101,15 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           // to append to. The next eager prefetch will fetch the full set from
           // the server, so we can no-op safely here.
           if (!existing) return state;
+          // Dedupe by the server's persisted hook id. The same logical late
+          // hook can be redelivered (observed: SessionStart:* events
+          // accumulating per thread switch), and without a stable key each
+          // arrival would append a fresh synthetic record indefinitely.
+          if (persistedHookId && existing.hooks.some((h) => h.id === persistedHookId)) {
+            return state;
+          }
           const record = {
-            id: crypto.randomUUID(),
+            id: persistedHookId ?? crypto.randomUUID(),
             message_id: persistedMessageId,
             hook_name: hookName,
             tool_name: null,
