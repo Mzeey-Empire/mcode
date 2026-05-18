@@ -23,9 +23,9 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   openInExplorer: (path: string): Promise<void> =>
     ipcRenderer.invoke("open-in-explorer", path),
 
-  /** Open a URL in the default browser (https, http, mailto). */
-  openExternalUrl: (url: string): Promise<void> =>
-    ipcRenderer.invoke("open-external-url", url),
+  /** Open a URL in the default browser (https, http, mailto, or resolved mcode-workspace file targets). */
+  openExternalUrl: (url: string, workspacePath?: string | null): Promise<void> =>
+    ipcRenderer.invoke("open-external-url", url, workspacePath ?? null),
 
   /** Detect which supported editors are installed. */
   detectEditors: (): Promise<string[]> => ipcRenderer.invoke("detect-editors"),

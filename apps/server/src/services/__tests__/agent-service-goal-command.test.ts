@@ -1,0 +1,238 @@
+import "reflect-metadata";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { container } from "tsyringe";
+import type Database from "better-sqlite3";
+import type { Thread, IProviderRegistry } from "@mcode/contracts";
+import { AgentEventType } from "@mcode/contracts";
+import { openMemoryDatabase } from "../../store/database.js";
+import { ThreadRepo } from "../../repositories/thread-repo.js";
+import { WorkspaceRepo } from "../../repositories/workspace-repo.js";
+import { MessageRepo } from "../../repositories/message-repo.js";
+import { PlanQuestionAnswersRepo } from "../../repositories/plan-question-answers-repo.js";
+import { ToolCallRecordRepo } from "../../repositories/tool-call-record-repo.js";
+import { TurnSnapshotRepo } from "../../repositories/turn-snapshot-repo.js";
+import { TaskRepo } from "../../repositories/task-repo.js";
+import { AgentService } from "../agent-service.js";
+import { ProviderAvailabilityService } from "../provider-availability-service.js";
+import type { GitService } from "../git-service.js";
+import type { AttachmentService } from "../attachment-service.js";
+import type { SnapshotService } from "../snapshot-service.js";
+import type { MemoryPressureService } from "../memory-pressure-service.js";
+import type { SettingsService } from "../settings-service.js";
+import type { ThreadService } from "../thread-service.js";
+import { EventEmitter } from "events";
+
+vi.mock("../../transport/push.js", () => ({ broadcast: vi.fn() }));
+import { broadcast } from "../../transport/push.js";
+
+/**
+ * Build an AgentService with a Claude-shaped provider stub that records
+ * setGoal/clearGoal/sendMessage so we can assert which path the /goal
+ * intercept took (control short-circuit vs SET fall-through).
+ */
+function buildService(db: Database.Database) {
+  container.reset();
+  container.registerInstance("Database", db);
+
+  const threadRepo = container.resolve(ThreadRepo);
+  const workspaceRepo = container.resolve(WorkspaceRepo);
+  const messageRepo = container.resolve(MessageRepo);
+  const planQuestionAnswersRepo = container.resolve(PlanQuestionAnswersRepo);
+  const toolCallRecordRepo = container.resolve(ToolCallRecordRepo);
+  const turnSnapshotRepo = container.resolve(TurnSnapshotRepo);
+  const taskRepo = container.resolve(TaskRepo);
+
+  const gitService = {
+    resolveWorkingDir: vi.fn(() => process.cwd()),
+    listWorktrees: vi.fn(() => []),
+  } as unknown as GitService;
+
+  const attachmentService = {
+    persist: vi.fn(() => Promise.resolve({ stored: [], persisted: [] })),
+  } as unknown as AttachmentService;
+
+  const providerStub = Object.assign(new EventEmitter(), {
+    id: "claude" as const,
+    supportsCompletion: true,
+    sendMessage: vi.fn<(params: { message: string; [k: string]: unknown }) => Promise<void>>(
+      () => Promise.resolve(),
+    ),
+    setSdkSessionId: vi.fn(),
+    setGoal: vi.fn<(sid: string, condition: string) => void>(),
+    clearGoal: vi.fn<(sid: string) => void>(),
+    getGoal: vi.fn<(sid: string) => string | undefined>(() => undefined),
+  });
+  const providerRegistry = {
+    resolve: vi.fn(() => providerStub),
+    resolveAll: vi.fn(() => []),
+    shutdown: vi.fn(),
+  } as unknown as IProviderRegistry;
+
+  const threadService = { create: vi.fn() } as unknown as ThreadService;
+
+  const snapshotService = {
+    captureRef: vi.fn(() => Promise.resolve("abc123")),
+    getFilesChanged: vi.fn(() => Promise.resolve([])),
+  } as unknown as SnapshotService;
+
+  const memoryPressureService = {
+    markActive: vi.fn(),
+    markIdle: vi.fn(),
+  } as unknown as MemoryPressureService;
+
+  const settingsService = {
+    get: vi.fn(() =>
+      Promise.resolve({
+        model: { defaults: { fallbackId: undefined, contextWindow: "auto", thinking: false } },
+        agent: { guardrails: { maxBudgetUsd: 0, maxTurns: 0 } },
+        provider: { enabled: {}, cli: {} },
+      }),
+    ),
+    on: vi.fn(),
+  } as unknown as SettingsService;
+
+  const availability = {
+    assertUsable: vi.fn(),
+  } as unknown as ProviderAvailabilityService;
+
+  const svc = new AgentService(
+    threadRepo,
+    workspaceRepo,
+    messageRepo,
+    gitService,
+    attachmentService,
+    providerRegistry,
+    threadService,
+    toolCallRecordRepo,
+    { bulkCreate: () => {}, create: () => ({}), listByMessage: () => [], countByMessage: () => 0 } as unknown as import("../../repositories/thought-segment-repo.js").ThoughtSegmentRepo,
+    { bulkCreate: () => {}, create: () => ({}), listByMessage: () => [], countByMessage: () => 0 } as unknown as import("../../repositories/hook-execution-repo.js").HookExecutionRepo,
+    turnSnapshotRepo,
+    snapshotService,
+    db,
+    memoryPressureService,
+    taskRepo,
+    settingsService,
+    availability,
+    planQuestionAnswersRepo,
+  );
+
+  return { svc, threadRepo, workspaceRepo, messageRepo, providerStub };
+}
+
+describe("AgentService.sendMessage — /goal command", () => {
+  let db: Database.Database;
+  let thread: Thread;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    db = openMemoryDatabase();
+    const { workspaceRepo, threadRepo } = buildService(db);
+    const ws = workspaceRepo.create("test-ws", process.cwd(), false);
+    thread = threadRepo.create(ws.id, "thread", "direct", "main");
+  });
+
+  it("/goal <condition> installs the goal AND invokes the provider with a directive payload", async () => {
+    const { svc, providerStub, messageRepo } = buildService(db);
+
+    await svc.sendMessage(
+      thread.id,
+      "/goal analyse this branch",
+      "default",
+      "claude-sonnet-4-6",
+      [],
+      undefined,
+      "claude",
+    );
+
+    // Goal installed on the matching session id used by ClaudeProvider.
+    expect(providerStub.setGoal).toHaveBeenCalledWith(
+      `mcode-${thread.id}`,
+      "analyse this branch",
+    );
+
+    // Provider was actually called — this is the regression the user hit
+    // where /goal <condition> set the hook but never started the agent.
+    expect(providerStub.sendMessage).toHaveBeenCalledTimes(1);
+    const sentMessage = providerStub.sendMessage.mock.calls[0][0].message;
+    expect(sentMessage).toContain("analyse this branch");
+    expect(sentMessage.toLowerCase()).toContain("directive");
+
+    // Persisted user row should keep the original "/goal …" text so the
+    // transcript reflects what the user typed, not the directive prompt.
+    const { messages } = messageRepo.listByThread(thread.id, 100);
+    const userMsg = messages.find((m) => m.role === "user");
+    expect(userMsg?.content).toBe("/goal analyse this branch");
+  });
+
+  it("/goal clear short-circuits — clears the goal, does NOT invoke the provider, emits Ended", async () => {
+    const { svc, providerStub, messageRepo } = buildService(db);
+
+    await svc.sendMessage(
+      thread.id,
+      "/goal clear",
+      "default",
+      "claude-sonnet-4-6",
+      [],
+      undefined,
+      "claude",
+    );
+
+    expect(providerStub.clearGoal).toHaveBeenCalledWith(`mcode-${thread.id}`);
+    expect(providerStub.sendMessage).not.toHaveBeenCalled();
+
+    // Confirmation pill persisted as an assistant message.
+    const { messages } = messageRepo.listByThread(thread.id, 100);
+    const assistantMsg = messages.find((m) => m.role === "assistant");
+    expect(assistantMsg?.content).toMatch(/Goal cleared/);
+
+    // The composer relies on Ended to clear its optimistic running state —
+    // without this broadcast the UI hangs on "thinking" forever.
+    const endedEvents = (broadcast as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([channel, payload]) =>
+        channel === "agent.event" && (payload as { type?: string }).type === AgentEventType.Ended,
+    );
+    expect(endedEvents.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("/goal (no args) reports active goal without invoking the provider", async () => {
+    const { svc, providerStub, messageRepo } = buildService(db);
+    providerStub.getGoal.mockReturnValueOnce("ship the feature");
+
+    await svc.sendMessage(
+      thread.id,
+      "/goal",
+      "default",
+      "claude-sonnet-4-6",
+      [],
+      undefined,
+      "claude",
+    );
+
+    expect(providerStub.sendMessage).not.toHaveBeenCalled();
+    expect(providerStub.setGoal).not.toHaveBeenCalled();
+
+    const { messages } = messageRepo.listByThread(thread.id, 100);
+    const assistantMsg = messages.find((m) => m.role === "assistant");
+    expect(assistantMsg?.content).toContain("ship the feature");
+  });
+
+  it("non-Claude providers do not trigger the /goal intercept", async () => {
+    const { svc, providerStub } = buildService(db);
+
+    await svc.sendMessage(
+      thread.id,
+      "/goal something",
+      "default",
+      "claude-sonnet-4-6",
+      [],
+      undefined,
+      // Force a different provider so the intercept regex stays inactive.
+      "codex",
+    );
+
+    // Provider was still called with the raw text (no rewrite, no goal install).
+    expect(providerStub.setGoal).not.toHaveBeenCalled();
+    expect(providerStub.sendMessage).toHaveBeenCalledTimes(1);
+    expect(providerStub.sendMessage.mock.calls[0][0].message).toBe("/goal something");
+  });
+});

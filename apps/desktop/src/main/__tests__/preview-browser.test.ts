@@ -102,11 +102,15 @@ vi.mock("electron", () => ({
   },
 }));
 
-vi.mock("@mcode/contracts", () => ({
-  clampMcodeBrowserCaptureV2: vi.fn(),
-  isBrowserCaptureSpillAppDataPath: vi.fn().mockReturnValue(false),
-  MCODE_BROWSER_CAPTURE_V2_STRING_MAX: 100_000,
-}));
+vi.mock("@mcode/contracts", async () => {
+  const actual = await vi.importActual<typeof import("@mcode/contracts")>("@mcode/contracts");
+  return {
+    ...actual,
+    clampMcodeBrowserCaptureV2: vi.fn(),
+    isBrowserCaptureSpillAppDataPath: vi.fn().mockReturnValue(false),
+    MCODE_BROWSER_CAPTURE_V2_STRING_MAX: 100_000,
+  };
+});
 
 vi.mock("@mcode/shared", () => ({
   getMcodeDir: vi.fn().mockReturnValue("/tmp/mcode"),
@@ -411,6 +415,55 @@ describe("preview-browser", () => {
       expect(view.webContents.loadURL).toHaveBeenCalledWith(
         pathToFileURL(join(tempDir, "sub", "page.html")).href,
       );
+    });
+
+    it("navigates mcode-workspace URLs resolved against workspace", async () => {
+      const win = createWindow();
+      await showPreview(win);
+
+      const result = await navigate(win, "mcode-workspace:///sub/page.html", tempDir);
+
+      expect(result).toEqual({ ok: true });
+      const view = createdViews[0]!;
+      expect(view.webContents.loadURL).toHaveBeenCalledWith(
+        pathToFileURL(join(tempDir, "sub", "page.html")).href,
+      );
+    });
+
+    it("returns no-workspace for mcode-workspace URL without workspace path", async () => {
+      const win = createWindow();
+      await showPreview(win);
+
+      const result = await navigate(win, "mcode-workspace:///sub/page.html", null);
+
+      expect(result).toEqual({ ok: false, error: "no-workspace" });
+    });
+
+    it("returns invalid-url for mcode-workspace path with encoded absolute root", async () => {
+      const win = createWindow();
+      await showPreview(win);
+
+      const result = await navigate(win, "mcode-workspace:///%2Ftmp%2Foutside.html", tempDir);
+
+      expect(result).toEqual({ ok: false, error: "invalid-url" });
+    });
+
+    it("returns invalid-url for mcode-workspace path with encoded parent segments", async () => {
+      const win = createWindow();
+      await showPreview(win);
+
+      const result = await navigate(win, "mcode-workspace:///%2e%2e%2Fescape.html", tempDir);
+
+      expect(result).toEqual({ ok: false, error: "invalid-url" });
+    });
+
+    it("returns invalid-url for malformed percent escapes in mcode-workspace path", async () => {
+      const win = createWindow();
+      await showPreview(win);
+
+      const result = await navigate(win, "mcode-workspace:///bad%ZZ/x.html", tempDir);
+
+      expect(result).toEqual({ ok: false, error: "invalid-url" });
     });
 
     it("returns error for relative path without workspace", async () => {

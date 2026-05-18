@@ -1,11 +1,14 @@
 import { memo, useMemo, useState, useCallback, useRef, useEffect, lazy, Suspense } from "react";
 import type { Message } from "@/transport";
-import { FileText, File, ImageIcon, RotateCcw, Copy, Check, GitBranch, AlertCircle, Reply } from "lucide-react";
+import { ImageIcon, RotateCcw, Copy, Check, GitBranch, AlertCircle, Reply, Target } from "lucide-react";
 import { cn } from "@/lib/utils";
 const LazyMarkdownContent = lazy(() => import("./MarkdownContent"));
 import { stripInjectedFiles } from "@/lib/file-tags";
+import { buildStoredAttachmentImageSrc } from "@/lib/attachment-url";
 import { isHandoffMessage, parseHandoffJson } from "./handoff-utils";
 import { HandoffCard } from "./HandoffCard";
+import { FileAttachmentTile } from "./FileAttachmentTile";
+import { ImageAttachmentLightbox } from "./ImageAttachmentLightbox";
 
 /**
  * Returns true when the assistant message body collapses to nothing visible
@@ -20,6 +23,26 @@ function isAssistantContentEmpty(content: string): boolean {
 }
 
 /** Parses the message content of a synthetic agent-error system message. Returns the error text, or null if not an agent error. */
+/**
+ * Detect /goal-command confirmations emitted by AgentService. Returns a
+ * structured render hint when the assistant message is one of the goal
+ * status messages, or null for ordinary model output.
+ */
+function parseGoalStatus(content: string): {
+  label: string;
+  condition?: string;
+  hint: string;
+} | null {
+  const text = content.trim();
+  let m = /^Goal set: "([\s\S]+?)"\./.exec(text);
+  if (m) return { label: "Goal set", condition: m[1], hint: "/goal clear to remove" };
+  m = /^Active goal: "([\s\S]+?)"\./.exec(text);
+  if (m) return { label: "Active goal", condition: m[1], hint: "/goal clear to remove" };
+  if (/^Goal cleared\./.test(text)) return { label: "Goal cleared", hint: "agent may end its turn normally" };
+  if (/^No active goal\./.test(text)) return { label: "No active goal", hint: "/goal <condition> to set one" };
+  return null;
+}
+
 function parseAgentError(content: string): string | null {
   try {
     const parsed = JSON.parse(content) as { __type?: string; message?: string };
@@ -45,72 +68,67 @@ interface MessageBubbleProps {
   onScrollToMessage?: (messageId: string) => void;
 }
 
-/** Maps a MIME type to a file extension for attachment URLs. */
-const MIME_TO_EXT: Record<string, string> = {
-  "image/jpeg": ".jpg",
-  "image/png": ".png",
-  "image/gif": ".gif",
-  "image/webp": ".webp",
-  "application/pdf": ".pdf",
-  "text/plain": ".txt",
-};
-
-function extFromMime(mimeType: string): string {
-  return MIME_TO_EXT[mimeType] ?? "";
-}
-
-/** Compact human-readable size for attachment chips in the transcript. */
-function formatAttachmentBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-/** Icon for non-image attachments in user message chips (matches composer preview semantics). */
-function FileAttachmentGlyph({ mimeType }: { mimeType: string }) {
-  const isOfficeDoc =
-    mimeType.includes("officedocument") ||
-    mimeType.includes("opendocument") ||
-    mimeType === "application/rtf" ||
-    mimeType === "text/rtf";
-  if (mimeType === "application/pdf") {
-    return <FileText size={16} className="shrink-0 text-red-600 dark:text-red-400" aria-hidden />;
-  }
-  if (isOfficeDoc) {
-    return <FileText size={16} className="shrink-0 text-blue-600 dark:text-blue-400" aria-hidden />;
-  }
-  return <File size={16} className="shrink-0 text-muted-foreground" aria-hidden />;
-}
-
-/** Single image thumbnail with error fallback. */
-function ImageThumbnail({ src, name, single }: { src: string; name: string; single: boolean }) {
+/** Single image thumbnail with error fallback and optional full-size preview. */
+function ImageThumbnail({
+  src,
+  name,
+  single,
+  onOpenPreview,
+}: {
+  src: string;
+  name: string;
+  single: boolean;
+  onOpenPreview?: () => void;
+}) {
   const [failed, setFailed] = useState(false);
   const handleError = useCallback(() => setFailed(true), []);
 
-  return (
-    <div
-      className={cn(
-        "overflow-hidden rounded-xl ring-1 ring-border/40",
-        single ? "max-w-[240px]" : "max-w-[140px]"
-      )}
-    >
-      {failed ? (
+  const frame = cn(
+    "overflow-hidden rounded-xl ring-1 ring-border/40",
+    single ? "max-w-[240px]" : "max-w-[140px]",
+  );
+
+  if (failed) {
+    return (
+      <div className={frame}>
         <div className="flex items-center gap-2 rounded-xl bg-muted/50 px-3 py-2.5">
           <ImageIcon size={14} className="shrink-0 text-muted-foreground" />
           <span className="truncate text-xs text-muted-foreground">{name}</span>
         </div>
-      ) : (
-        <img
-          src={src}
-          alt={name}
-          className="block h-auto max-h-[160px] w-full object-contain bg-muted"
-          loading="lazy"
-          onError={handleError}
-          style={{ imageOrientation: "from-image" }}
-        />
-      )}
-    </div>
+      </div>
+    );
+  }
+
+  const imgEl = (
+    <img
+      src={src}
+      alt={name}
+      className="block h-auto max-h-[160px] w-full bg-muted/40 object-contain"
+      loading="lazy"
+      onError={handleError}
+      style={{ imageOrientation: "from-image" }}
+    />
   );
+
+  if (onOpenPreview) {
+    return (
+      <button
+        type="button"
+        className={cn(
+          frame,
+          "block w-full cursor-pointer bg-transparent p-0 text-left outline-none",
+          "transition-[box-shadow,filter] hover:brightness-[1.03] hover:ring-border/65",
+          "focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        )}
+        aria-label={`Preview image ${name}`}
+        onClick={onOpenPreview}
+      >
+        {imgEl}
+      </button>
+    );
+  }
+
+  return <div className={frame}>{imgEl}</div>;
 }
 
 /** Copy button with check feedback, visible on parent hover. */
@@ -223,6 +241,11 @@ function QuoteBlock({
 
 /** Renders a single chat message (system, user, or assistant). Memoized to prevent re-renders when the message ref is unchanged. */
 export const MessageBubble = memo(function MessageBubble({ message, onBranch, onReply, onScrollToMessage }: MessageBubbleProps) {
+  const [imagePreview, setImagePreview] = useState<{
+    items: { src: string; title: string }[];
+    initialIndex: number;
+  } | null>(null);
+
   const formattedTime = useMemo(
     () => new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     [message.timestamp],
@@ -237,6 +260,15 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
     [message.attachments],
   );
   const textContent = useMemo(() => stripInjectedFiles(message.content), [message.content]);
+
+  const imageSlides = useMemo(
+    () =>
+      imageAttachments.map((img) => ({
+        src: buildStoredAttachmentImageSrc(message.thread_id, img.id, img.mimeType),
+        title: img.name,
+      })),
+    [imageAttachments, message.thread_id],
+  );
 
   if (message.role === "system") {
     if (isHandoffMessage(message.role, message.content)) {
@@ -268,57 +300,81 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
     );
   }
 
+  // Goal-status confirmations are emitted by AgentService when the user types
+  // /goal in the composer. They arrive as assistant messages but read as
+  // chat-control notices, not model output — render them as a compact pill
+  // rather than a full bubble.
+  if (message.role === "assistant") {
+    const goal = parseGoalStatus(textContent);
+    if (goal) {
+      return (
+        <div className="flex items-start gap-2.5 rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-sm">
+          <Target size={14} className="mt-0.5 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1 text-muted-foreground leading-relaxed">
+            <span className="font-medium text-foreground">{goal.label}</span>
+            {goal.condition && (
+              <span className="ml-1.5 text-foreground/80">&ldquo;{goal.condition}&rdquo;</span>
+            )}
+            <span className="ml-1.5 text-xs opacity-80">{goal.hint}</span>
+          </div>
+        </div>
+      );
+    }
+  }
+
   const isUser = message.role === "user";
 
   if (isUser) {
 
     return (
-      <div className="group/msg flex justify-end" data-message-id={message.id} data-message-role={message.role} data-thread-id={message.thread_id}>
-        <div className="min-w-0 max-w-[75%] space-y-1.5">
-          {/* Quote block — shown when this message is a reply */}
-          {message.reply_to_message_id && (
-            <QuoteBlock
-              quotedText={message.quoted_text ?? ""}
-              available={!!message.quoted_text}
-              onClick={() => onScrollToMessage?.(message.reply_to_message_id!)}
-            />
-          )}
-          {/* Image attachments — standalone thumbnails above the bubble */}
-          {imageAttachments.length > 0 && (
-            <div className={cn(
-              "flex justify-end gap-1.5",
-              imageAttachments.length > 2 ? "flex-wrap" : ""
-            )}>
-              {imageAttachments.map((img) => (
-                <ImageThumbnail
-                  key={img.id}
-                  src={`mcode-attachment://${message.thread_id}/${img.id}${extFromMime(img.mimeType)}`}
-                  name={img.name}
-                  single={imageAttachments.length === 1}
-                />
-              ))}
-            </div>
-          )}
+      <>
+        <div className="group/msg flex justify-end" data-message-id={message.id} data-message-role={message.role} data-thread-id={message.thread_id}>
+          <div className="min-w-0 max-w-[75%] space-y-1.5">
+            {/* Quote block — shown when this message is a reply */}
+            {message.reply_to_message_id && (
+              <QuoteBlock
+                quotedText={message.quoted_text ?? ""}
+                available={!!message.quoted_text}
+                onClick={() => onScrollToMessage?.(message.reply_to_message_id!)}
+              />
+            )}
+            {/* Image attachments — standalone thumbnails above the bubble */}
+            {imageAttachments.length > 0 && (
+              <div className={cn(
+                "flex justify-end gap-1.5",
+                imageAttachments.length > 2 ? "flex-wrap" : ""
+              )}>
+                {imageAttachments.map((img, idx) => {
+                  const src = buildStoredAttachmentImageSrc(message.thread_id, img.id, img.mimeType);
+                  return (
+                    <ImageThumbnail
+                      key={img.id}
+                      src={src}
+                      name={img.name}
+                      single={imageAttachments.length === 1}
+                      onOpenPreview={() =>
+                        setImagePreview({ items: imageSlides, initialIndex: idx })
+                      }
+                    />
+                  );
+                })}
+              </div>
+            )}
 
-          {/* Non-image files sit outside the colored bubble so names stay readable on any theme. */}
-          {fileAttachments.length > 0 && (
-            <div className="flex flex-wrap justify-end gap-2">
-              {fileAttachments.map((file) => (
-                <div
-                  key={file.id}
-                  className="flex min-w-0 max-w-[260px] items-start gap-2 rounded-lg border border-border bg-card px-3 py-2 shadow-sm"
-                >
-                  <FileAttachmentGlyph mimeType={file.mimeType} />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-xs font-medium text-foreground">{file.name}</p>
-                    <p className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
-                      {formatAttachmentBytes(file.sizeBytes)}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+            {/* Non-image files sit outside the colored bubble so names stay readable on any theme. */}
+            {fileAttachments.length > 0 && (
+              <div className="flex flex-wrap justify-end gap-2">
+                {fileAttachments.map((file) => (
+                  <FileAttachmentTile
+                    key={file.id}
+                    variant="transcript"
+                    name={file.name}
+                    sizeBytes={file.sizeBytes}
+                    mimeType={file.mimeType}
+                  />
+                ))}
+              </div>
+            )}
 
           {textContent.trim() && (
             <div className="overflow-hidden break-words rounded-lg rounded-br-md bg-primary px-3 py-1.5 text-sm text-primary-foreground shadow-sm shadow-primary/15">
@@ -346,7 +402,16 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
             <span className="font-mono text-[10px] tabular-nums text-muted-foreground/55">{formattedTime}</span>
           </div>
         </div>
-      </div>
+        </div>
+        <ImageAttachmentLightbox
+          open={imagePreview !== null}
+          onOpenChange={(open) => {
+            if (!open) setImagePreview(null);
+          }}
+          items={imagePreview?.items ?? []}
+          initialIndex={imagePreview?.initialIndex ?? 0}
+        />
+      </>
     );
   }
 

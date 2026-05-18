@@ -7,7 +7,13 @@ import { SectionHeading } from "../SectionHeading";
 import { Switch } from "@/components/ui/switch";
 import { SegControl } from "../SegControl";
 import type { UpdateStatus } from "@/transport/desktop-bridge";
-import type { UpdateCheckInterval } from "@mcode/contracts";
+import type { UpdateCheckInterval, UpdateReleaseLine } from "@mcode/contracts";
+
+/** Segmented control options for update release line (electron-updater publish channel). */
+const RELEASE_LINE_OPTIONS: { value: UpdateReleaseLine; label: string }[] = [
+  { value: "stable", label: "Stable" },
+  { value: "nightly", label: "Nightly" },
+];
 
 /** Segmented control options for update check frequency. */
 const INTERVAL_OPTIONS = [
@@ -97,8 +103,17 @@ export function AboutSection() {
   const autoDownload = settings.updates?.autoDownload ?? true;
   const autoInstallOnQuit = settings.updates?.autoInstallOnQuit ?? true;
   const checkInterval = settings.updates?.checkInterval ?? "4hours";
+  const releaseLine = settings.updates?.channel ?? "stable";
 
   const isBusy = checking || status.state === "checking" || status.state === "downloading";
+
+  let updatesHint = "Checks for new releases on the configured interval.";
+  if (checkInterval === "never") {
+    updatesHint = "Automatic checks disabled.";
+  } else if (releaseLine === "nightly") {
+    updatesHint =
+      "Nightly uses prerelease builds. They may be unstable. Switching back to Stable with a newer nightly installed can require a reinstall from the website if no stable update appears.";
+  }
 
   // Derive the inline status label shown beside the button.
   const statusLabel = upToDateLabel ? "Up to date" : describeStatus(status);
@@ -113,14 +128,7 @@ export function AboutSection() {
           </span>
         </SettingRow>
 
-        <SettingRow
-          label="Updates"
-          hint={
-            checkInterval === "never"
-              ? "Automatic checks disabled."
-              : "Checks for new releases on the configured interval."
-          }
-        >
+        <SettingRow label="Updates" hint={updatesHint}>
           <div className="flex items-center gap-3">
             {statusLabel && (
               <span
@@ -156,6 +164,21 @@ export function AboutSection() {
               </button>
             )}
           </div>
+        </SettingRow>
+
+        <SettingRow
+          label="Release line"
+          hint="Stable follows tagged releases. Nightly follows automated prerelease builds when the project publishes them."
+        >
+          <SegControl
+            options={RELEASE_LINE_OPTIONS}
+            value={releaseLine}
+            onChange={(v) =>
+              void updateSettings({
+                updates: { channel: v as UpdateReleaseLine },
+              })
+            }
+          />
         </SettingRow>
 
         <SettingRow

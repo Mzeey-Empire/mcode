@@ -29,6 +29,7 @@ import {
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThreadStore } from "@/stores/threadStore";
 import type { PermissionRequest } from "@mcode/contracts";
+import { setAttachmentTransportWsUrl } from "@/lib/attachment-url";
 
 /** Minimum reconnect delay in milliseconds. */
 const MIN_RECONNECT_MS = 1000;
@@ -186,6 +187,7 @@ export function createWsTransport(
     ws.onopen = () => {
       reconnectDelay = MIN_RECONNECT_MS;
       consecutiveAuthFailures = 0;
+      setAttachmentTransportWsUrl(url);
       resolveReady();
       options?.onStatusChange?.("connected");
 

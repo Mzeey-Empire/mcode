@@ -1,3 +1,4 @@
 provider: github
 owner: mzeey-empire
 repo: mcode
+# Optional third line for local nightly feed tests: channel: nightly

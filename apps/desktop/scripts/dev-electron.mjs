@@ -120,6 +120,9 @@ function scheduleServerBundleRebuild() {
 
 let viteProcess = null;
 
+/** True while `cleanup()` is tearing children down so Vite exit is not treated as a crash. */
+let devSessionShuttingDown = false;
+
 /**
  * Start the Vite dev server. Returns a promise that resolves with the
  * actual URL once Vite prints its "Local:" line (checks both stdout and
@@ -127,15 +130,15 @@ let viteProcess = null;
  */
 function startViteDevServer() {
   return new Promise((resolveUrl) => {
-    let resolved = false;
+    let bootstrapResolved = false;
 
     function tryParseUrl(text) {
-      if (resolved) return;
+      if (bootstrapResolved) return;
       // Strip ANSI escape codes - Vite injects bold/color mid-token
       const clean = text.replace(/\x1b\[[0-9;]*m/g, "");
       const match = clean.match(/Local:\s+(https?:\/\/\S+)/);
       if (match) {
-        resolved = true;
+        bootstrapResolved = true;
         resolveUrl(match[1].replace(/\/+$/, ""));
       }
     }
@@ -159,12 +162,21 @@ function startViteDevServer() {
     });
 
     viteProcess.on("exit", (code) => {
-      if (!resolved) {
-        resolved = true;
+      if (!bootstrapResolved) {
+        bootstrapResolved = true;
         resolveUrl(null);
       }
-      if (viteProcess) {
-        console.error(`[web] Vite dev server exited with code ${code}`);
+      console.error(`[web] Vite dev server exited with code ${code}`);
+
+      if (devSessionShuttingDown) return;
+
+      if (electronProcess) {
+        console.error(
+          "[dev] The renderer loads modules from Vite; with the dev server gone the window " +
+            "will show ERR_CONNECTION_REFUSED and failed dynamic imports. Stopping Electron.",
+        );
+        cleanup();
+        process.exit(code ?? 1);
       }
     });
   });
@@ -283,6 +295,7 @@ watch(serverOutFile, () => scheduleElectronRestart("server bundle updated"));
 
 /** Stop all child processes and esbuild watchers. */
 function cleanup() {
+  devSessionShuttingDown = true;
   if (debounceTimer) clearTimeout(debounceTimer);
   if (serverBundleRebuildTimer) {
     clearTimeout(serverBundleRebuildTimer);
