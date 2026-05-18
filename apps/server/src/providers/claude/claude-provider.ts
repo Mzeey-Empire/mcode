@@ -8,7 +8,7 @@ import { injectable, inject } from "tsyringe";
 import { EventEmitter } from "events";
 import { readFile } from "fs/promises";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
-import type { Query, SDKUserMessage, PostCompactHookInput, CanUseTool } from "@anthropic-ai/claude-agent-sdk";
+import type { Query, SDKUserMessage, PostCompactHookInput, StopHookInput, CanUseTool } from "@anthropic-ai/claude-agent-sdk";
 import { logger } from "@mcode/shared";
 import { AgentEventType, isVirtualBrowserContextAttachment } from "@mcode/contracts";
 import type {
@@ -226,6 +226,15 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
 
   private sessions = new Map<string, SessionEntry>();
   private sdkSessionIds = new Map<string, string>();
+  /**
+   * Active goals keyed by sessionId (mcode-${threadId}). When set, the SDK
+   * Stop hook installed in baseOptions blocks the agent from ending its turn
+   * with a "Goal not yet met" message until the goal is cleared. Set by the
+   * `/goal <condition>` chat command (intercepted in AgentService) and
+   * cleared by `/goal clear`. In-memory only — does not persist across
+   * server restarts.
+   */
+  private goalsBySession = new Map<string, string>();
   /**
    * Session IDs for which a stop was requested before the session was created.
    * Checked by doSendMessage after session creation; if found the session is
@@ -696,6 +705,25 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
               summary: compact_summary,
             } satisfies AgentEvent);
             return {};
+          }],
+        }],
+        Stop: [{
+          // @ts-expect-error: HookCallback accepts 3 params but we only need input
+          hooks: [async (input) => {
+            const stopInput = input as StopHookInput;
+            const goal = this.goalsBySession.get(sessionId);
+            // No goal set or hook is already re-prompting → allow stop. The
+            // `stop_hook_active` guard prevents an infinite block loop when the
+            // model insists on stopping after the first re-prompt.
+            if (!goal || stopInput.stop_hook_active) {
+              return {};
+            }
+            return {
+              decision: "block" as const,
+              reason:
+                `Goal not yet met: "${goal}". Continue working until the goal is satisfied. ` +
+                `If you have satisfied it, ask the user to clear it with "/goal clear".`,
+            };
           }],
         }],
       },
@@ -1620,6 +1648,26 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     this.sdkSessionIds.set(sessionId, sdkSessionId);
   }
 
+  /**
+   * Install a goal on a session. The next Stop event from the SDK will be
+   * blocked with a "Goal not yet met" reason until {@link clearGoal} is
+   * called. Storage is in-memory and tied to the sessionId; restarting the
+   * server clears all goals.
+   */
+  setGoal(sessionId: string, condition: string): void {
+    this.goalsBySession.set(sessionId, condition);
+  }
+
+  /** Remove an active goal so the next Stop event is allowed through. */
+  clearGoal(sessionId: string): void {
+    this.goalsBySession.delete(sessionId);
+  }
+
+  /** Return the active goal condition for a session, or undefined. */
+  getGoal(sessionId: string): string | undefined {
+    return this.goalsBySession.get(sessionId);
+  }
+
   /** Abort a running session, or record a pending stop if the session hasn't been created yet. */
   stopSession(sessionId: string): void {
     // Normalize to the raw UUID that canUseTool stores as threadId.
@@ -1632,6 +1680,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
         this.emit("permission_resolved", { requestId, decision: "cancelled" });
       }
     }
+    this.goalsBySession.delete(sessionId);
     const entry = this.sessions.get(sessionId);
     if (entry) {
       this.sessions.delete(sessionId);
@@ -1772,6 +1821,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     }
     this.sessions.clear();
     this.sdkSessionIds.clear();
+    this.goalsBySession.clear();
     logger.info("ClaudeProvider shutdown complete");
   }
 }

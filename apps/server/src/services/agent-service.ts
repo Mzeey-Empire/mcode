@@ -272,6 +272,67 @@ export class AgentService {
       throw new Error(`Workspace not found: ${thread.workspace_id}`);
     }
 
+    // `/goal` chat-command interception. Recognises three forms typed in the
+    // composer:
+    //   `/goal <condition>` — install a stop hook that blocks the agent from
+    //                         ending its turn until <condition> is satisfied
+    //   `/goal clear`       — remove the active goal
+    //   `/goal`             — show the active goal (or "no active goal")
+    // Only the Claude provider implements goals; on other providers the
+    // command degrades to a system-style notice. We persist the user message
+    // (so the command itself stays in the transcript) and a synthetic
+    // assistant reply with the result, then return without invoking the
+    // provider so no LLM turn runs.
+    const goalMatch = effectiveProvider === "claude"
+      ? /^\s*\/goal\b\s*(.*)$/s.exec(content)
+      : null;
+    if (goalMatch) {
+      const arg = goalMatch[1].trim();
+      const sessionName = `mcode-${threadId}`;
+      const claudeProvider = this.providerRegistry.resolve("claude") as unknown as {
+        setGoal?: (sid: string, c: string) => void;
+        clearGoal?: (sid: string) => void;
+        getGoal?: (sid: string) => string | undefined;
+      };
+
+      let replyText: string;
+      if (arg === "" || arg.toLowerCase() === "show") {
+        const current = claudeProvider.getGoal?.(sessionName);
+        replyText = current
+          ? `Active goal: "${current}". The agent will not stop until this condition is met. Use \`/goal clear\` to remove it.`
+          : `No active goal. Use \`/goal <condition>\` to set one.`;
+      } else if (arg.toLowerCase() === "clear" || arg.toLowerCase() === "reset") {
+        claudeProvider.clearGoal?.(sessionName);
+        replyText = `Goal cleared. The agent may now end its turn normally.`;
+      } else {
+        claudeProvider.setGoal?.(sessionName, arg);
+        replyText =
+          `Goal set: "${arg}". The agent will keep working until this condition is met. ` +
+          `Use \`/goal clear\` to remove it.`;
+      }
+
+      const { messages: existing } = this.messageRepo.listByThread(threadId, 1);
+      const baseSeq = existing.length > 0 ? existing[existing.length - 1].sequence : 0;
+      let userMsgId: string;
+      let assistantMsgId: string;
+      this.db.transaction(() => {
+        const u = this.messageRepo.create(threadId, "user", content, baseSeq + 1);
+        const a = this.messageRepo.create(threadId, "assistant", replyText, baseSeq + 2);
+        userMsgId = u.id;
+        assistantMsgId = a.id;
+      })();
+
+      broadcast("agent.event", {
+        type: AgentEventType.Message,
+        threadId,
+        content: replyText,
+        tokens: null,
+        messageId: assistantMsgId!,
+      } satisfies AgentEvent);
+      logger.info("Handled /goal command", { threadId, arg, userMsgId: userMsgId! });
+      return;
+    }
+
     const cwd = this.gitService.resolveWorkingDir(
       workspace.path,
       thread.mode,
