@@ -55,6 +55,8 @@ export interface CursorStreamToolCallStarted {
   tool_call: Record<string, unknown>;
   call_id: string;
   session_id?: string;
+  /** When set, nested tools belong to this parent call id (Cursor subagents / delegation). */
+  parent_call_id?: string;
 }
 
 /** Result body of a completed tool call. */
@@ -71,6 +73,7 @@ export interface CursorStreamToolCallCompleted {
   tool_call: Record<string, unknown> & { result?: CursorStreamToolCallResult };
   call_id: string;
   session_id?: string;
+  parent_call_id?: string;
 }
 
 /** Terminal event marking turn completion. */

@@ -243,6 +243,39 @@ describe("mapCursorAcpSessionNotification", () => {
     });
   });
 
+  it("maps explore-style delegation to Agent ToolUse and forwards parentToolCallId", () => {
+    const state = createCursorAcpTurnState();
+    const events = mapCursorAcpSessionNotification(
+      {
+        sessionId: "s",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "c-exp",
+          title: "Explore workspace",
+          rawInput: {
+            exploreWorkspaceToolCall: { args: { goal: "sketch module layout" } },
+          },
+          status: "in_progress",
+          parent_tool_call_id: "parent-root",
+          // Narrow ACP payloads may carry parent linkage before `@agentclientprotocol/sdk` exposes it on `tool_call`.
+        } as unknown as Parameters<typeof mapCursorAcpSessionNotification>[0]["update"],
+      },
+      threadId,
+      state,
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: AgentEventType.ToolUse,
+      toolCallId: "c-exp",
+      toolName: "Agent",
+      threadId,
+      parentToolCallId: "parent-root",
+    });
+    expect((events[0] as { toolInput: Record<string, unknown> }).toolInput.goal).toBe(
+      "sketch module layout",
+    );
+  });
+
   it("returns empty for plan with no entries", () => {
     const state = createCursorAcpTurnState();
     const events = mapCursorAcpSessionNotification(

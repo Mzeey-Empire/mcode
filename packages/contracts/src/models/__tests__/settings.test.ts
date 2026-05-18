@@ -27,6 +27,7 @@ describe("settings.provider.cursor", () => {
       idleSessionTtlMinutes: 20,
       retryTransientFailuresOnce: true,
       verboseFailureLogs: true,
+      traceSessionUpdates: false,
       autoAnswerAskQuestions: true,
       echoAskQuestionsToTimeline: false,
     });

@@ -22,6 +22,10 @@ import {
 } from "./cursor-todo-snapshot.js";
 import { normalizeMcodeCursorToolInput } from "./cursor-tool-input-normalize.js";
 import type { CursorStreamAccumulator } from "./cursor-stream-event-mapper.js";
+import {
+  extractCursorParentToolCallId,
+  resolveCursorSubagentToolName,
+} from "./cursor-subagent-detection.js";
 
 /** Maps ACP `kind` field to Mcode tool names. */
 const TOOL_NAME_BY_ACP_KIND: Record<string, string> = {
@@ -30,6 +34,8 @@ const TOOL_NAME_BY_ACP_KIND: Record<string, string> = {
   write: "Write",
   command: "Bash",
   search: "Grep",
+  subagent: "Agent",
+  delegate: "Agent",
   other: "Tool",
 };
 
@@ -301,6 +307,7 @@ function mapAcpToolCallStarted(
   acc: CursorStreamAccumulator,
   todoSnapshot: CursorTodoSnapshot | undefined,
 ): AgentEvent[] {
+  const parentToolCallId = extractCursorParentToolCallId(update as unknown as Record<string, unknown>);
   const rawInputRecord =
     update.rawInput && typeof update.rawInput === "object" && !Array.isArray(update.rawInput)
       ? (update.rawInput as Record<string, unknown>)
@@ -333,14 +340,16 @@ function mapAcpToolCallStarted(
         toolCallId: update.toolCallId,
         toolName: "TodoWrite",
         toolInput: { todos },
+        ...(parentToolCallId ? { parentToolCallId } : {}),
       },
     ];
   }
 
   // Resolve tool name from ACP kind/title/discriminator
-  const toolName = raw.discriminator
+  let toolName = raw.discriminator
     ? (TOOL_NAME_BY_DISCRIMINATOR[raw.discriminator] ?? raw.discriminator)
     : resolveAcpToolName(update);
+  toolName = resolveCursorSubagentToolName(toolName, raw.discriminator, update.title);
 
   // Build toolInput from rawInput if available
   let toolInput: Record<string, unknown> =
@@ -376,6 +385,7 @@ function mapAcpToolCallStarted(
       toolCallId: update.toolCallId,
       toolName,
       toolInput,
+      ...(parentToolCallId ? { parentToolCallId } : {}),
     },
   ];
 }
@@ -398,6 +408,7 @@ function mapAcpToolCallUpdated(
   state: CursorAcpTurnState,
   acc: CursorStreamAccumulator,
 ): AgentEvent[] {
+  const parentToolCallId = extractCursorParentToolCallId(update as unknown as Record<string, unknown>);
   // Suppress lifecycle-only tool calls (handled by ext methods)
   if (state.suppressedToolCallIds.has(update.toolCallId)) {
     acc.toolStartTimes.delete(update.toolCallId);
@@ -419,13 +430,21 @@ function mapAcpToolCallUpdated(
   const events: AgentEvent[] = [];
   const isError = update.status === "failed";
   const knownToolName = state.toolNameByCallId.get(update.toolCallId);
+  const rawInputRecord =
+    update.rawInput && typeof update.rawInput === "object" && !Array.isArray(update.rawInput)
+      ? (update.rawInput as Record<string, unknown>)
+      : undefined;
+  const derivedDiscriminator = rawInputRecord
+    ? extractToolCallDiscriminator(rawInputRecord).discriminator
+    : null;
 
   // Extract structured output from the two ACP channels
   const diffs = extractContentDiffs(update as Record<string, unknown>);
   const rawOut = extractAcpRawOutput(update.rawOutput);
 
   // Determine tool name and build ToolUse input from available data
-  const toolName = knownToolName ?? resolveAcpToolName(update);
+  let toolName = knownToolName ?? resolveAcpToolName(update);
+  toolName = resolveCursorSubagentToolName(toolName, derivedDiscriminator, update.title);
   let toolInput: Record<string, unknown> = {};
   let output = "";
 
@@ -462,6 +481,7 @@ function mapAcpToolCallUpdated(
       toolCallId: update.toolCallId,
       toolName,
       toolInput,
+      ...(parentToolCallId ? { parentToolCallId } : {}),
     });
     acc.hasFiredToolThisTurn = true;
   }
