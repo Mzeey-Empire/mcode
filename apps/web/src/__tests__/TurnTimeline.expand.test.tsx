@@ -3,6 +3,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { TurnSnapshot } from "@mcode/contracts";
 import { TurnTimeline } from "../components/diff/TurnTimeline";
+import { useDiffStore } from "../stores/diffStore";
 
 // Mock the transport so FileEntry's lazy diff load resolves immediately.
 vi.mock("@/transport", () => ({
@@ -41,6 +42,7 @@ function snap(id: string, files: string[]): TurnSnapshot {
 describe("TurnTimeline auto-expand", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useDiffStore.setState({ inlineDiffCache: {} });
   });
 
   it("expands the latest turn by default", () => {

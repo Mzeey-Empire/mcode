@@ -94,7 +94,7 @@ export function CommitsView() {
   return (
     <div className="flex flex-col">
       {commits.map((commit) => (
-        <CommitEntry key={commit.sha} commit={commit} />
+        <CommitEntry key={commit.sha} commit={commit} threadId={activeThreadId!} />
       ))}
     </div>
   );
