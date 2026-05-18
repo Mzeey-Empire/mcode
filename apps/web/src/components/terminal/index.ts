@@ -1,1 +1,2 @@
-export { TerminalPanel } from "./TerminalPanel";
+export { TerminalTabContent } from "./TerminalTabContent";
+export { DormantTerminals } from "./DormantTerminals";

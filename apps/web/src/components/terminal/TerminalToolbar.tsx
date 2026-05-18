@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Columns2, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTerminalStore } from "@/stores/terminalStore";
@@ -7,12 +8,14 @@ interface TerminalToolbarProps {
   readonly onDeleteAll: () => void;
 }
 
-export function TerminalToolbar({
+// Stable action ref — avoids a reactive subscription for a function that never changes.
+const { toggleSplit } = useTerminalStore.getState();
+
+export const TerminalToolbar = memo(function TerminalToolbar({
   onAdd,
   onDeleteAll,
 }: TerminalToolbarProps) {
   const splitMode = useTerminalStore((s) => s.splitMode);
-  const toggleSplit = useTerminalStore((s) => s.toggleSplit);
 
   return (
     <div className="flex items-center gap-1">
@@ -45,4 +48,4 @@ export function TerminalToolbar({
       </Button>
     </div>
   );
-}
+});

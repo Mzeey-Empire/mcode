@@ -18,6 +18,7 @@ describe("terminalStore pause/resume wiring", () => {
     useTerminalStore.setState({
       terminals: {},
       terminalPanelByThread: {},
+      ptyToThread: {},
       splitMode: false,
     });
   });

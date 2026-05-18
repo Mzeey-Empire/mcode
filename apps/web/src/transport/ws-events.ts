@@ -10,6 +10,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import { useSkillsStore } from "@/stores/skillsStore";
 import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
+import { emitPtyData, emitPtyExit } from "@/components/terminal/ptyDataRegistry";
 
 /** Unsubscribe handles for all push listeners. */
 let unsubs: (() => void)[] = [];
@@ -65,11 +66,15 @@ export function startPushListeners(): void {
     }),
   );
 
-  // terminal.data: broadcast to TerminalView instances via CustomEvent
+  // terminal.data: forward PTY output to the registered TerminalView callback.
+  // Supports multiple payload encodings for forward/backward compatibility:
+  //   - Uint8Array: direct binary WebSocket frames (preferred)
+  //   - base64 string: IPC path (current) — compact JSON-safe encoding
+  //   - number[]: legacy IPC path (pre-base64 servers)
+  //   - indexed object: very old servers that sent raw Uint8Array through JSON.stringify
+  //   - string "data" field: legacy JSON fallback
   unsubs.push(
     pushEmitter.on("terminal.data", (data) => {
-      // Binary path (preferred): { ptyId, seq, payload: Uint8Array }
-      // Legacy JSON fallback: { ptyId, data: string, seq?: number }
       let detail: { ptyId: string; payload: Uint8Array; seq: number };
       const d = data as Record<string, unknown>;
       if (d["payload"] instanceof Uint8Array) {
@@ -78,26 +83,32 @@ export function startPushListeners(): void {
           seq: d["seq"] as number,
           payload: d["payload"] as Uint8Array,
         };
+      } else if (typeof d["payload"] === "string" && d["encoding"] === "base64") {
+        // IPC path (current): base64-encoded bytes — decode without intermediate array.
+        const bin = atob(d["payload"]);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        detail = {
+          ptyId: d["ptyId"] as string,
+          seq: d["seq"] as number,
+          payload: bytes,
+        };
       } else if (Array.isArray(d["payload"])) {
-        // IPC path (current): the socket adapter serializes via JSON.stringify;
-        // the server converts to number[] so it survives the round-trip.
+        // Legacy IPC path: number[] from Array.from(bytes).
         detail = {
           ptyId: d["ptyId"] as string,
           seq: d["seq"] as number,
           payload: new Uint8Array(d["payload"] as number[]),
         };
       } else if (d["payload"] && typeof d["payload"] === "object") {
-        // IPC fallback for older servers that sent a raw Uint8Array through
-        // JSON.stringify — it arrives as an indexed object {"0":72,"1":101,...}.
-        // Object.values gives us the bytes in ascending-key order.
+        // Very old IPC fallback: indexed object {"0":72,"1":101,...}.
         detail = {
           ptyId: d["ptyId"] as string,
           seq: d["seq"] as number,
           payload: new Uint8Array(Object.values(d["payload"] as Record<string, number>)),
         };
       } else {
-        // Legacy JSON fallback: older servers send { ptyId, data: string, seq? }.
-        // Guard: skip malformed frames where data is not a string.
+        // Legacy JSON fallback: { ptyId, data: string, seq? }.
         if (typeof d["data"] !== "string") return;
         detail = {
           ptyId: d["ptyId"] as string,
@@ -105,7 +116,7 @@ export function startPushListeners(): void {
           seq: (d["seq"] as number | undefined) ?? 0,
         };
       }
-      window.dispatchEvent(new CustomEvent("mcode:pty-data", { detail }));
+      emitPtyData(detail);
     }),
   );
 
@@ -113,9 +124,7 @@ export function startPushListeners(): void {
   unsubs.push(
     pushEmitter.on("terminal.exit", (data) => {
       const payload = data as { ptyId: string; code: number };
-      window.dispatchEvent(
-        new CustomEvent("mcode:pty-exit", { detail: payload }),
-      );
+      emitPtyExit(payload);
       // Remove the terminal from the store after a brief delay so the
       // exit message has time to render.
       setTimeout(() => {

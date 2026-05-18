@@ -80,7 +80,7 @@ describe("TerminalView focus behaviour (regression)", () => {
   // contradict commit 09e0a3e (Ctrl+J from composer).
   it("does not call term.focus() on document visibilitychange", async () => {
     await act(async () => {
-      render(<TerminalView ptyId="pty-1" visible={true} />);
+      render(<TerminalView ptyId="pty-1" visible={true} threadActive={true} />);
     });
     // Let the async dynamic imports in init() settle.
     await act(async () => {
@@ -107,7 +107,7 @@ describe("TerminalView focus behaviour (regression)", () => {
 
   it("resumes a newly-created PTY after the view mounts", async () => {
     await act(async () => {
-      render(<TerminalView ptyId="pty-1" visible={true} />);
+      render(<TerminalView ptyId="pty-1" visible={true} threadActive={true} />);
     });
     await act(async () => {
       await Promise.resolve();
@@ -119,7 +119,7 @@ describe("TerminalView focus behaviour (regression)", () => {
 
   it("does NOT resume when mounted hidden", async () => {
     await act(async () => {
-      render(<TerminalView ptyId="pty-1" visible={false} />);
+      render(<TerminalView ptyId="pty-1" visible={false} threadActive={true} />);
     });
     await act(async () => {
       await Promise.resolve();

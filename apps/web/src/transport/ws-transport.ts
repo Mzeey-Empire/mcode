@@ -18,6 +18,7 @@ import type {
   CopilotSubagent,
 } from "./types";
 import type { CreateAndSendResult } from "@mcode/contracts";
+import { emitPtyReconnectGap } from "@/components/terminal/ptyDataRegistry";
 import type { PaginatedMessages, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus, ProviderAvailability } from "@mcode/contracts";
 import type { ReasoningLevel } from "@mcode/contracts";
 import {
@@ -248,9 +249,7 @@ export function createWsTransport(
                   { ptyId: p.ptyId, lastSeq },
                 );
                 if (gapped) {
-                  window.dispatchEvent(
-                    new CustomEvent("mcode:pty-reconnect-gap", { detail: { ptyId: p.ptyId } }),
-                  );
+                  emitPtyReconnectGap({ ptyId: p.ptyId });
                 }
               }),
           );

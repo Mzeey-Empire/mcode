@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { TerminalSquare, X } from "lucide-react";
 import { useTerminalStore, type TerminalInstance } from "@/stores/terminalStore";
 
@@ -9,17 +10,19 @@ interface TerminalListProps {
   readonly onClose: (ptyId: string) => void;
 }
 
-export function TerminalList({ threadId, onClose }: TerminalListProps) {
+// Stable action ref — avoids a reactive subscription for a function that never changes.
+const { setActiveTerminal } = useTerminalStore.getState();
+
+export const TerminalList = memo(function TerminalList({ threadId, onClose }: TerminalListProps) {
   const terminals = useTerminalStore(
     (s) => s.terminals[threadId] ?? EMPTY_TERMINALS,
   );
   const activeTerminalId = useTerminalStore(
     (s) => s.terminalPanelByThread[threadId]?.activeTerminalId ?? null,
   );
-  const setActiveTerminal = useTerminalStore((s) => s.setActiveTerminal);
 
   return (
-    <div className="w-48 border-l border-border bg-background">
+    <div className="w-48 border-r border-border bg-background">
       {terminals.map((terminal) => {
         const isActive = terminal.id === activeTerminalId;
 
@@ -57,4 +60,4 @@ export function TerminalList({ threadId, onClose }: TerminalListProps) {
       })}
     </div>
   );
-}
+});

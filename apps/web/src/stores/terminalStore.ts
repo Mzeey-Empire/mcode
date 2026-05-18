@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { getTransport } from "@/transport";
+import { createBatchedUpdater } from "./batchMiddleware";
 
 /** A single PTY-backed terminal instance displayed in the terminal panel. */
 export interface TerminalInstance {
@@ -25,6 +26,8 @@ export const TERMINAL_PANEL_DEFAULTS: TerminalPanelState = {
 interface TerminalState {
   readonly terminals: Record<string, readonly TerminalInstance[]>;
   readonly terminalPanelByThread: Record<string, TerminalPanelState>;
+  /** Reverse index: ptyId → threadId for O(1) owner lookup in removeTerminal. */
+  readonly ptyToThread: Record<string, string>;
   readonly splitMode: boolean;
 
   getTerminalPanel: (threadId: string) => TerminalPanelState;
@@ -74,7 +77,8 @@ function generateLabel(existing: readonly TerminalInstance[]): string {
 export const useTerminalStore = create<TerminalState>((set, get) => ({
   terminals: {},
   terminalPanelByThread: {},
-  splitMode: false,
+  ptyToThread: {},
+  splitMode: true,
 
   getTerminalPanel: (threadId) =>
     get().terminalPanelByThread[threadId] ?? TERMINAL_PANEL_DEFAULTS,
@@ -116,16 +120,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       };
     }),
 
-  setTerminalPanelHeight: (threadId, height) =>
-    set((state) => {
-      const current = state.terminalPanelByThread[threadId] ?? TERMINAL_PANEL_DEFAULTS;
-      return {
-        terminalPanelByThread: {
-          ...state.terminalPanelByThread,
-          [threadId]: { ...current, height },
-        },
-      };
-    }),
+  setTerminalPanelHeight: () => {
+    // Replaced post-creation with a batched version below.
+    throw new Error("setTerminalPanelHeight not yet initialised");
+  },
 
   setActiveTerminal: (threadId, ptyId) =>
     set((state) => {
@@ -149,6 +147,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           ...state.terminals,
           [threadId]: [...existing, instance],
         },
+        ptyToThread: { ...state.ptyToThread, [ptyId]: threadId },
         terminalPanelByThread: {
           ...state.terminalPanelByThread,
           [threadId]: { ...currentPanel, visible: true, activeTerminalId: ptyId },
@@ -158,14 +157,12 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   removeTerminal: (ptyId) =>
     set((state) => {
-      // Find the owning thread before filtering so the predicate stays pure.
-      const ownerEntry = Object.entries(state.terminals).find(([, instances]) =>
-        instances.some((t) => t.id === ptyId),
-      );
-      if (!ownerEntry) return state;
-      const [ownerThreadId, ownerInstances] = ownerEntry;
+      // O(1) owner lookup via the reverse index.
+      const ownerThreadId = state.ptyToThread[ptyId];
+      if (!ownerThreadId) return state;
+      const ownerInstances = state.terminals[ownerThreadId];
+      if (!ownerInstances) return state;
 
-      // Only rebuild the owning thread's array; other threads keep their identity.
       const filtered = ownerInstances.filter((t) => t.id !== ptyId);
       const updatedTerminals =
         filtered.length > 0
@@ -176,12 +173,16 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
               return rest;
             })();
 
+      const remainingPtyToThread = { ...state.ptyToThread };
+      delete remainingPtyToThread[ptyId];
+
       const currentPanel = state.terminalPanelByThread[ownerThreadId] ?? TERMINAL_PANEL_DEFAULTS;
       const needsNewActive = currentPanel.activeTerminalId === ptyId;
       const nextActive = needsNewActive ? (filtered[0]?.id ?? null) : currentPanel.activeTerminalId;
 
       return {
         terminals: updatedTerminals,
+        ptyToThread: remainingPtyToThread,
         terminalPanelByThread: {
           ...state.terminalPanelByThread,
           [ownerThreadId]: { ...currentPanel, activeTerminalId: nextActive },
@@ -191,14 +192,19 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   removeAllTerminals: (threadId) =>
     set((state) => {
-      if (!state.terminals[threadId]) return state;
+      const threadTerminals = state.terminals[threadId];
+      if (!threadTerminals) return state;
       const remainingTerminals = { ...state.terminals };
       delete remainingTerminals[threadId];
-      // Preserve panel config (height, visibility) so it persists across "close all".
-      // Only null out activeTerminalId since there are no terminals left.
+
+      // Clean up reverse index for all removed PTYs.
+      const remainingPtyToThread = { ...state.ptyToThread };
+      for (const t of threadTerminals) delete remainingPtyToThread[t.id];
+
       const currentPanel = state.terminalPanelByThread[threadId];
       return {
         terminals: remainingTerminals,
+        ptyToThread: remainingPtyToThread,
         ...(currentPanel
           ? {
               terminalPanelByThread: {
@@ -213,15 +219,45 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   clearThread: (threadId) =>
     set((state) => {
       if (!state.terminals[threadId] && !state.terminalPanelByThread[threadId]) return state;
+      const threadTerminals = state.terminals[threadId];
       const remainingTerminals = { ...state.terminals };
       delete remainingTerminals[threadId];
       const remainingPanels = { ...state.terminalPanelByThread };
       delete remainingPanels[threadId];
+
+      // Clean up reverse index for all removed PTYs.
+      const remainingPtyToThread = { ...state.ptyToThread };
+      if (threadTerminals) {
+        for (const t of threadTerminals) delete remainingPtyToThread[t.id];
+      }
+
       return {
         terminals: remainingTerminals,
+        ptyToThread: remainingPtyToThread,
         terminalPanelByThread: remainingPanels,
       };
     }),
 
   toggleSplit: () => set((state) => ({ splitMode: !state.splitMode })),
 }));
+
+// Wire setTerminalPanelHeight through a rAF-batched updater so rapid
+// mousemove events during drag-to-resize produce at most one React
+// re-render per animation frame instead of one per pixel.
+const batchedSet = createBatchedUpdater<TerminalState>(
+  useTerminalStore.setState.bind(useTerminalStore),
+);
+
+useTerminalStore.setState({
+  setTerminalPanelHeight: (threadId: string, height: number) => {
+    batchedSet((state) => {
+      const current = state.terminalPanelByThread[threadId] ?? TERMINAL_PANEL_DEFAULTS;
+      return {
+        terminalPanelByThread: {
+          ...state.terminalPanelByThread,
+          [threadId]: { ...current, height },
+        },
+      };
+    });
+  },
+});

@@ -1,10 +1,11 @@
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import type { Terminal, IDisposable } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import { getTransport } from "@/transport";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { shouldInterceptKeyEvent } from "./terminalKeyHandler";
 import { ClientTerminalFlowControl } from "./terminalFlowControl";
+import { onPtyData, onPtyExit, onPtyReconnectGap } from "./ptyDataRegistry";
 // Static import so bundler deduplicates the stylesheet
 import "@xterm/xterm/css/xterm.css";
 
@@ -188,10 +189,16 @@ interface TerminalViewProps {
   readonly ptyId: string;
   /** Whether the terminal panel is currently visible. Controls display style. */
   readonly visible: boolean;
+  /**
+   * Whether this terminal's owning thread is the active, visible thread.
+   * When false the WebGL renderer is disposed to save GPU memory; the xterm
+   * buffer (scrollback) is preserved. Re-attaches WebGL on next true transition.
+   */
+  readonly threadActive: boolean;
 }
 
 /** Renders a single xterm.js terminal backed by a server-side PTY via WS transport. */
-export function TerminalView({ ptyId, visible }: TerminalViewProps) {
+export const TerminalView = memo(function TerminalView({ ptyId, visible, threadActive }: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -289,52 +296,34 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
         transport.terminalWrite(ptyId, data).catch(() => {});
       });
 
-      // Listen for PTY output via push channel (CustomEvent dispatched by ws-events).
+      // Listen for PTY output via the direct callback registry.
       // Attached BEFORE awaiting the renderer so initial PTY output that arrives
       // during renderer initialization is buffered into the xterm write queue
       // (term.write is renderer-independent) and painted as soon as a renderer
       // is attached — never dropped.
-      const handlePtyData = (e: Event) => {
-        const detail = (e as CustomEvent).detail as {
-          ptyId: string;
-          payload: Uint8Array;
-          seq: number;
-        };
-        if (detail.ptyId !== ptyId) return;
-        // Track last-seen seq so the reconnect handler can call terminal.reattach
-        // with the correct lastSeq, minimising replayed output on reconnect.
+      const unsubPtyData = onPtyData(ptyId, (detail) => {
         transport.ptySetLastSeq(ptyId, detail.seq);
         const n = detail.payload.length;
         fc.written(n);
         // Use xterm's callback form so acked() fires only after the bytes
         // are committed to the terminal buffer — not just queued.
         term.write(detail.payload, () => fc.acked(n));
-      };
-      window.addEventListener("mcode:pty-data", handlePtyData);
+      });
 
       // Show a reconnect banner when the server signals that the replay window
       // was exceeded and some output may have been missed.
-      const handleReconnectGap = (e: Event) => {
-        const detail = (e as CustomEvent).detail as { ptyId: string };
-        if (detail.ptyId !== ptyId) return;
+      const unsubReconnectGap = onPtyReconnectGap(ptyId, () => {
         term.write("\r\n\x1b[90m[Reconnected - some output may be missing]\x1b[0m\r\n");
-      };
-      window.addEventListener("mcode:pty-reconnect-gap", handleReconnectGap);
+      });
 
-      // Listen for PTY exit via push channel (attached pre-renderer for the
-      // same reason as pty-data: an early exit should not be silently lost).
-      const handlePtyExit = (e: Event) => {
-        const detail = (e as CustomEvent).detail as {
-          ptyId: string;
-          code: number;
-        };
-        if (detail.ptyId === ptyId) {
-          term.write(
-            `\r\n\x1b[90m[Process exited with code ${detail.code}]\x1b[0m\r\n`,
-          );
-        }
-      };
-      window.addEventListener("mcode:pty-exit", handlePtyExit);
+      // Listen for PTY exit via the direct callback registry (attached
+      // pre-renderer for the same reason as pty-data: an early exit should
+      // not be silently lost).
+      const unsubPtyExit = onPtyExit(ptyId, (detail) => {
+        term.write(
+          `\r\n\x1b[90m[Process exited with code ${detail.code}]\x1b[0m\r\n`,
+        );
+      });
 
       // Resize handling:
       //
@@ -391,9 +380,9 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
         flushResizeRpcRef.current = null;
         dataDisposable.dispose();
         el.removeEventListener("contextmenu", handleContextMenu);
-        window.removeEventListener("mcode:pty-data", handlePtyData);
-        window.removeEventListener("mcode:pty-reconnect-gap", handleReconnectGap);
-        window.removeEventListener("mcode:pty-exit", handlePtyExit);
+        unsubPtyData();
+        unsubReconnectGap();
+        unsubPtyExit();
         transport.ptyDeleteLastSeq(ptyId);
         observer.disconnect();
         try {
@@ -508,6 +497,41 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
     }
   }, [scrollback]);
 
+  // Dispose WebGL when the thread goes dormant; re-attach when active again.
+  // The xterm buffer (scrollback) stays intact regardless of renderer state.
+  // This saves ~10-30 MB of GPU memory per dormant terminal while preserving
+  // the user's scroll position and history.
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+
+    if (!threadActive) {
+      // Thread went dormant: dispose the WebGL renderer. xterm's built-in
+      // DOM renderer auto-activates when the addon is disposed, but the
+      // terminal is display:none so no paint cost.
+      try {
+        rendererRef.current?.dispose();
+      } catch {
+        // Already disposed or no renderer attached.
+      }
+      rendererRef.current = null;
+      return;
+    }
+
+    // Thread became active: re-attach WebGL if supported. The terminal
+    // may already have WebGL (first mount) so only attach if rendererRef
+    // is null (was previously disposed by the dormant branch above).
+    if (rendererRef.current !== null) return;
+    let cancelled = false;
+    void loadRenderer(term, rendererRef, () => cancelled).then(() => {
+      if (cancelled) return;
+      // Refit after renderer swap to ensure the canvas matches the container.
+      fitAddonRef.current?.fit();
+      term.refresh(0, term.rows - 1);
+    });
+    return () => { cancelled = true; };
+  }, [threadActive]);
+
   return (
     <div
       ref={containerRef}
@@ -515,4 +539,4 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
       style={{ display: visible ? "block" : "none" }}
     />
   );
-}
+});

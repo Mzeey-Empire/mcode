@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { TerminalSquare } from "lucide-react";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useTerminalStore, TERMINAL_PANEL_DEFAULTS, type TerminalInstance } from "@/stores/terminalStore";
@@ -24,11 +24,19 @@ const {
   setTerminalPanelHeight,
 } = useTerminalStore.getState();
 
-/** Terminal panel that renders per-thread terminal instances with drag-to-resize. */
+/**
+ * Terminal panel that renders per-thread terminal instances with drag-to-resize.
+ *
+ * Terminal views for ALL threads are kept mounted so xterm preserves their
+ * scrollback buffer across thread switches. The active thread's terminals are
+ * visible inside the panel layout; dormant threads' terminals are rendered in a
+ * zero-height hidden container so they remain in the React tree but consume no
+ * layout space or GPU resources (WebGL is disposed when threadActive is false).
+ */
 export function TerminalPanel() {
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
 
-  // Reactive subscriptions
+  // Reactive subscriptions for the active thread's panel
   const panelState = useTerminalStore((s) =>
     activeThreadId
       ? (s.terminalPanelByThread[activeThreadId] ?? TERMINAL_PANEL_DEFAULTS)
@@ -39,6 +47,11 @@ export function TerminalPanel() {
   const terminals = useTerminalStore(
     (s) => (activeThreadId ? s.terminals[activeThreadId] : undefined) ?? EMPTY_TERMINALS,
   );
+
+  // All terminals across all threads (for the dormant view container).
+  const allTerminals = useTerminalStore((s) => s.terminals);
+  const allPanels = useTerminalStore((s) => s.terminalPanelByThread);
+
   const splitMode = useTerminalStore((s) => s.splitMode);
   const confirmOnKill = useSettingsStore((s) => s.settings.terminal.confirmOnKill);
 
@@ -49,11 +62,14 @@ export function TerminalPanel() {
   const [pendingKill, setPendingKill] = useState<(() => void) | null>(null);
 
   // Dismiss any pending kill confirmation when the user switches threads.
-  // Without this, the callback would be orphaned: the panel returns null for
-  // the old thread, leaving a stale closure that could fire on the next open.
   useEffect(() => {
     setPendingKill(null);
   }, [activeThreadId]);
+
+  // Ref tracks current height so the drag handler captures it at drag
+  // start without needing panelHeight in the useCallback dependency array.
+  const panelHeightRef = useRef(panelHeight);
+  panelHeightRef.current = panelHeight;
 
   /** Handles drag-to-resize from the top edge of the panel. */
   const onDragStart = useCallback(
@@ -62,7 +78,7 @@ export function TerminalPanel() {
       e.preventDefault();
       draggingRef.current = true;
       const startY = e.clientY;
-      const startHeight = panelHeight;
+      const startHeight = panelHeightRef.current;
 
       const onMouseMove = (moveEvent: MouseEvent) => {
         if (!draggingRef.current) return;
@@ -84,7 +100,7 @@ export function TerminalPanel() {
       document.addEventListener("mousemove", onMouseMove);
       document.addEventListener("mouseup", onMouseUp);
     },
-    [panelHeight, activeThreadId],
+    [activeThreadId],
   );
 
   /** Creates a new terminal for the active thread. */
@@ -122,12 +138,9 @@ export function TerminalPanel() {
             doCloseTerminal(ptyId);
             return;
           }
-          // Store the action in state — React requires functional updater to
-          // store a function value without it being called immediately.
           setPendingKill(() => () => doCloseTerminal(ptyId));
         })
         .catch(() => {
-          // If the check fails, proceed without confirmation.
           doCloseTerminal(ptyId);
         });
     },
@@ -152,9 +165,7 @@ export function TerminalPanel() {
 
   /**
    * Kills and removes all terminals for the active thread, then collapses the
-   * panel. Leaving the empty panel open after hitting the bin was confusing —
-   * users had to toggle it shut manually (issue #303).
-   * When confirmOnKill is enabled, checks if any terminal has children first.
+   * panel. When confirmOnKill is enabled, checks if any terminal has children.
    */
   const closeAllTerminals = useCallback(() => {
     if (!activeThreadId) return;
@@ -162,10 +173,6 @@ export function TerminalPanel() {
       doCloseAllTerminals();
       return;
     }
-    // Check the active terminal as a proxy for the whole panel.
-    // Known limitation: a background terminal with running children will not
-    // trigger the dialog if the active terminal happens to be idle. Checking
-    // every PTY in parallel was deemed excessive for this UX path.
     const targetId = activeTerminalId ?? terminals[0]?.id;
     if (!targetId) {
       doCloseAllTerminals();
@@ -185,9 +192,23 @@ export function TerminalPanel() {
       });
   }, [activeThreadId, confirmOnKill, terminals, activeTerminalId, doCloseAllTerminals]);
 
-  if (!panelVisible || !activeThreadId) {
-    return null;
-  }
+  // Collect dormant terminals (non-active threads) that should stay mounted
+  // but hidden so xterm preserves their scrollback buffer.
+  const dormantTerminals = useMemo(() => {
+    const result: Array<{ term: TerminalInstance; activeInTab: boolean }> = [];
+    for (const [threadId, instances] of Object.entries(allTerminals)) {
+      if (threadId === activeThreadId) continue;
+      const panel = allPanels[threadId];
+      const activeTab = panel?.activeTerminalId ?? null;
+      for (const term of instances) {
+        result.push({ term, activeInTab: term.id === activeTab });
+      }
+    }
+    return result;
+  }, [allTerminals, allPanels, activeThreadId]);
+
+  const hasDormant = dormantTerminals.length > 0;
+  const panelActive = panelVisible && !!activeThreadId;
 
   return (
     <>
@@ -199,51 +220,72 @@ export function TerminalPanel() {
       }}
       onCancel={() => setPendingKill(null)}
     />
-    <div
-      style={{ height: panelHeight }}
-      className="flex flex-col rounded-lg bg-background shadow-sm overflow-hidden"
-    >
-      {/* Drag handle */}
+
+    {/* Active thread's terminal panel with chrome */}
+    {panelActive && (
       <div
-        className="h-1 cursor-row-resize bg-transparent hover:bg-muted-foreground/20"
-        onMouseDown={onDragStart}
-      />
-
-      {/* Toolbar row */}
-      <div className="flex justify-end px-2 py-1">
-        <TerminalToolbar
-          onAdd={createTerminal}
-          onDeleteAll={closeAllTerminals}
+        style={{ height: panelHeight }}
+        className="flex flex-col rounded-lg bg-background shadow-sm overflow-hidden"
+      >
+        {/* Drag handle */}
+        <div
+          className="h-1 cursor-row-resize bg-transparent hover:bg-muted-foreground/20"
+          onMouseDown={onDragStart}
         />
-      </div>
 
-      {/* Terminal views + optional split list */}
-      {terminals.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
-          <TerminalSquare className="h-10 w-10 opacity-40" />
-          <p className="text-sm">No terminals</p>
-          <Button variant="outline" size="sm" onClick={createTerminal}>
-            New terminal
-          </Button>
+        {/* Toolbar row */}
+        <div className="flex justify-end px-2 py-1">
+          <TerminalToolbar
+            onAdd={createTerminal}
+            onDeleteAll={closeAllTerminals}
+          />
         </div>
-      ) : (
-        <div className="relative flex flex-1 overflow-hidden">
-          <div className="flex-1 overflow-hidden">
-            {terminals.map((term) => (
-              <TerminalView
-                key={term.id}
-                ptyId={term.id}
-                visible={term.id === activeTerminalId}
-              />
-            ))}
+
+        {/* Terminal views + optional split list */}
+        {terminals.length === 0 ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
+            <TerminalSquare className="h-10 w-10 opacity-40" />
+            <p className="text-sm">No terminals</p>
+            <Button variant="outline" size="sm" onClick={createTerminal}>
+              New terminal
+            </Button>
           </div>
+        ) : (
+          <div className="relative flex flex-1 overflow-hidden">
+            <div className="flex-1 overflow-hidden">
+              {terminals.map((term) => (
+                <TerminalView
+                  key={term.id}
+                  ptyId={term.id}
+                  visible={term.id === activeTerminalId}
+                  threadActive
+                />
+              ))}
+            </div>
 
-          {splitMode && (
-            <TerminalList threadId={activeThreadId} onClose={closeTerminal} />
-          )}
-        </div>
-      )}
-    </div>
+            {splitMode && (
+              <TerminalList threadId={activeThreadId} onClose={closeTerminal} />
+            )}
+          </div>
+        )}
+      </div>
+    )}
+
+    {/* Dormant terminals: kept mounted for scrollback preservation but
+        hidden and with WebGL disposed to save GPU memory. The container
+        has no dimensions so it consumes no layout space. */}
+    {hasDormant && (
+      <div className="sr-only" aria-hidden="true">
+        {dormantTerminals.map((d) => (
+          <TerminalView
+            key={d.term.id}
+            ptyId={d.term.id}
+            visible={false}
+            threadActive={false}
+          />
+        ))}
+      </div>
+    )}
     </>
   );
 }

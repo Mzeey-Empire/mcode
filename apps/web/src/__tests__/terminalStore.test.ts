@@ -1,13 +1,21 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { useTerminalStore, TERMINAL_PANEL_DEFAULTS } from "@/stores/terminalStore";
 
 describe("TerminalStore", () => {
   beforeEach(() => {
+    // setTerminalPanelHeight is batched via rAF/setTimeout; fake timers
+    // let tests flush the queue synchronously with vi.runAllTimers().
+    vi.useFakeTimers();
     useTerminalStore.setState({
       terminals: {},
       terminalPanelByThread: {},
+      ptyToThread: {},
       splitMode: false,
     });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   describe("addTerminal", () => {
@@ -225,6 +233,7 @@ describe("TerminalStore", () => {
     it("showTerminalPanel sets visible true without affecting other fields", () => {
       const { showTerminalPanel, setTerminalPanelHeight, getTerminalPanel } = useTerminalStore.getState();
       setTerminalPanelHeight("thread-1", 450);
+      vi.runAllTimers(); // flush batched height update
       showTerminalPanel("thread-1");
       const panel = getTerminalPanel("thread-1");
       expect(panel.visible).toBe(true);
@@ -235,6 +244,7 @@ describe("TerminalStore", () => {
       const { showTerminalPanel, hideTerminalPanel, setTerminalPanelHeight, getTerminalPanel } = useTerminalStore.getState();
       showTerminalPanel("thread-1");
       setTerminalPanelHeight("thread-1", 450);
+      vi.runAllTimers(); // flush batched height update
       hideTerminalPanel("thread-1");
       const panel = getTerminalPanel("thread-1");
       expect(panel.visible).toBe(false);
@@ -244,6 +254,7 @@ describe("TerminalStore", () => {
     it("setTerminalPanelHeight updates height for one thread only", () => {
       const { setTerminalPanelHeight, getTerminalPanel } = useTerminalStore.getState();
       setTerminalPanelHeight("thread-1", 450);
+      vi.runAllTimers(); // flush batched height update
       expect(getTerminalPanel("thread-1").height).toBe(450);
       expect(getTerminalPanel("thread-2").height).toBe(300); // default
     });

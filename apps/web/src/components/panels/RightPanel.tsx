@@ -1,6 +1,6 @@
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ListChecks, Diff, Globe, X } from "lucide-react";
+import { ListChecks, Diff, Globe, TerminalSquare, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useTaskStore } from "@/stores/taskStore";
@@ -9,6 +9,7 @@ import { TaskPanel } from "@/components/tasks/TaskPanel";
 import { TaskPanelHeader } from "@/components/tasks/TaskPanelHeader";
 import { DiffPanel } from "@/components/diff";
 import { PreviewPanel } from "@/components/panels/PreviewPanel";
+import { TerminalTabContent } from "@/components/terminal/TerminalTabContent";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";
 
@@ -281,6 +282,18 @@ export function RightPanel() {
               <Globe size={12} />
               Preview
             </button>
+            <button
+              type="button"
+              onClick={() => setRightPanelTab(activeThreadId!, "terminal")}
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-[10px] font-semibold tracking-[0.16em] uppercase transition-colors ${
+                activeTab === "terminal"
+                  ? "text-foreground bg-muted/50"
+                  : "text-foreground/70 hover:text-foreground"
+              }`}
+            >
+              <TerminalSquare size={12} />
+              Terminal
+            </button>
           </div>
           <Button
             variant="ghost"
@@ -306,6 +319,14 @@ export function RightPanel() {
         {activeTab === "preview" && (
           <PreviewPanel threadId={activeThreadId} workspaceId={activeWorkspaceId} />
         )}
+        {/* Terminal: display-toggled (not conditional) to preserve xterm
+            instances across tab switches within the right panel. */}
+        <div
+          className="flex min-h-0 flex-1 flex-col overflow-hidden"
+          style={{ display: activeTab === "terminal" ? "flex" : "none" }}
+        >
+          <TerminalTabContent threadId={activeThreadId} visible={activeTab === "terminal"} />
+        </div>
       </div>
       </div>
     </>
