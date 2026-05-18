@@ -93,6 +93,26 @@ function activateTabView(
     }
     void view.webContents.loadURL(tab.resumeUrl);
   }
+
+  // Tell the renderer the newly-mounted tab's chrome state so the omnibox,
+  // title, and favicon update immediately on tab swap. Without this the
+  // user sees a stale URL/title until the next page event fires on the
+  // (warm) webContents - which may never happen for a long-lived page.
+  if (!win.isDestroyed()) {
+    const wc = view.webContents;
+    if (!wc.isDestroyed()) {
+      const liveUrl = wc.getURL();
+      const liveTitle = wc.getTitle();
+      win.webContents.send("preview:did-navigate", {
+        url: liveUrl,
+        title: liveTitle,
+        favicon: tab.faviconUrl ?? null,
+      });
+      win.webContents.send("preview:did-update-favicon", {
+        favicon: tab.faviconUrl ?? null,
+      });
+    }
+  }
 }
 
 /**
