@@ -96,6 +96,16 @@ interface PreviewBridge {
   tabs: PreviewTabsBridge;
   /** Live preview perf counters; dev HUD only. */
   getPerfCounters(): Promise<BrowserPerfCounters>;
+  /** Phase D: adopt a renderer-hosted <webview>'s WebContents into the host bridge. */
+  adoptWebview(payload: {
+    webContentsId: number;
+    threadId: string;
+    tabId: string;
+  }): Promise<{ ok: true } | { ok: false; error: string }>;
+  releaseWebview(payload: {
+    threadId: string;
+    tabId: string;
+  }): Promise<{ ok: true } | { ok: false; error: string }>;
 }
 
 /** Wire-side result of a tab IPC call. */

@@ -209,6 +209,22 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       return ipcRenderer.invoke("preview:get-perf-counters");
     },
     /**
+     * Phase D: adopt a renderer-hosted <webview> into the host bridge so the
+     * Codex browser-use pipe can drive it via executeCdp. The renderer reads
+     * the guest's webContentsId via `webview.getWebContentsId()` after
+     * `did-attach` fires, then forwards it here.
+     */
+    adoptWebview(payload: {
+      webContentsId: number;
+      threadId: string;
+      tabId: string;
+    }): Promise<unknown> {
+      return ipcRenderer.invoke("preview:adopt-webview", payload);
+    },
+    releaseWebview(payload: { threadId: string; tabId: string }): Promise<unknown> {
+      return ipcRenderer.invoke("preview:release-webview", payload);
+    },
+    /**
      * Multi-tab control surface (Phase A of the in-app browser rewrite).
      * Phase A keeps a single backing BrowserView per window; these methods
      * give the renderer a stable contract for tab list / mutations so the UI

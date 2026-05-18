@@ -12,6 +12,7 @@ import type { BrowserWindow, WebContents } from "electron";
 import { BrowserWindow as ElectronBrowserWindow } from "electron";
 import { logger } from "@mcode/shared";
 import { ensureThreadTabSet, sessions, type TabState } from "../preview/preview-session.js";
+import { findAdoptedWebContents } from "../preview/preview-webview-adopt.js";
 
 /** Snapshot of the currently-visible preview, or null if none. */
 export interface BrowserHostSnapshot {
@@ -75,6 +76,18 @@ function locateTab(threadId: string, tabId: string): {
   win: BrowserWindow;
   webContents: WebContents | null;
 } | null {
+  // Phase D: an adopted renderer-hosted <webview> wins over any
+  // BrowserView-backed live view for the same slot.
+  const adopted = findAdoptedWebContents(threadId, tabId);
+  if (adopted) {
+    for (const win of ElectronBrowserWindow.getAllWindows()) {
+      const s = sessions.get(win.id);
+      if (s && s.tabsByThread.has(threadId)) {
+        return { win, webContents: adopted };
+      }
+    }
+  }
+
   for (const win of ElectronBrowserWindow.getAllWindows()) {
     const s = sessions.get(win.id);
     if (!s) continue;

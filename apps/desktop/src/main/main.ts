@@ -263,6 +263,12 @@ function createWindow(): void {
       // Documented explicitly; defaults to true in Electron but we set it
       // here for clarity. The load-bearing call is setSpellCheckerLanguages().
       spellcheck: true,
+      // Phase D of the in-app browser rewrite: enable <webview> so the
+      // renderer can host a guest WebContents whose id is later adopted by
+      // the host bridge (browser-use). webview-tag carries Chromium guest
+      // process risks; the will-attach-webview hook below clamps webPreferences
+      // and we never expose nodeIntegrationInSubFrames.
+      webviewTag: true,
     },
   });
 
@@ -281,6 +287,18 @@ function createWindow(): void {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     openIfAllowed(url);
     return { action: "deny" };
+  });
+
+  // Harden every <webview> the renderer attaches: strip node integration,
+  // force the preview partition, and remove any preload script the renderer
+  // tries to inject. These guarantees are essential because webviewTag is on.
+  mainWindow.webContents.on("will-attach-webview", (_event, webPreferences, params) => {
+    webPreferences.nodeIntegration = false;
+    webPreferences.contextIsolation = true;
+    webPreferences.sandbox = true;
+    delete (webPreferences as { preload?: string }).preload;
+    delete (webPreferences as { preloadURL?: string }).preloadURL;
+    params.partition = "persist:mcode-preview";
   });
 
   // Prevent the main window from navigating away from the app.
