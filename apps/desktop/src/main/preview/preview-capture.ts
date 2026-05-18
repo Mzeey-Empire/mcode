@@ -1,12 +1,12 @@
 /**
  * Screenshot capture, guest page context extraction, and capture payload construction
- * for the embedded preview BrowserView.
+ * for the embedded preview WebContentsView.
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { BrowserView, BrowserWindow, app, ipcMain } from "electron";
+import { BrowserWindow, app, ipcMain, type WebContents } from "electron";
 import {
   clampMcodeBrowserCaptureV2,
   MCODE_BROWSER_CAPTURE_V2_STRING_MAX,
@@ -127,7 +127,7 @@ type GuestPageContextPayload = {
  * or null if the webContents is gone or the script throws.
  */
 async function captureGuestPageContextForCapture(
-  webContents: BrowserView["webContents"],
+  webContents: WebContents,
 ): Promise<GuestPageContextPayload | null> {
   if (webContents.isDestroyed()) return null;
   try {
@@ -232,7 +232,7 @@ function captureNeedsSpillPostRedact(c: McodeBrowserCaptureV2): boolean {
   );
 }
 
-/** Full viewport bounds in BrowserView-relative CSS pixels. */
+/** Full viewport bounds in WebContentsView-relative CSS pixels. */
 export function viewportBoundsFallback(viewWidth: number, viewHeight: number): Bounds {
   return { x: 0, y: 0, width: Math.max(1, viewWidth), height: Math.max(1, viewHeight) };
 }
@@ -295,7 +295,7 @@ export function previewCaptureFileStem(pageUrl: string): string {
 
 /** Typed capture envelope aligned with PNG bytes for outbound prompt augmentation (v2 adds text outline and console tail). */
 export async function buildBrowserCapturePayload(
-  webContents: BrowserView["webContents"],
+  webContents: WebContents,
   boundsCss: Bounds,
   consoleBuffer: readonly string[],
   failedRequests: McodeBrowserCaptureV2["failedRequests"],

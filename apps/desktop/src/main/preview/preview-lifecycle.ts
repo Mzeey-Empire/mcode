@@ -1,9 +1,13 @@
 /**
- * BrowserView lifecycle management: create, attach, hide, park, and dispose
+ * WebContentsView lifecycle management: create, attach, hide, park, and dispose
  * the embedded preview view for a given BrowserWindow.
+ *
+ * Migrated from BrowserView (deprecated in Electron 30+) to WebContentsView
+ * which is mounted via `BaseWindow.contentView.addChildView`. `BrowserWindow`
+ * extends `BaseWindow` so the same window reference works for both APIs.
  */
 
-import { BrowserView, BrowserWindow, shell } from "electron";
+import { BrowserWindow, WebContentsView, shell } from "electron";
 import { logger } from "@mcode/shared";
 import {
   type PreviewSession,
@@ -32,11 +36,40 @@ const PREVIEW_SCROLLBAR_CSS = [
   "*{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.28) transparent}",
 ].join("");
 
+/** True when `view` is currently a child of the window's contentView. */
+function isMounted(win: BrowserWindow, view: WebContentsView): boolean {
+  try {
+    return win.contentView.children.includes(view);
+  } catch {
+    return false;
+  }
+}
+
+/** Idempotently mount the view inside the window's contentView. */
+export function mountView(win: BrowserWindow, view: WebContentsView): void {
+  if (isMounted(win, view)) return;
+  try {
+    win.contentView.addChildView(view);
+  } catch {
+    /* window may be tearing down */
+  }
+}
+
+/** Idempotently remove the view from the window's contentView. */
+export function unmountView(win: BrowserWindow, view: WebContentsView): void {
+  if (!isMounted(win, view)) return;
+  try {
+    win.contentView.removeChildView(view);
+  } catch {
+    /* already detached */
+  }
+}
+
 /**
- * Removes all preview-related webContents listeners from a BrowserView so teardown
- * does not fire stale callbacks after the view is detached.
+ * Removes all preview-related webContents listeners from a WebContentsView so
+ * teardown does not fire stale callbacks after the view is detached.
  */
-export function detachViewListeners(view: BrowserView): void {
+export function detachViewListeners(view: WebContentsView): void {
   view.webContents.removeAllListeners("did-navigate");
   view.webContents.removeAllListeners("did-navigate-in-page");
   view.webContents.removeAllListeners("page-title-updated");
@@ -50,13 +83,14 @@ export function detachViewListeners(view: BrowserView): void {
 }
 
 /**
- * Returns the existing BrowserView for the session, or creates and wires a new one.
- * Attaches navigation, loading, console, crash recovery, and file-URL gate listeners.
+ * Returns the existing WebContentsView for the session, or creates and wires
+ * a new one. Attaches navigation, loading, console, crash recovery, and
+ * file-URL gate listeners.
  */
-export function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
+export function ensureView(win: BrowserWindow, s: PreviewSession): WebContentsView {
   if (s.view) return s.view;
-  logger.info("Preview: BrowserView created");
-  const view = new BrowserView({
+  logger.info("Preview: WebContentsView created");
+  const view = new WebContentsView({
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -191,11 +225,7 @@ export function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
     if (s.view === view) {
       detachViewListeners(view);
       if (!win.isDestroyed()) {
-        try {
-          win.removeBrowserView(view);
-        } catch {
-          /* already detached */
-        }
+        unmountView(win, view);
       }
       s.view = null;
       s.scrollbarCssKey = null;
@@ -223,9 +253,7 @@ export function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
       if (s.lastBounds) {
         fresh.setBounds(s.lastBounds);
       }
-      if (win.getBrowserView() !== fresh) {
-        win.setBrowserView(fresh);
-      }
+      mountView(win, fresh);
       sendPreviewLoading(win, true);
       trustMainProcessFileNavigation(s, url);
       void fresh.webContents.loadURL(url);
@@ -260,22 +288,18 @@ async function injectPreviewScrollbarStyles(s: PreviewSession): Promise<void> {
 }
 
 /**
- * Detaches the BrowserView from the window without destroying it, and aborts
- * any in-progress overlay capture. Used by preview:sync when visibility toggles
- * off temporarily (e.g. React effect cleanup during in-page navigations).
- * The webContents stays alive so the page isn't reloaded when the view is
- * re-attached moments later.
+ * Detaches the WebContentsView from the window without destroying it, and
+ * aborts any in-progress overlay capture. Used by preview:sync when
+ * visibility toggles off temporarily (e.g. React effect cleanup during
+ * in-page navigations). The webContents stays alive so the page isn't
+ * reloaded when the view is re-attached moments later.
  */
 export function hidePreview(win: BrowserWindow, s: PreviewSession): void {
   abortOverlayCapture(s, "capture-interrupted");
   clearIdle(s);
   if (s.view && !win.isDestroyed()) {
     logger.info("Preview: view hidden (detached, kept alive)");
-    try {
-      win.removeBrowserView(s.view);
-    } catch {
-      // Window may already be detaching the view.
-    }
+    unmountView(win, s.view);
   }
   if (!win.isDestroyed()) {
     sendPreviewLoading(win, false);
@@ -283,8 +307,9 @@ export function hidePreview(win: BrowserWindow, s: PreviewSession): void {
 }
 
 /**
- * Detaches and destroys the BrowserView, clearing all buffers and stopping the idle timer.
- * Saves the current URL as the resume URL so the next ensureView call can reload it.
+ * Detaches the WebContentsView from the window and closes its underlying
+ * WebContents, clearing all buffers and stopping the idle timer. Saves the
+ * current URL as the resume URL so the next ensureView call can reload it.
  */
 export function parkPreview(win: BrowserWindow, s: PreviewSession): void {
   logger.info("Preview: view parked (destroyed)", { url: s.resumePreviewUrl });

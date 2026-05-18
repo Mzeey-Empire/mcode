@@ -1,5 +1,5 @@
 /**
- * Navigation IPC handlers for the embedded preview BrowserView:
+ * Navigation IPC handlers for the embedded preview WebContentsView:
  * sync, navigate, go-back, go-forward, reload, open-external, get-navigation-state.
  */
 
@@ -15,7 +15,7 @@ import {
   sendPreviewLoading,
   syncActiveTabFromSession,
 } from "./preview-session.js";
-import { hidePreview, ensureView } from "./preview-lifecycle.js";
+import { ensureView, hidePreview, mountView } from "./preview-lifecycle.js";
 import { type Bounds } from "./preview-session.js";
 import { bumpPerf } from "./preview-perf.js";
 import {
@@ -96,9 +96,7 @@ export function registerNavigationHandlers(): void {
       s.lastBounds = { x: b.x, y: b.y, width: b.width, height: b.height };
       const view = ensureView(win, s);
       view.setBounds(s.lastBounds);
-      if (win.getBrowserView() !== view) {
-        win.setBrowserView(view);
-      }
+      mountView(win, view);
       const wc = view.webContents;
       if (!wc.isDestroyed()) {
         const current = wc.getURL();
@@ -113,7 +111,7 @@ export function registerNavigationHandlers(): void {
           ensureThreadTabSet(s, tid);
         }
 
-        // One BrowserView is shared across threads; without an explicit navigation on switch,
+        // One WebContentsView is shared across threads; without an explicit navigation on switch,
         // the previous thread's document (and resumePreviewUrl) would leak into the next thread.
         const safeHint = await validateResumeUrl(hint);
         if (switchedThread) {
@@ -203,9 +201,7 @@ export function registerNavigationHandlers(): void {
 
       const view = ensureView(win, s);
       view.setBounds(s.lastBounds);
-      if (win.getBrowserView() !== view) {
-        win.setBrowserView(view);
-      }
+      mountView(win, view);
       logger.info("Preview: user navigated", { url: target });
       sendPreviewLoading(win, true);
       trustMainProcessFileNavigation(s, target);

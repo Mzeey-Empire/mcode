@@ -14,10 +14,10 @@ let ipcHandlers: Record<string, (...args: unknown[]) => unknown> = {};
 /** Tracks all registered ipcMain.on handlers by channel name. */
 let ipcOnHandlers: Record<string, (...args: unknown[]) => unknown> = {};
 
-/** Tracks BrowserView instances created during a test. */
-let createdViews: ReturnType<typeof makeBrowserView>[] = [];
+/** Tracks WebContentsView instances created during a test. */
+let createdViews: ReturnType<typeof makeWebContentsView>[] = [];
 
-function makeBrowserView() {
+function makeWebContentsView() {
   const webContents = {
     isDestroyed: vi.fn().mockReturnValue(false),
     getURL: vi.fn().mockReturnValue("https://example.com"),
@@ -49,30 +49,35 @@ function makeBrowserView() {
 /** Auto-incrementing window ID so each test gets a fresh session in the module-level sessions Map. */
 let nextWindowId = 1;
 
-/** Minimal BrowserWindow stub. */
+/** Minimal BrowserWindow stub with contentView mount API. */
 function makeWindow() {
   const id = nextWindowId++;
-  let currentView: ReturnType<typeof makeBrowserView> | null = null;
+  const children: Array<ReturnType<typeof makeWebContentsView>> = [];
   return {
     id,
     isDestroyed: vi.fn().mockReturnValue(false),
-    getBrowserView: vi.fn(() => currentView),
-    setBrowserView: vi.fn((v: ReturnType<typeof makeBrowserView>) => {
-      currentView = v;
-    }),
-    removeBrowserView: vi.fn((v: ReturnType<typeof makeBrowserView>) => {
-      if (currentView === v) currentView = null;
-    }),
+    contentView: {
+      children,
+      addChildView: vi.fn((v: ReturnType<typeof makeWebContentsView>) => {
+        if (!children.includes(v)) children.push(v);
+      }),
+      removeChildView: vi.fn((v: ReturnType<typeof makeWebContentsView>) => {
+        const idx = children.indexOf(v);
+        if (idx >= 0) children.splice(idx, 1);
+      }),
+    },
     webContents: {
       isDestroyed: vi.fn().mockReturnValue(false),
       send: vi.fn(),
+      on: vi.fn(),
+      setWindowOpenHandler: vi.fn(),
     },
   };
 }
 
 vi.mock("electron", () => ({
-  BrowserView: vi.fn(function () {
-    const view = makeBrowserView();
+  WebContentsView: vi.fn(function () {
+    const view = makeWebContentsView();
     return view;
   }),
   BrowserWindow: {
@@ -213,16 +218,16 @@ function createWindow() {
 
 describe("preview-browser", () => {
   describe("hidePreview (tab switch)", () => {
-    it("detaches the BrowserView from the window without destroying webContents", async () => {
+    it("detaches the WebContentsView from the window without destroying webContents", async () => {
       const win = createWindow();
       await showPreview(win);
 
       const view = createdViews[0]!;
-      expect(win.setBrowserView).toHaveBeenCalledWith(view);
+      expect(win.contentView.addChildView).toHaveBeenCalledWith(view);
 
       await hidePreview(win);
 
-      expect(win.removeBrowserView).toHaveBeenCalledWith(view);
+      expect(win.contentView.removeChildView).toHaveBeenCalledWith(view);
       expect(view.webContents.close).not.toHaveBeenCalled();
     });
 
@@ -241,7 +246,7 @@ describe("preview-browser", () => {
   });
 
   describe("re-show after hide", () => {
-    it("reattaches the same BrowserView without creating a new one", async () => {
+    it("reattaches the same WebContentsView without creating a new one", async () => {
       const win = createWindow();
       await showPreview(win);
       const viewCountAfterFirstShow = createdViews.length;
@@ -305,13 +310,13 @@ describe("preview-browser", () => {
       await showPreview(win);
 
       const view = createdViews[0]!;
-      win.removeBrowserView.mockClear();
+      win.contentView.removeChildView.mockClear();
 
       disposePreviewForWindow(win as never);
       // Remove from testWindows so afterEach doesn't double-dispose.
       testWindows = testWindows.filter((w) => w !== win);
 
-      expect(win.removeBrowserView).toHaveBeenCalled();
+      expect(win.contentView.removeChildView).toHaveBeenCalled();
       expect(view.webContents.close).toHaveBeenCalled();
     });
   });

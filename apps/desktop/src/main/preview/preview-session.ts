@@ -1,9 +1,9 @@
 /**
- * Shared session state types and accessors for the embedded preview BrowserView.
+ * Shared session state types and accessors for the embedded preview WebContentsView.
  * All other preview modules import from here rather than maintaining their own state.
  */
 
-import { BrowserView, BrowserWindow } from "electron";
+import { BrowserWindow, WebContentsView } from "electron";
 import { randomUUID } from "node:crypto";
 import type { AttachmentMeta, BrowserTabInfo, BrowserTabSet, McodeBrowserCaptureV2 } from "@mcode/contracts";
 
@@ -15,19 +15,19 @@ export type CaptureFinishResult =
   | { ok: true; meta: AttachmentMeta; previewBytes: Uint8Array; capture: McodeBrowserCaptureV2 }
   | { ok: false; error: string };
 
-/** CSS-pixel rectangle used for BrowserView bounds and capture regions. */
+/** CSS-pixel rectangle used for WebContentsView bounds and capture regions. */
 export type Bounds = { x: number; y: number; width: number; height: number };
 
 /**
  * Per-tab record held inside a thread's tab set. Phase A keeps a single backing
- * BrowserView per session (see {@link PreviewSession.view}), so `view` here is
+ * WebContentsView per session (see {@link PreviewSession.view}), so `view` here is
  * non-null only on the currently-active tab. Cold/inactive tabs hold the URL
  * needed to re-create the view when re-activated in Phase A.
  */
 export interface TabState {
   id: string;
   threadId: string;
-  view: BrowserView | null;
+  view: WebContentsView | null;
   resumeUrl: string | null;
   title: string | null;
   faviconUrl: string | null;
@@ -41,22 +41,22 @@ export interface ThreadTabSet {
 }
 
 /**
- * Per-window state for the embedded preview BrowserView.
+ * Per-window state for the embedded preview WebContentsView.
  * One entry is created lazily per BrowserWindow id and removed when the window closes.
  */
 export interface PreviewSession {
-  view: BrowserView | null;
+  view: WebContentsView | null;
   idleTimer: NodeJS.Timeout | null;
   /** Last shell-reported bounds so navigate can attach the view before the next sync tick. */
   lastBounds: Bounds | null;
   /**
-   * Last loaded http(s) URL before the view was torn down. New BrowserViews start blank;
+   * Last loaded http(s) URL before the view was torn down. New WebContentsViews start blank;
    * sync restores this so closing and reopening the preview panel keeps the page.
    */
   resumePreviewUrl: string | null;
   /** Key from the last insertCSS call; cleared when the guest navigates or the view is destroyed. */
   scrollbarCssKey: string | null;
-  /** Drag-marquee or element-pick overlay; sits above the BrowserView while capturing input. */
+  /** Drag-marquee or element-pick overlay; sits above the WebContentsView while capturing input. */
   selectionOverlay: BrowserWindow | null;
   overlayPending:
     | { mode: "region" | "element"; finish: (r: CaptureFinishResult) => void; hostWin: BrowserWindow }
@@ -221,7 +221,7 @@ export function resetIdle(_win: BrowserWindow, s: PreviewSession): void {
 
 /**
  * Tells the React shell to show or hide the loading affordance. The native
- * BrowserView stacks above HTML, so the indicator lives in chrome above the
+ * WebContentsView stacks above HTML, so the indicator lives in chrome above the
  * guest bounds rather than inside the surface div.
  */
 export function sendPreviewLoading(win: BrowserWindow, loading: boolean): void {
@@ -247,7 +247,7 @@ export function isAllowedHttpUrl(url: string): boolean {
   }
 }
 
-/** Accepts http, https, and file URLs for the preview BrowserView. */
+/** Accepts http, https, and file URLs for the preview WebContentsView. */
 export function isAllowedPreviewUrl(url: string): boolean {
   try {
     const u = new URL(url);

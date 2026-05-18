@@ -2,7 +2,7 @@
  * Design Mode IPC handlers (Phase G MVP).
  *
  * Two affordances:
- *   - Viewport presets: stretches the BrowserView/webview bounds to common
+ *   - Viewport presets: stretches the WebContentsView/webview bounds to common
  *     device widths so the user can sanity-check responsive layouts without
  *     leaving the IAB.
  *   - Read-only inspect overlay: injects a small in-guest script that

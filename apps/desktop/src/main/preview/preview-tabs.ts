@@ -1,11 +1,11 @@
 /**
- * Tab IPC handlers for the embedded preview BrowserView.
+ * Tab IPC handlers for the embedded preview WebContentsView.
  *
- * Phase A scope (this PR): the host still owns a single backing BrowserView per
+ * Phase A scope (this PR): the host still owns a single backing WebContentsView per
  * window. These handlers maintain a per-thread tab set whose **active** tab
  * mirrors that single view, and surface a stable wire format so the renderer
  * can build a tab bar today. Future PRs replace the single backing view with
- * one BrowserView per warm tab; the wire contract here does not change.
+ * one WebContentsView per warm tab; the wire contract here does not change.
  */
 
 import { BrowserWindow, ipcMain } from "electron";
@@ -52,7 +52,7 @@ function sendTabsUpdated(win: BrowserWindow, set: BrowserTabSet): void {
 
 /**
  * Drive the single backing view to the new active tab's URL. Phase A keeps a
- * single BrowserView per window (Slice 2 lifts this); after `tabs.activate`
+ * single WebContentsView per window (Slice 2 lifts this); after `tabs.activate`
  * or `tabs.create` we navigate that view so what the user sees matches the
  * activated tab. When no view is mounted yet, the next `preview:sync` will
  * create one and restore from `s.resumePreviewUrl`, so we still update that.
