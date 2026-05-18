@@ -54,8 +54,78 @@ jobs:
           fi
           echo "last_nightly_tag=$last_tag" >> "$GITHUB_OUTPUT"
 
-  build:
+  prepare-release:
     needs: [preflight]
+    if: needs.preflight.outputs.should_build == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute nightly version and tag
+        id: tag
+        shell: bash
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          version=$(node <<'NODE'
+          const fs = require("fs");
+          const path = require("path");
+          const { pathToFileURL } = require("url");
+          (async () => {
+            const modUrl = pathToFileURL(
+              path.resolve("apps/desktop/scripts/compute-nightly-version.mjs"),
+            ).href;
+            const { computeNightlyVersion } = await import(modUrl);
+            const manifest = JSON.parse(
+              fs.readFileSync(".release-please-manifest.json", "utf8"),
+            );
+            const v = computeNightlyVersion({
+              manifest,
+              runNumber: Number(process.env.GITHUB_RUN_NUMBER || "0"),
+              date: new Date(),
+            });
+            process.stdout.write(v);
+          })().catch((err) => {
+            console.error(err);
+            process.exit(1);
+          });
+          NODE
+          )
+          tag="v${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Computed nightly tag: ${tag}"
+
+      - name: Generate bot token
+        id: bot-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Create per-build nightly release
+        env:
+          GH_TOKEN: ${{ steps.bot-token.outputs.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -e
+          if gh release view "$TAG" --repo "${{ github.repository }}" &>/dev/null; then
+            echo "Release $TAG already exists (re-run); proceeding without recreate."
+            exit 0
+          fi
+          short_sha=$(git rev-parse --short HEAD)
+          gh release create "$TAG" \
+            --prerelease \
+            --title "Mcode Nightly ${{ steps.tag.outputs.version }} (${short_sha})" \
+            --notes "Automated nightly build from ${{ github.sha }}. Not marked latest. Channel YAML: \`latest-nightly.yml\`." \
+            --target ${{ github.sha }} \
+            --repo "${{ github.repository }}"
+
+  build:
+    needs: [preflight, prepare-release]
     if: needs.preflight.outputs.should_build == 'true'
     strategy:
       fail-fast: false
@@ -188,14 +258,15 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare-release.outputs.tag }}
         run: |
           while IFS= read -r f; do
-            echo "Uploading: $f"
-            gh release upload nightly "$f" --clobber --repo "${{ github.repository }}"
+            echo "Uploading: $f -> $TAG"
+            gh release upload "$TAG" "$f" --clobber --repo "${{ github.repository }}"
           done < artifact-list.txt
 
   merge-mac-yml-nightly:
-    needs: [preflight, build]
+    needs: [preflight, build, prepare-release]
     if: needs.preflight.outputs.should_build == 'true'
     runs-on: ubuntu-22.04
     steps:
@@ -310,8 +381,9 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare-release.outputs.tag }}
         run: |
           if [ -f latest-mac-nightly.yml ]; then
-            echo "Uploading merged latest-mac-nightly.yml"
-            gh release upload nightly latest-mac-nightly.yml --clobber --repo "${{ github.repository }}"
+            echo "Uploading merged latest-mac-nightly.yml to $TAG"
+            gh release upload "$TAG" latest-mac-nightly.yml --clobber --repo "${{ github.repository }}"
           fi
