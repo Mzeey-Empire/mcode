@@ -6,8 +6,9 @@
  * render an in-app banner and an "About" panel showing current state.
  * Also fires a native OS Notification when an update finishes downloading.
  *
- * Update behavior (auto-download, auto-install, check interval) is controlled
- * via user settings read from settings.json. Changes take effect on next app launch.
+ * Update behavior (release line, auto-download, auto-install, check interval)
+ * is read from settings.json. Release line changes apply on the next check;
+ * check interval still applies after restart (timer started at launch).
  */
 
 import { autoUpdater } from "electron-updater";
@@ -31,14 +32,31 @@ const INTERVAL_MS_MAP: Record<string, number> = {
 };
 
 interface UpdaterSettings {
+  /** Stable follows tagged releases; nightly follows the CI prerelease channel. */
+  releaseLine: "stable" | "nightly";
   autoDownload: boolean;
   autoInstallOnQuit: boolean;
   checkInterval: string;
 }
 
+/**
+ * Maps persisted `updates.channel` to the electron-updater publish channel name.
+ */
+function releaseLineToUpdaterChannel(releaseLine: "stable" | "nightly"): string {
+  return releaseLine === "nightly" ? "nightly" : "latest";
+}
+
+/**
+ * Applies `autoUpdater.channel` from user settings so checks target stable or nightly feeds.
+ */
+function applyUpdaterChannelFromSettings(settings: UpdaterSettings): void {
+  autoUpdater.channel = releaseLineToUpdaterChannel(settings.releaseLine);
+}
+
 /** Read updater settings from settings.json; falls back to safe defaults if the file is missing or invalid. */
 function loadUpdaterSettings(): UpdaterSettings {
   const defaults: UpdaterSettings = {
+    releaseLine: "stable",
     autoDownload: true,
     autoInstallOnQuit: true,
     checkInterval: "4hours",
@@ -48,6 +66,7 @@ function loadUpdaterSettings(): UpdaterSettings {
     const result = SettingsSchema().safeParse(JSON.parse(raw));
     if (result.success) {
       return {
+        releaseLine: result.data.updates?.channel ?? defaults.releaseLine,
         autoDownload: result.data.updates?.autoDownload ?? defaults.autoDownload,
         autoInstallOnQuit: result.data.updates?.autoInstallOnQuit ?? defaults.autoInstallOnQuit,
         checkInterval: result.data.updates?.checkInterval ?? defaults.checkInterval,
@@ -160,11 +179,12 @@ export function checkForUpdatesNow(): Promise<UpdateStatus> {
   }
   inFlightCheck = (async () => {
     try {
-      // Re-read settings so toggling "auto-download" in the UI takes
-      // effect without an app restart.
-      const { autoDownload, autoInstallOnQuit } = loadUpdaterSettings();
-      autoUpdater.autoDownload = autoDownload;
-      autoUpdater.autoInstallOnAppQuit = autoInstallOnQuit;
+      // Re-read settings so toggles and release line in the UI take effect
+      // without an app restart.
+      const settings = loadUpdaterSettings();
+      applyUpdaterChannelFromSettings(settings);
+      autoUpdater.autoDownload = settings.autoDownload;
+      autoUpdater.autoInstallOnAppQuit = settings.autoInstallOnQuit;
 
       broadcastStatus({ state: "checking" });
       await autoUpdater.checkForUpdates();
@@ -244,9 +264,11 @@ export function initAutoUpdater(): void {
 
   autoUpdater.allowDowngrade = false;
 
-  const { autoDownload, autoInstallOnQuit, checkInterval } = loadUpdaterSettings();
-  autoUpdater.autoDownload = autoDownload;
-  autoUpdater.autoInstallOnAppQuit = autoInstallOnQuit;
+  const updaterSettings = loadUpdaterSettings();
+  applyUpdaterChannelFromSettings(updaterSettings);
+  autoUpdater.autoDownload = updaterSettings.autoDownload;
+  autoUpdater.autoInstallOnAppQuit = updaterSettings.autoInstallOnQuit;
+  const { checkInterval } = updaterSettings;
 
   autoUpdater.on("checking-for-update", () => {
     broadcastStatus({ state: "checking" });
