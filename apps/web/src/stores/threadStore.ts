@@ -637,8 +637,13 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     if (!isRunning) {
       get().toolCallRecordCache.clear();
       set((state) => {
-        const nextToolCalls = { ...state.toolCallsByThread };
-        delete nextToolCalls[threadId];
+        // Intentionally preserve `toolCallsByThread[threadId]` here. Wiping it
+        // synchronously while the persisted narrative prefetch is still in
+        // flight produced a visible gap where the last turn's tool-call audit
+        // trail disappeared after a thread switch. The volatile state is
+        // cleared on the next `session.turnStarted` for this thread, which
+        // covers the only case where leaving stale entries would mislead the
+        // user (a new turn that should start with an empty trail).
         const nextStreaming = { ...state.streamingByThread };
         delete nextStreaming[threadId];
         const nextStartTimes = { ...state.agentStartTimes };
@@ -659,7 +664,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           latestTurnWithChanges: null,
           isLoadingMore: {},
           loadEpochByThread: { ...state.loadEpochByThread, [threadId]: (state.loadEpochByThread[threadId] ?? 0) + 1 },
-          toolCallsByThread: nextToolCalls,
           streamingByThread: nextStreaming,
           agentStartTimes: nextStartTimes,
           currentTurnMessageIdByThread: nextTurnMsgIds,
