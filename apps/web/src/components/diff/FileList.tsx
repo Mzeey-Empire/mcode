@@ -9,6 +9,8 @@ interface FileListProps {
   files: string[];
   source: SelectedFile["source"];
   id: string;
+  /** When true every file entry starts expanded (used for the latest turn). */
+  defaultFilesExpanded?: boolean;
 }
 
 /**
@@ -16,7 +18,7 @@ interface FileListProps {
  * Single-child folder chains are compressed (e.g., `src/stores/__tests__/`).
  * Folders sort before files; both alphabetical within their group.
  */
-export function FileList({ files, source, id }: FileListProps) {
+export function FileList({ files, source, id, defaultFilesExpanded = false }: FileListProps) {
   const tree = useMemo(() => buildFileTree(files), [files]);
 
   if (files.length === 0) {
@@ -28,7 +30,7 @@ export function FileList({ files, source, id }: FileListProps) {
   return (
     <div className="flex flex-col">
       {tree.map((node) => (
-        <TreeNodeRenderer key={nodeKey(node)} node={node} depth={0} source={source} id={id} />
+        <TreeNodeRenderer key={nodeKey(node)} node={node} depth={0} source={source} id={id} defaultExpanded={defaultFilesExpanded} />
       ))}
     </div>
   );
@@ -45,16 +47,16 @@ function TreeNodeRenderer({
   depth,
   source,
   id,
+  defaultExpanded,
 }: {
   node: TreeNode;
   depth: number;
   source: SelectedFile["source"];
   id: string;
+  defaultExpanded?: boolean;
 }) {
   if (node.type === "file") {
-    // depth 0 = file at the root of the input (no folder above it) → render flat.
-    // depth > 0 = file inside a folder → render nested (suppress redundant parent path).
-    return <FileEntry filePath={node.path} source={source} id={id} depth={depth} />;
+    return <FileEntry filePath={node.path} source={source} id={id} depth={depth} defaultExpanded={defaultExpanded} />;
   }
 
   return (
@@ -66,6 +68,7 @@ function TreeNodeRenderer({
           depth={depth + 1}
           source={source}
           id={id}
+          defaultExpanded={defaultExpanded}
         />
       ))}
     </FolderEntry>

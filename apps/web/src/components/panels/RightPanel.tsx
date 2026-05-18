@@ -310,7 +310,8 @@ export function RightPanel() {
         </div>
       </div>
 
-      {/* Tab content */}
+      {/* Tab content — DiffPanel stays mounted (hidden) so turn expand
+          state and loaded diffs survive tab switches. */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {activeTab === "tasks" && (
           <>
@@ -318,7 +319,9 @@ export function RightPanel() {
             <TaskPanel />
           </>
         )}
-        {activeTab === "changes" && <DiffPanel />}
+        <div className={activeTab === "changes" ? "flex flex-1 flex-col min-h-0" : "hidden"}>
+          <DiffPanel />
+        </div>
         {activeTab === "preview" && (
           <PreviewPanel threadId={activeThreadId} workspaceId={activeWorkspaceId} />
         )}

@@ -20,6 +20,8 @@ interface FileEntryProps {
    * parent-path suffix is suppressed (the folder header above carries it).
    */
   depth?: number;
+  /** When true the diff starts expanded on mount (used for the latest turn). */
+  defaultExpanded?: boolean;
 }
 
 /** Extract the basename from a file path. */
@@ -59,15 +61,20 @@ type DiffState = null | { loading: true } | { loading: false; data: string };
  * Diff is loaded lazily on the first expand.
  * Large diffs (>200 lines) are truncated with a "Show all N lines" button.
  */
-export function FileEntry({ filePath, source, id, depth = 0 }: FileEntryProps) {
+export function FileEntry({ filePath, source, id, depth = 0, defaultExpanded: defaultExpandedProp = false }: FileEntryProps) {
   const nested = depth > 0;
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpandedProp);
   const [showAllLines, setShowAllLines] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
-  const [diffState, setDiffState] = useState<DiffState>(null);
+  // Initialise from the Zustand cache so diffs survive panel close/reopen.
+  const cachedDiff = useDiffStore((s) => s.inlineDiffCache[`${source}:${id}:${filePath}`]);
+  const [diffState, setDiffState] = useState<DiffState>(
+    () => (cachedDiff !== undefined ? { loading: false, data: cachedDiff } : null),
+  );
   const renderMode = useDiffStore((s) => s.renderMode);
-  // Tracks whether a load has been kicked off so the effect doesn't cancel itself
-  // when diffState transitions from null → {loading:true}
+  // Tracks whether a load has been kicked off in this effect lifecycle.
+  // Reset in cleanup so React StrictMode's second invocation can start a
+  // fresh, non-cancelled fetch (the first is cancelled by cleanup).
   const loadStartedRef = useRef(false);
 
   const { basename, parent, ext, language, isMarkdown } = useMemo(() => {
@@ -77,10 +84,9 @@ export function FileEntry({ filePath, source, id, depth = 0 }: FileEntryProps) {
     return { basename: bn, parent: pr, ext: ex, language: langFromPath(filePath), isMarkdown: isMarkdownFile(filePath) };
   }, [filePath]);
 
-  // Load diff lazily on first expand. Uses a ref guard so that the state
-  // transition to {loading:true} doesn't re-trigger cleanup and cancel the fetch.
+  // Load diff lazily on first expand. Skips if the diff is already cached.
   useEffect(() => {
-    if (!expanded || loadStartedRef.current) return;
+    if (!expanded || loadStartedRef.current || (diffState !== null && !diffState.loading)) return;
     loadStartedRef.current = true;
 
     let cancelled = false;
@@ -100,7 +106,10 @@ export function FileEntry({ filePath, source, id, depth = 0 }: FileEntryProps) {
             ? await transport.getCommitDiff(workspaceId, id, filePath)
             : "";
         }
-        if (!cancelled) setDiffState({ loading: false, data: result });
+        if (!cancelled) {
+          setDiffState({ loading: false, data: result });
+          useDiffStore.getState().cacheInlineDiff(source, id, filePath, result);
+        }
       } catch {
         if (!cancelled) setDiffState({ loading: false, data: "" });
       }
@@ -109,6 +118,7 @@ export function FileEntry({ filePath, source, id, depth = 0 }: FileEntryProps) {
     void load();
     return () => {
       cancelled = true;
+      loadStartedRef.current = false;
     };
   }, [expanded, source, id, filePath]);
 
@@ -120,18 +130,15 @@ export function FileEntry({ filePath, source, id, depth = 0 }: FileEntryProps) {
     [diffState],
   );
 
-  const stats = useMemo(
-    () =>
-      lines.reduce(
-        (acc, l) => {
-          if (l.type === "add") acc.additions++;
-          else if (l.type === "remove") acc.deletions++;
-          return acc;
-        },
-        { additions: 0, deletions: 0 },
-      ),
-    [lines],
-  );
+  const stats = useMemo(() => {
+    let additions = 0;
+    let deletions = 0;
+    for (const l of lines) {
+      if (l.type === "add") additions++;
+      else if (l.type === "remove") deletions++;
+    }
+    return { additions, deletions };
+  }, [lines]);
 
   const isLoaded = diffState !== null && !diffState.loading;
   const isLargeDiff = lines.length > LARGE_DIFF_THRESHOLD;
@@ -192,7 +199,7 @@ export function FileEntry({ filePath, source, id, depth = 0 }: FileEntryProps) {
           )}
         </span>
 
-        {/* Stats: proportion bar + counts. The bar gives an at-a-glance sense of net impact. */}
+        {/* Stats: proportion bar + counts. Shown after the diff loads. */}
         {isLoaded && (stats.additions > 0 || stats.deletions > 0) && (
           <span className="flex shrink-0 items-center gap-2 font-mono text-[10px] tabular-nums">
             <span className="flex h-[3px] w-12 items-stretch overflow-hidden rounded-full bg-border/40">
