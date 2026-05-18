@@ -272,22 +272,30 @@ export class AgentService {
       throw new Error(`Workspace not found: ${thread.workspace_id}`);
     }
 
-    // `/goal` chat-command interception. Recognises three forms typed in the
-    // composer:
-    //   `/goal <condition>` — install a stop hook that blocks the agent from
-    //                         ending its turn until <condition> is satisfied
-    //   `/goal clear`       — remove the active goal
-    //   `/goal`             — show the active goal (or "no active goal")
+    // `/goal` chat-command interception. Three forms are recognised:
+    //
+    //   `/goal <condition>` — install a Stop hook for the condition AND
+    //                         immediately invoke the agent with the condition
+    //                         as its directive. The hook blocks the agent from
+    //                         ending its turn until the condition is satisfied.
+    //   `/goal clear`       — remove the active goal. No agent invocation.
+    //   `/goal` / `/goal show` — show the active goal. No agent invocation.
+    //
     // Only the Claude provider implements goals; on other providers the
-    // command degrades to a system-style notice. We persist the user message
-    // (so the command itself stays in the transcript) and a synthetic
-    // assistant reply with the result, then return without invoking the
-    // provider so no LLM turn runs.
+    // command is left as plain text so the model sees it.
+    //
+    // For SET form, we fall through to the normal sendMessage path with
+    // `content` rewritten to a directive prompt and `messageDisplayContent`
+    // pinned to the original `/goal …` text so the transcript shows what
+    // the user actually typed. For SHOW/CLEAR we short-circuit: persist the
+    // user message + a synthetic confirmation pill, then emit Ended so the
+    // composer can clear its optimistic "thinking" state.
     const goalMatch = effectiveProvider === "claude"
       ? /^\s*\/goal\b\s*(.*)$/s.exec(content)
       : null;
     if (goalMatch) {
       const arg = goalMatch[1].trim();
+      const lower = arg.toLowerCase();
       const sessionName = `mcode-${threadId}`;
       const claudeProvider = this.providerRegistry.resolve("claude") as unknown as {
         setGoal?: (sid: string, c: string) => void;
@@ -295,50 +303,62 @@ export class AgentService {
         getGoal?: (sid: string) => string | undefined;
       };
 
-      let replyText: string;
-      if (arg === "" || arg.toLowerCase() === "show") {
-        const current = claudeProvider.getGoal?.(sessionName);
-        replyText = current
-          ? `Active goal: "${current}". The agent will not stop until this condition is met. Use \`/goal clear\` to remove it.`
-          : `No active goal. Use \`/goal <condition>\` to set one.`;
-      } else if (arg.toLowerCase() === "clear" || arg.toLowerCase() === "reset") {
-        claudeProvider.clearGoal?.(sessionName);
-        replyText = `Goal cleared. The agent may now end its turn normally.`;
-      } else {
-        claudeProvider.setGoal?.(sessionName, arg);
-        replyText =
-          `Goal set: "${arg}". The agent will keep working until this condition is met. ` +
-          `Use \`/goal clear\` to remove it.`;
+      const isControl = arg === "" || lower === "show" || lower === "clear" || lower === "reset";
+
+      if (isControl) {
+        let replyText: string;
+        if (arg === "" || lower === "show") {
+          const current = claudeProvider.getGoal?.(sessionName);
+          replyText = current
+            ? `Active goal: "${current}". The agent will not stop until this condition is met. Use \`/goal clear\` to remove it.`
+            : `No active goal. Use \`/goal <condition>\` to set one.`;
+        } else {
+          claudeProvider.clearGoal?.(sessionName);
+          replyText = `Goal cleared. The agent may now end its turn normally.`;
+        }
+
+        const { messages: existing } = this.messageRepo.listByThread(threadId, 1);
+        const baseSeq = existing.length > 0 ? existing[existing.length - 1].sequence : 0;
+        let userMsgId: string;
+        let assistantMsgId: string;
+        this.db.transaction(() => {
+          const u = this.messageRepo.create(threadId, "user", content, baseSeq + 1);
+          const a = this.messageRepo.create(threadId, "assistant", replyText, baseSeq + 2);
+          userMsgId = u.id;
+          assistantMsgId = a.id;
+        })();
+
+        broadcast("agent.event", {
+          type: AgentEventType.Message,
+          threadId,
+          content: replyText,
+          tokens: null,
+          messageId: assistantMsgId!,
+        } satisfies AgentEvent);
+        // Composer optimistically marks the thread as running on send and
+        // waits for Ended to clear it. Since no provider call ran, emit one
+        // here so the indicator clears.
+        broadcast("agent.event", {
+          type: AgentEventType.Ended,
+          threadId,
+        } satisfies AgentEvent);
+        logger.info("Handled /goal control command", { threadId, arg, userMsgId: userMsgId! });
+        return;
       }
 
-      const { messages: existing } = this.messageRepo.listByThread(threadId, 1);
-      const baseSeq = existing.length > 0 ? existing[existing.length - 1].sequence : 0;
-      let userMsgId: string;
-      let assistantMsgId: string;
-      this.db.transaction(() => {
-        const u = this.messageRepo.create(threadId, "user", content, baseSeq + 1);
-        const a = this.messageRepo.create(threadId, "assistant", replyText, baseSeq + 2);
-        userMsgId = u.id;
-        assistantMsgId = a.id;
-      })();
-
-      broadcast("agent.event", {
-        type: AgentEventType.Message,
-        threadId,
-        content: replyText,
-        tokens: null,
-        messageId: assistantMsgId!,
-      } satisfies AgentEvent);
-      // The composer optimistically adds threadId to runningThreadIds on send
-      // and only clears it on an Ended event. Since we never invoked the
-      // provider, no Ended would fire naturally and the UI would spin at
-      // "thinking" forever — emit one here to close the turn cleanly.
-      broadcast("agent.event", {
-        type: AgentEventType.Ended,
-        threadId,
-      } satisfies AgentEvent);
-      logger.info("Handled /goal command", { threadId, arg, userMsgId: userMsgId! });
-      return;
+      // SET form. Install the goal, pin the user-visible text to the
+      // original "/goal …" string, and rewrite the wire payload to a
+      // directive so the agent starts working on the condition right away.
+      // The rest of sendMessage runs unchanged — Stop hook on the SDK
+      // session will block end-of-turn until the goal is satisfied or the
+      // user clears it with `/goal clear`.
+      claudeProvider.setGoal?.(sessionName, arg);
+      logger.info("Goal installed; forwarding directive to provider", { threadId, arg });
+      messageDisplayContent = content;
+      content =
+        `A goal has been set for this session: "${arg}". Treat this exactly ` +
+        `as your directive — start working toward it now. The session will not ` +
+        `stop until the goal is satisfied.`;
     }
 
     const cwd = this.gitService.resolveWorkingDir(
