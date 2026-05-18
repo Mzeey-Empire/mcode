@@ -31,27 +31,23 @@ const PILL_HTML = (label: string, condition: string | null, hint: string) => `
 <head>
   <meta charset="utf-8" />
   <style>
-    :root { color-scheme: dark; }
-    body { margin: 0; padding: 24px; background: #0a0a0a; font-family: ui-sans-serif, system-ui; color: #fafafa; font-size: 14px; }
-    .border-border\\/60 { border-color: rgba(115, 115, 115, 0.6); }
-    .bg-muted\\/30 { background: rgba(38, 38, 38, 0.3); }
-    .text-muted-foreground { color: #a1a1aa; }
-    .text-foreground { color: #fafafa; }
-    .text-foreground\\/80 { color: rgba(250, 250, 250, 0.8); }
-    .opacity-80 { opacity: 0.8; }
+    :root { color-scheme: dark; --primary: #f0a800; --foreground: #fafafa; --muted: #a1a1aa; }
+    body { margin: 0; padding: 24px; background: #0a0a0a; font-family: ui-sans-serif, system-ui; color: var(--foreground); font-size: 14px; }
   </style>
 </head>
 <body>
-  <div class="flex items-start gap-2.5 rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-sm"
-       style="display:flex;align-items:flex-start;gap:10px;border-radius:6px;border-width:1px;border-style:solid;padding:8px 12px;">
-    <svg data-testid="target-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mt-0.5 shrink-0 text-muted-foreground" style="margin-top:2px;flex-shrink:0;">
-      <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
-    </svg>
-    <div class="min-w-0 flex-1 text-muted-foreground leading-relaxed" style="min-width:0;flex:1 1 0;line-height:1.6;">
-      <span class="font-medium text-foreground" style="font-weight:500;">${label}</span>
-      ${condition ? `<span class="ml-1.5 text-foreground/80" style="margin-left:6px;">&ldquo;${condition}&rdquo;</span>` : ""}
-      <span class="ml-1.5 text-xs opacity-80" style="margin-left:6px;font-size:12px;opacity:0.8;">${hint}</span>
+  <div data-testid="goal-pill" role="note" aria-label="${condition ? `${label}: ${condition}` : label}"
+       style="display:flex;align-items:center;gap:12px;padding:8px 0;">
+    <div style="flex:1 1 0;height:1px;background:rgba(240,168,0,0.4);"></div>
+    <div style="display:flex;min-width:0;align-items:baseline;gap:10px;">
+      <svg data-testid="target-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;align-self:center;color:var(--primary);">
+        <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
+      </svg>
+      <span style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:0.2em;color:var(--primary);">${label}</span>
+      ${condition ? `<span style="font-family:ui-serif,Georgia,serif;font-size:14px;font-style:italic;line-height:1.4;color:var(--foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">&ldquo;${condition}&rdquo;</span>` : ""}
+      <span style="flex-shrink:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:9.5px;text-transform:uppercase;letter-spacing:0.18em;color:rgba(161,161,170,0.7);">${hint}</span>
     </div>
+    <div style="flex:1 1 0;height:1px;background:rgba(240,168,0,0.4);"></div>
   </div>
 </body>
 </html>
