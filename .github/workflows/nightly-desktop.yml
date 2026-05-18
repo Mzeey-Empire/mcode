@@ -76,16 +76,32 @@ jobs:
         run: |
           node <<'NODE'
           const fs = require("fs");
-          const manifest = JSON.parse(fs.readFileSync(".release-please-manifest.json", "utf8"));
-          const base = manifest["."];
-          const day = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-          const run = process.env.GITHUB_RUN_NUMBER || "0";
-          const version = `${base}-nightly.${day}.${run}`;
-          const pkgPath = "apps/desktop/package.json";
-          const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
-          pkg.version = version;
-          fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
-          console.log("Nightly desktop version:", version);
+          const path = require("path");
+          const { pathToFileURL } = require("url");
+          (async () => {
+            const modUrl = pathToFileURL(
+              path.resolve("apps/desktop/scripts/compute-nightly-version.mjs"),
+            ).href;
+            const { computeNightlyVersion } = await import(modUrl);
+            const manifest = JSON.parse(
+              fs.readFileSync(".release-please-manifest.json", "utf8"),
+            );
+            const version = computeNightlyVersion({
+              manifest,
+              runNumber: Number(process.env.GITHUB_RUN_NUMBER || "0"),
+              date: new Date(),
+            });
+            const pkgPath = "apps/desktop/package.json";
+            const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+            pkg.version = version;
+            fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+            console.log("Nightly desktop version:", version);
+            // Export for later steps that build the release tag.
+            fs.appendFileSync(process.env.GITHUB_ENV, `MCODE_NIGHTLY_VERSION=${version}\n`);
+          })().catch((err) => {
+            console.error(err);
+            process.exit(1);
+          });
           NODE
 
       - name: Build main & renderer
