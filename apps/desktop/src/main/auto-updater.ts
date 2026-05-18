@@ -201,6 +201,7 @@ export function checkForUpdatesNow(): Promise<UpdateStatus> {
       // without an app restart.
       const settings = loadUpdaterSettings();
       applyUpdaterChannelFromSettings(settings);
+      autoUpdater.allowPrerelease = settings.releaseLine === "nightly";
       autoUpdater.autoDownload = settings.autoDownload;
       autoUpdater.autoInstallOnAppQuit = settings.autoInstallOnQuit;
 
@@ -281,9 +282,9 @@ export function initAutoUpdater(): void {
   }
 
   autoUpdater.allowDowngrade = false;
-  autoUpdater.allowPrerelease = isNightlyBuild();
 
   const updaterSettings = loadUpdaterSettings();
+  autoUpdater.allowPrerelease = updaterSettings.releaseLine === "nightly";
   applyUpdaterChannelFromSettings(updaterSettings);
   autoUpdater.autoDownload = updaterSettings.autoDownload;
   autoUpdater.autoInstallOnAppQuit = updaterSettings.autoInstallOnQuit;
