@@ -132,6 +132,18 @@ export type {
   BrowserCaptureSpillFile,
 } from "./models/browser-preview.js";
 
+export {
+  BrowserTabIdSchema,
+  BrowserTabInfoSchema,
+  BrowserTabSetSchema,
+  BROWSER_TAB_INFO_STRING_MAX,
+} from "./models/browser-tab.js";
+export type {
+  BrowserTabId,
+  BrowserTabInfo,
+  BrowserTabSet,
+} from "./models/browser-tab.js";
+
 // Events
 export { AgentEventSchema, AgentEventType } from "./events/agent-event.js";
 export type { AgentEvent } from "./events/agent-event.js";
