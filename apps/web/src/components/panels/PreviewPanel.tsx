@@ -2,8 +2,12 @@ import { useRef } from "react";
 import { Globe } from "lucide-react";
 import { SmartOmnibox } from "./SmartOmnibox";
 import { PreviewToolbar } from "./PreviewToolbar";
+import { PreviewTabBar } from "./PreviewTabBar";
+import { PreviewPerfHud } from "./PreviewPerfHud";
+import { PreviewDesignBar } from "./PreviewDesignBar";
 import { usePreviewBridge } from "./hooks/usePreviewBridge";
 import { usePreviewCapture } from "./hooks/usePreviewCapture";
+import { usePreviewTabs } from "./hooks/usePreviewTabs";
 
 export interface PreviewPanelProps {
   /** Thread that owns preview state (URL memory and future captures). */
@@ -24,6 +28,14 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
 
   const bridge = usePreviewBridge({ threadId, workspaceId, surfaceRef });
   const capture = usePreviewCapture({ threadId, pushSync: bridge.pushSync });
+  const tabs = usePreviewTabs(threadId);
+  const designEnabled = (() => {
+    try {
+      return new URLSearchParams(window.location.search).get("previewDesign") === "1";
+    } catch {
+      return false;
+    }
+  })();
 
   if (!window.desktopBridge?.preview) {
     return (
@@ -47,9 +59,16 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
       data-testid="preview-panel"
       className="flex min-h-0 min-w-[20rem] flex-1 flex-col"
     >
+      <PreviewTabBar
+        tabSet={tabs.tabSet}
+        onNewTab={tabs.newTab}
+        onActivate={tabs.activateTab}
+        onClose={tabs.closeTab}
+      />
+      {designEnabled ? <PreviewDesignBar /> : null}
       <form
         onSubmit={(e) => e.preventDefault()}
-        className="flex-none space-y-1.5 border-b border-border/40 px-2 pt-2 pb-1.5"
+        className="flex-none space-y-1.5 border-b border-border/40 px-2 pt-1 pb-1.5"
       >
         <SmartOmnibox
           url={bridge.inputUrl}
@@ -111,6 +130,7 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
           </div>
         ) : null}
       </div>
+      <PreviewPerfHud />
     </div>
   );
 }
