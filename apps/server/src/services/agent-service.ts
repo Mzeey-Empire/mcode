@@ -329,6 +329,14 @@ export class AgentService {
         tokens: null,
         messageId: assistantMsgId!,
       } satisfies AgentEvent);
+      // The composer optimistically adds threadId to runningThreadIds on send
+      // and only clears it on an Ended event. Since we never invoked the
+      // provider, no Ended would fire naturally and the UI would spin at
+      // "thinking" forever — emit one here to close the turn cleanly.
+      broadcast("agent.event", {
+        type: AgentEventType.Ended,
+        threadId,
+      } satisfies AgentEvent);
       logger.info("Handled /goal command", { threadId, arg, userMsgId: userMsgId! });
       return;
     }
