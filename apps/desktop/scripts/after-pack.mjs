@@ -35,15 +35,24 @@ export default async function afterPack(context) {
   const productFilename =
     context.packager.appInfo.productFilename ??
     context.packager.appInfo.productName;
-  // Windows VERSIONINFO requires a numeric dotted quad (x.x.x.x). package.json
-  // versions can include semver prerelease/build suffixes (e.g. "1.2.3-beta.1"),
-  // so extract numeric segments only and pad to four.
+  // Windows VERSIONINFO requires a numeric dotted quad (x.x.x.x) where each
+  // segment fits in [0, 65535]. Parse only the semver core (major.minor.patch)
+  // and derive a bounded fourth segment from the prerelease metadata. Nightly
+  // versions like "0.11.1-nightly.20260518.42" contain a date segment that
+  // exceeds 65535, so we use the run number (last prerelease segment) instead.
   const rawVersion = context.packager.appInfo.version;
-  const numericSegments = (rawVersion.match(/\d+/g) ?? []).slice(0, 4);
-  const appVersion = [
-    ...numericSegments,
-    ...Array(Math.max(0, 4 - numericSegments.length)).fill("0"),
-  ].join(".");
+  const semverCore = rawVersion.match(/^(\d+)\.(\d+)\.(\d+)/);
+  const [major, minor, patch] = semverCore
+    ? [semverCore[1], semverCore[2], semverCore[3]]
+    : ["0", "0", "0"];
+  // Extract the last numeric segment from the prerelease suffix (typically the
+  // CI run number), clamped to 65535 so it always fits VERSIONINFO.
+  const prerelease = rawVersion.replace(/^\d+\.\d+\.\d+[-.]?/, "");
+  const preNums = prerelease.match(/\d+/g);
+  const fourth = preNums
+    ? String(Math.min(Number(preNums[preNums.length - 1]), 65535))
+    : "0";
+  const appVersion = `${major}.${minor}.${patch}.${fourth}`;
   const companyName = context.packager.appInfo.companyName ?? "Mcode";
 
   // The renamed copy at Contents/Resources/bin/mcode-server is co-signed by
