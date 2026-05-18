@@ -6,6 +6,7 @@ import {
   type RefObject,
 } from "react";
 import { useDiffStore } from "@/stores/diffStore";
+import { usePreviewSuppressionStore } from "@/stores/previewSuppressionStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 
 const NAV_ERROR_LABEL: Record<string, string> = {
@@ -185,6 +186,19 @@ export function usePreviewBridge({
     if (!preview) return;
     return preview.onLoadingState((p) => setPreviewLoading(p.loading));
   }, []);
+
+  // Hide the native WebContentsView while any modal/dialog overlay is open
+  // in the renderer. Without this the native view paints above all HTML and
+  // covers Dialog/CommandPalette/etc. The bounds are remembered on the host
+  // (s.lastBounds), so reattach is seamless.
+  const suppressionCount = usePreviewSuppressionStore((s) => s.count);
+  useEffect(() => {
+    if (suppressionCount > 0) {
+      void pushSyncRef.current(false);
+    } else {
+      void pushSyncRef.current(true);
+    }
+  }, [suppressionCount]);
 
   useEffect(() => {
     const preview = window.desktopBridge?.preview;
