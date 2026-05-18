@@ -53,20 +53,38 @@ function applyUpdaterChannelFromSettings(settings: UpdaterSettings): void {
   autoUpdater.channel = releaseLineToUpdaterChannel(settings.releaseLine);
 }
 
+/**
+ * Returns true when the running app version contains a `-nightly.` prerelease tag
+ * (e.g. `0.11.1-nightly.20260518.3`). Used to auto-select the nightly update channel.
+ */
+function isNightlyBuild(): boolean {
+  return app.getVersion().includes("-nightly.");
+}
+
 /** Read updater settings from settings.json; falls back to safe defaults if the file is missing or invalid. */
 function loadUpdaterSettings(): UpdaterSettings {
   const defaults: UpdaterSettings = {
-    releaseLine: "stable",
+    releaseLine: isNightlyBuild() ? "nightly" : "stable",
     autoDownload: true,
     autoInstallOnQuit: true,
     checkInterval: "4hours",
   };
   try {
     const raw = readFileSync(join(getMcodeDir(), "settings.json"), "utf-8");
-    const result = SettingsSchema().safeParse(JSON.parse(raw));
+    const parsed = JSON.parse(raw);
+    const result = SettingsSchema().safeParse(parsed);
     if (result.success) {
+      // Zod applies `.default("stable")` even when the user never set a
+      // channel, so we check the raw JSON to tell "unset" from "explicit".
+      // When no explicit channel is present, nightly builds default to
+      // "nightly"; otherwise respect the user's explicit choice.
+      const explicitChannel = parsed?.updates?.channel as string | undefined;
+      const releaseLine = explicitChannel
+        ? (result.data.updates.channel as "stable" | "nightly")
+        : defaults.releaseLine;
+
       return {
-        releaseLine: result.data.updates?.channel ?? defaults.releaseLine,
+        releaseLine,
         autoDownload: result.data.updates?.autoDownload ?? defaults.autoDownload,
         autoInstallOnQuit: result.data.updates?.autoInstallOnQuit ?? defaults.autoInstallOnQuit,
         checkInterval: result.data.updates?.checkInterval ?? defaults.checkInterval,
@@ -263,6 +281,7 @@ export function initAutoUpdater(): void {
   }
 
   autoUpdater.allowDowngrade = false;
+  autoUpdater.allowPrerelease = isNightlyBuild();
 
   const updaterSettings = loadUpdaterSettings();
   applyUpdaterChannelFromSettings(updaterSettings);

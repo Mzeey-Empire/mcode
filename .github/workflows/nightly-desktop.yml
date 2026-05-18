@@ -20,9 +20,16 @@ jobs:
   prepare:
     runs-on: ubuntu-22.04
     steps:
+      - name: Generate bot token
+        id: bot-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - name: Ensure nightly prerelease exists
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.bot-token.outputs.token }}
         run: |
           set -e
           if ! gh release view nightly --repo "${{ github.repository }}" &>/dev/null; then
