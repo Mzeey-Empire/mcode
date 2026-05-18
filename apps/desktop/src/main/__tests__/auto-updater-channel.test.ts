@@ -30,7 +30,7 @@ vi.mock("@mcode/shared", () => ({
   getMcodeDir: vi.fn().mockReturnValue("/tmp/mcode"),
 }));
 
-import { applyChannelConfig } from "../auto-updater";
+import { applyChannelConfig, isCrossChannelDowngrade } from "../auto-updater";
 
 describe("applyChannelConfig", () => {
   beforeEach(() => {
@@ -56,5 +56,104 @@ describe("applyChannelConfig", () => {
     expect(updaterMock.allowDowngrade).toBe(false);
     applyChannelConfig("stable");
     expect(updaterMock.allowDowngrade).toBe(false);
+  });
+});
+
+describe("isCrossChannelDowngrade", () => {
+  it("nightly version > latest stable triggers downgrade flow", () => {
+    expect(
+      isCrossChannelDowngrade({
+        from: "nightly",
+        to: "stable",
+        currentVersion: "0.12.0-nightly.20260518.42",
+        latestStable: "0.11.1",
+      }),
+    ).toBe(true);
+  });
+
+  it("nightly version older than latest stable does not", () => {
+    expect(
+      isCrossChannelDowngrade({
+        from: "nightly",
+        to: "stable",
+        currentVersion: "0.11.0-nightly.20260301.1",
+        latestStable: "0.11.1",
+      }),
+    ).toBe(false);
+  });
+
+  it("stable → nightly never triggers downgrade", () => {
+    expect(
+      isCrossChannelDowngrade({
+        from: "stable",
+        to: "nightly",
+        currentVersion: "0.11.1",
+        latestStable: "0.11.1",
+      }),
+    ).toBe(false);
+  });
+
+  it("same channel never triggers downgrade", () => {
+    expect(
+      isCrossChannelDowngrade({
+        from: "nightly",
+        to: "nightly",
+        currentVersion: "0.12.0-nightly.20260518.42",
+        latestStable: "0.11.1",
+      }),
+    ).toBe(false);
+  });
+
+  it("missing latestStable falls back to false (no info, no warning)", () => {
+    expect(
+      isCrossChannelDowngrade({
+        from: "nightly",
+        to: "stable",
+        currentVersion: "0.12.0-nightly.20260518.42",
+        latestStable: undefined,
+      }),
+    ).toBe(false);
+  });
+
+  it("current nightly at same core as just-shipped stable is older (no downgrade)", () => {
+    // semverGt §11.4.1: equal core, no-prerelease > has-prerelease.
+    // Running 0.12.0-nightly.X right after 0.12.0 stable ships: stable is
+    // newer, so switching channels does NOT cross-downgrade.
+    expect(
+      isCrossChannelDowngrade({
+        from: "nightly",
+        to: "stable",
+        currentVersion: "0.12.0-nightly.20260518.42",
+        latestStable: "0.12.0",
+      }),
+    ).toBe(false);
+  });
+
+  it("current is plain semver newer than latest stable (downgrade)", () => {
+    // Belt-and-suspenders: a non-prerelease current version greater than
+    // latestStable still triggers downgrade. (Practically rare for nightly→
+    // stable, but exercises semverGt's no-prerelease-on-both branch.)
+    expect(
+      isCrossChannelDowngrade({
+        from: "nightly",
+        to: "stable",
+        currentVersion: "0.12.0",
+        latestStable: "0.11.1",
+      }),
+    ).toBe(true);
+  });
+
+  it("identical core and identical prerelease is not a downgrade", () => {
+    // currentVersion === latestStable should return false even if both happen
+    // to carry the same prerelease tag (defensive — practical case is two
+    // stables that happen to match).
+    expect(
+      isCrossChannelDowngrade({
+        from: "nightly",
+        to: "stable",
+        currentVersion: "0.11.1",
+        latestStable: "0.11.1",
+      }),
+    ).toBe(false);
   });
 });

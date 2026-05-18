@@ -57,6 +57,71 @@ export function applyChannelConfig(releaseLine: "stable" | "nightly"): void {
 }
 
 /**
+ * Compare a major.minor.patch[-prerelease] string against another using semver
+ * precedence rules (numeric segments compared numerically; prerelease present
+ * is less than no prerelease at the same MAJOR.MINOR.PATCH).
+ */
+function semverGt(a: string, b: string): boolean {
+  const parse = (v: string) => {
+    const [main, pre] = v.split("-", 2);
+    const nums = main.split(".").map((n) => Number(n));
+    return { nums, pre: pre ?? null };
+  };
+  const A = parse(a);
+  const B = parse(b);
+  for (let i = 0; i < 3; i++) {
+    const ai = A.nums[i] ?? 0;
+    const bi = B.nums[i] ?? 0;
+    if (ai !== bi) return ai > bi;
+  }
+  // Equal core. No-prerelease > has-prerelease.
+  if (A.pre === null && B.pre !== null) return true;
+  if (A.pre !== null && B.pre === null) return false;
+  if (A.pre === null && B.pre === null) return false;
+  // Both prerelease: compare identifiers per semver §11.4.
+  const ap = (A.pre as string).split(".");
+  const bp = (B.pre as string).split(".");
+  for (let i = 0; i < Math.max(ap.length, bp.length); i++) {
+    const x = ap[i];
+    const y = bp[i];
+    if (x === undefined) return false;
+    if (y === undefined) return true;
+    const xn = Number(x);
+    const yn = Number(y);
+    const xIsNum = !Number.isNaN(xn);
+    const yIsNum = !Number.isNaN(yn);
+    if (xIsNum && yIsNum) {
+      if (xn !== yn) return xn > yn;
+    } else if (xIsNum) {
+      return false; // numeric < alphanumeric
+    } else if (yIsNum) {
+      return true;
+    } else if (x !== y) {
+      return x > y;
+    }
+  }
+  return false;
+}
+
+/**
+ * True when switching `from` → `to` would require electron-updater to install
+ * a version older than what is currently running. Used by the renderer's
+ * channel-switch handler to decide whether to show a downgrade-confirmation
+ * dialog before applying the new channel.
+ */
+export function isCrossChannelDowngrade(args: {
+  from: "stable" | "nightly";
+  to: "stable" | "nightly";
+  currentVersion: string;
+  latestStable: string | undefined;
+}): boolean {
+  if (args.from === args.to) return false;
+  if (args.to !== "stable") return false;
+  if (!args.latestStable) return false;
+  return semverGt(args.currentVersion, args.latestStable);
+}
+
+/**
  * Applies the updater channel configuration (`channel` and `allowPrerelease`)
  * from user settings via `applyChannelConfig`, so checks target the stable or
  * nightly feed correctly.
