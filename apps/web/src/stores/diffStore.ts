@@ -93,6 +93,11 @@ interface DiffState {
   commitsByThread: Record<string, GitCommit[]>;
   /** Whether commits are currently loading, keyed by thread ID. */
   commitsLoadingByThread: Record<string, boolean>;
+  /**
+   * Inline diff cache keyed by `"source:id:filePath"`. Survives component
+   * unmounts (panel close/reopen, tab switches) so diffs aren't re-fetched.
+   */
+  inlineDiffCache: Record<string, string>;
   /** Currently selected file for diff viewing. */
   selectedFile: SelectedFile | null;
   /** Raw unified diff text for the selected file. */
@@ -131,6 +136,10 @@ interface DiffState {
   setSummaryRecord: (record: DiffState["summaryRecord"]) => void;
   /** Set summary loading state. */
   setSummaryLoading: (loading: boolean) => void;
+  /** Cache a fetched inline diff so it survives component unmounts. */
+  cacheInlineDiff: (source: string, id: string, filePath: string, data: string) => void;
+  /** Retrieve a cached inline diff, or undefined if not cached. */
+  getCachedInlineDiff: (source: string, id: string, filePath: string) => string | undefined;
   /** Persist the omnibox URL for a thread's embedded preview. */
   setPreviewUrlForThread: (threadId: string, url: string) => void;
   clearThread: (threadId: string) => void;
@@ -147,6 +156,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   snapshotsLoadingByThread: {},
   commitsByThread: {},
   commitsLoadingByThread: {},
+  inlineDiffCache: {},
   selectedFile: null,
   diffContent: null,
   diffLoading: false,
@@ -227,6 +237,12 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   setDiffLoading: (loading) => set({ diffLoading: loading }),
   setSummaryRecord: (record) => set({ summaryRecord: record }),
   setSummaryLoading: (loading) => set({ summaryLoading: loading }),
+  cacheInlineDiff: (source, id, filePath, data) =>
+    set((s) => ({
+      inlineDiffCache: { ...s.inlineDiffCache, [`${source}:${id}:${filePath}`]: data },
+    })),
+  getCachedInlineDiff: (source, id, filePath) =>
+    get().inlineDiffCache[`${source}:${id}:${filePath}`],
   setPreviewUrlForThread: (threadId, url) =>
     set((s) => ({
       previewUrlByThread: { ...s.previewUrlByThread, [threadId]: url },
