@@ -28,6 +28,27 @@ import {
 import { isMcodeWorkspacePreviewUrl } from "@mcode/contracts";
 
 /**
+ * True when `input` looks like a bare host (e.g. `example.com`, `sub.x.io/path`,
+ * `localhost:3000`) rather than a free-form search query. Heuristic: no
+ * whitespace, and the part before the first `/` either contains a dot or is
+ * `localhost`/IP and matches `host[:port]` characters. Strings that fail the
+ * check fall through to a Google search.
+ */
+export function looksLikeBareDomain(input: string): boolean {
+  if (/\s/.test(input)) return false;
+  const hostPart = input.split("/", 1)[0]!;
+  if (hostPart.length === 0) return false;
+  if (!/^[a-z0-9.\-:]+$/i.test(hostPart)) return false;
+  if (hostPart === "localhost" || /^localhost:\d+$/.test(hostPart)) return true;
+  // Accept IPv4 dotted quads.
+  if (/^\d{1,3}(\.\d{1,3}){3}(:\d+)?$/.test(hostPart)) return true;
+  // Generic host: must contain at least one dot and end on a non-numeric TLD-ish run.
+  if (!hostPart.includes(".")) return false;
+  const tld = hostPart.split(":")[0]!.split(".").pop() ?? "";
+  return /^[a-z][a-z0-9-]{1,}$/i.test(tld);
+}
+
+/**
  * Registers all navigation-related IPC handlers:
  * preview:sync, preview:navigate, preview:go-back, preview:go-forward,
  * preview:reload, preview:open-external, preview:get-navigation-state.
@@ -162,8 +183,13 @@ export function registerNavigationHandlers(): void {
         const resolved = await resolveLocalFileUrl(trimmed, workspacePath?.trim() ?? null);
         if (!resolved.ok) return resolved;
         target = resolved.url;
-      } else {
+      } else if (looksLikeBareDomain(trimmed)) {
         target = `https://${trimmed}`;
+      } else {
+        // Fallback: treat as a Google search query. Mirrors dpcode's
+        // SEARCH_URL_PREFIX behavior so the omnibox "Search or enter URL"
+        // affordance always lands somewhere when the user just types words.
+        target = `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`;
       }
 
       if (!isAllowedPreviewUrl(target)) {

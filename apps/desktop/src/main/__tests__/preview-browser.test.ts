@@ -644,6 +644,55 @@ describe("preview-browser", () => {
       const view = createdViews[0]!;
       expect(view.webContents.loadURL).toHaveBeenCalledWith("https://example.com/page.html");
     });
+
+    it("routes free-form text queries to Google search", async () => {
+      const win = createWindow();
+      await showPreview(win);
+      const view = createdViews[0]!;
+      view.webContents.loadURL.mockClear();
+
+      const result = await navigate(win, "best coffee shops near me");
+
+      expect(result).toEqual({ ok: true });
+      expect(view.webContents.loadURL).toHaveBeenCalledWith(
+        "https://www.google.com/search?q=best%20coffee%20shops%20near%20me",
+      );
+    });
+
+    it("routes single-word queries with no TLD to Google search", async () => {
+      const win = createWindow();
+      await showPreview(win);
+      const view = createdViews[0]!;
+      view.webContents.loadURL.mockClear();
+
+      await navigate(win, "electron");
+
+      expect(view.webContents.loadURL).toHaveBeenCalledWith(
+        "https://www.google.com/search?q=electron",
+      );
+    });
+
+    it("treats bare domains as URLs (https prepended)", async () => {
+      const win = createWindow();
+      await showPreview(win);
+      const view = createdViews[0]!;
+      view.webContents.loadURL.mockClear();
+
+      await navigate(win, "example.com");
+
+      expect(view.webContents.loadURL).toHaveBeenCalledWith("https://example.com");
+    });
+
+    it("treats localhost:PORT as a URL", async () => {
+      const win = createWindow();
+      await showPreview(win);
+      const view = createdViews[0]!;
+      view.webContents.loadURL.mockClear();
+
+      await navigate(win, "localhost:3000");
+
+      expect(view.webContents.loadURL).toHaveBeenCalledWith("https://localhost:3000");
+    });
   });
 
   describe("tabs IPC (Phase A)", () => {
