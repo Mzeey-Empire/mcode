@@ -140,6 +140,13 @@ interface ThreadState {
   interruptStopFileNoticeByThread: Record<string, { paths: string[] }>;
   /** Pre-fill the composer with the last user prompt after Stop, keyed by thread (consumed by Composer). */
   composerRecallFromStopByThread: Record<string, { text: string }>;
+  /**
+   * Wall-clock timestamp of the last successful cache-hit side-effect refresh
+   * per thread. Used by `loadMessages` to skip redundant `listPendingPermissions`,
+   * `getThreadTasks`, and `listSnapshots` calls when the user rapidly switches
+   * back to a recently-visited thread.
+   */
+  lastHydratedByThread: Record<string, number>;
 
   /** Store tool call records in the cache. */
   cacheToolCallRecords: (key: string, records: ToolCallRecord[]) => void;
@@ -502,6 +509,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   awaitingUserStopPersistByThread: {},
   interruptStopFileNoticeByThread: {},
   composerRecallFromStopByThread: {},
+  lastHydratedByThread: {},
 
   cacheToolCallRecords: (key, records) => {
     get().toolCallRecordCache.set(key, records);
@@ -524,7 +532,12 @@ export const useThreadStore = create<ThreadState>((set, get) => {
    * real-time state intact to avoid disrupting live tool call rendering.
    */
   loadMessages: async (threadId) => {
-    flushPendingTextDeltas();
+    // Defer the streaming-delta flush so it commits AFTER the cache-restore
+    // set() below. The flush mutates `streamingPreviewByThread[outgoingThreadId]`,
+    // which would otherwise trigger an extra MessageList re-render on the
+    // outgoing thread mid-switch. queueMicrotask still runs before next paint,
+    // so deltas land before the user sees anything stale.
+    queueMicrotask(flushPendingTextDeltas);
     // Cache-hit fast path. Restores message-loading state synchronously,
     // skipping the getMessages RPC and avoiding the blank-flash transition.
     const cached = getCachedSnapshot(threadId);
@@ -555,43 +568,60 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         };
       });
 
-      // Side-effect refresh: pending permissions and tasks may have changed since cache was last written.
-      void getTransport()
-        .listPendingPermissions(threadId)
-        .then((pending) => {
-          const mapped = pending.map((p) => ({ ...p, settled: false }));
-          const current = get().permissionsByThread[threadId] ?? [];
-          if (!shallowEqualBy(mapped, current, ["requestId", "toolName", "settled"])) {
-            set((s) => ({
-              permissionsByThread: {
-                ...s.permissionsByThread,
-                [threadId]: mapped,
-              },
-            }));
-          }
-        })
-        .catch(() => { /* non-critical */ });
+      // Side-effect refresh: pending permissions, tasks, and snapshot data
+      // may have changed since the cache was last written. Skip these RPCs
+      // when the user rapidly toggles back to a recently-visited thread - push
+      // events keep state fresh in the interim, so re-fetching wastes a
+      // round trip per gated channel.
+      const HYDRATION_TTL_MS = 2000;
+      const lastHydrated = get().lastHydratedByThread[threadId] ?? 0;
+      const isHydrationFresh = Date.now() - lastHydrated < HYDRATION_TTL_MS;
 
-      getTransport()
-        .getThreadTasks(threadId)
-        .then((tasks) => {
-          const items: TaskItem[] = (tasks ?? []).map((t, i) => ({
-            id: String(i),
-            content: t.content,
-            status: coerceTaskStatus(t.status),
-            group: "Tasks",
-          }));
-          const currentTasks = useTaskStore.getState().tasksByThread[threadId] ?? [];
-          if (!shallowEqualBy(items, currentTasks, ["content", "status"])) {
-            useTaskStore.getState().setTasks(threadId, items);
-          }
-        })
-        .catch((err) => {
-          console.debug("[taskHydration] Failed to load tasks for thread %s:", threadId, err);
-        });
+      if (!isHydrationFresh) {
+        set((s) => ({
+          lastHydratedByThread: { ...s.lastHydratedByThread, [threadId]: Date.now() },
+        }));
+
+        void getTransport()
+          .listPendingPermissions(threadId)
+          .then((pending) => {
+            const mapped = pending.map((p) => ({ ...p, settled: false }));
+            const current = get().permissionsByThread[threadId] ?? [];
+            if (!shallowEqualBy(mapped, current, ["requestId", "toolName", "settled"])) {
+              set((s) => ({
+                permissionsByThread: {
+                  ...s.permissionsByThread,
+                  [threadId]: mapped,
+                },
+              }));
+            }
+          })
+          .catch(() => { /* non-critical */ });
+
+        getTransport()
+          .getThreadTasks(threadId)
+          .then((tasks) => {
+            const items: TaskItem[] = (tasks ?? []).map((t, i) => ({
+              id: String(i),
+              content: t.content,
+              status: coerceTaskStatus(t.status),
+              group: "Tasks",
+            }));
+            const currentTasks = useTaskStore.getState().tasksByThread[threadId] ?? [];
+            if (!shallowEqualBy(items, currentTasks, ["content", "status"])) {
+              useTaskStore.getState().setTasks(threadId, items);
+            }
+          })
+          .catch((err) => {
+            console.debug("[taskHydration] Failed to load tasks for thread %s:", threadId, err);
+          });
+      }
 
       // If the cached snapshot has no file-change data but the thread has changes,
-      // fetch snapshots in the background (covers prefetched entries).
+      // fetch snapshots in the background (covers prefetched entries). The
+      // staleness gate above does not protect this branch because it only fires
+      // when prior visits left the cache without file-change data - that state
+      // does not change rapidly, so re-fetching per visit is rare.
       const threadRecord = useWorkspaceStore.getState().threads.find((t) => t.id === threadId);
       if (threadRecord?.has_file_changes && !cached.latestTurnWithChanges) {
         void getTransport().listSnapshots(threadId).then((snapshots) => {
@@ -765,6 +795,12 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               }
             });
         }
+
+        // Mark this thread freshly hydrated so subsequent rapid switches back
+        // skip the redundant side-effect refresh (see cache-hit gate above).
+        set((s) => ({
+          lastHydratedByThread: { ...s.lastHydratedByThread, [threadId]: Date.now() },
+        }));
 
         // Re-hydrate pending permissions (covers reconnect and thread switch)
         void getTransport().listPendingPermissions(threadId).then((pending) => {

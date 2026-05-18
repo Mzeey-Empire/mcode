@@ -829,7 +829,11 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const sendMessage = useThreadStore((s) => s.sendMessage);
   const stopAgent = useThreadStore((s) => s.stopAgent);
   const branchThread = useWorkspaceStore((s) => s.branchThread);
-  const runningThreadIds = useThreadStore((s) => s.runningThreadIds);
+  // Subscribe to just the boolean for this thread instead of the full Set.
+  // Avoids Composer re-renders when other threads start/stop their agents.
+  const isAgentRunning = useThreadStore(
+    (s) => threadId ? s.runningThreadIds.has(threadId) : false,
+  );
   const setThreadSettings = useThreadStore((s) => s.setThreadSettings);
 
   // Cursor on Windows has no usable supervised mode (cursor-agent's OS
@@ -852,7 +856,6 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const planPending = useThreadStore(
     (s) => !!threadId && (s.planQuestionsStatusByThread[threadId] ?? "idle") === "pending",
   );
-  const isAgentRunning = threadId ? runningThreadIds.has(threadId) : false;
 
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const workspacePath = workspaces.find((w) => w.id === workspaceId)?.path;
