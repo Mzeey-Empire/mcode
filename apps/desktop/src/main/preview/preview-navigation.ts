@@ -17,6 +17,7 @@ import {
 } from "./preview-session.js";
 import { hidePreview, ensureView } from "./preview-lifecycle.js";
 import { type Bounds } from "./preview-session.js";
+import { bumpPerf } from "./preview-perf.js";
 import {
   resolveLocalFileUrl,
   resolveMcodeWorkspacePreviewUrl,
@@ -52,9 +53,23 @@ export function registerNavigationHandlers(): void {
       const ws = payload.workspaceId;
       s.workspaceId = typeof ws === "string" && ws.trim().length > 0 ? ws.trim() : null;
       const b = payload.bounds;
+      bumpPerf("setPanelBoundsCalls");
       if (!payload.visible || !b || b.width < 4 || b.height < 4) {
         hidePreview(win, s);
         return;
+      }
+
+      const prevBounds = s.lastBounds;
+      const sameBounds =
+        prevBounds !== null &&
+        prevBounds.x === b.x &&
+        prevBounds.y === b.y &&
+        prevBounds.width === b.width &&
+        prevBounds.height === b.height;
+      if (sameBounds) {
+        bumpPerf("setPanelBoundsNoopSkips");
+      } else {
+        bumpPerf("setPanelBoundsViewportUpdates");
       }
 
       s.lastBounds = { x: b.x, y: b.y, width: b.width, height: b.height };

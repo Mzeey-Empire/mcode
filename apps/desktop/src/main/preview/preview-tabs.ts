@@ -20,6 +20,7 @@ import {
   type PreviewSession,
 } from "./preview-session.js";
 import { hidePreview } from "./preview-lifecycle.js";
+import { bumpPerf } from "./preview-perf.js";
 
 type TabIpcResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -37,10 +38,11 @@ function normaliseTabId(value: unknown): string | null {
 
 function sendTabsUpdated(win: BrowserWindow, set: BrowserTabSet): void {
   if (win.isDestroyed()) return;
+  bumpPerf("stateEmitCalls");
   try {
     win.webContents.send("preview:tabs-updated", set);
   } catch {
-    /* sender may be gone */
+    bumpPerf("stateEmitSkips");
   }
 }
 

@@ -136,12 +136,14 @@ export {
   BrowserTabIdSchema,
   BrowserTabInfoSchema,
   BrowserTabSetSchema,
+  BrowserPerfCountersSchema,
   BROWSER_TAB_INFO_STRING_MAX,
 } from "./models/browser-tab.js";
 export type {
   BrowserTabId,
   BrowserTabInfo,
   BrowserTabSet,
+  BrowserPerfCounters,
 } from "./models/browser-tab.js";
 
 export {

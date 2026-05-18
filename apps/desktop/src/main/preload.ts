@@ -204,6 +204,10 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     cancelCapture(): Promise<void> {
       return ipcRenderer.invoke("preview:cancel-capture");
     },
+    /** Read the live perf counter bag (dev HUD only). */
+    getPerfCounters(): Promise<unknown> {
+      return ipcRenderer.invoke("preview:get-perf-counters");
+    },
     /**
      * Multi-tab control surface (Phase A of the in-app browser rewrite).
      * Phase A keeps a single backing BrowserView per window; these methods

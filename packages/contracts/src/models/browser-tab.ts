@@ -51,3 +51,26 @@ export const BrowserTabSetSchema = lazySchema(() =>
   }),
 );
 export type BrowserTabSet = z.infer<ReturnType<typeof BrowserTabSetSchema>>;
+
+/**
+ * Hot-path counters for the embedded browser. Mirrors dpcode's
+ * `BrowserPerformanceSnapshot.counters` so the dev HUD and any future eval
+ * harness see the same shape across both projects.
+ */
+export const BrowserPerfCountersSchema = lazySchema(() =>
+  z.object({
+    setPanelBoundsCalls: z.number().int().nonnegative(),
+    setPanelBoundsNoopSkips: z.number().int().nonnegative(),
+    setPanelBoundsViewportUpdates: z.number().int().nonnegative(),
+    stateEmitCalls: z.number().int().nonnegative(),
+    stateEmitSkips: z.number().int().nonnegative(),
+    stateCloneCount: z.number().int().nonnegative(),
+    runtimeSyncQueueFlushes: z.number().int().nonnegative(),
+    syncRuntimeStateCalls: z.number().int().nonnegative(),
+    inactiveTabSuspendScheduled: z.number().int().nonnegative(),
+    inactiveTabSuspendCancelled: z.number().int().nonnegative(),
+    inactiveTabBudgetEvictions: z.number().int().nonnegative(),
+    warmInactiveRuntimeCount: z.number().int().nonnegative(),
+  }),
+);
+export type BrowserPerfCounters = z.infer<ReturnType<typeof BrowserPerfCountersSchema>>;

@@ -1,5 +1,5 @@
 import type { AttachmentMeta } from "./types";
-import type { BrowserTabSet, McodeBrowserCapture } from "@mcode/contracts";
+import type { BrowserPerfCounters, BrowserTabSet, McodeBrowserCapture } from "@mcode/contracts";
 
 /** Discriminated union describing the auto-updater lifecycle state. */
 export type UpdateStatus =
@@ -94,6 +94,8 @@ interface PreviewBridge {
   cancelCapture(): Promise<void>;
   /** Multi-tab control surface (Phase A of the in-app browser rewrite). */
   tabs: PreviewTabsBridge;
+  /** Live preview perf counters; dev HUD only. */
+  getPerfCounters(): Promise<BrowserPerfCounters>;
 }
 
 /** Wire-side result of a tab IPC call. */

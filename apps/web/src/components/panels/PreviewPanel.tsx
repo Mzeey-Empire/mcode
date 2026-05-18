@@ -3,6 +3,7 @@ import { Globe } from "lucide-react";
 import { SmartOmnibox } from "./SmartOmnibox";
 import { PreviewToolbar } from "./PreviewToolbar";
 import { PreviewTabBar } from "./PreviewTabBar";
+import { PreviewPerfHud } from "./PreviewPerfHud";
 import { usePreviewBridge } from "./hooks/usePreviewBridge";
 import { usePreviewCapture } from "./hooks/usePreviewCapture";
 import { usePreviewTabs } from "./hooks/usePreviewTabs";
@@ -120,6 +121,7 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
           </div>
         ) : null}
       </div>
+      <PreviewPerfHud />
     </div>
   );
 }
