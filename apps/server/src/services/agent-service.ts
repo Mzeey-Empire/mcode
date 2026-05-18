@@ -1829,6 +1829,8 @@ ${userMessage}`;
       durationMs: hook.durationMs ?? 0,
       didBlock: hook.didBlock,
       persistedMessageId: messageId,
+      // Stable DB row id so the client can dedupe redelivered broadcasts.
+      persistedHookId: hook.id,
     } satisfies AgentEvent);
   }
 
