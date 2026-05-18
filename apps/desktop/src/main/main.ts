@@ -41,6 +41,7 @@ import {
 } from "./auto-updater.js";
 import { setupSpellcheck } from "./spellcheck.js";
 import { registerPreviewBrowserHandlers, disposePreviewForWindow } from "./preview/index.js";
+import { startBrowserUseBridge, disposeBrowserUseBridge } from "./browser-use/index.js";
 import { resolveMcodeWorkspacePreviewUrl } from "./preview/preview-local-file.js";
 
 // Isolate dev's Electron userData (cache, cookies, localStorage, IndexedDB)
@@ -708,6 +709,17 @@ app.whenReady().then(async () => {
     // Initialize auto-updater (checks still run in dev; install hooks are packaged-only paths)
     initAutoUpdater();
 
+    // Boot the Codex browser-use pipe server. Failures are logged inside the
+    // module; do not block app startup if the pipe cannot bind (e.g. stale
+    // socket the user lacks permission to remove).
+    const pipePath = await startBrowserUseBridge();
+    if (pipePath) {
+      // Expose the path to child processes spawned later (Codex provider,
+      // OpenCode automation tools). The MCODE_ prefix is already protected
+      // by ProtectedEnvStore on the server side.
+      process.env["MCODE_BROWSER_USE_PIPE_PATH"] = pipePath;
+    }
+
     console.log(`[perf] Startup complete: ${(performance.now() - STARTUP_TIME).toFixed(1)}ms`);
   } catch (error) {
     const detail = error instanceof Error ? `${error.message}\n\n${error.stack ?? ""}` : String(error);
@@ -744,6 +756,7 @@ app.on("before-quit", async (e) => {
 
 app.on("will-quit", () => {
   cleanupAutoUpdater();
+  void disposeBrowserUseBridge();
 });
 
 export { mainWindow };
