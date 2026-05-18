@@ -13,6 +13,7 @@ const VIRTUAL_THRESHOLD = 20; // use virtual scroll only above this count
 // placement calculation; the rendered footer remains naturally sized.
 const FOOTER_HEIGHT = 28;
 
+/** Props for the {@link SlashCommandPopup} component. */
 interface SlashCommandPopupProps {
   isOpen: boolean;
   isLoading: boolean;
@@ -25,6 +26,13 @@ interface SlashCommandPopupProps {
   onRetry: () => void;
 }
 
+/**
+ * Floating popup that lists slash command suggestions anchored to the
+ * composer editor. Handles keyboard navigation via `selectedIndex`, virtualises
+ * long lists past `VIRTUAL_THRESHOLD`, flips above/below the anchor based on
+ * available viewport space, and dismisses on outside click. Render priority is
+ * error → list → inline loader → empty state.
+ */
 export function SlashCommandPopup({
   isOpen,
   isLoading,
@@ -74,11 +82,14 @@ export function SlashCommandPopup({
   // their natural content so a popup with two items isn't truncated.
   const listMaxHeight = VISIBLE_ITEMS * ITEM_HEIGHT;
 
-  // Estimate the rendered popup height (list rows + footer) only for the
-  // above/below placement decision. The outer wrapper itself has no maxHeight
-  // so it grows to fit list + footer without clipping the last row.
+  // Estimate the rendered popup height for the above/below placement
+  // decision. Only the list branch renders a footer (Refresh row); error,
+  // inline-loading, and empty branches do not. Including FOOTER_HEIGHT in
+  // those cases would cause unnecessary above-placement flips.
+  const willRenderList = !error && items.length > 0;
   const estimatedHeight =
-    Math.min(items.length, VISIBLE_ITEMS) * ITEM_HEIGHT + FOOTER_HEIGHT;
+    Math.min(items.length, VISIBLE_ITEMS) * ITEM_HEIGHT +
+    (willRenderList ? FOOTER_HEIGHT : 0);
   const spaceAbove = anchorRect.top;
   const placeAbove = spaceAbove > estimatedHeight + 8;
 
