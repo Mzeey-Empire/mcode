@@ -19,8 +19,12 @@ import {
   toBrowserTabSet,
   type PreviewSession,
 } from "./preview-session.js";
-import { hidePreview } from "./preview-lifecycle.js";
 import { bumpPerf } from "./preview-perf.js";
+import {
+  isAllowedPreviewUrl,
+  sendPreviewLoading,
+} from "./preview-session.js";
+import { trustMainProcessFileNavigation } from "./preview-local-file.js";
 
 type TabIpcResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -44,6 +48,37 @@ function sendTabsUpdated(win: BrowserWindow, set: BrowserTabSet): void {
   } catch {
     bumpPerf("stateEmitSkips");
   }
+}
+
+/**
+ * Drive the single backing view to the new active tab's URL. Phase A keeps a
+ * single BrowserView per window (Slice 2 lifts this); after `tabs.activate`
+ * or `tabs.create` we navigate that view so what the user sees matches the
+ * activated tab. When no view is mounted yet, the next `preview:sync` will
+ * create one and restore from `s.resumePreviewUrl`, so we still update that.
+ */
+function navigateActiveBackingViewToTab(
+  win: BrowserWindow,
+  s: PreviewSession,
+  resumeUrl: string | null,
+): void {
+  s.resumePreviewUrl = resumeUrl;
+  if (!s.view || s.view.webContents.isDestroyed()) {
+    return; // sync will recreate and restore from resumeUrl
+  }
+  const target = resumeUrl ?? "about:blank";
+  const wc = s.view.webContents;
+  if (wc.getURL() === target) return;
+  if (resumeUrl && !isAllowedPreviewUrl(resumeUrl)) {
+    // Defensive: should not happen because resumeUrl came from a vetted path,
+    // but never navigate to a non-whitelisted protocol.
+    return;
+  }
+  sendPreviewLoading(win, true);
+  if (resumeUrl && resumeUrl.startsWith("file:")) {
+    trustMainProcessFileNavigation(s, resumeUrl);
+  }
+  void wc.loadURL(target);
 }
 
 /**
@@ -97,13 +132,11 @@ export function registerTabHandlers(): void {
       });
 
       if (activate && tid === s.lastPreviewThreadId) {
-        // Phase A: activating a brand-new blank tab on the current thread
-        // detaches the existing view so the bar reflects "new tab" state.
-        // The renderer is expected to follow up with preview:navigate.
+        // Activating a brand-new blank tab on the current thread: navigate
+        // the backing view to about:blank so the user sees a clean slate.
         set.activeTabId = tabId;
-        hidePreview(win, s);
-        s.resumePreviewUrl = null;
         s.lastFavicons = [];
+        navigateActiveBackingViewToTab(win, s, null);
       } else if (activate) {
         set.activeTabId = tabId;
       }
@@ -136,12 +169,11 @@ export function registerTabHandlers(): void {
       if (set.activeTabId !== tabId) {
         set.activeTabId = tabId;
         if (tid === s.lastPreviewThreadId) {
-          // Phase A: with a single backing view, "activating" a different tab
-          // means hiding the current view and letting the renderer's next
-          // preview:sync drive the new active tab's resume URL.
-          hidePreview(win, s);
-          s.resumePreviewUrl = tab.resumeUrl;
+          // Drive the single backing view to the activated tab's URL so the
+          // user sees the right page immediately. Slice 2 swaps per-tab
+          // webContents here instead of navigating one shared view.
           s.lastFavicons = tab.faviconUrl ? [tab.faviconUrl] : [];
+          navigateActiveBackingViewToTab(win, s, tab.resumeUrl);
         }
       }
 
@@ -186,17 +218,15 @@ export function registerTabHandlers(): void {
         });
         set.activeTabId = fallbackId;
         if (tid === s.lastPreviewThreadId) {
-          hidePreview(win, s);
-          s.resumePreviewUrl = null;
           s.lastFavicons = [];
+          navigateActiveBackingViewToTab(win, s, null);
         }
       } else if (wasActive) {
         const nextActive = set.tabs[Math.min(idx, set.tabs.length - 1)]!;
         set.activeTabId = nextActive.id;
         if (tid === s.lastPreviewThreadId) {
-          hidePreview(win, s);
-          s.resumePreviewUrl = nextActive.resumeUrl;
           s.lastFavicons = nextActive.faviconUrl ? [nextActive.faviconUrl] : [];
+          navigateActiveBackingViewToTab(win, s, nextActive.resumeUrl);
         }
       }
 
