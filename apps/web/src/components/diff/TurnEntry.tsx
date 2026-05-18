@@ -72,6 +72,7 @@ export function TurnEntry({ snapshot, turnNumber, defaultExpanded = false }: Tur
             files={snapshot.files_changed}
             source="snapshot"
             id={snapshot.id}
+            threadId={snapshot.thread_id}
             defaultFilesExpanded={defaultExpanded}
           />
         </div>

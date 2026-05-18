@@ -15,6 +15,8 @@ interface FileEntryProps {
   filePath: string;
   source: SelectedFile["source"];
   id: string;
+  /** Thread that owns this file, used to scope the inline diff cache. */
+  threadId: string;
   /**
    * Indentation depth when rendered inside a folder tree. When > 0, the
    * parent-path suffix is suppressed (the folder header above carries it).
@@ -61,13 +63,13 @@ type DiffState = null | { loading: true } | { loading: false; data: string };
  * Diff is loaded lazily on the first expand.
  * Large diffs (>200 lines) are truncated with a "Show all N lines" button.
  */
-export function FileEntry({ filePath, source, id, depth = 0, defaultExpanded: defaultExpandedProp = false }: FileEntryProps) {
+export function FileEntry({ filePath, source, id, threadId, depth = 0, defaultExpanded: defaultExpandedProp = false }: FileEntryProps) {
   const nested = depth > 0;
   const [expanded, setExpanded] = useState(defaultExpandedProp);
   const [showAllLines, setShowAllLines] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
   // Initialise from the Zustand cache so diffs survive panel close/reopen.
-  const cachedDiff = useDiffStore((s) => s.inlineDiffCache[`${source}:${id}:${filePath}`]);
+  const cachedDiff = useDiffStore((s) => s.inlineDiffCache[`${threadId}:${source}:${id}:${filePath}`]);
   const [diffState, setDiffState] = useState<DiffState>(
     () => (cachedDiff !== undefined ? { loading: false, data: cachedDiff } : null),
   );
@@ -76,6 +78,17 @@ export function FileEntry({ filePath, source, id, depth = 0, defaultExpanded: de
   // Reset in cleanup so React StrictMode's second invocation can start a
   // fresh, non-cancelled fetch (the first is cancelled by cleanup).
   const loadStartedRef = useRef(false);
+
+  // Reset local state when the cache identity changes so a reused component
+  // instance doesn't show stale content from a previous identity.
+  const cacheKey = `${threadId}:${source}:${id}:${filePath}`;
+  useEffect(() => {
+    const cached = useDiffStore.getState().inlineDiffCache[cacheKey];
+    setDiffState(cached !== undefined ? { loading: false, data: cached } : null);
+    setShowAllLines(false);
+    setPreviewMode(false);
+    loadStartedRef.current = false;
+  }, [cacheKey]);
 
   const { basename, parent, ext, language, isMarkdown } = useMemo(() => {
     const bn = getFileBasename(filePath);
@@ -108,7 +121,7 @@ export function FileEntry({ filePath, source, id, depth = 0, defaultExpanded: de
         }
         if (!cancelled) {
           setDiffState({ loading: false, data: result });
-          useDiffStore.getState().cacheInlineDiff(source, id, filePath, result);
+          useDiffStore.getState().cacheInlineDiff(threadId, source, id, filePath, result);
         }
       } catch {
         if (!cancelled) setDiffState({ loading: false, data: "" });
@@ -120,7 +133,7 @@ export function FileEntry({ filePath, source, id, depth = 0, defaultExpanded: de
       cancelled = true;
       loadStartedRef.current = false;
     };
-  }, [expanded, source, id, filePath]);
+  }, [expanded, source, id, filePath, threadId]);
 
   const lines = useMemo(
     () =>
