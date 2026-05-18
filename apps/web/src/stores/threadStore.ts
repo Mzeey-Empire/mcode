@@ -1371,6 +1371,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         awaitingUserStopPersistByThread: omitKey(state.awaitingUserStopPersistByThread, threadId),
         interruptStopFileNoticeByThread: omitKey(state.interruptStopFileNoticeByThread, threadId),
         composerRecallFromStopByThread: omitKey(state.composerRecallFromStopByThread, threadId),
+        lastHydratedByThread: omitKey(state.lastHydratedByThread, threadId),
         // Clear message-keyed globals only when deleting the currently loaded thread.
         // For background threads, message-keyed maps (persistedToolCallCounts, etc.)
         // belong to the active thread's messages and must not be touched.
@@ -1462,6 +1463,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         awaitingUserStopPersistByThread: pruneAll(state.awaitingUserStopPersistByThread),
         interruptStopFileNoticeByThread: pruneAll(state.interruptStopFileNoticeByThread),
         composerRecallFromStopByThread: pruneAll(state.composerRecallFromStopByThread),
+        lastHydratedByThread: pruneAll(state.lastHydratedByThread),
         ...(deletingCurrentThread
           ? {
               currentThreadId: null,
