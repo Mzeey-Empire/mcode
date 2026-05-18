@@ -645,4 +645,161 @@ describe("preview-browser", () => {
       expect(view.webContents.loadURL).toHaveBeenCalledWith("https://example.com/page.html");
     });
   });
+
+  describe("tabs IPC (Phase A)", () => {
+    type TabIpcOk<T> = { ok: true; data: T };
+    type TabIpcResult<T> = TabIpcOk<T> | { ok: false; error: string };
+
+    function callTabs<T>(
+      win: ReturnType<typeof makeWindow>,
+      channel: string,
+      payload: Record<string, unknown>,
+    ): TabIpcResult<T> {
+      const ev = fakeEvent(win);
+      return ipcHandlers[channel]!(ev, payload) as TabIpcResult<T>;
+    }
+
+    it("tabs.list materialises a single tab for a new thread", async () => {
+      const win = createWindow();
+      await showPreview(win, { threadId: "thread-A" });
+
+      const result = callTabs<{ tabs: unknown[]; threadId: string; activeTabId: string | null }>(
+        win,
+        "preview:tabs.list",
+        { threadId: "thread-A" },
+      );
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.data.threadId).toBe("thread-A");
+      expect(result.data.tabs).toHaveLength(1);
+      expect(result.data.activeTabId).toBeTruthy();
+    });
+
+    it("tabs.create appends a tab and activates it by default", async () => {
+      const win = createWindow();
+      await showPreview(win, { threadId: "thread-A" });
+
+      const created = callTabs<{ tabId: string; tabs: { tabs: unknown[]; activeTabId: string } }>(
+        win,
+        "preview:tabs.create",
+        { threadId: "thread-A" },
+      );
+
+      expect(created.ok).toBe(true);
+      if (!created.ok) return;
+      expect(created.data.tabs.tabs).toHaveLength(2);
+      expect(created.data.tabs.activeTabId).toBe(created.data.tabId);
+    });
+
+    it("tabs.activate switches the active tab", async () => {
+      const win = createWindow();
+      await showPreview(win, { threadId: "thread-A" });
+
+      const created = callTabs<{ tabId: string; tabs: { activeTabId: string } }>(
+        win,
+        "preview:tabs.create",
+        { threadId: "thread-A", activate: false },
+      );
+      expect(created.ok).toBe(true);
+      if (!created.ok) return;
+      expect(created.data.tabs.activeTabId).not.toBe(created.data.tabId);
+
+      const activated = callTabs<{ activeTabId: string }>(win, "preview:tabs.activate", {
+        threadId: "thread-A",
+        tabId: created.data.tabId,
+      });
+      expect(activated.ok).toBe(true);
+      if (!activated.ok) return;
+      expect(activated.data.activeTabId).toBe(created.data.tabId);
+    });
+
+    it("tabs.close promotes a sibling when the active tab is removed", async () => {
+      const win = createWindow();
+      await showPreview(win, { threadId: "thread-A" });
+
+      const created = callTabs<{ tabId: string; tabs: { tabs: { id: string }[]; activeTabId: string } }>(
+        win,
+        "preview:tabs.create",
+        { threadId: "thread-A" },
+      );
+      expect(created.ok).toBe(true);
+      if (!created.ok) return;
+      const firstTabId = created.data.tabs.tabs[0]!.id;
+
+      const closed = callTabs<{ tabs: { id: string }[]; activeTabId: string | null }>(
+        win,
+        "preview:tabs.close",
+        { threadId: "thread-A", tabId: created.data.tabId },
+      );
+      expect(closed.ok).toBe(true);
+      if (!closed.ok) return;
+      expect(closed.data.tabs).toHaveLength(1);
+      expect(closed.data.activeTabId).toBe(firstTabId);
+    });
+
+    it("tabs.close on the last tab leaves a fresh fallback tab", async () => {
+      const win = createWindow();
+      await showPreview(win, { threadId: "thread-A" });
+
+      const initial = callTabs<{ tabs: { id: string }[]; activeTabId: string | null }>(
+        win,
+        "preview:tabs.list",
+        { threadId: "thread-A" },
+      );
+      expect(initial.ok).toBe(true);
+      if (!initial.ok) return;
+      const onlyId = initial.data.tabs[0]!.id;
+
+      const closed = callTabs<{ tabs: { id: string }[]; activeTabId: string | null }>(
+        win,
+        "preview:tabs.close",
+        { threadId: "thread-A", tabId: onlyId },
+      );
+      expect(closed.ok).toBe(true);
+      if (!closed.ok) return;
+      expect(closed.data.tabs).toHaveLength(1);
+      expect(closed.data.tabs[0]!.id).not.toBe(onlyId);
+      expect(closed.data.activeTabId).toBe(closed.data.tabs[0]!.id);
+    });
+
+    it("tab sets are isolated per thread (thread restore)", async () => {
+      const win = createWindow();
+      await showPreview(win, { threadId: "thread-A" });
+      const createdA = callTabs<{ tabId: string }>(win, "preview:tabs.create", {
+        threadId: "thread-A",
+      });
+      expect(createdA.ok).toBe(true);
+
+      // Switch to thread-B via preview:sync
+      await showPreview(win, { threadId: "thread-B" });
+
+      const bList = callTabs<{ tabs: unknown[] }>(win, "preview:tabs.list", {
+        threadId: "thread-B",
+      });
+      expect(bList.ok).toBe(true);
+      if (!bList.ok) return;
+      expect(bList.data.tabs).toHaveLength(1);
+
+      // Switch back: thread-A still has its two tabs
+      await showPreview(win, { threadId: "thread-A" });
+      const aListAgain = callTabs<{ tabs: unknown[] }>(win, "preview:tabs.list", {
+        threadId: "thread-A",
+      });
+      expect(aListAgain.ok).toBe(true);
+      if (!aListAgain.ok) return;
+      expect(aListAgain.data.tabs).toHaveLength(2);
+    });
+
+    it("rejects invalid thread or tab ids", () => {
+      const win = createWindow();
+      const r1 = callTabs(win, "preview:tabs.list", { threadId: "" });
+      expect(r1.ok).toBe(false);
+      const r2 = callTabs(win, "preview:tabs.activate", {
+        threadId: "thread-A",
+        tabId: "",
+      });
+      expect(r2.ok).toBe(false);
+    });
+  });
 });
