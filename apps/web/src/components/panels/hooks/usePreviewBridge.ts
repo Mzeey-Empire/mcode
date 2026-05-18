@@ -6,6 +6,7 @@ import {
   type RefObject,
 } from "react";
 import { useDiffStore } from "@/stores/diffStore";
+import { useElectronBlockingOverlayStore } from "@/stores/electronBlockingOverlayStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 
 const NAV_ERROR_LABEL: Record<string, string> = {
@@ -86,6 +87,9 @@ export function usePreviewBridge({
   const storedUrl = useDiffStore(
     (s) => s.previewUrlByThread[threadId] ?? "",
   );
+
+  /** Non-zero while a fullscreen modal hides the Electron preview (BrowserView composites above renderer HTML). */
+  const electronBlockingOverlayDepth = useElectronBlockingOverlayStore((s) => s.depth);
 
   /** Stable ref to the current storedUrl, read inside pushSync to avoid
    *  adding storedUrl to pushSync's dependency array. */
@@ -213,6 +217,16 @@ export function usePreviewBridge({
       void pushSyncRef.current(false);
     };
   }, []);
+
+  /** Detach BrowserView while blocking modals are open so confirmation dialogs remain visible above the preview. */
+  useEffect(() => {
+    if (!window.desktopBridge?.preview) return;
+    if (electronBlockingOverlayDepth > 0) {
+      void pushSyncRef.current(false);
+      return;
+    }
+    void pushSyncRef.current(true);
+  }, [electronBlockingOverlayDepth]);
 
   const onGoBack = useCallback(async () => {
     const preview = window.desktopBridge?.preview;

@@ -5,6 +5,7 @@ import { SearchIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Command } from "@/components/ui/command";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
+import { syncElectronBlockingOverlayOpen } from "@/stores/electronBlockingOverlayStore";
 import { setContext } from "@/lib/context-tracker";
 import { isMac } from "@/lib/platform";
 import { RootView } from "./views/RootView";
@@ -44,6 +45,13 @@ export function CommandPalette() {
     setContext("commandPaletteOpen", isOpen);
   }, [isOpen]);
 
+  /** Hide Electron BrowserView during palette focus (same native stacking constraint as Dialog). */
+  useEffect(() => {
+    if (!isOpen) return
+    syncElectronBlockingOverlayOpen(true)
+    return () => syncElectronBlockingOverlayOpen(false)
+  }, [isOpen])
+
   // The placeholder hints at what the input does in the current view/mode.
   const placeholder = browseMode
     ? "Type a path or filter…"
@@ -54,13 +62,19 @@ export function CommandPalette() {
         : "Search commands, type ~/ to browse, > for actions only…";
 
   return (
-    <DialogPrimitive.Root open={isOpen} onOpenChange={(o) => !o && close()} modal="trap-focus">
+    <DialogPrimitive.Root
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) close();
+      }}
+      modal="trap-focus"
+    >
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-foreground/40 backdrop-blur-sm" />
+        <DialogPrimitive.Backdrop className="fixed inset-0 z-[100] bg-white/[0.04] supports-backdrop-filter:backdrop-blur-[1px] dark:bg-white/[0.05]" />
         <DialogPrimitive.Popup
           data-testid="command-palette"
           className={cn(
-            "fixed left-1/2 top-[clamp(4rem,15vh,9rem)] z-50 w-full -translate-x-1/2 outline-none",
+            "fixed left-1/2 top-[clamp(4rem,15vh,9rem)] z-[100] w-full -translate-x-1/2 outline-none",
             top?.kind === "projects" ? "max-w-2xl" : "max-w-xl",
           )}
         >
