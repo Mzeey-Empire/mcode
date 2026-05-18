@@ -4,7 +4,8 @@
  */
 
 import { BrowserView, BrowserWindow } from "electron";
-import type { AttachmentMeta, McodeBrowserCaptureV2 } from "@mcode/contracts";
+import { randomUUID } from "node:crypto";
+import type { AttachmentMeta, BrowserTabInfo, BrowserTabSet, McodeBrowserCaptureV2 } from "@mcode/contracts";
 
 /**
  * Result of a picture-reference capture; defined here so PreviewSession can reference
@@ -16,6 +17,28 @@ export type CaptureFinishResult =
 
 /** CSS-pixel rectangle used for BrowserView bounds and capture regions. */
 export type Bounds = { x: number; y: number; width: number; height: number };
+
+/**
+ * Per-tab record held inside a thread's tab set. Phase A keeps a single backing
+ * BrowserView per session (see {@link PreviewSession.view}), so `view` here is
+ * non-null only on the currently-active tab. Cold/inactive tabs hold the URL
+ * needed to re-create the view when re-activated in Phase A.
+ */
+export interface TabState {
+  id: string;
+  threadId: string;
+  view: BrowserView | null;
+  resumeUrl: string | null;
+  title: string | null;
+  faviconUrl: string | null;
+}
+
+/** Per-thread tab set: an ordered list plus the id of the mounted tab. */
+export interface ThreadTabSet {
+  threadId: string;
+  tabs: TabState[];
+  activeTabId: string | null;
+}
 
 /**
  * Per-window state for the embedded preview BrowserView.
@@ -57,6 +80,12 @@ export interface PreviewSession {
    * since those loads already passed {@link resolveLocalFileUrl}.
    */
   trustedFileNavigationBudget: number;
+  /**
+   * Per-thread tab sets. Phase A: each thread has at least one synthetic tab whose
+   * `view` mirrors {@link PreviewSession.view} when that thread is active. Inactive
+   * threads' tabs carry only the resume URL/title/favicon needed to restore them.
+   */
+  tabsByThread: Map<string, ThreadTabSet>;
 }
 
 /** Global map of window id -> preview session state. */
@@ -84,10 +113,95 @@ export function getSession(win: BrowserWindow): PreviewSession {
       lastFavicons: [],
       lastCrashRecoveryAt: 0,
       trustedFileNavigationBudget: 0,
+      tabsByThread: new Map(),
     };
     sessions.set(win.id, s);
   }
   return s;
+}
+
+/**
+ * Ensures the given thread has a tab set with at least one tab. Returns the set.
+ * The first tab adopts whatever resume URL/title/favicon the session currently
+ * has for that thread so existing single-view behavior carries over.
+ */
+export function ensureThreadTabSet(s: PreviewSession, threadId: string): ThreadTabSet {
+  let set = s.tabsByThread.get(threadId);
+  if (!set) {
+    const tabId = randomUUID();
+    const isActiveThread = s.lastPreviewThreadId === threadId;
+    const firstTab: TabState = {
+      id: tabId,
+      threadId,
+      view: isActiveThread ? s.view : null,
+      resumeUrl: isActiveThread ? s.resumePreviewUrl : null,
+      title: null,
+      faviconUrl: isActiveThread ? (s.lastFavicons[0] ?? null) : null,
+    };
+    set = { threadId, tabs: [firstTab], activeTabId: tabId };
+    s.tabsByThread.set(threadId, set);
+  }
+  return set;
+}
+
+/** Returns the active tab for the given thread, creating a default tab if needed. */
+export function getActiveTab(s: PreviewSession, threadId: string): TabState {
+  const set = ensureThreadTabSet(s, threadId);
+  const active = set.tabs.find((t) => t.id === set.activeTabId) ?? set.tabs[0];
+  if (!active) {
+    // Defensive: ensureThreadTabSet guarantees at least one tab, but TypeScript
+    // doesn't know that. Add a synthetic one rather than throwing.
+    const id = randomUUID();
+    const tab: TabState = {
+      id,
+      threadId,
+      view: null,
+      resumeUrl: null,
+      title: null,
+      faviconUrl: null,
+    };
+    set.tabs.push(tab);
+    set.activeTabId = id;
+    return tab;
+  }
+  return active;
+}
+
+/** Serializable view of a thread's tab set for IPC and renderer reconciliation. */
+export function toBrowserTabSet(s: PreviewSession, threadId: string): BrowserTabSet {
+  const set = ensureThreadTabSet(s, threadId);
+  const tabs: BrowserTabInfo[] = set.tabs.map((t) => ({
+    id: t.id,
+    threadId: t.threadId,
+    title: t.title,
+    url: t.resumeUrl,
+    faviconUrl: t.faviconUrl,
+    warm: t.view !== null && !t.view.webContents.isDestroyed(),
+    active: t.id === set.activeTabId,
+  }));
+  return {
+    threadId,
+    activeTabId: set.activeTabId,
+    tabs,
+  };
+}
+
+/**
+ * Reflects the session's active single-view state onto the given thread's
+ * active tab. Called by navigation/lifecycle code after URL or favicon changes
+ * so {@link toBrowserTabSet} returns fresh data.
+ */
+export function syncActiveTabFromSession(s: PreviewSession): void {
+  const threadId = s.lastPreviewThreadId;
+  if (!threadId) return;
+  const tab = getActiveTab(s, threadId);
+  tab.view = s.view;
+  tab.resumeUrl = s.resumePreviewUrl;
+  tab.faviconUrl = s.lastFavicons[0] ?? null;
+  if (s.view && !s.view.webContents.isDestroyed()) {
+    const t = s.view.webContents.getTitle();
+    tab.title = t && t.length > 0 ? t : tab.title;
+  }
 }
 
 /**

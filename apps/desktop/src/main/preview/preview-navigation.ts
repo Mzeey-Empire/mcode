@@ -6,12 +6,14 @@
 import { BrowserWindow, ipcMain, shell } from "electron";
 import { logger } from "@mcode/shared";
 import {
+  ensureThreadTabSet,
   getSession,
-  sendPreviewLoading,
-  resetIdle,
+  guestUrlNeedsHttpRestore,
   isAllowedHttpUrl,
   isAllowedPreviewUrl,
-  guestUrlNeedsHttpRestore,
+  resetIdle,
+  sendPreviewLoading,
+  syncActiveTabFromSession,
 } from "./preview-session.js";
 import { hidePreview, ensureView } from "./preview-lifecycle.js";
 import { type Bounds } from "./preview-session.js";
@@ -69,6 +71,11 @@ export function registerNavigationHandlers(): void {
         const tid = payload.threadId ?? null;
         const switchedThread = tid != null && tid !== s.lastPreviewThreadId;
         s.lastPreviewThreadId = tid;
+        // Phase A: ensure the active thread always has a tab set materialised so
+        // tab IPC and "tabs-updated" pushes have something to reference.
+        if (tid != null) {
+          ensureThreadTabSet(s, tid);
+        }
 
         // One BrowserView is shared across threads; without an explicit navigation on switch,
         // the previous thread's document (and resumePreviewUrl) would leak into the next thread.
@@ -163,6 +170,7 @@ export function registerNavigationHandlers(): void {
       trustMainProcessFileNavigation(s, target);
       void view.webContents.loadURL(target);
       s.resumePreviewUrl = target;
+      syncActiveTabFromSession(s);
       resetIdle(win, s);
       return { ok: true };
     },

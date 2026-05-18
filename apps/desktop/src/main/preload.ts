@@ -204,6 +204,31 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     cancelCapture(): Promise<void> {
       return ipcRenderer.invoke("preview:cancel-capture");
     },
+    /**
+     * Multi-tab control surface (Phase A of the in-app browser rewrite).
+     * Phase A keeps a single backing BrowserView per window; these methods
+     * give the renderer a stable contract for tab list / mutations so the UI
+     * can ship tab affordances before the real per-tab backing lands.
+     */
+    tabs: {
+      list(threadId: string): Promise<unknown> {
+        return ipcRenderer.invoke("preview:tabs.list", { threadId });
+      },
+      create(threadId: string, activate = true): Promise<unknown> {
+        return ipcRenderer.invoke("preview:tabs.create", { threadId, activate });
+      },
+      activate(threadId: string, tabId: string): Promise<unknown> {
+        return ipcRenderer.invoke("preview:tabs.activate", { threadId, tabId });
+      },
+      close(threadId: string, tabId: string): Promise<unknown> {
+        return ipcRenderer.invoke("preview:tabs.close", { threadId, tabId });
+      },
+      onUpdated(callback: (payload: unknown) => void): () => void {
+        const listener = (_event: unknown, payload: unknown) => callback(payload);
+        ipcRenderer.on("preview:tabs-updated", listener);
+        return () => ipcRenderer.removeListener("preview:tabs-updated", listener);
+      },
+    },
   },
 
   /** IPC push transport relayed from the main process. */

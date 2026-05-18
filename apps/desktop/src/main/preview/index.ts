@@ -14,6 +14,7 @@ import { registerNavigationHandlers } from "./preview-navigation.js";
 import { registerCaptureHandlers, registerWebRequestInterceptor } from "./preview-capture.js";
 import { registerOverlayHandlers } from "./preview-overlay.js";
 import { registerSpillHandlers } from "./preview-spill.js";
+import { registerTabHandlers } from "./preview-tabs.js";
 
 /** Registers all preview:* IPC handlers. Call once at app startup. */
 export function registerPreviewBrowserHandlers(): void {
@@ -27,4 +28,5 @@ export function registerPreviewBrowserHandlers(): void {
   registerWebRequestInterceptor(previewPartition);
   registerOverlayHandlers();
   registerSpillHandlers();
+  registerTabHandlers();
 }

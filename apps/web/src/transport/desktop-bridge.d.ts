@@ -1,5 +1,5 @@
 import type { AttachmentMeta } from "./types";
-import type { McodeBrowserCapture } from "@mcode/contracts";
+import type { BrowserTabSet, McodeBrowserCapture } from "@mcode/contracts";
 
 /** Discriminated union describing the auto-updater lifecycle state. */
 export type UpdateStatus =
@@ -92,6 +92,29 @@ interface PreviewBridge {
   onDidUpdateFavicon(callback: (payload: { favicon: string | null }) => void): () => void;
   /** Cancel any in-progress capture operation (region or element-pick). */
   cancelCapture(): Promise<void>;
+  /** Multi-tab control surface (Phase A of the in-app browser rewrite). */
+  tabs: PreviewTabsBridge;
+}
+
+/** Wire-side result of a tab IPC call. */
+export type PreviewTabIpcResult<T> =
+  | { readonly ok: true; readonly data: T }
+  | { readonly ok: false; readonly error: string };
+
+/** Mutation result for create. */
+export interface PreviewTabCreateData {
+  readonly tabId: string;
+  readonly tabs: BrowserTabSet;
+}
+
+/** Tab control surface mounted under `desktopBridge.preview.tabs`. */
+interface PreviewTabsBridge {
+  list(threadId: string): Promise<PreviewTabIpcResult<BrowserTabSet>>;
+  create(threadId: string, activate?: boolean): Promise<PreviewTabIpcResult<PreviewTabCreateData>>;
+  activate(threadId: string, tabId: string): Promise<PreviewTabIpcResult<BrowserTabSet>>;
+  close(threadId: string, tabId: string): Promise<PreviewTabIpcResult<BrowserTabSet>>;
+  /** Subscribe to push-style tab set updates emitted on navigation/favicon/close. */
+  onUpdated(callback: (payload: BrowserTabSet) => void): () => void;
 }
 
 /** IPC push transport relayed from the Electron main process. */

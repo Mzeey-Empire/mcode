@@ -11,6 +11,8 @@ import {
   clearIdle,
   sendPreviewLoading,
   isAllowedPreviewUrl,
+  syncActiveTabFromSession,
+  toBrowserTabSet,
 } from "./preview-session.js";
 import { removeEpPickHighlighter, abortOverlayCapture } from "./preview-overlay.js";
 import { pushPreviewConsoleLine } from "./preview-capture.js";
@@ -131,6 +133,13 @@ export function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
           title: view.webContents.getTitle(),
           favicon: s.lastFavicons[0] ?? null,
         });
+        syncActiveTabFromSession(s);
+        if (s.lastPreviewThreadId) {
+          win.webContents.send(
+            "preview:tabs-updated",
+            toBrowserTabSet(s, s.lastPreviewThreadId),
+          );
+        }
       }
     })();
   };
@@ -144,6 +153,13 @@ export function ensureView(win: BrowserWindow, s: PreviewSession): BrowserView {
       win.webContents.send("preview:did-update-favicon", {
         favicon: urls[0] ?? null,
       });
+      syncActiveTabFromSession(s);
+      if (s.lastPreviewThreadId) {
+        win.webContents.send(
+          "preview:tabs-updated",
+          toBrowserTabSet(s, s.lastPreviewThreadId),
+        );
+      }
     }
   });
   view.webContents.on("did-finish-load", () => {
