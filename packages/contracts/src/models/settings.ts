@@ -69,6 +69,15 @@ export const UpdateCheckIntervalSchema = z.enum(["15min", "1hour", "4hours", "1d
 /** Auto-update check interval value. */
 export type UpdateCheckInterval = z.infer<typeof UpdateCheckIntervalSchema>;
 
+/**
+ * Desktop auto-update release line. Maps to electron-updater publish channel:
+ * `stable` uses the default `latest` feed; `nightly` uses the `nightly` channel
+ * (prerelease artifacts from CI).
+ */
+export const UpdateReleaseLineSchema = z.enum(["stable", "nightly"]);
+/** Desktop auto-update release line value. */
+export type UpdateReleaseLine = z.infer<typeof UpdateReleaseLineSchema>;
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -353,6 +362,11 @@ export const SettingsSchema = lazySchema(() =>
     /** App auto-update settings. */
     updates: z
       .object({
+        /**
+         * Release line to follow. Stable uses tagged releases; nightly uses automated
+         * prerelease builds from the default branch (when published by maintainers).
+         */
+        channel: UpdateReleaseLineSchema.default("stable"),
         /** Whether to automatically download available updates. */
         autoDownload: z.boolean().default(true),
         /** Whether to automatically install updates when the app quits. */
@@ -523,6 +537,7 @@ export const PartialSettingsSchema = lazySchema(() =>
       .optional(),
     updates: z
       .object({
+        channel: UpdateReleaseLineSchema.optional(),
         autoDownload: z.boolean().optional(),
         autoInstallOnQuit: z.boolean().optional(),
         checkInterval: UpdateCheckIntervalSchema.optional(),

@@ -75,6 +75,7 @@ export {
   ProviderIdSchema,
   NamingModeSchema,
   UpdateCheckIntervalSchema,
+  UpdateReleaseLineSchema,
   GRACE_PERIOD_DEFAULT_SECONDS,
 } from "./models/settings.js";
 export type {
@@ -87,6 +88,7 @@ export type {
   SettingsProviderId,
   NamingMode,
   UpdateCheckInterval,
+  UpdateReleaseLine,
 } from "./models/settings.js";
 
 export {
