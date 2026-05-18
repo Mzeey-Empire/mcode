@@ -1,6 +1,6 @@
 import { memo, useMemo, useState, useCallback, useRef, useEffect, lazy, Suspense } from "react";
 import type { Message } from "@/transport";
-import { ImageIcon, RotateCcw, Copy, Check, GitBranch, AlertCircle, Reply } from "lucide-react";
+import { ImageIcon, RotateCcw, Copy, Check, GitBranch, AlertCircle, Reply, Target } from "lucide-react";
 import { cn } from "@/lib/utils";
 const LazyMarkdownContent = lazy(() => import("./MarkdownContent"));
 import { stripInjectedFiles } from "@/lib/file-tags";
@@ -23,6 +23,26 @@ function isAssistantContentEmpty(content: string): boolean {
 }
 
 /** Parses the message content of a synthetic agent-error system message. Returns the error text, or null if not an agent error. */
+/**
+ * Detect /goal-command confirmations emitted by AgentService. Returns a
+ * structured render hint when the assistant message is one of the goal
+ * status messages, or null for ordinary model output.
+ */
+function parseGoalStatus(content: string): {
+  label: string;
+  condition?: string;
+  hint: string;
+} | null {
+  const text = content.trim();
+  let m = /^Goal set: "([\s\S]+?)"\./.exec(text);
+  if (m) return { label: "Goal set", condition: m[1], hint: "/goal clear to remove" };
+  m = /^Active goal: "([\s\S]+?)"\./.exec(text);
+  if (m) return { label: "Active goal", condition: m[1], hint: "/goal clear to remove" };
+  if (/^Goal cleared\./.test(text)) return { label: "Goal cleared", hint: "agent may end its turn normally" };
+  if (/^No active goal\./.test(text)) return { label: "No active goal", hint: "/goal <condition> to set one" };
+  return null;
+}
+
 function parseAgentError(content: string): string | null {
   try {
     const parsed = JSON.parse(content) as { __type?: string; message?: string };
@@ -278,6 +298,28 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
         <div className="h-px flex-1 bg-border" />
       </div>
     );
+  }
+
+  // Goal-status confirmations are emitted by AgentService when the user types
+  // /goal in the composer. They arrive as assistant messages but read as
+  // chat-control notices, not model output — render them as a compact pill
+  // rather than a full bubble.
+  if (message.role === "assistant") {
+    const goal = parseGoalStatus(textContent);
+    if (goal) {
+      return (
+        <div className="flex items-start gap-2.5 rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-sm">
+          <Target size={14} className="mt-0.5 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1 text-muted-foreground leading-relaxed">
+            <span className="font-medium text-foreground">{goal.label}</span>
+            {goal.condition && (
+              <span className="ml-1.5 text-foreground/80">&ldquo;{goal.condition}&rdquo;</span>
+            )}
+            <span className="ml-1.5 text-xs opacity-80">{goal.hint}</span>
+          </div>
+        </div>
+      );
+    }
   }
 
   const isUser = message.role === "user";

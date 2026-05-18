@@ -15,6 +15,7 @@ export interface Command {
 const BUILTIN_COMMANDS: Command[] = [
   { name: "m:plan", description: "Toggle plan mode", namespace: "mcode", action: "toggle-plan" },
   { name: "compact", description: "Summarise conversation history to free up context window", namespace: "command" },
+  { name: "goal", description: "Set a goal the agent must satisfy before stopping (\"/goal clear\" to remove)", namespace: "command" },
 ];
 
 /** Regex: matches `/` at start of line or after whitespace, followed by non-space chars. */
@@ -101,6 +102,8 @@ export function useSlashCommand({
     const builtins = BUILTIN_COMMANDS.filter((cmd) => {
       // /m:plan is hidden for copilot (uses its own dynamic modes instead)
       if (cmd.name === "m:plan" && providerId === "copilot") return false;
+      // /goal is implemented in the Claude provider's Stop hook; hide on others.
+      if (cmd.name === "goal" && providerId !== "claude") return false;
       return true;
     });
     const commands: Command[] = [
