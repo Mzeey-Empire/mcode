@@ -30,10 +30,6 @@ const LazySettingsView = lazy(async () => {
   return { default: m.SettingsView };
 });
 
-const LazyDormantTerminals = lazy(async () => {
-  const m = await import("@/components/terminal/DormantTerminals");
-  return { default: m.DormantTerminals };
-});
 
 const LazyRightPanel = lazy(async () => {
   const m = await import("@/components/panels/RightPanel");
@@ -413,11 +409,8 @@ export function App() {
           </div>
         </div>
       </div>
-      {/* Dormant terminals: non-active threads' xterm instances stay mounted
-          for scrollback preservation. WebGL is disposed to save GPU memory. */}
-      <Suspense fallback={null}>
-        <LazyDormantTerminals />
-      </Suspense>
+      {/* All terminal xterm instances are now rendered persistently inside
+          TerminalTabContent's pool — no separate dormant container needed. */}
       <Suspense fallback={null}>
         <LazyCommandPalette />
       </Suspense>

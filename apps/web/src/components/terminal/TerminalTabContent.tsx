@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { TerminalSquare } from "lucide-react";
 import { useTerminalStore, TERMINAL_PANEL_DEFAULTS, type TerminalInstance } from "@/stores/terminalStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -19,6 +19,12 @@ const {
   hideTerminalPanel,
 } = useTerminalStore.getState();
 
+/** Flattened entry for the persistent terminal pool. */
+interface PoolEntry {
+  readonly term: TerminalInstance;
+  readonly ownerThreadId: string;
+}
+
 /** Props for {@link TerminalTabContent}. */
 interface TerminalTabContentProps {
   /** The thread whose terminals to display. */
@@ -30,9 +36,11 @@ interface TerminalTabContentProps {
 /**
  * Terminal content rendered inside the right panel's "terminal" tab.
  *
- * Renders the toolbar, terminal views for the active thread, the optional
- * split list, and the kill-confirm dialog. Does NOT handle drag-to-resize
- * (the right panel manages its own width).
+ * All xterm instances from every thread are rendered here in a single
+ * persistent pool so they never remount on thread switches. Only the
+ * active thread's active terminal is visible; the rest are hidden via
+ * CSS `display:none`. This preserves scrollback, cursor position, and
+ * WebGL state across thread switches with zero flicker.
  */
 export function TerminalTabContent({ threadId, visible }: TerminalTabContentProps) {
   const panelState = useTerminalStore((s) =>
@@ -43,6 +51,20 @@ export function TerminalTabContent({ threadId, visible }: TerminalTabContentProp
   const terminals = useTerminalStore(
     (s) => (s.terminals[threadId] ?? EMPTY_TERMINALS),
   );
+
+  // Persistent pool: flatten ALL terminals from ALL threads so xterm
+  // instances are mounted once and never destroyed on thread switch.
+  const allTerminals = useTerminalStore((s) => s.terminals);
+  const allPanels = useTerminalStore((s) => s.terminalPanelByThread);
+  const pool = useMemo(() => {
+    const entries: PoolEntry[] = [];
+    for (const [tid, instances] of Object.entries(allTerminals)) {
+      for (const term of instances) {
+        entries.push({ term, ownerThreadId: tid });
+      }
+    }
+    return entries;
+  }, [allTerminals]);
 
   const splitMode = useTerminalStore((s) => s.splitMode);
   const confirmOnKill = useSettingsStore((s) => s.settings.terminal.confirmOnKill);
@@ -176,15 +198,23 @@ export function TerminalTabContent({ threadId, visible }: TerminalTabContentProp
               <TerminalList threadId={threadId} onClose={closeTerminal} />
             )}
 
+            {/* Persistent terminal pool: ALL terminals from ALL threads
+                are rendered here so xterm instances never remount. Only
+                the active thread's active terminal is display:block. */}
             <div className="flex flex-1 flex-col overflow-hidden p-2">
-              {terminals.map((term) => (
-                <TerminalView
-                  key={term.id}
-                  ptyId={term.id}
-                  visible={term.id === activeTerminalId}
-                  threadActive
-                />
-              ))}
+              {pool.map(({ term, ownerThreadId }) => {
+                const isActiveThread = ownerThreadId === threadId;
+                const ownerPanel = allPanels[ownerThreadId];
+                const ownerActiveId = ownerPanel?.activeTerminalId ?? null;
+                return (
+                  <TerminalView
+                    key={term.id}
+                    ptyId={term.id}
+                    visible={isActiveThread && term.id === (activeTerminalId ?? ownerActiveId)}
+                    threadActive={isActiveThread}
+                  />
+                );
+              })}
             </div>
           </div>
         </>
