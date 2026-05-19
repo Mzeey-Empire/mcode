@@ -319,7 +319,7 @@ export interface McodeTransport {
   }>>;
 
   /** Fetch persisted task list for a thread (from last TodoWrite). */
-  getThreadTasks(threadId: string): Promise<Array<{ content: string; status: "pending" | "in_progress" | "completed" | "cancelled" }> | null>;
+  getThreadTasks(threadId: string): Promise<Array<{ content: string; status: "pending" | "in_progress" | "completed" | "cancelled"; group?: string }> | null>;
 
   // Snapshots
   /** Get a unified diff for a specific file from a turn snapshot. */

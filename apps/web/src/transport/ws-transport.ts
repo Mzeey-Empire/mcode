@@ -666,7 +666,7 @@ export function createWsTransport(
 
     // Thread tasks
     getThreadTasks: (threadId: string) =>
-      rpc<Array<{ content: string; status: "pending" | "in_progress" | "completed" | "cancelled" }> | null>(
+      rpc<Array<{ content: string; status: "pending" | "in_progress" | "completed" | "cancelled"; group?: string }> | null>(
         "thread.getTasks", { threadId },
       ),
 
