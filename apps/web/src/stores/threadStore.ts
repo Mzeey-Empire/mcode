@@ -292,6 +292,30 @@ function omitKey<V>(rec: Record<string, V>, key: string): Record<string, V> {
 }
 
 /**
+ * Walk up the parentToolCallId chain to find the nearest Agent tool call
+ * and return its description as a group label for TodoWrite tasks.
+ */
+function resolveAgentGroupLabel(
+  toolCalls: readonly ToolCall[],
+  parentToolCallId: string,
+): string {
+  let current: string | undefined = parentToolCallId;
+  while (current) {
+    const tc = toolCalls.find((c) => c.id === current);
+    if (!tc) break;
+    if (tc.toolName === "Agent") {
+      const desc = tc.toolInput?.description ?? tc.toolInput?.prompt;
+      if (typeof desc === "string" && desc.length > 0) {
+        return desc.length > 80 ? desc.slice(0, 77) + "..." : desc;
+      }
+      return "Sub-agent";
+    }
+    current = tc.parentToolCallId;
+  }
+  return "Sub-agent";
+}
+
+/**
  * Returns how many Agent (subagent) tool calls are still in flight for status UI.
  */
 export function countActiveSubagentCalls(calls: ToolCall[] | undefined): number {
@@ -605,10 +629,10 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               id: String(i),
               content: t.content,
               status: coerceTaskStatus(t.status),
-              group: "Tasks",
+              group: t.group ?? "Tasks",
             }));
             const currentTasks = useTaskStore.getState().tasksByThread[threadId] ?? [];
-            if (!shallowEqualBy(items, currentTasks, ["content", "status"])) {
+            if (!shallowEqualBy(items, currentTasks, ["content", "status", "group"])) {
               useTaskStore.getState().setTasks(threadId, items);
             }
           })
@@ -826,10 +850,10 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               id: String(i),
               content: t.content,
               status: coerceTaskStatus(t.status),
-              group: "Tasks",
+              group: t.group ?? "Tasks",
             }));
             const currentTasks = useTaskStore.getState().tasksByThread[threadId] ?? [];
-            if (!shallowEqualBy(items, currentTasks, ["content", "status"])) {
+            if (!shallowEqualBy(items, currentTasks, ["content", "status", "group"])) {
               useTaskStore.getState().setTasks(threadId, items);
             }
           })
@@ -1931,19 +1955,29 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       }
       const toolName = (params.toolName as string) || "unknown";
 
-      // Intercept TodoWrite calls to populate the task panel
+      // Intercept TodoWrite calls to populate the task panel.
+      // Sub-agent calls are grouped by their parent Agent's description so
+      // multiple sub-agents each get their own collapsible section.
       if (toolName === "TodoWrite") {
         const toolInput = (params.toolInput as Record<string, unknown>) || {};
         const todos = toolInput.todos as Array<Record<string, unknown>> | undefined;
         if (todos && Array.isArray(todos)) {
+          const group = parentToolCallId
+            ? resolveAgentGroupLabel(existingCalls, parentToolCallId)
+            : "Tasks";
+
           const taskItems: TaskItem[] = todos.map((t, i) => ({
-            // Prefer SDK-provided stable id; fall back to index-based surrogate
             id: t.id != null ? String(t.id) : String(i),
             content: String(t.content ?? ""),
             status: coerceTaskStatus(t.status),
-            group: "Tasks",
+            group,
           }));
-          useTaskStore.getState().setTasks(threadId, taskItems);
+
+          if (parentToolCallId) {
+            useTaskStore.getState().setTaskGroup(threadId, group, taskItems);
+          } else {
+            useTaskStore.getState().setTasks(threadId, taskItems);
+          }
         }
       }
 

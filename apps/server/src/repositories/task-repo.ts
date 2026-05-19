@@ -17,6 +17,8 @@ import { logger } from "@mcode/shared";
 export interface StoredTask {
   content: string;
   status: "pending" | "in_progress" | "completed" | "cancelled";
+  /** Group label for the task. Sub-agent tasks use the agent's description. */
+  group?: string;
 }
 
 /** Repository for persisting and retrieving per-thread TodoWrite task state. */
@@ -42,9 +44,17 @@ export class TaskRepo {
     );
   }
 
-  /** Save or update the task list for a thread. */
+  /** Save or update the task list for a thread (full replace). */
   upsert(threadId: string, tasks: readonly StoredTask[]): void {
     this.stmtUpsert.run(threadId, JSON.stringify(tasks));
+  }
+
+  /** Replace only tasks belonging to a specific group, preserving other groups. */
+  upsertGroup(threadId: string, group: string, tasks: readonly StoredTask[]): void {
+    const existing = this.get(threadId) ?? [];
+    const otherGroups = existing.filter((t) => (t.group ?? "Tasks") !== group);
+    const merged = [...otherGroups, ...tasks];
+    this.stmtUpsert.run(threadId, JSON.stringify(merged));
   }
 
   /** Retrieve the persisted task list for a thread, or null if none exists. */

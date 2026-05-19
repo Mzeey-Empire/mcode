@@ -1148,6 +1148,33 @@ export class AgentService {
     return runningAgentIds.length === 1 ? runningAgentIds[0] : undefined;
   }
 
+  /**
+   * Walk up the parentToolCallId chain to find the nearest Agent tool call
+   * and return its description as the group label for TodoWrite tasks.
+   */
+  private resolveAgentGroupLabel(
+    threadId: string,
+    parentToolCallId: string,
+  ): string {
+    const buffer = this.turnToolCalls.get(threadId) ?? [];
+    let current: string | undefined = parentToolCallId;
+
+    while (current) {
+      const tc = buffer.find((b) => b.toolCallId === current);
+      if (!tc) break;
+      if (tc.toolName === "Agent") {
+        const desc = tc._rawToolInput?.description ?? tc._rawToolInput?.prompt;
+        if (typeof desc === "string" && desc.length > 0) {
+          return desc.length > 80 ? desc.slice(0, 77) + "..." : desc;
+        }
+        return "Sub-agent";
+      }
+      current = tc.parentToolCallId;
+    }
+
+    return "Sub-agent";
+  }
+
   /** Number of currently active sessions. */
   activeCount(): number {
     return this.activeSessionIds.size;
@@ -1687,6 +1714,12 @@ ${userMessage}`;
           "completed",
           "cancelled",
         ]);
+
+        // Resolve group label: sub-agent calls use the parent Agent's description
+        const group = parentToolCallId
+          ? this.resolveAgentGroupLabel(threadId, parentToolCallId)
+          : "Tasks";
+
         const cleanedTodos = todos
           .filter(
             (t): t is Record<string, unknown> =>
@@ -1701,11 +1734,16 @@ ${userMessage}`;
                 | "in_progress"
                 | "completed"
                 | "cancelled",
+              group,
             };
           });
         if (cleanedTodos.length > 0) {
           try {
-            this.taskRepo.upsert(threadId, cleanedTodos);
+            if (parentToolCallId) {
+              this.taskRepo.upsertGroup(threadId, group, cleanedTodos);
+            } else {
+              this.taskRepo.upsert(threadId, cleanedTodos);
+            }
           } catch (err) {
             logger.warn("TodoWrite tasks not persisted", {
               threadId,
