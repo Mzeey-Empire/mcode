@@ -176,7 +176,7 @@ export function TerminalTabContent({ threadId, visible }: TerminalTabContentProp
               <TerminalList threadId={threadId} onClose={closeTerminal} />
             )}
 
-            <div className="flex-1 overflow-hidden p-2">
+            <div className="flex flex-1 flex-col overflow-hidden p-2">
               {terminals.map((term) => (
                 <TerminalView
                   key={term.id}

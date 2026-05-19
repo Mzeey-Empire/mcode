@@ -549,7 +549,7 @@ export const TerminalView = memo(function TerminalView({ ptyId, visible, threadA
   return (
     <div
       ref={containerRef}
-      className="h-full w-full"
+      className="min-h-0 w-full flex-1"
       style={{ display: visible ? "block" : "none" }}
     />
   );
