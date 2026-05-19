@@ -1739,11 +1739,8 @@ ${userMessage}`;
           });
         if (cleanedTodos.length > 0) {
           try {
-            if (parentToolCallId) {
-              this.taskRepo.upsertGroup(threadId, group, cleanedTodos);
-            } else {
-              this.taskRepo.upsert(threadId, cleanedTodos);
-            }
+            // Always merge by group so top-level and sub-agent tasks coexist
+            this.taskRepo.upsertGroup(threadId, group, cleanedTodos);
           } catch (err) {
             logger.warn("TodoWrite tasks not persisted", {
               threadId,

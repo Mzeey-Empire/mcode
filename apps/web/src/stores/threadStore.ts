@@ -1973,11 +1973,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             group,
           }));
 
-          if (parentToolCallId) {
-            useTaskStore.getState().setTaskGroup(threadId, group, taskItems);
-          } else {
-            useTaskStore.getState().setTasks(threadId, taskItems);
-          }
+          // Always merge by group so sub-agent groups are never wiped out
+          // by a top-level TodoWrite call (or vice versa).
+          useTaskStore.getState().setTaskGroup(threadId, group, taskItems);
         }
       }
 
