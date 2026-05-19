@@ -600,7 +600,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       // ExitPlanMode tools conflict because Mcode has no UI to handle
       // the SDK's "Exit plan mode?" confirmation, causing the model to
       // get stuck.
-      disallowedTools: ["EnterPlanMode", "ExitPlanMode"],
+      // AskUserQuestion is also disallowed: in chat mode the model can
+      // ask questions in plain text, and in plan mode Mcode uses its own
+      // PlanQuestionWizard.  The SDK tool has no result handler here, so
+      // calling it stalls the session indefinitely.
+      disallowedTools: ["EnterPlanMode", "ExitPlanMode", "AskUserQuestion"],
       permissionMode: sdkPermissionMode,
       canUseTool: (async (
         toolName: string,
