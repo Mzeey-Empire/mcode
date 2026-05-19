@@ -116,6 +116,15 @@ export function startPushListeners(): void {
           seq: (d["seq"] as number | undefined) ?? 0,
         };
       }
+      // Guard against oversized payloads that could exhaust browser memory.
+      // 4 MB is well above normal PTY output (typically <64 KB per frame)
+      // but small enough to prevent runaway allocation from a misbehaving server.
+      if (detail.payload.byteLength > 4 * 1024 * 1024) {
+        console.warn(
+          `[ws-events] dropping oversized terminal.data payload (${detail.payload.byteLength} bytes) for PTY ${detail.ptyId}`,
+        );
+        return;
+      }
       emitPtyData(detail);
     }),
   );

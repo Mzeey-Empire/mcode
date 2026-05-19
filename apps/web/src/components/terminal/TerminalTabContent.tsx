@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { TerminalSquare } from "lucide-react";
 import { useTerminalStore, TERMINAL_PANEL_DEFAULTS, type TerminalInstance } from "@/stores/terminalStore";
 import { useSettingsStore } from "@/stores/settingsStore";
@@ -23,6 +23,26 @@ const {
 interface PoolEntry {
   readonly term: TerminalInstance;
   readonly ownerThreadId: string;
+}
+
+/**
+ * Selector that flattens `terminals` into a stable array of pool entries.
+ * Returns the same reference when the underlying `terminals` map has not
+ * changed, avoiding unnecessary re-renders of the pool container.
+ */
+let _prevTerminals: Record<string, readonly TerminalInstance[]> | null = null;
+let _cachedPool: readonly PoolEntry[] = [];
+function selectPool(s: { terminals: Record<string, readonly TerminalInstance[]> }): readonly PoolEntry[] {
+  if (s.terminals === _prevTerminals) return _cachedPool;
+  _prevTerminals = s.terminals;
+  const entries: PoolEntry[] = [];
+  for (const [tid, instances] of Object.entries(s.terminals)) {
+    for (const term of instances) {
+      entries.push({ term, ownerThreadId: tid });
+    }
+  }
+  _cachedPool = entries;
+  return entries;
 }
 
 /** Props for {@link TerminalTabContent}. */
@@ -54,17 +74,9 @@ export function TerminalTabContent({ threadId, visible }: TerminalTabContentProp
 
   // Persistent pool: flatten ALL terminals from ALL threads so xterm
   // instances are mounted once and never destroyed on thread switch.
-  const allTerminals = useTerminalStore((s) => s.terminals);
-  const allPanels = useTerminalStore((s) => s.terminalPanelByThread);
-  const pool = useMemo(() => {
-    const entries: PoolEntry[] = [];
-    for (const [tid, instances] of Object.entries(allTerminals)) {
-      for (const term of instances) {
-        entries.push({ term, ownerThreadId: tid });
-      }
-    }
-    return entries;
-  }, [allTerminals]);
+  // Uses a module-scoped memoized selector to avoid re-creating the
+  // array on every unrelated store update (e.g. panel height changes).
+  const pool = useTerminalStore(selectPool);
 
   const splitMode = useTerminalStore((s) => s.splitMode);
   const confirmOnKill = useSettingsStore((s) => s.settings.terminal.confirmOnKill);
@@ -163,15 +175,21 @@ export function TerminalTabContent({ threadId, visible }: TerminalTabContentProp
       });
   }, [confirmOnKill, terminals, activeTerminalId, doCloseAllTerminals]);
 
+  const confirmKill = useCallback(() => {
+    pendingKill?.();
+    setPendingKill(null);
+  }, [pendingKill]);
+
+  const cancelKill = useCallback(() => {
+    setPendingKill(null);
+  }, []);
+
   return (
     <>
       <TerminalKillConfirmDialog
         open={pendingKill !== null}
-        onConfirm={() => {
-          pendingKill?.();
-          setPendingKill(null);
-        }}
-        onCancel={() => setPendingKill(null)}
+        onConfirm={confirmKill}
+        onCancel={cancelKill}
       />
 
       {terminals.length === 0 ? (
@@ -204,13 +222,11 @@ export function TerminalTabContent({ threadId, visible }: TerminalTabContentProp
             <div className="flex flex-1 flex-col overflow-hidden p-2">
               {pool.map(({ term, ownerThreadId }) => {
                 const isActiveThread = ownerThreadId === threadId;
-                const ownerPanel = allPanels[ownerThreadId];
-                const ownerActiveId = ownerPanel?.activeTerminalId ?? null;
                 return (
                   <TerminalView
                     key={term.id}
                     ptyId={term.id}
-                    visible={isActiveThread && term.id === (activeTerminalId ?? ownerActiveId)}
+                    visible={isActiveThread && term.id === activeTerminalId}
                     threadActive={isActiveThread}
                   />
                 );

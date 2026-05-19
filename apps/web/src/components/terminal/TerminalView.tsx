@@ -247,10 +247,11 @@ export const TerminalView = memo(function TerminalView({ ptyId, visible, threadA
 
       // Intercept Ctrl/Cmd+C when text is selected — copy to clipboard instead of sending SIGINT.
       // Returning false prevents xterm from forwarding the raw \x03 byte to the PTY.
-      // getSelection() is called first to avoid a TOCTOU race with hasSelection().
+      // Only call getSelection() (a DOM range query) when the key event actually
+      // matches the copy shortcut — avoids the cost on every regular keystroke.
       term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
-        const selection = term.getSelection();
-        if (shouldInterceptKeyEvent(event, selection.length > 0)) {
+        if (shouldInterceptKeyEvent(event, term.hasSelection())) {
+          const selection = term.getSelection();
           if (selection) {
             navigator.clipboard.writeText(selection).catch(() => {});
           }
@@ -450,29 +451,26 @@ export const TerminalView = memo(function TerminalView({ ptyId, visible, threadA
   }, [ptyId]);
 
   // When the panel is toggled open (visible: false -> true) we refit,
-  // repaint, and intentionally pull focus into xterm so the user can start
+  // flush the resize RPC, and pull focus into xterm so the user can start
   // typing immediately. Focus is deliberately NOT moved on window/tab
   // return — doing so would steal focus from the composer whenever the
   // user alt-tabs back, contradicting the Ctrl+J-from-composer workflow.
-  // Flushing the debounced resize RPC ensures the PTY learns the new dims
-  // without waiting for the 100 ms debounce tail.
   useEffect(() => {
     if (!visible) return;
     const term = termRef.current;
     if (!term) return;
     fitAddonRef.current?.fit();
     flushResizeRpcRef.current?.();
-    term.refresh(0, term.rows - 1);
     term.focus();
   }, [visible]);
 
-  // Repaint xterm's DOM renderer when the window/tab regains visibility.
-  // Long background stints leave the canvas half-painted; fit + refresh is
-  // idempotent and cheap, and crucially skips term.focus() so we don't
-  // yank focus out of whatever the user was typing in (issue #305).
+  // Repaint xterm when the browser window/tab regains visibility.
+  // Long background stints leave the canvas half-painted; fit + refresh
+  // fixes it. Reads `visibleRef` (not the prop) so the effect registers
+  // listeners once and never re-registers on prop changes.
   useEffect(() => {
     const repaint = () => {
-      if (!visible) return;
+      if (!visibleRef.current) return;
       const term = termRef.current;
       if (!term) return;
       fitAddonRef.current?.fit();
@@ -488,7 +486,7 @@ export const TerminalView = memo(function TerminalView({ ptyId, visible, threadA
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("focus", repaint);
     };
-  }, [visible]);
+  }, []);
 
   // Sync scrollback setting to live terminal without remounting
   useEffect(() => {

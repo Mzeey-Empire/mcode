@@ -65,11 +65,14 @@ function setPtyPaused(
 }
 
 function generateLabel(existing: readonly TerminalInstance[]): string {
-  const numbers = existing.map((t) => {
+  let max = 0;
+  for (const t of existing) {
     const match = t.label.match(/^Terminal (\d+)$/);
-    return match ? parseInt(match[1], 10) : 0;
-  });
-  const max = numbers.length > 0 ? Math.max(...numbers) : 0;
+    if (match) {
+      const n = parseInt(match[1], 10);
+      if (n > max) max = n;
+    }
+  }
   return `Terminal ${max + 1}`;
 }
 

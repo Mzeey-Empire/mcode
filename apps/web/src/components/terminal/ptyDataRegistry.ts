@@ -29,20 +29,39 @@ const dataListeners = new Map<string, PtyDataCallback>();
 const exitListeners = new Map<string, PtyExitCallback>();
 const reconnectGapListeners = new Map<string, PtyReconnectGapCallback>();
 
-/** Register a data listener for a specific PTY. Returns an unsubscribe function. */
+/**
+ * Register a data listener for a specific PTY. Returns an unsubscribe function.
+ * Only one listener per PTY is allowed — a duplicate registration warns and
+ * overwrites the previous listener to avoid silent data loss.
+ */
 export function onPtyData(ptyId: string, cb: PtyDataCallback): () => void {
+  if (import.meta.env.DEV && dataListeners.has(ptyId)) {
+    console.warn(`[ptyDataRegistry] overwriting existing data listener for PTY ${ptyId}`);
+  }
   dataListeners.set(ptyId, cb);
   return () => { dataListeners.delete(ptyId); };
 }
 
-/** Register an exit listener for a specific PTY. Returns an unsubscribe function. */
+/**
+ * Register an exit listener for a specific PTY. Returns an unsubscribe function.
+ * Only one listener per PTY is allowed.
+ */
 export function onPtyExit(ptyId: string, cb: PtyExitCallback): () => void {
+  if (import.meta.env.DEV && exitListeners.has(ptyId)) {
+    console.warn(`[ptyDataRegistry] overwriting existing exit listener for PTY ${ptyId}`);
+  }
   exitListeners.set(ptyId, cb);
   return () => { exitListeners.delete(ptyId); };
 }
 
-/** Register a reconnect-gap listener for a specific PTY. Returns an unsubscribe function. */
+/**
+ * Register a reconnect-gap listener for a specific PTY. Returns an unsubscribe function.
+ * Only one listener per PTY is allowed.
+ */
 export function onPtyReconnectGap(ptyId: string, cb: PtyReconnectGapCallback): () => void {
+  if (import.meta.env.DEV && reconnectGapListeners.has(ptyId)) {
+    console.warn(`[ptyDataRegistry] overwriting existing reconnect-gap listener for PTY ${ptyId}`);
+  }
   reconnectGapListeners.set(ptyId, cb);
   return () => { reconnectGapListeners.delete(ptyId); };
 }
