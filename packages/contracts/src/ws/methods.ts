@@ -442,14 +442,18 @@ export const WS_METHODS = lazySchema(() => ({
     result: z.string(),
   },
   "terminal.write": {
-    params: z.object({ ptyId: z.string(), data: z.string() }),
+    params: z.object({
+      ptyId: z.string(),
+      /** Cap at 64 KB — well above any single keystroke burst or paste. */
+      data: z.string().max(65_536),
+    }),
     result: z.void(),
   },
   "terminal.resize": {
     params: z.object({
       ptyId: z.string(),
-      cols: z.number(),
-      rows: z.number(),
+      cols: z.number().int().min(1).max(500),
+      rows: z.number().int().min(1).max(500),
     }),
     result: z.void(),
   },

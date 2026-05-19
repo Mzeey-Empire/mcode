@@ -173,10 +173,12 @@ async function loadRenderer(
       // WebGL addon construction failed; fall through to DOM unless we
       // were disposed during the await.
       if (isDisposed()) return;
-      console.warn(
-        "[terminal] WebGL renderer init failed, falling back to DOM",
-        err,
-      );
+      if (import.meta.env.DEV) {
+        console.warn(
+          "[terminal] WebGL renderer init failed, falling back to DOM",
+          err,
+        );
+      }
     }
   }
   // No renderer addon attached → xterm's built-in DOM renderer is active.
