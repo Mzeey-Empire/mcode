@@ -425,6 +425,20 @@ export const TerminalView = memo(function TerminalView({ ptyId, visible, threadA
       // already invoked cleanupRef.current, and loadRenderer's own
       // isDisposed() guards ensured no renderer addon was attached to the
       // now-disposed terminal. No post-await work is required.
+      if (disposed) return;
+
+      // Deferred refit: the initial fitAddon.fit() (pre-renderer) ran
+      // before the CSS flexbox layout fully settled, so xterm may have
+      // calculated too few rows. Now that the renderer is attached AND
+      // the container has had time to lay out, refit to the true size.
+      // Deferring to the next frame guarantees the browser has
+      // committed the layout.
+      requestAnimationFrame(() => {
+        if (disposed) return;
+        fitAddonRef.current?.fit();
+        flushResizeRpc();
+        term.refresh(0, term.rows - 1);
+      });
     }
 
     // init() awaits dynamic imports and may construct/attach xterm before
