@@ -94,6 +94,13 @@ export const messages = sqliteTable(
     attachments: text("attachments"),
     replyToMessageId: text("reply_to_message_id").references((): AnySQLiteColumn => messages.id, { onDelete: "set null" }),
     quotedText: text("quoted_text"),
+    /**
+     * Model identifier active when this assistant message was produced
+     * (e.g. "claude-opus-4-7", "cursor-agent", "gpt-4.1"). Nullable for
+     * user messages and for assistant messages persisted before this column
+     * existed — the UI falls back gracefully when absent.
+     */
+    model: text("model"),
   },
   (table) => [
     index("idx_messages_thread").on(table.threadId),

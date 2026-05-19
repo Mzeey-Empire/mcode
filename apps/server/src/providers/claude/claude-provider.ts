@@ -1021,12 +1021,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
 
           switch (anyMsg.type) {
             case "assistant": {
-              const contentBlocks =
-                (
-                  anyMsg.message as {
-                    content?: Array<Record<string, unknown>>;
-                  }
-                )?.content ?? [];
+              const innerMessage = anyMsg.message as {
+                content?: Array<Record<string, unknown>>;
+                stop_reason?: string | null;
+              } | undefined;
+              const contentBlocks = innerMessage?.content ?? [];
               const text = contentBlocks
                 .filter((b) => b.type === "text")
                 .map((b) => (b.text as string) ?? "")
@@ -1034,6 +1033,26 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
 
               if (text && text !== lastAssistantText) {
                 lastAssistantText = text;
+              }
+
+              // Anthropic message-level stop_reason is the authoritative
+              // discriminator between thoughts and final response text.
+              // {end_turn, stop_sequence, max_tokens, refusal} → final response
+              // {tool_use, pause_turn, null, anything else} → preamble/thought
+              // Only emit a boundary when this message actually carried text;
+              // pure tool-call messages have no streamed deltas to reclassify.
+              if (text.length > 0) {
+                const stopReason = innerMessage?.stop_reason ?? null;
+                const isFinalResponse =
+                  stopReason === "end_turn" ||
+                  stopReason === "stop_sequence" ||
+                  stopReason === "max_tokens" ||
+                  stopReason === "refusal";
+                this.emit("event", {
+                  type: AgentEventType.AssistantMessageBoundary,
+                  threadId,
+                  isFinalResponse,
+                } satisfies AgentEvent);
               }
 
               // Read parent_tool_use_id from the SDK message top-level.

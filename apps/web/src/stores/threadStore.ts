@@ -2000,6 +2000,49 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       return;
     }
 
+    if (method === "session.assistantMessageBoundary") {
+      // Authoritative classification of the text deltas just streamed for this
+      // assistant message, derived from the Anthropic `stop_reason`.
+      //
+      // - isFinalResponse=true (end_turn, stop_sequence, max_tokens, refusal):
+      //   the streamed text was the assistant's final response, not a thought.
+      //   Drop the open thought segment so it does not render alongside the
+      //   forthcoming MessageBubble. The streaming buffer already holds the
+      //   text and will be cleared by `session.message`.
+      // - isFinalResponse=false (tool_use, pause_turn, anything else):
+      //   the streamed text was preamble. Close the open thought so the next
+      //   delta starts a fresh segment.
+      const isFinalResponse = params.isFinalResponse === true;
+      // Flush any pending text delta chunks first so the open thought we
+      // operate on reflects every delta that arrived for this message.
+      flushPendingTextDeltas();
+      set((state) => {
+        const segments = state.thoughtSegmentsByThread[threadId] ?? [];
+        const last = segments[segments.length - 1];
+        if (!last || last.endedAt !== undefined) {
+          return state;
+        }
+        if (isFinalResponse) {
+          return {
+            thoughtSegmentsByThread: {
+              ...state.thoughtSegmentsByThread,
+              [threadId]: segments.slice(0, -1),
+            },
+          };
+        }
+        return {
+          thoughtSegmentsByThread: {
+            ...state.thoughtSegmentsByThread,
+            [threadId]: [
+              ...segments.slice(0, -1),
+              { ...last, endedAt: Date.now() },
+            ],
+          },
+        };
+      });
+      return;
+    }
+
     if (method === "session.toolProgress") {
       const toolCallId = (params.toolCallId as string) || "";
       const elapsedSeconds = (params.elapsedSeconds as number) ?? 0;
