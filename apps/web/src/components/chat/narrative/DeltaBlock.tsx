@@ -5,6 +5,13 @@ const LazyMarkdownContent = lazy(() => import("../MarkdownContent"));
 interface DeltaBlockProps {
   /** The streamed response text to display. */
   text: string;
+  /**
+   * When false, the typing cursor stays hidden and the text renders as static
+   * prose. Defaults to true (the legacy delta-row usage). Set to false for
+   * completed inline text segments where the cursor would otherwise blink at
+   * the end of a finished paragraph.
+   */
+  isStreaming?: boolean;
 }
 
 /**
@@ -51,6 +58,14 @@ function getCaretRectAtEnd(node: Text): DOMRect | null {
  * Reveals `target` character-by-character at a steady rate, with adaptive
  * catch-up when the target races ahead of the displayed text.
  *
+ * - When `isStreaming` is true on first mount, `displayed` starts empty so
+ *   the rAF loop animates from "" up to the current target (e.g. the first
+ *   batched flush of text deltas) — producing a visible typewriter reveal
+ *   instead of the full text popping in.
+ * - When `isStreaming` is false, `displayed` starts at `target` and the loop
+ *   never runs — completed segments render their full text immediately on
+ *   mount so persisted history doesn't re-typewriter when scrolled into view.
+ *
  * Idle rate: ~3 chars per animation frame (≈180 chars/sec at 60fps).
  * Catch-up: `step = max(3, ceil(behind / 10))` — each frame closes 1/10 of
  * the gap, so a 1000-char buffer drains in well under a second.
@@ -58,10 +73,10 @@ function getCaretRectAtEnd(node: Text): DOMRect | null {
  * When `target` shrinks (e.g., the parent reset for a new turn), the
  * displayed value resets immediately and the animation cancels.
  */
-function useTypewriter(target: string): string {
-  const [displayed, setDisplayed] = useState(target);
+function useTypewriter(target: string, isStreaming: boolean): string {
+  const [displayed, setDisplayed] = useState(isStreaming ? "" : target);
   const targetRef = useRef(target);
-  const displayedRef = useRef(target);
+  const displayedRef = useRef(isStreaming ? "" : target);
   const rafRef = useRef<number | null>(null);
 
   // Mirror current target / displayed into refs so the rAF tick (which
@@ -101,6 +116,18 @@ function useTypewriter(target: string): string {
     rafRef.current = requestAnimationFrame(tick);
   }, [target]);
 
+  // When the segment completes mid-animation, snap to target so the cursor
+  // disappears against the full text rather than against a half-typed line.
+  useEffect(() => {
+    if (!isStreaming && displayedRef.current !== target) {
+      if (rafRef.current != null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      setDisplayed(target);
+    }
+  }, [isStreaming, target]);
+
   // Cancel any in-flight frame on unmount.
   useEffect(() => () => {
     if (rafRef.current != null) {
@@ -126,8 +153,8 @@ function useTypewriter(target: string): string {
  * stays a permanent child of the root <div> (React-owned, never re-parented)
  * to avoid corrupting React's fiber tree.
  */
-export function DeltaBlock({ text }: DeltaBlockProps) {
-  const displayed = useTypewriter(text);
+export function DeltaBlock({ text, isStreaming = true }: DeltaBlockProps) {
+  const displayed = useTypewriter(text, isStreaming);
   const rootRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef<HTMLSpanElement>(null);
   /** Tracks whether the first-paint entry flight animation has already played. */
@@ -137,6 +164,13 @@ export function DeltaBlock({ text }: DeltaBlockProps) {
     const root = rootRef.current;
     const cursor = cursorRef.current;
     if (!root || !cursor) return;
+
+    // Static text segments (completed thoughts, persisted prose) skip the cursor
+    // so we don't leave a blinking caret at the end of every finished paragraph.
+    if (!isStreaming) {
+      cursor.style.opacity = "0";
+      return;
+    }
 
     const lastTextNode = findLastTextNode(root);
     if (!lastTextNode) {
@@ -191,8 +225,13 @@ export function DeltaBlock({ text }: DeltaBlockProps) {
           </p>
         }
       >
-        <LazyMarkdownContent content={displayed} isStreaming={true} />
+        <LazyMarkdownContent content={displayed} isStreaming={isStreaming} />
       </Suspense>
+      {/* Cursor is mounted ONLY when actively streaming. The `.typing-cursor`
+          class runs a CSS blink animation that overrides any inline opacity,
+          so an unmounted-but-not-rendered cursor was previously blinking in
+          the top-left corner of completed text blocks. */}
+      {isStreaming && (
       <span
         ref={cursorRef}
         aria-hidden="true"
@@ -210,6 +249,7 @@ export function DeltaBlock({ text }: DeltaBlockProps) {
             "transform 90ms cubic-bezier(0.33, 1, 0.68, 1), opacity 140ms ease-out",
         }}
       />
+      )}
     </div>
   );
 }

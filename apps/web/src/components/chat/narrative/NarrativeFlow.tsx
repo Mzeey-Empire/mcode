@@ -33,43 +33,19 @@ export interface NarrativeFlowProps {
 }
 
 /**
- * Returns the Tailwind `before:` dot color classes for a given narrative item.
- * Hook items use a smaller dot; blocked hooks use a destructive color.
- */
-function dotClassForItem(item: NarrativeItem): string {
-  // One muted color for completed items. Active items get primary + pulse.
-  // Errors get diff-remove. Hooks get smaller dots.
-  switch (item.type) {
-    case "thought":
-      return item.isActive ? "before:bg-primary before:animate-pulse" : "before:bg-muted-foreground/30";
-
-    case "hook":
-      return item.hook.didBlock
-        ? "before:w-[3px] before:h-[3px] before:top-[9px] before:bg-[var(--diff-remove)]"
-        : "before:w-[3px] before:h-[3px] before:top-[9px] before:bg-muted-foreground/25";
-
-    case "subagent":
-      if (item.toolCall.isError) return "before:bg-[var(--diff-remove)]";
-      return item.toolCall.isComplete ? "before:bg-muted-foreground/30" : "before:bg-primary before:animate-pulse";
-
-    case "active-tool":
-      return "before:bg-primary before:animate-pulse";
-
-    default:
-      return "before:bg-muted-foreground/30";
-  }
-}
-
-/**
  * Returns the top-margin class for a given narrative item.
- * The margin separates items visually on the timeline.
+ *
+ * Text rows get a comfortable gap so the response breathes apart from the
+ * preceding action row. Tools, hooks, and sub-agents stack tightly into a
+ * single "actions molecule" — they read as one group of agent activity
+ * rather than independent timeline rows.
  */
 function marginClassForItem(item: NarrativeItem, index: number): string {
+  if (index === 0) return "mt-0";
   switch (item.type) {
     case "thought":
-      return index === 0 ? "mt-0" : "mt-1.5";
+      return "mt-3";
     case "tool-group":
-      return "mt-0";
     case "hook":
       return "mt-0";
     case "subagent":
@@ -262,50 +238,36 @@ export function NarrativeFlow({
     return Math.max(0, completedAt - startTime);
   }, [isAgentRunning, startTime, completedAt]);
 
-  // Split items: timeline (thoughts, tools, etc.) renders inside the
-  // padded/lined column. Delta (final streaming response) renders outside
-  // as a standalone message-style block so it matches the eventual
-  // MessageBubble that replaces it on turnComplete.
+  // Split items: timeline rows (tools, sub-agents, hooks, in-line text) all
+  // render in chronological order. The delta (final streaming response) lives
+  // outside the timeline so it can transition seamlessly into the persisted
+  // MessageBubble on turnComplete.
   const timelineItems = items.filter((it) => it.type !== "delta");
   const deltaItem = items.find((it) => it.type === "delta") as Extract<NarrativeItem, { type: "delta" }> | undefined;
 
   return (
     <div className="relative">
-      {/* Timeline flow - only renders when there are items to show */}
+      {/* Timeline — no vertical rail, no row dots. Each row component carries
+          its own visual marker (chevron, icon, badge), and consecutive action
+          rows (tools, hooks, sub-agents) stack tightly as one "actions
+          molecule" while text rows breathe with a larger top margin. */}
       {timelineItems.length > 0 && (
-        <div className="relative flex flex-col pl-5">
-          {/* Vertical spine centered in the gutter: line and row dots share x = 10px. */}
-          <div
-            className="absolute left-[10px] top-3 bottom-3 w-px -translate-x-1/2 bg-border pointer-events-none"
-            aria-hidden
-          />
-          {timelineItems.map((item, i) => {
-            const margin = marginClassForItem(item, i);
-            const dot = dotClassForItem(item);
-
-            return (
-              <div
-                key={keyForItem(item, i)}
-                className={[
-                  "relative",
-                  margin,
-                  // Dot centered on spine via left offset + translate.
-                  "before:content-[''] before:absolute before:w-1 before:h-1 before:rounded-full before:z-[1]",
-                  "before:left-[-10px] before:top-[11px] before:-translate-x-1/2",
-                  dot,
-                  // Halo masks line under semi-transparent fills (see index.css).
-                  "narrative-timeline-row",
-                  "narrative-row-enter",
-                ].join(" ")}
-              >
-                {renderItem(item, mostActiveSubagentId, toolCalls)}
-              </div>
-            );
-          })}
+        <div className="flex flex-col">
+          {timelineItems.map((item, i) => (
+            <div
+              key={keyForItem(item, i)}
+              className={[
+                marginClassForItem(item, i),
+                "narrative-row-enter",
+              ].join(" ")}
+            >
+              {renderItem(item, mostActiveSubagentId, toolCalls)}
+            </div>
+          ))}
         </div>
       )}
 
-      {/* While running: show the live indicator bar. */}
+      {/* While running: live indicator bar. */}
       {isAgentRunning && (
         <NarrativeIndicator
           stepCount={stepCount}
@@ -315,23 +277,23 @@ export function NarrativeFlow({
         />
       )}
 
-      {/* After completion: show the audit-trail footer. Hidden when running,
-          when there's no timeline content, or when there's a delta still
-          streaming (the delta means we haven't actually transitioned to a
-          completed-turn state yet). */}
-      {!isAgentRunning && timelineItems.length > 0 && !deltaItem && (
-        <TurnFooter counts={counts} durationMs={completedDurationMs} />
-      )}
-
-      {/* Final streaming response - rendered as a standalone message-style
-          block so the visual transition to the persisted MessageBubble at
-          turnComplete is seamless. The delta-row-enter animation gives a
-          gentle fade-up entry the first time this block mounts, matching
-          the prose weight rather than the thought-row styling. */}
+      {/* Final streaming response — rendered immediately under the timeline
+          rows so it reads as the agent's reply, not as a row in the timeline.
+          The delta-row-enter animation matches the prose weight of the
+          persisted MessageBubble that will replace it on turnComplete. */}
       {deltaItem && (
-        <div className="mt-2 delta-row-enter">
+        <div className="mt-3 delta-row-enter">
           <DeltaBlock text={deltaItem.text} />
         </div>
+      )}
+
+      {/* Turn footer renders LAST — after the response body — so the step
+          summary closes the turn instead of separating its actions from its
+          answer. Hidden while the agent is still running or while a delta is
+          still streaming (the latter means the turn has not yet transitioned
+          to a completed state). */}
+      {!isAgentRunning && timelineItems.length > 0 && !deltaItem && (
+        <TurnFooter counts={counts} durationMs={completedDurationMs} />
       )}
     </div>
   );

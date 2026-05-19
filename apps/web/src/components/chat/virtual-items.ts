@@ -73,6 +73,16 @@ export type ChatVirtualItem =
        *   narrative timeline → assistant text → stop hooks → files summary
        */
       messageId: string;
+    }
+  | {
+      key: string;
+      type: "persisted-turn-footer";
+      /**
+       * Assistant message id whose turn footer (step / sub-agent counts plus
+       * duration) is rendered AFTER the message body, closing the turn.
+       * Renders null until the persisted narrative records are loaded.
+       */
+      messageId: string;
     };
 
 /**
@@ -110,6 +120,15 @@ export function buildStableItems(
       items.push({
         key: `persisted-late-hooks-${msg.id}`,
         type: "persisted-late-hooks",
+        messageId: msg.id,
+      });
+
+      // Turn footer (step / sub-agent counts + duration) renders AFTER the
+      // assistant body — closing the turn rather than separating its actions
+      // from its answer.
+      items.push({
+        key: `persisted-turn-footer-${msg.id}`,
+        type: "persisted-turn-footer",
         messageId: msg.id,
       });
 
@@ -209,11 +228,16 @@ export function buildVirtualItems(
   // message; permission requests go after it.
 
   // Find the last assistant message, skipping any trailing items that appear
-  // after the message bubble (turn-changes, persisted-late-hooks).
+  // after the message bubble (turn-changes, persisted-late-hooks,
+  // persisted-turn-footer).
   let lastAssistantIdx = stableItems.length - 1;
   while (lastAssistantIdx >= 0) {
     const item = stableItems[lastAssistantIdx];
-    if (item.type === "turn-changes" || item.type === "persisted-late-hooks") {
+    if (
+      item.type === "turn-changes" ||
+      item.type === "persisted-late-hooks" ||
+      item.type === "persisted-turn-footer"
+    ) {
       lastAssistantIdx--;
       continue;
     }
@@ -379,6 +403,10 @@ export function estimateItemHeight(item: ChatVirtualItem): number {
       // case. The virtualizer will re-measure on mount, so a small default
       // keeps pre-allocated space tight for the common (no-late-hooks) path.
       return 0;
+    case "persisted-turn-footer":
+      // One-line summary plus margin; the component renders null when records
+      // are still loading or when the turn had no structured activity.
+      return 24;
     default:
       return assertNever(item);
   }

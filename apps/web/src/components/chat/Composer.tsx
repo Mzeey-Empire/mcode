@@ -1945,8 +1945,11 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
 
   return (
     <div className="relative px-8 py-4">
-      {/* Gradient fade replacing the hard border-t line */}
-      <div className="pointer-events-none absolute inset-x-0 -top-5 h-5 bg-gradient-to-t from-background to-transparent" />
+      {/* Soft gradient hint above the composer — short enough that it doesn't
+          bury the last line of content (e.g. the turn footer) when the chat is
+          scrolled to its tail. Reduced from h-5/opaque to h-3/70% so the band
+          reads as edge-softening rather than a mask. */}
+      <div className="pointer-events-none absolute inset-x-0 -top-3 h-3 bg-gradient-to-t from-background/70 to-transparent" />
       {/* Queue toast */}
       {toast && (
         <div className="pointer-events-none absolute -top-8 right-4 z-20 flex items-center gap-1.5 rounded-full bg-card/90 px-3 py-1 text-xs text-muted-foreground shadow-sm ring-1 ring-border/50 backdrop-blur-sm animate-in fade-in-0 slide-in-from-bottom-1 duration-150">
