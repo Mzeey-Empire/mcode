@@ -1,3 +1,4 @@
+import { memo, useCallback } from "react";
 import {
   Dialog,
   DialogContent,
@@ -9,11 +10,11 @@ import { Button } from "@/components/ui/button";
 /** Props for {@link TerminalKillConfirmDialog}. */
 export interface TerminalKillConfirmDialogProps {
   /** Whether the dialog is open. */
-  open: boolean;
+  readonly open: boolean;
   /** Called when the user confirms the kill. */
-  onConfirm: () => void;
+  readonly onConfirm: () => void;
   /** Called when the user cancels or the dialog is dismissed. */
-  onCancel: () => void;
+  readonly onCancel: () => void;
 }
 
 /**
@@ -21,13 +22,18 @@ export interface TerminalKillConfirmDialogProps {
  * the target PTY has live child processes. Presents "Kill anyway" and
  * "Cancel" actions.
  */
-export function TerminalKillConfirmDialog({
+export const TerminalKillConfirmDialog = memo(function TerminalKillConfirmDialog({
   open,
   onConfirm,
   onCancel,
 }: TerminalKillConfirmDialogProps) {
+  const handleOpenChange = useCallback(
+    (isOpen: boolean) => { if (!isOpen) onCancel(); },
+    [onCancel],
+  );
+
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onCancel(); }}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-sm">
         <div className="space-y-3">
           <DialogTitle className="text-sm font-medium">
@@ -48,4 +54,4 @@ export function TerminalKillConfirmDialog({
       </DialogContent>
     </Dialog>
   );
-}
+});

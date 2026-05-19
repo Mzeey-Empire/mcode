@@ -71,6 +71,7 @@ export function TerminalTabContent({ threadId, visible }: TerminalTabContentProp
   const terminals = useTerminalStore(
     (s) => (s.terminals[threadId] ?? EMPTY_TERMINALS),
   );
+  const hasTerminals = terminals.length > 0;
 
   // Persistent pool: flatten ALL terminals from ALL threads so xterm
   // instances are mounted once and never destroyed on thread switch.
@@ -192,49 +193,50 @@ export function TerminalTabContent({ threadId, visible }: TerminalTabContentProp
         onCancel={cancelKill}
       />
 
-      {terminals.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
-          <TerminalSquare className="h-10 w-10 opacity-40" />
-          <p className="text-sm">No terminals</p>
-          <Button variant="outline" size="sm" onClick={createTerminal}>
-            New terminal
-          </Button>
+      {/* Empty state: overlaid on top of the pool so the pool never
+          unmounts when the current thread has no terminals. Other threads'
+          xterm instances stay alive underneath. */}
+      {hasTerminals && (
+        <div className="flex justify-end px-2 py-1 border-b border-border/40">
+          <TerminalToolbar
+            onAdd={createTerminal}
+            onDeleteAll={closeAllTerminals}
+          />
         </div>
-      ) : (
-        <>
-          {/* Toolbar row */}
-          <div className="flex justify-end px-2 py-1 border-b border-border/40">
-            <TerminalToolbar
-              onAdd={createTerminal}
-              onDeleteAll={closeAllTerminals}
-            />
-          </div>
-
-          {/* Terminal list (left) + terminal views (right) */}
-          <div className="relative flex flex-1 overflow-hidden">
-            {splitMode && (
-              <TerminalList threadId={threadId} onClose={closeTerminal} />
-            )}
-
-            {/* Persistent terminal pool: ALL terminals from ALL threads
-                are rendered here so xterm instances never remount. Only
-                the active thread's active terminal is display:block. */}
-            <div className="flex flex-1 flex-col overflow-hidden p-2">
-              {pool.map(({ term, ownerThreadId }) => {
-                const isActiveThread = ownerThreadId === threadId;
-                return (
-                  <TerminalView
-                    key={term.id}
-                    ptyId={term.id}
-                    visible={isActiveThread && term.id === activeTerminalId}
-                    threadActive={isActiveThread}
-                  />
-                );
-              })}
-            </div>
-          </div>
-        </>
       )}
+
+      <div className="relative flex flex-1 overflow-hidden">
+        {hasTerminals && splitMode && (
+          <TerminalList threadId={threadId} onClose={closeTerminal} />
+        )}
+
+        {/* Persistent terminal pool: ALL terminals from ALL threads
+            are rendered here so xterm instances never remount. Only
+            the active thread's active terminal is display:block. */}
+        <div className="flex flex-1 flex-col overflow-hidden p-2">
+          {pool.map(({ term, ownerThreadId }) => {
+            const isActiveThread = ownerThreadId === threadId;
+            return (
+              <TerminalView
+                key={term.id}
+                ptyId={term.id}
+                visible={isActiveThread && term.id === activeTerminalId}
+                threadActive={isActiveThread}
+              />
+            );
+          })}
+        </div>
+
+        {!hasTerminals && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background text-muted-foreground">
+            <TerminalSquare className="h-10 w-10 opacity-40" />
+            <p className="text-sm">No terminals</p>
+            <Button variant="outline" size="sm" onClick={createTerminal}>
+              New terminal
+            </Button>
+          </div>
+        )}
+      </div>
     </>
   );
 }
