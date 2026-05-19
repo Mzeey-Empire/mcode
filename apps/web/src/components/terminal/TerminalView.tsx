@@ -453,16 +453,21 @@ export const TerminalView = memo(function TerminalView({ ptyId, visible, threadA
   }, [ptyId]);
 
   // When the panel is toggled open (visible: false -> true) we refit,
-  // flush the resize RPC, and pull focus into xterm so the user can start
-  // typing immediately. Focus is deliberately NOT moved on window/tab
-  // return — doing so would steal focus from the composer whenever the
-  // user alt-tabs back, contradicting the Ctrl+J-from-composer workflow.
+  // repaint the viewport, flush the resize RPC, and pull focus into xterm
+  // so the user can start typing immediately. The explicit refresh() is
+  // required after a display:none → display:block transition because the
+  // renderer canvas goes stale while hidden and fit() alone doesn't
+  // repaint the viewport — without it, scrollback is inaccessible and
+  // the terminal shows only the tail of the buffer.
+  // Focus is deliberately NOT moved on window/tab return — doing so would
+  // steal focus from the composer whenever the user alt-tabs back.
   useEffect(() => {
     if (!visible) return;
     const term = termRef.current;
     if (!term) return;
     fitAddonRef.current?.fit();
     flushResizeRpcRef.current?.();
+    term.refresh(0, term.rows - 1);
     term.focus();
   }, [visible]);
 
