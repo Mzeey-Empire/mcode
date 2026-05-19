@@ -1,0 +1,1330 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mcode — narrative streaming simulator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Spectral:ital,wght@0,400;0,500;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: oklch(0.176 0.005 60);
+        --bg-sunken: oklch(0.142 0.006 60);
+        --bg-raised: oklch(0.205 0.005 60);
+        --bg-card: oklch(0.225 0.006 60);
+        --rail: oklch(0.32 0.008 60);
+        --rail-soft: oklch(0.22 0.006 60 / 0.7);
+        --rail-trace: oklch(0.22 0.006 60 / 0.45);
+        --rail-hair: oklch(0.22 0.006 60);
+        --ink-1: oklch(0.94 0.008 70);
+        --ink-2: oklch(0.78 0.008 70);
+        --ink-3: oklch(0.62 0.008 70);
+        --ink-4: oklch(0.46 0.008 70);
+        --ink-5: oklch(0.36 0.008 70);
+        --accent: oklch(0.74 0.13 65);
+        --accent-soft: oklch(0.74 0.13 65 / 0.12);
+        --accent-line: oklch(0.74 0.13 65 / 0.32);
+        --thinking: oklch(0.66 0.14 290);
+        --thinking-soft: oklch(0.66 0.14 290 / 0.14);
+        --tool: oklch(0.72 0.13 200);
+        --tool-soft: oklch(0.72 0.13 200 / 0.12);
+        --subagent: oklch(0.74 0.14 320);
+        --subagent-soft: oklch(0.74 0.14 320 / 0.14);
+        --ok: oklch(0.78 0.13 145);
+        --err: oklch(0.7 0.18 25);
+        --r-xs: 3px;
+        --r-sm: 5px;
+        --r-md: 8px;
+        --r-lg: 14px;
+        --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+        --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+      }
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body {
+        margin: 0; padding: 0;
+        background: var(--bg); color: var(--ink-1);
+        font-family: "Geist", system-ui, sans-serif;
+        font-size: 14px; line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+      }
+      ::selection { background: var(--accent-soft); color: var(--ink-1); }
+      :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-sm); }
+
+      .shell { max-width: 1320px; margin: 0 auto; padding: 40px 32px 80px; }
+
+      header.intro { margin-bottom: 32px; }
+      header.intro h1 { font-weight: 600; font-size: 22px; margin: 0 0 6px; letter-spacing: -0.015em; }
+      header.intro p { margin: 0; max-width: 68ch; color: var(--ink-3); font-size: 13px; }
+
+      .layout { display: grid; grid-template-columns: 280px 1fr; gap: 24px; align-items: start; }
+
+      /* ============ Controls ============ */
+      .controls {
+        background: var(--bg-sunken);
+        border: 1px solid var(--rail-hair);
+        border-radius: var(--r-lg);
+        padding: 18px;
+        position: sticky; top: 24px;
+      }
+      .controls section + section { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--rail-soft); }
+      .controls h2 {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px; font-weight: 500;
+        letter-spacing: 0.14em; text-transform: uppercase;
+        color: var(--ink-4); margin: 0 0 10px;
+      }
+      .picker { display: flex; flex-direction: column; gap: 2px; }
+      .picker label {
+        position: relative; display: grid;
+        grid-template-columns: auto 1fr; gap: 11px;
+        align-items: start;
+        padding: 8px 11px;
+        border-radius: var(--r-md);
+        cursor: pointer; font-size: 13px;
+        color: var(--ink-2);
+        transition: background 160ms var(--ease-out), color 160ms var(--ease-out);
+      }
+      .picker label:hover { background: var(--bg-raised); color: var(--ink-1); }
+      .picker label.active { background: var(--accent-soft); color: var(--ink-1); }
+      .picker label .name { font-weight: 500; font-size: 13px; line-height: 1.3; }
+      .picker label .desc { display: block; font-size: 11px; color: var(--ink-4); margin-top: 1px; line-height: 1.35; }
+      .picker label.active .desc { color: var(--ink-3); }
+      .picker input { position: absolute; opacity: 0; pointer-events: none; }
+      .picker label .dot {
+        width: 8px; height: 8px; margin-top: 7px;
+        border-radius: 50%; background: var(--bg-raised);
+        border: 1px solid var(--rail);
+        transition: background 160ms var(--ease-out), box-shadow 160ms var(--ease-out);
+      }
+      .picker label.active .dot { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+      .actions { display: flex; gap: 8px; }
+      .btn {
+        font-family: "Geist", sans-serif;
+        font-size: 13px; font-weight: 500;
+        padding: 8px 14px;
+        border-radius: var(--r-md);
+        border: 1px solid var(--rail);
+        background: var(--bg-raised); color: var(--ink-1);
+        cursor: pointer; flex: 1;
+        transition: background 160ms var(--ease-out), transform 160ms var(--ease-out);
+      }
+      .btn:hover { background: var(--bg-card); }
+      .btn:active { transform: translateY(1px); }
+      .btn.primary { background: var(--accent); color: oklch(0.22 0.04 65); border-color: var(--accent); }
+      .btn.primary:hover { filter: brightness(1.08); }
+      .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+      .speed { display: grid; gap: 6px; }
+      .speed-head {
+        display: flex; justify-content: space-between;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px; letter-spacing: 0.12em;
+        text-transform: uppercase; color: var(--ink-4);
+      }
+      .speed-head .val { color: var(--ink-2); letter-spacing: 0.04em; }
+      .speed input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
+      .progress { height: 2px; background: var(--bg-raised); border-radius: 100px; overflow: hidden; }
+      .progress .fill { height: 100%; background: var(--accent); width: 0; transition: width 100ms linear; }
+
+      .toggle {
+        display: flex; justify-content: space-between; align-items: center;
+        gap: 12px; font-size: 12.5px; color: var(--ink-2);
+        padding: 4px 0; cursor: pointer;
+      }
+      .toggle:hover { color: var(--ink-1); }
+      .toggle .desc { display: block; font-size: 11px; color: var(--ink-4); margin-top: 1px; line-height: 1.35; }
+      .toggle input { accent-color: var(--accent); cursor: pointer; flex-shrink: 0; }
+
+      /* ============ Pane / tabs ============ */
+      .pane {
+        background: var(--bg-sunken);
+        border: 1px solid var(--rail-hair);
+        border-radius: var(--r-lg);
+        overflow: hidden;
+        min-height: 580px;
+        display: flex; flex-direction: column;
+      }
+      .tabs {
+        display: flex; align-items: center;
+        padding: 10px 14px 0;
+        border-bottom: 1px solid var(--rail-soft);
+        gap: 2px;
+      }
+      .tab {
+        font-family: "Geist", sans-serif;
+        font-size: 12.5px; font-weight: 500;
+        padding: 8px 14px;
+        background: transparent; border: 0;
+        border-radius: var(--r-sm) var(--r-sm) 0 0;
+        color: var(--ink-3); cursor: pointer;
+        transition: color 160ms var(--ease-out), background 160ms var(--ease-out);
+        position: relative;
+        display: inline-flex; gap: 8px; align-items: center;
+      }
+      .tab:hover { color: var(--ink-1); background: oklch(0.205 0.005 60 / 0.6); }
+      .tab[aria-selected="true"] { color: var(--ink-1); }
+      .tab[aria-selected="true"]::after {
+        content: ""; position: absolute;
+        left: 8px; right: 8px; bottom: -1px;
+        height: 2px; background: var(--accent);
+        border-radius: 2px 2px 0 0;
+      }
+      .tab .count {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10.5px; color: var(--ink-4);
+        background: var(--bg-raised); padding: 1px 6px;
+        border-radius: 100px;
+      }
+      .tab[aria-selected="true"] .count { color: var(--accent); background: var(--accent-soft); }
+
+      .pane-body { flex: 1; padding: 28px 36px 32px; overflow: auto; }
+      .pane-body[hidden] { display: none; }
+
+      /* ============ User msg ============ */
+      .user-msg {
+        background: var(--accent); color: oklch(0.22 0.04 65);
+        padding: 9px 14px; border-radius: var(--r-md);
+        font-size: 14px; font-weight: 500;
+        margin-left: auto; margin-bottom: 26px;
+        width: max-content; max-width: 70%;
+        animation: row-in 240ms var(--ease-out) both;
+      }
+
+      /* ============ Turn rail (shared base) ============ */
+      .turn { position: relative; padding-left: 28px; }
+      .turn::before {
+        content: ""; position: absolute;
+        left: 7px; top: 14px; bottom: 14px;
+        width: 1px; background: var(--rail-trace);
+      }
+      .row { position: relative; padding: 8px 0; animation: row-in 280ms var(--ease-out) both; }
+      @keyframes row-in {
+        from { opacity: 0; transform: translateY(3px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .row::before {
+        content: ""; position: absolute;
+        left: -22px; border-radius: 50%;
+        background: var(--bg-sunken); border: 1px solid var(--rail);
+        z-index: 1;
+        transition: background 240ms var(--ease-out), box-shadow 240ms var(--ease-out);
+      }
+      .row.text-row::before { display: none; }
+      .row.tool-row-wrap::before {
+        top: 13px; width: 11px; height: 11px;
+        background: var(--tool); border-color: var(--tool);
+        box-shadow: 0 0 0 3px var(--tool-soft);
+      }
+      .row.thinking-row-wrap::before {
+        top: 13px; width: 9px; height: 9px;
+        background: var(--thinking); border-color: var(--thinking);
+        box-shadow: 0 0 0 3px var(--thinking-soft);
+      }
+      .row.subagent-row::before {
+        top: 13px; width: 12px; height: 12px;
+        background: var(--subagent); border-color: var(--subagent);
+        box-shadow: 0 0 0 4px var(--subagent-soft);
+      }
+
+      /* ============ Text block — body prose ============ */
+      .text-block { color: var(--ink-1); font-size: 15px; line-height: 1.62; max-width: 66ch; padding: 3px 0; }
+      .text-block .body { font-family: "Geist", sans-serif; }
+      .text-block .body strong { font-weight: 600; }
+      .text-block .body em { font-style: italic; color: var(--ink-2); }
+      .text-block .body code {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 0.86em; padding: 1px 5px;
+        border-radius: var(--r-xs);
+        background: var(--bg-raised); color: var(--ink-1);
+      }
+
+      .cursor {
+        display: inline-block; width: 2px; height: 1.05em;
+        background: var(--accent); vertical-align: -3px;
+        margin-left: 2px; border-radius: 1px;
+        animation: blink 1.05s var(--ease-in-out) infinite;
+      }
+      .thinking-block .cursor { background: var(--thinking); }
+      @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.15; } }
+
+      /* ============ Tool / sub-agent / thinking shared bits ============ */
+      .tool-block { display: flex; align-items: center; gap: 10px; font-size: 13px; padding: 4px 0; }
+      .tool-block .name { font-family: "JetBrains Mono", monospace; font-weight: 500; font-size: 12.5px; color: var(--ink-1); }
+      .tool-block .input {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 12px; color: var(--ink-3);
+        overflow: hidden; text-overflow: ellipsis;
+        white-space: nowrap; max-width: 48ch;
+      }
+      .tool-block .status {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px; color: var(--ink-4);
+        margin-left: auto; font-variant-numeric: tabular-nums;
+        transition: color 240ms var(--ease-out);
+      }
+      .tool-block.is-done .status { color: var(--ok); }
+
+      .subagent-block { padding: 3px 0; }
+      .subagent-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+      .subagent-head .badge {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px; font-weight: 500;
+        letter-spacing: 0.08em; text-transform: uppercase;
+        color: var(--subagent); background: var(--subagent-soft);
+        padding: 2px 8px; border-radius: 100px;
+      }
+      .subagent-head .agent-name {
+        font-family: "JetBrains Mono", monospace;
+        font-weight: 500; font-size: 12.5px; color: var(--ink-1);
+      }
+      .subagent-head .agent-stats {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px; color: var(--ink-4);
+        margin-left: auto; font-variant-numeric: tabular-nums;
+        transition: color 240ms var(--ease-out);
+      }
+      .subagent-nest {
+        margin-left: 2px; padding-left: 14px;
+        border-left: 1px solid var(--rail-soft);
+      }
+      .subagent-nest .tool-block { padding: 3px 0; font-size: 12px; }
+      .subagent-nest .tool-block .name { font-size: 11.5px; color: var(--ink-2); }
+
+      .thinking-block { font-size: 13.5px; padding: 3px 0; }
+      .thinking-block .thinking-chip {
+        display: inline-flex; gap: 6px; align-items: center;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px; font-weight: 500;
+        letter-spacing: 0.08em; text-transform: uppercase;
+        color: var(--thinking); background: var(--thinking-soft);
+        padding: 2px 8px; border-radius: 100px;
+        margin-bottom: 7px;
+      }
+      .thinking-block .body {
+        font-family: "Spectral", "Geist", serif;
+        font-style: italic; color: var(--ink-3);
+        padding-left: 13px;
+        border-left: 1px solid var(--rail-trace);
+        max-width: 62ch; line-height: 1.55;
+      }
+
+      /* ============ Boundary inspector ============ */
+      .boundary {
+        margin: 10px 0; padding: 8px 12px;
+        background: var(--bg-raised); border-radius: var(--r-md);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px; color: var(--ink-3);
+        display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+        animation: boundary-in 280ms var(--ease-out) both;
+      }
+      @keyframes boundary-in {
+        from { opacity: 0; background: var(--accent-soft); }
+        to { opacity: 1; background: var(--bg-raised); }
+      }
+      .boundary .label { color: var(--accent); font-weight: 600; }
+      .boundary code { color: var(--ink-1); }
+      .hide-boundary .boundary { display: none; }
+
+      /* ============ Turn footer & meta ============ */
+      .turn-footer {
+        margin-top: 18px; padding-top: 11px;
+        border-top: 1px solid var(--rail-soft);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10.5px; color: var(--ink-4);
+        letter-spacing: 0.08em; text-transform: uppercase;
+        display: flex; gap: 18px;
+        font-variant-numeric: tabular-nums;
+      }
+      .turn-footer .right { margin-left: auto; }
+
+      .turn-meta {
+        text-align: center; margin-top: 18px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px; color: var(--ink-5);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .empty {
+        color: var(--ink-4); font-size: 13px;
+        text-align: center; padding: 80px 24px;
+      }
+      .empty .glyph {
+        display: block; margin: 0 auto 14px;
+        width: 28px; height: 28px;
+        border-radius: 50%; background: var(--bg-raised);
+        border: 1px dashed var(--rail);
+      }
+      .empty .title { color: var(--ink-2); font-weight: 500; margin-bottom: 4px; font-size: 14px; }
+      .empty .sub { color: var(--ink-4); font-size: 12.5px; }
+
+      /* ============ Wire log ============ */
+      .log { font-family: "JetBrains Mono", monospace; font-size: 12px; line-height: 1.5; }
+      .ev {
+        display: grid; grid-template-columns: 84px 1fr; gap: 16px;
+        padding: 4px 8px; color: var(--ink-3); border-radius: var(--r-sm);
+      }
+      .ev.fresh { animation: ev-fade 1.4s var(--ease-out) forwards; }
+      @keyframes ev-fade { 0% { background: var(--accent-soft); } 100% { background: transparent; } }
+      .ev .ts { color: var(--ink-5); font-size: 11px; padding-top: 1px; font-variant-numeric: tabular-nums; }
+      .ev .body { color: var(--ink-2); }
+      .ev .body .key { color: var(--ink-4); }
+      .ev .body .str { color: var(--accent); }
+      .ev .body .num { color: var(--tool); }
+      .ev .body .typ { color: var(--ink-1); font-weight: 600; }
+      .ev .body .com { color: var(--ink-5); font-style: italic; }
+      .ev.is-text .body .typ { color: var(--accent); }
+      .ev.is-thinking .body .typ { color: var(--thinking); }
+      .ev.is-tool .body .typ { color: var(--tool); }
+      .ev.is-boundary .body .typ { color: var(--ok); }
+
+      /* ===================================================
+         STYLE: production-close (default)
+         Tool rows use Mcode's "Edited N files"-style row, with
+         a small mono chevron and an action verb derived from
+         the tool name. Turn footer uses uppercase mono stats.
+         =================================================== */
+      [data-style="production"] .row.tool-row-wrap {
+        background: transparent; padding: 4px 0;
+      }
+      [data-style="production"] .tool-block {
+        cursor: pointer; padding: 5px 8px;
+        margin-left: -8px;
+        border-radius: var(--r-sm);
+        transition: background 160ms var(--ease-out);
+      }
+      [data-style="production"] .tool-block:hover { background: var(--bg-raised); }
+      [data-style="production"] .tool-block::before {
+        content: "›"; color: var(--ink-4);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 14px; flex-shrink: 0;
+        transform: translateY(-1px);
+      }
+      [data-style="production"] .tool-block .name { color: var(--ink-2); font-weight: 400; }
+      [data-style="production"] .subagent-head { padding: 4px 0; }
+
+      [data-style="production"] .pane-body { padding: 28px 32px 32px; }
+
+      /* ===================================================
+         STYLE A — Whisper (prose-first, timeline for groups)
+         Outer rail is hidden. Top-level tools sit as quiet
+         markers — small ink ticks, muted typography. The rail
+         re-emerges *inside* nested groups (sub-agents,
+         thinking quote) where the eye needs structure to
+         follow. Body prose dominates throughout.
+         =================================================== */
+      [data-style="whisper"] .turn { padding-left: 22px; }
+      [data-style="whisper"] .turn::before { background: transparent; }
+      [data-style="whisper"] .row { padding: 5px 0; }
+
+      /* Top-level tool: a quiet 6px tick — no rail behind it */
+      [data-style="whisper"] .row.tool-row-wrap::before {
+        top: 14px; width: 6px; height: 6px;
+        background: var(--ink-4); border-color: var(--ink-4);
+        box-shadow: none;
+      }
+      [data-style="whisper"] .tool-block {
+        gap: 10px; font-size: 12.5px;
+        color: var(--ink-3); padding: 2px 0;
+      }
+      [data-style="whisper"] .tool-block .name {
+        font-size: 12px; color: var(--ink-2); font-weight: 500;
+      }
+      [data-style="whisper"] .tool-block .input { font-size: 12px; color: var(--ink-4); }
+      [data-style="whisper"] .tool-block .status { font-size: 10.5px; color: var(--ink-5); }
+      [data-style="whisper"] .tool-block.is-done .status { color: var(--ok); }
+
+      /* Sub-agent: clear dot + visible mini-rail in the nest */
+      [data-style="whisper"] .row.subagent-row::before {
+        top: 13px; width: 9px; height: 9px;
+        background: var(--subagent); border-color: var(--subagent);
+        box-shadow: 0 0 0 3px var(--subagent-soft);
+      }
+      [data-style="whisper"] .subagent-head { gap: 9px; margin-bottom: 8px; }
+      [data-style="whisper"] .subagent-head .badge {
+        background: transparent; color: var(--subagent);
+        padding: 0; font-size: 10px; letter-spacing: 0.1em;
+      }
+      [data-style="whisper"] .subagent-head .agent-name {
+        font-size: 12px; color: var(--ink-2); font-weight: 500;
+      }
+      [data-style="whisper"] .subagent-head .agent-stats { font-size: 10.5px; }
+
+      /* The mini-rail inside a sub-agent group — clearer than rail-trace
+         because here the rail is *load-bearing* (it ties children to parent). */
+      [data-style="whisper"] .subagent-nest {
+        position: relative;
+        margin-left: 4px;
+        padding-left: 20px;
+        border-left: 1px solid var(--rail-soft);
+      }
+      [data-style="whisper"] .subagent-nest .tool-block {
+        position: relative;
+        padding: 4px 0;
+        font-size: 12px;
+      }
+      [data-style="whisper"] .subagent-nest .tool-block::before {
+        content: "";
+        position: absolute;
+        left: -24px; top: 11px;
+        width: 5px; height: 5px;
+        border-radius: 50%;
+        background: var(--ink-4);
+      }
+      [data-style="whisper"] .subagent-nest .tool-block .name {
+        font-size: 11.5px; color: var(--ink-2); font-weight: 500;
+      }
+
+      /* Thinking — only true thoughts get the label; quote bar earns its keep */
+      [data-style="whisper"] .row.thinking-row-wrap::before {
+        top: 14px; width: 7px; height: 7px;
+        background: var(--thinking); border-color: var(--thinking);
+        box-shadow: 0 0 0 3px var(--thinking-soft);
+      }
+      [data-style="whisper"] .thinking-block .thinking-chip {
+        background: transparent; padding: 0;
+        color: var(--thinking); font-size: 10px;
+      }
+      [data-style="whisper"] .thinking-block .body {
+        border-left-color: var(--rail-soft);
+      }
+
+      /* Body prose breathes */
+      [data-style="whisper"] .text-block { font-size: 15.5px; line-height: 1.7; }
+
+      /* Turn footer recedes — uppercase letters too loud at the bottom */
+      [data-style="whisper"] .turn-footer {
+        border-top: 0; padding-top: 6px;
+        color: var(--ink-5); opacity: 0.7;
+        text-transform: none; letter-spacing: 0.04em;
+        font-size: 11px;
+      }
+
+      /* ===================================================
+         STYLE B — Storyboard
+         Tool rows get a pacing bar to their right showing
+         relative duration. Sub-agents show a four-track
+         timing strip. You can see at a glance which step
+         dominated the turn.
+         =================================================== */
+      [data-style="storyboard"] .tool-block {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 12px; align-items: center;
+      }
+      [data-style="storyboard"] .tool-block .bar {
+        height: 3px; background: var(--bg-raised);
+        border-radius: 100px; overflow: hidden;
+        max-width: 200px;
+      }
+      [data-style="storyboard"] .tool-block .bar .fill {
+        height: 100%; background: var(--tool);
+        width: 0; transition: width 240ms var(--ease-out);
+        border-radius: 100px;
+      }
+      [data-style="storyboard"] .tool-block.is-done .bar .fill { background: var(--ok); }
+      [data-style="storyboard"] .subagent-nest .tool-block .bar { max-width: 120px; }
+      [data-style="storyboard"] .subagent-nest .tool-block .bar .fill { background: var(--subagent); }
+      [data-style="storyboard"] .turn-footer .pacing {
+        margin-left: 8px; font-size: 10px; color: var(--ink-5);
+      }
+
+      /* ===================================================
+         STYLE C — Letter
+         Editorial / magazine. The response reads like
+         long-form text with a drop cap on the first
+         paragraph. Tools become small numbered footnote
+         markers in the timeline.
+         =================================================== */
+      [data-style="letter"] {
+        font-family: "Spectral", Georgia, serif;
+      }
+      [data-style="letter"] .turn { padding-left: 36px; }
+      [data-style="letter"] .turn::before { left: 11px; }
+      [data-style="letter"] .text-block {
+        font-family: "Spectral", Georgia, serif;
+        font-size: 17px; line-height: 1.65;
+        max-width: 64ch;
+      }
+      [data-style="letter"] .text-block .body { font-family: inherit; }
+      [data-style="letter"] .row.text-row:first-of-type .text-block .body::first-letter {
+        font-size: 3.6em; font-weight: 500;
+        float: left; line-height: 0.95;
+        padding: 4px 8px 0 0;
+        color: var(--accent);
+        font-family: "Spectral", Georgia, serif;
+      }
+      [data-style="letter"] .row.tool-row-wrap::before {
+        top: 14px; width: 18px; height: 18px;
+        left: -26px;
+        background: var(--bg); border-color: var(--rail);
+        box-shadow: none;
+        display: flex; align-items: center; justify-content: center;
+      }
+      [data-style="letter"] .row.tool-row-wrap .marker {
+        position: absolute; left: -26px; top: 14px;
+        width: 18px; height: 18px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 9.5px; font-weight: 600;
+        color: var(--accent);
+        display: flex; align-items: center; justify-content: center;
+        z-index: 2; font-variant-numeric: tabular-nums;
+      }
+      [data-style="letter"] .tool-block {
+        font-family: "Spectral", Georgia, serif;
+        font-style: italic; color: var(--ink-3);
+        font-size: 13.5px;
+      }
+      [data-style="letter"] .tool-block .name {
+        font-family: "Spectral", Georgia, serif;
+        font-style: italic; font-weight: 400;
+        color: var(--ink-2);
+      }
+      [data-style="letter"] .tool-block .input {
+        font-family: "JetBrains Mono", monospace;
+        font-style: normal; font-size: 11.5px;
+      }
+      [data-style="letter"] .tool-block .status {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10.5px;
+      }
+      [data-style="letter"] .subagent-head .badge {
+        font-family: "Spectral", Georgia, serif;
+        font-style: italic; font-weight: 500;
+        text-transform: none; letter-spacing: 0;
+        background: transparent; padding: 0;
+        font-size: 12.5px;
+      }
+      [data-style="letter"] .subagent-head .agent-name {
+        font-family: "Spectral", Georgia, serif;
+        font-style: italic; font-weight: 400;
+        font-size: 13px;
+      }
+      [data-style="letter"] .thinking-block .body {
+        font-family: "Spectral", Georgia, serif;
+        font-style: italic; font-size: 14.5px;
+      }
+      [data-style="letter"] .turn-footer {
+        font-family: "Spectral", Georgia, serif;
+        font-style: italic; text-transform: none;
+        letter-spacing: 0; font-size: 13px;
+        color: var(--ink-4);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        * { animation: none !important; transition: none !important; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="intro">
+        <h1>Narrative streaming simulator</h1>
+        <p>
+          Pick a scenario and a style — the rendering switches between Production-close
+          (what Mcode looks like today, with the classification fix applied) and three
+          design alternatives. Hit play to stream the events.
+        </p>
+      </header>
+
+      <div class="layout">
+        <aside class="controls" aria-label="Simulator controls">
+          <section>
+            <h2>Scenario</h2>
+            <div class="picker" id="scenarios" role="radiogroup">
+              <label class="active" data-scenario="tool-free">
+                <input type="radio" name="scenario" value="tool-free" checked />
+                <span class="dot"></span>
+                <span><span class="name">Direct answer</span><span class="desc">single text · end_turn</span></span>
+              </label>
+              <label data-scenario="goal-feature">
+                <input type="radio" name="scenario" value="goal-feature" />
+                <span class="dot"></span>
+                <span><span class="name">Goal-feature pattern</span><span class="desc">answer · tool · /goal clear</span></span>
+              </label>
+              <label data-scenario="research">
+                <input type="radio" name="scenario" value="research" />
+                <span class="dot"></span>
+                <span><span class="name">Research flow</span><span class="desc">interleaved text and tools</span></span>
+              </label>
+              <label data-scenario="subagents">
+                <input type="radio" name="scenario" value="subagents" />
+                <span class="dot"></span>
+                <span><span class="name">Parallel sub-agents</span><span class="desc">4 agents · synthesised</span></span>
+              </label>
+              <label data-scenario="thinking">
+                <input type="radio" name="scenario" value="thinking" />
+                <span class="dot"></span>
+                <span><span class="name">Extended thinking</span><span class="desc">thinking + answer</span></span>
+              </label>
+            </div>
+          </section>
+
+          <section>
+            <h2>Style</h2>
+            <div class="picker" id="styles" role="radiogroup">
+              <label class="active" data-style-key="whisper">
+                <input type="radio" name="style" value="whisper" checked />
+                <span class="dot"></span>
+                <span><span class="name">Whisper</span><span class="desc">prose-first · rail only for groups</span></span>
+              </label>
+              <label data-style-key="production">
+                <input type="radio" name="style" value="production" />
+                <span class="dot"></span>
+                <span><span class="name">Production-close</span><span class="desc">today's Mcode UI · fixed</span></span>
+              </label>
+              <label data-style-key="storyboard">
+                <input type="radio" name="style" value="storyboard" />
+                <span class="dot"></span>
+                <span><span class="name">Storyboard</span><span class="desc">pacing bars · timing visible</span></span>
+              </label>
+              <label data-style-key="letter">
+                <input type="radio" name="style" value="letter" />
+                <span class="dot"></span>
+                <span><span class="name">Letter</span><span class="desc">editorial · drop cap</span></span>
+              </label>
+            </div>
+          </section>
+
+          <section>
+            <h2>Playback</h2>
+            <div class="actions">
+              <button class="btn primary" id="playBtn" type="button">▶ Play</button>
+              <button class="btn" id="resetBtn" type="button">↻ Reset</button>
+            </div>
+            <div style="margin-top:14px" class="speed">
+              <div class="speed-head"><span>Speed</span><span class="val" id="speedLabel">1×</span></div>
+              <input type="range" id="speed" min="0.25" max="4" step="0.25" value="1" aria-label="Playback speed" />
+              <div class="progress" aria-hidden="true"><div class="fill" id="progressFill"></div></div>
+            </div>
+          </section>
+
+          <section>
+            <h2>Options</h2>
+            <label class="toggle" for="showBoundary">
+              <span>
+                Boundary inspector
+                <span class="desc">Show AssistantMessageBoundary inline</span>
+              </span>
+              <input type="checkbox" id="showBoundary" />
+            </label>
+          </section>
+        </aside>
+
+        <section class="pane" aria-label="Simulation output">
+          <div class="tabs" role="tablist">
+            <button class="tab" role="tab" id="tab-narrative" aria-selected="true" aria-controls="view-narrative" type="button">Narrative</button>
+            <button class="tab" role="tab" id="tab-wire" aria-selected="false" aria-controls="view-wire" type="button">
+              Wire <span class="count" id="eventCounter">0</span>
+            </button>
+          </div>
+          <div class="pane-body hide-boundary" id="view-narrative" data-style="whisper" role="tabpanel">
+            <div id="narrative"></div>
+          </div>
+          <div class="pane-body" id="view-wire" role="tabpanel" hidden>
+            <div class="log" id="eventLog"></div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <script>
+      // ============================================================
+      // Scenarios
+      // ============================================================
+      const SCENARIOS = {
+        "tool-free": [
+          { t: 0, kind: "user", text: "explain automaker simply" },
+          { t: 60, kind: "stream:message_start", input_tokens: 1247 },
+          { t: 80, kind: "stream:content_block_start", index: 0, block_type: "text" },
+          { t: 100, kind: "stream:text_delta", index: 0, text: "Automaker is a " },
+          { t: 200, kind: "stream:text_delta", index: 0, text: "Kanban board where AI agents " },
+          { t: 320, kind: "stream:text_delta", index: 0, text: "write your code for you. " },
+          { t: 460, kind: "stream:text_delta", index: 0, text: "You describe a feature on a card, " },
+          { t: 600, kind: "stream:text_delta", index: 0, text: "drag it to In Progress, and an agent picks it up." },
+          { t: 740, kind: "stream:content_block_stop", index: 0 },
+          { t: 760, kind: "stream:message_delta", stop_reason: "end_turn", output_tokens: 47 },
+          { t: 780, kind: "boundary", isFinalResponse: true, reason: "end_turn" },
+          { t: 880, kind: "sdk:result", stop_reason: "end_turn", duration_ms: 880, tokens: 47 },
+        ],
+        "goal-feature": [
+          { t: 0, kind: "user", text: "explain automaker simply" },
+          { t: 60, kind: "stream:message_start", input_tokens: 1247 },
+          { t: 80, kind: "stream:content_block_start", index: 0, block_type: "text" },
+          { t: 110, kind: "stream:text_delta", index: 0, text: "Here's Automaker, simply put.\n\n" },
+          { t: 260, kind: "stream:text_delta", index: 0, text: "Automaker is a " },
+          { t: 360, kind: "stream:text_delta", index: 0, text: "Kanban board where AI agents " },
+          { t: 480, kind: "stream:text_delta", index: 0, text: "write your code for you. You describe a feature on a card, " },
+          { t: 660, kind: "stream:text_delta", index: 0, text: "drag it to In Progress, and an agent picks it up and " },
+          { t: 820, kind: "stream:text_delta", index: 0, text: "writes the code — reading files, running commands, making commits. " },
+          { t: 1000, kind: "stream:text_delta", index: 0, text: "You review and approve the finished work." },
+          { t: 1140, kind: "stream:content_block_stop", index: 0 },
+          { t: 1160, kind: "stream:content_block_start", index: 1, block_type: "tool_use", tool_id: "toolu_01", tool_name: "Read" },
+          { t: 1180, kind: "stream:input_json_delta", index: 1, partial_json: '{"file_path":"README.md"}' },
+          { t: 1240, kind: "stream:content_block_stop", index: 1 },
+          { t: 1260, kind: "stream:message_delta", stop_reason: "tool_use", output_tokens: 84 },
+          { t: 1280, kind: "boundary", isFinalResponse: false, reason: "tool_use" },
+          { t: 1300, kind: "sdk:tool_use", id: "toolu_01", name: "Read" },
+          { t: 1700, kind: "sdk:tool_result", tool_use_id: "toolu_01" },
+          { t: 1740, kind: "stream:message_start", input_tokens: 1820 },
+          { t: 1780, kind: "stream:content_block_start", index: 0, block_type: "text" },
+          { t: 1820, kind: "stream:text_delta", index: 0, text: "I've explained the repo above. " },
+          { t: 1960, kind: "stream:text_delta", index: 0, text: "If that covers what you needed, run " },
+          { t: 2100, kind: "stream:text_delta", index: 0, text: "/goal clear to mark the goal as satisfied." },
+          { t: 2240, kind: "stream:content_block_stop", index: 0 },
+          { t: 2260, kind: "stream:message_delta", stop_reason: "end_turn", output_tokens: 28 },
+          { t: 2280, kind: "boundary", isFinalResponse: true, reason: "end_turn" },
+          { t: 2360, kind: "sdk:result", stop_reason: "end_turn", duration_ms: 2360, tokens: 112 },
+        ],
+        research: [
+          { t: 0, kind: "user", text: "where is the pagination implemented?" },
+          { t: 60, kind: "stream:message_start", input_tokens: 1340 },
+          { t: 80, kind: "stream:content_block_start", index: 0, block_type: "text" },
+          { t: 110, kind: "stream:text_delta", index: 0, text: "Let me search for cursor-based pagination first." },
+          { t: 320, kind: "stream:content_block_stop", index: 0 },
+          { t: 340, kind: "stream:content_block_start", index: 1, block_type: "tool_use", tool_id: "toolu_01", tool_name: "Grep" },
+          { t: 360, kind: "stream:input_json_delta", index: 1, partial_json: '{"pattern":"cursor","glob":"**/*.ts"}' },
+          { t: 460, kind: "stream:content_block_stop", index: 1 },
+          { t: 480, kind: "stream:message_delta", stop_reason: "tool_use", output_tokens: 16 },
+          { t: 500, kind: "boundary", isFinalResponse: false, reason: "tool_use" },
+          { t: 520, kind: "sdk:tool_use", id: "toolu_01", name: "Grep" },
+          { t: 1000, kind: "sdk:tool_result", tool_use_id: "toolu_01", duration_ms: 480 },
+          { t: 1040, kind: "stream:message_start", input_tokens: 1820 },
+          { t: 1080, kind: "stream:content_block_start", index: 0, block_type: "text" },
+          { t: 1120, kind: "stream:text_delta", index: 0, text: "Found 7 matches. The implementation looks like it's in " },
+          { t: 1280, kind: "stream:text_delta", index: 0, text: "routes/threads.ts — let me read the handler." },
+          { t: 1440, kind: "stream:content_block_stop", index: 0 },
+          { t: 1460, kind: "stream:content_block_start", index: 1, block_type: "tool_use", tool_id: "toolu_02", tool_name: "Read" },
+          { t: 1480, kind: "stream:input_json_delta", index: 1, partial_json: '{"file_path":"apps/server/src/routes/threads.ts"}' },
+          { t: 1560, kind: "stream:content_block_stop", index: 1 },
+          { t: 1580, kind: "stream:message_delta", stop_reason: "tool_use", output_tokens: 24 },
+          { t: 1600, kind: "boundary", isFinalResponse: false, reason: "tool_use" },
+          { t: 1620, kind: "sdk:tool_use", id: "toolu_02", name: "Read" },
+          { t: 2200, kind: "sdk:tool_result", tool_use_id: "toolu_02", duration_ms: 580 },
+          { t: 2240, kind: "stream:message_start", input_tokens: 2500 },
+          { t: 2280, kind: "stream:content_block_start", index: 0, block_type: "text" },
+          { t: 2320, kind: "stream:text_delta", index: 0, text: "Pagination lives in " },
+          { t: 2440, kind: "stream:text_delta", index: 0, text: "apps/server/src/routes/threads.ts at line 42. " },
+          { t: 2580, kind: "stream:text_delta", index: 0, text: "The handler reads ?cursor= and ?limit= from the query, " },
+          { t: 2740, kind: "stream:text_delta", index: 0, text: "applies them to the SQLite query, and returns next_cursor in the response body." },
+          { t: 2900, kind: "stream:content_block_stop", index: 0 },
+          { t: 2920, kind: "stream:message_delta", stop_reason: "end_turn", output_tokens: 58 },
+          { t: 2940, kind: "boundary", isFinalResponse: true, reason: "end_turn" },
+          { t: 3000, kind: "sdk:result", stop_reason: "end_turn", duration_ms: 3000, tokens: 98 },
+        ],
+        subagents: [
+          { t: 0, kind: "user", text: "using sub-agents, analyse this branch" },
+          { t: 60, kind: "stream:message_start", input_tokens: 1200 },
+          { t: 80, kind: "stream:content_block_start", index: 0, block_type: "text" },
+          { t: 110, kind: "stream:text_delta", index: 0, text: "Large set of changes. I'll dispatch " },
+          { t: 240, kind: "stream:text_delta", index: 0, text: "four parallel sub-agents, one per analysis lens." },
+          { t: 400, kind: "stream:content_block_stop", index: 0 },
+          { t: 420, kind: "stream:content_block_start", index: 1, block_type: "tool_use", tool_id: "agent_sec", tool_name: "Agent" },
+          { t: 440, kind: "stream:input_json_delta", index: 1, partial_json: '{"subagent_type":"security-reviewer"}' },
+          { t: 480, kind: "stream:content_block_stop", index: 1 },
+          { t: 500, kind: "stream:content_block_start", index: 2, block_type: "tool_use", tool_id: "agent_qa", tool_name: "Agent" },
+          { t: 520, kind: "stream:input_json_delta", index: 2, partial_json: '{"subagent_type":"code-reviewer"}' },
+          { t: 560, kind: "stream:content_block_stop", index: 2 },
+          { t: 580, kind: "stream:content_block_start", index: 3, block_type: "tool_use", tool_id: "agent_arch", tool_name: "Agent" },
+          { t: 600, kind: "stream:input_json_delta", index: 3, partial_json: '{"subagent_type":"architect"}' },
+          { t: 640, kind: "stream:content_block_stop", index: 3 },
+          { t: 660, kind: "stream:content_block_start", index: 4, block_type: "tool_use", tool_id: "agent_doc", tool_name: "Agent" },
+          { t: 680, kind: "stream:input_json_delta", index: 4, partial_json: '{"subagent_type":"doc-updater"}' },
+          { t: 720, kind: "stream:content_block_stop", index: 4 },
+          { t: 740, kind: "stream:message_delta", stop_reason: "tool_use", output_tokens: 36 },
+          { t: 760, kind: "boundary", isFinalResponse: false, reason: "tool_use" },
+          { t: 800, kind: "subagent:child", parent: "agent_sec", tool: "Read", input: "10 files", duration: 1800 },
+          { t: 900, kind: "subagent:child", parent: "agent_qa", tool: "Read", input: "19 files", duration: 2400 },
+          { t: 1000, kind: "subagent:child", parent: "agent_arch", tool: "Read", input: "16 files", duration: 1600 },
+          { t: 1100, kind: "subagent:child", parent: "agent_doc", tool: "Glob", input: "docs/**/*.md", duration: 200 },
+          { t: 1400, kind: "subagent:child", parent: "agent_sec", tool: "Grep", input: "2 searches", duration: 600 },
+          { t: 1800, kind: "subagent:child", parent: "agent_qa", tool: "Grep", input: "3 searches", duration: 900 },
+          { t: 2400, kind: "subagent:done", id: "agent_sec", duration_ms: 1900 },
+          { t: 2600, kind: "subagent:done", id: "agent_arch", duration_ms: 2200 },
+          { t: 3200, kind: "subagent:done", id: "agent_qa", duration_ms: 2800 },
+          { t: 3400, kind: "subagent:done", id: "agent_doc", duration_ms: 2400 },
+          { t: 3440, kind: "stream:message_start", input_tokens: 8200 },
+          { t: 3480, kind: "stream:content_block_start", index: 0, block_type: "text" },
+          { t: 3520, kind: "stream:text_delta", index: 0, text: "All four agents reported. " },
+          { t: 3680, kind: "stream:text_delta", index: 0, text: "Headline findings: " },
+          { t: 3820, kind: "stream:text_delta", index: 0, text: "security flagged an unauthenticated webhook handler as CRITICAL, " },
+          { t: 4000, kind: "stream:text_delta", index: 0, text: "the architect agent independently flagged the same handler for tight DB coupling — " },
+          { t: 4200, kind: "stream:text_delta", index: 0, text: "one refactor will address both. Quality and docs were clean." },
+          { t: 4400, kind: "stream:content_block_stop", index: 0 },
+          { t: 4420, kind: "stream:message_delta", stop_reason: "end_turn", output_tokens: 124 },
+          { t: 4440, kind: "boundary", isFinalResponse: true, reason: "end_turn" },
+          { t: 4500, kind: "sdk:result", stop_reason: "end_turn", duration_ms: 4500, tokens: 380 },
+        ],
+        thinking: [
+          { t: 0, kind: "user", text: "should I merge this branch?" },
+          { t: 60, kind: "stream:message_start", input_tokens: 2100 },
+          { t: 80, kind: "stream:content_block_start", index: 0, block_type: "thinking" },
+          { t: 100, kind: "stream:thinking_delta", index: 0, thinking: "The branch touches the provider " },
+          { t: 220, kind: "stream:thinking_delta", index: 0, thinking: "layer and the contract schemas. " },
+          { t: 360, kind: "stream:thinking_delta", index: 0, thinking: "Risk surface is wide; I should " },
+          { t: 500, kind: "stream:thinking_delta", index: 0, thinking: "weigh test coverage and migration impact." },
+          { t: 640, kind: "stream:content_block_stop", index: 0 },
+          { t: 660, kind: "stream:content_block_start", index: 1, block_type: "text" },
+          { t: 700, kind: "stream:text_delta", index: 1, text: "Yes — ready to merge. " },
+          { t: 820, kind: "stream:text_delta", index: 1, text: "All checks passed, the contract change is additive, " },
+          { t: 960, kind: "stream:text_delta", index: 1, text: "and there are no schema migrations required." },
+          { t: 1100, kind: "stream:content_block_stop", index: 1 },
+          { t: 1120, kind: "stream:message_delta", stop_reason: "end_turn", output_tokens: 134 },
+          { t: 1140, kind: "boundary", isFinalResponse: true, reason: "end_turn" },
+          { t: 1240, kind: "sdk:result", stop_reason: "end_turn", duration_ms: 1240, tokens: 134 },
+        ],
+      };
+
+      // ============================================================
+      // DOM helpers
+      // ============================================================
+      function el(tag, props = {}, ...children) {
+        const node = document.createElement(tag);
+        for (const k in props) {
+          if (k === "class") node.className = props[k];
+          else if (k === "style") node.setAttribute("style", props[k]);
+          else if (k.startsWith("on")) node.addEventListener(k.slice(2).toLowerCase(), props[k]);
+          else if (k in node) node[k] = props[k];
+          else node.setAttribute(k, props[k]);
+        }
+        for (const c of children) {
+          if (c == null || c === false) continue;
+          node.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+        }
+        return node;
+      }
+      const txt = (s) => document.createTextNode(s);
+      const span = (cls, text) => el("span", { class: cls }, text);
+
+      // ============================================================
+      // State
+      // ============================================================
+      const $narrative = document.getElementById("narrative");
+      const $log = document.getElementById("eventLog");
+      const $playBtn = document.getElementById("playBtn");
+      const $resetBtn = document.getElementById("resetBtn");
+      const $speed = document.getElementById("speed");
+      const $speedLabel = document.getElementById("speedLabel");
+      const $eventCounter = document.getElementById("eventCounter");
+      const $progressFill = document.getElementById("progressFill");
+      const $narrativeView = document.getElementById("view-narrative");
+      const $showBoundary = document.getElementById("showBoundary");
+      const $tabNarrative = document.getElementById("tab-narrative");
+      const $tabWire = document.getElementById("tab-wire");
+
+      let scenarioKey = "tool-free";
+      let timer = null;
+      let cursor = 0;
+      let startedAt = 0;
+      let eventCount = 0;
+      let speed = 1;
+      let blocks = {};
+      let subagentRows = {};
+      let currentMsgId = null;
+      let messageCounter = 0;
+      let topLevelToolIndex = 0; // for the Letter style's footnote numbers
+
+      function showEmpty(target, title, sub) {
+        target.replaceChildren(el("div", { class: "empty" },
+          el("span", { class: "glyph" }),
+          el("div", { class: "title" }, title),
+          el("div", { class: "sub" }, sub),
+        ));
+      }
+
+      function resetNarrative() {
+        showEmpty($narrative, "Ready when you are", "Hit ▶ Play to stream the scenario.");
+        showEmpty($log, "Nothing on the wire yet", "Events will appear here once playback begins.");
+        $eventCounter.textContent = "0";
+        $progressFill.style.width = "0";
+        eventCount = 0;
+        blocks = {};
+        subagentRows = {};
+        currentMsgId = null;
+        messageCounter = 0;
+        topLevelToolIndex = 0;
+      }
+
+      function ensureTurn() {
+        let turn = $narrative.querySelector(".turn");
+        if (!turn) {
+          const userMsg = $narrative.querySelector(".user-msg");
+          $narrative.replaceChildren();
+          if (userMsg) $narrative.appendChild(userMsg);
+          turn = el("div", { class: "turn" });
+          $narrative.appendChild(turn);
+        }
+        return turn;
+      }
+
+      function addUserMsg(text) {
+        $narrative.replaceChildren(el("div", { class: "user-msg" }, text));
+      }
+
+      // ============================================================
+      // Block renderers
+      // ============================================================
+      function startBlock(msgId, index, type, toolName, toolId) {
+        const turn = ensureTurn();
+        let row, inner, body;
+
+        if (type === "text") {
+          body = el("span", { class: "body" });
+          inner = el("div", { class: "text-block" }, body);
+          row = el("div", { class: "row text-row is-streaming" }, inner);
+        } else if (type === "thinking") {
+          body = el("span", { class: "body" });
+          inner = el("div", { class: "thinking-block" },
+            el("div", { class: "thinking-chip" }, "thinking"),
+            body,
+          );
+          row = el("div", { class: "row thinking-row-wrap" }, inner);
+        } else if (type === "tool_use") {
+          if (toolName === "Agent") {
+            const nameEl = el("span", { class: "agent-name" }, "—");
+            const statsEl = el("span", { class: "agent-stats" }, "starting…");
+            const nest = el("div", { class: "subagent-nest" });
+            inner = el("div", { class: "subagent-block" },
+              el("div", { class: "subagent-head" },
+                el("span", { class: "badge" }, "sub-agent"),
+                nameEl, statsEl,
+              ),
+              nest,
+            );
+            row = el("div", { class: "row subagent-row" }, inner);
+            subagentRows[toolId] = { nest, statsEl, nameEl };
+            body = el("span", { style: "display:none" });
+            inner.appendChild(body);
+          } else {
+            const nameEl = el("span", { class: "name" }, toolName || "");
+            const inputEl = el("span", { class: "input" });
+            const bar = el("div", { class: "bar" }, el("div", { class: "fill" }));
+            const statusEl = el("span", { class: "status" }, "streaming…");
+            inner = el("div", { class: "tool-block" }, nameEl, inputEl, bar, statusEl);
+            row = el("div", { class: "row tool-row-wrap" }, inner);
+            topLevelToolIndex++;
+            row.appendChild(el("span", { class: "marker" }, String(topLevelToolIndex)));
+            body = inputEl;
+          }
+        }
+
+        turn.appendChild(row);
+        blocks[`${msgId}:${index}`] = { kind: type, el: inner, body, row, msgId, index, toolId, toolName };
+      }
+
+      function appendDelta(msgId, index, text) {
+        const block = blocks[`${msgId}:${index}`];
+        if (!block || !block.body) return;
+        block.body.appendChild(txt(text));
+        if (block.kind !== "tool_use") ensureCursor(block);
+      }
+
+      function ensureCursor(block) {
+        let cur = block.el.querySelector(".cursor");
+        if (!cur) {
+          cur = el("span", { class: "cursor" });
+          block.el.appendChild(cur);
+        } else block.el.appendChild(cur);
+      }
+
+      function stopBlock(msgId, index) {
+        const block = blocks[`${msgId}:${index}`];
+        if (!block) return;
+        const cur = block.el.querySelector(".cursor");
+        if (cur) cur.remove();
+        block.row.classList.remove("is-streaming");
+        if (block.kind === "tool_use" && block.toolName === "Agent" && subagentRows[block.toolId]) {
+          try {
+            const json = JSON.parse(block.body.textContent || "{}");
+            if (json.subagent_type) subagentRows[block.toolId].nameEl.textContent = json.subagent_type;
+          } catch {}
+        }
+      }
+
+      function markToolDone(toolUseId, durationMs) {
+        for (const k in blocks) {
+          const b = blocks[k];
+          if (b.kind === "tool_use" && b.toolId === toolUseId) {
+            b.el.classList.add("is-done");
+            const s = b.el.querySelector(".status");
+            if (s) s.textContent = durationMs ? `✓ ${durationMs}ms` : "✓ done";
+            // Animate storyboard bar to a width derived from duration
+            const fill = b.el.querySelector(".bar .fill");
+            if (fill) {
+              const pct = Math.min(100, Math.max(8, (durationMs || 200) / 30));
+              fill.style.width = `${pct}%`;
+            }
+          }
+        }
+      }
+
+      function addSubagentChild(parentId, toolName, input, durationMs) {
+        const row = subagentRows[parentId];
+        if (!row) return;
+        const bar = el("div", { class: "bar" }, el("div", { class: "fill", style: `width:${Math.min(100, Math.max(10, durationMs/30))}%` }));
+        row.nest.appendChild(el("div", { class: "tool-block is-done" },
+          el("span", { class: "name" }, toolName),
+          el("span", { class: "input" }, input),
+          bar,
+          el("span", { class: "status" }, `✓ ${durationMs}ms`),
+        ));
+      }
+
+      function markSubagentDone(id, durationMs) {
+        const row = subagentRows[id];
+        if (!row) return;
+        row.statsEl.textContent = `✓ ${(durationMs / 1000).toFixed(1)}s`;
+        row.statsEl.style.color = "var(--ok)";
+      }
+
+      function emitBoundary(isFinalResponse, reason) {
+        const turn = ensureTurn();
+        turn.appendChild(el("div", { class: "boundary" },
+          span("label", "AssistantMessageBoundary"),
+          txt(" · "),
+          el("span", {}, span("key", "stop_reason"), txt(" = "), el("code", {}, `"${reason}"`)),
+          txt(" · "),
+          el("span", {}, span("key", "isFinalResponse"), txt(" = "), el("code", {}, String(isFinalResponse))),
+        ));
+      }
+
+      function emitTurnFooter(duration_ms, tokens) {
+        const turn = ensureTurn();
+        const allTools = turn.querySelectorAll(".tool-block").length;
+        const nestedTools = turn.querySelectorAll(".subagent-nest .tool-block").length;
+        const topLevelTools = allTools - nestedTools;
+        const subagents = turn.querySelectorAll(".subagent-block").length;
+        const thinking = turn.querySelectorAll(".thinking-block").length;
+        const parts = [];
+        if (topLevelTools) parts.push(span("", `${topLevelTools} step${topLevelTools === 1 ? "" : "s"}`));
+        if (subagents) parts.push(span("", `${subagents} sub-agent${subagents === 1 ? "" : "s"}`));
+        if (thinking) parts.push(span("", `${thinking} thinking`));
+        if (parts.length === 0) parts.push(span("", "0 steps"));
+        parts.push(el("span", { class: "right" }, fmtDuration(duration_ms)));
+        turn.appendChild(el("div", { class: "turn-footer" }, ...parts));
+        if (tokens) {
+          const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+          turn.appendChild(el("div", { class: "turn-meta" }, `${tokens} tok · ${time}`));
+        }
+      }
+
+      function fmtDuration(ms) {
+        if (ms < 1000) return `${ms}ms`;
+        const s = ms / 1000;
+        if (s < 60) return `${s.toFixed(1)}s`;
+        const m = Math.floor(s / 60);
+        const rs = Math.floor(s % 60);
+        return `${m}m ${rs.toString().padStart(2, "0")}s`;
+      }
+
+      // ============================================================
+      // Wire log
+      // ============================================================
+      function ts() {
+        const elapsed = Date.now() - startedAt;
+        const s = Math.floor(elapsed / 1000);
+        const ms = elapsed % 1000;
+        return `+${s.toString().padStart(2, "0")}.${ms.toString().padStart(3, "0")}`;
+      }
+      function logRow(klass, ...children) {
+        if (eventCount === 0) $log.replaceChildren();
+        eventCount++;
+        $eventCounter.textContent = String(eventCount);
+        const row = el("div", { class: `ev fresh ${klass}` },
+          el("span", { class: "ts" }, ts()),
+          el("span", { class: "body" }, ...children),
+        );
+        $log.appendChild(row);
+        $log.scrollTop = $log.scrollHeight;
+      }
+      function logSdk(typeName, klass, kv, comment) {
+        const children = [span("typ", typeName), txt(" { ")];
+        kv.forEach(([k, v, c = "str"], i) => {
+          if (i > 0) children.push(txt(", "));
+          children.push(span("key", k));
+          children.push(txt(": "));
+          if (c === "str") children.push(span("str", JSON.stringify(v)));
+          else if (c === "num") children.push(span("num", String(v)));
+        });
+        children.push(txt(" }"));
+        if (comment) { children.push(txt(" ")); children.push(span("com", `// ${comment}`)); }
+        logRow(klass, ...children);
+      }
+      function logForEvent(ev) {
+        switch (ev.kind) {
+          case "user": return;
+          case "stream:message_start":
+            logSdk("stream_event", "", [["type", "message_start"], ["input_tokens", ev.input_tokens, "num"]]);
+            break;
+          case "stream:content_block_start": {
+            const cls = ev.block_type === "text" ? "is-text" : ev.block_type === "thinking" ? "is-thinking" : "is-tool";
+            const pairs = [["type", "content_block_start"], ["index", ev.index, "num"], ["content_block.type", ev.block_type]];
+            if (ev.tool_name) pairs.push(["content_block.name", ev.tool_name]);
+            logSdk("stream_event", cls, pairs);
+            break;
+          }
+          case "stream:text_delta":
+            logSdk("stream_event", "is-text", [["type", "content_block_delta"], ["index", ev.index, "num"], ["delta.type", "text_delta"], ["delta.text", ev.text]]);
+            break;
+          case "stream:thinking_delta":
+            logSdk("stream_event", "is-thinking", [["type", "content_block_delta"], ["index", ev.index, "num"], ["delta.type", "thinking_delta"], ["delta.thinking", ev.thinking]]);
+            break;
+          case "stream:input_json_delta":
+            logSdk("stream_event", "is-tool", [["type", "content_block_delta"], ["index", ev.index, "num"], ["delta.type", "input_json_delta"], ["delta.partial_json", ev.partial_json]]);
+            break;
+          case "stream:content_block_stop":
+            logSdk("stream_event", "", [["type", "content_block_stop"], ["index", ev.index, "num"]]);
+            break;
+          case "stream:message_delta":
+            logSdk("stream_event", "is-boundary", [["type", "message_delta"], ["delta.stop_reason", ev.stop_reason]], "← classification source");
+            break;
+          case "sdk:tool_use":
+            logSdk("SDKToolUseMessage", "is-tool", [["id", ev.id], ["name", ev.name]]);
+            break;
+          case "sdk:tool_result":
+            logSdk("SDKUserMessage", "is-tool", [["tool_use_id", ev.tool_use_id]], "tool_result");
+            break;
+          case "subagent:child":
+            logSdk("SDKToolUseMessage", "is-tool", [["parent_tool_use_id", ev.parent], ["name", ev.tool]], "sub-agent child");
+            break;
+          case "subagent:done":
+            logSdk("SDKUserMessage", "is-tool", [["tool_use_id", ev.id]], `sub-agent done (${ev.duration_ms}ms)`);
+            break;
+          case "boundary":
+            logSdk("AgentEvent.AssistantMessageBoundary", "is-boundary", [["isFinalResponse", ev.isFinalResponse, "num"]], "derived from stop_reason");
+            break;
+          case "sdk:result":
+            logSdk("SDKResultMessage", "", [["stop_reason", ev.stop_reason], ["duration_ms", ev.duration_ms, "num"]], "turn complete");
+            break;
+        }
+      }
+
+      // ============================================================
+      // Apply
+      // ============================================================
+      function applyEvent(ev) {
+        logForEvent(ev);
+        switch (ev.kind) {
+          case "user":
+            addUserMsg(ev.text);
+            blocks = {}; subagentRows = {}; currentMsgId = null; topLevelToolIndex = 0;
+            break;
+          case "stream:message_start":
+            messageCounter++; currentMsgId = `m${messageCounter}`;
+            break;
+          case "stream:content_block_start":
+            startBlock(currentMsgId, ev.index, ev.block_type, ev.tool_name, ev.tool_id);
+            break;
+          case "stream:text_delta":
+            appendDelta(currentMsgId, ev.index, ev.text);
+            break;
+          case "stream:thinking_delta":
+            appendDelta(currentMsgId, ev.index, ev.thinking);
+            break;
+          case "stream:input_json_delta":
+            appendDelta(currentMsgId, ev.index, ev.partial_json);
+            break;
+          case "stream:content_block_stop":
+            stopBlock(currentMsgId, ev.index);
+            break;
+          case "sdk:tool_result":
+            markToolDone(ev.tool_use_id, ev.duration_ms);
+            break;
+          case "subagent:child":
+            addSubagentChild(ev.parent, ev.tool, ev.input, ev.duration);
+            break;
+          case "subagent:done":
+            markSubagentDone(ev.id, ev.duration_ms);
+            break;
+          case "boundary":
+            emitBoundary(ev.isFinalResponse, ev.reason);
+            break;
+          case "sdk:result":
+            emitTurnFooter(ev.duration_ms, ev.tokens);
+            break;
+        }
+      }
+
+      // ============================================================
+      // Playback
+      // ============================================================
+      function play() {
+        const events = SCENARIOS[scenarioKey];
+        if (cursor === 0) { resetNarrative(); startedAt = Date.now(); }
+        $playBtn.disabled = true;
+        const step = () => {
+          if (cursor >= events.length) {
+            $playBtn.disabled = false; $playBtn.textContent = "▶ Play again";
+            $progressFill.style.width = "100%"; return;
+          }
+          const ev = events[cursor];
+          const next = events[cursor + 1];
+          applyEvent(ev);
+          cursor++;
+          $progressFill.style.width = `${(cursor / events.length) * 100}%`;
+          timer = setTimeout(step, next ? Math.max(20, (next.t - ev.t) / speed) : 50);
+        };
+        step();
+      }
+      function reset() {
+        if (timer) { clearTimeout(timer); timer = null; }
+        cursor = 0; resetNarrative();
+        $playBtn.disabled = false; $playBtn.textContent = "▶ Play";
+      }
+
+      function selectTab(which) {
+        const isNarrative = which === "narrative";
+        $tabNarrative.setAttribute("aria-selected", String(isNarrative));
+        $tabWire.setAttribute("aria-selected", String(!isNarrative));
+        document.getElementById("view-narrative").hidden = !isNarrative;
+        document.getElementById("view-wire").hidden = isNarrative;
+      }
+
+      // ============================================================
+      // Wiring
+      // ============================================================
+      document.getElementById("scenarios").addEventListener("change", (e) => {
+        if (e.target.name !== "scenario") return;
+        document.querySelectorAll("#scenarios label").forEach((l) => l.classList.remove("active"));
+        e.target.closest("label").classList.add("active");
+        scenarioKey = e.target.value;
+        reset();
+      });
+      document.getElementById("styles").addEventListener("change", (e) => {
+        if (e.target.name !== "style") return;
+        document.querySelectorAll("#styles label").forEach((l) => l.classList.remove("active"));
+        e.target.closest("label").classList.add("active");
+        $narrativeView.setAttribute("data-style", e.target.value);
+      });
+      $playBtn.addEventListener("click", () => {
+        if (cursor >= SCENARIOS[scenarioKey].length) cursor = 0;
+        play();
+      });
+      $resetBtn.addEventListener("click", reset);
+      $speed.addEventListener("input", (e) => {
+        speed = parseFloat(e.target.value);
+        $speedLabel.textContent = `${speed}×`;
+      });
+      $showBoundary.addEventListener("change", (e) => {
+        $narrativeView.classList.toggle("hide-boundary", !e.target.checked);
+      });
+      $tabNarrative.addEventListener("click", () => selectTab("narrative"));
+      $tabWire.addEventListener("click", () => selectTab("wire"));
+      [$tabNarrative, $tabWire].forEach((tEl) => {
+        tEl.addEventListener("keydown", (e) => {
+          if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+            e.preventDefault();
+            selectTab($tabNarrative.getAttribute("aria-selected") === "true" ? "wire" : "narrative");
+            (e.target === $tabNarrative ? $tabWire : $tabNarrative).focus();
+          }
+        });
+      });
+
+      resetNarrative();
+    </script>
+  </body>
+</html>
