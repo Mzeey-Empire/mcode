@@ -25,6 +25,7 @@ import { rememberScrollTop, recallScrollTop, forgetScrollTop } from "./scrollPos
 import { NarrativeFlow } from "./narrative";
 import { PersistedNarrative } from "./narrative/PersistedNarrative";
 import { PersistedTurnFooter } from "./narrative/PersistedTurnFooter";
+import { StreamingResponseRow } from "./narrative/StreamingResponseRow";
 import { PersistedLateHooks } from "./PersistedLateHooks";
 import type { ThoughtSegment } from "./narrative";
 
@@ -136,6 +137,8 @@ const VirtualItemRenderer = memo(function VirtualItemRenderer({
       return <PersistedLateHooks messageId={item.messageId} />;
     case "persisted-turn-footer":
       return <PersistedTurnFooter messageId={item.messageId} />;
+    case "streaming-response":
+      return <StreamingResponseRow text={item.text} />;
   }
 }, (prev, next) =>
   prev.item.key === next.item.key

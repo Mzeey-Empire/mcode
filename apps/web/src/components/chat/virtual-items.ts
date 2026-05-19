@@ -1,6 +1,7 @@
 import type { PermissionDecision } from "@mcode/contracts";
 import type { Message, ToolCall, HookExecution } from "@/transport/types";
 import type { ThoughtSegment } from "./narrative/types";
+import { computeLiveStreamingText } from "./narrative/build-narrative";
 
 /** Compile-time exhaustive check; throws at runtime for unhandled discriminants. */
 function assertNever(value: never): never {
@@ -83,6 +84,17 @@ export type ChatVirtualItem =
        * Renders null until the persisted narrative records are loaded.
        */
       messageId: string;
+    }
+  | {
+      key: string;
+      type: "streaming-response";
+      /**
+       * Live, in-flight response text streaming character-by-character. Lives
+       * in the virtual-item slot the persisted `MessageBubble` will occupy on
+       * `session.message`, so the swap from streaming → persisted is a content
+       * replacement rather than a position jump.
+       */
+      text: string;
     };
 
 /**
@@ -187,6 +199,24 @@ export function buildVolatileItems(
     });
   }
 
+  // Streaming response item — fills the slot where the persisted MessageBubble
+  // will appear on `session.message`. Keeps the live typing text in the same
+  // virtual-list position the persisted bubble lands in, so the swap is a
+  // content replacement rather than a jump.
+  const liveText = computeLiveStreamingText({
+    thoughtSegments: thoughtSegments ?? [],
+    streamingText: streamingText ?? "",
+    isAgentRunning,
+    toolCalls,
+  });
+  if (liveText.length > 0) {
+    items.push({
+      key: "streaming-response",
+      type: "streaming-response",
+      text: liveText,
+    });
+  }
+
   // Show all permission requests (settled and unsettled) so the user gets
   // visual confirmation of their allow/deny decision. Settled cards collapse
   // to a single-line badge. The full permissionsByThread entry is cleared
@@ -246,9 +276,17 @@ export function buildVirtualItems(
 
   const lastItem = stableItems[lastAssistantIdx];
   if (lastItem?.type === "message" && lastItem.message.role === "assistant") {
-    const narrativeIdx = volatileItems.findIndex((i) => i.type === "narrative-flow");
-    const narrativeItems = narrativeIdx !== -1 ? [volatileItems[narrativeIdx]] : [];
-    const tailItems = volatileItems.filter((v) => v.type !== "narrative-flow");
+    // narrative-flow and streaming-response both go BEFORE the last assistant
+    // message bubble so the user reads top-to-bottom: actions → response.
+    // streaming-response is placed AFTER narrative-flow so the live response
+    // sits immediately under the action group, mirroring where the
+    // MessageBubble will land on persist.
+    const headItems = volatileItems.filter(
+      (v) => v.type === "narrative-flow" || v.type === "streaming-response",
+    );
+    const tailItems = volatileItems.filter(
+      (v) => v.type !== "narrative-flow" && v.type !== "streaming-response",
+    );
     // Drop the persisted-narrative placeholder for the message that has
     // live narrative-flow above it, to avoid double-rendering the same
     // timeline while volatile records are still in-memory.
@@ -275,7 +313,7 @@ export function buildVirtualItems(
     }
     return [
       ...filteredStable.slice(0, newLastAssistantIdx),
-      ...narrativeItems,
+      ...headItems,
       ...filteredStable.slice(newLastAssistantIdx),
       ...tailItems,
     ];
@@ -407,6 +445,11 @@ export function estimateItemHeight(item: ChatVirtualItem): number {
       // One-line summary plus margin; the component renders null when records
       // are still loading or when the turn had no structured activity.
       return 24;
+    case "streaming-response":
+      // Same shape as a small assistant MessageBubble — virtualizer re-measures
+      // once mounted; this estimate keeps the slot from being too cramped on
+      // first paint while text is still streaming in.
+      return Math.max(estimateMarkdownHeight(item.text), 48);
     default:
       return assertNever(item);
   }

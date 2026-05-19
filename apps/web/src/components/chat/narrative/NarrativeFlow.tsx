@@ -277,15 +277,14 @@ export function NarrativeFlow({
         />
       )}
 
-      {/* Final streaming response — rendered immediately under the timeline
-          rows so it reads as the agent's reply, not as a row in the timeline.
-          The delta-row-enter animation matches the prose weight of the
-          persisted MessageBubble that will replace it on turnComplete. */}
-      {deltaItem && (
-        <div className="mt-3 delta-row-enter">
-          <DeltaBlock text={deltaItem.text} />
-        </div>
-      )}
+      {/* The in-flight response text lives in its own virtual-item slot
+          (`streaming-response`) rendered as a sibling AFTER this narrative-flow
+          in MessageList. That keeps the streaming text and the persisted
+          MessageBubble at the SAME virtual-list position so the swap on
+          `session.message` is a content replacement rather than a position
+          jump. The `delta` items produced by `buildNarrativeItems` are kept on
+          the items array for compatibility with `counts` and tests but are
+          intentionally not rendered here. */}
 
       {/* Turn footer renders LAST — after the response body — so the step
           summary closes the turn instead of separating its actions from its

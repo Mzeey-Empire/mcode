@@ -167,14 +167,23 @@ describe("buildVirtualItems (combined)", () => {
     expect(result[2]).toMatchObject({ type: "message", key: "msg-2" });
   });
 
-  it("streaming text with agent running adds a 'narrative-flow' item at the end", () => {
+  it("streaming text with agent running emits narrative-flow and streaming-response items", () => {
     const messages = [makeMessage({ id: "msg-1" })];
     const result = buildAll(messages, [], "partial response...", true, undefined);
 
-    const last = result[result.length - 1];
-    expect(last.type).toBe("narrative-flow");
-    const narrativeItem = last as ChatVirtualItem & { type: "narrative-flow" };
-    expect(narrativeItem.streamingText).toBe("partial response...");
+    const narrative = result.find((i) => i.type === "narrative-flow") as
+      | (ChatVirtualItem & { type: "narrative-flow" })
+      | undefined;
+    expect(narrative).toBeDefined();
+    expect(narrative?.streamingText).toBe("partial response...");
+
+    // The streaming text also surfaces in its own streaming-response slot so
+    // the persisted MessageBubble lands at the same virtual-list position.
+    const streaming = result.find((i) => i.type === "streaming-response") as
+      | (ChatVirtualItem & { type: "streaming-response" })
+      | undefined;
+    expect(streaming).toBeDefined();
+    expect(streaming?.text).toBe("partial response...");
   });
 
   it("indicator (running, no streaming) adds a 'narrative-flow' item", () => {
