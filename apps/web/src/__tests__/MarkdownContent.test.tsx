@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { MarkdownContent } from "../components/chat/MarkdownContent";
 import { CodeBlock } from "../components/chat/CodeBlock";
+import { useWorkspaceStore } from "../stores/workspaceStore";
+import { createMockWorkspace } from "./mocks/transport";
 
 // Mock CodeBlock to avoid shiki/worker dependencies
 vi.mock("../components/chat/MermaidBlock", () => ({
@@ -11,13 +13,20 @@ vi.mock("../components/chat/MermaidBlock", () => ({
 }));
 
 vi.mock("../components/chat/CodeBlock", () => ({
-  CodeBlock: vi.fn(({ code, language, disableHighlighting, isStreaming }: {
+  CodeBlock: vi.fn(({ code, language, languageLabel, disableHighlighting, isStreaming }: {
     code: string;
     language: string;
+    languageLabel?: string;
     disableHighlighting?: boolean;
     isStreaming?: boolean;
   }) => (
-    <pre data-testid="code-block" data-language={language} data-disable-highlighting={String(disableHighlighting)} data-streaming={String(isStreaming)}>
+    <pre
+      data-testid="code-block"
+      data-language={language}
+      data-language-label={languageLabel ?? ""}
+      data-disable-highlighting={String(disableHighlighting)}
+      data-streaming={String(isStreaming)}
+    >
       {code}
     </pre>
   )),
@@ -86,6 +95,158 @@ describe("MarkdownContent link handling", () => {
   });
 });
 
+describe("MarkdownContent workspace preview navigation", () => {
+  let mockNavigate: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockNavigate = vi.fn().mockResolvedValue({ ok: true });
+    const ws = createMockWorkspace({ id: "ws-prev", path: "/tmp/ws-preview-test" });
+    useWorkspaceStore.setState({
+      workspaces: [ws],
+      activeWorkspaceId: ws.id,
+      activeThreadId: "thread-prev",
+    });
+    window.desktopBridge = {
+      openExternalUrl: vi.fn(),
+      preview: { navigate: mockNavigate },
+    } as unknown as typeof window.desktopBridge;
+  });
+
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>).desktopBridge;
+    useWorkspaceStore.setState({
+      workspaces: [],
+      activeWorkspaceId: null,
+      activeThreadId: null,
+    });
+  });
+
+  it("passes workspace path when opening mcode-workspace link with ctrl+click", async () => {
+    const { container } = render(<MarkdownContent content="[doc](mcode-workspace:///sub/page.html)" />);
+    const link = container.querySelector("a");
+    expect(link).toBeTruthy();
+    expect(link).toHaveAttribute("href", "mcode-workspace:///sub/page.html");
+    await act(async () => {
+      fireEvent.click(link!, { ctrlKey: true });
+    });
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith(
+        "mcode-workspace:///sub/page.html",
+        "/tmp/ws-preview-test",
+      );
+    });
+  });
+
+  it("rewrites relative html link to mcode-workspace for navigation", async () => {
+    const { container } = render(<MarkdownContent content="[doc](./sub/page.html)" />);
+    const link = container.querySelector("a");
+    expect(link).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(link!, { ctrlKey: true });
+    });
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith(
+        "mcode-workspace:///sub/page.html",
+        "/tmp/ws-preview-test",
+      );
+    });
+  });
+
+  it("opens mcode-workspace in the default browser on plain click", async () => {
+    const mockOpenExternal = vi.fn();
+    const ws = createMockWorkspace({ id: "ws-plain", path: "/proj/plain" });
+    useWorkspaceStore.setState({
+      workspaces: [ws],
+      activeWorkspaceId: ws.id,
+      activeThreadId: "thread-plain",
+    });
+    window.desktopBridge = {
+      openExternalUrl: mockOpenExternal,
+      preview: { navigate: vi.fn() },
+    } as unknown as typeof window.desktopBridge;
+
+    const { container } = render(<MarkdownContent content="[doc](mcode-workspace:///page.html)" />);
+    const link = container.querySelector("a");
+    expect(link).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(link!);
+    });
+    expect(mockOpenExternal).toHaveBeenCalledWith("mcode-workspace:///page.html", "/proj/plain");
+
+    useWorkspaceStore.setState({
+      workspaces: [],
+      activeWorkspaceId: null,
+      activeThreadId: null,
+    });
+    delete (window as unknown as Record<string, unknown>).desktopBridge;
+  });
+
+  it("treats inline workspace html path like a previewable shortcut", async () => {
+    const { container } = render(<MarkdownContent content="Open `report.html` now" />);
+    const el = container.querySelector('[role="link"]');
+    expect(el).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(el!, { ctrlKey: true });
+    });
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith(
+        "mcode-workspace:///report.html",
+        "/tmp/ws-preview-test",
+      );
+    });
+  });
+
+  it("falls back to openExternalUrl when preview.navigate is missing after ctrl+click", async () => {
+    const mockOpenExternal = vi.fn();
+    const ws = createMockWorkspace({ id: "ws-fallback", path: "/tmp/ws-fallback" });
+    useWorkspaceStore.setState({
+      workspaces: [ws],
+      activeWorkspaceId: ws.id,
+      activeThreadId: "thread-fallback",
+    });
+    window.desktopBridge = {
+      openExternalUrl: mockOpenExternal,
+      preview: {},
+    } as unknown as typeof window.desktopBridge;
+
+    const { container } = render(<MarkdownContent content="[doc](mcode-workspace:///page.html)" />);
+    const link = container.querySelector("a");
+    expect(link).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(link!, { ctrlKey: true });
+    });
+    await waitFor(() => {
+      expect(mockOpenExternal).toHaveBeenCalledWith("mcode-workspace:///page.html", "/tmp/ws-fallback");
+    });
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it("falls back to openExternalUrl when preview.navigate rejects", async () => {
+    const mockOpenExternal = vi.fn();
+    const nav = vi.fn().mockRejectedValue(new Error("nav failed"));
+    const ws = createMockWorkspace({ id: "ws-rej", path: "/tmp/ws-rej" });
+    useWorkspaceStore.setState({
+      workspaces: [ws],
+      activeWorkspaceId: ws.id,
+      activeThreadId: "thread-rej",
+    });
+    window.desktopBridge = {
+      openExternalUrl: mockOpenExternal,
+      preview: { navigate: nav },
+    } as unknown as typeof window.desktopBridge;
+
+    const { container } = render(<MarkdownContent content="[doc](https://example.com/x)" />);
+    const link = container.querySelector("a");
+    expect(link).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(link!, { ctrlKey: true });
+    });
+    await waitFor(() => {
+      expect(mockOpenExternal).toHaveBeenCalledWith("https://example.com/x");
+    });
+  });
+});
+
 describe("MarkdownContent variant styling", () => {
   beforeEach(() => {
     mockCodeBlock.mockClear();
@@ -149,6 +310,17 @@ describe("MarkdownContent variant styling", () => {
         undefined,
       );
     });
+  });
+});
+
+describe("MarkdownContent path-based fence language", () => {
+  it("resolves GitHub-style start:end:path fences to Shiki language and basename label", () => {
+    render(
+      <MarkdownContent content={'```1:20:apps/web/foo.ts\nconst a = 1;\n```'} />,
+    );
+    const block = screen.getByTestId("code-block");
+    expect(block).toHaveAttribute("data-language", "typescript");
+    expect(block).toHaveAttribute("data-language-label", "foo.ts");
   });
 });
 

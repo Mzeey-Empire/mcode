@@ -14,6 +14,7 @@ import {
   normalizeReasoningLevelForModel,
   getCodexReasoningLevels,
   pickProviderModelsForSettings,
+  providerSupportsReasoningLevels,
   type ModelDefinition,
 } from "@/lib/model-registry";
 import { SettingRow } from "../SettingRow";
@@ -95,8 +96,9 @@ function buildProviderOption(
 }
 
 /**
- * Model settings section: provider, default model, fallback model, reasoning effort,
- * utility model provider/model, diff summary toggle, and CLI paths.
+ * Model settings section: provider, default model, fallback model, reasoning effort
+ * (only when the provider exposes an effort tier), utility model provider/model,
+ * diff summary toggle, and CLI paths.
  *
  * Default and fallback pickers merge live `listProviderModels` results with static
  * catalog fallbacks (needed for Cursor, Copilot, and Claude API discovery). Stale
@@ -447,7 +449,8 @@ export function ModelSection() {
         </div>
       </SettingRow>
 
-      {(provider !== "claude" || supportsEffortParameter(modelId)) && (
+      {providerSupportsReasoningLevels(provider) &&
+        (provider !== "claude" || supportsEffortParameter(modelId)) && (
         <SettingRow
           label="Reasoning effort"
           configKey="model.defaults.reasoning"

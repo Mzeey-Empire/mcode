@@ -1,11 +1,14 @@
 import { memo, useMemo, useState, useCallback, useRef, useEffect, lazy, Suspense } from "react";
 import type { Message } from "@/transport";
-import { FileText, File, ImageIcon, RotateCcw, Copy, Check, GitBranch, AlertCircle, Reply } from "lucide-react";
+import { ImageIcon, RotateCcw, Copy, Check, GitBranch, AlertCircle, Reply, Target } from "lucide-react";
 import { cn } from "@/lib/utils";
 const LazyMarkdownContent = lazy(() => import("./MarkdownContent"));
 import { stripInjectedFiles } from "@/lib/file-tags";
+import { buildStoredAttachmentImageSrc } from "@/lib/attachment-url";
 import { isHandoffMessage, parseHandoffJson } from "./handoff-utils";
 import { HandoffCard } from "./HandoffCard";
+import { FileAttachmentTile } from "./FileAttachmentTile";
+import { ImageAttachmentLightbox } from "./ImageAttachmentLightbox";
 
 /**
  * Returns true when the assistant message body collapses to nothing visible
@@ -20,6 +23,147 @@ function isAssistantContentEmpty(content: string): boolean {
 }
 
 /** Parses the message content of a synthetic agent-error system message. Returns the error text, or null if not an agent error. */
+/**
+ * Detect /goal-command confirmations emitted by AgentService. Returns a
+ * structured render hint when the assistant message is one of the goal
+ * status messages, or null for ordinary model output.
+ */
+function parseGoalStatus(content: string): {
+  label: string;
+  condition?: string;
+  hint: string;
+} | null {
+  const text = content.trim();
+  let m = /^Goal set: "([\s\S]+?)"\./.exec(text);
+  if (m) return { label: "Goal set", condition: m[1], hint: "/goal clear to remove" };
+  m = /^Active goal: "([\s\S]+?)"\./.exec(text);
+  if (m) return { label: "Active goal", condition: m[1], hint: "/goal clear to remove" };
+  if (/^Goal cleared\./.test(text)) return { label: "Goal cleared", hint: "agent may end its turn normally" };
+  if (/^No active goal\./.test(text)) return { label: "No active goal", hint: "/goal <condition> to set one" };
+  return null;
+}
+
+/**
+ * Detect a user-typed /goal SET form (`/goal <condition>` with non-empty,
+ * non-control argument). The server rewrites the wire payload into a
+ * directive and dispatches it to the agent without emitting a separate
+ * assistant "Goal set: ..." status message, so the pill must render off
+ * the user's own message. Returns null for control forms (clear, reset,
+ * show, empty) — those still get an assistant-side pill from the server.
+ */
+function parseUserGoalCommand(content: string): { condition: string } | null {
+  const m = /^\s*\/goal\b\s*([\s\S]*)$/.exec(content);
+  if (!m) return null;
+  const arg = m[1].trim();
+  if (arg === "") return null;
+  const lower = arg.toLowerCase();
+  if (lower === "clear" || lower === "reset" || lower === "show") return null;
+  return { condition: arg };
+}
+
+/**
+ * Hairline chapter-break rendering for /goal command notices. Used by both
+ * the user-typed SET form and assistant-emitted SHOW/CLEAR confirmations.
+ * Mirrors the existing system-message divider pattern (hairline + glyph +
+ * caption) but tinted with the amber `primary` accent so /goal events read
+ * as structural marks rather than card chips in the transcript.
+ *
+ * Layout (collapsed): ─── ◎ GOAL SET "<condition>" /GOAL CLEAR ─── (truncated)
+ * Layout (expanded):  ─── ◎ GOAL SET /GOAL CLEAR ───
+ *                          "<condition wrapping across multiple lines>"
+ *
+ * The condition is a button that toggles expansion so long directives stay
+ * readable. `dir="auto"` lets the browser pick reading order from the
+ * content itself so RTL or mixed-script conditions render naturally.
+ * `[overflow-wrap:anywhere]` allows breaking inside long unbroken tokens
+ * (URLs, hashes) that ordinary `break-words` would leave to overflow.
+ */
+function GoalPill({ label, condition, hint }: { label: string; condition?: string; hint: string }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const labelEl = (
+    <span className="font-mono text-[10.5px] uppercase tracking-[0.2em] text-primary">
+      {label}
+    </span>
+  );
+  const hintEl = (
+    <span className="shrink-0 font-mono text-[9.5px] uppercase tracking-[0.18em] text-muted-foreground/70">
+      {hint}
+    </span>
+  );
+  const iconEl = (
+    <Target
+      data-testid="target-icon"
+      size={12}
+      className="shrink-0 self-center text-primary"
+      aria-hidden="true"
+    />
+  );
+
+  if (expanded && condition) {
+    return (
+      <div
+        className="flex items-start gap-3 py-2"
+        data-testid="goal-pill"
+        data-expanded="true"
+        role="note"
+        aria-label={`${label}: ${condition}`}
+      >
+        <div className="mt-2 h-px flex-1 bg-primary/40" />
+        <div className="flex min-w-0 flex-col items-start gap-1.5">
+          <div className="flex items-baseline gap-2.5">
+            {iconEl}
+            {labelEl}
+            {hintEl}
+          </div>
+          <button
+            type="button"
+            onClick={() => setExpanded(false)}
+            aria-expanded="true"
+            aria-label="Collapse goal condition"
+            dir="auto"
+            className="cursor-pointer text-left font-serif text-[14px] italic leading-snug text-foreground [overflow-wrap:anywhere] hover:text-foreground/80"
+          >
+            &ldquo;{condition}&rdquo;
+          </button>
+        </div>
+        <div className="mt-2 h-px flex-1 bg-primary/40" />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="flex items-center gap-3 py-2"
+      data-testid="goal-pill"
+      data-expanded="false"
+      role="note"
+      aria-label={condition ? `${label}: ${condition}` : label}
+    >
+      <div className="h-px flex-1 bg-primary/40" />
+      <div className="flex min-w-0 items-baseline gap-2.5">
+        {iconEl}
+        {labelEl}
+        {condition && (
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            aria-expanded="false"
+            aria-label="Expand full goal condition"
+            title={condition}
+            dir="auto"
+            className="min-w-0 cursor-pointer truncate text-left font-serif text-[14px] italic leading-snug text-foreground hover:text-foreground/80"
+          >
+            &ldquo;{condition}&rdquo;
+          </button>
+        )}
+        {hintEl}
+      </div>
+      <div className="h-px flex-1 bg-primary/40" />
+    </div>
+  );
+}
+
 function parseAgentError(content: string): string | null {
   try {
     const parsed = JSON.parse(content) as { __type?: string; message?: string };
@@ -45,72 +189,67 @@ interface MessageBubbleProps {
   onScrollToMessage?: (messageId: string) => void;
 }
 
-/** Maps a MIME type to a file extension for attachment URLs. */
-const MIME_TO_EXT: Record<string, string> = {
-  "image/jpeg": ".jpg",
-  "image/png": ".png",
-  "image/gif": ".gif",
-  "image/webp": ".webp",
-  "application/pdf": ".pdf",
-  "text/plain": ".txt",
-};
-
-function extFromMime(mimeType: string): string {
-  return MIME_TO_EXT[mimeType] ?? "";
-}
-
-/** Compact human-readable size for attachment chips in the transcript. */
-function formatAttachmentBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-/** Icon for non-image attachments in user message chips (matches composer preview semantics). */
-function FileAttachmentGlyph({ mimeType }: { mimeType: string }) {
-  const isOfficeDoc =
-    mimeType.includes("officedocument") ||
-    mimeType.includes("opendocument") ||
-    mimeType === "application/rtf" ||
-    mimeType === "text/rtf";
-  if (mimeType === "application/pdf") {
-    return <FileText size={16} className="shrink-0 text-red-600 dark:text-red-400" aria-hidden />;
-  }
-  if (isOfficeDoc) {
-    return <FileText size={16} className="shrink-0 text-blue-600 dark:text-blue-400" aria-hidden />;
-  }
-  return <File size={16} className="shrink-0 text-muted-foreground" aria-hidden />;
-}
-
-/** Single image thumbnail with error fallback. */
-function ImageThumbnail({ src, name, single }: { src: string; name: string; single: boolean }) {
+/** Single image thumbnail with error fallback and optional full-size preview. */
+function ImageThumbnail({
+  src,
+  name,
+  single,
+  onOpenPreview,
+}: {
+  src: string;
+  name: string;
+  single: boolean;
+  onOpenPreview?: () => void;
+}) {
   const [failed, setFailed] = useState(false);
   const handleError = useCallback(() => setFailed(true), []);
 
-  return (
-    <div
-      className={cn(
-        "overflow-hidden rounded-xl ring-1 ring-border/40",
-        single ? "max-w-[240px]" : "max-w-[140px]"
-      )}
-    >
-      {failed ? (
+  const frame = cn(
+    "overflow-hidden rounded-xl ring-1 ring-border/40",
+    single ? "max-w-[240px]" : "max-w-[140px]",
+  );
+
+  if (failed) {
+    return (
+      <div className={frame}>
         <div className="flex items-center gap-2 rounded-xl bg-muted/50 px-3 py-2.5">
           <ImageIcon size={14} className="shrink-0 text-muted-foreground" />
           <span className="truncate text-xs text-muted-foreground">{name}</span>
         </div>
-      ) : (
-        <img
-          src={src}
-          alt={name}
-          className="block h-auto max-h-[160px] w-full object-contain bg-muted"
-          loading="lazy"
-          onError={handleError}
-          style={{ imageOrientation: "from-image" }}
-        />
-      )}
-    </div>
+      </div>
+    );
+  }
+
+  const imgEl = (
+    <img
+      src={src}
+      alt={name}
+      className="block h-auto max-h-[160px] w-full bg-muted/40 object-contain"
+      loading="lazy"
+      onError={handleError}
+      style={{ imageOrientation: "from-image" }}
+    />
   );
+
+  if (onOpenPreview) {
+    return (
+      <button
+        type="button"
+        className={cn(
+          frame,
+          "block w-full cursor-pointer bg-transparent p-0 text-left outline-none",
+          "transition-[box-shadow,filter] hover:brightness-[1.03] hover:ring-border/65",
+          "focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        )}
+        aria-label={`Preview image ${name}`}
+        onClick={onOpenPreview}
+      >
+        {imgEl}
+      </button>
+    );
+  }
+
+  return <div className={frame}>{imgEl}</div>;
 }
 
 /** Copy button with check feedback, visible on parent hover. */
@@ -223,6 +362,11 @@ function QuoteBlock({
 
 /** Renders a single chat message (system, user, or assistant). Memoized to prevent re-renders when the message ref is unchanged. */
 export const MessageBubble = memo(function MessageBubble({ message, onBranch, onReply, onScrollToMessage }: MessageBubbleProps) {
+  const [imagePreview, setImagePreview] = useState<{
+    items: { src: string; title: string }[];
+    initialIndex: number;
+  } | null>(null);
+
   const formattedTime = useMemo(
     () => new Date(message.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     [message.timestamp],
@@ -237,6 +381,15 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
     [message.attachments],
   );
   const textContent = useMemo(() => stripInjectedFiles(message.content), [message.content]);
+
+  const imageSlides = useMemo(
+    () =>
+      imageAttachments.map((img) => ({
+        src: buildStoredAttachmentImageSrc(message.thread_id, img.id, img.mimeType),
+        title: img.name,
+      })),
+    [imageAttachments, message.thread_id],
+  );
 
   if (message.role === "system") {
     if (isHandoffMessage(message.role, message.content)) {
@@ -268,59 +421,88 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
     );
   }
 
+  // Goal-status confirmations are emitted by AgentService when the user types
+  // /goal in the composer. They arrive as assistant messages but read as
+  // chat-control notices, not model output — render them as a compact pill
+  // rather than a full bubble.
+  if (message.role === "assistant") {
+    const goal = parseGoalStatus(textContent);
+    if (goal) {
+      return <GoalPill label={goal.label} condition={goal.condition} hint={goal.hint} />;
+    }
+  }
+
+  // User-typed `/goal <condition>` SET form. AgentService rewrites the wire
+  // payload into a directive prompt and dispatches it to the agent without
+  // emitting a separate assistant status message, so the only place we can
+  // anchor the pill is the user's own message. Control forms (clear/show)
+  // still get an assistant-side pill from the server, so they fall through
+  // to the normal user bubble below.
+  const userGoal = message.role === "user" ? parseUserGoalCommand(textContent) : null;
+  const hasAttachments = imageAttachments.length > 0 || fileAttachments.length > 0;
+  // Without attachments the pill replaces the whole bubble (chapter-break
+  // full-width). With attachments we keep the user's images/files visible
+  // and render the pill alongside, so the directive is not "stolen" from
+  // the attachments the user intentionally sent with it.
+  if (message.role === "user" && userGoal && !hasAttachments) {
+    return <GoalPill label="Goal set" condition={userGoal.condition} hint="/goal clear to remove" />;
+  }
+
   const isUser = message.role === "user";
 
   if (isUser) {
 
     return (
-      <div className="group/msg flex justify-end" data-message-id={message.id} data-message-role={message.role} data-thread-id={message.thread_id}>
-        <div className="min-w-0 max-w-[75%] space-y-1.5">
-          {/* Quote block — shown when this message is a reply */}
-          {message.reply_to_message_id && (
-            <QuoteBlock
-              quotedText={message.quoted_text ?? ""}
-              available={!!message.quoted_text}
-              onClick={() => onScrollToMessage?.(message.reply_to_message_id!)}
-            />
-          )}
-          {/* Image attachments — standalone thumbnails above the bubble */}
-          {imageAttachments.length > 0 && (
-            <div className={cn(
-              "flex justify-end gap-1.5",
-              imageAttachments.length > 2 ? "flex-wrap" : ""
-            )}>
-              {imageAttachments.map((img) => (
-                <ImageThumbnail
-                  key={img.id}
-                  src={`mcode-attachment://${message.thread_id}/${img.id}${extFromMime(img.mimeType)}`}
-                  name={img.name}
-                  single={imageAttachments.length === 1}
-                />
-              ))}
-            </div>
-          )}
+      <>
+        <div className="group/msg flex justify-end" data-message-id={message.id} data-message-role={message.role} data-thread-id={message.thread_id}>
+          <div className="min-w-0 max-w-[75%] space-y-1.5">
+            {/* Quote block — shown when this message is a reply */}
+            {message.reply_to_message_id && (
+              <QuoteBlock
+                quotedText={message.quoted_text ?? ""}
+                available={!!message.quoted_text}
+                onClick={() => onScrollToMessage?.(message.reply_to_message_id!)}
+              />
+            )}
+            {/* Image attachments — standalone thumbnails above the bubble */}
+            {imageAttachments.length > 0 && (
+              <div className={cn(
+                "flex justify-end gap-1.5",
+                imageAttachments.length > 2 ? "flex-wrap" : ""
+              )}>
+                {imageAttachments.map((img, idx) => {
+                  const src = buildStoredAttachmentImageSrc(message.thread_id, img.id, img.mimeType);
+                  return (
+                    <ImageThumbnail
+                      key={img.id}
+                      src={src}
+                      name={img.name}
+                      single={imageAttachments.length === 1}
+                      onOpenPreview={() =>
+                        setImagePreview({ items: imageSlides, initialIndex: idx })
+                      }
+                    />
+                  );
+                })}
+              </div>
+            )}
 
-          {/* Non-image files sit outside the colored bubble so names stay readable on any theme. */}
-          {fileAttachments.length > 0 && (
-            <div className="flex flex-wrap justify-end gap-2">
-              {fileAttachments.map((file) => (
-                <div
-                  key={file.id}
-                  className="flex min-w-0 max-w-[260px] items-start gap-2 rounded-lg border border-border bg-card px-3 py-2 shadow-sm"
-                >
-                  <FileAttachmentGlyph mimeType={file.mimeType} />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-xs font-medium text-foreground">{file.name}</p>
-                    <p className="mt-0.5 text-[10px] tabular-nums text-muted-foreground">
-                      {formatAttachmentBytes(file.sizeBytes)}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+            {/* Non-image files sit outside the colored bubble so names stay readable on any theme. */}
+            {fileAttachments.length > 0 && (
+              <div className="flex flex-wrap justify-end gap-2">
+                {fileAttachments.map((file) => (
+                  <FileAttachmentTile
+                    key={file.id}
+                    variant="transcript"
+                    name={file.name}
+                    sizeBytes={file.sizeBytes}
+                    mimeType={file.mimeType}
+                  />
+                ))}
+              </div>
+            )}
 
-          {textContent.trim() && (
+          {textContent.trim() && !userGoal && (
             <div className="overflow-hidden break-words rounded-lg rounded-br-md bg-primary px-3 py-1.5 text-sm text-primary-foreground shadow-sm shadow-primary/15">
               <Suspense fallback={null}>
                 <LazyMarkdownContent content={textContent} isStreaming={false} variant="user" />
@@ -341,12 +523,24 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
                 onReply(message.id, textContent.trim() || fallback, "user");
               }} />}
               {onBranch && <BranchButton onClick={() => onBranch(message.id)} />}
-              {textContent.trim() && <CopyButton content={textContent} />}
+              {textContent.trim() && !userGoal && <CopyButton content={textContent} />}
             </div>
             <span className="font-mono text-[10px] tabular-nums text-muted-foreground/55">{formattedTime}</span>
           </div>
         </div>
-      </div>
+        </div>
+        {userGoal && (
+          <GoalPill label="Goal set" condition={userGoal.condition} hint="/goal clear to remove" />
+        )}
+        <ImageAttachmentLightbox
+          open={imagePreview !== null}
+          onOpenChange={(open) => {
+            if (!open) setImagePreview(null);
+          }}
+          items={imagePreview?.items ?? []}
+          initialIndex={imagePreview?.initialIndex ?? 0}
+        />
+      </>
     );
   }
 

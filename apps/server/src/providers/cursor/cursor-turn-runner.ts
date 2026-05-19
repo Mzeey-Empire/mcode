@@ -25,6 +25,7 @@ import { CursorStreamJsonParser } from "./cursor-stream-json-parser.js";
 import {
   createCursorStreamAccumulator,
   mapCursorStreamEvent,
+  resolveCursorAssistantMessageContent,
 } from "./cursor-stream-event-mapper.js";
 import type { CursorTodoSnapshot } from "./cursor-todo-snapshot.js";
 import type { CursorStreamEvent } from "./cursor-stream-json-types.js";
@@ -75,6 +76,8 @@ export interface CursorTurnResult {
   chatId: string | null;
   /** Concatenated assistant text accumulated this turn. */
   assistantText: string;
+  /** Text used for persisted assistant messages (post-tool deltas when tagged final, otherwise full transcript). */
+  assistantMessageContent: string;
   /** Subtype of the terminal `result` event (`success`, `error`, …). */
   resultSubtype: string;
 }
@@ -229,6 +232,7 @@ export async function runCursorTurn(
           resolve({
             chatId: acc.chatId,
             assistantText: acc.assistantText,
+            assistantMessageContent: resolveCursorAssistantMessageContent(acc),
             resultSubtype: resultSubtype as string,
           }),
         );

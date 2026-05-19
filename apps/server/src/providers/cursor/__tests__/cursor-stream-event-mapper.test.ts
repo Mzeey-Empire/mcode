@@ -25,6 +25,7 @@ import { describe, it, expect } from "vitest";
 import {
   mapCursorStreamEvent,
   createCursorStreamAccumulator,
+  resolveCursorAssistantMessageContent,
   type CursorStreamAccumulator,
 } from "../cursor-stream-event-mapper.js";
 import { createCursorTodoSnapshot, type CursorTodoSnapshot } from "../cursor-todo-snapshot.js";
@@ -168,6 +169,57 @@ describe("mapCursorStreamEvent", () => {
       );
       expect(events).toEqual([]);
       expect(acc.assistantText).toBe("Hello");
+    });
+
+    it("accumulates assistantFinalText only after tools complete (post-tool reply)", () => {
+      const acc = freshAcc();
+      mapCursorStreamEvent(
+        {
+          type: "assistant",
+          message: { role: "assistant", content: [{ type: "text", text: "Prep " }] },
+          timestamp_ms: 1,
+        } as CursorStreamEvent,
+        "t1",
+        acc,
+      );
+      expect(acc.assistantFinalText).toBe("");
+      mapCursorStreamEvent(
+        {
+          type: "tool_call",
+          subtype: "started",
+          call_id: "tc1",
+          tool_call: { readToolCall: { args: { path: "/x" } } },
+        } as CursorStreamEvent,
+        "t1",
+        acc,
+      );
+      mapCursorStreamEvent(
+        {
+          type: "tool_call",
+          subtype: "completed",
+          call_id: "tc1",
+          tool_call: {
+            readToolCall: {
+              args: { path: "/x" },
+              result: { success: {} },
+            },
+          },
+        } as CursorStreamEvent,
+        "t1",
+        acc,
+      );
+      mapCursorStreamEvent(
+        {
+          type: "assistant",
+          message: { role: "assistant", content: [{ type: "text", text: "Done" }] },
+          timestamp_ms: 2,
+        } as CursorStreamEvent,
+        "t1",
+        acc,
+      );
+      expect(acc.assistantText).toBe("Prep Done");
+      expect(acc.assistantFinalText).toBe("Done");
+      expect(resolveCursorAssistantMessageContent(acc)).toBe("Done");
     });
 
     it("emits the full message as a single delta when it arrives without prior deltas", () => {

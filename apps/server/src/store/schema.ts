@@ -123,6 +123,52 @@ export const toolCallRecords = sqliteTable(
   ],
 );
 
+export const thoughtSegments = sqliteTable(
+  "thought_segments",
+  {
+    id: text("id").primaryKey().notNull(),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    text: text("text").notNull(),
+    startedAt: text("started_at").notNull().default(timestampDefault),
+    endedAt: text("ended_at"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    /**
+     * Non-zero when this segment is the assistant's final user-facing response
+     * (set by the provider stream tag or the persistTurn suffix-match safeguard).
+     * The client suppresses rendering these as ThoughtBlock rows to avoid
+     * duplicating text that already appears in the assistant message body.
+     */
+    isFinalResponse: integer("is_final_response").notNull().default(0),
+  },
+  (table) => [
+    index("idx_thought_segments_message").on(table.messageId),
+  ],
+);
+
+export const hookExecutions = sqliteTable(
+  "hook_executions",
+  {
+    id: text("id").primaryKey().notNull(),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    hookName: text("hook_name").notNull(),
+    toolName: text("tool_name"),
+    phase: text("phase").notNull(),
+    payload: text("payload").notNull().default("{}"),
+    durationMs: integer("duration_ms"),
+    didBlock: integer("did_block").notNull().default(0),
+    startedAt: text("started_at").notNull().default(timestampDefault),
+    endedAt: text("ended_at"),
+    sortOrder: integer("sort_order").notNull().default(0),
+  },
+  (table) => [
+    index("idx_hook_executions_message").on(table.messageId),
+  ],
+);
+
 export const turnSnapshots = sqliteTable(
   "turn_snapshots",
   {

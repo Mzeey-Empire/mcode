@@ -333,6 +333,7 @@ describe("runCursorTurn", () => {
     });
     const result = await promise;
     expect(result.assistantText).toBe("Hello");
+    expect(result.assistantMessageContent).toBe("Hello");
     const deltas = events
       .filter((e): e is AgentEvent & { delta: string } => e.type === "textDelta")
       .map((e) => e.delta);

@@ -1,5 +1,5 @@
 import type { AttachmentMeta } from "./types";
-import type { McodeBrowserCapture } from "@mcode/contracts";
+import type { BrowserPerfCounters, BrowserTabSet, McodeBrowserCapture } from "@mcode/contracts";
 
 /** Discriminated union describing the auto-updater lifecycle state. */
 export type UpdateStatus =
@@ -92,6 +92,56 @@ interface PreviewBridge {
   onDidUpdateFavicon(callback: (payload: { favicon: string | null }) => void): () => void;
   /** Cancel any in-progress capture operation (region or element-pick). */
   cancelCapture(): Promise<void>;
+  /** Multi-tab control surface (Phase A of the in-app browser rewrite). */
+  tabs: PreviewTabsBridge;
+  /** Live preview perf counters; dev HUD only. */
+  getPerfCounters(): Promise<BrowserPerfCounters>;
+  /** Phase D: adopt a renderer-hosted <webview>'s WebContents into the host bridge. */
+  adoptWebview(payload: {
+    webContentsId: number;
+    threadId: string;
+    tabId: string;
+  }): Promise<{ ok: true } | { ok: false; error: string }>;
+  releaseWebview(payload: {
+    threadId: string;
+    tabId: string;
+  }): Promise<{ ok: true } | { ok: false; error: string }>;
+  /** Phase G: design-mode surface. */
+  design: PreviewDesignBridge;
+}
+
+/** Built-in viewport presets exposed by Phase G. */
+export type DesignViewportPresetId = "phone" | "tablet" | "desktop";
+
+interface PreviewDesignBridge {
+  setViewport(payload: {
+    presetId?: DesignViewportPresetId;
+    widthOverride?: number;
+    heightOverride?: number;
+  }): Promise<{ ok: true; data: { width: number; height: number } } | { ok: false; error: string }>;
+  resetViewport(): Promise<{ ok: true } | { ok: false; error: string }>;
+  setInspect(enabled: boolean): Promise<{ ok: true } | { ok: false; error: string }>;
+}
+
+/** Wire-side result of a tab IPC call. */
+export type PreviewTabIpcResult<T> =
+  | { readonly ok: true; readonly data: T }
+  | { readonly ok: false; readonly error: string };
+
+/** Mutation result for create. */
+export interface PreviewTabCreateData {
+  readonly tabId: string;
+  readonly tabs: BrowserTabSet;
+}
+
+/** Tab control surface mounted under `desktopBridge.preview.tabs`. */
+interface PreviewTabsBridge {
+  list(threadId: string): Promise<PreviewTabIpcResult<BrowserTabSet>>;
+  create(threadId: string, activate?: boolean): Promise<PreviewTabIpcResult<PreviewTabCreateData>>;
+  activate(threadId: string, tabId: string): Promise<PreviewTabIpcResult<BrowserTabSet>>;
+  close(threadId: string, tabId: string): Promise<PreviewTabIpcResult<BrowserTabSet>>;
+  /** Subscribe to push-style tab set updates emitted on navigation/favicon/close. */
+  onUpdated(callback: (payload: BrowserTabSet) => void): () => void;
 }
 
 /** IPC push transport relayed from the Electron main process. */
@@ -149,7 +199,7 @@ interface DesktopBridge {
   /** Open the OS file explorer at the given directory. */
   openInExplorer(dirPath: string): Promise<void>;
   /** Open a URL in the default browser. */
-  openExternalUrl(url: string): Promise<void>;
+  openExternalUrl(url: string, workspacePath?: string | null): Promise<void>;
   /** Return a list of detected editor names on the system. */
   detectEditors(): Promise<string[]>;
   /** Read an image from the system clipboard. Returns metadata or null. */

@@ -15,6 +15,7 @@ export interface Command {
 const BUILTIN_COMMANDS: Command[] = [
   { name: "m:plan", description: "Toggle plan mode", namespace: "mcode", action: "toggle-plan" },
   { name: "compact", description: "Summarise conversation history to free up context window", namespace: "command" },
+  { name: "goal", description: "Set a goal the agent must satisfy before stopping (\"/goal clear\" to remove)", namespace: "command" },
 ];
 
 /** Regex: matches `/` at start of line or after whitespace, followed by non-space chars. */
@@ -101,6 +102,8 @@ export function useSlashCommand({
     const builtins = BUILTIN_COMMANDS.filter((cmd) => {
       // /m:plan is hidden for copilot (uses its own dynamic modes instead)
       if (cmd.name === "m:plan" && providerId === "copilot") return false;
+      // /goal is implemented in the Claude provider's Stop hook; hide on others.
+      if (cmd.name === "goal" && providerId !== "claude") return false;
       return true;
     });
     const commands: Command[] = [
@@ -116,25 +119,29 @@ export function useSlashCommand({
     return allCommands.filter((c) => c.name.toLowerCase().includes(f));
   })();
 
-  // Trigger a load when the popup opens AND either (a) we have no skills,
-  // or (b) the current workspace's cwd differs from the cached cwd. The
-  // store now tracks `cwd` for both successful and failed loads, so a
-  // mismatch is the right signal — without this, switching workspaces
-  // would keep showing the previous workspace's commands forever.
+  // Eager prefetch: load skills as soon as cwd/providerId are known, NOT
+  // when the popup opens. This ensures the cache is warm by the time the
+  // user types `/`, so the popup renders the full list on first paint and
+  // the loading skeleton is never visible.
+  //
+  // Conditions to trigger a load:
+  //   - cwd differs from the cached cwd (workspace switch)
+  //   - providerId differs (provider switch)
+  //   - skills are null and no prior error (cold start)
   //
   // The `!error` gate prevents an infinite retry loop on persistent
   // failures: when cwd is unchanged, recovery happens via `onRetry`.
   // When cwd changes, we always load (treating it as a fresh workspace,
   // ignoring any prior error from the old one).
   useEffect(() => {
-    if (!isOpen || isLoading) return;
+    if (isLoading) return;
     const cwdChanged = cachedCwd !== cwd;
     const providerChanged = cachedProviderId !== providerId;
     const noSkills = skills === null;
     if (cwdChanged || providerChanged || (noSkills && !error)) {
       load(cwd, providerId).catch(() => { /* surfaced via `error` */ });
     }
-  }, [isOpen, skills, cachedCwd, cachedProviderId, cwd, providerId, isLoading, error, load]);
+  }, [skills, cachedCwd, cachedProviderId, cwd, providerId, isLoading, error, load]);
 
   const onInputChange = useCallback(
     (value: string) => {

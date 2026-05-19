@@ -12,6 +12,8 @@ import type {
   PrDetail,
   PermissionMode,
   ToolCallRecord,
+  ThoughtSegmentRecord,
+  HookExecutionRecord,
   Settings,
   GitCommit,
   ProviderModelInfo,
@@ -28,6 +30,7 @@ import {
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThreadStore } from "@/stores/threadStore";
 import type { PermissionRequest } from "@mcode/contracts";
+import { setAttachmentTransportWsUrl } from "@/lib/attachment-url";
 
 /** Minimum reconnect delay in milliseconds. */
 const MIN_RECONNECT_MS = 1000;
@@ -185,6 +188,7 @@ export function createWsTransport(
     ws.onopen = () => {
       reconnectDelay = MIN_RECONNECT_MS;
       consecutiveAuthFailures = 0;
+      setAttachmentTransportWsUrl(url);
       resolveReady();
       options?.onStatusChange?.("connected");
 
@@ -646,6 +650,18 @@ export function createWsTransport(
       rpc<ToolCallRecord[]>("toolCallRecord.list", { messageId }),
     listToolCallRecordsByParent: (parentToolCallId) =>
       rpc<ToolCallRecord[]>("toolCallRecord.listByParent", { parentToolCallId }),
+    listNarrative: (messageId) =>
+      rpc<{
+        tools: ToolCallRecord[];
+        thoughts: ThoughtSegmentRecord[];
+        hooks: HookExecutionRecord[];
+      }>("narrative.list", { messageId }),
+    listNarrativeBatch: (messageIds) =>
+      rpc<Record<string, {
+        tools: ToolCallRecord[];
+        thoughts: ThoughtSegmentRecord[];
+        hooks: HookExecutionRecord[];
+      }>>("narrative.listBatch", { messageIds }),
 
     // Thread tasks
     getThreadTasks: (threadId: string) =>

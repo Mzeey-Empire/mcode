@@ -129,6 +129,16 @@ export const AgentEventSchema = lazySchema(() =>
       threadId: z.string(),
       /** Partial response text - append to accumulate the full response. */
       delta: z.string(),
+      /**
+       * Set to `true` when this delta belongs to the final user-facing response
+       * (i.e. all tool calls have been resolved for this turn). The client uses
+       * this to suppress creating a ThoughtSegment row for these deltas.
+       *
+       * Not set for tool-free turns (no lookahead is possible at the provider
+       * layer); the client fallback in `build-narrative.ts` and the
+       * `persistTurn` suffix-match safeguard handle that case instead.
+       */
+      isFinalResponse: z.boolean().optional(),
     }),
     z.object({
       /** Incremental JSON fragment emitted while Claude builds a tool call's input. */
@@ -244,6 +254,20 @@ export const AgentEventSchema = lazySchema(() =>
       durationMs: z.number(),
       /** Whether the hook blocked the tool call or agent turn from proceeding. */
       didBlock: z.boolean(),
+      /**
+       * Set only for late hooks (Stop/SessionEnd/PreCompact) that arrived after
+       * `persistTurn` had already run. Carries the message ID the hook was
+       * attached to so the client can route it into the persisted narrative cache
+       * rather than the volatile `hooksByThread` list.
+       */
+      persistedMessageId: z.string().optional(),
+      /**
+       * Set together with `persistedMessageId`. Stable DB row id for the late
+       * hook so the client can dedupe across redelivered broadcasts (the same
+       * logical event can arrive multiple times during a session) and avoid
+       * accumulating duplicate entries in `narrativeByMessage[id].hooks`.
+       */
+      persistedHookId: z.string().optional(),
     }),
   ]),
 );

@@ -1,11 +1,23 @@
 import { memo, useMemo, lazy, Suspense } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import {
+  isMcodeWorkspacePreviewUrl,
+  mcodeWorkspacePreviewHref,
+  looksLikeWorkspaceRelativeFileRef,
+} from "@mcode/contracts";
 import { CodeBlock } from "./CodeBlock";
+import { resolveCodeBlockLanguage } from "@/lib/resolve-code-block-language";
 import { useDiffStore } from "@/stores/diffStore";
 import { isMac } from "@/lib/platform";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+
+/** Pass through workspace preview URLs; otherwise use react-markdown's default sanitizer. */
+function markdownUrlTransform(value: string): string {
+  const trimmed = value.trim();
+  if (isMcodeWorkspacePreviewUrl(trimmed)) return trimmed;
+  return defaultUrlTransform(value);
+}
 
 /** Props for {@link MarkdownContent}. */
 interface MarkdownContentProps {
@@ -38,12 +50,23 @@ function hasPreview(): boolean {
 }
 
 /**
- * Handles a click on a previewable URL. Opens in the browser preview panel on
- * Ctrl/Cmd+click, otherwise opens externally.
+ * Looks up the on-disk path for the active workspace so the desktop preview
+ * can resolve relative files and `mcode-workspace:` URLs.
+ */
+function getWorkspacePathForPreview(): string | null {
+  const { activeWorkspaceId, workspaces } = useWorkspaceStore.getState();
+  if (!activeWorkspaceId) return null;
+  return workspaces.find((w) => w.id === activeWorkspaceId)?.path ?? null;
+}
+
+/**
+ * Handles a click on a previewable URL. Ctrl/Cmd+click opens in the embedded
+ * preview when available; a normal click opens in the system default browser.
  */
 function handleLinkClick(e: React.MouseEvent | React.KeyboardEvent, url: string): void {
   e.preventDefault();
 
+  const workspacePath = getWorkspacePathForPreview();
   const isModifierClick = e.ctrlKey || e.metaKey;
   if (isModifierClick && hasPreview()) {
     const threadId = useWorkspaceStore.getState().activeThreadId;
@@ -53,27 +76,46 @@ function handleLinkClick(e: React.MouseEvent | React.KeyboardEvent, url: string)
       setRightPanelTab(threadId, "preview");
       // Defer navigation so React can re-render and sync BrowserView bounds
       setTimeout(() => {
-        window.desktopBridge?.preview?.navigate(url).then((r) => {
-          if (!r?.ok) window.desktopBridge?.openExternalUrl?.(url);
-        });
+        const fallback = (): void => {
+          if (isMcodeWorkspacePreviewUrl(url)) {
+            void window.desktopBridge?.openExternalUrl?.(url, workspacePath ?? undefined);
+          } else {
+            window.desktopBridge?.openExternalUrl?.(url);
+          }
+        };
+        const navigatePromise = window.desktopBridge?.preview?.navigate?.(url, workspacePath);
+        if (!navigatePromise) {
+          fallback();
+          return;
+        }
+        void navigatePromise
+          .then((r) => {
+            if (!r?.ok) fallback();
+          })
+          .catch(() => {
+            fallback();
+          });
       }, 0);
       return;
     }
-    // No active thread; fall through to open externally
   }
 
   if (window.desktopBridge?.openExternalUrl) {
-    window.desktopBridge.openExternalUrl(url);
-  } else {
+    if (isMcodeWorkspacePreviewUrl(url)) {
+      void window.desktopBridge.openExternalUrl(url, workspacePath ?? null);
+    } else {
+      void window.desktopBridge.openExternalUrl(url);
+    }
+  } else if (!isMcodeWorkspacePreviewUrl(url)) {
     window.open(url, "_blank", "noopener,noreferrer");
   }
 }
 
 /**
- * Builds the static component overrides that depend on `variant`.
+ * Builds the static component overrides that depend on `variant` and workspace context.
  * Elements whose colors differ between assistant and user bubble are variant-conditional.
  */
-function makeStaticComponents(variant: "assistant" | "user") {
+function makeStaticComponents(variant: "assistant" | "user", workspacePath: string | null) {
   const isUser = variant === "user";
 
   return {
@@ -89,23 +131,33 @@ function makeStaticComponents(variant: "assistant" | "user") {
     a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
       let safeHref: string | undefined;
       if (href) {
-        try {
+        const raw = href.trim();
+        if (isMcodeWorkspacePreviewUrl(raw)) {
+          safeHref = raw;
+        } else if (workspacePath && looksLikeWorkspaceRelativeFileRef(raw)) {
+          safeHref = mcodeWorkspacePreviewHref(raw);
+        } else try {
           const { protocol } = new URL(href);
           if (protocol === "https:" || protocol === "http:" || protocol === "mailto:") {
             safeHref = href;
           }
         } catch {
-          // Invalid URL - safeHref stays undefined
+          /* invalid URL */
         }
       }
       const linkClass = isUser
         ? "text-primary-foreground underline hover:opacity-80"
         : "text-primary underline hover:text-primary";
-      const isPreviewable = safeHref && (safeHref.startsWith("http:") || safeHref.startsWith("https:"));
+      const isPreviewable =
+        !!safeHref &&
+        (safeHref.startsWith("http:") ||
+          safeHref.startsWith("https:") ||
+          isMcodeWorkspacePreviewUrl(safeHref));
       const showHint = isPreviewable && hasPreview();
-      const anchor = (
+      return (
         <a
           href={safeHref}
+          title={showHint ? previewHint : undefined}
           className={linkClass}
           target="_blank"
           rel="noopener noreferrer"
@@ -114,7 +166,7 @@ function makeStaticComponents(variant: "assistant" | "user") {
             if (isPreviewable) return handleLinkClick(e, safeHref);
             e.preventDefault();
             if (window.desktopBridge?.openExternalUrl) {
-              window.desktopBridge.openExternalUrl(safeHref);
+              void window.desktopBridge.openExternalUrl(safeHref);
             } else {
               window.open(safeHref, "_blank", "noopener,noreferrer");
             }
@@ -122,13 +174,6 @@ function makeStaticComponents(variant: "assistant" | "user") {
         >
           {children}
         </a>
-      );
-      if (!showHint) return anchor;
-      return (
-        <Tooltip>
-          <TooltipTrigger render={anchor} />
-          <TooltipContent side="top" className="text-xs">{previewHint}</TooltipContent>
-        </Tooltip>
       );
     },
     blockquote: ({ children }: { children?: React.ReactNode }) => (
@@ -185,13 +230,17 @@ function makeStaticComponents(variant: "assistant" | "user") {
 }
 
 /**
- * Builds the `code` override that depends on `isStreaming` and `variant`.
+ * Builds the `code` override that depends on `isStreaming`, `variant`, and workspace path.
  * Only recreated when those props change; static overrides are reused.
  */
-function makeComponents(isStreaming: boolean, variant: "assistant" | "user") {
+function makeComponents(
+  isStreaming: boolean,
+  variant: "assistant" | "user",
+  workspacePath: string | null,
+) {
   const isUser = variant === "user";
   return {
-    ...makeStaticComponents(variant),
+    ...makeStaticComponents(variant, workspacePath),
     code: ({ children, className }: { children?: React.ReactNode; className?: string }) => {
       // Detect inline vs block code. In react-markdown's HAST, fenced code
       // blocks are wrapped in a <pre> parent (even without a language tag).
@@ -212,10 +261,11 @@ function makeComponents(isStreaming: boolean, variant: "assistant" | "user") {
           const linkClass = isUser
             ? "text-primary-foreground underline decoration-dotted hover:opacity-80 cursor-pointer"
             : "text-primary underline decoration-dotted hover:text-primary cursor-pointer";
-          const codeLink = (
+          return (
             <code
               role="link"
               tabIndex={0}
+              title={hasPreview() ? previewHint : undefined}
               className={`${codeClass} ${linkClass}`}
               onClick={(e) => handleLinkClick(e, text)}
               onKeyDown={(e) => { if (e.key === "Enter") handleLinkClick(e, text); }}
@@ -223,12 +273,24 @@ function makeComponents(isStreaming: boolean, variant: "assistant" | "user") {
               {children}
             </code>
           );
-          if (!hasPreview()) return codeLink;
+        }
+
+        if (workspacePath && looksLikeWorkspaceRelativeFileRef(text)) {
+          const previewUrl = mcodeWorkspacePreviewHref(text);
+          const linkClass = isUser
+            ? "text-primary-foreground underline decoration-dotted hover:opacity-80 cursor-pointer"
+            : "text-primary underline decoration-dotted hover:text-primary cursor-pointer";
           return (
-            <Tooltip>
-              <TooltipTrigger render={codeLink} />
-              <TooltipContent side="top" className="text-xs">{previewHint}</TooltipContent>
-            </Tooltip>
+            <code
+              role="link"
+              tabIndex={0}
+              title={hasPreview() ? previewHint : undefined}
+              className={`${codeClass} ${linkClass}`}
+              onClick={(e) => handleLinkClick(e, previewUrl)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleLinkClick(e, previewUrl); }}
+            >
+              {children}
+            </code>
           );
         }
 
@@ -236,15 +298,15 @@ function makeComponents(isStreaming: boolean, variant: "assistant" | "user") {
       }
 
       const langMatch = className?.match(/language-(\S+)/);
-      const language = langMatch ? langMatch[1] : "";
+      const rawFence = langMatch ? langMatch[1] : "";
 
       // Suppress the fenced block the model emits to signal plan questions —
       // the wizard renders from the parsed payload, not from raw markdown.
-      if (language === "plan-questions") return null;
+      if (rawFence === "plan-questions") return null;
 
       const code = String(children).replace(/\n$/, "");
 
-      if (language === "mermaid") {
+      if (rawFence === "mermaid") {
         return (
           <Suspense fallback={
             <pre className="bg-muted/30 rounded-lg p-4 overflow-x-auto"><code>{code}</code></pre>
@@ -254,10 +316,13 @@ function makeComponents(isStreaming: boolean, variant: "assistant" | "user") {
         );
       }
 
+      const { language, label } = resolveCodeBlockLanguage(rawFence, code);
+
       return (
         <CodeBlock
           code={code}
           language={language}
+          languageLabel={label}
           isStreaming={isStreaming}
           disableHighlighting={isUser}
         />
@@ -272,10 +337,19 @@ export const MarkdownContent = memo(function MarkdownContent({
   isStreaming = false,
   variant = "assistant",
 }: MarkdownContentProps) {
-  const components = useMemo(() => makeComponents(isStreaming, variant), [isStreaming, variant]);
+  const workspacePath = useWorkspaceStore((s) => {
+    const id = s.activeWorkspaceId;
+    if (!id) return null;
+    return s.workspaces.find((w) => w.id === id)?.path ?? null;
+  });
+
+  const components = useMemo(
+    () => makeComponents(isStreaming, variant, workspacePath),
+    [isStreaming, variant, workspacePath],
+  );
 
   return (
-    <ReactMarkdown remarkPlugins={plugins} components={components}>
+    <ReactMarkdown remarkPlugins={plugins} components={components} urlTransform={markdownUrlTransform}>
       {content}
     </ReactMarkdown>
   );

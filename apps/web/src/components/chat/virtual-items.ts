@@ -1,5 +1,6 @@
 import type { PermissionDecision } from "@mcode/contracts";
 import type { Message, ToolCall, HookExecution } from "@/transport/types";
+import type { ThoughtSegment } from "./narrative/types";
 
 /** Compile-time exhaustive check; throws at runtime for unhandled discriminants. */
 function assertNever(value: never): never {
@@ -20,7 +21,6 @@ export type ChatVirtualItem =
       activeToolCalls: readonly ToolCall[];
     }
   | { key: string; type: "streaming"; text: string }
-  | { key: string; type: "tool-summary"; messageId: string; serverMessageId: string; toolCallCount: number }
   | {
       key: string;
       type: "turn-changes";
@@ -42,38 +42,78 @@ export type ChatVirtualItem =
       key: string;
       type: "hook-activity";
       hooks: readonly HookExecution[];
+    }
+  | {
+      key: string;
+      type: "narrative-flow";
+      toolCalls: readonly ToolCall[];
+      hooks: readonly HookExecution[];
+      thoughtSegments: readonly ThoughtSegment[];
+      streamingText: string;
+      isAgentRunning: boolean;
+      startTime: number | undefined;
+      /** Last assistant bubble text when the turn finished; duplicate thoughts are hidden. */
+      committedAssistantBody?: string;
+    }
+  | {
+      key: string;
+      type: "persisted-narrative";
+      /** Assistant message id this persisted timeline belongs to. */
+      messageId: string;
+      /** Assistant message body — passed to the safety net that suppresses final-response thoughts. */
+      messageContent: string;
+    }
+  | {
+      key: string;
+      type: "persisted-late-hooks";
+      /**
+       * Assistant message id whose late hooks (Stop / SessionEnd / PreCompact)
+       * are rendered here -- i.e. between the assistant bubble and the
+       * files-changed summary, giving the render order:
+       *   narrative timeline → assistant text → stop hooks → files summary
+       */
+      messageId: string;
     };
 
 /**
- * Build the stable segment: messages interleaved with persisted tool summaries.
- * This only changes when messages or persistedToolCallCounts change (infrequent).
+ * Build the stable segment: messages with optional turn-change summaries.
+ * This only changes when messages or persistedFilesChanged change (infrequent).
  */
 export function buildStableItems(
   messages: readonly Message[],
-  persistedToolCallCounts?: Record<string, number>,
-  serverMessageIds?: Record<string, string>,
   persistedFilesChanged?: Record<string, string[]>,
   latestTurnWithChanges?: string | null,
 ): ChatVirtualItem[] {
   const items: ChatVirtualItem[] = [];
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
+    // Persisted narrative timeline appears immediately BEFORE each
+    // assistant message so the audit trail visually precedes the response
+    // text - matching the live narrative-flow placement. The component
+    // renders `null` until records are fetched, so emitting a placeholder
+    // here doesn't cause layout jitter once records land.
     if (msg.role === "assistant") {
-      const count = persistedToolCallCounts?.[msg.id];
-      if (count && count > 0) {
-        items.push({
-          key: `tool-summary-${msg.id}`,
-          type: "tool-summary",
-          messageId: msg.id,
-          serverMessageId: serverMessageIds?.[msg.id] ?? msg.id,
-          toolCallCount: count,
-        });
-      }
+      items.push({
+        key: `persisted-narrative-${msg.id}`,
+        type: "persisted-narrative",
+        messageId: msg.id,
+        messageContent: msg.content,
+      });
     }
     items.push({ key: msg.id, type: "message", message: msg });
 
-    // File change summary appears after the assistant message
     if (msg.role === "assistant") {
+      // Late stop hooks (Stop / SessionEnd / PreCompact) render immediately
+      // after the assistant bubble, before the files-changed summary.
+      // The component renders null when no late hooks are present, so this
+      // placeholder costs nothing for turns without stop hooks.
+      items.push({
+        key: `persisted-late-hooks-${msg.id}`,
+        type: "persisted-late-hooks",
+        messageId: msg.id,
+      });
+
+      // File change summary appears after the late hook rows
       const files = persistedFilesChanged?.[msg.id];
       if (files && files.length > 0) {
         items.push({
@@ -90,7 +130,8 @@ export function buildStableItems(
 }
 
 /**
- * Build the volatile segment: permission requests, active tool calls, streaming text, and indicator.
+ * Build the volatile segment: permission requests and a single narrative-flow item
+ * that consolidates tool calls, hooks, thought segments, streaming text, and indicator.
  * This changes on every tool call event but doesn't depend on messages.
  */
 export function buildVolatileItems(
@@ -107,12 +148,24 @@ export function buildVolatileItems(
     decision?: PermissionDecision;
   }[],
   hooks?: readonly HookExecution[],
+  thoughtSegments?: readonly ThoughtSegment[],
 ): ChatVirtualItem[] {
   const items: ChatVirtualItem[] = [];
 
-  // Tool calls first — the agent invoked a tool before the permission gate fires.
-  if (toolCalls.length > 0) {
-    items.push({ key: "active-tools", type: "active-tools", toolCalls });
+  // Emit the narrative flow item when agent is running or has tool calls.
+  // This replaces the separate "active-tools", "hook-activity", "indicator",
+  // and "streaming" items with a single unified item.
+  if (isAgentRunning || toolCalls.length > 0) {
+    items.push({
+      key: "narrative-flow",
+      type: "narrative-flow",
+      toolCalls,
+      hooks: hooks ?? [],
+      thoughtSegments: thoughtSegments ?? [],
+      streamingText: streamingText ?? "",
+      isAgentRunning,
+      startTime: agentStartTime,
+    });
   }
 
   // Show all permission requests (settled and unsettled) so the user gets
@@ -135,32 +188,13 @@ export function buildVolatileItems(
     }
   }
 
-  // Hook activity section — grouped below permissions, above indicator.
-  if (hooks && hooks.length > 0) {
-    items.push({ key: "hook-activity", type: "hook-activity", hooks });
-  }
-
-  if (isAgentRunning) {
-    const activeOnly = toolCalls.filter((tc) => !tc.isComplete);
-    items.push({
-      key: "indicator",
-      type: "indicator",
-      startTime: agentStartTime,
-      activeToolCalls: activeOnly,
-    });
-  }
-
-  if (streamingText) {
-    items.push({ key: "streaming", type: "streaming", text: streamingText });
-  }
-
   return items;
 }
 
 /**
  * Combine stable and volatile segments into the final virtual item array.
- * When tool calls exist, the active-tools item is placed before the last
- * assistant message while streaming/indicator items remain after it.
+ * When tool calls exist, the narrative-flow item is placed before the last
+ * assistant message while permission-request items remain after it.
  */
 export function buildVirtualItems(
   stableItems: readonly ChatVirtualItem[],
@@ -171,14 +205,15 @@ export function buildVirtualItems(
     return [...stableItems, ...volatileItems];
   }
 
-  // Split volatile items: active-tools goes before the last assistant
-  // message; streaming and indicator go after it.
+  // Split volatile items: narrative-flow goes before the last assistant
+  // message; permission requests go after it.
 
-  // Find the last assistant message, skipping any trailing turn-changes and tool-summary items
+  // Find the last assistant message, skipping any trailing items that appear
+  // after the message bubble (turn-changes, persisted-late-hooks).
   let lastAssistantIdx = stableItems.length - 1;
   while (lastAssistantIdx >= 0) {
     const item = stableItems[lastAssistantIdx];
-    if (item.type === "turn-changes" || item.type === "tool-summary") {
+    if (item.type === "turn-changes" || item.type === "persisted-late-hooks") {
       lastAssistantIdx--;
       continue;
     }
@@ -187,21 +222,37 @@ export function buildVirtualItems(
 
   const lastItem = stableItems[lastAssistantIdx];
   if (lastItem?.type === "message" && lastItem.message.role === "assistant") {
-    const toolItems = volatileItems.filter((v) => v.type === "active-tools");
-    const tailItems = volatileItems.filter((v) => v.type !== "active-tools");
-    // Also skip the tool-summary that precedes the message
-    let cutAt = lastAssistantIdx;
-    const preceding = stableItems[lastAssistantIdx - 1];
-    if (
-      preceding?.type === "tool-summary" &&
-      preceding.messageId === lastItem.message.id
-    ) {
-      cutAt = lastAssistantIdx - 1;
+    const narrativeIdx = volatileItems.findIndex((i) => i.type === "narrative-flow");
+    const narrativeItems = narrativeIdx !== -1 ? [volatileItems[narrativeIdx]] : [];
+    const tailItems = volatileItems.filter((v) => v.type !== "narrative-flow");
+    // Drop the persisted-narrative placeholder for the message that has
+    // live narrative-flow above it, to avoid double-rendering the same
+    // timeline while volatile records are still in-memory.
+    const lastAssistantMessageId = lastItem.message.id;
+    const filteredStable = stableItems.filter(
+      (it, idx) =>
+        !(
+          it.type === "persisted-narrative" &&
+          it.messageId === lastAssistantMessageId &&
+          // Only filter the one immediately preceding the message - older
+          // persisted narratives for prior turns must still render.
+          idx === lastAssistantIdx - 1
+        ),
+    );
+    // Recompute index after the filter.
+    const newLastAssistantIdx = filteredStable.findIndex(
+      (it, idx) =>
+        it.type === "message" &&
+        it.message.id === lastAssistantMessageId &&
+        idx >= 0,
+    );
+    if (newLastAssistantIdx === -1) {
+      return [...stableItems, ...volatileItems];
     }
     return [
-      ...stableItems.slice(0, cutAt),
-      ...toolItems,
-      ...stableItems.slice(cutAt),
+      ...filteredStable.slice(0, newLastAssistantIdx),
+      ...narrativeItems,
+      ...filteredStable.slice(newLastAssistantIdx),
       ...tailItems,
     ];
   }
@@ -300,8 +351,6 @@ export function estimateItemHeight(item: ChatVirtualItem): number {
       return 48;
     case "streaming":
       return STREAMING_CARD_COLLAPSED_HEIGHT;
-    case "tool-summary":
-      return 36;
     case "turn-changes": {
       // Collapsed: ~44px. Expanded: 44px header + 32px per file row (capped at 50) + overflow link.
       const visibleFiles = Math.min(item.filesChanged.length, 50);
@@ -313,6 +362,23 @@ export function estimateItemHeight(item: ChatVirtualItem): number {
     case "hook-activity":
       // Header (28px) + one row (28px) per hook, capped at 300px
       return Math.min(28 + item.hooks.length * 28, 300);
+    case "narrative-flow": {
+      const segCount = item.thoughtSegments.length;
+      const toolCount = item.toolCalls.length;
+      const hookCount = item.hooks.length;
+      return Math.min(segCount * 60 + toolCount * 32 + hookCount * 28 + 48, 600);
+    }
+    case "persisted-narrative":
+      // Conservative estimate: most turns produce a handful of rows. The
+      // virtualizer re-measures once mounted, so this only affects scrollbar
+      // initial sizing. Setting too small causes scroll-jump on settle;
+      // setting too large wastes pre-allocated space.
+      return 120;
+    case "persisted-late-hooks":
+      // Most turns have zero late hooks; the component renders null in that
+      // case. The virtualizer will re-measure on mount, so a small default
+      // keeps pre-allocated space tight for the common (no-late-hooks) path.
+      return 0;
     default:
       return assertNever(item);
   }

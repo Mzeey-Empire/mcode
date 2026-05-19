@@ -1,0 +1,23 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "playwright": {
+      "type": "local",
+      "command": ["npx", "@playwright/mcp@0.0.75"]
+    }
+  },
+  "hooks": {
+    "preToolUse": [
+      {
+        "matcher": "edit|write",
+        "command": "bash -c 'if echo \"$TOOL_INPUT\" | grep -qE \"\\.env(\\.|$)\" && ! echo \"$TOOL_INPUT\" | grep -qE \"\\.env\\.example(\\.|$)\"; then echo \"{\\\"decision\\\":\\\"block\\\",\\\"reason\\\":\\\"Do not edit .env files directly. Update .env.example instead.\\\"}\"; fi'"
+      }
+    ],
+    "stop": [
+      {
+        "command": "node scripts/agent/hooks/codex-stop.mjs",
+        "timeout": 120
+      }
+    ]
+  }
+}

@@ -9,11 +9,15 @@ export type {
   PreviewContextReferenceResult,
 } from "./preview-capture.js";
 
-import { session } from "electron";
+import { ipcMain, session } from "electron";
 import { registerNavigationHandlers } from "./preview-navigation.js";
 import { registerCaptureHandlers, registerWebRequestInterceptor } from "./preview-capture.js";
 import { registerOverlayHandlers } from "./preview-overlay.js";
 import { registerSpillHandlers } from "./preview-spill.js";
+import { registerTabHandlers } from "./preview-tabs.js";
+import { getPerfCounters } from "./preview-perf.js";
+import { registerWebviewAdoptHandlers } from "./preview-webview-adopt.js";
+import { registerDesignModeHandlers } from "./preview-design-mode.js";
 
 /** Registers all preview:* IPC handlers. Call once at app startup. */
 export function registerPreviewBrowserHandlers(): void {
@@ -27,4 +31,8 @@ export function registerPreviewBrowserHandlers(): void {
   registerWebRequestInterceptor(previewPartition);
   registerOverlayHandlers();
   registerSpillHandlers();
+  registerTabHandlers();
+  registerWebviewAdoptHandlers();
+  registerDesignModeHandlers();
+  ipcMain.handle("preview:get-perf-counters", () => getPerfCounters());
 }

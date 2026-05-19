@@ -4,6 +4,7 @@ import {
   createCursorAcpTurnState,
   mapCursorAcpSessionNotification,
 } from "../cursor-acp-event-mapper.js";
+import { resolveCursorAssistantMessageContent } from "../cursor-stream-event-mapper.js";
 
 describe("mapCursorAcpSessionNotification", () => {
   const threadId = "t1";
@@ -37,6 +38,68 @@ describe("mapCursorAcpSessionNotification", () => {
     );
     expect(ev2[0]).toMatchObject({ delta: " there" });
     expect(state.accumulator.assistantText).toBe("Hi there");
+  });
+
+  it("accumulates assistantFinalText only for message chunks after a tool resolves", () => {
+    const state = createCursorAcpTurnState();
+    mapCursorAcpSessionNotification(
+      {
+        sessionId: "s",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "Before " },
+        },
+      },
+      threadId,
+      state,
+    );
+    expect(state.accumulator.assistantFinalText).toBe("");
+    mapCursorAcpSessionNotification(
+      {
+        sessionId: "s",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "c1",
+          title: "Shell",
+          rawInput: { shellToolCall: { args: { command: "ls" } } },
+          status: "in_progress",
+        },
+      },
+      threadId,
+      state,
+    );
+    mapCursorAcpSessionNotification(
+      {
+        sessionId: "s",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "c1",
+          status: "completed",
+          rawInput: {
+            shellToolCall: {
+              args: { command: "ls" },
+              result: { success: "ok" },
+            },
+          },
+        },
+      },
+      threadId,
+      state,
+    );
+    mapCursorAcpSessionNotification(
+      {
+        sessionId: "s",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "After" },
+        },
+      },
+      threadId,
+      state,
+    );
+    expect(state.accumulator.assistantText).toBe("Before After");
+    expect(state.accumulator.assistantFinalText).toBe("After");
+    expect(resolveCursorAssistantMessageContent(state.accumulator)).toBe("After");
   });
 
   it("suppresses agent_thought_chunk so thinking data never leaks to the UI", () => {

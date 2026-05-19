@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Bot } from "lucide-react";
+import { StackedLayersIcon } from "../narrative/StackedLayersIcon";
 import type { ToolRendererProps } from "./types";
 import { ToolCallWrapper } from "./ToolCallWrapper";
 
@@ -11,7 +11,7 @@ export function AgentRenderer({ toolCall, isActive }: ToolRendererProps) {
 
   return (
     <ToolCallWrapper
-      icon={Bot}
+      icon={StackedLayersIcon}
       label="Thinking deeper..."
       badge={summary}
       isActive={isActive}

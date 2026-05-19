@@ -13,6 +13,19 @@ and agent write boundaries.
 Run `bun run setup` to bootstrap from a fresh clone.
 Run `bun run doctor` to verify all prerequisites are installed.
 
+## Supported Agent Harnesses
+
+This repo is configured for four agent harnesses. All four read `AGENTS.md` (Claude Code via `CLAUDE.md` which re-exports it), share the same `.env`-edit block and Stop-hook verify, and load the Playwright MCP for visual verification.
+
+| Harness | Config | Stop hook | MCP | Slash commands |
+|---------|--------|-----------|-----|----------------|
+| Claude Code | `.claude/settings.json`, `.claude/agents/`, `.claude/commands/`, `CLAUDE.md` | `scripts/agent/verify-tests.mjs` | `.mcp.json` | `.claude/commands/` (auto) |
+| Cursor | `.cursor/hooks.json`, `AGENTS.md` | `scripts/agent/hooks/cursor-stop.mjs` | `.cursor/mcp.json` | `.cursor/commands/` (auto) |
+| Codex | `.codex/hooks.json`, `AGENTS.md` | `scripts/agent/hooks/codex-stop.mjs` | `.mcp.json` | `.codex/prompts/` → install once with `node scripts/agent/install-codex-prompts.mjs` (copies to `~/.codex/prompts/`) |
+| OpenCode | `.opencode/opencode.json`, `AGENTS.md` | `scripts/agent/hooks/codex-stop.mjs` (shared; Codex-compatible JSON contract) | `.opencode/opencode.json` | `.opencode/command/` (auto) |
+
+All four harnesses expose the same six commands: `/verify`, `/verify-e2e`, `/verify-e2e-desktop`, `/demo`, `/demo-desktop`, `/review-pr`. Claude Code additionally has specialized subagents under `.claude/agents/` (`frontend-engineer`, `backend-engineer`, `qa-engineer`, `security-reviewer`). The shell equivalents are documented in `docs/agents/runtime.md` § Common Workflows.
+
 ## Directory Structure
 
 ```text
@@ -85,6 +98,10 @@ Key components:
 When working on frontend code, follow the component registry and rules in **[docs/guides/ui-components.md](docs/guides/ui-components.md)**. Always use existing shadcn primitives from `apps/web/src/components/ui/` before creating custom elements.
 
 That guide's **Testing UI Changes** section lists the triggers that require a Playwright run (interactive components, responsive layout, accessibility semantics, theme tokens, `data-testid` changes, floating overlays, persisted first-paint state). Run `cd apps/web && bun run e2e` and report pass counts before claiming a UI change is done.
+
+## Narrative Timeline
+
+Before touching the Claude provider event pipeline, the agent-service, the `threadStore` tool-call lifecycle, or anything under `apps/web/src/components/chat/narrative/`, read **[docs/guides/narrative-pipeline.md](docs/guides/narrative-pipeline.md)**. It documents the end-to-end event flow and six specific traps (parent-id attribution for parallel sub-agents, `agentCallStack` lifecycle, volatile-state lifetime through `turn.persisted`, the DOM-mutation anti-pattern for the typing cursor, wall-clock snapshots in React, and the intentional step/sub-agent count overlap) that have already caused regressions on this codebase.
 
 ## Code Style
 

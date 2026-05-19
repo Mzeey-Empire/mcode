@@ -16,6 +16,8 @@ import type {
   ReasoningLevel,
   ContextWindowMode,
   ToolCallRecord,
+  ThoughtSegmentRecord,
+  HookExecutionRecord,
   TurnSnapshot,
   Settings,
   PartialSettings,
@@ -59,7 +61,7 @@ export type {
   ProviderModelInfo,
 } from "@mcode/contracts";
 
-export type { PaginatedMessages, ToolCallRecord, TurnSnapshot, CopilotSubagent } from "@mcode/contracts";
+export type { PaginatedMessages, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord, TurnSnapshot, CopilotSubagent } from "@mcode/contracts";
 
 export { PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts";
 
@@ -75,6 +77,8 @@ export interface ToolCall {
   parentToolCallId?: string;
   /** Elapsed wall-clock seconds reported by the most recent toolProgress event. */
   elapsedSeconds?: number;
+  /** Epoch ms when the toolUse event was received, used for duration display. */
+  startedAt?: number;
 }
 
 /** Ephemeral hook execution state tracked during a session. Not persisted to DB. */
@@ -301,6 +305,18 @@ export interface McodeTransport {
   listToolCallRecords(messageId: string): Promise<ToolCallRecord[]>;
   /** Fetch child tool call records for a parent tool call. */
   listToolCallRecordsByParent(parentToolCallId: string): Promise<ToolCallRecord[]>;
+  /** Fetch the full persisted narrative (tools, thoughts, hooks) for an assistant message. */
+  listNarrative(messageId: string): Promise<{
+    tools: ToolCallRecord[];
+    thoughts: ThoughtSegmentRecord[];
+    hooks: HookExecutionRecord[];
+  }>;
+  /** Batch fetch narratives for multiple messages in one round-trip. */
+  listNarrativeBatch(messageIds: string[]): Promise<Record<string, {
+    tools: ToolCallRecord[];
+    thoughts: ThoughtSegmentRecord[];
+    hooks: HookExecutionRecord[];
+  }>>;
 
   /** Fetch persisted task list for a thread (from last TodoWrite). */
   getThreadTasks(threadId: string): Promise<Array<{ content: string; status: "pending" | "in_progress" | "completed" | "cancelled" }> | null>;

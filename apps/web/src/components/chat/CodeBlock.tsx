@@ -9,6 +9,10 @@ interface CodeBlockProps {
   code: string;
   /** Language identifier from the code fence (e.g. "typescript", "python"). */
   language: string;
+  /**
+   * Optional header text; when set (e.g. basename inferred from a path), shown instead of {@link language}.
+   */
+  languageLabel?: string;
   /** When true, shows raw code inline and hides the copy button. */
   isStreaming: boolean;
   /** When true, skips Shiki highlighting but keeps the copy button and language label. */
@@ -19,7 +23,13 @@ interface CodeBlockProps {
  * Renders a syntax-highlighted code block with a language header and copy button.
  * Uses a CSS grid stack to crossfade from plain to highlighted code with zero layout shift.
  */
-export const CodeBlock = memo(function CodeBlock({ code, language, isStreaming, disableHighlighting = false }: CodeBlockProps) {
+export const CodeBlock = memo(function CodeBlock({
+  code,
+  language,
+  languageLabel,
+  isStreaming,
+  disableHighlighting = false,
+}: CodeBlockProps) {
   const theme = useShikiTheme();
   // The hook is always called unconditionally (rules of hooks), but `enabled`
   // suppresses the Worker postMessage during streaming so no requests are wasted.
@@ -48,10 +58,14 @@ export const CodeBlock = memo(function CodeBlock({ code, language, isStreaming, 
 
   const isReady = html !== null && html !== "";
 
+  /** Body layout: muted fill lives on the scrollport so horizontally overflowed glyphs stay on the tinted surface. Inner `pre` sizes to `max(content, 100%)`. */
+  const codeScrollBody = "overflow-x-auto bg-muted text-foreground text-sm font-mono leading-relaxed";
+  const codePreInner = "m-0 min-w-full w-max bg-transparent p-3";
+
   return (
-    <div className="my-2 rounded-lg overflow-hidden border border-border">
+    <div className="my-2 min-w-0 rounded-lg overflow-hidden border border-border">
       <div className="flex items-center justify-between bg-background px-3 py-1 border-b border-border">
-        <span className="text-xs text-muted-foreground">{language || "text"}</span>
+        <span className="text-xs text-muted-foreground">{languageLabel || language || "text"}</span>
         {!isStreaming && (
           <button
             type="button"
@@ -64,28 +78,33 @@ export const CodeBlock = memo(function CodeBlock({ code, language, isStreaming, 
         )}
       </div>
       {isStreaming ? (
-        <pre className="bg-muted text-foreground p-3 overflow-x-auto text-sm font-mono leading-relaxed">
-          <code>{code}</code>
-        </pre>
+        <div className={codeScrollBody}>
+          <pre className={`${codePreInner} text-foreground`}>
+            <code>{code}</code>
+          </pre>
+        </div>
       ) : (
         <div
           data-code-block
-          className={`grid ${isReady ? "ready" : ""}`}
+          className={`grid min-w-0 ${isReady ? "ready" : ""}`}
         >
           {/* Plain text layer */}
-          <pre
-            className={`bg-muted text-foreground p-3 overflow-x-auto text-sm font-mono leading-relaxed
-              [grid-row:1/2] [grid-column:1/2]
-              ${isReady ? "invisible opacity-0" : "visible opacity-100"}`}
+          <div
+            className={`${codeScrollBody} [grid-row:1/2] [grid-column:1/2] ${
+              isReady ? "invisible opacity-0" : "visible opacity-100"
+            }`}
           >
-            <code>{code}</code>
-          </pre>
+            <pre className={codePreInner}>
+              <code>{code}</code>
+            </pre>
+          </div>
           {/* Highlighted layer */}
           {html && (
             <div
-              className="[grid-row:1/2] [grid-column:1/2] overflow-x-auto transition-opacity duration-150 ease-in
-                [&_pre]:p-3 [&_pre]:text-sm [&_pre]:leading-relaxed [&_pre]:!bg-muted [&_pre]:m-0 [&_pre]:text-foreground
-                [&_code]:text-sm [&_code]:font-mono"
+              className={`${codeScrollBody} [grid-row:1/2] [grid-column:1/2] transition-opacity duration-150 ease-in
+                [&_pre]:m-0 [&_pre]:min-w-full [&_pre]:w-max [&_pre]:bg-transparent [&_pre]:!bg-transparent [&_pre]:p-3
+                [&_pre]:text-sm [&_pre]:leading-relaxed [&_pre]:text-foreground
+                [&_code]:text-sm [&_code]:font-mono`}
               dangerouslySetInnerHTML={{ __html: html }}
             />
           )}

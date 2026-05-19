@@ -153,6 +153,18 @@ describe("ModelSection reasoning options", () => {
     expect(screen.queryByText("Reasoning effort")).not.toBeInTheDocument();
   });
 
+  it("Reasoning Effort row is hidden for Cursor (no backend effort parameter)", () => {
+    renderWithModel("cursor", "composer-fast");
+
+    expect(screen.queryByText("Reasoning effort")).not.toBeInTheDocument();
+  });
+
+  it("Reasoning Effort row is hidden for Copilot (no backend effort parameter)", () => {
+    renderWithModel("copilot", "gpt-5");
+
+    expect(screen.queryByText("Reasoning effort")).not.toBeInTheDocument();
+  });
+
   it("Reasoning Effort row is visible for Claude Opus 4.7", () => {
     renderWithModel("claude", "claude-opus-4-7");
 

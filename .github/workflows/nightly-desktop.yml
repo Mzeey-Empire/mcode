@@ -1,0 +1,283 @@
+# Packs the desktop app from the default branch and uploads to the rolling
+# prerelease tagged `nightly`, using electron-builder publish channel `nightly`
+# so clients with `updates.channel` = `nightly` resolve `latest-nightly.yml` (etc.).
+
+name: Nightly Desktop
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-desktop
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Generate bot token
+        id: bot-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Ensure nightly prerelease exists
+        env:
+          GH_TOKEN: ${{ steps.bot-token.outputs.token }}
+        run: |
+          set -e
+          if ! gh release view nightly --repo "${{ github.repository }}" &>/dev/null; then
+            gh release create nightly --prerelease --title "Mcode nightly" \
+              --notes "Automated desktop builds from the default branch. Assets are replaced on each successful run." \
+              --repo "${{ github.repository }}"
+          fi
+
+  build:
+    needs: [prepare]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: blacksmith-4vcpu-windows-2025
+            build-args: ""
+            target-arch: ""
+          - os: ubuntu-22.04
+            build-args: ""
+            target-arch: ""
+          - os: blacksmith-12vcpu-macos-26
+            build-args: "--mac --arm64"
+            target-arch: "arm64"
+          - os: blacksmith-12vcpu-macos-26
+            build-args: "--mac --x64"
+            target-arch: "x64"
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.2.14"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Set nightly package version
+        shell: bash
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+          const manifest = JSON.parse(fs.readFileSync(".release-please-manifest.json", "utf8"));
+          const base = manifest["."];
+          const day = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+          const run = process.env.GITHUB_RUN_NUMBER || "0";
+          const version = `${base}-nightly.${day}.${run}`;
+          const pkgPath = "apps/desktop/package.json";
+          const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+          pkg.version = version;
+          fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+          console.log("Nightly desktop version:", version);
+          NODE
+
+      - name: Build main & renderer
+        run: bun run --cwd apps/desktop build
+
+      - name: Generate V8 snapshot
+        run: bun apps/desktop/scripts/generate-snapshot.mjs
+        env:
+          MCODE_TARGET_ARCH: ${{ matrix.target-arch }}
+
+      - name: Install Python setuptools (node-gyp on Python 3.12+ needs it)
+        shell: bash
+        run: python3 -m pip install setuptools --break-system-packages 2>/dev/null || python3 -m pip install setuptools 2>/dev/null || pip install setuptools 2>/dev/null || true
+
+      - name: Package with electron-builder (nightly channel)
+        run: node apps/desktop/scripts/ci-package.mjs --config.publish.channel=nightly ${{ matrix.build-args }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ runner.os == 'macOS' && 'false' || '' }}
+
+      - name: Smoke test packaged server
+        if: matrix.target-arch == '' || matrix.target-arch == 'arm64'
+        run: node apps/desktop/scripts/smoke-test.mjs
+
+      - name: Upload macOS update metadata (nightly channel)
+        if: matrix.target-arch == 'arm64' || matrix.target-arch == 'x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-mac-yml-${{ matrix.target-arch }}-nightly
+          path: apps/desktop/release/latest-mac-nightly.yml
+          retention-days: 1
+
+      - name: Collect nightly release artifacts
+        id: artifacts
+        shell: bash
+        run: |
+          echo "tag=nightly" >> "$GITHUB_OUTPUT"
+          shopt -s nullglob
+          files=()
+          for f in \
+            apps/desktop/release/*.exe \
+            apps/desktop/release/*.exe.blockmap \
+            apps/desktop/release/*.dmg \
+            apps/desktop/release/*.dmg.blockmap \
+            apps/desktop/release/*.zip \
+            apps/desktop/release/*.zip.blockmap \
+            apps/desktop/release/*.AppImage \
+            apps/desktop/release/*.deb \
+            apps/desktop/release/latest-nightly.yml \
+            apps/desktop/release/latest-linux-nightly.yml; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f")
+            [[ "$base" == "elevate.exe" ]] && continue
+            files+=("$f")
+          done
+
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No artifacts found to upload"
+            exit 0
+          fi
+
+          printf '%s\n' "${files[@]}"
+          printf '%s\n' "${files[@]}" > artifact-list.txt
+          echo "count=${#files[@]}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload nightly release artifacts
+        if: steps.artifacts.outputs.count > 0
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          while IFS= read -r f; do
+            echo "Uploading: $f"
+            gh release upload nightly "$f" --clobber --repo "${{ github.repository }}"
+          done < artifact-list.txt
+
+  merge-mac-yml-nightly:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Download arm64 yml
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: latest-mac-yml-arm64-nightly
+          path: yml-arm64
+
+      - name: Download x64 yml
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: latest-mac-yml-x64-nightly
+          path: yml-x64
+
+      - name: Merge latest-mac-nightly.yml
+        shell: bash
+        run: |
+          ARM64_YML="yml-arm64/latest-mac-nightly.yml"
+          X64_YML="yml-x64/latest-mac-nightly.yml"
+
+          if [ ! -f "$ARM64_YML" ] || [ ! -f "$X64_YML" ]; then
+            echo "One or both nightly mac yml files missing, skipping merge"
+            if [ -f "$ARM64_YML" ]; then cp "$ARM64_YML" latest-mac-nightly.yml; fi
+            if [ -f "$X64_YML" ]; then cp "$X64_YML" latest-mac-nightly.yml; fi
+            if [ ! -f latest-mac-nightly.yml ]; then exit 0; fi
+          else
+            node -e "
+              const fs = require('fs');
+              const arm64 = fs.readFileSync('$ARM64_YML', 'utf8');
+              const x64 = fs.readFileSync('$X64_YML', 'utf8');
+
+              function parseFiles(yml) {
+                const lines = yml.split('\n');
+                const files = [];
+                let inFiles = false;
+                let current = null;
+                for (const line of lines) {
+                  if (line.startsWith('files:')) { inFiles = true; continue; }
+                  if (inFiles) {
+                    if (line.match(/^  - url:/)) {
+                      if (current) files.push(current);
+                      current = line + '\n';
+                    } else if (line.match(/^    \w/) && current) {
+                      current += line + '\n';
+                    } else if (line.match(/^\w/) && line.trim()) {
+                      if (current) files.push(current);
+                      current = null;
+                      inFiles = false;
+                    } else if (current) {
+                      current += line + '\n';
+                    }
+                  }
+                }
+                if (current) files.push(current);
+                return files;
+              }
+
+              const arm64Files = parseFiles(arm64);
+              const x64Files = parseFiles(x64);
+
+              const arm64Urls = new Set(arm64Files.map(f => {
+                const m = f.match(/url:\s*(.+)/);
+                return m ? m[1].trim() : '';
+              }));
+
+              const newEntries = x64Files.filter(f => {
+                const m = f.match(/url:\s*(.+)/);
+                return m && !arm64Urls.has(m[1].trim());
+              });
+
+              if (newEntries.length === 0) {
+                fs.writeFileSync('latest-mac-nightly.yml', arm64);
+              } else {
+                const lines = arm64.split('\n');
+                const out = [];
+                let insertedExtra = false;
+                let inFilesBlock = false;
+
+                for (let i = 0; i < lines.length; i++) {
+                  out.push(lines[i]);
+                  if (lines[i].startsWith('files:')) {
+                    inFilesBlock = true;
+                  }
+                  if (inFilesBlock && i > 0 && lines[i].match(/^\w/) && lines[i].trim() && !lines[i].startsWith('files:')) {
+                    if (!insertedExtra) {
+                      const lastLine = out.pop();
+                      for (const entry of newEntries) {
+                        out.push(entry.trimEnd());
+                      }
+                      out.push(lastLine);
+                      insertedExtra = true;
+                    }
+                    inFilesBlock = false;
+                  }
+                }
+                if (inFilesBlock && !insertedExtra) {
+                  for (const entry of newEntries) {
+                    out.push(entry.trimEnd());
+                  }
+                }
+                fs.writeFileSync('latest-mac-nightly.yml', out.join('\n'));
+              }
+              console.log('Merged latest-mac-nightly.yml:');
+              console.log(fs.readFileSync('latest-mac-nightly.yml', 'utf8'));
+            "
+          fi
+
+      - name: Upload merged latest-mac-nightly.yml
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -f latest-mac-nightly.yml ]; then
+            echo "Uploading merged latest-mac-nightly.yml"
+            gh release upload nightly latest-mac-nightly.yml --clobber --repo "${{ github.repository }}"
+          fi

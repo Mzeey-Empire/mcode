@@ -117,3 +117,57 @@ describe("loadMessages - listSnapshots RPC gating", () => {
     expect(mockTransport.listSnapshots).toHaveBeenCalledWith(THREAD_ID);
   });
 });
+
+describe("loadMessages (cache-hit) - hydration staleness gate", () => {
+  beforeEach(() => {
+    resetState();
+  });
+
+  it("skips listPendingPermissions and getThreadTasks on a cache-hit within the staleness window", async () => {
+    const thread = createMockThread({ id: THREAD_ID, has_file_changes: false });
+    useWorkspaceStore.setState({ threads: [thread] });
+
+    // First load: cache-miss path populates cache AND stamps lastHydratedByThread.
+    await useThreadStore.getState().loadMessages(THREAD_ID);
+    await vi.waitFor(() => {
+      expect(mockTransport.getMessages).toHaveBeenCalledWith(THREAD_ID, MESSAGE_FETCH_SIZE);
+    });
+
+    // Switch away so the next load is a cache-hit.
+    useThreadStore.setState({ currentThreadId: "other-thread" });
+    vi.clearAllMocks();
+
+    // Second load within 2s of the first - the gate should suppress both side-effect RPCs.
+    await useThreadStore.getState().loadMessages(THREAD_ID);
+    // Give any erroneously-scheduled microtasks a chance to fire.
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(mockTransport.getMessages).not.toHaveBeenCalled();
+    expect(mockTransport.listPendingPermissions).not.toHaveBeenCalled();
+    expect(mockTransport.getThreadTasks).not.toHaveBeenCalled();
+  });
+
+  it("calls side-effect RPCs again once the staleness window has elapsed", async () => {
+    const thread = createMockThread({ id: THREAD_ID, has_file_changes: false });
+    useWorkspaceStore.setState({ threads: [thread] });
+
+    await useThreadStore.getState().loadMessages(THREAD_ID);
+    await vi.waitFor(() => {
+      expect(mockTransport.getMessages).toHaveBeenCalledWith(THREAD_ID, MESSAGE_FETCH_SIZE);
+    });
+
+    // Simulate ">2s ago" by rewinding the hydration timestamp.
+    useThreadStore.setState({
+      currentThreadId: "other-thread",
+      lastHydratedByThread: { [THREAD_ID]: Date.now() - 5000 },
+    });
+    vi.clearAllMocks();
+
+    await useThreadStore.getState().loadMessages(THREAD_ID);
+
+    await vi.waitFor(() => {
+      expect(mockTransport.listPendingPermissions).toHaveBeenCalledWith(THREAD_ID);
+      expect(mockTransport.getThreadTasks).toHaveBeenCalledWith(THREAD_ID);
+    });
+  });
+});

@@ -76,8 +76,11 @@ export function createCursorAcpTurnState(): CursorAcpTurnState {
   return {
     accumulator: {
       assistantText: "",
+      assistantFinalText: "",
       toolStartTimes: new Map(),
       chatId: null,
+      pendingToolCalls: new Set(),
+      hasFiredToolThisTurn: false,
     },
     suppressedToolCallIds: new Set(),
     toolNameByCallId: new Map(),
@@ -132,7 +135,15 @@ function mapAgentLanguageChunk(
   if (update.content.type !== "text" || !update.content.text) return [];
   const text = update.content.text;
   acc.assistantText += text;
-  return [{ type: AgentEventType.TextDelta, threadId, delta: text }];
+  // Tag as final-response when all tools have resolved and at least one fired.
+  const isFinalResponse = acc.pendingToolCalls.size === 0 && acc.hasFiredToolThisTurn;
+  if (isFinalResponse) acc.assistantFinalText += text;
+  return [{
+    type: AgentEventType.TextDelta,
+    threadId,
+    delta: text,
+    ...(isFinalResponse && { isFinalResponse: true }),
+  }];
 }
 
 // ---------------------------------------------------------------------------
@@ -313,6 +324,8 @@ function mapAcpToolCallStarted(
     const incoming = entries.map((entry, index) => normalizeCursorTodoEntry(entry, index));
     const todos = reconcileCursorTodos(incoming, merge, todoSnapshot);
     acc.toolStartTimes.set(update.toolCallId, Date.now());
+    acc.pendingToolCalls.add(update.toolCallId);
+    acc.hasFiredToolThisTurn = true;
     return [
       {
         type: AgentEventType.ToolUse,
@@ -353,6 +366,8 @@ function mapAcpToolCallStarted(
   // Align with {@link CursorStreamAccumulator}: only set once a ToolUse is emitted
   // so `tool_call_update` can orphan-synthesize a card like stream-json completions.
   acc.toolStartTimes.set(update.toolCallId, Date.now());
+  acc.pendingToolCalls.add(update.toolCallId);
+  acc.hasFiredToolThisTurn = true;
 
   return [
     {
@@ -388,6 +403,7 @@ function mapAcpToolCallUpdated(
     acc.toolStartTimes.delete(update.toolCallId);
     if (update.status === "completed" || update.status === "failed") {
       state.suppressedToolCallIds.delete(update.toolCallId);
+      acc.pendingToolCalls.delete(update.toolCallId);
     }
     return [];
   }
@@ -447,9 +463,11 @@ function mapAcpToolCallUpdated(
       toolName,
       toolInput,
     });
+    acc.hasFiredToolThisTurn = true;
   }
 
   acc.toolStartTimes.delete(update.toolCallId);
+  acc.pendingToolCalls.delete(update.toolCallId);
   state.toolNameByCallId.delete(update.toolCallId);
 
   events.push({

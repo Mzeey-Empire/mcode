@@ -25,11 +25,20 @@ export {
   MCODE_BROWSER_CONTEXT_ATTACHMENT_MIME,
   isVirtualBrowserContextAttachment,
   shouldPersistAttachmentWithoutFile,
+  storedAttachmentSuffix,
 } from "./models/attachment.js";
 export type { AttachmentMeta, StoredAttachment } from "./models/attachment.js";
 
 export { WorkspaceSchema, WorkspaceEnrichmentSchema } from "./models/workspace.js";
 export type { Workspace, WorkspaceEnrichment } from "./models/workspace.js";
+
+export {
+  MCODE_WORKSPACE_PREVIEW_PROTOCOL,
+  isMcodeWorkspacePreviewUrl,
+  mcodeWorkspacePreviewHref,
+  markdownWorkspaceRefToPreviewPath,
+  looksLikeWorkspaceRelativeFileRef,
+} from "./models/workspace-preview-uri.js";
 
 export { ThreadSchema, RecentThreadSchema } from "./models/thread.js";
 export type { Thread, RecentThread } from "./models/thread.js";
@@ -46,6 +55,12 @@ export type {
   ToolCallStatus,
 } from "./models/tool-call-record.js";
 
+export { ThoughtSegmentRecordSchema } from "./models/thought-segment.js";
+export type { ThoughtSegmentRecord } from "./models/thought-segment.js";
+
+export { HookExecutionRecordSchema } from "./models/hook-execution.js";
+export type { HookExecutionRecord } from "./models/hook-execution.js";
+
 export { TurnSnapshotSchema } from "./models/turn-snapshot.js";
 export type { TurnSnapshot } from "./models/turn-snapshot.js";
 
@@ -60,6 +75,7 @@ export {
   ProviderIdSchema,
   NamingModeSchema,
   UpdateCheckIntervalSchema,
+  UpdateReleaseLineSchema,
   GRACE_PERIOD_DEFAULT_SECONDS,
 } from "./models/settings.js";
 export type {
@@ -72,6 +88,7 @@ export type {
   SettingsProviderId,
   NamingMode,
   UpdateCheckInterval,
+  UpdateReleaseLine,
 } from "./models/settings.js";
 
 export {
@@ -114,6 +131,38 @@ export type {
   AttachedBrowserCapture,
   BrowserCaptureSpillFile,
 } from "./models/browser-preview.js";
+
+export {
+  BrowserTabIdSchema,
+  BrowserTabInfoSchema,
+  BrowserTabSetSchema,
+  BrowserPerfCountersSchema,
+  BROWSER_TAB_INFO_STRING_MAX,
+} from "./models/browser-tab.js";
+export type {
+  BrowserTabId,
+  BrowserTabInfo,
+  BrowserTabSet,
+  BrowserPerfCounters,
+} from "./models/browser-tab.js";
+
+export {
+  BROWSER_USE_FRAME_HEADER_BYTES,
+  BROWSER_USE_MAX_MESSAGE_BYTES,
+  BROWSER_USE_METHODS,
+  MCODE_BROWSER_USE_PIPE_ENV,
+  DPCODE_BROWSER_USE_PIPE_ENV,
+  T3CODE_BROWSER_USE_PIPE_ENV,
+  BrowserUseTabRowSchema,
+  BrowserExecuteCdpInputSchema,
+  BrowserUseCdpNotificationParamsSchema,
+} from "./models/browser-use.js";
+export type {
+  BrowserUseMethod,
+  BrowserUseTabRow,
+  BrowserExecuteCdpInput,
+  BrowserUseCdpNotificationParams,
+} from "./models/browser-use.js";
 
 // Events
 export { AgentEventSchema, AgentEventType } from "./events/agent-event.js";

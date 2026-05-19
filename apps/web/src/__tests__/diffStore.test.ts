@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   useDiffStore,
-  RIGHT_PANEL_DEFAULTS,
-  PANEL_DEFAULT_WIDTH,
   PANEL_MIN_WIDTH,
+  getDefaultPanelWidthPx,
+  createDefaultRightPanelState,
 } from "../stores/diffStore";
 
 describe("diffStore", () => {
@@ -27,7 +27,7 @@ describe("diffStore", () => {
   describe("getRightPanel", () => {
     it("should return defaults for unknown thread", () => {
       const { getRightPanel } = useDiffStore.getState();
-      expect(getRightPanel("unknown")).toEqual(RIGHT_PANEL_DEFAULTS);
+      expect(getRightPanel("unknown")).toEqual(createDefaultRightPanelState());
     });
 
     it("should return stored state for known thread", () => {
@@ -79,7 +79,7 @@ describe("diffStore", () => {
       const { setRightPanelWidth, getRightPanel } = useDiffStore.getState();
       setRightPanelWidth("thread-1", 500);
       expect(getRightPanel("thread-1").width).toBe(500);
-      expect(getRightPanel("thread-2").width).toBe(PANEL_DEFAULT_WIDTH);
+      expect(getRightPanel("thread-2").width).toBe(getDefaultPanelWidthPx());
     });
 
     it("should clamp width to PANEL_MIN_WIDTH", () => {
@@ -140,7 +140,7 @@ describe("diffStore", () => {
       const state = useDiffStore.getState();
       expect(state.previewUrlByThread["thread-1"]).toBeUndefined();
       expect(state.rightPanelByThread["thread-1"]).toBeUndefined();
-      expect(getRightPanel("thread-1")).toEqual(RIGHT_PANEL_DEFAULTS);
+      expect(getRightPanel("thread-1")).toEqual(createDefaultRightPanelState());
       expect(state.snapshotsByThread["thread-1"]).toBeUndefined();
       expect(state.snapshotsLoadingByThread["thread-1"]).toBeUndefined();
       expect(state.commitsByThread["thread-1"]).toBeUndefined();

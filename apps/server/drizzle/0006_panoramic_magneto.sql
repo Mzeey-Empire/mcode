@@ -1,0 +1,1 @@
+ALTER TABLE `thought_segments` ADD `is_final_response` integer DEFAULT 0 NOT NULL;

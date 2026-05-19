@@ -24,7 +24,7 @@ import { isAbsolute, join } from "path";
 import { randomUUID } from "crypto";
 import { Readable } from "stream";
 import { getLogPath, getMcodeDir, getRecentLogs } from "@mcode/shared";
-import { getExtension as bundledGetExtension } from "@mcode/contracts";
+import { getExtension as bundledGetExtension, isMcodeWorkspacePreviewUrl } from "@mcode/contracts";
 
 /** Use snapshot-provided module when available (V8 snapshot skips re-init). */
 const getExtension = globalThis.__v8Snapshot?.contracts?.getExtension ?? bundledGetExtension;
@@ -41,6 +41,8 @@ import {
 } from "./auto-updater.js";
 import { setupSpellcheck } from "./spellcheck.js";
 import { registerPreviewBrowserHandlers, disposePreviewForWindow } from "./preview/index.js";
+import { startBrowserUseBridge, disposeBrowserUseBridge } from "./browser-use/index.js";
+import { resolveMcodeWorkspacePreviewUrl } from "./preview/preview-local-file.js";
 
 // Isolate dev's Electron userData (cache, cookies, localStorage, IndexedDB)
 // from the installed prod build. Without this, both share %APPDATA%/Mcode/
@@ -261,6 +263,12 @@ function createWindow(): void {
       // Documented explicitly; defaults to true in Electron but we set it
       // here for clarity. The load-bearing call is setSpellCheckerLanguages().
       spellcheck: true,
+      // Phase D of the in-app browser rewrite: enable <webview> so the
+      // renderer can host a guest WebContents whose id is later adopted by
+      // the host bridge (browser-use). webview-tag carries Chromium guest
+      // process risks; the will-attach-webview hook below clamps webPreferences
+      // and we never expose nodeIntegrationInSubFrames.
+      webviewTag: true,
     },
   });
 
@@ -279,6 +287,18 @@ function createWindow(): void {
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     openIfAllowed(url);
     return { action: "deny" };
+  });
+
+  // Harden every <webview> the renderer attaches: strip node integration,
+  // force the preview partition, and remove any preload script the renderer
+  // tries to inject. These guarantees are essential because webviewTag is on.
+  mainWindow.webContents.on("will-attach-webview", (_event, webPreferences, params) => {
+    webPreferences.nodeIntegration = false;
+    webPreferences.contextIsolation = true;
+    webPreferences.sandbox = true;
+    delete (webPreferences as { preload?: string }).preload;
+    delete (webPreferences as { preloadURL?: string }).preloadURL;
+    params.partition = "persist:mcode-preview";
   });
 
   // Prevent the main window from navigating away from the app.
@@ -377,10 +397,27 @@ function registerIpcHandlers(): void {
     return shell.openPath(dirPath);
   });
 
-  // Open external URL (https, http, mailto)
-  ipcMain.handle("open-external-url", (_event, url: string) => {
-    openIfAllowed(url);
-  });
+  // Open external URL (https, http, mailto), or workspace-relative preview targets in the default browser.
+  ipcMain.handle(
+    "open-external-url",
+    async (_event, url: string, workspacePath?: string | null) => {
+      const trimmed = typeof url === "string" ? url.trim() : "";
+      if (!trimmed) return;
+      if (isMcodeWorkspacePreviewUrl(trimmed)) {
+        const ws =
+          typeof workspacePath === "string" && workspacePath.trim().length > 0
+            ? workspacePath.trim()
+            : null;
+        const resolved = await resolveMcodeWorkspacePreviewUrl(trimmed, ws);
+        if (!resolved.ok) return;
+        void shell.openExternal(resolved.url).catch((err: unknown) => {
+          console.error(`[open-external-url] Failed to open file URL: ${resolved.url}`, err);
+        });
+        return;
+      }
+      openIfAllowed(trimmed);
+    },
+  );
 
   // Read clipboard image and save to temp JPEG
   ipcMain.handle("read-clipboard-image", async () => {
@@ -614,6 +651,15 @@ app.whenReady().then(async () => {
     console.log(`[perf] V8 snapshot: ${globalThis.__v8Snapshot ? "loaded" : "not available"}`);
     console.log(`Mcode v${app.getVersion()} starting`);
 
+    // Boot the Codex browser-use pipe BEFORE the server child spawns so the
+    // server inherits MCODE_BROWSER_USE_PIPE_PATH and can pass it to every
+    // child it spawns later (Codex provider, terminals, automation tools).
+    // Failures here are non-fatal: the bridge module logs and returns null.
+    const pipePathEarly = await startBrowserUseBridge();
+    if (pipePathEarly) {
+      process.env["MCODE_BROWSER_USE_PIPE_PATH"] = pipePathEarly;
+    }
+
     // Start the server child process
     const { port } = await serverManager.start();
     console.log(`[perf] Server ready: ${(performance.now() - STARTUP_TIME).toFixed(1)}ms`);
@@ -726,6 +772,7 @@ app.on("before-quit", async (e) => {
 
 app.on("will-quit", () => {
   cleanupAutoUpdater();
+  void disposeBrowserUseBridge();
 });
 
 export { mainWindow };

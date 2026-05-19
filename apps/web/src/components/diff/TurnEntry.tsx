@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type { TurnSnapshot } from "@mcode/contracts";
 import { FileList } from "./FileList";
 
@@ -6,18 +6,32 @@ import { FileList } from "./FileList";
 interface TurnEntryProps {
   snapshot: TurnSnapshot;
   turnNumber: number;
+  /** When true the accordion starts expanded (used for the latest turn). */
+  defaultExpanded?: boolean;
 }
 
 /**
  * Single turn accordion. Leading element is an oversized ordinal — the page's
  * primary navigational rhythm. Expansion is a typographic chevron, not a heavy
  * plus/minus glyph.
+ *
+ * When `defaultExpanded` is set, the turn opens on mount so the file list is
+ * visible without a click (used for the latest turn in the By Turn view).
  */
-export function TurnEntry({ snapshot, turnNumber }: TurnEntryProps) {
-  const [expanded, setExpanded] = useState(false);
+export function TurnEntry({ snapshot, turnNumber, defaultExpanded = false }: TurnEntryProps) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+
+  // Sync when defaultExpanded transitions to true (e.g. a new turn arrives
+  // and this entry becomes the latest, or snapshots load after mount).
+  // useState only reads its initializer on first mount.
+  useEffect(() => {
+    if (defaultExpanded) setExpanded(true);
+  }, [defaultExpanded]);
+
   const fileCount = snapshot.files_changed.length;
   const ordinal = String(turnNumber).padStart(2, "0");
   const contentId = `turn-entry-content-${snapshot.id}`;
+
 
   return (
     <div className={`border-b border-border/15 ${expanded ? "bg-muted/[0.04]" : ""}`}>
@@ -54,7 +68,13 @@ export function TurnEntry({ snapshot, turnNumber }: TurnEntryProps) {
 
       {expanded && (
         <div id={contentId} className="pb-1">
-          <FileList files={snapshot.files_changed} source="snapshot" id={snapshot.id} />
+          <FileList
+            files={snapshot.files_changed}
+            source="snapshot"
+            id={snapshot.id}
+            threadId={snapshot.thread_id}
+            defaultFilesExpanded={defaultExpanded}
+          />
         </div>
       )}
     </div>
