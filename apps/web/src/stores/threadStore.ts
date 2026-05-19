@@ -1774,6 +1774,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           timestamp: new Date().toISOString(),
           sequence: get().messages.length + 1,
           attachments: null,
+          // Server injects the model after persisting; defaults to null when
+          // unknown (legacy clients, non-Claude providers without model info).
+          model: (params.model as string | null | undefined) ?? null,
         };
         set((state) => {
           // Clear streaming text so turnComplete won't duplicate this message.

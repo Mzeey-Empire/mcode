@@ -1278,6 +1278,11 @@ export class AgentService {
             // through to the client. The client uses it for stable message identity
             // (branching, dedup across Electron's dual MessagePort+WebSocket channels).
             event.messageId = msg.id;
+            // Carry the model too so the client's locally-built Message can
+            // show the model name in the footer immediately — without it the
+            // footer renders without the model until a thread refresh re-fetches
+            // the persisted row from the DB.
+            event.model = modelForMessage;
             this.streamingAssistantTextByThread.delete(event.threadId);
           } catch (err) {
             logger.error("Failed to persist assistant message", {
