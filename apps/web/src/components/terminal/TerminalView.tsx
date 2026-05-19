@@ -365,10 +365,16 @@ export const TerminalView = memo(function TerminalView({ ptyId, visible, threadA
 
       const observer = new ResizeObserver(() => {
         if (disposed || !fitAddonRef.current) return;
+        // Skip fit() when the container is display:none (visible=false).
+        // FitAddon.proposeDimensions() reads the parent's clientWidth/Height
+        // which are 0 when hidden, producing a 2×1 grid. Resizing xterm to
+        // 2 columns causes every line to wrap, overflowing the fixed-size
+        // scrollback buffer and permanently truncating history.
+        if (!visibleRef.current) return;
         if (rafId === null) {
           rafId = requestAnimationFrame(() => {
             rafId = null;
-            if (disposed) return;
+            if (disposed || !visibleRef.current) return;
             fitAddonRef.current?.fit();
           });
         }
