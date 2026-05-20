@@ -3,6 +3,7 @@ import { TerminalSquare, X, Plus, Trash2, ChevronsLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { useTerminalStore, type TerminalInstance } from "@/stores/terminalStore";
+import { cn } from "@/lib/utils";
 
 const EMPTY_TERMINALS: readonly TerminalInstance[] = [];
 
@@ -154,37 +155,40 @@ export const TerminalList = memo(function TerminalList({
         {terminals.map((terminal) => {
           const isActive = terminal.id === activeTerminalId;
           return (
-            <div
-              key={terminal.id}
-              role="button"
-              tabIndex={0}
-              className={`group flex cursor-pointer items-center gap-2 px-2.5 py-1.5 transition-colors focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset focus-visible:outline-none ${
-                isActive
-                  ? "bg-muted/50 text-foreground"
-                  : "text-muted-foreground hover:bg-muted/30 hover:text-foreground"
-              }`}
-              onClick={() => setActiveTerminal(threadId, terminal.id)}
-              onKeyDown={(e) => {
-                if (e.target !== e.currentTarget) return;
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setActiveTerminal(threadId, terminal.id);
-                }
-              }}
-            >
-              <TerminalSquare className={`size-3.5 flex-shrink-0 ${isActive ? "opacity-70" : "opacity-40"}`} />
-              <span className={`flex-1 truncate text-xs ${isActive ? "font-semibold" : ""}`}>
-                {terminal.label}
-              </span>
+            <div key={terminal.id} className="group flex items-center pr-1">
+              <Button
+                type="button"
+                variant="ghost"
+                className={cn(
+                  "h-auto min-w-0 flex-1 justify-start gap-2 rounded-none px-2.5 py-1.5 font-normal",
+                  isActive
+                    ? "bg-muted/50 text-foreground"
+                    : "text-muted-foreground hover:bg-muted/30 hover:text-foreground",
+                )}
+                onClick={() => setActiveTerminal(threadId, terminal.id)}
+                aria-current={isActive ? "true" : undefined}
+              >
+                <TerminalSquare
+                  className={cn(
+                    "size-3.5 shrink-0",
+                    isActive ? "opacity-70" : "opacity-40",
+                  )}
+                />
+                <span
+                  className={cn(
+                    "truncate text-xs",
+                    isActive && "font-semibold",
+                  )}
+                >
+                  {terminal.label}
+                </span>
+              </Button>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon-xs"
-                className="size-4 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-60"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onClose(terminal.id);
-                }}
+                className="size-4 shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-60"
+                onClick={() => onClose(terminal.id)}
                 aria-label={`Close ${terminal.label}`}
               >
                 <X className="size-2.5" />
