@@ -1,6 +1,6 @@
 /**
  * Local file preview support: path resolution, security guards, and validation
- * for serving `file:` URLs in the embedded preview BrowserView.
+ * for serving `file:` URLs in the embedded preview WebContentsView.
  */
 
 import { lstat, realpath, stat } from "node:fs/promises";

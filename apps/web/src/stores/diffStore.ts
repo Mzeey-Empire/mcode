@@ -4,7 +4,7 @@ import type { TurnSnapshot, GitCommit } from "@mcode/contracts";
 export type { GitCommit };
 
 /** Active tab in the right panel. */
-export type RightPanelTab = "tasks" | "changes" | "preview";
+export type RightPanelTab = "tasks" | "changes" | "preview" | "terminal";
 
 /** View mode within the Changes tab. */
 export type DiffViewMode = "by-turn" | "all" | "commits" | "summary";
@@ -93,6 +93,12 @@ interface DiffState {
   commitsByThread: Record<string, GitCommit[]>;
   /** Whether commits are currently loading, keyed by thread ID. */
   commitsLoadingByThread: Record<string, boolean>;
+  /**
+   * Inline diff cache keyed by `"threadId:source:id:filePath"`. Survives
+   * component unmounts (panel close/reopen, tab switches) so diffs aren't
+   * re-fetched. Scoped by thread to prevent cross-thread collisions.
+   */
+  inlineDiffCache: Record<string, string>;
   /** Currently selected file for diff viewing. */
   selectedFile: SelectedFile | null;
   /** Raw unified diff text for the selected file. */
@@ -131,6 +137,10 @@ interface DiffState {
   setSummaryRecord: (record: DiffState["summaryRecord"]) => void;
   /** Set summary loading state. */
   setSummaryLoading: (loading: boolean) => void;
+  /** Cache a fetched inline diff so it survives component unmounts. */
+  cacheInlineDiff: (threadId: string, source: string, id: string, filePath: string, data: string) => void;
+  /** Retrieve a cached inline diff, or undefined if not cached. */
+  getCachedInlineDiff: (threadId: string, source: string, id: string, filePath: string) => string | undefined;
   /** Persist the omnibox URL for a thread's embedded preview. */
   setPreviewUrlForThread: (threadId: string, url: string) => void;
   clearThread: (threadId: string) => void;
@@ -147,6 +157,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   snapshotsLoadingByThread: {},
   commitsByThread: {},
   commitsLoadingByThread: {},
+  inlineDiffCache: {},
   selectedFile: null,
   diffContent: null,
   diffLoading: false,
@@ -227,6 +238,12 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   setDiffLoading: (loading) => set({ diffLoading: loading }),
   setSummaryRecord: (record) => set({ summaryRecord: record }),
   setSummaryLoading: (loading) => set({ summaryLoading: loading }),
+  cacheInlineDiff: (threadId, source, id, filePath, data) =>
+    set((s) => ({
+      inlineDiffCache: { ...s.inlineDiffCache, [`${threadId}:${source}:${id}:${filePath}`]: data },
+    })),
+  getCachedInlineDiff: (threadId, source, id, filePath) =>
+    get().inlineDiffCache[`${threadId}:${source}:${id}:${filePath}`],
   setPreviewUrlForThread: (threadId, url) =>
     set((s) => ({
       previewUrlByThread: { ...s.previewUrlByThread, [threadId]: url },
@@ -246,6 +263,13 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       const previewUrls = { ...state.previewUrlByThread };
       delete previewUrls[threadId];
 
+      // Evict inline diff cache entries scoped to this thread.
+      const prefix = `${threadId}:`;
+      const inlineDiffCache: Record<string, string> = {};
+      for (const [key, value] of Object.entries(state.inlineDiffCache)) {
+        if (!key.startsWith(prefix)) inlineDiffCache[key] = value;
+      }
+
       // Only clear the global selection when it belongs to the deleted thread.
       const selectionBelongsToThread = state.selectedFile?.threadId === threadId;
       const summaryBelongsToThread = state.summaryRecord?.threadId === threadId;
@@ -257,6 +281,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         commitsLoadingByThread: commitsLoading,
         rightPanelByThread: rightPanels,
         previewUrlByThread: previewUrls,
+        inlineDiffCache,
         ...(selectionBelongsToThread
           ? { selectedFile: null, diffContent: null, diffLoading: false }
           : {}),

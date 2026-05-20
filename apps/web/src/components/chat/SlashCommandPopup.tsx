@@ -8,7 +8,12 @@ import type { Command } from "./useSlashCommand";
 const ITEM_HEIGHT = 44; // px per row
 const VISIBLE_ITEMS = 8;
 const VIRTUAL_THRESHOLD = 20; // use virtual scroll only above this count
+// Footer (Refresh row) intrinsic height: border-t (1px) + py-1 (8px) + icon
+// button height (~20px). Used to estimate popup height for the above/below
+// placement calculation; the rendered footer remains naturally sized.
+const FOOTER_HEIGHT = 28;
 
+/** Props for the {@link SlashCommandPopup} component. */
 interface SlashCommandPopupProps {
   isOpen: boolean;
   isLoading: boolean;
@@ -21,6 +26,13 @@ interface SlashCommandPopupProps {
   onRetry: () => void;
 }
 
+/**
+ * Floating popup that lists slash command suggestions anchored to the
+ * composer editor. Handles keyboard navigation via `selectedIndex`, virtualises
+ * long lists past `VIRTUAL_THRESHOLD`, flips above/below the anchor based on
+ * available viewport space, and dismisses on outside click. Render priority is
+ * error → list → inline loader → empty state.
+ */
 export function SlashCommandPopup({
   isOpen,
   isLoading,
@@ -66,16 +78,25 @@ export function SlashCommandPopup({
 
   if (!isOpen || !anchorRect) return null;
 
-  // Position: default above the anchor rect, flip below if not enough space
+  // Cap the scrollable list at VISIBLE_ITEMS rows; shorter lists size to
+  // their natural content so a popup with two items isn't truncated.
+  const listMaxHeight = VISIBLE_ITEMS * ITEM_HEIGHT;
+
+  // Estimate the rendered popup height for the above/below placement
+  // decision. Only the list branch renders a footer (Refresh row); error,
+  // inline-loading, and empty branches do not. Including FOOTER_HEIGHT in
+  // those cases would cause unnecessary above-placement flips.
+  const willRenderList = !error && items.length > 0;
+  const estimatedHeight =
+    Math.min(items.length, VISIBLE_ITEMS) * ITEM_HEIGHT +
+    (willRenderList ? FOOTER_HEIGHT : 0);
   const spaceAbove = anchorRect.top;
-  const maxHeight = Math.min(VISIBLE_ITEMS * ITEM_HEIGHT, items.length * ITEM_HEIGHT || ITEM_HEIGHT * 2);
-  const placeAbove = spaceAbove > maxHeight + 8;
+  const placeAbove = spaceAbove > estimatedHeight + 8;
 
   const style: React.CSSProperties = {
     position: "fixed",
     left: anchorRect.left,
     width: Math.max(anchorRect.width, 320),
-    maxHeight,
     ...(placeAbove
       ? { bottom: window.innerHeight - anchorRect.top + 4 }
       : { top: anchorRect.bottom + 4 }),
@@ -96,20 +117,29 @@ export function SlashCommandPopup({
         "animate-in fade-in-0 zoom-in-95 duration-[120ms]",
       )}
     >
-      {isLoading ? (
-        <SkeletonRows />
-      ) : error ? (
+      {/*
+        Render priority (stale-while-revalidate):
+          1. error -> ErrorRow  (unchanged; surfaces transient failures even
+             when built-in commands are present, preserving the explicit
+             "loading failed" signal validated by the slash-command E2E)
+          2. items.length > 0 -> list  (built-ins are always available, so
+             this branch wins on cold start, workspace switches, and cache
+             invalidations; the loading skeleton is unreachable in normal use)
+          3. isLoading -> inline "Loading commands..."  (only hit when a
+             filter yields zero matches AND skills are still arriving;
+             replaces the 3-row skeleton with a single quiet row)
+          4. EmptyState  (no matches, not loading, no error)
+      */}
+      {error ? (
         <ErrorRow message={error.message} onRetry={onRetry} />
-      ) : items.length === 0 ? (
-        <EmptyState />
-      ) : (
+      ) : items.length > 0 ? (
         <>
           <div
             ref={scrollRef}
             role="listbox"
             aria-label="Slash commands"
             aria-activedescendant={items[selectedIndex] ? `slash-cmd-${items[selectedIndex].name}` : undefined}
-            style={{ maxHeight, overflowY: "auto" }}
+            style={{ maxHeight: listMaxHeight, overflowY: "auto" }}
           >
             {useVirtual ? (
               <div role="presentation" style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
@@ -154,6 +184,10 @@ export function SlashCommandPopup({
             </button>
           </div>
         </>
+      ) : isLoading ? (
+        <LoadingInline />
+      ) : (
+        <EmptyState />
       )}
     </div>
   );
@@ -221,18 +255,25 @@ function CommandRow({
   );
 }
 
-function SkeletonRows() {
+/**
+ * Single-row "Loading commands..." indicator. Replaces the previous 3-row
+ * skeleton-shimmer block. The skeleton was visually noisy and triggered on
+ * every cold start, workspace switch, and cache-invalidation push; with the
+ * stale-while-revalidate render order in this component plus the eager
+ * prefetch in `useSlashCommand`, this branch should only be reachable when
+ * the user has typed a filter that excludes every cached built-in AND a
+ * skill load is still in flight -- an exceedingly rare combination.
+ */
+function LoadingInline() {
   return (
-    <div aria-busy="true" aria-label="Loading commands" className="p-1">
-      {[0, 1, 2].map((i) => (
-        <div key={i} className="flex items-center gap-3 px-3 py-2">
-          <div className="h-5 w-5 rounded bg-muted animate-pulse" />
-          <div className="flex flex-1 flex-col gap-1">
-            <div className="h-3 w-24 rounded bg-muted animate-pulse" />
-            <div className="h-2 w-40 rounded bg-muted animate-pulse" />
-          </div>
-        </div>
-      ))}
+    <div
+      aria-busy="true"
+      aria-live="polite"
+      role="status"
+      className="flex items-center gap-3 px-3 py-2"
+    >
+      <span className="flex h-5 w-5 flex-shrink-0" />
+      <span className="text-sm text-muted-foreground">Loading commands...</span>
     </div>
   );
 }

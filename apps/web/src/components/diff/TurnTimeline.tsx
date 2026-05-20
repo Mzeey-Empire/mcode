@@ -25,10 +25,17 @@ export function TurnTimeline({ snapshots }: TurnTimelineProps) {
     );
   }
 
+  const reversed = [...withFiles].reverse();
+
   return (
     <div className="flex flex-col">
-      {[...withFiles].reverse().map(({ snapshot, turnNumber }) => (
-        <TurnEntry key={snapshot.id} snapshot={snapshot} turnNumber={turnNumber} />
+      {reversed.map(({ snapshot, turnNumber }, i) => (
+        <TurnEntry
+          key={snapshot.id}
+          snapshot={snapshot}
+          turnNumber={turnNumber}
+          defaultExpanded={i === 0}
+        />
       ))}
     </div>
   );

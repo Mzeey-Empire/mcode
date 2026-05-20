@@ -1,12 +1,12 @@
 /**
  * Selection overlay management for region drag and element-pick capture modes.
- * Overlay BrowserWindows sit above the preview BrowserView and intercept pointer events.
+ * Overlay BrowserWindows sit above the preview WebContentsView and intercept pointer events.
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { BrowserView, BrowserWindow, app, ipcMain } from "electron";
+import { BrowserWindow, app, ipcMain, type WebContents } from "electron";
 import { type AttachmentMeta } from "@mcode/contracts";
 import {
   type Bounds,
@@ -55,7 +55,7 @@ const EP_REMOVE_JS = `(function(){
 
 /**
  * Drag-marquee overlay: nodeIntegration is limited to this inline page string so OS-level
- * pointer events sit above the preview BrowserView while the user draws a crop rectangle.
+ * pointer events sit above the preview WebContentsView while the user draws a crop rectangle.
  */
 const REGION_OVERLAY_DATA_URL =
   "data:text/html;charset=utf-8," +
@@ -177,7 +177,7 @@ type HitTestResult =
  * Draws the element-pick highlight inside the guest page (not the shell overlay), matching layout viewport coords.
  * Must run removeEpPickHighlighter before capturePage so the cyan frame is not in the PNG.
  */
-async function injectEpPickHighlighter(wc: BrowserView["webContents"]): Promise<void> {
+async function injectEpPickHighlighter(wc: WebContents): Promise<void> {
   if (wc.isDestroyed()) return;
   try {
     await wc.executeJavaScript(EP_INJECT_JS, true);
@@ -188,7 +188,7 @@ async function injectEpPickHighlighter(wc: BrowserView["webContents"]): Promise<
 
 /** Updates or clears the guest highlight box and selector tooltip. */
 async function updateEpPickHighlighter(
-  wc: BrowserView["webContents"],
+  wc: WebContents,
   bounds: Bounds | null,
   label: string,
 ): Promise<void> {
@@ -241,7 +241,7 @@ async function updateEpPickHighlighter(
 /**
  * Removes the element-pick highlight injected by injectEpPickHighlighter from the guest page.
  */
-export async function removeEpPickHighlighter(wc: BrowserView["webContents"]): Promise<void> {
+export async function removeEpPickHighlighter(wc: WebContents): Promise<void> {
   if (wc.isDestroyed()) return;
   try {
     await wc.executeJavaScript(EP_REMOVE_JS, true);
@@ -250,7 +250,7 @@ export async function removeEpPickHighlighter(wc: BrowserView["webContents"]): P
   }
 }
 
-/** Prefer BrowserView bounds; shell-reported rect can lag ResizeObserver. */
+/** Prefer WebContentsView bounds; shell-reported rect can lag ResizeObserver. */
 function hostBoundsForHitTest(s: PreviewSession): Bounds | null {
   if (s.view && !s.view.webContents.isDestroyed()) {
     try {
@@ -573,7 +573,7 @@ function parseHitTestPayload(parsed: unknown): HitTestResult | null {
  * or null if the webContents is gone or the script throws.
  */
 async function runElementHitTest(
-  webContents: BrowserView["webContents"],
+  webContents: WebContents,
   overlayX: number,
   overlayY: number,
   hostBounds: Bounds | null,
@@ -643,7 +643,7 @@ export function abortOverlayCapture(s: PreviewSession, error: string): void {
  * Attaches a did-start-navigation listener that aborts the overlay capture when the
  * main frame navigates away. Returns a disposable that removes the listener.
  */
-function attachMainFrameNavigationAbort(s: PreviewSession, webContents: BrowserView["webContents"]): () => void {
+function attachMainFrameNavigationAbort(s: PreviewSession, webContents: WebContents): () => void {
   const handler = (_event: unknown, _url: string, _isSameDocument: boolean, isMainFrame: boolean): void => {
     if (isMainFrame) abortOverlayCapture(s, "navigated-away");
   };
@@ -654,7 +654,7 @@ function attachMainFrameNavigationAbort(s: PreviewSession, webContents: BrowserV
 /**
  * Starts a new overlay capture session, replacing any previous navigation abort listener.
  */
-function beginOverlaySession(s: PreviewSession, webContents: BrowserView["webContents"]): void {
+function beginOverlaySession(s: PreviewSession, webContents: WebContents): void {
   if (s.navigationAbortDisposable) {
     s.navigationAbortDisposable();
     s.navigationAbortDisposable = null;

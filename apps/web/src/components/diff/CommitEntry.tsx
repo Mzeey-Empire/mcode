@@ -7,6 +7,8 @@ import { FileList } from "./FileList";
 /** Props for CommitEntry. */
 interface CommitEntryProps {
   commit: GitCommit;
+  /** Thread that owns this commit, used to scope the inline diff cache. */
+  threadId: string;
 }
 
 /** Format ISO date to a compact relative string. */
@@ -35,7 +37,7 @@ function getInitials(author: string): string {
  * Single commit row. Avatar is a quiet typographic mark (initials in muted square),
  * not a colored chip. Hierarchy: SHA (mono leading) → message → time.
  */
-export function CommitEntry({ commit }: CommitEntryProps) {
+export function CommitEntry({ commit, threadId }: CommitEntryProps) {
   const [expanded, setExpanded] = useState(false);
   const [files, setFiles] = useState<string[] | null>(null);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
@@ -122,7 +124,7 @@ export function CommitEntry({ commit }: CommitEntryProps) {
               No files changed
             </p>
           ) : (
-            <FileList files={files} source="commit" id={commit.sha} />
+            <FileList files={files} source="commit" id={commit.sha} threadId={threadId} />
           )}
         </div>
       )}

@@ -1,6 +1,6 @@
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ListChecks, Diff, Globe, X } from "lucide-react";
+import { ListChecks, Diff, Globe, Terminal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useTaskStore } from "@/stores/taskStore";
@@ -15,6 +15,8 @@ import { TaskPanel } from "@/components/tasks/TaskPanel";
 import { TaskPanelHeader } from "@/components/tasks/TaskPanelHeader";
 import { DiffPanel } from "@/components/diff";
 import { PreviewPanel } from "@/components/panels/PreviewPanel";
+import { TerminalTabContent } from "@/components/terminal/TerminalTabContent";
+import { TerminalPoolSlot } from "@/components/terminal/TerminalPoolSlotContext";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";
 
@@ -182,7 +184,10 @@ export function RightPanel() {
     };
   }, []);
 
-  if (!panelVisible || !activeThreadId) return null;
+  // Keep the panel (and terminal pool) mounted when hidden so xterm instances
+  // and scroll anchors survive workspace thread switches. Per-thread visibility
+  // uses Tailwind `hidden` so layout width stays zero.
+  if (!activeThreadId) return null;
 
   // Overlay-mode width: cap to 90vw so the chat is still partially visible
   // behind the backdrop and the panel doesn't dominate small screens.
@@ -215,10 +220,12 @@ export function RightPanel() {
         }
         className={cn(
           "relative flex h-full min-h-0 min-w-0 flex-col bg-background focus:outline-none",
+          !panelVisible && "hidden",
           isOverlay
             ? "fixed inset-y-0 right-0 z-50 shadow-sm animate-fade-up-in"
             : "rounded-lg shadow-sm overflow-hidden",
         )}
+        aria-hidden={!panelVisible}
       >
       {/* Drag handle (left edge) — double-click snaps between default and wide.
           Kept visible in overlay mode too, so the user can shrink the panel
@@ -297,6 +304,18 @@ export function RightPanel() {
               <Globe size={12} />
               Preview
             </button>
+            <button
+              type="button"
+              onClick={() => setRightPanelTab(activeThreadId!, "terminal")}
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-[10px] font-semibold tracking-[0.16em] uppercase transition-colors ${
+                activeTab === "terminal"
+                  ? "text-foreground bg-muted/50"
+                  : "text-foreground/70 hover:text-foreground"
+              }`}
+            >
+              <Terminal size={12} />
+              Terminal
+            </button>
           </div>
           <Button
             variant="ghost"
@@ -310,18 +329,36 @@ export function RightPanel() {
         </div>
       </div>
 
-      {/* Tab content */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {/* Tab content — DiffPanel and terminal pool stay mounted (stacked) so
+          turn expand state, loaded diffs, and xterm scroll anchors survive tab
+          and workspace thread switches. */}
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         {activeTab === "tasks" && (
           <>
             <TaskPanelHeader tasks={tasks ?? []} />
             <TaskPanel />
           </>
         )}
-        {activeTab === "changes" && <DiffPanel />}
+        <div className={activeTab === "changes" ? "flex flex-1 flex-col min-h-0" : "hidden"}>
+          <DiffPanel />
+        </div>
         {activeTab === "preview" && (
           <PreviewPanel threadId={activeThreadId} workspaceId={activeWorkspaceId} />
         )}
+        <div
+          className={cn(
+            "absolute inset-0 flex min-h-0 flex-row overflow-hidden",
+            activeTab !== "terminal" && "pointer-events-none z-0 opacity-0",
+            activeTab === "terminal" && "z-10",
+          )}
+          aria-hidden={activeTab !== "terminal"}
+          inert={activeTab !== "terminal" ? true : undefined}
+        >
+          {activeTab === "terminal" && (
+            <TerminalTabContent threadId={activeThreadId} />
+          )}
+          <TerminalPoolSlot className="relative min-h-0 min-w-0 flex-1 overflow-hidden p-2" />
+        </div>
       </div>
       </div>
     </>

@@ -47,26 +47,164 @@ function releaseLineToUpdaterChannel(releaseLine: "stable" | "nightly"): string 
 }
 
 /**
- * Applies `autoUpdater.channel` from user settings so checks target stable or nightly feeds.
+ * Apply both `autoUpdater.channel` and `autoUpdater.allowPrerelease` from the
+ * persisted release line. Nightly per-build releases are GitHub prereleases,
+ * so the updater must opt in via `allowPrerelease` to discover them.
+ */
+export function applyChannelConfig(releaseLine: "stable" | "nightly"): void {
+  autoUpdater.channel = releaseLineToUpdaterChannel(releaseLine);
+  autoUpdater.allowPrerelease = releaseLine === "nightly";
+}
+
+/** Shared promise so concurrent callers of applyReleaseLineSwitch await the same switch. */
+let inFlightReleaseLineSwitch: Promise<UpdateStatus> | null = null;
+
+/**
+ * Switch the running updater to a new release line and trigger an immediate
+ * check. When `allowDowngrade` is true, the underlying autoUpdater is
+ * temporarily allowed to install an older build (used when the user has
+ * confirmed a nightly → stable rollback). The flag is reset after the check
+ * resolves so subsequent in-channel checks behave normally.
+ *
+ * **Precondition:** the caller MUST persist `updates.channel` to settings.json
+ * BEFORE invoking this. `checkForUpdatesNow` internally re-reads settings and
+ * re-applies the channel, so an unpersisted switch would be silently reverted
+ * by the next periodic check.
+ *
+ * Concurrent calls share the same in-flight switch via `inFlightReleaseLineSwitch`.
+ */
+export async function applyReleaseLineSwitch(
+  releaseLine: "stable" | "nightly",
+  options: { allowDowngrade?: boolean } = {},
+): Promise<UpdateStatus> {
+  if (inFlightReleaseLineSwitch) {
+    return inFlightReleaseLineSwitch;
+  }
+  inFlightReleaseLineSwitch = (async () => {
+    applyChannelConfig(releaseLine);
+    const previousAllowDowngrade = autoUpdater.allowDowngrade;
+    if (options.allowDowngrade) {
+      autoUpdater.allowDowngrade = true;
+    }
+    try {
+      return await checkForUpdatesNow();
+    } finally {
+      autoUpdater.allowDowngrade = previousAllowDowngrade;
+    }
+  })();
+  try {
+    return await inFlightReleaseLineSwitch;
+  } finally {
+    inFlightReleaseLineSwitch = null;
+  }
+}
+
+/**
+ * Compare a major.minor.patch[-prerelease] string against another using semver
+ * precedence rules (numeric segments compared numerically; prerelease present
+ * is less than no prerelease at the same MAJOR.MINOR.PATCH).
+ */
+function semverGt(a: string, b: string): boolean {
+  const parse = (v: string) => {
+    const [main, pre] = v.split("-", 2);
+    const nums = main.split(".").map((n) => Number(n));
+    return { nums, pre: pre ?? null };
+  };
+  const A = parse(a);
+  const B = parse(b);
+  for (let i = 0; i < 3; i++) {
+    const ai = A.nums[i] ?? 0;
+    const bi = B.nums[i] ?? 0;
+    if (ai !== bi) return ai > bi;
+  }
+  // Equal core. No-prerelease > has-prerelease.
+  if (A.pre === null && B.pre !== null) return true;
+  if (A.pre !== null && B.pre === null) return false;
+  if (A.pre === null && B.pre === null) return false;
+  // Both prerelease: compare identifiers per semver §11.4.
+  const ap = (A.pre as string).split(".");
+  const bp = (B.pre as string).split(".");
+  for (let i = 0; i < Math.max(ap.length, bp.length); i++) {
+    const x = ap[i];
+    const y = bp[i];
+    if (x === undefined) return false;
+    if (y === undefined) return true;
+    const xn = Number(x);
+    const yn = Number(y);
+    const xIsNum = !Number.isNaN(xn);
+    const yIsNum = !Number.isNaN(yn);
+    if (xIsNum && yIsNum) {
+      if (xn !== yn) return xn > yn;
+    } else if (xIsNum) {
+      return false; // numeric < alphanumeric
+    } else if (yIsNum) {
+      return true;
+    } else if (x !== y) {
+      return x > y;
+    }
+  }
+  return false;
+}
+
+/**
+ * True when switching `from` → `to` would require electron-updater to install
+ * a version older than what is currently running. Used by the renderer's
+ * channel-switch handler to decide whether to show a downgrade-confirmation
+ * dialog before applying the new channel.
+ */
+export function isCrossChannelDowngrade(args: {
+  from: "stable" | "nightly";
+  to: "stable" | "nightly";
+  currentVersion: string;
+  latestStable: string | undefined;
+}): boolean {
+  if (args.from === args.to) return false;
+  if (args.to !== "stable") return false;
+  if (!args.latestStable) return false;
+  return semverGt(args.currentVersion, args.latestStable);
+}
+
+/**
+ * Applies the updater channel configuration (`channel` and `allowPrerelease`)
+ * from user settings via `applyChannelConfig`, so checks target the stable or
+ * nightly feed correctly.
  */
 function applyUpdaterChannelFromSettings(settings: UpdaterSettings): void {
-  autoUpdater.channel = releaseLineToUpdaterChannel(settings.releaseLine);
+  applyChannelConfig(settings.releaseLine);
+}
+
+/**
+ * Returns true when the running app version contains a `-nightly.` prerelease tag
+ * (e.g. `0.11.1-nightly.20260518.3`). Used to auto-select the nightly update channel.
+ */
+function isNightlyBuild(): boolean {
+  return app.getVersion().includes("-nightly.");
 }
 
 /** Read updater settings from settings.json; falls back to safe defaults if the file is missing or invalid. */
 function loadUpdaterSettings(): UpdaterSettings {
   const defaults: UpdaterSettings = {
-    releaseLine: "stable",
+    releaseLine: isNightlyBuild() ? "nightly" : "stable",
     autoDownload: true,
     autoInstallOnQuit: true,
     checkInterval: "4hours",
   };
   try {
     const raw = readFileSync(join(getMcodeDir(), "settings.json"), "utf-8");
-    const result = SettingsSchema().safeParse(JSON.parse(raw));
+    const parsed = JSON.parse(raw);
+    const result = SettingsSchema().safeParse(parsed);
     if (result.success) {
+      // Zod applies `.default("stable")` even when the user never set a
+      // channel, so we check the raw JSON to tell "unset" from "explicit".
+      // When no explicit channel is present, nightly builds default to
+      // "nightly"; otherwise respect the user's explicit choice.
+      const explicitChannel = parsed?.updates?.channel as string | undefined;
+      const releaseLine = explicitChannel
+        ? (result.data.updates.channel as "stable" | "nightly")
+        : defaults.releaseLine;
+
       return {
-        releaseLine: result.data.updates?.channel ?? defaults.releaseLine,
+        releaseLine,
         autoDownload: result.data.updates?.autoDownload ?? defaults.autoDownload,
         autoInstallOnQuit: result.data.updates?.autoInstallOnQuit ?? defaults.autoInstallOnQuit,
         checkInterval: result.data.updates?.checkInterval ?? defaults.checkInterval,

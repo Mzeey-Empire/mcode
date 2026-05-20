@@ -1,5 +1,5 @@
 import type { AttachmentMeta } from "./types";
-import type { McodeBrowserCapture } from "@mcode/contracts";
+import type { BrowserPerfCounters, BrowserTabSet, McodeBrowserCapture } from "@mcode/contracts";
 
 /** Discriminated union describing the auto-updater lifecycle state. */
 export type UpdateStatus =
@@ -23,6 +23,15 @@ interface AppBridge {
   installUpdate(): Promise<boolean>;
   /** Trigger download of a discovered update (when auto-download is off). */
   downloadUpdate(): Promise<void>;
+  /**
+   * Switch the updater release line ("stable" or "nightly") and trigger a
+   * check. Pass `allowDowngrade: true` when the user has confirmed a
+   * nightly → stable rollback (the install will be older than current).
+   */
+  applyReleaseLine(payload: {
+    releaseLine: "stable" | "nightly";
+    allowDowngrade?: boolean;
+  }): Promise<UpdateStatus>;
   /** Subscribe to push updates of update-status. Returns the listener for cleanup. */
   onUpdateStatus(callback: (status: UpdateStatus) => void): (...args: unknown[]) => void;
   /** Remove a previously registered update-status listener. */
@@ -92,6 +101,56 @@ interface PreviewBridge {
   onDidUpdateFavicon(callback: (payload: { favicon: string | null }) => void): () => void;
   /** Cancel any in-progress capture operation (region or element-pick). */
   cancelCapture(): Promise<void>;
+  /** Multi-tab control surface (Phase A of the in-app browser rewrite). */
+  tabs: PreviewTabsBridge;
+  /** Live preview perf counters; dev HUD only. */
+  getPerfCounters(): Promise<BrowserPerfCounters>;
+  /** Phase D: adopt a renderer-hosted <webview>'s WebContents into the host bridge. */
+  adoptWebview(payload: {
+    webContentsId: number;
+    threadId: string;
+    tabId: string;
+  }): Promise<{ ok: true } | { ok: false; error: string }>;
+  releaseWebview(payload: {
+    threadId: string;
+    tabId: string;
+  }): Promise<{ ok: true } | { ok: false; error: string }>;
+  /** Phase G: design-mode surface. */
+  design: PreviewDesignBridge;
+}
+
+/** Built-in viewport presets exposed by Phase G. */
+export type DesignViewportPresetId = "phone" | "tablet" | "desktop";
+
+interface PreviewDesignBridge {
+  setViewport(payload: {
+    presetId?: DesignViewportPresetId;
+    widthOverride?: number;
+    heightOverride?: number;
+  }): Promise<{ ok: true; data: { width: number; height: number } } | { ok: false; error: string }>;
+  resetViewport(): Promise<{ ok: true } | { ok: false; error: string }>;
+  setInspect(enabled: boolean): Promise<{ ok: true } | { ok: false; error: string }>;
+}
+
+/** Wire-side result of a tab IPC call. */
+export type PreviewTabIpcResult<T> =
+  | { readonly ok: true; readonly data: T }
+  | { readonly ok: false; readonly error: string };
+
+/** Mutation result for create. */
+export interface PreviewTabCreateData {
+  readonly tabId: string;
+  readonly tabs: BrowserTabSet;
+}
+
+/** Tab control surface mounted under `desktopBridge.preview.tabs`. */
+interface PreviewTabsBridge {
+  list(threadId: string): Promise<PreviewTabIpcResult<BrowserTabSet>>;
+  create(threadId: string, activate?: boolean): Promise<PreviewTabIpcResult<PreviewTabCreateData>>;
+  activate(threadId: string, tabId: string): Promise<PreviewTabIpcResult<BrowserTabSet>>;
+  close(threadId: string, tabId: string): Promise<PreviewTabIpcResult<BrowserTabSet>>;
+  /** Subscribe to push-style tab set updates emitted on navigation/favicon/close. */
+  onUpdated(callback: (payload: BrowserTabSet) => void): () => void;
 }
 
 /** IPC push transport relayed from the Electron main process. */

@@ -28,6 +28,25 @@ const SYNC_THROTTLE_MS = 30_000;
 const lastSyncTime = new Map<string, number>();
 
 /**
+ * Trailing-edge debounce window for `markThreadViewed` RPCs. Rapid sidebar
+ * navigation (e.g. arrow-keys, fast clicks) collapses to one RPC per thread
+ * instead of one per click. The "completed -> paused" optimistic local
+ * transition is unaffected and still applies synchronously on every click.
+ */
+const MARK_VIEWED_DEBOUNCE_MS = 150;
+const pendingMarkViewedTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleMarkThreadViewed(threadId: string): void {
+  const existing = pendingMarkViewedTimers.get(threadId);
+  if (existing) clearTimeout(existing);
+  const timer = setTimeout(() => {
+    pendingMarkViewedTimers.delete(threadId);
+    getTransport().markThreadViewed(threadId).catch(() => { /* non-critical */ });
+  }, MARK_VIEWED_DEBOUNCE_MS);
+  pendingMarkViewedTimers.set(threadId, timer);
+}
+
+/**
  * Bumped immediately before applying local additions/removals that must win over
  * in-flight {@link WorkspaceState.loadThreads} responses. Without this, a slow
  * `thread.list` that started before branching (for example) can finish after the
@@ -960,7 +979,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     }));
 
     if (isCompleted && id) {
-      getTransport().markThreadViewed(id).catch(() => {});
+      scheduleMarkThreadViewed(id);
     }
   },
 

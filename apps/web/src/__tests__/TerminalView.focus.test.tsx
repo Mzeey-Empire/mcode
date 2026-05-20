@@ -16,20 +16,26 @@ if (typeof globalThis.ResizeObserver === "undefined") {
 // Shared xterm term instance observable from the tests. We focus on the
 // .focus() call because that's the one that can steal input from the
 // composer — fit and refresh are idempotent repaints.
+const bufferActive = { viewportY: 42, length: 100 };
+
 const term = {
   options: { scrollback: 0 },
+  buffer: { active: bufferActive },
+  cols: 80,
+  rows: 24,
   loadAddon: vi.fn(),
   open: vi.fn(),
   attachCustomKeyEventHandler: vi.fn(),
   getSelection: vi.fn(() => ""),
   onData: vi.fn(() => ({ dispose: vi.fn() })),
+  onScroll: vi.fn(() => ({ dispose: vi.fn() })),
   write: vi.fn(),
   paste: vi.fn(),
   clear: vi.fn(),
   refresh: vi.fn(),
   focus: vi.fn(),
+  scrollToLine: vi.fn(),
   dispose: vi.fn(),
-  rows: 24,
 };
 
 const transport = {
@@ -69,8 +75,10 @@ import { TerminalView } from "@/components/terminal/TerminalView";
 
 describe("TerminalView focus behaviour (regression)", () => {
   beforeEach(() => {
+    bufferActive.viewportY = 42;
     term.focus.mockClear();
     term.refresh.mockClear();
+    term.scrollToLine.mockClear();
     transport.terminalResume.mockClear();
   });
 
@@ -80,7 +88,7 @@ describe("TerminalView focus behaviour (regression)", () => {
   // contradict commit 09e0a3e (Ctrl+J from composer).
   it("does not call term.focus() on document visibilitychange", async () => {
     await act(async () => {
-      render(<TerminalView ptyId="pty-1" visible={true} />);
+      render(<TerminalView ptyId="pty-1" visible={true} threadActive={true} />);
     });
     // Let the async dynamic imports in init() settle.
     await act(async () => {
@@ -107,7 +115,7 @@ describe("TerminalView focus behaviour (regression)", () => {
 
   it("resumes a newly-created PTY after the view mounts", async () => {
     await act(async () => {
-      render(<TerminalView ptyId="pty-1" visible={true} />);
+      render(<TerminalView ptyId="pty-1" visible={true} threadActive={true} />);
     });
     await act(async () => {
       await Promise.resolve();
@@ -117,9 +125,45 @@ describe("TerminalView focus behaviour (regression)", () => {
     expect(transport.terminalResume).toHaveBeenCalledWith("pty-1");
   });
 
+  it("restores viewport and does not focus when becoming visible again", async () => {
+    const { rerender } = render(<TerminalView ptyId="pty-1" visible={true} threadActive={true} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    term.focus.mockClear();
+    term.scrollToLine.mockClear();
+
+    await act(async () => {
+      rerender(<TerminalView ptyId="pty-1" visible={false} threadActive={false} />);
+    });
+
+    term.focus.mockClear();
+    term.scrollToLine.mockClear();
+
+    await act(async () => {
+      rerender(<TerminalView ptyId="pty-1" visible={true} threadActive={true} />);
+    });
+
+    await act(async () => {
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => resolve());
+          });
+        });
+      });
+    });
+
+    expect(term.scrollToLine).toHaveBeenCalledWith(42);
+    expect(term.focus).not.toHaveBeenCalled();
+  });
+
   it("does NOT resume when mounted hidden", async () => {
     await act(async () => {
-      render(<TerminalView ptyId="pty-1" visible={false} />);
+      render(<TerminalView ptyId="pty-1" visible={false} threadActive={true} />);
     });
     await act(async () => {
       await Promise.resolve();

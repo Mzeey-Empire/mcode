@@ -237,11 +237,15 @@ terminalService.setSender({
   },
   data: (ptyId, seq, bytes) => {
     broadcastTerminalData(ptyId, seq, bytes);
-    // The IPC socket adapter (ipc-push-server.ts) serializes via JSON.stringify,
-    // so a Uint8Array would arrive as {"0":72,"1":101,...} on the client. Converting
-    // to a plain number[] survives the JSON round-trip; the client reconstructs it
-    // with new Uint8Array(arr).
-    portPush.send("terminal.data", { ptyId, payload: Array.from(bytes), seq });
+    // The IPC socket adapter serializes via JSON.stringify. Base64 encoding
+    // produces ~33% overhead vs the raw bytes, much smaller than the
+    // number[] approach which creates one JSON number per byte (~3-4x).
+    portPush.send("terminal.data", {
+      ptyId,
+      payload: Buffer.from(bytes).toString("base64"),
+      encoding: "base64",
+      seq,
+    });
   },
 });
 

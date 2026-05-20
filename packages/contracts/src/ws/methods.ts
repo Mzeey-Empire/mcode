@@ -439,17 +439,21 @@ export const WS_METHODS = lazySchema(() => ({
   },
   "terminal.create": {
     params: z.object({ threadId: z.string() }),
-    result: z.string(),
+    result: z.object({ ptyId: z.string(), shell: z.string().max(64) }),
   },
   "terminal.write": {
-    params: z.object({ ptyId: z.string(), data: z.string() }),
+    params: z.object({
+      ptyId: z.string(),
+      /** Cap at 64 KB — well above any single keystroke burst or paste. */
+      data: z.string().max(65_536),
+    }),
     result: z.void(),
   },
   "terminal.resize": {
     params: z.object({
       ptyId: z.string(),
-      cols: z.number(),
-      rows: z.number(),
+      cols: z.number().int().min(1).max(500),
+      rows: z.number().int().min(1).max(500),
     }),
     result: z.void(),
   },
@@ -542,13 +546,11 @@ export const WS_METHODS = lazySchema(() => ({
   },
   "thread.getTasks": {
     params: z.object({ threadId: z.string() }),
-    // Note: `group` is intentionally absent from the wire format — the SDK's TodoWrite tool
-    // does not provide grouping metadata, so clients assign all tasks to a single "Tasks" group.
-    // If a future SDK version adds grouping, this schema and StoredTask will need to be extended.
     result: z
       .array(z.object({
         content: z.string(),
         status: z.enum(["pending", "in_progress", "completed", "cancelled"]),
+        group: z.string().optional(),
       }))
       .nullable(),
   },
