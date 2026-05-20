@@ -150,29 +150,22 @@ export function TerminalTabContent({ threadId }: TerminalTabContentProps) {
         onCancel={cancelKill}
       />
 
-      <div className="pointer-events-none absolute inset-0 flex overflow-hidden">
-        {hasTerminals && (
-          <div className="pointer-events-auto relative z-10 flex-shrink-0">
-            <TerminalList
-              threadId={threadId}
-              onClose={closeTerminal}
-              onAdd={createTerminal}
-              onDeleteAll={closeAllTerminals}
-            />
-          </div>
-        )}
-        {hasTerminals && <div className="min-w-0 flex-1" aria-hidden />}
-
-        {!hasTerminals && (
-          <div className="pointer-events-auto absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background text-muted-foreground">
-            <TerminalSquare className="h-10 w-10 opacity-40" />
-            <p className="text-sm">No terminals</p>
-            <Button variant="outline" size="sm" onClick={createTerminal}>
-              New terminal
-            </Button>
-          </div>
-        )}
-      </div>
+      {hasTerminals ? (
+        <TerminalList
+          threadId={threadId}
+          onClose={closeTerminal}
+          onAdd={createTerminal}
+          onDeleteAll={closeAllTerminals}
+        />
+      ) : (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background text-muted-foreground">
+          <TerminalSquare className="h-10 w-10 opacity-40" />
+          <p className="text-sm">No terminals</p>
+          <Button variant="outline" size="sm" onClick={createTerminal}>
+            New terminal
+          </Button>
+        </div>
+      )}
     </>
   );
 }

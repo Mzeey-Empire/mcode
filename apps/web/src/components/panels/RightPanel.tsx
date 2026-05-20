@@ -347,17 +347,17 @@ export function RightPanel() {
         )}
         <div
           className={cn(
-            "absolute inset-0 flex min-h-0 flex-col overflow-hidden",
+            "absolute inset-0 flex min-h-0 flex-row overflow-hidden",
             activeTab !== "terminal" && "pointer-events-none z-0 opacity-0",
             activeTab === "terminal" && "z-10",
           )}
           aria-hidden={activeTab !== "terminal"}
           inert={activeTab !== "terminal" ? true : undefined}
         >
-          <TerminalPoolSlot className="relative min-h-0 flex-1 overflow-hidden p-2" />
           {activeTab === "terminal" && (
             <TerminalTabContent threadId={activeThreadId} />
           )}
+          <TerminalPoolSlot className="relative min-h-0 min-w-0 flex-1 overflow-hidden p-2" />
         </div>
       </div>
       </div>
