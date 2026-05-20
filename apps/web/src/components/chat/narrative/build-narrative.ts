@@ -139,16 +139,21 @@ export function buildNarrativeItems(params: {
     return { items: [], counts: { steps: 0, thoughts: 0, subagents: 0 } };
   }
 
-  // Separate top-level from child tool calls.
+  // Separate top-level from child tool calls. A parent id that is null,
+  // undefined, or empty string must be treated identically: empty string
+  // never matches an Agent id and would silently drop the child from the
+  // tree (childrenMap[""] is built but never read, orphaning the child).
   const topLevel: ToolCall[] = [];
   const childrenMap = new Map<string, ToolCall[]>();
   for (const tc of toolCalls) {
-    if (tc.parentToolCallId == null) {
+    const parent = tc.parentToolCallId;
+    const hasParent = typeof parent === "string" && parent.length > 0;
+    if (!hasParent) {
       topLevel.push(tc);
     } else {
-      const siblings = childrenMap.get(tc.parentToolCallId) ?? [];
+      const siblings = childrenMap.get(parent) ?? [];
       siblings.push(tc);
-      childrenMap.set(tc.parentToolCallId, siblings);
+      childrenMap.set(parent, siblings);
     }
   }
 

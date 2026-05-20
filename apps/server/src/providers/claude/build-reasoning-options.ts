@@ -47,7 +47,7 @@ export function buildReasoningOptions(
   }
 
   // Ultrathink is a Mcode virtual tier; the SDK only accepts up through "max".
-  // The "Ultrathink:\n" prompt prefix is applied separately by the caller.
+  // "none" / "minimal" are OpenAI Codex presets; Claude path normalizes them to "low" above.
   const sdkEffort = normalized === "ultrathink" ? "max" : normalized;
 
   return {
