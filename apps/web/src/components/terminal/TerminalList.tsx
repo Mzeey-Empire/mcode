@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { TerminalSquare, X, Plus, Trash2, ChevronLeft } from "lucide-react";
+import { TerminalSquare, X, Plus, Trash2, ChevronsLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { useTerminalStore, type TerminalInstance } from "@/stores/terminalStore";
@@ -48,7 +48,7 @@ export const TerminalList = memo(function TerminalList({
                 />
               }
             >
-              <ChevronLeft className="size-3.5 rotate-180" />
+              <ChevronsLeft className="size-3.5 rotate-180" />
             </TooltipTrigger>
             <TooltipContent side="right" className="text-xs">
               Expand sidebar
@@ -103,7 +103,7 @@ export const TerminalList = memo(function TerminalList({
               />
             }
           >
-            <ChevronLeft className="size-3.5" />
+            <ChevronsLeft className="size-3.5" />
           </TooltipTrigger>
           <TooltipContent side="bottom" className="text-xs">
             Collapse
