@@ -20,6 +20,20 @@ const TRANSIENT_RE = new RegExp(
   "i",
 );
 
+/** Cursor cloud / GRPC-style stream resets surfaced through the Cursor CLI HTTP stack. */
+const UPSTREAM_CANCEL_RE =
+  /\[canceled\]|http\/2\s+stream\s+closed|cancell?ed[^\n]{0,120}stream|\berror\s+code\s+CANCEL\b|\(0x8\)|RST_STREAM/i;
+
+/**
+ * Returns true when the message resembles Cursor upstream closing an HTTP or gRPC stream.
+ * Pair with intent flags before deciding whether to show an error toast.
+ *
+ * @param message - Serialized error (`Error.message` or stderr snippet).
+ */
+export function looksLikeUpstreamStreamCancel(message: string): boolean {
+  return UPSTREAM_CANCEL_RE.test(message);
+}
+
 /**
  * Returns whether a Cursor CLI `prompt` rejection likely indicates a retryable flake.
  *
@@ -28,5 +42,5 @@ const TRANSIENT_RE = new RegExp(
  * @param message - Serialized error (`Error.message` or stderr snippet).
  */
 export function isLikelyTransientCursorPromptFailure(message: string): boolean {
-  return TRANSIENT_RE.test(message);
+  return TRANSIENT_RE.test(message) || looksLikeUpstreamStreamCancel(message);
 }

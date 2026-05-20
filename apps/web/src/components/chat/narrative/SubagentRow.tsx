@@ -1,6 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { ChevronRight, ChevronDown } from "lucide-react";
-import { StackedLayersIcon } from "./StackedLayersIcon";
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import {
   TOOL_ICONS,
@@ -9,7 +8,11 @@ import {
   buildToolSummaryText,
 } from "../tool-renderers/constants";
 import type { ToolCall, HookExecution } from "@/transport/types";
+import { cn } from "@/lib/utils";
 import { extractToolInputDetail } from "./tool-detail";
+import { buildDelegationTags } from "./subagent-delegation-tags";
+import { extractSubagentDescription } from "./extract-subagent-description";
+import { StackedLayersIcon, stackedLayersIconClassName } from "./StackedLayersIcon";
 
 interface SubagentRowProps {
   toolCall: ToolCall;
@@ -25,30 +28,110 @@ interface SubagentRowProps {
   depth?: number;
 }
 
-function extractDescription(toolCall: ToolCall): string {
-  const input = toolCall.toolInput;
-  if (typeof input.description === "string" && input.description.length > 0) return input.description;
-  if (typeof input.prompt === "string" && input.prompt.length > 0) {
-    return input.prompt.length > 60 ? input.prompt.slice(0, 60) + "…" : input.prompt;
-  }
-  return "Delegated task";
+interface DelegationTagsProps {
+  tags: readonly string[];
+}
+
+/** Compact tags for model and task kind on delegation rows. */
+function DelegationTags({ tags }: DelegationTagsProps) {
+  if (tags.length === 0) return null;
+  return (
+    <span className="flex items-center gap-1 shrink-0">
+      {tags.map((tag) => (
+        <span
+          key={tag}
+          className="font-mono text-[0.625rem] font-medium px-1 py-px rounded-sm bg-muted-foreground/12 text-muted-foreground/70"
+        >
+          {tag}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 const CHILD_CAP = 8;
 const MAX_DEPTH = 4;
 
 /**
- * Renders a subagent as a collapsible row in the narrative timeline.
- * Recursively renders Agent children as nested SubagentRows.
+ * Renders a subagent in the narrative timeline.
+ *
+ * Running rows use the same amber {@link StackedLayersIcon} treatment as
+ * {@link NarrativeIndicator}. Description and tags update when `cursor/task`
+ * metadata arrives.
  */
 export function SubagentRow({ toolCall, children, hooks, allToolCalls, depth = 0 }: SubagentRowProps) {
   const isRunning = !toolCall.isComplete;
   const isErrored = toolCall.isComplete && toolCall.isError;
+  const hasChildren = children.length > 0;
+  const description = extractSubagentDescription(toolCall);
+  const delegationTags = useMemo(() => buildDelegationTags(toolCall), [toolCall]);
+
+  if (!hasChildren) {
+    return (
+      <div
+        className="flex w-full items-center gap-1.5 px-2 py-1 text-[0.8125rem]"
+        data-testid="subagent-flat-row"
+      >
+        <StackedLayersIcon
+          animated={isRunning}
+          className={stackedLayersIconClassName(isRunning)}
+        />
+        <span
+          className={cn(
+            "truncate flex-1 min-w-0",
+            isRunning ? "text-foreground font-medium" : "text-foreground/80",
+          )}
+        >
+          {description}
+        </span>
+        <DelegationTags tags={delegationTags} />
+        {isErrored && (
+          <span className="font-mono text-[0.625rem] font-medium px-1 py-px rounded-sm bg-[var(--diff-remove)]/15 text-[var(--diff-remove)] shrink-0">
+            errored
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <ExpandableSubagentRow
+      toolCall={toolCall}
+      children={children}
+      hooks={hooks}
+      allToolCalls={allToolCalls}
+      depth={depth}
+      description={description}
+      delegationTags={delegationTags}
+      isRunning={isRunning}
+      isErrored={isErrored}
+    />
+  );
+}
+
+interface ExpandableSubagentRowProps extends SubagentRowProps {
+  description: string;
+  delegationTags: readonly string[];
+  isRunning: boolean;
+  isErrored: boolean;
+}
+
+/**
+ * Collapsible sub-agent row when nested tool calls exist (Claude SDK path).
+ */
+function ExpandableSubagentRow({
+  children,
+  hooks,
+  allToolCalls,
+  depth = 0,
+  description,
+  delegationTags,
+  isRunning,
+  isErrored,
+}: ExpandableSubagentRowProps) {
   const [open, setOpen] = useState(isRunning);
   const userToggledRef = useRef(false);
 
-  // Auto-collapse when the sub-agent finishes, unless the user manually
-  // toggled it open during the run. Manual interactions win.
   useEffect(() => {
     if (!isRunning && !userToggledRef.current) {
       setOpen(false);
@@ -57,18 +140,12 @@ export function SubagentRow({ toolCall, children, hooks, allToolCalls, depth = 0
 
   const [showAll, setShowAll] = useState(false);
 
-  const description = extractDescription(toolCall);
-
-  // Count direct children only (Agents count as one item, not as their grandchildren).
-  const metaText = !isRunning && children.length > 0
+  const metaText = !isRunning
     ? buildToolSummaryText(children)
-    : children.length > 0
-    ? `${children.length} call${children.length === 1 ? "" : "s"}`
-    : null;
+    : `${children.length} call${children.length === 1 ? "" : "s"}`;
 
   const lastIncompleteIdx = children.reduce<number>((acc, tc, idx) => (!tc.isComplete ? idx : acc), -1);
 
-  // Build a grandchildren map: for each Agent child, find its own children in allToolCalls.
   const grandchildrenMap = useMemo(() => {
     const map = new Map<string, ToolCall[]>();
     if (!allToolCalls) return map;
@@ -96,20 +173,23 @@ export function SubagentRow({ toolCall, children, hooks, allToolCalls, depth = 0
       >
         <StackedLayersIcon
           animated={isRunning}
-          className={`w-3.5 h-3.5 shrink-0 ${isRunning ? "text-primary/80" : "text-muted-foreground/60"}`}
+          className={stackedLayersIconClassName(isRunning)}
         />
 
-        <span className="text-foreground/80 truncate flex-1 min-w-0">{description}</span>
+        <span
+          className={cn(
+            "truncate flex-1 min-w-0",
+            isRunning ? "text-foreground font-medium" : "text-foreground/80",
+          )}
+        >
+          {description}
+        </span>
 
-        {metaText && (
-          <span className="font-mono text-[0.6875rem] text-muted-foreground/50 shrink-0">
-            {!isRunning ? `· ${metaText}` : metaText}
-          </span>
-        )}
+        <DelegationTags tags={delegationTags} />
 
-        {isRunning && (
-          <span className="size-1.5 shrink-0 rounded-full bg-primary animate-pulse" />
-        )}
+        <span className="font-mono text-[0.6875rem] text-muted-foreground/50 shrink-0">
+          {!isRunning ? `· ${metaText}` : metaText}
+        </span>
 
         {isErrored && (
           <span className="font-mono text-[0.625rem] font-medium px-1 py-px rounded-sm bg-[var(--diff-remove)]/15 text-[var(--diff-remove)] shrink-0">
@@ -123,21 +203,10 @@ export function SubagentRow({ toolCall, children, hooks, allToolCalls, depth = 0
       </button>
 
       <AnimatedCollapsible open={open}>
-        {/* Mini-timeline: a hairline rail emerges inside the expanded sub-agent
-            because the children are a nested group that the eye benefits from
-            tracking as one unit. The rail aligns with the parent's stacked-
-            layers icon (centred at ~x=15), so it reads as "these calls belong
-            to this sub-agent" rather than a generic indent. */}
-        <div className="relative pl-7 mt-0.5 pb-1">
-          <div
-            className="absolute left-[14px] top-1 bottom-2 w-px bg-border/50 pointer-events-none"
-            aria-hidden
-          />
-          <ul className="space-y-px max-h-64 overflow-y-auto">
+        <ul className="pl-7 mt-0.5 space-y-px pb-1 max-h-64 overflow-y-auto border-l border-muted-foreground/15 ml-3">
           {visibleChildren.map((tc, idx) => {
             const isActive = idx === lastIncompleteIdx;
 
-            // Nested Agent - recursively render as a SubagentRow
             if (tc.toolName === "Agent" && depth < MAX_DEPTH) {
               return (
                 <li key={tc.id} className="list-none">
@@ -167,8 +236,7 @@ export function SubagentRow({ toolCall, children, hooks, allToolCalls, depth = 0
               </li>
             );
           })}
-          </ul>
-        </div>
+        </ul>
         {children.length > CHILD_CAP && (
           <button
             type="button"

@@ -25,6 +25,7 @@
     "state:paths": "bun scripts/state-paths.mjs",
     "state:reset": "node scripts/state-reset.mjs",
     "db:info": "bun scripts/db-info.mjs",
+    "sync:cursor-models": "bun apps/server/scripts/sync-cursor-models-snapshot.ts",
     "verify": "node scripts/agent/verify-tests.mjs",
     "verify:e2e": "node scripts/agent/verify-e2e.mjs",
     "verify:all": "node scripts/agent/verify-all.mjs"
