@@ -156,7 +156,8 @@ describe("Settings-aware defaults", () => {
 
 describe("ReasoningLevelSchema", () => {
   it("accepts low, medium, high", () => {
-    expect(() => ReasoningLevelSchema.parse("low")).not.toThrow();
+    expect(() => ReasoningLevelSchema.parse("none")).not.toThrow();
+    expect(() => ReasoningLevelSchema.parse("minimal")).not.toThrow();
     expect(() => ReasoningLevelSchema.parse("medium")).not.toThrow();
     expect(() => ReasoningLevelSchema.parse("high")).not.toThrow();
   });

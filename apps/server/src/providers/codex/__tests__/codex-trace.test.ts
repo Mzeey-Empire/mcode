@@ -1,0 +1,60 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { AgentEventType } from "@mcode/contracts";
+import type { AgentEvent } from "@mcode/contracts";
+import {
+  isCodexTraceEnabled,
+  summarizeAgentEventsForTrace,
+  summarizeCodexNotificationParams,
+} from "../codex-trace.js";
+
+describe("codex-trace", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("isCodexTraceEnabled is false when unset", () => {
+    vi.stubEnv("MCODE_CODEX_TRACE", "");
+    expect(isCodexTraceEnabled()).toBe(false);
+  });
+
+  it("isCodexTraceEnabled accepts 1 true yes case-insensitive", () => {
+    vi.stubEnv("MCODE_CODEX_TRACE", "1");
+    expect(isCodexTraceEnabled()).toBe(true);
+    vi.stubEnv("MCODE_CODEX_TRACE", "TRUE");
+    expect(isCodexTraceEnabled()).toBe(true);
+  });
+
+  it("summarizeCodexNotificationParams extracts collab item fields", () => {
+    const s = summarizeCodexNotificationParams("item/completed", {
+      item: {
+        type: "collabAgentToolCall",
+        id: "item-1",
+        toolKind: "delegate",
+      },
+    });
+    expect(s).toEqual({
+      itemType: "collabAgentToolCall",
+      itemId: "item-1",
+      toolKind: "delegate",
+      functionName: undefined,
+    });
+  });
+
+  it("summarizeAgentEventsForTrace includes parentToolCallId when present", () => {
+    const toolUse: AgentEvent = {
+      type: AgentEventType.ToolUse,
+      threadId: "t1",
+      toolCallId: "c1",
+      toolName: "Agent",
+      toolInput: { a: 1 },
+      parentToolCallId: "parent-9",
+    };
+    const rows = summarizeAgentEventsForTrace([toolUse]);
+    expect(rows[0]).toMatchObject({
+      type: "toolUse",
+      toolName: "Agent",
+      toolCallId: "c1",
+      parentToolCallId: "parent-9",
+    });
+  });
+});
