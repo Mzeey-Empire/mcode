@@ -11,7 +11,7 @@ function mkAgent(partial: Partial<ToolCall>): ToolCall {
     isError: false,
     isComplete: false,
     startedAt: 0,
-    parentToolCallId: null,
+    parentToolCallId: undefined,
     ...partial,
   };
 }
@@ -31,14 +31,15 @@ describe("buildDelegationTags", () => {
     expect(tags).toContain("Composer");
   });
 
-  it("appends duration from tool result output when complete", () => {
+  it("does not include duration tags", () => {
     const tags = buildDelegationTags(
       mkAgent({
         isComplete: true,
-        output: "Glob files\nCompleted in 8.3s\nModel: composer-2.5-fast",
-        toolInput: { model: "composer-2.5-fast" },
+        output: "Glob files",
+        toolInput: { model: "composer-2.5-fast", durationMs: 8300 },
       }),
     );
-    expect(tags).toContain("8.3s");
+    expect(tags).toEqual(["Composer"]);
+    expect(tags).not.toContain("8.3s");
   });
 });

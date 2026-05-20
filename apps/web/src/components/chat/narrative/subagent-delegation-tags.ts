@@ -18,7 +18,7 @@ function formatSubagentTypeLabel(subagentType: unknown): string | undefined {
 }
 
 /**
- * Builds short delegation tags for a sub-agent row (model, task kind, duration).
+ * Builds short delegation tags for a sub-agent row (task kind and model).
  *
  * @param toolCall - Agent tool call with `cursor/task` metadata in `toolInput`.
  */
@@ -31,11 +31,6 @@ export function buildDelegationTags(toolCall: ToolCall): string[] {
 
   if (typeof input.model === "string" && input.model.length > 0) {
     tags.push(formatModelLabel(input.model));
-  }
-
-  if (toolCall.isComplete && toolCall.output) {
-    const durationMatch = toolCall.output.match(/Completed in ([\d.]+s)/);
-    if (durationMatch) tags.push(durationMatch[1]);
   }
 
   return tags;

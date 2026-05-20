@@ -1,0 +1,49 @@
+import { describe, expect, it } from "vitest";
+import { extractSubagentDescription } from "../extract-subagent-description";
+import type { ToolCall } from "@/transport/types";
+
+function mkAgent(partial: Partial<ToolCall>): ToolCall {
+  return {
+    id: "a1",
+    toolName: "Agent",
+    toolInput: {},
+    output: null,
+    isError: false,
+    isComplete: false,
+    ...partial,
+  };
+}
+
+describe("extractSubagentDescription", () => {
+  it("uses cursor/task description when present", () => {
+    expect(
+      extractSubagentDescription(
+        mkAgent({
+          toolInput: { description: "Glob cursor provider files" },
+        }),
+      ),
+    ).toBe("Glob cursor provider files");
+  });
+
+  it("falls back to prompt when description is the generic Task title", () => {
+    const prompt = "Read apps/server/src/providers/cursor/cursor-acp-task.ts in full.";
+    expect(
+      extractSubagentDescription(
+        mkAgent({
+          toolInput: { description: "Subagent task", prompt },
+        }),
+      ),
+    ).toBe(prompt);
+  });
+
+  it("shows a running placeholder while incomplete and metadata is generic", () => {
+    expect(
+      extractSubagentDescription(
+        mkAgent({
+          isComplete: false,
+          toolInput: { description: "Subagent task" },
+        }),
+      ),
+    ).toBe("Running subagent");
+  });
+});
