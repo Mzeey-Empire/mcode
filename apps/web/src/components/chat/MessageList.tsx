@@ -26,6 +26,7 @@ import { NarrativeFlow } from "./narrative";
 import { PersistedNarrative } from "./narrative/PersistedNarrative";
 import { PersistedTurnFooter } from "./narrative/PersistedTurnFooter";
 import { StreamingResponseRow } from "./narrative/StreamingResponseRow";
+import { NarrativeIndicator } from "./narrative/NarrativeIndicator";
 import { PersistedLateHooks } from "./PersistedLateHooks";
 import type { ThoughtSegment } from "./narrative";
 
@@ -141,6 +142,15 @@ const VirtualItemRenderer = memo(function VirtualItemRenderer({
       return <PersistedTurnFooter messageId={item.messageId} />;
     case "streaming-response":
       return <StreamingResponseRow text={item.text} />;
+    case "narrative-indicator":
+      return (
+        <NarrativeIndicator
+          stepCount={item.stepCount}
+          subagentCount={item.subagentCount}
+          activeToolCalls={item.activeToolCalls}
+          startTime={item.startTime}
+        />
+      );
   }
 }, (prev, next) =>
   prev.item.key === next.item.key

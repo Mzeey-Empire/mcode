@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo } from "react";
 import type { ToolCall, HookExecution } from "@/transport/types";
 import type { ThoughtSegment, NarrativeItem } from "./types";
 import { buildNarrativeItems } from "./build-narrative";
@@ -8,8 +8,6 @@ import { HookRow } from "./HookRow";
 import { SubagentRow } from "./SubagentRow";
 import { ActiveToolRow } from "./ActiveToolRow";
 import { DeltaBlock } from "./DeltaBlock";
-import { NarrativeIndicator } from "./NarrativeIndicator";
-import { TurnFooter } from "./TurnFooter";
 
 /** Props for the NarrativeFlow container component. */
 export interface NarrativeFlowProps {
@@ -132,10 +130,9 @@ export function NarrativeFlow({
   thoughtSegments,
   streamingText,
   isAgentRunning,
-  startTime,
   committedAssistantBody,
 }: NarrativeFlowProps) {
-  const { items, counts } = useMemo(
+  const { items } = useMemo(
     () =>
       buildNarrativeItems({
         toolCalls,
@@ -153,27 +150,6 @@ export function NarrativeFlow({
       isAgentRunning,
       committedAssistantBody,
     ],
-  );
-
-  // stepCount: top-level tool calls (no parentToolCallId) + thought segments.
-  const stepCount = useMemo(() => {
-    const topLevelCount = toolCalls.filter((tc) => tc.parentToolCallId == null).length;
-    return topLevelCount + thoughtSegments.length;
-  }, [toolCalls, thoughtSegments]);
-
-  // subagentCount: incomplete Agent tool calls.
-  const subagentCount = useMemo(
-    () =>
-      toolCalls.filter(
-        (tc) => tc.toolName === "Agent" && !tc.isComplete && tc.parentToolCallId == null,
-      ).length,
-    [toolCalls],
-  );
-
-  // Active tool calls passed to the indicator for phase label derivation.
-  const activeToolCalls = useMemo(
-    () => toolCalls.filter((tc) => !tc.isComplete && tc.parentToolCallId == null),
-    [toolCalls],
   );
 
   /**
@@ -212,38 +188,11 @@ export function NarrativeFlow({
     return bestId;
   }, [items]);
 
-  /**
-   * Wall-clock moment when this turn finished, snapshotted once via an
-   * effect so the `TurnFooter` shows a stable duration. Reset to `null`
-   * if the agent starts again (e.g. follow-up turn) so the next end
-   * timestamp is captured fresh.
-   */
-  const [completedAt, setCompletedAt] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (isAgentRunning) {
-      setCompletedAt(null);
-    } else if (completedAt == null) {
-      setCompletedAt(Date.now());
-    }
-  }, [isAgentRunning, completedAt]);
-
-  /**
-   * Total elapsed time for this turn — `Date.now()` at end minus `startTime`.
-   * Returns `null` while running, before the snapshot is taken, or when
-   * `startTime` is unknown.
-   */
-  const completedDurationMs = useMemo<number | null>(() => {
-    if (isAgentRunning || startTime == null || completedAt == null) return null;
-    return Math.max(0, completedAt - startTime);
-  }, [isAgentRunning, startTime, completedAt]);
-
   // Split items: timeline rows (tools, sub-agents, hooks, in-line text) all
   // render in chronological order. The delta (final streaming response) lives
   // outside the timeline so it can transition seamlessly into the persisted
   // MessageBubble on turnComplete.
   const timelineItems = items.filter((it) => it.type !== "delta");
-  const deltaItem = items.find((it) => it.type === "delta") as Extract<NarrativeItem, { type: "delta" }> | undefined;
 
   return (
     <div className="relative">
@@ -267,15 +216,11 @@ export function NarrativeFlow({
         </div>
       )}
 
-      {/* While running: live indicator bar. */}
-      {isAgentRunning && (
-        <NarrativeIndicator
-          stepCount={stepCount}
-          subagentCount={subagentCount}
-          activeToolCalls={activeToolCalls}
-          startTime={startTime}
-        />
-      )}
+      {/* The live "X steps · N subagents · phase…" indicator is rendered as
+          its own virtual-item slot (`narrative-indicator`) BELOW the streaming
+          response in MessageList. Keeping it out of this container means the
+          writing animation reads as the primary surface and the progress meta
+          sits underneath it instead of above it. */}
 
       {/* The in-flight response text lives in its own virtual-item slot
           (`streaming-response`) rendered as a sibling AFTER this narrative-flow
@@ -286,14 +231,13 @@ export function NarrativeFlow({
           the items array for compatibility with `counts` and tests but are
           intentionally not rendered here. */}
 
-      {/* Turn footer renders LAST — after the response body — so the step
-          summary closes the turn instead of separating its actions from its
-          answer. Hidden while the agent is still running or while a delta is
-          still streaming (the latter means the turn has not yet transitioned
-          to a completed state). */}
-      {!isAgentRunning && timelineItems.length > 0 && !deltaItem && (
-        <TurnFooter counts={counts} durationMs={completedDurationMs} />
-      )}
+      {/* The turn footer is owned exclusively by the `persisted-turn-footer`
+          virtual-item slot, which is positioned AFTER the `MessageBubble` so
+          the summary closes the turn rather than separating its actions from
+          its answer. Rendering a TurnFooter inside this container would place
+          it ABOVE the message body — which is exactly the bug we are
+          fixing — because this container itself sits before the bubble in
+          the virtual-list order. */}
     </div>
   );
 }
