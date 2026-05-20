@@ -81,6 +81,7 @@ All variables are optional — defaults work for local development.
 | `SNAPSHOT_MAX_AGE_DAYS` | `30` | Days before turn snapshot cleanup |
 | `SKIP_ELECTRON_REBUILD` | (unset) | Set to `1` to skip Electron ABI rebuild in postinstall |
 | `NODE_ENV` | `development` | Controls data dir suffix and log verbosity |
+| `MCODE_CODEX_TRACE` | (unset) | Set to `1` to log each Codex JSON-RPC notification and mapped `AgentEvent` summaries (for debugging sub-agent and narrative issues) |
 
 Copy `.env.example` to `.env` and uncomment to override any variable.
 
