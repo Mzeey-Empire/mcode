@@ -89,8 +89,26 @@ export const TerminalList = memo(function TerminalList({
 
   return (
     <div className="flex w-[148px] flex-shrink-0 flex-col border-r border-border">
-      {/* Header: actions + collapse toggle */}
-      <div className="flex h-[34px] items-center justify-end gap-0.5 border-b border-border px-1.5">
+      {/* Header: collapse toggle + actions, left-aligned */}
+      <div className="flex h-[34px] items-center gap-0.5 border-b border-border px-1.5">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={toggleSplit}
+                className="text-muted-foreground"
+                aria-label="Collapse sidebar"
+              />
+            }
+          >
+            <ChevronLeft className="size-3.5" />
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">
+            Collapse
+          </TooltipContent>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger
             render={
@@ -125,24 +143,6 @@ export const TerminalList = memo(function TerminalList({
           </TooltipTrigger>
           <TooltipContent side="bottom" className="text-xs">
             Kill all
-          </TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-xs"
-                onClick={toggleSplit}
-                className="text-muted-foreground"
-                aria-label="Collapse sidebar"
-              />
-            }
-          >
-            <ChevronLeft className="size-3.5" />
-          </TooltipTrigger>
-          <TooltipContent side="bottom" className="text-xs">
-            Collapse
           </TooltipContent>
         </Tooltip>
       </div>
