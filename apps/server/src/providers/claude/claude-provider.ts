@@ -1037,7 +1037,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
 
               // Anthropic message-level stop_reason is the authoritative
               // discriminator between thoughts and final response text.
-              // {end_turn, stop_sequence, max_tokens, refusal} → final response
+              // {end_turn, stop_sequence, max_tokens} → final response
               // {tool_use, pause_turn, null, anything else} → preamble/thought
               // Only emit a boundary when this message actually carried text;
               // pure tool-call messages have no streamed deltas to reclassify.
@@ -1046,8 +1046,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                 const isFinalResponse =
                   stopReason === "end_turn" ||
                   stopReason === "stop_sequence" ||
-                  stopReason === "max_tokens" ||
-                  stopReason === "refusal";
+                  stopReason === "max_tokens";
                 this.emit("event", {
                   type: AgentEventType.AssistantMessageBoundary,
                   threadId,
