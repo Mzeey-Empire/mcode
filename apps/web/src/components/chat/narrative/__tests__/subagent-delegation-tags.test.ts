@@ -28,7 +28,7 @@ describe("buildDelegationTags", () => {
       }),
     );
     expect(tags).toContain("Task");
-    expect(tags).toContain("Composer");
+    expect(tags).toContain("Composer 2.5 Fast");
   });
 
   it("skips whitespace-only model labels", () => {
@@ -44,7 +44,7 @@ describe("buildDelegationTags", () => {
         toolInput: { model: "composer-2.5-fast", durationMs: 8300 },
       }),
     );
-    expect(tags).toEqual(["Composer"]);
+    expect(tags).toEqual(["Composer 2.5 Fast"]);
     expect(tags).not.toContain("8.3s");
   });
 });

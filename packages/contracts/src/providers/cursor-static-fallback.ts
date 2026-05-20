@@ -7,4 +7,5 @@ import type { ProviderModelInfo } from "./models.js";
 export const CURSOR_STATIC_MODEL_FALLBACK: readonly ProviderModelInfo[] = [
   { id: "auto", name: "Auto", group: "Cursor" },
   { id: "composer-2-fast", name: "Composer 2 Fast", group: "Cursor" },
+  { id: "composer-2.5-fast", name: "Composer 2.5 Fast", group: "Cursor" },
 ];

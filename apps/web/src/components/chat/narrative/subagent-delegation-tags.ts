@@ -1,4 +1,4 @@
-import { formatModelLabel } from "@/lib/format-model-label";
+import { resolveModelDisplayLabel } from "@/lib/format-model-label";
 import type { ToolCall } from "@/transport/types";
 
 /**
@@ -30,7 +30,7 @@ export function buildDelegationTags(toolCall: ToolCall): string[] {
   if (typeLabel) tags.push(typeLabel);
 
   if (typeof input.model === "string" && input.model.trim().length > 0) {
-    tags.push(formatModelLabel(input.model.trim()));
+    tags.push(resolveModelDisplayLabel(input.model));
   }
 
   return tags;
