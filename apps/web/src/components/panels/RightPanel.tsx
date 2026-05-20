@@ -16,6 +16,7 @@ import { TaskPanelHeader } from "@/components/tasks/TaskPanelHeader";
 import { DiffPanel } from "@/components/diff";
 import { PreviewPanel } from "@/components/panels/PreviewPanel";
 import { TerminalTabContent } from "@/components/terminal/TerminalTabContent";
+import { TerminalPoolSlot } from "@/components/terminal/TerminalPoolSlotContext";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";
 
@@ -351,8 +352,12 @@ export function RightPanel() {
             activeTab === "terminal" && "z-10",
           )}
           aria-hidden={activeTab !== "terminal"}
+          inert={activeTab !== "terminal" ? true : undefined}
         >
-          <TerminalTabContent threadId={activeThreadId} />
+          <TerminalPoolSlot className="relative min-h-0 flex-1 overflow-hidden p-2" />
+          {activeTab === "terminal" && (
+            <TerminalTabContent threadId={activeThreadId} />
+          )}
         </div>
       </div>
       </div>

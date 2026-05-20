@@ -11,7 +11,13 @@ const releaseByPtyId = new Map<string, () => void>();
  */
 export function claimWebglSlot(ptyId: string, release: () => void): void {
   for (const [id, releaseFn] of releaseByPtyId) {
-    if (id !== ptyId) releaseFn();
+    if (id !== ptyId) {
+      try {
+        releaseFn();
+      } catch (err) {
+        console.error("[terminal] WebGL release callback failed", id, err);
+      }
+    }
   }
   releaseByPtyId.clear();
   releaseByPtyId.set(ptyId, release);

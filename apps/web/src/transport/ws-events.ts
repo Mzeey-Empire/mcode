@@ -35,8 +35,10 @@ function approxBase64DecodedBytes(encoded: string): number {
  *
  * Push channels handled:
  * - `agent.event` -- agent stream events forwarded to threadStore
- * - `terminal.data` -- PTY output forwarded to xterm instances via custom DOM event
- * - `terminal.exit` -- PTY exit forwarded via custom DOM event
+ * - `terminal.data` -- PTY output forwarded to xterm via ptyDataRegistry
+ * - `terminal.exit` -- PTY exit forwarded via ptyDataRegistry
+ * - Reconnect-gap banners are emitted from ws-transport after `terminal.reattach` RPC
+ *   (there is no `terminal.reconnectGap` push channel on the server)
  * - `thread.status` -- thread status changes reflected in threadStore
  * - `thread.prLinked` -- PR detected for a thread, updates pr_number/pr_status
  * - `thread.checksUpdated` -- CI check status polled for a thread's PR, updates checksById

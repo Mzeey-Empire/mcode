@@ -48,7 +48,7 @@ function captureViewport(term: Terminal): TerminalViewportSnapshot {
   };
 }
 
-if (import.meta.env.DEV) {
+if (import.meta.env.DEV && typeof window !== "undefined") {
   const w = window as TerminalScrollHarnessWindow;
   w.__mcodeTerminalScrollHarness = {
     getViewport(ptyId: string) {

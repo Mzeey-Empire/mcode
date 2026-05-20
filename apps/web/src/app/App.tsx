@@ -412,7 +412,7 @@ export function App() {
           </div>
         </div>
       </div>
-      {!settingsOpen && !showLanding && <TerminalPoolHost />}
+      <TerminalPoolHost />
       <Suspense fallback={null}>
         <LazyCommandPalette />
       </Suspense>

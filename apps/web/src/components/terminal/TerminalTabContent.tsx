@@ -7,7 +7,6 @@ import { getTransport } from "@/transport";
 import { Button } from "@/components/ui/button";
 import { TerminalList } from "./TerminalList";
 import { TerminalKillConfirmDialog } from "./TerminalKillConfirmDialog";
-import { TerminalPoolSlot } from "./TerminalPoolSlotContext";
 
 const EMPTY_TERMINALS: readonly TerminalInstance[] = [];
 
@@ -25,7 +24,8 @@ interface TerminalTabContentProps {
 
 /**
  * Terminal chrome in the right panel (list, empty state, kill dialog).
- * xterm instances are rendered by {@link TerminalPoolHost} into {@link TerminalPoolSlot}.
+ * xterm instances are rendered by {@link TerminalPoolHost} into the right-panel
+ * {@link TerminalPoolSlot} (mounted by the right panel terminal tab layer).
  */
 export function TerminalTabContent({ threadId }: TerminalTabContentProps) {
   const terminals = useTerminalStore(
@@ -150,20 +150,21 @@ export function TerminalTabContent({ threadId }: TerminalTabContentProps) {
         onCancel={cancelKill}
       />
 
-      <div className="relative flex flex-1 overflow-hidden">
+      <div className="pointer-events-none absolute inset-0 flex overflow-hidden">
         {hasTerminals && (
-          <TerminalList
-            threadId={threadId}
-            onClose={closeTerminal}
-            onAdd={createTerminal}
-            onDeleteAll={closeAllTerminals}
-          />
+          <div className="pointer-events-auto relative z-10 flex-shrink-0">
+            <TerminalList
+              threadId={threadId}
+              onClose={closeTerminal}
+              onAdd={createTerminal}
+              onDeleteAll={closeAllTerminals}
+            />
+          </div>
         )}
-
-        <TerminalPoolSlot className="relative min-h-0 flex-1 overflow-hidden p-2" />
+        {hasTerminals && <div className="min-w-0 flex-1" aria-hidden />}
 
         {!hasTerminals && (
-          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background text-muted-foreground">
+          <div className="pointer-events-auto absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background text-muted-foreground">
             <TerminalSquare className="h-10 w-10 opacity-40" />
             <p className="text-sm">No terminals</p>
             <Button variant="outline" size="sm" onClick={createTerminal}>
