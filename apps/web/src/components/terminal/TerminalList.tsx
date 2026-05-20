@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { TerminalSquare, X, Plus, Trash2, ChevronsLeft } from "lucide-react";
+import { Terminal, X, Plus, Trash2, ChevronsLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { useTerminalStore, type TerminalInstance } from "@/stores/terminalStore";
@@ -77,7 +77,7 @@ export const TerminalList = memo(function TerminalList({
                     />
                   }
                 >
-                  <TerminalSquare className="size-3.5" />
+                  <Terminal className="size-3.5" />
                 </TooltipTrigger>
                 <TooltipContent side="right" className="text-xs">
                   {terminal.label}
@@ -168,7 +168,7 @@ export const TerminalList = memo(function TerminalList({
                 onClick={() => setActiveTerminal(threadId, terminal.id)}
                 aria-current={isActive ? "true" : undefined}
               >
-                <TerminalSquare
+                <Terminal
                   className={cn(
                     "size-3.5 shrink-0",
                     isActive ? "opacity-70" : "opacity-40",

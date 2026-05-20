@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useToastStore } from "@/stores/toastStore";
-import { TerminalSquare } from "lucide-react";
+import { Terminal } from "lucide-react";
 import { useTerminalStore, type TerminalInstance } from "@/stores/terminalStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { getTransport } from "@/transport";
@@ -159,7 +159,7 @@ export function TerminalTabContent({ threadId }: TerminalTabContentProps) {
         />
       ) : (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background text-muted-foreground">
-          <TerminalSquare className="h-10 w-10 opacity-40" />
+          <Terminal className="h-10 w-10 opacity-40" />
           <p className="text-sm">No terminals</p>
           <Button variant="outline" size="sm" onClick={createTerminal}>
             New terminal
