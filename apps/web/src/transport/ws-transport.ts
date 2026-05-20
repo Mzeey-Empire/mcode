@@ -627,7 +627,7 @@ export function createWsTransport(
     diagnoseSkills: (cwd?) => rpc<SkillDiagnostics>("skill.diagnose", { cwd }),
 
     // Terminal (PTY)
-    terminalCreate: (threadId) => rpc<string>("terminal.create", { threadId }),
+    terminalCreate: (threadId) => rpc<{ ptyId: string; shell: string }>("terminal.create", { threadId }),
     terminalWrite: (ptyId, data) => rpc<void>("terminal.write", { ptyId, data }),
     terminalResize: (ptyId, cols, rows) =>
       rpc<void>("terminal.resize", { ptyId, cols, rows }),

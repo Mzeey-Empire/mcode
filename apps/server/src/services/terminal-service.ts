@@ -108,7 +108,7 @@ export class TerminalService {
    * Resolves the working directory from the thread's workspace and worktree path.
    * @returns The unique PTY session ID.
    */
-  create(threadId: string): string {
+  create(threadId: string): { ptyId: string; shell: string } {
     const thread = this.threadRepo.findById(threadId);
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
 
@@ -214,7 +214,8 @@ export class TerminalService {
       [threadId, updatedSet],
     ]);
 
-    return id;
+    const shellBasename2 = shell.split(/[\\/]/).pop()?.replace(/\.exe$/i, "") ?? shell;
+    return { ptyId: id, shell: shellBasename2 };
   }
 
   /**

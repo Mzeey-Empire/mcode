@@ -134,7 +134,7 @@ export const mockTransport: McodeTransport = {
   checkStatus: vi.fn().mockResolvedValue({ aggregate: "no_checks", runs: [], fetchedAt: 0 }),
   listSkills: vi.fn().mockResolvedValue([] as SkillInfo[]),
   diagnoseSkills: vi.fn().mockResolvedValue({ scanned: [], errors: [], totalSkills: 0, totalCommands: 0 }),
-  terminalCreate: vi.fn().mockResolvedValue("pty-mock-1"),
+  terminalCreate: vi.fn().mockResolvedValue({ ptyId: "pty-mock-1", shell: "pwsh" }),
   terminalWrite: vi.fn().mockResolvedValue(undefined),
   terminalResize: vi.fn().mockResolvedValue(undefined),
   terminalKill: vi.fn().mockResolvedValue(undefined),

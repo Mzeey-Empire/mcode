@@ -1,19 +1,30 @@
 import { memo } from "react";
-import { TerminalSquare, X } from "lucide-react";
+import { TerminalSquare, X, Plus, Trash2, ChevronLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { useTerminalStore, type TerminalInstance } from "@/stores/terminalStore";
 
 const EMPTY_TERMINALS: readonly TerminalInstance[] = [];
 
-/** Props for TerminalList: the owning thread and a handler to close a single terminal. */
+/** Props for the terminal sidebar. */
 interface TerminalListProps {
   readonly threadId: string;
   readonly onClose: (ptyId: string) => void;
+  readonly onAdd: () => void;
+  readonly onDeleteAll: () => void;
 }
 
-// Stable action ref — avoids a reactive subscription for a function that never changes.
-const { setActiveTerminal } = useTerminalStore.getState();
+// Stable action refs.
+const { setActiveTerminal, toggleSplit } = useTerminalStore.getState();
 
-export const TerminalList = memo(function TerminalList({ threadId, onClose }: TerminalListProps) {
+/** Terminal sidebar with shell list, header actions, and collapse toggle. */
+export const TerminalList = memo(function TerminalList({
+  threadId,
+  onClose,
+  onAdd,
+  onDeleteAll,
+}: TerminalListProps) {
+  const collapsed = !useTerminalStore((s) => s.splitMode);
   const terminals = useTerminalStore(
     (s) => s.terminals[threadId] ?? EMPTY_TERMINALS,
   );
@@ -21,43 +32,165 @@ export const TerminalList = memo(function TerminalList({ threadId, onClose }: Te
     (s) => s.terminalPanelByThread[threadId]?.activeTerminalId ?? null,
   );
 
-  return (
-    <div className="w-48 border-r border-border bg-background">
-      {terminals.map((terminal) => {
-        const isActive = terminal.id === activeTerminalId;
+  if (collapsed) {
+    return (
+      <div className="flex w-[38px] flex-shrink-0 flex-col border-r border-border">
+        <div className="flex h-[34px] items-center justify-center border-b border-border">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={toggleSplit}
+                  className="text-muted-foreground"
+                  aria-label="Expand sidebar"
+                />
+              }
+            >
+              <ChevronLeft className="size-3.5 rotate-180" />
+            </TooltipTrigger>
+            <TooltipContent side="right" className="text-xs">
+              Expand sidebar
+            </TooltipContent>
+          </Tooltip>
+        </div>
+        <div className="flex flex-1 flex-col items-center gap-0.5 overflow-y-auto pt-1">
+          {terminals.map((terminal) => {
+            const isActive = terminal.id === activeTerminalId;
+            return (
+              <Tooltip key={terminal.id}>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type="button"
+                      onClick={() => setActiveTerminal(threadId, terminal.id)}
+                      className={`flex size-7 items-center justify-center rounded-md transition-colors ${
+                        isActive
+                          ? "bg-muted text-foreground"
+                          : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                      }`}
+                      aria-label={terminal.label}
+                    />
+                  }
+                >
+                  <TerminalSquare className="size-3.5" />
+                </TooltipTrigger>
+                <TooltipContent side="right" className="text-xs">
+                  {terminal.label}
+                </TooltipContent>
+              </Tooltip>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
 
-        return (
-          <div
-            key={terminal.id}
-            className="group flex cursor-pointer items-center justify-between px-3 py-1.5 hover:bg-muted"
-            onClick={() => setActiveTerminal(threadId, terminal.id)}
+  return (
+    <div className="flex w-[148px] flex-shrink-0 flex-col border-r border-border">
+      {/* Header: label + actions + collapse toggle */}
+      <div className="flex h-[34px] items-center gap-0.5 border-b border-border px-2.5">
+        <span className="mr-auto text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          Shells
+        </span>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={onAdd}
+                className="text-muted-foreground hover:text-foreground"
+                aria-label="New terminal"
+              />
+            }
           >
-            <div className="flex items-center gap-2">
-              <TerminalSquare className="size-3.5 text-muted-foreground" />
-              <span
-                className={`text-xs ${
-                  isActive
-                    ? "font-bold text-foreground"
-                    : "text-muted-foreground"
-                }`}
-              >
+            <Plus className="size-3" />
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">
+            New terminal
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={onDeleteAll}
+                className="text-muted-foreground hover:text-foreground"
+                aria-label="Kill all terminals"
+              />
+            }
+          >
+            <Trash2 className="size-3" />
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">
+            Kill all
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={toggleSplit}
+                className="text-muted-foreground"
+                aria-label="Collapse sidebar"
+              />
+            }
+          >
+            <ChevronLeft className="size-3" />
+          </TooltipTrigger>
+          <TooltipContent side="bottom" className="text-xs">
+            Collapse
+          </TooltipContent>
+        </Tooltip>
+      </div>
+
+      {/* Shell list */}
+      <div className="flex-1 overflow-y-auto pt-0.5">
+        {terminals.map((terminal) => {
+          const isActive = terminal.id === activeTerminalId;
+          return (
+            <div
+              key={terminal.id}
+              role="button"
+              tabIndex={0}
+              className={`group flex cursor-pointer items-center gap-2 px-2.5 py-1.5 transition-colors ${
+                isActive
+                  ? "bg-muted/50 text-foreground"
+                  : "text-muted-foreground hover:bg-muted/30 hover:text-foreground"
+              }`}
+              onClick={() => setActiveTerminal(threadId, terminal.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setActiveTerminal(threadId, terminal.id);
+                }
+              }}
+            >
+              <TerminalSquare className={`size-3.5 flex-shrink-0 ${isActive ? "opacity-70" : "opacity-40"}`} />
+              <span className={`flex-1 truncate text-xs ${isActive ? "font-semibold" : ""}`}>
                 {terminal.label}
               </span>
+              <button
+                type="button"
+                className="flex size-4 flex-shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-60"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClose(terminal.id);
+                }}
+                aria-label={`Close ${terminal.label}`}
+              >
+                <X className="size-2.5" />
+              </button>
             </div>
-            <button
-              type="button"
-              className="invisible text-muted-foreground hover:text-foreground group-hover:visible"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClose(terminal.id);
-              }}
-              aria-label={`Close ${terminal.label}`}
-            >
-              <X className="size-3" />
-            </button>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 });

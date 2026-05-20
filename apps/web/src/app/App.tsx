@@ -213,7 +213,7 @@ export function App() {
                 const transport = getTransport();
                 transport
                   .terminalCreate(tid)
-                  .then((ptyId) => {
+                  .then(({ ptyId, shell }) => {
                     terminalCreationInFlight.delete(tid);
                     const rightPanel = useDiffStore.getState().getRightPanel(tid);
                     // Panel was closed while creation was in flight — dispose the orphaned PTY.
@@ -223,7 +223,7 @@ export function App() {
                     }
                     const currentTerminals = useTerminalStore.getState().terminals[tid];
                     if (!currentTerminals || currentTerminals.length === 0) {
-                      useTerminalStore.getState().addTerminal(tid, ptyId);
+                      useTerminalStore.getState().addTerminal(tid, ptyId, shell);
                     } else {
                       transport.terminalKill(ptyId).catch(() => {});
                     }

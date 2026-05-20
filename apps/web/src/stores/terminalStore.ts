@@ -36,7 +36,7 @@ interface TerminalState {
   hideTerminalPanel: (threadId: string) => void;
   setTerminalPanelHeight: (threadId: string, height: number) => void;
   setActiveTerminal: (threadId: string, ptyId: string | null) => void;
-  addTerminal: (threadId: string, ptyId: string) => void;
+  addTerminal: (threadId: string, ptyId: string, shell?: string) => void;
   removeTerminal: (ptyId: string) => void;
   removeAllTerminals: (threadId: string) => void;
   clearThread: (threadId: string) => void;
@@ -139,10 +139,10 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       };
     }),
 
-  addTerminal: (threadId, ptyId) =>
+  addTerminal: (threadId, ptyId, shell) =>
     set((state) => {
       const existing = state.terminals[threadId] ?? [];
-      const label = generateLabel(existing);
+      const label = shell ?? generateLabel(existing);
       const instance: TerminalInstance = { id: ptyId, threadId, label };
       const currentPanel = state.terminalPanelByThread[threadId] ?? TERMINAL_PANEL_DEFAULTS;
       return {

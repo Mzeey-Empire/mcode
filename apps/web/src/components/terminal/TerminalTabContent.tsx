@@ -4,7 +4,6 @@ import { useTerminalStore, TERMINAL_PANEL_DEFAULTS, type TerminalInstance } from
 import { useSettingsStore } from "@/stores/settingsStore";
 import { getTransport } from "@/transport";
 import { Button } from "@/components/ui/button";
-import { TerminalToolbar } from "./TerminalToolbar";
 import { TerminalList } from "./TerminalList";
 import { TerminalView } from "./TerminalView";
 import { TerminalKillConfirmDialog } from "./TerminalKillConfirmDialog";
@@ -79,7 +78,6 @@ export function TerminalTabContent({ threadId, visible }: TerminalTabContentProp
   // array on every unrelated store update (e.g. panel height changes).
   const pool = useTerminalStore(selectPool);
 
-  const splitMode = useTerminalStore((s) => s.splitMode);
   const confirmOnKill = useSettingsStore((s) => s.settings.terminal.confirmOnKill);
 
   const [pendingKill, setPendingKill] = useState<(() => void) | null>(null);
@@ -103,8 +101,8 @@ export function TerminalTabContent({ threadId, visible }: TerminalTabContentProp
   /** Creates a new terminal for the thread. */
   const createTerminal = useCallback(async () => {
     const transport = getTransport();
-    const ptyId = await transport.terminalCreate(threadId);
-    storeAddTerminal(threadId, ptyId);
+    const { ptyId, shell } = await transport.terminalCreate(threadId);
+    storeAddTerminal(threadId, ptyId, shell);
   }, [threadId]);
 
   /** Immediate kill without guard. */
@@ -193,21 +191,14 @@ export function TerminalTabContent({ threadId, visible }: TerminalTabContentProp
         onCancel={cancelKill}
       />
 
-      {/* Empty state: overlaid on top of the pool so the pool never
-          unmounts when the current thread has no terminals. Other threads'
-          xterm instances stay alive underneath. */}
-      {hasTerminals && (
-        <div className="flex justify-end px-2 py-1 border-b border-border/40">
-          <TerminalToolbar
+      <div className="relative flex flex-1 overflow-hidden">
+        {hasTerminals && (
+          <TerminalList
+            threadId={threadId}
+            onClose={closeTerminal}
             onAdd={createTerminal}
             onDeleteAll={closeAllTerminals}
           />
-        </div>
-      )}
-
-      <div className="relative flex flex-1 overflow-hidden">
-        {hasTerminals && splitMode && (
-          <TerminalList threadId={threadId} onClose={closeTerminal} />
         )}
 
         {/* Persistent terminal pool: ALL terminals from ALL threads

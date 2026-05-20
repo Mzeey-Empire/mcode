@@ -271,8 +271,8 @@ export interface McodeTransport {
   diagnoseSkills(cwd?: string): Promise<SkillDiagnostics>;
 
   // Terminal (PTY)
-  /** Create a new PTY attached to a thread's working directory. Returns the pty ID. */
-  terminalCreate(threadId: string): Promise<string>;
+  /** Create a new PTY attached to a thread's working directory. Returns the pty ID and shell name. */
+  terminalCreate(threadId: string): Promise<{ ptyId: string; shell: string }>;
   /** Write data (keystrokes) to a PTY. */
   terminalWrite(ptyId: string, data: string): Promise<void>;
   /** Resize a PTY to the given dimensions. */

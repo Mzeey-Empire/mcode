@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // keeps the mock observable from the test body without tripping hoisting.
 const terminalKillByThread = vi.fn().mockResolvedValue(undefined);
 const terminalKill = vi.fn().mockResolvedValue(undefined);
-const terminalCreate = vi.fn().mockResolvedValue("pty-new");
+const terminalCreate = vi.fn().mockResolvedValue({ ptyId: "pty-new", shell: "pwsh" });
 
 vi.mock("@/transport", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/transport")>();

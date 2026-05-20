@@ -107,8 +107,8 @@ export function TerminalPanel() {
   const createTerminal = useCallback(async () => {
     if (!activeThreadId) return;
     const transport = getTransport();
-    const ptyId = await transport.terminalCreate(activeThreadId);
-    storeAddTerminal(activeThreadId, ptyId);
+    const { ptyId, shell } = await transport.terminalCreate(activeThreadId);
+    storeAddTerminal(activeThreadId, ptyId, shell);
   }, [activeThreadId]);
 
   /** Performs the immediate kill of a single terminal without any guard. */
@@ -264,7 +264,12 @@ export function TerminalPanel() {
             </div>
 
             {splitMode && (
-              <TerminalList threadId={activeThreadId} onClose={closeTerminal} />
+              <TerminalList
+                threadId={activeThreadId}
+                onClose={closeTerminal}
+                onAdd={createTerminal}
+                onDeleteAll={closeAllTerminals}
+              />
             )}
           </div>
         )}
