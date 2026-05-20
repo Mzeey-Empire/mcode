@@ -208,6 +208,43 @@ describe("buildVirtualItems (combined)", () => {
     expect(indicatorIdx).toBeGreaterThan(streamingResponseIdx);
   });
 
+  it("indicator stepCount counts top-level tools only, not thought segments", () => {
+    const toolCalls: ToolCall[] = [
+      makeToolCall({ id: "tc-1", toolName: "Read" }),
+      makeToolCall({ id: "tc-2", toolName: "Bash" }),
+    ];
+    const thoughtSegments: ThoughtSegment[] = [
+      { text: "preamble one", startedAt: 1, endedAt: 2 },
+      { text: "preamble two", startedAt: 3, endedAt: 4 },
+    ];
+    const items = buildVolatileItems(
+      toolCalls,
+      true,
+      1000,
+      undefined,
+      undefined,
+      undefined,
+      thoughtSegments,
+    );
+    const indicator = items.find((i) => i.type === "narrative-indicator") as
+      | (ChatVirtualItem & { type: "narrative-indicator" })
+      | undefined;
+    expect(indicator?.stepCount).toBe(2);
+  });
+
+  it("indicator subagentCount counts all dispatched Agent calls, not only in-flight", () => {
+    const toolCalls: ToolCall[] = [
+      makeToolCall({ id: "a1", toolName: "Agent", isComplete: true }),
+      makeToolCall({ id: "a2", toolName: "Agent", isComplete: false }),
+      makeToolCall({ id: "read-1", toolName: "Read", parentToolCallId: "a1" }),
+    ];
+    const items = buildVolatileItems(toolCalls, true, 1000, undefined);
+    const indicator = items.find((i) => i.type === "narrative-indicator") as
+      | (ChatVirtualItem & { type: "narrative-indicator" })
+      | undefined;
+    expect(indicator?.subagentCount).toBe(2);
+  });
+
   it("does not emit a narrative-indicator when the agent is not running", () => {
     const messages = [makeMessage({ id: "msg-1" })];
     const result = buildAll(messages, [], undefined, false, undefined);

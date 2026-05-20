@@ -21,7 +21,7 @@ function derivePhaseLabel(toolCalls: readonly ToolCall[]): string {
 interface NarrativeIndicatorProps {
   /** Total number of steps executed so far in this agent turn. */
   stepCount: number;
-  /** Number of subagent calls dispatched. Only rendered when > 0. */
+  /** Number of subagent calls dispatched at the top level. Only rendered when > 0. */
   subagentCount: number;
   /** Currently active (possibly incomplete) tool calls. */
   activeToolCalls: readonly ToolCall[];

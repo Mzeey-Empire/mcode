@@ -43,7 +43,7 @@ describe("threadStore assistantMessageBoundary", () => {
     // response, not a thought.
     useThreadStore.getState().handleAgentEvent(tid, {
       method: "session.assistantMessageBoundary",
-      params: { isFinalResponse: true },
+      isFinalResponse: true,
     });
 
     expect(useThreadStore.getState().thoughtSegmentsByThread[tid] ?? []).toEqual([]);
@@ -67,7 +67,7 @@ describe("threadStore assistantMessageBoundary", () => {
 
     useThreadStore.getState().handleAgentEvent(tid, {
       method: "session.assistantMessageBoundary",
-      params: { isFinalResponse: false },
+      isFinalResponse: false,
     });
 
     const segs = useThreadStore.getState().thoughtSegmentsByThread[tid] ?? [];
@@ -80,7 +80,7 @@ describe("threadStore assistantMessageBoundary", () => {
     const tid = "thread-empty";
     useThreadStore.getState().handleAgentEvent(tid, {
       method: "session.assistantMessageBoundary",
-      params: { isFinalResponse: true },
+      isFinalResponse: true,
     });
     expect(useThreadStore.getState().thoughtSegmentsByThread[tid]).toBeUndefined();
   });
@@ -102,7 +102,7 @@ describe("threadStore assistantMessageBoundary", () => {
 
     useThreadStore.getState().handleAgentEvent(tid, {
       method: "session.assistantMessageBoundary",
-      params: { isFinalResponse: true },
+      isFinalResponse: true,
     });
 
     const segs = useThreadStore.getState().thoughtSegmentsByThread[tid] ?? [];

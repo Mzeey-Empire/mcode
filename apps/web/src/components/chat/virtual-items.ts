@@ -238,13 +238,10 @@ export function buildVolatileItems(
   // Only emitted while the agent is running.
   if (isAgentRunning) {
     const topLevelTools = toolCalls.filter((tc) => tc.parentToolCallId == null);
-    const stepCount = topLevelTools.length + (thoughtSegments?.length ?? 0);
-    const subagentCount = toolCalls.filter(
-      (tc) =>
-        tc.toolName === "Agent" &&
-        !tc.isComplete &&
-        tc.parentToolCallId == null,
-    ).length;
+    // Match `buildNarrativeItems` / `NarrativeCounts.steps`: top-level tool
+    // calls only. Thought segments are tracked separately in the footer.
+    const stepCount = topLevelTools.length;
+    const subagentCount = topLevelTools.filter((tc) => tc.toolName === "Agent").length;
     const activeToolCalls = toolCalls.filter(
       (tc) => !tc.isComplete && tc.parentToolCallId == null,
     );
