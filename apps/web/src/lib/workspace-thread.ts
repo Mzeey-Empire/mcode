@@ -102,6 +102,7 @@ export function buildPlaceholderWorkspaceThread(params: {
     permission_mode: null,
     context_window_mode: null,
     thinking: null,
+    codex_fast_mode: null,
     copilot_agent: null,
     parent_thread_id: params.parentThreadId ?? null,
     forked_from_message_id: params.forkedFromMessageId ?? null,

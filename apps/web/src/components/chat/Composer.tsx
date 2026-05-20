@@ -116,12 +116,16 @@ function resolveOutboundDisplayContent(
 const ATTACHMENT_INPUT_ACCEPT = attachmentAcceptAttribute();
 
 /** ReasoningLevel values as a Set for O(1) membership checks in the Codex level filter. */
-const VALID_REASONING_LEVELS_SET = new Set<string>(["low", "medium", "high", "xhigh", "max", "ultrathink"]);
+const VALID_REASONING_LEVELS_SET = new Set<string>([
+  "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultrathink",
+]);
 
 /** Display label for a reasoning level value. */
 function reasoningLabel(level: string): string {
   if (level === "xhigh") return "X-High";
   if (level === "ultrathink") return "Ultrathink";
+  if (level === "none") return "None";
+  if (level === "minimal") return "Minimal";
   return level.charAt(0).toUpperCase() + level.slice(1);
 }
 
@@ -471,6 +475,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   // Per-thread overrides; null/undefined means inherit from settings default.
   const [contextWindow, setContextWindow] = useState<ContextWindowMode | null>(null);
   const [thinking, setThinking] = useState<boolean | null>(null);
+  /** Null inherits global `provider.codex.fastMode`; explicit boolean persists per thread. */
+  const [codexFastMode, setCodexFastMode] = useState<boolean | null>(null);
   const [access, setAccess] = useState<AccessMode>(PERMISSION_MODES.FULL);
   const [showReasoningPicker, setShowReasoningPicker] = useState(false);
   const [composerMode, setComposerModeLocal] = useState<ComposerMode>("direct");
@@ -511,6 +517,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     reasoning: ReasoningLevel;
     contextWindow?: ContextWindowMode;
     thinking?: boolean;
+    codexFastMode?: boolean | null;
   }>({ input, attachments, modelId, provider, reasoning });
   /** Tracks whether the user toggled mode/access before settings finished loading. */
   const agentSettingsTouchedRef = useRef(false);
@@ -530,6 +537,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       reasoning,
       contextWindow: contextWindow ?? undefined,
       thinking: thinking ?? undefined,
+      codexFastMode,
     };
   });
 
@@ -548,6 +556,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const settingsDefaultPermission = useSettingsStore((s) => s.settings.agent.defaults.permission);
   const settingsDefaultContextWindow = useSettingsStore((s) => s.settings.model.defaults.contextWindow);
   const settingsDefaultThinking = useSettingsStore((s) => s.settings.model.defaults.thinking);
+  const settingsGlobalCodexFast = useSettingsStore((s) => s.settings.provider.codex.fastMode === true);
 
   useEffect(() => {
     if (!settingsLoaded) return;
@@ -666,6 +675,11 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         setCopilotAgent(threadSettings.copilotAgent ?? null);
         setContextWindow(threadSettings.contextWindow ?? null);
         setThinking(threadSettings.thinking ?? null);
+        setCodexFastMode(
+          saved.codexFastMode !== undefined
+            ? saved.codexFastMode
+            : (threadSettings.codexFastMode ?? null),
+        );
       } else {
         // No saved draft: use thread's persisted settings as-is
         setInput("");
@@ -700,6 +714,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         setCopilotAgent(nextThread?.copilot_agent ?? null);
         setContextWindow((nextThread?.context_window_mode as ContextWindowMode | null | undefined) ?? null);
         setThinking(nextThread?.thinking ?? null);
+        setCodexFastMode(nextThread?.codex_fast_mode ?? null);
 
         // Reset Lexical editor
         if (editorRef.current) {
@@ -725,6 +740,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       setCopilotAgent(null);
       setContextWindow(null);
       setThinking(null);
+      setCodexFastMode(null);
       if (editorRef.current) {
         editorRef.current.update(() => {
           const root = $getRoot();
@@ -1150,11 +1166,13 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         copilotAgent: provider === "copilot" ? (copilotAgent ?? undefined) : undefined,
         contextWindow: contextWindow ?? undefined,
         thinking: thinking ?? undefined,
+        codexFastMode:
+          provider === "codex" ? (codexFastMode === null ? undefined : codexFastMode) : undefined,
         replyToMessageId: replyContext?.messageId,
         quotedText: replyContext?.quotedText,
       };
     },
-    [modelId, access, reasoning, provider, copilotAgent, contextWindow, thinking, replyContext],
+    [modelId, access, reasoning, provider, copilotAgent, contextWindow, thinking, codexFastMode, replyContext],
   );
 
   /**
@@ -1236,6 +1254,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       setCopilotAgent(popped.copilotAgent ?? null);
       setContextWindow(popped.contextWindow ?? null);
       setThinking(popped.thinking ?? null);
+      setCodexFastMode(popped.codexFastMode !== undefined ? popped.codexFastMode : null);
 
       if (popped.browserCaptureSpillPaths?.length) {
         void releaseBrowserCaptureSpills(popped.browserCaptureSpillPaths);
@@ -1258,6 +1277,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       setCopilotAgent,
       setContextWindow,
       setThinking,
+      setCodexFastMode,
     ],
   );
 
@@ -1284,6 +1304,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         copilotAgent: original.copilotAgent,
         contextWindow: original.contextWindow,
         thinking: original.thinking,
+        codexFastMode: original.codexFastMode,
         replyToMessageId: original.replyToMessageId,
         quotedText: original.quotedText,
         browserCaptureSpillPaths: original.browserCaptureSpillPaths,
@@ -1687,6 +1708,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         copilotAgent: provider === "copilot" ? (copilotAgent ?? undefined) : undefined,
         contextWindow: contextWindow ?? undefined,
         thinking: thinking ?? undefined,
+        codexFastMode:
+          provider === "codex" ? (codexFastMode === null ? undefined : codexFastMode) : undefined,
         replyToMessageId: replyContext?.messageId,
         quotedText: replyContext?.quotedText,
         browserCaptureSpillPaths:
@@ -1799,6 +1822,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
           provider === "copilot" ? (copilotAgent ?? undefined) : undefined,
           contextWindow ?? undefined,
           thinking ?? undefined,
+          provider === "codex" && codexFastMode !== null ? codexFastMode : undefined,
           outboundDisplay,
         );
     } else if (branchFromMessageId && threadId) {
@@ -1836,6 +1860,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         copilotAgent: provider === "copilot" ? (copilotAgent ?? undefined) : undefined,
         contextWindow: contextWindow ?? undefined,
         thinking: thinking ?? undefined,
+        codexFastMode: provider === "codex" && codexFastMode !== null ? codexFastMode : undefined,
       });
       onBranchModeExit?.();
     } else if (threadId) {
@@ -1851,6 +1876,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         provider === "copilot" ? (copilotAgent ?? undefined) : undefined,
         contextWindow ?? undefined,
         thinking ?? undefined,
+        provider === "codex" && codexFastMode !== null ? codexFastMode : undefined,
         replyContext?.messageId,
         replyContext?.quotedText,
       );
@@ -1870,7 +1896,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     }
 
     editorRef.current?.focus();
-  }, [input, attachments, isAgentRunning, isNewThread, newThreadMode, newThreadBranch, workspaceId, threadId, sendMessage, modelId, provider, reasoning, mode, access, copilotAgent, contextWindow, thinking, namingMode, customBranchName, selectedWorktree, injectFileContent, collectAndClearAttachments, clearDraftFromStore, isThreadScaffold, branchFromMessageId, branchExecMode, branchTargetBranch, branchNamingMode, branchCustomName, branchWorktreePath, activeThread, branchThread, branchAutoPreview, onBranchModeExit, replyContext, clearReply, editingFromQueue]);
+  }, [input, attachments, isAgentRunning, isNewThread, newThreadMode, newThreadBranch, workspaceId, threadId, sendMessage, modelId, provider, reasoning, mode, access, copilotAgent, contextWindow, thinking, codexFastMode, namingMode, customBranchName, selectedWorktree, injectFileContent, collectAndClearAttachments, clearDraftFromStore, isThreadScaffold, branchFromMessageId, branchExecMode, branchTargetBranch, branchNamingMode, branchCustomName, branchWorktreePath, activeThread, branchThread, branchAutoPreview, onBranchModeExit, replyContext, clearReply, editingFromQueue]);
 
   const handleEditorChange = useCallback((text: string) => {
     setInput(text);
@@ -1937,7 +1963,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     // Gate on provider to prevent Copilot models sharing Codex IDs from taking Codex branch.
     const codexLvls = provider === "codex" ? getCodexReasoningLevels(modelId) : null;
     if (codexLvls) {
-      // Filter out Codex-only levels (e.g. "minimal") that have no ReasoningLevel equivalent.
+      // Drop registry entries that are not valid shared ReasoningLevel values (defensive).
       return codexLvls.filter((l) => VALID_REASONING_LEVELS_SET.has(l)) as ReasoningLevel[];
     }
     if (!supportsEffortParameter(modelId)) return [];
@@ -1957,10 +1983,10 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const has1MCapability = supports1MContextWindow(modelId);
   const hasThinkingCapability = supportsThinkingToggle(modelId);
   useEffect(() => {
-    if (reasoningLevels.length === 0 && !has1MCapability && !hasThinkingCapability) {
+    if (reasoningLevels.length === 0 && !has1MCapability && !hasThinkingCapability && provider !== "codex") {
       setShowReasoningPicker(false);
     }
-  }, [reasoningLevels.length, has1MCapability, hasThinkingCapability]);
+  }, [reasoningLevels.length, has1MCapability, hasThinkingCapability, provider]);
 
   return (
     <div className="relative px-8 py-4">
@@ -2006,6 +2032,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
                 next.copilotAgent,
                 next.contextWindow,
                 next.thinking,
+                next.codexFastMode,
                 next.replyToMessageId,
                 next.quotedText,
               );
@@ -2036,6 +2063,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
                 popped.copilotAgent,
                 popped.contextWindow,
                 popped.thinking,
+                popped.codexFastMode,
                 popped.replyToMessageId,
                 popped.quotedText,
               );
@@ -2230,38 +2258,46 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
             const hasReasoning = reasoningLevels.length > 0;
             const has1M = provider === "claude" && supports1MContextWindow(modelId);
             const hasThinking = provider === "claude" && supportsThinkingToggle(modelId);
-            if (!hasReasoning && !has1M && !hasThinking) return null;
+            const hasCodexFast = provider === "codex";
+            if (!hasReasoning && !has1M && !hasThinking && !hasCodexFast) return null;
 
             const ctxMode: ContextWindowMode = contextWindow ?? settingsDefaultContextWindow ?? "200k";
             const thinkingOn: boolean = thinking ?? settingsDefaultThinking ?? false;
+            const effectiveCodexFast: boolean =
+              codexFastMode === null ? settingsGlobalCodexFast : codexFastMode;
+            const codexTierLabel =
+              codexFastMode === null
+                ? "Default"
+                : codexFastMode
+                  ? "Fast"
+                  : "Standard";
 
-            // Trigger label: reasoning level when present; falls back to a
-            // bare "Thinking" or the active context mode for models that only
-            // expose those knobs. Active state (1M / Thinking on) is conveyed
-            // through a trailing chip rather than rewriting the label, so the
-            // trigger width stays stable as users toggle.
             const triggerLabel = hasReasoning
               ? reasoningLabel(reasoning)
               : hasThinking
                 ? "Thinking"
-                : ctxMode === "1m" ? "1M" : "200K";
+                : hasCodexFast
+                  ? codexTierLabel
+                  : ctxMode === "1m" ? "1M" : "200K";
 
-            // Show a trailing chip for any active "extension" of the base
-            // model behaviour: 1M context (when reasoning is also visible),
-            // or thinking-on (when thinking is the only knob). When context
-            // is the only knob, the mode is already in the trigger label, so
-            // no chip is needed.
-            const activeChipLabel = hasReasoning && has1M && ctxMode === "1m"
-              ? "1M"
-              : !hasReasoning && hasThinking && thinkingOn
-                ? "ON"
-                : null;
+            const activeChipLabel =
+              hasReasoning && has1M && ctxMode === "1m"
+                ? "1M"
+                : hasReasoning && hasCodexFast && effectiveCodexFast
+                  ? "FAST"
+                  : !hasReasoning && hasThinking && thinkingOn
+                    ? "ON"
+                    : hasCodexFast && codexFastMode === null && effectiveCodexFast
+                      ? "FAST"
+                      : null;
 
             const tooltipLabel = hasReasoning
-              ? has1M || hasThinking ? "Reasoning, context & thinking" : "Reasoning level"
+              ? has1M || hasThinking || hasCodexFast ? "Reasoning & model options" : "Reasoning level"
               : hasThinking
                 ? "Thinking"
-                : "Context window";
+                : hasCodexFast
+                  ? "Codex throughput"
+                  : "Context window";
 
             const sectionHeaderClass = "px-3 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60 select-none";
             const itemClass = (active: boolean) => cn(
@@ -2362,6 +2398,34 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
                           >
                             <span>{label}</span>
                             {thinkingOn === value && <Check size={10} className="shrink-0 text-foreground" />}
+                          </button>
+                        ))}
+                      </>
+                    )}
+
+                    {hasCodexFast && (
+                      <>
+                        {(hasReasoning || has1M || hasThinking) && <div className="my-1 h-px bg-border/60" />}
+                        <div className={sectionHeaderClass}>Codex throughput</div>
+                        {(
+                          [
+                            { value: null as boolean | null, label: "Default (from settings)" },
+                            { value: false, label: "Standard" },
+                            { value: true, label: "Fast" },
+                          ] as const
+                        ).map(({ value, label }) => (
+                          <button
+                            key={String(value)}
+                            onClick={() => {
+                              setCodexFastMode(value);
+                              if (threadId && !branchFromMessageId) {
+                                void setThreadSettings(threadId, { codexFastMode: value });
+                              }
+                            }}
+                            className={itemClass(codexFastMode === value)}
+                          >
+                            <span>{label}</span>
+                            {codexFastMode === value && <Check size={10} className="shrink-0 text-foreground" />}
                           </button>
                         ))}
                       </>

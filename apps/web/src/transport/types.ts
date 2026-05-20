@@ -160,6 +160,7 @@ export interface McodeTransport {
     copilotAgent?: string,
     contextWindow?: ContextWindowMode,
     thinking?: boolean,
+    codexFastMode?: boolean,
     replyToMessageId?: string,
     quotedText?: string,
   ): Promise<void>;
@@ -180,6 +181,7 @@ export interface McodeTransport {
     copilotAgent?: string,
     contextWindow?: ContextWindowMode,
     thinking?: boolean,
+    codexFastMode?: boolean,
     displayContent?: string,
   ): Promise<CreateAndSendResult>;
   stopAgent(threadId: string): Promise<void>;
@@ -219,6 +221,7 @@ export interface McodeTransport {
       copilotAgent?: string | null;
       contextWindow?: ContextWindowMode | null;
       thinking?: boolean | null;
+      codexFastMode?: boolean | null;
     },
   ): Promise<boolean>;
   /** Clear the "completed" badge for a thread. Transitions completed -> paused in the DB. */

@@ -54,6 +54,7 @@ const REASONING_OPTIONS_BASE = [
 
 /** Codex reasoning effort labels mapped from SDK level names. */
 const CODEX_REASONING_LABELS: Record<string, string> = {
+  none: "None",
   minimal: "Minimal",
   low: "Low",
   medium: "Medium",
@@ -117,6 +118,9 @@ export function ModelSection() {
     (s) => s.settings.model.defaults.contextWindow,
   );
   const thinking = useSettingsStore((s) => s.settings.model.defaults.thinking);
+  const codexFastMode = useSettingsStore(
+    (s) => s.settings.provider.codex?.fastMode ?? false,
+  );
   const utilityProvider = useSettingsStore((s) => s.settings.model.utility.provider);
   const utilityModelId = useSettingsStore((s) => s.settings.model.utility.id);
   const diffSummaryEnabled = useSettingsStore((s) => s.settings.diffSummary.enabled);
@@ -461,6 +465,21 @@ export function ModelSection() {
             value={reasoning}
             onChange={(v) =>
               update({ model: { defaults: { reasoning: v as ReasoningLevel } } })
+            }
+          />
+        </SettingRow>
+      )}
+
+      {provider === "codex" && (
+        <SettingRow
+          label="Fast mode"
+          configKey="provider.codex.fastMode"
+          hint="Sends OpenAI fast service tier on Codex turns when your CLI and account support it (often lower latency; billing follows OpenAI rules)."
+        >
+          <Switch
+            checked={codexFastMode}
+            onCheckedChange={(v) =>
+              void update({ provider: { codex: { fastMode: v } } })
             }
           />
         </SettingRow>
