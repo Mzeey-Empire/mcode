@@ -23,6 +23,10 @@ import {
 import { normalizeMcodeCursorToolInput } from "./cursor-tool-input-normalize.js";
 import type { CursorStreamAccumulator } from "./cursor-stream-event-mapper.js";
 import {
+  cursorTaskCompletionToAgentEvents,
+  isCursorTaskAcpTool,
+} from "./cursor-acp-task.js";
+import {
   extractCursorParentToolCallId,
   resolveCursorSubagentToolName,
 } from "./cursor-subagent-detection.js";
@@ -33,6 +37,7 @@ const TOOL_NAME_BY_ACP_KIND: Record<string, string> = {
   edit: "Edit",
   write: "Write",
   command: "Bash",
+  execute: "Bash",
   search: "Grep",
   subagent: "Agent",
   delegate: "Agent",
@@ -73,6 +78,12 @@ export interface CursorAcpTurnState {
   accumulator: CursorStreamAccumulator;
   /** Tool call IDs whose data arrives via ext methods, not session updates. */
   suppressedToolCallIds: Set<string>;
+  /** Task/subagent tool_call ids awaiting `cursor/task` + completion (see cursor-acp-task.ts). */
+  pendingTaskToolCallIds: Set<string>;
+  /** Task ids that completed on ACP before `cursor/task` metadata arrived. */
+  taskCompletedAwaitingMeta: Set<string>;
+  /** Cached `cursor/task` metadata keyed by toolCallId until tool_call_update completes. */
+  taskMetaByCallId: Map<string, import("./cursor-acp-task.js").CursorTaskMeta>;
   /** Tracks the ACP tool name (kind/title) per tool call ID for enriching updates. */
   toolNameByCallId: Map<string, string>;
 }
@@ -89,6 +100,9 @@ export function createCursorAcpTurnState(): CursorAcpTurnState {
       hasFiredToolThisTurn: false,
     },
     suppressedToolCallIds: new Set(),
+    pendingTaskToolCallIds: new Set(),
+    taskCompletedAwaitingMeta: new Set(),
+    taskMetaByCallId: new Map(),
     toolNameByCallId: new Map(),
   };
 }
@@ -313,11 +327,13 @@ function mapAcpToolCallStarted(
       ? (update.rawInput as Record<string, unknown>)
       : undefined;
 
-  // ACP `_toolName` tools (e.g. updateTodos) carry no args in rawInput;
-  // data arrives via ext methods. Suppress these lifecycle markers.
+  // ACP `_toolName` tools carry no args on `tool_call`; data arrives via ext methods.
   const acpToolName = rawInputRecord?._toolName;
-  if (typeof acpToolName === "string") {
+  if (typeof acpToolName === "string" || isCursorTaskAcpTool(rawInputRecord, update.title)) {
     state.suppressedToolCallIds.add(update.toolCallId);
+    if (acpToolName === "task" || isCursorTaskAcpTool(rawInputRecord, update.title)) {
+      state.pendingTaskToolCallIds.add(update.toolCallId);
+    }
     return [];
   }
 
@@ -411,8 +427,22 @@ function mapAcpToolCallUpdated(
   const parentToolCallId = extractCursorParentToolCallId(update as unknown as Record<string, unknown>);
   // Suppress lifecycle-only tool calls (handled by ext methods)
   if (state.suppressedToolCallIds.has(update.toolCallId)) {
+    const isTerminal = update.status === "completed" || update.status === "failed";
+    if (isTerminal && state.pendingTaskToolCallIds.has(update.toolCallId)) {
+      if (state.taskMetaByCallId.has(update.toolCallId)) {
+        return cursorTaskCompletionToAgentEvents(
+          threadId,
+          update.toolCallId,
+          state,
+          update.status === "failed",
+        );
+      }
+      // `cursor/task` often arrives after the completed tool_call_update.
+      state.taskCompletedAwaitingMeta.add(update.toolCallId);
+      return [];
+    }
     acc.toolStartTimes.delete(update.toolCallId);
-    if (update.status === "completed" || update.status === "failed") {
+    if (isTerminal) {
       state.suppressedToolCallIds.delete(update.toolCallId);
       acc.pendingToolCalls.delete(update.toolCallId);
     }

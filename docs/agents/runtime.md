@@ -120,6 +120,14 @@ Upstream references:
 - [Cursor CLI ACP docs](https://cursor.com/docs/cli/acp)
 - [Agent Client Protocol tool calls](https://agentclientprotocol.com/protocol/tool-calls)
 
+Capture live ACP envelopes for mapper work:
+
+```sh
+bun apps/server/scripts/capture-cursor-acp.ts --suite
+```
+
+Artifacts land in `<repo>/.mcode-local/cursor-acp-capture/` (`*-raw.jsonl`, `*-mapped.jsonl`, `*-summary.txt`).
+
 ---
 
 ## Server Discovery

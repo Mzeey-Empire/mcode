@@ -80,6 +80,7 @@ import {
   summarizeCursorSessionNotification,
   summarizeEmittedAgentEventsForTrace,
 } from "./cursor-acp-session-trace.js";
+import { cursorTaskExtToAgentEvents } from "./cursor-acp-task.js";
 
 const CURSOR_STDERR_TAIL_MAX = 48;
 const EVICTION_INTERVAL_MS = 60 * 1000;
@@ -494,6 +495,21 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
         }
         if (method === "cursor/create_plan") {
           return { outcome: { outcome: "accepted" } };
+        }
+        if (method === "cursor/task" && entry.activeTurnState) {
+          const record =
+            params !== null && typeof params === "object" && !Array.isArray(params)
+              ? (params as Record<string, unknown>)
+              : {};
+          const events = cursorTaskExtToAgentEvents(
+            entry.threadId,
+            record,
+            entry.activeTurnState,
+          );
+          for (const ev of events) {
+            this.emit("event", ev);
+          }
+          return {};
         }
         // cursor/update_todos arrives as a request (not notification) in the
         // ACP SDK dispatch. Handle it here so the task panel stays in sync.
