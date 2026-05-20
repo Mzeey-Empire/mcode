@@ -1942,8 +1942,31 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     if (method === "session.toolUse") {
       const toolCallId = (params.toolCallId as string) || "";
       const existingCalls = get().toolCallsByThread[threadId] ?? [];
-      if (toolCallId && existingCalls.some((tc) => tc.id === toolCallId)) {
-        return;
+      const toolName = (params.toolName as string) || "unknown";
+      const incomingInput = (params.toolInput as Record<string, unknown>) || {};
+      if (toolCallId) {
+        const existing = existingCalls.find((tc) => tc.id === toolCallId);
+        if (existing) {
+          // Cursor Task: provisional ToolUse on tool_call, enriched ToolUse on cursor/task.
+          if (
+            !existing.isComplete &&
+            existing.toolName === "Agent" &&
+            toolName === "Agent"
+          ) {
+            set((state) => {
+              const calls = state.toolCallsByThread[threadId] ?? [];
+              const updated = calls.map((tc) =>
+                tc.id === toolCallId
+                  ? { ...tc, toolInput: { ...tc.toolInput, ...incomingInput } }
+                  : tc,
+              );
+              return {
+                toolCallsByThread: { ...state.toolCallsByThread, [threadId]: updated },
+              };
+            });
+          }
+          return;
+        }
       }
 
       const parentToolCallId = params.parentToolCallId as string | undefined;
@@ -1953,8 +1976,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       if (!parentToolCallId) {
         markPriorToolCallsComplete();
       }
-      const toolName = (params.toolName as string) || "unknown";
-
       // Intercept TodoWrite calls to populate the task panel.
       // Sub-agent calls are grouped by their parent Agent's description so
       // multiple sub-agents each get their own collapsible section.
@@ -1982,7 +2003,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       const toolCall: ToolCall = {
         id: toolCallId || crypto.randomUUID(),
         toolName,
-        toolInput: (params.toolInput as Record<string, unknown>) || {},
+        toolInput: incomingInput,
         output: null,
         isError: false,
         isComplete: false,
@@ -2030,14 +2051,28 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         const hasActiveChildren = (id: string) =>
           calls.some((c) => c.parentToolCallId === id && !c.isComplete);
         let matched = false;
+        const completeCall = (tc: ToolCall): ToolCall => {
+          const fromInput = tc.toolInput.durationMs;
+          const durationMs =
+            typeof fromInput === "number" && Number.isFinite(fromInput)
+              ? fromInput
+              : tc.startedAt != null
+                ? Math.max(0, Date.now() - tc.startedAt)
+                : undefined;
+          return {
+            ...tc,
+            output,
+            isError,
+            isComplete: true,
+            ...(durationMs != null ? { durationMs } : {}),
+          };
+        };
         const updated = hasIdMatch
-          ? calls.map((tc) =>
-              tc.id === toolCallId ? { ...tc, output, isError, isComplete: true } : tc
-            )
+          ? calls.map((tc) => (tc.id === toolCallId ? completeCall(tc) : tc))
           : calls.map((tc) => {
               if (!matched && !tc.isComplete && !(tc.toolName === "Agent" && hasActiveChildren(tc.id))) {
                 matched = true;
-                return { ...tc, output, isError, isComplete: true };
+                return completeCall(tc);
               }
               return tc;
             });
