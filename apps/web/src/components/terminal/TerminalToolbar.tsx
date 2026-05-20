@@ -12,6 +12,7 @@ interface TerminalToolbarProps {
 // Stable action ref — avoids a reactive subscription for a function that never changes.
 const { toggleSplit } = useTerminalStore.getState();
 
+/** Toolbar actions for terminal list visibility, creation, and bulk kill. */
 export const TerminalToolbar = memo(function TerminalToolbar({
   onAdd,
   onDeleteAll,

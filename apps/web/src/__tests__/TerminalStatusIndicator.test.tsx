@@ -4,20 +4,19 @@ import { useTerminalStore } from "@/stores/terminalStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { TerminalStatusIndicator } from "@/components/chat/TerminalStatusIndicator";
 
-// toggleTerminalPanel now calls getTransport() to pause/resume PTYs.
-// Provide a no-op mock so these UI-focused tests don't throw on transport access.
-vi.mock("@/transport", () => ({
-  getTransport: () => ({
-    terminalPause: vi.fn().mockResolvedValue(undefined),
-    terminalResume: vi.fn().mockResolvedValue(undefined),
-  }),
+const executeCommandMock = vi.fn(() => true);
+
+vi.mock("@/lib/command-registry", () => ({
+  executeCommand: (...args: unknown[]) => executeCommandMock(...args),
 }));
 
 describe("TerminalStatusIndicator", () => {
   beforeEach(() => {
+    executeCommandMock.mockClear();
     useTerminalStore.setState({
       terminals: {},
       terminalPanelByThread: {},
+      ptyToThread: {},
       splitMode: false,
     });
     useWorkspaceStore.setState({
@@ -33,7 +32,7 @@ describe("TerminalStatusIndicator", () => {
   it("renders nothing when there is no active thread", () => {
     useWorkspaceStore.setState({ activeThreadId: null });
     useTerminalStore.setState({
-      terminals: { "thread-1": [{ id: "pty-1", threadId: "thread-1", label: "Terminal 1" }] },
+      terminals: { "thread-1": [{ id: "pty-1", threadId: "thread-1", label: "pwsh" }] },
     });
 
     const { container } = render(<TerminalStatusIndicator />);
@@ -43,7 +42,7 @@ describe("TerminalStatusIndicator", () => {
   it("shows '1 active terminal' when one terminal is active", () => {
     useTerminalStore.setState({
       terminals: {
-        "thread-1": [{ id: "pty-1", threadId: "thread-1", label: "Terminal 1" }],
+        "thread-1": [{ id: "pty-1", threadId: "thread-1", label: "pwsh" }],
       },
     });
 
@@ -55,8 +54,8 @@ describe("TerminalStatusIndicator", () => {
     useTerminalStore.setState({
       terminals: {
         "thread-1": [
-          { id: "pty-1", threadId: "thread-1", label: "Terminal 1" },
-          { id: "pty-2", threadId: "thread-1", label: "Terminal 2" },
+          { id: "pty-1", threadId: "thread-1", label: "pwsh" },
+          { id: "pty-2", threadId: "thread-1", label: "cmd" },
         ],
       },
     });
@@ -68,10 +67,10 @@ describe("TerminalStatusIndicator", () => {
   it("only counts terminals for the active thread", () => {
     useTerminalStore.setState({
       terminals: {
-        "thread-1": [{ id: "pty-1", threadId: "thread-1", label: "Terminal 1" }],
+        "thread-1": [{ id: "pty-1", threadId: "thread-1", label: "pwsh" }],
         "thread-2": [
-          { id: "pty-2", threadId: "thread-2", label: "Terminal 1" },
-          { id: "pty-3", threadId: "thread-2", label: "Terminal 2" },
+          { id: "pty-2", threadId: "thread-2", label: "pwsh" },
+          { id: "pty-3", threadId: "thread-2", label: "cmd" },
         ],
       },
     });
@@ -80,31 +79,16 @@ describe("TerminalStatusIndicator", () => {
     expect(screen.getByText("1 active terminal")).toBeInTheDocument();
   });
 
-  it("toggles terminal panel when clicked", () => {
+  it("invokes terminal.toggle when clicked", () => {
     useTerminalStore.setState({
       terminals: {
-        "thread-1": [{ id: "pty-1", threadId: "thread-1", label: "Terminal 1" }],
+        "thread-1": [{ id: "pty-1", threadId: "thread-1", label: "pwsh" }],
       },
-      terminalPanelByThread: { "thread-1": { visible: false, height: 300, activeTerminalId: null } },
     });
 
     render(<TerminalStatusIndicator />);
     fireEvent.click(screen.getByRole("button"));
 
-    expect(useTerminalStore.getState().terminalPanelByThread["thread-1"]?.visible).toBe(true);
-  });
-
-  it("toggles panel off when clicked while panel is visible", () => {
-    useTerminalStore.setState({
-      terminals: {
-        "thread-1": [{ id: "pty-1", threadId: "thread-1", label: "Terminal 1" }],
-      },
-      terminalPanelByThread: { "thread-1": { visible: true, height: 300, activeTerminalId: null } },
-    });
-
-    render(<TerminalStatusIndicator />);
-    fireEvent.click(screen.getByRole("button"));
-
-    expect(useTerminalStore.getState().terminalPanelByThread["thread-1"]?.visible).toBe(false);
+    expect(executeCommandMock).toHaveBeenCalledWith("terminal.toggle");
   });
 });

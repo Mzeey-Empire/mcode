@@ -18,6 +18,17 @@ let unsubs: (() => void)[] = [];
 /** Encoder reused across all legacy JSON terminal.data frames. */
 const _legacyEncoder = new TextEncoder();
 
+/** Maximum PTY payload size accepted by the client (4 MB). */
+const MAX_PTY_PAYLOAD_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Estimates decoded byte length from a base64 string without allocating.
+ */
+function approxBase64DecodedBytes(encoded: string): number {
+  const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
+  return Math.floor((encoded.length * 3) / 4) - padding;
+}
+
 /**
  * Wire up push channel listeners that forward server events to the
  * appropriate Zustand stores. Call once at app startup.
@@ -75,17 +86,40 @@ export function startPushListeners(): void {
   //   - string "data" field: legacy JSON fallback
   unsubs.push(
     pushEmitter.on("terminal.data", (data) => {
-      let detail: { ptyId: string; payload: Uint8Array; seq: number };
       const d = data as Record<string, unknown>;
+      if (typeof d["ptyId"] !== "string" || typeof d["seq"] !== "number") return;
+
+      let detail: { ptyId: string; payload: Uint8Array; seq: number };
       if (d["payload"] instanceof Uint8Array) {
+        const payload = d["payload"] as Uint8Array;
+        if (payload.byteLength > MAX_PTY_PAYLOAD_BYTES) {
+          console.warn(
+            `[ws-events] dropped oversized terminal.data payload (${payload.byteLength} bytes) for PTY ${d["ptyId"]}`,
+          );
+          return;
+        }
         detail = {
           ptyId: d["ptyId"] as string,
           seq: d["seq"] as number,
-          payload: d["payload"] as Uint8Array,
+          payload,
         };
       } else if (typeof d["payload"] === "string" && d["encoding"] === "base64") {
-        // IPC path (current): base64-encoded bytes — decode without intermediate array.
-        const bin = atob(d["payload"]);
+        const encoded = d["payload"];
+        const approxBytes = approxBase64DecodedBytes(encoded);
+        if (approxBytes > MAX_PTY_PAYLOAD_BYTES) {
+          console.warn(
+            `[ws-events] dropped oversized terminal.data payload (~${approxBytes} bytes) for PTY ${d["ptyId"]}`,
+          );
+          return;
+        }
+        // IPC path (current): base64-encoded bytes.
+        let bin: string;
+        try {
+          bin = atob(encoded);
+        } catch {
+          console.warn("[ws-events] dropped terminal.data frame: invalid base64 payload");
+          return;
+        }
         const bytes = new Uint8Array(bin.length);
         for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
         detail = {
@@ -116,10 +150,7 @@ export function startPushListeners(): void {
           seq: (d["seq"] as number | undefined) ?? 0,
         };
       }
-      // Guard against oversized payloads that could exhaust browser memory.
-      // 4 MB is well above normal PTY output (typically <64 KB per frame)
-      // but small enough to prevent runaway allocation from a misbehaving server.
-      if (detail.payload.byteLength > 4 * 1024 * 1024) {
+      if (detail.payload.byteLength > MAX_PTY_PAYLOAD_BYTES) {
         console.warn(
           `[ws-events] dropping oversized terminal.data payload (${detail.payload.byteLength} bytes) for PTY ${detail.ptyId}`,
         );

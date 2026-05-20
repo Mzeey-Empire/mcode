@@ -26,6 +26,15 @@ import { EnvService } from "./env-service.js";
 const _require = createRequire(import.meta.url);
 
 /**
+ * Returns the shell executable basename without a `.exe` suffix for display
+ * and job-object descriptions.
+ */
+function shellBasename(shellPath: string): string {
+  const base = shellPath.split(/[\\/]/).pop() ?? shellPath;
+  return base.replace(/\.exe$/i, "");
+}
+
+/**
  * Lazily load node-pty's spawn function. Deferred to avoid crashing the server
  * at startup if the native binding is missing or incompatible - the error is
  * surfaced only when a terminal is actually requested.
@@ -177,8 +186,7 @@ export class TerminalService {
     // so explicit assignment is needed — inheritance alone is not sufficient.
     // Best-effort: no-op on non-Windows or if JobObject failed to init.
     this.jobObject.assign(pty.pid);
-    const shellBasename = shell.split(/[\\/]/).pop() ?? shell;
-    this.jobObject.setDescription(pty.pid, `Mcode Terminal: ${shellBasename}`);
+    this.jobObject.setDescription(pty.pid, `Mcode Terminal: ${shellBasename(shell)}`);
 
     const dataDisposable = pty.onData((data: string) => {
       // Re-encode to bytes so multi-byte sequences that straddle a node-pty
@@ -214,8 +222,7 @@ export class TerminalService {
       [threadId, updatedSet],
     ]);
 
-    const shellBasename2 = shell.split(/[\\/]/).pop()?.replace(/\.exe$/i, "") ?? shell;
-    return { ptyId: id, shell: shellBasename2 };
+    return { ptyId: id, shell: shellBasename(shell) };
   }
 
   /**

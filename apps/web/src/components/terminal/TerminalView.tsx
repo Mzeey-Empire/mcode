@@ -211,6 +211,9 @@ export const TerminalView = memo(function TerminalView({ ptyId, visible, threadA
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
 
+  const threadActiveRef = useRef(threadActive);
+  threadActiveRef.current = threadActive;
+
   const scrollback = useSettingsStore((s) => s.settings.terminal.scrollback);
   const scrollbackRef = useRef(scrollback);
   scrollbackRef.current = scrollback;
@@ -308,6 +311,12 @@ export const TerminalView = memo(function TerminalView({ ptyId, visible, threadA
         transport.ptySetLastSeq(ptyId, detail.seq);
         const n = detail.payload.length;
         fc.written(n);
+        // Dormant threads keep xterm mounted but must not write — that corrupts
+        // scrollback (zero-width refit) and wastes main-thread work.
+        if (!threadActiveRef.current) {
+          fc.acked(n);
+          return;
+        }
         // Use xterm's callback form so acked() fires only after the bytes
         // are committed to the terminal buffer — not just queued.
         term.write(detail.payload, () => fc.acked(n));
@@ -480,10 +489,23 @@ export const TerminalView = memo(function TerminalView({ ptyId, visible, threadA
     if (!visible) return;
     const term = termRef.current;
     if (!term) return;
-    fitAddonRef.current?.fit();
-    flushResizeRpcRef.current?.();
-    term.refresh(0, term.rows - 1);
-    term.focus();
+
+    // Defer fit until layout has non-zero dimensions. Synchronous fit() after
+    // display:none → block reads 0×0 and permanently truncates scrollback.
+    const refitAndFocus = () => {
+      if (!visibleRef.current) return;
+      const fit = fitAddonRef.current;
+      const dims = fit?.proposeDimensions();
+      if (!dims || dims.cols <= 0 || dims.rows <= 0) return;
+      fit.fit();
+      flushResizeRpcRef.current?.();
+      term.refresh(0, term.rows - 1);
+      term.focus();
+    };
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(refitAndFocus);
+    });
   }, [visible]);
 
   // Repaint xterm when the browser window/tab regains visibility.
@@ -495,7 +517,10 @@ export const TerminalView = memo(function TerminalView({ ptyId, visible, threadA
       if (!visibleRef.current) return;
       const term = termRef.current;
       if (!term) return;
-      fitAddonRef.current?.fit();
+      const fit = fitAddonRef.current;
+      const dims = fit?.proposeDimensions();
+      if (!dims || dims.cols <= 0 || dims.rows <= 0) return;
+      fit.fit();
       term.refresh(0, term.rows - 1);
     };
 
@@ -545,9 +570,14 @@ export const TerminalView = memo(function TerminalView({ ptyId, visible, threadA
     let cancelled = false;
     void loadRenderer(term, rendererRef, () => cancelled).then(() => {
       if (cancelled) return;
-      // Refit after renderer swap to ensure the canvas matches the container.
-      fitAddonRef.current?.fit();
-      term.refresh(0, term.rows - 1);
+      requestAnimationFrame(() => {
+        if (cancelled || !visibleRef.current) return;
+        const fit = fitAddonRef.current;
+        const dims = fit?.proposeDimensions();
+        if (!dims || dims.cols <= 0 || dims.rows <= 0) return;
+        fit.fit();
+        term.refresh(0, term.rows - 1);
+      });
     });
     return () => { cancelled = true; };
   }, [threadActive]);

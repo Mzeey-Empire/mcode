@@ -439,7 +439,7 @@ export const WS_METHODS = lazySchema(() => ({
   },
   "terminal.create": {
     params: z.object({ threadId: z.string() }),
-    result: z.object({ ptyId: z.string(), shell: z.string() }),
+    result: z.object({ ptyId: z.string(), shell: z.string().max(64) }),
   },
   "terminal.write": {
     params: z.object({

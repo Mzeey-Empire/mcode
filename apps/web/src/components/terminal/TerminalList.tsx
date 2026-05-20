@@ -62,10 +62,12 @@ export const TerminalList = memo(function TerminalList({
               <Tooltip key={terminal.id}>
                 <TooltipTrigger
                   render={
-                    <button
+                    <Button
                       type="button"
+                      variant="ghost"
+                      size="icon-xs"
                       onClick={() => setActiveTerminal(threadId, terminal.id)}
-                      className={`flex size-7 items-center justify-center rounded-md transition-colors focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none ${
+                      className={`size-7 ${
                         isActive
                           ? "bg-muted text-foreground"
                           : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
@@ -173,9 +175,11 @@ export const TerminalList = memo(function TerminalList({
               <span className={`flex-1 truncate text-xs ${isActive ? "font-semibold" : ""}`}>
                 {terminal.label}
               </span>
-              <button
+              <Button
                 type="button"
-                className="flex size-4 flex-shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none hover:bg-muted hover:text-foreground group-hover:opacity-60"
+                variant="ghost"
+                size="icon-xs"
+                className="size-4 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-60"
                 onClick={(e) => {
                   e.stopPropagation();
                   onClose(terminal.id);
@@ -183,7 +187,7 @@ export const TerminalList = memo(function TerminalList({
                 aria-label={`Close ${terminal.label}`}
               >
                 <X className="size-2.5" />
-              </button>
+              </Button>
             </div>
           );
         })}

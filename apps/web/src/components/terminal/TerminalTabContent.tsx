@@ -87,15 +87,26 @@ export function TerminalTabContent({ threadId, visible }: TerminalTabContentProp
     setPendingKill(null);
   }, [threadId]);
 
-  // Sync PTY pause/resume with right panel visibility. When the terminal
-  // tab becomes visible, resume all PTYs for this thread. When it becomes
-  // hidden (tab switch or panel close), pause them.
+  // Sync PTY pause/resume with right-panel terminal tab visibility.
+  // Only the active workspace thread may stream; all others stay paused.
   useEffect(() => {
+    const { terminals } = useTerminalStore.getState();
+    const threadIds = Object.keys(terminals);
+
     if (visible) {
-      showTerminalPanel(threadId);
+      for (const tid of threadIds) {
+        if (tid === threadId) showTerminalPanel(tid);
+        else hideTerminalPanel(tid);
+      }
     } else {
-      hideTerminalPanel(threadId);
+      for (const tid of threadIds) {
+        hideTerminalPanel(tid);
+      }
     }
+
+    return () => {
+      hideTerminalPanel(threadId);
+    };
   }, [visible, threadId]);
 
   /** Creates a new terminal for the thread. */
@@ -105,13 +116,17 @@ export function TerminalTabContent({ threadId, visible }: TerminalTabContentProp
     storeAddTerminal(threadId, ptyId, shell);
   }, [threadId]);
 
-  /** Immediate kill without guard. */
-  const doCloseTerminal = useCallback((ptyId: string) => {
-    getTransport().terminalKill(ptyId).catch(() => {});
-    storeRemoveTerminal(ptyId);
-    const remaining = useTerminalStore.getState().terminals[threadId];
-    if (!remaining || remaining.length === 0) {
-      hideTerminalPanel(threadId);
+  /** Immediate kill without guard. Waits for server RPC before evicting local state. */
+  const doCloseTerminal = useCallback(async (ptyId: string) => {
+    try {
+      await getTransport().terminalKill(ptyId);
+      storeRemoveTerminal(ptyId);
+      const remaining = useTerminalStore.getState().terminals[threadId];
+      if (!remaining || remaining.length === 0) {
+        hideTerminalPanel(threadId);
+      }
+    } catch (err) {
+      console.error("[terminal] Failed to kill terminal", ptyId, err);
     }
   }, [threadId]);
 
@@ -119,60 +134,62 @@ export function TerminalTabContent({ threadId, visible }: TerminalTabContentProp
   const closeTerminal = useCallback(
     (ptyId: string) => {
       if (confirmOnKill === "never") {
-        doCloseTerminal(ptyId);
+        void doCloseTerminal(ptyId);
         return;
       }
       getTransport()
         .terminalHasChildren(ptyId)
         .then(({ hasChildren }) => {
           if (!hasChildren) {
-            doCloseTerminal(ptyId);
+            void doCloseTerminal(ptyId);
             return;
           }
-          setPendingKill(() => () => doCloseTerminal(ptyId));
+          setPendingKill(() => () => {
+            void doCloseTerminal(ptyId);
+          });
         })
         .catch(() => {
-          doCloseTerminal(ptyId);
+          void doCloseTerminal(ptyId);
         });
     },
     [confirmOnKill, doCloseTerminal],
   );
 
-  /** Immediate kill-all without guard. */
-  const doCloseAllTerminals = useCallback(() => {
-    getTransport()
-      .terminalKillByThread(threadId)
-      .catch((err) => {
-        console.error("Failed to kill terminals for thread", threadId, err);
-      });
-    removeAllTerminals(threadId);
-    hideTerminalPanel(threadId);
+  /** Immediate kill-all without guard. Waits for server RPC before evicting local state. */
+  const doCloseAllTerminals = useCallback(async () => {
+    try {
+      await getTransport().terminalKillByThread(threadId);
+      removeAllTerminals(threadId);
+      hideTerminalPanel(threadId);
+    } catch (err) {
+      console.error("[terminal] Failed to kill terminals for thread", threadId, err);
+    }
   }, [threadId]);
 
   /** Kill-all with optional confirmation. */
   const closeAllTerminals = useCallback(() => {
     if (confirmOnKill === "never" || terminals.length === 0) {
-      doCloseAllTerminals();
+      void doCloseAllTerminals();
       return;
     }
-    const targetId = activeTerminalId ?? terminals[0]?.id;
-    if (!targetId) {
-      doCloseAllTerminals();
-      return;
-    }
-    getTransport()
-      .terminalHasChildren(targetId)
-      .then(({ hasChildren }) => {
-        if (!hasChildren) {
-          doCloseAllTerminals();
-          return;
-        }
-        setPendingKill(() => doCloseAllTerminals);
-      })
-      .catch(() => {
-        doCloseAllTerminals();
+    const transport = getTransport();
+    void Promise.all(
+      terminals.map((term) =>
+        transport
+          .terminalHasChildren(term.id)
+          .then(({ hasChildren }) => hasChildren)
+          .catch(() => true),
+      ),
+    ).then((results) => {
+      if (!results.some(Boolean)) {
+        void doCloseAllTerminals();
+        return;
+      }
+      setPendingKill(() => () => {
+        void doCloseAllTerminals();
       });
-  }, [confirmOnKill, terminals, activeTerminalId, doCloseAllTerminals]);
+    });
+  }, [confirmOnKill, terminals, doCloseAllTerminals]);
 
   const confirmKill = useCallback(() => {
     pendingKill?.();
@@ -211,7 +228,7 @@ export function TerminalTabContent({ threadId, visible }: TerminalTabContentProp
               <TerminalView
                 key={term.id}
                 ptyId={term.id}
-                visible={isActiveThread && term.id === activeTerminalId}
+                visible={visible && isActiveThread && term.id === activeTerminalId}
                 threadActive={isActiveThread}
               />
             );
