@@ -9,6 +9,8 @@ import { isHandoffMessage, parseHandoffJson } from "./handoff-utils";
 import { HandoffCard } from "./HandoffCard";
 import { FileAttachmentTile } from "./FileAttachmentTile";
 import { ImageAttachmentLightbox } from "./ImageAttachmentLightbox";
+import { useThreadStore } from "@/stores/threadStore";
+import { AnsweredSummary } from "./plan-questions/AnsweredSummary";
 
 /**
  * Returns true when the assistant message body collapses to nothing visible
@@ -382,6 +384,10 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
   );
   const textContent = useMemo(() => stripInjectedFiles(message.content), [message.content]);
 
+  const isAnsweredPlanMessage = useThreadStore(
+    (s) => s.answeredPlanMessageIdsByThread[message.thread_id]?.has(message.id) ?? false,
+  );
+
   const imageSlides = useMemo(
     () =>
       imageAttachments.map((img) => ({
@@ -546,9 +552,14 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
 
   // Assistant body that collapses to nothing visible (e.g. cursor-agent's
   // plan-mode output is exclusively a `plan-questions` fenced block, which
-  // the markdown renderer suppresses). Skip the bubble entirely so the
-  // wizard alone represents that turn instead of a stray empty header.
+  // the markdown renderer suppresses).
   if (isAssistantContentEmpty(message.content)) {
+    // For answered plan-questions messages, show a read-only summary
+    // instead of hiding the bubble entirely (AC-1.28).
+    if (isAnsweredPlanMessage) {
+      return <AnsweredSummary content={message.content} />;
+    }
+    // Active wizard or unanswered: the wizard component handles rendering.
     return null;
   }
 

@@ -224,6 +224,50 @@
   }
 }
 
+/* Plan-question wizard: incoming question slides in from the right */
+@keyframes wizard-slide-in-right {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+/* Plan-question wizard: incoming question slides in from the left (going back) */
+@keyframes wizard-slide-in-left {
+  from { opacity: 0; transform: translateX(-20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.animate-wizard-slide-in-right {
+  animation: wizard-slide-in-right 250ms ease-out;
+}
+.animate-wizard-slide-in-left {
+  animation: wizard-slide-in-left 250ms ease-out;
+}
+
+/* Option tile spring on selection */
+@keyframes option-spring {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+.animate-option-spring {
+  animation: option-spring 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Step indicator pulse on current dot */
+@keyframes step-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
+.animate-step-pulse {
+  animation: step-pulse 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-wizard-slide-in-right,
+  .animate-wizard-slide-in-left,
+  .animate-option-spring,
+  .animate-step-pulse {
+    animation: none;
+  }
+}
 
 .glow-primary {
   box-shadow: -2px 0 8px -1px oklch(0.72 0.17 75 / 0.35);
