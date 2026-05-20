@@ -55,7 +55,7 @@ export const TerminalList = memo(function TerminalList({
             </TooltipContent>
           </Tooltip>
         </div>
-        <div className="flex flex-1 flex-col items-center gap-0.5 overflow-y-auto pt-1">
+        <div className="flex flex-1 flex-col items-center gap-0.5 overflow-y-auto py-1">
           {terminals.map((terminal) => {
             const isActive = terminal.id === activeTerminalId;
             return (
@@ -65,7 +65,7 @@ export const TerminalList = memo(function TerminalList({
                     <button
                       type="button"
                       onClick={() => setActiveTerminal(threadId, terminal.id)}
-                      className={`flex size-7 items-center justify-center rounded-md transition-colors ${
+                      className={`flex size-7 items-center justify-center rounded-md transition-colors focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none ${
                         isActive
                           ? "bg-muted text-foreground"
                           : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
@@ -89,8 +89,8 @@ export const TerminalList = memo(function TerminalList({
 
   return (
     <div className="flex w-[148px] flex-shrink-0 flex-col border-r border-border">
-      {/* Header: label + actions + collapse toggle */}
-      <div className="flex h-[34px] items-center justify-end gap-0.5 border-b border-border px-2.5">
+      {/* Header: actions + collapse toggle */}
+      <div className="flex h-[34px] items-center justify-end gap-0.5 border-b border-border px-1.5">
         <Tooltip>
           <TooltipTrigger
             render={
@@ -103,7 +103,7 @@ export const TerminalList = memo(function TerminalList({
               />
             }
           >
-            <Plus className="size-3" />
+            <Plus className="size-3.5" />
           </TooltipTrigger>
           <TooltipContent side="bottom" className="text-xs">
             New terminal
@@ -121,7 +121,7 @@ export const TerminalList = memo(function TerminalList({
               />
             }
           >
-            <Trash2 className="size-3" />
+            <Trash2 className="size-3.5" />
           </TooltipTrigger>
           <TooltipContent side="bottom" className="text-xs">
             Kill all
@@ -139,7 +139,7 @@ export const TerminalList = memo(function TerminalList({
               />
             }
           >
-            <ChevronLeft className="size-3" />
+            <ChevronLeft className="size-3.5" />
           </TooltipTrigger>
           <TooltipContent side="bottom" className="text-xs">
             Collapse
@@ -148,7 +148,7 @@ export const TerminalList = memo(function TerminalList({
       </div>
 
       {/* Shell list */}
-      <div className="flex-1 overflow-y-auto pt-0.5">
+      <div className="flex-1 overflow-y-auto py-1">
         {terminals.map((terminal) => {
           const isActive = terminal.id === activeTerminalId;
           return (
@@ -156,7 +156,7 @@ export const TerminalList = memo(function TerminalList({
               key={terminal.id}
               role="button"
               tabIndex={0}
-              className={`group flex cursor-pointer items-center gap-2 px-2.5 py-1.5 transition-colors ${
+              className={`group flex cursor-pointer items-center gap-2 px-2.5 py-1.5 transition-colors focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset focus-visible:outline-none ${
                 isActive
                   ? "bg-muted/50 text-foreground"
                   : "text-muted-foreground hover:bg-muted/30 hover:text-foreground"
@@ -175,7 +175,7 @@ export const TerminalList = memo(function TerminalList({
               </span>
               <button
                 type="button"
-                className="flex size-4 flex-shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-60"
+                className="flex size-4 flex-shrink-0 items-center justify-center rounded-sm opacity-0 transition-opacity focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none hover:bg-muted hover:text-foreground group-hover:opacity-60"
                 onClick={(e) => {
                   e.stopPropagation();
                   onClose(terminal.id);
