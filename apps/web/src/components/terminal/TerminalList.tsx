@@ -18,6 +18,20 @@ interface TerminalListProps {
 // Stable action refs.
 const { setActiveTerminal, toggleSplit } = useTerminalStore.getState();
 
+/** Full-width shell row highlight (hover/active live on the row, not the inner Button). */
+function shellRowClass(isActive: boolean): string {
+  return cn(
+    "group flex w-full min-h-8 items-center gap-0.5 pr-1 transition-colors",
+    isActive
+      ? "bg-muted/50 text-foreground"
+      : "text-muted-foreground hover:bg-muted/30 hover:text-foreground",
+  );
+}
+
+/** Select shell: shadcn Button without its own hover pill or press shift. */
+const shellSelectButtonClass =
+  "h-8 min-h-8 min-w-0 flex-1 justify-start gap-2 rounded-none border-0 bg-transparent px-2 font-normal shadow-none hover:bg-transparent active:translate-y-0 active:bg-transparent";
+
 /** Terminal sidebar with shell list, header actions, and collapse toggle. */
 export const TerminalList = memo(function TerminalList({
   threadId,
@@ -60,29 +74,28 @@ export const TerminalList = memo(function TerminalList({
           {terminals.map((terminal) => {
             const isActive = terminal.id === activeTerminalId;
             return (
-              <Tooltip key={terminal.id}>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      onClick={() => setActiveTerminal(threadId, terminal.id)}
-                      className={`size-7 ${
-                        isActive
-                          ? "bg-muted text-foreground"
-                          : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                      }`}
-                      aria-label={terminal.label}
-                    />
-                  }
-                >
-                  <Terminal className="size-3.5" />
-                </TooltipTrigger>
-                <TooltipContent side="right" className="text-xs">
-                  {terminal.label}
-                </TooltipContent>
-              </Tooltip>
+              <div key={terminal.id} className={shellRowClass(isActive)}>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => setActiveTerminal(threadId, terminal.id)}
+                        className="size-7 bg-transparent hover:bg-transparent active:translate-y-0 active:bg-transparent"
+                        aria-label={terminal.label}
+                        aria-current={isActive ? "true" : undefined}
+                      />
+                    }
+                  >
+                    <Terminal className="size-3.5" />
+                  </TooltipTrigger>
+                  <TooltipContent side="right" className="text-xs">
+                    {terminal.label}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
             );
           })}
         </div>
@@ -155,16 +168,11 @@ export const TerminalList = memo(function TerminalList({
         {terminals.map((terminal) => {
           const isActive = terminal.id === activeTerminalId;
           return (
-            <div key={terminal.id} className="group flex items-center pr-1">
+            <div key={terminal.id} className={shellRowClass(isActive)}>
               <Button
                 type="button"
                 variant="ghost"
-                className={cn(
-                  "h-auto min-w-0 flex-1 justify-start gap-2 rounded-none px-2.5 py-1.5 font-normal",
-                  isActive
-                    ? "bg-muted/50 text-foreground"
-                    : "text-muted-foreground hover:bg-muted/30 hover:text-foreground",
-                )}
+                className={shellSelectButtonClass}
                 onClick={() => setActiveTerminal(threadId, terminal.id)}
                 aria-current={isActive ? "true" : undefined}
               >
@@ -187,7 +195,7 @@ export const TerminalList = memo(function TerminalList({
                 type="button"
                 variant="ghost"
                 size="icon-xs"
-                className="size-4 shrink-0 opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-60"
+                className="size-6 shrink-0 bg-transparent opacity-0 transition-opacity hover:bg-transparent active:translate-y-0 active:bg-transparent focus-visible:opacity-100 group-hover:opacity-60"
                 onClick={() => onClose(terminal.id)}
                 aria-label={`Close ${terminal.label}`}
               >
