@@ -2,8 +2,10 @@
  * Maps Cursor `cursor/task` ACP ext payloads to Mcode `Agent` tool events.
  *
  * Live ACP capture shows subagent delegations use `tool_call` markers with
- * `rawInput._toolName === "task"` and `title: "Task: Subagent task"`, while
- * the real description/prompt/model arrive on `cursor/task` after completion.
+ * `rawInput._toolName === "task"` and `title: "Task: Subagent task"`. Rich
+ * description/prompt/model usually arrive on `cursor/task` after the subagent
+ * finishes; we emit a provisional ToolUse on `tool_call` so the UI can show
+ * in-progress rows immediately.
  */
 
 import { AgentEventType } from "@mcode/contracts";
@@ -18,6 +20,48 @@ export interface CursorTaskMeta {
   model?: string;
   agentId?: string;
   durationMs?: number;
+}
+
+/**
+ * Derives a short description from an ACP Task `tool_call` title until `cursor/task` arrives.
+ */
+export function taskDescriptionFromAcpTitle(title: string | null | undefined): string {
+  const t = (title ?? "").trim();
+  if (!t) return "Subagent task";
+  const stripped = t.replace(/^task:\s*/i, "").trim();
+  return stripped.length > 0 ? stripped : "Subagent task";
+}
+
+/**
+ * Emits a provisional {@link AgentEventType.ToolUse} when Cursor starts a Task tool_call.
+ *
+ * Cursor sends rich metadata on `cursor/task` only after the subagent finishes; without
+ * this early event the narrative timeline shows delegations only at turn end.
+ */
+export function cursorTaskToolCallStartedToAgentEvents(
+  threadId: string,
+  toolCallId: string,
+  title: string | null | undefined,
+  state: CursorAcpTurnState,
+): AgentEvent[] {
+  state.suppressedToolCallIds.add(toolCallId);
+  state.pendingTaskToolCallIds.add(toolCallId);
+  state.toolNameByCallId.set(toolCallId, "Agent");
+
+  const acc = state.accumulator;
+  acc.toolStartTimes.set(toolCallId, Date.now());
+  acc.pendingToolCalls.add(toolCallId);
+  acc.hasFiredToolThisTurn = true;
+
+  return [
+    {
+      type: AgentEventType.ToolUse,
+      threadId,
+      toolCallId,
+      toolName: "Agent",
+      toolInput: { description: taskDescriptionFromAcpTitle(title) },
+    },
+  ];
 }
 
 /**
@@ -79,9 +123,12 @@ export function cursorTaskExtToAgentEvents(
   state.pendingTaskToolCallIds.add(toolCallId);
 
   const acc = state.accumulator;
-  acc.toolStartTimes.set(toolCallId, Date.now());
-  acc.pendingToolCalls.add(toolCallId);
-  acc.hasFiredToolThisTurn = true;
+  const earlyToolUseEmitted = acc.pendingToolCalls.has(toolCallId);
+  if (!earlyToolUseEmitted) {
+    acc.toolStartTimes.set(toolCallId, Date.now());
+    acc.pendingToolCalls.add(toolCallId);
+    acc.hasFiredToolThisTurn = true;
+  }
 
   const toolInput: Record<string, unknown> = {
     description,
@@ -90,16 +137,20 @@ export function cursorTaskExtToAgentEvents(
   if (model) toolInput.model = model;
   if (agentId) toolInput.agentId = agentId;
   if (params.subagentType !== undefined) toolInput.subagentType = params.subagentType;
+  if (durationMs != null) toolInput.durationMs = durationMs;
 
-  const events: AgentEvent[] = [
-    {
+  const events: AgentEvent[] = [];
+  // When tool_call already fired a provisional ToolUse, emit again so the client can merge
+  // enriched description/prompt/model without waiting for completion.
+  if (!earlyToolUseEmitted || Object.keys(toolInput).length > 1) {
+    events.push({
       type: AgentEventType.ToolUse,
       threadId,
       toolCallId,
       toolName: "Agent",
       toolInput,
-    },
-  ];
+    });
+  }
 
   if (state.taskCompletedAwaitingMeta.has(toolCallId)) {
     state.taskCompletedAwaitingMeta.delete(toolCallId);
@@ -137,17 +188,17 @@ export function cursorTaskCompletionToAgentEvents(
   acc.toolStartTimes.delete(toolCallId);
   acc.pendingToolCalls.delete(toolCallId);
 
-  const lines: string[] = [];
-  if (meta?.description) lines.push(meta.description);
-  if (meta?.durationMs != null) lines.push(`Completed in ${(meta.durationMs / 1000).toFixed(1)}s`);
-  if (meta?.model) lines.push(`Model: ${meta.model}`);
+  const output =
+    meta?.description && meta.description.length > 0
+      ? meta.description
+      : "Subagent finished";
 
   return [
     {
       type: AgentEventType.ToolResult,
       threadId,
       toolCallId,
-      output: lines.length > 0 ? lines.join("\n") : "Subagent finished",
+      output,
       isError,
     },
   ];

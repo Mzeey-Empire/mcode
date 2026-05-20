@@ -4,14 +4,19 @@ import {
   createCursorAcpTurnState,
   mapCursorAcpSessionNotification,
 } from "../cursor-acp-event-mapper.js";
-import { cursorTaskExtToAgentEvents, isCursorTaskAcpTool } from "../cursor-acp-task.js";
+import {
+  cursorTaskExtToAgentEvents,
+  cursorTaskToolCallStartedToAgentEvents,
+  isCursorTaskAcpTool,
+  taskDescriptionFromAcpTitle,
+} from "../cursor-acp-task.js";
 
 /** Shapes observed in live capture (2026-05-20, agent acp). */
 const CAPTURED_TASK_TOOL_CALL = {
   sessionUpdate: "tool_call" as const,
-  kind: "other",
+  kind: "other" as const,
   rawInput: { _toolName: "task" },
-  status: "pending",
+  status: "pending" as const,
   title: "Task: Subagent task",
   toolCallId: "tool_c1b1b251-a54e-421e-ae5f-44a2aa94abc",
 };
@@ -32,6 +37,27 @@ describe("cursor-acp-task", () => {
   it("detects Task subagent tool_call markers from live ACP", () => {
     expect(isCursorTaskAcpTool({ _toolName: "task" }, "Task: Subagent task")).toBe(true);
     expect(isCursorTaskAcpTool({ _toolName: "updateTodos" }, "Update TODOs")).toBe(false);
+  });
+
+  it("derives provisional description from Task tool_call title", () => {
+    expect(taskDescriptionFromAcpTitle("Task: Subagent task")).toBe("Subagent task");
+    expect(taskDescriptionFromAcpTitle("")).toBe("Subagent task");
+  });
+
+  it("emits provisional Agent ToolUse when Task tool_call starts", () => {
+    const state = createCursorAcpTurnState();
+    const events = cursorTaskToolCallStartedToAgentEvents(
+      threadId,
+      CAPTURED_TASK_TOOL_CALL.toolCallId,
+      CAPTURED_TASK_TOOL_CALL.title,
+      state,
+    );
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: AgentEventType.ToolUse,
+      toolName: "Agent",
+      toolInput: { description: "Subagent task" },
+    });
   });
 
   it("maps cursor/task ext to Agent ToolUse with description and prompt", () => {
@@ -60,7 +86,12 @@ describe("cursor-acp-task", () => {
       threadId,
       state,
     );
-    expect(started).toEqual([]);
+    expect(started).toHaveLength(1);
+    expect(started[0]).toMatchObject({
+      type: AgentEventType.ToolUse,
+      toolName: "Agent",
+      toolCallId: CAPTURED_TASK_TOOL_CALL.toolCallId,
+    });
 
     const completed = mapCursorAcpSessionNotification(
       {

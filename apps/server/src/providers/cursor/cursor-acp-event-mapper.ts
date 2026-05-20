@@ -30,6 +30,7 @@ import {
 } from "./cursor-acp-tool-input-enrichment.js";
 import {
   cursorTaskCompletionToAgentEvents,
+  cursorTaskToolCallStartedToAgentEvents,
   isCursorTaskAcpTool,
 } from "./cursor-acp-task.js";
 import {
@@ -281,10 +282,15 @@ function mapAcpToolCallStarted(
   // ACP `_toolName` tools carry no args on `tool_call`; data arrives via ext methods.
   const acpToolName = rawInputRecord?._toolName;
   if (typeof acpToolName === "string" || isCursorTaskAcpTool(rawInputRecord, update.title)) {
-    state.suppressedToolCallIds.add(update.toolCallId);
     if (acpToolName === "task" || isCursorTaskAcpTool(rawInputRecord, update.title)) {
-      state.pendingTaskToolCallIds.add(update.toolCallId);
+      return cursorTaskToolCallStartedToAgentEvents(
+        threadId,
+        update.toolCallId,
+        update.title,
+        state,
+      );
     }
+    state.suppressedToolCallIds.add(update.toolCallId);
     return [];
   }
 
