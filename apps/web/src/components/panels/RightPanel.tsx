@@ -1,6 +1,6 @@
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ListChecks, Diff, Globe, TerminalSquare, X } from "lucide-react";
+import { ListChecks, Diff, Globe, Terminal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useTaskStore } from "@/stores/taskStore";
@@ -307,7 +307,7 @@ export function RightPanel() {
                   : "text-foreground/70 hover:text-foreground"
               }`}
             >
-              <TerminalSquare size={12} />
+              <Terminal size={12} />
               Terminal
             </button>
           </div>
