@@ -6,8 +6,8 @@ import { PrSplitButton } from "./PrSplitButton";
 import { useBranchPr } from "@/hooks/useBranchPr";
 import { useHasCommitsAhead } from "@/hooks/useHasCommitsAhead";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
-import { useTerminalStore } from "@/stores/terminalStore";
 import { useDiffStore } from "@/stores/diffStore";
+import { executeCommand } from "@/lib/command-registry";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Thread } from "@/transport";
@@ -86,12 +86,14 @@ export function HeaderActions({ thread }: HeaderActionsProps) {
     });
   }, [pr, thread.id]);
 
-  const terminalVisible = useTerminalStore((s) =>
-    thread?.id ? (s.terminalPanelByThread[thread.id]?.visible ?? false) : false,
-  );
+  const terminalVisible = useDiffStore((s) => {
+    if (!thread?.id) return false;
+    const panel = s.rightPanelByThread[thread.id];
+    return (panel?.visible ?? false) && (panel?.activeTab ?? "tasks") === "terminal";
+  });
   const toggleTerminal = useCallback(() => {
-    if (thread?.id) useTerminalStore.getState().toggleTerminalPanel(thread.id);
-  }, [thread?.id]);
+    executeCommand("terminal.toggle");
+  }, []);
 
   const diffActive = useDiffStore((s) => {
     if (!thread?.id) return false;

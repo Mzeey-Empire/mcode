@@ -10,6 +10,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import { useSkillsStore } from "@/stores/skillsStore";
 import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
+import { emitPtyData, emitPtyExit } from "@/components/terminal/ptyDataRegistry";
 
 /** Unsubscribe handles for all push listeners. */
 let unsubs: (() => void)[] = [];
@@ -17,14 +18,27 @@ let unsubs: (() => void)[] = [];
 /** Encoder reused across all legacy JSON terminal.data frames. */
 const _legacyEncoder = new TextEncoder();
 
+/** Maximum PTY payload size accepted by the client (4 MB). */
+const MAX_PTY_PAYLOAD_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Estimates decoded byte length from a base64 string without allocating.
+ */
+function approxBase64DecodedBytes(encoded: string): number {
+  const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
+  return Math.floor((encoded.length * 3) / 4) - padding;
+}
+
 /**
  * Wire up push channel listeners that forward server events to the
  * appropriate Zustand stores. Call once at app startup.
  *
  * Push channels handled:
  * - `agent.event` -- agent stream events forwarded to threadStore
- * - `terminal.data` -- PTY output forwarded to xterm instances via custom DOM event
- * - `terminal.exit` -- PTY exit forwarded via custom DOM event
+ * - `terminal.data` -- PTY output forwarded to xterm via ptyDataRegistry
+ * - `terminal.exit` -- PTY exit forwarded via ptyDataRegistry
+ * - Reconnect-gap banners are emitted from ws-transport after `terminal.reattach` RPC
+ *   (there is no `terminal.reconnectGap` push channel on the server)
  * - `thread.status` -- thread status changes reflected in threadStore
  * - `thread.prLinked` -- PR detected for a thread, updates pr_number/pr_status
  * - `thread.checksUpdated` -- CI check status polled for a thread's PR, updates checksById
@@ -65,47 +79,84 @@ export function startPushListeners(): void {
     }),
   );
 
-  // terminal.data: broadcast to TerminalView instances via CustomEvent
+  // terminal.data: forward PTY output to the registered TerminalView callback.
+  // Supports multiple payload encodings for forward/backward compatibility:
+  //   - Uint8Array: direct binary WebSocket frames (preferred)
+  //   - base64 string: IPC path (current) — compact JSON-safe encoding
+  //   - number[]: legacy IPC path (pre-base64 servers)
+  //   - indexed object: very old servers that sent raw Uint8Array through JSON.stringify
+  //   - string "data" field: legacy JSON fallback
   unsubs.push(
     pushEmitter.on("terminal.data", (data) => {
-      // Binary path (preferred): { ptyId, seq, payload: Uint8Array }
-      // Legacy JSON fallback: { ptyId, data: string, seq?: number }
-      let detail: { ptyId: string; payload: Uint8Array; seq: number };
       const d = data as Record<string, unknown>;
+      if (typeof d["ptyId"] !== "string") return;
+      const ptyId = d["ptyId"];
+      const seq = typeof d["seq"] === "number" ? d["seq"] : 0;
+
+      let detail: { ptyId: string; payload: Uint8Array; seq: number };
       if (d["payload"] instanceof Uint8Array) {
-        detail = {
-          ptyId: d["ptyId"] as string,
-          seq: d["seq"] as number,
-          payload: d["payload"] as Uint8Array,
-        };
+        const payload = d["payload"] as Uint8Array;
+        if (payload.byteLength > MAX_PTY_PAYLOAD_BYTES) {
+          console.warn(
+            `[ws-events] dropped oversized terminal.data payload (${payload.byteLength} bytes) for PTY ${ptyId}`,
+          );
+          return;
+        }
+        detail = { ptyId, seq, payload };
+      } else if (typeof d["payload"] === "string" && d["encoding"] === "base64") {
+        const encoded = d["payload"];
+        const approxBytes = approxBase64DecodedBytes(encoded);
+        if (approxBytes > MAX_PTY_PAYLOAD_BYTES) {
+          console.warn(
+            `[ws-events] dropped oversized terminal.data payload (~${approxBytes} bytes) for PTY ${ptyId}`,
+          );
+          return;
+        }
+        // IPC path (current): base64-encoded bytes.
+        let bin: string;
+        try {
+          bin = atob(encoded);
+        } catch {
+          console.warn("[ws-events] dropped terminal.data frame: invalid base64 payload");
+          return;
+        }
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        detail = { ptyId, seq, payload: bytes };
       } else if (Array.isArray(d["payload"])) {
-        // IPC path (current): the socket adapter serializes via JSON.stringify;
-        // the server converts to number[] so it survives the round-trip.
-        detail = {
-          ptyId: d["ptyId"] as string,
-          seq: d["seq"] as number,
-          payload: new Uint8Array(d["payload"] as number[]),
-        };
+        const arr = d["payload"] as number[];
+        if (arr.length > MAX_PTY_PAYLOAD_BYTES) {
+          console.warn(
+            `[ws-events] dropped oversized terminal.data payload (${arr.length} bytes) for PTY ${ptyId}`,
+          );
+          return;
+        }
+        detail = { ptyId, seq, payload: new Uint8Array(arr) };
       } else if (d["payload"] && typeof d["payload"] === "object") {
-        // IPC fallback for older servers that sent a raw Uint8Array through
-        // JSON.stringify — it arrives as an indexed object {"0":72,"1":101,...}.
-        // Object.values gives us the bytes in ascending-key order.
-        detail = {
-          ptyId: d["ptyId"] as string,
-          seq: d["seq"] as number,
-          payload: new Uint8Array(Object.values(d["payload"] as Record<string, number>)),
-        };
+        const values = Object.values(d["payload"] as Record<string, number>);
+        if (values.length > MAX_PTY_PAYLOAD_BYTES) {
+          console.warn(
+            `[ws-events] dropped oversized terminal.data payload (${values.length} bytes) for PTY ${ptyId}`,
+          );
+          return;
+        }
+        detail = { ptyId, seq, payload: new Uint8Array(values) };
       } else {
-        // Legacy JSON fallback: older servers send { ptyId, data: string, seq? }.
-        // Guard: skip malformed frames where data is not a string.
+        // Legacy JSON fallback: { ptyId, data: string, seq? }.
         if (typeof d["data"] !== "string") return;
         detail = {
-          ptyId: d["ptyId"] as string,
+          ptyId,
           payload: _legacyEncoder.encode(d["data"]),
-          seq: (d["seq"] as number | undefined) ?? 0,
+          seq,
         };
       }
-      window.dispatchEvent(new CustomEvent("mcode:pty-data", { detail }));
+      if (detail.payload.byteLength > MAX_PTY_PAYLOAD_BYTES) {
+        console.warn(
+          `[ws-events] dropping oversized terminal.data payload (${detail.payload.byteLength} bytes) for PTY ${detail.ptyId}`,
+        );
+        return;
+      }
+      emitPtyData(detail);
     }),
   );
 
@@ -113,9 +164,7 @@ export function startPushListeners(): void {
   unsubs.push(
     pushEmitter.on("terminal.exit", (data) => {
       const payload = data as { ptyId: string; code: number };
-      window.dispatchEvent(
-        new CustomEvent("mcode:pty-exit", { detail: payload }),
-      );
+      emitPtyExit(payload);
       // Remove the terminal from the store after a brief delay so the
       // exit message has time to render.
       setTimeout(() => {

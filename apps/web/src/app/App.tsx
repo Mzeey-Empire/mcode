@@ -24,16 +24,14 @@ import { useIdleReclamation } from "@/hooks/useIdleReclamation";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ToastContainer } from "@/components/Toast";
 import type { SettingsSection } from "@/components/settings/settings-nav";
+import { TerminalPoolHost } from "@/components/terminal/TerminalPoolHost";
+import { TerminalPoolSlotProvider } from "@/components/terminal/TerminalPoolSlotContext";
 
 const LazySettingsView = lazy(async () => {
   const m = await import("@/components/settings/SettingsView");
   return { default: m.SettingsView };
 });
 
-const LazyTerminalPanel = lazy(async () => {
-  const m = await import("@/components/terminal");
-  return { default: m.TerminalPanel };
-});
 
 const LazyRightPanel = lazy(async () => {
   const m = await import("@/components/panels/RightPanel");
@@ -195,33 +193,39 @@ export function App() {
         handler: () => {
           const tid = useWorkspaceStore.getState().activeThreadId;
           if (!tid) return;
-          const store = useTerminalStore.getState();
-          const panel = store.terminalPanelByThread[tid];
-          const isCurrentlyVisible = panel?.visible ?? false;
-          store.toggleTerminalPanel(tid);
-          // Auto-create a terminal when opening a panel that has none.
-          if (!isCurrentlyVisible && !terminalCreationInFlight.has(tid)) {
-            const terminals = store.terminals[tid];
+          const { getRightPanel, showRightPanel, setRightPanelTab, hideRightPanel } =
+            useDiffStore.getState();
+          const panel = getRightPanel(tid);
+          const isOpening = !panel.visible || panel.activeTab !== "terminal";
+          if (!panel.visible) {
+            showRightPanel(tid);
+            setRightPanelTab(tid, "terminal");
+          } else if (panel.activeTab !== "terminal") {
+            setRightPanelTab(tid, "terminal");
+          } else {
+            hideRightPanel(tid);
+          }
+          // Auto-create a terminal when opening the tab with none.
+          if (isOpening && !terminalCreationInFlight.has(tid)) {
+            const termStore = useTerminalStore.getState();
+            const terminals = termStore.terminals[tid];
             if (!terminals || terminals.length === 0) {
               terminalCreationInFlight.add(tid);
               try {
                 const transport = getTransport();
                 transport
                   .terminalCreate(tid)
-                  .then((ptyId) => {
+                  .then(({ ptyId, shell }) => {
                     terminalCreationInFlight.delete(tid);
-                    const currentStore = useTerminalStore.getState();
-                    const currentPanel = currentStore.terminalPanelByThread[tid];
+                    const rightPanel = useDiffStore.getState().getRightPanel(tid);
                     // Panel was closed while creation was in flight — dispose the orphaned PTY.
-                    if (!currentPanel?.visible) {
+                    if (!rightPanel.visible || rightPanel.activeTab !== "terminal") {
                       transport.terminalKill(ptyId).catch(() => {});
                       return;
                     }
-                    // Another terminal may have been created (e.g. user clicked "New terminal")
-                    // while the RPC was in flight — avoid duplicates.
-                    const currentTerminals = currentStore.terminals[tid];
+                    const currentTerminals = useTerminalStore.getState().terminals[tid];
                     if (!currentTerminals || currentTerminals.length === 0) {
-                      currentStore.addTerminal(tid, ptyId);
+                      useTerminalStore.getState().addTerminal(tid, ptyId, shell);
                     } else {
                       transport.terminalKill(ptyId).catch(() => {});
                     }
@@ -356,6 +360,7 @@ export function App() {
   }, [theme]);
 
   return (
+    <TerminalPoolSlotProvider>
     <TooltipProvider delay={400}>
       {/* Floating-panel layout: page chrome is a darker tone (--page) with small
           gaps between panels. Each panel renders as a rounded surface that
@@ -378,47 +383,42 @@ export function App() {
               />
             </div>
           )}
-          <div className="flex flex-1 flex-col gap-1.5 overflow-hidden">
-            <div className="flex flex-1 gap-1.5 overflow-hidden">
-              <main className="flex-1 overflow-hidden rounded-lg bg-background shadow-sm">
-                {settingsOpen ? (
-                  <Suspense fallback={null}>
-                    <LazySettingsView section={settingsSection} />
-                  </Suspense>
-                ) : showLanding ? (
-                  <div className="flex h-full flex-col">
-                    {/* When the sidebar is collapsed, show the reveal button so the
-                        user can re-expand it from the landing page. */}
-                    {sidebarCollapsed && (
-                      <div className="flex h-11 shrink-0 items-center px-2">
-                        <SidebarRevealButton />
-                      </div>
-                    )}
-                    <ProjectSelectorLanding />
-                  </div>
-                ) : (
-                  <ChatView />
-                )}
-              </main>
-              {!settingsOpen && !showLanding && (
+          <div className="flex flex-1 gap-1.5 overflow-hidden">
+            <main className="flex-1 overflow-hidden rounded-lg bg-background shadow-sm">
+              {settingsOpen ? (
                 <Suspense fallback={null}>
-                  <LazyRightPanel />
+                  <LazySettingsView section={settingsSection} />
                 </Suspense>
+              ) : showLanding ? (
+                <div className="flex h-full flex-col">
+                  {/* When the sidebar is collapsed, show the reveal button so the
+                      user can re-expand it from the landing page. */}
+                  {sidebarCollapsed && (
+                    <div className="flex h-11 shrink-0 items-center px-2">
+                      <SidebarRevealButton />
+                    </div>
+                  )}
+                  <ProjectSelectorLanding />
+                </div>
+              ) : (
+                <ChatView />
               )}
-            </div>
+            </main>
             {!settingsOpen && !showLanding && (
               <Suspense fallback={null}>
-                <LazyTerminalPanel />
+                <LazyRightPanel />
               </Suspense>
             )}
           </div>
         </div>
       </div>
+      <TerminalPoolHost />
       <Suspense fallback={null}>
         <LazyCommandPalette />
       </Suspense>
       <ShortcutHelpDialog />
       <ToastContainer />
     </TooltipProvider>
+    </TerminalPoolSlotProvider>
   );
 }

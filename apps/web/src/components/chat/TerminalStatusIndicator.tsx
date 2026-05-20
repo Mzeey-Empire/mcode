@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { TerminalSquare } from "lucide-react";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { executeCommand } from "@/lib/command-registry";
 
 const SLOW_SPIN_STYLE = { animationDuration: "2s" } as const;
 
@@ -12,8 +13,8 @@ export function TerminalStatusIndicator() {
     activeThreadId ? (s.terminals[activeThreadId]?.length ?? 0) : 0,
   );
   const togglePanel = useCallback(() => {
-    if (activeThreadId) useTerminalStore.getState().toggleTerminalPanel(activeThreadId);
-  }, [activeThreadId]);
+    executeCommand("terminal.toggle");
+  }, []);
 
   if (count <= 0) return null;
 
@@ -21,7 +22,7 @@ export function TerminalStatusIndicator() {
     // button, not div — this element is interactive; AgentStatusBar uses div because it is display-only
     <button
       type="button"
-      aria-label="Toggle terminal panel"
+      aria-label="Toggle terminal"
       onClick={togglePanel}
       className="flex cursor-pointer items-center gap-1.5 text-[11px] hover:opacity-80"
     >
