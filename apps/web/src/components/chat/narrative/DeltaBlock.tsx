@@ -107,7 +107,14 @@ function useTypewriter(target: string, isStreaming: boolean): string {
         return;
       }
       const behind = t.length - d.length;
-      const step = Math.max(3, Math.ceil(behind / 10));
+      // Step floor (6 chars/frame ≈ 360 chars/sec) keeps tiny deltas visibly
+      // typing instead of popping in within a single frame. Step ceiling
+      // (28 chars/frame ≈ 1680 chars/sec) prevents huge coalesced batches
+      // from skipping the typewriter entirely — even a 1000-char buffer
+      // takes ~600 ms to drain at the cap, which still reads as fast typing.
+      // The middle band (behind / 8) keeps the natural exponential-decay
+      // catch-up so mid-size gaps feel snappy but not jumpy.
+      const step = Math.max(6, Math.min(28, Math.ceil(behind / 8)));
       const next = t.slice(0, d.length + step);
       displayedRef.current = next;
       setDisplayed(next);
@@ -172,16 +179,15 @@ export function DeltaBlock({ text, isStreaming = true }: DeltaBlockProps) {
       return;
     }
 
+    // If the markdown DOM is momentarily empty (Suspense in flight, or a
+    // re-render between fallback and resolved children), keep the cursor at
+    // its last position rather than hiding it. Hiding on every empty frame
+    // produced visible flicker during fast streaming — the cursor would
+    // disappear for one paint then fade back in.
     const lastTextNode = findLastTextNode(root);
-    if (!lastTextNode) {
-      cursor.style.opacity = "0";
-      return;
-    }
+    if (!lastTextNode) return;
     const caretRect = getCaretRectAtEnd(lastTextNode);
-    if (!caretRect) {
-      cursor.style.opacity = "0";
-      return;
-    }
+    if (!caretRect) return;
 
     const rootRect = root.getBoundingClientRect();
     const x = caretRect.right - rootRect.left;
