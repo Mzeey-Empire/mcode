@@ -789,6 +789,11 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
           break;
         } catch (attemptErr) {
           const raw = attemptErr instanceof Error ? attemptErr.message : String(attemptErr);
+          // Do not retry after explicit Stop; cancel-like errors are expected and a
+          // second prompt would fight the user's abort.
+          if (entry.pendingUserStopAbort) {
+            throw attemptErr;
+          }
           if (
             attempt >= maxAttempts ||
             !cursorCfg.retryTransientFailuresOnce ||
