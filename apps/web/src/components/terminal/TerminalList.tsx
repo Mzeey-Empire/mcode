@@ -90,10 +90,7 @@ export const TerminalList = memo(function TerminalList({
   return (
     <div className="flex w-[148px] flex-shrink-0 flex-col border-r border-border">
       {/* Header: label + actions + collapse toggle */}
-      <div className="flex h-[34px] items-center gap-0.5 border-b border-border px-2.5">
-        <span className="mr-auto text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Shells
-        </span>
+      <div className="flex h-[34px] items-center justify-end gap-0.5 border-b border-border px-2.5">
         <Tooltip>
           <TooltipTrigger
             render={
