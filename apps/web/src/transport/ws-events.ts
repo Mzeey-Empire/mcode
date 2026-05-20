@@ -87,28 +87,26 @@ export function startPushListeners(): void {
   unsubs.push(
     pushEmitter.on("terminal.data", (data) => {
       const d = data as Record<string, unknown>;
-      if (typeof d["ptyId"] !== "string" || typeof d["seq"] !== "number") return;
+      if (typeof d["ptyId"] !== "string") return;
+      const ptyId = d["ptyId"];
+      const seq = typeof d["seq"] === "number" ? d["seq"] : 0;
 
       let detail: { ptyId: string; payload: Uint8Array; seq: number };
       if (d["payload"] instanceof Uint8Array) {
         const payload = d["payload"] as Uint8Array;
         if (payload.byteLength > MAX_PTY_PAYLOAD_BYTES) {
           console.warn(
-            `[ws-events] dropped oversized terminal.data payload (${payload.byteLength} bytes) for PTY ${d["ptyId"]}`,
+            `[ws-events] dropped oversized terminal.data payload (${payload.byteLength} bytes) for PTY ${ptyId}`,
           );
           return;
         }
-        detail = {
-          ptyId: d["ptyId"] as string,
-          seq: d["seq"] as number,
-          payload,
-        };
+        detail = { ptyId, seq, payload };
       } else if (typeof d["payload"] === "string" && d["encoding"] === "base64") {
         const encoded = d["payload"];
         const approxBytes = approxBase64DecodedBytes(encoded);
         if (approxBytes > MAX_PTY_PAYLOAD_BYTES) {
           console.warn(
-            `[ws-events] dropped oversized terminal.data payload (~${approxBytes} bytes) for PTY ${d["ptyId"]}`,
+            `[ws-events] dropped oversized terminal.data payload (~${approxBytes} bytes) for PTY ${ptyId}`,
           );
           return;
         }
@@ -122,32 +120,32 @@ export function startPushListeners(): void {
         }
         const bytes = new Uint8Array(bin.length);
         for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        detail = {
-          ptyId: d["ptyId"] as string,
-          seq: d["seq"] as number,
-          payload: bytes,
-        };
+        detail = { ptyId, seq, payload: bytes };
       } else if (Array.isArray(d["payload"])) {
-        // Legacy IPC path: number[] from Array.from(bytes).
-        detail = {
-          ptyId: d["ptyId"] as string,
-          seq: d["seq"] as number,
-          payload: new Uint8Array(d["payload"] as number[]),
-        };
+        const arr = d["payload"] as number[];
+        if (arr.length > MAX_PTY_PAYLOAD_BYTES) {
+          console.warn(
+            `[ws-events] dropped oversized terminal.data payload (${arr.length} bytes) for PTY ${ptyId}`,
+          );
+          return;
+        }
+        detail = { ptyId, seq, payload: new Uint8Array(arr) };
       } else if (d["payload"] && typeof d["payload"] === "object") {
-        // Very old IPC fallback: indexed object {"0":72,"1":101,...}.
-        detail = {
-          ptyId: d["ptyId"] as string,
-          seq: d["seq"] as number,
-          payload: new Uint8Array(Object.values(d["payload"] as Record<string, number>)),
-        };
+        const values = Object.values(d["payload"] as Record<string, number>);
+        if (values.length > MAX_PTY_PAYLOAD_BYTES) {
+          console.warn(
+            `[ws-events] dropped oversized terminal.data payload (${values.length} bytes) for PTY ${ptyId}`,
+          );
+          return;
+        }
+        detail = { ptyId, seq, payload: new Uint8Array(values) };
       } else {
         // Legacy JSON fallback: { ptyId, data: string, seq? }.
         if (typeof d["data"] !== "string") return;
         detail = {
-          ptyId: d["ptyId"] as string,
+          ptyId,
           payload: _legacyEncoder.encode(d["data"]),
-          seq: (d["seq"] as number | undefined) ?? 0,
+          seq,
         };
       }
       if (detail.payload.byteLength > MAX_PTY_PAYLOAD_BYTES) {

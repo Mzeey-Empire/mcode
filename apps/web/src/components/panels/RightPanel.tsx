@@ -183,7 +183,10 @@ export function RightPanel() {
     };
   }, []);
 
-  if (!panelVisible || !activeThreadId) return null;
+  // Keep the panel (and terminal pool) mounted when hidden so xterm instances
+  // and scroll anchors survive workspace thread switches. Per-thread visibility
+  // uses Tailwind `hidden` so layout width stays zero.
+  if (!activeThreadId) return null;
 
   // Overlay-mode width: cap to 90vw so the chat is still partially visible
   // behind the backdrop and the panel doesn't dominate small screens.
@@ -216,10 +219,12 @@ export function RightPanel() {
         }
         className={cn(
           "relative flex h-full min-h-0 min-w-0 flex-col bg-background focus:outline-none",
+          !panelVisible && "hidden",
           isOverlay
             ? "fixed inset-y-0 right-0 z-50 shadow-sm animate-fade-up-in"
             : "rounded-lg shadow-sm overflow-hidden",
         )}
+        aria-hidden={!panelVisible}
       >
       {/* Drag handle (left edge) — double-click snaps between default and wide.
           Kept visible in overlay mode too, so the user can shrink the panel
@@ -323,9 +328,10 @@ export function RightPanel() {
         </div>
       </div>
 
-      {/* Tab content — DiffPanel stays mounted (hidden) so turn expand
-          state and loaded diffs survive tab switches. */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      {/* Tab content — DiffPanel and terminal pool stay mounted (stacked) so
+          turn expand state, loaded diffs, and xterm scroll anchors survive tab
+          and workspace thread switches. */}
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         {activeTab === "tasks" && (
           <>
             <TaskPanelHeader tasks={tasks ?? []} />
@@ -338,13 +344,15 @@ export function RightPanel() {
         {activeTab === "preview" && (
           <PreviewPanel threadId={activeThreadId} workspaceId={activeWorkspaceId} />
         )}
-        {/* Terminal: display-toggled (not conditional) to preserve xterm
-            instances across tab switches within the right panel. */}
         <div
-          className="flex min-h-0 flex-1 flex-col overflow-hidden"
-          style={{ display: activeTab === "terminal" ? "flex" : "none" }}
+          className={cn(
+            "absolute inset-0 flex min-h-0 flex-col overflow-hidden",
+            activeTab !== "terminal" && "pointer-events-none z-0 opacity-0",
+            activeTab === "terminal" && "z-10",
+          )}
+          aria-hidden={activeTab !== "terminal"}
         >
-          <TerminalTabContent threadId={activeThreadId} visible={activeTab === "terminal"} />
+          <TerminalTabContent threadId={activeThreadId} />
         </div>
       </div>
       </div>

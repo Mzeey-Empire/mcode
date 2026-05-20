@@ -31,7 +31,7 @@ const _require = createRequire(import.meta.url);
  */
 function shellBasename(shellPath: string): string {
   const base = shellPath.split(/[\\/]/).pop() ?? shellPath;
-  return base.replace(/\.exe$/i, "");
+  return base.replace(/\.exe$/i, "").slice(0, 64);
 }
 
 /**

@@ -24,6 +24,8 @@ import { useIdleReclamation } from "@/hooks/useIdleReclamation";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ToastContainer } from "@/components/Toast";
 import type { SettingsSection } from "@/components/settings/settings-nav";
+import { TerminalPoolHost } from "@/components/terminal/TerminalPoolHost";
+import { TerminalPoolSlotProvider } from "@/components/terminal/TerminalPoolSlotContext";
 
 const LazySettingsView = lazy(async () => {
   const m = await import("@/components/settings/SettingsView");
@@ -358,6 +360,7 @@ export function App() {
   }, [theme]);
 
   return (
+    <TerminalPoolSlotProvider>
     <TooltipProvider delay={400}>
       {/* Floating-panel layout: page chrome is a darker tone (--page) with small
           gaps between panels. Each panel renders as a rounded surface that
@@ -409,13 +412,13 @@ export function App() {
           </div>
         </div>
       </div>
-      {/* All terminal xterm instances are now rendered persistently inside
-          TerminalTabContent's pool — no separate dormant container needed. */}
+      {!settingsOpen && !showLanding && <TerminalPoolHost />}
       <Suspense fallback={null}>
         <LazyCommandPalette />
       </Suspense>
       <ShortcutHelpDialog />
       <ToastContainer />
     </TooltipProvider>
+    </TerminalPoolSlotProvider>
   );
 }
