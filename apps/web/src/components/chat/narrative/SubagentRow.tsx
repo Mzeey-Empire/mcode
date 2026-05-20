@@ -7,9 +7,11 @@ import {
   TOOL_LABELS,
   DEFAULT_ICON,
   buildToolSummaryText,
+  resolveToolName,
 } from "../tool-renderers/constants";
 import type { ToolCall, HookExecution } from "@/transport/types";
 import { extractToolInputDetail } from "./tool-detail";
+import { NARRATIVE_TOOL_ROW, narrativeToolDetailClass } from "./narrative-layout";
 
 interface SubagentRowProps {
   toolCall: ToolCall;
@@ -84,14 +86,14 @@ export function SubagentRow({ toolCall, children, hooks, allToolCalls, depth = 0
   const visibleChildren = showAll ? children : children.slice(0, CHILD_CAP);
 
   return (
-    <div>
+    <div className="min-w-0 max-w-full">
       <button
         type="button"
         onClick={() => {
           userToggledRef.current = true;
           setOpen((o) => !o);
         }}
-        className="flex w-full items-center gap-1.5 px-2 py-1 text-left rounded-md hover:bg-muted/30 transition-colors duration-100 text-[0.8125rem]"
+        className={`${NARRATIVE_TOOL_ROW} w-full px-2 py-1 text-left rounded-md hover:bg-muted/30 transition-colors duration-100 text-[0.8125rem]`}
         aria-expanded={open}
       >
         <StackedLayersIcon
@@ -128,12 +130,12 @@ export function SubagentRow({ toolCall, children, hooks, allToolCalls, depth = 0
             tracking as one unit. The rail aligns with the parent's stacked-
             layers icon (centred at ~x=15), so it reads as "these calls belong
             to this sub-agent" rather than a generic indent. */}
-        <div className="relative pl-7 mt-0.5 pb-1">
+        <div className="relative min-w-0 max-w-full pl-7 mt-0.5 pb-1">
           <div
             className="absolute left-[14px] top-1 bottom-2 w-px bg-border/50 pointer-events-none"
             aria-hidden
           />
-          <ul className="space-y-px max-h-64 overflow-y-auto">
+          <ul className="min-w-0 max-w-full space-y-px max-h-64 overflow-y-auto overflow-x-hidden">
           {visibleChildren.map((tc, idx) => {
             const isActive = idx === lastIncompleteIdx;
 
@@ -152,15 +154,18 @@ export function SubagentRow({ toolCall, children, hooks, allToolCalls, depth = 0
               );
             }
 
-            const Icon = TOOL_ICONS[tc.toolName] ?? DEFAULT_ICON;
-            const label = TOOL_LABELS[tc.toolName] ?? tc.toolName;
+            const canonicalName = resolveToolName(tc.toolName);
+            const Icon = TOOL_ICONS[canonicalName] ?? DEFAULT_ICON;
+            const label = TOOL_LABELS[canonicalName] ?? tc.toolName;
             const detail = extractToolInputDetail(tc);
 
             return (
-              <li key={tc.id} className="flex items-center gap-1.5 py-px text-[0.8125rem]">
+              <li key={tc.id} className={`${NARRATIVE_TOOL_ROW} py-px text-[0.8125rem]`}>
                 <Icon className={`w-3 h-3 shrink-0 ${isActive ? "text-primary" : "text-muted-foreground/50"}`} />
                 <span className={`shrink-0 ${isActive ? "text-foreground" : "text-muted-foreground/70"}`}>{label}</span>
-                <span className="font-mono text-[0.6875rem] text-muted-foreground/50 truncate flex-1 min-w-0">{detail}</span>
+                <span className={narrativeToolDetailClass("sm")} title={detail}>
+                  {detail}
+                </span>
                 {isActive && (
                   <span className="size-1.5 shrink-0 rounded-full bg-primary animate-pulse" />
                 )}
