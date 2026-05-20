@@ -1740,10 +1740,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           if (tc.isComplete) return tc;
           if (tc.toolName === "Agent") {
             const done = isAgentDone(tc.id);
-            if (done) console.debug("[narrative:markComplete] Agent done", { id: tc.id, childCount: children(tc.id).length });
             return done ? { ...tc, isComplete: true } : tc;
           }
-          console.debug("[narrative:markComplete]", { id: tc.id, toolName: tc.toolName, parentToolCallId: tc.parentToolCallId });
           return { ...tc, isComplete: true };
         });
         return {
@@ -1840,6 +1838,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           timestamp: new Date().toISOString(),
           sequence: get().messages.length + 1,
           attachments: null,
+          // Server injects the model after persisting; defaults to null when
+          // unknown (legacy clients, non-Claude providers without model info).
+          model: (params.model as string | null | undefined) ?? null,
         };
         set((state) => {
           // Clear streaming text so turnComplete won't duplicate this message.
@@ -1942,7 +1943,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       const toolCallId = (params.toolCallId as string) || "";
       const existingCalls = get().toolCallsByThread[threadId] ?? [];
       if (toolCallId && existingCalls.some((tc) => tc.id === toolCallId)) {
-        console.debug("[narrative:toolUse] DEDUP skip", { toolCallId });
         return;
       }
 
@@ -1989,7 +1989,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         parentToolCallId: parentToolCallId || undefined,
         startedAt: Date.now(),
       };
-      console.debug("[narrative:toolUse]", { threadId, toolName, toolCallId, parentToolCallId, isAgent: toolName === "Agent" });
       set((state) => {
         // Freeze the active thought segment so it has a definite end time.
         const segments = state.thoughtSegmentsByThread[threadId] ?? [];
@@ -2005,7 +2004,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
                 ],
               }
             : state.thoughtSegmentsByThread;
-        console.debug("[narrative:toolUse] segments", { froze, segCount: segments.length, lastEndedAt: last?.endedAt });
         return {
           toolCallsByThread: {
             ...state.toolCallsByThread,
@@ -2021,7 +2019,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       const toolCallId = (params.toolCallId as string) || "";
       const output = (params.output as string) || "";
       const isError = (params.isError as boolean) || false;
-      console.debug("[narrative:toolResult]", { threadId, toolCallId, isError, outputLen: output.length });
       set((state) => {
         const calls = state.toolCallsByThread[threadId] ?? [];
         // Try matching by ID first; fall back to the first incomplete tool call
@@ -2071,6 +2068,49 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         markPriorToolCallsComplete();
       }
       scheduleTextDeltaFlush();
+      return;
+    }
+
+    if (method === "session.assistantMessageBoundary") {
+      // Authoritative classification of the text deltas just streamed for this
+      // assistant message, derived from the Anthropic `stop_reason`.
+      //
+      // - isFinalResponse=true (end_turn, stop_sequence, max_tokens, refusal):
+      //   the streamed text was the assistant's final response, not a thought.
+      //   Drop the open thought segment so it does not render alongside the
+      //   forthcoming MessageBubble. The streaming buffer already holds the
+      //   text and will be cleared by `session.message`.
+      // - isFinalResponse=false (tool_use, pause_turn, anything else):
+      //   the streamed text was preamble. Close the open thought so the next
+      //   delta starts a fresh segment.
+      const isFinalResponse = params.isFinalResponse === true;
+      // Flush any pending text delta chunks first so the open thought we
+      // operate on reflects every delta that arrived for this message.
+      flushPendingTextDeltas();
+      set((state) => {
+        const segments = state.thoughtSegmentsByThread[threadId] ?? [];
+        const last = segments[segments.length - 1];
+        if (!last || last.endedAt !== undefined) {
+          return state;
+        }
+        if (isFinalResponse) {
+          return {
+            thoughtSegmentsByThread: {
+              ...state.thoughtSegmentsByThread,
+              [threadId]: segments.slice(0, -1),
+            },
+          };
+        }
+        return {
+          thoughtSegmentsByThread: {
+            ...state.thoughtSegmentsByThread,
+            [threadId]: [
+              ...segments.slice(0, -1),
+              { ...last, endedAt: Date.now() },
+            ],
+          },
+        };
+      });
       return;
     }
 

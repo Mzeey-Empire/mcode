@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo } from "react";
 import type { ToolCall, HookExecution } from "@/transport/types";
 import type { ThoughtSegment, NarrativeItem } from "./types";
 import { buildNarrativeItems } from "./build-narrative";
@@ -8,8 +8,6 @@ import { HookRow } from "./HookRow";
 import { SubagentRow } from "./SubagentRow";
 import { ActiveToolRow } from "./ActiveToolRow";
 import { DeltaBlock } from "./DeltaBlock";
-import { NarrativeIndicator } from "./NarrativeIndicator";
-import { TurnFooter } from "./TurnFooter";
 
 /** Props for the NarrativeFlow container component. */
 export interface NarrativeFlowProps {
@@ -33,43 +31,19 @@ export interface NarrativeFlowProps {
 }
 
 /**
- * Returns the Tailwind `before:` dot color classes for a given narrative item.
- * Hook items use a smaller dot; blocked hooks use a destructive color.
- */
-function dotClassForItem(item: NarrativeItem): string {
-  // One muted color for completed items. Active items get primary + pulse.
-  // Errors get diff-remove. Hooks get smaller dots.
-  switch (item.type) {
-    case "thought":
-      return item.isActive ? "before:bg-primary before:animate-pulse" : "before:bg-muted-foreground/30";
-
-    case "hook":
-      return item.hook.didBlock
-        ? "before:w-[3px] before:h-[3px] before:top-[9px] before:bg-[var(--diff-remove)]"
-        : "before:w-[3px] before:h-[3px] before:top-[9px] before:bg-muted-foreground/25";
-
-    case "subagent":
-      if (item.toolCall.isError) return "before:bg-[var(--diff-remove)]";
-      return item.toolCall.isComplete ? "before:bg-muted-foreground/30" : "before:bg-primary before:animate-pulse";
-
-    case "active-tool":
-      return "before:bg-primary before:animate-pulse";
-
-    default:
-      return "before:bg-muted-foreground/30";
-  }
-}
-
-/**
  * Returns the top-margin class for a given narrative item.
- * The margin separates items visually on the timeline.
+ *
+ * Text rows get a comfortable gap so the response breathes apart from the
+ * preceding action row. Tools, hooks, and sub-agents stack tightly into a
+ * single "actions molecule" — they read as one group of agent activity
+ * rather than independent timeline rows.
  */
 function marginClassForItem(item: NarrativeItem, index: number): string {
+  if (index === 0) return "mt-0";
   switch (item.type) {
     case "thought":
-      return index === 0 ? "mt-0" : "mt-1.5";
+      return "mt-3";
     case "tool-group":
-      return "mt-0";
     case "hook":
       return "mt-0";
     case "subagent":
@@ -156,10 +130,9 @@ export function NarrativeFlow({
   thoughtSegments,
   streamingText,
   isAgentRunning,
-  startTime,
   committedAssistantBody,
 }: NarrativeFlowProps) {
-  const { items, counts } = useMemo(
+  const { items } = useMemo(
     () =>
       buildNarrativeItems({
         toolCalls,
@@ -177,27 +150,6 @@ export function NarrativeFlow({
       isAgentRunning,
       committedAssistantBody,
     ],
-  );
-
-  // stepCount: top-level tool calls (no parentToolCallId) + thought segments.
-  const stepCount = useMemo(() => {
-    const topLevelCount = toolCalls.filter((tc) => tc.parentToolCallId == null).length;
-    return topLevelCount + thoughtSegments.length;
-  }, [toolCalls, thoughtSegments]);
-
-  // subagentCount: incomplete Agent tool calls.
-  const subagentCount = useMemo(
-    () =>
-      toolCalls.filter(
-        (tc) => tc.toolName === "Agent" && !tc.isComplete && tc.parentToolCallId == null,
-      ).length,
-    [toolCalls],
-  );
-
-  // Active tool calls passed to the indicator for phase label derivation.
-  const activeToolCalls = useMemo(
-    () => toolCalls.filter((tc) => !tc.isComplete && tc.parentToolCallId == null),
-    [toolCalls],
   );
 
   /**
@@ -236,103 +188,56 @@ export function NarrativeFlow({
     return bestId;
   }, [items]);
 
-  /**
-   * Wall-clock moment when this turn finished, snapshotted once via an
-   * effect so the `TurnFooter` shows a stable duration. Reset to `null`
-   * if the agent starts again (e.g. follow-up turn) so the next end
-   * timestamp is captured fresh.
-   */
-  const [completedAt, setCompletedAt] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (isAgentRunning) {
-      setCompletedAt(null);
-    } else if (completedAt == null) {
-      setCompletedAt(Date.now());
-    }
-  }, [isAgentRunning, completedAt]);
-
-  /**
-   * Total elapsed time for this turn — `Date.now()` at end minus `startTime`.
-   * Returns `null` while running, before the snapshot is taken, or when
-   * `startTime` is unknown.
-   */
-  const completedDurationMs = useMemo<number | null>(() => {
-    if (isAgentRunning || startTime == null || completedAt == null) return null;
-    return Math.max(0, completedAt - startTime);
-  }, [isAgentRunning, startTime, completedAt]);
-
-  // Split items: timeline (thoughts, tools, etc.) renders inside the
-  // padded/lined column. Delta (final streaming response) renders outside
-  // as a standalone message-style block so it matches the eventual
-  // MessageBubble that replaces it on turnComplete.
+  // Split items: timeline rows (tools, sub-agents, hooks, in-line text) all
+  // render in chronological order. The delta (final streaming response) lives
+  // outside the timeline so it can transition seamlessly into the persisted
+  // MessageBubble on turnComplete.
   const timelineItems = items.filter((it) => it.type !== "delta");
-  const deltaItem = items.find((it) => it.type === "delta") as Extract<NarrativeItem, { type: "delta" }> | undefined;
 
   return (
     <div className="relative">
-      {/* Timeline flow - only renders when there are items to show */}
+      {/* Timeline — no vertical rail, no row dots. Each row component carries
+          its own visual marker (chevron, icon, badge), and consecutive action
+          rows (tools, hooks, sub-agents) stack tightly as one "actions
+          molecule" while text rows breathe with a larger top margin. */}
       {timelineItems.length > 0 && (
-        <div className="relative flex flex-col pl-5">
-          {/* Vertical spine centered in the gutter: line and row dots share x = 10px. */}
-          <div
-            className="absolute left-[10px] top-3 bottom-3 w-px -translate-x-1/2 bg-border pointer-events-none"
-            aria-hidden
-          />
-          {timelineItems.map((item, i) => {
-            const margin = marginClassForItem(item, i);
-            const dot = dotClassForItem(item);
-
-            return (
-              <div
-                key={keyForItem(item, i)}
-                className={[
-                  "relative",
-                  margin,
-                  // Dot centered on spine via left offset + translate.
-                  "before:content-[''] before:absolute before:w-1 before:h-1 before:rounded-full before:z-[1]",
-                  "before:left-[-10px] before:top-[11px] before:-translate-x-1/2",
-                  dot,
-                  // Halo masks line under semi-transparent fills (see index.css).
-                  "narrative-timeline-row",
-                  "narrative-row-enter",
-                ].join(" ")}
-              >
-                {renderItem(item, mostActiveSubagentId, toolCalls)}
-              </div>
-            );
-          })}
+        <div className="flex flex-col">
+          {timelineItems.map((item, i) => (
+            <div
+              key={keyForItem(item, i)}
+              className={[
+                marginClassForItem(item, i),
+                "narrative-row-enter",
+              ].join(" ")}
+            >
+              {renderItem(item, mostActiveSubagentId, toolCalls)}
+            </div>
+          ))}
         </div>
       )}
 
-      {/* While running: show the live indicator bar. */}
-      {isAgentRunning && (
-        <NarrativeIndicator
-          stepCount={stepCount}
-          subagentCount={subagentCount}
-          activeToolCalls={activeToolCalls}
-          startTime={startTime}
-        />
-      )}
+      {/* The live "X steps · N subagents · phase…" indicator is rendered as
+          its own virtual-item slot (`narrative-indicator`) BELOW the streaming
+          response in MessageList. Keeping it out of this container means the
+          writing animation reads as the primary surface and the progress meta
+          sits underneath it instead of above it. */}
 
-      {/* After completion: show the audit-trail footer. Hidden when running,
-          when there's no timeline content, or when there's a delta still
-          streaming (the delta means we haven't actually transitioned to a
-          completed-turn state yet). */}
-      {!isAgentRunning && timelineItems.length > 0 && !deltaItem && (
-        <TurnFooter counts={counts} durationMs={completedDurationMs} />
-      )}
+      {/* The in-flight response text lives in its own virtual-item slot
+          (`streaming-response`) rendered as a sibling AFTER this narrative-flow
+          in MessageList. That keeps the streaming text and the persisted
+          MessageBubble at the SAME virtual-list position so the swap on
+          `session.message` is a content replacement rather than a position
+          jump. The `delta` items produced by `buildNarrativeItems` are kept on
+          the items array for compatibility with `counts` and tests but are
+          intentionally not rendered here. */}
 
-      {/* Final streaming response - rendered as a standalone message-style
-          block so the visual transition to the persisted MessageBubble at
-          turnComplete is seamless. The delta-row-enter animation gives a
-          gentle fade-up entry the first time this block mounts, matching
-          the prose weight rather than the thought-row styling. */}
-      {deltaItem && (
-        <div className="mt-2 delta-row-enter">
-          <DeltaBlock text={deltaItem.text} />
-        </div>
-      )}
+      {/* The turn footer is owned exclusively by the `persisted-turn-footer`
+          virtual-item slot, which is positioned AFTER the `MessageBubble` so
+          the summary closes the turn rather than separating its actions from
+          its answer. Rendering a TurnFooter inside this container would place
+          it ABOVE the message body — which is exactly the bug we are
+          fixing — because this container itself sits before the bubble in
+          the virtual-list order. */}
     </div>
   );
 }

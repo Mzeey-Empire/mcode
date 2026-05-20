@@ -33,6 +33,7 @@ export const AgentEventType = {
   HookStarted: "hookStarted",
   HookProgress: "hookProgress",
   HookCompleted: "hookCompleted",
+  AssistantMessageBoundary: "assistantMessageBoundary",
 } as const;
 
 /** Union of all valid `AgentEvent` type discriminants. */
@@ -54,6 +55,13 @@ export const AgentEventSchema = lazySchema(() =>
       tokens: z.number().nullable(),
       /** Server-assigned message ID, injected after DB persistence. Used by the client for stable branching. */
       messageId: z.string().optional(),
+      /**
+       * Model identifier recorded with the message at persistence time
+       * (e.g. "claude-opus-4-7"). Injected by agent-service after the row is
+       * created so the client can render the model in the message footer
+       * without having to refresh and re-fetch.
+       */
+      model: z.string().nullable().optional(),
     }),
     z.object({
       type: z.literal(AgentEventType.ToolUse),
@@ -268,6 +276,28 @@ export const AgentEventSchema = lazySchema(() =>
        * accumulating duplicate entries in `narrativeByMessage[id].hooks`.
        */
       persistedHookId: z.string().optional(),
+    }),
+    z.object({
+      /**
+       * Emitted at the end of each assistant SDK message, derived from the
+       * Anthropic message-level `stop_reason`. Carries the authoritative
+       * classification for the text deltas streamed during that message:
+       *
+       * - `isFinalResponse: true` when `stop_reason` ∈
+       *   {`end_turn`, `stop_sequence`, `max_tokens`, `refusal`} — the deltas
+       *   were the user-facing final response. The consumer should retract any
+       *   open thought segment whose content really belonged to the response.
+       * - `isFinalResponse: false` when `stop_reason` is `tool_use` (or any
+       *   other non-finalizing value) — the deltas were preamble. The consumer
+       *   should close the open thought segment so it persists as a thought.
+       *
+       * This is the authoritative classification signal, replacing the legacy
+       * `hasFiredToolThisTurn && pendingToolUses==0` heuristic for tool-free
+       * turns and other cases the heuristic could not lookahead for.
+       */
+      type: z.literal(AgentEventType.AssistantMessageBoundary),
+      threadId: z.string(),
+      isFinalResponse: z.boolean(),
     }),
   ]),
 );

@@ -43,10 +43,44 @@ threadStore.ts appends to toolCallsByThread[threadId]
 buildNarrativeItems groups by parentToolCallId → SubagentRow children
     │
     ▼
-NarrativeFlow renders timeline + TurnFooter
+virtual-items.ts splits live turn into three slots:
+  narrative-flow (timeline) → streaming-response (typing bubble slot)
+  → narrative-indicator (step/subagent meta below the response)
+    │
+    ▼
+NarrativeFlow + StreamingResponseRow + NarrativeIndicator render live turn
+    │
+    ▼
+PersistedTurnFooter appears after narrative.list RPC resolves
 ```
 
 Every step has at least one trap. Read on.
+
+---
+
+## Thought vs final response classification
+
+Multiple layers classify streamed text. Use this precedence when debugging
+misclassified preamble or duplicate assistant bodies:
+
+1. **`AssistantMessageBoundary`** (authoritative) — emitted from
+   `claude-provider.ts` when an SDK `assistant` message carries text and a
+   `stop_reason`. `{end_turn, stop_sequence, max_tokens}` → final response;
+   everything else (including `tool_use`) → preamble/thought.
+2. **`TextDelta.isFinalResponse`** (stream hint) — best-effort flag set on
+   `content_block_delta` when all tools have resolved and at least one tool
+   fired this turn. May be absent on tool-free turns; boundary event wins.
+3. **Client segment routing** — `threadStore` retracts or closes the open
+   thought segment on `session.assistantMessageBoundary`. Final response text
+   stays in `streamingByThread` and renders via the `streaming-response`
+   virtual slot, not `thoughtSegmentsByThread`.
+4. **Persist suffix match** — `agent-service.ts` tags the last matching
+   thought row `is_final_response` before DB insert as a safety net for
+   older rows or reconnect gaps.
+
+**Don't break this:** dropping the boundary handler or counting thought
+segments in `NarrativeIndicator.stepCount` will diverge live counts from
+`PersistedTurnFooter` (Trap 6).
 
 ---
 
@@ -305,4 +339,8 @@ ship a bug:
 4. No React-rendered DOM node is moved via `appendChild` / `insertBefore` /
    etc.
 5. Wall-clock snapshots use `useState` + `useEffect`, not `useMemo`.
-6. `NarrativeCounts.steps` is the count of timeline rows — Agents included.
+6. `NarrativeCounts.steps` is the count of top-level tool calls only — not
+   thought segments. Live `narrative-indicator` must use the same definition.
+7. Final response text renders in the `streaming-response` virtual slot;
+   preamble text renders as thought rows inside `narrative-flow`. The
+   `AssistantMessageBoundary` event is the authoritative split.

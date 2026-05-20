@@ -5,6 +5,22 @@ const LazyMarkdownContent = lazy(() => import("../MarkdownContent"));
 interface DeltaBlockProps {
   /** The streamed response text to display. */
   text: string;
+  /**
+   * When true, the typewriter reveals characters one-at-a-time. When false,
+   * the text renders immediately at its full length and no animation runs.
+   * Drives only the *reveal animation*, not the cursor caret — see
+   * `showCursor` for that. Defaults to true (legacy delta-row usage).
+   */
+  isStreaming?: boolean;
+  /**
+   * When true, the typing caret blinks at the end of the rendered text while
+   * `isStreaming` is also true. Set false for segments that are *animating
+   * into view* but are not actively receiving more deltas — e.g. a just-closed
+   * preamble thought re-typewriting into a `ThoughtBlock` after `tool_use`
+   * fires. Without this gate, every closed thought would park a blinking
+   * cursor at its end. Defaults to true.
+   */
+  showCursor?: boolean;
 }
 
 /**
@@ -48,20 +64,59 @@ function getCaretRectAtEnd(node: Text): DOMRect | null {
 }
 
 /**
+ * Maximum initial `target` length we still consider a "fresh first delta
+ * batch" rather than a remount into an in-flight stream. Typical first
+ * flushes are 10-50 chars; thread-switch remounts bring back hundreds or
+ * thousands. Above this threshold, the typewriter snaps to a point near the
+ * end of `target` on its first effect so the user sees the typing edge
+ * instead of a multi-hundred-char catch-up dump.
+ */
+const REMOUNT_TARGET_THRESHOLD = 96;
+
+/**
+ * On a detected remount, leave this many characters of trailing text
+ * un-typed so a short typewriter reveal plays at the leading edge — the user
+ * still perceives the response as "live" without watching the whole buffer
+ * fast-forward.
+ */
+const REMOUNT_TAIL_CHARS = 24;
+
+/**
  * Reveals `target` character-by-character at a steady rate, with adaptive
  * catch-up when the target races ahead of the displayed text.
  *
- * Idle rate: ~3 chars per animation frame (≈180 chars/sec at 60fps).
- * Catch-up: `step = max(3, ceil(behind / 10))` — each frame closes 1/10 of
- * the gap, so a 1000-char buffer drains in well under a second.
+ * - When `isStreaming` is true on first mount with a SHORT initial target,
+ *   `displayed` starts empty so the rAF loop animates from "" up to the
+ *   current target (e.g. the first batched flush of text deltas) — producing
+ *   a visible typewriter reveal instead of the full text popping in.
+ * - When `isStreaming` is true on first mount with a LONG initial target,
+ *   we assume a remount into an in-flight stream (e.g. thread-switch back
+ *   during streaming). `displayed` starts at `target.length - REMOUNT_TAIL_CHARS`
+ *   so only the last few chars typewriter in, avoiding the multi-hundred-char
+ *   "dump" the user would otherwise see.
+ * - When `isStreaming` is false, `displayed` starts at `target` and the loop
+ *   never runs — completed segments render their full text immediately on
+ *   mount so persisted history doesn't re-typewriter when scrolled into view.
+ *
+ * Idle rate: ~6 chars per animation frame (≈360 chars/sec at 60fps).
+ * Catch-up: `step = clamp(6, ceil(behind / 8), 28)` — each frame closes
+ * roughly 1/8 of the gap, capped so even huge coalesced batches still read
+ * as fast typing rather than a single-frame paste.
  *
  * When `target` shrinks (e.g., the parent reset for a new turn), the
  * displayed value resets immediately and the animation cancels.
  */
-function useTypewriter(target: string): string {
-  const [displayed, setDisplayed] = useState(target);
+function useTypewriter(target: string, isStreaming: boolean): string {
+  // Lazy useState initializer runs exactly once at mount — the right place
+  // to evaluate the remount heuristic, since later renders see `target`
+  // grow but should not retro-actively change the starting point.
+  const [displayed, setDisplayed] = useState<string>(() => {
+    if (!isStreaming) return target;
+    if (target.length <= REMOUNT_TARGET_THRESHOLD) return "";
+    return target.slice(0, Math.max(0, target.length - REMOUNT_TAIL_CHARS));
+  });
   const targetRef = useRef(target);
-  const displayedRef = useRef(target);
+  const displayedRef = useRef(displayed);
   const rafRef = useRef<number | null>(null);
 
   // Mirror current target / displayed into refs so the rAF tick (which
@@ -92,7 +147,14 @@ function useTypewriter(target: string): string {
         return;
       }
       const behind = t.length - d.length;
-      const step = Math.max(3, Math.ceil(behind / 10));
+      // Step floor (6 chars/frame ≈ 360 chars/sec) keeps tiny deltas visibly
+      // typing instead of popping in within a single frame. Step ceiling
+      // (28 chars/frame ≈ 1680 chars/sec) prevents huge coalesced batches
+      // from skipping the typewriter entirely — even a 1000-char buffer
+      // takes ~600 ms to drain at the cap, which still reads as fast typing.
+      // The middle band (behind / 8) keeps the natural exponential-decay
+      // catch-up so mid-size gaps feel snappy but not jumpy.
+      const step = Math.max(6, Math.min(28, Math.ceil(behind / 8)));
       const next = t.slice(0, d.length + step);
       displayedRef.current = next;
       setDisplayed(next);
@@ -100,6 +162,18 @@ function useTypewriter(target: string): string {
     };
     rafRef.current = requestAnimationFrame(tick);
   }, [target]);
+
+  // When the segment completes mid-animation, snap to target so the cursor
+  // disappears against the full text rather than against a half-typed line.
+  useEffect(() => {
+    if (!isStreaming && displayedRef.current !== target) {
+      if (rafRef.current != null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      setDisplayed(target);
+    }
+  }, [isStreaming, target]);
 
   // Cancel any in-flight frame on unmount.
   useEffect(() => () => {
@@ -126,28 +200,32 @@ function useTypewriter(target: string): string {
  * stays a permanent child of the root <div> (React-owned, never re-parented)
  * to avoid corrupting React's fiber tree.
  */
-export function DeltaBlock({ text }: DeltaBlockProps) {
-  const displayed = useTypewriter(text);
+export function DeltaBlock({ text, isStreaming = true, showCursor = true }: DeltaBlockProps) {
+  const displayed = useTypewriter(text, isStreaming);
   const rootRef = useRef<HTMLDivElement>(null);
   const cursorRef = useRef<HTMLSpanElement>(null);
   /** Tracks whether the first-paint entry flight animation has already played. */
   const hasFlownInRef = useRef<boolean>(false);
+  // The cursor is rendered only when BOTH actively receiving deltas (the
+  // typewriter reveal) AND `showCursor` is true. A just-closed thought that
+  // animates into view still uses `isStreaming` for the typewriter, but turns
+  // `showCursor` off so the caret doesn't park at the end of a finished block.
+  const renderCursor = isStreaming && showCursor;
 
   useLayoutEffect(() => {
     const root = rootRef.current;
     const cursor = cursorRef.current;
     if (!root || !cursor) return;
 
+    // If the markdown DOM is momentarily empty (Suspense in flight, or a
+    // re-render between fallback and resolved children), keep the cursor at
+    // its last position rather than hiding it. Hiding on every empty frame
+    // produced visible flicker during fast streaming — the cursor would
+    // disappear for one paint then fade back in.
     const lastTextNode = findLastTextNode(root);
-    if (!lastTextNode) {
-      cursor.style.opacity = "0";
-      return;
-    }
+    if (!lastTextNode) return;
     const caretRect = getCaretRectAtEnd(lastTextNode);
-    if (!caretRect) {
-      cursor.style.opacity = "0";
-      return;
-    }
+    if (!caretRect) return;
 
     const rootRect = root.getBoundingClientRect();
     const x = caretRect.right - rootRect.left;
@@ -191,8 +269,15 @@ export function DeltaBlock({ text }: DeltaBlockProps) {
           </p>
         }
       >
-        <LazyMarkdownContent content={displayed} isStreaming={true} />
+        <LazyMarkdownContent content={displayed} isStreaming={isStreaming} />
       </Suspense>
+      {/* Cursor is mounted ONLY when actively streaming AND `showCursor` is
+          true. The `.typing-cursor` class runs a CSS blink animation that
+          overrides any inline opacity, so an unmounted-but-not-rendered cursor
+          was previously blinking in the top-left corner of completed text
+          blocks. `showCursor=false` is used by ThoughtBlock so just-closed
+          preamble segments don't leave a blinking caret in the timeline. */}
+      {renderCursor && (
       <span
         ref={cursorRef}
         aria-hidden="true"
@@ -210,6 +295,7 @@ export function DeltaBlock({ text }: DeltaBlockProps) {
             "transform 90ms cubic-bezier(0.33, 1, 0.68, 1), opacity 140ms ease-out",
         }}
       />
+      )}
     </div>
   );
 }

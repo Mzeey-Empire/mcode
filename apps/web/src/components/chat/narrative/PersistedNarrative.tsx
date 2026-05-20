@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useThreadStore } from "@/stores/threadStore";
-import type { NarrativeItem, NarrativeCounts } from "./types";
+import type { NarrativeItem } from "./types";
 import type { ToolCall } from "@/transport/types";
 import { ThoughtBlock } from "./ThoughtBlock";
 import { ToolSummaryLine } from "./ToolSummaryLine";
 import { HookRow } from "./HookRow";
 import { SubagentRow } from "./SubagentRow";
-import { TurnFooter } from "./TurnFooter";
 import { buildPersistedNarrativeItems } from "./build-persisted-narrative";
 
 /** Props for `PersistedNarrative`. */
@@ -21,29 +20,17 @@ export interface PersistedNarrativeProps {
 }
 
 /**
- * Returns the muted-dot class for a persisted item. All rows render as
- * completed (no `animate-pulse`, no primary tint) because the turn is over.
+ * Top-margin class for a persisted row. Mirrors the live `marginClassForItem`.
+ *
+ * Tools, hooks, and sub-agents stack tightly as one "actions molecule".
+ * Text rows get a comfortable gap so the response breathes apart from the
+ * preceding action group.
  */
-function dotClassForItem(item: NarrativeItem): string {
-  switch (item.type) {
-    case "hook":
-      return item.hook.didBlock
-        ? "before:w-[3px] before:h-[3px] before:top-[9px] before:left-[-10px] before:-translate-x-1/2 before:bg-[var(--diff-remove)]"
-        : "before:w-[3px] before:h-[3px] before:top-[9px] before:left-[-10px] before:-translate-x-1/2 before:bg-muted-foreground/25";
-    case "subagent":
-      return item.toolCall.isError
-        ? "before:bg-[var(--diff-remove)]"
-        : "before:bg-muted-foreground/30";
-    default:
-      return "before:bg-muted-foreground/30";
-  }
-}
-
-/** Top-margin class for a persisted row. Mirrors the live `marginClassForItem`. */
 function marginClassForItem(item: NarrativeItem, index: number): string {
+  if (index === 0) return "mt-0";
   switch (item.type) {
     case "thought":
-      return index === 0 ? "mt-0" : "mt-1.5";
+      return "mt-3";
     case "subagent":
       return "mt-1";
     default:
@@ -121,23 +108,14 @@ export function PersistedNarrative({ messageId, messageContent }: PersistedNarra
     void load(messageId);
   }, [messageId, records, load]);
 
-  const { items, counts, allToolCalls, durationMs } = useMemo(() => {
+  const { items, allToolCalls } = useMemo(() => {
     if (!records) {
       return {
         items: [] as NarrativeItem[],
-        counts: { steps: 0, thoughts: 0, subagents: 0 } as NarrativeCounts,
         allToolCalls: [] as ToolCall[],
-        durationMs: null as number | null,
       };
     }
     const built = buildPersistedNarrativeItems({ ...records, messageContent });
-    const topLevel = records.tools.filter((t) => t.parent_tool_call_id == null);
-    const subagents = topLevel.filter((t) => t.tool_name === "Agent").length;
-    const computedCounts: NarrativeCounts = {
-      steps: topLevel.length,
-      thoughts: records.thoughts.length,
-      subagents,
-    };
     const liveTools: ToolCall[] = records.tools.map((r) => ({
       id: r.id,
       toolName: r.tool_name,
@@ -149,65 +127,21 @@ export function PersistedNarrative({ messageId, messageContent }: PersistedNarra
       parentToolCallId: r.parent_tool_call_id ?? undefined,
       startedAt: Date.parse(r.started_at) || 0,
     }));
-    // Derive duration from the earliest start to the latest completion across
-    // tools and thoughts. Null when no boundary is parseable.
-    const starts: number[] = [];
-    const ends: number[] = [];
-    for (const t of records.tools) {
-      const s = Date.parse(t.started_at);
-      if (Number.isFinite(s)) starts.push(s);
-      if (t.completed_at) {
-        const e = Date.parse(t.completed_at);
-        if (Number.isFinite(e)) ends.push(e);
-      }
-    }
-    for (const th of records.thoughts) {
-      const s = Date.parse(th.started_at);
-      if (Number.isFinite(s)) starts.push(s);
-      if (th.ended_at) {
-        const e = Date.parse(th.ended_at);
-        if (Number.isFinite(e)) ends.push(e);
-      }
-    }
-    const dur =
-      starts.length > 0 && ends.length > 0
-        ? Math.max(0, Math.max(...ends) - Math.min(...starts))
-        : null;
-    return {
-      items: built,
-      counts: computedCounts,
-      allToolCalls: liveTools,
-      durationMs: dur,
-    };
-  }, [records]);
+    return { items: built, allToolCalls: liveTools };
+  }, [records, messageContent]);
 
   if (!records) return null;
   if (items.length === 0) return null;
 
   return (
     <div className="relative">
-      <div className="relative flex flex-col pl-5">
-        <div
-          className="absolute left-[10px] top-3 bottom-3 w-px -translate-x-1/2 bg-border pointer-events-none"
-          aria-hidden
-        />
+      <div className="flex flex-col">
         {items.map((item, i) => (
-          <div
-            key={keyForItem(item, i)}
-            className={[
-              "relative",
-              marginClassForItem(item, i),
-              "before:content-[''] before:absolute before:w-1 before:h-1 before:rounded-full before:z-[1]",
-              "before:left-[-10px] before:top-[11px] before:-translate-x-1/2",
-              dotClassForItem(item),
-              "narrative-timeline-row",
-            ].join(" ")}
-          >
+          <div key={keyForItem(item, i)} className={marginClassForItem(item, i)}>
             {renderItem(item, allToolCalls)}
           </div>
         ))}
       </div>
-      <TurnFooter counts={counts} durationMs={durationMs} />
     </div>
   );
 }

@@ -361,4 +361,69 @@ describe("AgentService narrative persistence", () => {
     expect(thoughts[0].text).toBe(body);
     expect(thoughts[0].isFinalResponse).toBe(1);
   });
+
+  it("drops the open thought when AssistantMessageBoundary reports isFinalResponse=true", async () => {
+    const { providerEmitter, thoughtBulk } = build();
+
+    providerEmitter.emit("event", {
+      type: AgentEventType.TextDelta,
+      threadId: THREAD_ID,
+      delta: "Tool-free final answer",
+    });
+    providerEmitter.emit("event", {
+      type: AgentEventType.AssistantMessageBoundary,
+      threadId: THREAD_ID,
+      isFinalResponse: true,
+    });
+    providerEmitter.emit("event", {
+      type: AgentEventType.TurnComplete,
+      threadId: THREAD_ID,
+      tokensIn: 0,
+      tokensOut: 0,
+      contextWindow: 0,
+    });
+
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    expect(thoughtBulk).not.toHaveBeenCalled();
+  });
+
+  it("persists preamble thought when AssistantMessageBoundary reports isFinalResponse=false", async () => {
+    const { providerEmitter, thoughtBulk } = build();
+
+    providerEmitter.emit("event", {
+      type: AgentEventType.TextDelta,
+      threadId: THREAD_ID,
+      delta: "Let me check that file.",
+    });
+    providerEmitter.emit("event", {
+      type: AgentEventType.AssistantMessageBoundary,
+      threadId: THREAD_ID,
+      isFinalResponse: false,
+    });
+    providerEmitter.emit("event", {
+      type: AgentEventType.ToolUse,
+      threadId: THREAD_ID,
+      toolCallId: "tc-read",
+      toolName: "Read",
+      toolInput: { file_path: "/a.ts" },
+    });
+    providerEmitter.emit("event", {
+      type: AgentEventType.TurnComplete,
+      threadId: THREAD_ID,
+      tokensIn: 0,
+      tokensOut: 0,
+      contextWindow: 0,
+    });
+
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    expect(thoughtBulk).toHaveBeenCalledOnce();
+    const thoughts: CreateThoughtSegmentInput[] = thoughtBulk.mock.calls[0][0];
+    expect(thoughts).toHaveLength(1);
+    expect(thoughts[0].text).toBe("Let me check that file.");
+    expect(thoughts[0].isFinalResponse).toBeUndefined();
+  });
 });

@@ -94,7 +94,10 @@ export function SubagentRow({ toolCall, children, hooks, allToolCalls, depth = 0
         className="flex w-full items-center gap-1.5 px-2 py-1 text-left rounded-md hover:bg-muted/30 transition-colors duration-100 text-[0.8125rem]"
         aria-expanded={open}
       >
-        <StackedLayersIcon className="w-3.5 h-3.5 shrink-0 text-muted-foreground/60" />
+        <StackedLayersIcon
+          animated={isRunning}
+          className={`w-3.5 h-3.5 shrink-0 ${isRunning ? "text-primary/80" : "text-muted-foreground/60"}`}
+        />
 
         <span className="text-foreground/80 truncate flex-1 min-w-0">{description}</span>
 
@@ -120,7 +123,17 @@ export function SubagentRow({ toolCall, children, hooks, allToolCalls, depth = 0
       </button>
 
       <AnimatedCollapsible open={open}>
-        <ul className="pl-7 mt-0.5 space-y-px pb-1 max-h-64 overflow-y-auto">
+        {/* Mini-timeline: a hairline rail emerges inside the expanded sub-agent
+            because the children are a nested group that the eye benefits from
+            tracking as one unit. The rail aligns with the parent's stacked-
+            layers icon (centred at ~x=15), so it reads as "these calls belong
+            to this sub-agent" rather than a generic indent. */}
+        <div className="relative pl-7 mt-0.5 pb-1">
+          <div
+            className="absolute left-[14px] top-1 bottom-2 w-px bg-border/50 pointer-events-none"
+            aria-hidden
+          />
+          <ul className="space-y-px max-h-64 overflow-y-auto">
           {visibleChildren.map((tc, idx) => {
             const isActive = idx === lastIncompleteIdx;
 
@@ -154,7 +167,8 @@ export function SubagentRow({ toolCall, children, hooks, allToolCalls, depth = 0
               </li>
             );
           })}
-        </ul>
+          </ul>
+        </div>
         {children.length > CHILD_CAP && (
           <button
             type="button"

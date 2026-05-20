@@ -20,6 +20,13 @@ export const MessageSchema = lazySchema(() =>
     tool_call_count: z.number().optional(),
     reply_to_message_id: z.string().nullable().optional(),
     quoted_text: z.string().nullable().optional(),
+    /**
+     * Model identifier active when an assistant message was produced
+     * (e.g. "claude-opus-4-7", "cursor-agent", "gpt-4.1"). Null for user
+     * messages and for assistant messages persisted before the `model`
+     * column existed.
+     */
+    model: z.string().nullable().optional(),
   }),
 );
 /** Message record from the database. */
