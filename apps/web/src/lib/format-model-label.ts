@@ -1,4 +1,6 @@
+import { CURSOR_CLI_MODEL_SNAPSHOT } from "@mcode/contracts";
 import { findModelById, type ModelDefinition } from "./model-registry.js";
+import { formatCursorCliModelId, isCursorCliModelId } from "./format-cursor-model-id.js";
 
 /**
  * Convert a raw provider model identifier into a friendly label for display.
@@ -14,6 +16,14 @@ import { findModelById, type ModelDefinition } from "./model-registry.js";
  */
 const CLAUDE_PATTERN = /^claude-(opus|sonnet|haiku)-(\d+)-(\d+)(?:-.+)?$/;
 const COMPOSER_PATTERN = /^composer-(\d+(?:\.\d+)?)(?:-(.+))?$/;
+
+/** Strips CLI metadata like "(current, default)" from catalog labels for message footers. */
+function normalizeProviderModelName(name: string): string {
+  return name
+    .replace(/\s*\([^)]*\)\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 /** Title-cases a single hyphenated word (e.g. "fast" -> "Fast"). */
 function titleCaseWord(word: string): string {
@@ -35,7 +45,15 @@ export function resolveModelDisplayLabel(
   if (!id) return "";
 
   const catalogHit = options?.catalog?.find((m) => m.id === id);
-  if (catalogHit) return catalogHit.label;
+  if (catalogHit) return normalizeProviderModelName(catalogHit.label);
+
+  const snapshotHit = CURSOR_CLI_MODEL_SNAPSHOT.find((m) => m.id === id);
+  if (snapshotHit) return normalizeProviderModelName(snapshotHit.name);
+
+  if (isCursorCliModelId(id)) {
+    const cursorLabel = formatCursorCliModelId(id);
+    if (cursorLabel) return cursorLabel;
+  }
 
   const registryHit = findModelById(id);
   if (registryHit) return registryHit.label;

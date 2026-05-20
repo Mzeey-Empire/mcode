@@ -30,8 +30,8 @@ describe("formatModelLabel", () => {
     expect(formatModelLabel("cursor-agent")).toBe("Cursor");
   });
 
-  it("title-cases unknown multi-segment identifiers", () => {
-    expect(formatModelLabel("gpt-5.4-codex")).toBe("Gpt 5.4 Codex");
+  it("title-cases unknown multi-segment identifiers without Cursor prefixes", () => {
+    expect(formatModelLabel("some-custom-model-id")).toBe("Some Custom Model Id");
   });
 
   it("returns empty string for blank input", () => {
@@ -42,17 +42,25 @@ describe("formatModelLabel", () => {
 
 describe("resolveModelDisplayLabel", () => {
   const catalog: ModelDefinition[] = [
-    { id: "composer-2.5-fast", label: "Composer 2.5 Fast (live)", providerId: "cursor" },
+    { id: "composer-9-beta", label: "Composer 9 Beta (live)", providerId: "cursor" },
   ];
 
-  it("prefers live catalog labels over heuristics", () => {
-    expect(resolveModelDisplayLabel("composer-2.5-fast", { catalog })).toBe(
-      "Composer 2.5 Fast (live)",
+  it("prefers live catalog labels over snapshot and heuristics", () => {
+    expect(resolveModelDisplayLabel("composer-9-beta", { catalog })).toBe(
+      "Composer 9 Beta",
     );
   });
 
-  it("falls back to static registry labels", () => {
+  it("uses CLI snapshot labels for Cursor GPT and Opus ids", () => {
     expect(resolveModelDisplayLabel("composer-2-fast")).toBe("Composer 2 Fast");
+    expect(resolveModelDisplayLabel("claude-opus-4-7-thinking-high")).toBe(
+      "Opus 4.7 1M High Thinking",
+    );
+    expect(resolveModelDisplayLabel("gpt-5.4-high-fast")).toBe("GPT-5.4 High Fast");
+  });
+
+  it("strips parenthetical CLI metadata from snapshot names", () => {
+    expect(resolveModelDisplayLabel("composer-2.5-fast")).toBe("Composer 2.5 Fast");
   });
 
   it("falls back to heuristics for unknown ids", () => {
