@@ -217,13 +217,6 @@ export function DeltaBlock({ text, isStreaming = true, showCursor = true }: Delt
     const cursor = cursorRef.current;
     if (!root || !cursor) return;
 
-    // Static text segments (completed thoughts, persisted prose) skip the cursor
-    // so we don't leave a blinking caret at the end of every finished paragraph.
-    if (!renderCursor) {
-      cursor.style.opacity = "0";
-      return;
-    }
-
     // If the markdown DOM is momentarily empty (Suspense in flight, or a
     // re-render between fallback and resolved children), keep the cursor at
     // its last position rather than hiding it. Hiding on every empty frame

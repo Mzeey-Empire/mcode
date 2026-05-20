@@ -1740,10 +1740,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           if (tc.isComplete) return tc;
           if (tc.toolName === "Agent") {
             const done = isAgentDone(tc.id);
-            if (done) console.debug("[narrative:markComplete] Agent done", { id: tc.id, childCount: children(tc.id).length });
             return done ? { ...tc, isComplete: true } : tc;
           }
-          console.debug("[narrative:markComplete]", { id: tc.id, toolName: tc.toolName, parentToolCallId: tc.parentToolCallId });
           return { ...tc, isComplete: true };
         });
         return {
@@ -1945,7 +1943,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       const toolCallId = (params.toolCallId as string) || "";
       const existingCalls = get().toolCallsByThread[threadId] ?? [];
       if (toolCallId && existingCalls.some((tc) => tc.id === toolCallId)) {
-        console.debug("[narrative:toolUse] DEDUP skip", { toolCallId });
         return;
       }
 
@@ -1992,7 +1989,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         parentToolCallId: parentToolCallId || undefined,
         startedAt: Date.now(),
       };
-      console.debug("[narrative:toolUse]", { threadId, toolName, toolCallId, parentToolCallId, isAgent: toolName === "Agent" });
       set((state) => {
         // Freeze the active thought segment so it has a definite end time.
         const segments = state.thoughtSegmentsByThread[threadId] ?? [];
@@ -2008,7 +2004,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
                 ],
               }
             : state.thoughtSegmentsByThread;
-        console.debug("[narrative:toolUse] segments", { froze, segCount: segments.length, lastEndedAt: last?.endedAt });
         return {
           toolCallsByThread: {
             ...state.toolCallsByThread,
@@ -2024,7 +2019,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       const toolCallId = (params.toolCallId as string) || "";
       const output = (params.output as string) || "";
       const isError = (params.isError as boolean) || false;
-      console.debug("[narrative:toolResult]", { threadId, toolCallId, isError, outputLen: output.length });
       set((state) => {
         const calls = state.toolCallsByThread[threadId] ?? [];
         // Try matching by ID first; fall back to the first incomplete tool call
