@@ -434,6 +434,15 @@ export const TerminalView = memo(function TerminalView({ ptyId, visible, threadA
       // already invoked cleanupRef.current, and loadRenderer's own
       // isDisposed() guards ensured no renderer addon was attached to the
       // now-disposed terminal. No post-await work is required.
+      if (disposed) return;
+
+      // Auto-focus: the visibility effect's term.focus() fires before
+      // init completes (termRef is still null at that point), so newly
+      // created terminals wouldn't receive focus. Pull focus here after
+      // init when the terminal is visible.
+      if (visibleRef.current) {
+        term.focus();
+      }
     }
 
     // init() awaits dynamic imports and may construct/attach xterm before
