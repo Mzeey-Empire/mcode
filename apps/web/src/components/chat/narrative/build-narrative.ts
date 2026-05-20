@@ -217,7 +217,17 @@ export function buildNarrativeItems(params: {
         continue;
       }
 
-      const isActive = isLatest && isStreaming && !anyToolRunning;
+      // `isActive` drives `DeltaBlock.isStreaming` inside `ThoughtBlock`.
+      // While the agent turn is live, every thought segment (including ones
+      // that have just closed because a tool_use boundary fired) animates
+      // on appearance — preserving the typewriter feel for preamble text
+      // that streams in, then snaps up to the timeline when its segment
+      // closes. The DeltaBlock remount-threshold heuristic keeps the
+      // re-animation to just the trailing edge for segments already past
+      // their first paint, so the snap-up reads as "finishing typing" rather
+      // than restarting from empty. Once the agent stops running, all
+      // thoughts settle to static prose.
+      const isActive = isAgentRunning;
       items.push({ type: "thought", segment: evt.segment, isActive });
       continue;
     }

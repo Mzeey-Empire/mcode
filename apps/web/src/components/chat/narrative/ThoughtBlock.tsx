@@ -27,7 +27,14 @@ interface ThoughtBlockProps {
 export function ThoughtBlock({ segment, isActive }: ThoughtBlockProps) {
   return (
     <div className="px-2 py-1">
-      <DeltaBlock text={segment.text} isStreaming={isActive} />
+      {/* `showCursor={false}` — a thought rendered in the timeline is either
+          settled (turn over) or just-closed because a tool_use boundary
+          fired. In neither case is the agent actively typing INTO this block:
+          the next deltas land in a different segment (or in the streaming
+          response slot below). Suppressing the caret here prevents stacking
+          multiple blinking cursors across the timeline as preamble segments
+          accumulate. The typewriter reveal still plays via `isStreaming`. */}
+      <DeltaBlock text={segment.text} isStreaming={isActive} showCursor={false} />
     </div>
   );
 }
