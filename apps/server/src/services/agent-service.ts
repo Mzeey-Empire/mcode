@@ -529,7 +529,7 @@ export class AgentService {
             ? codexFastMode
             : thread.codex_fast_mode != null
               ? thread.codex_fast_mode
-              : settings.provider.codex.fastMode)
+              : (settings.provider.codex?.fastMode ?? false))
         : false;
     this.threadRepo.updateModel(threadId, resolvedModel);
     // Only persist provider when the caller explicitly supplied one (new thread or deliberate switch).

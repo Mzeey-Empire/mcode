@@ -487,7 +487,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             const prevEndsSentence = /[.!?]/.test(lastChar);
             const firstChar = nextText.replace(/^\s+/, "").slice(0, 1);
             const nextStartsLowerOrPunct =
-              firstChar === "" || /[a-z,;:)\]}\-]/.test(firstChar);
+              firstChar === "" || /[a-z,;:)\]}-]/.test(firstChar);
             return !prevEndsSentence || nextStartsLowerOrPunct;
           };
           const TINY_SEGMENT_THRESHOLD = 40; // chars
