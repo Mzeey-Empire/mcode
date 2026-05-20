@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { Columns2, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { useTerminalStore } from "@/stores/terminalStore";
 
 interface TerminalToolbarProps {
@@ -19,33 +20,60 @@ export const TerminalToolbar = memo(function TerminalToolbar({
 
   return (
     <div className="flex items-center gap-1">
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        onClick={toggleSplit}
-        className={splitMode ? "text-foreground" : "text-muted-foreground"}
-        aria-label="Toggle split mode"
-      >
-        <Columns2 className="size-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        onClick={onAdd}
-        className="text-muted-foreground hover:text-foreground"
-        aria-label="Add terminal"
-      >
-        <Plus className="size-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        onClick={onDeleteAll}
-        className="text-muted-foreground hover:text-foreground"
-        aria-label="Delete all terminals"
-      >
-        <Trash2 className="size-3.5" />
-      </Button>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={toggleSplit}
+              className={splitMode ? "text-foreground" : "text-muted-foreground"}
+              aria-label="Toggle terminal list"
+            />
+          }
+        >
+          <Columns2 className="size-3.5" />
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="text-xs">
+          Toggle terminal list
+        </TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={onAdd}
+              className="text-muted-foreground hover:text-foreground"
+              aria-label="New terminal"
+            />
+          }
+        >
+          <Plus className="size-3.5" />
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="text-xs">
+          New terminal
+        </TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={onDeleteAll}
+              className="text-muted-foreground hover:text-foreground"
+              aria-label="Kill all terminals"
+            />
+          }
+        >
+          <Trash2 className="size-3.5" />
+        </TooltipTrigger>
+        <TooltipContent side="bottom" className="text-xs">
+          Kill all
+        </TooltipContent>
+      </Tooltip>
     </div>
   );
 });

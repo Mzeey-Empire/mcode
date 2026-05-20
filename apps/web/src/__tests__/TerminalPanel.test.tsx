@@ -56,7 +56,7 @@ describe("TerminalPanel", () => {
 
     render(<TerminalPanel />);
 
-    const bin = screen.getByRole("button", { name: /delete all terminals/i });
+    const bin = screen.getByRole("button", { name: /kill all terminals/i });
     fireEvent.click(bin);
 
     expect(terminalKillByThread).toHaveBeenCalledWith("thread-1");
