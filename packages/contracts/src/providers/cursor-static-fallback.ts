@@ -1,11 +1,10 @@
 import type { ProviderModelInfo } from "./models.js";
+import { CURSOR_CLI_MODEL_SNAPSHOT } from "./cursor-cli-models-snapshot.js";
 
 /**
- * Minimal Cursor model rows when CLI discovery fails (`cursor-agent models` unavailable).
- * Single source for server {@link CursorProvider.listModels} and web model-registry fallback UI.
+ * Cursor model rows when CLI discovery fails (`cursor-agent models` unavailable).
+ * Uses the checked-in CLI snapshot; regenerate with
+ * `bun apps/server/scripts/sync-cursor-models-snapshot.ts`.
  */
-export const CURSOR_STATIC_MODEL_FALLBACK: readonly ProviderModelInfo[] = [
-  { id: "auto", name: "Auto", group: "Cursor" },
-  { id: "composer-2-fast", name: "Composer 2 Fast", group: "Cursor" },
-  { id: "composer-2.5-fast", name: "Composer 2.5 Fast", group: "Cursor" },
-];
+export const CURSOR_STATIC_MODEL_FALLBACK: readonly ProviderModelInfo[] =
+  CURSOR_CLI_MODEL_SNAPSHOT;
