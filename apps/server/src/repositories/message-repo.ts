@@ -26,6 +26,7 @@ interface MessageRow {
   attachments: string | null;
   reply_to_message_id: string | null;
   quoted_text: string | null;
+  model: string | null;
   tool_call_count?: number;
 }
 
@@ -57,6 +58,7 @@ function rowToMessage(row: MessageRow): Message {
       | null,
     reply_to_message_id: row.reply_to_message_id,
     quoted_text: row.quoted_text,
+    model: row.model,
   };
 
   if (row.tool_call_count && row.tool_call_count > 0) {
@@ -67,10 +69,10 @@ function rowToMessage(row: MessageRow): Message {
 }
 
 const MESSAGE_COLUMNS =
-  "id, thread_id, role, content, tool_calls, files_changed, cost_usd, tokens_used, timestamp, sequence, attachments, reply_to_message_id, quoted_text";
+  "id, thread_id, role, content, tool_calls, files_changed, cost_usd, tokens_used, timestamp, sequence, attachments, reply_to_message_id, quoted_text, model";
 
 const MESSAGE_COLUMNS_PREFIXED =
-  "m.id, m.thread_id, m.role, m.content, m.tool_calls, m.files_changed, m.cost_usd, m.tokens_used, m.timestamp, m.sequence, m.attachments, m.reply_to_message_id, m.quoted_text";
+  "m.id, m.thread_id, m.role, m.content, m.tool_calls, m.files_changed, m.cost_usd, m.tokens_used, m.timestamp, m.sequence, m.attachments, m.reply_to_message_id, m.quoted_text, m.model";
 
 /**
  * Per-row tool call counts via index on `message_id`.
@@ -84,7 +86,14 @@ const TOOL_CALL_COUNT_SQL =
 export class MessageRepo {
   constructor(@inject("Database") private readonly db: Database.Database) {}
 
-  /** Create a new message and return the fully-populated record. */
+  /**
+   * Create a new message and return the fully-populated record.
+   *
+   * `model` records the model identifier active when an assistant message was
+   * produced (e.g. "claude-opus-4-7"). Null for user/system messages and
+   * acceptable for assistant messages when the provider doesn't surface a
+   * model — the UI footer falls back gracefully.
+   */
   create(
     threadId: string,
     role: MessageRole,
@@ -93,6 +102,7 @@ export class MessageRepo {
     attachments?: StoredAttachment[],
     replyToMessageId?: string,
     quotedText?: string,
+    model?: string | null,
   ): Message {
     const id = randomUUID();
     const now = new Date().toISOString();
@@ -100,12 +110,16 @@ export class MessageRepo {
       attachments && attachments.length > 0
         ? JSON.stringify(attachments)
         : null;
+    const modelValue = model ?? null;
 
     this.db
       .prepare(
-        "INSERT INTO messages (id, thread_id, role, content, timestamp, sequence, attachments, reply_to_message_id, quoted_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO messages (id, thread_id, role, content, timestamp, sequence, attachments, reply_to_message_id, quoted_text, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
-      .run(id, threadId, role, content, now, sequence, attachmentsJson, replyToMessageId ?? null, quotedText ?? null);
+      .run(
+        id, threadId, role, content, now, sequence,
+        attachmentsJson, replyToMessageId ?? null, quotedText ?? null, modelValue,
+      );
 
     return {
       id,
@@ -121,6 +135,7 @@ export class MessageRepo {
       attachments: attachments ?? null,
       reply_to_message_id: replyToMessageId ?? null,
       quoted_text: quotedText ?? null,
+      model: modelValue,
     };
   }
 

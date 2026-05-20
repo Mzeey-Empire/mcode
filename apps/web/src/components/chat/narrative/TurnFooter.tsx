@@ -27,17 +27,21 @@ function formatDuration(ms: number | null): string {
  * Compact meta line shown between the narrative timeline and the final
  * assistant message after the turn completes.
  *
- * Reads: `7 steps · 4 thoughts · 1 sub-agent ——— 14.3s`. Items with zero
- * counts are omitted. The hairline rule fills the gap between the labels
- * and the duration.
+ * Reads: `7 steps · 1 sub-agent ——— 14.3s`. Items with zero counts are
+ * omitted. The hairline rule fills the gap between the labels and the
+ * duration.
+ *
+ * `counts.thoughts` is computed but no longer surfaced — the legacy
+ * "thoughts" tally counted preamble text blocks that are now rendered as
+ * agent response prose, so labelling them as thoughts would mislead. The
+ * field is preserved on `NarrativeCounts` for the day extended `thinking`
+ * blocks land, at which point a real "N thinking" count can be reinstated
+ * here against that source.
  */
 export function TurnFooter({ counts, durationMs }: TurnFooterProps) {
   const parts: string[] = [];
   if (counts.steps > 0) {
     parts.push(`${counts.steps} ${counts.steps === 1 ? "step" : "steps"}`);
-  }
-  if (counts.thoughts > 0) {
-    parts.push(`${counts.thoughts} ${counts.thoughts === 1 ? "thought" : "thoughts"}`);
   }
   if (counts.subagents > 0) {
     parts.push(`${counts.subagents} ${counts.subagents === 1 ? "sub-agent" : "sub-agents"}`);

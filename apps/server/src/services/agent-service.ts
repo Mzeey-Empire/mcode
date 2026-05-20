@@ -1286,16 +1286,30 @@ export class AgentService {
               existing.length > 0
                 ? existing[existing.length - 1].sequence + 1
                 : 1;
+            // Record the thread's active model on the message so the UI can
+            // display which provider/model produced the response, even if the
+            // user later switches model mid-conversation.
+            const thread = this.threadRepo.findById(event.threadId);
+            const modelForMessage = thread?.model ?? null;
             const msg = this.messageRepo.create(
               event.threadId,
               "assistant",
               event.content,
               nextSeq,
+              undefined,
+              undefined,
+              undefined,
+              modelForMessage,
             );
             // Carry the persisted message ID so the broadcast schema passes it
             // through to the client. The client uses it for stable message identity
             // (branching, dedup across Electron's dual MessagePort+WebSocket channels).
             event.messageId = msg.id;
+            // Carry the model too so the client's locally-built Message can
+            // show the model name in the footer immediately — without it the
+            // footer renders without the model until a thread refresh re-fetches
+            // the persisted row from the DB.
+            event.model = modelForMessage;
             this.streamingAssistantTextByThread.delete(event.threadId);
           } catch (err) {
             logger.error("Failed to persist assistant message", {
@@ -1309,6 +1323,22 @@ export class AgentService {
           const stackOnMessage = this.agentCallStack.get(event.threadId);
           if (stackOnMessage && stackOnMessage.length > 0) {
             stackOnMessage.length = 0;
+          }
+        }
+
+        if (event.type === AgentEventType.AssistantMessageBoundary) {
+          // Authoritative classification of the just-streamed text deltas based
+          // on the Anthropic message-level `stop_reason`. When `isFinalResponse`
+          // is true the open thought segment was really the final user-facing
+          // response (the legacy heuristic could not detect this for tool-free
+          // turns) — drop it so it never gets persisted as a thought row, which
+          // would otherwise render alongside the assistant message bubble.
+          // Otherwise the message ended with a non-finalizing stop_reason such
+          // as `tool_use`; close the thought so it persists as preamble.
+          if (event.isFinalResponse) {
+            this.dropOpenThought(event.threadId);
+          } else {
+            this.closeOpenThought(event.threadId);
           }
         }
 
@@ -1652,6 +1682,18 @@ ${userMessage}`;
     this.turnOpenThought.set(threadId, null);
   }
 
+  /**
+   * Discards the open thought without persisting it.
+   *
+   * Called when `AssistantMessageBoundary` reports `isFinalResponse: true` —
+   * the streamed text was actually the final assistant response and will be
+   * persisted via the `Message` event, so keeping the matching thought row
+   * would duplicate the body as a ThoughtBlock in the narrative.
+   */
+  private dropOpenThought(threadId: string): void {
+    this.turnOpenThought.set(threadId, null);
+  }
+
   /** Buffer a tool call event for later persistence. */
   private bufferToolCall(
     threadId: string,
@@ -1803,7 +1845,12 @@ ${userMessage}`;
 
     const nextSeq = last ? last.sequence + 1 : 1;
     try {
-      const msg = this.messageRepo.create(threadId, "assistant", text, nextSeq);
+      const thread = this.threadRepo.findById(threadId);
+      const modelForMessage = thread?.model ?? null;
+      const msg = this.messageRepo.create(
+        threadId, "assistant", text, nextSeq,
+        undefined, undefined, undefined, modelForMessage,
+      );
       this.streamingAssistantTextByThread.delete(threadId);
       broadcast("agent.event", {
         type: AgentEventType.Message,

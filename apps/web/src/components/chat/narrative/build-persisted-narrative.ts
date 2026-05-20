@@ -90,11 +90,14 @@ type TimelineEvent =
  */
 /**
  * WeakMap-based memo so `buildPersistedNarrativeItems` does not rebuild the
- * item tree on every render when the inputs object identity is stable. The
- * `thoughts` array reference changes whenever the narrative cache updates, so
- * keying on that is sufficient for per-messageId invalidation.
+ * item tree on every render when inputs are stable. Keyed by the `thoughts`
+ * array reference plus trimmed `messageContent` because suffix-match filtering
+ * depends on the assistant body even when DB rows are unchanged.
  */
-const _memoCache = new WeakMap<readonly ThoughtSegmentRecord[], NarrativeItem[]>();
+const _memoCache = new WeakMap<
+  readonly ThoughtSegmentRecord[],
+  Map<string, NarrativeItem[]>
+>();
 
 export function buildPersistedNarrativeItems(
   inputs: PersistedNarrativeInputs,
@@ -105,11 +108,9 @@ export function buildPersistedNarrativeItems(
     return [];
   }
 
-  // Memo: if tools/hooks are stable AND messageContent is unchanged since last
-  // call, return cached result. Using the thoughts array reference as the key
-  // is sufficient because narrative.list returns a fresh array only when DB
-  // records change.
-  const cached = _memoCache.get(thoughts);
+  const msgTrimmed = (messageContent ?? "").trim();
+  const cachedByContent = _memoCache.get(thoughts);
+  const cached = cachedByContent?.get(msgTrimmed);
   if (cached !== undefined) return cached;
 
   // Filter out thought segments that are the assistant's final response to
@@ -117,7 +118,6 @@ export function buildPersistedNarrativeItems(
   // Server `is_final_response` is primary; client fallbacks cover older rows:
   // exact trimmed body match (any segment order) plus suffix match on the last
   // segment by sort_order.
-  const msgTrimmed = (messageContent ?? "").trim();
   let filteredThoughts = thoughts;
 
   if (thoughts.length > 0) {
@@ -233,10 +233,8 @@ export function buildPersistedNarrativeItems(
   }
   flushGroup();
 
-  // Cache against the thoughts array reference so repeated calls with the
-  // same inputs are O(1). The WeakMap key is the thoughts array itself;
-  // when the narrative cache updates it replaces the array, invalidating
-  // the entry automatically.
-  _memoCache.set(thoughts, items);
+  const contentCache = _memoCache.get(thoughts) ?? new Map<string, NarrativeItem[]>();
+  contentCache.set(msgTrimmed, items);
+  _memoCache.set(thoughts, contentCache);
   return items;
 }

@@ -1,6 +1,7 @@
 import type { PermissionDecision } from "@mcode/contracts";
 import type { Message, ToolCall, HookExecution } from "@/transport/types";
 import type { ThoughtSegment } from "./narrative/types";
+import { computeLiveStreamingText } from "./narrative/build-narrative";
 
 /** Compile-time exhaustive check; throws at runtime for unhandled discriminants. */
 function assertNever(value: never): never {
@@ -73,6 +74,41 @@ export type ChatVirtualItem =
        *   narrative timeline → assistant text → stop hooks → files summary
        */
       messageId: string;
+    }
+  | {
+      key: string;
+      type: "persisted-turn-footer";
+      /**
+       * Assistant message id whose turn footer (step / sub-agent counts plus
+       * duration) is rendered AFTER the message body, closing the turn.
+       * Renders null until the persisted narrative records are loaded.
+       */
+      messageId: string;
+    }
+  | {
+      key: string;
+      type: "streaming-response";
+      /**
+       * Live, in-flight response text streaming character-by-character. Lives
+       * in the virtual-item slot the persisted `MessageBubble` will occupy on
+       * `session.message`, so the swap from streaming → persisted is a content
+       * replacement rather than a position jump.
+       */
+      text: string;
+    }
+  | {
+      key: string;
+      type: "narrative-indicator";
+      /**
+       * "X steps · N subagents · phase…" status footer rendered BELOW the
+       * live streaming-response so the writing-animation reads as the primary
+       * surface and the progress meta sits underneath. Only emitted while the
+       * agent is running.
+       */
+      stepCount: number;
+      subagentCount: number;
+      activeToolCalls: readonly ToolCall[];
+      startTime: number | undefined;
     };
 
 /**
@@ -110,6 +146,15 @@ export function buildStableItems(
       items.push({
         key: `persisted-late-hooks-${msg.id}`,
         type: "persisted-late-hooks",
+        messageId: msg.id,
+      });
+
+      // Turn footer (step / sub-agent counts + duration) renders AFTER the
+      // assistant body — closing the turn rather than separating its actions
+      // from its answer.
+      items.push({
+        key: `persisted-turn-footer-${msg.id}`,
+        type: "persisted-turn-footer",
         messageId: msg.id,
       });
 
@@ -168,6 +213,48 @@ export function buildVolatileItems(
     });
   }
 
+  // Streaming response item — fills the slot where the persisted MessageBubble
+  // will appear on `session.message`. Keeps the live typing text in the same
+  // virtual-list position the persisted bubble lands in, so the swap is a
+  // content replacement rather than a jump.
+  const liveText = computeLiveStreamingText({
+    thoughtSegments: thoughtSegments ?? [],
+    streamingText: streamingText ?? "",
+    isAgentRunning,
+    toolCalls,
+  });
+  if (liveText.length > 0) {
+    items.push({
+      key: "streaming-response",
+      type: "streaming-response",
+      text: liveText,
+    });
+  }
+
+  // Narrative indicator — "X steps · N subagents · phase… (0:22)" — rendered
+  // as its own virtual-item slot BELOW the streaming-response so the writing
+  // animation reads as the primary surface and the meta status sits underneath
+  // it (rather than above, between the actions molecule and the response).
+  // Only emitted while the agent is running.
+  if (isAgentRunning) {
+    const topLevelTools = toolCalls.filter((tc) => tc.parentToolCallId == null);
+    // Match `buildNarrativeItems` / `NarrativeCounts.steps`: top-level tool
+    // calls only. Thought segments are tracked separately in the footer.
+    const stepCount = topLevelTools.length;
+    const subagentCount = topLevelTools.filter((tc) => tc.toolName === "Agent").length;
+    const activeToolCalls = toolCalls.filter(
+      (tc) => !tc.isComplete && tc.parentToolCallId == null,
+    );
+    items.push({
+      key: "narrative-indicator",
+      type: "narrative-indicator",
+      stepCount,
+      subagentCount,
+      activeToolCalls,
+      startTime: agentStartTime,
+    });
+  }
+
   // Show all permission requests (settled and unsettled) so the user gets
   // visual confirmation of their allow/deny decision. Settled cards collapse
   // to a single-line badge. The full permissionsByThread entry is cleared
@@ -209,11 +296,16 @@ export function buildVirtualItems(
   // message; permission requests go after it.
 
   // Find the last assistant message, skipping any trailing items that appear
-  // after the message bubble (turn-changes, persisted-late-hooks).
+  // after the message bubble (turn-changes, persisted-late-hooks,
+  // persisted-turn-footer).
   let lastAssistantIdx = stableItems.length - 1;
   while (lastAssistantIdx >= 0) {
     const item = stableItems[lastAssistantIdx];
-    if (item.type === "turn-changes" || item.type === "persisted-late-hooks") {
+    if (
+      item.type === "turn-changes" ||
+      item.type === "persisted-late-hooks" ||
+      item.type === "persisted-turn-footer"
+    ) {
       lastAssistantIdx--;
       continue;
     }
@@ -222,12 +314,30 @@ export function buildVirtualItems(
 
   const lastItem = stableItems[lastAssistantIdx];
   if (lastItem?.type === "message" && lastItem.message.role === "assistant") {
-    const narrativeIdx = volatileItems.findIndex((i) => i.type === "narrative-flow");
-    const narrativeItems = narrativeIdx !== -1 ? [volatileItems[narrativeIdx]] : [];
-    const tailItems = volatileItems.filter((v) => v.type !== "narrative-flow");
-    // Drop the persisted-narrative placeholder for the message that has
-    // live narrative-flow above it, to avoid double-rendering the same
-    // timeline while volatile records are still in-memory.
+    // narrative-flow, streaming-response, and narrative-indicator all go
+    // BEFORE the last assistant message bubble so the user reads
+    // top-to-bottom: actions → response → progress meta. streaming-response
+    // sits under narrative-flow (mirroring where the MessageBubble lands on
+    // persist), and the indicator sits under the streaming-response so the
+    // writing animation reads as the primary surface.
+    const headItems = volatileItems.filter(
+      (v) =>
+        v.type === "narrative-flow" ||
+        v.type === "streaming-response" ||
+        v.type === "narrative-indicator",
+    );
+    const tailItems = volatileItems.filter(
+      (v) =>
+        v.type !== "narrative-flow" &&
+        v.type !== "streaming-response" &&
+        v.type !== "narrative-indicator",
+    );
+    // Drop the persisted-narrative placeholder for the message that has live
+    // narrative-flow above it, to avoid double-rendering the same timeline
+    // while volatile records are still in-memory. The persisted-turn-footer
+    // is NOT suppressed because it sits AFTER the assistant message bubble —
+    // it owns the post-response summary that closes the turn, regardless of
+    // whether the live narrative-flow is still mounted above the bubble.
     const lastAssistantMessageId = lastItem.message.id;
     const filteredStable = stableItems.filter(
       (it, idx) =>
@@ -251,7 +361,7 @@ export function buildVirtualItems(
     }
     return [
       ...filteredStable.slice(0, newLastAssistantIdx),
-      ...narrativeItems,
+      ...headItems,
       ...filteredStable.slice(newLastAssistantIdx),
       ...tailItems,
     ];
@@ -379,6 +489,19 @@ export function estimateItemHeight(item: ChatVirtualItem): number {
       // case. The virtualizer will re-measure on mount, so a small default
       // keeps pre-allocated space tight for the common (no-late-hooks) path.
       return 0;
+    case "persisted-turn-footer":
+      // One-line summary plus margin; the component renders null when records
+      // are still loading or when the turn had no structured activity.
+      return 24;
+    case "streaming-response":
+      // Same shape as a small assistant MessageBubble — virtualizer re-measures
+      // once mounted; this estimate keeps the slot from being too cramped on
+      // first paint while text is still streaming in.
+      return Math.max(estimateMarkdownHeight(item.text), 48);
+    case "narrative-indicator":
+      // One-line status bar (dot/layers icon + "X steps … 0:22"). 36px keeps
+      // pre-allocation tight; the virtualizer re-measures once mounted.
+      return 36;
     default:
       return assertNever(item);
   }
