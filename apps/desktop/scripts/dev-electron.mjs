@@ -12,7 +12,7 @@
  */
 
 import { context, build } from "esbuild";
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import { watch } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -22,6 +22,27 @@ import {
   resolveServerTscBin,
   copyClaudeSdkCliNextTo,
 } from "../../../scripts/build-server-dev-bundle.mjs";
+
+/**
+ * Kill a child process and its entire process tree.
+ *
+ * On Windows, child.kill() only terminates the direct subprocess (e.g. bun),
+ * leaving grandchildren (e.g. the Vite server spawned by bun) as orphans that
+ * continue holding their network ports across dev sessions. taskkill /F /T
+ * kills the full tree atomically before returning.
+ *
+ * @param {import("child_process").ChildProcess | null} child
+ */
+function killTree(child) {
+  if (!child?.pid) return;
+  if (process.platform === "win32") {
+    spawnSync("taskkill", ["/F", "/T", "/PID", String(child.pid)], {
+      stdio: "ignore",
+    });
+  } else {
+    child.kill();
+  }
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, "..");
@@ -220,7 +241,7 @@ let electronProcess = null;
 /** Spawn (or restart) the Electron process. */
 function spawnElectron() {
   if (electronProcess) {
-    electronProcess.kill();
+    killTree(electronProcess);
     electronProcess = null;
   }
 
@@ -312,7 +333,7 @@ function cleanup() {
   }
 
   if (serverTscWatch) {
-    serverTscWatch.kill();
+    killTree(serverTscWatch);
     serverTscWatch = null;
   }
 
@@ -321,12 +342,12 @@ function cleanup() {
   }
 
   if (electronProcess) {
-    electronProcess.kill();
+    killTree(electronProcess);
     electronProcess = null;
   }
 
   if (viteProcess) {
-    viteProcess.kill();
+    killTree(viteProcess);
     viteProcess = null;
   }
 }
