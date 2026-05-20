@@ -68,8 +68,8 @@ async function setActiveThread(
   await page.evaluate((tid) => {
     const stores: unknown[] = (window as unknown as { __mcodeStores?: unknown[] }).__mcodeStores ?? [];
     const wsStore = stores.find((s: unknown) => {
-      const st = (s as { getState: () => Record<string, unknown> }).getState();
-      return "setActiveThread" in (s as object);
+      const state = (s as { getState: () => Record<string, unknown> }).getState();
+      return "setActiveThread" in state;
     });
     if (!wsStore) return;
     (wsStore as { getState: () => { setActiveThread: (id: string) => void } }).getState().setActiveThread(tid);
