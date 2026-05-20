@@ -496,7 +496,7 @@ export const TerminalView = memo(function TerminalView({ ptyId, visible, threadA
       if (!visibleRef.current) return;
       const fit = fitAddonRef.current;
       const dims = fit?.proposeDimensions();
-      if (!dims || dims.cols <= 0 || dims.rows <= 0) return;
+      if (!fit || !dims || dims.cols <= 0 || dims.rows <= 0) return;
       fit.fit();
       flushResizeRpcRef.current?.();
       term.refresh(0, term.rows - 1);
@@ -519,7 +519,7 @@ export const TerminalView = memo(function TerminalView({ ptyId, visible, threadA
       if (!term) return;
       const fit = fitAddonRef.current;
       const dims = fit?.proposeDimensions();
-      if (!dims || dims.cols <= 0 || dims.rows <= 0) return;
+      if (!fit || !dims || dims.cols <= 0 || dims.rows <= 0) return;
       fit.fit();
       term.refresh(0, term.rows - 1);
     };
@@ -574,7 +574,7 @@ export const TerminalView = memo(function TerminalView({ ptyId, visible, threadA
         if (cancelled || !visibleRef.current) return;
         const fit = fitAddonRef.current;
         const dims = fit?.proposeDimensions();
-        if (!dims || dims.cols <= 0 || dims.rows <= 0) return;
+        if (!fit || !dims || dims.cols <= 0 || dims.rows <= 0) return;
         fit.fit();
         term.refresh(0, term.rows - 1);
       });

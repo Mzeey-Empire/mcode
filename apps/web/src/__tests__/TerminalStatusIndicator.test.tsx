@@ -4,10 +4,10 @@ import { useTerminalStore } from "@/stores/terminalStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { TerminalStatusIndicator } from "@/components/chat/TerminalStatusIndicator";
 
-const executeCommandMock = vi.fn(() => true);
+const executeCommandMock = vi.fn((_id: string) => true);
 
 vi.mock("@/lib/command-registry", () => ({
-  executeCommand: (...args: unknown[]) => executeCommandMock(...args),
+  executeCommand: (id: string) => executeCommandMock(id),
 }));
 
 describe("TerminalStatusIndicator", () => {
