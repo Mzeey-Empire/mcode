@@ -26,4 +26,11 @@ Mapper emits top-level `toolName: "Agent"` rows keyed by `toolCallId`. Use that 
 
 So Mcode can render parallel **Agent** delegation cards (with `agentId` in `toolInput`), but cannot yet group child tool calls under each subagent from ACP alone. `agent-service` stack fallback only applies when non-Agent tools arrive on the same thread with a running Agent on the stack.
 
-Regenerate fixtures: `bun apps/server/scripts/capture-cursor-acp.ts --suite`, then re-run the extract script in `capture-cursor-acp.ts` or copy tool lines manually.
+## Mapper enrichment (post-capture)
+
+- **Read:** `file_path` from `rawOutput.path` (or title when it looks like a path).
+- **Grep:** `pattern` / `path` from `rawInput` or `rawOutput`; falls back to `"N matches"` from `totalMatches`.
+- **Bash:** `command` from `rawInput` on `kind: execute` tool calls.
+- **Write:** `kind: write` uses the same diff/content paths as Edit when Cursor sends them.
+
+Regenerate fixtures: `bun apps/server/scripts/capture-cursor-acp.ts --suite`, then copy tool lines into `cursor-acp-suite-*.jsonl` or re-run the extract helper in the capture script.

@@ -67,6 +67,18 @@ const CAPTURE_SUITE: Array<{ id: string; prompt: string }> = [
       "Scenario shell_echo: Run one terminal command only: echo mcode-acp-capture-ok (or Windows equivalent). " +
       "Do not edit files and do not use subagents.",
   },
+  {
+    id: "write_create",
+    prompt:
+      `Scenario write_create: Create a new file only at ${FIXTURE_DIR.replace(/\\/g, "/")}/capture-new.txt ` +
+      "with exactly the line 'created-by-acp-capture'. Do not modify any other file.",
+  },
+  {
+    id: "todos_plan",
+    prompt:
+      "Scenario todos_plan: Without editing repo files, create a short 3-step plan in your reply " +
+      "and use your todo/plan tool if available. Steps: inspect, verify, summarize.",
+  },
 ];
 
 const args = process.argv.slice(2);

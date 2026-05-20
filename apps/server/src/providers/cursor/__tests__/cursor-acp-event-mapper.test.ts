@@ -147,7 +147,7 @@ describe("mapCursorAcpSessionNotification", () => {
           kind: "read",
           title: "Read File",
           status: "completed",
-          rawOutput: { content: "file body" },
+          rawOutput: { path: "src/module.ts", content: "file body" },
         },
       },
       threadId,
@@ -160,6 +160,7 @@ describe("mapCursorAcpSessionNotification", () => {
       threadId,
       toolCallId: "c-read",
       toolName: "Read",
+      toolInput: { file_path: "src/module.ts" },
     });
     expect(done[1]).toMatchObject({
       type: AgentEventType.ToolResult,
@@ -274,6 +275,68 @@ describe("mapCursorAcpSessionNotification", () => {
     expect((events[0] as { toolInput: Record<string, unknown> }).toolInput.goal).toBe(
       "sketch module layout",
     );
+  });
+
+  it("maps deferred Grep with totalMatches into toolInput pattern summary", () => {
+    const state = createCursorAcpTurnState();
+    mapCursorAcpSessionNotification(
+      {
+        sessionId: "s",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "c-grep",
+          title: "grep",
+          kind: "search",
+          status: "in_progress",
+        },
+      },
+      threadId,
+      state,
+    );
+    const done = mapCursorAcpSessionNotification(
+      {
+        sessionId: "s",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "c-grep",
+          kind: "search",
+          status: "completed",
+          rawOutput: { totalMatches: 4, truncated: false },
+        },
+      },
+      threadId,
+      state,
+    );
+    const use = done.find((e) => e.type === AgentEventType.ToolUse);
+    expect(use).toMatchObject({
+      toolName: "Grep",
+      toolInput: { pattern: "4 matches" },
+    });
+  });
+
+  it("maps execute kind with command on tool_call to Bash ToolUse", () => {
+    const state = createCursorAcpTurnState();
+    const started = mapCursorAcpSessionNotification(
+      {
+        sessionId: "s",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "c-sh",
+          title: "`echo ok`",
+          kind: "execute",
+          rawInput: { command: "echo ok" },
+          status: "in_progress",
+        },
+      },
+      threadId,
+      state,
+    );
+    expect(started).toHaveLength(1);
+    expect(started[0]).toMatchObject({
+      type: AgentEventType.ToolUse,
+      toolName: "Bash",
+      toolInput: { command: "echo ok" },
+    });
   });
 
   it("returns empty for plan with no entries", () => {

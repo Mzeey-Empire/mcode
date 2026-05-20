@@ -23,6 +23,12 @@ import {
 import { normalizeMcodeCursorToolInput } from "./cursor-tool-input-normalize.js";
 import type { CursorStreamAccumulator } from "./cursor-stream-event-mapper.js";
 import {
+  enrichAcpToolInput,
+  formatAcpToolResultOutput,
+  type AcpDiffBlock,
+  type PendingAcpToolMarker,
+} from "./cursor-acp-tool-input-enrichment.js";
+import {
   cursorTaskCompletionToAgentEvents,
   isCursorTaskAcpTool,
 } from "./cursor-acp-task.js";
@@ -86,6 +92,8 @@ export interface CursorAcpTurnState {
   taskMetaByCallId: Map<string, import("./cursor-acp-task.js").CursorTaskMeta>;
   /** Tracks the ACP tool name (kind/title) per tool call ID for enriching updates. */
   toolNameByCallId: Map<string, string>;
+  /** Kind/title from deferred lifecycle `tool_call` markers. */
+  pendingToolMarkerByCallId: Map<string, PendingAcpToolMarker>;
 }
 
 /** Creates a fresh per-turn state bundle (wraps shared stream accumulator shape). */
@@ -104,6 +112,7 @@ export function createCursorAcpTurnState(): CursorAcpTurnState {
     taskCompletedAwaitingMeta: new Set(),
     taskMetaByCallId: new Map(),
     toolNameByCallId: new Map(),
+    pendingToolMarkerByCallId: new Map(),
   };
 }
 
@@ -201,14 +210,6 @@ function resolveAcpToolName(update: {
   return title || "Tool";
 }
 
-/** Extract `content` blocks from an ACP tool_call or tool_call_update. */
-interface AcpDiffBlock {
-  type: "diff";
-  path: string;
-  oldText: string;
-  newText: string;
-}
-
 function extractContentDiffs(update: Record<string, unknown>): AcpDiffBlock[] {
   const content = update.content;
   if (!Array.isArray(content)) return [];
@@ -219,56 +220,6 @@ function extractContentDiffs(update: Record<string, unknown>): AcpDiffBlock[] {
       (c as Record<string, unknown>).type === "diff" &&
       typeof (c as Record<string, unknown>).path === "string",
   );
-}
-
-/** Extract structured rawOutput fields for different tool types. */
-function extractAcpRawOutput(rawOutput: unknown): {
-  /** File content (Read tool) */
-  fileContent?: string;
-  /** Terminal stdout */
-  stdout?: string;
-  /** Terminal stderr */
-  stderr?: string;
-  /** Terminal exit code */
-  exitCode?: number;
-  /** Raw string output */
-  raw?: string;
-} {
-  if (rawOutput === undefined || rawOutput === null) return {};
-  if (typeof rawOutput === "string") return { raw: rawOutput };
-  if (typeof rawOutput !== "object" || Array.isArray(rawOutput)) return {};
-
-  const r = rawOutput as Record<string, unknown>;
-
-  // Read tool: { content: "file contents..." }
-  if (typeof r.content === "string") {
-    return { fileContent: r.content };
-  }
-
-  // Terminal/Bash: { exitCode, stdout, stderr }
-  if ("stdout" in r || "exitCode" in r) {
-    return {
-      stdout: typeof r.stdout === "string" ? r.stdout : undefined,
-      stderr: typeof r.stderr === "string" ? r.stderr : undefined,
-      exitCode: typeof r.exitCode === "number" ? r.exitCode : undefined,
-    };
-  }
-
-  // Legacy: { success/rejected/failure }
-  const body = r.success ?? r.rejected ?? r.failure;
-  if (body != null) {
-    return { raw: typeof body === "string" ? body : safeStringify(body) };
-  }
-
-  return { raw: safeStringify(rawOutput) };
-}
-
-function safeStringify(value: unknown): string {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -380,6 +331,10 @@ function mapAcpToolCallStarted(
   }
 
   state.toolNameByCallId.set(update.toolCallId, toolName);
+  state.pendingToolMarkerByCallId.set(update.toolCallId, {
+    kind: typeof update.kind === "string" ? update.kind : undefined,
+    title: update.title,
+  });
 
   // ACP tool_calls with empty rawInput are lifecycle markers; actual data
   // arrives on tool_call_update (content blocks or rawOutput). Defer ToolUse
@@ -468,38 +423,19 @@ function mapAcpToolCallUpdated(
     ? extractToolCallDiscriminator(rawInputRecord).discriminator
     : null;
 
-  // Extract structured output from the two ACP channels
   const diffs = extractContentDiffs(update as Record<string, unknown>);
-  const rawOut = extractAcpRawOutput(update.rawOutput);
+  const marker = state.pendingToolMarkerByCallId.get(update.toolCallId);
 
-  // Determine tool name and build ToolUse input from available data
   let toolName = knownToolName ?? resolveAcpToolName(update);
   toolName = resolveCursorSubagentToolName(toolName, derivedDiscriminator, update.title);
-  let toolInput: Record<string, unknown> = {};
-  let output = "";
-
-  if (diffs.length > 0) {
-    const diff = diffs[0];
-    toolInput = {
-      file_path: diff.path,
-      old_string: diff.oldText,
-      new_string: diff.newText,
-    };
-    output = `Applied edit to ${diff.path}`;
-  } else if (rawOut.fileContent !== undefined) {
-    toolInput = { file_path: "" };
-    output = rawOut.fileContent;
-  } else if (rawOut.stdout !== undefined || rawOut.stderr !== undefined) {
-    const parts: string[] = [];
-    if (rawOut.stdout) parts.push(rawOut.stdout);
-    if (rawOut.stderr) parts.push(`stderr: ${rawOut.stderr}`);
-    if (rawOut.exitCode !== undefined && rawOut.exitCode !== 0) {
-      parts.push(`exit code: ${rawOut.exitCode}`);
-    }
-    output = parts.join("\n");
-  } else if (rawOut.raw) {
-    output = rawOut.raw;
-  }
+  const toolInput = enrichAcpToolInput(
+    toolName,
+    marker,
+    update.rawInput,
+    update.rawOutput,
+    diffs,
+  );
+  const output = formatAcpToolResultOutput(toolName, update.rawOutput, diffs);
 
   // Emit ToolUse with actual data only if the initial tool_call deferred it
   // (rawInput was empty). If tool_call already emitted ToolUse, skip to avoid
@@ -519,6 +455,7 @@ function mapAcpToolCallUpdated(
   acc.toolStartTimes.delete(update.toolCallId);
   acc.pendingToolCalls.delete(update.toolCallId);
   state.toolNameByCallId.delete(update.toolCallId);
+  state.pendingToolMarkerByCallId.delete(update.toolCallId);
 
   events.push({
     type: AgentEventType.ToolResult,
