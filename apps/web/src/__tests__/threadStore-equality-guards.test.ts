@@ -269,7 +269,10 @@ describe("loadMessages (cache-hit) - listPendingPermissions equality guard", () 
       expect(getCachedSnapshot(THREAD_ID)).toBeDefined();
     });
     // Switch away so that the next call to loadMessages(THREAD_ID) hits the cache.
-    useThreadStore.setState({ currentThreadId: "other-thread" });
+    // Clear `lastHydratedByThread` so the cache-hit staleness gate does not skip
+    // the side-effect refresh under test - these tests exercise the equality
+    // guards inside the RPC handlers, not the gate itself.
+    useThreadStore.setState({ currentThreadId: "other-thread", lastHydratedByThread: {} });
     vi.clearAllMocks();
     // Re-set mock defaults so the cache-hit refresh calls are controlled.
     (mockTransport.listSnapshots as ReturnType<typeof vi.fn>).mockResolvedValue([]);
@@ -343,7 +346,8 @@ describe("loadMessages (cache-hit) - getThreadTasks equality guard", () => {
     await vi.waitFor(() => {
       expect(getCachedSnapshot(THREAD_ID)).toBeDefined();
     });
-    useThreadStore.setState({ currentThreadId: "other-thread" });
+    // See note in the sibling warmCache about clearing `lastHydratedByThread`.
+    useThreadStore.setState({ currentThreadId: "other-thread", lastHydratedByThread: {} });
     vi.clearAllMocks();
     (mockTransport.listSnapshots as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   }

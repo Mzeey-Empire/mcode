@@ -132,6 +132,38 @@ export type {
   BrowserCaptureSpillFile,
 } from "./models/browser-preview.js";
 
+export {
+  BrowserTabIdSchema,
+  BrowserTabInfoSchema,
+  BrowserTabSetSchema,
+  BrowserPerfCountersSchema,
+  BROWSER_TAB_INFO_STRING_MAX,
+} from "./models/browser-tab.js";
+export type {
+  BrowserTabId,
+  BrowserTabInfo,
+  BrowserTabSet,
+  BrowserPerfCounters,
+} from "./models/browser-tab.js";
+
+export {
+  BROWSER_USE_FRAME_HEADER_BYTES,
+  BROWSER_USE_MAX_MESSAGE_BYTES,
+  BROWSER_USE_METHODS,
+  MCODE_BROWSER_USE_PIPE_ENV,
+  DPCODE_BROWSER_USE_PIPE_ENV,
+  T3CODE_BROWSER_USE_PIPE_ENV,
+  BrowserUseTabRowSchema,
+  BrowserExecuteCdpInputSchema,
+  BrowserUseCdpNotificationParamsSchema,
+} from "./models/browser-use.js";
+export type {
+  BrowserUseMethod,
+  BrowserUseTabRow,
+  BrowserExecuteCdpInput,
+  BrowserUseCdpNotificationParams,
+} from "./models/browser-use.js";
+
 // Events
 export { AgentEventSchema, AgentEventType } from "./events/agent-event.js";
 export type { AgentEvent } from "./events/agent-event.js";

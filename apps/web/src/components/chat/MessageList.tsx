@@ -31,6 +31,8 @@ import type { ThoughtSegment } from "./narrative";
 
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
 const EMPTY_THOUGHT_SEGMENTS: readonly ThoughtSegment[] = [];
+const EMPTY_TURN_MAP: Record<string, string> = {};
+const EMPTY_FILES_CHANGED: Record<string, string[]> = {};
 const AUTO_SCROLL_THRESHOLD = 64;
 /**
  * If the viewport is farther than this from the scroll tail, the user has left
@@ -260,8 +262,19 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   const toolCallsRaw = useThreadStore((s) =>
     activeThreadId ? s.toolCallsByThread[activeThreadId] : undefined,
   );
+  // Narrowed selector: only subscribe to entries for messages currently
+  // rendered in this thread, not the global map. Avoids re-renders when a
+  // background thread's snapshot list updates.
   const persistedFilesChanged = useThreadStore(
-    useShallow((s) => s.persistedFilesChanged),
+    useShallow((s) => {
+      if (s.messages.length === 0) return EMPTY_FILES_CHANGED;
+      const out: Record<string, string[]> = {};
+      for (const m of s.messages) {
+        const v = s.persistedFilesChanged[m.id];
+        if (v) out[m.id] = v;
+      }
+      return out;
+    }),
   );
   const latestTurnWithChanges = useThreadStore(
     (s) => s.latestTurnWithChanges,
@@ -283,8 +296,18 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   const thoughtSegments = useThreadStore(
     (s) => s.thoughtSegmentsByThread[currentThreadId ?? ""] ?? EMPTY_THOUGHT_SEGMENTS,
   );
-  const currentTurnMessageIdByThread = useThreadStore(
-    (s) => s.currentTurnMessageIdByThread,
+  // Narrowed selector: subscribe only to the active thread's current-turn
+  // message id (a string), not the whole per-thread map. The downstream
+  // `VirtualItemRenderer` still expects the map shape, so we wrap it back
+  // up via useMemo - stable across renders unless the string actually changes.
+  const currentTurnMessageId = useThreadStore(
+    (s) => currentThreadId ? (s.currentTurnMessageIdByThread?.[currentThreadId] ?? "") : "",
+  );
+  const currentTurnMessageIdByThread = useMemo(
+    () => (currentThreadId && currentTurnMessageId
+      ? { [currentThreadId]: currentTurnMessageId }
+      : EMPTY_TURN_MAP),
+    [currentThreadId, currentTurnMessageId],
   );
 
   const toolCalls = toolCallsRaw ?? EMPTY_TOOL_CALLS;

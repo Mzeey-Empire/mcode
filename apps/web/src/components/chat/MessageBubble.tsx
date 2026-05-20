@@ -44,6 +44,127 @@ function parseGoalStatus(content: string): {
   return null;
 }
 
+/**
+ * Detect a user-typed /goal SET form (`/goal <condition>` with non-empty,
+ * non-control argument). The server rewrites the wire payload into a
+ * directive and dispatches it to the agent without emitting a separate
+ * assistant "Goal set: ..." status message, so the pill must render off
+ * the user's own message. Returns null for control forms (clear, reset,
+ * show, empty) — those still get an assistant-side pill from the server.
+ */
+function parseUserGoalCommand(content: string): { condition: string } | null {
+  const m = /^\s*\/goal\b\s*([\s\S]*)$/.exec(content);
+  if (!m) return null;
+  const arg = m[1].trim();
+  if (arg === "") return null;
+  const lower = arg.toLowerCase();
+  if (lower === "clear" || lower === "reset" || lower === "show") return null;
+  return { condition: arg };
+}
+
+/**
+ * Hairline chapter-break rendering for /goal command notices. Used by both
+ * the user-typed SET form and assistant-emitted SHOW/CLEAR confirmations.
+ * Mirrors the existing system-message divider pattern (hairline + glyph +
+ * caption) but tinted with the amber `primary` accent so /goal events read
+ * as structural marks rather than card chips in the transcript.
+ *
+ * Layout (collapsed): ─── ◎ GOAL SET "<condition>" /GOAL CLEAR ─── (truncated)
+ * Layout (expanded):  ─── ◎ GOAL SET /GOAL CLEAR ───
+ *                          "<condition wrapping across multiple lines>"
+ *
+ * The condition is a button that toggles expansion so long directives stay
+ * readable. `dir="auto"` lets the browser pick reading order from the
+ * content itself so RTL or mixed-script conditions render naturally.
+ * `[overflow-wrap:anywhere]` allows breaking inside long unbroken tokens
+ * (URLs, hashes) that ordinary `break-words` would leave to overflow.
+ */
+function GoalPill({ label, condition, hint }: { label: string; condition?: string; hint: string }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const labelEl = (
+    <span className="font-mono text-[10.5px] uppercase tracking-[0.2em] text-primary">
+      {label}
+    </span>
+  );
+  const hintEl = (
+    <span className="shrink-0 font-mono text-[9.5px] uppercase tracking-[0.18em] text-muted-foreground/70">
+      {hint}
+    </span>
+  );
+  const iconEl = (
+    <Target
+      data-testid="target-icon"
+      size={12}
+      className="shrink-0 self-center text-primary"
+      aria-hidden="true"
+    />
+  );
+
+  if (expanded && condition) {
+    return (
+      <div
+        className="flex items-start gap-3 py-2"
+        data-testid="goal-pill"
+        data-expanded="true"
+        role="note"
+        aria-label={`${label}: ${condition}`}
+      >
+        <div className="mt-2 h-px flex-1 bg-primary/40" />
+        <div className="flex min-w-0 flex-col items-start gap-1.5">
+          <div className="flex items-baseline gap-2.5">
+            {iconEl}
+            {labelEl}
+            {hintEl}
+          </div>
+          <button
+            type="button"
+            onClick={() => setExpanded(false)}
+            aria-expanded="true"
+            aria-label="Collapse goal condition"
+            dir="auto"
+            className="cursor-pointer text-left font-serif text-[14px] italic leading-snug text-foreground [overflow-wrap:anywhere] hover:text-foreground/80"
+          >
+            &ldquo;{condition}&rdquo;
+          </button>
+        </div>
+        <div className="mt-2 h-px flex-1 bg-primary/40" />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="flex items-center gap-3 py-2"
+      data-testid="goal-pill"
+      data-expanded="false"
+      role="note"
+      aria-label={condition ? `${label}: ${condition}` : label}
+    >
+      <div className="h-px flex-1 bg-primary/40" />
+      <div className="flex min-w-0 items-baseline gap-2.5">
+        {iconEl}
+        {labelEl}
+        {condition && (
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            aria-expanded="false"
+            aria-label="Expand full goal condition"
+            title={condition}
+            dir="auto"
+            className="min-w-0 cursor-pointer truncate text-left font-serif text-[14px] italic leading-snug text-foreground hover:text-foreground/80"
+          >
+            &ldquo;{condition}&rdquo;
+          </button>
+        )}
+        {hintEl}
+      </div>
+      <div className="h-px flex-1 bg-primary/40" />
+    </div>
+  );
+}
+
 function parseAgentError(content: string): string | null {
   try {
     const parsed = JSON.parse(content) as { __type?: string; message?: string };
@@ -308,19 +429,24 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
   if (message.role === "assistant") {
     const goal = parseGoalStatus(textContent);
     if (goal) {
-      return (
-        <div className="flex items-start gap-2.5 rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-sm">
-          <Target size={14} className="mt-0.5 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 flex-1 text-muted-foreground leading-relaxed">
-            <span className="font-medium text-foreground">{goal.label}</span>
-            {goal.condition && (
-              <span className="ml-1.5 text-foreground/80">&ldquo;{goal.condition}&rdquo;</span>
-            )}
-            <span className="ml-1.5 text-xs opacity-80">{goal.hint}</span>
-          </div>
-        </div>
-      );
+      return <GoalPill label={goal.label} condition={goal.condition} hint={goal.hint} />;
     }
+  }
+
+  // User-typed `/goal <condition>` SET form. AgentService rewrites the wire
+  // payload into a directive prompt and dispatches it to the agent without
+  // emitting a separate assistant status message, so the only place we can
+  // anchor the pill is the user's own message. Control forms (clear/show)
+  // still get an assistant-side pill from the server, so they fall through
+  // to the normal user bubble below.
+  const userGoal = message.role === "user" ? parseUserGoalCommand(textContent) : null;
+  const hasAttachments = imageAttachments.length > 0 || fileAttachments.length > 0;
+  // Without attachments the pill replaces the whole bubble (chapter-break
+  // full-width). With attachments we keep the user's images/files visible
+  // and render the pill alongside, so the directive is not "stolen" from
+  // the attachments the user intentionally sent with it.
+  if (message.role === "user" && userGoal && !hasAttachments) {
+    return <GoalPill label="Goal set" condition={userGoal.condition} hint="/goal clear to remove" />;
   }
 
   const isUser = message.role === "user";
@@ -377,7 +503,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
               </div>
             )}
 
-          {textContent.trim() && (
+          {textContent.trim() && !userGoal && (
             <div className="overflow-hidden break-words rounded-lg rounded-br-md bg-primary px-3 py-1.5 text-sm text-primary-foreground shadow-sm shadow-primary/15">
               <Suspense fallback={null}>
                 <LazyMarkdownContent content={textContent} isStreaming={false} variant="user" />
@@ -398,12 +524,15 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
                 onReply(message.id, textContent.trim() || fallback, "user");
               }} />}
               {onBranch && <BranchButton onClick={() => onBranch(message.id)} />}
-              {textContent.trim() && <CopyButton content={textContent} />}
+              {textContent.trim() && !userGoal && <CopyButton content={textContent} />}
             </div>
             <span className="font-mono text-[10px] tabular-nums text-muted-foreground/55">{formattedTime}</span>
           </div>
         </div>
         </div>
+        {userGoal && (
+          <GoalPill label="Goal set" condition={userGoal.condition} hint="/goal clear to remove" />
+        )}
         <ImageAttachmentLightbox
           open={imagePreview !== null}
           onOpenChange={(open) => {

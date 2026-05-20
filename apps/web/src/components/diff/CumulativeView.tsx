@@ -43,7 +43,7 @@ export function CumulativeView({ snapshots, threadId }: CumulativeViewProps) {
           file{files.length !== 1 ? "s" : ""} · {snapshots.length} turn{snapshots.length !== 1 ? "s" : ""}
         </span>
       </div>
-      <FileList files={files} source="cumulative" id={threadId} />
+      <FileList files={files} source="cumulative" id={threadId} threadId={threadId} />
     </div>
   );
 }

@@ -118,6 +118,17 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     downloadUpdate(): Promise<void> {
       return ipcRenderer.invoke("app:download-update");
     },
+    /**
+     * Switch the running updater to a new release line and immediately check.
+     * When `allowDowngrade` is true, the next install is allowed to be older
+     * than the running version (used by the nightly→stable confirmation flow).
+     */
+    applyReleaseLine(payload: {
+      releaseLine: "stable" | "nightly";
+      allowDowngrade?: boolean;
+    }): Promise<unknown> {
+      return ipcRenderer.invoke("app:apply-release-line", payload);
+    },
     /** Subscribe to push updates of update-status. Returns the listener for cleanup. */
     onUpdateStatus(callback: (status: unknown) => void) {
       const listener = (_event: unknown, status: unknown) => callback(status);
@@ -203,6 +214,71 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     /** Cancel any in-progress capture operation (region or element-pick). */
     cancelCapture(): Promise<void> {
       return ipcRenderer.invoke("preview:cancel-capture");
+    },
+    /** Read the live perf counter bag (dev HUD only). */
+    getPerfCounters(): Promise<unknown> {
+      return ipcRenderer.invoke("preview:get-perf-counters");
+    },
+    /**
+     * Phase D: adopt a renderer-hosted <webview> into the host bridge so the
+     * Codex browser-use pipe can drive it via executeCdp. The renderer reads
+     * the guest's webContentsId via `webview.getWebContentsId()` after
+     * `did-attach` fires, then forwards it here.
+     */
+    adoptWebview(payload: {
+      webContentsId: number;
+      threadId: string;
+      tabId: string;
+    }): Promise<unknown> {
+      return ipcRenderer.invoke("preview:adopt-webview", payload);
+    },
+    releaseWebview(payload: { threadId: string; tabId: string }): Promise<unknown> {
+      return ipcRenderer.invoke("preview:release-webview", payload);
+    },
+    /**
+     * Phase G design mode: stretch the panel to one of the named viewport
+     * presets ("phone" | "tablet" | "desktop") or pass explicit dimensions.
+     * Use design.reset() to restore the bounds the React shell last synced.
+     */
+    design: {
+      setViewport(payload: {
+        presetId?: string;
+        widthOverride?: number;
+        heightOverride?: number;
+      }): Promise<unknown> {
+        return ipcRenderer.invoke("preview:design.set-viewport", payload);
+      },
+      resetViewport(): Promise<unknown> {
+        return ipcRenderer.invoke("preview:design.reset-viewport");
+      },
+      setInspect(enabled: boolean): Promise<unknown> {
+        return ipcRenderer.invoke("preview:design.set-inspect", { enabled });
+      },
+    },
+    /**
+     * Multi-tab control surface (Phase A of the in-app browser rewrite).
+     * Phase A keeps a single backing BrowserView per window; these methods
+     * give the renderer a stable contract for tab list / mutations so the UI
+     * can ship tab affordances before the real per-tab backing lands.
+     */
+    tabs: {
+      list(threadId: string): Promise<unknown> {
+        return ipcRenderer.invoke("preview:tabs.list", { threadId });
+      },
+      create(threadId: string, activate = true): Promise<unknown> {
+        return ipcRenderer.invoke("preview:tabs.create", { threadId, activate });
+      },
+      activate(threadId: string, tabId: string): Promise<unknown> {
+        return ipcRenderer.invoke("preview:tabs.activate", { threadId, tabId });
+      },
+      close(threadId: string, tabId: string): Promise<unknown> {
+        return ipcRenderer.invoke("preview:tabs.close", { threadId, tabId });
+      },
+      onUpdated(callback: (payload: unknown) => void): () => void {
+        const listener = (_event: unknown, payload: unknown) => callback(payload);
+        ipcRenderer.on("preview:tabs-updated", listener);
+        return () => ipcRenderer.removeListener("preview:tabs-updated", listener);
+      },
     },
   },
 

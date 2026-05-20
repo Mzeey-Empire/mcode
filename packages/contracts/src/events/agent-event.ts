@@ -269,6 +269,13 @@ export const AgentEventSchema = lazySchema(() =>
        * rather than the volatile `hooksByThread` list.
        */
       persistedMessageId: z.string().optional(),
+      /**
+       * Set together with `persistedMessageId`. Stable DB row id for the late
+       * hook so the client can dedupe across redelivered broadcasts (the same
+       * logical event can arrive multiple times during a session) and avoid
+       * accumulating duplicate entries in `narrativeByMessage[id].hooks`.
+       */
+      persistedHookId: z.string().optional(),
     }),
     z.object({
       /**

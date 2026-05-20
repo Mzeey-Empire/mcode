@@ -23,6 +23,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 import { isWindows } from "@/lib/platform";
 import { isCursorPermissionLockedToFull } from "@/lib/cursor-permission";
+import { isGoalControlCommand } from "@/lib/goal-command";
 import { getDefaultModelId, getDefaultReasoningLevel, getDefaultProviderId, isMaxEffortModel, isXhighEffortModel, supportsEffortParameter, supportsUltrathink, supports1MContextWindow, supportsThinkingToggle, resolveThreadModelId, normalizeReasoningLevelForModel, getCodexReasoningLevels, providerSupportsReasoningLevels } from "@/lib/model-registry";
 import { ModelSelector } from "./ModelSelector";
 import { ModeSelector, ALL_MODE_OPTIONS } from "./ModeSelector";
@@ -829,7 +830,11 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const sendMessage = useThreadStore((s) => s.sendMessage);
   const stopAgent = useThreadStore((s) => s.stopAgent);
   const branchThread = useWorkspaceStore((s) => s.branchThread);
-  const runningThreadIds = useThreadStore((s) => s.runningThreadIds);
+  // Subscribe to just the boolean for this thread instead of the full Set.
+  // Avoids Composer re-renders when other threads start/stop their agents.
+  const isAgentRunning = useThreadStore(
+    (s) => threadId ? s.runningThreadIds.has(threadId) : false,
+  );
   const setThreadSettings = useThreadStore((s) => s.setThreadSettings);
 
   // Cursor on Windows has no usable supervised mode (cursor-agent's OS
@@ -852,7 +857,6 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const planPending = useThreadStore(
     (s) => !!threadId && (s.planQuestionsStatusByThread[threadId] ?? "idle") === "pending",
   );
-  const isAgentRunning = threadId ? runningThreadIds.has(threadId) : false;
 
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const workspacePath = workspaces.find((w) => w.id === workspaceId)?.path;
@@ -1641,7 +1645,22 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     // Skip when composing a branch (`branchFromMessageId`) or a brand-new thread
     // (`isNewThread`) - both target a *different* thread and must not enqueue
     // on the parent thread that happens to be currently running.
-    if (isAgentRunning && threadId && !branchFromMessageId && !isNewThread) {
+    //
+    // Also skip for `/goal` control-form commands (`clear`, `reset`, `show`,
+    // bare `/goal`). When a goal is active the agent's Stop hook blocks the
+    // turn from ending until the goal is met - which means `session.turnComplete`
+    // never fires and the queue never drains. Queueing `/goal clear` here would
+    // deadlock: the only way to clear the goal is to send `/goal clear`, but
+    // that message would sit in the queue waiting for a turn that cannot
+    // complete. The server intercept handles these control forms synchronously
+    // without invoking the provider, so they are safe to send mid-turn.
+    if (
+      isAgentRunning &&
+      threadId &&
+      !branchFromMessageId &&
+      !isNewThread &&
+      !isGoalControlCommand(trimmed)
+    ) {
       const captureRows = buildAttachedBrowserCaptures(attachments);
       const { content: injectedContent, display: displayInjected } = await injectFileContent(trimmed);
       let content: string;

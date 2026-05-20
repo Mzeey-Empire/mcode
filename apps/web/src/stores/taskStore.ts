@@ -36,8 +36,10 @@ export interface TaskItem {
 interface TaskState {
   /** Task items keyed by thread ID. */
   tasksByThread: Record<string, readonly TaskItem[]>;
-  /** Replace all tasks for a thread. */
+  /** Replace all tasks for a thread (top-level TodoWrite). */
   setTasks: (threadId: string, tasks: readonly TaskItem[]) => void;
+  /** Replace only tasks belonging to a specific group, preserving other groups. */
+  setTaskGroup: (threadId: string, group: string, tasks: readonly TaskItem[]) => void;
   /** Clear tasks for a thread (e.g. on deletion). */
   clearTasks: (threadId: string) => void;
 }
@@ -47,6 +49,12 @@ export const useTaskStore = create<TaskState>((set) => ({
   tasksByThread: {},
   setTasks: (threadId, tasks) =>
     set((s) => ({ tasksByThread: { ...s.tasksByThread, [threadId]: tasks } })),
+  setTaskGroup: (threadId, group, tasks) =>
+    set((s) => {
+      const existing = s.tasksByThread[threadId] ?? [];
+      const otherGroups = existing.filter((t) => t.group !== group);
+      return { tasksByThread: { ...s.tasksByThread, [threadId]: [...otherGroups, ...tasks] } };
+    }),
   clearTasks: (threadId) =>
     set((s) => {
       const next = { ...s.tasksByThread };
@@ -61,6 +69,8 @@ if (import.meta.env.DEV && typeof window !== "undefined") {
     get state() { return useTaskStore.getState(); },
     setTasks: (threadId: string, tasks: readonly TaskItem[]) =>
       useTaskStore.getState().setTasks(threadId, tasks),
+    setTaskGroup: (threadId: string, group: string, tasks: readonly TaskItem[]) =>
+      useTaskStore.getState().setTaskGroup(threadId, group, tasks),
     clear: (threadId: string) => useTaskStore.getState().clearTasks(threadId),
   };
 }

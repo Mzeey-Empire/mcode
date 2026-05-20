@@ -16,6 +16,12 @@ permissions:
 
 jobs:
   build:
+    # Skip nightly per-build releases: the dedicated `nightly-desktop.yml`
+    # workflow handles those. Without this guard, the `release: published`
+    # event fired by `gh release create v<x>-nightly.<...>` would also run
+    # this workflow and upload stable-channel artifacts into the nightly
+    # release.
+    if: ${{ !contains(github.event.release.tag_name, '-nightly.') }}
     strategy:
       fail-fast: false
       matrix:
@@ -130,7 +136,9 @@ jobs:
   # so electron-updater resolves the correct binary for each architecture.
   merge-mac-yml:
     needs: build
-    if: github.event.release.tag_name || inputs.tag
+    # Same nightly-tag exclusion as the `build` job (this job would otherwise
+    # try to upload `latest-mac.yml` into a nightly release).
+    if: ${{ (github.event.release.tag_name || inputs.tag) && !contains(github.event.release.tag_name, '-nightly.') }}
     runs-on: ubuntu-22.04
     steps:
       - name: Download arm64 yml
