@@ -153,14 +153,16 @@ describe("buildVirtualItems (combined)", () => {
     const result = buildAll(messages, toolCalls, undefined, false, undefined);
 
     const types = result.map((item) => item.type);
-    // msg-1, narrative-flow, msg-2, persisted-late-hooks(msg-2), persisted-turn-footer(msg-2)
-    // (persisted-narrative for msg-2 is filtered out because live narrative-flow is present)
+    // msg-1, narrative-flow, msg-2, persisted-late-hooks(msg-2)
+    // persisted-narrative AND persisted-turn-footer for msg-2 are filtered out
+    // because live narrative-flow is present — NarrativeFlow renders its own
+    // turn footer below the timeline when the agent stops, so showing the
+    // persisted one too would duplicate the summary.
     expect(types).toEqual([
       "message",
       "narrative-flow",
       "message",
       "persisted-late-hooks",
-      "persisted-turn-footer",
     ]);
     expect(result[0]).toMatchObject({ type: "message", key: "msg-1" });
     expect(result[1]).toMatchObject({ type: "narrative-flow" });
@@ -261,13 +263,17 @@ describe("buildVirtualItems (combined)", () => {
 
     const types = result.map((item) => item.type);
     // user msg, narrative-flow (before split assistant msg), split assistant msg,
-    // persisted-late-hooks(msg-2) and persisted-turn-footer(msg-2) after the bubble
+    // persisted-late-hooks(msg-2). persisted-turn-footer suppressed while the
+    // live narrative-flow is present (its own footer covers the summary).
+    // streaming-response is suppressed too because a tool is still running —
+    // `computeLiveStreamingText` returns "" while any top-level tool is in
+    // flight, since the model isn't streaming user-facing text during tool
+    // execution.
     expect(types).toEqual([
       "message",
       "narrative-flow",
       "message",
       "persisted-late-hooks",
-      "persisted-turn-footer",
     ]);
     expect(result[0]).toMatchObject({ key: "msg-1" });
     expect(result[2]).toMatchObject({ key: "msg-2" });

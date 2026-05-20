@@ -287,9 +287,13 @@ export function buildVirtualItems(
     const tailItems = volatileItems.filter(
       (v) => v.type !== "narrative-flow" && v.type !== "streaming-response",
     );
-    // Drop the persisted-narrative placeholder for the message that has
-    // live narrative-flow above it, to avoid double-rendering the same
-    // timeline while volatile records are still in-memory.
+    // Drop the persisted-narrative placeholder AND the persisted-turn-footer
+    // for the message that has live narrative-flow above it, to avoid
+    // double-rendering the same timeline / turn summary while volatile records
+    // are still in-memory. NarrativeFlow renders its own footer below the
+    // timeline when `!isAgentRunning && !deltaItem`, so the persisted footer
+    // would otherwise duplicate it (with a slightly different duration since
+    // one reads timestamps and the other reads DB-recorded `completed_at`).
     const lastAssistantMessageId = lastItem.message.id;
     const filteredStable = stableItems.filter(
       (it, idx) =>
@@ -299,6 +303,10 @@ export function buildVirtualItems(
           // Only filter the one immediately preceding the message - older
           // persisted narratives for prior turns must still render.
           idx === lastAssistantIdx - 1
+        ) &&
+        !(
+          it.type === "persisted-turn-footer" &&
+          it.messageId === lastAssistantMessageId
         ),
     );
     // Recompute index after the filter.
