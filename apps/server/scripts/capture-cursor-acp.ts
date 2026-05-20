@@ -13,7 +13,7 @@
  * Requires `agent` or `cursor-agent` on PATH and a logged-in Cursor CLI session.
  */
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import {
@@ -35,6 +35,19 @@ import { cursorTaskExtToAgentEvents } from "../src/providers/cursor/cursor-acp-t
 
 const REPO_ROOT = resolve(import.meta.dir, "../../..");
 const OUT_DIR = join(REPO_ROOT, ".mcode-local", "cursor-acp-capture");
+
+/**
+ * Resolves a request path under {@link REPO_ROOT}, rejecting traversal outside the repo.
+ */
+function resolveWithinRepo(requestPath: string): string {
+  const root = resolve(REPO_ROOT);
+  const candidate = resolve(root, requestPath);
+  const rel = relative(root, candidate);
+  if (rel.startsWith("..") || rel.split(/[/\\]/).includes("..")) {
+    throw new Error(`Path escapes repo root: ${requestPath}`);
+  }
+  return candidate;
+}
 const FIXTURE_DIR = join(OUT_DIR, "fixture-workspace");
 const FIXTURE_FILE = join(FIXTURE_DIR, "scratch.txt");
 
@@ -188,11 +201,11 @@ function buildClient(opts: {
       return { outcome: { outcome: "selected", optionId } };
     },
     readTextFile: async (r) => {
-      const path = resolve(REPO_ROOT, r.path);
+      const path = resolveWithinRepo(r.path);
       return { content: readFileSync(path, "utf8") };
     },
     writeTextFile: async (r) => {
-      const path = resolve(REPO_ROOT, r.path);
+      const path = resolveWithinRepo(r.path);
       mkdirSync(dirname(path), { recursive: true });
       writeFileSync(path, r.content, "utf8");
       return {};

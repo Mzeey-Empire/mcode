@@ -31,6 +31,11 @@ describe("buildDelegationTags", () => {
     expect(tags).toContain("Composer");
   });
 
+  it("skips whitespace-only model labels", () => {
+    const tags = buildDelegationTags(mkAgent({ toolInput: { model: "   " } }));
+    expect(tags).toEqual([]);
+  });
+
   it("does not include duration tags", () => {
     const tags = buildDelegationTags(
       mkAgent({

@@ -19,6 +19,7 @@ export interface PendingAcpToolMarker {
   title?: string | null;
 }
 
+/** Returns the first non-empty string value for any of the given keys. */
 function pickString(obj: Record<string, unknown> | undefined, keys: string[]): string | undefined {
   if (!obj) return undefined;
   for (const k of keys) {
@@ -28,6 +29,7 @@ function pickString(obj: Record<string, unknown> | undefined, keys: string[]): s
   return undefined;
 }
 
+/** Narrows an unknown value to a plain object record when safe. */
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (value != null && typeof value === "object" && !Array.isArray(value)) {
     return value as Record<string, unknown>;

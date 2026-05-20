@@ -29,8 +29,8 @@ export function buildDelegationTags(toolCall: ToolCall): string[] {
   const typeLabel = formatSubagentTypeLabel(input.subagentType);
   if (typeLabel) tags.push(typeLabel);
 
-  if (typeof input.model === "string" && input.model.length > 0) {
-    tags.push(formatModelLabel(input.model));
+  if (typeof input.model === "string" && input.model.trim().length > 0) {
+    tags.push(formatModelLabel(input.model.trim()));
   }
 
   return tags;
