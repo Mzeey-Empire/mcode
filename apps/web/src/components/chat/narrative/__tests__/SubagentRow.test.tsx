@@ -12,7 +12,7 @@ function mkAgent(partial: Partial<ToolCall>): ToolCall {
     isError: false,
     isComplete: true,
     startedAt: 0,
-    parentToolCallId: null,
+    parentToolCallId: undefined,
     ...partial,
   };
 }

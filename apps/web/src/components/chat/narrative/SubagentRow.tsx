@@ -120,7 +120,6 @@ interface ExpandableSubagentRowProps extends SubagentRowProps {
  * Collapsible sub-agent row when nested tool calls exist (Claude SDK path).
  */
 function ExpandableSubagentRow({
-  toolCall,
   children,
   hooks,
   allToolCalls,
