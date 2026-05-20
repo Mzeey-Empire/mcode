@@ -108,3 +108,13 @@ PreToolUse hooks also block direct `.env` file edits across all agents.
 - **Claude Code:** reads `.mcp.json` automatically
 - **Cursor:** reads `.cursor/mcp.json` automatically
 - **Other agents:** run `npx @playwright/mcp@latest` and connect via MCP
+
+## One-time cleanup
+
+After the first per-build nightly release lands, run:
+
+```bash
+GH_TOKEN=$(gh auth token) node scripts/agent/one-time-cleanup-rolling-nightly.mjs --confirm
+```
+
+This deletes the legacy rolling `nightly` release (49 stale assets) and its tag. Clients on the nightly channel auto-rediscover via `allowPrerelease`.

@@ -1,6 +1,6 @@
 # Packs the desktop app from the default branch and uploads to the rolling
 # prerelease tagged `nightly`, using electron-builder publish channel `nightly`
-# so clients with `updates.channel` = `nightly` resolve `latest-nightly.yml` (etc.).
+# so clients with `updates.channel` = `nightly` resolve `nightly.yml` (etc.).
 
 name: Nightly Desktop
 
@@ -17,9 +17,88 @@ permissions:
   contents: write
 
 jobs:
-  prepare:
-    runs-on: ubuntu-22.04
+  preflight:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      last_nightly_tag: ${{ steps.check.outputs.last_nightly_tag }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - id: check
+        name: Compare HEAD to last nightly tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Find the most recent tag matching our nightly pattern. If none
+          # exists yet, force a build so we bootstrap the first nightly.
+          last_tag=$(git tag --list "v*-nightly.*" --sort=-creatordate | head -n 1)
+          if [ -z "$last_tag" ]; then
+            echo "No prior nightly tag found; will build."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "last_nightly_tag=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          last_sha=$(git rev-parse "${last_tag}^{commit}")
+          head_sha=$(git rev-parse HEAD)
+          echo "last nightly tag: $last_tag ($last_sha)"
+          echo "HEAD: $head_sha"
+          if [ "$last_sha" = "$head_sha" ]; then
+            echo "No new commits since last nightly; skipping."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "last_nightly_tag=$last_tag" >> "$GITHUB_OUTPUT"
+
+  prepare-release:
+    needs: [preflight]
+    if: needs.preflight.outputs.should_build == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute nightly version and tag
+        id: tag
+        shell: bash
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          version=$(node <<'NODE'
+          const fs = require("fs");
+          const path = require("path");
+          const { pathToFileURL } = require("url");
+          (async () => {
+            const modUrl = pathToFileURL(
+              path.resolve("apps/desktop/scripts/compute-nightly-version.mjs"),
+            ).href;
+            const { computeNightlyVersion } = await import(modUrl);
+            const manifest = JSON.parse(
+              fs.readFileSync(".release-please-manifest.json", "utf8"),
+            );
+            const v = computeNightlyVersion({
+              manifest,
+              runNumber: Number(process.env.GITHUB_RUN_NUMBER || "0"),
+              date: new Date(),
+            });
+            process.stdout.write(v);
+          })().catch((err) => {
+            console.error(err);
+            process.exit(1);
+          });
+          NODE
+          )
+          tag="v${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Computed nightly tag: ${tag}"
+
       - name: Generate bot token
         id: bot-token
         uses: actions/create-github-app-token@v1
@@ -27,19 +106,27 @@ jobs:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
-      - name: Ensure nightly prerelease exists
+      - name: Create per-build nightly release
         env:
           GH_TOKEN: ${{ steps.bot-token.outputs.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -e
-          if ! gh release view nightly --repo "${{ github.repository }}" &>/dev/null; then
-            gh release create nightly --prerelease --title "Mcode nightly" \
-              --notes "Automated desktop builds from the default branch. Assets are replaced on each successful run." \
-              --repo "${{ github.repository }}"
+          if gh release view "$TAG" --repo "${{ github.repository }}" &>/dev/null; then
+            echo "Release $TAG already exists (re-run); proceeding without recreate."
+            exit 0
           fi
+          short_sha=$(git rev-parse --short HEAD)
+          gh release create "$TAG" \
+            --prerelease \
+            --title "Mcode Nightly ${{ steps.tag.outputs.version }} (${short_sha})" \
+            --notes "Automated nightly build from ${{ github.sha }}. Not marked latest. Channel YAML: \`nightly.yml\`." \
+            --target ${{ github.sha }} \
+            --repo "${{ github.repository }}"
 
   build:
-    needs: [prepare]
+    needs: [preflight, prepare-release]
+    if: needs.preflight.outputs.should_build == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -72,20 +159,20 @@ jobs:
       - name: Set nightly package version
         shell: bash
         env:
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          MCODE_NIGHTLY_VERSION: ${{ needs.prepare-release.outputs.version }}
         run: |
           node <<'NODE'
           const fs = require("fs");
-          const manifest = JSON.parse(fs.readFileSync(".release-please-manifest.json", "utf8"));
-          const base = manifest["."];
-          const day = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-          const run = process.env.GITHUB_RUN_NUMBER || "0";
-          const version = `${base}-nightly.${day}.${run}`;
+          const version = process.env.MCODE_NIGHTLY_VERSION;
+          if (!version) {
+            console.error("MCODE_NIGHTLY_VERSION not set; this job depends on prepare-release.");
+            process.exit(1);
+          }
           const pkgPath = "apps/desktop/package.json";
           const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
           pkg.version = version;
           fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
-          console.log("Nightly desktop version:", version);
+          console.log("Nightly desktop version (from prepare-release):", version);
           NODE
 
       - name: Build main & renderer
@@ -113,15 +200,14 @@ jobs:
         if: matrix.target-arch == 'arm64' || matrix.target-arch == 'x64'
         uses: actions/upload-artifact@v4
         with:
-          name: latest-mac-yml-${{ matrix.target-arch }}-nightly
-          path: apps/desktop/release/latest-mac-nightly.yml
+          name: mac-yml-${{ matrix.target-arch }}-nightly
+          path: apps/desktop/release/nightly-mac.yml
           retention-days: 1
 
       - name: Collect nightly release artifacts
         id: artifacts
         shell: bash
         run: |
-          echo "tag=nightly" >> "$GITHUB_OUTPUT"
           shopt -s nullglob
           files=()
           for f in \
@@ -133,8 +219,8 @@ jobs:
             apps/desktop/release/*.zip.blockmap \
             apps/desktop/release/*.AppImage \
             apps/desktop/release/*.deb \
-            apps/desktop/release/latest-nightly.yml \
-            apps/desktop/release/latest-linux-nightly.yml; do
+            apps/desktop/release/nightly.yml \
+            apps/desktop/release/nightly-linux.yml; do
             [ -f "$f" ] || continue
             base=$(basename "$f")
             [[ "$base" == "elevate.exe" ]] && continue
@@ -155,41 +241,43 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare-release.outputs.tag }}
         run: |
           while IFS= read -r f; do
-            echo "Uploading: $f"
-            gh release upload nightly "$f" --clobber --repo "${{ github.repository }}"
+            echo "Uploading: $f -> $TAG"
+            gh release upload "$TAG" "$f" --clobber --repo "${{ github.repository }}"
           done < artifact-list.txt
 
   merge-mac-yml-nightly:
-    needs: build
+    needs: [preflight, build, prepare-release]
+    if: needs.preflight.outputs.should_build == 'true'
     runs-on: ubuntu-22.04
     steps:
       - name: Download arm64 yml
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
-          name: latest-mac-yml-arm64-nightly
+          name: mac-yml-arm64-nightly
           path: yml-arm64
 
       - name: Download x64 yml
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
-          name: latest-mac-yml-x64-nightly
+          name: mac-yml-x64-nightly
           path: yml-x64
 
-      - name: Merge latest-mac-nightly.yml
+      - name: Merge nightly-mac.yml
         shell: bash
         run: |
-          ARM64_YML="yml-arm64/latest-mac-nightly.yml"
-          X64_YML="yml-x64/latest-mac-nightly.yml"
+          ARM64_YML="yml-arm64/nightly-mac.yml"
+          X64_YML="yml-x64/nightly-mac.yml"
 
           if [ ! -f "$ARM64_YML" ] || [ ! -f "$X64_YML" ]; then
             echo "One or both nightly mac yml files missing, skipping merge"
-            if [ -f "$ARM64_YML" ]; then cp "$ARM64_YML" latest-mac-nightly.yml; fi
-            if [ -f "$X64_YML" ]; then cp "$X64_YML" latest-mac-nightly.yml; fi
-            if [ ! -f latest-mac-nightly.yml ]; then exit 0; fi
+            if [ -f "$ARM64_YML" ]; then cp "$ARM64_YML" nightly-mac.yml; fi
+            if [ -f "$X64_YML" ]; then cp "$X64_YML" nightly-mac.yml; fi
+            if [ ! -f nightly-mac.yml ]; then exit 0; fi
           else
             node -e "
               const fs = require('fs');
@@ -236,7 +324,7 @@ jobs:
               });
 
               if (newEntries.length === 0) {
-                fs.writeFileSync('latest-mac-nightly.yml', arm64);
+                fs.writeFileSync('nightly-mac.yml', arm64);
               } else {
                 const lines = arm64.split('\n');
                 const out = [];
@@ -265,19 +353,20 @@ jobs:
                     out.push(entry.trimEnd());
                   }
                 }
-                fs.writeFileSync('latest-mac-nightly.yml', out.join('\n'));
+                fs.writeFileSync('nightly-mac.yml', out.join('\n'));
               }
-              console.log('Merged latest-mac-nightly.yml:');
-              console.log(fs.readFileSync('latest-mac-nightly.yml', 'utf8'));
+              console.log('Merged nightly-mac.yml:');
+              console.log(fs.readFileSync('nightly-mac.yml', 'utf8'));
             "
           fi
 
-      - name: Upload merged latest-mac-nightly.yml
+      - name: Upload merged nightly-mac.yml
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare-release.outputs.tag }}
         run: |
-          if [ -f latest-mac-nightly.yml ]; then
-            echo "Uploading merged latest-mac-nightly.yml"
-            gh release upload nightly latest-mac-nightly.yml --clobber --repo "${{ github.repository }}"
+          if [ -f nightly-mac.yml ]; then
+            echo "Uploading merged nightly-mac.yml to $TAG"
+            gh release upload "$TAG" nightly-mac.yml --clobber --repo "${{ github.repository }}"
           fi

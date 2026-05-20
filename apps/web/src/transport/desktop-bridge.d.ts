@@ -23,6 +23,15 @@ interface AppBridge {
   installUpdate(): Promise<boolean>;
   /** Trigger download of a discovered update (when auto-download is off). */
   downloadUpdate(): Promise<void>;
+  /**
+   * Switch the updater release line ("stable" or "nightly") and trigger a
+   * check. Pass `allowDowngrade: true` when the user has confirmed a
+   * nightly → stable rollback (the install will be older than current).
+   */
+  applyReleaseLine(payload: {
+    releaseLine: "stable" | "nightly";
+    allowDowngrade?: boolean;
+  }): Promise<UpdateStatus>;
   /** Subscribe to push updates of update-status. Returns the listener for cleanup. */
   onUpdateStatus(callback: (status: UpdateStatus) => void): (...args: unknown[]) => void;
   /** Remove a previously registered update-status listener. */
