@@ -197,8 +197,8 @@ export function RightPanel() {
 
   return (
     <>
-      {/* Backdrop — only rendered in overlay mode. Click dismisses the panel. */}
-      {isOverlay && (
+      {/* Backdrop — overlay mode with panel open only. Click dismisses the panel. */}
+      {isOverlay && panelVisible && (
         <div
           role="presentation"
           onClick={() => hideRightPanel(activeThreadId)}
