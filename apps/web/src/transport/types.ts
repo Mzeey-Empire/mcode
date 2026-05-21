@@ -79,6 +79,8 @@ export interface ToolCall {
   elapsedSeconds?: number;
   /** Epoch ms when the toolUse event was received, used for duration display. */
   startedAt?: number;
+  /** Wall-clock duration when the tool call completed (ms). */
+  durationMs?: number;
 }
 
 /** Ephemeral hook execution state tracked during a session. Not persisted to DB. */

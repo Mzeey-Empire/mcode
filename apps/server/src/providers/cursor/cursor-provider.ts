@@ -71,7 +71,16 @@ import {
 } from "./cursor-acp-permission-mapper.js";
 import { resolveCursorStickyInstructionBlob } from "./cursor-acp-sticky-instructions.js";
 import { buildCursorAskQuestionExtResponse } from "./cursor-acp-ask-question.js";
-import { isLikelyTransientCursorPromptFailure } from "./cursor-acp-transient-retry.js";
+import {
+  looksLikeUpstreamStreamCancel,
+  isLikelyTransientCursorPromptFailure,
+} from "./cursor-acp-transient-retry.js";
+import {
+  shouldEmitCursorSessionTrace,
+  summarizeCursorSessionNotification,
+  summarizeEmittedAgentEventsForTrace,
+} from "./cursor-acp-session-trace.js";
+import { cursorTaskExtToAgentEvents } from "./cursor-acp-task.js";
 
 const CURSOR_STDERR_TAIL_MAX = 48;
 const EVICTION_INTERVAL_MS = 60 * 1000;
@@ -109,6 +118,8 @@ interface CursorAcpSessionEntry {
   stderrTailLines: string[];
   /** Last stable `modelId` handshake for this MCP session (`acpSessionId` rotation forces re-apply). */
   cursorModelAppliedPair: { acpSessionId: string; modelId: string } | null;
+  /** Set immediately before issuing ACP cancel while a prompt is in flight (explicit Stop vs noisy upstream errors). */
+  pendingUserStopAbort: boolean;
 }
 
 /** Cursor ACP (Agent Communication Protocol) adapter implementing IAgentProvider via a MCP subprocess per session. */
@@ -237,6 +248,9 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
   stopSession(sessionId: string): void {
     const entry = this.sessions.get(sessionId);
     this.cancelPendingForThread(sessionId);
+    if (entry?.acpSessionId && entry.activeTurnState) {
+      entry.pendingUserStopAbort = true;
+    }
     if (entry?.acpSessionId) {
       void entry.connection.cancel({ sessionId: entry.acpSessionId }).catch(() => {});
     } else if (entry) {
@@ -391,6 +405,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       cursorPromptOrdinal: 0,
       stderrTailLines: [],
       cursorModelAppliedPair: null,
+      pendingUserStopAbort: false,
     };
 
     entry.connection = new ClientSideConnection(
@@ -480,6 +495,21 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
         }
         if (method === "cursor/create_plan") {
           return { outcome: { outcome: "accepted" } };
+        }
+        if (method === "cursor/task" && entry.activeTurnState) {
+          const record =
+            params !== null && typeof params === "object" && !Array.isArray(params)
+              ? (params as Record<string, unknown>)
+              : {};
+          const events = cursorTaskExtToAgentEvents(
+            entry.threadId,
+            record,
+            entry.activeTurnState,
+          );
+          for (const ev of events) {
+            this.emit("event", ev);
+          }
+          return {};
         }
         // cursor/update_todos arrives as a request (not notification) in the
         // ACP SDK dispatch. Handle it here so the task panel stays in sync.
@@ -579,6 +609,20 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       state,
       entry.todoSnapshot,
     );
+
+    const cursorCfg = this.settingsService.get().provider.cursor;
+    if (
+      cursorCfg.traceSessionUpdates &&
+      shouldEmitCursorSessionTrace(params, mapped.length)
+    ) {
+      logger.info("Cursor ACP session/update trace", {
+        threadId: entry.threadId,
+        mappedCount: mapped.length,
+        notification: summarizeCursorSessionNotification(params),
+        mappedEvents: summarizeEmittedAgentEventsForTrace(mapped),
+      });
+    }
+
     for (const ev of mapped) {
       this.emit("event", ev);
     }
@@ -745,6 +789,11 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
           break;
         } catch (attemptErr) {
           const raw = attemptErr instanceof Error ? attemptErr.message : String(attemptErr);
+          // Do not retry after explicit Stop; cancel-like errors are expected and a
+          // second prompt would fight the user's abort.
+          if (entry.pendingUserStopAbort) {
+            throw attemptErr;
+          }
           if (
             attempt >= maxAttempts ||
             !cursorCfg.retryTransientFailuresOnce ||
@@ -784,27 +833,49 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       this.emit("event", { type: AgentEventType.Ended, threadId: entry.threadId } satisfies AgentEvent);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
+      const userStoppedStream =
+        entry.pendingUserStopAbort && looksLikeUpstreamStreamCancel(errMsg);
       const stderrTail =
         cursorCfg.verboseFailureLogs && entry.stderrTailLines.length > 0
           ? entry.stderrTailLines.slice(-16)
           : undefined;
-      logger.error("Cursor ACP prompt failed", {
-        threadId: entry.threadId,
-        stickyHeavyCommitted: entry.stickyHeavyInstructionsSent,
-        promptOrdinal: entry.cursorPromptOrdinal,
-        acpSessionId: entry.acpSessionId,
-        verboseFailureLogs: cursorCfg.verboseFailureLogs,
-        stderrTail,
-        error: errMsg,
-      });
-      this.emit("event", {
-        type: AgentEventType.Error,
-        threadId: entry.threadId,
-        error: errMsg,
-      } satisfies AgentEvent);
+      if (!userStoppedStream) {
+        logger.error("Cursor ACP prompt failed", {
+          threadId: entry.threadId,
+          stickyHeavyCommitted: entry.stickyHeavyInstructionsSent,
+          promptOrdinal: entry.cursorPromptOrdinal,
+          acpSessionId: entry.acpSessionId,
+          verboseFailureLogs: cursorCfg.verboseFailureLogs,
+          stderrTail,
+          error: errMsg,
+        });
+        this.emit("event", {
+          type: AgentEventType.Error,
+          threadId: entry.threadId,
+          error: errMsg,
+        } satisfies AgentEvent);
+      } else {
+        logger.info("Cursor prompt ended after Stop (stream cancel)", {
+          threadId: entry.threadId,
+          errorSample: errMsg.slice(0, 200),
+        });
+        const interrupted =
+          entry.activeTurnState?.accumulator !== undefined
+            ? resolveCursorAssistantMessageContent(entry.activeTurnState.accumulator).trim()
+            : "";
+        if (interrupted.length > 0) {
+          this.emit("event", {
+            type: AgentEventType.Message,
+            threadId: entry.threadId,
+            content: interrupted,
+            tokens: null,
+          } satisfies AgentEvent);
+        }
+      }
       this.emit("event", { type: AgentEventType.Ended, threadId: entry.threadId } satisfies AgentEvent);
     } finally {
       entry.activeTurnState = null;
+      entry.pendingUserStopAbort = false;
     }
   }
 
@@ -814,6 +885,10 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     clearStoredSdkId: boolean,
   ): Promise<void> {
     this.cancelPendingForThread(mcodeSessionId);
+    entry.pendingUserStopAbort = false;
+    if (entry.acpSessionId) {
+      await entry.connection.cancel({ sessionId: entry.acpSessionId }).catch(() => {});
+    }
     try {
       entry.child.kill();
     } catch {

@@ -112,6 +112,23 @@ Use `bun run state:paths` to print all resolved paths for the current environmen
 
 Log files rotate daily and are retained for 14 days.
 
+### Cursor provider tracing
+
+Set `provider.cursor.traceSessionUpdates` to `true` in `settings.json`, restart so the backend reloads settings, reproduce a Cursor thread, then grep `mcode.log.*` under `$MCODE_DATA_DIR/logs/` for `Cursor ACP session/update trace`. Each structured line lists the sanitized inbound `notification` envelope plus summarized `mappedEvents` so you can decide whether Cursor is omitting `kind`/`rawInput`, mis-sizing sub-agent parents, etc. Streaming assistant chunks (`sessionUpdate: "agent_message_chunk"`) stay off the trace on purpose because they overwhelm the logs.
+
+Upstream references:
+
+- [Cursor CLI ACP docs](https://cursor.com/docs/cli/acp)
+- [Agent Client Protocol tool calls](https://agentclientprotocol.com/protocol/tool-calls)
+
+Capture live ACP envelopes for mapper work:
+
+```sh
+bun apps/server/scripts/capture-cursor-acp.ts --suite
+```
+
+Artifacts land in `<repo>/.mcode-local/cursor-acp-capture/` (`*-raw.jsonl`, `*-mapped.jsonl`, `*-summary.txt`). Golden tool-only traces live in `apps/server/src/providers/cursor/__tests__/fixtures/`.
+
 ---
 
 ## Server Discovery

@@ -36,6 +36,7 @@ Per-setting reference for Mcode's `settings.json`. For schema conventions and st
 | `provider.cursor.idleSessionTtlMinutes` | integer | `20` | 5–240 | - | Idle minutes before tearing down an unused `cursor-agent` subprocess. |
 | `provider.cursor.retryTransientFailuresOnce` | boolean | `true` | - | - | Retry `session/prompt` once when the failure looks like a transient CLI or HTTP transport flake. |
 | `provider.cursor.verboseFailureLogs` | boolean | `true` | - | - | On Cursor prompt failure, append recent stderr lines to structured logs when available. |
+| `provider.cursor.traceSessionUpdates` | boolean | `false` | - | - | When true, writes sanitized Cursor ACP `session/update` payloads and mapped agent events to daily server logs (skips noisy `agent_message_chunk` streaming). Inspect `$MCODE_DATA_DIR/logs/` for timelines. |
 | `provider.cursor.autoAnswerAskQuestions` | boolean | `true` | - | - | For blocking `cursor/ask_question`, auto-select recommended or first selectable options. When false, answer as skipped only. |
 | `provider.cursor.echoAskQuestionsToTimeline` | boolean | `false` | - | - | When auto answers run, emit a short synthetic system subtype on the timeline. Server logs always record resolutions. |
 | `prDraft.provider` | string | `""` | `""` \| `"claude"` \| `"codex"` \| `"gemini"` \| `"copilot"` | - | AI provider for PR draft generation. Empty string inherits from `model.defaults.provider`. |

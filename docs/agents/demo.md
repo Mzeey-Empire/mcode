@@ -101,7 +101,8 @@ Both:
 1. Require `cd apps/desktop && bun run build` to have produced `dist/main/main.cjs` (and `dist/server/server.cjs` for the spawned child).
 2. Launch Electron via Playwright's `_electron.launch()` (not the Playwright MCP — the MCP does not support Electron).
 3. Wait for the first window, screenshot it to `apps/web/e2e/screenshots/demo-desktop/`, dump renderer console errors.
-4. Exit and close the window by default. Pass `--keep-open` to leave Electron running for further interactive driving.
+4. (**Optional**) Pass `--tour` to record `tour-*.png` snapshots (`tour-02b-active-chat.png` opens a sidebar or Recent thread row when present, then captures Changes / Terminal / Preview hotkeys plus `tour-06-changes-header-button.png`).
+5. Exit and close the window by default. Pass `--keep-open` to leave Electron running for further interactive driving.
 
 ### Driving the running app
 
