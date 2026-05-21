@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { PlanQuestionOption } from "@mcode/contracts";
 
 interface OptionTileProps {
@@ -42,7 +42,6 @@ export function OptionTile({
   flashing = false,
 }: OptionTileProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [pressing, setPressing] = useState(false);
 
   // Auto-focus textarea when "Other" is selected
   useEffect(() => {
@@ -51,31 +50,19 @@ export function OptionTile({
     }
   }, [isOtherTile, selected]);
 
-  // Reset the press-feedback flag after the animation completes so a
-  // subsequent press can fire the keyframe again on the same element.
-  useEffect(() => {
-    if (!pressing) return;
-    const id = window.setTimeout(() => setPressing(false), 110);
-    return () => window.clearTimeout(id);
-  }, [pressing]);
-
   return (
     <button
       type="button"
       role="radio"
       aria-checked={selected}
-      onClick={() => {
-        setPressing(true);
-        onSelect(option.id);
-      }}
+      onClick={() => onSelect(option.id)}
       style={{ ["--tile-index" as string]: index }}
       className={cn(
         "group relative w-full text-left animate-wizard-tile",
         "px-3 py-2.5 cursor-pointer",
         "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/40",
-        "transition-[background-color,transform] duration-150 ease-out",
+        "transition-colors duration-150 ease-out",
         selected ? "bg-primary/[0.06]" : "hover:bg-foreground/[0.025]",
-        pressing && "animate-wizard-tile-press",
       )}
     >
       <div className="flex items-baseline gap-2">
