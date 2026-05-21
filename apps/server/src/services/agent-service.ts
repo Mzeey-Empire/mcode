@@ -50,9 +50,7 @@ import {
 } from "./provider-availability-errors.js";
 import { PlanQuestionParser } from "./plan-question-parser.js";
 import { buildHandoffContent, buildConversationReplay, replayBudgetChars, resolveForkSnapshot } from "./handoff-builder.js";
-import { PlanQuestionSchema } from "@mcode/contracts";
 import { normalizeAgentProviderError } from "./provider-agent-error-normalize.js";
-import { z } from "zod";
 
 /**
  * Escape special XML characters in a string to prevent injection into
@@ -160,10 +158,6 @@ export class AgentService {
   private streamingAssistantTextByThread = new Map<string, string>();
   /** Per-thread streaming parsers active while the model is generating questions in plan mode. */
   private planParsers = new Map<string, PlanQuestionParser>();
-  /** Buffered plan questions awaiting broadcast until the turn closes (`ended` event).
-   * Broadcasting from `ended` ensures the session is fully closed before the client
-   * can submit answers, preventing overlapping sends on the same thread. */
-  private pendingPlanQuestions = new Map<string, z.infer<typeof PlanQuestionSchema>[]>();
   constructor(
     @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
     @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
@@ -1301,7 +1295,10 @@ export class AgentService {
           if (parser) {
             const questions = parser.feed(event.delta);
             if (questions) {
-              this.pendingPlanQuestions.set(event.threadId, questions);
+              // Broadcast immediately so the wizard renders as soon as the model
+              // finishes emitting the fenced block, even while the session keeps
+              // streaming. Submission is gated client-side on thread-running state.
+              broadcast("plan.questions", { threadId: event.threadId, questions });
               this.planParsers.delete(event.threadId);
             }
           }
@@ -1578,7 +1575,6 @@ export class AgentService {
             this.clearTurnState(event.threadId);
           }
           this.planParsers.delete(event.threadId);
-          this.pendingPlanQuestions.delete(event.threadId);
         }
 
         if (event.type === AgentEventType.Compacting && event.active) {
@@ -1646,13 +1642,6 @@ export class AgentService {
         if (event.type === AgentEventType.Ended) {
           this.trackSessionEnded(event.threadId);
           this.planParsers.delete(event.threadId);
-          // Broadcast buffered plan questions now that the session is fully closed,
-          // ensuring the client cannot submit answers against an active session.
-          const questions = this.pendingPlanQuestions.get(event.threadId);
-          if (questions) {
-            broadcast("plan.questions", { threadId: event.threadId, questions });
-            this.pendingPlanQuestions.delete(event.threadId);
-          }
         }
       });
     }
