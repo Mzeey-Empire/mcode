@@ -8,6 +8,12 @@ export {
   isLinkedGitWorktree,
   resolveDbPath,
 } from "./paths/index.js";
+export {
+  newHandoffUlid,
+  resolveThreadHandoffsDir,
+  resolveHandoffDir,
+  resolveThreadAttachmentsDir,
+} from "./paths/handoffs.js";
 
 // Git utilities
 export {
