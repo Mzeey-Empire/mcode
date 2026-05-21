@@ -134,7 +134,8 @@ const pass =
   statusEvents.some((s) => terminalStatuses.has(s)) &&
   toolCalls.size > 0 &&
   inFlightAfter.length === 0 &&
-  (inFlightBefore.length === 0 || cancelled.length > 0);
+  inFlightBefore.length > 0 &&
+  cancelled.length > 0;
 
 console.log(`\n========== RESULT: ${pass ? "PASS ✓" : "FAIL ✗"} ==========`);
 ws.close();

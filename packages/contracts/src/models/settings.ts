@@ -311,7 +311,10 @@ export const SettingsSchema = lazySchema(() =>
             priorityProcessing: z.boolean().optional(),
           })
           .transform((o) => ({
-            fastMode: o.fastMode === true || o.priorityProcessing === true,
+            fastMode:
+              typeof o.fastMode === "boolean"
+                ? o.fastMode
+                : o.priorityProcessing === true,
           }))
           .default({ fastMode: false }),
         /** Cursor ACP-only tuning (`provider` + `cursor` keeps nesting depth ≤ 3). */

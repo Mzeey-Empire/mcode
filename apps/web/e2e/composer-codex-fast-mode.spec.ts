@@ -3,7 +3,7 @@ import {
   mockWebSocketServer,
   interceptZustandStores,
 } from "./helpers/e2e-helpers";
-import { getDefaultSettings } from "@mcode/contracts";
+import { getDefaultSettings, type Settings } from "@mcode/contracts";
 
 const WORKSPACE = {
   id: "ws-codex-fast",
@@ -79,31 +79,36 @@ async function setupCodexChat(page: Page): Promise<void> {
   );
 }
 
+/** Boots the composer page with mocked settings and a Codex thread selected. */
+async function bootComposer(page: Page, settings: Settings): Promise<void> {
+  updateCalls.length = 0;
+  await mockWebSocketServer(page, {
+    "workspace.enrich": { items: [] },
+    "settings.get": settings,
+    "thread.updateSettings": (params) => {
+      const p = params as { threadId: string; codexFastMode?: boolean | null };
+      updateCalls.push(p);
+      return true;
+    },
+  });
+  await interceptZustandStores(page);
+  await page.goto("/");
+  await page.waitForLoadState("networkidle");
+  await page.waitForFunction(
+    () => (window as unknown as { __mcodeHydrationComplete?: boolean }).__mcodeHydrationComplete === true,
+  );
+  await setupCodexChat(page);
+  await page.waitForSelector('[contenteditable="true"]', { timeout: 30_000 });
+}
+
 test.describe("Composer Codex fast mode", () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
-    updateCalls.length = 0;
-    await mockWebSocketServer(page, {
-      "workspace.enrich": { items: [] },
-      "settings.get": getDefaultSettings(),
-      "thread.updateSettings": (params) => {
-        const p = params as { threadId: string; codexFastMode?: boolean | null };
-        updateCalls.push(p);
-        return true;
-      },
-    });
-    await interceptZustandStores(page);
-    await page.goto("/");
-    await page.waitForLoadState("networkidle");
-    await page.waitForFunction(
-      () => (window as unknown as { __mcodeHydrationComplete?: boolean }).__mcodeHydrationComplete === true,
-    );
-    await setupCodexChat(page);
-    await page.waitForSelector('[contenteditable="true"]', { timeout: 30_000 });
   });
 
   test("fast mode switch toggles and persists per thread", async ({ page }) => {
-    await page.getByRole("button", { name: "Medium", exact: true }).click();
+    await bootComposer(page, getDefaultSettings());
+    await page.getByRole("button", { name: /Medium/ }).click();
     const fastSwitch = page.getByTestId("composer-codex-fast-switch");
     await expect(fastSwitch).toBeVisible({ timeout: 10_000 });
     await expect(fastSwitch).toHaveAttribute("aria-checked", "false");
@@ -115,6 +120,25 @@ test.describe("Composer Codex fast mode", () => {
 
     await fastSwitch.click({ force: true });
     await expect(fastSwitch).toHaveAttribute("aria-checked", "false");
+    await expect.poll(() => updateCalls.some((c) => c.codexFastMode === null)).toBe(true);
+  });
+
+  test("fast mode switch respects global-fast-default=true", async ({ page }) => {
+    const settings = getDefaultSettings();
+    settings.provider.codex.fastMode = true;
+    await bootComposer(page, settings);
+    await page.getByRole("button", { name: /Medium/ }).click();
+    const fastSwitch = page.getByTestId("composer-codex-fast-switch");
+    await expect(fastSwitch).toBeVisible({ timeout: 10_000 });
+    await expect(fastSwitch).toHaveAttribute("aria-checked", "true");
+
+    await fastSwitch.click({ force: true });
+    await expect(fastSwitch).toHaveAttribute("aria-checked", "false");
+    await expect.poll(() => updateCalls.some((c) => c.codexFastMode === false)).toBe(true);
+    expect(updateCalls.at(-1)?.threadId).toBe(CODEX_THREAD.id);
+
+    await fastSwitch.click({ force: true });
+    await expect(fastSwitch).toHaveAttribute("aria-checked", "true");
     await expect.poll(() => updateCalls.some((c) => c.codexFastMode === null)).toBe(true);
   });
 });

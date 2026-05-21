@@ -65,11 +65,11 @@ export function resolveModelDisplayLabel(
 
 /** Format a raw model identifier into a display label (registry and heuristics). */
 export function formatModelLabel(modelId: string): string {
-  const registryHit = findModelById(modelId);
-  if (registryHit) return normalizeProviderModelName(registryHit.label);
-
   const id = modelId.trim();
   if (!id) return "";
+
+  const registryHit = findModelById(id);
+  if (registryHit) return normalizeProviderModelName(registryHit.label);
 
   if (id === "auto") return "Auto";
 
