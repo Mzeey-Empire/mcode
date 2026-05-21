@@ -15,9 +15,13 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   showOpenDialog: (opts: Record<string, unknown>): Promise<string | null> =>
     ipcRenderer.invoke("show-open-dialog", opts),
 
-  /** Open a directory in the specified editor. */
-  openInEditor: (editor: string, path: string): Promise<void> =>
-    ipcRenderer.invoke("open-in-editor", editor, path),
+  /**
+   * Open a path in the specified editor. If `line` is provided, the editor
+   * jumps to that line (file targets only — for directory targets the line
+   * is silently ignored).
+   */
+  openInEditor: (editor: string, path: string, line?: number): Promise<void> =>
+    ipcRenderer.invoke("open-in-editor", editor, path, line),
 
   /** Open a directory in the system file explorer. */
   openInExplorer: (path: string): Promise<void> =>
