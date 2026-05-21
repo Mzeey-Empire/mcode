@@ -21,6 +21,25 @@ export interface IAgentProvider {
    */
   readonly supportsCompletion: boolean;
 
+  /**
+   * How the provider's `resume` mechanism behaves when used to fork a session
+   * for side-channel queries (e.g. handoff generation):
+   * - "clean": resuming creates a forked session; the original session is unaffected.
+   * - "mutating": resuming mutates the original session's forward history.
+   * - "unsupported": resuming is not supported or not yet verified.
+   */
+  readonly sessionForkOnResume: "clean" | "mutating" | "unsupported";
+
+  /**
+   * Maximum input characters the provider accepts per turn, across all roles
+   * (system + user content + tool results). `string.length` units, not tokens —
+   * tokens vary per model and are not portable.
+   *
+   * Used to size handoff documents so they fit inside the child provider's
+   * first-turn budget. When undeclared, callers fall back to 16_000.
+   */
+  readonly maxInputCharactersPerTurn: number;
+
   /** Start or continue a session by sending a message. */
   sendMessage(params: {
     sessionId: string;
