@@ -291,6 +291,16 @@
   animation: wizard-question-in-back 220ms cubic-bezier(0.25, 1, 0.5, 1) both;
 }
 
+/* Keyboard legend overlay enters quietly — fade + tiny rise, no horizontal
+   movement so it reads as overlay material rather than panel content. */
+@keyframes wizard-legend-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-wizard-legend {
+  animation: wizard-legend-enter 180ms cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+
 /* Accept-all sparkle: each tile briefly flashes its title to brand color
    left to right with a staggered delay. Triggered as a one-shot when
    the user accepts every recommended option in a single gesture. */
@@ -322,6 +332,7 @@
   .animate-wizard-nav,
   .animate-wizard-question-forward,
   .animate-wizard-question-back,
+  .animate-wizard-legend,
   .animate-wizard-accept-flash,
   .animate-wizard-marker-echo {
     animation: none;

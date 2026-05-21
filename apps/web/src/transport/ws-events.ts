@@ -405,7 +405,9 @@ export function startPushListeners(): void {
     }),
   );
 
-  // plan.answered: server committed an answered marker for a plan-questions message
+  // plan.answered: server committed an answered marker for a plan-questions
+  // message via the SUBMIT path. Adds to recentlyAnsweredPlanMessageIds so
+  // the AnsweredSummary marker can play its one-shot echo on first paint.
   unsubs.push(
     pushEmitter.on("plan.answered", (data) => {
       const { threadId, assistantMessageId } = data as {
@@ -414,6 +416,20 @@ export function startPushListeners(): void {
       };
       if (!threadId || !assistantMessageId) return;
       useThreadStore.getState().markPlanAnswered(threadId, assistantMessageId);
+    }),
+  );
+
+  // plan.dismissed: server committed the marker via the CANCEL path. Same
+  // state update (the batch is settled, wizard hides on other tabs) but
+  // skips the echo animation — dismiss is not submission.
+  unsubs.push(
+    pushEmitter.on("plan.dismissed", (data) => {
+      const { threadId, assistantMessageId } = data as {
+        threadId: string;
+        assistantMessageId: string;
+      };
+      if (!threadId || !assistantMessageId) return;
+      useThreadStore.getState().markPlanDismissed(threadId, assistantMessageId);
     }),
   );
 

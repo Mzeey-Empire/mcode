@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useThreadStore } from "@/stores/threadStore";
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import { OptionTile } from "./plan-questions/OptionTile";
@@ -122,11 +122,22 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
   const q = questions?.[activeIndex] ?? null;
   const answer = q ? answersMap.get(q.id) : undefined;
   const isLast = questions ? activeIndex === questions.length - 1 : false;
-  const allOptions = q ? [...q.options, OTHER_OPTION] : [];
+  // Memoize so the array identity is stable across renders that don't change
+  // the underlying question. `handleSelectByIndex` closes over `allOptions`
+  // and feeds `useWizardKeyboard`; without memoization the keyboard listener
+  // re-registers on every unrelated zustand subscription update.
+  const allOptions = useMemo<PlanQuestionOption[]>(
+    () => (q ? [...q.options, OTHER_OPTION] : []),
+    [q],
+  );
   const selectedOptionId = answer?.selectedOptionId ?? null;
-  const selectedIndex = selectedOptionId
-    ? allOptions.findIndex((o) => o.id === selectedOptionId)
-    : -1;
+  const selectedIndex = useMemo(
+    () =>
+      selectedOptionId
+        ? allOptions.findIndex((o) => o.id === selectedOptionId)
+        : -1,
+    [allOptions, selectedOptionId],
+  );
 
   const handleSelectOption = useCallback(
     (optionId: string): void => {
@@ -373,7 +384,7 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
                 "absolute right-5 bottom-12 z-10",
                 "rounded-sm border border-border/40 bg-card/95 backdrop-blur-sm",
                 "px-3 py-2 font-mono text-[10px] leading-relaxed text-muted-foreground/80",
-                "shadow-sm animate-wizard-header",
+                "shadow-sm animate-wizard-legend",
               )}
             >
               <div>

@@ -350,7 +350,7 @@ export const WS_METHODS = lazySchema(() => ({
   "agent.answerQuestions": {
     params: z.object({
       threadId: z.string(),
-      answers: z.array(PlanAnswerSchema),
+      answers: z.array(PlanAnswerSchema()),
       permissionMode: PermissionModeSchema.optional(),
       reasoningLevel: ReasoningLevelSchema.optional(),
       contextWindow: ContextWindowModeSchema.optional(),

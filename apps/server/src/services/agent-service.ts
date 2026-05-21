@@ -760,7 +760,10 @@ export class AgentService {
     const assistantMessageId = this.findLatestPlanQuestionsMessageId(threadId);
     if (!assistantMessageId) return;
     this.planQuestionAnswersRepo.markAnswered(assistantMessageId, threadId);
-    broadcast("plan.answered", { threadId, assistantMessageId });
+    // Use `plan.dismissed` rather than `plan.answered` so other tabs settle
+    // the batch (hide the wizard, add to the answered set) without firing
+    // the "submission echo" animation reserved for actual answers.
+    broadcast("plan.dismissed", { threadId, assistantMessageId });
   }
 
   /**

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useThreadStore } from "@/stores/threadStore";
-import type { PlanQuestion } from "@mcode/contracts";
+import { PlanQuestionSchema, type PlanQuestion } from "@mcode/contracts";
 
 const PLAN_QUESTIONS_RE = /```plan-questions\n([\s\S]*?)```/;
 
@@ -30,17 +30,30 @@ export function AnsweredSummary({ content, messageId }: AnsweredSummaryProps) {
     messageId ? s.recentlyAnsweredPlanMessageIds.has(messageId) : false,
   );
 
-  // Parse questions from the fenced block
+  // Parse questions from the fenced block. Validate the result with
+  // the schema so a model that emits structurally valid JSON but a
+  // shape-wrong batch (e.g. missing `options`) is rejected here rather
+  // than crashing the .map below.
   const match = content.match(PLAN_QUESTIONS_RE);
   if (!match) return null;
 
-  let questions: PlanQuestion[];
+  let raw: unknown;
   try {
-    questions = JSON.parse(match[1]);
+    raw = JSON.parse(match[1]);
   } catch {
     return null;
   }
+  if (!Array.isArray(raw)) return null;
 
+  // Per-element validation mirrors the pattern used in threadStore's
+  // extractPendingPlanQuestions. Reject the whole batch if any entry
+  // is malformed so downstream .map calls never see a partially-shaped
+  // question.
+  const results = raw.map((item) => PlanQuestionSchema().safeParse(item));
+  if (results.some((r) => !r.success)) return null;
+  const questions: PlanQuestion[] = results.map(
+    (r) => (r as { success: true; data: PlanQuestion }).data,
+  );
   if (!questions.length) return null;
 
   return (

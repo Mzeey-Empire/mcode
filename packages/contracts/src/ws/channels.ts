@@ -71,14 +71,25 @@ export const WS_CHANNELS = {
   /** Emitted when the model proposes a batch of clarifying questions in plan mode. */
   "plan.questions": z.object({
     threadId: z.string(),
-    questions: z.array(PlanQuestionSchema),
+    questions: z.array(PlanQuestionSchema()),
   }),
   /**
    * Emitted after the user submits answers and the plan-questions answered
    * marker is committed. Lets multi-tab clients on the same thread hide the
-   * wizard without a full reload.
+   * wizard without a full reload. Carries the "submission" semantics so the
+   * AnsweredSummary marker can play its one-shot echo on receipt.
    */
   "plan.answered": z.object({
+    threadId: z.string(),
+    assistantMessageId: z.string(),
+  }),
+  /**
+   * Emitted when the user dismisses the wizard via cancel. Settles the batch
+   * on the receiving client (same answered-set update as `plan.answered`)
+   * but intentionally distinct so the celebratory echo animation does NOT
+   * play on other tabs — the user did not submit, they cancelled.
+   */
+  "plan.dismissed": z.object({
     threadId: z.string(),
     assistantMessageId: z.string(),
   }),

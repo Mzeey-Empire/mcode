@@ -275,16 +275,22 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
     expect(calls).toEqual([]);
   });
 
-  it("dismissPlanQuestions marks the latest fence answered and broadcasts plan.answered", () => {
+  it("dismissPlanQuestions marks the latest fence answered and broadcasts plan.dismissed", () => {
     const { svc, planQuestionAnswersRepo } = buildService(db);
 
     svc.dismissPlanQuestions(thread.id);
 
     expect(planQuestionAnswersRepo.isAnswered(assistantMessageId)).toBe(true);
-    expect(broadcast).toHaveBeenCalledWith("plan.answered", {
+    expect(broadcast).toHaveBeenCalledWith("plan.dismissed", {
       threadId: thread.id,
       assistantMessageId,
     });
+    // Dismiss must NOT broadcast plan.answered — that channel is reserved
+    // for submissions and triggers the AnsweredSummary echo on receivers.
+    const answeredCalls = (broadcast as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c) => c[0] === "plan.answered",
+    );
+    expect(answeredCalls).toEqual([]);
   });
 
   it("dismissPlanQuestions is idempotent — repeat calls don't fail and re-broadcast", () => {
@@ -308,7 +314,9 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
 
     expect(planQuestionAnswersRepo.listAnsweredForThread(plainThread.id)).toEqual([]);
     const calls = (broadcast as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
-      (c) => c[0] === "plan.answered" && (c[1] as { threadId: string }).threadId === plainThread.id,
+      (c) =>
+        (c[0] === "plan.dismissed" || c[0] === "plan.answered") &&
+        (c[1] as { threadId: string }).threadId === plainThread.id,
     );
     expect(calls).toEqual([]);
   });

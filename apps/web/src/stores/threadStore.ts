@@ -195,6 +195,14 @@ interface ThreadState {
    * the `plan.answered` push channel from `ws-events.ts`.
    */
   markPlanAnswered: (threadId: string, assistantMessageId: string) => void;
+  /**
+   * Same settle semantics as `markPlanAnswered` (adds to the answered set,
+   * dismisses the wizard) but intentionally skips the
+   * recentlyAnsweredPlanMessageIds add — dismiss is not submission, so the
+   * AnsweredSummary echo animation must not play. Wired to the
+   * `plan.dismissed` push channel.
+   */
+  markPlanDismissed: (threadId: string, assistantMessageId: string) => void;
   /** Add a new pending permission request for a thread. */
   addPermissionRequest: (request: PermissionRequest) => void;
   /** Mark a permission request as settled with its decision. */
@@ -426,7 +434,7 @@ export function extractPendingPlanQuestions(
   try {
     const raw = JSON.parse(fenceContent);
     if (!Array.isArray(raw)) return null;
-    const results = raw.map((item) => PlanQuestionSchema.safeParse(item));
+    const results = raw.map((item) => PlanQuestionSchema().safeParse(item));
     // Reject the whole batch if any question fails — partial batches break
     // index continuity between the wizard UI and the answer map keys.
     if (results.some((r) => !r.success)) return null;
@@ -1697,6 +1705,37 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         return { recentlyAnsweredPlanMessageIds: next };
       });
     }, 800);
+  },
+
+  markPlanDismissed: (threadId, assistantMessageId) => {
+    set((state) => {
+      const existing =
+        state.answeredPlanMessageIdsByThread[threadId] ?? new Set<string>();
+      const nextSet = new Set(existing);
+      nextSet.add(assistantMessageId);
+
+      // Settle the wizard without the celebratory echo set — dismiss is
+      // not submission.
+      const nextQuestions = { ...state.planQuestionsByThread };
+      const nextAnswers = { ...state.planAnswersByThread };
+      const nextIndex = { ...state.activeQuestionIndexByThread };
+      const nextStatus = { ...state.planQuestionsStatusByThread };
+      delete nextQuestions[threadId];
+      delete nextAnswers[threadId];
+      delete nextIndex[threadId];
+      delete nextStatus[threadId];
+
+      return {
+        answeredPlanMessageIdsByThread: {
+          ...state.answeredPlanMessageIdsByThread,
+          [threadId]: nextSet,
+        },
+        planQuestionsByThread: nextQuestions,
+        planAnswersByThread: nextAnswers,
+        activeQuestionIndexByThread: nextIndex,
+        planQuestionsStatusByThread: nextStatus,
+      };
+    });
   },
 
   addPermissionRequest: (request) => {

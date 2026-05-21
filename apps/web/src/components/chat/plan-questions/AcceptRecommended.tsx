@@ -1,3 +1,4 @@
+import { useCallback, useMemo } from "react";
 import { cn } from "@/lib/utils";
 import type { PlanQuestion, PlanAnswer } from "@mcode/contracts";
 
@@ -26,21 +27,28 @@ export function AcceptRecommended({
   disabled,
   testId,
 }: AcceptRecommendedProps) {
-  // Every question must have exactly one recommended option
-  const allHaveRecommended = questions.every(
-    (q) => q.options.filter((o) => o.recommended).length === 1,
+  // Every question must have exactly one recommended option. Memoize the
+  // predicate and the answer-builder so they don't recompute on every
+  // unrelated re-render — `questions` is stable from the store, so both
+  // memos invalidate only when a new batch arrives.
+  const allHaveRecommended = useMemo(
+    () =>
+      questions.every(
+        (q) => q.options.filter((o) => o.recommended).length === 1,
+      ),
+    [questions],
   );
 
-  if (!allHaveRecommended) return null;
-
-  const handleClick = (): void => {
+  const handleClick = useCallback((): void => {
     const answers: PlanAnswer[] = questions.map((q) => ({
       questionId: q.id,
       selectedOptionId: q.options.find((o) => o.recommended)!.id,
       freeText: null,
     }));
     onAccept(answers);
-  };
+  }, [questions, onAccept]);
+
+  if (!allHaveRecommended) return null;
 
   return (
     <button
