@@ -175,6 +175,19 @@ test.describe("Plan Question Wizard", () => {
       await expect(radios.nth(i)).toHaveAttribute("aria-checked", "false");
     }
 
+    // The tile entrance animation runs for ~140ms + 40ms*index + 180ms
+    // duration. Let it settle so the documentation screenshot captures
+    // the resting visual instead of the staggered fade.
+    await page.waitForFunction(() => {
+      const tiles = document.querySelectorAll("[role='radio']");
+      if (tiles.length === 0) return false;
+      for (const t of Array.from(tiles)) {
+        const el = t as HTMLElement;
+        if (parseFloat(window.getComputedStyle(el).opacity) < 0.99) return false;
+      }
+      return true;
+    });
+
     await page.screenshot({
       path: "e2e/screenshots/plan-wizard-active.png",
       fullPage: true,
@@ -187,22 +200,27 @@ test.describe("Plan Question Wizard", () => {
     const wizard = page.locator("[role='form'][aria-label='Plan questions']");
     await expect(wizard).toBeVisible({ timeout: 3000 });
 
-    // First question category and text
-    await expect(wizard.locator("text=ARCHITECTURE")).toBeVisible();
+    // Category renders lowercased in the mono header
+    await expect(wizard.getByText("architecture", { exact: true })).toBeVisible();
     await expect(wizard.locator("text=Which database should we use?")).toBeVisible();
 
-    // Step indicator shows 1/2
-    await expect(wizard.locator("text=1/2")).toBeVisible();
+    // Mono step counter shows "step 01 of 02"
+    await expect(wizard.getByText(/step\s+01\s+of\s+02/)).toBeVisible();
   });
 
-  test("shows Recommended badge on recommended options", async ({ page }) => {
+  test("shows inline 'recommended' annotation on recommended options", async ({ page }) => {
     await injectPlanQuestions(page, THREAD.id, MOCK_QUESTIONS);
 
     const wizard = page.locator("[role='form'][aria-label='Plan questions']");
     await expect(wizard).toBeVisible({ timeout: 3000 });
 
-    // PostgreSQL has recommended: true - use .first() since "Accept recommended" button also matches
-    await expect(wizard.locator("[role='radio']").filter({ hasText: "Recommended" }).first()).toBeVisible();
+    // PostgreSQL row carries the editorial annotation
+    const recommendedTile = wizard
+      .locator("[role='radio']")
+      .filter({ hasText: "recommended" })
+      .first();
+    await expect(recommendedTile).toBeVisible();
+    await expect(recommendedTile).toContainText("PostgreSQL");
   });
 
   test("keyboard number key selects an option", async ({ page }) => {
@@ -211,7 +229,6 @@ test.describe("Plan Question Wizard", () => {
     const wizard = page.locator("[role='form'][aria-label='Plan questions']");
     await expect(wizard).toBeVisible({ timeout: 3000 });
 
-    // Press "1" to select PostgreSQL
     await page.keyboard.press("1");
 
     const firstRadio = wizard.locator("[role='radio']").first();
@@ -224,73 +241,103 @@ test.describe("Plan Question Wizard", () => {
     const wizard = page.locator("[role='form'][aria-label='Plan questions']");
     await expect(wizard).toBeVisible({ timeout: 3000 });
 
-    // Select an option and advance
     await page.keyboard.press("1");
     await page.keyboard.press("Enter");
 
-    // Should now show question 2 - use getByText with exact match for category
-    await expect(wizard.getByText("AUTH", { exact: true })).toBeVisible();
+    // Question 2 now visible, mono counter advanced
+    await expect(wizard.getByText("auth", { exact: true })).toBeVisible();
     await expect(wizard.getByText("Authentication strategy?")).toBeVisible();
-    await expect(wizard.getByText("2/2")).toBeVisible();
+    await expect(wizard.getByText(/step\s+02\s+of\s+02/)).toBeVisible();
   });
 
-  test("AcceptRecommended button is visible when all questions have recommended", async ({ page }) => {
+  test("accept-all link is visible when all questions have recommended", async ({ page }) => {
     await injectPlanQuestions(page, THREAD.id, MOCK_QUESTIONS);
 
     const wizard = page.locator("[role='form'][aria-label='Plan questions']");
     await expect(wizard).toBeVisible({ timeout: 3000 });
 
-    // Both questions have exactly one recommended option
-    await expect(wizard.locator("text=Accept recommended")).toBeVisible();
+    await expect(wizard.getByTestId("plan-accept-recommended")).toBeVisible();
   });
 
-  test("Cancel button dismisses the wizard", async ({ page }) => {
+  test("cancel action dismisses the wizard", async ({ page }) => {
     await injectPlanQuestions(page, THREAD.id, MOCK_QUESTIONS);
 
     const wizard = page.locator("[role='form'][aria-label='Plan questions']");
     await expect(wizard).toBeVisible({ timeout: 3000 });
 
-    await wizard.locator("button", { hasText: "Cancel" }).click();
+    await wizard.locator("button", { hasText: "cancel" }).first().click();
 
-    // Wizard should collapse
     await expect(wizard).not.toBeVisible({ timeout: 2000 });
   });
 
-  test("single question batch hides step indicator", async ({ page }) => {
-    // Inject only one question
+  test("single question batch still shows the mono counter (one of one)", async ({ page }) => {
     await injectPlanQuestions(page, THREAD.id, [MOCK_QUESTIONS[0]]);
 
     const wizard = page.locator("[role='form'][aria-label='Plan questions']");
     await expect(wizard).toBeVisible({ timeout: 3000 });
 
-    // Step indicator should not be visible (AC-1.27)
-    const stepIndicator = wizard.locator("text=/\\d+\\/\\d+/");
-    await expect(stepIndicator).not.toBeVisible();
+    // The dotted indicator is gone; the mono counter is the only progress signal
+    await expect(wizard.getByText(/step\s+01\s+of\s+01/)).toBeVisible();
   });
 
   test("submit is disabled and hint shows while thread is still running", async ({ page }) => {
-    // Inject a single-question batch so the primary button is "Submit answers"
     await injectPlanQuestions(page, THREAD.id, [MOCK_QUESTIONS[0]]);
     await setThreadRunning(page, THREAD.id, true);
 
     const wizard = page.locator("[role='form'][aria-label='Plan questions']");
     await expect(wizard).toBeVisible({ timeout: 3000 });
 
-    // "Model is still working..." hint visible
-    await expect(wizard.getByText("Model is still working...")).toBeVisible();
+    await expect(wizard.getByText(/model is still working/)).toBeVisible();
 
-    // Submit button is disabled
-    const submit = wizard.locator("button", { hasText: "Submit answers" });
+    const submit = wizard.locator("button", { hasText: "submit" });
     await expect(submit).toBeDisabled();
 
-    // Accept recommended is also disabled
-    const accept = wizard.locator("button", { hasText: "Accept recommended" });
+    const accept = wizard.getByTestId("plan-accept-recommended");
     await expect(accept).toBeDisabled();
 
-    // After the thread stops running, the gate releases
     await setThreadRunning(page, THREAD.id, false);
-    await expect(wizard.getByText("Model is still working...")).not.toBeVisible();
+    await expect(wizard.getByText(/model is still working/)).not.toBeVisible();
     await expect(submit).toBeEnabled();
     await expect(accept).toBeEnabled();
+  });
+
+  test("pressing ? toggles a keyboard legend overlay", async ({ page }) => {
+    await injectPlanQuestions(page, THREAD.id, MOCK_QUESTIONS);
+
+    const wizard = page.locator("[role='form'][aria-label='Plan questions']");
+    await expect(wizard).toBeVisible({ timeout: 3000 });
+
+    // Ensure no input is focused so the `?` reaches the wizard handler
+    // rather than getting consumed by the Composer textarea.
+    await page.evaluate(() => {
+      const active = document.activeElement as HTMLElement | null;
+      if (
+        active &&
+        (active.tagName === "INPUT" || active.tagName === "TEXTAREA")
+      ) {
+        active.blur();
+      }
+    });
+
+    const legend = wizard.locator("[role='note'][aria-label='Keyboard shortcuts']");
+    await expect(legend).toHaveCount(0);
+
+    // Dispatch the literal `?` keydown via JS — the platform layout-aware
+    // shortcut Shift+/ doesn't reliably emit a "?" key in headless modes
+    // across operating systems.
+    await page.evaluate(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }));
+    });
+    await expect(legend).toBeVisible();
+    await expect(legend).toContainText("select");
+    await expect(legend).toContainText("navigate");
+    await expect(legend).toContainText("advance");
+    await expect(legend).toContainText("cancel");
+
+    // Any other key dismisses the legend.
+    await page.evaluate(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+    await expect(legend).toHaveCount(0);
   });
 });
