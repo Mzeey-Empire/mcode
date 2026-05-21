@@ -23,6 +23,7 @@ import {
   copyClaudeSdkCliNextTo,
 } from "../../../scripts/build-server-dev-bundle.mjs";
 import { killProcessTree } from "../../../scripts/kill-process-tree.mjs";
+import { makeCoalescedAsync } from "./coalesce-async.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, "..");
@@ -98,22 +99,25 @@ const serverEsbuildCfg = {
   },
 };
 
-/** esbuild `watch` races `tsc --watch` when it rebuilds after the first changed file; debounce bundling. */
-let serverBundleRebuildTimer = null;
+/**
+ * Server bundle rebuild is coalesced via {@link makeCoalescedAsync}:
+ *   - Bursty dist-tsc events within the debounce window collapse to one run.
+ *   - Events that arrive WHILE a build is in flight (e.g. tsc still emitting
+ *     during a multi-second esbuild) schedule exactly one follow-up run, not
+ *     N parallel runs. Without this, Electron would restart multiple times
+ *     per logical change because each completed build would write
+ *     `server.cjs` and trip the file watcher.
+ */
 let distTscWatcher = null;
 
-function scheduleServerBundleRebuild() {
-  if (serverBundleRebuildTimer) clearTimeout(serverBundleRebuildTimer);
-  serverBundleRebuildTimer = setTimeout(async () => {
-    serverBundleRebuildTimer = null;
-    try {
-      await build({ ...serverEsbuildCfg });
-      copyClaudeSdkCliNextTo(serverOutFile, serverRoot);
-    } catch (err) {
-      console.error("[dev] server bundle rebuild failed:", err);
-    }
-  }, 300);
-}
+const scheduleServerBundleRebuild = makeCoalescedAsync(async () => {
+  try {
+    await build({ ...serverEsbuildCfg });
+    copyClaudeSdkCliNextTo(serverOutFile, serverRoot);
+  } catch (err) {
+    console.error("[dev] server bundle rebuild failed:", err);
+  }
+}, 300);
 
 // -------------------------------------------------------------------------
 // Step 1: Start web dev server + esbuild in parallel
@@ -298,10 +302,9 @@ watch(serverOutFile, () => scheduleElectronRestart("server bundle updated"));
 function cleanup() {
   devSessionShuttingDown = true;
   if (debounceTimer) clearTimeout(debounceTimer);
-  if (serverBundleRebuildTimer) {
-    clearTimeout(serverBundleRebuildTimer);
-    serverBundleRebuildTimer = null;
-  }
+  // The server-bundle rebuild timer is owned by makeCoalescedAsync; we
+  // can't cancel its in-flight build, but stopping the dist-tsc watcher
+  // (below) prevents any further trigger.
 
   if (distTscWatcher) {
     try {
