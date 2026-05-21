@@ -134,10 +134,13 @@ export function PersistedNarrative({ messageId, messageContent }: PersistedNarra
   if (items.length === 0) return null;
 
   return (
-    <div className="relative">
-      <div className="flex flex-col">
+    <div className="relative min-w-0 max-w-full">
+      <div className="flex min-w-0 max-w-full flex-col">
         {items.map((item, i) => (
-          <div key={keyForItem(item, i)} className={marginClassForItem(item, i)}>
+          <div
+            key={keyForItem(item, i)}
+            className={`${marginClassForItem(item, i)} min-w-0 max-w-full`}
+          >
             {renderItem(item, allToolCalls)}
           </div>
         ))}
