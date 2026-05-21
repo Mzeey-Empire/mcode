@@ -1661,7 +1661,15 @@ export class AgentService {
    * generating the actual plan.
    */
   private buildPlanPrompt(userMessage: string): string {
-    return `[PLAN MODE] You are in planning mode. Before generating your plan, identify 2-5 key architectural decisions that need user input. Output your questions in this exact format:
+    return `[PLAN MODE] You are in planning mode. Your only job right now is to identify 2-5 key architectural decisions that need user input, based solely on the user's message below.
+
+Constraints:
+- Do NOT call any tools. Do NOT read files, run commands, or explore the codebase.
+- Do NOT write any prose, preamble, or commentary.
+- Your entire response MUST be the single fenced plan-questions block shown below, then stop.
+- After the user answers, you will receive their selections in a follow-up turn and may then plan freely.
+
+Output format (must be valid JSON inside the fence):
 
 \`\`\`plan-questions
 [
@@ -1676,8 +1684,6 @@ export class AgentService {
   }
 ]
 \`\`\`
-
-Output ONLY the plan-questions block, then stop. Do not generate the plan until you receive the user's answers.
 
 ---
 
