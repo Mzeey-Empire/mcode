@@ -86,6 +86,39 @@ describe("handleAgentEvent branches", () => {
     expect(calls[0].toolInput).toEqual({ path: "/a" });
   });
 
+  it("session.toolUse merges enriched Agent toolInput for duplicate toolCallId", () => {
+    useThreadStore.getState().handleAgentEvent("thread-1", {
+      method: "session.toolUse",
+      params: {
+        toolCallId: "agent-1",
+        toolName: "Agent",
+        toolInput: { description: "Subagent task" },
+      },
+    });
+    useThreadStore.getState().handleAgentEvent("thread-1", {
+      method: "session.toolUse",
+      params: {
+        toolCallId: "agent-1",
+        toolName: "Agent",
+        toolInput: {
+          description: "Read detection file",
+          prompt: "Read cursor-subagent-detection.ts",
+          model: "composer-2.5-fast",
+        },
+      },
+    });
+    vi.runAllTimers();
+
+    const calls = useThreadStore.getState().toolCallsByThread["thread-1"];
+    expect(calls).toHaveLength(1);
+    expect(calls[0].toolInput).toMatchObject({
+      description: "Read detection file",
+      prompt: "Read cursor-subagent-detection.ts",
+      model: "composer-2.5-fast",
+    });
+    expect(calls[0].isComplete).toBe(false);
+  });
+
   it("toolResult fallback does not mark an Agent call complete when it has active children", () => {
     useThreadStore.setState({
       toolCallsByThread: {

@@ -1,4 +1,21 @@
 import type { SVGProps } from "react";
+/** Tailwind classes for the active (running) stacked-layers glyph. */
+export const STACKED_LAYERS_ACTIVE_ICON_CLASS =
+  "w-3.5 h-3.5 shrink-0 text-primary/80";
+
+/** Tailwind classes for a completed or idle stacked-layers glyph. */
+export const STACKED_LAYERS_IDLE_ICON_CLASS =
+  "w-3.5 h-3.5 shrink-0 text-muted-foreground/60";
+
+/**
+ * Returns icon size and color classes for running vs idle sub-agent rows.
+ *
+ * Matches {@link NarrativeIndicator} so the timeline and footer use the same
+ * amber primary tint and animation.
+ */
+export function stackedLayersIconClassName(animated: boolean): string {
+  return animated ? STACKED_LAYERS_ACTIVE_ICON_CLASS : STACKED_LAYERS_IDLE_ICON_CLASS;
+}
 
 interface StackedLayersIconProps extends SVGProps<SVGSVGElement> {
   /**

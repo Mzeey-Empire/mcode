@@ -79,6 +79,8 @@ export interface ToolCall {
   elapsedSeconds?: number;
   /** Epoch ms when the toolUse event was received, used for duration display. */
   startedAt?: number;
+  /** Wall-clock duration when the tool call completed (ms). */
+  durationMs?: number;
 }
 
 /** Ephemeral hook execution state tracked during a session. Not persisted to DB. */
@@ -160,6 +162,7 @@ export interface McodeTransport {
     copilotAgent?: string,
     contextWindow?: ContextWindowMode,
     thinking?: boolean,
+    codexFastMode?: boolean,
     replyToMessageId?: string,
     quotedText?: string,
   ): Promise<void>;
@@ -180,6 +183,7 @@ export interface McodeTransport {
     copilotAgent?: string,
     contextWindow?: ContextWindowMode,
     thinking?: boolean,
+    codexFastMode?: boolean,
     displayContent?: string,
   ): Promise<CreateAndSendResult>;
   stopAgent(threadId: string): Promise<void>;
@@ -219,6 +223,7 @@ export interface McodeTransport {
       copilotAgent?: string | null;
       contextWindow?: ContextWindowMode | null;
       thinking?: boolean | null;
+      codexFastMode?: boolean | null;
     },
   ): Promise<boolean>;
   /** Clear the "completed" badge for a thread. Transitions completed -> paused in the DB. */

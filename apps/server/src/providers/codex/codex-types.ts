@@ -73,8 +73,8 @@ export interface ThreadResumeResult {
 // Turn RPCs
 // Source: codex-rs/app-server-protocol/schema/typescript/v2/TurnStartParams.ts
 
-/** A structured text or image input part for turn messages. */
-export type TurnInputPart = { type: "text"; text: string } | { type: "local_image"; path: string };
+/** A structured text or image input part for turn messages (discriminants match codex app-server JSON). */
+export type TurnInputPart = { type: "text"; text: string } | { type: "localImage"; path: string };
 
 /** Parameters for the `turn/start` RPC method. */
 export interface TurnStartParams {
@@ -86,6 +86,11 @@ export interface TurnStartParams {
   approvalPolicy?: AskForApproval | null;
   /** Override reasoning effort for this turn and subsequent turns. */
   effort?: ReasoningEffort | null;
+  /**
+   * OpenAI API service tier for this turn (e.g. `"priority"`). Omitted for default processing.
+   * Field name matches codex-rs app-server generated TypeScript (camelCase).
+   */
+  serviceTier?: string | null;
 }
 
 /** Result returned by the `turn/start` RPC method. */
@@ -117,6 +122,23 @@ export interface LifecyclePayload { [key: string]: unknown }
 export interface AgentMessageDeltaPayload { threadId?: string; turnId?: string; itemId?: string; delta: string }
 /** Payload for `item/commandExecution/outputDelta` - streaming shell output token. */
 export interface CommandExecOutputDeltaPayload { threadId?: string; turnId?: string; itemId?: string; delta: string }
+/** Payload for `item/reasoning/textDelta` and `item/reasoning/summaryTextDelta` streaming tokens. */
+export interface ReasoningStreamDeltaPayload {
+  threadId?: string;
+  turnId?: string;
+  itemId?: string;
+  delta?: string;
+  text?: string;
+  [key: string]: unknown;
+}
+
+/** Payload for experimental `item/plan/delta` streaming tokens (Codex app-server). */
+export interface PlanDeltaPayload {
+  threadId?: string;
+  turnId?: string;
+  itemId?: string;
+  delta: string;
+}
 
 // item/completed payload
 
@@ -136,21 +158,27 @@ export interface CompletedItem {
   role?: string;
   content?: Array<{ type: string; text?: string }>;
 
-  // commandExecution
+  // commandExecution (v2 uses aggregatedOutput; older payloads may use output)
   command?: string;
   output?: string | null;
+  aggregatedOutput?: string | null;
   exitCode?: number | null;
 
   // fileChange
   changes?: Array<{ path: string; kind: string }>;
 
-  // mcpToolCall / dynamicToolCall
+  // mcpToolCall / dynamicToolCall / collabAgentToolCall (`tool` is CollabAgentTool in app-server v2)
   server?: string;
   tool?: string;
   name?: string;
   arguments?: string | Record<string, unknown>;
   result?: string | null;
   error?: string | null;
+
+  /** `item/completed` with `type: "reasoning"` — human-readable summary lines */
+  summary?: string[];
+  /** `item/completed` with `type: "reasoning"` — raw reasoning text segments */
+  reasoningContent?: string[];
 
   // function_call (OpenAI Responses API shape, may appear in some versions)
   [key: string]: unknown;
@@ -197,15 +225,20 @@ export interface ErrorNotificationPayload {
  * that reach the mapper (lifecycle notifications are filtered upstream).
  *
  * Full protocol: codex-rs/app-server-protocol/schema/typescript/ServerNotification.ts
- * Filtered upstream by LIFECYCLE_NOTIFICATION_PREFIXES in CodexAppServer:
- *   thread/*, account/*, hook/*, item/reasoning/*, item/plan/*, item/fileChange/*,
- *   rawResponseItem/*, serverRequest/*, turn/diff/*, turn/plan/*
+ *
+ * Notifications whose `method` matches `LIFECYCLE_NOTIFICATION_PREFIXES` in
+ * `CodexAppServer` never reach the mapper. Everything else (including
+ * `item/reasoning/*` streams) is mapped to {@link AgentEvent} values.
  */
 export type CodexNotification =
   | (JsonRpcNotification<LifecyclePayload> & { method: "turn/started" })
   | (JsonRpcNotification<ItemStartedPayload> & { method: "item/started" })
   | (JsonRpcNotification<AgentMessageDeltaPayload> & { method: "item/agentMessage/delta" })
   | (JsonRpcNotification<CommandExecOutputDeltaPayload> & { method: "item/commandExecution/outputDelta" })
+  | (JsonRpcNotification<ReasoningStreamDeltaPayload> & { method: "item/reasoning/textDelta" })
+  | (JsonRpcNotification<ReasoningStreamDeltaPayload> & { method: "item/reasoning/summaryTextDelta" })
+  | (JsonRpcNotification<LifecyclePayload> & { method: "item/reasoning/summaryPartAdded" })
+  | (JsonRpcNotification<PlanDeltaPayload> & { method: "item/plan/delta" })
   | (JsonRpcNotification<ItemCompletedPayload> & { method: "item/completed" })
   | (JsonRpcNotification<TurnCompletedPayload> & { method: "turn/completed" })
   | (JsonRpcNotification<ErrorNotificationPayload> & { method: "error" });

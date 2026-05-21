@@ -600,7 +600,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       // ExitPlanMode tools conflict because Mcode has no UI to handle
       // the SDK's "Exit plan mode?" confirmation, causing the model to
       // get stuck.
-      disallowedTools: ["EnterPlanMode", "ExitPlanMode"],
+      // AskUserQuestion is also disallowed: in chat mode the model can
+      // ask questions in plain text, and in plan mode Mcode uses its own
+      // PlanQuestionWizard.  The SDK tool has no result handler here, so
+      // calling it stalls the session indefinitely.
+      disallowedTools: ["EnterPlanMode", "ExitPlanMode", "AskUserQuestion"],
       permissionMode: sdkPermissionMode,
       canUseTool: (async (
         toolName: string,
@@ -1059,8 +1063,15 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
               // to determine which Agent owns a given child tool call - the
               // server-side agentCallStack approach fails for parallel dispatch
               // because LIFO returns only the most recent Agent.
+              // Treat empty string the same as null/undefined: an empty parent id
+              // would otherwise be stored as a truthy value and break nesting
+              // (build-narrative.ts groups by parentToolCallId, and "" never matches
+              // an Agent id, so children get silently dropped from the tree).
+              const sdkParentRaw = anyMsg.parent_tool_use_id as string | null | undefined;
               const sdkParentToolUseId =
-                (anyMsg.parent_tool_use_id as string | null | undefined) ?? undefined;
+                typeof sdkParentRaw === "string" && sdkParentRaw.length > 0
+                  ? sdkParentRaw
+                  : undefined;
 
               for (const block of contentBlocks) {
                 if (block.type === "tool_use") {
@@ -1322,8 +1333,12 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                   entry.hasFiredToolThisTurn = true;
                 }
               }
+              // See sdkParentToolUseId above: empty string breaks nesting.
+              const parentRaw = anyMsg.parent_tool_use_id as string | null | undefined;
               const parentToolCallId =
-                (anyMsg.parent_tool_use_id as string | null | undefined) ?? undefined;
+                typeof parentRaw === "string" && parentRaw.length > 0
+                  ? parentRaw
+                  : undefined;
               const toolName =
                 (anyMsg.tool_name as string) ||
                 (anyMsg.name as string) ||

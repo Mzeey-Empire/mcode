@@ -50,6 +50,7 @@ vi.mock("@/stores/threadStore", () => ({
       runningThreadIds: new Set(),
       agentStartTimes: {},
       streamingPreviewByThread: {},
+      streamingByThread: {},
       toolCallsByThread: {},
       persistedToolCallCounts: {},
       serverMessageIds: {},

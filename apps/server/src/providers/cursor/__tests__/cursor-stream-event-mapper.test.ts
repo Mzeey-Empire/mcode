@@ -293,6 +293,35 @@ describe("mapCursorStreamEvent", () => {
       expect(acc.toolStartTimes.has("tu_1")).toBe(true);
     });
 
+    it("maps exploreWorkspaceToolCall to Agent and forwards parent_call_id", () => {
+      const acc = freshAcc();
+      const events = mapCursorStreamEvent(
+        {
+          type: "tool_call",
+          subtype: "started",
+          call_id: "deleg_1",
+          parent_call_id: "root_9",
+          tool_call: {
+            exploreWorkspaceToolCall: {
+              args: { goal: "list top-level dirs" },
+            },
+          },
+        } as CursorStreamEvent,
+        "t1",
+        acc,
+      );
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({
+        type: "toolUse",
+        toolCallId: "deleg_1",
+        toolName: "Agent",
+        parentToolCallId: "root_9",
+      });
+      expect((events[0] as { toolInput: Record<string, unknown> }).toolInput.goal).toBe(
+        "list top-level dirs",
+      );
+    });
+
     it("maps shellToolCall to a ToolUse with toolName=Bash", () => {
       const acc = freshAcc();
       const events = mapCursorStreamEvent(

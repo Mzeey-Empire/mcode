@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { formatDuration } from "@/lib/time";
 import type { ToolCall } from "@/transport/types";
 import { TOOL_PHASE_LABELS } from "../tool-renderers/constants";
-import { StackedLayersIcon } from "./StackedLayersIcon";
+import { StackedLayersIcon, stackedLayersIconClassName } from "./StackedLayersIcon";
 
 /** Derive the current phase label from active tool calls. */
 function derivePhaseLabel(toolCalls: readonly ToolCall[]): string {
@@ -71,10 +71,7 @@ export function NarrativeIndicator({
             semantic than a generic dot because it mirrors the same glyph used
             on each sub-agent row. Otherwise a quiet pulsing dot. */}
         {subagentCount > 0 ? (
-          <StackedLayersIcon
-            animated
-            className="w-3.5 h-3.5 shrink-0 text-primary/80"
-          />
+          <StackedLayersIcon animated className={stackedLayersIconClassName(true)} />
         ) : (
           <span className="size-1.5 shrink-0 rounded-full bg-primary animate-pulse" />
         )}
