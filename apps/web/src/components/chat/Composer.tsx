@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -475,7 +476,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   // Per-thread overrides; null/undefined means inherit from settings default.
   const [contextWindow, setContextWindow] = useState<ContextWindowMode | null>(null);
   const [thinking, setThinking] = useState<boolean | null>(null);
-  /** Null inherits global `provider.codex.fastMode`; explicit boolean persists per thread. */
+  /** Per-thread Codex fast mode. `null` follows global settings until the user toggles the switch. */
   const [codexFastMode, setCodexFastMode] = useState<boolean | null>(null);
   const [access, setAccess] = useState<AccessMode>(PERMISSION_MODES.FULL);
   const [showReasoningPicker, setShowReasoningPicker] = useState(false);
@@ -2265,19 +2266,12 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
             const thinkingOn: boolean = thinking ?? settingsDefaultThinking ?? false;
             const effectiveCodexFast: boolean =
               codexFastMode === null ? settingsGlobalCodexFast : codexFastMode;
-            const codexTierLabel =
-              codexFastMode === null
-                ? "Default"
-                : codexFastMode
-                  ? "Fast"
-                  : "Standard";
-
             const triggerLabel = hasReasoning
               ? reasoningLabel(reasoning)
               : hasThinking
                 ? "Thinking"
                 : hasCodexFast
-                  ? codexTierLabel
+                  ? (effectiveCodexFast ? "Fast" : "Off")
                   : ctxMode === "1m" ? "1M" : "200K";
 
             const activeChipLabel =
@@ -2296,7 +2290,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
               : hasThinking
                 ? "Thinking"
                 : hasCodexFast
-                  ? "Codex throughput"
+                  ? "Fast mode"
                   : "Context window";
 
             const sectionHeaderClass = "px-3 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60 select-none";
@@ -2406,28 +2400,29 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
                     {hasCodexFast && (
                       <>
                         {(hasReasoning || has1M || hasThinking) && <div className="my-1 h-px bg-border/60" />}
-                        <div className={sectionHeaderClass}>Codex throughput</div>
-                        {(
-                          [
-                            { value: null as boolean | null, label: "Default (from settings)" },
-                            { value: false, label: "Standard" },
-                            { value: true, label: "Fast" },
-                          ] as const
-                        ).map(({ value, label }) => (
-                          <button
-                            key={String(value)}
-                            onClick={() => {
-                              setCodexFastMode(value);
+                        <div className={sectionHeaderClass}>Fast mode</div>
+                        <label
+                          className={cn(
+                            "flex w-full cursor-pointer items-center justify-between rounded px-3 py-1.5 text-xs",
+                            effectiveCodexFast
+                              ? "bg-accent/50 text-foreground"
+                              : "text-popover-foreground hover:bg-accent/50 hover:text-foreground",
+                          )}
+                        >
+                          <span>Fast</span>
+                          <Switch
+                            data-testid="composer-codex-fast-switch"
+                            checked={effectiveCodexFast}
+                            onCheckedChange={(checked) => {
+                              setCodexFastMode(checked);
                               if (threadId && !branchFromMessageId) {
-                                void setThreadSettings(threadId, { codexFastMode: value });
+                                void setThreadSettings(threadId, { codexFastMode: checked });
                               }
                             }}
-                            className={itemClass(codexFastMode === value)}
-                          >
-                            <span>{label}</span>
-                            {codexFastMode === value && <Check size={10} className="shrink-0 text-foreground" />}
-                          </button>
-                        ))}
+                            aria-label="Fast mode"
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                        </label>
                       </>
                     )}
                   </div>
