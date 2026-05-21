@@ -12,7 +12,7 @@
  */
 
 import { context, build } from "esbuild";
-import { spawn } from "child_process";
+import { execSync, spawn } from "child_process";
 import { watch } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -22,6 +22,33 @@ import {
   resolveServerTscBin,
   copyClaudeSdkCliNextTo,
 } from "../../../scripts/build-server-dev-bundle.mjs";
+
+const isWindows = process.platform === "win32";
+
+/**
+ * Kill a process and its entire child tree.
+ *
+ * On Windows, `ChildProcess.kill()` only terminates the immediate process.
+ * When `shell: true` is used (required for spawning .exe under Git Bash),
+ * the actual application runs as a child of `cmd.exe`. Killing `cmd.exe`
+ * leaves the real process as an orphan. `taskkill /T /F` walks the tree.
+ *
+ * On POSIX, `process.kill(-pid)` sends the signal to the process group.
+ */
+function killProcessTree(child) {
+  if (!child || child.killed) return;
+  const pid = child.pid;
+  if (!pid) return;
+  try {
+    if (isWindows) {
+      execSync(`taskkill /PID ${pid} /T /F`, { stdio: "ignore", timeout: 5000 });
+    } else {
+      process.kill(-pid, "SIGTERM");
+    }
+  } catch {
+    // Process already exited or PID invalid
+  }
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, "..");
@@ -220,7 +247,7 @@ let electronProcess = null;
 /** Spawn (or restart) the Electron process. */
 function spawnElectron() {
   if (electronProcess) {
-    electronProcess.kill();
+    killProcessTree(electronProcess);
     electronProcess = null;
   }
 
@@ -312,7 +339,7 @@ function cleanup() {
   }
 
   if (serverTscWatch) {
-    serverTscWatch.kill();
+    killProcessTree(serverTscWatch);
     serverTscWatch = null;
   }
 
@@ -321,12 +348,12 @@ function cleanup() {
   }
 
   if (electronProcess) {
-    electronProcess.kill();
+    killProcessTree(electronProcess);
     electronProcess = null;
   }
 
   if (viteProcess) {
-    viteProcess.kill();
+    killProcessTree(viteProcess);
     viteProcess = null;
   }
 }
