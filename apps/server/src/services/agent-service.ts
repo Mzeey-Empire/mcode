@@ -50,6 +50,7 @@ import {
 } from "./provider-availability-errors.js";
 import { PlanQuestionParser } from "./plan-question-parser.js";
 import { buildHandoffContent, buildConversationReplay, replayBudgetChars, resolveForkSnapshot } from "./handoff-builder.js";
+import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts";
 import { normalizeAgentProviderError } from "./provider-agent-error-normalize.js";
 
 /**
@@ -688,7 +689,7 @@ export class AgentService {
     // follow-up message is human-readable rather than using opaque IDs.
     const questionContext = this.buildQuestionContext(threadId);
 
-    const lines: string[] = ["Here are my answers to your planning questions:\n"];
+    const lines: string[] = [`${PLAN_ANSWER_MESSAGE_PREFIX}\n`];
     for (const a of answers) {
       const qCtx = questionContext.get(a.questionId);
       const label = qCtx?.question ?? a.questionId;

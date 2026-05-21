@@ -47,3 +47,12 @@ export const PlanQuestionBatchSchema = z.object({
 });
 /** Batch of plan questions emitted by the model. */
 export type PlanQuestionBatch = z.infer<typeof PlanQuestionBatchSchema>;
+
+/**
+ * Sentinel prefix the server prepends to the user message that carries plan-mode
+ * answers back to the model. The client uses this constant to suppress the
+ * redundant bubble — the AnsweredSummary marker is the canonical UI for the
+ * answered batch.
+ */
+export const PLAN_ANSWER_MESSAGE_PREFIX =
+  "Here are my answers to your planning questions:";

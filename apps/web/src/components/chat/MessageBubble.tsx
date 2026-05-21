@@ -14,6 +14,7 @@ import { FileAttachmentTile } from "./FileAttachmentTile";
 import { ImageAttachmentLightbox } from "./ImageAttachmentLightbox";
 import { useThreadStore } from "@/stores/threadStore";
 import { AnsweredSummary } from "./plan-questions/AnsweredSummary";
+import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts";
 
 /**
  * Returns true when the assistant message body collapses to nothing visible
@@ -463,6 +464,19 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
   // to the normal user bubble below.
   const userGoal = message.role === "user" ? parseUserGoalCommand(textContent) : null;
   const hasAttachments = imageAttachments.length > 0 || fileAttachments.length > 0;
+
+  // Suppress the plan-mode answer payload that the server sends to the model
+  // on submit — the AnsweredSummary marker on the originating assistant
+  // message is the canonical UI representation for the answered batch, so
+  // also rendering the verbose user re-statement would be redundant noise
+  // when the thread reloads.
+  if (
+    message.role === "user" &&
+    !hasAttachments &&
+    textContent.startsWith(PLAN_ANSWER_MESSAGE_PREFIX)
+  ) {
+    return null;
+  }
   // Without attachments the pill replaces the whole bubble (chapter-break
   // full-width). With attachments we keep the user's images/files visible
   // and render the pill alongside, so the directive is not "stolen" from
@@ -574,7 +588,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
     // For answered plan-questions messages, show a read-only summary
     // instead of hiding the bubble entirely (AC-1.28).
     if (isAnsweredPlanMessage) {
-      return <AnsweredSummary content={message.content} />;
+      return <AnsweredSummary content={message.content} messageId={message.id} />;
     }
     // Active wizard or unanswered: the wizard component handles rendering.
     return null;

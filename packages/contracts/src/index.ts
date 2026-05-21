@@ -174,6 +174,7 @@ export {
   PlanQuestionSchema,
   PlanAnswerSchema,
   PlanQuestionBatchSchema,
+  PLAN_ANSWER_MESSAGE_PREFIX,
 } from "./models/plan-questions.js";
 export type {
   PlanQuestionOption,
