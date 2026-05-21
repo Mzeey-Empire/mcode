@@ -481,6 +481,7 @@ export function createWsTransport(
         copilotAgent: settings.copilotAgent,
         contextWindow: settings.contextWindow,
         thinking: settings.thinking,
+        codexFastMode: settings.codexFastMode,
       }),
     markThreadViewed: (threadId) => rpc<void>("thread.markViewed", { threadId }),
     syncThreadPrs: (workspaceId) =>
@@ -507,6 +508,7 @@ export function createWsTransport(
       copilotAgent?: string,
       contextWindow?,
       thinking?,
+      codexFastMode?,
       replyToMessageId?,
       quotedText?,
     ) => {
@@ -526,6 +528,7 @@ export function createWsTransport(
         copilotAgent,
         contextWindow,
         thinking,
+        ...(codexFastMode !== undefined && { codexFastMode }),
         ...(replyToMessageId && { replyToMessageId }),
         ...(quotedText && { quotedText }),
         ...(displayContent !== undefined && { displayContent }),
@@ -549,6 +552,7 @@ export function createWsTransport(
       copilotAgent?,
       contextWindow?,
       thinking?,
+      codexFastMode?,
       displayContent?,
     ) => {
       const state = useSettingsStore.getState();
@@ -572,6 +576,7 @@ export function createWsTransport(
         copilotAgent,
         contextWindow,
         thinking,
+        ...(codexFastMode !== undefined && { codexFastMode }),
         ...(displayContent !== undefined && { displayContent }),
         ...guardrails,
       });

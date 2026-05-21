@@ -190,6 +190,7 @@ export class ThreadService {
       copilot_agent?: string | null;
       context_window_mode?: ContextWindowMode | null;
       thinking?: boolean | null;
+      codex_fast_mode?: boolean | null;
     },
   ): boolean {
     return this.threadRepo.updateSettings(threadId, {
@@ -199,6 +200,7 @@ export class ThreadService {
       ...("copilot_agent" in settings && { copilot_agent: settings.copilot_agent }),
       ...("context_window_mode" in settings && { context_window_mode: settings.context_window_mode }),
       ...("thinking" in settings && { thinking: settings.thinking }),
+      ...("codex_fast_mode" in settings && { codex_fast_mode: settings.codex_fast_mode }),
     });
   }
 

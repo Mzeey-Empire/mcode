@@ -297,6 +297,7 @@ async function dispatch(
         copilot_agent: params.copilotAgent,
         context_window_mode: params.contextWindow,
         thinking: params.thinking,
+        codex_fast_mode: params.codexFastMode,
       });
     case "thread.markViewed":
       deps.threadService.markViewed(params.threadId);
@@ -420,6 +421,7 @@ async function dispatch(
         params.copilotAgent,
         params.contextWindow,
         params.thinking,
+        params.codexFastMode,
         undefined,
         undefined,
         params.replyToMessageId,
@@ -447,6 +449,7 @@ async function dispatch(
         params.copilotAgent,
         params.contextWindow,
         params.thinking,
+        params.codexFastMode,
         params.displayContent,
       );
     case "agent.stop":

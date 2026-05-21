@@ -1,0 +1,1 @@
+ALTER TABLE `threads` ADD `codex_fast_mode` integer;

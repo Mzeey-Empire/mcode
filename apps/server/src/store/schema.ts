@@ -66,6 +66,11 @@ export const threads = sqliteTable(
     copilotAgent: text("copilot_agent"),
     contextWindowMode: text("context_window_mode"),
     thinking: integer("thinking"),
+    /**
+     * Codex-only: 1 = request `serviceTier: fast`, 0 = standard, null = inherit global
+     * `settings.provider.codex.fastMode`.
+     */
+    codexFastMode: integer("codex_fast_mode"),
     hasFileChanges: integer("has_file_changes").notNull().default(0),
   },
   (table) => [
