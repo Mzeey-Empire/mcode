@@ -54,6 +54,8 @@ function buildService(db: Database.Database) {
   const providerStub = Object.assign(new EventEmitter(), {
     id: "claude" as const,
     supportsCompletion: true,
+    sessionForkOnResume: "unsupported" as const,
+    maxInputCharactersPerTurn: 16_000,
     sendMessage: vi.fn<(params: { message: string; [k: string]: unknown }) => Promise<void>>(
       () => Promise.resolve(),
     ),

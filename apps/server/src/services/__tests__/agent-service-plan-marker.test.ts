@@ -53,6 +53,10 @@ function buildService(db: Database.Database) {
   // Provider stub: extends EventEmitter (matches real provider shape) and
   // resolves sendMessage immediately so the turn "completes" without I/O.
   const providerStub = Object.assign(new EventEmitter(), {
+    id: "claude" as const,
+    supportsCompletion: true,
+    sessionForkOnResume: "unsupported" as const,
+    maxInputCharactersPerTurn: 16_000,
     sendMessage: vi.fn(() => Promise.resolve()),
     setSdkSessionId: vi.fn(),
   });
