@@ -1,6 +1,6 @@
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ListChecks, Diff, Globe, Terminal, X } from "lucide-react";
+import { ListChecks, Diff, Globe, Terminal, X, ScrollText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useTaskStore } from "@/stores/taskStore";
@@ -17,6 +17,7 @@ import { DiffPanel } from "@/components/diff";
 import { PreviewPanel } from "@/components/panels/PreviewPanel";
 import { TerminalTabContent } from "@/components/terminal/TerminalTabContent";
 import { TerminalPoolSlot } from "@/components/terminal/TerminalPoolSlotContext";
+import { PlanPanel } from "@/components/panels/plan";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";
 
@@ -316,6 +317,18 @@ export function RightPanel() {
               <Terminal size={12} />
               Terminal
             </button>
+            <button
+              type="button"
+              onClick={() => setRightPanelTab(activeThreadId!, "plan")}
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-[10px] font-semibold tracking-[0.16em] uppercase transition-colors ${
+                activeTab === "plan"
+                  ? "text-foreground bg-muted/50"
+                  : "text-foreground/70 hover:text-foreground"
+              }`}
+            >
+              <ScrollText size={12} />
+              Plan
+            </button>
           </div>
           <Button
             variant="ghost"
@@ -344,6 +357,9 @@ export function RightPanel() {
         </div>
         {activeTab === "preview" && (
           <PreviewPanel threadId={activeThreadId} workspaceId={activeWorkspaceId} />
+        )}
+        {activeTab === "plan" && activeThreadId && (
+          <PlanPanel threadId={activeThreadId} />
         )}
         <div
           className={cn(

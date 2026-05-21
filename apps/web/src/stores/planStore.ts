@@ -80,8 +80,10 @@ export const usePlanStore = create<PlanState>((set) => ({
 
   clearPlans: (threadId) =>
     set((state) => {
-      const { [threadId]: _, ...rest } = state.plansByThread;
-      const { [threadId]: __, ...restVersions } = state.activeVersionByThread;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [threadId]: _omitPlans, ...rest } = state.plansByThread;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [threadId]: _omitVersion, ...restVersions } = state.activeVersionByThread;
       return { plansByThread: rest, activeVersionByThread: restVersions };
     }),
 }));
