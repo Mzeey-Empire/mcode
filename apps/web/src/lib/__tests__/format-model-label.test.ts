@@ -22,6 +22,15 @@ describe("formatModelLabel", () => {
     expect(formatModelLabel("cursor-agent")).toBe("Cursor");
   });
 
+  it("uses registry labels for known Codex models", () => {
+    expect(formatModelLabel("gpt-5.2-codex")).toBe("GPT-5.2 Codex");
+    expect(formatModelLabel("gpt-5.3-codex")).toBe("GPT-5.3 Codex");
+  });
+
+  it("formats unknown gpt-* ids without truncating to Gpt", () => {
+    expect(formatModelLabel("gpt-5.9-future")).toBe("GPT-5.9-future");
+  });
+
   it("returns unknown identifiers unchanged when no segment can be extracted", () => {
     expect(formatModelLabel("")).toBe("");
   });
