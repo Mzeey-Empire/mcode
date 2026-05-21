@@ -5,6 +5,7 @@ import { useDiffStore, type SelectedFile } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { getTransport } from "@/transport";
 import { parseDiffLines, isMarkdownFile } from "@/lib/diff-parser";
+import { parseFirstHunkLine } from "@/lib/parse-first-hunk-line";
 import { langFromPath } from "@/lib/lang-from-path";
 import { UnifiedDiff } from "./UnifiedDiff";
 import { SideBySideDiff } from "./SideBySideDiff";
@@ -141,6 +142,37 @@ export function FileEntry({ filePath, source, id, threadId, depth = 0, defaultEx
       diffState && !diffState.loading && diffState.data
         ? parseDiffLines(diffState.data)
         : [],
+    [diffState],
+  );
+
+  // Resolve the file's absolute path on disk so the SideRail can pass it to
+  // the editor / file-manager IPC. Worktree threads anchor at their
+  // worktree_path; non-worktree threads anchor at the workspace path.
+  const basePath = useWorkspaceStore((s) => {
+    const thread = s.threads.find((t) => t.id === threadId);
+    if (thread?.worktree_path) return thread.worktree_path;
+    const ws = s.workspaces.find((w) => w.id === thread?.workspace_id);
+    return ws?.path ?? null;
+  });
+
+  const absolutePath = useMemo(
+    () => (basePath ? joinPaths(basePath, filePath) : undefined),
+    [basePath, filePath],
+  );
+
+  const absoluteDir = useMemo(() => {
+    if (!absolutePath) return undefined;
+    const i = absolutePath.lastIndexOf("/");
+    const j = absolutePath.lastIndexOf("\\");
+    const cut = Math.max(i, j);
+    return cut > 0 ? absolutePath.slice(0, cut) : absolutePath;
+  }, [absolutePath]);
+
+  const openAtLine = useMemo(
+    () =>
+      diffState && !diffState.loading && diffState.data
+        ? parseFirstHunkLine(diffState.data)
+        : undefined,
     [diffState],
   );
 
@@ -296,6 +328,9 @@ export function FileEntry({ filePath, source, id, threadId, depth = 0, defaultEx
 
           <SideRail
             filePath={filePath}
+            absolutePath={absolutePath}
+            absoluteDir={absoluteDir}
+            openAtLine={openAtLine}
             isMarkdown={isMarkdown}
             previewMode={previewMode}
             onTogglePreview={() => setPreviewMode((p) => !p)}
@@ -304,4 +339,18 @@ export function FileEntry({ filePath, source, id, threadId, depth = 0, defaultEx
       )}
     </div>
   );
+}
+
+/**
+ * Tiny path joiner that picks the right separator without dragging in node:path.
+ * Falls back to `/` on the web, but preserves `\` when the base path already
+ * uses it (Windows workspace paths).
+ */
+function joinPaths(base: string, rel: string): string {
+  const sep = base.includes("\\") && !base.includes("/") ? "\\" : "/";
+  const left = base.endsWith(sep) ? base.slice(0, -1) : base;
+  const right = rel.startsWith("/") || rel.startsWith("\\") ? rel.slice(1) : rel;
+  // Normalise forward slashes in `rel` to the chosen separator when on Windows.
+  const normalised = sep === "\\" ? right.replace(/\//g, "\\") : right;
+  return `${left}${sep}${normalised}`;
 }
