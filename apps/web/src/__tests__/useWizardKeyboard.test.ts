@@ -73,6 +73,26 @@ describe("resolveWizardKeyAction", () => {
     expect(action).toEqual({ type: "advance" });
   });
 
+  it("ignores Enter when text input is focused (allows newlines in textarea)", () => {
+    const action = resolveWizardKeyAction(
+      key("Enter", { target: "TEXTAREA" }),
+      4,
+      0,
+      true,
+    );
+    expect(action).toBeNull();
+  });
+
+  it("ignores Enter when an INPUT is focused", () => {
+    const action = resolveWizardKeyAction(
+      key("Enter", { target: "INPUT" }),
+      4,
+      0,
+      true,
+    );
+    expect(action).toBeNull();
+  });
+
   // --- Escape (AC-1.10) ---
   it("deselects on Escape when an option is selected", () => {
     const action = resolveWizardKeyAction(key("Escape"), 4, 1, true);

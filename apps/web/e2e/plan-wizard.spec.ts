@@ -229,9 +229,14 @@ test.describe("Plan Question Wizard", () => {
     const wizard = page.locator("[role='form'][aria-label='Plan questions']");
     await expect(wizard).toBeVisible({ timeout: 3000 });
 
-    await page.keyboard.press("1");
-
+    // Explicit focus before key press — `page.keyboard.press` dispatches
+    // to whatever element currently holds focus, so without focusing a
+    // wizard radio the keystroke could be consumed by the Composer
+    // textarea and the test would flake.
     const firstRadio = wizard.locator("[role='radio']").first();
+    await firstRadio.focus();
+    await firstRadio.press("1");
+
     await expect(firstRadio).toHaveAttribute("aria-checked", "true");
   });
 
@@ -241,8 +246,10 @@ test.describe("Plan Question Wizard", () => {
     const wizard = page.locator("[role='form'][aria-label='Plan questions']");
     await expect(wizard).toBeVisible({ timeout: 3000 });
 
-    await page.keyboard.press("1");
-    await page.keyboard.press("Enter");
+    const firstRadio = wizard.locator("[role='radio']").first();
+    await firstRadio.focus();
+    await firstRadio.press("1");
+    await firstRadio.press("Enter");
 
     // Question 2 now visible, mono counter advanced
     await expect(wizard.getByText("auth", { exact: true })).toBeVisible();

@@ -1,5 +1,10 @@
 import { useState } from "react";
 import { ChevronRight } from "lucide-react";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { useThreadStore } from "@/stores/threadStore";
 import { PlanQuestionSchema, type PlanQuestion } from "@mcode/contracts";
@@ -25,7 +30,7 @@ interface AnsweredSummaryProps {
  * expired in the store.
  */
 export function AnsweredSummary({ content, messageId }: AnsweredSummaryProps) {
-  const [expanded, setExpanded] = useState(false);
+  const [open, setOpen] = useState(false);
   const echo = useThreadStore((s) =>
     messageId ? s.recentlyAnsweredPlanMessageIds.has(messageId) : false,
   );
@@ -57,56 +62,52 @@ export function AnsweredSummary({ content, messageId }: AnsweredSummaryProps) {
   if (!questions.length) return null;
 
   return (
-    <div
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
       className={cn(
         "group/msg space-y-2 rounded-sm px-1.5 -mx-1.5",
         echo && "animate-wizard-marker-echo",
       )}
       data-role="answered-plan-questions"
     >
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-1.5 text-xs text-muted-foreground/50 hover:text-muted-foreground/70 transition-colors cursor-pointer"
-      >
+      <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground/50 hover:text-muted-foreground/70 transition-colors cursor-pointer">
         <ChevronRight
           className={cn(
             "w-3 h-3 transition-transform duration-150",
-            expanded && "rotate-90",
+            open && "rotate-90",
           )}
         />
         <span className="font-mono text-[10px] uppercase tracking-widest">
           {questions.length} plan question{questions.length !== 1 ? "s" : ""} answered
         </span>
-      </button>
+      </CollapsibleTrigger>
 
-      {expanded && (
-        <div className="ml-4.5 space-y-2 animate-fade-up-in">
-          {questions.map((q) => (
-            <div key={q.id} className="text-xs">
-              <span className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground/30">
-                {q.category}
-              </span>
-              <p className="text-muted-foreground/60 mt-0.5">{q.question}</p>
-              <div className="flex flex-wrap gap-1.5 mt-1">
-                {q.options.map((o) => (
-                  <span
-                    key={o.id}
-                    className={cn(
-                      "inline-block text-[10px] px-1.5 py-0.5 rounded border",
-                      o.recommended
-                        ? "border-primary/20 text-primary/50 bg-primary/5"
-                        : "border-border/30 text-muted-foreground/35",
-                    )}
-                  >
-                    {o.title}
-                  </span>
-                ))}
-              </div>
+      <CollapsibleContent className="ml-4.5 space-y-2 data-[state=open]:animate-fade-up-in">
+        {questions.map((q) => (
+          <div key={q.id} className="text-xs">
+            <span className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground/30">
+              {q.category}
+            </span>
+            <p className="text-muted-foreground/60 mt-0.5">{q.question}</p>
+            <div className="flex flex-wrap gap-1.5 mt-1">
+              {q.options.map((o) => (
+                <span
+                  key={o.id}
+                  className={cn(
+                    "inline-block text-[10px] px-1.5 py-0.5 rounded border",
+                    o.recommended
+                      ? "border-primary/20 text-primary/50 bg-primary/5"
+                      : "border-border/30 text-muted-foreground/35",
+                  )}
+                >
+                  {o.title}
+                </span>
+              ))}
             </div>
-          ))}
-        </div>
-      )}
-    </div>
+          </div>
+        ))}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

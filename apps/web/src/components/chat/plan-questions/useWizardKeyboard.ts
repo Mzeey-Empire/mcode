@@ -18,26 +18,36 @@ export function resolveWizardKeyAction(
   selectedIndex: number,
   hasSelection: boolean,
 ): WizardKeyAction | null {
-  const tag = (e.target as HTMLElement)?.tagName;
-  const isTextInput = tag === "TEXTAREA" || tag === "INPUT";
+  const target = e.target as HTMLElement | null;
+  const tag = target?.tagName;
+  const isTextInput =
+    tag === "TEXTAREA" ||
+    tag === "INPUT" ||
+    target?.isContentEditable === true;
 
-  // Alt+ArrowLeft: always goes to previous (even in text inputs)
+  // Alt+ArrowLeft: always goes to previous (even in text inputs) — Alt is
+  // not a typing modifier, so this never conflicts with typing.
   if (e.altKey && e.key === "ArrowLeft") {
     return { type: "previous" };
   }
 
-  // Enter / Ctrl+Enter: advance to next question or submit
-  if (e.key === "Enter") {
-    return { type: "advance" };
-  }
-
-  // Escape: deselect if selected, cancel if not
+  // Escape: deselect if selected, cancel if not. Honored everywhere because
+  // escape is universally non-typing — pressing it in the "Other" textarea
+  // should still cancel the wizard.
   if (e.key === "Escape") {
     return hasSelection ? { type: "deselect" } : { type: "cancel" };
   }
 
-  // Everything below is suppressed when a text input is focused
+  // Everything below — including Enter — is suppressed when a text input
+  // is focused. Letting Enter through caused users typing multi-line text
+  // in the "Other" tile's textarea to advance the wizard instead of
+  // inserting a newline.
   if (isTextInput) return null;
+
+  // Enter: advance to next question or submit.
+  if (e.key === "Enter") {
+    return { type: "advance" };
+  }
 
   // Backspace: go to previous question
   if (e.key === "Backspace") {

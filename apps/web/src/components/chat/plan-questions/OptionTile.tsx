@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { Textarea } from "@/components/ui/textarea";
 import { useEffect, useRef } from "react";
 import type { PlanQuestionOption } from "@mcode/contracts";
 
@@ -102,17 +103,20 @@ export function OptionTile({
           </div>
 
           {isOtherTile && selected ? (
-            <textarea
+            <Textarea
               ref={textareaRef}
               value={otherText}
               onChange={(e) => onOtherTextChange?.(e.target.value)}
               onClick={(e) => e.stopPropagation()}
               placeholder="Describe your preference..."
               rows={2}
+              // Override the shadcn Textarea's boxed chrome to match the
+              // wizard's quiet borderless aesthetic — only a bottom hairline
+              // marks the editable region, focus colors the rule.
               className={cn(
-                "mt-2 w-full bg-transparent text-xs text-foreground resize-none outline-none",
-                "placeholder:text-muted-foreground/40 border-b border-border/40 focus:border-primary/50",
-                "transition-colors py-1.5",
+                "mt-2 min-h-0 rounded-none border-0 border-b border-border/40 bg-transparent px-0 py-1.5 text-xs",
+                "shadow-none focus-visible:ring-0 focus-visible:border-primary/50",
+                "resize-none",
               )}
             />
           ) : (

@@ -5,7 +5,7 @@ import { OptionTile } from "./plan-questions/OptionTile";
 import { AcceptRecommended } from "./plan-questions/AcceptRecommended";
 import { useWizardKeyboard } from "./plan-questions/useWizardKeyboard";
 import { cn } from "@/lib/utils";
-import type { PlanAnswer, PlanQuestionOption } from "@mcode/contracts";
+import type { PlanAnswer, PlanQuestion, PlanQuestionOption } from "@mcode/contracts";
 
 /** Sentinel ID for the user-written "Other" option. */
 export const OTHER_OPTION_ID = "__other__";
@@ -119,9 +119,53 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
     [isSubmitting, isThreadRunning, threadId, setPlanAnswer, submitPlanAnswers],
   );
 
-  const q = questions?.[activeIndex] ?? null;
+  // Hold the last-rendered question batch in local state so the wizard's
+  // inner subtree stays mounted while AnimatedCollapsible animates its
+  // height down on cancel/submit. Without this, the children unmount in
+  // the same render that flips `open` to false and the close snaps shut
+  // instead of collapsing smoothly. Cleared ~280ms later (matches the
+  // collapse duration in AnimatedCollapsible).
+  const [closingSnapshot, setClosingSnapshot] = useState<{
+    questions: PlanQuestion[];
+    activeIndex: number;
+  } | null>(null);
+  useEffect(() => {
+    if (questions && questions.length > 0) {
+      // Fresh data is live — drop any held closing snapshot so the body
+      // tracks the current store.
+      if (closingSnapshot) setClosingSnapshot(null);
+      return;
+    }
+    // Store cleared (cancel/submit). Capture the previous render's data
+    // by snapshotting on the next state transition; the previous block
+    // already populated the snapshot via `questions` being live, so we
+    // just need to delay the actual clear.
+    if (!closingSnapshot) return;
+    const t = window.setTimeout(() => setClosingSnapshot(null), 280);
+    return () => window.clearTimeout(t);
+  }, [questions, closingSnapshot]);
+  // Keep the snapshot fresh while data is live so the next "go null"
+  // transition always has the last-good batch to fall back on.
+  useEffect(() => {
+    if (questions && questions.length > 0) {
+      setClosingSnapshot({ questions, activeIndex });
+    }
+  }, [questions, activeIndex]);
+
+  const displayQuestions =
+    questions && questions.length > 0
+      ? questions
+      : closingSnapshot?.questions ?? null;
+  const displayActiveIndex =
+    questions && questions.length > 0
+      ? activeIndex
+      : closingSnapshot?.activeIndex ?? 0;
+
+  const q = displayQuestions?.[displayActiveIndex] ?? null;
   const answer = q ? answersMap.get(q.id) : undefined;
-  const isLast = questions ? activeIndex === questions.length - 1 : false;
+  const isLast = displayQuestions
+    ? displayActiveIndex === displayQuestions.length - 1
+    : false;
   // Memoize so the array identity is stable across renders that don't change
   // the underlying question. `handleSelectByIndex` closes over `allOptions`
   // and feeds `useWizardKeyboard`; without memoization the keyboard listener
@@ -220,8 +264,13 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [isActive]);
 
+  // Gate on `!!q` as well as `isActive` — without it the global key
+  // listener can still intercept Enter/Escape/arrows when the wizard
+  // has no renderable question (e.g. questions array drained mid-state
+  // but status not yet reconciled), mutating wizard state with no
+  // visible UI to ground the action.
   useWizardKeyboard({
-    enabled: isActive && !isSubmitting,
+    enabled: isActive && !isSubmitting && q !== null,
     optionCount: allOptions.length,
     selectedIndex,
     hasSelection: selectedOptionId !== null,
@@ -236,7 +285,7 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
 
   return (
     <AnimatedCollapsible open={isActive}>
-      {isActive && questions && q && (
+      {displayQuestions && q && (
         <div
           role="form"
           aria-label="Plan questions"
@@ -259,7 +308,7 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
               ›
             </span>
             <span className="tabular-nums">
-              step {formatStep(activeIndex + 1, questions.length)}
+              step {formatStep(displayActiveIndex + 1, displayQuestions.length)}
             </span>
             <span className="text-muted-foreground/25" aria-hidden="true">
               ·
@@ -270,7 +319,7 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
           {/* Question — the focal point. Animates in on advance/previous;
               the data-direction on the wrapper drives which keyframe runs. */}
           <p
-            key={activeIndex}
+            key={displayActiveIndex}
             className={cn(
               "text-[15px] font-medium text-foreground leading-snug mb-3 max-w-[68ch]",
               slideDirection === "forward"
@@ -315,7 +364,7 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
               question has a single recommended option. */}
           <div className="mb-3 px-0.5">
             <AcceptRecommended
-              questions={questions}
+              questions={displayQuestions}
               onAccept={handleAcceptRecommended}
               disabled={submitDisabled}
               testId="plan-accept-recommended"
@@ -334,7 +383,7 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
               >
                 cancel
               </button>
-              {activeIndex > 0 && (
+              {displayActiveIndex > 0 && (
                 <button
                   type="button"
                   onClick={handlePrevious}
