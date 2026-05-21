@@ -36,6 +36,10 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
   const answersMap = useThreadStore((s) => s.planAnswersByThread[threadId] ?? EMPTY_MAP);
   const activeIndex = useThreadStore((s) => s.activeQuestionIndexByThread[threadId] ?? 0);
   const status = useThreadStore((s) => s.planQuestionsStatusByThread[threadId] ?? "idle");
+  // Block submission while the model is still streaming. The server now
+  // broadcasts plan.questions as soon as the fence parses, so the wizard
+  // opens mid-turn — but the user can't submit answers until the turn ends.
+  const isThreadRunning = useThreadStore((s) => s.runningThreadIds.has(threadId));
   const setPlanAnswer = useThreadStore((s) => s.setPlanAnswer);
   const setActiveQuestionIndex = useThreadStore((s) => s.setActiveQuestionIndex);
   const submitPlanAnswers = useThreadStore((s) => s.submitPlanAnswers);
@@ -59,18 +63,18 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
   }, [activeIndex]);
 
   const handleSubmit = useCallback(async () => {
-    if (isSubmitting) return;
+    if (isSubmitting || isThreadRunning) return;
     setIsSubmitting(true);
     try {
       await submitPlanAnswers(threadId);
     } finally {
       setIsSubmitting(false);
     }
-  }, [isSubmitting, threadId, submitPlanAnswers]);
+  }, [isSubmitting, isThreadRunning, threadId, submitPlanAnswers]);
 
   const handleAcceptRecommended = useCallback(
     async (answers: PlanAnswer[]) => {
-      if (isSubmitting) return;
+      if (isSubmitting || isThreadRunning) return;
       // Set each answer in the store, then submit (AC-1.13)
       for (const a of answers) {
         setPlanAnswer(threadId, a.questionId, a);
@@ -82,7 +86,7 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
         setIsSubmitting(false);
       }
     },
-    [isSubmitting, threadId, setPlanAnswer, submitPlanAnswers],
+    [isSubmitting, isThreadRunning, threadId, setPlanAnswer, submitPlanAnswers],
   );
 
   // Current question state
@@ -134,6 +138,9 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
   const handleAdvance = useCallback(() => {
     if (isSubmitting) return;
     if (isLast) {
+      // Submit is gated separately on isThreadRunning inside handleSubmit;
+      // arrowing/Entering on the last question while the model is still
+      // streaming silently no-ops rather than throwing.
       handleSubmit();
     } else {
       setActiveQuestionIndex(threadId, activeIndex + 1);
@@ -159,7 +166,9 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
     clearPlanQuestions(threadId);
   }, [clearPlanQuestions, threadId]);
 
-  // Keyboard navigation (AC-1.7 through AC-1.11)
+  // Keyboard navigation (AC-1.7 through AC-1.11). Stays enabled while the
+  // thread is running so users can pre-select answers — only the actual
+  // submit is gated on isThreadRunning.
   useWizardKeyboard({
     enabled: isActive && !isSubmitting,
     optionCount: allOptions.length,
@@ -171,6 +180,8 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
     onDeselect: handleDeselect,
     onCancel: handleCancel,
   });
+
+  const submitDisabled = isSubmitting || isThreadRunning;
 
   return (
     <AnimatedCollapsible open={isActive}>
@@ -261,27 +272,36 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
               <AcceptRecommended
                 questions={questions}
                 onAccept={handleAcceptRecommended}
-                disabled={isSubmitting}
+                disabled={submitDisabled}
               />
             </div>
 
             {/* Center: step indicator */}
             <StepIndicator current={activeIndex} total={questions.length} />
 
-            {/* Right: primary action */}
-            <Button
-              size="sm"
-              onClick={handleAdvance}
-              disabled={isSubmitting}
-              className="h-7 gap-1.5 px-3 text-xs"
-            >
-              {isSubmitting
-                ? "Submitting..."
-                : isLast
-                  ? "Submit answers"
-                  : "Next"}
-              {!isSubmitting && !isLast && <ArrowRight className="w-3 h-3" />}
-            </Button>
+            {/* Right: primary action — disabled while the model is still
+                streaming so the user can read/select but not submit until
+                the turn fully ends. */}
+            <div className="flex items-center gap-2">
+              {isThreadRunning && !isSubmitting && (
+                <span className="text-[10px] text-muted-foreground/55" aria-live="polite">
+                  Model is still working...
+                </span>
+              )}
+              <Button
+                size="sm"
+                onClick={handleAdvance}
+                disabled={isLast ? submitDisabled : isSubmitting}
+                className="h-7 gap-1.5 px-3 text-xs"
+              >
+                {isSubmitting
+                  ? "Submitting..."
+                  : isLast
+                    ? "Submit answers"
+                    : "Next"}
+                {!isSubmitting && !isLast && <ArrowRight className="w-3 h-3" />}
+              </Button>
+            </div>
           </div>
         </div>
       )}

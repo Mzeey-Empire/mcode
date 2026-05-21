@@ -114,6 +114,32 @@ async function injectPlanQuestions(
   );
 }
 
+/** Mark a thread as running so the submit gate engages. */
+async function setThreadRunning(
+  page: Page,
+  threadId: string,
+  running: boolean,
+): Promise<void> {
+  await page.evaluate(
+    ({ tid, on }) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const stores: any[] = (window as any).__mcodeStores ?? [];
+      const threadStore = stores.find((s) => {
+        const st = s.getState();
+        return "runningThreadIds" in st && "planQuestionsByThread" in st;
+      });
+      if (!threadStore) throw new Error("[E2E] thread store not found");
+      threadStore.setState((s: { runningThreadIds: Set<string> }) => {
+        const next = new Set(s.runningThreadIds);
+        if (on) next.add(tid);
+        else next.delete(tid);
+        return { runningThreadIds: next };
+      });
+    },
+    { tid: threadId, on: running },
+  );
+}
+
 test.describe("Plan Question Wizard", () => {
   test.beforeEach(async ({ page }) => {
     await mockWebSocketServer(page);
@@ -240,5 +266,31 @@ test.describe("Plan Question Wizard", () => {
     // Step indicator should not be visible (AC-1.27)
     const stepIndicator = wizard.locator("text=/\\d+\\/\\d+/");
     await expect(stepIndicator).not.toBeVisible();
+  });
+
+  test("submit is disabled and hint shows while thread is still running", async ({ page }) => {
+    // Inject a single-question batch so the primary button is "Submit answers"
+    await injectPlanQuestions(page, THREAD.id, [MOCK_QUESTIONS[0]]);
+    await setThreadRunning(page, THREAD.id, true);
+
+    const wizard = page.locator("[role='form'][aria-label='Plan questions']");
+    await expect(wizard).toBeVisible({ timeout: 3000 });
+
+    // "Model is still working..." hint visible
+    await expect(wizard.getByText("Model is still working...")).toBeVisible();
+
+    // Submit button is disabled
+    const submit = wizard.locator("button", { hasText: "Submit answers" });
+    await expect(submit).toBeDisabled();
+
+    // Accept recommended is also disabled
+    const accept = wizard.locator("button", { hasText: "Accept recommended" });
+    await expect(accept).toBeDisabled();
+
+    // After the thread stops running, the gate releases
+    await setThreadRunning(page, THREAD.id, false);
+    await expect(wizard.getByText("Model is still working...")).not.toBeVisible();
+    await expect(submit).toBeEnabled();
+    await expect(accept).toBeEnabled();
   });
 });
