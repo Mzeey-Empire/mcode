@@ -271,12 +271,26 @@ export function startPushListeners(): void {
       try {
         const transport = getTransport();
         if (hasSnapshots) {
-          transport
-            .listSnapshots(payload.threadId)
-            .then((snapshots) =>
-              useDiffStore.getState().setSnapshots(payload.threadId, snapshots),
-            )
-            .catch(() => { /* non-critical */ });
+          // If the user is actively viewing the All-changes panel, defer the
+          // refresh and let CumulativeView surface a refresh affordance so
+          // their scroll position isn't yanked. Otherwise refetch silently
+          // so re-entry shows the latest data.
+          const panel = snap.rightPanelByThread[payload.threadId];
+          const isViewingAllChanges =
+            panel?.visible === true &&
+            panel.activeTab === "changes" &&
+            snap.viewMode === "all";
+
+          if (isViewingAllChanges) {
+            useDiffStore.getState().markSnapshotsPending(payload.threadId, true);
+          } else {
+            transport
+              .listSnapshots(payload.threadId)
+              .then((snapshots) =>
+                useDiffStore.getState().setSnapshots(payload.threadId, snapshots),
+              )
+              .catch(() => { /* non-critical */ });
+          }
         }
 
         if (hasCommits) {

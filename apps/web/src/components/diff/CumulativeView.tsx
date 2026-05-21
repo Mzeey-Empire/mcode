@@ -1,5 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import type { TurnSnapshot } from "@mcode/contracts";
+import { useDiffStore } from "@/stores/diffStore";
+import { getTransport } from "@/transport";
 import { FileList } from "./FileList";
 
 /** Props for CumulativeView. */
@@ -10,6 +13,11 @@ interface CumulativeViewProps {
 
 /** Deduplicated file list across all snapshots for the "All" cumulative view. */
 export function CumulativeView({ snapshots, threadId }: CumulativeViewProps) {
+  const pending = useDiffStore((s) => s.snapshotsPendingByThread[threadId] ?? false);
+  const setSnapshots = useDiffStore((s) => s.setSnapshots);
+  const markSnapshotsPending = useDiffStore((s) => s.markSnapshotsPending);
+  const [refreshing, setRefreshing] = useState(false);
+
   const files = useMemo(() => {
     const seen = new Set<string>();
     for (const snapshot of snapshots) {
@@ -19,6 +27,20 @@ export function CumulativeView({ snapshots, threadId }: CumulativeViewProps) {
     }
     return [...seen].sort();
   }, [snapshots]);
+
+  const handleRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      const result = await getTransport().listSnapshots(threadId);
+      setSnapshots(threadId, result);
+    } catch {
+      // Best-effort refresh; leave the pending flag so the user can retry.
+      markSnapshotsPending(threadId, true);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   if (files.length === 0) {
     return (
@@ -42,6 +64,19 @@ export function CumulativeView({ snapshots, threadId }: CumulativeViewProps) {
         <span className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-muted-foreground/55">
           file{files.length !== 1 ? "s" : ""} · {snapshots.length} turn{snapshots.length !== 1 ? "s" : ""}
         </span>
+        {pending && (
+          <button
+            type="button"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            aria-label="Refresh changes"
+            data-testid="cumulative-view-refresh"
+            className="ml-auto inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 font-mono text-[10.5px] uppercase tracking-[0.14em] text-foreground/70 hover:bg-muted/40 hover:text-foreground disabled:opacity-50"
+          >
+            <RefreshCw size={11} className={refreshing ? "animate-spin" : ""} />
+            New changes
+          </button>
+        )}
       </div>
       <FileList files={files} source="cumulative" id={threadId} threadId={threadId} />
     </div>

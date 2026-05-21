@@ -22,6 +22,12 @@ export function DiffPanel() {
   const snapshotsLoading = useDiffStore((s) =>
     activeThreadId ? (s.snapshotsLoadingByThread[activeThreadId] ?? false) : false,
   );
+  const snapshotsPending = useDiffStore((s) =>
+    activeThreadId ? (s.snapshotsPendingByThread[activeThreadId] ?? false) : false,
+  );
+  const panelState = useDiffStore((s) =>
+    activeThreadId ? s.rightPanelByThread[activeThreadId] : undefined,
+  );
   const setSnapshots = useDiffStore((s) => s.setSnapshots);
   const setSnapshotsLoading = useDiffStore((s) => s.setSnapshotsLoading);
 
@@ -48,6 +54,28 @@ export function DiffPanel() {
       cancelled = true;
     };
   }, [activeThreadId, snapshots, setSnapshots, setSnapshotsLoading]);
+
+  // When a snapshot refresh is pending and the user is no longer viewing the
+  // All-changes view, silently refetch so a return to "All" shows fresh data.
+  useEffect(() => {
+    if (!activeThreadId || !snapshotsPending) return;
+    const isViewingAllChanges =
+      panelState?.visible === true &&
+      panelState.activeTab === "changes" &&
+      viewMode === "all";
+    if (isViewingAllChanges) return;
+
+    let cancelled = false;
+    getTransport()
+      .listSnapshots(activeThreadId)
+      .then((result) => {
+        if (!cancelled) setSnapshots(activeThreadId, result);
+      })
+      .catch(() => { /* non-critical */ });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeThreadId, snapshotsPending, panelState, viewMode, setSnapshots]);
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden min-h-0">
