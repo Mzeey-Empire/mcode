@@ -40,6 +40,7 @@ import { SkillService } from "./services/skill-service";
 import { TerminalService } from "./services/terminal-service";
 import { AttachmentService } from "./services/attachment-service";
 import { HandoffStorage } from "./services/handoff/handoff-storage.js";
+import { HandoffPipelineService } from "./services/handoff/handoff-pipeline.js";
 import { SnapshotService } from "./services/snapshot-service";
 import { SettingsService } from "./services/settings-service";
 import { GitWatcherService } from "./services/git-watcher-service";
@@ -294,6 +295,11 @@ export function setupContainer(mcodeDir: string): typeof container {
   container.register(
     HandoffStorage,
     { useClass: HandoffStorage },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register(
+    HandoffPipelineService,
+    { useClass: HandoffPipelineService },
     { lifecycle: Lifecycle.Singleton },
   );
   container.register(
