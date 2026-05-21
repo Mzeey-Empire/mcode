@@ -1,12 +1,10 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useThreadStore } from "@/stores/threadStore";
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
-import { Button } from "@/components/ui/button";
 import { OptionTile } from "./plan-questions/OptionTile";
-import { StepIndicator } from "./plan-questions/StepIndicator";
 import { AcceptRecommended } from "./plan-questions/AcceptRecommended";
 import { useWizardKeyboard } from "./plan-questions/useWizardKeyboard";
-import { ArrowRight } from "lucide-react";
+import { cn } from "@/lib/utils";
 import type { PlanAnswer, PlanQuestionOption } from "@mcode/contracts";
 
 /** Sentinel ID for the user-written "Other" option. */
@@ -25,20 +23,28 @@ interface PlanQuestionWizardProps {
 }
 
 /**
- * Composer-takeover wizard: expands upward from the composer area when
- * plan questions arrive, collapses back when submitted or cancelled.
- * Renders inside ChatView between MessageList and Composer.
+ * Renders the inline plan-mode wizard inside the conversation surface
+ * (between MessageList and Composer). The wizard inhabits the prose
+ * flow rather than overlaying it — a single top hairline marks the
+ * threshold, the body uses the same background as the conversation,
+ * and selected state is signaled by the same `▸` chevron that prefixes
+ * assistant turns. Submission is gated client-side on thread-running
+ * state so the wizard can render mid-turn without risking overlapping
+ * sends.
  */
 const EMPTY_MAP = new Map<string, PlanAnswer>();
+
+/** Format the step counter as two-digit mono ("01 of 05"). */
+function formatStep(current: number, total: number): string {
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${pad(current)} of ${pad(total)}`;
+}
 
 export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
   const questions = useThreadStore((s) => s.planQuestionsByThread[threadId] ?? null);
   const answersMap = useThreadStore((s) => s.planAnswersByThread[threadId] ?? EMPTY_MAP);
   const activeIndex = useThreadStore((s) => s.activeQuestionIndexByThread[threadId] ?? 0);
   const status = useThreadStore((s) => s.planQuestionsStatusByThread[threadId] ?? "idle");
-  // Block submission while the model is still streaming. The server now
-  // broadcasts plan.questions as soon as the fence parses, so the wizard
-  // opens mid-turn — but the user can't submit answers until the turn ends.
   const isThreadRunning = useThreadStore((s) => s.runningThreadIds.has(threadId));
   const setPlanAnswer = useThreadStore((s) => s.setPlanAnswer);
   const setActiveQuestionIndex = useThreadStore((s) => s.setActiveQuestionIndex);
@@ -46,23 +52,42 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
   const clearPlanQuestions = useThreadStore((s) => s.clearPlanQuestions);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
-  // Track slide direction for question transitions
-  const [slideDirection, setSlideDirection] = useState<"right" | "left">("right");
+  const [slideDirection, setSlideDirection] = useState<"forward" | "back">("forward");
   const prevIndexRef = useRef(activeIndex);
+  // Toggles the per-tile flash when the user accepts every recommended
+  // option in one gesture. Reset shortly after so the keyframe can fire
+  // again on a subsequent batch.
+  const [flashing, setFlashing] = useState(false);
+  // Pressing `?` reveals a transient keyboard legend. The legend
+  // auto-hides on the next keystroke or after a short timeout, so it
+  // never sticks around to compete with the question.
+  const [legendOpen, setLegendOpen] = useState(false);
 
   const isActive = status === "pending";
 
-  // Track slide direction based on index changes
   useEffect(() => {
-    if (activeIndex > prevIndexRef.current) {
-      setSlideDirection("right");
-    } else if (activeIndex < prevIndexRef.current) {
-      setSlideDirection("left");
-    }
+    if (activeIndex > prevIndexRef.current) setSlideDirection("forward");
+    else if (activeIndex < prevIndexRef.current) setSlideDirection("back");
     prevIndexRef.current = activeIndex;
   }, [activeIndex]);
 
-  const handleSubmit = useCallback(async () => {
+  // Hide the legend after 3s, or sooner on any other key. Mounted only
+  // while `legendOpen` is true so we don't keep a listener around for
+  // the common case where the legend has never been triggered.
+  useEffect(() => {
+    if (!legendOpen) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== "?") setLegendOpen(false);
+    };
+    const timer = window.setTimeout(() => setLegendOpen(false), 3000);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [legendOpen]);
+
+  const handleSubmit = useCallback(async (): Promise<void> => {
     if (isSubmitting || isThreadRunning) return;
     setIsSubmitting(true);
     try {
@@ -73,12 +98,17 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
   }, [isSubmitting, isThreadRunning, threadId, submitPlanAnswers]);
 
   const handleAcceptRecommended = useCallback(
-    async (answers: PlanAnswer[]) => {
+    async (answers: PlanAnswer[]): Promise<void> => {
       if (isSubmitting || isThreadRunning) return;
-      // Set each answer in the store, then submit (AC-1.13)
       for (const a of answers) {
         setPlanAnswer(threadId, a.questionId, a);
       }
+      // Trigger the per-tile flash before submitting. The flash runs
+      // entirely in CSS (~400ms with stagger) and is non-blocking — we
+      // kick off the submit immediately and let the animation play
+      // through whichever transition state arrives first.
+      setFlashing(true);
+      window.setTimeout(() => setFlashing(false), 600);
       setIsSubmitting(true);
       try {
         await submitPlanAnswers(threadId);
@@ -89,22 +119,17 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
     [isSubmitting, isThreadRunning, threadId, setPlanAnswer, submitPlanAnswers],
   );
 
-  // Current question state
   const q = questions?.[activeIndex] ?? null;
   const answer = q ? answersMap.get(q.id) : undefined;
   const isLast = questions ? activeIndex === questions.length - 1 : false;
-
-  // Build the full options list (question options + "Other")
   const allOptions = q ? [...q.options, OTHER_OPTION] : [];
   const selectedOptionId = answer?.selectedOptionId ?? null;
-
-  // Map selectedOptionId to an index in allOptions (for keyboard navigation)
   const selectedIndex = selectedOptionId
     ? allOptions.findIndex((o) => o.id === selectedOptionId)
     : -1;
 
   const handleSelectOption = useCallback(
-    (optionId: string) => {
+    (optionId: string): void => {
       if (!q) return;
       setPlanAnswer(threadId, q.id, {
         questionId: q.id,
@@ -116,7 +141,7 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
   );
 
   const handleSelectByIndex = useCallback(
-    (index: number) => {
+    (index: number): void => {
       const opt = allOptions[index];
       if (opt) handleSelectOption(opt.id);
     },
@@ -124,7 +149,7 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
   );
 
   const handleOtherText = useCallback(
-    (text: string) => {
+    (text: string): void => {
       if (!q) return;
       setPlanAnswer(threadId, q.id, {
         questionId: q.id,
@@ -135,25 +160,23 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
     [q, threadId, setPlanAnswer],
   );
 
-  const handleAdvance = useCallback(() => {
+  const handleAdvance = useCallback((): void => {
     if (isSubmitting) return;
     if (isLast) {
-      // Submit is gated separately on isThreadRunning inside handleSubmit;
-      // arrowing/Entering on the last question while the model is still
-      // streaming silently no-ops rather than throwing.
-      handleSubmit();
+      // Submit is independently gated on isThreadRunning inside
+      // handleSubmit; calling it here while the model is still running
+      // is a silent no-op rather than throwing.
+      void handleSubmit();
     } else {
       setActiveQuestionIndex(threadId, activeIndex + 1);
     }
   }, [isSubmitting, isLast, handleSubmit, setActiveQuestionIndex, threadId, activeIndex]);
 
-  const handlePrevious = useCallback(() => {
-    if (activeIndex > 0) {
-      setActiveQuestionIndex(threadId, activeIndex - 1);
-    }
+  const handlePrevious = useCallback((): void => {
+    if (activeIndex > 0) setActiveQuestionIndex(threadId, activeIndex - 1);
   }, [activeIndex, setActiveQuestionIndex, threadId]);
 
-  const handleDeselect = useCallback(() => {
+  const handleDeselect = useCallback((): void => {
     if (!q) return;
     setPlanAnswer(threadId, q.id, {
       questionId: q.id,
@@ -162,13 +185,30 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
     });
   }, [q, threadId, setPlanAnswer]);
 
-  const handleCancel = useCallback(() => {
+  const handleCancel = useCallback((): void => {
     clearPlanQuestions(threadId);
   }, [clearPlanQuestions, threadId]);
 
-  // Keyboard navigation (AC-1.7 through AC-1.11). Stays enabled while the
-  // thread is running so users can pre-select answers — only the actual
-  // submit is gated on isThreadRunning.
+  // Capture `?` for the legend before useWizardKeyboard processes other
+  // shortcuts. The legend is a passive overlay; it does not affect
+  // selection or navigation state.
+  useEffect(() => {
+    if (!isActive) return;
+    const onKey = (e: KeyboardEvent): void => {
+      // Ignore when typing into an input/textarea — `?` should reach the field.
+      const target = e.target as HTMLElement | null;
+      const inField =
+        target?.tagName === "INPUT" || target?.tagName === "TEXTAREA";
+      if (inField) return;
+      if (e.key === "?") {
+        e.preventDefault();
+        setLegendOpen((open) => !open);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isActive]);
+
   useWizardKeyboard({
     enabled: isActive && !isSubmitting,
     optionCount: allOptions.length,
@@ -189,120 +229,167 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
         <div
           role="form"
           aria-label="Plan questions"
-          className="border-t border-border/60 bg-card px-4 py-3.5"
+          data-direction={slideDirection}
+          className="relative px-5 pt-4 pb-3"
         >
-          {/* Header: step counter + category + question text */}
-          <div className="mb-3">
-            <div className="flex items-center gap-1.5 mb-2">
-              {questions.length > 1 && (
-                <>
-                  <span className="text-[11px] text-muted-foreground/40 tabular-nums font-mono">
-                    {activeIndex + 1}/{questions.length}
-                  </span>
-                  <span className="text-muted-foreground/25" aria-hidden="true">
-                    ·
-                  </span>
-                </>
-              )}
-              <span className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground/35">
-                {q.category}
-              </span>
-            </div>
-            <p className="text-sm font-semibold text-foreground leading-snug">{q.question}</p>
-          </div>
-
-          {/* Option tiles (AC-1.20: slide animation on question change) */}
+          {/* Top hairline draws outward on mount. transform-origin: center
+              gives the symmetric "drawer" feel rather than the linear
+              swipe of a left-anchored origin. */}
           <div
-            key={activeIndex}
-            className={
-              slideDirection === "right"
-                ? "animate-wizard-slide-in-right"
-                : "animate-wizard-slide-in-left"
-            }
-          >
-            <div
-              role="radiogroup"
-              aria-label="Options"
-              className="flex flex-col mb-3 rounded-md border border-border/30 overflow-hidden"
-            >
-              {q.options.map((option) => (
-                <OptionTile
-                  key={option.id}
-                  option={option}
-                  selected={selectedOptionId === option.id}
-                  isRecommended={option.recommended}
-                  onSelect={handleSelectOption}
-                />
-              ))}
-              <OptionTile
-                option={OTHER_OPTION}
-                selected={selectedOptionId === OTHER_OPTION_ID}
-                onSelect={handleSelectOption}
-                isOtherTile
-                otherText={answer?.freeText ?? ""}
-                onOtherTextChange={handleOtherText}
-              />
-            </div>
+            aria-hidden="true"
+            className="absolute left-0 right-0 top-0 h-px bg-border/50 animate-wizard-hairline"
+          />
+
+          {/* Mono header: step counter + category. Lives above the
+              question so the question text itself can be the visual
+              hero of the panel. */}
+          <div className="animate-wizard-header flex items-baseline gap-2 mb-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground/45">
+            <span aria-hidden="true" className="text-muted-foreground/30">
+              ›
+            </span>
+            <span className="tabular-nums">
+              step {formatStep(activeIndex + 1, questions.length)}
+            </span>
+            <span className="text-muted-foreground/25" aria-hidden="true">
+              ·
+            </span>
+            <span>{q.category.toLowerCase()}</span>
           </div>
 
-          {/* Navigation bar */}
-          <div className="flex items-center justify-between pt-1">
-            {/* Left: secondary actions */}
-            <div className="flex items-center gap-1">
-              {activeIndex > 0 && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handlePrevious}
-                  disabled={isSubmitting}
-                  className="h-7 px-2 text-xs text-muted-foreground/50 hover:text-muted-foreground"
-                >
-                  Previous
-                </Button>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
+          {/* Question — the focal point. Animates in on advance/previous;
+              the data-direction on the wrapper drives which keyframe runs. */}
+          <p
+            key={activeIndex}
+            className={cn(
+              "text-[15px] font-medium text-foreground leading-snug mb-3 max-w-[68ch]",
+              slideDirection === "forward"
+                ? "animate-wizard-question-forward"
+                : "animate-wizard-question-back",
+            )}
+          >
+            {q.question}
+          </p>
+
+          {/* Option list — borderless, flows like a list within the prose. */}
+          <div
+            role="radiogroup"
+            aria-label="Options"
+            className="-mx-3 mb-3"
+          >
+            {q.options.map((option, i) => (
+              <OptionTile
+                key={option.id}
+                option={option}
+                selected={selectedOptionId === option.id}
+                isRecommended={option.recommended}
+                onSelect={handleSelectOption}
+                index={i}
+                flashing={flashing}
+              />
+            ))}
+            <OptionTile
+              option={OTHER_OPTION}
+              selected={selectedOptionId === OTHER_OPTION_ID}
+              onSelect={handleSelectOption}
+              isOtherTile
+              otherText={answer?.freeText ?? ""}
+              onOtherTextChange={handleOtherText}
+              index={q.options.length}
+              flashing={false}
+            />
+          </div>
+
+          {/* Secondary action: accept-all shortcut. Sits as a quiet
+              text-link under the options, only visible when every
+              question has a single recommended option. */}
+          <div className="mb-3 px-0.5">
+            <AcceptRecommended
+              questions={questions}
+              onAccept={handleAcceptRecommended}
+              disabled={submitDisabled}
+              testId="plan-accept-recommended"
+            />
+          </div>
+
+          {/* Nav row — lowercase mono actions, no boxed buttons. The
+              spacing carries the affordance instead of a button chrome. */}
+          <div className="animate-wizard-nav flex items-center justify-between font-mono text-[11px] tracking-wide">
+            <div className="flex items-center gap-4 text-muted-foreground/55">
+              <button
+                type="button"
                 onClick={handleCancel}
                 disabled={isSubmitting}
-                className="h-7 px-2 text-xs text-muted-foreground/50 hover:text-muted-foreground"
+                className="lowercase hover:text-muted-foreground transition-colors duration-150 ease-out disabled:opacity-40"
               >
-                Cancel
-              </Button>
-              <AcceptRecommended
-                questions={questions}
-                onAccept={handleAcceptRecommended}
-                disabled={submitDisabled}
-              />
+                cancel
+              </button>
+              {activeIndex > 0 && (
+                <button
+                  type="button"
+                  onClick={handlePrevious}
+                  disabled={isSubmitting}
+                  className="lowercase hover:text-muted-foreground transition-colors duration-150 ease-out disabled:opacity-40"
+                >
+                  ← previous
+                </button>
+              )}
             </div>
 
-            {/* Center: step indicator */}
-            <StepIndicator current={activeIndex} total={questions.length} />
-
-            {/* Right: primary action — disabled while the model is still
-                streaming so the user can read/select but not submit until
-                the turn fully ends. */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               {isThreadRunning && !isSubmitting && (
-                <span className="text-[10px] text-muted-foreground/55" aria-live="polite">
-                  Model is still working...
+                <span
+                  className="lowercase text-muted-foreground/55"
+                  aria-live="polite"
+                >
+                  model is still working…
                 </span>
               )}
-              <Button
-                size="sm"
+              <button
+                type="button"
                 onClick={handleAdvance}
                 disabled={isLast ? submitDisabled : isSubmitting}
-                className="h-7 gap-1.5 px-3 text-xs"
+                className={cn(
+                  "lowercase font-medium text-primary/85 hover:text-primary",
+                  "transition-colors duration-150 ease-out",
+                  "disabled:opacity-40 disabled:hover:text-primary/85",
+                )}
               >
                 {isSubmitting
-                  ? "Submitting..."
+                  ? "submitting…"
                   : isLast
-                    ? "Submit answers"
-                    : "Next"}
-                {!isSubmitting && !isLast && <ArrowRight className="w-3 h-3" />}
-              </Button>
+                    ? "submit ↵"
+                    : "next →"}
+              </button>
             </div>
           </div>
+
+          {/* Keyboard legend — discoverable via `?`, auto-hides. Sits
+              absolutely so it never affects layout when closed. */}
+          {legendOpen && (
+            <div
+              role="note"
+              aria-label="Keyboard shortcuts"
+              className={cn(
+                "absolute right-5 bottom-12 z-10",
+                "rounded-sm border border-border/40 bg-card/95 backdrop-blur-sm",
+                "px-3 py-2 font-mono text-[10px] leading-relaxed text-muted-foreground/80",
+                "shadow-sm animate-wizard-header",
+              )}
+            >
+              <div>
+                <span className="text-foreground/80">1–5</span> select
+              </div>
+              <div>
+                <span className="text-foreground/80">← →</span> navigate
+              </div>
+              <div>
+                <span className="text-foreground/80">⏎</span> advance
+              </div>
+              <div>
+                <span className="text-foreground/80">esc</span> cancel
+              </div>
+            </div>
+          )}
         </div>
       )}
     </AnimatedCollapsible>

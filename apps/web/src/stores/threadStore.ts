@@ -119,6 +119,14 @@ interface ThreadState {
    * extended by the `plan.answered` push channel.
    */
   answeredPlanMessageIdsByThread: Record<string, Set<string>>;
+  /**
+   * Transient set of assistant-message IDs whose plan-questions block was
+   * JUST marked answered via the `plan.answered` push channel. Used by
+   * the AnsweredSummary marker to play a one-shot echo animation. Entries
+   * are removed automatically ~800ms after they are added so the pulse
+   * does NOT replay when a thread reloads later.
+   */
+  recentlyAnsweredPlanMessageIds: Set<string>;
   /** Pending and recently-settled permission requests per thread. */
   permissionsByThread: Record<string, StoredPermission[]>;
   /** Ephemeral hook execution state per thread. Cleared on page reload, not persisted to DB. */
@@ -560,6 +568,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   activeQuestionIndexByThread: {},
   planQuestionsStatusByThread: {},
   answeredPlanMessageIdsByThread: {},
+  recentlyAnsweredPlanMessageIds: new Set<string>(),
   permissionsByThread: {},
   hooksByThread: {},
   thoughtSegmentsByThread: {},
@@ -1649,17 +1658,32 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       delete nextIndex[threadId];
       delete nextStatus[threadId];
 
+      const nextRecent = new Set(state.recentlyAnsweredPlanMessageIds);
+      nextRecent.add(assistantMessageId);
+
       return {
         answeredPlanMessageIdsByThread: {
           ...state.answeredPlanMessageIdsByThread,
           [threadId]: nextSet,
         },
+        recentlyAnsweredPlanMessageIds: nextRecent,
         planQuestionsByThread: nextQuestions,
         planAnswersByThread: nextAnswers,
         activeQuestionIndexByThread: nextIndex,
         planQuestionsStatusByThread: nextStatus,
       };
     });
+    // Schedule removal so the echo only fires on the live submission,
+    // not on later remounts. 800ms covers the 600ms keyframe with a
+    // small buffer for the mount-to-paint gap.
+    window.setTimeout(() => {
+      set((s) => {
+        if (!s.recentlyAnsweredPlanMessageIds.has(assistantMessageId)) return {};
+        const next = new Set(s.recentlyAnsweredPlanMessageIds);
+        next.delete(assistantMessageId);
+        return { recentlyAnsweredPlanMessageIds: next };
+      });
+    }, 800);
   },
 
   addPermissionRequest: (request) => {

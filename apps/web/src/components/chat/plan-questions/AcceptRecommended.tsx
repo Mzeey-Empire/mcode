@@ -1,5 +1,4 @@
-import { Button } from "@/components/ui/button";
-import { Zap } from "lucide-react";
+import { cn } from "@/lib/utils";
 import type { PlanQuestion, PlanAnswer } from "@mcode/contracts";
 
 interface AcceptRecommendedProps {
@@ -9,21 +8,32 @@ interface AcceptRecommendedProps {
   onAccept: (answers: PlanAnswer[]) => void;
   /** Disables the button during submission. */
   disabled?: boolean;
+  /** Adds a `data-` hook so tests and the wizard can target this action. */
+  testId?: string;
 }
 
 /**
- * Visible when every question has exactly one option with `recommended: true`.
- * Clicking submits all recommended options at once (AC-1.12, AC-1.13).
+ * Subtle text-link action that appears below the option list when every
+ * question has exactly one recommended option. Surfaces the one-gesture
+ * shortcut for the common case without competing visually with the
+ * primary Next/Submit button. The wizard triggers a per-tile flash
+ * animation when this fires — the visual ack lives in the tiles, not in
+ * a confirmation dialog.
  */
-export function AcceptRecommended({ questions, onAccept, disabled }: AcceptRecommendedProps) {
-  // Check: every question must have exactly one recommended option
+export function AcceptRecommended({
+  questions,
+  onAccept,
+  disabled,
+  testId,
+}: AcceptRecommendedProps) {
+  // Every question must have exactly one recommended option
   const allHaveRecommended = questions.every(
     (q) => q.options.filter((o) => o.recommended).length === 1,
   );
 
   if (!allHaveRecommended) return null;
 
-  const handleClick = () => {
+  const handleClick = (): void => {
     const answers: PlanAnswer[] = questions.map((q) => ({
       questionId: q.id,
       selectedOptionId: q.options.find((o) => o.recommended)!.id,
@@ -33,15 +43,21 @@ export function AcceptRecommended({ questions, onAccept, disabled }: AcceptRecom
   };
 
   return (
-    <Button
-      variant="ghost"
-      size="sm"
+    <button
+      type="button"
       onClick={handleClick}
       disabled={disabled}
-      className="h-7 gap-1.5 px-2.5 text-xs text-primary/70 hover:text-primary hover:bg-primary/8"
+      data-testid={testId}
+      className={cn(
+        "inline-flex items-center gap-1.5 text-[11px] font-mono",
+        "text-primary/65 hover:text-primary",
+        "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-primary/65",
+        "transition-colors duration-150 ease-out",
+        "focus-visible:outline-none focus-visible:underline underline-offset-4",
+      )}
     >
-      <Zap className="w-3 h-3" />
-      Accept recommended
-    </Button>
+      <span aria-hidden="true">↵</span>
+      <span className="lowercase tracking-wide">accept all recommended</span>
+    </button>
   );
 }

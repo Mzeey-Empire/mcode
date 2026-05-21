@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useThreadStore } from "@/stores/threadStore";
 import type { PlanQuestion } from "@mcode/contracts";
 
 const PLAN_QUESTIONS_RE = /```plan-questions\n([\s\S]*?)```/;
@@ -8,14 +9,26 @@ const PLAN_QUESTIONS_RE = /```plan-questions\n([\s\S]*?)```/;
 interface AnsweredSummaryProps {
   /** Raw message content containing the plan-questions fence. */
   content: string;
+  /** ID of the assistant message that owns this fence. Used to play the
+   *  one-shot submission echo when the answer just landed via the
+   *  `plan.answered` push channel. Optional so existing call sites
+   *  without a message id still render correctly (no pulse). */
+  messageId?: string;
 }
 
 /**
  * Read-only collapsed summary of plan questions shown in historical
- * threads where the questions were already answered (AC-1.28).
+ * threads where the questions were already answered. On the live
+ * submission, the marker pulses once with the brand accent to
+ * acknowledge the submit — on later thread reloads, the pulse stays
+ * quiet because the `recentlyAnsweredPlanMessageIds` flag has already
+ * expired in the store.
  */
-export function AnsweredSummary({ content }: AnsweredSummaryProps) {
+export function AnsweredSummary({ content, messageId }: AnsweredSummaryProps) {
   const [expanded, setExpanded] = useState(false);
+  const echo = useThreadStore((s) =>
+    messageId ? s.recentlyAnsweredPlanMessageIds.has(messageId) : false,
+  );
 
   // Parse questions from the fenced block
   const match = content.match(PLAN_QUESTIONS_RE);
@@ -31,7 +44,13 @@ export function AnsweredSummary({ content }: AnsweredSummaryProps) {
   if (!questions.length) return null;
 
   return (
-    <div className="group/msg space-y-2" data-role="answered-plan-questions">
+    <div
+      className={cn(
+        "group/msg space-y-2 rounded-sm px-1.5 -mx-1.5",
+        echo && "animate-wizard-marker-echo",
+      )}
+      data-role="answered-plan-questions"
+    >
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
