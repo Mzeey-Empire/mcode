@@ -28,6 +28,8 @@ import { getExtension as bundledGetExtension, isMcodeWorkspacePreviewUrl } from 
 
 /** Use snapshot-provided module when available (V8 snapshot skips re-init). */
 const getExtension = globalThis.__v8Snapshot?.contracts?.getExtension ?? bundledGetExtension;
+
+import { buildEditorArgs } from "./editor-args.js";
 import { ServerManager } from "./server-manager.js";
 import { startIpcRelay } from "./ipc-relay.js";
 import {
@@ -166,8 +168,17 @@ function detectEditors(): EditorId[] {
   return [...resolvedEditors.keys()];
 }
 
-/** Open a directory in the given editor as a detached process. */
-function openInEditor(editor: EditorId, dirPath: string): Promise<void> {
+/**
+ * Open a path in the given editor as a detached process. If `line` is
+ * provided, the editor jumps to that line on open. See `editor-args.ts`
+ * for the per-editor CLI flag mapping (VS Code/Cursor use `-g`, Zed
+ * uses native `<path>:<line>`).
+ */
+function openInEditor(
+  editor: EditorId,
+  path: string,
+  line?: number,
+): Promise<void> {
   const cmd = resolvedEditors?.get(editor);
   if (!cmd) {
     return Promise.reject(
@@ -175,17 +186,19 @@ function openInEditor(editor: EditorId, dirPath: string): Promise<void> {
     );
   }
 
+  const args = buildEditorArgs(editor, path, line);
+
   return new Promise<void>((resolve, reject) => {
     let child: ChildProcess;
     // On Windows, always route through cmd.exe because PATH-resolved commands
     // (e.g. "code") are .cmd scripts that Node's spawn cannot execute directly.
     if (process.platform === "win32") {
-      child = spawn("cmd.exe", ["/c", cmd, dirPath], {
+      child = spawn("cmd.exe", ["/c", cmd, ...args], {
         detached: true,
         stdio: "ignore",
       });
     } else {
-      child = spawn(cmd, [dirPath], { detached: true, stdio: "ignore" });
+      child = spawn(cmd, args, { detached: true, stdio: "ignore" });
     }
 
     child.on("error", (err: Error) => {
@@ -382,21 +395,28 @@ function registerIpcHandlers(): void {
     return detectEditors();
   });
 
-  // Open in editor
+  // Open a file or directory in the given editor. Optional `line` jumps the
+  // editor's cursor to that line on open (file targets only — passing a line
+  // with a directory target is harmless, editors ignore it).
   ipcMain.handle(
     "open-in-editor",
-    async (_event, editor: string, dirPath: string) => {
-      if (!isAbsolute(dirPath)) {
+    async (
+      _event,
+      editor: string,
+      targetPath: string,
+      line?: number,
+    ) => {
+      if (!isAbsolute(targetPath)) {
         throw new Error("Editor path must be absolute");
       }
-      if (!existsSync(dirPath)) {
-        throw new Error(`Path does not exist: ${dirPath}`);
+      if (!existsSync(targetPath)) {
+        throw new Error(`Path does not exist: ${targetPath}`);
       }
       const validEditors = new Set(["code", "cursor", "zed"]);
       if (!validEditors.has(editor)) {
         throw new Error(`Unknown editor: ${editor}`);
       }
-      await openInEditor(editor as EditorId, dirPath);
+      await openInEditor(editor as EditorId, targetPath, line);
     },
   );
 
