@@ -183,6 +183,20 @@ export type {
   PlanQuestionBatch,
 } from "./models/plan-questions.js";
 
+// Plan output
+export {
+  PlanSectionSchema,
+  PlanOutputSchema,
+  PlanStatusSchema,
+  PlanRecordSchema,
+} from "./models/plan-output.js";
+export type {
+  PlanSection,
+  PlanOutput,
+  PlanStatus,
+  PlanRecord,
+} from "./models/plan-output.js";
+
 // Permissions
 export {
   PermissionDecisionSchema,

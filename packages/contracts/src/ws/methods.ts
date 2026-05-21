@@ -14,6 +14,7 @@ import { PrInfoSchema, PrDetailSchema, PrDraftSchema, CreatePrResultSchema, Chec
 import { SkillInfoSchema, SkillDiagnosticsSchema } from "../skills.js";
 import { TurnSnapshotSchema } from "../models/turn-snapshot.js";
 import { PlanAnswerSchema } from "../models/plan-questions.js";
+import { PlanStatusSchema } from "../models/plan-output.js";
 import { DiffStatsSchema } from "../models/diff-stats.js";
 import {
   SettingsSchema,
@@ -366,6 +367,14 @@ export const WS_METHODS = lazySchema(() => ({
    */
   "agent.dismissPlanQuestions": {
     params: z.object({ threadId: z.string() }),
+    result: z.void(),
+  },
+  /** Update the status of a persisted plan (e.g. accept or supersede). */
+  "plan.updateStatus": {
+    params: z.object({
+      planId: z.string(),
+      status: PlanStatusSchema(),
+    }),
     result: z.void(),
   },
   "permission.respond": {

@@ -3,6 +3,7 @@ import { AgentEventSchema } from "../events/agent-event.js";
 import { ThreadStatusSchema } from "../models/enums.js";
 import { SettingsSchema } from "../models/settings.js";
 import { PlanQuestionSchema } from "../models/plan-questions.js";
+import { PlanRecordSchema } from "../models/plan-output.js";
 import { ChecksStatusSchema } from "../github.js";
 import { PermissionRequestSchema, PermissionDecisionSchema } from "../models/permission.js";
 import { ProviderAvailabilitySchema } from "../providers/availability.js";
@@ -92,6 +93,11 @@ export const WS_CHANNELS = {
   "plan.dismissed": z.object({
     threadId: z.string(),
     assistantMessageId: z.string(),
+  }),
+  /** Emitted when the agent generates a structured plan output. */
+  "plan.generated": z.object({
+    threadId: z.string(),
+    plan: PlanRecordSchema(),
   }),
   /** A tool permission request awaiting user decision. */
   "permission.request": PermissionRequestSchema(),
