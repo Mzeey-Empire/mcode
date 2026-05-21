@@ -209,7 +209,7 @@ ORDER BY m.sequence ASC`,
       .prepare(
         `SELECT ${MESSAGE_COLUMNS_PREFIXED}, ${TOOL_CALL_COUNT_SQL}
 FROM messages m
-WHERE m.thread_id = ? AND m.sequence <= ?
+WHERE m.thread_id = ? AND m.sequence <= ? AND m.is_internal = 0
 ORDER BY m.sequence ASC`,
       )
       .all(threadId, maxSequence) as MessageRow[];
@@ -221,7 +221,7 @@ ORDER BY m.sequence ASC`,
   findByIdInThread(threadId: string, messageId: string): Message | null {
     const row = this.db
       .prepare(
-        `SELECT ${MESSAGE_COLUMNS} FROM messages WHERE id = ? AND thread_id = ?`,
+        `SELECT ${MESSAGE_COLUMNS} FROM messages WHERE id = ? AND thread_id = ? AND is_internal = 0`,
       )
       .get(messageId, threadId) as MessageRow | undefined;
 
@@ -231,7 +231,7 @@ ORDER BY m.sequence ASC`,
   /** Look up a single message by its primary key. */
   findById(id: string): Message | undefined {
     const row = this.db
-      .prepare(`SELECT ${MESSAGE_COLUMNS} FROM messages WHERE id = ?`)
+      .prepare(`SELECT ${MESSAGE_COLUMNS} FROM messages WHERE id = ? AND is_internal = 0`)
       .get(id) as MessageRow | undefined;
     return row ? rowToMessage(row) : undefined;
   }
