@@ -47,11 +47,18 @@ const shared = {
 /**
  * Spawn `tsc --watch` so server source edits re-emit apps/server/dist-tsc.
  *
- * @returns Detached subprocess handle (caller must kill via killProcessTree on shutdown).
+ * Returns both the subprocess and a promise that resolves the first time tsc
+ * prints its watch-mode settle marker. Used to gate Electron startup so the
+ * initial dist-tsc emission cannot masquerade as a real change and trigger
+ * a spurious restart ~60s after the window opens.
+ *
+ * @returns {{ proc: import("child_process").ChildProcess, initialSettled: Promise<void> }}
+ *   Subprocess handle (caller must kill via killProcessTree on shutdown) and
+ *   a one-shot promise that resolves on the first settle marker.
  */
 function startServerTscWatch() {
   const tscBin = resolveServerTscBin(serverRoot);
-  return spawn(process.execPath, [
+  const proc = spawn(process.execPath, [
     tscBin,
     "--project",
     resolve(serverRoot, "tsconfig.build.json"),
@@ -59,8 +66,25 @@ function startServerTscWatch() {
     "--preserveWatchOutput",
   ], {
     cwd: serverRoot,
-    stdio: "inherit",
+    stdio: ["ignore", "pipe", "inherit"],
   });
+
+  let resolveSettled;
+  const initialSettled = new Promise((r) => {
+    resolveSettled = r;
+  });
+  let firstSettle = true;
+
+  proc.stdout.on("data", (data) => {
+    const text = data.toString();
+    process.stdout.write(text);
+    if (firstSettle && /Watching for file changes\./.test(text)) {
+      firstSettle = false;
+      resolveSettled();
+    }
+  });
+
+  return { proc, initialSettled };
 }
 
 /** esbuild entry point configs. */
@@ -83,7 +107,8 @@ console.log("[dev] Building bundled server entry (apps/desktop/dist/server/serve
 await rebuildServerDevBundle();
 
 /** Must run before server `esbuild` watch so `dist-tsc` emits complete graphs per save. */
-let serverTscWatch = startServerTscWatch();
+let { proc: serverTscWatch, initialSettled: serverTscInitialSettled } =
+  startServerTscWatch();
 
 const serverEsbuildCfg = {
   ...shared,
@@ -215,6 +240,17 @@ if (!devServerUrl) {
 
 console.log("[dev] Initial build complete, watching for changes...");
 console.log(`[dev] Web dev server is ready at ${devServerUrl}`);
+
+// Wait for tsc --watch's initial pass to settle before starting Electron.
+// `rebuildServerDevBundle()` already wrote server.cjs synchronously above, but
+// tsc --watch was spawned in parallel and takes ~60s to settle its first
+// emission. If Electron starts first, that delayed emission fires the
+// dist-tsc watcher, triggers a redundant esbuild rebundle, rewrites
+// server.cjs, and restarts a freshly-running Electron - racing the first
+// instance for cache locks and named pipes.
+console.log("[dev] Waiting for tsc --watch initial pass to settle...");
+await serverTscInitialSettled;
+console.log("[dev] tsc settled; launching Electron.");
 
 // -------------------------------------------------------------------------
 // Step 2: Spawn Electron
