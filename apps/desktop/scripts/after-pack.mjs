@@ -117,6 +117,8 @@ export default async function afterPack(context) {
       // Reset it so the binary can launch before electron-builder codesigns.
       resetAdHocDarwinSignature: electronPlatformName === "darwin" || electronPlatformName === "mas",
       [FuseV1Options.LoadBrowserProcessSpecificV8Snapshot]: true,
+      // Packaged apps must not expose Node/V8 inspector on the main binary.
+      [FuseV1Options.EnableNodeCliInspectArguments]: false,
     });
 
     console.log("[after-pack] V8 snapshot fuse enabled");

@@ -16,6 +16,7 @@ import { resolve, join, dirname } from "path";
 import { getMcodeDir } from "@mcode/shared";
 import { SettingsSchema as BundledSettingsSchema } from "@mcode/contracts";
 import { resolveServerBinary } from "./server-binary-resolver.js";
+import { isDesktopDev } from "./is-desktop-dev.js";
 
 /** Use snapshot-provided schema when available (V8 snapshot pre-initializes Zod). */
 const SettingsSchema = globalThis.__v8Snapshot?.contracts?.SettingsSchema ?? BundledSettingsSchema;
@@ -60,9 +61,8 @@ function getServerPaths(): {
  *  - Packaged installed app (app.isPackaged):  19700-19799
  * The standalone server defaults to 19400 via MCODE_PORT.
  */
-const isDev = !!process.env.ELECTRON_RENDERER_URL;
-const PORT_MIN = app.isPackaged ? 19700 : isDev ? 19500 : 19600;
-const PORT_MAX = app.isPackaged ? 19800 : isDev ? 19600 : 19700;
+const PORT_MIN = app.isPackaged ? 19700 : isDesktopDev() ? 19500 : 19600;
+const PORT_MAX = app.isPackaged ? 19800 : isDesktopDev() ? 19600 : 19700;
 
 /** Interval (ms) between health-check polls during startup. */
 const HEALTH_POLL_INTERVAL = 200;
@@ -330,7 +330,7 @@ export class ServerManager {
         MCODE_VERSION: app.getVersion(),
       };
 
-      if (isDev && !process.env.MCODE_GIT_BRANCH) {
+      if (isDesktopDev() && !process.env.MCODE_GIT_BRANCH) {
         try {
           const branch = execSync("git rev-parse --abbrev-ref HEAD", {
             encoding: "utf-8",
@@ -347,7 +347,7 @@ export class ServerManager {
         env.MCODE_GIT_BRANCH = process.env.MCODE_GIT_BRANCH;
       }
 
-      if (isDev && !process.env.MCODE_GIT_TOPLEVEL) {
+      if (isDesktopDev() && !process.env.MCODE_GIT_TOPLEVEL) {
         try {
           const top = execSync("git rev-parse --show-toplevel", {
             encoding: "utf-8",
@@ -382,7 +382,7 @@ export class ServerManager {
 
       // In production, route stderr to a log file so crashes are diagnosable.
       // Dev mode inherits stdio for immediate console visibility.
-      const stderrStream = isDev
+      const stderrStream = isDesktopDev()
         ? undefined
         : createWriteStream(SERVER_LOG_PATH, { flags: "w" });
 
@@ -400,7 +400,7 @@ export class ServerManager {
           cwd,
           env,
           detached: true,
-          stdio: isDev ? "inherit" : ["ignore", "ignore", stderrStream ? "pipe" : "ignore"],
+          stdio: isDesktopDev() ? "inherit" : ["ignore", "ignore", stderrStream ? "pipe" : "ignore"],
         });
       } catch (err) {
         stderrStream?.destroy();
@@ -410,7 +410,7 @@ export class ServerManager {
       this.serverProcess = child;
 
       // Pipe stderr to the log file when running packaged
-      if (!isDev && stderrStream && child.stderr) {
+      if (!isDesktopDev() && stderrStream && child.stderr) {
         child.stderr.pipe(stderrStream);
       }
 
