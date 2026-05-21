@@ -27,11 +27,35 @@ describe("CodexEventMapper", () => {
     expect(events).toEqual([]);
   });
 
-  it("returns empty array for item/started", () => {
+  it("emits Agent toolUse for item/started collabAgentToolCall", () => {
     const events = mapper.mapNotification({
       jsonrpc: "2.0",
       method: "item/started",
-      params: {},
+      params: {
+        threadId: "t",
+        turnId: "u",
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab-1",
+          tool: "spawnAgent",
+          prompt: "Review security",
+        },
+      },
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: "toolUse",
+      toolCallId: "collab-1",
+      toolName: "Agent",
+      toolInput: { codexCollabKind: "spawnAgent", prompt: "Review security" },
+    });
+  });
+
+  it("returns empty array for item/started non-collab", () => {
+    const events = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/started",
+      params: { item: { type: "commandExecution", id: "x" } },
     });
     expect(events).toEqual([]);
   });
@@ -40,7 +64,9 @@ describe("CodexEventMapper", () => {
   // item/agentMessage/delta – streaming text tokens
   // ---------------------------------------------------------------------------
 
-  it("emits textDelta for item/agentMessage/delta and accumulates text", () => {
+  it("emits textDelta WITHOUT isFinalResponse for pre-tool item/agentMessage/delta (thought)", () => {
+    // No tool has fired this turn yet — every delta is a thought, matching
+    // Claude/Cursor's tool-state-based classification.
     const e1 = mapper.mapNotification({
       jsonrpc: "2.0",
       method: "item/agentMessage/delta",
@@ -54,6 +80,42 @@ describe("CodexEventMapper", () => {
 
     expect(e1).toEqual([{ type: "textDelta", threadId: "test-thread", delta: "Hello" }]);
     expect(e2).toEqual([{ type: "textDelta", threadId: "test-thread", delta: "!" }]);
+  });
+
+  it("emits textDelta WITH isFinalResponse:true for item/agentMessage/delta after tool completes", () => {
+    // Tool fires and completes -> subsequent agentMessage deltas are the final reply.
+    mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/started",
+      params: { item: { type: "commandExecution", id: "cmd1" } },
+    });
+    mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: { item: { type: "commandExecution", id: "cmd1", command: "echo hi", output: "hi", exitCode: 0 } },
+    });
+    const evt = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/agentMessage/delta",
+      params: { delta: "Done" },
+    });
+    expect(evt).toEqual([{ type: "textDelta", threadId: "test-thread", delta: "Done", isFinalResponse: true }]);
+  });
+
+  it("keeps pre-tool agentMessage delta as thought even while tools run", () => {
+    // Some Codex turns interleave: preamble -> tool start -> more text -> tool complete -> final.
+    // While a tool is in-flight, deltas are still thoughts (pendingToolItems > 0).
+    mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/started",
+      params: { item: { type: "commandExecution", id: "cmd1" } },
+    });
+    const mid = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/agentMessage/delta",
+      params: { delta: "thinking..." },
+    });
+    expect(mid).toEqual([{ type: "textDelta", threadId: "test-thread", delta: "thinking..." }]);
   });
 
   it("emits Message with full accumulated text on turn/completed after deltas", () => {
@@ -97,7 +159,7 @@ describe("CodexEventMapper", () => {
     });
 
     expect(events).toEqual([
-      { type: "textDelta", threadId: "test-thread", delta: "Hello" },
+      { type: "textDelta", threadId: "test-thread", delta: "Hello", isFinalResponse: true },
     ]);
   });
 
@@ -114,7 +176,7 @@ describe("CodexEventMapper", () => {
       },
     });
     expect(events).toEqual([
-      { type: "textDelta", threadId: "test-thread", delta: "Hello from codex" },
+      { type: "textDelta", threadId: "test-thread", delta: "Hello from codex", isFinalResponse: true },
     ]);
   });
 
@@ -136,7 +198,7 @@ describe("CodexEventMapper", () => {
     });
 
     expect(events).toEqual([
-      { type: "textDelta", threadId: "test-thread", delta: " world" },
+      { type: "textDelta", threadId: "test-thread", delta: " world", isFinalResponse: true },
     ]);
   });
 
@@ -277,6 +339,251 @@ describe("CodexEventMapper", () => {
     });
 
     expect(events[1]).toMatchObject({ type: "toolResult", output: "" });
+  });
+
+  it("after item/started collab, item/completed emits only toolResult", () => {
+    mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/started",
+      params: {
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab-1",
+          tool: "spawnAgent",
+          prompt: "Do work",
+        },
+      },
+    });
+
+    const events = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab-1",
+          toolKind: "spawn_agent",
+          prompt: "Do work",
+          result: "Done",
+        },
+      },
+    });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: "toolResult",
+      toolCallId: "collab-1",
+      output: "Done",
+      isError: false,
+    });
+  });
+
+  it("nests commandExecution on Codex receiver thread via receiverThreadIds", () => {
+    mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/started",
+      params: {
+        item: { type: "collabAgentToolCall", id: "collab-a", tool: "spawnAgent", prompt: "x" },
+      },
+    });
+    mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        threadId: "parent-thread",
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab-a",
+          tool: "spawnAgent",
+          receiverThreadIds: ["child-thread-1"],
+          result: "ok",
+        },
+      },
+    });
+
+    const events = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        threadId: "child-thread-1",
+        item: {
+          type: "commandExecution",
+          id: "cmd-child",
+          command: "git status",
+          aggregatedOutput: "ok",
+          exitCode: 0,
+        },
+      },
+    });
+
+    expect(events[0]).toMatchObject({
+      type: "toolUse",
+      toolCallId: "cmd-child",
+      parentToolCallId: "collab-a",
+    });
+  });
+
+  it("nests commandExecution under inner collab on a nested receiver thread (two-level sub-agents)", () => {
+    mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/started",
+      params: {
+        item: { type: "collabAgentToolCall", id: "collab-outer", tool: "spawnAgent", prompt: "outer" },
+      },
+    });
+    mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        threadId: "parent-thread",
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab-outer",
+          tool: "spawnAgent",
+          receiverThreadIds: ["child-thread-1"],
+          result: "outer ok",
+        },
+      },
+    });
+    mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/started",
+      params: {
+        threadId: "child-thread-1",
+        item: { type: "collabAgentToolCall", id: "collab-inner", tool: "spawnAgent", prompt: "inner" },
+      },
+    });
+    mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        threadId: "child-thread-1",
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab-inner",
+          tool: "spawnAgent",
+          receiverThreadIds: ["child-thread-2"],
+          result: "inner ok",
+        },
+      },
+    });
+
+    const events = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        threadId: "child-thread-2",
+        item: {
+          type: "commandExecution",
+          id: "cmd-deep",
+          command: "git status",
+          aggregatedOutput: "ok",
+          exitCode: 0,
+        },
+      },
+    });
+
+    expect(events[0]).toMatchObject({
+      type: "toolUse",
+      toolCallId: "cmd-deep",
+      parentToolCallId: "collab-inner",
+    });
+  });
+
+  it("nests commandExecution under open collab via parentToolCallId", () => {
+    mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/started",
+      params: {
+        item: { type: "collabAgentToolCall", id: "collab-p", tool: "spawnAgent", prompt: "x" },
+      },
+    });
+
+    const events = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        item: {
+          type: "commandExecution",
+          id: "cmd-1",
+          command: "git status",
+          aggregatedOutput: "ok",
+          exitCode: 0,
+        },
+      },
+    });
+
+    expect(events[0]).toMatchObject({
+      type: "toolUse",
+      toolCallId: "cmd-1",
+      parentToolCallId: "collab-p",
+    });
+  });
+
+  it("maps collabAgentToolCall to Agent toolUse + toolResult for narrative nesting (legacy, no item/started)", () => {
+    const events = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab-1",
+          toolKind: "spawn_agent",
+          prompt: "Review security",
+          result: "Done",
+        },
+      },
+    });
+
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      type: "toolUse",
+      toolCallId: "collab-1",
+      toolName: "Agent",
+      toolInput: { codexCollabKind: "spawn_agent", prompt: "Review security" },
+    });
+    expect(events[1]).toMatchObject({
+      type: "toolResult",
+      toolCallId: "collab-1",
+      output: "Done",
+      isError: false,
+    });
+  });
+
+  it("after legacy collab completion, nests later commandExecution under collab via parentToolCallId", () => {
+    mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        item: {
+          type: "collabAgentToolCall",
+          id: "collab-legacy",
+          tool: "spawnAgent",
+          prompt: "Work",
+          result: "ok",
+        },
+      },
+    });
+
+    const events = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        item: {
+          type: "commandExecution",
+          id: "cmd-after-legacy",
+          command: "git status",
+          aggregatedOutput: "clean",
+          exitCode: 0,
+        },
+      },
+    });
+
+    expect(events[0]).toMatchObject({
+      type: "toolUse",
+      toolCallId: "cmd-after-legacy",
+      parentToolCallId: "collab-legacy",
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -436,7 +743,83 @@ describe("CodexEventMapper", () => {
 
     // After reset the accumulator is empty, so "Hello" is emitted as a full delta
     expect(events).toEqual([
-      { type: "textDelta", threadId: "test-thread", delta: "Hello" },
+      { type: "textDelta", threadId: "test-thread", delta: "Hello", isFinalResponse: true },
+    ]);
+  });
+
+  it("maps item/plan/delta to non-final text deltas (live planning / thinking stream)", () => {
+    const events = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/plan/delta",
+      params: { threadId: "t1", turnId: "u1", itemId: "p1", delta: "Checking repo layout…" },
+    } as never);
+    expect(events).toEqual([
+      {
+        type: "textDelta",
+        threadId: "test-thread",
+        delta: "Checking repo layout…",
+        isFinalResponse: false,
+      },
+    ]);
+  });
+
+  it("maps reasoning stream notifications to non-final text deltas", () => {
+    const eSummary = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/reasoning/summaryTextDelta",
+      params: { delta: "Plan: " },
+    } as never);
+    const eText = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/reasoning/textDelta",
+      params: { text: "step 1" },
+    } as never);
+    expect(eSummary).toEqual([
+      { type: "textDelta", threadId: "test-thread", delta: "Plan: ", isFinalResponse: false },
+    ]);
+    expect(eText).toEqual([
+      { type: "textDelta", threadId: "test-thread", delta: "step 1", isFinalResponse: false },
+    ]);
+    expect(mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/reasoning/summaryPartAdded",
+      params: {},
+    } as never)).toEqual([]);
+  });
+
+  it("emits non-final textDelta for item/completed reasoning item (summary + content)", () => {
+    const events = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        item: { type: "reasoning", id: "r1", summary: ["Plan step 1", "Plan step 2"], reasoningContent: ["Raw detail"] },
+      },
+    });
+    expect(events).toEqual([
+      {
+        type: "textDelta",
+        threadId: "test-thread",
+        delta: "Plan step 1\nPlan step 2\nRaw detail",
+        isFinalResponse: false,
+      },
+    ]);
+  });
+
+  it("dedupes item/completed reasoning against streamed reasoning deltas", () => {
+    mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/reasoning/textDelta",
+      params: { delta: "Hello" },
+    } as never);
+    const rest = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        item: { type: "reasoning", summary: ["Hello world"], content: [] },
+      },
+    } as never);
+    expect(rest).toEqual([
+      { type: "textDelta", threadId: "test-thread", delta: " world", isFinalResponse: false },
     ]);
   });
 

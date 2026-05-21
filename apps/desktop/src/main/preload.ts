@@ -118,6 +118,17 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     downloadUpdate(): Promise<void> {
       return ipcRenderer.invoke("app:download-update");
     },
+    /**
+     * Switch the running updater to a new release line and immediately check.
+     * When `allowDowngrade` is true, the next install is allowed to be older
+     * than the running version (used by the nightly→stable confirmation flow).
+     */
+    applyReleaseLine(payload: {
+      releaseLine: "stable" | "nightly";
+      allowDowngrade?: boolean;
+    }): Promise<unknown> {
+      return ipcRenderer.invoke("app:apply-release-line", payload);
+    },
     /** Subscribe to push updates of update-status. Returns the listener for cleanup. */
     onUpdateStatus(callback: (status: unknown) => void) {
       const listener = (_event: unknown, status: unknown) => callback(status);

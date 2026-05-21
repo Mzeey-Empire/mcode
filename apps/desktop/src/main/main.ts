@@ -31,6 +31,7 @@ const getExtension = globalThis.__v8Snapshot?.contracts?.getExtension ?? bundled
 import { ServerManager } from "./server-manager.js";
 import { startIpcRelay } from "./ipc-relay.js";
 import {
+  applyReleaseLineSwitch,
   checkForUpdatesNow,
   downloadUpdate,
   getUpdateStatus,
@@ -43,6 +44,7 @@ import { setupSpellcheck } from "./spellcheck.js";
 import { registerPreviewBrowserHandlers, disposePreviewForWindow } from "./preview/index.js";
 import { startBrowserUseBridge, disposeBrowserUseBridge } from "./browser-use/index.js";
 import { resolveMcodeWorkspacePreviewUrl } from "./preview/preview-local-file.js";
+import { isDesktopDev } from "./is-desktop-dev.js";
 
 // Isolate dev's Electron userData (cache, cookies, localStorage, IndexedDB)
 // from the installed prod build. Without this, both share %APPDATA%/Mcode/
@@ -269,6 +271,9 @@ function createWindow(): void {
       // process risks; the will-attach-webview hook below clamps webPreferences
       // and we never expose nodeIntegrationInSubFrames.
       webviewTag: true,
+      // Chromium DevTools only in `bun run dev:desktop` (ELECTRON_RENDERER_URL).
+      // Packaged releases and local `bun run prod` keep DevTools disabled.
+      devTools: isDesktopDev(),
     },
   });
 
@@ -296,6 +301,7 @@ function createWindow(): void {
     webPreferences.nodeIntegration = false;
     webPreferences.contextIsolation = true;
     webPreferences.sandbox = true;
+    webPreferences.devTools = false;
     delete (webPreferences as { preload?: string }).preload;
     delete (webPreferences as { preloadURL?: string }).preloadURL;
     params.partition = "persist:mcode-preview";
@@ -334,6 +340,14 @@ function createWindow(): void {
     mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
   } else {
     mainWindow.loadFile(join(__dirname, "../renderer/index.html"));
+  }
+
+  if (isDesktopDev()) {
+    mainWindow.webContents.once("did-finish-load", () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.openDevTools({ mode: "right" });
+      }
+    });
   }
 }
 
@@ -525,6 +539,17 @@ function registerIpcHandlers(): void {
   ipcMain.handle("app:check-for-updates", () => checkForUpdatesNow());
   ipcMain.handle("app:install-update", () => installUpdate());
   ipcMain.handle("app:download-update", () => downloadUpdate());
+  ipcMain.handle(
+    "app:apply-release-line",
+    async (_e, payload: { releaseLine: "stable" | "nightly"; allowDowngrade?: boolean }) => {
+      if (payload?.releaseLine !== "stable" && payload?.releaseLine !== "nightly") {
+        throw new Error(`Invalid releaseLine: ${String(payload?.releaseLine)}`);
+      }
+      return applyReleaseLineSwitch(payload.releaseLine, {
+        allowDowngrade: payload.allowDowngrade === true,
+      });
+    },
+  );
 
   registerPreviewBrowserHandlers();
 }

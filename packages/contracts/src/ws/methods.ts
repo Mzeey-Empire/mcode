@@ -66,6 +66,12 @@ export const SendMessageSchema = lazySchema(() =>
     contextWindow: ContextWindowModeSchema.optional(),
     /** Boolean thinking toggle. Honored only by models with a thinking toggle (Haiku 4.5). */
     thinking: z.boolean().optional(),
+    /**
+     * Codex: fast service tier for this message. When set, persisted on the
+     * thread like other per-send composer overrides. Undefined uses thread row
+     * then global default.
+     */
+    codexFastMode: z.boolean().optional(),
     /** ID of the message being replied to. */
     replyToMessageId: z.string().uuid().optional(),
     /** Highlighted text excerpt from the original message. Absent for full-message replies. */
@@ -99,11 +105,16 @@ export const CreateAndSendSchema = lazySchema(() =>
     contextWindow: ContextWindowModeSchema.optional(),
     /** Boolean thinking toggle. Honored only by models with a thinking toggle (Haiku 4.5). */
     thinking: z.boolean().optional(),
+    /**
+     * Codex: persist fast tier on the new thread before the first message.
+     * Undefined leaves `codex_fast_mode` null (inherit global on each turn).
+     */
+    codexFastMode: z.boolean().optional(),
     /** Source thread ID when branching from an existing thread. */
-  parentThreadId: z.string().optional(),
-  /** Fork-point message ID in the parent thread. Defaults to last persisted message. */
-  forkedFromMessageId: z.string().optional(),
-}).refine(
+    parentThreadId: z.string().optional(),
+    /** Fork-point message ID in the parent thread. Defaults to last persisted message. */
+    forkedFromMessageId: z.string().optional(),
+  }).refine(
   (d) => !d.forkedFromMessageId || d.parentThreadId,
   { message: "forkedFromMessageId requires parentThreadId", path: ["forkedFromMessageId"] },
   ),
@@ -212,6 +223,11 @@ export const WS_METHODS = lazySchema(() => ({
       contextWindow: ContextWindowModeSchema.nullable().optional(),
       /** Boolean thinking toggle persisted on the thread. Honored only for Haiku-class models. Pass null to clear. */
       thinking: z.boolean().nullable().optional(),
+      /**
+       * Codex fast API tier override. True = fast, false = standard, null clears so the thread
+       * inherits `settings.provider.codex.fastMode`.
+       */
+      codexFastMode: z.boolean().nullable().optional(),
     }).refine(
       (data) =>
         data.reasoningLevel !== undefined ||
@@ -219,7 +235,8 @@ export const WS_METHODS = lazySchema(() => ({
         data.permissionMode !== undefined ||
         data.copilotAgent !== undefined ||
         data.contextWindow !== undefined ||
-        data.thinking !== undefined,
+        data.thinking !== undefined ||
+        data.codexFastMode !== undefined,
       { message: "Must provide at least one setting to update" },
     ),
     result: z.boolean(),
@@ -439,17 +456,21 @@ export const WS_METHODS = lazySchema(() => ({
   },
   "terminal.create": {
     params: z.object({ threadId: z.string() }),
-    result: z.string(),
+    result: z.object({ ptyId: z.string(), shell: z.string().max(64) }),
   },
   "terminal.write": {
-    params: z.object({ ptyId: z.string(), data: z.string() }),
+    params: z.object({
+      ptyId: z.string(),
+      /** Cap at 64 KB — well above any single keystroke burst or paste. */
+      data: z.string().max(65_536),
+    }),
     result: z.void(),
   },
   "terminal.resize": {
     params: z.object({
       ptyId: z.string(),
-      cols: z.number(),
-      rows: z.number(),
+      cols: z.number().int().min(1).max(500),
+      rows: z.number().int().min(1).max(500),
     }),
     result: z.void(),
   },
@@ -542,13 +563,11 @@ export const WS_METHODS = lazySchema(() => ({
   },
   "thread.getTasks": {
     params: z.object({ threadId: z.string() }),
-    // Note: `group` is intentionally absent from the wire format — the SDK's TodoWrite tool
-    // does not provide grouping metadata, so clients assign all tasks to a single "Tasks" group.
-    // If a future SDK version adds grouping, this schema and StoredTask will need to be extended.
     result: z
       .array(z.object({
         content: z.string(),
         status: z.enum(["pending", "in_progress", "completed", "cancelled"]),
+        group: z.string().optional(),
       }))
       .nullable(),
   },

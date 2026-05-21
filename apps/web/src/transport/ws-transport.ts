@@ -20,6 +20,7 @@ import type {
   CopilotSubagent,
 } from "./types";
 import type { CreateAndSendResult } from "@mcode/contracts";
+import { emitPtyReconnectGap } from "@/components/terminal/ptyDataRegistry";
 import type { PaginatedMessages, TurnSnapshot, PrDraft, CreatePrResult, ProviderUsageInfo, ChecksStatus, ProviderAvailability } from "@mcode/contracts";
 import type { ReasoningLevel } from "@mcode/contracts";
 import {
@@ -252,9 +253,7 @@ export function createWsTransport(
                   { ptyId: p.ptyId, lastSeq },
                 );
                 if (gapped) {
-                  window.dispatchEvent(
-                    new CustomEvent("mcode:pty-reconnect-gap", { detail: { ptyId: p.ptyId } }),
-                  );
+                  emitPtyReconnectGap({ ptyId: p.ptyId });
                 }
               }),
           );
@@ -482,6 +481,7 @@ export function createWsTransport(
         copilotAgent: settings.copilotAgent,
         contextWindow: settings.contextWindow,
         thinking: settings.thinking,
+        codexFastMode: settings.codexFastMode,
       }),
     markThreadViewed: (threadId) => rpc<void>("thread.markViewed", { threadId }),
     syncThreadPrs: (workspaceId) =>
@@ -508,6 +508,7 @@ export function createWsTransport(
       copilotAgent?: string,
       contextWindow?,
       thinking?,
+      codexFastMode?,
       replyToMessageId?,
       quotedText?,
     ) => {
@@ -527,6 +528,7 @@ export function createWsTransport(
         copilotAgent,
         contextWindow,
         thinking,
+        ...(codexFastMode !== undefined && { codexFastMode }),
         ...(replyToMessageId && { replyToMessageId }),
         ...(quotedText && { quotedText }),
         ...(displayContent !== undefined && { displayContent }),
@@ -550,6 +552,7 @@ export function createWsTransport(
       copilotAgent?,
       contextWindow?,
       thinking?,
+      codexFastMode?,
       displayContent?,
     ) => {
       const state = useSettingsStore.getState();
@@ -573,6 +576,7 @@ export function createWsTransport(
         copilotAgent,
         contextWindow,
         thinking,
+        ...(codexFastMode !== undefined && { codexFastMode }),
         ...(displayContent !== undefined && { displayContent }),
         ...guardrails,
       });
@@ -628,7 +632,7 @@ export function createWsTransport(
     diagnoseSkills: (cwd?) => rpc<SkillDiagnostics>("skill.diagnose", { cwd }),
 
     // Terminal (PTY)
-    terminalCreate: (threadId) => rpc<string>("terminal.create", { threadId }),
+    terminalCreate: (threadId) => rpc<{ ptyId: string; shell: string }>("terminal.create", { threadId }),
     terminalWrite: (ptyId, data) => rpc<void>("terminal.write", { ptyId, data }),
     terminalResize: (ptyId, cols, rows) =>
       rpc<void>("terminal.resize", { ptyId, cols, rows }),
@@ -666,7 +670,7 @@ export function createWsTransport(
 
     // Thread tasks
     getThreadTasks: (threadId: string) =>
-      rpc<Array<{ content: string; status: "pending" | "in_progress" | "completed" | "cancelled" }> | null>(
+      rpc<Array<{ content: string; status: "pending" | "in_progress" | "completed" | "cancelled"; group?: string }> | null>(
         "thread.getTasks", { threadId },
       ),
 

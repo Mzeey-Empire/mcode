@@ -54,8 +54,10 @@ apps/web/e2e/screenshots/
 
 # Plans and superpowers (local working docs)
 docs/plans/
+docs/specs/*-plan.md
 docs/superpowers/
 .superpowers/
+.ai/
 
 # Build cache artifacts
 *.timestamp-*.mjs

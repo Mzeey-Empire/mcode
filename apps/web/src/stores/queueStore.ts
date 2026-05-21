@@ -22,7 +22,8 @@ export interface QueuedMessage {
   contextWindow?: ContextWindowMode;
   /** Haiku thinking toggle for this turn; undefined means inherit from thread/settings. */
   thinking?: boolean;
-  /** Reply target message ID, if this message is a reply. */
+  /** Codex OpenAI fast tier for this queued send; undefined inherits at dequeue. */
+  codexFastMode?: boolean;
   replyToMessageId?: string;
   /** Quoted text excerpt for the reply. */
   quotedText?: string;

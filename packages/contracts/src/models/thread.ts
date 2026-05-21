@@ -42,6 +42,11 @@ export const ThreadSchema = lazySchema(() =>
   context_window_mode: ContextWindowModeSchema.nullable(),
   /** Boolean thinking toggle last used in this thread. Honored only by models with a thinking toggle (Haiku 4.5). */
   thinking: z.boolean().nullable(),
+  /**
+   * Codex: when true, request OpenAI fast service tier for turns; false = standard;
+   * null = inherit global `settings.provider.codex.fastMode`.
+   */
+  codex_fast_mode: z.boolean().nullable(),
   /** Selected Copilot sub-agent name. Null means provider default (interactive). */
   copilot_agent: z.string().nullable(),
   /** ID of the parent thread this was branched from. Null for root threads. */

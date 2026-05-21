@@ -1,10 +1,19 @@
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useLayoutEffect, useRef } from "react";
 import type { Terminal, IDisposable } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import { getTransport } from "@/transport";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { shouldInterceptKeyEvent } from "./terminalKeyHandler";
 import { ClientTerminalFlowControl } from "./terminalFlowControl";
+import { onPtyData, onPtyExit, onPtyReconnectGap } from "./ptyDataRegistry";
+import { isSafeTerminalDimensions, safeFit } from "./safeFit";
+import { terminalScroll } from "./terminalScrollController";
+import { TERMINAL_POOL_REFIT } from "./terminalPoolRefit";
+import { claimWebglSlot, clearWebglSlot, releaseWebglSlot } from "./terminalWebglSlot";
+import {
+  registerTerminalScrollHarness,
+  unregisterTerminalScrollHarness,
+} from "./terminalScrollHarness";
 // Static import so bundler deduplicates the stylesheet
 import "@xterm/xterm/css/xterm.css";
 
@@ -100,6 +109,16 @@ function detectWebglSupport(): boolean {
 }
 
 /**
+ * Returns true when the WebGL renderer should be used. Electron desktop skips
+ * WebGL to avoid software-GL ReadPixels stalls that reset the viewport.
+ */
+function shouldUseWebglRenderer(): boolean {
+  if (!detectWebglSupport()) return false;
+  if (typeof window !== "undefined" && window.desktopBridge) return false;
+  return true;
+}
+
+/**
  * Attempts to load the WebGL renderer. On success, installs an
  * `onContextLoss` handler that disposes the WebGL addon for the rest of
  * this terminal's session (no retry — context loss typically recurs
@@ -121,11 +140,12 @@ function detectWebglSupport(): boolean {
  * or leave a constructed addon leaked with no owner.
  */
 async function loadRenderer(
+  ptyId: string,
   term: Terminal,
   rendererRef: { current: IDisposable | null },
   isDisposed: () => boolean,
 ): Promise<void> {
-  if (detectWebglSupport()) {
+  if (shouldUseWebglRenderer()) {
     try {
       const { WebglAddon } = await import("@xterm/addon-webgl");
       if (isDisposed()) return;
@@ -153,16 +173,23 @@ async function loadRenderer(
       }
       rendererRef.current = webgl;
       setActiveRenderer("webgl");
-      webgl.onContextLoss(() => {
-        // Dispose WebGL; xterm automatically falls back to its built-in
-        // DOM renderer when a loaded renderer addon is disposed. The
-        // xterm buffer is renderer-independent, so this repaints the
-        // existing output without needing a snapshot/restore dance.
+      claimWebglSlot(ptyId, () => {
         try {
           webgl.dispose();
         } catch {
           // Already disposed by a racing cleanup — safe to ignore.
         }
+        if (rendererRef.current === webgl) {
+          rendererRef.current = null;
+        }
+        setActiveRenderer("dom");
+      });
+      webgl.onContextLoss(() => {
+        // Dispose WebGL; xterm automatically falls back to its built-in
+        // DOM renderer when a loaded renderer addon is disposed. The
+        // xterm buffer is renderer-independent, so this repaints the
+        // existing output without needing a snapshot/restore dance.
+        releaseWebglSlot(ptyId);
         if (isDisposed()) return;
         rendererRef.current = null;
         setActiveRenderer("dom");
@@ -172,10 +199,12 @@ async function loadRenderer(
       // WebGL addon construction failed; fall through to DOM unless we
       // were disposed during the await.
       if (isDisposed()) return;
-      console.warn(
-        "[terminal] WebGL renderer init failed, falling back to DOM",
-        err,
-      );
+      if (import.meta.env.DEV) {
+        console.warn(
+          "[terminal] WebGL renderer init failed, falling back to DOM",
+          err,
+        );
+      }
     }
   }
   // No renderer addon attached → xterm's built-in DOM renderer is active.
@@ -186,21 +215,40 @@ async function loadRenderer(
 interface TerminalViewProps {
   /** The PTY session ID this view is bound to. */
   readonly ptyId: string;
-  /** Whether the terminal panel is currently visible. Controls display style. */
+  /**
+   * Whether this terminal is the active tab for the active workspace thread
+   * (combined pool flag from {@link TerminalTabContent}).
+   */
   readonly visible: boolean;
+  /**
+   * Whether this terminal's owning thread is the active workspace thread.
+   * When false, incoming PTY output is not written to xterm; the renderer
+   * stays attached so scroll position is preserved across thread switches.
+   */
+  readonly threadActive: boolean;
 }
 
 /** Renders a single xterm.js terminal backed by a server-side PTY via WS transport. */
-export function TerminalView({ ptyId, visible }: TerminalViewProps) {
+export const TerminalView = memo(function TerminalView({
+  ptyId,
+  visible: shown,
+  threadActive,
+}: TerminalViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
   const flushResizeRpcRef = useRef<(() => void) | null>(null);
   const rendererRef = useRef<IDisposable | null>(null);
+  /** Cancels in-flight {@link loadRenderer} when the thread goes dormant or the effect cleans up. */
+  const rendererInitCancelledRef = useRef(false);
+  const shownRef = useRef(shown);
+  shownRef.current = shown;
 
-  const visibleRef = useRef(visible);
-  visibleRef.current = visible;
+  const threadActiveRef = useRef(threadActive);
+  threadActiveRef.current = threadActive;
+
+  const prevShownRef = useRef(shown);
 
   const scrollback = useSettingsStore((s) => s.settings.terminal.scrollback);
   const scrollbackRef = useRef(scrollback);
@@ -240,10 +288,11 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
 
       // Intercept Ctrl/Cmd+C when text is selected — copy to clipboard instead of sending SIGINT.
       // Returning false prevents xterm from forwarding the raw \x03 byte to the PTY.
-      // getSelection() is called first to avoid a TOCTOU race with hasSelection().
+      // Only call getSelection() (a DOM range query) when the key event actually
+      // matches the copy shortcut — avoids the cost on every regular keystroke.
       term.attachCustomKeyEventHandler((event: KeyboardEvent) => {
-        const selection = term.getSelection();
-        if (shouldInterceptKeyEvent(event, selection.length > 0)) {
+        if (shouldInterceptKeyEvent(event, term.hasSelection())) {
+          const selection = term.getSelection();
           if (selection) {
             navigator.clipboard.writeText(selection).catch(() => {});
           }
@@ -252,10 +301,11 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
         return true;
       });
 
-      fitAddon.fit();
+      safeFit(fitAddon, el, term);
 
       termRef.current = term;
       fitAddonRef.current = fitAddon;
+      registerTerminalScrollHarness(ptyId, term);
 
       const transport = getTransport();
 
@@ -289,52 +339,54 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
         transport.terminalWrite(ptyId, data).catch(() => {});
       });
 
-      // Listen for PTY output via push channel (CustomEvent dispatched by ws-events).
+      const onUserScroll = () => {
+        if (!shownRef.current) return;
+        terminalScroll.onUserScroll(ptyId, term);
+      };
+      const scrollDisposable = term.onScroll(onUserScroll);
+      // Mouse wheel may not always emit onScroll before a thread switch.
+      const onWheel = onUserScroll;
+      el.addEventListener("wheel", onWheel, { passive: true });
+
+      // Listen for PTY output via the direct callback registry.
       // Attached BEFORE awaiting the renderer so initial PTY output that arrives
       // during renderer initialization is buffered into the xterm write queue
       // (term.write is renderer-independent) and painted as soon as a renderer
       // is attached — never dropped.
-      const handlePtyData = (e: Event) => {
-        const detail = (e as CustomEvent).detail as {
-          ptyId: string;
-          payload: Uint8Array;
-          seq: number;
-        };
-        if (detail.ptyId !== ptyId) return;
-        // Track last-seen seq so the reconnect handler can call terminal.reattach
-        // with the correct lastSeq, minimising replayed output on reconnect.
+      const unsubPtyData = onPtyData(ptyId, (detail) => {
         transport.ptySetLastSeq(ptyId, detail.seq);
         const n = detail.payload.length;
         fc.written(n);
+        // Hidden or dormant terminals keep xterm mounted but must not write —
+        // that corrupts scrollback and can yank the viewport to the cursor.
+        if (!shownRef.current || !threadActiveRef.current) {
+          fc.acked(n);
+          return;
+        }
         // Use xterm's callback form so acked() fires only after the bytes
         // are committed to the terminal buffer — not just queued.
-        term.write(detail.payload, () => fc.acked(n));
-      };
-      window.addEventListener("mcode:pty-data", handlePtyData);
+        term.write(detail.payload, () => {
+          fc.acked(n);
+          if (terminalScroll.restoreAnchor(ptyId)) {
+            terminalScroll.restore(ptyId, term);
+          }
+        });
+      });
 
       // Show a reconnect banner when the server signals that the replay window
       // was exceeded and some output may have been missed.
-      const handleReconnectGap = (e: Event) => {
-        const detail = (e as CustomEvent).detail as { ptyId: string };
-        if (detail.ptyId !== ptyId) return;
+      const unsubReconnectGap = onPtyReconnectGap(ptyId, () => {
         term.write("\r\n\x1b[90m[Reconnected - some output may be missing]\x1b[0m\r\n");
-      };
-      window.addEventListener("mcode:pty-reconnect-gap", handleReconnectGap);
+      });
 
-      // Listen for PTY exit via push channel (attached pre-renderer for the
-      // same reason as pty-data: an early exit should not be silently lost).
-      const handlePtyExit = (e: Event) => {
-        const detail = (e as CustomEvent).detail as {
-          ptyId: string;
-          code: number;
-        };
-        if (detail.ptyId === ptyId) {
-          term.write(
-            `\r\n\x1b[90m[Process exited with code ${detail.code}]\x1b[0m\r\n`,
-          );
-        }
-      };
-      window.addEventListener("mcode:pty-exit", handlePtyExit);
+      // Listen for PTY exit via the direct callback registry (attached
+      // pre-renderer for the same reason as pty-data: an early exit should
+      // not be silently lost).
+      const unsubPtyExit = onPtyExit(ptyId, (detail) => {
+        term.write(
+          `\r\n\x1b[90m[Process exited with code ${detail.code}]\x1b[0m\r\n`,
+        );
+      });
 
       // Resize handling:
       //
@@ -361,9 +413,9 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
           clearTimeout(rpcTimer);
           rpcTimer = null;
         }
-        if (disposed) return;
+        if (disposed || terminalScroll.shouldDeferFitRefresh(ptyId)) return;
         const dims = fitAddonRef.current?.proposeDimensions();
-        if (!dims || dims.cols <= 0 || dims.rows <= 0) return;
+        if (!isSafeTerminalDimensions(dims)) return;
         if (dims.cols === lastSentCols && dims.rows === lastSentRows) return;
         lastSentCols = dims.cols;
         lastSentRows = dims.rows;
@@ -373,11 +425,26 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
 
       const observer = new ResizeObserver(() => {
         if (disposed || !fitAddonRef.current) return;
+        // Skip fit() when the container is display:none (visible=false).
+        // FitAddon.proposeDimensions() reads the parent's clientWidth/Height
+        // which are 0 when hidden, producing a 2×1 grid. Resizing xterm to
+        // 2 columns causes every line to wrap, overflowing the fixed-size
+        // scrollback buffer and permanently truncating history.
+        if (!shownRef.current || !threadActiveRef.current) return;
         if (rafId === null) {
           rafId = requestAnimationFrame(() => {
             rafId = null;
-            if (disposed) return;
-            fitAddonRef.current?.fit();
+            if (
+              disposed ||
+              !shownRef.current ||
+              !threadActiveRef.current ||
+              terminalScroll.shouldDeferFitRefresh(ptyId)
+            ) {
+              return;
+            }
+            const fit = fitAddonRef.current;
+            const t = termRef.current;
+            if (fit && t) safeFit(fit, el, t);
           });
         }
         if (rpcTimer !== null) clearTimeout(rpcTimer);
@@ -390,12 +457,16 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
         if (rpcTimer !== null) clearTimeout(rpcTimer);
         flushResizeRpcRef.current = null;
         dataDisposable.dispose();
+        scrollDisposable.dispose();
+        el.removeEventListener("wheel", onWheel);
         el.removeEventListener("contextmenu", handleContextMenu);
-        window.removeEventListener("mcode:pty-data", handlePtyData);
-        window.removeEventListener("mcode:pty-reconnect-gap", handleReconnectGap);
-        window.removeEventListener("mcode:pty-exit", handlePtyExit);
+        unsubPtyData();
+        unsubReconnectGap();
+        unsubPtyExit();
         transport.ptyDeleteLastSeq(ptyId);
+        terminalScroll.clear(ptyId);
         observer.disconnect();
+        releaseWebglSlot(ptyId);
         try {
           rendererRef.current?.dispose();
         } catch {
@@ -404,7 +475,9 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
           // mid-await disposal. Either way, nothing left to release here.
         }
         rendererRef.current = null;
+        clearWebglSlot(ptyId);
         clearActiveRenderer();
+        unregisterTerminalScrollHarness(ptyId);
         term.dispose();
         decrementLiveTerminalCount();
       };
@@ -427,15 +500,21 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
       // the PTY listeners above are attached; term.write queues bytes even
       // before the renderer addon finishes loading. Guard with the current
       // visibility state so a late init doesn't race with pause-on-hide.
-      if (visibleRef.current) {
+      if (shownRef.current && threadActiveRef.current) {
         transport.terminalResume(ptyId).catch(() => {});
       }
 
-      await loadRenderer(term, rendererRef, () => disposed);
-      // If `disposed` flipped during the await, React's effect teardown
-      // already invoked cleanupRef.current, and loadRenderer's own
-      // isDisposed() guards ensured no renderer addon was attached to the
-      // now-disposed terminal. No post-await work is required.
+      // DOM renderer only at init; WebGL loads when this terminal becomes shown
+      // (see shown effect) so the pool never holds multiple GL contexts.
+      setActiveRenderer("dom");
+
+      // Auto-focus: the visibility effect's term.focus() fires before
+      // init completes (termRef is still null at that point), so newly
+      // created terminals wouldn't receive focus. Pull focus here after
+      // init when the terminal is visible.
+      if (shownRef.current) {
+        term.focus();
+      }
     }
 
     // init() awaits dynamic imports and may construct/attach xterm before
@@ -453,6 +532,7 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
 
     return () => {
       disposed = true;
+      rendererInitCancelledRef.current = true;
       cleanupRef.current?.();
       cleanupRef.current = null;
       termRef.current = null;
@@ -460,34 +540,94 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
     };
   }, [ptyId]);
 
-  // When the panel is toggled open (visible: false -> true) we refit,
-  // repaint, and intentionally pull focus into xterm so the user can start
-  // typing immediately. Focus is deliberately NOT moved on window/tab
-  // return — doing so would steal focus from the composer whenever the
-  // user alt-tabs back, contradicting the Ctrl+J-from-composer workflow.
-  // Flushing the debounced resize RPC ensures the PTY learns the new dims
-  // without waiting for the 100 ms debounce tail.
-  useEffect(() => {
-    if (!visible) return;
+  // Save scroll on hide; arm restore on show (restore runs after paint in finishShow).
+  useLayoutEffect(() => {
     const term = termRef.current;
-    if (!term) return;
-    fitAddonRef.current?.fit();
-    flushResizeRpcRef.current?.();
-    term.refresh(0, term.rows - 1);
-    term.focus();
-  }, [visible]);
 
-  // Repaint xterm's DOM renderer when the window/tab regains visibility.
-  // Long background stints leave the canvas half-painted; fit + refresh is
-  // idempotent and cheap, and crucially skips term.focus() so we don't
-  // yank focus out of whatever the user was typing in (issue #305).
+    if (term && prevShownRef.current && !shown) {
+      terminalScroll.onHide(ptyId, term);
+      releaseWebglSlot(ptyId);
+    }
+
+    if (term && shown && !prevShownRef.current) {
+      terminalScroll.onShow(ptyId);
+    }
+
+    prevShownRef.current = shown;
+  }, [shown, ptyId]);
+
+  // After layout + visibility (or pool refit), restore scroll then repaint/focus when safe.
+  useEffect(() => {
+    const applyRestore = () => {
+      const t = termRef.current;
+      if (!t || !shownRef.current) return;
+      terminalScroll.restore(ptyId, t);
+    };
+
+    const finishShow = () => {
+      if (!shownRef.current) return;
+      const t = termRef.current;
+      if (!t) return;
+      applyRestore();
+      const fit = fitAddonRef.current;
+      if (fit) {
+        safeFit(fit, containerRef.current, t);
+      }
+      applyRestore();
+      flushResizeRpcRef.current?.();
+      const pinned = terminalScroll.isPinned(ptyId);
+      if (!pinned && !terminalScroll.shouldDeferFitRefresh(ptyId)) {
+        t.refresh(0, t.rows - 1);
+      }
+      if (!pinned) {
+        t.focus();
+      }
+    };
+
+    const runShowSequence = () => {
+      requestAnimationFrame(() => {
+        applyRestore();
+        requestAnimationFrame(() => {
+          applyRestore();
+          requestAnimationFrame(finishShow);
+        });
+      });
+    };
+
+    const onPoolRefit = () => {
+      if (!shownRef.current) return;
+      runShowSequence();
+    };
+
+    window.addEventListener(TERMINAL_POOL_REFIT, onPoolRefit);
+
+    if (shown) {
+      runShowSequence();
+    }
+
+    return () => {
+      window.removeEventListener(TERMINAL_POOL_REFIT, onPoolRefit);
+    };
+  }, [shown, ptyId]);
+
+  // Repaint xterm when the browser window/tab regains visibility.
+  // Long background stints leave the canvas half-painted; fit + refresh
+  // fixes it. Reads `shownRef` (not the prop) so the effect registers
+  // listeners once and never re-registers on prop changes.
   useEffect(() => {
     const repaint = () => {
-      if (!visible) return;
+      if (!shownRef.current) return;
       const term = termRef.current;
-      if (!term) return;
-      fitAddonRef.current?.fit();
-      term.refresh(0, term.rows - 1);
+      if (!term || terminalScroll.shouldDeferFitRefresh(ptyId)) return;
+      if (terminalScroll.restoreAnchor(ptyId)) {
+        terminalScroll.restore(ptyId, term);
+        return;
+      }
+      const fit = fitAddonRef.current;
+      if (fit) safeFit(fit, containerRef.current, term);
+      if (!terminalScroll.shouldDeferFitRefresh(ptyId) && !terminalScroll.isPinned(ptyId)) {
+        term.refresh(0, term.rows - 1);
+      }
     };
 
     const onVisibilityChange = () => {
@@ -499,7 +639,7 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("focus", repaint);
     };
-  }, [visible]);
+  }, []);
 
   // Sync scrollback setting to live terminal without remounting
   useEffect(() => {
@@ -508,11 +648,53 @@ export function TerminalView({ ptyId, visible }: TerminalViewProps) {
     }
   }, [scrollback]);
 
+  // Attach WebGL only while shown and after scroll restore; one GL context pool-wide.
+  useEffect(() => {
+    if (!shown || !threadActive) {
+      rendererInitCancelledRef.current = true;
+      return;
+    }
+
+    const term = termRef.current;
+    if (!term) return;
+
+    rendererInitCancelledRef.current = false;
+    let cancelled = false;
+
+    const scheduleLoad = () => {
+      if (cancelled || rendererInitCancelledRef.current) return;
+      if (!shownRef.current || !threadActiveRef.current) return;
+      if (rendererRef.current !== null) return;
+      if (terminalScroll.shouldDeferFitRefresh(ptyId)) {
+        requestAnimationFrame(scheduleLoad);
+        return;
+      }
+      void loadRenderer(
+        ptyId,
+        term,
+        rendererRef,
+        () =>
+          cancelled ||
+          rendererInitCancelledRef.current ||
+          !shownRef.current ||
+          !threadActiveRef.current,
+      ).then(() => {
+        if (cancelled || !shownRef.current) return;
+        terminalScroll.restore(ptyId, term);
+      });
+    };
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(scheduleLoad);
+    });
+
+    return () => {
+      cancelled = true;
+      rendererInitCancelledRef.current = true;
+    };
+  }, [shown, threadActive, ptyId]);
+
   return (
-    <div
-      ref={containerRef}
-      className="h-full w-full"
-      style={{ display: visible ? "block" : "none" }}
-    />
+    <div ref={containerRef} className="h-full min-h-0 w-full" />
   );
-}
+});

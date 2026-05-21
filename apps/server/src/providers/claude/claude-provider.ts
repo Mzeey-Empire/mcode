@@ -600,7 +600,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       // ExitPlanMode tools conflict because Mcode has no UI to handle
       // the SDK's "Exit plan mode?" confirmation, causing the model to
       // get stuck.
-      disallowedTools: ["EnterPlanMode", "ExitPlanMode"],
+      // AskUserQuestion is also disallowed: in chat mode the model can
+      // ask questions in plain text, and in plan mode Mcode uses its own
+      // PlanQuestionWizard.  The SDK tool has no result handler here, so
+      // calling it stalls the session indefinitely.
+      disallowedTools: ["EnterPlanMode", "ExitPlanMode", "AskUserQuestion"],
       permissionMode: sdkPermissionMode,
       canUseTool: (async (
         toolName: string,
@@ -1021,12 +1025,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
 
           switch (anyMsg.type) {
             case "assistant": {
-              const contentBlocks =
-                (
-                  anyMsg.message as {
-                    content?: Array<Record<string, unknown>>;
-                  }
-                )?.content ?? [];
+              const innerMessage = anyMsg.message as {
+                content?: Array<Record<string, unknown>>;
+                stop_reason?: string | null;
+              } | undefined;
+              const contentBlocks = innerMessage?.content ?? [];
               const text = contentBlocks
                 .filter((b) => b.type === "text")
                 .map((b) => (b.text as string) ?? "")
@@ -1036,13 +1039,39 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                 lastAssistantText = text;
               }
 
+              // Anthropic message-level stop_reason is the authoritative
+              // discriminator between thoughts and final response text.
+              // {end_turn, stop_sequence, max_tokens} → final response
+              // {tool_use, pause_turn, null, anything else} → preamble/thought
+              // Only emit a boundary when this message actually carried text;
+              // pure tool-call messages have no streamed deltas to reclassify.
+              if (text.length > 0) {
+                const stopReason = innerMessage?.stop_reason ?? null;
+                const isFinalResponse =
+                  stopReason === "end_turn" ||
+                  stopReason === "stop_sequence" ||
+                  stopReason === "max_tokens";
+                this.emit("event", {
+                  type: AgentEventType.AssistantMessageBoundary,
+                  threadId,
+                  isFinalResponse,
+                } satisfies AgentEvent);
+              }
+
               // Read parent_tool_use_id from the SDK message top-level.
               // When subagents run in parallel, this is the ONLY reliable way
               // to determine which Agent owns a given child tool call - the
               // server-side agentCallStack approach fails for parallel dispatch
               // because LIFO returns only the most recent Agent.
+              // Treat empty string the same as null/undefined: an empty parent id
+              // would otherwise be stored as a truthy value and break nesting
+              // (build-narrative.ts groups by parentToolCallId, and "" never matches
+              // an Agent id, so children get silently dropped from the tree).
+              const sdkParentRaw = anyMsg.parent_tool_use_id as string | null | undefined;
               const sdkParentToolUseId =
-                (anyMsg.parent_tool_use_id as string | null | undefined) ?? undefined;
+                typeof sdkParentRaw === "string" && sdkParentRaw.length > 0
+                  ? sdkParentRaw
+                  : undefined;
 
               for (const block of contentBlocks) {
                 if (block.type === "tool_use") {
@@ -1304,8 +1333,12 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                   entry.hasFiredToolThisTurn = true;
                 }
               }
+              // See sdkParentToolUseId above: empty string breaks nesting.
+              const parentRaw = anyMsg.parent_tool_use_id as string | null | undefined;
               const parentToolCallId =
-                (anyMsg.parent_tool_use_id as string | null | undefined) ?? undefined;
+                typeof parentRaw === "string" && parentRaw.length > 0
+                  ? parentRaw
+                  : undefined;
               const toolName =
                 (anyMsg.tool_name as string) ||
                 (anyMsg.name as string) ||

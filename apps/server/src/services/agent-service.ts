@@ -210,6 +210,7 @@ export class AgentService {
     copilotAgent?: string,
     contextWindowMode?: ContextWindowMode,
     thinking?: boolean,
+    codexFastMode?: boolean,
     /**
      * If set, persist a plan-questions "answered" marker for the given
      * assistant message id in the same SQLite transaction as the user
@@ -522,6 +523,14 @@ export class AgentService {
       settings.model.defaults.contextWindow;
     const effectiveThinking: boolean =
       thinking ?? (thread.thinking ?? settings.model.defaults.thinking);
+    const effectiveCodexFastMode: boolean =
+      effectiveProvider === "codex"
+        ? (codexFastMode !== undefined
+            ? codexFastMode
+            : thread.codex_fast_mode != null
+              ? thread.codex_fast_mode
+              : (settings.provider.codex?.fastMode ?? false))
+        : false;
     this.threadRepo.updateModel(threadId, resolvedModel);
     // Only persist provider when the caller explicitly supplied one (new thread or deliberate switch).
     if (provider !== undefined) {
@@ -535,6 +544,7 @@ export class AgentService {
       ...(contextWindowMode !== undefined && { context_window_mode: contextWindowMode }),
       ...(thinking !== undefined && { thinking }),
       ...(copilotAgent !== undefined && { copilot_agent: copilotAgent }),
+      ...(codexFastMode !== undefined && effectiveProvider === "codex" && { codex_fast_mode: codexFastMode }),
     });
 
     const persistedProvider: ProviderId =
@@ -602,6 +612,7 @@ export class AgentService {
         reasoningLevel,
         contextWindowMode: effectiveContextWindowMode,
         thinking: effectiveThinking,
+        ...(effectiveProvider === "codex" && { codexFastMode: effectiveCodexFastMode }),
         ...(effectiveBudget > 0 && { maxBudgetUsd: effectiveBudget }),
         ...(effectiveTurns > 0 && { maxTurns: effectiveTurns }),
         copilotAgent: effectiveCopilotAgent,
@@ -719,6 +730,7 @@ export class AgentService {
       undefined, // copilotAgent
       contextWindowMode,
       thinking,
+      undefined,
       markPlanAnswerForMessageId,
     );
   }
@@ -763,6 +775,7 @@ export class AgentService {
     copilotAgent?: string,
     contextWindowMode?: ContextWindowMode,
     thinking?: boolean,
+    codexFastMode?: boolean,
     displayContent?: string,
   ): Promise<Thread & { warnings?: string[] }> {
     const title = truncateTitle(displayContent ?? content);
@@ -776,6 +789,7 @@ export class AgentService {
         copilotAgent,
         contextWindowMode,
         thinking,
+        codexFastMode,
         displayContent,
       });
     }
@@ -831,6 +845,12 @@ export class AgentService {
 
     this.threadRepo.updateModel(thread.id, model);
 
+    if (provider === "codex" && codexFastMode !== undefined) {
+      this.threadRepo.updateSettings(thread.id, {
+        codex_fast_mode: codexFastMode,
+      });
+    }
+
     void this.sendMessage(
       thread.id,
       content,
@@ -845,6 +865,7 @@ export class AgentService {
       copilotAgent,
       contextWindowMode,
       thinking,
+      undefined,
       undefined,
       undefined,
       undefined,
@@ -887,6 +908,7 @@ export class AgentService {
     copilotAgent?: string;
     contextWindowMode?: ContextWindowMode;
     thinking?: boolean;
+    codexFastMode?: boolean;
     displayContent?: string;
   }): Promise<Thread & { warnings?: string[] }> {
     const {
@@ -897,6 +919,7 @@ export class AgentService {
       copilotAgent,
       contextWindowMode,
       thinking,
+      codexFastMode,
       displayContent,
     } = params;
 
@@ -1062,6 +1085,16 @@ export class AgentService {
     const providerInput =
       interactionMode === "plan" ? this.buildPlanPrompt(stitchedContent) : stitchedContent;
 
+    const resolvedCodexFast =
+      codexFastMode !== undefined
+        ? codexFastMode
+        : parentThread.codex_fast_mode;
+    if (provider === "codex" && resolvedCodexFast !== null) {
+      this.threadRepo.updateSettings(thread.id, {
+        codex_fast_mode: resolvedCodexFast,
+      });
+    }
+
     void this.sendMessage(
       thread.id,
       content,
@@ -1076,6 +1109,7 @@ export class AgentService {
       copilotAgent,
       effectiveContextWindowMode,
       effectiveThinking,
+      undefined,
       undefined,
       providerInput,
       undefined,
@@ -1146,6 +1180,33 @@ export class AgentService {
     }
 
     return runningAgentIds.length === 1 ? runningAgentIds[0] : undefined;
+  }
+
+  /**
+   * Walk up the parentToolCallId chain to find the nearest Agent tool call
+   * and return its description as the group label for TodoWrite tasks.
+   */
+  private resolveAgentGroupLabel(
+    threadId: string,
+    parentToolCallId: string,
+  ): string {
+    const buffer = this.turnToolCalls.get(threadId) ?? [];
+    let current: string | undefined = parentToolCallId;
+
+    while (current) {
+      const tc = buffer.find((b) => b.toolCallId === current);
+      if (!tc) break;
+      if (tc.toolName === "Agent") {
+        const desc = tc._rawToolInput?.description ?? tc._rawToolInput?.prompt;
+        if (typeof desc === "string" && desc.length > 0) {
+          return desc.length > 80 ? desc.slice(0, 77) + "..." : desc;
+        }
+        return "Sub-agent";
+      }
+      current = tc.parentToolCallId;
+    }
+
+    return "Sub-agent";
   }
 
   /** Number of currently active sessions. */
@@ -1259,16 +1320,30 @@ export class AgentService {
               existing.length > 0
                 ? existing[existing.length - 1].sequence + 1
                 : 1;
+            // Record the thread's active model on the message so the UI can
+            // display which provider/model produced the response, even if the
+            // user later switches model mid-conversation.
+            const thread = this.threadRepo.findById(event.threadId);
+            const modelForMessage = thread?.model ?? null;
             const msg = this.messageRepo.create(
               event.threadId,
               "assistant",
               event.content,
               nextSeq,
+              undefined,
+              undefined,
+              undefined,
+              modelForMessage,
             );
             // Carry the persisted message ID so the broadcast schema passes it
             // through to the client. The client uses it for stable message identity
             // (branching, dedup across Electron's dual MessagePort+WebSocket channels).
             event.messageId = msg.id;
+            // Carry the model too so the client's locally-built Message can
+            // show the model name in the footer immediately — without it the
+            // footer renders without the model until a thread refresh re-fetches
+            // the persisted row from the DB.
+            event.model = modelForMessage;
             this.streamingAssistantTextByThread.delete(event.threadId);
           } catch (err) {
             logger.error("Failed to persist assistant message", {
@@ -1282,6 +1357,22 @@ export class AgentService {
           const stackOnMessage = this.agentCallStack.get(event.threadId);
           if (stackOnMessage && stackOnMessage.length > 0) {
             stackOnMessage.length = 0;
+          }
+        }
+
+        if (event.type === AgentEventType.AssistantMessageBoundary) {
+          // Authoritative classification of the just-streamed text deltas based
+          // on the Anthropic message-level `stop_reason`. When `isFinalResponse`
+          // is true the open thought segment was really the final user-facing
+          // response (the legacy heuristic could not detect this for tool-free
+          // turns) — drop it so it never gets persisted as a thought row, which
+          // would otherwise render alongside the assistant message bubble.
+          // Otherwise the message ended with a non-finalizing stop_reason such
+          // as `tool_use`; close the thought so it persists as preamble.
+          if (event.isFinalResponse) {
+            this.dropOpenThought(event.threadId);
+          } else {
+            this.closeOpenThought(event.threadId);
           }
         }
 
@@ -1625,6 +1716,18 @@ ${userMessage}`;
     this.turnOpenThought.set(threadId, null);
   }
 
+  /**
+   * Discards the open thought without persisting it.
+   *
+   * Called when `AssistantMessageBoundary` reports `isFinalResponse: true` —
+   * the streamed text was actually the final assistant response and will be
+   * persisted via the `Message` event, so keeping the matching thought row
+   * would duplicate the body as a ThoughtBlock in the narrative.
+   */
+  private dropOpenThought(threadId: string): void {
+    this.turnOpenThought.set(threadId, null);
+  }
+
   /** Buffer a tool call event for later persistence. */
   private bufferToolCall(
     threadId: string,
@@ -1687,6 +1790,12 @@ ${userMessage}`;
           "completed",
           "cancelled",
         ]);
+
+        // Resolve group label: sub-agent calls use the parent Agent's description
+        const group = parentToolCallId
+          ? this.resolveAgentGroupLabel(threadId, parentToolCallId)
+          : "Tasks";
+
         const cleanedTodos = todos
           .filter(
             (t): t is Record<string, unknown> =>
@@ -1701,11 +1810,13 @@ ${userMessage}`;
                 | "in_progress"
                 | "completed"
                 | "cancelled",
+              group,
             };
           });
         if (cleanedTodos.length > 0) {
           try {
-            this.taskRepo.upsert(threadId, cleanedTodos);
+            // Always merge by group so top-level and sub-agent tasks coexist
+            this.taskRepo.upsertGroup(threadId, group, cleanedTodos);
           } catch (err) {
             logger.warn("TodoWrite tasks not persisted", {
               threadId,
@@ -1768,7 +1879,12 @@ ${userMessage}`;
 
     const nextSeq = last ? last.sequence + 1 : 1;
     try {
-      const msg = this.messageRepo.create(threadId, "assistant", text, nextSeq);
+      const thread = this.threadRepo.findById(threadId);
+      const modelForMessage = thread?.model ?? null;
+      const msg = this.messageRepo.create(
+        threadId, "assistant", text, nextSeq,
+        undefined, undefined, undefined, modelForMessage,
+      );
       this.streamingAssistantTextByThread.delete(threadId);
       broadcast("agent.event", {
         type: AgentEventType.Message,

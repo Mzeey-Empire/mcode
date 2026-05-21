@@ -162,4 +162,31 @@ describe("buildPersistedNarrativeItems", () => {
       .map((i) => i.segment.text);
     expect(thoughtTexts).toEqual(["short note"]);
   });
+
+  it("memo cache invalidates when messageContent changes but thoughts reference is stable", () => {
+    const thoughts = [
+      makeThought({ id: "th-dup", text: "BODY", sort_order: 1 }),
+      makeThought({ id: "th-keep", text: "note", sort_order: 2 }),
+    ];
+    const first = buildPersistedNarrativeItems({
+      tools: [],
+      thoughts,
+      hooks: [],
+      messageContent: "BODY",
+    });
+    const second = buildPersistedNarrativeItems({
+      tools: [],
+      thoughts,
+      hooks: [],
+      messageContent: "OTHER",
+    });
+    const firstTexts = first
+      .filter((i): i is Extract<typeof i, { type: "thought" }> => i.type === "thought")
+      .map((i) => i.segment.text);
+    const secondTexts = second
+      .filter((i): i is Extract<typeof i, { type: "thought" }> => i.type === "thought")
+      .map((i) => i.segment.text);
+    expect(firstTexts).toEqual(["note"]);
+    expect(secondTexts).toEqual(["BODY", "note"]);
+  });
 });

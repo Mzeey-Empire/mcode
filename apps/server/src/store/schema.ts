@@ -66,6 +66,11 @@ export const threads = sqliteTable(
     copilotAgent: text("copilot_agent"),
     contextWindowMode: text("context_window_mode"),
     thinking: integer("thinking"),
+    /**
+     * Codex-only: 1 = request `serviceTier: fast`, 0 = standard, null = inherit global
+     * `settings.provider.codex.fastMode`.
+     */
+    codexFastMode: integer("codex_fast_mode"),
     hasFileChanges: integer("has_file_changes").notNull().default(0),
   },
   (table) => [
@@ -94,6 +99,13 @@ export const messages = sqliteTable(
     attachments: text("attachments"),
     replyToMessageId: text("reply_to_message_id").references((): AnySQLiteColumn => messages.id, { onDelete: "set null" }),
     quotedText: text("quoted_text"),
+    /**
+     * Model identifier active when this assistant message was produced
+     * (e.g. "claude-opus-4-7", "cursor-agent", "gpt-4.1"). Nullable for
+     * user messages and for assistant messages persisted before this column
+     * existed — the UI falls back gracefully when absent.
+     */
+    model: text("model"),
   },
   (table) => [
     index("idx_messages_thread").on(table.threadId),

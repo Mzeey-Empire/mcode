@@ -19,7 +19,8 @@ function createTestDb(): Database.Database {
       sequence INTEGER NOT NULL,
       attachments TEXT,
       reply_to_message_id TEXT,
-      quoted_text TEXT
+      quoted_text TEXT,
+      model TEXT
     );
     CREATE TABLE tool_call_records (
       id TEXT PRIMARY KEY,
@@ -62,11 +63,11 @@ describe("MessageRepo", () => {
     it("EXPLAIN avoids full-table scan on tool_call_records", () => {
       repo.create("thread-1", "user", "x", 1);
       const stmt = db.prepare(
-        `EXPLAIN QUERY PLAN 
-SELECT id, thread_id, role, content, tool_calls, files_changed, cost_usd, tokens_used, timestamp, sequence, attachments, reply_to_message_id, quoted_text,
+        `EXPLAIN QUERY PLAN
+SELECT id, thread_id, role, content, tool_calls, files_changed, cost_usd, tokens_used, timestamp, sequence, attachments, reply_to_message_id, quoted_text, model,
 (SELECT COUNT(*) FROM tool_call_records WHERE message_id = m.id) AS tool_call_count
 FROM (
-  SELECT m.id, m.thread_id, m.role, m.content, m.tool_calls, m.files_changed, m.cost_usd, m.tokens_used, m.timestamp, m.sequence, m.attachments, m.reply_to_message_id, m.quoted_text
+  SELECT m.id, m.thread_id, m.role, m.content, m.tool_calls, m.files_changed, m.cost_usd, m.tokens_used, m.timestamp, m.sequence, m.attachments, m.reply_to_message_id, m.quoted_text, m.model
   FROM messages m
   WHERE m.thread_id = ?
   ORDER BY m.sequence DESC

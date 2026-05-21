@@ -4,6 +4,48 @@ import type { ThoughtSegment, NarrativeItem, NarrativeBuildResult } from "./type
 const AGENT_TOOL_NAME = "Agent";
 
 /**
+ * Live response text that should fill the streaming-response virtual-item
+ * slot — i.e. the text the user is actively watching type, which the
+ * persisted `MessageBubble` will replace once the turn persists.
+ *
+ * Mirrors `buildNarrativeItems`'s internal delta-promotion logic so the live
+ * timeline (which omits this content from its rows) and the streaming-response
+ * slot stay in sync. Returns "" when there is nothing to render — caller
+ * suppresses the virtual item in that case.
+ *
+ *  - When the latest thought segment is open and no tool is running, that
+ *    segment IS the live response (tool-free turn, or pre-tool preamble that
+ *    will be classified by the next `AssistantMessageBoundary`).
+ *  - Otherwise, the suffix of `streamingText` past the closed-thought tape is
+ *    the final-response text emitted after the last tool completed.
+ */
+export function computeLiveStreamingText(params: {
+  thoughtSegments: readonly ThoughtSegment[];
+  streamingText: string;
+  isAgentRunning: boolean;
+  toolCalls: readonly ToolCall[];
+}): string {
+  const { thoughtSegments, streamingText, isAgentRunning, toolCalls } = params;
+  if (!isAgentRunning) return "";
+
+  const anyToolRunning = toolCalls.some(
+    (tc) => tc.parentToolCallId == null && !tc.isComplete,
+  );
+  if (anyToolRunning) return "";
+
+  const lastSeg = thoughtSegments[thoughtSegments.length - 1];
+  if (lastSeg && lastSeg.endedAt == null) {
+    return lastSeg.text;
+  }
+
+  const tape = thoughtSegments.map((s) => s.text).join("");
+  if (streamingText.startsWith(tape) && streamingText.length > tape.length) {
+    return streamingText.slice(tape.length);
+  }
+  return "";
+}
+
+/**
  * Removes thought segments that duplicate the committed assistant message body.
  * Mirrors the client fallbacks in `buildPersistedNarrativeItems` so the live
  * trail does not repeat the bubble after `session.turnComplete` while tool rows
@@ -97,16 +139,21 @@ export function buildNarrativeItems(params: {
     return { items: [], counts: { steps: 0, thoughts: 0, subagents: 0 } };
   }
 
-  // Separate top-level from child tool calls.
+  // Separate top-level from child tool calls. A parent id that is null,
+  // undefined, or empty string must be treated identically: empty string
+  // never matches an Agent id and would silently drop the child from the
+  // tree (childrenMap[""] is built but never read, orphaning the child).
   const topLevel: ToolCall[] = [];
   const childrenMap = new Map<string, ToolCall[]>();
   for (const tc of toolCalls) {
-    if (tc.parentToolCallId == null) {
+    const parent = tc.parentToolCallId;
+    const hasParent = typeof parent === "string" && parent.length > 0;
+    if (!hasParent) {
       topLevel.push(tc);
     } else {
-      const siblings = childrenMap.get(tc.parentToolCallId) ?? [];
+      const siblings = childrenMap.get(parent) ?? [];
       siblings.push(tc);
-      childrenMap.set(tc.parentToolCallId, siblings);
+      childrenMap.set(parent, siblings);
     }
   }
 
@@ -175,7 +222,17 @@ export function buildNarrativeItems(params: {
         continue;
       }
 
-      const isActive = isLatest && isStreaming && !anyToolRunning;
+      // `isActive` drives `DeltaBlock.isStreaming` inside `ThoughtBlock`.
+      // While the agent turn is live, every thought segment (including ones
+      // that have just closed because a tool_use boundary fired) animates
+      // on appearance — preserving the typewriter feel for preamble text
+      // that streams in, then snaps up to the timeline when its segment
+      // closes. The DeltaBlock remount-threshold heuristic keeps the
+      // re-animation to just the trailing edge for segments already past
+      // their first paint, so the snap-up reads as "finishing typing" rather
+      // than restarting from empty. Once the agent stops running, all
+      // thoughts settle to static prose.
+      const isActive = isAgentRunning;
       items.push({ type: "thought", segment: evt.segment, isActive });
       continue;
     }

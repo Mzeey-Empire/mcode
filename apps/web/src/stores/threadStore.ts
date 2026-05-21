@@ -51,6 +51,11 @@ export interface ThreadSettings {
    * expose a thinking toggle (Haiku 4.5).
    */
   thinking?: boolean | null;
+  /**
+   * Per-thread Codex OpenAI fast tier. Null clears the override so the thread
+   * inherits from the global settings `provider.codex.fastMode`.
+   */
+  codexFastMode?: boolean | null;
 }
 
 interface ThreadState {
@@ -158,7 +163,7 @@ interface ThreadState {
   // Message actions
   loadMessages: (threadId: string) => Promise<void>;
   loadOlderMessages: (threadId: string) => Promise<void>;
-  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean, replyToMessageId?: string, quotedText?: string) => Promise<void>;
+  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean, codexFastMode?: boolean, replyToMessageId?: string, quotedText?: string) => Promise<void>;
   stopAgent: (threadId: string) => Promise<void>;
   /** Replace runningThreadIds with the authoritative server snapshot. Called on WS (re)connect. */
   hydrateRunningThreads: (ids: string[]) => void;
@@ -269,6 +274,7 @@ export function scheduleDrainAfterEdit(threadId: string): void {
             next.copilotAgent,
             next.contextWindow,
             next.thinking,
+            next.codexFastMode,
             next.replyToMessageId,
             next.quotedText,
           );
@@ -289,6 +295,30 @@ function omitKey<V>(rec: Record<string, V>, key: string): Record<string, V> {
   const next = { ...rec };
   delete next[key];
   return next;
+}
+
+/**
+ * Walk up the parentToolCallId chain to find the nearest Agent tool call
+ * and return its description as a group label for TodoWrite tasks.
+ */
+function resolveAgentGroupLabel(
+  toolCalls: readonly ToolCall[],
+  parentToolCallId: string,
+): string {
+  let current: string | undefined = parentToolCallId;
+  while (current) {
+    const tc = toolCalls.find((c) => c.id === current);
+    if (!tc) break;
+    if (tc.toolName === "Agent") {
+      const desc = tc.toolInput?.description ?? tc.toolInput?.prompt;
+      if (typeof desc === "string" && desc.length > 0) {
+        return desc.length > 80 ? desc.slice(0, 77) + "..." : desc;
+      }
+      return "Sub-agent";
+    }
+    current = tc.parentToolCallId;
+  }
+  return "Sub-agent";
 }
 
 /**
@@ -442,10 +472,38 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           }
 
           // Manage thought segments: append to the active segment or start a new one.
+          // Codex turns interleave short text deltas with tools, which causes the
+          // session.toolUse freeze to chop a single flowing sentence into micro
+          // fragments ("the", "changed set and therefore the only", …). When the
+          // most recent segment is frozen but its text is short AND the incoming
+          // delta is clearly a continuation (starts lowercase / punctuation, or
+          // the previous segment did not end in sentence-terminating punctuation),
+          // re-open and append instead of starting a new row.
           const segments = nextSegments[tid] ?? [];
           const last = segments[segments.length - 1];
-          if (!last || last.endedAt !== undefined) {
+          const looksLikeContinuation = (prevText: string, nextText: string): boolean => {
+            const trimmedPrev = prevText.trimEnd();
+            const lastChar = trimmedPrev.slice(-1);
+            const prevEndsSentence = /[.!?]/.test(lastChar);
+            const firstChar = nextText.replace(/^\s+/, "").slice(0, 1);
+            const nextStartsLowerOrPunct =
+              firstChar === "" || /[a-z,;:)\]}-]/.test(firstChar);
+            return !prevEndsSentence || nextStartsLowerOrPunct;
+          };
+          const TINY_SEGMENT_THRESHOLD = 40; // chars
+          const shouldReopen =
+            last &&
+            last.endedAt !== undefined &&
+            (last.text.length < TINY_SEGMENT_THRESHOLD ||
+              looksLikeContinuation(last.text, acc));
+          if (!last || (last.endedAt !== undefined && !shouldReopen)) {
             nextSegments[tid] = [...segments, { text: acc, startedAt: Date.now() }];
+          } else if (last.endedAt !== undefined && shouldReopen) {
+            // Re-open the frozen tail and append. endedAt is dropped so it can
+            // continue accumulating until the next genuine boundary.
+            const reopened: typeof last = { ...last, text: last.text + acc };
+            delete (reopened as { endedAt?: number }).endedAt;
+            nextSegments[tid] = [...segments.slice(0, -1), reopened];
           } else {
             nextSegments[tid] = [
               ...segments.slice(0, -1),
@@ -605,10 +663,10 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               id: String(i),
               content: t.content,
               status: coerceTaskStatus(t.status),
-              group: "Tasks",
+              group: t.group ?? "Tasks",
             }));
             const currentTasks = useTaskStore.getState().tasksByThread[threadId] ?? [];
-            if (!shallowEqualBy(items, currentTasks, ["content", "status"])) {
+            if (!shallowEqualBy(items, currentTasks, ["content", "status", "group"])) {
               useTaskStore.getState().setTasks(threadId, items);
             }
           })
@@ -826,10 +884,10 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               id: String(i),
               content: t.content,
               status: coerceTaskStatus(t.status),
-              group: "Tasks",
+              group: t.group ?? "Tasks",
             }));
             const currentTasks = useTaskStore.getState().tasksByThread[threadId] ?? [];
-            if (!shallowEqualBy(items, currentTasks, ["content", "status"])) {
+            if (!shallowEqualBy(items, currentTasks, ["content", "status", "group"])) {
               useTaskStore.getState().setTasks(threadId, items);
             }
           })
@@ -993,7 +1051,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
    * message to local state, marks the thread as running, then dispatches
    * to the transport layer. On failure, rolls back the running state.
    */
-  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, copilotAgent, contextWindow, thinking, replyToMessageId, quotedText) => {
+  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, copilotAgent, contextWindow, thinking, codexFastMode, replyToMessageId, quotedText) => {
     evictMessageCache(threadId);
 
     // Add user message to local state immediately (optimistic)
@@ -1034,7 +1092,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       thoughtSegmentsByThread: omitKey(state.thoughtSegmentsByThread, threadId),
       hooksByThread: omitKey(state.hooksByThread, threadId),
       // Persist composer-side overrides so the post-wizard answer turn forwards them
-      settingsByThread: (reasoningLevel !== undefined || contextWindow !== undefined || thinking !== undefined)
+      settingsByThread: (reasoningLevel !== undefined || contextWindow !== undefined || thinking !== undefined || codexFastMode !== undefined)
         ? {
             ...state.settingsByThread,
             [threadId]: {
@@ -1042,6 +1100,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               ...(reasoningLevel !== undefined && { reasoningLevel }),
               ...(contextWindow !== undefined && { contextWindow }),
               ...(thinking !== undefined && { thinking }),
+              ...(codexFastMode !== undefined && { codexFastMode }),
             },
           }
         : state.settingsByThread,
@@ -1083,6 +1142,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         copilotAgent,
         contextWindow,
         thinking,
+        codexFastMode,
         replyToMessageId,
         quotedText,
       );
@@ -1252,6 +1312,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         copilotAgent: thread.copilot_agent,
         contextWindow: (thread.context_window_mode as ContextWindowMode | null) ?? null,
         thinking: thread.thinking ?? null,
+        codexFastMode: thread.codex_fast_mode ?? null,
       };
     }
 
@@ -1277,6 +1338,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     // null clears the override so the thread inherits from the global default.
     if ("contextWindow" in settings) patch.contextWindow = settings.contextWindow;
     if ("thinking" in settings) patch.thinking = settings.thinking;
+    if ("codexFastMode" in settings) patch.codexFastMode = settings.codexFastMode;
 
     if (Object.keys(patch).length === 0) return Promise.resolve(false);
 
@@ -1303,6 +1365,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               ...("copilotAgent" in patch && { copilot_agent: patch.copilotAgent ?? null }),
               ...("contextWindow" in patch && { context_window_mode: patch.contextWindow ?? null }),
               ...("thinking" in patch && { thinking: patch.thinking ?? null }),
+              ...("codexFastMode" in patch && { codex_fast_mode: patch.codexFastMode ?? null }),
             }
           : t,
       ),
@@ -1316,6 +1379,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       copilotAgent?: string | null;
       contextWindow?: ContextWindowMode | null;
       thinking?: boolean | null;
+      codexFastMode?: boolean | null;
     } = {
       ...(patch.permissionMode !== undefined ? { permissionMode: patch.permissionMode } : {}),
       ...(patch.interactionMode !== undefined ? { interactionMode: patch.interactionMode } : {}),
@@ -1323,6 +1387,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       ...("copilotAgent" in patch ? { copilotAgent: patch.copilotAgent } : {}),
       ...("contextWindow" in patch ? { contextWindow: patch.contextWindow } : {}),
       ...("thinking" in patch ? { thinking: patch.thinking } : {}),
+      ...("codexFastMode" in patch ? { codexFastMode: patch.codexFastMode } : {}),
     };
     return getTransport().updateThreadSettings(threadId, transportPatch).catch(() => false);
   },
@@ -1716,10 +1781,8 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           if (tc.isComplete) return tc;
           if (tc.toolName === "Agent") {
             const done = isAgentDone(tc.id);
-            if (done) console.debug("[narrative:markComplete] Agent done", { id: tc.id, childCount: children(tc.id).length });
             return done ? { ...tc, isComplete: true } : tc;
           }
-          console.debug("[narrative:markComplete]", { id: tc.id, toolName: tc.toolName, parentToolCallId: tc.parentToolCallId });
           return { ...tc, isComplete: true };
         });
         return {
@@ -1816,6 +1879,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           timestamp: new Date().toISOString(),
           sequence: get().messages.length + 1,
           attachments: null,
+          // Server injects the model after persisting; defaults to null when
+          // unknown (legacy clients, non-Claude providers without model info).
+          model: (params.model as string | null | undefined) ?? null,
         };
         set((state) => {
           // Clear streaming text so turnComplete won't duplicate this message.
@@ -1917,9 +1983,31 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     if (method === "session.toolUse") {
       const toolCallId = (params.toolCallId as string) || "";
       const existingCalls = get().toolCallsByThread[threadId] ?? [];
-      if (toolCallId && existingCalls.some((tc) => tc.id === toolCallId)) {
-        console.debug("[narrative:toolUse] DEDUP skip", { toolCallId });
-        return;
+      const toolName = (params.toolName as string) || "unknown";
+      const incomingInput = (params.toolInput as Record<string, unknown>) || {};
+      if (toolCallId) {
+        const existing = existingCalls.find((tc) => tc.id === toolCallId);
+        if (existing) {
+          // Cursor Task: provisional ToolUse on tool_call, enriched ToolUse on cursor/task.
+          if (
+            !existing.isComplete &&
+            existing.toolName === "Agent" &&
+            toolName === "Agent"
+          ) {
+            set((state) => {
+              const calls = state.toolCallsByThread[threadId] ?? [];
+              const updated = calls.map((tc) =>
+                tc.id === toolCallId
+                  ? { ...tc, toolInput: { ...tc.toolInput, ...incomingInput } }
+                  : tc,
+              );
+              return {
+                toolCallsByThread: { ...state.toolCallsByThread, [threadId]: updated },
+              };
+            });
+          }
+          return;
+        }
       }
 
       const parentToolCallId = params.parentToolCallId as string | undefined;
@@ -1929,35 +2017,40 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       if (!parentToolCallId) {
         markPriorToolCallsComplete();
       }
-      const toolName = (params.toolName as string) || "unknown";
-
-      // Intercept TodoWrite calls to populate the task panel
+      // Intercept TodoWrite calls to populate the task panel.
+      // Sub-agent calls are grouped by their parent Agent's description so
+      // multiple sub-agents each get their own collapsible section.
       if (toolName === "TodoWrite") {
         const toolInput = (params.toolInput as Record<string, unknown>) || {};
         const todos = toolInput.todos as Array<Record<string, unknown>> | undefined;
         if (todos && Array.isArray(todos)) {
+          const group = parentToolCallId
+            ? resolveAgentGroupLabel(existingCalls, parentToolCallId)
+            : "Tasks";
+
           const taskItems: TaskItem[] = todos.map((t, i) => ({
-            // Prefer SDK-provided stable id; fall back to index-based surrogate
             id: t.id != null ? String(t.id) : String(i),
             content: String(t.content ?? ""),
             status: coerceTaskStatus(t.status),
-            group: "Tasks",
+            group,
           }));
-          useTaskStore.getState().setTasks(threadId, taskItems);
+
+          // Always merge by group so sub-agent groups are never wiped out
+          // by a top-level TodoWrite call (or vice versa).
+          useTaskStore.getState().setTaskGroup(threadId, group, taskItems);
         }
       }
 
       const toolCall: ToolCall = {
         id: toolCallId || crypto.randomUUID(),
         toolName,
-        toolInput: (params.toolInput as Record<string, unknown>) || {},
+        toolInput: incomingInput,
         output: null,
         isError: false,
         isComplete: false,
         parentToolCallId: parentToolCallId || undefined,
         startedAt: Date.now(),
       };
-      console.debug("[narrative:toolUse]", { threadId, toolName, toolCallId, parentToolCallId, isAgent: toolName === "Agent" });
       set((state) => {
         // Freeze the active thought segment so it has a definite end time.
         const segments = state.thoughtSegmentsByThread[threadId] ?? [];
@@ -1973,7 +2066,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
                 ],
               }
             : state.thoughtSegmentsByThread;
-        console.debug("[narrative:toolUse] segments", { froze, segCount: segments.length, lastEndedAt: last?.endedAt });
         return {
           toolCallsByThread: {
             ...state.toolCallsByThread,
@@ -1989,7 +2081,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       const toolCallId = (params.toolCallId as string) || "";
       const output = (params.output as string) || "";
       const isError = (params.isError as boolean) || false;
-      console.debug("[narrative:toolResult]", { threadId, toolCallId, isError, outputLen: output.length });
       set((state) => {
         const calls = state.toolCallsByThread[threadId] ?? [];
         // Try matching by ID first; fall back to the first incomplete tool call
@@ -2001,14 +2092,28 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         const hasActiveChildren = (id: string) =>
           calls.some((c) => c.parentToolCallId === id && !c.isComplete);
         let matched = false;
+        const completeCall = (tc: ToolCall): ToolCall => {
+          const fromInput = tc.toolInput.durationMs;
+          const durationMs =
+            typeof fromInput === "number" && Number.isFinite(fromInput)
+              ? fromInput
+              : tc.startedAt != null
+                ? Math.max(0, Date.now() - tc.startedAt)
+                : undefined;
+          return {
+            ...tc,
+            output,
+            isError,
+            isComplete: true,
+            ...(durationMs != null ? { durationMs } : {}),
+          };
+        };
         const updated = hasIdMatch
-          ? calls.map((tc) =>
-              tc.id === toolCallId ? { ...tc, output, isError, isComplete: true } : tc
-            )
+          ? calls.map((tc) => (tc.id === toolCallId ? completeCall(tc) : tc))
           : calls.map((tc) => {
               if (!matched && !tc.isComplete && !(tc.toolName === "Agent" && hasActiveChildren(tc.id))) {
                 matched = true;
-                return { ...tc, output, isError, isComplete: true };
+                return completeCall(tc);
               }
               return tc;
             });
@@ -2039,6 +2144,49 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         markPriorToolCallsComplete();
       }
       scheduleTextDeltaFlush();
+      return;
+    }
+
+    if (method === "session.assistantMessageBoundary") {
+      // Authoritative classification of the text deltas just streamed for this
+      // assistant message, derived from the Anthropic `stop_reason`.
+      //
+      // - isFinalResponse=true (end_turn, stop_sequence, max_tokens, refusal):
+      //   the streamed text was the assistant's final response, not a thought.
+      //   Drop the open thought segment so it does not render alongside the
+      //   forthcoming MessageBubble. The streaming buffer already holds the
+      //   text and will be cleared by `session.message`.
+      // - isFinalResponse=false (tool_use, pause_turn, anything else):
+      //   the streamed text was preamble. Close the open thought so the next
+      //   delta starts a fresh segment.
+      const isFinalResponse = params.isFinalResponse === true;
+      // Flush any pending text delta chunks first so the open thought we
+      // operate on reflects every delta that arrived for this message.
+      flushPendingTextDeltas();
+      set((state) => {
+        const segments = state.thoughtSegmentsByThread[threadId] ?? [];
+        const last = segments[segments.length - 1];
+        if (!last || last.endedAt !== undefined) {
+          return state;
+        }
+        if (isFinalResponse) {
+          return {
+            thoughtSegmentsByThread: {
+              ...state.thoughtSegmentsByThread,
+              [threadId]: segments.slice(0, -1),
+            },
+          };
+        }
+        return {
+          thoughtSegmentsByThread: {
+            ...state.thoughtSegmentsByThread,
+            [threadId]: [
+              ...segments.slice(0, -1),
+              { ...last, endedAt: Date.now() },
+            ],
+          },
+        };
+      });
       return;
     }
 
@@ -2438,6 +2586,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
                   next.copilotAgent,
                   next.contextWindow,
                   next.thinking,
+                  next.codexFastMode,
                   next.replyToMessageId,
                   next.quotedText,
                 );

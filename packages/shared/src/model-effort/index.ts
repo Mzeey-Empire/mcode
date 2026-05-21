@@ -16,7 +16,12 @@ import type { ReasoningLevel } from "@mcode/contracts";
 // "ultrathink" is the virtual top tier: it is mapped to "max" effort at the SDK
 // boundary and additionally prepends "Ultrathink:\n" to the user prompt.
 // Eligibility is identical to the max tier (Opus 4.7/4.6, Sonnet 4.6).
+//
+// "none" and "minimal" align with OpenAI Codex app-server ReasoningEffort and are filtered
+// out or mapped before Claude SDK calls.
 const TIER_LADDER: readonly ReasoningLevel[] = [
+  "none",
+  "minimal",
   "low",
   "medium",
   "high",
@@ -92,6 +97,37 @@ function normalizeModelId(modelId: string): string {
   return modelId;
 }
 
+/** True for static mcode Codex catalog models (GPT-5 family routed via `codex app-server`). */
+function isCodexCatalogModelId(modelId: string): boolean {
+  const id = normalizeModelId(modelId);
+  return id.startsWith("gpt-5");
+}
+
+/**
+ * Normalize reasoning level for OpenAI Codex GPT-5 models. Mirrors `supportedReasoningLevels`
+ * in the web model registry (mini / codex-mini variants omit xhigh).
+ */
+function normalizeCodexReasoningLevel(modelId: string, level: ReasoningLevel): ReasoningLevel {
+  const id = normalizeModelId(modelId);
+  const base = new Set<ReasoningLevel>(["none", "minimal", "low", "medium", "high"]);
+  const withXhigh = new Set<ReasoningLevel>([...base, "xhigh", "max", "ultrathink"]);
+  const isMini =
+    (id.includes("mini") && id.includes("codex"))
+    || id === "gpt-5.4-mini";
+  const allowed = isMini ? base : withXhigh;
+
+  if (allowed.has(level)) return level;
+
+  const idx = TIER_LADDER.indexOf(level);
+  if (idx === -1) return "medium";
+
+  for (let i = idx - 1; i >= 0; i--) {
+    const t = TIER_LADDER[i];
+    if (allowed.has(t)) return t;
+  }
+  return "medium";
+}
+
 /**
  * Returns true when the model supports the "xhigh" effort tier.
  *
@@ -145,7 +181,7 @@ export function supportsThinkingToggle(modelId: string): boolean {
  *
  * Haiku-class models ignore effort; sending it causes API errors.
  * Unknown models default to true because most Claude models do support effort.
- * Codex models are handled by the caller and are never passed here.
+ * GPT-5 Codex catalog IDs take a separate path in `normalizeReasoningLevelForModel` before this returns.
  */
 export function supportsEffortParameter(modelId: string): boolean {
   return !EFFORT_UNSUPPORTED_CLAUDE_IDS.includes(normalizeModelId(modelId));
@@ -164,9 +200,18 @@ export function normalizeReasoningLevelForModel(
   modelId: string,
   level: ReasoningLevel,
 ): ReasoningLevel {
+  if (isCodexCatalogModelId(modelId)) {
+    return normalizeCodexReasoningLevel(modelId, level);
+  }
+
   // Short-circuit for models that don't accept the effort param at all.
   if (!supportsEffortParameter(modelId)) {
     return "high";
+  }
+
+  // OpenAI-only tiers: Claude maps to the lowest supported real tier.
+  if (level === "none" || level === "minimal") {
+    return "low";
   }
 
   // Build the set of tiers this model supports.

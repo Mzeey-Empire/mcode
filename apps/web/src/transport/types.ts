@@ -79,6 +79,8 @@ export interface ToolCall {
   elapsedSeconds?: number;
   /** Epoch ms when the toolUse event was received, used for duration display. */
   startedAt?: number;
+  /** Wall-clock duration when the tool call completed (ms). */
+  durationMs?: number;
 }
 
 /** Ephemeral hook execution state tracked during a session. Not persisted to DB. */
@@ -160,6 +162,7 @@ export interface McodeTransport {
     copilotAgent?: string,
     contextWindow?: ContextWindowMode,
     thinking?: boolean,
+    codexFastMode?: boolean,
     replyToMessageId?: string,
     quotedText?: string,
   ): Promise<void>;
@@ -180,6 +183,7 @@ export interface McodeTransport {
     copilotAgent?: string,
     contextWindow?: ContextWindowMode,
     thinking?: boolean,
+    codexFastMode?: boolean,
     displayContent?: string,
   ): Promise<CreateAndSendResult>;
   stopAgent(threadId: string): Promise<void>;
@@ -219,6 +223,7 @@ export interface McodeTransport {
       copilotAgent?: string | null;
       contextWindow?: ContextWindowMode | null;
       thinking?: boolean | null;
+      codexFastMode?: boolean | null;
     },
   ): Promise<boolean>;
   /** Clear the "completed" badge for a thread. Transitions completed -> paused in the DB. */
@@ -271,8 +276,8 @@ export interface McodeTransport {
   diagnoseSkills(cwd?: string): Promise<SkillDiagnostics>;
 
   // Terminal (PTY)
-  /** Create a new PTY attached to a thread's working directory. Returns the pty ID. */
-  terminalCreate(threadId: string): Promise<string>;
+  /** Create a new PTY attached to a thread's working directory. Returns the pty ID and shell name. */
+  terminalCreate(threadId: string): Promise<{ ptyId: string; shell: string }>;
   /** Write data (keystrokes) to a PTY. */
   terminalWrite(ptyId: string, data: string): Promise<void>;
   /** Resize a PTY to the given dimensions. */
@@ -319,7 +324,7 @@ export interface McodeTransport {
   }>>;
 
   /** Fetch persisted task list for a thread (from last TodoWrite). */
-  getThreadTasks(threadId: string): Promise<Array<{ content: string; status: "pending" | "in_progress" | "completed" | "cancelled" }> | null>;
+  getThreadTasks(threadId: string): Promise<Array<{ content: string; status: "pending" | "in_progress" | "completed" | "cancelled"; group?: string }> | null>;
 
   // Snapshots
   /** Get a unified diff for a specific file from a turn snapshot. */

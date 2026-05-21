@@ -264,6 +264,7 @@ export type {
 export * from "./providers/catalog.js";
 export * from "./providers/availability.js";
 export { CURSOR_STATIC_MODEL_FALLBACK } from "./providers/cursor-static-fallback.js";
+export { CURSOR_CLI_MODEL_SNAPSHOT } from "./providers/cursor-cli-models-snapshot.js";
 export { CODEX_STATIC_MODELS } from "./providers/codex-static-fallback.js";
 
 export {

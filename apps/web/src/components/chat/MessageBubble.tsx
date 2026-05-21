@@ -5,6 +5,9 @@ import { cn } from "@/lib/utils";
 const LazyMarkdownContent = lazy(() => import("./MarkdownContent"));
 import { stripInjectedFiles } from "@/lib/file-tags";
 import { buildStoredAttachmentImageSrc } from "@/lib/attachment-url";
+import { resolveModelDisplayLabel } from "@/lib/format-model-label";
+import { useProviderModelsStore } from "@/stores/providerModelsStore";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { isHandoffMessage, parseHandoffJson } from "./handoff-utils";
 import { HandoffCard } from "./HandoffCard";
 import { FileAttachmentTile } from "./FileAttachmentTile";
@@ -374,6 +377,20 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
     [message.timestamp],
   );
 
+  const threadProvider = useWorkspaceStore((s) =>
+    s.threads.find((t) => t.id === message.thread_id)?.provider,
+  );
+  const providerCatalog = useProviderModelsStore((s) =>
+    threadProvider ? s.models[threadProvider] : undefined,
+  );
+  const modelDisplayLabel = useMemo(
+    () =>
+      message.model
+        ? resolveModelDisplayLabel(message.model, { catalog: providerCatalog })
+        : null,
+    [message.model, providerCatalog],
+  );
+
   const imageAttachments = useMemo(
     () => message.attachments?.filter((a) => a.mimeType.startsWith("image/")) ?? [],
     [message.attachments],
@@ -563,13 +580,13 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
     return null;
   }
 
-  // Assistant message — borderless prose flowing directly on the page
+  // Assistant message — borderless prose flowing directly on the page.
+  // The legacy `▸ ASSISTANT` head was removed because it pre-empted the prose
+  // with redundant role labelling (only one party in the chat besides the
+  // user). Provenance — model, tokens, cost, time — now lives in one quiet
+  // foot line so the body owns the top of the message.
   return (
     <div className="group/msg space-y-2" data-message-id={message.id} data-message-role={message.role} data-thread-id={message.thread_id}>
-      <div className="flex items-baseline gap-2">
-        <span aria-hidden="true" className="font-mono text-[10px] leading-none text-muted-foreground/50">▸</span>
-        <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-muted-foreground/55">assistant</span>
-      </div>
       {/* Quote block — shown when this message is a reply */}
       {message.reply_to_message_id && (
         <QuoteBlock
@@ -583,13 +600,14 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
           <LazyMarkdownContent content={message.content} isStreaming={false} />
         </Suspense>
       </div>
-      <div className="flex items-center gap-3 px-1">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1">
         {onReply && <ReplyButton onClick={() => onReply(message.id, message.content, "assistant")} />}
         {onBranch && <BranchButton onClick={() => onBranch(message.id)} />}
         <CopyButton content={textContent} />
-        {(message.tokens_used != null || message.cost_usd != null || formattedTime) && (
-          <span className="font-mono text-[10px] tabular-nums text-muted-foreground/55 transition-colors group-hover/msg:text-muted-foreground/80">
+        {(message.model || message.tokens_used != null || message.cost_usd != null || formattedTime) && (
+          <span className="ml-auto font-mono text-[10px] tabular-nums text-muted-foreground/55 transition-colors group-hover/msg:text-muted-foreground/80">
             {[
+              modelDisplayLabel,
               message.tokens_used != null ? `${message.tokens_used.toLocaleString()} tok` : null,
               message.cost_usd != null ? `$${message.cost_usd.toFixed(4)}` : null,
               formattedTime,

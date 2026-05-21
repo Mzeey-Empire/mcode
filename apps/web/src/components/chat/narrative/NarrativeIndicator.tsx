@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { formatDuration } from "@/lib/time";
 import type { ToolCall } from "@/transport/types";
 import { TOOL_PHASE_LABELS } from "../tool-renderers/constants";
+import { StackedLayersIcon, stackedLayersIconClassName } from "./StackedLayersIcon";
 
 /** Derive the current phase label from active tool calls. */
 function derivePhaseLabel(toolCalls: readonly ToolCall[]): string {
@@ -20,7 +21,7 @@ function derivePhaseLabel(toolCalls: readonly ToolCall[]): string {
 interface NarrativeIndicatorProps {
   /** Total number of steps executed so far in this agent turn. */
   stepCount: number;
-  /** Number of subagent calls dispatched. Only rendered when > 0. */
+  /** Number of subagent calls dispatched at the top level. Only rendered when > 0. */
   subagentCount: number;
   /** Currently active (possibly incomplete) tool calls. */
   activeToolCalls: readonly ToolCall[];
@@ -65,7 +66,15 @@ export function NarrativeIndicator({
   return (
     <div className="flex items-center gap-2 px-4 py-2 mt-1.5">
       <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
-        <span className="size-1.5 shrink-0 rounded-full bg-primary animate-pulse" />
+        {/* When sub-agents are dispatched, the stacked-layers icon (with its
+            float + per-layer ripple) becomes the "agent working" mark — more
+            semantic than a generic dot because it mirrors the same glyph used
+            on each sub-agent row. Otherwise a quiet pulsing dot. */}
+        {subagentCount > 0 ? (
+          <StackedLayersIcon animated className={stackedLayersIconClassName(true)} />
+        ) : (
+          <span className="size-1.5 shrink-0 rounded-full bg-primary animate-pulse" />
+        )}
         {stepCount} {stepCount === 1 ? "step" : "steps"}
         {subagentCount > 0 && (
           <>
