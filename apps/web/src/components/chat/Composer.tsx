@@ -2414,9 +2414,11 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
                             data-testid="composer-codex-fast-switch"
                             checked={effectiveCodexFast}
                             onCheckedChange={(checked) => {
-                              setCodexFastMode(checked);
+                              const next =
+                                checked === settingsGlobalCodexFast ? null : checked;
+                              setCodexFastMode(next);
                               if (threadId && !branchFromMessageId) {
-                                void setThreadSettings(threadId, { codexFastMode: checked });
+                                void setThreadSettings(threadId, { codexFastMode: next });
                               }
                             }}
                             aria-label="Fast mode"

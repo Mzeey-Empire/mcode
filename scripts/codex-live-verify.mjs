@@ -9,12 +9,19 @@
  *    with whether the model has fired a tool yet this turn.
  * 5. Prints a clear pass/fail report and exits non-zero on regression.
  */
-import { WebSocket } from "file:///C:/Users/cjnwo/.mcode/worktrees/mcode/feat-openai-codex-eaa72655/node_modules/.bun/ws@8.20.0/node_modules/ws/wrapper.mjs";
+import { createRequire } from "node:module";
 import { writeFileSync, appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { request } from "node:http";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const TRACE_CWD = "C:/Users/cjnwo/AppData/Local/Temp/codex-trace";
-const LOG = "/tmp/codex-live-verify.log";
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const require = createRequire(join(REPO_ROOT, "apps", "web", "package.json"));
+const { WebSocket } = require("ws");
+
+const TRACE_CWD = process.env.CODEX_TRACE_CWD ?? join(tmpdir(), "codex-trace");
+const LOG = process.env.CODEX_VERIFY_LOG ?? join(tmpdir(), "codex-live-verify.log");
 writeFileSync(LOG, "");
 const w = (s) => { appendFileSync(LOG, s + "\n"); console.log(s); };
 
@@ -36,7 +43,7 @@ function getHealth() {
 }
 
 const health = await getHealth();
-w(`[health] activeAgents=${health.activeAgents} token=${health.authToken.slice(0, 8)}…`);
+w(`[health] activeAgents=${health.activeAgents} token=present`);
 
 const PORT = Number(process.env.MCODE_PORT || 19400);
 const ws = new WebSocket(`ws://127.0.0.1:${PORT}/?token=${health.authToken}`);

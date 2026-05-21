@@ -2,7 +2,14 @@
 // Open dev web in msedge, navigate to the codex-trace workspace's most recent
 // thread, and screenshot it so we can visually confirm the live thought-vs-final
 // rendering.
-import { chromium } from "file:///C:/Users/cjnwo/.mcode/worktrees/mcode/feat-openai-codex-eaa72655/node_modules/.bun/playwright@1.59.1/node_modules/playwright/index.mjs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const require = createRequire(join(REPO_ROOT, "apps", "web", "package.json"));
+const { chromium } = require("playwright");
 
 const browser = await chromium.launch({ channel: "msedge", headless: true });
 const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 } });
@@ -36,7 +43,7 @@ const threadClicked = await page.evaluate(() => {
 console.log(`[step] click thread: ${threadClicked}`);
 await page.waitForTimeout(5000);
 
-const outPath = String.raw`C:\Users\cjnwo\AppData\Local\Temp\codex-thread-rendered.png`;
+const outPath = join(tmpdir(), "codex-thread-rendered.png");
 await page.screenshot({ path: outPath, fullPage: true });
 console.log(`[ok] screenshot saved to ${outPath}`);
 

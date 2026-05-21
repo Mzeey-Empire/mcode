@@ -4,8 +4,14 @@
  * confirm thread.status push -> in-flight tool rows get cancelled.
  * Mirrors the client-side ws-events.ts thread.status handler.
  */
-import { WebSocket } from "file:///C:/Users/cjnwo/.mcode/worktrees/mcode/feat-openai-codex-eaa72655/node_modules/.bun/ws@8.20.0/node_modules/ws/wrapper.mjs";
+import { createRequire } from "node:module";
 import { request } from "node:http";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const require = createRequire(join(REPO_ROOT, "apps", "web", "package.json"));
+const { WebSocket } = require("ws");
 
 const PORT = Number(process.env.MCODE_PORT || 19400);
 
@@ -123,8 +129,10 @@ console.log(`in-flight BEFORE stop: ${inFlightBefore.length}`);
 console.log(`in-flight AFTER stop : ${inFlightAfter.length}`);
 console.log(`marked Cancelled by handler: ${cancelled.length}`);
 
+const terminalStatuses = new Set(["paused", "interrupted", "errored"]);
 const pass =
-  statusEvents.includes("paused") &&
+  statusEvents.some((s) => terminalStatuses.has(s)) &&
+  toolCalls.size > 0 &&
   inFlightAfter.length === 0 &&
   (inFlightBefore.length === 0 || cancelled.length > 0);
 

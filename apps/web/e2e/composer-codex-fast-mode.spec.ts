@@ -115,6 +115,6 @@ test.describe("Composer Codex fast mode", () => {
 
     await fastSwitch.click({ force: true });
     await expect(fastSwitch).toHaveAttribute("aria-checked", "false");
-    await expect.poll(() => updateCalls.some((c) => c.codexFastMode === false)).toBe(true);
+    await expect.poll(() => updateCalls.some((c) => c.codexFastMode === null)).toBe(true);
   });
 });

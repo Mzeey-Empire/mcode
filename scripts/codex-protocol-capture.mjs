@@ -11,8 +11,8 @@
  * Requires: `codex` on PATH, ChatGPT auth, network.
  */
 import { spawn } from "node:child_process";
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { appendFileSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { execSync } from "node:child_process";
 import readline from "node:readline";
 
@@ -30,6 +30,9 @@ try {
 } catch {
   /* optional */
 }
+
+const INCLUDE_RAW = process.env.MCODE_CAPTURE_RAW === "1";
+const SCRATCH_FILE = "codex-capture-scratch.txt";
 
 const SCENARIOS = [
   { id: "A_text_only", prompt: "Reply with exactly: OK" },
@@ -115,7 +118,7 @@ rl.on("line", (line) => {
     command: typeof item.command === "string" ? item.command.slice(0, 120) : undefined,
     tool: typeof item.tool === "string" ? item.tool : undefined,
     summaryLen: Array.isArray(item.summary) ? item.summary.length : undefined,
-    raw: msg,
+    ...(INCLUDE_RAW ? { raw: msg } : {}),
   });
   if (msg.method === "turn/completed" && p.turnId === activeTurnId && resolveTurnDone) {
     const done = resolveTurnDone;
@@ -147,6 +150,13 @@ async function runScenario(scenario) {
   ]);
   activeTurnId = null;
   log({ type: "scenario_end", id: scenario.id, status });
+  if (scenario.id === "C_file_touch") {
+    try {
+      unlinkSync(join(cwd, SCRATCH_FILE));
+    } catch {
+      /* ignore */
+    }
+  }
   activeScenario = null;
 }
 

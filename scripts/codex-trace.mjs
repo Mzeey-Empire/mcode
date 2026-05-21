@@ -80,20 +80,20 @@ rl.on("line", (line) => {
       if (Array.isArray(it.summary)) summary.summaryLen = it.summary.length;
       if (Array.isArray(it.reasoningContent)) summary.reasoningLen = it.reasoningContent.length;
     }
+    if (msg.method === "error") {
+      summary.errorMsg = p.error?.message;
+      summary.willRetry = p.willRetry;
+    }
     logLine(summary);
     if (msg.method === "turn/completed" && p.turnId === activeTurnId) {
       turnCompleted = true;
       resolveDone();
     }
-    if (msg.method === "error") {
-      summary.errorMsg = p.error?.message;
-      summary.willRetry = p.willRetry;
-    }
   }
 });
 
 proc.stderr.on("data", (d) => {
-  appendFileSync(traceFile, "STDERR: " + d.toString().slice(0, 500) + "\n");
+  logLine({ event: "stderr", text: d.toString().slice(0, 500) });
 });
 proc.on("exit", (code) => {
   logLine({ event: "exit", code });

@@ -25,10 +25,10 @@ Across both runs, Codex split "thinking" from "answer" cleanly at the wire: anyt
 | `item/completed` (reasoning) | Reasoning closed with `summaryLen: 0` | A:11 (no text payload) | A:11 |
 | `item/started` (commandExecution) | Shell command starting | between reasoning and final message | B:12 |
 | `item/commandExecution/outputDelta` | Streaming stdout/stderr token | repeated | B:13,14 |
-| `item/completed` (commandExecution) | Command finished, includes `command`, `aggregatedOutput`, `exitCode` | B:15 |
+| `item/completed` (commandExecution) | Command finished, includes `command`, `aggregatedOutput`, `exitCode` | after command stream | B:15 |
 | `item/started` (agentMessage) | Final assistant turn began | after tools | A:12 / B:16 |
 | `item/agentMessage/delta` | Streaming final answer token | many | A:13 / B:17–31 |
-| `item/completed` (agentMessage) | Final answer text closed | A:14 / B:32 |
+| `item/completed` (agentMessage) | Final answer text closed | end of answer stream | A:14 / B:32 |
 | `turn/completed` | Turn ended with `status: "completed"`, `turn.items` length 0 | terminal | A:18 / B:36 |
 
 `turn.items` was **empty** (`itemsLen: 0`) in both completed turns. Streaming items are the only place children appear; the post-hoc `turn.items` array was not populated in this CLI version. Code that depends on `turn.items` to reconstruct child order is unsafe — trust live ordering.
