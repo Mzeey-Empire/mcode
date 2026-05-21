@@ -406,6 +406,88 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     }
   }
 
+  /**
+   * Run a one-shot query against a forked copy of the parent's session.
+   * Uses `resume: parentSdkSessionId` which creates a clean fork — the
+   * original session is not mutated. Only the text output is returned;
+   * the forked session ID is discarded.
+   */
+  async runSideChannelQuery(args: {
+    parentThreadId: string;
+    parentSdkSessionId: string;
+    prompt: string;
+    abortSignal?: AbortSignal;
+  }): Promise<string> {
+    const { parentSdkSessionId, prompt, abortSignal } = args;
+
+    // Resolve model from the parent thread's active session if available,
+    // falling back to the default claude-sonnet model.
+    const parentSessionId = `mcode-${args.parentThreadId}`;
+    const model = this.sessions.get(parentSessionId)?.model ?? "claude-sonnet-4-5";
+
+    // Resolve cwd from the parent session's stored options if available.
+    // The SDK requires a cwd; fall back to the server working directory.
+    const cwd = process.cwd();
+
+    const backup = snapshotProcessEnv();
+    try {
+      const merged = this.envService.getEnv();
+      for (const [k, v] of Object.entries(merged)) {
+        process.env[k] = v;
+      }
+
+      const queue = createPromptQueue();
+      const ephemeralId = `side-channel-${crypto.randomUUID()}`;
+
+      const q = sdkQuery({
+        prompt: queue.iterable,
+        options: {
+          cwd,
+          model,
+          maxTurns: 1,
+          resume: parentSdkSessionId,
+          tools: [],
+          settingSources: [],
+          permissionMode: "default" as const,
+          persistSession: false,
+          includePartialMessages: true,
+          ...(abortSignal ? { abortController: Object.assign(new AbortController(), { signal: abortSignal }) } : {}),
+        },
+      });
+
+      queue.push(toUserMessage(prompt, ephemeralId));
+      // Close immediately after pushing so the SDK subprocess exits after the
+      // single turn instead of blocking waiting for more input.
+      queue.close();
+
+      let assistantText = "";
+
+      for await (const msg of q) {
+        const anyMsg = msg as Record<string, unknown>;
+
+        if (anyMsg.type === "result" && anyMsg.is_error) {
+          const errors = (anyMsg.errors as string[]) ?? [];
+          throw new Error(`Claude side-channel query SDK error: ${errors.join(", ") || "unknown error"}`);
+        }
+
+        // Collect text content blocks from assistant turns only.
+        if (anyMsg.type === "assistant") {
+          const content =
+            (anyMsg.message as { content?: Array<{ type: string; text?: string }> })
+              ?.content ?? [];
+          for (const block of content) {
+            if (block.type === "text" && block.text) assistantText += block.text;
+          }
+        }
+      }
+
+      if (!assistantText) throw new Error("Claude side-channel query returned empty output");
+      return assistantText.trim();
+    } finally {
+      restoreProcessEnv(backup);
+    }
+  }
+
   private async doSendMessage(params: {
     sessionId: string;
     message: string;
