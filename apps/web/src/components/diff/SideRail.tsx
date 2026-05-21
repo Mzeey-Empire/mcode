@@ -181,7 +181,13 @@ function RailButton({ icon, label, pressed, onClick, ariaLabel }: RailButtonProp
   );
 }
 
-/** Thin horizontal divider between rail action groups. */
+/**
+ * Thin horizontal divider between rail action groups. Uses the full
+ * `border` token (no opacity modifier) because the rail's semi-transparent
+ * backdrop already dims everything beneath it — at /40 the line all but
+ * vanished. Solid `bg-border` lands at roughly the same visual weight as
+ * the panel's other dividers (`border-border/30` on opaque surfaces).
+ */
 function RailSeparator() {
-  return <div aria-hidden className="mx-3 h-px bg-border/40" />;
+  return <div aria-hidden className="mx-3 h-px bg-border" />;
 }
