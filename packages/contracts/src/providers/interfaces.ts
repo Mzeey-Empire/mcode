@@ -105,6 +105,34 @@ export interface IAgentProvider {
   /** Return all pending permission requests for a given thread. */
   listPendingPermissions?(threadId: string): PermissionRequest[];
 
+  /**
+   * Run a one-shot query against a forked copy of the parent's session.
+   * Only providers with `sessionForkOnResume === "clean"` implement this.
+   * The returned string is the assistant's final text output.
+   *
+   * Throws a provider-specific error on failure. The pipeline classifies via
+   * classifyProviderError.
+   */
+  runSideChannelQuery?(args: {
+    parentThreadId: string;
+    parentSdkSessionId: string;
+    prompt: string;
+    abortSignal?: AbortSignal;
+  }): Promise<string>;
+
+  /**
+   * Run a hidden turn on the parent thread's session. Persists both the
+   * request and the assistant reply with isInternal=1. Only providers with
+   * `sessionForkOnResume === "mutating"` implement this. After the hidden
+   * turn the implementation MUST send a second hidden turn instructing the
+   * model to disregard the handoff request and continue normally.
+   */
+  runHiddenTurn?(args: {
+    parentThreadId: string;
+    prompt: string;
+    abortSignal?: AbortSignal;
+  }): Promise<string>;
+
   /** Subscribe to agent events. */
   on(event: "event", handler: (event: AgentEvent) => void): void;
   /** Subscribe to provider-level errors. */
