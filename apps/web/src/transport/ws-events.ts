@@ -294,9 +294,15 @@ export function startPushListeners(): void {
       const hasCommits = snap.commitsByThread[payload.threadId] !== undefined;
       if (!hasSnapshots && !hasCommits) return;
 
+      // Only refetch snapshots / mark the cumulative view pending when the
+      // persisted turn actually touched files. Chat-only turns (no tool
+      // writes) would otherwise surface a "New changes" affordance with
+      // nothing new to show.
+      const hasFileChanges = payload.filesChanged.length > 0;
+
       try {
         const transport = getTransport();
-        if (hasSnapshots) {
+        if (hasSnapshots && hasFileChanges) {
           // If the user is actively viewing the All-changes panel, defer the
           // refresh and let CumulativeView surface a refresh affordance so
           // their scroll position isn't yanked. Otherwise refetch silently
