@@ -195,19 +195,19 @@ export function NarrativeFlow({
   const timelineItems = items.filter((it) => it.type !== "delta");
 
   return (
-    <div className="relative">
+    <div className="relative min-w-0 max-w-full">
       {/* Timeline — no vertical rail, no row dots. Each row component carries
           its own visual marker (chevron, icon, badge), and consecutive action
           rows (tools, hooks, sub-agents) stack tightly as one "actions
           molecule" while text rows breathe with a larger top margin. */}
       {timelineItems.length > 0 && (
-        <div className="flex flex-col">
+        <div className="flex min-w-0 max-w-full flex-col">
           {timelineItems.map((item, i) => (
             <div
               key={keyForItem(item, i)}
               className={[
                 marginClassForItem(item, i),
-                "narrative-row-enter",
+                "narrative-row-enter min-w-0 max-w-full",
               ].join(" ")}
             >
               {renderItem(item, mostActiveSubagentId, toolCalls)}

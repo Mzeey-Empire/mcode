@@ -10,7 +10,9 @@ import { formatCursorCliModelId, isCursorCliModelId } from "./format-cursor-mode
  *
  * Examples:
  *   formatModelLabel("claude-opus-4-7")               // "Claude Opus 4.7"
- *   formatModelLabel("composer-2.5-fast")           // "Composer 2.5 Fast"
+ *   formatModelLabel("claude-sonnet-4-6")             // "Claude Sonnet 4.6"
+ *   formatModelLabel("gpt-5.2-codex")                 // "GPT-5.2 Codex"
+ *   formatModelLabel("composer-2.5-fast")              // "Composer 2.5 Fast"
  *   formatModelLabel("cursor-agent")                  // "Cursor"
  *   formatModelLabel("codex")                         // "Codex"
  */
@@ -61,9 +63,13 @@ export function resolveModelDisplayLabel(
   return formatModelLabel(id);
 }
 
+/** Format a raw model identifier into a display label (registry and heuristics). */
 export function formatModelLabel(modelId: string): string {
   const id = modelId.trim();
   if (!id) return "";
+
+  const registryHit = findModelById(id);
+  if (registryHit) return normalizeProviderModelName(registryHit.label);
 
   if (id === "auto") return "Auto";
 
@@ -81,6 +87,11 @@ export function formatModelLabel(modelId: string): string {
       return `Composer ${version} ${titleCaseWord(tier)}`;
     }
     return `Composer ${version}`;
+  }
+
+  // OpenAI-style ids (gpt-5.2-codex) — avoid truncating to "Gpt" via first-segment logic
+  if (/^gpt[-_]/i.test(id)) {
+    return `GPT-${id.replace(/^gpt[-_]/i, "")}`;
   }
 
   if (id === "cursor-agent") return "Cursor";

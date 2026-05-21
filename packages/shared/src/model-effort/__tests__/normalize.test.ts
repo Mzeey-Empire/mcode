@@ -105,6 +105,11 @@ describe("normalizeReasoningLevelForModel", () => {
     it("passes max through unchanged", () => {
       expect(normalizeReasoningLevelForModel("claude-opus-4-7", "max")).toBe("max");
     });
+
+    it("maps none and minimal to low (OpenAI-only presets)", () => {
+      expect(normalizeReasoningLevelForModel("claude-opus-4-7", "none")).toBe("low");
+      expect(normalizeReasoningLevelForModel("claude-opus-4-7", "minimal")).toBe("low");
+    });
   });
 
   describe("claude-opus-4-6 (supports low, medium, high, max but not xhigh)", () => {
@@ -174,6 +179,20 @@ describe("normalizeReasoningLevelForModel", () => {
 
     it("claude-haiku-4-5-20251001 short-circuits to high (recognized as haiku)", () => {
       expect(normalizeReasoningLevelForModel("claude-haiku-4-5-20251001", "low")).toBe("high");
+    });
+  });
+
+  describe("OpenAI Codex GPT-5 static catalog models", () => {
+    it("preserves xhigh on gpt-5.4", () => {
+      expect(normalizeReasoningLevelForModel("gpt-5.4", "xhigh")).toBe("xhigh");
+    });
+
+    it("preserves none on gpt-5.5", () => {
+      expect(normalizeReasoningLevelForModel("gpt-5.5", "none")).toBe("none");
+    });
+
+    it("downgrades xhigh to high on gpt-5.1-codex-mini", () => {
+      expect(normalizeReasoningLevelForModel("gpt-5.1-codex-mini", "xhigh")).toBe("high");
     });
   });
 });

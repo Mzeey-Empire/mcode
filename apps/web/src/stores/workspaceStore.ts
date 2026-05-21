@@ -91,6 +91,7 @@ interface PendingThreadCreation {
   copilotAgent?: string;
   contextWindow?: ContextWindowMode;
   thinking?: boolean;
+  codexFastMode?: boolean;
 }
 
 const pendingThreadCreationByPlaceholderId = new Map<string, PendingThreadCreation>();
@@ -113,6 +114,7 @@ async function runCreateAndSend(pending: PendingThreadCreation): Promise<CreateA
     pending.copilotAgent,
     pending.contextWindow,
     pending.thinking,
+    pending.codexFastMode,
     pending.displayContent,
   );
 }
@@ -192,6 +194,7 @@ interface WorkspaceState {
     copilotAgent?: string,
     contextWindow?: ContextWindowMode,
     thinking?: boolean,
+    codexFastMode?: boolean,
     displayContent?: string,
   ) => Promise<Thread>;
   /** Branch an existing thread into a new child with handoff context. */
@@ -212,6 +215,7 @@ interface WorkspaceState {
     copilotAgent?: string;
     contextWindow?: ContextWindowMode;
     thinking?: boolean;
+    codexFastMode?: boolean;
   }) => Promise<Thread>;
   /**
    * Re-run server creation for a placeholder thread after {@link WorkspaceThread.clientError}.
@@ -673,6 +677,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     copilotAgent,
     contextWindow,
     thinking,
+    codexFastMode,
     displayContent,
   ) => {
     const workspaceId = get().activeWorkspaceId;
@@ -718,6 +723,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       copilotAgent,
       contextWindow,
       thinking,
+      codexFastMode,
     };
 
     const captionForUi = displayContent ?? content;
@@ -801,6 +807,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       copilotAgent: params.copilotAgent,
       contextWindow: params.contextWindow,
       thinking: params.thinking,
+      codexFastMode: params.codexFastMode,
     };
 
     const branchCaptionForUi = params.displayContent ?? params.content;

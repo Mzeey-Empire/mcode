@@ -70,17 +70,40 @@ export default async function afterPack(context) {
   console.log("[after-pack] Built renamed server binary");
 
   // -------------------------------------------------------------------------
-  // Step 2: V8 snapshot copy + fuse flip (skip if snapshot not generated).
+  // Step 2: V8 snapshot copy + fuse flip.
   // This runs AFTER the server binary copy so only the main Electron binary
-  // (used for the GUI) gets the fuse — not the ELECTRON_RUN_AS_NODE copy.
+  // (used for the GUI) gets the fuses — not the ELECTRON_RUN_AS_NODE copy.
+  //
+  // The snapshot copy is conditional on the snapshot file existing, but the
+  // fuse flip is always performed so that EnableNodeCliInspectArguments is
+  // disabled on every packaged build regardless of snapshot presence.
   // -------------------------------------------------------------------------
 
-  if (!existsSync(snapshotFile)) {
-    console.log("[after-pack] No snapshot found, skipping fuse configuration");
-  } else {
-    let snapshotDest;
-    let electronBinary;
+  const hasSnapshot = existsSync(snapshotFile);
 
+  // Resolve the main Electron binary path — needed for the fuse flip whether
+  // or not a snapshot was generated.
+  let electronBinary;
+  if (electronPlatformName === "darwin" || electronPlatformName === "mas") {
+    // @electron/fuses expects the main executable, not the framework binary.
+    // It resolves to the framework internally; passing the framework path
+    // causes double Frameworks/ resolution (ENOENT).
+    electronBinary = join(
+      appOutDir,
+      `${context.packager.appInfo.productFilename}.app`,
+      "Contents", "MacOS", context.packager.appInfo.productFilename,
+    );
+  } else if (electronPlatformName === "win32") {
+    electronBinary = join(
+      appOutDir,
+      `${context.packager.appInfo.productFilename}.exe`,
+    );
+  } else {
+    electronBinary = join(appOutDir, context.packager.executableName);
+  }
+
+  if (hasSnapshot) {
+    let snapshotDest;
     if (electronPlatformName === "darwin" || electronPlatformName === "mas") {
       const frameworkDir = join(
         appOutDir,
@@ -88,37 +111,29 @@ export default async function afterPack(context) {
         "Contents/Frameworks/Electron Framework.framework/Resources",
       );
       snapshotDest = join(frameworkDir, "browser_v8_context_snapshot.bin");
-      // @electron/fuses expects the main executable, not the framework binary.
-      // It resolves to the framework internally; passing the framework path
-      // causes double Frameworks/ resolution (ENOENT).
-      electronBinary = join(
-        appOutDir,
-        `${context.packager.appInfo.productFilename}.app`,
-        "Contents", "MacOS", context.packager.appInfo.productFilename,
-      );
-    } else if (electronPlatformName === "win32") {
-      snapshotDest = join(appOutDir, "browser_v8_context_snapshot.bin");
-      electronBinary = join(
-        appOutDir,
-        `${context.packager.appInfo.productFilename}.exe`,
-      );
     } else {
       snapshotDest = join(appOutDir, "browser_v8_context_snapshot.bin");
-      electronBinary = join(appOutDir, context.packager.executableName);
     }
-
     console.log(`[after-pack] Copying snapshot to ${snapshotDest}`);
     copyFileSync(snapshotFile, snapshotDest);
-
-    console.log(`[after-pack] Flipping V8 snapshot fuse on ${electronBinary}`);
-    await flipFuses(electronBinary, {
-      version: FuseVersion.V1,
-      // On ARM64 macOS, flipping fuses invalidates the ad-hoc code signature.
-      // Reset it so the binary can launch before electron-builder codesigns.
-      resetAdHocDarwinSignature: electronPlatformName === "darwin" || electronPlatformName === "mas",
-      [FuseV1Options.LoadBrowserProcessSpecificV8Snapshot]: true,
-    });
-
-    console.log("[after-pack] V8 snapshot fuse enabled");
+  } else {
+    console.log("[after-pack] No snapshot found, skipping snapshot copy");
   }
+
+  console.log(`[after-pack] Flipping security fuses on ${electronBinary}`);
+  await flipFuses(electronBinary, {
+    version: FuseVersion.V1,
+    // On ARM64 macOS, flipping fuses invalidates the ad-hoc code signature.
+    // Reset it so the binary can launch before electron-builder codesigns.
+    resetAdHocDarwinSignature: electronPlatformName === "darwin" || electronPlatformName === "mas",
+    // Only enable the browser-process V8 snapshot fuse when the snapshot was
+    // actually copied into the app bundle; otherwise Electron crashes trying
+    // to load a missing file.
+    [FuseV1Options.LoadBrowserProcessSpecificV8Snapshot]: hasSnapshot,
+    // Packaged apps must not expose Node/V8 inspector on the main binary.
+    // This runs unconditionally — independent of snapshot presence.
+    [FuseV1Options.EnableNodeCliInspectArguments]: false,
+  });
+
+  console.log("[after-pack] Security fuses applied");
 }

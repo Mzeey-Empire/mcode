@@ -35,6 +35,25 @@ export const TOOL_ICONS: Record<string, IconComponent> = {
 
 export const DEFAULT_ICON: IconComponent = Wrench;
 
+/** Provider-specific shell tool names normalized to `Bash`. */
+const SHELL_TOOL_ALIASES: Record<string, "Bash"> = {
+  Shell: "Bash",
+  Terminal: "Bash",
+  command_execution: "Bash",
+};
+
+/**
+ * Maps provider-specific shell tool names to the canonical `Bash` label/icon set.
+ */
+export function resolveToolName(toolName: string): string {
+  return SHELL_TOOL_ALIASES[toolName] ?? toolName;
+}
+
+/** Returns true when the tool is a shell/command execution (any provider alias). */
+export function isShellTool(toolName: string): boolean {
+  return resolveToolName(toolName) === "Bash";
+}
+
 /** Present-tense phase labels shown in the streaming indicator. */
 export const TOOL_PHASE_LABELS: Record<string, string> = {
   Glob: "Searching the codebase...",
@@ -67,7 +86,8 @@ export const TOOL_SUMMARY_VERBS: Record<string, [string, string]> = {
 export function buildToolSummaryText(calls: readonly { toolName: string }[]): string {
   const counts = new Map<string, number>();
   for (const c of calls) {
-    counts.set(c.toolName, (counts.get(c.toolName) ?? 0) + 1);
+    const name = resolveToolName(c.toolName);
+    counts.set(name, (counts.get(name) ?? 0) + 1);
   }
   const parts: string[] = [];
   for (const [name, count] of counts) {

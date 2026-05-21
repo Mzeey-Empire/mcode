@@ -6,10 +6,13 @@ import {
   TOOL_LABELS,
   DEFAULT_ICON,
   buildToolSummaryText,
+  resolveToolName,
+  isShellTool,
 } from "../tool-renderers/constants";
 import type { ToolCall } from "@/transport/types";
 import type { ToolGroup } from "./types";
 import { extractToolInputDetail } from "./tool-detail";
+import { NARRATIVE_TOOL_ROW, narrativeToolDetailClass } from "./narrative-layout";
 
 interface ToolSummaryLineProps {
   /** The group of consecutive tool calls to summarize. */
@@ -73,7 +76,7 @@ export function ToolSummaryLine({
 
   const firstCall = group.calls[0];
   const LeadingIcon = firstCall
-    ? (TOOL_ICONS[firstCall.toolName] ?? DEFAULT_ICON)
+    ? (TOOL_ICONS[resolveToolName(firstCall.toolName)] ?? DEFAULT_ICON)
     : DEFAULT_ICON;
 
   const summaryText = buildToolSummaryText(group.calls);
@@ -85,12 +88,12 @@ export function ToolSummaryLine({
     : null;
 
   return (
-    <div className="rounded-md">
+    <div className="min-w-0 max-w-full rounded-md">
       {/* Summary row */}
       <button
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="flex w-full items-center gap-1.5 px-2 py-1 text-left hover:bg-muted/30 rounded-md transition-colors duration-100 text-[0.8125rem]"
+        className={`${NARRATIVE_TOOL_ROW} w-full px-2 py-1 text-left hover:bg-muted/30 rounded-md transition-colors duration-100 text-[0.8125rem]`}
         aria-expanded={open}
       >
         <LeadingIcon className="w-3 h-3 shrink-0 text-muted-foreground/40" />
@@ -110,36 +113,37 @@ export function ToolSummaryLine({
 
       {/* Expanded detail list */}
       <AnimatedCollapsible open={open}>
-        <ul className="pl-6 mt-0.5 space-y-0.5 pb-1">
+        <ul className="min-w-0 max-w-full pl-6 mt-0.5 space-y-0.5 pb-1">
           {group.calls.map((tc) => {
-            const Icon = TOOL_ICONS[tc.toolName] ?? DEFAULT_ICON;
-            const label = TOOL_LABELS[tc.toolName] ?? tc.toolName;
+            const canonicalName = resolveToolName(tc.toolName);
+            const Icon = TOOL_ICONS[canonicalName] ?? DEFAULT_ICON;
+            const label = TOOL_LABELS[canonicalName] ?? tc.toolName;
             const detail = extractToolInputDetail(tc);
             const status = getCallStatus(tc);
 
             return (
-              <li key={tc.id} className="flex flex-col gap-0.5">
+              <li key={tc.id} className="flex min-w-0 max-w-full flex-col gap-0.5">
                 {/* Row: icon + label + detail + badge */}
-                <div className="flex items-center gap-1.5 text-[0.8125rem]">
+                <div className={`${NARRATIVE_TOOL_ROW} text-[0.8125rem]`}>
                   <Icon className="w-[14px] h-[14px] text-muted-foreground/75 shrink-0" />
                   <span className="text-foreground/65 font-medium shrink-0">
                     {label}
                   </span>
-                  <span className="font-mono text-[0.75rem] text-muted-foreground/80 truncate flex-1 min-w-0">
+                  <span className={narrativeToolDetailClass("md")} title={detail}>
                     {detail}
                   </span>
                   {status !== "completed" && <StatusBadge status={status} />}
                 </div>
 
                 {/* Inline content blocks */}
-                {tc.isComplete && !tc.isError && tc.toolName === "Bash" && tc.output && (
-                  <pre className="text-[0.75rem] font-mono rounded px-2 py-1 bg-[var(--code-bg)] text-foreground/80 overflow-x-auto whitespace-pre-wrap break-words max-h-40">
+                {tc.isComplete && !tc.isError && isShellTool(tc.toolName) && tc.output && (
+                  <pre className="max-w-full text-[0.75rem] font-mono rounded px-2 py-1 bg-[var(--code-bg)] text-foreground/80 overflow-x-auto whitespace-pre-wrap break-words max-h-40">
                     {tc.output}
                   </pre>
                 )}
 
                 {tc.isError && tc.output && (
-                  <pre className="text-[0.75rem] font-mono rounded px-2 py-1 bg-[var(--diff-remove)]/10 text-[var(--diff-remove)] overflow-x-auto whitespace-pre-wrap break-words max-h-40">
+                  <pre className="max-w-full text-[0.75rem] font-mono rounded px-2 py-1 bg-[var(--diff-remove)]/10 text-[var(--diff-remove)] overflow-x-auto whitespace-pre-wrap break-words max-h-40">
                     {tc.output}
                   </pre>
                 )}

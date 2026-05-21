@@ -3,9 +3,11 @@ import {
   TOOL_LABELS,
   TOOL_PHASE_LABELS,
   DEFAULT_ICON,
+  resolveToolName,
 } from "../tool-renderers/constants";
 import type { ToolCall } from "@/transport/types";
 import { extractToolInputDetail } from "./tool-detail";
+import { NARRATIVE_TOOL_ROW, narrativeToolDetailClass } from "./narrative-layout";
 
 interface ActiveToolRowProps {
   toolCall: ToolCall;
@@ -16,15 +18,21 @@ interface ActiveToolRowProps {
  * No background tint - the spinning icon alone signals activity.
  */
 export function ActiveToolRow({ toolCall }: ActiveToolRowProps) {
-  const Icon = TOOL_ICONS[toolCall.toolName] ?? DEFAULT_ICON;
-  const label = TOOL_PHASE_LABELS[toolCall.toolName] ?? TOOL_LABELS[toolCall.toolName] ?? toolCall.toolName;
+  const canonicalName = resolveToolName(toolCall.toolName);
+  const Icon = TOOL_ICONS[canonicalName] ?? DEFAULT_ICON;
+  const label =
+    TOOL_PHASE_LABELS[canonicalName] ??
+    TOOL_LABELS[canonicalName] ??
+    toolCall.toolName;
   const detail = extractToolInputDetail(toolCall);
 
   return (
-    <div className="flex items-center gap-1.5 px-2 py-1 text-[0.8125rem]">
+    <div className={`${NARRATIVE_TOOL_ROW} px-2 py-1 text-[0.8125rem]`}>
       <Icon className="w-3.5 h-3.5 shrink-0 text-muted-foreground/60" />
       <span className="font-medium text-foreground shrink-0">{label}</span>
-      <span className="font-mono text-[0.6875rem] text-muted-foreground/50 truncate flex-1 min-w-0">{detail}</span>
+      <span className={narrativeToolDetailClass("sm")} title={detail}>
+        {detail}
+      </span>
     </div>
   );
 }

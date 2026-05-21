@@ -173,7 +173,10 @@ export function startPushListeners(): void {
     }),
   );
 
-  // thread.status: update running state in the thread store
+  // thread.status: update running state in the thread store. When the turn
+  // terminates without per-tool toolResult events (paused / interrupted /
+  // errored), force every in-flight tool call to complete with cancelled
+  // state so Agent rows stop spinning and reflect the stop on the parent.
   unsubs.push(
     pushEmitter.on("thread.status", (data) => {
       const { threadId, status } = data as {
@@ -185,6 +188,29 @@ export function startPushListeners(): void {
           t.id === threadId ? { ...t, status: status as typeof t.status } : t,
         ),
       }));
+
+      const isTerminal =
+        status === "paused" || status === "interrupted" || status === "errored";
+      if (!isTerminal) return;
+      useThreadStore.setState((state) => {
+        const calls = state.toolCallsByThread[threadId];
+        if (!calls || calls.length === 0) return state;
+        let mutated = false;
+        const next = calls.map((tc) => {
+          if (tc.isComplete) return tc;
+          mutated = true;
+          return {
+            ...tc,
+            isComplete: true,
+            isError: true,
+            output: tc.output ?? "Cancelled",
+          };
+        });
+        if (!mutated) return state;
+        return {
+          toolCallsByThread: { ...state.toolCallsByThread, [threadId]: next },
+        };
+      });
     }),
   );
 
