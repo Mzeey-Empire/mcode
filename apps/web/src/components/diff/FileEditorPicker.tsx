@@ -39,6 +39,12 @@ interface FileEditorPickerProps {
   readonly line?: number;
   /** Element rendered as the dropdown trigger (typically a SideRail button). */
   readonly trigger: React.ReactElement;
+  /**
+   * Notifies the parent when the dropdown opens or closes. The SideRail
+   * uses this to keep the rail expanded while the picker is open — otherwise
+   * focus moves into the portal-rendered popover and the rail collapses.
+   */
+  readonly onOpenChange?: (open: boolean) => void;
 }
 
 /**
@@ -50,7 +56,13 @@ interface FileEditorPickerProps {
  * When no editors are detected, the menu collapses to just the Reveal item
  * — the file manager fallback is always available.
  */
-export function FileEditorPicker({ filePath, dirPath, line, trigger }: FileEditorPickerProps) {
+export function FileEditorPicker({
+  filePath,
+  dirPath,
+  line,
+  trigger,
+  onOpenChange,
+}: FileEditorPickerProps) {
   const installedEditors = useInstalledEditors();
   const entries: EditorMeta[] = installedEditors
     .filter((id) => id in EDITOR_CONFIG)
@@ -90,7 +102,7 @@ export function FileEditorPicker({ filePath, dirPath, line, trigger }: FileEdito
   };
 
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={onOpenChange}>
       <DropdownMenuTrigger render={trigger} />
       <DropdownMenuContent align="end" sideOffset={6} className="min-w-[200px]">
         {entries.length > 0 && (

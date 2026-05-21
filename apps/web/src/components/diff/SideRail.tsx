@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { Code2, FileText, ClipboardCopy, ExternalLink } from "lucide-react";
 import { useToastStore } from "@/stores/toastStore";
 import { FileEditorPicker } from "./FileEditorPicker";
@@ -45,6 +45,12 @@ export function SideRail({
   previewMode,
   onTogglePreview,
 }: SideRailProps) {
+  // While the editor picker is open, focus moves into the portal-rendered
+  // dropdown and the rail loses :focus-within / :hover. Tracking the open
+  // state lets us force the rail expanded via a data attribute that mirrors
+  // the same expand condition as hover/focus-within.
+  const [pickerOpen, setPickerOpen] = useState(false);
+
   const handleCopyPath = useCallback(() => {
     void navigator.clipboard
       .writeText(filePath)
@@ -59,6 +65,7 @@ export function SideRail({
   return (
     <nav
       aria-label="File actions"
+      data-picker-open={pickerOpen || undefined}
       className={[
         // Layout: absolutely positioned overlay anchored to the right edge.
         "group/rail absolute inset-y-0 right-0 z-[2]",
@@ -67,8 +74,15 @@ export function SideRail({
         // when collapsed; opaque on expand.
         "w-8 border-l border-border/30 bg-background/75 backdrop-blur-[6px]",
         "transition-[width,background-color,box-shadow] duration-200",
+        // The rail expands on any of three signals:
+        //   1. Mouse hover anywhere on the nav
+        //   2. Keyboard focus inside the nav
+        //   3. data-picker-open=true — set by the FileEditorPicker while its
+        //      popover is open. The popover is portal-rendered, so it lives
+        //      outside the nav and would otherwise drop focus-within.
         "hover:w-[152px] hover:bg-background/95 hover:shadow-[-4px_0_16px_rgba(0,0,0,0.35)]",
         "focus-within:w-[152px] focus-within:bg-background/95 focus-within:shadow-[-4px_0_16px_rgba(0,0,0,0.35)]",
+        "data-[picker-open]:w-[152px] data-[picker-open]:bg-background/95 data-[picker-open]:shadow-[-4px_0_16px_rgba(0,0,0,0.35)]",
       ].join(" ")}
     >
       <RailButton
@@ -107,6 +121,7 @@ export function SideRail({
           filePath={absolutePath}
           dirPath={absoluteDir ?? absolutePath}
           line={openAtLine}
+          onOpenChange={setPickerOpen}
           trigger={
             <button
               type="button"
@@ -139,6 +154,9 @@ const RAIL_LABEL_CLASS = [
   "transition-[opacity,transform] duration-150 delay-[60ms]",
   "group-hover/rail:translate-x-0 group-hover/rail:opacity-100",
   "group-focus-within/rail:translate-x-0 group-focus-within/rail:opacity-100",
+  // Mirror hover/focus reveal when the picker popover is open — see the
+  // nav-level data-picker-open notes above for why this is needed.
+  "group-data-[picker-open]/rail:translate-x-0 group-data-[picker-open]/rail:opacity-100",
 ].join(" ");
 
 /** Props for a single rail action button. */
