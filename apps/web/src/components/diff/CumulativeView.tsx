@@ -57,7 +57,7 @@ export function CumulativeView({ snapshots, threadId }: CumulativeViewProps) {
 
   return (
     <div className="flex flex-col">
-      <div className="flex items-baseline gap-2 px-3 py-2 border-b border-border/15">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-border/15">
         <span className="font-mono text-[11px] tabular-nums text-foreground/70">
           {files.length}
         </span>
@@ -69,10 +69,14 @@ export function CumulativeView({ snapshots, threadId }: CumulativeViewProps) {
             type="button"
             onClick={handleRefresh}
             disabled={refreshing}
-            aria-label="Refresh changes"
+            aria-label="New changes available — click to refresh"
             data-testid="cumulative-view-refresh"
-            className="ml-auto inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 font-mono text-[10.5px] uppercase tracking-[0.14em] text-foreground/70 hover:bg-muted/40 hover:text-foreground disabled:opacity-50"
+            className="ml-auto inline-flex items-center gap-2 rounded border border-border/30 bg-muted/30 px-2 py-0.5 font-mono text-[10.5px] uppercase tracking-[0.14em] text-foreground/70 transition-colors hover:border-border/70 hover:bg-muted/60 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring/55 disabled:opacity-50"
           >
+            <span
+              aria-hidden
+              className="block h-[5px] w-[5px] animate-pulse rounded-full bg-[var(--diff-add-strong)] motion-reduce:animate-none"
+            />
             <RefreshCw size={11} className={refreshing ? "animate-spin" : ""} />
             New changes
           </button>
