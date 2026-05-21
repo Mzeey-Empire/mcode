@@ -747,6 +747,23 @@ export class AgentService {
   }
 
   /**
+   * Durably mark the latest plan-questions batch for the thread as
+   * settled without sending any answers to the model. Used by the
+   * wizard's `cancel` action so the batch does NOT re-surface on
+   * subsequent reloads or thread switches. Idempotent — `INSERT OR
+   * IGNORE` inside the repo absorbs repeat calls. No-ops silently
+   * when there is no fenced message to settle (e.g. dev / test
+   * harnesses that inject the wizard without a real fence in the
+   * message history).
+   */
+  dismissPlanQuestions(threadId: string): void {
+    const assistantMessageId = this.findLatestPlanQuestionsMessageId(threadId);
+    if (!assistantMessageId) return;
+    this.planQuestionAnswersRepo.markAnswered(assistantMessageId, threadId);
+    broadcast("plan.answered", { threadId, assistantMessageId });
+  }
+
+  /**
    * Create a new thread and immediately send the first message.
    * Generates a title from the content, creates the thread, sends,
    * and returns the fully-populated Thread object.

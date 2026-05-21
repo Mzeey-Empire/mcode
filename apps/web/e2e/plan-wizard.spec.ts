@@ -270,6 +270,47 @@ test.describe("Plan Question Wizard", () => {
     await expect(wizard).not.toBeVisible({ timeout: 2000 });
   });
 
+  test("cancel fires the dismissPlanQuestions RPC so the wizard stays dismissed across reloads", async ({ page }) => {
+    await injectPlanQuestions(page, THREAD.id, MOCK_QUESTIONS);
+
+    const wizard = page.locator("[role='form'][aria-label='Plan questions']");
+    await expect(wizard).toBeVisible({ timeout: 3000 });
+
+    // Capture RPC calls so we can assert the durable dismiss fired.
+    // The mocked WebSocket from mockWebSocketServer doesn't echo RPCs back to
+    // page-side observers, so trace them via window patching instead.
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const w = window as any;
+      w.__dismissCalls = [];
+      const original = w.WebSocket;
+      // The transport is already constructed; intercept at the prototype level
+      // for any messages that go out after this point.
+      const origSend = original.prototype.send;
+      original.prototype.send = function (data: string) {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed?.method === "agent.dismissPlanQuestions") {
+            w.__dismissCalls.push(parsed.params);
+          }
+        } catch {
+          // Non-JSON frames are fine to ignore for this trace.
+        }
+        return origSend.call(this, data);
+      };
+    });
+
+    await wizard.locator("button", { hasText: "cancel" }).first().click();
+    await expect(wizard).not.toBeVisible({ timeout: 2000 });
+
+    const calls = await page.evaluate(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => (window as any).__dismissCalls as Array<{ threadId: string }>,
+    );
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[0].threadId).toBe(THREAD.id);
+  });
+
   test("single question batch still shows the mono counter (one of one)", async ({ page }) => {
     await injectPlanQuestions(page, THREAD.id, [MOCK_QUESTIONS[0]]);
 

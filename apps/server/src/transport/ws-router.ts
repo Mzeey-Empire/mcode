@@ -469,6 +469,9 @@ async function dispatch(
         params.thinking,
       );
       return;
+    case "agent.dismissPlanQuestions":
+      deps.agentService.dismissPlanQuestions(params.threadId);
+      return;
 
     // Messages
     case "message.list": {

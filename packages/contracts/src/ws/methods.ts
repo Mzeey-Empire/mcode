@@ -358,6 +358,16 @@ export const WS_METHODS = lazySchema(() => ({
     }),
     result: z.void(),
   },
+  /**
+   * Durably mark the latest plan-questions batch for a thread as
+   * settled without submitting answers. Used by the wizard's `cancel`
+   * action so the wizard does NOT re-appear on subsequent reloads /
+   * thread switches.
+   */
+  "agent.dismissPlanQuestions": {
+    params: z.object({ threadId: z.string() }),
+    result: z.void(),
+  },
   "permission.respond": {
     params: z.object({
       requestId: z.string(),

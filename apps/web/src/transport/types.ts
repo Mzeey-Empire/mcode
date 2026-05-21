@@ -200,6 +200,12 @@ export interface McodeTransport {
     contextWindow?: ContextWindowMode,
     thinking?: boolean,
   ): Promise<void>;
+  /**
+   * Durably dismiss the latest plan-questions batch for a thread.
+   * The server marks the batch as settled and broadcasts plan.answered;
+   * the wizard does NOT re-appear on subsequent reloads.
+   */
+  dismissPlanQuestions(threadId: string): Promise<void>;
   readClipboardImage(): Promise<AttachmentMeta | null>;
   /** Save a clipboard file blob to disk via the server. Returns attachment metadata. */
   saveClipboardFile(data: ArrayBuffer, mimeType: string, fileName: string): Promise<AttachmentMeta | null>;

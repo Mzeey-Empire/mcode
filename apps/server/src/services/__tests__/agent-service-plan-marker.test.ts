@@ -275,6 +275,44 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
     expect(calls).toEqual([]);
   });
 
+  it("dismissPlanQuestions marks the latest fence answered and broadcasts plan.answered", () => {
+    const { svc, planQuestionAnswersRepo } = buildService(db);
+
+    svc.dismissPlanQuestions(thread.id);
+
+    expect(planQuestionAnswersRepo.isAnswered(assistantMessageId)).toBe(true);
+    expect(broadcast).toHaveBeenCalledWith("plan.answered", {
+      threadId: thread.id,
+      assistantMessageId,
+    });
+  });
+
+  it("dismissPlanQuestions is idempotent — repeat calls don't fail and re-broadcast", () => {
+    const { svc, planQuestionAnswersRepo } = buildService(db);
+
+    svc.dismissPlanQuestions(thread.id);
+    svc.dismissPlanQuestions(thread.id);
+
+    expect(planQuestionAnswersRepo.listAnsweredForThread(thread.id)).toEqual([
+      assistantMessageId,
+    ]);
+  });
+
+  it("dismissPlanQuestions is a no-op when the thread has no plan-questions fence", () => {
+    const { svc, workspaceRepo, threadRepo, planQuestionAnswersRepo } =
+      buildService(db);
+    const ws2 = workspaceRepo.create("dismiss-ws", `${process.cwd()}#dismiss`, false);
+    const plainThread = threadRepo.create(ws2.id, "plain", "direct", "main");
+
+    svc.dismissPlanQuestions(plainThread.id);
+
+    expect(planQuestionAnswersRepo.listAnsweredForThread(plainThread.id)).toEqual([]);
+    const calls = (broadcast as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c) => c[0] === "plan.answered" && (c[1] as { threadId: string }).threadId === plainThread.id,
+    );
+    expect(calls).toEqual([]);
+  });
+
   it("rolls back the user message when the marker insert fails (FK violation)", async () => {
     const { svc, messageRepo, planQuestionAnswersRepo } = buildService(db);
     const beforeCount =

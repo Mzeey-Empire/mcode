@@ -588,6 +588,8 @@ export function createWsTransport(
       rpc<PermissionRequest[]>("permission.listPending", { threadId }),
     answerPlanQuestions: (threadId, answers, permissionMode?, reasoningLevel?, contextWindow?, thinking?) =>
       rpc<void>("agent.answerQuestions", { threadId, answers, permissionMode, reasoningLevel, contextWindow, thinking }),
+    dismissPlanQuestions: (threadId) =>
+      rpc<void>("agent.dismissPlanQuestions", { threadId }),
     readClipboardImage: () =>
       Promise.resolve(null as AttachmentMeta | null),
     saveClipboardFile: (data, mimeType, fileName) =>

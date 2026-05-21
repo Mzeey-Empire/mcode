@@ -1623,6 +1623,14 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   },
 
   clearPlanQuestions: (threadId) => {
+    // Optimistically dismiss locally so the UI is snappy. The server
+    // RPC writes a `plan_question_answers` marker so the wizard stays
+    // dismissed across reloads / thread switches — without it the
+    // extractPendingPlanQuestions restore on the next loadMessages
+    // would see the fence again and re-open the wizard, defeating
+    // cancel. Fire-and-forget: the broadcast handler reconciles other
+    // tabs, and a failed RPC is non-fatal (worst case the wizard
+    // reappears on next load, matching prior behavior).
     set((state) => {
       const nextQuestions = { ...state.planQuestionsByThread };
       const nextAnswers = { ...state.planAnswersByThread };
@@ -1639,6 +1647,11 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         planQuestionsStatusByThread: nextStatus,
       };
     });
+    void getTransport()
+      .dismissPlanQuestions(threadId)
+      .catch((err: unknown) => {
+        console.warn("[plan] dismissPlanQuestions failed", err);
+      });
   },
 
   markPlanAnswered: (threadId, assistantMessageId) => {
