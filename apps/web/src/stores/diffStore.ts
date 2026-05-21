@@ -4,7 +4,7 @@ import type { TurnSnapshot, GitCommit } from "@mcode/contracts";
 export type { GitCommit };
 
 /** Active tab in the right panel. */
-export type RightPanelTab = "tasks" | "changes" | "preview" | "terminal";
+export type RightPanelTab = "tasks" | "changes" | "preview" | "terminal" | "plan";
 
 /** View mode within the Changes tab. */
 export type DiffViewMode = "by-turn" | "all" | "commits" | "summary";
