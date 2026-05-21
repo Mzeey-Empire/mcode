@@ -1,11 +1,26 @@
 import { useCallback } from "react";
-import { Code2, FileText, ClipboardCopy } from "lucide-react";
+import { Code2, FileText, ClipboardCopy, ExternalLink } from "lucide-react";
 import { useToastStore } from "@/stores/toastStore";
+import { FileEditorPicker } from "./FileEditorPicker";
 
 /** Props for the SideRail component. */
 interface SideRailProps {
   /** Path used as the clipboard payload (workspace-relative is fine). */
   readonly filePath: string;
+  /**
+   * Absolute path on disk. When provided, the Open action surfaces a picker
+   * of installed editors plus Reveal. When undefined, Open is hidden — the
+   * web-only context has no IPC for spawning editors.
+   */
+  readonly absolutePath?: string;
+  /**
+   * Absolute parent directory of the file. Used by the picker's Reveal
+   * action to open the OS file manager. Falls back to `absolutePath` if
+   * omitted, which is harmless — most OS file managers handle either.
+   */
+  readonly absoluteDir?: string;
+  /** Line to jump to when opening in an editor (first hunk's new-start line). */
+  readonly openAtLine?: number;
   /** Whether the file is markdown — only then does the Preview toggle render. */
   readonly isMarkdown: boolean;
   /** Whether the rail is currently in preview mode. */
@@ -21,7 +36,15 @@ interface SideRailProps {
  * disclosure button is never accidentally triggered when reaching for an
  * action.
  */
-export function SideRail({ filePath, isMarkdown, previewMode, onTogglePreview }: SideRailProps) {
+export function SideRail({
+  filePath,
+  absolutePath,
+  absoluteDir,
+  openAtLine,
+  isMarkdown,
+  previewMode,
+  onTogglePreview,
+}: SideRailProps) {
   const handleCopyPath = useCallback(() => {
     void navigator.clipboard
       .writeText(filePath)
@@ -78,9 +101,45 @@ export function SideRail({ filePath, isMarkdown, previewMode, onTogglePreview }:
         onClick={handleCopyPath}
         ariaLabel="Copy file path"
       />
+
+      {absolutePath && (
+        <FileEditorPicker
+          filePath={absolutePath}
+          dirPath={absoluteDir ?? absolutePath}
+          line={openAtLine}
+          trigger={
+            <button
+              type="button"
+              aria-label="Open file in editor"
+              className={RAIL_BUTTON_CLASS}
+            >
+              <span className="flex h-[14px] w-[14px] shrink-0 items-center justify-center">
+                <ExternalLink size={13} />
+              </span>
+              <span className={RAIL_LABEL_CLASS}>Open</span>
+            </button>
+          }
+        />
+      )}
     </nav>
   );
 }
+
+/** Shared classes for the rail's button structure — used by both RailButton
+ *  and the inline DropdownMenu trigger so they remain visually identical. */
+const RAIL_BUTTON_CLASS = [
+  "relative flex min-h-[30px] w-full items-center gap-2.5",
+  "px-3 py-1 text-left font-mono text-[10.5px] uppercase tracking-[0.04em]",
+  "transition-colors text-muted-foreground hover:bg-muted/50 hover:text-foreground",
+  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring/55",
+].join(" ");
+
+const RAIL_LABEL_CLASS = [
+  "-translate-x-1 whitespace-nowrap opacity-0",
+  "transition-[opacity,transform] duration-150 delay-[60ms]",
+  "group-hover/rail:translate-x-0 group-hover/rail:opacity-100",
+  "group-focus-within/rail:translate-x-0 group-focus-within/rail:opacity-100",
+].join(" ");
 
 /** Props for a single rail action button. */
 interface RailButtonProps {
@@ -102,15 +161,11 @@ function RailButton({ icon, label, pressed, onClick, ariaLabel }: RailButtonProp
       onClick={onClick}
       aria-pressed={pressed}
       aria-label={ariaLabel}
-      className={[
-        "relative flex min-h-[30px] w-full items-center gap-2.5",
-        "px-3 py-1 text-left font-mono text-[10.5px] uppercase tracking-[0.04em]",
-        "transition-colors",
-        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring/55",
+      className={
         pressed
-          ? "bg-muted/40 text-foreground"
-          : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-      ].join(" ")}
+          ? `${RAIL_BUTTON_CLASS} bg-muted/40 text-foreground`
+          : RAIL_BUTTON_CLASS
+      }
     >
       {pressed && (
         <span
@@ -121,16 +176,7 @@ function RailButton({ icon, label, pressed, onClick, ariaLabel }: RailButtonProp
       <span className="flex h-[14px] w-[14px] shrink-0 items-center justify-center">
         {icon}
       </span>
-      <span
-        className={[
-          "-translate-x-1 whitespace-nowrap opacity-0",
-          "transition-[opacity,transform] duration-150 delay-[60ms]",
-          "group-hover/rail:translate-x-0 group-hover/rail:opacity-100",
-          "group-focus-within/rail:translate-x-0 group-focus-within/rail:opacity-100",
-        ].join(" ")}
-      >
-        {label}
-      </span>
+      <span className={RAIL_LABEL_CLASS}>{label}</span>
     </button>
   );
 }
