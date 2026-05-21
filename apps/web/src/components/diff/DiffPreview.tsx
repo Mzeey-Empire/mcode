@@ -1,7 +1,13 @@
-import { useMemo, lazy, Suspense } from "react";
-import { reconstructNewContent, type ParsedDiffLine } from "@/lib/diff-parser";
+import { lazy, Suspense, useMemo } from "react";
+import { reconstructWithChangeMap } from "@/lib/diff-preview-content";
+import type { ParsedDiffLine } from "@/lib/diff-parser";
 
-const PreviewMarkdown = lazy(() => import("@/components/chat/MarkdownContent"));
+/**
+ * Lazy-loaded inner renderer. Bundles `react-markdown`, `remark-gfm` and
+ * our diff-markers plugin into a separate chunk so the diff preview only
+ * pulls them in when the user actually clicks Preview.
+ */
+const PreviewMarkdown = lazy(() => import("./DiffPreviewMarkdown"));
 
 /** Props for {@link DiffPreview}. */
 interface DiffPreviewProps {
@@ -10,17 +16,27 @@ interface DiffPreviewProps {
 }
 
 /**
- * Renders a markdown preview of the new (post-change) file content reconstructed
- * from parsed diff lines. Reuses the existing {@link MarkdownContent} renderer so
- * GFM tables, headings, code blocks, and Mermaid diagrams all work out of the box.
+ * Whole-file Markdown preview with GitHub-style change highlighting.
+ *
+ * Reconstructs the post-change content from the parsed diff lines and
+ * tags each block whose source range contains an added line so the
+ * renderer can tint it sage. Removed content is omitted from the preview
+ * — the raw diff view shows it.
  */
 export function DiffPreview({ lines }: DiffPreviewProps) {
-  const markdown = useMemo(() => reconstructNewContent(lines), [lines]);
+  const { content, addedLines } = useMemo(
+    () => reconstructWithChangeMap(lines),
+    [lines],
+  );
 
   return (
-    <div className="p-4 text-sm leading-relaxed text-foreground/80">
-      <Suspense fallback={<span className="text-muted-foreground text-sm">Loading preview…</span>}>
-        <PreviewMarkdown content={markdown} />
+    <div className="p-4 text-sm leading-relaxed text-foreground/85">
+      <Suspense
+        fallback={
+          <span className="text-muted-foreground text-sm">Loading preview…</span>
+        }
+      >
+        <PreviewMarkdown content={content} addedLines={addedLines} />
       </Suspense>
     </div>
   );
