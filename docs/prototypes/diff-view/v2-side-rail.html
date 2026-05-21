@@ -1,0 +1,1290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>V2 · Side Rail (rev 2) — Diff View Prototype</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: oklch(0.155 0.008 75);
+    --panel: oklch(0.185 0.008 75);
+    --panel-2: oklch(0.21 0.008 75);
+    --surface: oklch(0.235 0.008 75);
+    --rail-bg: oklch(0.20 0.008 75 / 0.78);
+    --rail-bg-hover: oklch(0.215 0.008 75 / 0.97);
+    --border: oklch(0.32 0.008 75);
+    --border-subtle: oklch(0.255 0.008 75);
+    --text: oklch(0.94 0.005 75);
+    --text-muted: oklch(0.66 0.008 75);
+    --text-faint: oklch(0.46 0.008 75);
+    --accent: oklch(0.78 0.12 75);
+    --accent-dim: oklch(0.42 0.07 75);
+    --add: oklch(0.74 0.13 145);
+    --add-strong: oklch(0.78 0.16 145);
+    --add-bg: oklch(0.32 0.06 145 / 0.30);
+    --add-bg-soft: oklch(0.32 0.05 145 / 0.16);
+    --add-bg-word: oklch(0.50 0.13 145 / 0.45);
+    --remove: oklch(0.72 0.16 25);
+    --remove-bg: oklch(0.32 0.07 25 / 0.28);
+    --remove-bg-soft: oklch(0.32 0.06 25 / 0.16);
+    --remove-bg-word: oklch(0.50 0.16 25 / 0.42);
+    --focus: oklch(0.78 0.12 75 / 0.55);
+    --sans: "Public Sans", ui-sans-serif, system-ui, sans-serif;
+    --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13px;
+    line-height: 1.5;
+    min-height: 100vh;
+    padding: 56px 24px 96px;
+  }
+  .wrap { max-width: 1240px; margin: 0 auto; }
+
+  /* ── HEADER ─────────────────────────────────────────── */
+  header { margin-bottom: 40px; max-width: 720px; }
+  .crumb {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.18em;
+    color: var(--text-faint); margin-bottom: 16px;
+    text-decoration: none;
+  }
+  .crumb a { color: inherit; text-decoration: none; }
+  .crumb a:hover { color: var(--accent); }
+  h1 {
+    font-size: 38px;
+    font-weight: 500;
+    margin: 0 0 14px;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+  }
+  .lede {
+    color: var(--text-muted);
+    font-size: 15px;
+    line-height: 1.6;
+    margin: 0 0 24px;
+  }
+  .lede strong { color: var(--text); font-weight: 500; }
+  .lede code {
+    font-family: var(--mono); font-size: 12.5px;
+    background: var(--panel); padding: 1px 5px; border-radius: 3px;
+  }
+  .changes-from-v1 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1px;
+    background: var(--border-subtle);
+    border: 1px solid var(--border-subtle);
+    border-radius: 5px;
+    overflow: hidden;
+  }
+  .changes-from-v1 div {
+    background: var(--panel);
+    padding: 12px 14px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+  .changes-from-v1 div strong {
+    display: block;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    font-size: 10px;
+    font-weight: 500;
+    margin-bottom: 4px;
+  }
+
+  /* ── SECTION LABELS ──────────────────────────────────── */
+  .section-label {
+    margin: 56px 0 12px;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--text-faint);
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+  }
+  .section-label::before, .section-label::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--border-subtle);
+  }
+  .section-label::before { flex: 0; min-width: 0; }
+  .section-note {
+    margin: 0 0 16px;
+    max-width: 80ch;
+    color: var(--text-muted);
+    font-size: 13.5px;
+    line-height: 1.55;
+  }
+  .section-note code {
+    font-family: var(--mono); font-size: 12px;
+    background: var(--panel); padding: 1px 5px; border-radius: 3px;
+  }
+
+  /* ── DIFF PANEL ─────────────────────────────────────── */
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    overflow: hidden;
+    font-size: 12.5px;
+  }
+  .panel-toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .view-tabs { display: flex; gap: 22px; }
+  .view-tabs button {
+    appearance: none; background: none; border: 0;
+    color: var(--text-faint);
+    font-family: inherit; font-size: 11.5px; font-weight: 500;
+    padding: 4px 0 6px; cursor: pointer; position: relative;
+  }
+  .view-tabs button:hover { color: var(--text); }
+  .view-tabs button[aria-pressed="true"] { color: var(--text); }
+  .view-tabs button[aria-pressed="true"]::after {
+    content: ""; position: absolute; left:0; right:0; bottom:0;
+    height: 1.5px; background: var(--text);
+  }
+  .cum-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .cum-head .count {
+    font-family: var(--mono); font-size: 11px; color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .cum-head .label {
+    font-family: var(--mono); font-size: 10.5px;
+    text-transform: uppercase; letter-spacing: 0.14em;
+    color: var(--text-faint);
+  }
+  /* Refresh affordance — appears when new snapshots arrived while the
+     user is actively viewing the "All" view (per the snapshotsPending
+     state already wired into diffStore). */
+  .pending-refresh {
+    appearance: none;
+    margin-left: auto;
+    background: oklch(0.21 0.008 75);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+    border-radius: 4px;
+    padding: 4px 9px 4px 8px;
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    display: inline-flex; align-items: center; gap: 8px;
+    transition: color 140ms, background 140ms, border-color 140ms;
+  }
+  .pending-refresh:hover {
+    color: var(--text);
+    background: var(--surface);
+    border-color: var(--border);
+  }
+  .pending-refresh:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 1px;
+  }
+  .pending-refresh svg { width: 11px; height: 11px; }
+  .pending-refresh .pulse {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--add);
+    box-shadow: 0 0 0 0 oklch(0.74 0.13 145 / 0.55);
+    animation: pulse 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0   oklch(0.74 0.13 145 / 0.55); }
+    70%  { box-shadow: 0 0 0 6px oklch(0.74 0.13 145 / 0); }
+    100% { box-shadow: 0 0 0 0   oklch(0.74 0.13 145 / 0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pending-refresh .pulse { animation: none; }
+  }
+
+  /* ── FILE ENTRY ─────────────────────────────────────── */
+  .file { border-bottom: 1px solid var(--border-subtle); }
+  .file:last-child { border-bottom: none; }
+
+  /* Disclosure row — pure expand/collapse, no inline actions */
+  .file-row {
+    width: 100%;
+    appearance: none; background: none; border: 0;
+    color: var(--text); font-family: inherit; text-align: left;
+    display: grid;
+    grid-template-columns: 18px 1fr auto auto;
+    align-items: center; gap: 10px;
+    padding: 8px 14px 8px 12px;
+    cursor: pointer;
+    transition: background 120ms;
+  }
+  .file-row:hover { background: oklch(0.21 0.008 75); }
+  .file-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .file-row .chev {
+    font-family: var(--mono); font-size: 12px; line-height: 1;
+    color: var(--text-faint); width: 18px; text-align: center;
+    transition: transform 150ms cubic-bezier(0.2,0.7,0.2,1);
+  }
+  .file[data-open="true"] .file-row { background: oklch(0.21 0.008 75); }
+  .file[data-open="true"] .file-row .chev { transform: rotate(90deg); color: var(--text); }
+  .file-name {
+    font-family: var(--mono); font-size: 12.5px; min-width: 0;
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .file-name .base { font-weight: 500; }
+  .file-name .dir { color: var(--text-faint); font-size: 11px; }
+  .stats {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+  }
+  .stats .bar {
+    width: 44px; height: 3px;
+    display: flex; overflow: hidden;
+    border-radius: 999px;
+    background: var(--border-subtle);
+  }
+  .stats .bar .add { background: var(--add); }
+  .stats .bar .rem { background: var(--remove); }
+  .stats .add-n { color: var(--add); }
+  .stats .rem-n { color: var(--remove); }
+  .ext-tag {
+    font-family: var(--mono); font-size: 9.5px;
+    text-transform: uppercase; letter-spacing: 0.14em;
+    color: var(--text-faint);
+    padding: 1px 6px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 3px;
+  }
+
+  /* ── EXPANDED BODY: rail OVERLAYS, diff is full-width ── */
+  .file-body {
+    position: relative;
+    border-top: 1px solid var(--border-subtle);
+    /* Reserve only 32px on the right for the collapsed rail. Diff content
+       remains usable; the rail expands AS AN OVERLAY when hovered. */
+    /* min-height guarantees the rail (5 buttons + sep + padding ≈ 171px)
+       is always fully visible, even on 1-line diffs. The extra space below
+       small diffs reads as intentional vertical breathing room. */
+    min-height: 180px;
+  }
+  .diff-wrap {
+    padding-right: 32px;
+    min-width: 0;
+  }
+
+  /* The rail — absolute, overlays. Hover on the RAIL itself expands it. */
+  .side-rail {
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    width: 32px;
+    background: var(--rail-bg);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border-left: 1px solid var(--border-subtle);
+    display: flex; flex-direction: column;
+    padding: 6px 0;
+    gap: 2px;
+    transition: width 220ms cubic-bezier(0.2,0.7,0.2,1),
+                background 220ms cubic-bezier(0.2,0.7,0.2,1),
+                box-shadow 220ms cubic-bezier(0.2,0.7,0.2,1);
+    overflow: hidden;
+    z-index: 2;
+  }
+  /* Hover ONLY on the rail expands. Focus-within keeps it open for keyboard. */
+  .side-rail:hover,
+  .side-rail:focus-within {
+    width: 152px;
+    background: var(--rail-bg-hover);
+    box-shadow: -4px 0 16px oklch(0.10 0.008 75 / 0.35);
+  }
+
+  .rail-btn {
+    appearance: none; background: none; border: 0;
+    width: 100%; min-height: 30px;
+    color: var(--text-muted);
+    display: flex; align-items: center;
+    gap: 10px;
+    padding: 0 12px 0 9px;
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    transition: color 140ms, background 140ms;
+    position: relative;
+  }
+  .rail-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
+  .rail-btn .rlabel {
+    opacity: 0;
+    transform: translateX(-4px);
+    transition: opacity 160ms 60ms, transform 160ms 60ms;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .side-rail:hover .rlabel,
+  .side-rail:focus-within .rlabel {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  .rail-btn:hover {
+    color: var(--text);
+    background: oklch(0.28 0.008 75);
+  }
+  .rail-btn:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
+  }
+  .rail-btn[aria-pressed="true"] {
+    color: var(--text);
+    background: oklch(0.28 0.008 75 / 0.7);
+  }
+  /* The single 2px accent dot on active button — placed inside without using border-left as a stripe */
+  .rail-btn[aria-pressed="true"]::after {
+    content: "";
+    position: absolute;
+    left: 3px; top: 50%;
+    transform: translateY(-50%);
+    width: 2px; height: 14px;
+    background: var(--accent);
+    border-radius: 2px;
+  }
+  .rail-sep {
+    height: 1px;
+    background: var(--border-subtle);
+    margin: 4px 12px;
+  }
+
+  /* Editor-picker popover — appears to the LEFT of the rail when the
+     user clicks "Open". Mirrors the existing OpenInEditorMenu dropdown
+     pattern but anchored to the rail button. */
+  .editor-pop {
+    position: absolute;
+    right: 156px;
+    top: 56px;
+    z-index: 3;
+    background: oklch(0.215 0.008 75);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 4px;
+    min-width: 200px;
+    box-shadow: 0 8px 24px oklch(0.10 0.008 75 / 0.55);
+    font-family: var(--sans);
+  }
+  .editor-pop::after {
+    /* Small notch toward the rail */
+    content: "";
+    position: absolute;
+    top: 14px; right: -5px;
+    width: 8px; height: 8px;
+    background: oklch(0.215 0.008 75);
+    border-top: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+    transform: rotate(45deg);
+  }
+  .editor-pop .pop-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--text-faint);
+    padding: 6px 10px 4px;
+  }
+  .editor-pop .pop-item {
+    appearance: none;
+    width: 100%; border: 0; background: none;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
+    padding: 7px 10px;
+    text-align: left;
+    border-radius: 3px;
+    cursor: pointer;
+    display: flex; align-items: center; gap: 10px;
+    transition: background 130ms;
+  }
+  .editor-pop .pop-item:hover { background: var(--surface); }
+  .editor-pop .pop-item kbd {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    background: oklch(0.28 0.008 75);
+    padding: 1px 5px;
+    border-radius: 3px;
+    margin-left: auto;
+  }
+  .editor-pop .pop-item .pop-glyph {
+    width: 16px; height: 16px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 500;
+    color: var(--text-muted);
+    border: 1px solid var(--border-subtle);
+    border-radius: 3px;
+    background: var(--panel);
+  }
+  .editor-pop .pop-sep {
+    height: 1px; background: var(--border-subtle); margin: 4px 6px;
+  }
+  .editor-pop .pop-note {
+    padding: 6px 10px 8px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-faint);
+    letter-spacing: 0.02em;
+    line-height: 1.4;
+  }
+  .editor-pop .pop-note code {
+    font-family: var(--mono); font-size: 10px;
+    background: oklch(0.16 0.008 75);
+    padding: 1px 4px; border-radius: 2px;
+  }
+
+  /* ── DIFF CONTENT ───────────────────────────────────── */
+  .diff {
+    font-family: var(--mono); font-size: 12px; line-height: 1.55;
+  }
+  .diff .line {
+    display: grid;
+    grid-template-columns: 38px 38px 1fr;
+    align-items: baseline;
+  }
+  .diff .gutter {
+    text-align: right; padding: 0 8px 0 4px;
+    color: var(--text-faint);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    user-select: none;
+  }
+  .diff .code {
+    padding: 0 14px 0 10px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text);
+  }
+  .diff .line.add { background: var(--add-bg); }
+  .diff .line.add .gutter { color: var(--add); }
+  .diff .line.rem { background: var(--remove-bg); }
+  .diff .line.rem .gutter { color: var(--remove); }
+  .diff .line.hunk { background: oklch(0.20 0.008 75); }
+  .diff .line.hunk .code { color: var(--text-faint); }
+  .diff .line .word-add {
+    background: var(--add-bg-word);
+    border-radius: 2px;
+  }
+  .diff .line .word-rem {
+    background: var(--remove-bg-word);
+    border-radius: 2px;
+    text-decoration: line-through;
+    text-decoration-thickness: 1px;
+  }
+
+  /* "Show more" button for large diffs */
+  .show-more {
+    appearance: none;
+    width: 100%;
+    background: oklch(0.175 0.008 75);
+    border: 0;
+    border-top: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 9px 14px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    transition: color 130ms, background 130ms;
+  }
+  .show-more:hover { color: var(--text); background: var(--surface); }
+  .show-more svg { width: 12px; height: 12px; }
+
+  /* ── MARKDOWN PREVIEW (whole-file with GitHub-style change spotting) ── */
+  .preview-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 44px 10px 16px;
+    background: oklch(0.175 0.008 75);
+    border-bottom: 1px solid var(--border-subtle);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+  }
+  .preview-head .filemeta { color: var(--text); }
+  .preview-head .filter-pills {
+    display: inline-flex; gap: 2px;
+    padding: 2px;
+    background: oklch(0.20 0.008 75);
+    border-radius: 4px;
+    border: 1px solid var(--border-subtle);
+  }
+  .preview-head .filter-pills button {
+    appearance: none; background: none; border: 0;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    padding: 4px 9px;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  .preview-head .filter-pills button[aria-pressed="true"] {
+    background: var(--surface);
+    color: var(--text);
+  }
+
+  .preview {
+    padding: 22px 56px 28px 28px;
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.65;
+    max-width: 76ch;
+  }
+  .preview h1, .preview h2, .preview h3, .preview h4 {
+    color: var(--text);
+    margin: 18px 0 10px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+  .preview h1 { font-size: 24px; margin-top: 0; }
+  .preview h2 { font-size: 19px; }
+  .preview h3 { font-size: 16px; }
+  .preview p { margin: 0 0 14px; color: var(--text); }
+  .preview ul, .preview ol { margin: 0 0 14px; padding-left: 22px; color: var(--text); }
+  .preview ul li, .preview ol li { margin: 4px 0; }
+  .preview code {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: oklch(0.21 0.008 75);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .preview pre {
+    margin: 0 0 14px;
+    padding: 12px 14px;
+    background: oklch(0.16 0.008 75);
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text);
+    overflow-x: auto;
+  }
+  .preview blockquote {
+    margin: 0 0 14px;
+    padding: 6px 14px;
+    background: oklch(0.18 0.008 75);
+    color: var(--text-muted);
+  }
+  .preview hr {
+    border: 0; height: 1px;
+    background: var(--border-subtle);
+    margin: 22px 0;
+  }
+  .preview .row {
+    /* Full-width block backgrounds for add/remove paragraphs, never a left stripe.
+       The colour treatment alone communicates change — no pills, no tags. */
+    margin: 0 -14px 14px;
+    padding: 8px 14px;
+    border-radius: 3px;
+  }
+  .preview .row.added { background: var(--add-bg-soft); }
+  .preview .row.removed {
+    background: var(--remove-bg-soft);
+    color: var(--text-muted);
+    text-decoration: line-through;
+    text-decoration-color: oklch(0.55 0.16 25 / 0.55);
+    text-decoration-thickness: 1px;
+  }
+  .preview .row.removed p,
+  .preview .row.removed h1,
+  .preview .row.removed h2,
+  .preview .row.removed h3 { color: var(--text-muted); }
+  .preview .row > *:first-child { margin-top: 0; }
+  .preview .row > *:last-child { margin-bottom: 0; }
+  .preview .word-add { background: var(--add-bg-word); border-radius: 2px; padding: 0 2px; }
+  .preview .word-rem {
+    background: var(--remove-bg-word);
+    border-radius: 2px; padding: 0 2px;
+    text-decoration: line-through;
+    text-decoration-thickness: 1px;
+  }
+
+  /* ── EMPTY STATE / META ─────────────────────────────── */
+  .empty-state {
+    padding: 36px 14px;
+    text-align: center;
+    color: var(--text-faint);
+  }
+  .empty-state .glyph {
+    font-family: var(--mono);
+    font-size: 28px;
+    color: oklch(0.30 0.008 75);
+    margin-bottom: 6px;
+  }
+  .empty-state .cap {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--text-faint);
+  }
+
+  /* ── RAIL STATE INDICATOR — micro callouts ──────────── */
+  .rail-states {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+    margin: 32px 0 0;
+  }
+  .rail-states .state {
+    background: var(--panel);
+    border: 1px solid var(--border-subtle);
+    border-radius: 5px;
+    padding: 16px 18px 18px;
+  }
+  .rail-states .state h4 {
+    margin: 0 0 6px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: var(--accent);
+    font-weight: 500;
+  }
+  .rail-states .state p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  .rail-states .state code {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    background: var(--surface);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--text);
+  }
+
+  @media (max-width: 760px) {
+    .rail-states { grid-template-columns: 1fr; }
+    .preview { padding: 18px 36px 22px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+<header>
+  <div class="crumb"><a href="index.html">← All prototypes</a></div>
+  <h1>V2 · Side Rail <span style="color:var(--text-faint); font-weight:400; font-size:22px;"> rev 2</span></h1>
+  <p class="lede">
+    The rail now <strong>overlays</strong> rather than steals diff width.
+    Hovering the rail itself (not the diff) expands it. Actions are
+    <strong>Diff · Preview · Copy path · Open · Reveal</strong> — the
+    close action is gone (the header is the collapse target). The
+    Markdown <strong>Preview</strong> shows the whole file, with
+    GitHub-style change highlighting so you can spot diffs in context.
+  </p>
+  <div class="changes-from-v1">
+    <div><strong>Rail position</strong>Absolute overlay, never blocks diff</div>
+    <div><strong>Hover target</strong>The rail, not the file body</div>
+    <div><strong>Preview label</strong>"Preview" (not "Render")</div>
+    <div><strong>Copy</strong>Copies the file path</div>
+    <div><strong>Close</strong>Removed — header collapses</div>
+    <div><strong>MD preview</strong>Whole-file render with diff marks</div>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     STATE 0 — New changes arrived while user is viewing
+═══════════════════════════════════════════════════════════════ -->
+
+<div class="section-label">State 0 · pending refresh · viewing while changes land</div>
+<p class="section-note">
+  When a new turn persists snapshots <em>and the user is currently
+  viewing</em> the "All" view, the existing
+  <code>diffStore.snapshotsPendingByThread</code> flag flips on. We surface
+  it in the cumulative header as a quiet sage pulse + "New changes"
+  pill. Click it to refetch; the pill clears, and a fresh count + turn
+  total drops in. If the user is <em>not</em> viewing, the refetch
+  happens silently so the next open shows fresh data — no pill needed.
+</p>
+
+<section class="panel" aria-label="Changes panel · pending refresh state">
+  <div class="panel-toolbar">
+    <div class="view-tabs" role="tablist" aria-label="View mode">
+      <button role="tab" aria-pressed="true">All</button>
+      <button role="tab" aria-pressed="false">By Turn</button>
+      <button role="tab" aria-pressed="false">Commits</button>
+      <button role="tab" aria-pressed="false">Summary</button>
+    </div>
+    <div style="font-family:var(--mono); font-size:10.5px; color:var(--text-faint); letter-spacing:0.14em; text-transform:uppercase;">
+      worktree · feat/diff-view
+    </div>
+  </div>
+
+  <!-- The header that flips when snapshotsPending is true for this thread -->
+  <div class="cum-head">
+    <span class="count">7</span>
+    <span class="label">files · 4 turns</span>
+    <button class="pending-refresh" type="button"
+            aria-label="New changes available — click to refresh"
+            data-testid="cumulative-view-refresh">
+      <span class="pulse" aria-hidden="true"></span>
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true">
+        <path d="M3 8a5 5 0 0 1 9-3"/>
+        <path d="M13 8a5 5 0 0 1-9 3"/>
+        <path d="M12 2v3h-3M4 14v-3h3"/>
+      </svg>
+      New changes
+    </button>
+  </div>
+
+  <!-- A few files to give the panel weight (not the showcase here — header is) -->
+  <div class="file">
+    <button class="file-row" type="button" aria-expanded="false">
+      <span class="chev" aria-hidden="true">›</span>
+      <span class="file-name"><span class="base">README.md</span><span class="dir">docs</span></span>
+      <span class="stats">
+        <span class="bar"><span class="add" style="width:86%"></span><span class="rem" style="width:14%"></span></span>
+        <span class="add-n">+18</span><span class="rem-n">−3</span>
+      </span>
+      <span class="ext-tag">MD</span>
+    </button>
+  </div>
+  <div class="file">
+    <button class="file-row" type="button" aria-expanded="false">
+      <span class="chev" aria-hidden="true">›</span>
+      <span class="file-name"><span class="base">format.ts</span><span class="dir">apps/web/src/lib</span></span>
+      <span class="stats">
+        <span class="bar"><span class="add" style="width:75%"></span><span class="rem" style="width:25%"></span></span>
+        <span class="add-n">+12</span><span class="rem-n">−4</span>
+      </span>
+      <span class="ext-tag">TS</span>
+    </button>
+  </div>
+  <div class="file">
+    <button class="file-row" type="button" aria-expanded="false">
+      <span class="chev" aria-hidden="true">›</span>
+      <span class="file-name"><span class="base">CHANGELOG.md</span><span class="dir">root</span></span>
+      <span class="stats">
+        <span class="bar"><span class="add" style="width:100%"></span></span>
+        <span class="add-n">+6</span>
+      </span>
+      <span class="ext-tag">MD</span>
+    </button>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     STATE 1 — Default (markdown file, Diff view, rail collapsed)
+═══════════════════════════════════════════════════════════════ -->
+
+<div class="section-label">State 1 · default · diff view</div>
+<p class="section-note">
+  The rail sits at <code>width: 32px</code>, semi-transparent. The diff
+  uses <code>padding-right: 32px</code> so code never sits under the icons.
+  Hover the rail's right edge to reveal labels — the diff is untouched.
+</p>
+
+<section class="panel" aria-label="Changes panel · default state">
+  <div class="panel-toolbar">
+    <div class="view-tabs" role="tablist" aria-label="View mode">
+      <button role="tab" aria-pressed="true">All</button>
+      <button role="tab" aria-pressed="false">By Turn</button>
+      <button role="tab" aria-pressed="false">Commits</button>
+      <button role="tab" aria-pressed="false">Summary</button>
+    </div>
+    <div style="font-family:var(--mono); font-size:10.5px; color:var(--text-faint); letter-spacing:0.14em; text-transform:uppercase;">
+      worktree · feat/diff-view
+    </div>
+  </div>
+
+  <div class="cum-head">
+    <span class="count">7</span>
+    <span class="label">files · 4 turns</span>
+  </div>
+
+  <!-- README.md EXPANDED, DIFF MODE -->
+  <div class="file" data-open="true">
+    <button class="file-row" type="button" aria-expanded="true">
+      <span class="chev" aria-hidden="true">›</span>
+      <span class="file-name"><span class="base">README.md</span><span class="dir">docs</span></span>
+      <span class="stats">
+        <span class="bar"><span class="add" style="width:86%"></span><span class="rem" style="width:14%"></span></span>
+        <span class="add-n">+18</span><span class="rem-n">−3</span>
+      </span>
+      <span class="ext-tag">MD</span>
+    </button>
+
+    <div class="file-body">
+      <div class="diff-wrap">
+        <div class="diff">
+          <div class="line hunk"><span class="gutter"></span><span class="gutter"></span><span class="code">@@ -42,3 +42,18 @@ ## Installation</span></div>
+          <div class="line"><span class="gutter">42</span><span class="gutter">42</span><span class="code">Mcode runs as a desktop app on macOS, Windows, and Linux.</span></div>
+          <div class="line"><span class="gutter">43</span><span class="gutter">43</span><span class="code"></span></div>
+          <div class="line rem"><span class="gutter">44</span><span class="gutter"></span><span class="code">- Download the latest release from the GitHub releases page.</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">44</span><span class="code">+ ### Installing from a nightly build</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">45</span><span class="code">+</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">46</span><span class="code">+ Per-build releases are published nightly to the `nightly` channel.</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">47</span><span class="code">+ To opt in, set `mcode.update.channel = "nightly"` in your settings.</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">48</span><span class="code">+</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">49</span><span class="code">+ ```sh</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">50</span><span class="code">+ mcode update --channel nightly</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">51</span><span class="code">+ ```</span></div>
+        </div>
+      </div>
+
+      <nav class="side-rail" aria-label="File actions">
+        <button class="rail-btn" type="button" aria-pressed="true" aria-label="Show diff (current view)">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M5 3 2 8l3 5M11 3l3 5-3 5"/></svg>
+          <span class="rlabel">Diff</span>
+        </button>
+        <button class="rail-btn" type="button" aria-pressed="false" aria-label="Show preview">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 3h10v10H3z"/><path d="M5 6h6M5 9h4"/></svg>
+          <span class="rlabel">Preview</span>
+        </button>
+        <div class="rail-sep" aria-hidden="true"></div>
+        <button class="rail-btn" type="button" aria-label="Copy file path">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="5" y="5" width="8" height="8" rx="1"/><path d="M3 11V4a1 1 0 011-1h7"/></svg>
+          <span class="rlabel">Copy path</span>
+        </button>
+        <button class="rail-btn" type="button" aria-label="Open in editor">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 8v5h10V8"/><path d="M8 2v8M5 5l3-3 3 3"/></svg>
+          <span class="rlabel">Open</span>
+        </button>
+        <button class="rail-btn" type="button" aria-label="Reveal in file tree">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 4h5l1 2h6v7H2z"/></svg>
+          <span class="rlabel">Reveal</span>
+        </button>
+      </nav>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     STATE 2 — One-line change
+═══════════════════════════════════════════════════════════════ -->
+
+<div class="section-label">State 2 · one-line change · word-level highlights</div>
+<p class="section-note">
+  Tiny diffs keep their compact footprint — the rail still spans the
+  full height of the body so it's reachable even on single-line edits.
+  Word-level intra-line highlights (<span class="word-add" style="font-family:var(--mono); font-size:12px;">added</span> /
+  <span class="word-rem" style="font-family:var(--mono); font-size:12px;">removed</span>) show what changed within the line.
+</p>
+
+<section class="panel" aria-label="Changes panel · one-line state">
+  <div class="cum-head">
+    <span class="count">1</span>
+    <span class="label">file · 1 line touched</span>
+  </div>
+
+  <div class="file" data-open="true">
+    <button class="file-row" type="button" aria-expanded="true">
+      <span class="chev" aria-hidden="true">›</span>
+      <span class="file-name"><span class="base">package.json</span><span class="dir">apps/server</span></span>
+      <span class="stats">
+        <span class="bar"><span class="add" style="width:50%"></span><span class="rem" style="width:50%"></span></span>
+        <span class="add-n">+1</span><span class="rem-n">−1</span>
+      </span>
+      <span class="ext-tag">JSON</span>
+    </button>
+
+    <div class="file-body">
+      <div class="diff-wrap">
+        <div class="diff">
+          <div class="line hunk"><span class="gutter"></span><span class="gutter"></span><span class="code">@@ -14,1 +14,1 @@</span></div>
+          <div class="line"><span class="gutter">13</span><span class="gutter">13</span><span class="code">    "drizzle-kit": "^0.31.5",</span></div>
+          <div class="line rem"><span class="gutter">14</span><span class="gutter"></span><span class="code">-    "drizzle-orm": "<span class="word-rem">^0.36.4</span>",</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">14</span><span class="code">+    "drizzle-orm": "<span class="word-add">^0.38.0</span>",</span></div>
+          <div class="line"><span class="gutter">15</span><span class="gutter">15</span><span class="code">    "better-sqlite3": "^12.9.0",</span></div>
+        </div>
+      </div>
+
+      <nav class="side-rail" aria-label="File actions">
+        <button class="rail-btn" type="button" aria-pressed="true" aria-label="Show diff (current view)">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M5 3 2 8l3 5M11 3l3 5-3 5"/></svg>
+          <span class="rlabel">Diff</span>
+        </button>
+        <div class="rail-sep" aria-hidden="true"></div>
+        <button class="rail-btn" type="button" aria-label="Copy file path">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="5" y="5" width="8" height="8" rx="1"/><path d="M3 11V4a1 1 0 011-1h7"/></svg>
+          <span class="rlabel">Copy path</span>
+        </button>
+        <button class="rail-btn" type="button" aria-label="Open in editor">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 8v5h10V8"/><path d="M8 2v8M5 5l3-3 3 3"/></svg>
+          <span class="rlabel">Open</span>
+        </button>
+        <button class="rail-btn" type="button" aria-label="Reveal in file tree">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 4h5l1 2h6v7H2z"/></svg>
+          <span class="rlabel">Reveal</span>
+        </button>
+      </nav>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     STATE 3 — Large diff (truncated with show-more)
+═══════════════════════════════════════════════════════════════ -->
+
+<div class="section-label">State 3 · large diff · truncated with show-more</div>
+<p class="section-note">
+  Diffs over ~200 lines start truncated (first 100 lines visible). The
+  rail stays sticky to the file body — at any scroll position you can
+  still copy the path or jump to the file. The "Show more" button is
+  full-width and unambiguous, with the count in tabular nums.
+</p>
+
+<section class="panel" aria-label="Changes panel · large diff state">
+  <div class="cum-head">
+    <span class="count">1</span>
+    <span class="label">file · 462 lines touched</span>
+  </div>
+
+  <div class="file" data-open="true">
+    <button class="file-row" type="button" aria-expanded="true">
+      <span class="chev" aria-hidden="true">›</span>
+      <span class="file-name"><span class="base">codex-mapper.ts</span><span class="dir">apps/server/src/providers/codex</span></span>
+      <span class="stats">
+        <span class="bar"><span class="add" style="width:73%"></span><span class="rem" style="width:27%"></span></span>
+        <span class="add-n">+337</span><span class="rem-n">−125</span>
+      </span>
+      <span class="ext-tag">TS</span>
+    </button>
+
+    <div class="file-body">
+      <div class="diff-wrap">
+        <div class="diff">
+          <div class="line hunk"><span class="gutter"></span><span class="gutter"></span><span class="code">@@ -1,12 +1,46 @@ Codex protocol mapper</span></div>
+          <div class="line rem"><span class="gutter">1</span><span class="gutter"></span><span class="code">- import { EventEmitter } from "node:events";</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">1</span><span class="code">+ import { EventEmitter, once } from "node:events";</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">2</span><span class="code">+ import { setImmediate as setImmediateAsync } from "node:timers/promises";</span></div>
+          <div class="line"><span class="gutter">2</span><span class="gutter">3</span><span class="code">import type { AgentEvent, ToolCall } from "@mcode/contracts";</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">4</span><span class="code">+ import { codexTraceRecorder } from "./codex-trace.js";</span></div>
+          <div class="line"><span class="gutter">3</span><span class="gutter">5</span><span class="code"></span></div>
+          <div class="line"><span class="gutter">4</span><span class="gutter">6</span><span class="code">/**</span></div>
+          <div class="line"><span class="gutter">5</span><span class="gutter">7</span><span class="code"> * Maps Codex JSON-RPC protocol events to Mcode AgentEvents.</span></div>
+          <div class="line rem"><span class="gutter">6</span><span class="gutter"></span><span class="code">- * Stateless — pure function.</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">8</span><span class="code">+ * Stateful across a session — tracks <span class="word-add">subagent nesting,</span> tool-call IDs,</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">9</span><span class="code">+ * and the active <span class="word-add">turn</span> for parent-id attribution.</span></div>
+          <div class="line"><span class="gutter">7</span><span class="gutter">10</span><span class="code"> */</span></div>
+          <div class="line"><span class="gutter">8</span><span class="gutter">11</span><span class="code">export class CodexMapper extends EventEmitter {</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">12</span><span class="code">+   private callStack: string[] = [];</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">13</span><span class="code">+   private turnId: string | null = null;</span></div>
+          <div class="line"><span class="gutter">9</span><span class="gutter">14</span><span class="code">  constructor(private readonly source: string) {</span></div>
+          <div class="line"><span class="gutter">10</span><span class="gutter">15</span><span class="code">    super();</span></div>
+          <div class="line"><span class="gutter">11</span><span class="gutter">16</span><span class="code">  }</span></div>
+          <div class="line"><span class="gutter">12</span><span class="gutter">17</span><span class="code"></span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">18</span><span class="code">+   handle(event: CodexProtocolEvent): void {</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">19</span><span class="code">+     codexTraceRecorder.record(this.source, event);</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">20</span><span class="code">+     switch (event.type) {</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">21</span><span class="code">+       case "session.created":</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">22</span><span class="code">+         this.onSessionCreated(event);</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">23</span><span class="code">+         break;</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">24</span><span class="code">+       case "subagent.start":</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">25</span><span class="code">+         this.callStack.push(event.id);</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">26</span><span class="code">+         this.emit("subagent.start", event);</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">27</span><span class="code">+         break;</span></div>
+        </div>
+
+        <button class="show-more" type="button" aria-label="Show 362 more lines">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M4 6l4 4 4-4M4 10l4 4 4-4"/></svg>
+          Show 362 more lines
+          <span style="font-family:var(--mono); font-size:10px; color:var(--text-faint); margin-left:4px;">100 / 462</span>
+        </button>
+      </div>
+
+      <nav class="side-rail" aria-label="File actions">
+        <button class="rail-btn" type="button" aria-pressed="true" aria-label="Show diff (current view)">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M5 3 2 8l3 5M11 3l3 5-3 5"/></svg>
+          <span class="rlabel">Diff</span>
+        </button>
+        <div class="rail-sep" aria-hidden="true"></div>
+        <button class="rail-btn" type="button" aria-label="Copy file path">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="5" y="5" width="8" height="8" rx="1"/><path d="M3 11V4a1 1 0 011-1h7"/></svg>
+          <span class="rlabel">Copy path</span>
+        </button>
+        <button class="rail-btn" type="button" aria-label="Open in editor">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 8v5h10V8"/><path d="M8 2v8M5 5l3-3 3 3"/></svg>
+          <span class="rlabel">Open</span>
+        </button>
+        <button class="rail-btn" type="button" aria-label="Reveal in file tree">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 4h5l1 2h6v7H2z"/></svg>
+          <span class="rlabel">Reveal</span>
+        </button>
+      </nav>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     STATE 4 — Markdown Preview (whole file, GitHub-style spotting)
+═══════════════════════════════════════════════════════════════ -->
+
+<div class="section-label">State 4 · markdown preview · whole-file render with change-spotting</div>
+<p class="section-note">
+  Preview mode renders <em>the entire file</em>, not just the diffed
+  hunks. Added blocks get a sage-tinted background; removed blocks
+  render inline above their replacement with clay tint and
+  strikethrough. Word-level highlights mark intra-paragraph
+  edits — the colour and strikethrough do the talking, no pills
+  needed.
+</p>
+
+<section class="panel" aria-label="Changes panel · markdown preview state">
+  <div class="cum-head">
+    <span class="count">1</span>
+    <span class="label">file · markdown preview</span>
+  </div>
+
+  <div class="file" data-open="true">
+    <button class="file-row" type="button" aria-expanded="true">
+      <span class="chev" aria-hidden="true">›</span>
+      <span class="file-name"><span class="base">README.md</span><span class="dir">docs</span></span>
+      <span class="stats">
+        <span class="bar"><span class="add" style="width:86%"></span><span class="rem" style="width:14%"></span></span>
+        <span class="add-n">+18</span><span class="rem-n">−3</span>
+      </span>
+      <span class="ext-tag">MD</span>
+    </button>
+
+    <div class="file-body">
+      <div class="diff-wrap" style="padding-right: 32px;">
+        <div class="preview-head">
+          <span><span class="filemeta">docs/README.md</span> · whole file</span>
+          <div class="filter-pills" role="group" aria-label="Visibility filter">
+            <button type="button" aria-pressed="true">Show all</button>
+            <button type="button" aria-pressed="false">Changes only</button>
+          </div>
+        </div>
+
+        <div class="preview">
+          <h1>Mcode</h1>
+          <p>Performant AI agent orchestration desktop app built with Electron + TypeScript. Drive long-running coding agents across multiple worktrees and threads, review diffs and commits, and switch between projects without losing context.</p>
+
+          <h2>Quick start</h2>
+
+          <pre>bun install
+bun run dev</pre>
+
+          <p>Run <code>bun run setup</code> to bootstrap from a fresh clone. Run <code>bun run doctor</code> to verify all prerequisites are installed.</p>
+
+          <h2>Installation</h2>
+          <p>Mcode runs as a desktop app on macOS, Windows, and Linux.</p>
+
+          <div class="row removed">
+            Download the latest release from the GitHub releases page.
+          </div>
+
+          <div class="row added">
+            <h3>Installing from a nightly build</h3>
+            <p>Per-build releases are published nightly to the <code>nightly</code> channel. To opt in, set <code>mcode.update.channel = "nightly"</code> in your settings.</p>
+            <pre>mcode update --channel nightly</pre>
+          </div>
+
+          <h2>Supported agent harnesses</h2>
+          <p>This repo is configured for four agent harnesses. All four read <code>AGENTS.md</code>, share the same Stop-hook verify, and load the Playwright MCP for visual verification.</p>
+
+          <ul>
+            <li>Claude Code — <code>.claude/settings.json</code></li>
+            <li>Cursor — <code>.cursor/hooks.json</code></li>
+            <li>Codex — <code>.codex/hooks.json</code></li>
+            <li>OpenCode — <code>.opencode/opencode.json</code></li>
+          </ul>
+
+          <p>All four harnesses expose the same six commands: <code>/verify</code>, <code>/verify-e2e</code>, <code>/verify-e2e-desktop</code>, <code>/demo</code>, <code>/demo-desktop</code>, <code>/review-pr</code>.</p>
+
+          <p>The narrative pipeline classifies <span class="word-rem">model thoughts</span><span class="word-add"> text and thinking blocks</span> separately, with the Whisper redesign surfacing prose-first content and rail-only nesting for sub-agents.</p>
+
+          <hr/>
+
+          <p style="color:var(--text-faint); font-size:12px;">Licensed under MIT.</p>
+        </div>
+      </div>
+
+      <nav class="side-rail" aria-label="File actions">
+        <button class="rail-btn" type="button" aria-pressed="false" aria-label="Show diff">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M5 3 2 8l3 5M11 3l3 5-3 5"/></svg>
+          <span class="rlabel">Diff</span>
+        </button>
+        <button class="rail-btn" type="button" aria-pressed="true" aria-label="Show preview (current view)">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 3h10v10H3z"/><path d="M5 6h6M5 9h4"/></svg>
+          <span class="rlabel">Preview</span>
+        </button>
+        <div class="rail-sep" aria-hidden="true"></div>
+        <button class="rail-btn" type="button" aria-label="Copy file path">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="5" y="5" width="8" height="8" rx="1"/><path d="M3 11V4a1 1 0 011-1h7"/></svg>
+          <span class="rlabel">Copy path</span>
+        </button>
+        <button class="rail-btn" type="button" aria-label="Open in editor">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 8v5h10V8"/><path d="M8 2v8M5 5l3-3 3 3"/></svg>
+          <span class="rlabel">Open</span>
+        </button>
+        <button class="rail-btn" type="button" aria-label="Reveal in file tree">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 4h5l1 2h6v7H2z"/></svg>
+          <span class="rlabel">Reveal</span>
+        </button>
+      </nav>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     STATE 5 — Open / Reveal — using existing desktop IPC
+═══════════════════════════════════════════════════════════════ -->
+
+<div class="section-label">State 5 · open &amp; reveal · existing desktop IPC</div>
+<p class="section-note">
+  Mcode doesn't host its own code editor, but the desktop bridge
+  already exposes <code>openInEditor(editorId, path)</code> and
+  <code>openInExplorer(path)</code> (see
+  <code>OpenInEditorMenu.tsx</code>). The rail's <strong>Open</strong>
+  button surfaces a small picker anchored to its left, listing only
+  the editors <code>useInstalledEditors()</code> detected on the user's
+  machine. <strong>Reveal</strong> is a single-action button that
+  opens the OS file manager at the file's directory. No new IPC is
+  needed — both are wired today, just not yet surfaced in the diff view.
+</p>
+
+<section class="panel" aria-label="Changes panel · open and reveal demo">
+  <div class="cum-head">
+    <span class="count">1</span>
+    <span class="label">file · click "open" on the rail</span>
+  </div>
+
+  <div class="file" data-open="true">
+    <button class="file-row" type="button" aria-expanded="true">
+      <span class="chev" aria-hidden="true">›</span>
+      <span class="file-name"><span class="base">diffStore.ts</span><span class="dir">apps/web/src/stores</span></span>
+      <span class="stats">
+        <span class="bar"><span class="add" style="width:91%"></span><span class="rem" style="width:9%"></span></span>
+        <span class="add-n">+29</span><span class="rem-n">−3</span>
+      </span>
+      <span class="ext-tag">TS</span>
+    </button>
+
+    <!-- Slightly taller min-height for this demo so the popover sits entirely inside the file body -->
+    <div class="file-body" style="min-height: 290px;">
+      <div class="diff-wrap">
+        <div class="diff">
+          <div class="line hunk"><span class="gutter"></span><span class="gutter"></span><span class="code">@@ -85,3 +85,12 @@ interface DiffState {</span></div>
+          <div class="line"><span class="gutter">85</span><span class="gutter">85</span><span class="code">  snapshotsByThread: Record&lt;string, TurnSnapshot[]&gt;;</span></div>
+          <div class="line"><span class="gutter">86</span><span class="gutter">86</span><span class="code">  snapshotsLoadingByThread: Record&lt;string, boolean&gt;;</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">87</span><span class="code">+ snapshotsPendingByThread: Record&lt;string, boolean&gt;;</span></div>
+          <div class="line"><span class="gutter">87</span><span class="gutter">88</span><span class="code">  commitsByThread: Record&lt;string, GitCommit[]&gt;;</span></div>
+        </div>
+      </div>
+
+      <!-- Editor picker popover, anchored next to the rail. Shown statically here. -->
+      <div class="editor-pop" role="menu" aria-label="Open file in editor">
+        <div class="pop-label">Open in</div>
+        <button class="pop-item" role="menuitem" type="button">
+          <span class="pop-glyph">V</span>
+          VS Code
+          <kbd>↵</kbd>
+        </button>
+        <button class="pop-item" role="menuitem" type="button">
+          <span class="pop-glyph">C</span>
+          Cursor
+        </button>
+        <button class="pop-item" role="menuitem" type="button">
+          <span class="pop-glyph">Z</span>
+          Zed
+        </button>
+        <div class="pop-sep" aria-hidden="true"></div>
+        <button class="pop-item" role="menuitem" type="button">
+          <span class="pop-glyph">⌂</span>
+          Reveal in file manager
+        </button>
+        <div class="pop-sep" aria-hidden="true"></div>
+        <div class="pop-note">
+          Detected by <code>useInstalledEditors()</code>.
+          If none are installed, only Reveal is offered.
+        </div>
+      </div>
+
+      <nav class="side-rail" aria-label="File actions">
+        <button class="rail-btn" type="button" aria-pressed="true" aria-label="Show diff (current view)">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M5 3 2 8l3 5M11 3l3 5-3 5"/></svg>
+          <span class="rlabel">Diff</span>
+        </button>
+        <div class="rail-sep" aria-hidden="true"></div>
+        <button class="rail-btn" type="button" aria-label="Copy file path">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="5" y="5" width="8" height="8" rx="1"/><path d="M3 11V4a1 1 0 011-1h7"/></svg>
+          <span class="rlabel">Copy path</span>
+        </button>
+        <button class="rail-btn" type="button" aria-haspopup="menu" aria-expanded="true" aria-label="Open file (picker visible)">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 8v5h10V8"/><path d="M8 2v8M5 5l3-3 3 3"/></svg>
+          <span class="rlabel">Open</span>
+        </button>
+        <button class="rail-btn" type="button" aria-label="Reveal in file manager">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M2 4h5l1 2h6v7H2z"/></svg>
+          <span class="rlabel">Reveal</span>
+        </button>
+      </nav>
+    </div>
+  </div>
+
+  <div style="display:grid; grid-template-columns: 1fr 1fr; gap:1px; background: var(--border-subtle); border-top:1px solid var(--border-subtle);">
+    <div style="background:var(--panel); padding:14px 16px; font-family:var(--mono); font-size:11px; color:var(--text-muted); line-height:1.55;">
+      <strong style="color:var(--accent); text-transform:uppercase; letter-spacing:0.16em; font-size:10px; font-weight:500; display:block; margin-bottom:6px;">Open</strong>
+      <code style="font-family:var(--mono); font-size:11px; background:var(--surface); padding:1px 5px; border-radius:3px;">desktopBridge.openInEditor(editorId, path)</code>
+      <br/>
+      Spawns the user's editor via shell. Only installed editors appear; if none are detected, the button collapses into Reveal.
+    </div>
+    <div style="background:var(--panel); padding:14px 16px; font-family:var(--mono); font-size:11px; color:var(--text-muted); line-height:1.55;">
+      <strong style="color:var(--accent); text-transform:uppercase; letter-spacing:0.16em; font-size:10px; font-weight:500; display:block; margin-bottom:6px;">Reveal</strong>
+      <code style="font-family:var(--mono); font-size:11px; background:var(--surface); padding:1px 5px; border-radius:3px;">desktopBridge.openInExplorer(dirPath)</code>
+      <br/>
+      Opens Finder / Explorer / Files at the file's parent directory. Works regardless of installed editors.
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     RAIL STATE TRIO — small explainer
+═══════════════════════════════════════════════════════════════ -->
+
+<div class="section-label">Rail · three resting states</div>
+<div class="rail-states">
+  <div class="state">
+    <h4>Idle (32 px)</h4>
+    <p>Semi-transparent backdrop, icons-only. Diff content has a matching <code>padding-right</code> so code never sits behind icons.</p>
+  </div>
+  <div class="state">
+    <h4>Hovered (152 px)</h4>
+    <p>The rail itself triggers the expand — pointing at the diff does nothing. Labels fade in 60 ms after the width animates.</p>
+  </div>
+  <div class="state">
+    <h4>Keyboard-focused</h4>
+    <p>Tab into the rail and it widens via <code>:focus-within</code>. Same expanded state, no mouse needed.</p>
+  </div>
+</div>
+
+</div>
+</body>
+</html>
