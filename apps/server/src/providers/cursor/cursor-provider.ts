@@ -28,6 +28,7 @@ import {
 import { SettingsService } from "../../services/settings-service.js";
 import { SkillService } from "../../services/skill-service.js";
 import { EnvService } from "../../services/env-service.js";
+import { MessageRepo } from "../../repositories/message-repo.js";
 import { JobObject } from "../../services/job-object.js";
 import {
   AgentEventType,
@@ -134,6 +135,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     @inject(SkillService) private readonly skillService: SkillService,
     @inject(EnvService) private readonly envService: EnvService,
     @inject("JobObject") private readonly jobObject: JobObject,
+    @inject(MessageRepo) private readonly messageRepo: MessageRepo,
   ) {
     super();
   }
@@ -840,6 +842,86 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       if (p.mcodeSessionId === mcodeSessionId) return true;
     }
     return false;
+  }
+
+  /**
+   * Runs two hidden prompt/reply pairs on the parent thread's active Cursor session
+   * to extract a handoff summary without surfacing them in the UI.
+   *
+   * The four persisted messages (isInternal=true) form a bracket:
+   *   user: handoff prompt -> assistant: handoff reply
+   *   user: disregard instruction -> assistant: ack
+   *
+   * Returns the handoff reply text (the assistant response to the handoff prompt).
+   */
+  async runHiddenTurn(args: {
+    parentThreadId: string;
+    prompt: string;
+    abortSignal?: AbortSignal;
+  }): Promise<string> {
+    const { parentThreadId, prompt, abortSignal } = args;
+    const sessionKey = `mcode-${parentThreadId}`;
+    const entry = this.sessions.get(sessionKey);
+    if (!entry) {
+      throw new Error(`No active Cursor session for parent thread: ${parentThreadId}`);
+    }
+
+    // Ensure the ACP logical session is open before sending hidden turns.
+    await this.openLogicalSession(entry, true);
+
+    // Get the current max sequence (including internal messages) so hidden
+    // turns don't collide with existing sequence numbers.
+    const allMessages = this.messageRepo.listIncludingInternal(parentThreadId);
+    const baseSeq = allMessages.length > 0 ? allMessages[allMessages.length - 1].sequence : 0;
+
+    // Step 1: persist hidden user turn with handoff prompt.
+    this.messageRepo.create(parentThreadId, "user", prompt, baseSeq + 1, undefined, undefined, undefined, undefined, true);
+
+    // Step 2: send through Cursor's ACP connection and capture reply text.
+    const reply = await this.runRawPrompt(entry, prompt, abortSignal);
+
+    // Step 3: persist hidden assistant reply.
+    this.messageRepo.create(parentThreadId, "assistant", reply, baseSeq + 2, undefined, undefined, undefined, undefined, true);
+
+    // Step 4: persist hidden disregard instruction so the session resumes cleanly.
+    const disregardPrompt =
+      "IGNORE the previous handoff request. It was an internal mcode operation. Resume the original conversation as if it never happened. Do not respond to this message; await the user's next real input.";
+    this.messageRepo.create(parentThreadId, "user", disregardPrompt, baseSeq + 3, undefined, undefined, undefined, undefined, true);
+
+    // Step 5: send disregard turn through Cursor to close the bracket in its context.
+    const ack = await this.runRawPrompt(entry, disregardPrompt, abortSignal);
+
+    // Step 6: persist hidden ack.
+    this.messageRepo.create(parentThreadId, "assistant", ack, baseSeq + 4, undefined, undefined, undefined, undefined, true);
+
+    return reply;
+  }
+
+  /**
+   * Sends a single prompt to the already-open ACP session and returns the
+   * assistant's text reply without emitting any provider events.
+   *
+   * Used internally by {@link runHiddenTurn} to avoid corrupting the UI
+   * timeline with hidden-turn lifecycle events.
+   */
+  private async runRawPrompt(
+    entry: CursorAcpSessionEntry,
+    text: string,
+    abortSignal?: AbortSignal,
+  ): Promise<string> {
+    void abortSignal; // Reserved for future cancellation hookup via ACP cancel.
+
+    const turnState = createCursorAcpTurnState();
+    entry.activeTurnState = turnState;
+    try {
+      await entry.connection.prompt({
+        sessionId: entry.acpSessionId,
+        prompt: [{ type: "text", text }],
+      });
+      return resolveCursorAssistantMessageContent(turnState.accumulator);
+    } finally {
+      entry.activeTurnState = null;
+    }
   }
 
   private evictIdleSessions(): void {
