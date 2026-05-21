@@ -12,7 +12,7 @@
  */
 
 import { context, build } from "esbuild";
-import { spawn, spawnSync } from "child_process";
+import { spawn } from "child_process";
 import { watch } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -22,27 +22,7 @@ import {
   resolveServerTscBin,
   copyClaudeSdkCliNextTo,
 } from "../../../scripts/build-server-dev-bundle.mjs";
-
-/**
- * Kill a child process and its entire process tree.
- *
- * On Windows, child.kill() only terminates the direct subprocess (e.g. bun),
- * leaving grandchildren (e.g. the Vite server spawned by bun) as orphans that
- * continue holding their network ports across dev sessions. taskkill /F /T
- * kills the full tree atomically before returning.
- *
- * @param {import("child_process").ChildProcess | null} child
- */
-function killTree(child) {
-  if (!child?.pid) return;
-  if (process.platform === "win32") {
-    spawnSync("taskkill", ["/F", "/T", "/PID", String(child.pid)], {
-      stdio: "ignore",
-    });
-  } else {
-    child.kill();
-  }
-}
+import { killProcessTree } from "../../../scripts/kill-process-tree.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, "..");
@@ -66,7 +46,7 @@ const shared = {
 /**
  * Spawn `tsc --watch` so server source edits re-emit apps/server/dist-tsc.
  *
- * @returns Detached subprocess handle (caller must `.kill()` on shutdown).
+ * @returns Detached subprocess handle (caller must kill via killProcessTree on shutdown).
  */
 function startServerTscWatch() {
   const tscBin = resolveServerTscBin(serverRoot);
@@ -241,7 +221,7 @@ let electronProcess = null;
 /** Spawn (or restart) the Electron process. */
 function spawnElectron() {
   if (electronProcess) {
-    killTree(electronProcess);
+    killProcessTree(electronProcess);
     electronProcess = null;
   }
 
@@ -333,7 +313,7 @@ function cleanup() {
   }
 
   if (serverTscWatch) {
-    killTree(serverTscWatch);
+    killProcessTree(serverTscWatch);
     serverTscWatch = null;
   }
 
@@ -342,12 +322,12 @@ function cleanup() {
   }
 
   if (electronProcess) {
-    killTree(electronProcess);
+    killProcessTree(electronProcess);
     electronProcess = null;
   }
 
   if (viteProcess) {
-    killTree(viteProcess);
+    killProcessTree(viteProcess);
     viteProcess = null;
   }
 }
