@@ -34,6 +34,7 @@ import { HookExecutionRepo } from "./repositories/hook-execution-repo";
 import { TurnSnapshotRepo } from "./repositories/turn-snapshot-repo";
 import { TaskRepo } from "./repositories/task-repo";
 import { PlanQuestionAnswersRepo } from "./repositories/plan-question-answers-repo";
+import { PlanRepo } from "./repositories/plan-repo";
 import { SnapshotService } from "./services/snapshot-service";
 import { SettingsService } from "./services/settings-service";
 import { GitWatcherService } from "./services/git-watcher-service";
@@ -187,6 +188,7 @@ const skillWatcherService = container.resolve(SkillWatcherService);
 const memoryPressureService = container.resolve(MemoryPressureService);
 const taskRepo = container.resolve(TaskRepo);
 const planQuestionAnswersRepo = container.resolve(PlanQuestionAnswersRepo);
+const planRepo = container.resolve(PlanRepo);
 const workspaceRepo = container.resolve(WorkspaceRepo); // Used only for startup watcher initialization
 const enricher = container.resolve(WorkspaceEnricher);
 const filesystemBrowser = container.resolve(FilesystemBrowser);
@@ -455,6 +457,7 @@ const { httpServer, wss } = createWsServer({
   memoryPressureService,
   taskRepo,
   planQuestionAnswersRepo,
+  planRepo,
   providerRegistry,
   providerAvailability,
   modelCacheService,

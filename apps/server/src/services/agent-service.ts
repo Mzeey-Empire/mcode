@@ -22,6 +22,7 @@ import type {
   InteractionMode,
   PermissionDecision,
   PermissionRequest,
+  PlanOutput,
 } from "@mcode/contracts";
 import { ThreadRepo } from "../repositories/thread-repo";
 import { WorkspaceRepo } from "../repositories/workspace-repo";
@@ -49,6 +50,8 @@ import {
   ProviderCliMissingError,
 } from "./provider-availability-errors.js";
 import { PlanQuestionParser } from "./plan-question-parser.js";
+import { PlanOutputParser } from "./plan-output-parser.js";
+import { PlanRepo } from "../repositories/plan-repo";
 import { buildHandoffContent, buildConversationReplay, replayBudgetChars, resolveForkSnapshot } from "./handoff-builder.js";
 import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts";
 import { normalizeAgentProviderError } from "./provider-agent-error-normalize.js";
@@ -159,6 +162,10 @@ export class AgentService {
   private streamingAssistantTextByThread = new Map<string, string>();
   /** Per-thread streaming parsers active while the model is generating questions in plan mode. */
   private planParsers = new Map<string, PlanQuestionParser>();
+  /** Per-thread streaming parsers for extracting structured plan-output blocks. */
+  private planOutputParsers = new Map<string, PlanOutputParser>();
+  /** Holds parsed plan output until the Message event provides a messageId for persistence. */
+  private pendingPlanOutputs = new Map<string, PlanOutput>();
   constructor(
     @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
     @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
@@ -184,6 +191,7 @@ export class AgentService {
     private readonly availability: ProviderAvailabilityService,
     @inject(PlanQuestionAnswersRepo)
     private readonly planQuestionAnswersRepo: PlanQuestionAnswersRepo,
+    @inject(PlanRepo) private readonly planRepo: PlanRepo,
   ) {}
 
   /**
@@ -702,13 +710,39 @@ export class AgentService {
         lines.push(`- **${label}**: (skipped)`);
       }
     }
-    lines.push("\nNow generate the full plan based on these decisions.");
+    lines.push(`
+Now generate the full implementation plan based on these decisions.
+
+Write the plan as normal markdown in your response so the user can read it in the chat.
+
+Additionally, emit the plan in a structured format inside a fenced block so it can be displayed in the Plan tab. The block must contain valid JSON matching this schema:
+
+\`\`\`plan-output
+{
+  "title": "Short plan title",
+  "changeSummary": "One-line summary of what changed (omit for first version)",
+  "sections": [
+    {
+      "id": "unique-section-id",
+      "title": "Section Heading",
+      "level": 1,
+      "content": "Full markdown content of this section."
+    }
+  ]
+}
+\`\`\`
+
+The fenced block can appear anywhere in your response. The sections should mirror the headings in your markdown plan. Level 1 = top-level heading, level 2 = subheading, level 3 = sub-subheading.`);
 
     // Locate the assistant message carrying the plan-questions fence so the
     // marker is keyed on it (not just on the thread). Survives restarts and
     // mid-turn errors — see docs/plans/2026-04-30-plan-question-answers-marker.md.
     const markPlanAnswerForMessageId =
       this.findLatestPlanQuestionsMessageId(threadId) ?? undefined;
+
+    // Arm the plan-output parser so text deltas from the answer turn are
+    // scanned for a structured ```plan-output``` fenced block.
+    this.planOutputParsers.set(threadId, new PlanOutputParser());
 
     // interactionMode intentionally omitted — no question wrapping for the answer turn
     await this.sendMessage(
@@ -1323,6 +1357,14 @@ export class AgentService {
               this.planParsers.delete(event.threadId);
             }
           }
+          const outputParser = this.planOutputParsers.get(event.threadId);
+          if (outputParser) {
+            const planOutput = outputParser.feed(event.delta);
+            if (planOutput) {
+              this.planOutputParsers.delete(event.threadId);
+              this.pendingPlanOutputs.set(event.threadId, planOutput);
+            }
+          }
           // NOTE: Do NOT clear agentCallStack on textDelta. The Claude SDK
           // emits textDelta from subagents while they are still running child
           // tool calls. Clearing the stack here would cause subsequent child
@@ -1375,6 +1417,39 @@ export class AgentService {
           const stackOnMessage = this.agentCallStack.get(event.threadId);
           if (stackOnMessage && stackOnMessage.length > 0) {
             stackOnMessage.length = 0;
+          }
+
+          // Persist any pending plan-output extracted from streamed text deltas.
+          // Guarded on event.messageId so it only runs when the assistant message
+          // was successfully persisted above.
+          const pendingPlan = this.pendingPlanOutputs.get(event.threadId);
+          if (pendingPlan && event.messageId) {
+            this.pendingPlanOutputs.delete(event.threadId);
+            try {
+              const contentMd = pendingPlan.sections
+                .map((s) => `${"#".repeat(s.level + 1)} ${s.title}\n\n${s.content}`)
+                .join("\n\n");
+
+              const sectionsJson = JSON.stringify(
+                pendingPlan.sections.map((s) => ({ id: s.id, title: s.title, level: s.level })),
+              );
+
+              const plan = this.planRepo.create(
+                event.threadId,
+                event.messageId,
+                pendingPlan.title,
+                contentMd,
+                sectionsJson,
+                pendingPlan.changeSummary ?? null,
+              );
+
+              broadcast("plan.generated", { threadId: event.threadId, plan });
+            } catch (err) {
+              logger.error("Failed to persist plan output", {
+                threadId: event.threadId,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
           }
         }
 
@@ -1596,6 +1671,8 @@ export class AgentService {
             this.clearTurnState(event.threadId);
           }
           this.planParsers.delete(event.threadId);
+          this.planOutputParsers.delete(event.threadId);
+          this.pendingPlanOutputs.delete(event.threadId);
         }
 
         if (event.type === AgentEventType.Compacting && event.active) {
@@ -1663,6 +1740,8 @@ export class AgentService {
         if (event.type === AgentEventType.Ended) {
           this.trackSessionEnded(event.threadId);
           this.planParsers.delete(event.threadId);
+          this.planOutputParsers.delete(event.threadId);
+          this.pendingPlanOutputs.delete(event.threadId);
         }
       });
     }
