@@ -614,7 +614,8 @@ export function createWsTransport(
 
     // Editor (delegated to desktopBridge; no-op over WS)
     detectEditors: async () => window.desktopBridge?.detectEditors() ?? [],
-    openInEditor: async (editor, dirPath) => window.desktopBridge?.openInEditor(editor, dirPath),
+    openInEditor: async (editor, path, line) =>
+      window.desktopBridge?.openInEditor(editor, path, line),
     openInExplorer: async (dirPath) => window.desktopBridge?.openInExplorer(dirPath),
 
     // GitHub
