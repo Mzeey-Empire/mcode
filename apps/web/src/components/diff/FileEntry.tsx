@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { ChevronsDownUp, Code2, FileText } from "lucide-react";
+import { ChevronsDownUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDiffStore, type SelectedFile } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
@@ -9,6 +9,7 @@ import { langFromPath } from "@/lib/lang-from-path";
 import { UnifiedDiff } from "./UnifiedDiff";
 import { SideBySideDiff } from "./SideBySideDiff";
 import { DiffPreview } from "./DiffPreview";
+import { SideRail } from "./SideRail";
 
 /** Props for FileEntry. */
 interface FileEntryProps {
@@ -238,35 +239,6 @@ export function FileEntry({ filePath, source, id, threadId, depth = 0, defaultEx
           </span>
         )}
 
-        {/* Markdown preview toggle — span+role because the parent row is itself a <button>. */}
-        {expanded && isMarkdown && (
-          <span
-            role="button"
-            tabIndex={0}
-            aria-label={previewMode ? "Show raw diff" : "Preview rendered markdown"}
-            aria-pressed={previewMode}
-            onClick={(e) => {
-              e.stopPropagation();
-              setPreviewMode((prev) => !prev);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault(); // prevent Space from scrolling the page
-                e.stopPropagation();
-                setPreviewMode((prev) => !prev);
-              }
-            }}
-            className={`shrink-0 cursor-pointer rounded p-0.5 outline-none transition-colors focus-visible:ring-[2px] focus-visible:ring-ring/60 ${
-              previewMode
-                ? "text-foreground/70 hover:text-foreground"
-                : "text-muted-foreground/40 hover:text-foreground/60"
-            }`}
-          >
-            {/* Action-as-icon, mirroring MermaidBlock's source/render toggle: in preview, offer Code2 ("see source"); on raw diff, offer FileText ("see rendered"). */}
-            {previewMode ? <Code2 size={11} /> : <FileText size={11} />}
-          </span>
-        )}
-
         {/* Extension marker — single-color, monospace; lives quietly at the row's edge when collapsed */}
         {!expanded && ext && (
           <span className="shrink-0 font-mono text-[9.5px] uppercase tracking-[0.12em] text-muted-foreground/45">
@@ -275,47 +247,59 @@ export function FileEntry({ filePath, source, id, threadId, depth = 0, defaultEx
         )}
       </button>
 
-      {/* Inline diff — no height cap; outer ScrollArea owns vertical scroll */}
+      {/* Inline diff — no height cap; outer ScrollArea owns vertical scroll.
+          `relative` anchors the SideRail. min-h ensures the rail (5 buttons
+          ~ 171px) is always fully visible even for tiny diffs. pr-8 reserves
+          the collapsed rail's gutter so code never sits behind the icons. */}
       {expanded && (
-        <div className="border-t border-border/30">
-          {!isLoaded ? (
-            <div className="flex items-center justify-center gap-1.5 py-3">
-              {[0, 150, 300].map((delay) => (
-                <div
-                  key={delay}
-                  className="h-1 w-1 rounded-full bg-muted-foreground/40 animate-pulse"
-                  style={{ animationDelay: `${delay}ms` }}
-                />
-              ))}
-            </div>
-          ) : previewMode && isMarkdown ? (
-            <DiffPreview lines={lines} />
-          ) : lines.length > 0 ? (
-            <>
-              {renderMode === "unified" ? (
-                <UnifiedDiff lines={visibleLines} language={language} />
-              ) : (
-                <SideBySideDiff lines={visibleLines} language={language} />
-              )}
+        <div className="relative border-t border-border/30 min-h-[180px]">
+          <div className="pr-8">
+            {!isLoaded ? (
+              <div className="flex items-center justify-center gap-1.5 py-3">
+                {[0, 150, 300].map((delay) => (
+                  <div
+                    key={delay}
+                    className="h-1 w-1 rounded-full bg-muted-foreground/40 animate-pulse"
+                    style={{ animationDelay: `${delay}ms` }}
+                  />
+                ))}
+              </div>
+            ) : previewMode && isMarkdown ? (
+              <DiffPreview lines={lines} />
+            ) : lines.length > 0 ? (
+              <>
+                {renderMode === "unified" ? (
+                  <UnifiedDiff lines={visibleLines} language={language} />
+                ) : (
+                  <SideBySideDiff lines={visibleLines} language={language} />
+                )}
 
-              {/* Large diff expansion button */}
-              {hiddenLineCount > 0 && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => setShowAllLines(true)}
-                  className="flex w-full items-center justify-center gap-1.5 rounded-none border-t border-border/20 py-2 text-[10px] text-muted-foreground/70 hover:text-foreground/70"
-                >
-                  <ChevronsDownUp size={11} />
-                  Show {hiddenLineCount} more lines
-                </Button>
-              )}
-            </>
-          ) : (
-            <div className="flex items-center justify-center py-4">
-              <p className="text-[10px] text-muted-foreground">No changes</p>
-            </div>
-          )}
+                {/* Large diff expansion button */}
+                {hiddenLineCount > 0 && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setShowAllLines(true)}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-none border-t border-border/20 py-2 text-[10px] text-muted-foreground/70 hover:text-foreground/70"
+                  >
+                    <ChevronsDownUp size={11} />
+                    Show {hiddenLineCount} more lines
+                  </Button>
+                )}
+              </>
+            ) : (
+              <div className="flex items-center justify-center py-4">
+                <p className="text-[10px] text-muted-foreground">No changes</p>
+              </div>
+            )}
+          </div>
+
+          <SideRail
+            filePath={filePath}
+            isMarkdown={isMarkdown}
+            previewMode={previewMode}
+            onTogglePreview={() => setPreviewMode((p) => !p)}
+          />
         </div>
       )}
     </div>
