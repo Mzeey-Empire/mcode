@@ -20,6 +20,7 @@ import { TaskRepo } from "./repositories/task-repo";
 import { CleanupJobRepo } from "./repositories/cleanup-job-repo";
 import { ModelCacheRepo } from "./repositories/model-cache-repo";
 import { PlanQuestionAnswersRepo } from "./repositories/plan-question-answers-repo";
+import { PlanRepo } from "./repositories/plan-repo";
 
 // Providers
 import { ClaudeProvider } from "./providers/claude/claude-provider";
@@ -185,6 +186,14 @@ export function setupContainer(mcodeDir: string): typeof container {
   );
   container.register("PlanQuestionAnswersRepo", {
     useFactory: (c) => c.resolve(PlanQuestionAnswersRepo),
+  });
+  container.register(
+    PlanRepo,
+    { useClass: PlanRepo },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register("PlanRepo", {
+    useFactory: (c) => c.resolve(PlanRepo),
   });
 
   // Providers
