@@ -71,12 +71,8 @@ export function CumulativeView({ snapshots, threadId }: CumulativeViewProps) {
             disabled={refreshing}
             aria-label="New changes available — click to refresh"
             data-testid="cumulative-view-refresh"
-            className="ml-auto inline-flex items-center gap-2 rounded border border-border/30 bg-muted/30 px-2 py-0.5 font-mono text-[10.5px] uppercase tracking-[0.14em] text-foreground/70 transition-colors hover:border-border/70 hover:bg-muted/60 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring/55 disabled:opacity-50"
+            className="ml-auto inline-flex items-center gap-1.5 rounded bg-primary px-2.5 py-1 font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-primary-foreground shadow-sm transition-colors hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring/55 disabled:opacity-60"
           >
-            <span
-              aria-hidden
-              className="block h-[5px] w-[5px] animate-pulse rounded-full bg-[var(--diff-add-strong)] motion-reduce:animate-none"
-            />
             <RefreshCw size={11} className={refreshing ? "animate-spin" : ""} />
             New changes
           </button>
