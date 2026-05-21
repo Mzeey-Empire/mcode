@@ -11,6 +11,9 @@ import type { ProviderUsageInfo } from "./usage.js";
  */
 export type ProviderId = "claude" | "codex" | "gemini" | "copilot" | "cursor" | "opencode";
 
+/** How a provider's `resume` mechanism behaves when used to fork a session. */
+export type SessionForkBehavior = "clean" | "mutating" | "unsupported";
+
 /** A pluggable agent backend that can run sessions and emit events. */
 export interface IAgentProvider {
   readonly id: ProviderId;
@@ -28,15 +31,16 @@ export interface IAgentProvider {
    * - "mutating": resuming mutates the original session's forward history.
    * - "unsupported": resuming is not supported or not yet verified.
    */
-  readonly sessionForkOnResume: "clean" | "mutating" | "unsupported";
+  readonly sessionForkOnResume: SessionForkBehavior;
 
   /**
    * Maximum input characters the provider accepts per turn, across all roles
-   * (system + user content + tool results). `string.length` units, not tokens —
-   * tokens vary per model and are not portable.
+   * (system + user content + tool results). `string.length` units, not tokens.
+   * Tokens vary per model and are not portable.
    *
    * Used to size handoff documents so they fit inside the child provider's
-   * first-turn budget. When undeclared, callers fall back to 16_000.
+   * first-turn budget.
+   * Codex and Copilot use a conservative placeholder of 16_000 until verified.
    */
   readonly maxInputCharactersPerTurn: number;
 

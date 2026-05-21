@@ -140,6 +140,8 @@ interface SessionEntry {
 export class CopilotProvider extends EventEmitter implements IAgentProvider {
   readonly id: ProviderId = "copilot";
   readonly supportsCompletion = true;
+  readonly sessionForkOnResume = "unsupported" as const;
+  readonly maxInputCharactersPerTurn = 16_000;
 
   private client: CopilotClient | null = null;
   private lastCliPath: string | undefined;

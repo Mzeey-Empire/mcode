@@ -116,6 +116,8 @@ interface CursorAcpSessionEntry {
 export class CursorProvider extends EventEmitter implements IAgentProvider {
   readonly id: ProviderId = "cursor";
   readonly supportsCompletion = false;
+  readonly sessionForkOnResume = "mutating" as const;
+  readonly maxInputCharactersPerTurn = 4_000;
 
   private sessions = new Map<string, CursorAcpSessionEntry>();
   private sdkSessionIds = new Map<string, string>();

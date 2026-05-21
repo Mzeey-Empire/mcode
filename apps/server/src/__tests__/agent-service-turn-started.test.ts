@@ -64,6 +64,8 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
     providerStub = Object.assign(new EventEmitter(), {
       id: "claude" as ProviderId,
       supportsCompletion: false,
+      sessionForkOnResume: "unsupported" as const,
+      maxInputCharactersPerTurn: 16_000,
       // Never resolves. We want to observe events emitted BEFORE completion.
       // Snapshot capturedEvents.length synchronously on entry: this is the
       // load-bearing ordering signal. If the emit happened BEFORE the call

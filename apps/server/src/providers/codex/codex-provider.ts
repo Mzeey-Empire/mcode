@@ -107,6 +107,8 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
   readonly id: ProviderId = "codex";
   /** Codex CLI is an agentic tool with no one-shot text completion mode. */
   readonly supportsCompletion = false;
+  readonly sessionForkOnResume = "unsupported" as const;
+  readonly maxInputCharactersPerTurn = 16_000;
 
   /** Returns the static Codex model catalog. Codex does not support dynamic model discovery. */
   async listModels(): Promise<ProviderModelInfo[]> {
