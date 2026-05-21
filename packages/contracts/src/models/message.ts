@@ -27,6 +27,12 @@ export const MessageSchema = lazySchema(() =>
      * column existed.
      */
     model: z.string().nullable().optional(),
+    /**
+     * When true, mcode hides this message from the chat timeline.
+     * Used for hidden handoff turns on Cursor parent threads.
+     * Omitted or false for all legacy rows that predate this column.
+     */
+    is_internal: z.boolean().optional(),
   }),
 );
 /** Message record from the database. */

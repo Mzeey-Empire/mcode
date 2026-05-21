@@ -101,6 +101,13 @@ export const messages = sqliteTable(
      * existed — the UI falls back gracefully when absent.
      */
     model: text("model"),
+    /**
+     * When 1, this message is internal to mcode (e.g. a hidden handoff request
+     * on a Cursor parent thread) and must not render in the chat UI. The
+     * provider's session state still contains the message; mcode hides only
+     * the user-visible rendering.
+     */
+    isInternal: integer("is_internal").notNull().default(0),
   },
   (table) => [
     index("idx_messages_thread").on(table.threadId),

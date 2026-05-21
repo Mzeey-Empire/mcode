@@ -337,6 +337,7 @@ describe("AgentService narrative persistence", () => {
       timestamp: new Date().toISOString(),
       sequence: 2,
       attachments: null,
+      is_internal: false,
     };
     (service as unknown as { messageRepo: MessageRepo }).messageRepo.listByThread = vi.fn(() => ({
       messages: [mockMsg],
