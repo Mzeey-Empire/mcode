@@ -175,7 +175,7 @@ export function ChatView() {
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
   const forkModeStore = useThreadStore((s) => s.forkMode);
   const setForkMode = useThreadStore((s) => s.setForkMode);
-  const activeForkMode = activeThreadId ? (forkModeStore[activeThreadId] ?? null) : null;
+  const activeForkMode = activeThreadId ? (forkModeStore?.[activeThreadId] ?? null) : null;
   const branchFromMessageId = activeForkMode?.messageId;
   const branchFromMessageContent = activeForkMode?.content ?? undefined;
   const loadMessages = useThreadStore((s) => s.loadMessages);

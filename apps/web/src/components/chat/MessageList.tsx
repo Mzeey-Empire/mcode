@@ -293,7 +293,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     activeThreadId ? s.hasMoreMessages[activeThreadId] ?? false : false,
   );
   const handoffStatus = useThreadStore((s) =>
-    activeThreadId ? s.handoffStatus[activeThreadId] : undefined,
+    activeThreadId ? s.handoffStatus?.[activeThreadId] : undefined,
   );
   const isLoadingMore = useThreadStore((s) =>
     activeThreadId ? s.isLoadingMore[activeThreadId] ?? false : false,

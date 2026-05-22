@@ -151,7 +151,7 @@ export function HandoffFallbackBanner({ threadId }: Props) {
   const enabled = useSettingsStore(
     (s) => s.settings.chat?.handoff?.notifyOnLocalFallback ?? true,
   );
-  const meta = useThreadStore((s) => s.handoffMeta[threadId]);
+  const meta = useThreadStore((s) => s.handoffMeta?.[threadId]);
   const setHandoffStatus = useThreadStore((s) => s.setHandoffStatus);
   const [docOpen, setDocOpen] = useState(false);
 

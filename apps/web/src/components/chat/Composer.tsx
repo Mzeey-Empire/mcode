@@ -904,7 +904,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   }, [permissionLocked, access, threadId, setThreadSettings]);
   const contextEntry = useThreadStore((s) => threadId ? s.contextByThread[threadId] : undefined);
   const isCompacting = useThreadStore((s) => !!(threadId && s.isCompactingByThread[threadId]));
-  const handoffStatus = useThreadStore((s) => threadId ? s.handoffStatus[threadId] : undefined);
+  const handoffStatus = useThreadStore((s) => threadId ? s.handoffStatus?.[threadId] : undefined);
   const hasRetryState = useThreadStore(
     (s) => !!(threadId && (s.rateLimitByThread[threadId] || s.apiRetryByThread[threadId])),
   );

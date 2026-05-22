@@ -7,6 +7,7 @@ import { CleanupJobRepo, MAX_CLEANUP_ATTEMPTS } from "../repositories/cleanup-jo
 import { ThreadRepo } from "../repositories/thread-repo";
 import { WorkspaceRepo } from "../repositories/workspace-repo";
 import { CleanupWorker } from "../services/cleanup-worker";
+import { HandoffStorage } from "../services/handoff/handoff-storage";
 import type { ClaudeProvider } from "../providers/claude/claude-provider";
 import type { TerminalService } from "../services/terminal-service";
 import type { GitService } from "../services/git-service";
@@ -70,6 +71,7 @@ describe("CleanupWorker", () => {
       mockGitService,
       workspaceRepo,
       { removeForThread: vi.fn() } as unknown as AttachmentService,
+      { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage,
     );
   });
 
