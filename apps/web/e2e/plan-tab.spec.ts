@@ -5,11 +5,10 @@ import {
 } from "./helpers/e2e-helpers";
 
 /**
- * E2E tests for the Plan tab in the right panel.
+ * E2E tests for the plan view inside the Tasks tab.
  *
- * Verifies:
- * 1. The Plan tab button exists with correct text and icon
- * 2. Switching to the Plan tab shows the "No plan" empty state
+ * The plan document renders above the task list in the Tasks tab.
+ * When no plan exists, only the task list (or empty state) shows.
  */
 
 const WORKSPACE = {
@@ -42,7 +41,6 @@ const THREAD = {
   updated_at: new Date().toISOString(),
 };
 
-/** Set up workspace + thread so the ChatView (and RightPanel) renders. */
 async function setupWorkspace(page: Page): Promise<void> {
   await page.evaluate(
     ({ workspace, thread }) => {
@@ -66,7 +64,6 @@ async function setupWorkspace(page: Page): Promise<void> {
   );
 }
 
-/** Show the right panel for the active thread via the diffStore. */
 async function showRightPanel(page: Page, threadId: string): Promise<void> {
   await page.evaluate(
     ({ tid }) => {
@@ -78,19 +75,12 @@ async function showRightPanel(page: Page, threadId: string): Promise<void> {
       });
       if (!diffStore) throw new Error("[E2E] diff store not found");
       diffStore.getState().showRightPanel(tid);
+      diffStore.getState().setRightPanelTab(tid, "tasks");
     },
     { tid: threadId },
   );
 }
 
-/**
- * Pre-seed the planStore with a stable empty array for the thread.
- *
- * Without this, PlanPanel's `s.plansByThread[threadId] ?? []` selector
- * returns a new array reference on every getSnapshot call, which triggers
- * an infinite re-render loop under the zustand intercept. Seeding with a
- * stored `[]` gives the selector a stable reference.
- */
 async function seedPlanStore(page: Page, threadId: string): Promise<void> {
   await page.evaluate(
     ({ tid }) => {
@@ -111,7 +101,7 @@ async function seedPlanStore(page: Page, threadId: string): Promise<void> {
   );
 }
 
-test.describe("Plan Tab", () => {
+test.describe("Plan view in Tasks tab", () => {
   test.beforeEach(async ({ page }) => {
     await mockWebSocketServer(page);
     await interceptZustandStores(page);
@@ -120,39 +110,20 @@ test.describe("Plan Tab", () => {
     await setupWorkspace(page);
   });
 
-  test("plan tab button exists in the right panel header", async ({ page }) => {
+  test("tasks tab button exists in the right panel header", async ({ page }) => {
     await showRightPanel(page, THREAD.id);
 
-    // The Plan tab button renders with uppercase mono text and an SVG icon
-    const planTab = page.locator("button").filter({ hasText: /Plan/i }).filter({
+    const tasksTab = page.locator("button").filter({ hasText: /Tasks/i }).filter({
       has: page.locator("svg"),
     });
-    await expect(planTab.first()).toBeVisible({ timeout: 3000 });
+    await expect(tasksTab.first()).toBeVisible({ timeout: 3000 });
   });
 
-  test("plan tab shows 'No plan' empty state when no plan exists", async ({ page }) => {
-    // Seed planStore with a stable empty array so PlanPanel's selectors
-    // don't trigger an infinite re-render loop under the zustand intercept
+  test("tasks tab shows empty state when no plan and no tasks exist", async ({ page }) => {
     await seedPlanStore(page, THREAD.id);
-
     await showRightPanel(page, THREAD.id);
 
-    // Switch to the plan tab via store
-    await page.evaluate(
-      ({ tid }) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const stores: any[] = (window as any).__mcodeStores ?? [];
-        const diffStore = stores.find((s) => {
-          const st = s.getState();
-          return "rightPanelByThread" in st && "setRightPanelTab" in st;
-        });
-        if (!diffStore) throw new Error("[E2E] diff store not found");
-        diffStore.getState().setRightPanelTab(tid, "plan");
-      },
-      { tid: THREAD.id },
-    );
-
-    // The Plan tab empty state renders "No plan" in a mono-styled span
-    await expect(page.getByText("No plan")).toBeVisible({ timeout: 3000 });
+    // The empty state shows the existing "Nothing on the docket" message
+    await expect(page.getByText("Nothing on the docket")).toBeVisible({ timeout: 3000 });
   });
 });

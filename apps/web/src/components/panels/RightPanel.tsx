@@ -1,6 +1,6 @@
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ListChecks, Diff, Globe, Terminal, X, ScrollText } from "lucide-react";
+import { ListChecks, Diff, Globe, Terminal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useTaskStore } from "@/stores/taskStore";
@@ -317,18 +317,6 @@ export function RightPanel() {
               <Terminal size={12} />
               Terminal
             </button>
-            <button
-              type="button"
-              onClick={() => setRightPanelTab(activeThreadId!, "plan")}
-              className={`flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-[10px] font-semibold tracking-[0.16em] uppercase transition-colors ${
-                activeTab === "plan"
-                  ? "text-foreground bg-muted/50"
-                  : "text-foreground/70 hover:text-foreground"
-              }`}
-            >
-              <ScrollText size={12} />
-              Plan
-            </button>
           </div>
           <Button
             variant="ghost"
@@ -347,19 +335,23 @@ export function RightPanel() {
           and workspace thread switches. */}
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         {activeTab === "tasks" && (
-          <>
-            <TaskPanelHeader tasks={tasks ?? []} />
-            <TaskPanel />
-          </>
+          <div className="flex flex-1 flex-col min-h-0">
+            {/* Plan fills the top when one exists for this thread */}
+            {activeThreadId && (
+              <PlanPanel threadId={activeThreadId} />
+            )}
+            {/* Tasks pin at the bottom, always visible */}
+            <div className="flex flex-col flex-shrink-0 border-t border-border">
+              <TaskPanelHeader tasks={tasks ?? []} />
+              <TaskPanel />
+            </div>
+          </div>
         )}
         <div className={activeTab === "changes" ? "flex flex-1 flex-col min-h-0" : "hidden"}>
           <DiffPanel />
         </div>
         {activeTab === "preview" && (
           <PreviewPanel threadId={activeThreadId} workspaceId={activeWorkspaceId} />
-        )}
-        {activeTab === "plan" && activeThreadId && (
-          <PlanPanel threadId={activeThreadId} />
         )}
         <div
           className={cn(

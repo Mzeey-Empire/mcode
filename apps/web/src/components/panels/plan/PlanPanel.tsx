@@ -13,7 +13,10 @@ interface PlanPanelProps {
   threadId: string;
 }
 
-/** Right-panel Plan tab content. */
+/**
+ * Plan section of the Tasks tab. Renders the plan document above the task
+ * list. Returns null when no plan exists so the task list fills the tab.
+ */
 export function PlanPanel({ threadId }: PlanPanelProps) {
   const plans = usePlanStore((s) => s.plansByThread[threadId] ?? EMPTY_PLANS);
   const activeVersion = usePlanStore((s) => s.activeVersionByThread[threadId] ?? null);
@@ -31,18 +34,11 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
     return <PlanSkeleton title={activePlan?.title} />;
   }
 
-  if (!activePlan) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <span className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/40">
-          No plan
-        </span>
-      </div>
-    );
-  }
+  // No plan for this thread - render nothing so tasks fill the tab
+  if (!activePlan) return null;
 
   return (
-    <ScrollArea className="h-full">
+    <ScrollArea className="flex-1 min-h-0">
       <PlanChrome plan={activePlan} allVersions={plans} threadId={threadId} />
       <h1 className="px-6 pt-4 text-[17px] font-bold leading-[1.35]">
         {activePlan.title}
