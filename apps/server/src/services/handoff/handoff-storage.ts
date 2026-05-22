@@ -6,11 +6,12 @@
  * manifest). ULID ordering makes "latest handoff" a simple sort.
  */
 
-import { mkdir, readFile, writeFile, readdir, rm, copyFile } from "fs/promises";
+import { mkdir, readFile, writeFile, readdir, rm, copyFile, stat } from "fs/promises";
 import { existsSync } from "fs";
 import { dirname, extname, join } from "path";
 import { createHash } from "crypto";
 import { injectable } from "tsyringe";
+import { logger } from "@mcode/shared";
 import {
   getMcodeDir,
   newHandoffUlid,
@@ -29,10 +30,19 @@ export interface AttachmentSource {
   parentMessageId: string;
 }
 
+/** Attachments larger than this are skipped during copy to avoid blowing storage budgets. */
+const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
+
 @injectable()
 export class HandoffStorage {
-  /** Function injection for testability; defaults to the real mcode data dir resolver. */
-  constructor(private readonly mcodeDirFn: () => string = getMcodeDir) {}
+  /**
+   * Function injection for testability; defaults to the real mcode data dir resolver.
+   * `statFn` may be overridden in tests to simulate oversized files without writing real bytes.
+   */
+  constructor(
+    private readonly mcodeDirFn: () => string = getMcodeDir,
+    private readonly statFn: (path: string) => Promise<{ size: number }> = stat,
+  ) {}
 
   /** Persist an artifact under a fresh ULID. Returns the ULID assigned. */
   async write(threadId: string, artifact: HandoffArtifact): Promise<string> {
@@ -68,6 +78,22 @@ export class HandoffStorage {
     await mkdir(attachDir, { recursive: true });
     const result: HandoffMeta["attachments"] = [];
     for (const s of sources) {
+      const fileStat = await this.statFn(s.absolutePath);
+      if (fileStat.size > ATTACHMENT_MAX_BYTES) {
+        logger.warn("Attachment exceeds size cap; skipping copy", {
+          id: s.id,
+          sizeBytes: fileStat.size,
+          max: ATTACHMENT_MAX_BYTES,
+        });
+        result.push({
+          id: s.id,
+          originalName: s.originalName,
+          sha256: "<skipped>",
+          mime: s.mime,
+          parentMessageId: s.parentMessageId,
+        });
+        continue;
+      }
       const ext = extname(s.originalName) || extname(s.absolutePath) || "";
       const dest = join(attachDir, `${s.id}${ext}`);
       await copyFile(s.absolutePath, dest);

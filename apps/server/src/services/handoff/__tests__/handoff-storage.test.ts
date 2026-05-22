@@ -84,6 +84,26 @@ describe("HandoffStorage", () => {
     rmSync(srcDir, { recursive: true, force: true });
   });
 
+  it("skips copying attachments that exceed the 25MB cap and records sentinel sha256", async () => {
+    const srcDir = mkdtempSync(join(tmpdir(), "att-large-"));
+    const srcFile = join(srcDir, "huge.bin");
+    writeFileSync(srcFile, Buffer.from([0]));
+
+    // Inject a custom statFn that reports the file as oversized without writing real bytes.
+    const oversizedStatFn = async (_path: string) => ({ size: 26 * 1024 * 1024 });
+    const storageWithOverride = new HandoffStorage(() => dir, oversizedStatFn as any);
+
+    const manifest = await storageWithOverride.copyAttachments("t_child", [
+      { id: "att_large", absolutePath: srcFile, originalName: "huge.bin", mime: "application/octet-stream", parentMessageId: "m_10" },
+    ]);
+
+    expect(manifest).toHaveLength(1);
+    expect(manifest[0].sha256).toBe("<skipped>");
+    expect(existsSync(join(dir, "threads", "t_child", "attachments", "att_large.bin"))).toBe(false);
+
+    rmSync(srcDir, { recursive: true, force: true });
+  });
+
   it("deleteThreadFiles removes the entire thread subtree", async () => {
     await storage.write("t_child", makeArtifact());
     await storage.deleteThreadFiles("t_child");
