@@ -11,6 +11,7 @@ import type { Thread, Message } from "@mcode/contracts";
 import { buildHandoffContent } from "../handoff-builder.js";
 import type { HandoffArtifact, HandoffMeta, ForkAnchorRole, ProviderErrorClass } from "./handoff-types.js";
 
+/** Input data required to produce a deterministic path-D handoff artifact. */
 export interface PathDInput {
   parentThread: Thread;
   messagesUpToFork: Message[];

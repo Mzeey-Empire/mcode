@@ -69,7 +69,11 @@ export class CleanupWorker {
   start(): void {
     if (this.pollTimer !== null) return;
     this.cleanupJobRepo.resetAttempts();
-    this.reconcileOnStartup();
+    void this.reconcileOnStartup().catch((err) => {
+      logger.error("CleanupWorker startup reconciliation errored", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
     this.stopped = false;
     this.pollTimer = setInterval(() => {
       this.poll().catch((err) => {
@@ -142,7 +146,7 @@ export class CleanupWorker {
           this.threadRepo.hardDelete(job.thread_id);
           this.cleanupJobRepo.delete(job.id);
         })();
-        this.finalizeWorkspaceIfDone(job.workspace_path);
+        await this.finalizeWorkspaceIfDone(job.workspace_path);
         return;
       }
       if (resolvedWt === resolvedWs) {
@@ -200,7 +204,7 @@ export class CleanupWorker {
           this.threadRepo.hardDelete(job.thread_id);
           this.cleanupJobRepo.delete(job.id);
         })();
-        this.finalizeWorkspaceIfDone(job.workspace_path);
+        await this.finalizeWorkspaceIfDone(job.workspace_path);
         return;
       }
 
@@ -271,7 +275,7 @@ export class CleanupWorker {
    * have cleanup jobs enqueued. If a workspace has no remaining threads or jobs,
    * hard-deletes it immediately.
    */
-  reconcileOnStartup(): void {
+  async reconcileOnStartup(): Promise<void> {
     const deletingWorkspaces = this.workspaceRepo.findDeleting();
 
     for (const ws of deletingWorkspaces) {
@@ -311,6 +315,7 @@ export class CleanupWorker {
       if (pendingJobs === 0) {
         for (const t of threads) {
           this.attachmentService.removeForThread(t.id);
+          await this.handoffStorage.deleteThreadFiles(t.id);
           this.threadRepo.hardDelete(t.id);
         }
         this.workspaceRepo.hardDelete(ws.id);
@@ -320,7 +325,7 @@ export class CleanupWorker {
   }
 
   /** Check if workspace cleanup is complete and hard-delete if so. */
-  private finalizeWorkspaceIfDone(workspacePath: string): void {
+  private async finalizeWorkspaceIfDone(workspacePath: string): Promise<void> {
     const remaining = this.cleanupJobRepo.countByWorkspacePath(workspacePath);
     if (remaining > 0) return;
 
@@ -331,6 +336,7 @@ export class CleanupWorker {
       const remainingThreads = this.threadRepo.listAllByWorkspace(workspace.id);
       for (const thread of remainingThreads) {
         this.attachmentService.removeForThread(thread.id);
+        await this.handoffStorage.deleteThreadFiles(thread.id);
       }
 
       this.workspaceRepo.hardDelete(workspace.id);

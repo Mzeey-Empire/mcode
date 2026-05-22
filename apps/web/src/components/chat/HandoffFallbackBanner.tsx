@@ -96,6 +96,7 @@ function HandoffDocViewer({ threadId }: { threadId: string }) {
   // Fetch on mount. The dialog mounts only when open=true.
   useEffect(() => {
     let cancelled = false;
+    setState({ phase: "loading" });
     getTransport()
       .readLatestHandoff(threadId)
       .then((result) => {

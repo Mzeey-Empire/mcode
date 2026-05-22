@@ -142,8 +142,12 @@ export class HandoffPipelineService {
     const mode = pickHandoffMode(childCap);
 
     const messages = await this.messageRepo.listIncludingInternal(req.parentThreadId);
-    const forkMsg = messages.find((m: any) => m.id === req.forkedFromMessageId);
-    if (!forkMsg) throw new Error(`Fork message ${req.forkedFromMessageId} not in parent`);
+    const forkIndex = messages.findIndex((m: any) => m.id === req.forkedFromMessageId);
+    if (forkIndex === -1) throw new Error(`Fork message ${req.forkedFromMessageId} not in parent`);
+    // Slice to only include messages up to and including the fork anchor so that
+    // later parent messages cannot leak into the child handoff context.
+    const messagesUpToFork = messages.slice(0, forkIndex + 1);
+    const forkMsg = messagesUpToFork[forkIndex];
 
     const prompt = buildHandoffPrompt({
       mode,
@@ -169,7 +173,7 @@ export class HandoffPipelineService {
         // (e.g. after a server restart), the provider can retry without `resume:`
         // and still produce a high-fidelity path-B result.
         const replayBudget = computeBudgetChars(childCap);
-        const conversationHistory = buildConversationReplay(messages, replayBudget, null);
+        const conversationHistory = buildConversationReplay(messagesUpToFork, replayBudget, null);
 
         let text: string = await parentProvider.runSideChannelQuery({
           parentThreadId: req.parentThreadId,
@@ -186,7 +190,7 @@ export class HandoffPipelineService {
           logger.warn("Handoff path B timed out; falling to D", { threadId: req.parentThreadId });
           return runPathDDeterministic({
             parentThread: parent,
-            messagesUpToFork: messages,
+            messagesUpToFork,
             forkedFromMessageId: req.forkedFromMessageId,
             forkAnchorRole: req.forkAnchorRole,
             childThreadId: req.childThreadId,
@@ -197,7 +201,7 @@ export class HandoffPipelineService {
         logger.warn("Handoff path B failed", { error: describeError(err), cls, threadId: req.parentThreadId });
         return runPathDDeterministic({
           parentThread: parent,
-          messagesUpToFork: messages,
+          messagesUpToFork,
           forkedFromMessageId: req.forkedFromMessageId,
           forkAnchorRole: req.forkAnchorRole,
           childThreadId: req.childThreadId,
@@ -234,7 +238,7 @@ export class HandoffPipelineService {
             logger.warn("Handoff path A timed out; falling to D", { threadId: req.parentThreadId });
             return runPathDDeterministic({
               parentThread: parent,
-              messagesUpToFork: messages,
+              messagesUpToFork,
               forkedFromMessageId: req.forkedFromMessageId,
               forkAnchorRole: req.forkAnchorRole,
               childThreadId: req.childThreadId,
@@ -245,7 +249,7 @@ export class HandoffPipelineService {
           logger.warn("Handoff path A failed", { error: describeError(err), cls, threadId: req.parentThreadId });
           return runPathDDeterministic({
             parentThread: parent,
-            messagesUpToFork: messages,
+            messagesUpToFork,
             forkedFromMessageId: req.forkedFromMessageId,
             forkAnchorRole: req.forkAnchorRole,
             childThreadId: req.childThreadId,

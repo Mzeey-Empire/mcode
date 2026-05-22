@@ -1096,6 +1096,18 @@ export class AgentService {
       // Append the user's new message so the provider receives full context + the prompt.
       providerWireOverride = `${artifact.markdown}\n\n---\n\n${content}`;
     } catch (pipelineErr) {
+      // Re-check child thread existence before writing any fallback artifacts.
+      // The thread may have been hard-deleted between pipeline start and failure
+      // (e.g. rapid user delete during a slow path B), in which case proceeding
+      // would produce FK errors, stale files, or a misleading fallback event.
+      const childRecheck = this.threadRepo.findById(thread.id);
+      if (!childRecheck || childRecheck.deleted_at) {
+        logger.info("Child thread vanished mid-handoff; aborting fallback", {
+          childThreadId: thread.id,
+        });
+        throw pipelineErr;
+      }
+
       // Classify the error so we know how to label the artifact and log usefully.
       const errClass = classifyProviderError(pipelineErr);
       logger.warn("createBranchedThread: handoff pipeline failed, falling back to legacy replay", {

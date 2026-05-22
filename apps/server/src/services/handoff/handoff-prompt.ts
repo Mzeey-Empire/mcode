@@ -43,6 +43,7 @@ export function computeBudgetChars(childMaxInputCharacters: number): number {
   return Math.max(budget, MIN_HANDOFF_BUDGET);
 }
 
+/** Input arguments for building the handoff prompt sent to the parent provider session. */
 export interface HandoffPromptInput {
   mode: HandoffMode;
   forkAnchorRole: ForkAnchorRole;

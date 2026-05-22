@@ -36,7 +36,7 @@ Implement `runSideChannelQuery` on path-B providers and `runHiddenTurn` on path-
 
 Each handoff is a ULID-named directory so lexicographic order equals chronological order:
 
-```
+```text
 <MCODE_DATA_DIR>/threads/<threadId>/handoffs/<ulid>/handoff.md
 <MCODE_DATA_DIR>/threads/<threadId>/handoffs/<ulid>/handoff.json
 ```
@@ -47,7 +47,7 @@ Each handoff is a ULID-named directory so lexicographic order equals chronologic
 
 Attachments copied from parent messages land at:
 
-```
+```text
 <MCODE_DATA_DIR>/threads/<threadId>/attachments/<id>.<ext>
 ```
 

@@ -26,7 +26,7 @@ Path A exists only because the ACP wire protocol's `session/load` is broken:
 it does not send back `user_message_chunk` / `agent_message_chunk` updates
 when resuming a session, so the provider loses conversation history. mcode
 worked around this by injecting hidden turns directly into Cursor's mutable
-session, with a 10 second settle-wait poll and a disregard-turn cleanup
+session, with a 10-second settle-wait poll and a disregard-turn cleanup
 step. This is a substantial amount of provider-specific complexity that
 exists purely to compensate for one broken RPC method.
 
@@ -65,7 +65,7 @@ cursor-provider.ts uses it, the workaround infrastructure can be retired.
 
 - The `runHiddenTurn` method in cursor-provider.ts (about 80 lines).
 - The `runRawPrompt` private helper that bypassed UI event emission.
-- The 10 second settle-wait poll loop and its constant.
+- The 10-second settle-wait poll loop and its constant.
 - The disregard turn + acknowledgement turn sequence.
 - The `MessageRepo` injection on the Cursor provider, if no other method
   needs it after `runHiddenTurn` is removed (verify by grep).
@@ -208,7 +208,7 @@ References, not duplicated content:
 - `docs/plans/2026-05-21-chat-branch-handoff-pipeline.md`. The original
   implementation plan for the chat fork handoff feature. Section
   "Deferred Items" at the bottom mentions this migration. Phase 17 covers
-  the robustness guards including the 10 second settle-wait that gets
+  the robustness guards including the 10-second settle-wait that gets
   deleted.
 - `CONTEXT.md`. Glossary of all the relevant vocabulary.
 - `apps/server/src/providers/claude/claude-provider.ts`. The implementation

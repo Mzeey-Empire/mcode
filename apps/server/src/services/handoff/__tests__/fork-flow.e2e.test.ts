@@ -246,21 +246,8 @@ describe("fork flow with handoff pipeline (e2e)", () => {
     const persisted = await storage.readLatest(BASE_REQ.childThreadId);
     expect(persisted!.meta.ladderStep).toBe("D");
 
-    // Simulate the broadcast AgentService emits for a fallback (ladderStep D
-    // triggers status "fallback" in the real codepath).
-    const broadcastMock = vi.mocked(broadcast);
-    broadcastMock("thread.handoff", {
-      threadId: BASE_REQ.childThreadId,
-      status: artifact.meta.ladderStep === "D" ? "fallback" : "ready",
-      ladderStep: artifact.meta.ladderStep,
-      providerErrorOnGenerate: artifact.meta.providerErrorOnGenerate,
-    });
-
-    expect(broadcastMock).toHaveBeenCalledWith("thread.handoff", {
-      threadId: BASE_REQ.childThreadId,
-      status: "fallback",
-      ladderStep: "D",
-      providerErrorOnGenerate: "quota",
-    });
+    // Broadcast assertion is covered by agent-service integration;
+    // this test validates artifact shape only.
+    void broadcast;
   });
 });

@@ -105,16 +105,16 @@ describe("HandoffPipelineService.orchestrate", () => {
     // Override parent to have no session id
     const parentNoSession = { id: "t_parent", title: "X", provider: "claude", sdk_session_id: null, deleted_at: null, workspace_id: "ws_1", worktree_path: null };
     deps.threadRepo.findById = vi.fn(async (id) => (id === "t_parent" ? parentNoSession : null));
-    deps.providerRegistry.resolve = vi.fn(() => ({
+    const provider = {
       sessionForkOnResume: "clean",
       maxInputCharactersPerTurn: 180_000,
       runSideChannelQuery: vi.fn(async () => "should not be called"),
-    }));
+    };
+    deps.providerRegistry.resolve = vi.fn(() => provider);
     const svc = HandoffPipelineService.forTesting(deps);
     const r = await svc.orchestrate(BASE_REQ);
     expect(r.meta.ladderStep).toBe("D");
     // runSideChannelQuery must not have been called
-    const provider = deps.providerRegistry.resolve("claude" as any);
     expect(provider.runSideChannelQuery).not.toHaveBeenCalled();
   });
 
@@ -149,11 +149,13 @@ describe("HandoffPipelineService.orchestrate", () => {
       abort() {}
     } as unknown as typeof AbortController;
 
-    const svc = HandoffPipelineService.forTesting(deps);
-    const r = await svc.orchestrate(BASE_REQ);
-
-    globalThis.AbortController = OriginalAbortController;
-    expect(r.meta.ladderStep).toBe("D");
+    try {
+      const svc = HandoffPipelineService.forTesting(deps);
+      const r = await svc.orchestrate(BASE_REQ);
+      expect(r.meta.ladderStep).toBe("D");
+    } finally {
+      globalThis.AbortController = OriginalAbortController;
+    }
   });
 
   // 17.3: concurrent path A forks on the same parent thread are serialized

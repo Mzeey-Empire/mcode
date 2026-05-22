@@ -35,6 +35,12 @@ import { EnvService } from "../../services/env-service.js";
 import { JobObject } from "../../services/job-object.js";
 import { listDirectChildren } from "../../services/process-kill.js";
 
+/**
+ * Default model slug used for side-channel and fallback paths.
+ * Kept in one place so all paths stay in sync when upgrading the default.
+ */
+const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-5";
+
 /** Shallow snapshot of `process.env` for temporary Claude SDK subprocess alignment. */
 function snapshotProcessEnv(): Record<string, string | undefined> {
   return { ...process.env };
@@ -446,7 +452,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     // Resolve model from the parent thread's active session if available,
     // falling back to the default claude-sonnet model.
     const parentSessionId = `mcode-${args.parentThreadId}`;
-    const model = this.sessions.get(parentSessionId)?.model ?? "claude-sonnet-4-5";
+    const model = this.sessions.get(parentSessionId)?.model ?? DEFAULT_CLAUDE_MODEL;
 
     const backup = snapshotProcessEnv();
     try {
@@ -580,7 +586,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     const fullPrompt = `## Prior conversation (parent thread)\n\n${history}\n\n---\n\n${prompt}`;
     // The parent session is gone so we cannot look up its original model.
     // Use the same safe default as the main path's fallback.
-    const model = "claude-sonnet-4-5";
+    const model = DEFAULT_CLAUDE_MODEL;
 
     const backup = snapshotProcessEnv();
     try {

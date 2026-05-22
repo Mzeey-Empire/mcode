@@ -142,9 +142,12 @@ export class HandoffStorage {
       `generatedAt: ${meta.generatedAt}`,
       `characterCount: ${meta.characterCount}`,
     ].join("\n");
-    // TODO: regex stripping is non-greedy; if a provider's body starts with a
-    // YAML-looking block, that block would be eaten. Consider anchoring more strictly.
-    const body = markdownBody.replace(/^---\n[\s\S]*?\n---\n/, "");
+    // Only strip frontmatter that carries a known handoff key to avoid eating
+    // valid markdown content that starts with an unrelated YAML-looking block.
+    const body = markdownBody.replace(
+      /^---\n(?=[\s\S]*?\b(schemaVersion|parentThreadId|forkedFromMessageId):)[\s\S]*?\n---\n/,
+      "",
+    );
     return `---\n${fmFields}\n---\n\n${body}`;
   }
 }
