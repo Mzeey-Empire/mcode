@@ -20,6 +20,7 @@ import { AttachmentService } from "./attachment-service.js";
 import { killDescendantsByName } from "./process-kill.js";
 import { WorkspaceRepo } from "../repositories/workspace-repo.js";
 import { broadcast } from "../transport/push.js";
+import { HandoffStorage } from "./handoff/handoff-storage.js";
 
 /** How often to check for due cleanup jobs (ms). */
 const POLL_INTERVAL_MS = 5_000;
@@ -58,6 +59,7 @@ export class CleanupWorker {
     @inject(GitService) private readonly gitService: GitService,
     @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
     @inject(AttachmentService) private readonly attachmentService: AttachmentService,
+    @inject(HandoffStorage) private readonly handoffStorage: HandoffStorage,
   ) {}
 
   /**
@@ -135,6 +137,7 @@ export class CleanupWorker {
           workspacePath: resolvedWs,
         });
         this.attachmentService.removeForThread(job.thread_id);
+        await this.handoffStorage.deleteThreadFiles(job.thread_id);
         this.db.transaction(() => {
           this.threadRepo.hardDelete(job.thread_id);
           this.cleanupJobRepo.delete(job.id);
@@ -192,6 +195,7 @@ export class CleanupWorker {
           worktreePath: resolvedWt,
         });
         this.attachmentService.removeForThread(job.thread_id);
+        await this.handoffStorage.deleteThreadFiles(job.thread_id);
         this.db.transaction(() => {
           this.threadRepo.hardDelete(job.thread_id);
           this.cleanupJobRepo.delete(job.id);
@@ -222,6 +226,8 @@ export class CleanupWorker {
 
       // 5b. Clean up attachment files for this thread (idempotent - ignores missing dirs)
       this.attachmentService.removeForThread(job.thread_id);
+      // 5c. Wipe handoff artifacts for this thread (idempotent via rm --force).
+      await this.handoffStorage.deleteThreadFiles(job.thread_id);
 
       // 6. Hard-delete thread row and cleanup job atomically.
       //    Wrapping in a transaction ensures no orphaned job if either statement fails.
