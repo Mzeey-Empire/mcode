@@ -21,6 +21,18 @@ export function pickHandoffMode(childMaxInputCharacters: number): HandoffMode {
   return childMaxInputCharacters < MINIMAL_MODE_THRESHOLD_CHARS ? "minimal" : "full";
 }
 
+/**
+ * Truncates markdown at the last complete H2 (`## `) section boundary at or
+ * before maxChars. Falls back to a hard slice when no usable H2 exists past
+ * the halfway point, to avoid returning an empty or near-empty document.
+ */
+export function truncateAtSectionBoundary(md: string, maxChars: number): string {
+  if (md.length <= maxChars) return md;
+  const slice = md.slice(0, maxChars);
+  const lastH2 = slice.lastIndexOf("\n## ");
+  return lastH2 > maxChars * 0.5 ? slice.slice(0, lastH2) : slice;
+}
+
 /** Character budget the handoff doc should target. */
 export function computeBudgetChars(childMaxInputCharacters: number): number {
   const budget =

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHandoffPrompt, pickHandoffMode, computeBudgetChars } from "../handoff-prompt.js";
+import { buildHandoffPrompt, pickHandoffMode, computeBudgetChars, truncateAtSectionBoundary } from "../handoff-prompt.js";
 
 describe("pickHandoffMode", () => {
   it("returns minimal when child cap < 8000", () => {
@@ -63,5 +63,34 @@ describe("buildHandoffPrompt", () => {
   it("includes the absolute output path", () => {
     const p = buildHandoffPrompt({ ...baseInput, mode: "full" });
     expect(p).toContain("/data/threads/t_child/handoffs/01HX/handoff.md");
+  });
+});
+
+describe("truncateAtSectionBoundary", () => {
+  it("keeps the doc intact when under budget", () => {
+    const md = "## Goal\nDo something.\n\n## Open items\n- Item 1\n";
+    expect(truncateAtSectionBoundary(md, 1000)).toBe(md);
+  });
+
+  it("truncates at the last complete H2 boundary when one exists past halfway", () => {
+    const part1 = "## Goal\nSome goal text here.\n\n";
+    const part2 = "## Open items\nItem 1\nItem 2\n\n";
+    const part3 = "## Files in play\nMany files listed here to push over budget.";
+    const md = part1 + part2 + part3;
+    // Budget is tight enough to cut part3 but large enough that the H2 is past halfway
+    const budget = part1.length + part2.length + 5;
+    const result = truncateAtSectionBoundary(md, budget);
+    expect(result).not.toContain("Files in play");
+    expect(result).toContain("Open items");
+    // Must not end with a dangling "## " prefix
+    expect(result.endsWith("## ")).toBe(false);
+  });
+
+  it("falls back to hard truncate when no H2 is past the halfway point", () => {
+    // Only an H2 very near the beginning; the budget covers more than 2x that point
+    const md = "## Goal\nX\n" + "a".repeat(900);
+    const budget = 500;
+    const result = truncateAtSectionBoundary(md, budget);
+    expect(result.length).toBe(budget);
   });
 });
