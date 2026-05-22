@@ -279,7 +279,7 @@ export function RightPanel() {
               }`}
             >
               <ListChecks size={12} />
-              Tasks
+              Scope
             </button>
             <button
               type="button"

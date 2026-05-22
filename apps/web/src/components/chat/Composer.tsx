@@ -421,11 +421,11 @@ function InlineComposerOptions({
                 )}
               >
                 <ListTodo size={14} />
-                <span className="text-sm">Tasks</span>
+                <span className="text-sm">Scope</span>
               </Button>
             }
           />
-          <TooltipContent>{panelVisible ? "Hide tasks panel" : "Show tasks panel"}</TooltipContent>
+          <TooltipContent>{panelVisible ? "Hide scope panel" : "Show scope panel"}</TooltipContent>
         </Tooltip>
       )}
     </>
