@@ -998,6 +998,11 @@ export class AgentService {
     // Orchestrate the handoff pipeline (B->A->D ladder). On failure, fall back to the
     // legacy inline replay so the fork always succeeds.
     let providerWireOverride: string;
+
+    // Signal to clients that the handoff is in progress so the UI can show a spinner
+    // before the artifact lands.
+    broadcast("thread.handoff", { threadId: thread.id, status: "generating" });
+
     try {
       const artifact = await this.handoffPipeline.orchestrate({
         parentThreadId,
@@ -1040,6 +1045,13 @@ export class AgentService {
 
       await this.handoffStorage.write(thread.id, artifact);
 
+      broadcast("thread.handoff", {
+        threadId: thread.id,
+        status: artifact.meta.ladderStep === "D" ? "fallback" : "ready",
+        ladderStep: artifact.meta.ladderStep,
+        providerErrorOnGenerate: artifact.meta.providerErrorOnGenerate,
+      });
+
       // Store an internal-only system message at seq 1 as a DB anchor for the handoff.
       // isInternal=true keeps it off the UI render path.
       this.messageRepo.create(
@@ -1054,6 +1066,9 @@ export class AgentService {
         threadId: thread.id,
         error: pipelineErr instanceof Error ? pipelineErr.message : String(pipelineErr),
       });
+
+      // Notify clients that the handoff fell back to the deterministic legacy replay.
+      broadcast("thread.handoff", { threadId: thread.id, status: "fallback" });
 
       // Legacy fallback: build handoff content + conversation replay inline.
       const lastAssistantMsg = [...forkedMessages].reverse().find((m) => m.role === "assistant");
