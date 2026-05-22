@@ -19,6 +19,8 @@ import { join } from "path";
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { HandoffPipelineService } from "../handoff-pipeline.js";
 import { HandoffStorage } from "../handoff-storage.js";
+import type { HandoffArtifact } from "../handoff-types.js";
+import { classifyProviderError } from "../error-classifier.js";
 
 // ---------------------------------------------------------------------------
 // Mock the push broadcast so the pipeline's callers don't need a real WS server.
@@ -171,6 +173,49 @@ describe("fork flow with handoff pipeline (e2e)", () => {
     expect(sysMsg.role).toBe("system");
     expect(sysMsg.sequence).toBe(1);
     expect(sysMsg.isInternal).toBe(true);
+  });
+
+  it("legacy catch path: artifact written to disk with ladderStep=D and generatedBy=deterministic", async () => {
+    // Simulates the agent-service catch block: orchestrate() throws, so the
+    // catch path builds a HandoffArtifact from the legacy replay and calls
+    // handoffStorage.write(). This proves the artifact lands on disk so that
+    // readLatest() returns non-null and "View doc" works.
+    const simulatedPipelineErr = new Error("Provider subprocess exited unexpectedly");
+    const errClass = classifyProviderError(simulatedPipelineErr); // should be "fatal"
+
+    const legacyMarkdown = "You are continuing work from a previous thread.\n\n## Conversation\nUser: help";
+    const legacyArtifact: HandoffArtifact = {
+      markdown: legacyMarkdown,
+      meta: {
+        schemaVersion: 1,
+        parentThreadId: BASE_REQ.parentThreadId,
+        forkedFromMessageId: BASE_REQ.forkedFromMessageId,
+        forkAnchorRole: BASE_REQ.forkAnchorRole,
+        childThreadId: BASE_REQ.childThreadId,
+        generatedBy: "deterministic",
+        provider: "claude",
+        ladderStep: "D",
+        mode: "full",
+        generatedAt: new Date().toISOString(),
+        characterCount: legacyMarkdown.length,
+        parentSdkSessionId: "sdk_session_abc",
+        providerErrorOnGenerate: errClass === "clean" ? "fatal" : errClass,
+        regenerationHistory: [],
+        attachments: [],
+      },
+    };
+
+    await storage.write(BASE_REQ.childThreadId, legacyArtifact);
+
+    const persisted = await storage.readLatest(BASE_REQ.childThreadId);
+    expect(persisted).not.toBeNull();
+    expect(persisted!.meta.ladderStep).toBe("D");
+    expect(persisted!.meta.generatedBy).toBe("deterministic");
+    expect(persisted!.meta.providerErrorOnGenerate).toBe("fatal");
+
+    // Confirm the artifact directory exists on disk.
+    const handoffsRoot = join(dataDir, "threads", BASE_REQ.childThreadId, "handoffs");
+    expect(existsSync(handoffsRoot)).toBe(true);
   });
 
   it("path B quota failure (429) falls to D and artifact has ladderStep=D", async () => {

@@ -53,6 +53,8 @@ import { buildHandoffContent, buildConversationReplay, replayBudgetChars, resolv
 import { HandoffPipelineService } from "./handoff/handoff-pipeline.js";
 import { HandoffStorage } from "./handoff/handoff-storage.js";
 import type { AttachmentSource } from "./handoff/handoff-storage.js";
+import type { HandoffArtifact } from "./handoff/handoff-types.js";
+import { classifyProviderError } from "./handoff/error-classifier.js";
 import { getMcodeDir } from "@mcode/shared";
 import { join } from "path";
 import { storedAttachmentSuffix } from "@mcode/contracts";
@@ -1070,18 +1072,23 @@ export class AgentService {
       // Append the user's new message so the provider receives full context + the prompt.
       providerWireOverride = `${artifact.markdown}\n\n---\n\n${content}`;
     } catch (pipelineErr) {
+      // Classify the error so we know how to label the artifact and log usefully.
+      const errClass = classifyProviderError(pipelineErr);
       logger.warn("createBranchedThread: handoff pipeline failed, falling back to legacy replay", {
         threadId: thread.id,
+        parentThreadId,
+        errClass,
         error: pipelineErr instanceof Error ? pipelineErr.message : String(pipelineErr),
+        stack: pipelineErr instanceof Error ? pipelineErr.stack : undefined,
       });
 
       // Notify clients that the handoff fell back to the deterministic legacy replay.
-      // The pipeline itself threw, so this is treated as a fatal provider error.
+      // The pipeline itself threw, so treat as the classified error (or fatal if clean).
       broadcast("thread.handoff", {
         threadId: thread.id,
         status: "fallback",
         ladderStep: "D" as const,
-        providerErrorOnGenerate: "fatal" as const,
+        providerErrorOnGenerate: errClass === "clean" ? ("fatal" as const) : errClass,
       });
 
       // Legacy fallback: build handoff content + conversation replay inline.
@@ -1103,7 +1110,14 @@ export class AgentService {
         sourceHead,
       });
 
-      this.messageRepo.create(thread.id, "system", handoffContent, 1);
+      // isInternal=true keeps this off the UI render path, consistent with the
+      // pipeline path's system message (written below after replay is built).
+      // NOTE: we write this placeholder now; the legacy replay is stored via
+      // providerWireOverride, not as a second system message.
+      this.messageRepo.create(
+        thread.id, "system", handoffContent, 1,
+        undefined, undefined, undefined, undefined, /* isInternal */ true,
+      );
 
       const budget = replayBudgetChars(model);
       let compactSummary: string | null = null;
@@ -1128,6 +1142,40 @@ export class AgentService {
       const replay = buildConversationReplay(forkedMessages, budget, compactSummary);
       const replayHeader = `You are continuing work from a previous thread titled "${parentThread.title}". Here is the conversation history up to the fork point:\n\n`;
       providerWireOverride = replay ? `${replayHeader}${replay}\n\n---\n\n${content}` : content;
+
+      // Persist a HandoffArtifact so "View doc" has something to read.
+      // The markdown is the full replay that will be sent to the provider.
+      const legacyMarkdown = (replay ? `${replayHeader}${replay}` : handoffContent).trim();
+      const legacyArtifact: HandoffArtifact = {
+        markdown: legacyMarkdown,
+        meta: {
+          schemaVersion: 1,
+          parentThreadId,
+          forkedFromMessageId: resolvedForkMessageId,
+          forkAnchorRole,
+          childThreadId: thread.id,
+          generatedBy: "deterministic",
+          provider: parentThread.provider,
+          ladderStep: "D",
+          mode: "full",
+          generatedAt: new Date().toISOString(),
+          characterCount: legacyMarkdown.length,
+          parentSdkSessionId: parentThread.sdk_session_id ?? null,
+          providerErrorOnGenerate: errClass === "clean" ? "fatal" : errClass,
+          regenerationHistory: [],
+          attachments: [],
+        },
+      };
+      try {
+        await this.handoffStorage.write(thread.id, legacyArtifact);
+      } catch (storageErr) {
+        // Non-fatal: the fork still succeeds via providerWireOverride; View doc
+        // will show "not available" rather than blocking the user.
+        logger.warn("Failed to persist legacy handoff artifact (View doc will be unavailable)", {
+          threadId: thread.id,
+          storageError: storageErr instanceof Error ? storageErr.message : String(storageErr),
+        });
+      }
     }
 
     // In plan mode, wrap so the provider receives buildPlanPrompt(handoff + userPrompt).
