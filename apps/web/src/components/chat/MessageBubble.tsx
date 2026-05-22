@@ -5,7 +5,9 @@ import { cn } from "@/lib/utils";
 const LazyMarkdownContent = lazy(() => import("./MarkdownContent"));
 import { stripInjectedFiles } from "@/lib/file-tags";
 import { buildStoredAttachmentImageSrc } from "@/lib/attachment-url";
-import { formatModelLabel } from "@/lib/format-model-label";
+import { resolveModelDisplayLabel } from "@/lib/format-model-label";
+import { useProviderModelsStore } from "@/stores/providerModelsStore";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { isHandoffMessage, parseHandoffJson } from "./handoff-utils";
 import { HandoffCard } from "./HandoffCard";
 import { FileAttachmentTile } from "./FileAttachmentTile";
@@ -373,6 +375,20 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
     [message.timestamp],
   );
 
+  const threadProvider = useWorkspaceStore((s) =>
+    s.threads.find((t) => t.id === message.thread_id)?.provider,
+  );
+  const providerCatalog = useProviderModelsStore((s) =>
+    threadProvider ? s.models[threadProvider] : undefined,
+  );
+  const modelDisplayLabel = useMemo(
+    () =>
+      message.model
+        ? resolveModelDisplayLabel(message.model, { catalog: providerCatalog })
+        : null,
+    [message.model, providerCatalog],
+  );
+
   const imageAttachments = useMemo(
     () => message.attachments?.filter((a) => a.mimeType.startsWith("image/")) ?? [],
     [message.attachments],
@@ -580,7 +596,7 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
         {(message.model || message.tokens_used != null || message.cost_usd != null || formattedTime) && (
           <span className="ml-auto font-mono text-[10px] tabular-nums text-muted-foreground/55 transition-colors group-hover/msg:text-muted-foreground/80">
             {[
-              message.model ? formatModelLabel(message.model) : null,
+              modelDisplayLabel,
               message.tokens_used != null ? `${message.tokens_used.toLocaleString()} tok` : null,
               message.cost_usd != null ? `$${message.cost_usd.toFixed(4)}` : null,
               formattedTime,

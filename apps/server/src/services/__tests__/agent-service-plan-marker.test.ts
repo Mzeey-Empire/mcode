@@ -157,6 +157,7 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
       undefined, // copilotAgent
       undefined, // contextWindowMode
       undefined, // thinking
+      undefined, // codexFastMode
       assistantMessageId, // markPlanAnswerForMessageId
     );
 
@@ -222,6 +223,7 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
       undefined,
       undefined,
       undefined,
+      undefined,
       assistantMessageId,
     );
 
@@ -268,6 +270,7 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
         undefined,
         undefined,
         undefined,
+        undefined,
         "non-existent-message-id",
       ),
     ).rejects.toThrow();
@@ -294,6 +297,7 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
         [],
         undefined,
         "claude",
+        undefined,
         undefined,
         undefined,
         undefined,

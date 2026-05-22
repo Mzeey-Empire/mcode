@@ -1,0 +1,216 @@
+/**
+ * Replays captured Codex app-server notifications through {@link CodexEventMapper}
+ * and asserts we map (or intentionally silence) every method seen in live traces.
+ *
+ * Fixture: `fixtures/codex-protocol-golden.ndjson` (optional).
+ * Generate with:
+ *   node scripts/codex-protocol-capture.mjs <cwd> apps/server/src/providers/codex/__tests__/fixtures/codex-protocol-golden.ndjson
+ */
+import { readFileSync, existsSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, it, expect } from "vitest";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts";
+import { CodexEventMapper } from "../codex-event-mapper.js";
+import type { CodexNotification } from "../codex-types.js";
+
+const __dir = dirname(fileURLToPath(import.meta.url));
+const FIXTURE_PATH = join(__dir, "fixtures", "codex-protocol-golden.ndjson");
+
+/** Methods the mapper must handle without logging "unrecognized". */
+const KNOWN_METHODS = new Set([
+  "turn/started",
+  "turn/completed",
+  "item/started",
+  "item/completed",
+  "item/agentMessage/delta",
+  "item/commandExecution/outputDelta",
+  "item/reasoning/textDelta",
+  "item/reasoning/summaryTextDelta",
+  "item/reasoning/summaryPartAdded",
+  "item/plan/delta",
+  "error",
+  // Silenced lifecycle (see SILENCED_METHODS in mapper)
+  "thread/started",
+  "thread/status/changed",
+  "mcpServer/startupStatus/updated",
+  "account/rateLimits/updated",
+  "thread/tokenUsage/updated",
+  "turn/diff/updated",
+  "turn/plan/updated",
+  "skills/changed",
+  "model/rerouted",
+  "deprecationNotice",
+  "configWarning",
+  "item/fileChange/outputDelta",
+  "item/autoApprovalReview/started",
+  "item/autoApprovalReview/completed",
+  "item/mcpToolCall/progress",
+  "remoteControl/status/changed",
+]);
+
+/** Synthetic minimal trace for CI when golden file is absent. */
+const SYNTHETIC_NOTIFICATIONS: CodexNotification[] = [
+  { jsonrpc: "2.0", method: "turn/started", params: {} },
+  {
+    jsonrpc: "2.0",
+    method: "item/started",
+    params: { item: { type: "collabAgentToolCall", id: "collab-1", tool: "spawnAgent" } },
+  },
+  {
+    jsonrpc: "2.0",
+    method: "item/started",
+    params: { item: { type: "commandExecution", id: "cmd-1" } },
+  },
+  {
+    jsonrpc: "2.0",
+    method: "item/completed",
+    params: {
+      item: {
+        type: "commandExecution",
+        id: "cmd-1",
+        command: "git status",
+        aggregatedOutput: "ok",
+        exitCode: 0,
+      },
+    },
+  },
+  {
+    jsonrpc: "2.0",
+    method: "item/completed",
+    params: { item: { type: "collabAgentToolCall", id: "collab-1", result: "done" } },
+  },
+  { jsonrpc: "2.0", method: "item/plan/delta", params: { delta: "Planning…" } },
+  { jsonrpc: "2.0", method: "item/reasoning/textDelta", params: { delta: "Think" } },
+  { jsonrpc: "2.0", method: "item/agentMessage/delta", params: { delta: "Final" } },
+  {
+    jsonrpc: "2.0",
+    method: "turn/completed",
+    params: { turn: { status: "completed", usage: { input_tokens: 1, output_tokens: 2 } } },
+  },
+];
+
+type NdjsonRow = {
+  type?: string;
+  method?: string;
+  raw?: CodexNotification;
+};
+
+function loadNotifications(): { label: string; notifications: CodexNotification[] } {
+  if (existsSync(FIXTURE_PATH)) {
+    const lines = readFileSync(FIXTURE_PATH, "utf8").split("\n").filter(Boolean);
+    const notifications: CodexNotification[] = [];
+    for (const line of lines) {
+      const row = JSON.parse(line) as NdjsonRow;
+      if (row.type === "notification" && row.raw?.method) {
+        notifications.push(row.raw);
+      }
+    }
+    return { label: "golden", notifications };
+  }
+  return { label: "synthetic", notifications: SYNTHETIC_NOTIFICATIONS };
+}
+
+function replay(notifications: CodexNotification[]) {
+  const mapper = new CodexEventMapper("coverage-thread");
+  const methodsSeen = new Set<string>();
+  const events: ReturnType<CodexEventMapper["mapNotification"]> = [];
+  for (const n of notifications) {
+    methodsSeen.add(n.method);
+    events.push(...mapper.mapNotification(n));
+  }
+  return { methodsSeen, events };
+}
+
+describe("Codex protocol coverage", () => {
+  const { label, notifications } = loadNotifications();
+
+  it(`replays ${label} notifications without unknown methods`, () => {
+    const { methodsSeen } = replay(notifications);
+    const unknown = [...methodsSeen].filter((m) => !KNOWN_METHODS.has(m));
+    expect(unknown, `Add to KNOWN_METHODS or SILENCED_METHODS: ${unknown.join(", ")}`).toEqual([]);
+  });
+
+  it("maps collab Agent rows and nests child-thread commandExecution under collab", () => {
+    const { events } = replay(notifications);
+    const agentUses = events.filter(
+      (e) => e.type === AgentEventType.ToolUse && e.toolName === "Agent",
+    );
+    const commandUses = events.filter(
+      (e): e is Extract<AgentEvent, { type: "toolUse" }> =>
+        e.type === AgentEventType.ToolUse && e.toolName === "command_execution",
+    );
+    const nestedCommands = commandUses.filter((e) => e.parentToolCallId != null);
+
+    if (label === "synthetic") {
+      expect(agentUses).toHaveLength(1);
+      expect(nestedCommands).toHaveLength(1);
+      expect(nestedCommands[0]?.parentToolCallId).toBe("collab-1");
+      return;
+    }
+
+    // Golden D_subagents: parallel collabs on the parent thread, shell tools on child threads.
+    expect(agentUses.length).toBeGreaterThan(0);
+    expect(commandUses.length).toBeGreaterThan(0);
+    const sawChildThreadCommand = notifications.some((n) => {
+      if (n.method !== "item/completed") return false;
+      const params = n.params as { threadId?: string; item?: { type?: string } };
+      const tid = params.threadId;
+      return (
+        params.item?.type === "commandExecution"
+        && typeof tid === "string"
+        && tid.length > 0
+      );
+    });
+    if (sawChildThreadCommand) {
+      expect(nestedCommands.length).toBeGreaterThan(0);
+    } else if (agentUses.length === 1) {
+      expect(nestedCommands.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("emits non-final textDelta for plan/reasoning when present", () => {
+    const { events } = replay(notifications);
+    const thoughtDeltas = events.filter(
+      (e) => e.type === AgentEventType.TextDelta && e.isFinalResponse !== true,
+    );
+    const hasPlanOrReasoning = notifications.some(
+      (n) =>
+        n.method === "item/plan/delta"
+        || n.method === "item/reasoning/textDelta"
+        || n.method === "item/reasoning/summaryTextDelta",
+    );
+    if (hasPlanOrReasoning) {
+      expect(thoughtDeltas.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("golden fixture documents sub-agent scenario when captured", () => {
+    if (label !== "golden") return;
+    const lines = readFileSync(FIXTURE_PATH, "utf8").split("\n").filter(Boolean);
+    const scenarioEnd = lines
+      .map((l) => JSON.parse(l) as { type?: string; id?: string; methods?: string[] })
+      .find((r) => r.type === "scenario_end" && r.id === "D_subagents");
+    if (!scenarioEnd) return;
+    const methods = scenarioEnd.methods ?? [];
+    const sawCollab =
+      methods.includes("item/started")
+      && lines.some((l) => {
+        try {
+          const r = JSON.parse(l) as NdjsonRow;
+          return (
+            r.type === "notification"
+            && (r.raw?.params as { item?: { type?: string } } | undefined)?.item?.type
+              === "collabAgentToolCall"
+          );
+        } catch {
+          return false;
+        }
+      });
+    if (!sawCollab) {
+      console.warn(
+        "D_subagents scenario did not emit collabAgentToolCall; sub-agent nesting remains unit-test only",
+      );
+    }
+  });
+});

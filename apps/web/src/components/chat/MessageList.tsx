@@ -970,7 +970,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
                 className="absolute left-0 w-full px-8 py-2"
                 style={{ transform: `translateY(${vi.start}px)` }}
               >
-                <div className="mx-auto w-full max-w-4xl">
+                <div className="mx-auto w-full min-w-0 max-w-4xl overflow-x-hidden">
                   <VirtualItemRenderer item={item} turnExpandRef={turnExpandRef} onBranch={onBranch} onReply={onReply} onScrollToMessage={scrollToMessage} currentTurnMessageIdByThread={currentTurnMessageIdByThread} />
                 </div>
               </div>

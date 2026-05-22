@@ -59,6 +59,7 @@ export function createMockThread(overrides?: Partial<Thread>): Thread {
     permission_mode: null,
     context_window_mode: null,
     thinking: null,
+    codex_fast_mode: null,
     copilot_agent: null,
     parent_thread_id: null,
     forked_from_message_id: null,

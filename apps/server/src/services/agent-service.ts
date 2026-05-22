@@ -222,6 +222,7 @@ export class AgentService {
     copilotAgent?: string,
     contextWindowMode?: ContextWindowMode,
     thinking?: boolean,
+    codexFastMode?: boolean,
     /**
      * If set, persist a plan-questions "answered" marker for the given
      * assistant message id in the same SQLite transaction as the user
@@ -534,6 +535,14 @@ export class AgentService {
       settings.model.defaults.contextWindow;
     const effectiveThinking: boolean =
       thinking ?? (thread.thinking ?? settings.model.defaults.thinking);
+    const effectiveCodexFastMode: boolean =
+      effectiveProvider === "codex"
+        ? (codexFastMode !== undefined
+            ? codexFastMode
+            : thread.codex_fast_mode != null
+              ? thread.codex_fast_mode
+              : (settings.provider.codex?.fastMode ?? false))
+        : false;
     this.threadRepo.updateModel(threadId, resolvedModel);
     // Only persist provider when the caller explicitly supplied one (new thread or deliberate switch).
     if (provider !== undefined) {
@@ -547,6 +556,7 @@ export class AgentService {
       ...(contextWindowMode !== undefined && { context_window_mode: contextWindowMode }),
       ...(thinking !== undefined && { thinking }),
       ...(copilotAgent !== undefined && { copilot_agent: copilotAgent }),
+      ...(codexFastMode !== undefined && effectiveProvider === "codex" && { codex_fast_mode: codexFastMode }),
     });
 
     const persistedProvider: ProviderId =
@@ -614,6 +624,7 @@ export class AgentService {
         reasoningLevel,
         contextWindowMode: effectiveContextWindowMode,
         thinking: effectiveThinking,
+        ...(effectiveProvider === "codex" && { codexFastMode: effectiveCodexFastMode }),
         ...(effectiveBudget > 0 && { maxBudgetUsd: effectiveBudget }),
         ...(effectiveTurns > 0 && { maxTurns: effectiveTurns }),
         copilotAgent: effectiveCopilotAgent,
@@ -731,6 +742,7 @@ export class AgentService {
       undefined, // copilotAgent
       contextWindowMode,
       thinking,
+      undefined,
       markPlanAnswerForMessageId,
     );
   }
@@ -775,6 +787,7 @@ export class AgentService {
     copilotAgent?: string,
     contextWindowMode?: ContextWindowMode,
     thinking?: boolean,
+    codexFastMode?: boolean,
     displayContent?: string,
   ): Promise<Thread & { warnings?: string[] }> {
     const title = truncateTitle(displayContent ?? content);
@@ -788,6 +801,7 @@ export class AgentService {
         copilotAgent,
         contextWindowMode,
         thinking,
+        codexFastMode,
         displayContent,
       });
     }
@@ -843,6 +857,12 @@ export class AgentService {
 
     this.threadRepo.updateModel(thread.id, model);
 
+    if (provider === "codex" && codexFastMode !== undefined) {
+      this.threadRepo.updateSettings(thread.id, {
+        codex_fast_mode: codexFastMode,
+      });
+    }
+
     void this.sendMessage(
       thread.id,
       content,
@@ -857,6 +877,7 @@ export class AgentService {
       copilotAgent,
       contextWindowMode,
       thinking,
+      undefined,
       undefined,
       undefined,
       undefined,
@@ -899,6 +920,7 @@ export class AgentService {
     copilotAgent?: string;
     contextWindowMode?: ContextWindowMode;
     thinking?: boolean;
+    codexFastMode?: boolean;
     displayContent?: string;
   }): Promise<Thread & { warnings?: string[] }> {
     const {
@@ -909,6 +931,7 @@ export class AgentService {
       copilotAgent,
       contextWindowMode,
       thinking,
+      codexFastMode,
       displayContent,
     } = params;
 
@@ -1184,6 +1207,16 @@ export class AgentService {
     const providerInput =
       interactionMode === "plan" ? this.buildPlanPrompt(providerWireOverride) : providerWireOverride;
 
+    const resolvedCodexFast =
+      codexFastMode !== undefined
+        ? codexFastMode
+        : parentThread.codex_fast_mode;
+    if (provider === "codex" && resolvedCodexFast !== null) {
+      this.threadRepo.updateSettings(thread.id, {
+        codex_fast_mode: resolvedCodexFast,
+      });
+    }
+
     void this.sendMessage(
       thread.id,
       content,
@@ -1198,6 +1231,7 @@ export class AgentService {
       copilotAgent,
       effectiveContextWindowMode,
       effectiveThinking,
+      undefined,
       undefined,
       providerInput,
       undefined,

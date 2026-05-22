@@ -28,9 +28,12 @@ export type AgentDefaultMode = z.infer<typeof AgentDefaultModeSchema>;
  * Reasoning effort level for model inference.
  * "max" maps to Claude's extended thinking; "xhigh" maps to Codex's xhigh effort tier and Claude Opus 4.7+;
  * "ultrathink" is a virtual top-tier that prepends "Ultrathink:\n" to the user prompt and
- * sends "max" effort to the SDK. Supported only by max-tier Claude models (Opus 4.7/4.6, Sonnet 4.6).
+ * sends "max" effort to the SDK (supported only by max-tier Claude models).
+ * "none" and "minimal" map to OpenAI Codex `effort` presets; Claude models normalize them to "low".
  */
 export const ReasoningLevelSchema = z.enum([
+  "none",
+  "minimal",
   "low",
   "medium",
   "high",
@@ -297,6 +300,23 @@ export const SettingsSchema = lazySchema(() =>
             cursor: z.string().default(""),
           })
           .default({}),
+        /** OpenAI Codex CLI (`codex app-server`) tuning (`provider` + `codex` keeps depth ≤ 3). */
+        codex: z
+          .object({
+            /**
+             * When true, pass `serviceTier: "fast"` on Codex turns (OpenAI fast tier when available).
+             */
+            fastMode: z.boolean().optional(),
+            /** @deprecated Migrated into {@link fastMode}; still read from disk for older settings files. */
+            priorityProcessing: z.boolean().optional(),
+          })
+          .transform((o) => ({
+            fastMode:
+              typeof o.fastMode === "boolean"
+                ? o.fastMode
+                : o.priorityProcessing === true,
+          }))
+          .default({ fastMode: false }),
         /** Cursor ACP-only tuning (`provider` + `cursor` keeps nesting depth ≤ 3). */
         cursor: z
           .object({
@@ -320,6 +340,13 @@ export const SettingsSchema = lazySchema(() =>
             retryTransientFailuresOnce: z.boolean().default(true),
             /** Attach stderr tail excerpts to Cursor failure logs (debugging only). */
             verboseFailureLogs: z.boolean().default(true),
+            /**
+             * Log sanitized `session/update` envelopes plus mapped `AgentEvent` summaries while
+             * handling Cursor ACP traffic (daily server log files).
+             *
+             * **Note:** `agent_message_chunk` updates are intentionally skipped as they are too chatty.
+             */
+            traceSessionUpdates: z.boolean().default(false),
             /**
              * Respond to blocking `cursor/ask_question` with automatic option picks derived
              * from prompts (recommended-first). When false, answer `skipped`.
@@ -534,8 +561,15 @@ export const PartialSettingsSchema = lazySchema(() =>
             idleSessionTtlMinutes: z.number().int().min(5).max(240).optional(),
             retryTransientFailuresOnce: z.boolean().optional(),
             verboseFailureLogs: z.boolean().optional(),
+            traceSessionUpdates: z.boolean().optional(),
             autoAnswerAskQuestions: z.boolean().optional(),
             echoAskQuestionsToTimeline: z.boolean().optional(),
+          })
+          .optional(),
+        codex: z
+          .object({
+            fastMode: z.boolean().optional(),
+            priorityProcessing: z.boolean().optional(),
           })
           .optional(),
       })

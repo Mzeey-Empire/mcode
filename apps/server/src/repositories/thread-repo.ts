@@ -32,8 +32,9 @@ interface ThreadRow {
   interaction_mode: string | null;
   permission_mode: string | null;
   context_window_mode: string | null;
-  thinking: number | null;
-  copilot_agent: string | null;
+    thinking: number | null;
+    codex_fast_mode: number | null;
+    copilot_agent: string | null;
   parent_thread_id: string | null;
   forked_from_message_id: string | null;
   last_compact_summary: string | null;
@@ -67,6 +68,8 @@ function rowToThread(row: ThreadRow): Thread {
     context_window_mode:
       (row.context_window_mode ?? null) as ContextWindowMode | null,
     thinking: row.thinking == null ? null : row.thinking === 1,
+    codex_fast_mode:
+      row.codex_fast_mode == null ? null : row.codex_fast_mode === 1,
     copilot_agent: (row.copilot_agent ?? null) as string | null,
     parent_thread_id: row.parent_thread_id,
     forked_from_message_id: row.forked_from_message_id,
@@ -76,7 +79,7 @@ function rowToThread(row: ThreadRow): Thread {
 }
 
 const THREAD_COLUMNS =
-  "id, workspace_id, title, status, mode, worktree_path, branch, worktree_managed, issue_number, pr_number, pr_status, sdk_session_id, model, provider, created_at, updated_at, deleted_at, last_context_tokens, context_window, reasoning_level, interaction_mode, permission_mode, context_window_mode, thinking, copilot_agent, parent_thread_id, forked_from_message_id, last_compact_summary, has_file_changes";
+  "id, workspace_id, title, status, mode, worktree_path, branch, worktree_managed, issue_number, pr_number, pr_status, sdk_session_id, model, provider, created_at, updated_at, deleted_at, last_context_tokens, context_window, reasoning_level, interaction_mode, permission_mode, context_window_mode, thinking, codex_fast_mode, copilot_agent, parent_thread_id, forked_from_message_id, last_compact_summary, has_file_changes";
 
 /** Repository for thread lifecycle operations against SQLite. */
 @injectable()
@@ -144,6 +147,7 @@ export class ThreadRepo {
       permission_mode: null,
       context_window_mode: null,
       thinking: null,
+      codex_fast_mode: null,
       copilot_agent: null,
       parent_thread_id: lineage?.parentThreadId ?? null,
       forked_from_message_id: lineage?.forkedFromMessageId ?? null,
@@ -400,6 +404,7 @@ export class ThreadRepo {
       permission_mode?: string;
       context_window_mode?: ContextWindowMode | null;
       thinking?: boolean | null;
+      codex_fast_mode?: boolean | null;
       copilot_agent?: string | null;
     },
   ): boolean {
@@ -427,6 +432,12 @@ export class ThreadRepo {
       // SQLite has no native boolean — store 0/1 to match the column convention.
       // null clears the override so the thread inherits from settings.
       values.push(settings.thinking == null ? null : settings.thinking ? 1 : 0);
+    }
+    if (settings.codex_fast_mode !== undefined) {
+      fields.push("codex_fast_mode = ?");
+      values.push(
+        settings.codex_fast_mode == null ? null : settings.codex_fast_mode ? 1 : 0,
+      );
     }
     if (settings.copilot_agent !== undefined) {
       fields.push("copilot_agent = ?");

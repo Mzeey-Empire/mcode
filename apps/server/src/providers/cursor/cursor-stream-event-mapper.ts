@@ -23,6 +23,10 @@ import {
 } from "./cursor-todo-snapshot.js";
 import { normalizeMcodeCursorToolInput } from "./cursor-tool-input-normalize.js";
 import type { CursorTodoSnapshot } from "./cursor-todo-snapshot.js";
+import {
+  extractCursorParentToolCallId,
+  resolveCursorSubagentToolName,
+} from "./cursor-subagent-detection.js";
 import type {
   CursorStreamAssistant,
   CursorStreamContentBlock,
@@ -242,9 +246,9 @@ function mapToolCallEvent(
   if (!discriminator) return [];
 
   if (event.subtype === "started") {
-    return mapToolCallStarted(event.call_id, discriminator, payload, threadId, acc, todoSnapshot);
+    return mapToolCallStarted(event.call_id, discriminator, payload, threadId, acc, todoSnapshot, event);
   }
-  return mapToolCallCompleted(event.call_id, discriminator, payload, threadId, acc);
+  return mapToolCallCompleted(event.call_id, discriminator, payload, threadId, acc, event);
 }
 
 /**
@@ -276,14 +280,20 @@ function mapToolCallStarted(
   threadId: string,
   acc: CursorStreamAccumulator,
   todoSnapshot: CursorTodoSnapshot | undefined,
+  streamEvent: CursorStreamToolCallStarted,
 ): AgentEvent[] {
   const args = extractArgs(payload);
+  const parentToolCallId = extractCursorParentToolCallId(streamEvent as unknown as Record<string, unknown>);
 
   if (discriminator === "updateTodosToolCall") {
-    return mapUpdateTodosStarted(callId, args, threadId, acc, todoSnapshot);
+    return mapUpdateTodosStarted(callId, args, threadId, acc, todoSnapshot, parentToolCallId);
   }
 
-  const toolName = TOOL_NAME_BY_DISCRIMINATOR[discriminator] ?? discriminator;
+  const toolName = resolveCursorSubagentToolName(
+    TOOL_NAME_BY_DISCRIMINATOR[discriminator] ?? discriminator,
+    discriminator,
+    undefined,
+  );
   acc.toolStartTimes.set(callId, Date.now());
   acc.pendingToolCalls.add(callId);
   acc.hasFiredToolThisTurn = true;
@@ -299,6 +309,7 @@ function mapToolCallStarted(
       toolCallId: callId,
       toolName,
       toolInput,
+      ...(parentToolCallId ? { parentToolCallId } : {}),
     },
   ];
 }
@@ -309,6 +320,7 @@ function mapUpdateTodosStarted(
   threadId: string,
   acc: CursorStreamAccumulator,
   todoSnapshot: CursorTodoSnapshot | undefined,
+  parentToolCallId?: string,
 ): AgentEvent[] {
   const entries = extractCursorTodoEntries(args);
   if (!entries || entries.length === 0) return [];
@@ -325,6 +337,7 @@ function mapUpdateTodosStarted(
       toolCallId: callId,
       toolName: "TodoWrite",
       toolInput: { todos },
+      ...(parentToolCallId ? { parentToolCallId } : {}),
     },
   ];
 }
@@ -335,19 +348,22 @@ function mapToolCallCompleted(
   payload: Record<string, unknown> | undefined,
   threadId: string,
   acc: CursorStreamAccumulator,
+  streamEvent: CursorStreamToolCallCompleted,
 ): AgentEvent[] {
   const result = extractResult(payload);
   const isError = result?.rejected != null || result?.failure != null;
   const output = formatResultOutput(result);
 
   const events: AgentEvent[] = [];
+  const parentToolCallId = extractCursorParentToolCallId(streamEvent as unknown as Record<string, unknown>);
 
   // Synthesize a ToolUse if completed arrives without a prior started
   // (orphan recovery — better to render the result against a placeholder
   // ToolUse than to drop it entirely).
   if (!acc.toolStartTimes.has(callId)) {
     if (discriminator !== "updateTodosToolCall") {
-      const toolName = TOOL_NAME_BY_DISCRIMINATOR[discriminator] ?? discriminator;
+      let toolName = TOOL_NAME_BY_DISCRIMINATOR[discriminator] ?? discriminator;
+      toolName = resolveCursorSubagentToolName(toolName, discriminator, undefined);
       const orphanArgs = extractArgs(payload) ?? {};
       const toolInput =
         toolName === "Edit" || toolName === "Write"
@@ -359,6 +375,7 @@ function mapToolCallCompleted(
         toolCallId: callId,
         toolName,
         toolInput,
+        ...(parentToolCallId ? { parentToolCallId } : {}),
       });
     }
   }

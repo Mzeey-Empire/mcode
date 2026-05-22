@@ -21,7 +21,11 @@ export interface ComposerDraft {
    * persisted toggle (or the global settings default). Honored only by models
    * that expose a thinking toggle (Haiku 4.5).
    */
-  thinking?: boolean;
+  /**
+   * Per-thread Codex fast-tier override. Undefined in drafts means "not captured
+   * in this saved draft"; Composer falls back to thread settings.
+   */
+  codexFastMode?: boolean | null;
 }
 
 interface ComposerDraftState {

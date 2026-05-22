@@ -61,6 +61,11 @@ export interface ThreadSettings {
    * expose a thinking toggle (Haiku 4.5).
    */
   thinking?: boolean | null;
+  /**
+   * Per-thread Codex OpenAI fast tier. Null clears the override so the thread
+   * inherits from the global settings `provider.codex.fastMode`.
+   */
+  codexFastMode?: boolean | null;
 }
 
 interface ThreadState {
@@ -168,7 +173,7 @@ interface ThreadState {
   // Message actions
   loadMessages: (threadId: string) => Promise<void>;
   loadOlderMessages: (threadId: string) => Promise<void>;
-  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean, replyToMessageId?: string, quotedText?: string) => Promise<void>;
+  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean, codexFastMode?: boolean, replyToMessageId?: string, quotedText?: string) => Promise<void>;
   stopAgent: (threadId: string) => Promise<void>;
   /** Replace runningThreadIds with the authoritative server snapshot. Called on WS (re)connect. */
   hydrateRunningThreads: (ids: string[]) => void;
@@ -303,6 +308,7 @@ export function scheduleDrainAfterEdit(threadId: string): void {
             next.copilotAgent,
             next.contextWindow,
             next.thinking,
+            next.codexFastMode,
             next.replyToMessageId,
             next.quotedText,
           );
@@ -500,10 +506,38 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           }
 
           // Manage thought segments: append to the active segment or start a new one.
+          // Codex turns interleave short text deltas with tools, which causes the
+          // session.toolUse freeze to chop a single flowing sentence into micro
+          // fragments ("the", "changed set and therefore the only", …). When the
+          // most recent segment is frozen but its text is short AND the incoming
+          // delta is clearly a continuation (starts lowercase / punctuation, or
+          // the previous segment did not end in sentence-terminating punctuation),
+          // re-open and append instead of starting a new row.
           const segments = nextSegments[tid] ?? [];
           const last = segments[segments.length - 1];
-          if (!last || last.endedAt !== undefined) {
+          const looksLikeContinuation = (prevText: string, nextText: string): boolean => {
+            const trimmedPrev = prevText.trimEnd();
+            const lastChar = trimmedPrev.slice(-1);
+            const prevEndsSentence = /[.!?]/.test(lastChar);
+            const firstChar = nextText.replace(/^\s+/, "").slice(0, 1);
+            const nextStartsLowerOrPunct =
+              firstChar === "" || /[a-z,;:)\]}-]/.test(firstChar);
+            return !prevEndsSentence || nextStartsLowerOrPunct;
+          };
+          const TINY_SEGMENT_THRESHOLD = 40; // chars
+          const shouldReopen =
+            last &&
+            last.endedAt !== undefined &&
+            (last.text.length < TINY_SEGMENT_THRESHOLD ||
+              looksLikeContinuation(last.text, acc));
+          if (!last || (last.endedAt !== undefined && !shouldReopen)) {
             nextSegments[tid] = [...segments, { text: acc, startedAt: Date.now() }];
+          } else if (last.endedAt !== undefined && shouldReopen) {
+            // Re-open the frozen tail and append. endedAt is dropped so it can
+            // continue accumulating until the next genuine boundary.
+            const reopened: typeof last = { ...last, text: last.text + acc };
+            delete (reopened as { endedAt?: number }).endedAt;
+            nextSegments[tid] = [...segments.slice(0, -1), reopened];
           } else {
             nextSegments[tid] = [
               ...segments.slice(0, -1),
@@ -1054,7 +1088,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
    * message to local state, marks the thread as running, then dispatches
    * to the transport layer. On failure, rolls back the running state.
    */
-  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, copilotAgent, contextWindow, thinking, replyToMessageId, quotedText) => {
+  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, copilotAgent, contextWindow, thinking, codexFastMode, replyToMessageId, quotedText) => {
     evictMessageCache(threadId);
 
     // Add user message to local state immediately (optimistic)
@@ -1095,7 +1129,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       thoughtSegmentsByThread: omitKey(state.thoughtSegmentsByThread, threadId),
       hooksByThread: omitKey(state.hooksByThread, threadId),
       // Persist composer-side overrides so the post-wizard answer turn forwards them
-      settingsByThread: (reasoningLevel !== undefined || contextWindow !== undefined || thinking !== undefined)
+      settingsByThread: (reasoningLevel !== undefined || contextWindow !== undefined || thinking !== undefined || codexFastMode !== undefined)
         ? {
             ...state.settingsByThread,
             [threadId]: {
@@ -1103,6 +1137,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               ...(reasoningLevel !== undefined && { reasoningLevel }),
               ...(contextWindow !== undefined && { contextWindow }),
               ...(thinking !== undefined && { thinking }),
+              ...(codexFastMode !== undefined && { codexFastMode }),
             },
           }
         : state.settingsByThread,
@@ -1144,6 +1179,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         copilotAgent,
         contextWindow,
         thinking,
+        codexFastMode,
         replyToMessageId,
         quotedText,
       );
@@ -1313,6 +1349,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         copilotAgent: thread.copilot_agent,
         contextWindow: (thread.context_window_mode as ContextWindowMode | null) ?? null,
         thinking: thread.thinking ?? null,
+        codexFastMode: thread.codex_fast_mode ?? null,
       };
     }
 
@@ -1338,6 +1375,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     // null clears the override so the thread inherits from the global default.
     if ("contextWindow" in settings) patch.contextWindow = settings.contextWindow;
     if ("thinking" in settings) patch.thinking = settings.thinking;
+    if ("codexFastMode" in settings) patch.codexFastMode = settings.codexFastMode;
 
     if (Object.keys(patch).length === 0) return Promise.resolve(false);
 
@@ -1364,6 +1402,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               ...("copilotAgent" in patch && { copilot_agent: patch.copilotAgent ?? null }),
               ...("contextWindow" in patch && { context_window_mode: patch.contextWindow ?? null }),
               ...("thinking" in patch && { thinking: patch.thinking ?? null }),
+              ...("codexFastMode" in patch && { codex_fast_mode: patch.codexFastMode ?? null }),
             }
           : t,
       ),
@@ -1377,6 +1416,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       copilotAgent?: string | null;
       contextWindow?: ContextWindowMode | null;
       thinking?: boolean | null;
+      codexFastMode?: boolean | null;
     } = {
       ...(patch.permissionMode !== undefined ? { permissionMode: patch.permissionMode } : {}),
       ...(patch.interactionMode !== undefined ? { interactionMode: patch.interactionMode } : {}),
@@ -1384,6 +1424,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       ...("copilotAgent" in patch ? { copilotAgent: patch.copilotAgent } : {}),
       ...("contextWindow" in patch ? { contextWindow: patch.contextWindow } : {}),
       ...("thinking" in patch ? { thinking: patch.thinking } : {}),
+      ...("codexFastMode" in patch ? { codexFastMode: patch.codexFastMode } : {}),
     };
     return getTransport().updateThreadSettings(threadId, transportPatch).catch(() => false);
   },
@@ -2002,8 +2043,31 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     if (method === "session.toolUse") {
       const toolCallId = (params.toolCallId as string) || "";
       const existingCalls = get().toolCallsByThread[threadId] ?? [];
-      if (toolCallId && existingCalls.some((tc) => tc.id === toolCallId)) {
-        return;
+      const toolName = (params.toolName as string) || "unknown";
+      const incomingInput = (params.toolInput as Record<string, unknown>) || {};
+      if (toolCallId) {
+        const existing = existingCalls.find((tc) => tc.id === toolCallId);
+        if (existing) {
+          // Cursor Task: provisional ToolUse on tool_call, enriched ToolUse on cursor/task.
+          if (
+            !existing.isComplete &&
+            existing.toolName === "Agent" &&
+            toolName === "Agent"
+          ) {
+            set((state) => {
+              const calls = state.toolCallsByThread[threadId] ?? [];
+              const updated = calls.map((tc) =>
+                tc.id === toolCallId
+                  ? { ...tc, toolInput: { ...tc.toolInput, ...incomingInput } }
+                  : tc,
+              );
+              return {
+                toolCallsByThread: { ...state.toolCallsByThread, [threadId]: updated },
+              };
+            });
+          }
+          return;
+        }
       }
 
       const parentToolCallId = params.parentToolCallId as string | undefined;
@@ -2013,8 +2077,6 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       if (!parentToolCallId) {
         markPriorToolCallsComplete();
       }
-      const toolName = (params.toolName as string) || "unknown";
-
       // Intercept TodoWrite calls to populate the task panel.
       // Sub-agent calls are grouped by their parent Agent's description so
       // multiple sub-agents each get their own collapsible section.
@@ -2042,7 +2104,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       const toolCall: ToolCall = {
         id: toolCallId || crypto.randomUUID(),
         toolName,
-        toolInput: (params.toolInput as Record<string, unknown>) || {},
+        toolInput: incomingInput,
         output: null,
         isError: false,
         isComplete: false,
@@ -2090,14 +2152,28 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         const hasActiveChildren = (id: string) =>
           calls.some((c) => c.parentToolCallId === id && !c.isComplete);
         let matched = false;
+        const completeCall = (tc: ToolCall): ToolCall => {
+          const fromInput = tc.toolInput.durationMs;
+          const durationMs =
+            typeof fromInput === "number" && Number.isFinite(fromInput)
+              ? fromInput
+              : tc.startedAt != null
+                ? Math.max(0, Date.now() - tc.startedAt)
+                : undefined;
+          return {
+            ...tc,
+            output,
+            isError,
+            isComplete: true,
+            ...(durationMs != null ? { durationMs } : {}),
+          };
+        };
         const updated = hasIdMatch
-          ? calls.map((tc) =>
-              tc.id === toolCallId ? { ...tc, output, isError, isComplete: true } : tc
-            )
+          ? calls.map((tc) => (tc.id === toolCallId ? completeCall(tc) : tc))
           : calls.map((tc) => {
               if (!matched && !tc.isComplete && !(tc.toolName === "Agent" && hasActiveChildren(tc.id))) {
                 matched = true;
-                return { ...tc, output, isError, isComplete: true };
+                return completeCall(tc);
               }
               return tc;
             });
@@ -2570,6 +2646,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
                   next.copilotAgent,
                   next.contextWindow,
                   next.thinking,
+                  next.codexFastMode,
                   next.replyToMessageId,
                   next.quotedText,
                 );

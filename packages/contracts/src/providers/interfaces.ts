@@ -73,6 +73,10 @@ export interface IAgentProvider {
     /** Maximum agent turns for this session. Provider stops after this count. Undefined or 0 disables. */
     maxTurns?: number;
     /**
+     * Codex: request OpenAI fast tier when true. Undefined lets the provider read global settings.
+     */
+    codexFastMode?: boolean;
+    /**
      * Copilot-specific: name of the sub-agent to activate for this session.
      * Built-in modes: "interactive" | "plan" | "autopilot".
      * Custom agents: any name defined in user/project YAML config.

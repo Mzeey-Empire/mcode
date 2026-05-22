@@ -31,6 +31,7 @@ import { checkCodexVersion, meetsMinVersion } from "./codex-version.js";
 import { CodexAppServer } from "./codex-app-server.js";
 import type { CodexApprovalRequest } from "./codex-app-server.js";
 import { CodexEventMapper } from "./codex-event-mapper.js";
+import { traceCodexIngest } from "./codex-trace.js";
 import {
   mapDecisionToCodexResponse,
   synthesizeCodexPermissionRequest,
@@ -41,8 +42,21 @@ import type { TurnInputPart, CodexNotification } from "./codex-types.js";
 const IDLE_TTL_MS = 10 * 60 * 1000;
 /** How often to check for idle sessions (1 minute). */
 const EVICTION_INTERVAL_MS = 60 * 1000;
-/** Maximum time to wait for a turn to complete before timing out (10 minutes). */
-const TURN_TIMEOUT_MS = 10 * 60 * 1000;
+/**
+ * Maximum wall-clock idle between Codex app-server notifications while
+ * waiting for `turn/completed`. The timer resets on every notification so
+ * quiet stretches without RPC traffic still time out, but active streams and
+ * tool output keep the turn alive.
+ */
+const TURN_TIMEOUT_MS = 30 * 60 * 1000;
+
+/** Internal: a newer `sendMessage` aborted this turn wait (not user-facing). */
+class CodexTurnSupersededError extends Error {
+  constructor() {
+    super("Codex turn superseded");
+    this.name = "CodexTurnSupersededError";
+  }
+}
 
 interface SessionEntry {
   server: CodexAppServer;
@@ -50,6 +64,12 @@ interface SessionEntry {
   lastUsedAt: number;
   /** Sandbox mode used when this session was started; used to detect permission mode changes. */
   sandboxMode: string;
+  /** Monotonic counter so overlapping `runTurn` waits ignore stale completions. */
+  runTurnSeq: number;
+  /** Codex `turn.id` from the latest `turn/started` for this session. */
+  pendingTurnId: string | null;
+  /** Clears the in-flight `runTurn` listener when a new turn preempts it. */
+  abortPendingTurnWait?: () => void;
 }
 
 /** One pending codex approval bridged into the Phase 1 permission flow. */
@@ -66,7 +86,7 @@ interface PendingPermissionEntry {
 
 /**
  * Builds the Codex turn input from a message string and optional attachments.
- * Images become `local_image` parts; non-image files become sanitised text notes
+ * Images become `localImage` parts; non-image files become sanitised text notes
  * that omit internal filesystem paths to prevent prompt injection.
  */
 function buildCodexInput(
@@ -78,7 +98,7 @@ function buildCodexInput(
   for (const att of attachments ?? []) {
     if (isVirtualBrowserContextAttachment(att.mimeType)) continue;
     if (att.mimeType.startsWith("image/")) {
-      inputs.push({ type: "local_image", path: att.sourcePath });
+      inputs.push({ type: "localImage", path: att.sourcePath });
     } else {
       // Strip control characters (including newlines) from user-supplied strings
       // to prevent prompt injection. Do not expose internal filesystem paths.
@@ -95,9 +115,7 @@ function buildCodexInput(
 /** Maps mcode ReasoningLevel to the codex app-server `effort` field value. */
 function toCodexEffort(level?: ReasoningLevel): string | undefined {
   if (!level) return undefined;
-  // "max" is Claude-specific; map to "high" for codex.
-  if (level === "max") return "high";
-  // "low", "medium", "high", "xhigh" are all valid codex effort levels.
+  if (level === "max" || level === "ultrathink") return "high";
   return level;
 }
 
@@ -149,13 +167,15 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
     permissionMode: string;
     attachments?: AttachmentMeta[];
     reasoningLevel?: ReasoningLevel;
+    /** When true, pass OpenAI fast service tier; when false, standard. Undefined uses global settings. */
+    codexFastMode?: boolean;
   }): Promise<void> {
     const settings = await this.settingsService.get();
     const cliPath = settings.provider.cli.codex || "codex";
 
     const {
       sessionId, message, cwd, model, resume, permissionMode,
-      reasoningLevel, attachments,
+      reasoningLevel, attachments, codexFastMode,
     } = params;
 
     const input = buildCodexInput(message, attachments);
@@ -172,19 +192,36 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
     const approvalPolicy = permissionMode === "full" ? "never" : "on-request";
     const existing = this.sessions.get(sessionId);
 
+    const useFastTier =
+      codexFastMode !== undefined
+        ? codexFastMode
+        : settings.provider.codex?.fastMode === true;
+    const fastServiceTier = useFastTier ? "fast" : undefined;
+
     const turnOptions = {
       model: model || undefined,
       effort: toCodexEffort(reasoningLevel),
+      ...(fastServiceTier && { serviceTier: fastServiceTier }),
     };
 
     if (existing) {
-      if (existing.sandboxMode === sandbox) {
+      // Resilience: the cached SessionEntry may point at a dead app-server
+      // (codex CLI idle-killed, host suspend/resume, or the "exit" event has
+      // not yet drained the EventEmitter queue). Reusing a dead server makes
+      // the next user message hang on a turn/start RPC until the 30s timeout
+      // fires, surfaced to the user as a generic timeout error. Detect the
+      // dead-server case and fall through to a clean respawn instead.
+      if (!existing.server.isAlive) {
+        logger.info("Codex session was dead; respawning", { sessionId });
+        this.drainPending((e) => e.sessionId === sessionId);
+        this.sessions.delete(sessionId);
+      } else if (existing.sandboxMode === sandbox) {
         // Same permission mode - reuse the running session
         existing.lastUsedAt = Date.now();
         existing.mapper.reset();
         void this.runTurn(sessionId, threadId, existing.server, input, turnOptions);
         return;
-      }
+      } else {
       // Permission mode changed - kill the old session so we can start fresh with the correct sandbox
       logger.info("Codex session restarted due to permission mode change", {
         sessionId,
@@ -203,9 +240,10 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
       existing.server.kill().catch((err: unknown) => {
         logger.warn("Codex session kill on permission change failed", { error: String(err) });
       });
+      }
     }
 
-    // Version check only when starting a new session
+    // Version check only when starting a new session (cached in codex-version per CLI path).
     const versionResult = checkCodexVersion(cliPath);
     if (!versionResult.ok) {
       this.emit("event", { type: AgentEventType.Error, threadId, error: versionResult.error } satisfies AgentEvent);
@@ -246,7 +284,14 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
     const mapper = new CodexEventMapper(threadId);
 
     server.on("notification", (notification) => {
+      const n = notification as { method?: string; params?: Record<string, unknown> };
+      if (n.method === "turn/started") {
+        const turn = n.params?.turn as { id?: string } | undefined;
+        const entry = this.sessions.get(sessionId);
+        if (entry && turn?.id) entry.pendingTurnId = turn.id;
+      }
       const events = mapper.mapNotification(notification as CodexNotification);
+      traceCodexIngest(threadId, n.method, n.params, events);
       for (const event of events) {
         this.emit("event", event);
       }
@@ -307,7 +352,14 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
       } satisfies AgentEvent);
     }
 
-    this.sessions.set(sessionId, { server, mapper, lastUsedAt: Date.now(), sandboxMode: sandbox });
+    this.sessions.set(sessionId, {
+      server,
+      mapper,
+      lastUsedAt: Date.now(),
+      sandboxMode: sandbox,
+      runTurnSeq: 0,
+      pendingTurnId: null,
+    });
 
     if (this.pendingStops.delete(sessionId)) {
       logger.info("Pending stop consumed, tearing down new Codex session", { sessionId });
@@ -323,65 +375,105 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
   }
 
   /**
-   * Sends a single turn to the app-server and waits for `turn/completed`
-   * to arrive as a notification.
-   * Emits `ended` when the turn finishes, or skips it if the server died
-   * (the `fatal` handler already emitted `ended` in that case).
+   * Sends a single turn to the app-server and waits for matching `turn/completed`.
+   * Overlapping sends preempt prior waits so stale completions cannot finish
+   * the wrong promise. Emits `ended` when the turn finishes for this wait only.
    */
   private async runTurn(
     sessionId: string,
     threadId: string,
     server: CodexAppServer,
     input: string | TurnInputPart[],
-    turnOptions?: { model?: string; effort?: string },
+    turnOptions?: { model?: string; effort?: string; serviceTier?: string },
   ): Promise<void> {
+    const entry = this.sessions.get(sessionId);
+    if (!entry) return;
+
+    entry.abortPendingTurnWait?.();
+    entry.abortPendingTurnWait = undefined;
+
+    entry.runTurnSeq += 1;
+    const seq = entry.runTurnSeq;
+    entry.pendingTurnId = null;
+
+    await server.interruptTurn();
+
     let serverDied = false;
     let endedEmitted = false;
 
     try {
-      // Register all listeners BEFORE sendTurn so a turn/completed notification
-      // that arrives during the async sendTurn await is never missed.
       await new Promise<void>((resolve, reject) => {
+        let activityTimer: ReturnType<typeof setTimeout>;
+        let settled = false;
+
         const cleanup = () => {
-          clearTimeout(turnTimer);
+          if (settled) return;
+          settled = true;
+          clearTimeout(activityTimer);
           server.removeListener("notification", onNotification);
           server.removeListener("fatal", onFatal);
+          if (entry.abortPendingTurnWait === abortThis) entry.abortPendingTurnWait = undefined;
         };
+
+        const armTimer = () => {
+          clearTimeout(activityTimer);
+          activityTimer = setTimeout(() => {
+            cleanup();
+            reject(new Error(`Codex turn timed out after ${TURN_TIMEOUT_MS / 1000}s with no app-server notifications`));
+          }, TURN_TIMEOUT_MS);
+        };
+
+        const abortThis = () => {
+          cleanup();
+          reject(new CodexTurnSupersededError());
+        };
+        entry.abortPendingTurnWait = abortThis;
+
         const onNotification = (notification: unknown) => {
-          const n = notification as { method?: string };
+          armTimer();
+          const n = notification as { method?: string; params?: Record<string, unknown> };
           if (n.method === "turn/completed") {
+            const turn = n.params?.turn as { id?: string } | undefined;
+            const tid = turn?.id;
+            if (!tid || !entry.pendingTurnId || tid !== entry.pendingTurnId) {
+              logger.debug("Codex turn/completed ignored (stale or unmatched)", {
+                tid,
+                pending: entry.pendingTurnId,
+                seq,
+                liveSeq: entry.runTurnSeq,
+              });
+              return;
+            }
+            if (seq !== entry.runTurnSeq) return;
             cleanup();
             resolve();
           }
         };
+
         const onFatal = () => {
           cleanup();
           serverDied = true;
           reject(new Error("Codex app-server died during turn"));
         };
-        const turnTimer = setTimeout(() => {
-          cleanup();
-          reject(new Error(`Codex turn timed out after ${TURN_TIMEOUT_MS / 1000}s`));
-        }, TURN_TIMEOUT_MS);
 
+        armTimer();
         server.on("notification", onNotification);
         server.once("fatal", onFatal);
 
-        // Send the turn after listeners are wired.
-        server.sendTurn(input, turnOptions).catch((err) => {
+        void server.sendTurn(input, turnOptions).catch((err) => {
           cleanup();
           reject(err);
         });
       });
     } catch (e: unknown) {
-      if (!serverDied) {
+      if (e instanceof CodexTurnSupersededError) return;
+      if (!serverDied && seq === entry.runTurnSeq) {
         const errorMessage = e instanceof Error ? e.message : String(e);
         logger.error("Codex turn failed", { sessionId, error: errorMessage });
         this.emit("event", { type: AgentEventType.Error, threadId, error: errorMessage } satisfies AgentEvent);
       }
     } finally {
-      // Suppress ended if the fatal handler already emitted it
-      if (!serverDied && !endedEmitted) {
+      if (!serverDied && seq === entry.runTurnSeq && !endedEmitted) {
         endedEmitted = true;
         this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
       }

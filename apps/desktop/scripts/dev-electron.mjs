@@ -22,6 +22,7 @@ import {
   resolveServerTscBin,
   copyClaudeSdkCliNextTo,
 } from "../../../scripts/build-server-dev-bundle.mjs";
+import { killProcessTree } from "../../../scripts/kill-process-tree.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, "..");
@@ -45,7 +46,7 @@ const shared = {
 /**
  * Spawn `tsc --watch` so server source edits re-emit apps/server/dist-tsc.
  *
- * @returns Detached subprocess handle (caller must `.kill()` on shutdown).
+ * @returns Detached subprocess handle (caller must kill via killProcessTree on shutdown).
  */
 function startServerTscWatch() {
   const tscBin = resolveServerTscBin(serverRoot);
@@ -224,7 +225,7 @@ console.log(`[dev] Web dev server is ready at ${devServerUrl}`);
 /** Spawn (or restart) the Electron process. */
 function spawnElectron() {
   if (electronProcess) {
-    electronProcess.kill();
+    killProcessTree(electronProcess);
     electronProcess = null;
   }
 
@@ -316,7 +317,7 @@ function cleanup() {
   }
 
   if (serverTscWatch) {
-    serverTscWatch.kill();
+    killProcessTree(serverTscWatch);
     serverTscWatch = null;
   }
 
@@ -325,12 +326,12 @@ function cleanup() {
   }
 
   if (electronProcess) {
-    electronProcess.kill();
+    killProcessTree(electronProcess);
     electronProcess = null;
   }
 
   if (viteProcess) {
-    viteProcess.kill();
+    killProcessTree(viteProcess);
     viteProcess = null;
   }
 }

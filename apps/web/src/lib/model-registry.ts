@@ -34,7 +34,7 @@ export interface ModelProvider {
  * Reasoning effort level values accepted by the Codex SDK.
  * Distinct from mcode's internal ReasoningLevel which uses "max" for Claude.
  */
-export type CodexReasoningLevel = "minimal" | "low" | "medium" | "high" | "xhigh";
+export type CodexReasoningLevel = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 /** Metadata for a selectable model in the provider registry. */
 export interface ModelDefinition {
@@ -79,10 +79,17 @@ export const MODEL_PROVIDERS: readonly ModelProvider[] = [
     comingSoon: false,
     models: [
       {
+        id: "gpt-5.5",
+        label: "GPT-5.5",
+        providerId: "codex",
+        supportedReasoningLevels: ["none", "minimal", "low", "medium", "high", "xhigh"],
+        defaultReasoningLevel: "medium",
+      },
+      {
         id: "gpt-5.4",
         label: "GPT-5.4",
         providerId: "codex",
-        supportedReasoningLevels: ["low", "medium", "high", "xhigh"],
+        supportedReasoningLevels: ["none", "minimal", "low", "medium", "high", "xhigh"],
         defaultReasoningLevel: "medium",
       },
       {
@@ -90,21 +97,21 @@ export const MODEL_PROVIDERS: readonly ModelProvider[] = [
         label: "GPT-5.4 Mini",
         providerId: "codex",
         // Not yet in models.json catalog; assume same range as gpt-5.4
-        supportedReasoningLevels: ["low", "medium", "high", "xhigh"],
+        supportedReasoningLevels: ["none", "minimal", "low", "medium", "high", "xhigh"],
         defaultReasoningLevel: "medium",
       },
       {
         id: "gpt-5.3-codex",
         label: "GPT-5.3 Codex",
         providerId: "codex",
-        supportedReasoningLevels: ["low", "medium", "high", "xhigh"],
+        supportedReasoningLevels: ["none", "minimal", "low", "medium", "high", "xhigh"],
         defaultReasoningLevel: "medium",
       },
       {
         id: "gpt-5.2-codex",
         label: "GPT-5.2 Codex",
         providerId: "codex",
-        supportedReasoningLevels: ["low", "medium", "high", "xhigh"],
+        supportedReasoningLevels: ["none", "minimal", "low", "medium", "high", "xhigh"],
         defaultReasoningLevel: "medium",
       },
       {
@@ -112,7 +119,7 @@ export const MODEL_PROVIDERS: readonly ModelProvider[] = [
         label: "GPT-5.1 Codex Mini",
         providerId: "codex",
         // gpt-5.1-codex-mini treated same as gpt-5.1-codex: up to high, no xhigh
-        supportedReasoningLevels: ["low", "medium", "high"],
+        supportedReasoningLevels: ["none", "minimal", "low", "medium", "high"],
         defaultReasoningLevel: "medium",
       },
     ],
@@ -282,7 +289,9 @@ export function getDefaultProviderId(): string {
 }
 
 /** Valid reasoning levels for fallback validation. */
-const VALID_REASONING_LEVELS: readonly string[] = ["low", "medium", "high", "max", "xhigh", "ultrathink"];
+const VALID_REASONING_LEVELS: readonly string[] = [
+  "none", "minimal", "low", "medium", "high", "max", "xhigh", "ultrathink",
+];
 
 /**
  * Return the default reasoning level from user settings, falling back

@@ -412,12 +412,12 @@ export class CodexAppServer extends EventEmitter {
    * Returns after the server acknowledgment - events stream via the `notification` event.
    *
    * @param input - Plain text message or structured input parts (text + images).
-   * @param turnOptions - Optional per-turn overrides (model, effort).
+   * @param turnOptions - Optional per-turn overrides (model, effort, serviceTier).
    * @throws When the RPC call fails or times out.
    */
   async sendTurn(
     input: string | TurnInputPart[],
-    turnOptions?: { model?: string; effort?: string },
+    turnOptions?: { model?: string; effort?: string; serviceTier?: string },
   ): Promise<void> {
     if (!this.threadId) {
       throw new Error("sendTurn called before thread was established");
@@ -427,12 +427,30 @@ export class CodexAppServer extends EventEmitter {
       ? [{ type: "text", text: input }]
       : input;
     logger.debug("Codex turn/start sent", { threadId: this.threadId, model: turnOptions?.model });
+    // 60s on the RPC ack lets the codex CLI handle cold spin-up after long
+    // idle periods (auth refresh, sandbox setup) without surfacing a spurious
+    // timeout to the user. Long-running turn work is governed separately by
+    // TURN_TIMEOUT_MS in codex-provider.ts (resets on every notification).
     await this.rpc.sendRequest("turn/start", {
       threadId: this.threadId,
       input: parts,
       ...(turnOptions?.model && { model: turnOptions.model }),
       ...(turnOptions?.effort && { effort: turnOptions.effort }),
-    }, 30000);
+      ...(turnOptions?.serviceTier && { serviceTier: turnOptions.serviceTier }),
+    }, 60000);
+  }
+
+  /**
+   * Best-effort interrupt for the in-flight turn without killing the app-server.
+   * Used before starting a new turn so stale `turn/completed` waits cannot resolve early.
+   */
+  async interruptTurn(): Promise<void> {
+    if (!this.threadId || !this.rpc) return;
+    try {
+      await this.rpc.sendRequest("turn/interrupt", { threadId: this.threadId }, 5000);
+    } catch {
+      // Non-fatal: first turn or idle session may have nothing to interrupt.
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -465,7 +483,9 @@ export class CodexAppServer extends EventEmitter {
         }
       }
 
-      logger.warn("Codex stderr", { line });
+      // Tool output, Rust tracing, and agent-generated content are often muxed
+      // onto stderr; warn-level logs were drowning useful signal in .mcode-dev.
+      logger.debug("Codex stderr", { line });
     });
   }
 
