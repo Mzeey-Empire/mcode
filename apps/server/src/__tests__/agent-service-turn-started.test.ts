@@ -140,6 +140,8 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
       settingsServiceStub,
       availabilityStub,
       { markAnswered: vi.fn(), isAnswered: vi.fn(() => false), listAnsweredForThread: vi.fn(() => []) } as unknown as import("../repositories/plan-question-answers-repo.js").PlanQuestionAnswersRepo,
+      { orchestrate: vi.fn() } as any,
+      { write: vi.fn(), copyAttachments: vi.fn(() => []), deleteThreadFiles: vi.fn() } as any,
     );
   });
 

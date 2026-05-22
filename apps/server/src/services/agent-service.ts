@@ -50,6 +50,12 @@ import {
 } from "./provider-availability-errors.js";
 import { PlanQuestionParser } from "./plan-question-parser.js";
 import { buildHandoffContent, buildConversationReplay, replayBudgetChars, resolveForkSnapshot } from "./handoff-builder.js";
+import { HandoffPipelineService } from "./handoff/handoff-pipeline.js";
+import { HandoffStorage } from "./handoff/handoff-storage.js";
+import type { AttachmentSource } from "./handoff/handoff-storage.js";
+import { getMcodeDir } from "@mcode/shared";
+import { join } from "path";
+import { storedAttachmentSuffix } from "@mcode/contracts";
 import { PlanQuestionSchema } from "@mcode/contracts";
 import { normalizeAgentProviderError } from "./provider-agent-error-normalize.js";
 import { z } from "zod";
@@ -189,6 +195,10 @@ export class AgentService {
     private readonly availability: ProviderAvailabilityService,
     @inject(PlanQuestionAnswersRepo)
     private readonly planQuestionAnswersRepo: PlanQuestionAnswersRepo,
+    @inject(HandoffPipelineService)
+    private readonly handoffPipeline: HandoffPipelineService,
+    @inject(HandoffStorage)
+    private readonly handoffStorage: HandoffStorage,
   ) {}
 
   /**
@@ -948,41 +958,6 @@ export class AgentService {
       forkMessage.sequence,
     );
 
-    // Gather handoff data
-    // lastAssistantText comes from forkedMessages so it never leaks post-fork state.
-    const lastAssistantMsg = [...forkedMessages]
-      .reverse()
-      .find((m) => m.role === "assistant");
-    const lastAssistantText = lastAssistantMsg?.content ?? null;
-
-    // Resolve the snapshot at the fork point for historical fidelity.
-    // Only snapshots whose message_id falls within the forked message range are
-    // considered, preventing post-fork file changes and HEAD refs from leaking
-    // into the child thread's handoff context.
-    const allSnapshots = this.turnSnapshotRepo.listByThread(parentThreadId);
-    const forkedMessageIds = new Set(forkedMessages.map((m) => m.id));
-    const forkSnapshot = resolveForkSnapshot(allSnapshots, forkedMessageIds);
-    const recentFilesChanged: string[] = forkSnapshot?.files_changed ?? [];
-    const sourceHead = forkSnapshot?.ref_after ?? null;
-
-    // Task state has no historical version; include current tasks as best-effort context.
-    // Post-fork tasks on the parent may be included — this is a known limitation.
-    const rawTasks = this.taskRepo.get(parentThreadId);
-    const openTasks = (rawTasks ?? []).map((t) => ({
-      content: t.content,
-      status: t.status,
-    }));
-
-    // Build handoff content
-    const handoffContent = buildHandoffContent({
-      parentThread,
-      forkMessageId: resolvedForkMessageId,
-      lastAssistantText,
-      recentFilesChanged,
-      openTasks,
-      sourceHead,
-    });
-
     // Create child thread with lineage
     const lineage = { parentThreadId, forkedFromMessageId: resolvedForkMessageId };
     let thread: Thread;
@@ -1017,50 +992,119 @@ export class AgentService {
       thread = this.threadRepo.create(workspaceId, title, "direct", branch, true, provider, lineage);
     }
 
-    // Insert synthetic system handoff message as sequence 1
-    this.messageRepo.create(thread.id, "system", handoffContent, 1);
+    // Derive the fork anchor role for the pipeline.
+    const forkAnchorRole = forkMessage.role === "user" ? "user" : "assistant";
 
-    // Build the conversation replay for the provider.
-    // This gives the AI real conversation history instead of a lossy summary.
-    // The handoffContent (prose + JSON metadata) is stored in the DB for the UI only.
-    const budget = replayBudgetChars(model);
-    // The `last_compact_summary` on the thread is a single rolling value that
-    // gets overwritten on each compaction. It is only safe to use when the most
-    // recent compaction in the entire thread falls within our forked range;
-    // otherwise the summary describes turns that happened after the fork point.
-    let compactSummary: string | null = null;
-    if (parentThread.last_compact_summary) {
-      const lastForkCompactionIdx = findLastIndex(
-        forkedMessages,
-        (m) => m.role === "system" && m.content === "Context compacted",
-      );
-      if (lastForkCompactionIdx !== -1) {
-        // Check whether any compaction markers exist after the fork point.
-        const { messages: postForkWindow } = this.messageRepo.listByThread(parentThreadId, 100);
-        const postForkCompaction = postForkWindow.some(
-          (m) =>
-            m.role === "system" &&
-            m.content === "Context compacted" &&
-            m.sequence > forkMessage.sequence,
-        );
-        if (!postForkCompaction) {
-          compactSummary = parentThread.last_compact_summary;
+    // Orchestrate the handoff pipeline (B->A->D ladder). On failure, fall back to the
+    // legacy inline replay so the fork always succeeds.
+    let providerWireOverride: string;
+    try {
+      const artifact = await this.handoffPipeline.orchestrate({
+        parentThreadId,
+        forkedFromMessageId: resolvedForkMessageId,
+        forkAnchorRole,
+        childThreadId: thread.id,
+        childProviderId: provider,
+      });
+
+      // Copy attachments from parent messages within the fork range into the child thread's dir.
+      // StoredAttachment has no path field; files live at {mcodeDir}/attachments/{threadId}/{id}{ext}.
+      const parentAttachmentsDir = join(getMcodeDir(), "attachments", parentThreadId);
+      const attachmentSources: AttachmentSource[] = [];
+      for (const msg of forkedMessages) {
+        if (!msg.attachments) continue;
+        for (const att of msg.attachments) {
+          const ext = storedAttachmentSuffix(att.mimeType);
+          const absolutePath = join(parentAttachmentsDir, `${att.id}${ext}`);
+          if (!existsSync(absolutePath)) {
+            logger.warn("createBranchedThread: parent attachment not found on disk, skipping", {
+              attachmentId: att.id,
+              parentThreadId,
+              absolutePath,
+            });
+            continue;
+          }
+          attachmentSources.push({
+            id: att.id,
+            absolutePath,
+            originalName: att.name,
+            mime: att.mimeType,
+            parentMessageId: msg.id,
+          });
         }
       }
-    }
-    const replay = buildConversationReplay(forkedMessages, budget, compactSummary);
-    const replayHeader = `You are continuing work from a previous thread titled "${parentThread.title}". Here is the conversation history up to the fork point:\n\n`;
-    // When replay is empty (system-only or all-blank parent history), send the prompt alone.
-    // The seq-1 handoff message still provides context via its prose summary.
-    const stitchedContent = replay
-      ? `${replayHeader}${replay}\n\n---\n\n${content}`
-      : content;
 
-    // In plan mode, wrap the stitched content so the provider receives
-    // buildPlanPrompt(replay + userPrompt) on the first branch turn.
+      if (attachmentSources.length > 0) {
+        artifact.meta.attachments = await this.handoffStorage.copyAttachments(thread.id, attachmentSources);
+      }
+
+      await this.handoffStorage.write(thread.id, artifact);
+
+      // Store an internal-only system message at seq 1 as a DB anchor for the handoff.
+      // isInternal=true keeps it off the UI render path.
+      this.messageRepo.create(
+        thread.id, "system", artifact.markdown, 1,
+        undefined, undefined, undefined, undefined, /* isInternal */ true,
+      );
+
+      // Append the user's new message so the provider receives full context + the prompt.
+      providerWireOverride = `${artifact.markdown}\n\n---\n\n${content}`;
+    } catch (pipelineErr) {
+      logger.warn("createBranchedThread: handoff pipeline failed, falling back to legacy replay", {
+        threadId: thread.id,
+        error: pipelineErr instanceof Error ? pipelineErr.message : String(pipelineErr),
+      });
+
+      // Legacy fallback: build handoff content + conversation replay inline.
+      const lastAssistantMsg = [...forkedMessages].reverse().find((m) => m.role === "assistant");
+      const lastAssistantText = lastAssistantMsg?.content ?? null;
+      const allSnapshots = this.turnSnapshotRepo.listByThread(parentThreadId);
+      const forkedMessageIds = new Set(forkedMessages.map((m) => m.id));
+      const forkSnapshot = resolveForkSnapshot(allSnapshots, forkedMessageIds);
+      const recentFilesChanged: string[] = forkSnapshot?.files_changed ?? [];
+      const sourceHead = forkSnapshot?.ref_after ?? null;
+      const rawTasks = this.taskRepo.get(parentThreadId);
+      const openTasks = (rawTasks ?? []).map((t) => ({ content: t.content, status: t.status }));
+      const handoffContent = buildHandoffContent({
+        parentThread,
+        forkMessageId: resolvedForkMessageId,
+        lastAssistantText,
+        recentFilesChanged,
+        openTasks,
+        sourceHead,
+      });
+
+      this.messageRepo.create(thread.id, "system", handoffContent, 1);
+
+      const budget = replayBudgetChars(model);
+      let compactSummary: string | null = null;
+      if (parentThread.last_compact_summary) {
+        const lastForkCompactionIdx = findLastIndex(
+          forkedMessages,
+          (m) => m.role === "system" && m.content === "Context compacted",
+        );
+        if (lastForkCompactionIdx !== -1) {
+          const { messages: postForkWindow } = this.messageRepo.listByThread(parentThreadId, 100);
+          const postForkCompaction = postForkWindow.some(
+            (m) =>
+              m.role === "system" &&
+              m.content === "Context compacted" &&
+              m.sequence > forkMessage.sequence,
+          );
+          if (!postForkCompaction) {
+            compactSummary = parentThread.last_compact_summary;
+          }
+        }
+      }
+      const replay = buildConversationReplay(forkedMessages, budget, compactSummary);
+      const replayHeader = `You are continuing work from a previous thread titled "${parentThread.title}". Here is the conversation history up to the fork point:\n\n`;
+      providerWireOverride = replay ? `${replayHeader}${replay}\n\n---\n\n${content}` : content;
+    }
+
+    // In plan mode, wrap so the provider receives buildPlanPrompt(handoff + userPrompt).
     // The DB still stores the clean user prompt at seq 2 (written by sendMessage).
     const providerInput =
-      interactionMode === "plan" ? this.buildPlanPrompt(stitchedContent) : stitchedContent;
+      interactionMode === "plan" ? this.buildPlanPrompt(providerWireOverride) : providerWireOverride;
 
     void this.sendMessage(
       thread.id,

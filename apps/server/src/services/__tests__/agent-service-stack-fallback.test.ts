@@ -144,6 +144,8 @@ function minimalService(): AgentService {
     settingsService,
     availability,
     planQuestionAnswersRepo,
+    { orchestrate: vi.fn() } as any,
+    { write: vi.fn(), copyAttachments: vi.fn(() => []), deleteThreadFiles: vi.fn() } as any,
   );
 }
 
