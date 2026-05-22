@@ -1043,6 +1043,14 @@ export class AgentService {
         artifact.meta.attachments = await this.handoffStorage.copyAttachments(thread.id, attachmentSources);
       }
 
+      // Guard against the child thread being hard-deleted between orchestration
+      // start and artifact write (e.g. rapid user delete during a slow path B).
+      const childCheck = this.threadRepo.findById(thread.id);
+      if (!childCheck || childCheck.deleted_at) {
+        logger.info("Child thread vanished mid-handoff; dropping artifact", { childThreadId: thread.id });
+        throw new Error("Child thread deleted before handoff artifact could be written");
+      }
+
       await this.handoffStorage.write(thread.id, artifact);
 
       broadcast("thread.handoff", {
