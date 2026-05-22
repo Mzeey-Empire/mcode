@@ -4,6 +4,10 @@ import { PlanChrome } from "./PlanChrome";
 import { PlanDocument } from "./PlanDocument";
 import { PlanSkeleton } from "./PlanSkeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import type { PlanRecord } from "@mcode/contracts";
+
+/** Stable empty array to avoid new-reference-per-render in Zustand selectors. */
+const EMPTY_PLANS: readonly PlanRecord[] = [];
 
 interface PlanPanelProps {
   threadId: string;
@@ -11,7 +15,7 @@ interface PlanPanelProps {
 
 /** Right-panel Plan tab content. */
 export function PlanPanel({ threadId }: PlanPanelProps) {
-  const plans = usePlanStore((s) => s.plansByThread[threadId] ?? []);
+  const plans = usePlanStore((s) => s.plansByThread[threadId] ?? EMPTY_PLANS);
   const activeVersion = usePlanStore((s) => s.activeVersionByThread[threadId] ?? null);
   const isGenerating = usePlanStore((s) => s.generatingThreads.has(threadId));
 
