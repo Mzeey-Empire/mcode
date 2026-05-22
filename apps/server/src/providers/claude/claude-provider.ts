@@ -449,6 +449,20 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       const queue = createPromptQueue();
       const ephemeralId = `side-channel-${crypto.randomUUID()}`;
 
+      // The SDK takes an AbortController, not a bare AbortSignal. We cannot
+      // overwrite `signal` on a real AbortController (it is a getter-only
+      // property and Object.assign throws on modern Node). Instead, create a
+      // fresh controller and forward aborts from the caller's signal to it.
+      let sdkAbortController: AbortController | undefined;
+      if (abortSignal) {
+        sdkAbortController = new AbortController();
+        if (abortSignal.aborted) {
+          sdkAbortController.abort();
+        } else {
+          abortSignal.addEventListener("abort", () => sdkAbortController?.abort(), { once: true });
+        }
+      }
+
       const q = sdkQuery({
         prompt: queue.iterable,
         options: {
@@ -461,7 +475,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
           permissionMode: "default" as const,
           persistSession: false,
           includePartialMessages: true,
-          ...(abortSignal ? { abortController: Object.assign(new AbortController(), { signal: abortSignal }) } : {}),
+          ...(sdkAbortController ? { abortController: sdkAbortController } : {}),
         },
       });
 
