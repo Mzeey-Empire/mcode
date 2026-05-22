@@ -402,4 +402,39 @@ export interface McodeTransport {
   // Memory pressure
   /** Notify server of window background/foreground state for memory management. */
   setBackground(background: boolean): Promise<void>;
+
+  /**
+   * Read the latest handoff artifact for a child thread.
+   * Returns null when no handoff has been written for the thread.
+   */
+  readLatestHandoff(threadId: string): Promise<{
+    markdown: string;
+    meta: {
+      schemaVersion: 1;
+      parentThreadId: string;
+      forkedFromMessageId: string;
+      forkAnchorRole: "user" | "assistant";
+      childThreadId: string;
+      generatedBy: "provider" | "deterministic";
+      provider: string | null;
+      ladderStep: "B" | "A" | "D";
+      mode: "full" | "minimal";
+      generatedAt: string;
+      characterCount: number;
+      parentSdkSessionId: string | null;
+      providerErrorOnGenerate: "quota" | "auth" | "context-overflow" | "transient" | "fatal" | "clean" | null;
+      regenerationHistory: Array<{
+        at: string;
+        ladderStep: "B" | "A" | "D";
+        reason: "quota" | "auth" | "context-overflow" | "transient" | "fatal" | "clean" | "user-requested";
+      }>;
+      attachments: Array<{
+        id: string;
+        originalName: string;
+        sha256: string;
+        mime: string;
+        parentMessageId: string;
+      }>;
+    };
+  } | null>;
 }

@@ -11,6 +11,9 @@ import type { ProviderUsageInfo } from "./usage.js";
  */
 export type ProviderId = "claude" | "codex" | "gemini" | "copilot" | "cursor" | "opencode";
 
+/** How a provider's `resume` mechanism behaves when used to fork a session. */
+export type SessionForkBehavior = "clean" | "mutating" | "unsupported";
+
 /** A pluggable agent backend that can run sessions and emit events. */
 export interface IAgentProvider {
   readonly id: ProviderId;
@@ -20,6 +23,26 @@ export interface IAgentProvider {
    * Use `isCompletionCapable()` to narrow to `ICompletionCapable` before calling `complete()`.
    */
   readonly supportsCompletion: boolean;
+
+  /**
+   * How the provider's `resume` mechanism behaves when used to fork a session
+   * for side-channel queries (e.g. handoff generation):
+   * - "clean": resuming creates a forked session; the original session is unaffected.
+   * - "mutating": resuming mutates the original session's forward history.
+   * - "unsupported": resuming is not supported or not yet verified.
+   */
+  readonly sessionForkOnResume: SessionForkBehavior;
+
+  /**
+   * Maximum input characters the provider accepts per turn, across all roles
+   * (system + user content + tool results). `string.length` units, not tokens.
+   * Tokens vary per model and are not portable.
+   *
+   * Used to size handoff documents so they fit inside the child provider's
+   * first-turn budget.
+   * Codex and Copilot use a conservative placeholder of 16_000 until verified.
+   */
+  readonly maxInputCharactersPerTurn: number;
 
   /** Start or continue a session by sending a message. */
   sendMessage(params: {
@@ -85,6 +108,47 @@ export interface IAgentProvider {
 
   /** Return all pending permission requests for a given thread. */
   listPendingPermissions?(threadId: string): PermissionRequest[];
+
+  /**
+   * Run a one-shot query against a forked copy of the parent's session.
+   * Only providers with `sessionForkOnResume === "clean"` implement this.
+   * The returned string is the assistant's final text output.
+   *
+   * Throws a provider-specific error on failure. The pipeline classifies via
+   * classifyProviderError.
+   */
+  runSideChannelQuery?(args: {
+    parentThreadId: string;
+    parentSdkSessionId: string;
+    prompt: string;
+    abortSignal?: AbortSignal;
+    /**
+     * Conversation history as plain text (budgeted replay). When provided and
+     * the session-resume call fails with a session-missing error, the provider
+     * retries without `resume:` by baking this history into the prompt so the
+     * caller still gets a path-B result rather than falling to path D.
+     */
+    conversationHistory?: string;
+    /**
+     * Working directory for the side-channel SDK call. Must be the parent
+     * thread's effective worktree (worktree_path if set, otherwise the workspace
+     * path). The provider sees the same filesystem state the parent had.
+     */
+    cwd: string;
+  }): Promise<string>;
+
+  /**
+   * Run a hidden turn on the parent thread's session. Persists both the
+   * request and the assistant reply with isInternal=1. Only providers with
+   * `sessionForkOnResume === "mutating"` implement this. After the hidden
+   * turn the implementation MUST send a second hidden turn instructing the
+   * model to disregard the handoff request and continue normally.
+   */
+  runHiddenTurn?(args: {
+    parentThreadId: string;
+    prompt: string;
+    abortSignal?: AbortSignal;
+  }): Promise<string>;
 
   /** Subscribe to agent events. */
   on(event: "event", handler: (event: AgentEvent) => void): void;

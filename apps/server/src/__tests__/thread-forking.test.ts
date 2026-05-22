@@ -6,7 +6,7 @@ import { MessageRepo } from "../repositories/message-repo.js";
 import { HANDOFF_MARKER } from "../services/handoff-builder.js";
 import type Database from "better-sqlite3";
 
-describe("thread branching - data layer", () => {
+describe("thread forking - data layer", () => {
   let db: Database.Database;
   let threadRepo: ThreadRepo;
   let messageRepo: MessageRepo;
@@ -75,7 +75,7 @@ describe("thread branching - data layer", () => {
   });
 });
 
-describe("thread branching - edge cases", () => {
+describe("thread forking - edge cases", () => {
   let db: Database.Database;
   let threadRepo: ThreadRepo;
   let messageRepo: MessageRepo;
@@ -92,7 +92,7 @@ describe("thread branching - edge cases", () => {
     const parent = threadRepo.create("ws-1", "parent", "direct", "main");
     messageRepo.create(parent.id, "user", "hello", 1);
     expect(parent.workspace_id).toBe("ws-1");
-    // Cross-workspace branching is prevented by the guard in createBranchedThread
+    // Cross-workspace forking is prevented by the guard in createBranchedThread
   });
 
   it("deleted thread lineage is preserved", () => {

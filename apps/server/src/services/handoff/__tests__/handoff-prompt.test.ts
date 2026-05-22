@@ -1,0 +1,102 @@
+import { describe, expect, it } from "vitest";
+import { buildHandoffPrompt, pickHandoffMode, computeBudgetChars, truncateAtSectionBoundary } from "../handoff-prompt.js";
+
+describe("pickHandoffMode", () => {
+  it("returns minimal when child cap < 8000", () => {
+    expect(pickHandoffMode(4_000)).toBe("minimal");
+    expect(pickHandoffMode(7_999)).toBe("minimal");
+  });
+  it("returns full at or above 8000", () => {
+    expect(pickHandoffMode(8_000)).toBe("full");
+    expect(pickHandoffMode(180_000)).toBe("full");
+  });
+});
+
+describe("computeBudgetChars", () => {
+  it("subtracts reserved overhead from cap", () => {
+    expect(computeBudgetChars(180_000)).toBeGreaterThan(170_000);
+  });
+  it("floors at 1000 minimum", () => {
+    expect(computeBudgetChars(1_500)).toBe(1_000);
+  });
+});
+
+describe("buildHandoffPrompt", () => {
+  const baseInput = {
+    forkAnchorRole: "assistant" as const,
+    parentThreadTitle: "Database migration design",
+    forkMessageExcerpt: "We should use Postgres because...",
+    childProviderId: "claude",
+    childMaxInputCharacters: 180_000,
+    userFollowUpMessage: "what about feature X?",
+  };
+
+  it("quotes the /handoff skill instructions verbatim", () => {
+    const p = buildHandoffPrompt({ ...baseInput, mode: "full" });
+    expect(p).toContain("Write a handoff document summarising the current conversation so a fresh agent can continue the work.");
+    expect(p).toContain(`Include a "suggested skills" section in the document, which suggests skills that the agent should invoke.`);
+    expect(p).toContain("Do not duplicate content already captured in other artifacts");
+    expect(p).toContain("Redact any sensitive information");
+    expect(p).toContain("If the user passed arguments, treat them as a description of what the next session will focus on");
+  });
+
+  it("handles missing follow-up message by saying so explicitly", () => {
+    const p = buildHandoffPrompt({ ...baseInput, mode: "full", userFollowUpMessage: "" });
+    expect(p).toMatch(/has not provided a follow-up message yet/i);
+    expect(p).toMatch(/no skill arguments/i);
+  });
+
+  it("expresses budget in characters not tokens", () => {
+    const p = buildHandoffPrompt({ ...baseInput, mode: "minimal", childMaxInputCharacters: 4000 });
+    expect(p.toLowerCase()).toContain("character");
+    expect(p.toLowerCase()).not.toContain("token");
+  });
+
+  it("frames user-msg fork as retry, assistant-msg fork as follow-up about assistant reply", () => {
+    const userFork = buildHandoffPrompt({ ...baseInput, mode: "full", forkAnchorRole: "user" });
+    expect(userFork).toMatch(/retry this question/i);
+    const asstFork = buildHandoffPrompt({ ...baseInput, mode: "full", forkAnchorRole: "assistant" });
+    expect(asstFork).toMatch(/follow-up about what the assistant just said/i);
+  });
+
+  it("includes the user's follow-up message in the prompt", () => {
+    const p = buildHandoffPrompt({ ...baseInput, mode: "full" });
+    expect(p).toContain("what about feature X?");
+  });
+
+  it("instructs the model to return markdown as response text, not call tools", () => {
+    const p = buildHandoffPrompt({ ...baseInput, mode: "full" });
+    expect(p).toMatch(/return.*handoff.*document.*response/i);
+    expect(p).toMatch(/do not call any tools/i);
+    expect(p).toMatch(/do not write to disk/i);
+  });
+});
+
+describe("truncateAtSectionBoundary", () => {
+  it("keeps the doc intact when under budget", () => {
+    const md = "## Goal\nDo something.\n\n## Open items\n- Item 1\n";
+    expect(truncateAtSectionBoundary(md, 1000)).toBe(md);
+  });
+
+  it("truncates at the last complete H2 boundary when one exists past halfway", () => {
+    const part1 = "## Goal\nSome goal text here.\n\n";
+    const part2 = "## Open items\nItem 1\nItem 2\n\n";
+    const part3 = "## Files in play\nMany files listed here to push over budget.";
+    const md = part1 + part2 + part3;
+    // Budget is tight enough to cut part3 but large enough that the H2 is past halfway
+    const budget = part1.length + part2.length + 5;
+    const result = truncateAtSectionBoundary(md, budget);
+    expect(result).not.toContain("Files in play");
+    expect(result).toContain("Open items");
+    // Must not end with a dangling "## " prefix
+    expect(result.endsWith("## ")).toBe(false);
+  });
+
+  it("falls back to hard truncate when no H2 is past the halfway point", () => {
+    // Only an H2 very near the beginning; the budget covers more than 2x that point
+    const md = "## Goal\nX\n" + "a".repeat(900);
+    const budget = 500;
+    const result = truncateAtSectionBoundary(md, budget);
+    expect(result.length).toBe(budget);
+  });
+});

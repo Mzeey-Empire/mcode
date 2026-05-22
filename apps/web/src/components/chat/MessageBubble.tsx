@@ -1,6 +1,6 @@
 import { memo, useMemo, useState, useCallback, useRef, useEffect, lazy, Suspense } from "react";
 import type { Message } from "@/transport";
-import { ImageIcon, RotateCcw, Copy, Check, GitBranch, AlertCircle, Reply, Target } from "lucide-react";
+import { ImageIcon, RotateCcw, Copy, Check, GitFork, AlertCircle, Reply, Target } from "lucide-react";
 import { cn } from "@/lib/utils";
 const LazyMarkdownContent = lazy(() => import("./MarkdownContent"));
 import { stripInjectedFiles } from "@/lib/file-tags";
@@ -295,13 +295,13 @@ function BranchButton({ onClick }: { onClick: () => void }) {
             type="button"
             onClick={onClick}
             className="flex h-7 w-7 items-center justify-center rounded-md bg-muted/60 text-muted-foreground opacity-0 scale-90 transition-all duration-150 hover:bg-primary/10 hover:text-primary group-hover/msg:opacity-100 group-hover/msg:scale-100"
-            aria-label="Branch from this message"
+            aria-label="Fork from this message"
           >
-            <GitBranch size={14} />
+            <GitFork size={14} />
           </button>
         }
       />
-      <TooltipContent side="top" className="text-xs">Branch from here</TooltipContent>
+      <TooltipContent side="top" className="text-xs">Fork from here</TooltipContent>
     </Tooltip>
   );
 }

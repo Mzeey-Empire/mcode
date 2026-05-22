@@ -172,6 +172,7 @@ Integrated terminals and provider subprocesses use **`EnvService`** plus **`Prot
 - **shadcn/ui docs:** https://ui.shadcn.com/
 - **Tailwind CSS 4:** https://tailwindcss.com/docs
 - **Codex provider docs:** `apps/server/src/providers/codex/` - uses `codex app-server` JSON-RPC 2.0 protocol (see ARCHITECTURE.md)
+- **Chat fork handoff:** [docs/guides/chat-fork-handoff.md](docs/guides/chat-fork-handoff.md)
 
 ## Performance Requirements
 

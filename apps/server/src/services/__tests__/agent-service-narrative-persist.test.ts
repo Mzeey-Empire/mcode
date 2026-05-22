@@ -165,6 +165,8 @@ function build(): Built {
     settingsService,
     availability,
     planQuestionAnswersRepo,
+    { orchestrate: vi.fn() } as any,
+    { write: vi.fn(), copyAttachments: vi.fn(() => []), deleteThreadFiles: vi.fn() } as any,
   );
   service.init();
   // Prime per-thread state without running sendMessage's full path.
@@ -337,6 +339,7 @@ describe("AgentService narrative persistence", () => {
       timestamp: new Date().toISOString(),
       sequence: 2,
       attachments: null,
+      is_internal: false,
     };
     (service as unknown as { messageRepo: MessageRepo }).messageRepo.listByThread = vi.fn(() => ({
       messages: [mockMsg],

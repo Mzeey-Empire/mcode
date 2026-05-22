@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { GitBranch, Loader2 } from "lucide-react";
+import { GitFork, Loader2 } from "lucide-react";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { useConnectionStore } from "@/stores/connectionStore";
@@ -14,6 +14,7 @@ import { CliErrorBanner, isCliError } from "./CliErrorBanner";
 import { InterruptedSessionsBanner } from "./InterruptedSessionsBanner";
 import { CollapsibleError } from "./CollapsibleError";
 import { ThreadWarningBanner } from "./ThreadWarningBanner";
+import { HandoffFallbackBanner } from "./HandoffFallbackBanner";
 import { ThreadTitleEditor } from "./ThreadTitleEditor";
 import { SidebarRevealButton } from "@/components/sidebar/SidebarRevealButton";
 import { useUiStore } from "@/stores/uiStore";
@@ -126,8 +127,8 @@ function ThreadPreparingShell({
                     onClick={() => useWorkspaceStore.getState().setActiveThread(thread.parent_thread_id!)}
                     className="flex shrink-0 items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[11px] font-medium text-primary/80 transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
                   >
-                    <GitBranch size={10} />
-                    <span>Branched</span>
+                    <GitFork size={10} />
+                    <span>Forked</span>
                   </button>
                 }
               />
@@ -172,8 +173,11 @@ export function ChatView() {
   const updateThreadTitle = useWorkspaceStore((s) => s.updateThreadTitle);
   const setActiveThread = useWorkspaceStore((s) => s.setActiveThread);
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
-  const [branchFromMessageId, setBranchFromMessageId] = useState<string | undefined>(undefined);
-  const [branchFromMessageContent, setBranchFromMessageContent] = useState<string | undefined>(undefined);
+  const forkModeStore = useThreadStore((s) => s.forkMode);
+  const setForkMode = useThreadStore((s) => s.setForkMode);
+  const activeForkMode = activeThreadId ? (forkModeStore?.[activeThreadId] ?? null) : null;
+  const branchFromMessageId = activeForkMode?.messageId;
+  const branchFromMessageContent = activeForkMode?.content ?? undefined;
   const loadMessages = useThreadStore((s) => s.loadMessages);
   const clearMessages = useThreadStore((s) => s.clearMessages);
   const runningThreadIds = useThreadStore((s) => s.runningThreadIds);
@@ -203,11 +207,9 @@ export function ChatView() {
     setDismissedError(null);
   }, [activeThreadId]);
 
-  // Reset edit mode and branch state when the active thread changes
+  // Reset edit mode when the active thread changes (fork mode is preserved in the store)
   useEffect(() => {
     setEditingThreadId(null);
-    setBranchFromMessageId(undefined);
-    setBranchFromMessageContent(undefined);
   }, [activeThreadId]);
 
   const handleOpenSettings = useCallback(() => {
@@ -276,13 +278,18 @@ export function ChatView() {
     [sendMessage],
   );
 
-  /** Activates inline branch mode on the composer for the given message. */
+  /** Activates inline fork mode on the composer for the given message. */
   const handleBranch = useCallback((messageId: string) => {
-    // Read messages from store at call time to avoid re-creating this callback on every streaming token.
+    // Read messages and threadId from store at call time to avoid re-creating this callback on every streaming token.
     const msg = useThreadStore.getState().messages.find((m) => m.id === messageId);
-    setBranchFromMessageId(messageId);
-    setBranchFromMessageContent(msg?.content);
-  }, []);
+    const threadId = useWorkspaceStore.getState().activeThreadId;
+    if (!threadId || !msg) return;
+    setForkMode(threadId, {
+      messageId,
+      content: msg.role === "user" ? msg.content : null,
+      role: msg.role as "user" | "assistant",
+    });
+  }, [setForkMode]);
 
   /** Activates reply mode on the composer for the given message. */
   const handleReply = useCallback((messageId: string, content: string, role: "user" | "assistant") => {
@@ -451,8 +458,8 @@ export function ChatView() {
                     onClick={() => setActiveThread(activeThread.parent_thread_id!)}
                     className="flex items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[11px] font-medium text-primary/80 transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
                   >
-                    <GitBranch size={10} />
-                    <span>Branched</span>
+                    <GitFork size={10} />
+                    <span>Forked</span>
                   </button>
                 }
               />
@@ -487,6 +494,10 @@ export function ChatView() {
         </div>
       ) : null}
 
+      {/* Fallback handoff banner: shown when the fork's handoff was produced
+          locally because the AI provider was unavailable. */}
+      <HandoffFallbackBanner threadId={activeThread.id} />
+
       {/* Messages, tool calls, and streaming — all in one scrollable area.
           No `key` here: forcing remount on thread switch would destroy the
           virtualizer and discard cached row heights. MessageList resets its
@@ -520,8 +531,7 @@ export function ChatView() {
         branchFromMessageId={branchFromMessageId}
         branchFromMessageContent={branchFromMessageContent}
         onBranchModeExit={() => {
-          setBranchFromMessageId(undefined);
-          setBranchFromMessageContent(undefined);
+          if (activeThreadId) setForkMode(activeThreadId, null);
         }}
       />
     </div>

@@ -20,7 +20,8 @@ function createTestDb(): Database.Database {
       attachments TEXT,
       reply_to_message_id TEXT,
       quoted_text TEXT,
-      model TEXT
+      model TEXT,
+      is_internal INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE tool_call_records (
       id TEXT PRIMARY KEY,

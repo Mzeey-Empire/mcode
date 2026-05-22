@@ -64,6 +64,8 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
     providerStub = Object.assign(new EventEmitter(), {
       id: "claude" as ProviderId,
       supportsCompletion: false,
+      sessionForkOnResume: "unsupported" as const,
+      maxInputCharactersPerTurn: 16_000,
       // Never resolves. We want to observe events emitted BEFORE completion.
       // Snapshot capturedEvents.length synchronously on entry: this is the
       // load-bearing ordering signal. If the emit happened BEFORE the call
@@ -138,6 +140,8 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
       settingsServiceStub,
       availabilityStub,
       { markAnswered: vi.fn(), isAnswered: vi.fn(() => false), listAnsweredForThread: vi.fn(() => []) } as unknown as import("../repositories/plan-question-answers-repo.js").PlanQuestionAnswersRepo,
+      { orchestrate: vi.fn() } as any,
+      { write: vi.fn(), copyAttachments: vi.fn(() => []), deleteThreadFiles: vi.fn() } as any,
     );
   });
 

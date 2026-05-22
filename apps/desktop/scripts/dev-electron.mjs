@@ -183,6 +183,12 @@ function startViteDevServer() {
   });
 }
 
+// Declared here (rather than below the await Promise.all) so the vite-exit
+// handler in startViteDevServer can safely reference it during startup. If
+// vite fails fast (e.g. binary missing), the handler fires while the await
+// is still pending, so a `let` declaration after the await would be in TDZ.
+let electronProcess = null;
+
 // Run Vite startup and esbuild (main/preload) watch in parallel
 const [devServerUrl, watchContexts] = await Promise.all([
   startViteDevServer(),
@@ -215,8 +221,6 @@ console.log(`[dev] Web dev server is ready at ${devServerUrl}`);
 // -------------------------------------------------------------------------
 // Step 2: Spawn Electron
 // -------------------------------------------------------------------------
-
-let electronProcess = null;
 
 /** Spawn (or restart) the Electron process. */
 function spawnElectron() {

@@ -134,11 +134,11 @@ interface ComposerProps {
   threadId?: string;
   isNewThread?: boolean;
   workspaceId?: string;
-  /** When set, the composer is in branch mode — submit branches instead of sends. */
+  /** When set, the composer is in fork mode; submit creates a forked thread instead of sending. */
   branchFromMessageId?: string;
-  /** Preview content of the message being branched from, shown as a quote. */
+  /** Preview content of the message being forked from, shown as a quote. */
   branchFromMessageContent?: string;
-  /** Called when the user exits branch mode (X button or Escape). */
+  /** Called when the user exits fork mode (X button or Escape). */
   onBranchModeExit?: () => void;
 }
 
@@ -499,6 +499,16 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
    * code path that ends edit mode.
    */
   const editingOriginalRef = useRef<QueuedMessage | null>(null);
+  /**
+   * Text queued for send while the child thread's handoff context is still generating.
+   * Fires automatically when handoff status transitions to ready or fallback.
+   */
+  const [queuedSend, setQueuedSend] = useState<string | null>(null);
+  // Tracks whether we have seen the handoff transition away from "generating"
+  // at least once since this thread was opened. Guards against queueing a
+  // message when the user types during the server-initiated first turn on a
+  // freshly forked child thread (which would produce a duplicate message).
+  const [hasSeenHandoffTransition, setHasSeenHandoffTransition] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const dragDepthRef = useRef(0);
   const [detectedPr, setDetectedPr] = useState<PrDetail | null>(null);
@@ -781,6 +791,27 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   // so activeThread is always current when branchFromMessageId is set.
   }, [branchFromMessageId, workspaceId, loadBranches, loadWorktrees, initBranchMode]);
 
+  // Pre-fill the editor with the parent user message text when forking from a user message.
+  // The text is rendered italic to visually distinguish the prefill from fresh input.
+  // Assistant-message forks leave the editor empty; the user writes the new prompt from scratch.
+  useEffect(() => {
+    if (!branchFromMessageId || !branchFromMessageContent || !editorRef.current) return;
+    const text = branchFromMessageContent;
+    editorRef.current.update(() => {
+      const root = $getRoot();
+      root.clear();
+      const para = $createParagraphNode();
+      const textNode = $createTextNode(text);
+      // Lexical format bitmask: 2 = italic
+      textNode.setFormat(2);
+      para.append(textNode);
+      root.append(para);
+    });
+    setInput(branchFromMessageContent);
+    editorRef.current.focus();
+  // Only fire when branch mode is newly activated (branchFromMessageId transitions from falsy to truthy).
+  }, [branchFromMessageId]);
+
   // Consume pending prefill set by empty-state prompt chips
   useEffect(() => {
     if (!pendingPrefill) return;
@@ -819,6 +850,11 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       editorRef.current.focus();
     }
   }, [composerRecallFromStop, threadId, clearComposerRecallFromStop]);
+
+  // Ref to the latest queuedSend value so the handoff-fire effect doesn't need it as
+  // a reactive dep (which would re-run the effect on every keystroke while queued).
+  const queuedSendRef = useRef<string | null>(null);
+  queuedSendRef.current = queuedSend;
 
   const fileAutocomplete = useFileAutocomplete({
     workspaceId,
@@ -868,6 +904,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   }, [permissionLocked, access, threadId, setThreadSettings]);
   const contextEntry = useThreadStore((s) => threadId ? s.contextByThread[threadId] : undefined);
   const isCompacting = useThreadStore((s) => !!(threadId && s.isCompactingByThread[threadId]));
+  const handoffStatus = useThreadStore((s) => threadId ? s.handoffStatus?.[threadId] : undefined);
   const hasRetryState = useThreadStore(
     (s) => !!(threadId && (s.rateLimitByThread[threadId] || s.apiRetryByThread[threadId])),
   );
@@ -1663,6 +1700,37 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     // Avoid duplicate submissions while a placeholder thread is still materializing.
     if (isThreadScaffold) return;
 
+    // Guard against sending a slash command that the active provider doesn't support.
+    // This catches the case where the user typed a command, changed providers, and
+    // then sent without selecting a valid replacement from the popup.
+    const slashMatch = trimmed.match(/^\/(\S+)/);
+    if (slashMatch) {
+      const cmdName = slashMatch[1];
+      const exists = slashCommand.allCommands.some((c) => c.name === cmdName);
+      if (!exists && !slashCommand.isLoading) {
+        useToastStore
+          .getState()
+          .show("error", "Unknown command", `/${cmdName} is not available for this provider`);
+        return;
+      }
+    }
+
+    // ---- Handoff queue path: child thread context is still being generated ----
+    // When the handoff document hasn't landed yet, queue the message locally and
+    // fire it automatically once the status transitions to ready or fallback.
+    //
+    // Only queue AFTER the first transition away from "generating" has been seen.
+    // The server fires the user's prompt as the first turn on the child thread
+    // automatically; if the user types during that window before we've seen the
+    // transition, queueing here would produce a duplicate message.
+    if (threadId && !branchFromMessageId && !isNewThread) {
+      const status = useThreadStore.getState().handoffStatus[threadId];
+      if (status === "generating" && hasSeenHandoffTransition) {
+        setQueuedSend(trimmed);
+        return;
+      }
+    }
+
     // ---- Queue path: agent is running on THIS thread ----
     // Skip when composing a branch (`branchFromMessageId`) or a brand-new thread
     // (`isNewThread`) - both target a *different* thread and must not enqueue
@@ -1897,7 +1965,45 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     }
 
     editorRef.current?.focus();
-  }, [input, attachments, isAgentRunning, isNewThread, newThreadMode, newThreadBranch, workspaceId, threadId, sendMessage, modelId, provider, reasoning, mode, access, copilotAgent, contextWindow, thinking, codexFastMode, namingMode, customBranchName, selectedWorktree, injectFileContent, collectAndClearAttachments, clearDraftFromStore, isThreadScaffold, branchFromMessageId, branchExecMode, branchTargetBranch, branchNamingMode, branchCustomName, branchWorktreePath, activeThread, branchThread, branchAutoPreview, onBranchModeExit, replyContext, clearReply, editingFromQueue]);
+  }, [input, attachments, isAgentRunning, isNewThread, newThreadMode, newThreadBranch, workspaceId, threadId, sendMessage, modelId, provider, reasoning, mode, access, copilotAgent, contextWindow, thinking, codexFastMode, namingMode, customBranchName, selectedWorktree, injectFileContent, collectAndClearAttachments, clearDraftFromStore, isThreadScaffold, branchFromMessageId, branchExecMode, branchTargetBranch, branchNamingMode, branchCustomName, branchWorktreePath, activeThread, branchThread, branchAutoPreview, onBranchModeExit, replyContext, clearReply, editingFromQueue, slashCommand]);
+
+  // Reset the handoff-transition-seen flag whenever the user switches threads
+  // so the guard below evaluates correctly for each new child thread.
+  useEffect(() => {
+    setHasSeenHandoffTransition(false);
+  }, [threadId]);
+
+  // Track the first time handoff status leaves "generating" so we can
+  // distinguish the server-initiated first turn from user-typed queued sends.
+  // TODO: handoff status is not persisted server-side; clients reconnecting between
+  // "generating" and "ready" will miss the spinner state until the artifact lands.
+  useEffect(() => {
+    if (handoffStatus && handoffStatus !== "generating") {
+      setHasSeenHandoffTransition(true);
+    }
+  }, [handoffStatus]);
+
+  // Fire a locally queued message when the handoff context finishes generating.
+  // Calls sendMessage directly with current model/provider/access to avoid stale handleSend closures.
+  useEffect(() => {
+    if (!threadId) return;
+    if (handoffStatus !== "ready" && handoffStatus !== "fallback") return;
+    const text = queuedSendRef.current;
+    if (!text) return;
+    setQueuedSend(null);
+    useThreadStore.getState().sendMessage(
+      threadId,
+      text,
+      modelId,
+      access,
+      undefined,
+      text,
+      reasoning,
+      provider,
+    );
+  // modelId/access/reasoning/provider intentionally read from render-time values via closure;
+  // handoffStatus is the sole reactive trigger so we don't re-fire on unrelated changes.
+  }, [handoffStatus, threadId]);
 
   const handleEditorChange = useCallback((text: string) => {
     setInput(text);
@@ -2617,6 +2723,13 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
           </button>
         </div>
       </div>
+
+      {/* Queued-send hint: shown while the child thread handoff is still generating */}
+      {queuedSend && (
+        <p className="px-1 pt-1 text-[10px] text-muted-foreground/60">
+          queued · sends when handoff lands
+        </p>
+      )}
 
       {/* Status bar - below the container */}
       <div className="flex items-center justify-between px-1 pt-1.5">

@@ -20,6 +20,7 @@ import { AttachmentService } from "./attachment-service.js";
 import { killDescendantsByName } from "./process-kill.js";
 import { WorkspaceRepo } from "../repositories/workspace-repo.js";
 import { broadcast } from "../transport/push.js";
+import { HandoffStorage } from "./handoff/handoff-storage.js";
 
 /** How often to check for due cleanup jobs (ms). */
 const POLL_INTERVAL_MS = 5_000;
@@ -58,6 +59,7 @@ export class CleanupWorker {
     @inject(GitService) private readonly gitService: GitService,
     @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
     @inject(AttachmentService) private readonly attachmentService: AttachmentService,
+    @inject(HandoffStorage) private readonly handoffStorage: HandoffStorage,
   ) {}
 
   /**
@@ -67,7 +69,11 @@ export class CleanupWorker {
   start(): void {
     if (this.pollTimer !== null) return;
     this.cleanupJobRepo.resetAttempts();
-    this.reconcileOnStartup();
+    void this.reconcileOnStartup().catch((err) => {
+      logger.error("CleanupWorker startup reconciliation errored", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
     this.stopped = false;
     this.pollTimer = setInterval(() => {
       this.poll().catch((err) => {
@@ -135,11 +141,12 @@ export class CleanupWorker {
           workspacePath: resolvedWs,
         });
         this.attachmentService.removeForThread(job.thread_id);
+        await this.handoffStorage.deleteThreadFiles(job.thread_id);
         this.db.transaction(() => {
           this.threadRepo.hardDelete(job.thread_id);
           this.cleanupJobRepo.delete(job.id);
         })();
-        this.finalizeWorkspaceIfDone(job.workspace_path);
+        await this.finalizeWorkspaceIfDone(job.workspace_path);
         return;
       }
       if (resolvedWt === resolvedWs) {
@@ -192,11 +199,12 @@ export class CleanupWorker {
           worktreePath: resolvedWt,
         });
         this.attachmentService.removeForThread(job.thread_id);
+        await this.handoffStorage.deleteThreadFiles(job.thread_id);
         this.db.transaction(() => {
           this.threadRepo.hardDelete(job.thread_id);
           this.cleanupJobRepo.delete(job.id);
         })();
-        this.finalizeWorkspaceIfDone(job.workspace_path);
+        await this.finalizeWorkspaceIfDone(job.workspace_path);
         return;
       }
 
@@ -222,6 +230,8 @@ export class CleanupWorker {
 
       // 5b. Clean up attachment files for this thread (idempotent - ignores missing dirs)
       this.attachmentService.removeForThread(job.thread_id);
+      // 5c. Wipe handoff artifacts for this thread (idempotent via rm --force).
+      await this.handoffStorage.deleteThreadFiles(job.thread_id);
 
       // 6. Hard-delete thread row and cleanup job atomically.
       //    Wrapping in a transaction ensures no orphaned job if either statement fails.
@@ -265,7 +275,7 @@ export class CleanupWorker {
    * have cleanup jobs enqueued. If a workspace has no remaining threads or jobs,
    * hard-deletes it immediately.
    */
-  reconcileOnStartup(): void {
+  async reconcileOnStartup(): Promise<void> {
     const deletingWorkspaces = this.workspaceRepo.findDeleting();
 
     for (const ws of deletingWorkspaces) {
@@ -305,6 +315,7 @@ export class CleanupWorker {
       if (pendingJobs === 0) {
         for (const t of threads) {
           this.attachmentService.removeForThread(t.id);
+          await this.handoffStorage.deleteThreadFiles(t.id);
           this.threadRepo.hardDelete(t.id);
         }
         this.workspaceRepo.hardDelete(ws.id);
@@ -314,7 +325,7 @@ export class CleanupWorker {
   }
 
   /** Check if workspace cleanup is complete and hard-delete if so. */
-  private finalizeWorkspaceIfDone(workspacePath: string): void {
+  private async finalizeWorkspaceIfDone(workspacePath: string): Promise<void> {
     const remaining = this.cleanupJobRepo.countByWorkspacePath(workspacePath);
     if (remaining > 0) return;
 
@@ -325,6 +336,7 @@ export class CleanupWorker {
       const remainingThreads = this.threadRepo.listAllByWorkspace(workspace.id);
       for (const thread of remainingThreads) {
         this.attachmentService.removeForThread(thread.id);
+        await this.handoffStorage.deleteThreadFiles(thread.id);
       }
 
       this.workspaceRepo.hardDelete(workspace.id);

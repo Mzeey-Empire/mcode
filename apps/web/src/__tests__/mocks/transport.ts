@@ -183,4 +183,5 @@ export const mockTransport: McodeTransport = {
     model: "mock-model",
     createdAt: new Date().toISOString(),
   }),
+  readLatestHandoff: vi.fn().mockResolvedValue(null),
 };

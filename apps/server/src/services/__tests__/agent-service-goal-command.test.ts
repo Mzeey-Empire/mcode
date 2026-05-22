@@ -54,6 +54,8 @@ function buildService(db: Database.Database) {
   const providerStub = Object.assign(new EventEmitter(), {
     id: "claude" as const,
     supportsCompletion: true,
+    sessionForkOnResume: "unsupported" as const,
+    maxInputCharactersPerTurn: 16_000,
     sendMessage: vi.fn<(params: { message: string; [k: string]: unknown }) => Promise<void>>(
       () => Promise.resolve(),
     ),
@@ -114,6 +116,8 @@ function buildService(db: Database.Database) {
     settingsService,
     availability,
     planQuestionAnswersRepo,
+    { orchestrate: vi.fn() } as any,
+    { write: vi.fn(), copyAttachments: vi.fn(() => []), deleteThreadFiles: vi.fn() } as any,
   );
 
   return { svc, threadRepo, workspaceRepo, messageRepo, providerStub };

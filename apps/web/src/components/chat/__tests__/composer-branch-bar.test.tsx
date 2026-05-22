@@ -20,14 +20,14 @@ describe("ComposerBranchBar — minimal glyph layout", () => {
     expect(screen.getByText("↳")).toBeTruthy();
   });
 
-  it('renders "Branching from" label text', () => {
+  it('renders "Forking from" label text', () => {
     render(
       <ComposerBranchBar
         branchFromMessageId="msg-1"
         onBranchModeExit={vi.fn()}
       />,
     );
-    expect(screen.getByText("Branching from")).toBeTruthy();
+    expect(screen.getByText("Forking from")).toBeTruthy();
   });
 
   it("renders italic excerpt when branchFromMessageContent is provided", () => {

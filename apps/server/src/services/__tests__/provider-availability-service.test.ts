@@ -15,7 +15,11 @@ function stubSettings(overrides: Partial<ReturnType<typeof getDefaultSettings>> 
 }
 
 function stubRegistry(ids: string[]): IProviderRegistry {
-  const providers = ids.map((id) => ({ id } as IAgentProvider));
+  const providers = ids.map((id) => ({
+    id,
+    sessionForkOnResume: "unsupported" as const,
+    maxInputCharactersPerTurn: 16_000,
+  } as IAgentProvider));
   return {
     resolve: vi.fn((id) => providers.find((p) => p.id === id)!),
     resolveAll: vi.fn(() => providers),
