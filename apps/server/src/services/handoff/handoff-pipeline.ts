@@ -16,7 +16,7 @@ import { logger, getMcodeDir, resolveHandoffDir, newHandoffUlid } from "@mcode/s
 import { ThreadRepo } from "../../repositories/thread-repo.js";
 import { MessageRepo } from "../../repositories/message-repo.js";
 import { classifyProviderError } from "./error-classifier.js";
-import { buildHandoffPrompt, pickHandoffMode } from "./handoff-prompt.js";
+import { buildHandoffPrompt, computeBudgetChars, pickHandoffMode, truncateAtSectionBoundary } from "./handoff-prompt.js";
 import { runPathDDeterministic } from "./path-d-deterministic.js";
 import type {
   HandoffArtifact,
@@ -41,8 +41,17 @@ interface IProviderRegistry {
   get(id: string): any;
 }
 
+/** Timeout for side-channel and hidden-turn provider calls, in milliseconds. */
+const PROVIDER_CALL_TIMEOUT_MS = 60_000;
+
 @injectable()
 export class HandoffPipelineService {
+  /**
+   * Per-thread mutex for path A. Hidden turns must not interleave on the same
+   * parent thread because each turn mutates the provider session state.
+   */
+  private readonly pathALocks = new Map<string, Promise<void>>();
+
   constructor(
     @inject(ThreadRepo) private readonly threadRepo: IThreadRepo,
     @inject(MessageRepo) private readonly messageRepo: IMessageRepo,
@@ -62,6 +71,8 @@ export class HandoffPipelineService {
     (svc as any).threadRepo = deps.threadRepo;
     (svc as any).messageRepo = deps.messageRepo;
     (svc as any).providerRegistry = deps.providerRegistry;
+    // Initialize instance-field Maps that aren't set via the constructor.
+    (svc as any).pathALocks = new Map<string, Promise<void>>();
     return svc;
   }
 
@@ -100,16 +111,33 @@ export class HandoffPipelineService {
     const capability: string = parentProvider?.sessionForkOnResume ?? "unsupported";
     const parentSdkSession: string | null = parent.sdk_session_id ?? null;
 
-    // Path B: side-channel query against the parent provider's existing session
+    // Path B: side-channel query against the parent provider's existing session.
+    // Requires sdk_session_id because the side-channel must resume the correct
+    // provider conversation state.
     if (capability === "clean" && parentProvider?.runSideChannelQuery && parentSdkSession) {
+      const abort = new AbortController();
+      const timer = setTimeout(() => abort.abort(), PROVIDER_CALL_TIMEOUT_MS);
       try {
-        const text: string = await parentProvider.runSideChannelQuery({
+        let text: string = await parentProvider.runSideChannelQuery({
           parentThreadId: req.parentThreadId,
           parentSdkSessionId: parentSdkSession,
           prompt,
+          abortSignal: abort.signal,
         });
+        text = this.applyBudgetGuard(text, childCap, "B");
         return this.buildProviderArtifact(req, parent, text, "B", mode);
       } catch (err) {
+        if ((abort.signal as AbortSignal).aborted) {
+          logger.warn("Handoff path B timed out; falling to D", { threadId: req.parentThreadId });
+          return runPathDDeterministic({
+            parentThread: parent,
+            messagesUpToFork: messages,
+            forkedFromMessageId: req.forkedFromMessageId,
+            forkAnchorRole: req.forkAnchorRole,
+            childThreadId: req.childThreadId,
+            reason: "transient",
+          });
+        }
         const cls = classifyProviderError(err);
         logger.warn("Handoff path B failed", { err, cls, threadId: req.parentThreadId });
         return runPathDDeterministic({
@@ -120,29 +148,57 @@ export class HandoffPipelineService {
           childThreadId: req.childThreadId,
           reason: cls,
         });
+      } finally {
+        clearTimeout(timer);
       }
     }
 
-    // Path A: hidden turn injected into the parent's mutable session
+    // Path A: hidden turn injected into the parent's mutable session.
+    // sdk_session_id is NOT required here because runHiddenTurn creates its own
+    // ephemeral turn rather than resuming an existing session; the hidden turn
+    // is a no-op if the parent has never started a session (the provider will
+    // simply have no prior context to draw from, which is acceptable -- path D
+    // will produce an equivalent result in that case). We intentionally do not
+    // gate path A on sdk_session_id to avoid blocking providers that defer
+    // session creation until the first real turn.
     if (capability === "mutating" && parentProvider?.runHiddenTurn) {
-      try {
-        const text: string = await parentProvider.runHiddenTurn({
-          parentThreadId: req.parentThreadId,
-          prompt,
-        });
-        return this.buildProviderArtifact(req, parent, text, "A", mode);
-      } catch (err) {
-        const cls = classifyProviderError(err);
-        logger.warn("Handoff path A failed", { err, cls, threadId: req.parentThreadId });
-        return runPathDDeterministic({
-          parentThread: parent,
-          messagesUpToFork: messages,
-          forkedFromMessageId: req.forkedFromMessageId,
-          forkAnchorRole: req.forkAnchorRole,
-          childThreadId: req.childThreadId,
-          reason: cls,
-        });
-      }
+      return this.withPathALock(req.parentThreadId, async () => {
+        const abort = new AbortController();
+        const timer = setTimeout(() => abort.abort(), PROVIDER_CALL_TIMEOUT_MS);
+        try {
+          let text: string = await parentProvider.runHiddenTurn({
+            parentThreadId: req.parentThreadId,
+            prompt,
+            abortSignal: abort.signal,
+          });
+          text = this.applyBudgetGuard(text, childCap, "A");
+          return this.buildProviderArtifact(req, parent, text, "A", mode);
+        } catch (err) {
+          if ((abort.signal as AbortSignal).aborted) {
+            logger.warn("Handoff path A timed out; falling to D", { threadId: req.parentThreadId });
+            return runPathDDeterministic({
+              parentThread: parent,
+              messagesUpToFork: messages,
+              forkedFromMessageId: req.forkedFromMessageId,
+              forkAnchorRole: req.forkAnchorRole,
+              childThreadId: req.childThreadId,
+              reason: "transient",
+            });
+          }
+          const cls = classifyProviderError(err);
+          logger.warn("Handoff path A failed", { err, cls, threadId: req.parentThreadId });
+          return runPathDDeterministic({
+            parentThread: parent,
+            messagesUpToFork: messages,
+            forkedFromMessageId: req.forkedFromMessageId,
+            forkAnchorRole: req.forkAnchorRole,
+            childThreadId: req.childThreadId,
+            reason: cls,
+          });
+        } finally {
+          clearTimeout(timer);
+        }
+      });
     }
 
     // Path D: deterministic fallback for unsupported providers or missing sessions
@@ -154,6 +210,41 @@ export class HandoffPipelineService {
       childThreadId: req.childThreadId,
       reason: null,
     });
+  }
+
+  /**
+   * Serializes path A calls on the same parent thread. Concurrent fork
+   * requests mutate the provider session state, so each hidden turn must
+   * complete before the next begins.
+   */
+  private async withPathALock<T>(threadId: string, fn: () => Promise<T>): Promise<T> {
+    while (this.pathALocks.has(threadId)) {
+      await this.pathALocks.get(threadId);
+    }
+    let release!: () => void;
+    const p = new Promise<void>((res) => { release = res; });
+    this.pathALocks.set(threadId, p);
+    try {
+      return await fn();
+    } finally {
+      this.pathALocks.delete(threadId);
+      release();
+    }
+  }
+
+  /**
+   * Validates provider output against the child's input budget. Truncates at
+   * the nearest H2 section boundary when the provider overshoots by more than
+   * 15%, appending a truncation notice so the child agent knows the doc was cut.
+   */
+  private applyBudgetGuard(text: string, childCap: number, step: LadderStep): string {
+    const budget = computeBudgetChars(childCap);
+    if (text.length > budget * 1.15) {
+      logger.warn("Provider exceeded handoff budget; truncating", { produced: text.length, budget, ladderStep: step });
+      const truncated = truncateAtSectionBoundary(text, budget);
+      return truncated + "\n\n<!-- handoff truncated at budget; see full doc on disk -->";
+    }
+    return text;
   }
 
   /** Builds a provider-generated artifact with the given ladder step and mode. */

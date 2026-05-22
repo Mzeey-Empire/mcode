@@ -20,6 +20,14 @@ function mkDeps() {
   } as any;
 }
 
+const BASE_REQ = {
+  parentThreadId: "t_parent",
+  forkedFromMessageId: "m_1",
+  forkAnchorRole: "user" as const,
+  childThreadId: "t_child",
+  childProviderId: "claude",
+};
+
 describe("HandoffPipelineService.orchestrate", () => {
   it("path B success builds a provider artifact with ladderStep B", async () => {
     const deps = mkDeps();
@@ -34,13 +42,7 @@ describe("HandoffPipelineService.orchestrate", () => {
       return null;
     });
     const svc = HandoffPipelineService.forTesting(deps);
-    const r = await svc.orchestrate({
-      parentThreadId: "t_parent",
-      forkedFromMessageId: "m_1",
-      forkAnchorRole: "user",
-      childThreadId: "t_child",
-      childProviderId: "claude",
-    });
+    const r = await svc.orchestrate(BASE_REQ);
     expect(r.meta.ladderStep).toBe("B");
     expect(r.meta.generatedBy).toBe("provider");
   });
@@ -55,13 +57,7 @@ describe("HandoffPipelineService.orchestrate", () => {
       }),
     }));
     const svc = HandoffPipelineService.forTesting(deps);
-    const r = await svc.orchestrate({
-      parentThreadId: "t_parent",
-      forkedFromMessageId: "m_1",
-      forkAnchorRole: "user",
-      childThreadId: "t_child",
-      childProviderId: "claude",
-    });
+    const r = await svc.orchestrate(BASE_REQ);
     expect(r.meta.ladderStep).toBe("D");
     expect(r.meta.providerErrorOnGenerate).toBe("quota");
   });
@@ -75,10 +71,7 @@ describe("HandoffPipelineService.orchestrate", () => {
     }));
     const svc = HandoffPipelineService.forTesting(deps);
     const r = await svc.orchestrate({
-      parentThreadId: "t_parent",
-      forkedFromMessageId: "m_1",
-      forkAnchorRole: "user",
-      childThreadId: "t_child",
+      ...BASE_REQ,
       childProviderId: "cursor",
     });
     expect(r.meta.ladderStep).toBe("A");
@@ -93,13 +86,103 @@ describe("HandoffPipelineService.orchestrate", () => {
     }));
     const svc = HandoffPipelineService.forTesting(deps);
     const r = await svc.orchestrate({
-      parentThreadId: "t_parent",
-      forkedFromMessageId: "m_1",
-      forkAnchorRole: "user",
-      childThreadId: "t_child",
+      ...BASE_REQ,
       childProviderId: "codex",
     });
     expect(r.meta.ladderStep).toBe("D");
     expect(r.meta.providerErrorOnGenerate).toBeNull();
+  });
+
+  // 17.1: missing sdk_session_id falls through to D for path B (session needed
+  // for resume), path A is unaffected (no session required for hidden turns).
+  it("falls to D when parent has no sdkSessionId and provider is clean-resume", async () => {
+    const deps = mkDeps();
+    // Override parent to have no session id
+    const parentNoSession = { id: "t_parent", title: "X", provider: "claude", sdk_session_id: null, deleted_at: null };
+    deps.threadRepo.findById = vi.fn(async (id) => (id === "t_parent" ? parentNoSession : null));
+    deps.providerRegistry.get = vi.fn(() => ({
+      sessionForkOnResume: "clean",
+      maxInputCharactersPerTurn: 180_000,
+      runSideChannelQuery: vi.fn(async () => "should not be called"),
+    }));
+    const svc = HandoffPipelineService.forTesting(deps);
+    const r = await svc.orchestrate(BASE_REQ);
+    expect(r.meta.ladderStep).toBe("D");
+    // runSideChannelQuery must not have been called
+    const provider = deps.providerRegistry.get("claude");
+    expect(provider.runSideChannelQuery).not.toHaveBeenCalled();
+  });
+
+  // 17.2: when the AbortSignal fires (simulating the 60s timeout expiry),
+  // the pipeline catches the abort and falls to D with reason "transient".
+  it("falls to D when side-channel query rejects because abort signal fired", async () => {
+    const deps = mkDeps();
+    // Provider that rejects immediately when its signal is already aborted,
+    // simulating what a real provider does when the 60s AbortController fires.
+    deps.providerRegistry.get = vi.fn(() => ({
+      sessionForkOnResume: "clean",
+      maxInputCharactersPerTurn: 180_000,
+      runSideChannelQuery: vi.fn(async (args: { abortSignal?: AbortSignal }) => {
+        if (args.abortSignal?.aborted) {
+          throw Object.assign(new Error("The operation was aborted"), { name: "AbortError" });
+        }
+        // Should not reach here in this test
+        return "unexpected";
+      }),
+    }));
+
+    // Patch AbortController so its signal is pre-aborted, triggering the
+    // pipeline's abort-detection branch without waiting 60 real seconds.
+    const OriginalAbortController = globalThis.AbortController;
+    globalThis.AbortController = class {
+      signal: AbortSignal;
+      constructor() {
+        const ctrl = new OriginalAbortController();
+        ctrl.abort(); // pre-abort
+        this.signal = ctrl.signal;
+      }
+      abort() {}
+    } as unknown as typeof AbortController;
+
+    const svc = HandoffPipelineService.forTesting(deps);
+    const r = await svc.orchestrate(BASE_REQ);
+
+    globalThis.AbortController = OriginalAbortController;
+    expect(r.meta.ladderStep).toBe("D");
+  });
+
+  // 17.3: concurrent path A forks on the same parent thread are serialized
+  it("serializes concurrent path-A forks on the same parent thread", { timeout: 10_000 }, async () => {
+    const order: number[] = [];
+    let resolveFirst!: () => void;
+    const firstStarted = new Promise<void>((res) => { resolveFirst = res; });
+
+    const deps = mkDeps();
+    let callCount = 0;
+    deps.providerRegistry.get = vi.fn(() => ({
+      sessionForkOnResume: "mutating",
+      maxInputCharactersPerTurn: 180_000,
+      runHiddenTurn: vi.fn(async () => {
+        const idx = ++callCount;
+        order.push(idx);
+        if (idx === 1) {
+          resolveFirst();
+          // First call holds the lock briefly so the second must queue.
+          await new Promise<void>((res) => setTimeout(res, 50));
+        }
+        return "# Handoff\n\n## Goal\nX";
+      }),
+    }));
+
+    const svc = HandoffPipelineService.forTesting(deps);
+    const p1 = svc.orchestrate(BASE_REQ);
+    await firstStarted;
+    const p2 = svc.orchestrate(BASE_REQ);
+
+    const [r1, r2] = await Promise.all([p1, p2]);
+    expect(r1.meta.ladderStep).toBe("A");
+    expect(r2.meta.ladderStep).toBe("A");
+    // The second hidden turn must start only after the first completes.
+    expect(order).toEqual([1, 2]);
   });
 });
