@@ -187,7 +187,8 @@ describe("fork flow with handoff pipeline (e2e)", () => {
     // handoffStorage.write(). This proves the artifact lands on disk so that
     // readLatest() returns non-null and "View doc" works.
     const simulatedPipelineErr = new Error("Provider subprocess exited unexpectedly");
-    const errClass = classifyProviderError(simulatedPipelineErr); // should be "fatal"
+    // "subprocess" matches the transient SDK-wrapper pattern in classifyProviderError.
+    const errClass = classifyProviderError(simulatedPipelineErr); // "transient"
 
     const legacyMarkdown = "You are continuing work from a previous thread.\n\n## Conversation\nUser: help";
     const legacyArtifact: HandoffArtifact = {
@@ -205,7 +206,7 @@ describe("fork flow with handoff pipeline (e2e)", () => {
         generatedAt: new Date().toISOString(),
         characterCount: legacyMarkdown.length,
         parentSdkSessionId: "sdk_session_abc",
-        providerErrorOnGenerate: errClass === "clean" ? "fatal" : errClass,
+        providerErrorOnGenerate: errClass,
         regenerationHistory: [],
         attachments: [],
       },
@@ -217,7 +218,7 @@ describe("fork flow with handoff pipeline (e2e)", () => {
     expect(persisted).not.toBeNull();
     expect(persisted!.meta.ladderStep).toBe("D");
     expect(persisted!.meta.generatedBy).toBe("deterministic");
-    expect(persisted!.meta.providerErrorOnGenerate).toBe("fatal");
+    expect(persisted!.meta.providerErrorOnGenerate).toBe("transient");
 
     // Confirm the artifact directory exists on disk.
     const handoffsRoot = join(dataDir, "threads", BASE_REQ.childThreadId, "handoffs");

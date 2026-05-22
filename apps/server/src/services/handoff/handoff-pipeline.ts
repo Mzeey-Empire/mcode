@@ -23,6 +23,34 @@ import type {
   IProviderRegistry,
   ProviderId,
 } from "@mcode/contracts";
+/**
+ * Render an Error-shaped value for structured logging. Winston cannot
+ * serialize Error.message / Error.stack because they are non-enumerable;
+ * this returns a plain object with those fields plus any classifier-relevant
+ * properties (code, status, name).
+ */
+function describeError(err: unknown): Record<string, unknown> {
+  if (err instanceof Error) {
+    return {
+      name: err.name,
+      message: err.message,
+      stack: err.stack,
+      code: (err as { code?: string }).code,
+      status: (err as { status?: number }).status,
+    };
+  }
+  if (err && typeof err === "object") {
+    const obj = err as Record<string, unknown>;
+    return {
+      value: obj,
+      message: obj.message,
+      code: obj.code,
+      status: obj.status,
+    };
+  }
+  return { value: String(err) };
+}
+
 import type {
   HandoffArtifact,
   HandoffMeta,
@@ -141,7 +169,7 @@ export class HandoffPipelineService {
           });
         }
         const cls = classifyProviderError(err);
-        logger.warn("Handoff path B failed", { err, cls, threadId: req.parentThreadId });
+        logger.warn("Handoff path B failed", { error: describeError(err), cls, threadId: req.parentThreadId });
         return runPathDDeterministic({
           parentThread: parent,
           messagesUpToFork: messages,
@@ -189,7 +217,7 @@ export class HandoffPipelineService {
             });
           }
           const cls = classifyProviderError(err);
-          logger.warn("Handoff path A failed", { err, cls, threadId: req.parentThreadId });
+          logger.warn("Handoff path A failed", { error: describeError(err), cls, threadId: req.parentThreadId });
           return runPathDDeterministic({
             parentThread: parent,
             messagesUpToFork: messages,

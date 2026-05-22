@@ -477,6 +477,14 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
 
         if (anyMsg.type === "result" && anyMsg.is_error) {
           const errors = (anyMsg.errors as string[]) ?? [];
+          logger.warn("Claude side-channel SDK returned is_error", {
+            threadId: args.parentThreadId,
+            sdkResultKeys: Object.keys(anyMsg),
+            errorsField: errors,
+            subtype: anyMsg.subtype,
+            durationMs: anyMsg.duration_ms,
+            rawResult: anyMsg,
+          });
           throw new Error(`Claude side-channel query SDK error: ${errors.join(", ") || "unknown error"}`);
         }
 

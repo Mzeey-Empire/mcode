@@ -33,6 +33,16 @@ describe("classifyProviderError", () => {
   it("returns fatal for null input", () => {
     expect(classifyProviderError(null)).toBe("fatal");
   });
+
+  it("returns transient for SDK wrapper errors", () => {
+    expect(classifyProviderError({ message: "Claude side-channel query SDK error: unknown error" })).toBe("transient");
+    expect(classifyProviderError({ message: "CLI subprocess crashed" })).toBe("transient");
+  });
+
+  it("returns context-overflow for token-count errors", () => {
+    expect(classifyProviderError({ message: "Maximum context length exceeded" })).toBe("context-overflow");
+    expect(classifyProviderError({ message: "Too many tokens in input" })).toBe("context-overflow");
+  });
 });
 
 describe("shouldSkipToDeterministic", () => {

@@ -33,6 +33,15 @@ export function classifyProviderError(err: unknown): ProviderErrorClass {
   if (e.code === "ECONNRESET" || e.code === "ETIMEDOUT" || e.code === "ENOTFOUND") return "transient";
   if (/network|timeout|fetch failed/.test(msg)) return "transient";
 
+  // SDK wrapper errors that don't match other patterns are transient — the
+  // subprocess may have crashed or the CLI returned an unexpected error shape.
+  // Treating them as transient (rather than fatal) lets path D fire with a
+  // "try again later" hint instead of a permanent failure banner.
+  if (/sdk error|subprocess|claude.*error|cli.*error|side-channel/i.test(msg)) return "transient";
+
+  // Broader context-overflow patterns beyond the SDK-specific message.
+  if (/maximum context|tokens? exceeded|too many tokens/i.test(msg)) return "context-overflow";
+
   return "fatal";
 }
 
