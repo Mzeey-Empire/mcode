@@ -205,6 +205,14 @@ interface ThreadState {
   /** Clears composer recall state for one thread after the Composer applies it. */
   clearComposerRecallFromStop: (threadId: string) => void;
 
+  /**
+   * Ephemeral handoff pipeline status per child thread, keyed by thread ID.
+   * Populated by the `thread.handoff` push channel. Not persisted; cleared on reload.
+   */
+  handoffStatus: Record<string, "generating" | "ready" | "fallback" | "error">;
+  /** Update handoff pipeline status for a child thread. */
+  setHandoffStatus: (threadId: string, status: "generating" | "ready" | "fallback" | "error") => void;
+
   // Per-thread settings
   /** Return current settings for a thread, preferring in-memory overrides over DB-persisted values. */
   getThreadSettings: (threadId: string) => ThreadSettings;
@@ -534,6 +542,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   interruptStopFileNoticeByThread: {},
   composerRecallFromStopByThread: {},
   lastHydratedByThread: {},
+  handoffStatus: {},
 
   cacheToolCallRecords: (key, records) => {
     get().toolCallRecordCache.set(key, records);
@@ -1504,6 +1513,10 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     if (deletingCurrentThread) {
       get().toolCallRecordCache.clear();
     }
+  },
+
+  setHandoffStatus: (threadId, status) => {
+    set((s) => ({ handoffStatus: { ...s.handoffStatus, [threadId]: status } }));
   },
 
   setPlanQuestions: (threadId, questions) => {
