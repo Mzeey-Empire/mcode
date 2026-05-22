@@ -411,6 +411,14 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
    * Uses `resume: parentSdkSessionId` which creates a clean fork — the
    * original session is not mutated. Only the text output is returned;
    * the forked session ID is discarded.
+   *
+   * Post-restart vulnerability: after a server restart, the parent thread's
+   * sdk_session_id is still in SQLite but the Claude SDK's in-memory session
+   * cache is empty. The SDK may also reject sessions that exceed its retention
+   * window (TTL). When that happens, the SDK throws with a session-not-found /
+   * session-expired message. We detect that shape here and rethrow with
+   * code="ETIMEDOUT" so classifyProviderError routes it to "transient" and the
+   * pipeline falls cleanly to path D rather than escaping to the legacy catch.
    */
   async runSideChannelQuery(args: {
     parentThreadId: string;
@@ -485,6 +493,19 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
 
       if (!assistantText) throw new Error("Claude side-channel query returned empty output");
       return assistantText.trim();
+    } catch (err) {
+      // Detect session-not-found / expired errors and reclassify as transient
+      // so the pipeline's path-B catch routes to path D cleanly. Without this,
+      // the error escapes as "fatal" and ends up in the legacy catch path.
+      const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+      if (/session not found|session expired|resume.*invalid|unknown session/.test(msg)) {
+        const rethrown = new Error(
+          `Parent session not resumable (likely after server restart): ${err instanceof Error ? err.message : err}`,
+        ) as Error & { code: string };
+        rethrown.code = "ETIMEDOUT"; // classifyProviderError maps ETIMEDOUT -> "transient"
+        throw rethrown;
+      }
+      throw err;
     } finally {
       restoreProcessEnv(backup);
     }
