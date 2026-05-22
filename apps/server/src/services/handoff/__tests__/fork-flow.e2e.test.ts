@@ -1,5 +1,5 @@
 /**
- * End-to-end branch flow integration test.
+ * End-to-end fork flow integration test.
  *
  * Full DI bootstrap is impractical here because better-sqlite3 requires a
  * native binding that may not resolve in all CI environments, and the
@@ -77,7 +77,7 @@ const BASE_REQ = {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("branch flow with handoff pipeline (e2e)", () => {
+describe("fork flow with handoff pipeline (e2e)", () => {
   let dataDir: string;
   let storage: HandoffStorage;
 

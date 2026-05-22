@@ -140,7 +140,7 @@ describe("Workspace Behavior", () => {
     const child = createMockThread({
       id: "child-1",
       workspace_id: ws.id,
-      title: "Branched",
+      title: "Forked",
       parent_thread_id: "parent-1",
     });
     (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockResolvedValue(child);

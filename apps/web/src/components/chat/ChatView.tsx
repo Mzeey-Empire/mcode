@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { GitBranch, Loader2 } from "lucide-react";
+import { GitFork, Loader2 } from "lucide-react";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { useConnectionStore } from "@/stores/connectionStore";
@@ -127,8 +127,8 @@ function ThreadPreparingShell({
                     onClick={() => useWorkspaceStore.getState().setActiveThread(thread.parent_thread_id!)}
                     className="flex shrink-0 items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[11px] font-medium text-primary/80 transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
                   >
-                    <GitBranch size={10} />
-                    <span>Branched</span>
+                    <GitFork size={10} />
+                    <span>Forked</span>
                   </button>
                 }
               />
@@ -458,8 +458,8 @@ export function ChatView() {
                     onClick={() => setActiveThread(activeThread.parent_thread_id!)}
                     className="flex items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2 py-0.5 text-[11px] font-medium text-primary/80 transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
                   >
-                    <GitBranch size={10} />
-                    <span>Branched</span>
+                    <GitFork size={10} />
+                    <span>Forked</span>
                   </button>
                 }
               />

@@ -129,11 +129,11 @@ interface ComposerProps {
   threadId?: string;
   isNewThread?: boolean;
   workspaceId?: string;
-  /** When set, the composer is in branch mode — submit branches instead of sends. */
+  /** When set, the composer is in fork mode; submit creates a forked thread instead of sending. */
   branchFromMessageId?: string;
-  /** Preview content of the message being branched from, shown as a quote. */
+  /** Preview content of the message being forked from, shown as a quote. */
   branchFromMessageContent?: string;
-  /** Called when the user exits branch mode (X button or Escape). */
+  /** Called when the user exits fork mode (X button or Escape). */
   onBranchModeExit?: () => void;
 }
 
