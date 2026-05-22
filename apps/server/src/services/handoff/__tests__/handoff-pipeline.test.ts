@@ -4,7 +4,7 @@ import type { IProviderRegistry } from "@mcode/contracts";
 import { HandoffPipelineService } from "../handoff-pipeline.js";
 
 function mkDeps() {
-  const parent = { id: "t_parent", title: "X", provider: "claude", sdk_session_id: "sdk_1", deleted_at: null } as any;
+  const parent = { id: "t_parent", title: "X", provider: "claude", sdk_session_id: "sdk_1", deleted_at: null, workspace_id: "ws_1", worktree_path: null } as any;
   const child = { id: "t_child", provider: "claude", deleted_at: null } as any;
   return {
     threadRepo: {
@@ -18,6 +18,9 @@ function mkDeps() {
     providerRegistry: {
       resolve: vi.fn(),
     } satisfies Pick<IProviderRegistry, "resolve">,
+    workspaceRepo: {
+      findById: vi.fn(async (id) => (id === "ws_1" ? { id: "ws_1", path: "/tmp/test-workspace" } : null)),
+    },
   };
 }
 
@@ -99,7 +102,7 @@ describe("HandoffPipelineService.orchestrate", () => {
   it("falls to D when parent has no sdkSessionId and provider is clean-resume", async () => {
     const deps = mkDeps();
     // Override parent to have no session id
-    const parentNoSession = { id: "t_parent", title: "X", provider: "claude", sdk_session_id: null, deleted_at: null };
+    const parentNoSession = { id: "t_parent", title: "X", provider: "claude", sdk_session_id: null, deleted_at: null, workspace_id: "ws_1", worktree_path: null };
     deps.threadRepo.findById = vi.fn(async (id) => (id === "t_parent" ? parentNoSession : null));
     deps.providerRegistry.resolve = vi.fn(() => ({
       sessionForkOnResume: "clean",

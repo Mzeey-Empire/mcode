@@ -434,19 +434,19 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
      * restart). When omitted, session-missing errors propagate as before.
      */
     conversationHistory?: string;
+    /**
+     * Working directory for the SDK call. Must be the parent thread's effective
+     * worktree (worktree_path if set, otherwise the workspace path) so the
+     * model sees the correct user project files, not the server's own cwd.
+     */
+    cwd: string;
   }): Promise<string> {
-    const { parentSdkSessionId, prompt, abortSignal } = args;
+    const { parentSdkSessionId, prompt, abortSignal, cwd } = args;
 
     // Resolve model from the parent thread's active session if available,
     // falling back to the default claude-sonnet model.
     const parentSessionId = `mcode-${args.parentThreadId}`;
     const model = this.sessions.get(parentSessionId)?.model ?? "claude-sonnet-4-5";
-
-    // Resolve cwd from the parent session's stored options if available.
-    // The SDK requires a cwd; fall back to the server working directory.
-    // TODO: hardcoded cwd and model fallback. Persist parent session's cwd in the
-    // session entry and read from it here for higher fidelity.
-    const cwd = process.cwd();
 
     const backup = snapshotProcessEnv();
     try {
@@ -541,6 +541,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
           args.prompt,
           args.abortSignal,
           args.parentThreadId,
+          args.cwd,
         );
       }
       if (isSessionMissing) {
@@ -568,12 +569,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     prompt: string,
     abortSignal: AbortSignal | undefined,
     parentThreadId: string,
+    cwd: string,
   ): Promise<string> {
     // Prepend the prior conversation so the model has equivalent context to a
     // resumed session. The handoff request follows the separator.
     const fullPrompt = `## Prior conversation (parent thread)\n\n${history}\n\n---\n\n${prompt}`;
-
-    const cwd = process.cwd();
     // The parent session is gone so we cannot look up its original model.
     // Use the same safe default as the main path's fallback.
     const model = "claude-sonnet-4-5";

@@ -15,6 +15,7 @@ import { inject, injectable } from "tsyringe";
 import { logger, getMcodeDir, resolveHandoffDir, newHandoffUlid } from "@mcode/shared";
 import { ThreadRepo } from "../../repositories/thread-repo.js";
 import { MessageRepo } from "../../repositories/message-repo.js";
+import { WorkspaceRepo } from "../../repositories/workspace-repo.js";
 import { classifyProviderError } from "./error-classifier.js";
 import { buildHandoffPrompt, computeBudgetChars, pickHandoffMode, truncateAtSectionBoundary } from "./handoff-prompt.js";
 import { runPathDDeterministic } from "./path-d-deterministic.js";
@@ -71,6 +72,9 @@ interface IThreadRepo {
 interface IMessageRepo {
   listIncludingInternal(threadId: string): Promise<any[]> | any[];
 }
+interface IWorkspaceRepo {
+  findById(id: string): Promise<any> | any;
+}
 
 /** Timeout for side-channel and hidden-turn provider calls, in milliseconds. */
 const PROVIDER_CALL_TIMEOUT_MS = 60_000;
@@ -87,6 +91,7 @@ export class HandoffPipelineService {
     @inject(ThreadRepo) private readonly threadRepo: IThreadRepo,
     @inject(MessageRepo) private readonly messageRepo: IMessageRepo,
     @inject("IProviderRegistry") private readonly providerRegistry: Pick<IProviderRegistry, "resolve">,
+    @inject(WorkspaceRepo) private readonly workspaceRepo: IWorkspaceRepo,
   ) {}
 
   /**
@@ -97,11 +102,15 @@ export class HandoffPipelineService {
     threadRepo: IThreadRepo;
     messageRepo: IMessageRepo;
     providerRegistry: Pick<IProviderRegistry, "resolve">;
+    workspaceRepo?: IWorkspaceRepo;
   }): HandoffPipelineService {
     const svc = Object.create(HandoffPipelineService.prototype) as HandoffPipelineService;
     (svc as any).threadRepo = deps.threadRepo;
     (svc as any).messageRepo = deps.messageRepo;
     (svc as any).providerRegistry = deps.providerRegistry;
+    (svc as any).workspaceRepo = deps.workspaceRepo ?? {
+      findById: async () => ({ path: process.cwd() }),
+    };
     // Initialize instance-field Maps that aren't set via the constructor.
     (svc as any).pathALocks = new Map<string, Promise<void>>();
     return svc;
@@ -116,6 +125,13 @@ export class HandoffPipelineService {
     const parent = await this.threadRepo.findById(req.parentThreadId);
     if (!parent) throw new Error(`Parent thread ${req.parentThreadId} not found`);
     if (parent.deleted_at) throw new Error("Cannot fork from a deleted thread");
+
+    const workspace = await this.workspaceRepo.findById(parent.workspace_id);
+    if (!workspace) throw new Error(`Workspace ${parent.workspace_id} not found for parent thread`);
+    // Use worktree_path when the parent is running in a worktree; otherwise the
+    // workspace root. This ensures the side-channel SDK call sees the user's
+    // project files instead of the server's own working directory.
+    const parentCwd: string = parent.worktree_path ?? workspace.path;
 
     const parentProvider = this.tryResolveProvider(parent.provider);
     const childProvider = this.tryResolveProvider(req.childProviderId);
@@ -161,6 +177,7 @@ export class HandoffPipelineService {
           prompt,
           abortSignal: abort.signal,
           conversationHistory,
+          cwd: parentCwd,
         });
         text = this.applyBudgetGuard(text, childCap, "B");
         return this.buildProviderArtifact(req, parent, text, "B", mode);

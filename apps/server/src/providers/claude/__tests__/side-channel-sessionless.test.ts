@@ -97,6 +97,7 @@ describe("runSideChannelQuery sessionless fallback", () => {
       parentSdkSessionId: "sdk_abc123",
       prompt: "Generate a handoff document.",
       conversationHistory: "User: hello\nAssistant: hi there",
+      cwd: "/tmp/test-cwd",
     });
 
     expect(result).toBe("# Handoff\n\n## Goal\nForked task");
@@ -126,6 +127,7 @@ describe("runSideChannelQuery sessionless fallback", () => {
         parentThreadId: "t_parent",
         parentSdkSessionId: "sdk_abc123",
         prompt: "Generate a handoff document.",
+        cwd: "/tmp/test-cwd",
         // No conversationHistory — should rethrow as ETIMEDOUT
       })
       .catch((e: unknown) => e);

@@ -125,6 +125,12 @@ export interface IAgentProvider {
      * caller still gets a path-B result rather than falling to path D.
      */
     conversationHistory?: string;
+    /**
+     * Working directory for the side-channel SDK call. Must be the parent
+     * thread's effective worktree (worktree_path if set, otherwise the workspace
+     * path). The provider sees the same filesystem state the parent had.
+     */
+    cwd: string;
   }): Promise<string>;
 
   /**
