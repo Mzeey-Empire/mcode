@@ -19,6 +19,11 @@ import { classifyProviderError } from "./error-classifier.js";
 import { buildHandoffPrompt, computeBudgetChars, pickHandoffMode, truncateAtSectionBoundary } from "./handoff-prompt.js";
 import { runPathDDeterministic } from "./path-d-deterministic.js";
 import type {
+  IAgentProvider,
+  IProviderRegistry,
+  ProviderId,
+} from "@mcode/contracts";
+import type {
   HandoffArtifact,
   HandoffMeta,
   HandoffMode,
@@ -27,8 +32,8 @@ import type {
 } from "./handoff-types.js";
 
 /**
- * Minimal structural interface for the repos and registry needed by this
- * service. Sync or async return values are both accepted so tests can use
+ * Minimal structural interface for the repos needed by this service.
+ * Sync or async return values are both accepted so tests can use
  * async mocks against the real sync repo methods.
  */
 interface IThreadRepo {
@@ -36,9 +41,6 @@ interface IThreadRepo {
 }
 interface IMessageRepo {
   listIncludingInternal(threadId: string): Promise<any[]> | any[];
-}
-interface IProviderRegistry {
-  get(id: string): any;
 }
 
 /** Timeout for side-channel and hidden-turn provider calls, in milliseconds. */
@@ -55,7 +57,7 @@ export class HandoffPipelineService {
   constructor(
     @inject(ThreadRepo) private readonly threadRepo: IThreadRepo,
     @inject(MessageRepo) private readonly messageRepo: IMessageRepo,
-    @inject("IProviderRegistry") private readonly providerRegistry: IProviderRegistry,
+    @inject("IProviderRegistry") private readonly providerRegistry: Pick<IProviderRegistry, "resolve">,
   ) {}
 
   /**
@@ -65,7 +67,7 @@ export class HandoffPipelineService {
   static forTesting(deps: {
     threadRepo: IThreadRepo;
     messageRepo: IMessageRepo;
-    providerRegistry: IProviderRegistry;
+    providerRegistry: Pick<IProviderRegistry, "resolve">;
   }): HandoffPipelineService {
     const svc = Object.create(HandoffPipelineService.prototype) as HandoffPipelineService;
     (svc as any).threadRepo = deps.threadRepo;
@@ -86,8 +88,8 @@ export class HandoffPipelineService {
     if (!parent) throw new Error(`Parent thread ${req.parentThreadId} not found`);
     if (parent.deleted_at) throw new Error("Cannot fork from a deleted thread");
 
-    const parentProvider = this.providerRegistry.get(parent.provider);
-    const childProvider = this.providerRegistry.get(req.childProviderId);
+    const parentProvider = this.tryResolveProvider(parent.provider);
+    const childProvider = this.tryResolveProvider(req.childProviderId);
     const childCap: number = childProvider?.maxInputCharactersPerTurn ?? 16_000;
     const mode = pickHandoffMode(childCap);
 
@@ -161,12 +163,13 @@ export class HandoffPipelineService {
     // will produce an equivalent result in that case). We intentionally do not
     // gate path A on sdk_session_id to avoid blocking providers that defer
     // session creation until the first real turn.
-    if (capability === "mutating" && parentProvider?.runHiddenTurn) {
+    const runHiddenTurn = parentProvider?.runHiddenTurn?.bind(parentProvider);
+    if (capability === "mutating" && runHiddenTurn) {
       return this.withPathALock(req.parentThreadId, async () => {
         const abort = new AbortController();
         const timer = setTimeout(() => abort.abort(), PROVIDER_CALL_TIMEOUT_MS);
         try {
-          let text: string = await parentProvider.runHiddenTurn({
+          let text: string = await runHiddenTurn({
             parentThreadId: req.parentThreadId,
             prompt,
             abortSignal: abort.signal,
@@ -210,6 +213,19 @@ export class HandoffPipelineService {
       childThreadId: req.childThreadId,
       reason: null,
     });
+  }
+
+  /**
+   * Safely resolve a provider by ID. The real ProviderRegistry.resolve()
+   * throws if the provider isn't registered; this wraps that into a nullable
+   * return so the orchestrator can gracefully degrade (typically to path D).
+   */
+  private tryResolveProvider(providerId: string): IAgentProvider | null {
+    try {
+      return this.providerRegistry.resolve(providerId as ProviderId);
+    } catch {
+      return null;
+    }
   }
 
   /**

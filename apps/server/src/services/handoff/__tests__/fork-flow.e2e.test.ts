@@ -62,7 +62,13 @@ function makeDeps(providerFactory: (id: string) => unknown) {
       ]),
     },
     providerRegistry: {
-      get: vi.fn((id: string) => providerFactory(id)),
+      // Cast to any: test fixtures provide partial provider shapes,
+      // which is intentional for unit isolation.
+      resolve: vi.fn((id: string) => {
+        const p = providerFactory(id);
+        if (!p) throw new Error(`No provider: ${id}`);
+        return p;
+      }) as any,
     },
   };
 }
