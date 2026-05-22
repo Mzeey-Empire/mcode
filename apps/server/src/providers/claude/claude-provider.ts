@@ -416,15 +416,24 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
    * sdk_session_id is still in SQLite but the Claude SDK's in-memory session
    * cache is empty. The SDK may also reject sessions that exceed its retention
    * window (TTL). When that happens, the SDK throws with a session-not-found /
-   * session-expired message. We detect that shape here and rethrow with
-   * code="ETIMEDOUT" so classifyProviderError routes it to "transient" and the
-   * pipeline falls cleanly to path D rather than escaping to the legacy catch.
+   * session-expired message. We detect that shape here and, when
+   * `conversationHistory` is provided, transparently retry without `resume:`
+   * by baking the history directly into the prompt (sessionless fallback).
+   * Without `conversationHistory`, session-missing errors are rethrown with
+   * code="ETIMEDOUT" so the pipeline falls cleanly to path D.
    */
   async runSideChannelQuery(args: {
     parentThreadId: string;
     parentSdkSessionId: string;
     prompt: string;
     abortSignal?: AbortSignal;
+    /**
+     * Conversation history as plain text (the budgeted replay). Used as the
+     * fallback prompt body when `resume:` fails because the SDK's process-local
+     * session storage no longer has the parent session (e.g. after a server
+     * restart). When omitted, session-missing errors propagate as before.
+     */
+    conversationHistory?: string;
   }): Promise<string> {
     const { parentSdkSessionId, prompt, abortSignal } = args;
 
@@ -516,11 +525,26 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       if (!assistantText) throw new Error("Claude side-channel query returned empty output");
       return assistantText.trim();
     } catch (err) {
-      // Detect session-not-found / expired errors and reclassify as transient
-      // so the pipeline's path-B catch routes to path D cleanly. Without this,
-      // the error escapes as "fatal" and ends up in the legacy catch path.
+      // Detect session-not-found / expired errors. Includes the actual SDK
+      // phrase "No conversation found with session ID: ..." seen in user logs.
       const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
-      if (/session not found|session expired|resume.*invalid|unknown session/.test(msg)) {
+      const isSessionMissing = /no conversation found|session not found|session expired|resume.*invalid|unknown session/.test(msg);
+      if (isSessionMissing && args.conversationHistory) {
+        // Sessionless fallback: retry without `resume:` using baked-in history.
+        // From path B's perspective this still succeeds (ladderStep stays "B").
+        logger.info("Claude side-channel: parent session unresumable, retrying without resume", {
+          threadId: args.parentThreadId,
+          originalError: err instanceof Error ? err.message : String(err),
+        });
+        return await this.runSideChannelQuerySessionless(
+          args.conversationHistory,
+          args.prompt,
+          args.abortSignal,
+          args.parentThreadId,
+        );
+      }
+      if (isSessionMissing) {
+        // No history provided: reclassify as transient so path B falls to D.
         const rethrown = new Error(
           `Parent session not resumable (likely after server restart): ${err instanceof Error ? err.message : err}`,
         ) as Error & { code: string };
@@ -528,6 +552,96 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
         throw rethrown;
       }
       throw err;
+    } finally {
+      restoreProcessEnv(backup);
+    }
+  }
+
+  /**
+   * Retry a side-channel query without a `resume:` session ID by baking the
+   * conversation history directly into the prompt. Called automatically by
+   * `runSideChannelQuery` when the parent session is unresumable and history
+   * has been provided by the pipeline.
+   */
+  private async runSideChannelQuerySessionless(
+    history: string,
+    prompt: string,
+    abortSignal: AbortSignal | undefined,
+    parentThreadId: string,
+  ): Promise<string> {
+    // Prepend the prior conversation so the model has equivalent context to a
+    // resumed session. The handoff request follows the separator.
+    const fullPrompt = `## Prior conversation (parent thread)\n\n${history}\n\n---\n\n${prompt}`;
+
+    const cwd = process.cwd();
+    // The parent session is gone so we cannot look up its original model.
+    // Use the same safe default as the main path's fallback.
+    const model = "claude-sonnet-4-5";
+
+    const backup = snapshotProcessEnv();
+    try {
+      const merged = this.envService.getEnv();
+      for (const [k, v] of Object.entries(merged)) {
+        process.env[k] = v;
+      }
+
+      const queue = createPromptQueue();
+      const ephemeralId = `side-channel-sessionless-${crypto.randomUUID()}`;
+
+      let sdkAbortController: AbortController | undefined;
+      if (abortSignal) {
+        sdkAbortController = new AbortController();
+        if (abortSignal.aborted) {
+          sdkAbortController.abort();
+        } else {
+          abortSignal.addEventListener("abort", () => sdkAbortController?.abort(), { once: true });
+        }
+      }
+
+      const q = sdkQuery({
+        prompt: queue.iterable,
+        options: {
+          cwd,
+          model,
+          maxTurns: 1,
+          // No `resume:`: this is the point of the sessionless fallback.
+          tools: [],
+          settingSources: [],
+          permissionMode: "default" as const,
+          persistSession: false,
+          includePartialMessages: true,
+          ...(sdkAbortController ? { abortController: sdkAbortController } : {}),
+        },
+      });
+
+      queue.push(toUserMessage(fullPrompt, ephemeralId));
+      queue.close();
+
+      let assistantText = "";
+      for await (const msg of q) {
+        const anyMsg = msg as Record<string, unknown>;
+        if (anyMsg.type === "result" && anyMsg.is_error) {
+          const errors = (anyMsg.errors as string[]) ?? [];
+          logger.warn("Claude sessionless side-channel SDK returned is_error", {
+            threadId: parentThreadId,
+            sdkResultKeys: Object.keys(anyMsg),
+            errorsField: errors,
+            subtype: anyMsg.subtype,
+          });
+          throw new Error(`Claude sessionless side-channel SDK error: ${errors.join(", ") || "unknown error"}`);
+        }
+        if (anyMsg.type === "assistant") {
+          const content =
+            (anyMsg.message as { content?: Array<{ type: string; text?: string }> })
+              ?.content ?? [];
+          for (const block of content) {
+            if (block.type === "text" && block.text) assistantText += block.text;
+          }
+        }
+      }
+
+      if (!assistantText) throw new Error("Claude sessionless side-channel query returned empty output");
+      return assistantText.trim();
     } finally {
       restoreProcessEnv(backup);
     }

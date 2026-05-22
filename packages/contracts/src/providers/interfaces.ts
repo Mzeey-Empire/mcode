@@ -118,6 +118,13 @@ export interface IAgentProvider {
     parentSdkSessionId: string;
     prompt: string;
     abortSignal?: AbortSignal;
+    /**
+     * Conversation history as plain text (budgeted replay). When provided and
+     * the session-resume call fails with a session-missing error, the provider
+     * retries without `resume:` by baking this history into the prompt so the
+     * caller still gets a path-B result rather than falling to path D.
+     */
+    conversationHistory?: string;
   }): Promise<string>;
 
   /**

@@ -18,6 +18,7 @@ import { MessageRepo } from "../../repositories/message-repo.js";
 import { classifyProviderError } from "./error-classifier.js";
 import { buildHandoffPrompt, computeBudgetChars, pickHandoffMode, truncateAtSectionBoundary } from "./handoff-prompt.js";
 import { runPathDDeterministic } from "./path-d-deterministic.js";
+import { buildConversationReplay } from "../handoff-builder.js";
 import type {
   IAgentProvider,
   IProviderRegistry,
@@ -148,11 +149,18 @@ export class HandoffPipelineService {
       const abort = new AbortController();
       const timer = setTimeout(() => abort.abort(), PROVIDER_CALL_TIMEOUT_MS);
       try {
+        // Build a budgeted history replay so that if the session-resume fails
+        // (e.g. after a server restart), the provider can retry without `resume:`
+        // and still produce a high-fidelity path-B result.
+        const replayBudget = computeBudgetChars(childCap);
+        const conversationHistory = buildConversationReplay(messages, replayBudget, null);
+
         let text: string = await parentProvider.runSideChannelQuery({
           parentThreadId: req.parentThreadId,
           parentSdkSessionId: parentSdkSession,
           prompt,
           abortSignal: abort.signal,
+          conversationHistory,
         });
         text = this.applyBudgetGuard(text, childCap, "B");
         return this.buildProviderArtifact(req, parent, text, "B", mode);
