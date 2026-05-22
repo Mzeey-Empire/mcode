@@ -650,6 +650,14 @@ export const WS_METHODS = lazySchema(() => ({
       })
       .nullable(),
   },
+  /**
+   * v1 stub for regenerating a handoff document via the live AI path.
+   * Live regeneration is deferred to a follow-on plan.
+   */
+  "handoff.regenerate": {
+    params: z.object({ threadId: z.string() }),
+    result: z.object({ status: z.literal("not-implemented") }),
+  },
   /** Generate (or regenerate) an AI-powered diff summary for a thread. */
   "diffSummary.generate": {
     params: z.object({

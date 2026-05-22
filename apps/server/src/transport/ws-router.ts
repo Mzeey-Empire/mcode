@@ -864,6 +864,10 @@ async function dispatch(
     case "permission.listPending":
       return deps.agentService.listPendingPermissions(params.threadId);
 
+    case "handoff.regenerate":
+      // v1 stub; live regeneration is deferred to a follow-on plan.
+      return { status: "not-implemented" as const };
+
     default:
       throw new Error(`Unhandled method: ${method}`);
   }
