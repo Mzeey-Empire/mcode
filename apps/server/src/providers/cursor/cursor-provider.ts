@@ -869,13 +869,20 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     // Wait for any in-flight real turn to settle before injecting hidden turns.
     // Without this, runRawPrompt's `entry.activeTurnState = turnState` assignment
     // would clobber the in-flight turn's state, corrupting the real turn's output.
-    const deadline = Date.now() + 30_000;
+    //
+    // 10s ceiling: Cursor sessions often run multi-tool chains that take a long
+    // time. Making the user wait 30s for a fork to either proceed or fall back
+    // is a real UX cost. If the parent has not settled in 10s, fall to path D
+    // immediately (via the ETIMEDOUT classification) instead of dragging the
+    // user along.
+    const SETTLE_TIMEOUT_MS = 10_000;
+    const deadline = Date.now() + SETTLE_TIMEOUT_MS;
     while (entry.activeTurnState !== null && Date.now() < deadline) {
       await new Promise<void>((r) => setTimeout(r, 100));
     }
     if (entry.activeTurnState !== null) {
       const err: Error & { code?: string } = new Error(
-        "Cursor parent turn did not settle within 30s; aborting handoff",
+        `Cursor parent turn did not settle within ${SETTLE_TIMEOUT_MS}ms; aborting handoff`,
       );
       err.code = "ETIMEDOUT";
       throw err;
