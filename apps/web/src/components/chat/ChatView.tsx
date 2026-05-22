@@ -14,6 +14,7 @@ import { CliErrorBanner, isCliError } from "./CliErrorBanner";
 import { InterruptedSessionsBanner } from "./InterruptedSessionsBanner";
 import { CollapsibleError } from "./CollapsibleError";
 import { ThreadWarningBanner } from "./ThreadWarningBanner";
+import { HandoffFallbackBanner } from "./HandoffFallbackBanner";
 import { ThreadTitleEditor } from "./ThreadTitleEditor";
 import { SidebarRevealButton } from "@/components/sidebar/SidebarRevealButton";
 import { useUiStore } from "@/stores/uiStore";
@@ -492,6 +493,10 @@ export function ChatView() {
           />
         </div>
       ) : null}
+
+      {/* Fallback handoff banner: shown when the fork's handoff was produced
+          locally because the AI provider was unavailable. */}
+      <HandoffFallbackBanner threadId={activeThread.id} />
 
       {/* Messages, tool calls, and streaming — all in one scrollable area.
           No `key` here: forcing remount on thread switch would destroy the
