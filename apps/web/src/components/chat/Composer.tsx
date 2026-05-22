@@ -1673,6 +1673,21 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     // Avoid duplicate submissions while a placeholder thread is still materializing.
     if (isThreadScaffold) return;
 
+    // Guard against sending a slash command that the active provider doesn't support.
+    // This catches the case where the user typed a command, changed providers, and
+    // then sent without selecting a valid replacement from the popup.
+    const slashMatch = trimmed.match(/^\/(\S+)/);
+    if (slashMatch) {
+      const cmdName = slashMatch[1];
+      const exists = slashCommand.allCommands.some((c) => c.name === cmdName);
+      if (!exists && !slashCommand.isLoading) {
+        useToastStore
+          .getState()
+          .show("error", "Unknown command", `/${cmdName} is not available for this provider`);
+        return;
+      }
+    }
+
     // ---- Handoff queue path: child thread context is still being generated ----
     // When the handoff document hasn't landed yet, queue the message locally and
     // fire it automatically once the status transitions to ready or fallback.
@@ -1913,7 +1928,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     }
 
     editorRef.current?.focus();
-  }, [input, attachments, isAgentRunning, isNewThread, newThreadMode, newThreadBranch, workspaceId, threadId, sendMessage, modelId, provider, reasoning, mode, access, copilotAgent, contextWindow, thinking, namingMode, customBranchName, selectedWorktree, injectFileContent, collectAndClearAttachments, clearDraftFromStore, isThreadScaffold, branchFromMessageId, branchExecMode, branchTargetBranch, branchNamingMode, branchCustomName, branchWorktreePath, activeThread, branchThread, branchAutoPreview, onBranchModeExit, replyContext, clearReply, editingFromQueue]);
+  }, [input, attachments, isAgentRunning, isNewThread, newThreadMode, newThreadBranch, workspaceId, threadId, sendMessage, modelId, provider, reasoning, mode, access, copilotAgent, contextWindow, thinking, namingMode, customBranchName, selectedWorktree, injectFileContent, collectAndClearAttachments, clearDraftFromStore, isThreadScaffold, branchFromMessageId, branchExecMode, branchTargetBranch, branchNamingMode, branchCustomName, branchWorktreePath, activeThread, branchThread, branchAutoPreview, onBranchModeExit, replyContext, clearReply, editingFromQueue, slashCommand]);
 
   // Fire a locally queued message when the handoff context finishes generating.
   // Calls sendMessage directly with current model/provider/access to avoid stale handleSend closures.
