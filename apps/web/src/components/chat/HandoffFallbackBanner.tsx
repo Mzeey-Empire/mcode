@@ -145,11 +145,11 @@ export function HandoffFallbackBanner({ threadId }: Props) {
       <div
         role="status"
         data-testid="handoff-fallback-banner"
-        className="flex items-start gap-3 border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-sm"
+        className="flex items-start gap-3 border-b border-border bg-muted/40 px-4 py-2 text-sm"
       >
-        <AlertCircle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" aria-hidden />
+        <AlertCircle className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" aria-hidden />
         <span className="flex-1 min-w-0">
-          <span className="font-medium">{copy.title}</span>
+          <span className="font-medium text-foreground/80">{copy.title}</span>
           <span className="block text-xs text-muted-foreground mt-0.5">{copy.sub}</span>
         </span>
         <div className="flex items-center gap-2 shrink-0">
