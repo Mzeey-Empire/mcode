@@ -1854,7 +1854,12 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     return results;
   }
 
-  /** Mark a thread as expecting plan output (enables ExitPlanMode capture). */
+  /**
+   * Toggle plan-answer mode for a thread. When enabled, the canUseTool
+   * callback captures ExitPlanMode calls instead of denying them.
+   * When disabled (or after capture), the model's ExitPlanMode calls
+   * are denied silently.
+   */
   setPlanAnswerMode(threadId: string, enabled: boolean): void {
     if (enabled) {
       this.planAnswerThreads.add(threadId);
