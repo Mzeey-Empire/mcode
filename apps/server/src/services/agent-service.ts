@@ -1841,6 +1841,50 @@ The fenced block can appear anywhere in your response. The sections should mirro
     };
   }
 
+  /**
+   * Handle the ExitPlanMode tool call from the Claude SDK. The provider
+   * intercepts this tool call and emits an `exit_plan_mode` event with
+   * the plan markdown. We persist it and broadcast to clients.
+   */
+  handleExitPlanMode(threadId: string, planMarkdown: string): void {
+    // Clean up any pending parsers since we got the plan directly
+    this.planOutputParsers.delete(threadId);
+    this.pendingPlanOutputs.delete(threadId);
+
+    const extracted = this.extractPlanFromMarkdown(planMarkdown);
+    if (!extracted) {
+      logger.warn("ExitPlanMode: could not extract plan structure from markdown", { threadId });
+      return;
+    }
+
+    // Find the most recent assistant message for this thread to associate the plan with
+    const lastMessageId = this.lastPersistedMessageIdByThread.get(threadId);
+    // Use the last message or a synthetic one
+    const messageId = lastMessageId ?? `exit-plan-${Date.now()}`;
+
+    try {
+      const plan = this.planRepo.create(
+        threadId,
+        messageId,
+        extracted.title,
+        extracted.contentMd,
+        extracted.sectionsJson,
+        null,
+      );
+      broadcast("plan.generated", { threadId, plan });
+      logger.info("ExitPlanMode: plan captured and broadcast", {
+        threadId,
+        title: extracted.title,
+        version: plan.version,
+      });
+    } catch (err) {
+      logger.error("ExitPlanMode: failed to persist plan", {
+        threadId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   private buildPlanPrompt(userMessage: string): string {
     return `[PLAN MODE] You are in planning mode. Your only job right now is to identify 2-5 key architectural decisions that need user input, based solely on the user's message below.
 

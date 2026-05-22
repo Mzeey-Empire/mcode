@@ -595,16 +595,13 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
         type: "preset" as const,
         preset: "claude_code" as const,
       },
-      // Mcode implements its own plan mode via prompt wrapping and the
-      // PlanQuestionWizard UI.  The SDK's built-in EnterPlanMode /
-      // ExitPlanMode tools conflict because Mcode has no UI to handle
-      // the SDK's "Exit plan mode?" confirmation, causing the model to
-      // get stuck.
-      // AskUserQuestion is also disallowed: in chat mode the model can
-      // ask questions in plain text, and in plan mode Mcode uses its own
-      // PlanQuestionWizard.  The SDK tool has no result handler here, so
-      // calling it stalls the session indefinitely.
-      disallowedTools: ["EnterPlanMode", "ExitPlanMode", "AskUserQuestion"],
+      // EnterPlanMode is disallowed because Mcode controls plan entry
+      // via its own interaction mode and PlanQuestionWizard UI.
+      // ExitPlanMode is ALLOWED: we intercept it in canUseTool to capture
+      // the plan markdown, then deny the call so the model stops.
+      // AskUserQuestion is disallowed: the SDK tool has no result handler
+      // here, so calling it stalls the session indefinitely.
+      disallowedTools: ["EnterPlanMode", "AskUserQuestion"],
       permissionMode: sdkPermissionMode,
       canUseTool: (async (
         toolName: string,
@@ -612,6 +609,24 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
         options: Parameters<CanUseTool>[2],
       ) => {
         try {
+          // Intercept ExitPlanMode: the SDK calls this tool with
+          // { plan: "full markdown" } when exiting plan mode. We capture
+          // the plan and deny the call so the model stops and waits.
+          if (toolName === "ExitPlanMode") {
+            const planMd = typeof input?.plan === "string" ? input.plan.trim() : "";
+            if (planMd.length > 0) {
+              this.emit("exit_plan_mode", {
+                threadId: tid,
+                planMarkdown: planMd,
+              });
+            }
+            return {
+              behavior: "deny" as const,
+              message:
+                "The client captured your proposed plan. Stop here and wait for the user to review it.",
+            };
+          }
+
           const requestId = crypto.randomUUID();
           logger.debug("canUseTool called", { toolName, requestId, threadId: tid });
           const decision = await new Promise<PermissionDecision>((resolve) => {

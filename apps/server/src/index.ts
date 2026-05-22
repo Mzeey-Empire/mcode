@@ -433,6 +433,13 @@ for (const provider of providerRegistry.resolveAll()) {
       portPush.send("thread.status", erroredStatus);
     }
   });
+
+  // ExitPlanMode: Claude SDK's native plan output. The provider intercepts
+  // the tool call, captures the plan markdown, and emits this event. We
+  // persist the plan and broadcast to clients.
+  provider.on("exit_plan_mode", (data: { threadId: string; planMarkdown: string }) => {
+    agentService.handleExitPlanMode(data.threadId, data.planMarkdown);
+  });
 }
 
 // Create and start HTTP + WS server
