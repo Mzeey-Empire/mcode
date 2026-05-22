@@ -744,6 +744,12 @@ The fenced block can appear anywhere in your response. The sections should mirro
     // scanned for a structured ```plan-output``` fenced block.
     this.planOutputParsers.set(threadId, new PlanOutputParser());
 
+    // Tell the provider to allow ExitPlanMode for this thread so the
+    // Claude SDK's native plan output tool call is captured.
+    const effectiveProvider = (thread.provider as ProviderId) ?? "claude";
+    const provider = this.providerRegistry.resolve(effectiveProvider);
+    provider.setPlanAnswerMode?.(threadId, true);
+
     // interactionMode intentionally omitted — no question wrapping for the answer turn
     await this.sendMessage(
       threadId,

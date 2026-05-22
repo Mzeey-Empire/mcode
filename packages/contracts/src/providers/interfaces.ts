@@ -96,6 +96,9 @@ export interface IAgentProvider {
   on(event: "permission_resolved", handler: (payload: { requestId: string; decision: PermissionDecision }) => void): void;
   /** Subscribe to ExitPlanMode capture events (Claude SDK plan output). */
   on(event: "exit_plan_mode", handler: (payload: { threadId: string; planMarkdown: string }) => void): void;
+
+  /** Mark a thread as expecting a plan output (enables ExitPlanMode capture). */
+  setPlanAnswerMode?(threadId: string, enabled: boolean): void;
 }
 
 /**

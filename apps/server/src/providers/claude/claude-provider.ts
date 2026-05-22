@@ -241,6 +241,8 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
    * torn down immediately so the agent never starts.
    */
   private pendingStops = new Set<string>();
+  /** Threads currently in plan-answer mode. ExitPlanMode is only captured for these. */
+  private planAnswerThreads = new Set<string>();
   /** Pending permission requests awaiting user decision, keyed by requestId. */
   private pendingPermissions = new Map<
     string,
@@ -595,12 +597,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
         type: "preset" as const,
         preset: "claude_code" as const,
       },
-      // EnterPlanMode is disallowed because Mcode controls plan entry
-      // via its own interaction mode and PlanQuestionWizard UI.
-      // ExitPlanMode is ALLOWED: we intercept it in canUseTool to capture
-      // the plan markdown, then deny the call so the model stops.
-      // AskUserQuestion is disallowed: the SDK tool has no result handler
-      // here, so calling it stalls the session indefinitely.
+      // EnterPlanMode is disallowed because Mcode controls plan entry.
+      // ExitPlanMode is NOT disallowed: we intercept it in canUseTool.
+      // In plan-answer mode we capture the plan; in normal mode we deny
+      // it silently so the model doesn't get stuck.
+      // AskUserQuestion is disallowed: no result handler here.
       disallowedTools: ["EnterPlanMode", "AskUserQuestion"],
       permissionMode: sdkPermissionMode,
       canUseTool: (async (
@@ -609,21 +610,29 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
         options: Parameters<CanUseTool>[2],
       ) => {
         try {
-          // Intercept ExitPlanMode: the SDK calls this tool with
-          // { plan: "full markdown" } when exiting plan mode. We capture
-          // the plan and deny the call so the model stops and waits.
+          // ExitPlanMode: only capture the plan when the thread is in
+          // plan-answer mode. In normal chat, deny silently so the model
+          // doesn't get stuck calling a tool with no handler.
           if (toolName === "ExitPlanMode") {
-            const planMd = typeof input?.plan === "string" ? input.plan.trim() : "";
-            if (planMd.length > 0) {
-              this.emit("exit_plan_mode", {
-                threadId: tid,
-                planMarkdown: planMd,
-              });
+            if (this.planAnswerThreads.has(tid)) {
+              const planMd = typeof input?.plan === "string" ? input.plan.trim() : "";
+              if (planMd.length > 0) {
+                this.planAnswerThreads.delete(tid);
+                this.emit("exit_plan_mode", {
+                  threadId: tid,
+                  planMarkdown: planMd,
+                });
+              }
+              return {
+                behavior: "deny" as const,
+                message:
+                  "The client captured your proposed plan. Stop here and wait for the user to review it.",
+              };
             }
+            // Not in plan mode - deny without capturing
             return {
               behavior: "deny" as const,
-              message:
-                "The client captured your proposed plan. Stop here and wait for the user to review it.",
+              message: "Plan mode is not active. Continue with the user's request normally.",
             };
           }
 
@@ -1843,6 +1852,15 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       }
     }
     return results;
+  }
+
+  /** Mark a thread as expecting plan output (enables ExitPlanMode capture). */
+  setPlanAnswerMode(threadId: string, enabled: boolean): void {
+    if (enabled) {
+      this.planAnswerThreads.add(threadId);
+    } else {
+      this.planAnswerThreads.delete(threadId);
+    }
   }
 
   /** Tear down all sessions and release resources. */
