@@ -11,7 +11,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { AlertCircle, RotateCcw, FileText } from "lucide-react";
+import { AlertCircle, RotateCcw, FileText, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -80,11 +80,16 @@ function bannerCopy(meta: HandoffMeta): BannerCopy {
   }
 }
 
+/** Strips YAML frontmatter delimited by leading `---` lines from markdown. */
+function stripFrontmatter(md: string): string {
+  return md.replace(/^---\n[\s\S]*?\n---\n/, "");
+}
+
 /** The content rendered inside the handoff doc viewer dialog. */
 function HandoffDocViewer({ threadId }: { threadId: string }) {
   const [state, setState] = useState<
     | { phase: "loading" }
-    | { phase: "ready"; markdown: string }
+    | { phase: "ready"; markdown: string; meta: NonNullable<Awaited<ReturnType<ReturnType<typeof getTransport>["readLatestHandoff"]>>>["meta"] }
     | { phase: "error"; message: string }
   >({ phase: "loading" });
 
@@ -98,7 +103,7 @@ function HandoffDocViewer({ threadId }: { threadId: string }) {
         if (!result) {
           setState({ phase: "error", message: "No handoff document found for this thread." });
         } else {
-          setState({ phase: "ready", markdown: result.markdown });
+          setState({ phase: "ready", markdown: result.markdown, meta: result.meta });
         }
       })
       .catch((err: unknown) => {
@@ -117,9 +122,22 @@ function HandoffDocViewer({ threadId }: { threadId: string }) {
   if (state.phase === "error") {
     return <p className="text-destructive text-sm py-4">{state.message}</p>;
   }
+
+  const { meta } = state;
   return (
-    <div className="overflow-y-auto max-h-[60vh]">
-      <MarkdownContent content={state.markdown} />
+    <div className="flex flex-col gap-3 overflow-hidden">
+      {/* Metadata strip: key fields at a glance without wading into the doc body */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground border-b pb-3">
+        <div><span className="font-mono">ladderStep:</span> {meta.ladderStep}</div>
+        <div><span className="font-mono">mode:</span> {meta.mode}</div>
+        <div><span className="font-mono">generatedBy:</span> {meta.generatedBy}</div>
+        {meta.provider && <div><span className="font-mono">provider:</span> {meta.provider}</div>}
+        <div><span className="font-mono">chars:</span> {meta.characterCount.toLocaleString()}</div>
+        <div><span className="font-mono">when:</span> {new Date(meta.generatedAt).toLocaleString()}</div>
+      </div>
+      <div className="overflow-y-auto max-h-[65vh]">
+        <MarkdownContent content={stripFrontmatter(state.markdown)} />
+      </div>
     </div>
   );
 }
@@ -134,6 +152,7 @@ export function HandoffFallbackBanner({ threadId }: Props) {
     (s) => s.settings.chat?.handoff?.notifyOnLocalFallback ?? true,
   );
   const meta = useThreadStore((s) => s.handoffMeta[threadId]);
+  const setHandoffStatus = useThreadStore((s) => s.setHandoffStatus);
   const [docOpen, setDocOpen] = useState(false);
 
   if (!enabled || meta?.status !== "fallback") return null;
@@ -172,11 +191,20 @@ export function HandoffFallbackBanner({ threadId }: Props) {
             <RotateCcw className="h-3 w-3" />
             Regenerate
           </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={() => setHandoffStatus(threadId, "ready")}
+            aria-label="Dismiss"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </Button>
         </div>
       </div>
 
       <Dialog open={docOpen} onOpenChange={setDocOpen}>
-        <DialogContent className="max-w-3xl w-full">
+        <DialogContent className="max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden">
           <DialogTitle>Handoff document</DialogTitle>
           {docOpen && <HandoffDocViewer threadId={threadId} />}
         </DialogContent>
