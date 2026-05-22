@@ -1012,6 +1012,7 @@ export class AgentService {
         forkAnchorRole,
         childThreadId: thread.id,
         childProviderId: provider,
+        userFollowUpMessage: content,
       });
 
       // Copy attachments from parent messages within the fork range into the child thread's dir.

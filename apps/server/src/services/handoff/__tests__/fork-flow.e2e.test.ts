@@ -79,6 +79,7 @@ const BASE_REQ = {
   forkAnchorRole: "user" as const,
   childThreadId: "t_child",
   childProviderId: "claude",
+  userFollowUpMessage: "Can you elaborate on the refactor plan?",
 };
 
 // ---------------------------------------------------------------------------

@@ -28,21 +28,23 @@ describe("buildHandoffPrompt", () => {
     forkMessageExcerpt: "We should use Postgres because...",
     childProviderId: "claude",
     childMaxInputCharacters: 180_000,
+    userFollowUpMessage: "what about feature X?",
   };
 
   it("full mode mentions all eight sections", () => {
     const p = buildHandoffPrompt({ ...baseInput, mode: "full" });
-    for (const s of ["Goal", "At fork", "Open items", "Decisions made", "Files in play", "Suggested next steps", "Suggested skills", "Attachments"]) {
+    for (const s of ["Parent message", "Key facts established", "Recent context", "Open items", "Files in play", "Suggested next steps", "Suggested skills", "Attachments"]) {
       expect(p).toContain(s);
     }
   });
 
-  it("minimal mode lists only Goal / At fork / Open items", () => {
+  it("minimal mode lists only Parent message / Key facts / Recent context / Open items", () => {
     const p = buildHandoffPrompt({ ...baseInput, mode: "minimal", childMaxInputCharacters: 4000 });
-    expect(p).toContain("Goal");
-    expect(p).toContain("At fork");
+    expect(p).toContain("Parent message");
+    expect(p).toContain("Key facts established");
+    expect(p).toContain("Recent context");
     expect(p).toContain("Open items");
-    expect(p).not.toContain("Decisions made");
+    expect(p).not.toContain("Files in play");
     expect(p).not.toContain("Suggested skills");
   });
 
@@ -52,11 +54,16 @@ describe("buildHandoffPrompt", () => {
     expect(p.toLowerCase()).not.toContain("token");
   });
 
-  it("frames user-msg fork as retry, assistant-msg fork as continue", () => {
+  it("frames user-msg fork as retry, assistant-msg fork as follow-up about assistant reply", () => {
     const userFork = buildHandoffPrompt({ ...baseInput, mode: "full", forkAnchorRole: "user" });
-    expect(userFork).toMatch(/retry|redo|same question/i);
+    expect(userFork).toMatch(/retry the question/i);
     const asstFork = buildHandoffPrompt({ ...baseInput, mode: "full", forkAnchorRole: "assistant" });
-    expect(asstFork).toMatch(/continue|new direction|follow.?up/i);
+    expect(asstFork).toMatch(/follow-up about what the assistant just said/i);
+  });
+
+  it("includes the user's follow-up message in the prompt", () => {
+    const p = buildHandoffPrompt({ ...baseInput, mode: "full" });
+    expect(p).toContain("what about feature X?");
   });
 
   it("instructs the model to return markdown as response text, not call tools", () => {

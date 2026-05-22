@@ -11,6 +11,9 @@
  * attempting the next ladder step (the next step would hit the same wall).
  */
 
+import { tmpdir } from "os";
+import { writeFile } from "fs/promises";
+import { join as pathJoin } from "path";
 import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
 import { ThreadRepo } from "../../repositories/thread-repo.js";
@@ -149,6 +152,7 @@ export class HandoffPipelineService {
       forkMessageExcerpt: forkMsg.content,
       childProviderId: req.childProviderId,
       childMaxInputCharacters: childCap,
+      userFollowUpMessage: req.userFollowUpMessage,
     });
 
     const capability: string = parentProvider?.sessionForkOnResume ?? "unsupported";
@@ -175,7 +179,7 @@ export class HandoffPipelineService {
           conversationHistory,
           cwd: parentCwd,
         });
-        text = this.applyBudgetGuard(text, childCap, "B");
+        text = await this.applyBudgetGuard(text, childCap, "B", req.childThreadId);
         return this.buildProviderArtifact(req, parent, text, "B", mode);
       } catch (err) {
         if ((abort.signal as AbortSignal).aborted) {
@@ -223,7 +227,7 @@ export class HandoffPipelineService {
             prompt,
             abortSignal: abort.signal,
           });
-          text = this.applyBudgetGuard(text, childCap, "A");
+          text = await this.applyBudgetGuard(text, childCap, "A", req.childThreadId);
           return this.buildProviderArtifact(req, parent, text, "A", mode);
         } catch (err) {
           if ((abort.signal as AbortSignal).aborted) {
@@ -298,18 +302,58 @@ export class HandoffPipelineService {
   }
 
   /**
-   * Validates provider output against the child's input budget. Truncates at
-   * the nearest H2 section boundary when the provider overshoots by more than
-   * 15%, appending a truncation notice so the child agent knows the doc was cut.
+   * Validates provider output against the child's input budget. When the
+   * provider overshoots by more than 15%, writes the full doc to OS temp dir
+   * and returns a truncated inline version with a pointer to the overflow file.
+   * Falls back to a hard truncation with a comment if the temp write fails.
    */
-  private applyBudgetGuard(text: string, childCap: number, step: LadderStep): string {
+  private async applyBudgetGuard(
+    text: string,
+    childCap: number,
+    step: LadderStep,
+    childThreadId: string,
+  ): Promise<string> {
     const budget = computeBudgetChars(childCap);
-    if (text.length > budget * 1.15) {
-      logger.warn("Provider exceeded handoff budget; truncating", { produced: text.length, budget, ladderStep: step });
-      const truncated = truncateAtSectionBoundary(text, budget);
-      return truncated + "\n\n<!-- handoff truncated at budget; see full doc on disk -->";
+
+    // Within budget — return as-is.
+    if (text.length <= budget * 1.15) return text;
+
+    logger.warn("Provider exceeded handoff budget; truncating + overflowing to temp", {
+      produced: text.length,
+      budget,
+      ladderStep: step,
+      threadId: childThreadId,
+    });
+
+    // Generate overflow filename in OS temp dir. Format mirrors the
+    // /handoff skill's convention (timestamped, slugged).
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const overflowPath = pathJoin(tmpdir(), `mcode-handoff-overflow-${childThreadId}-${ts}.md`);
+
+    try {
+      // Write the FULL doc to temp so the next agent can Read it on demand.
+      await writeFile(overflowPath, text, "utf8");
+    } catch (err) {
+      logger.warn("Failed to write handoff overflow to temp; continuing with hard truncation only", {
+        overflowPath,
+        err: err instanceof Error ? err.message : String(err),
+      });
+      return truncateAtSectionBoundary(text, budget) + "\n\n<!-- handoff truncated at budget; overflow write failed -->";
     }
-    return text;
+
+    // Truncate the inline version, leaving room for the pointer block.
+    const POINTER_BUDGET = 400;
+    const inlinedBudget = budget - POINTER_BUDGET;
+    const truncated = truncateAtSectionBoundary(text, inlinedBudget);
+
+    return [
+      truncated,
+      "",
+      "## Detailed context (overflow)",
+      "The parent thread's full handoff exceeded the inline budget. The complete doc is on the user's filesystem at:",
+      `  ${overflowPath}`,
+      "Use the Read tool to access it for additional context on the parent thread.",
+    ].join("\n");
   }
 
   /** Builds a provider-generated artifact with the given ladder step and mode. */

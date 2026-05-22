@@ -66,4 +66,6 @@ export interface HandoffRequest {
   forkAnchorRole: ForkAnchorRole;
   childThreadId: string;
   childProviderId: string;
+  /** The user's new message in the fork composer that the child agent will receive as its first turn. */
+  userFollowUpMessage: string;
 }

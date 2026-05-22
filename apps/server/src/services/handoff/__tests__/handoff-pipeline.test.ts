@@ -30,6 +30,7 @@ const BASE_REQ = {
   forkAnchorRole: "user" as const,
   childThreadId: "t_child",
   childProviderId: "claude",
+  userFollowUpMessage: "What should I do next?",
 };
 
 describe("HandoffPipelineService.orchestrate", () => {
