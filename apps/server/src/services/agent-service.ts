@@ -1076,7 +1076,13 @@ export class AgentService {
       });
 
       // Notify clients that the handoff fell back to the deterministic legacy replay.
-      broadcast("thread.handoff", { threadId: thread.id, status: "fallback" });
+      // The pipeline itself threw, so this is treated as a fatal provider error.
+      broadcast("thread.handoff", {
+        threadId: thread.id,
+        status: "fallback",
+        ladderStep: "D" as const,
+        providerErrorOnGenerate: "fatal" as const,
+      });
 
       // Legacy fallback: build handoff content + conversation replay inline.
       const lastAssistantMsg = [...forkedMessages].reverse().find((m) => m.role === "assistant");

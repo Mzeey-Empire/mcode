@@ -23,6 +23,16 @@ import { shallowEqualBy } from "@/lib/shallowEqualBy";
 import { forgetScrollTop } from "@/components/chat/scrollPositionMemory";
 import { releaseBrowserCaptureSpills } from "@/lib/browser-capture-spill";
 
+/**
+ * Ephemeral metadata for a handoff artifact received via the `thread.handoff` push channel.
+ * Mirrors the server-side `HandoffMeta` fields that the UI needs, plus the pipeline status.
+ */
+export interface HandoffMeta {
+  status: "generating" | "ready" | "fallback" | "error";
+  ladderStep?: "B" | "A" | "D";
+  providerErrorOnGenerate?: "quota" | "auth" | "context-overflow" | "transient" | "fatal" | null;
+}
+
 /** A permission request with its current resolution state. */
 interface StoredPermission extends PermissionRequest {
   settled: boolean;
@@ -206,11 +216,18 @@ interface ThreadState {
   clearComposerRecallFromStop: (threadId: string) => void;
 
   /**
-   * Ephemeral handoff pipeline status per child thread, keyed by thread ID.
+   * Ephemeral handoff metadata per child thread, keyed by thread ID.
    * Populated by the `thread.handoff` push channel. Not persisted; cleared on reload.
    */
+  handoffMeta: Record<string, HandoffMeta>;
+  /**
+   * Derived selector: returns the handoff status for a thread from `handoffMeta`.
+   * Kept for backward compatibility with existing call sites.
+   */
   handoffStatus: Record<string, "generating" | "ready" | "fallback" | "error">;
-  /** Update handoff pipeline status for a child thread. */
+  /** Update handoff metadata for a child thread. */
+  setHandoffMeta: (threadId: string, meta: HandoffMeta) => void;
+  /** @deprecated Use setHandoffMeta. Still functional for legacy callers. */
   setHandoffStatus: (threadId: string, status: "generating" | "ready" | "fallback" | "error") => void;
 
   /**
@@ -551,6 +568,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   interruptStopFileNoticeByThread: {},
   composerRecallFromStopByThread: {},
   lastHydratedByThread: {},
+  handoffMeta: {},
   handoffStatus: {},
   forkMode: {},
 
@@ -1525,8 +1543,23 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     }
   },
 
+  setHandoffMeta: (threadId, meta) => {
+    set((s) => ({
+      handoffMeta: { ...s.handoffMeta, [threadId]: meta },
+      // Keep handoffStatus in sync as a derived cache for existing call sites.
+      handoffStatus: { ...s.handoffStatus, [threadId]: meta.status },
+    }));
+  },
+
   setHandoffStatus: (threadId, status) => {
-    set((s) => ({ handoffStatus: { ...s.handoffStatus, [threadId]: status } }));
+    set((s) => ({
+      handoffStatus: { ...s.handoffStatus, [threadId]: status },
+      // Upsert into handoffMeta preserving any existing fields.
+      handoffMeta: {
+        ...s.handoffMeta,
+        [threadId]: { ...s.handoffMeta[threadId], status },
+      },
+    }));
   },
 
   setForkMode: (threadId, state) => {

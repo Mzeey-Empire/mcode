@@ -425,12 +425,18 @@ export function startPushListeners(): void {
   // thread.handoff: handoff pipeline status for a child thread (generating -> ready/fallback/error)
   unsubs.push(
     pushEmitter.on("thread.handoff", (data) => {
-      const { threadId, status } = data as {
+      const payload = data as {
         threadId: string;
         status: "generating" | "ready" | "fallback" | "error";
+        ladderStep?: "B" | "A" | "D";
+        providerErrorOnGenerate?: "quota" | "auth" | "context-overflow" | "transient" | "fatal" | null;
       };
-      if (!threadId || !status) return;
-      useThreadStore.getState().setHandoffStatus(threadId, status);
+      if (!payload.threadId || !payload.status) return;
+      useThreadStore.getState().setHandoffMeta(payload.threadId, {
+        status: payload.status,
+        ladderStep: payload.ladderStep,
+        providerErrorOnGenerate: payload.providerErrorOnGenerate,
+      });
     }),
   );
 
