@@ -427,6 +427,8 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
 
     // Resolve cwd from the parent session's stored options if available.
     // The SDK requires a cwd; fall back to the server working directory.
+    // TODO: hardcoded cwd and model fallback. Persist parent session's cwd in the
+    // session entry and read from it here for higher fidelity.
     const cwd = process.cwd();
 
     const backup = snapshotProcessEnv();
