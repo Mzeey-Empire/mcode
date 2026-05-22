@@ -1423,8 +1423,10 @@ The fenced block can appear anywhere in your response. The sections should mirro
           // Guarded on event.messageId so it only runs when the assistant message
           // was successfully persisted above.
           const pendingPlan = this.pendingPlanOutputs.get(event.threadId);
+          const hadOutputParser = this.planOutputParsers.has(event.threadId);
           if (pendingPlan && event.messageId) {
             this.pendingPlanOutputs.delete(event.threadId);
+            this.planOutputParsers.delete(event.threadId);
             try {
               const contentMd = pendingPlan.sections
                 .map((s) => `${"#".repeat(s.level + 1)} ${s.title}\n\n${s.content}`)
@@ -1446,6 +1448,33 @@ The fenced block can appear anywhere in your response. The sections should mirro
               broadcast("plan.generated", { threadId: event.threadId, plan });
             } catch (err) {
               logger.error("Failed to persist plan output", {
+                threadId: event.threadId,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          } else if (hadOutputParser && !pendingPlan && event.messageId && event.content) {
+            // Fallback: the model didn't emit a ```plan-output block but this
+            // was a plan-answer turn. Extract a plan from the raw markdown.
+            this.planOutputParsers.delete(event.threadId);
+            try {
+              const extracted = this.extractPlanFromMarkdown(event.content);
+              if (extracted) {
+                const plan = this.planRepo.create(
+                  event.threadId,
+                  event.messageId,
+                  extracted.title,
+                  extracted.contentMd,
+                  extracted.sectionsJson,
+                  null,
+                );
+                broadcast("plan.generated", { threadId: event.threadId, plan });
+                logger.info("plan-output: extracted plan from markdown fallback", {
+                  threadId: event.threadId,
+                  title: extracted.title,
+                });
+              }
+            } catch (err) {
+              logger.warn("plan-output: markdown fallback extraction failed", {
                 threadId: event.threadId,
                 error: err instanceof Error ? err.message : String(err),
               });
@@ -1760,6 +1789,58 @@ The fenced block can appear anywhere in your response. The sections should mirro
    * Instructs the model to emit a fenced plan-questions JSON block before
    * generating the actual plan.
    */
+
+  /**
+   * Fallback plan extraction from raw markdown when the model doesn't emit
+   * a ```plan-output fenced block. Parses headings to build sections.
+   */
+  private extractPlanFromMarkdown(
+    content: string,
+  ): { title: string; contentMd: string; sectionsJson: string } | null {
+    const lines = content.split("\n");
+
+    // Find the first H1 or H2 as the plan title
+    let title: string | null = null;
+    const sections: { id: string; title: string; level: number }[] = [];
+    let sectionCounter = 0;
+
+    for (const line of lines) {
+      const h1Match = line.match(/^#\s+(.+)/);
+      const h2Match = line.match(/^##\s+(.+)/);
+      const h3Match = line.match(/^###\s+(.+)/);
+
+      if (h1Match && !title) {
+        title = h1Match[1].trim();
+      } else if (h1Match) {
+        sectionCounter++;
+        sections.push({ id: `s${sectionCounter}`, title: h1Match[1].trim(), level: 1 });
+      }
+
+      if (h2Match) {
+        if (!title) {
+          title = h2Match[1].trim();
+        } else {
+          sectionCounter++;
+          sections.push({ id: `s${sectionCounter}`, title: h2Match[1].trim(), level: 2 });
+        }
+      }
+
+      if (h3Match) {
+        sectionCounter++;
+        sections.push({ id: `s${sectionCounter}`, title: h3Match[1].trim(), level: 3 });
+      }
+    }
+
+    // Need at least a title and one section to consider this a plan
+    if (!title || sections.length === 0) return null;
+
+    return {
+      title,
+      contentMd: content,
+      sectionsJson: JSON.stringify(sections),
+    };
+  }
+
   private buildPlanPrompt(userMessage: string): string {
     return `[PLAN MODE] You are in planning mode. Your only job right now is to identify 2-5 key architectural decisions that need user input, based solely on the user's message below.
 
