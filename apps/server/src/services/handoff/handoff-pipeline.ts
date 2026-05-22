@@ -12,7 +12,7 @@
  */
 
 import { inject, injectable } from "tsyringe";
-import { logger, getMcodeDir, resolveHandoffDir, newHandoffUlid } from "@mcode/shared";
+import { logger } from "@mcode/shared";
 import { ThreadRepo } from "../../repositories/thread-repo.js";
 import { MessageRepo } from "../../repositories/message-repo.js";
 import { WorkspaceRepo } from "../../repositories/workspace-repo.js";
@@ -142,9 +142,6 @@ export class HandoffPipelineService {
     const forkMsg = messages.find((m: any) => m.id === req.forkedFromMessageId);
     if (!forkMsg) throw new Error(`Fork message ${req.forkedFromMessageId} not in parent`);
 
-    const preUlid = newHandoffUlid();
-    const handoffPath = `${resolveHandoffDir(getMcodeDir(), req.childThreadId, preUlid)}/handoff.md`;
-
     const prompt = buildHandoffPrompt({
       mode,
       forkAnchorRole: req.forkAnchorRole,
@@ -152,7 +149,6 @@ export class HandoffPipelineService {
       forkMessageExcerpt: forkMsg.content,
       childProviderId: req.childProviderId,
       childMaxInputCharacters: childCap,
-      handoffDocAbsolutePath: handoffPath,
     });
 
     const capability: string = parentProvider?.sessionForkOnResume ?? "unsupported";

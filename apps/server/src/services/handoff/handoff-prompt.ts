@@ -50,7 +50,6 @@ export interface HandoffPromptInput {
   forkMessageExcerpt: string;
   childProviderId: string;
   childMaxInputCharacters: number;
-  handoffDocAbsolutePath: string;
 }
 
 const SECTIONS_FULL = [
@@ -72,11 +71,14 @@ const SECTIONS_MINIMAL = [
 
 /**
  * Builds the prompt sent to the parent's provider session to produce the
- * handoff doc. The prompt instructs the provider to WRITE the result to the
- * given absolute path using its file-write tool. The pipeline then reads it back.
+ * handoff doc. The provider RETURNS the markdown as its assistant text; mcode
+ * writes the file itself via HandoffStorage.write(). The previous design
+ * instructed the model to write the file directly, which failed in
+ * production because the side-channel call passes `tools: []` and the model
+ * was hitting max_turns trying to invoke a Write tool it never had.
  */
 export function buildHandoffPrompt(input: HandoffPromptInput): string {
-  const { mode, forkAnchorRole, parentThreadTitle, forkMessageExcerpt, childProviderId, handoffDocAbsolutePath } = input;
+  const { mode, forkAnchorRole, parentThreadTitle, forkMessageExcerpt, childProviderId } = input;
   const budget = computeBudgetChars(input.childMaxInputCharacters);
 
   const forkFraming =
@@ -105,9 +107,6 @@ export function buildHandoffPrompt(input: HandoffPromptInput): string {
     ...sections,
     "",
     "## Output instructions",
-    "Write the complete handoff document to the absolute path:",
-    `  ${handoffDocAbsolutePath}`,
-    "",
-    "Begin the file with YAML frontmatter the pipeline will substitute later. You write only the markdown body with the sections above. Confirm the write succeeded before responding.",
+    "Return the complete handoff document as your assistant response, in markdown, with the sections above as ## headings. Do NOT call any tools. Do NOT write to disk. Do NOT include YAML frontmatter (the pipeline injects that itself). Begin your response directly with the first section heading.",
   ].join("\n");
 }

@@ -477,7 +477,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
         options: {
           cwd,
           model,
-          maxTurns: 1,
+          // 2 turns so a thinking-block or compliance turn from the model
+          // does not exhaust the budget before the actual response. We pass
+          // tools: [] so the model has nothing to call, but it can still
+          // emit a no-op turn during reasoning.
+          maxTurns: 2,
           resume: parentSdkSessionId,
           tools: [],
           settingSources: [],
@@ -603,7 +607,8 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
         options: {
           cwd,
           model,
-          maxTurns: 1,
+          // 2 turns, same rationale as the main side-channel method above.
+          maxTurns: 2,
           // No `resume:`: this is the point of the sessionless fallback.
           tools: [],
           settingSources: [],

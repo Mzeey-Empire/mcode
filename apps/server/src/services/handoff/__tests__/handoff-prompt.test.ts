@@ -28,7 +28,6 @@ describe("buildHandoffPrompt", () => {
     forkMessageExcerpt: "We should use Postgres because...",
     childProviderId: "claude",
     childMaxInputCharacters: 180_000,
-    handoffDocAbsolutePath: "/data/threads/t_child/handoffs/01HX/handoff.md",
   };
 
   it("full mode mentions all eight sections", () => {
@@ -60,9 +59,11 @@ describe("buildHandoffPrompt", () => {
     expect(asstFork).toMatch(/continue|new direction|follow.?up/i);
   });
 
-  it("includes the absolute output path", () => {
+  it("instructs the model to return markdown as response text, not call tools", () => {
     const p = buildHandoffPrompt({ ...baseInput, mode: "full" });
-    expect(p).toContain("/data/threads/t_child/handoffs/01HX/handoff.md");
+    expect(p).toMatch(/return.*handoff.*document.*response/i);
+    expect(p).toMatch(/do not call any tools/i);
+    expect(p).toMatch(/do not write to disk/i);
   });
 });
 
