@@ -771,7 +771,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
 
   // Pre-fill the editor with the parent user message text when forking from a user message.
   // The text is rendered italic to visually distinguish the prefill from fresh input.
-  // Assistant-message forks leave the editor empty — the user writes the new prompt from scratch.
+  // Assistant-message forks leave the editor empty; the user writes the new prompt from scratch.
   useEffect(() => {
     if (!branchFromMessageId || !branchFromMessageContent || !editorRef.current) return;
     const text = branchFromMessageContent;
@@ -2622,7 +2622,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         </div>
       </div>
 
-      {/* Queued-send hint — shown while the child thread handoff is still generating */}
+      {/* Queued-send hint: shown while the child thread handoff is still generating */}
       {queuedSend && (
         <p className="px-1 pt-1 text-[10px] text-muted-foreground/60">
           queued · sends when handoff lands
