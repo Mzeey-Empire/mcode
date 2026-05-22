@@ -501,9 +501,6 @@ export function ChatView() {
         )}
       </div>
 
-      {/* Plan question wizard — shown while plan questions are pending */}
-      <PlanQuestionWizard threadId={activeThread.id} />
-
       {/* CLI error banner — shown when the provider binary is not found */}
       {showCliError && (
         <CliErrorBanner
@@ -513,17 +510,20 @@ export function ChatView() {
         />
       )}
 
-      {/* Composer — enters branch mode inline when a message bubble's branch action is used */}
-      <Composer
-        threadId={activeThread.id}
-        workspaceId={activeWorkspaceId ?? undefined}
-        branchFromMessageId={branchFromMessageId}
-        branchFromMessageContent={branchFromMessageContent}
-        onBranchModeExit={() => {
-          setBranchFromMessageId(undefined);
-          setBranchFromMessageContent(undefined);
-        }}
-      />
+      {/* Composer area — plan question wizard floats above the composer input */}
+      <div className="relative flex-shrink-0">
+        <PlanQuestionWizard threadId={activeThread.id} />
+        <Composer
+          threadId={activeThread.id}
+          workspaceId={activeWorkspaceId ?? undefined}
+          branchFromMessageId={branchFromMessageId}
+          branchFromMessageContent={branchFromMessageContent}
+          onBranchModeExit={() => {
+            setBranchFromMessageId(undefined);
+            setBranchFromMessageContent(undefined);
+          }}
+        />
+      </div>
     </div>
   );
 }

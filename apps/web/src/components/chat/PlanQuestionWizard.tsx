@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useThreadStore } from "@/stores/threadStore";
-import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import { OptionTile } from "./plan-questions/OptionTile";
 import { AcceptRecommended } from "./plan-questions/AcceptRecommended";
 import { useWizardKeyboard } from "./plan-questions/useWizardKeyboard";
@@ -119,47 +118,8 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
     [isSubmitting, isThreadRunning, threadId, setPlanAnswer, submitPlanAnswers],
   );
 
-  // Hold the last-rendered question batch in local state so the wizard's
-  // inner subtree stays mounted while AnimatedCollapsible animates its
-  // height down on cancel/submit. Without this, the children unmount in
-  // the same render that flips `open` to false and the close snaps shut
-  // instead of collapsing smoothly. Cleared ~280ms later (matches the
-  // collapse duration in AnimatedCollapsible).
-  const [closingSnapshot, setClosingSnapshot] = useState<{
-    questions: PlanQuestion[];
-    activeIndex: number;
-  } | null>(null);
-  useEffect(() => {
-    if (questions && questions.length > 0) {
-      // Fresh data is live — drop any held closing snapshot so the body
-      // tracks the current store.
-      if (closingSnapshot) setClosingSnapshot(null);
-      return;
-    }
-    // Store cleared (cancel/submit). Capture the previous render's data
-    // by snapshotting on the next state transition; the previous block
-    // already populated the snapshot via `questions` being live, so we
-    // just need to delay the actual clear.
-    if (!closingSnapshot) return;
-    const t = window.setTimeout(() => setClosingSnapshot(null), 280);
-    return () => window.clearTimeout(t);
-  }, [questions, closingSnapshot]);
-  // Keep the snapshot fresh while data is live so the next "go null"
-  // transition always has the last-good batch to fall back on.
-  useEffect(() => {
-    if (questions && questions.length > 0) {
-      setClosingSnapshot({ questions, activeIndex });
-    }
-  }, [questions, activeIndex]);
-
-  const displayQuestions =
-    questions && questions.length > 0
-      ? questions
-      : closingSnapshot?.questions ?? null;
-  const displayActiveIndex =
-    questions && questions.length > 0
-      ? activeIndex
-      : closingSnapshot?.activeIndex ?? 0;
+  const displayQuestions = questions && questions.length > 0 ? questions : null;
+  const displayActiveIndex = activeIndex;
 
   const q = displayQuestions?.[displayActiveIndex] ?? null;
   const answer = q ? answersMap.get(q.id) : undefined;
@@ -283,175 +243,199 @@ export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
 
   const submitDisabled = isSubmitting || isThreadRunning;
 
+  if (!isActive || !displayQuestions || !q) return null;
+
   return (
-    <AnimatedCollapsible open={isActive}>
-      {displayQuestions && q && (
-        <div
-          role="form"
-          aria-label="Plan questions"
-          data-direction={slideDirection}
-          className="relative px-5 pt-4 pb-3"
-        >
-          {/* Top hairline draws outward on mount. transform-origin: center
-              gives the symmetric "drawer" feel rather than the linear
-              swipe of a left-anchored origin. */}
-          <div
-            aria-hidden="true"
-            className="absolute left-0 right-0 top-0 h-px bg-border/50 animate-wizard-hairline"
-          />
-
-          {/* Mono header: step counter + category. Lives above the
-              question so the question text itself can be the visual
-              hero of the panel. */}
-          <div className="animate-wizard-header flex items-baseline gap-2 mb-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground/45">
-            <span aria-hidden="true" className="text-muted-foreground/30">
-              ›
-            </span>
-            <span className="tabular-nums">
-              step {formatStep(displayActiveIndex + 1, displayQuestions.length)}
-            </span>
-            <span className="text-muted-foreground/25" aria-hidden="true">
-              ·
-            </span>
-            <span>{q.category.toLowerCase()}</span>
-          </div>
-
-          {/* Question — the focal point. Animates in on advance/previous;
-              the data-direction on the wrapper drives which keyframe runs. */}
-          <p
-            key={displayActiveIndex}
-            className={cn(
-              "text-[15px] font-medium text-foreground leading-snug mb-3 max-w-[68ch]",
-              slideDirection === "forward"
-                ? "animate-wizard-question-forward"
-                : "animate-wizard-question-back",
-            )}
-          >
-            {q.question}
-          </p>
-
-          {/* Option list — borderless, flows like a list within the prose. */}
-          <div
-            role="radiogroup"
-            aria-label="Options"
-            className="-mx-3 mb-3"
-          >
-            {q.options.map((option, i) => (
-              <OptionTile
-                key={option.id}
-                option={option}
-                selected={selectedOptionId === option.id}
-                isRecommended={option.recommended}
-                onSelect={handleSelectOption}
-                index={i}
-                flashing={flashing}
-              />
-            ))}
-            <OptionTile
-              option={OTHER_OPTION}
-              selected={selectedOptionId === OTHER_OPTION_ID}
-              onSelect={handleSelectOption}
-              isOtherTile
-              otherText={answer?.freeText ?? ""}
-              onOtherTextChange={handleOtherText}
-              index={q.options.length}
-              flashing={false}
-            />
-          </div>
-
-          {/* Secondary action: accept-all shortcut. Sits as a quiet
-              text-link under the options, only visible when every
-              question has a single recommended option. */}
-          <div className="mb-3 px-0.5">
-            <AcceptRecommended
-              questions={displayQuestions}
-              onAccept={handleAcceptRecommended}
-              disabled={submitDisabled}
-              testId="plan-accept-recommended"
-            />
-          </div>
-
-          {/* Nav row — lowercase mono actions, no boxed buttons. The
-              spacing carries the affordance instead of a button chrome. */}
-          <div className="animate-wizard-nav flex items-center justify-between font-mono text-[11px] tracking-wide">
-            <div className="flex items-center gap-4 text-muted-foreground/55">
+    <div
+      role="form"
+      aria-label="Plan questions"
+      data-direction={slideDirection}
+      className={cn(
+        "absolute bottom-full left-3 right-3 mb-1.5 z-20",
+        "rounded-xl border border-border bg-card",
+        "px-5 pt-4 pb-3",
+        "animate-wizard-float-rise",
+      )}
+    >
+      {/* Answered questions collapsed above the current question */}
+      {displayActiveIndex > 0 && (
+        <div className="mb-3 -mx-2 flex flex-col gap-px">
+          {displayQuestions.slice(0, displayActiveIndex).map((prev, i) => {
+            const prevAnswer = answersMap.get(prev.id);
+            const answerLabel = prevAnswer?.freeText
+              ?? prev.options.find((o) => o.id === prevAnswer?.selectedOptionId)?.title
+              ?? "skipped";
+            return (
               <button
+                key={prev.id}
                 type="button"
-                onClick={handleCancel}
-                disabled={isSubmitting}
-                className="lowercase hover:text-muted-foreground transition-colors duration-150 ease-out disabled:opacity-40"
+                onClick={() => setActiveQuestionIndex(threadId, i)}
+                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent/50"
               >
-                cancel
-              </button>
-              {displayActiveIndex > 0 && (
-                <button
-                  type="button"
-                  onClick={handlePrevious}
-                  disabled={isSubmitting}
-                  className="lowercase hover:text-muted-foreground transition-colors duration-150 ease-out disabled:opacity-40"
-                >
-                  ← previous
-                </button>
-              )}
-            </div>
-
-            <div className="flex items-center gap-3">
-              {isThreadRunning && !isSubmitting && (
-                <span
-                  className="lowercase text-muted-foreground/55"
-                  aria-live="polite"
-                >
-                  model is still working…
+                <span className="font-mono text-[10px] tabular-nums tracking-[0.12em] text-muted-foreground/45">
+                  {formatStep(i + 1, displayQuestions.length)}
                 </span>
-              )}
-              <button
-                type="button"
-                onClick={handleAdvance}
-                disabled={isLast ? submitDisabled : isSubmitting}
-                className={cn(
-                  "lowercase font-medium text-primary/85 hover:text-primary",
-                  "transition-colors duration-150 ease-out",
-                  "disabled:opacity-40 disabled:hover:text-primary/85",
-                )}
-              >
-                {isSubmitting
-                  ? "submitting…"
-                  : isLast
-                    ? "submit ↵"
-                    : "next →"}
+                <span className="flex-1 truncate text-[12px] text-muted-foreground/60">
+                  {prev.question}
+                </span>
+                <span className="flex-shrink-0 max-w-[140px] truncate text-[11.5px] font-medium text-muted-foreground">
+                  {answerLabel}
+                </span>
+                <span className="text-[12px] text-[oklch(0.48_0.14_145)]" aria-hidden="true">
+                  ✓
+                </span>
               </button>
-            </div>
-          </div>
-
-          {/* Keyboard legend — discoverable via `?`, auto-hides. Sits
-              absolutely so it never affects layout when closed. */}
-          {legendOpen && (
-            <div
-              role="note"
-              aria-label="Keyboard shortcuts"
-              className={cn(
-                "absolute right-5 bottom-12 z-10",
-                "rounded-sm border border-border/40 bg-card/95 backdrop-blur-sm",
-                "px-3 py-2 font-mono text-[10px] leading-relaxed text-muted-foreground/80",
-                "shadow-sm animate-wizard-legend",
-              )}
-            >
-              <div>
-                <span className="text-foreground/80">1–5</span> select
-              </div>
-              <div>
-                <span className="text-foreground/80">← →</span> navigate
-              </div>
-              <div>
-                <span className="text-foreground/80">⏎</span> advance
-              </div>
-              <div>
-                <span className="text-foreground/80">esc</span> cancel
-              </div>
-            </div>
-          )}
+            );
+          })}
+          <div className="mx-2 h-px bg-border/50" />
         </div>
       )}
-    </AnimatedCollapsible>
+
+      {/* Mono header: step counter + category + step dots */}
+      <div className="animate-wizard-header flex items-center gap-2 mb-2">
+        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground/45">
+          <span className="tabular-nums">{formatStep(displayActiveIndex + 1, displayQuestions.length)}</span>
+        </span>
+        <span className="font-mono text-[8px] text-muted-foreground/25" aria-hidden="true">/</span>
+        <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-primary/65">
+          {q.category.toLowerCase()}
+        </span>
+        <div className="ml-auto flex items-center gap-1">
+          {displayQuestions.map((_, i) => (
+            <div
+              key={i}
+              className={cn(
+                "h-[5px] w-[5px] rounded-full transition-all duration-200",
+                i < displayActiveIndex && "bg-[oklch(0.48_0.14_145)] opacity-70",
+                i === displayActiveIndex && "bg-primary scale-[1.3] animate-[step-pulse_1.8s_ease-in-out_infinite]",
+                i > displayActiveIndex && "bg-muted-foreground opacity-20",
+              )}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Question text */}
+      <p
+        key={displayActiveIndex}
+        className={cn(
+          "text-[14.5px] font-medium text-foreground leading-snug mb-3 max-w-[62ch]",
+          slideDirection === "forward"
+            ? "animate-wizard-question-forward"
+            : "animate-wizard-question-back",
+        )}
+      >
+        {q.question}
+      </p>
+
+      {/* Option tiles */}
+      <div
+        role="radiogroup"
+        aria-label="Options"
+        className="-mx-3 mb-3"
+      >
+        {q.options.map((option, i) => (
+          <OptionTile
+            key={option.id}
+            option={option}
+            selected={selectedOptionId === option.id}
+            isRecommended={option.recommended}
+            onSelect={handleSelectOption}
+            index={i}
+            flashing={flashing}
+          />
+        ))}
+        <OptionTile
+          option={OTHER_OPTION}
+          selected={selectedOptionId === OTHER_OPTION_ID}
+          onSelect={handleSelectOption}
+          isOtherTile
+          otherText={answer?.freeText ?? ""}
+          onOtherTextChange={handleOtherText}
+          index={q.options.length}
+          flashing={false}
+        />
+      </div>
+
+      {/* Accept all recommended */}
+      <div className="mb-3 px-0.5">
+        <AcceptRecommended
+          questions={displayQuestions}
+          onAccept={handleAcceptRecommended}
+          disabled={submitDisabled}
+          testId="plan-accept-recommended"
+        />
+      </div>
+
+      {/* Nav row */}
+      <div className="animate-wizard-nav flex items-center justify-between font-mono text-[11px] tracking-wide">
+        <div className="flex items-center gap-4 text-muted-foreground/55">
+          <button
+            type="button"
+            onClick={handleCancel}
+            disabled={isSubmitting}
+            className="lowercase hover:text-muted-foreground transition-colors duration-150 ease-out disabled:opacity-40"
+          >
+            cancel
+          </button>
+          {displayActiveIndex > 0 && (
+            <button
+              type="button"
+              onClick={handlePrevious}
+              disabled={isSubmitting}
+              className="lowercase hover:text-muted-foreground transition-colors duration-150 ease-out disabled:opacity-40"
+            >
+              ← previous
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3">
+          {isThreadRunning && !isSubmitting && (
+            <span
+              className="lowercase text-muted-foreground/55"
+              aria-live="polite"
+            >
+              model is still working...
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={handleAdvance}
+            disabled={isLast ? submitDisabled : isSubmitting}
+            className={cn(
+              "lowercase font-medium text-primary/85 hover:text-primary",
+              "transition-colors duration-150 ease-out",
+              "disabled:opacity-40 disabled:hover:text-primary/85",
+            )}
+          >
+            {isSubmitting
+              ? "submitting..."
+              : isLast
+                ? "submit ↵"
+                : "next →"}
+          </button>
+        </div>
+      </div>
+
+      {/* Keyboard legend */}
+      {legendOpen && (
+        <div
+          role="note"
+          aria-label="Keyboard shortcuts"
+          className={cn(
+            "absolute right-5 bottom-12 z-10",
+            "rounded-sm border border-border/40 bg-card/95 backdrop-blur-sm",
+            "px-3 py-2 font-mono text-[10px] leading-relaxed text-muted-foreground/80",
+            "shadow-sm animate-wizard-legend",
+          )}
+        >
+          <div><span className="text-foreground/80">1-5</span> select</div>
+          <div><span className="text-foreground/80">← →</span> navigate</div>
+          <div><span className="text-foreground/80">⏎</span> advance</div>
+          <div><span className="text-foreground/80">esc</span> cancel</div>
+        </div>
+      )}
+    </div>
   );
 }
