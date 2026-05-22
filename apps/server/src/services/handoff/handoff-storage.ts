@@ -35,14 +35,27 @@ const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
 
 @injectable()
 export class HandoffStorage {
+  // Parameterless constructor: tsyringe can resolve `@injectable()` classes only
+  // when every constructor parameter has a registered token. Function-typed
+  // defaults broke DI ("TypeInfo not known for Function"). Production callers
+  // get the real resolvers; tests override via `forTesting()`.
+  private mcodeDirFn: () => string = getMcodeDir;
+  private statFn: (path: string) => Promise<{ size: number }> = stat;
+
   /**
-   * Function injection for testability; defaults to the real mcode data dir resolver.
-   * `statFn` may be overridden in tests to simulate oversized files without writing real bytes.
+   * Test-only constructor override. Allows injecting a fake `mcodeDirFn`
+   * (e.g. pointing at a tmpdir) and/or a fake `statFn` (e.g. to simulate
+   * oversized files without writing real bytes).
    */
-  constructor(
-    private readonly mcodeDirFn: () => string = getMcodeDir,
-    private readonly statFn: (path: string) => Promise<{ size: number }> = stat,
-  ) {}
+  static forTesting(overrides: {
+    mcodeDirFn?: () => string;
+    statFn?: (path: string) => Promise<{ size: number }>;
+  }): HandoffStorage {
+    const s = new HandoffStorage();
+    if (overrides.mcodeDirFn) s.mcodeDirFn = overrides.mcodeDirFn;
+    if (overrides.statFn) s.statFn = overrides.statFn;
+    return s;
+  }
 
   /** Persist an artifact under a fresh ULID. Returns the ULID assigned. */
   async write(threadId: string, artifact: HandoffArtifact): Promise<string> {

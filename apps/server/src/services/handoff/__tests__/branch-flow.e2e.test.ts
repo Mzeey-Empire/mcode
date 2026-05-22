@@ -83,7 +83,7 @@ describe("branch flow with handoff pipeline (e2e)", () => {
 
   beforeEach(() => {
     dataDir = mkdtempSync(join(tmpdir(), "branch-e2e-"));
-    storage = new HandoffStorage(() => dataDir);
+    storage = HandoffStorage.forTesting({ mcodeDirFn: () => dataDir });
     vi.clearAllMocks();
   });
 

@@ -11,7 +11,7 @@ let storage: HandoffStorage;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "handoff-store-"));
-  storage = new HandoffStorage(() => dir);
+  storage = HandoffStorage.forTesting({ mcodeDirFn: () => dir });
 });
 
 afterEach(() => {
@@ -91,7 +91,10 @@ describe("HandoffStorage", () => {
 
     // Inject a custom statFn that reports the file as oversized without writing real bytes.
     const oversizedStatFn = async (_path: string) => ({ size: 26 * 1024 * 1024 });
-    const storageWithOverride = new HandoffStorage(() => dir, oversizedStatFn as any);
+    const storageWithOverride = HandoffStorage.forTesting({
+      mcodeDirFn: () => dir,
+      statFn: oversizedStatFn,
+    });
 
     const manifest = await storageWithOverride.copyAttachments("t_child", [
       { id: "att_large", absolutePath: srcFile, originalName: "huge.bin", mime: "application/octet-stream", parentMessageId: "m_10" },
