@@ -31,21 +31,19 @@ describe("buildHandoffPrompt", () => {
     userFollowUpMessage: "what about feature X?",
   };
 
-  it("full mode mentions all eight sections", () => {
+  it("quotes the /handoff skill instructions verbatim", () => {
     const p = buildHandoffPrompt({ ...baseInput, mode: "full" });
-    for (const s of ["Parent message", "Key facts established", "Recent context", "Open items", "Files in play", "Suggested next steps", "Suggested skills", "Attachments"]) {
-      expect(p).toContain(s);
-    }
+    expect(p).toContain("Write a handoff document summarising the current conversation so a fresh agent can continue the work.");
+    expect(p).toContain(`Include a "suggested skills" section in the document, which suggests skills that the agent should invoke.`);
+    expect(p).toContain("Do not duplicate content already captured in other artifacts");
+    expect(p).toContain("Redact any sensitive information");
+    expect(p).toContain("If the user passed arguments, treat them as a description of what the next session will focus on");
   });
 
-  it("minimal mode lists only Parent message / Key facts / Recent context / Open items", () => {
-    const p = buildHandoffPrompt({ ...baseInput, mode: "minimal", childMaxInputCharacters: 4000 });
-    expect(p).toContain("Parent message");
-    expect(p).toContain("Key facts established");
-    expect(p).toContain("Recent context");
-    expect(p).toContain("Open items");
-    expect(p).not.toContain("Files in play");
-    expect(p).not.toContain("Suggested skills");
+  it("handles missing follow-up message by saying so explicitly", () => {
+    const p = buildHandoffPrompt({ ...baseInput, mode: "full", userFollowUpMessage: "" });
+    expect(p).toMatch(/has not provided a follow-up message yet/i);
+    expect(p).toMatch(/no skill arguments/i);
   });
 
   it("expresses budget in characters not tokens", () => {
@@ -56,7 +54,7 @@ describe("buildHandoffPrompt", () => {
 
   it("frames user-msg fork as retry, assistant-msg fork as follow-up about assistant reply", () => {
     const userFork = buildHandoffPrompt({ ...baseInput, mode: "full", forkAnchorRole: "user" });
-    expect(userFork).toMatch(/retry the question/i);
+    expect(userFork).toMatch(/retry this question/i);
     const asstFork = buildHandoffPrompt({ ...baseInput, mode: "full", forkAnchorRole: "assistant" });
     expect(asstFork).toMatch(/follow-up about what the assistant just said/i);
   });

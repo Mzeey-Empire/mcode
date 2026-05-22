@@ -58,79 +58,59 @@ export interface HandoffPromptInput {
   userFollowUpMessage: string;
 }
 
-const SECTIONS_FULL = [
-  "## Parent message — quote VERBATIM the message being forked from. Do not summarize. Do not paraphrase. Copy the exact text.",
-  "## Key facts established — bullets of CONCRETE facts the parent thread settled. Lists with names. Values with definitions. Decisions with rationale. The next agent should be able to answer follow-up questions from this section alone, WITHOUT re-searching the filesystem. If the parent thread enumerated things (e.g. 'the three pillars are X, Y, Z'), list X Y Z here verbatim — not 'the parent enumerated three pillars'.",
-  "## Recent context — the last 3-5 turns leading up to the fork point. Quote turns when short. Compress to bullets only when individual turns are very long.",
-  "## Open items — unfinished work, blockers, open questions",
-  "## Files in play — bullets of `path/to/file` with a one-line relevance note",
-  "## Suggested next steps — numbered list, ordered by what the next agent should do first to answer the user's follow-up",
-  "## Suggested skills — bullets of `skill-name` with when to invoke. Required by the /handoff skill spec",
-  "## Attachments — bullets of `attachments/<id>.<ext>` referencing what the original user shared. Only include if attachments exist",
-];
-
-const SECTIONS_MINIMAL = [
-  "## Parent message — quote VERBATIM the message being forked from",
-  "## Key facts established — concrete facts the parent established (lists, names, decisions). Verbatim wherever possible.",
-  "## Recent context — last 2-3 turns, quoted when short",
-  "## Open items — unfinished work and blockers",
-];
-
 /**
  * Builds the prompt sent to the parent's provider session to produce the
  * handoff doc. The provider RETURNS the markdown as its assistant text; mcode
- * writes the file itself via HandoffStorage.write(). The previous design
- * instructed the model to write the file directly, which failed in
- * production because the side-channel call passes `tools: []` and the model
- * was hitting max_turns trying to invoke a Write tool it never had.
+ * writes the file itself via HandoffStorage.write(). The side-channel call
+ * passes `tools: []`, so the model must not be asked to write files.
  */
 export function buildHandoffPrompt(input: HandoffPromptInput): string {
   const { mode, forkAnchorRole, parentThreadTitle, forkMessageExcerpt, childProviderId, userFollowUpMessage } = input;
   const budget = computeBudgetChars(input.childMaxInputCharacters);
 
-  // Strong anchor-role-specific framing. Tell the model precisely what
-  // kind of follow-up the next agent will receive.
-  const forkFraming =
+  const anchorFraming =
     forkAnchorRole === "user"
-      ? [
-          "The user is forking from THEIR OWN message — they want to retry the question, potentially with a different provider or different framing.",
-          "Preserve the user's question and any prior context the assistant established that bears on answering it.",
-          "The next agent will receive the user's question (possibly edited) as its first turn. Prepare it to answer afresh, well-grounded by the prior context.",
-        ].join(" ")
-      : [
-          "The user is forking from the ASSISTANT'S message — they are asking a follow-up about what the assistant just said.",
-          "Preserve the assistant's last reply in full as part of Key facts. Quote it directly.",
-          "The user's follow-up is likely a clarifying question, a deeper-dive request, or a 'tell me more about X' where X came from the assistant's reply.",
-          "Prepare the next agent to answer questions ABOUT the assistant's reply specifically.",
-        ].join(" ");
+      ? "The user is forking from their own message. They want to retry this question, potentially with different framing or to a different provider."
+      : "The user is forking from the assistant's reply. They are asking a follow-up about what the assistant just said.";
 
-  const sections = mode === "full" ? SECTIONS_FULL : SECTIONS_MINIMAL;
+  // The "argument" the /handoff skill is designed to receive: what the next
+  // session will focus on. When the user has typed a follow-up message in the
+  // fork composer, that's the argument. When they haven't, we tell the skill
+  // explicitly so it knows to hand off the full context.
+  const argumentBlock = userFollowUpMessage.trim().length > 0
+    ? `The user's follow-up message in the new branched thread (treat this as the skill's "arguments", the description of what the next session will focus on): "${userFollowUpMessage.slice(0, 800)}"`
+    : "The user has not provided a follow-up message yet (no skill arguments). Hand off the full context up to the fork point so the next agent is prepared for any direction the user takes.";
 
   return [
-    "You are producing a handoff document for a fresh agent that will continue from this conversation in a new branched thread.",
-    "Your output IS the handoff doc — return it as your assistant text response. Do NOT call any tools. Do NOT write to disk.",
+    "You are executing the /handoff skill on the conversation up to the fork point. Below are the skill's instructions verbatim, followed by mcode-specific context.",
+    "",
+    "## /handoff skill instructions",
+    "",
+    "Write a handoff document summarising the current conversation so a fresh agent can continue the work.",
+    "",
+    `Include a "suggested skills" section in the document, which suggests skills that the agent should invoke.`,
+    "",
+    "Do not duplicate content already captured in other artifacts (PRDs, plans, ADRs, issues, commits, diffs). Reference them by path or URL instead.",
+    "",
+    "Redact any sensitive information, such as API keys, passwords, or personally identifiable information.",
+    "",
+    "If the user passed arguments, treat them as a description of what the next session will focus on and tailor the doc accordingly.",
     "",
     "## Context for this handoff",
     `- Parent thread title: ${parentThreadTitle}`,
-    `- Fork anchor message (${forkAnchorRole}): ${forkMessageExcerpt.slice(0, 600)}`,
-    `- Fork framing: ${forkFraming}`,
+    `- Fork anchor (${forkAnchorRole} message): ${forkMessageExcerpt.slice(0, 600)}`,
+    `- ${anchorFraming}`,
     `- Next agent's provider: ${childProviderId}`,
-    `- User's follow-up message in the new branched thread (this is what the next agent will be asked next): ${userFollowUpMessage.slice(0, 800)}`,
     "",
-    "## Your task",
-    "Produce a markdown handoff doc with these sections IN THIS ORDER. Prioritize CONTENT over abstract summary. If the parent thread named things, name them. If it listed items, list them. The next agent should be able to answer the user's follow-up using ONLY this doc plus its own reasoning — without re-searching the filesystem.",
+    "## Arguments",
+    argumentBlock,
     "",
-    "## Constraints",
-    `- Target output: less than or equal to ${budget} characters.`,
-    `- Output mode: ${mode}.`,
-    "- If you cannot fit everything within budget, prioritize the first three sections (Parent message, Key facts, Recent context). Truncate ancillary sections (file lists, skill bullets, attachments) last.",
-    "- Do NOT duplicate content captured elsewhere (PRDs, plans, ADRs, issues, commits). Reference by path or URL.",
-    "- Redact any API keys, passwords, or personally identifiable information.",
-    "",
-    "## Required sections (in this order)",
-    ...sections,
-    "",
-    "## Output instructions",
-    "Return the complete handoff document as your assistant response, in markdown, with the sections above as ## headings. Do NOT call any tools. Do NOT write to disk. Do NOT include YAML frontmatter (the pipeline injects that). Begin your response directly with the first section heading.",
+    "## Output constraints (mcode-specific)",
+    `- Target output: less than or equal to ${budget} characters (string.length, by character count not word count).`,
+    `- Output mode: ${mode}${mode === "minimal" ? " (the next provider has a small per-turn input window, so be concise but preserve the concrete facts that matter for the follow-up)" : ""}.`,
+    "- Return the complete handoff document as your assistant text response.",
+    "- Do NOT call any tools. Do NOT write to disk. mcode handles persistence; if your output exceeds the budget, mcode automatically overflows the full doc to the user's OS temp dir.",
+    "- Do NOT include YAML frontmatter (the pipeline injects that).",
+    "- Begin your response directly with the document's first heading.",
   ].join("\n");
 }
