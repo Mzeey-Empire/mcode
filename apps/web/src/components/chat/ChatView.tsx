@@ -172,8 +172,11 @@ export function ChatView() {
   const updateThreadTitle = useWorkspaceStore((s) => s.updateThreadTitle);
   const setActiveThread = useWorkspaceStore((s) => s.setActiveThread);
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
-  const [branchFromMessageId, setBranchFromMessageId] = useState<string | undefined>(undefined);
-  const [branchFromMessageContent, setBranchFromMessageContent] = useState<string | undefined>(undefined);
+  const forkModeStore = useThreadStore((s) => s.forkMode);
+  const setForkMode = useThreadStore((s) => s.setForkMode);
+  const activeForkMode = activeThreadId ? (forkModeStore[activeThreadId] ?? null) : null;
+  const branchFromMessageId = activeForkMode?.messageId;
+  const branchFromMessageContent = activeForkMode?.content ?? undefined;
   const loadMessages = useThreadStore((s) => s.loadMessages);
   const clearMessages = useThreadStore((s) => s.clearMessages);
   const runningThreadIds = useThreadStore((s) => s.runningThreadIds);
@@ -203,11 +206,9 @@ export function ChatView() {
     setDismissedError(null);
   }, [activeThreadId]);
 
-  // Reset edit mode and branch state when the active thread changes
+  // Reset edit mode when the active thread changes (fork mode is preserved in the store)
   useEffect(() => {
     setEditingThreadId(null);
-    setBranchFromMessageId(undefined);
-    setBranchFromMessageContent(undefined);
   }, [activeThreadId]);
 
   const handleOpenSettings = useCallback(() => {
@@ -276,13 +277,18 @@ export function ChatView() {
     [sendMessage],
   );
 
-  /** Activates inline branch mode on the composer for the given message. */
+  /** Activates inline fork mode on the composer for the given message. */
   const handleBranch = useCallback((messageId: string) => {
-    // Read messages from store at call time to avoid re-creating this callback on every streaming token.
+    // Read messages and threadId from store at call time to avoid re-creating this callback on every streaming token.
     const msg = useThreadStore.getState().messages.find((m) => m.id === messageId);
-    setBranchFromMessageId(messageId);
-    setBranchFromMessageContent(msg?.content);
-  }, []);
+    const threadId = useWorkspaceStore.getState().activeThreadId;
+    if (!threadId || !msg) return;
+    setForkMode(threadId, {
+      messageId,
+      content: msg.role === "user" ? msg.content : null,
+      role: msg.role as "user" | "assistant",
+    });
+  }, [setForkMode]);
 
   /** Activates reply mode on the composer for the given message. */
   const handleReply = useCallback((messageId: string, content: string, role: "user" | "assistant") => {
@@ -520,8 +526,7 @@ export function ChatView() {
         branchFromMessageId={branchFromMessageId}
         branchFromMessageContent={branchFromMessageContent}
         onBranchModeExit={() => {
-          setBranchFromMessageId(undefined);
-          setBranchFromMessageContent(undefined);
+          if (activeThreadId) setForkMode(activeThreadId, null);
         }}
       />
     </div>

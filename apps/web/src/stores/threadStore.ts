@@ -213,6 +213,15 @@ interface ThreadState {
   /** Update handoff pipeline status for a child thread. */
   setHandoffStatus: (threadId: string, status: "generating" | "ready" | "fallback" | "error") => void;
 
+  /**
+   * Per-thread fork mode state. Preserved across thread navigation so the user
+   * can switch threads and return to find fork mode still active.
+   * Null means fork mode is not active for that thread.
+   */
+  forkMode: Record<string, { messageId: string; content: string | null; role: "user" | "assistant" } | null>;
+  /** Set or clear fork mode for a thread. */
+  setForkMode: (threadId: string, state: { messageId: string; content: string | null; role: "user" | "assistant" } | null) => void;
+
   // Per-thread settings
   /** Return current settings for a thread, preferring in-memory overrides over DB-persisted values. */
   getThreadSettings: (threadId: string) => ThreadSettings;
@@ -543,6 +552,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   composerRecallFromStopByThread: {},
   lastHydratedByThread: {},
   handoffStatus: {},
+  forkMode: {},
 
   cacheToolCallRecords: (key, records) => {
     get().toolCallRecordCache.set(key, records);
@@ -1517,6 +1527,10 @@ export const useThreadStore = create<ThreadState>((set, get) => {
 
   setHandoffStatus: (threadId, status) => {
     set((s) => ({ handoffStatus: { ...s.handoffStatus, [threadId]: status } }));
+  },
+
+  setForkMode: (threadId, state) => {
+    set((s) => ({ forkMode: { ...s.forkMode, [threadId]: state } }));
   },
 
   setPlanQuestions: (threadId, questions) => {
