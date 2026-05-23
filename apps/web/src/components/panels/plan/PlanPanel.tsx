@@ -3,7 +3,6 @@ import { usePlanStore } from "@/stores/planStore";
 import { PlanChrome } from "./PlanChrome";
 import { PlanDocument, type PlanComment } from "./PlanDocument";
 import { PlanSkeleton } from "./PlanSkeleton";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import type { PlanRecord } from "@mcode/contracts";
 import { getTransport } from "@/transport";
 
@@ -109,16 +108,19 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
   if (!activePlan) return null;
 
   return (
-    <div className="flex flex-1 flex-col min-h-0">
-      <ScrollArea className="flex-1 min-h-0">
-        <PlanChrome
-          plan={activePlan}
-          allVersions={plans}
-          threadId={threadId}
-          onRevise={handleRevise}
-          onImplement={handleImplement}
-          commentCount={nonEmptyComments.length}
-        />
+    <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
+      {/* Chrome pinned at top - never scrolls */}
+      <PlanChrome
+        plan={activePlan}
+        allVersions={plans}
+        threadId={threadId}
+        onRevise={handleRevise}
+        onImplement={handleImplement}
+        commentCount={nonEmptyComments.length}
+      />
+
+      {/* Scrollable plan body */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
         <h1 className="px-6 pt-4 text-[17px] font-bold leading-[1.35]">
           {activePlan.title}
         </h1>
@@ -129,11 +131,11 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
           onCommentChange={handleCommentChange}
           onCommentDiscard={handleCommentDiscard}
         />
-      </ScrollArea>
+      </div>
 
       {/* Send feedback bar - only visible when annotations exist */}
       {nonEmptyComments.length > 0 && (
-        <div className="flex items-center border-t border-border bg-background px-4 py-2.5">
+        <div className="flex items-center border-t border-border bg-background px-4 py-2 flex-shrink-0">
           <span className="font-mono text-[10px] tabular-nums tracking-[0.06em] text-muted-foreground/50">
             {nonEmptyComments.length} {nonEmptyComments.length === 1 ? "comment" : "comments"}
           </span>
