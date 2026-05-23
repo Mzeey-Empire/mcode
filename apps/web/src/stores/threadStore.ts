@@ -172,7 +172,7 @@ interface ThreadState {
   // Message actions
   loadMessages: (threadId: string) => Promise<void>;
   loadOlderMessages: (threadId: string) => Promise<void>;
-  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean, codexFastMode?: boolean, replyToMessageId?: string, quotedText?: string) => Promise<void>;
+  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean, codexFastMode?: boolean, replyToMessageId?: string, quotedText?: string, planAction?: import("@mcode/contracts").PlanAction) => Promise<void>;
   stopAgent: (threadId: string) => Promise<void>;
   /** Replace runningThreadIds with the authoritative server snapshot. Called on WS (re)connect. */
   hydrateRunningThreads: (ids: string[]) => void;
@@ -188,6 +188,8 @@ interface ThreadState {
   setActiveQuestionIndex: (threadId: string, index: number) => void;
   /** Submit all answers to the server and dismiss the wizard. */
   submitPlanAnswers: (threadId: string) => Promise<void>;
+  /** Send a plan-tab revise or implement action without plan-questions wrapping. */
+  sendPlanAction: (threadId: string, content: string, action: import("@mcode/contracts").PlanAction) => Promise<void>;
   /** Reset plan question state for a thread (called on clear/reload). */
   clearPlanQuestions: (threadId: string) => void;
   /**
@@ -1097,7 +1099,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
    * message to local state, marks the thread as running, then dispatches
    * to the transport layer. On failure, rolls back the running state.
    */
-  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, copilotAgent, contextWindow, thinking, codexFastMode, replyToMessageId, quotedText) => {
+  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, copilotAgent, contextWindow, thinking, codexFastMode, replyToMessageId, quotedText, planAction) => {
     evictMessageCache(threadId);
 
     // Add user message to local state immediately (optimistic)
@@ -1191,8 +1193,12 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         codexFastMode,
         replyToMessageId,
         quotedText,
+        planAction,
       );
     } catch (e) {
+      if (planAction === "revise") {
+        usePlanStore.getState().setGenerating(threadId, false);
+      }
       set((state) => {
         const next = new Set(state.runningThreadIds);
         next.delete(threadId);
@@ -1639,6 +1645,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       runningThreadIds: new Set([...s.runningThreadIds, threadId]),
       agentStartTimes: { ...s.agentStartTimes, [threadId]: Date.now() },
     }));
+    usePlanStore.getState().setGenerating(threadId, true);
 
     try {
       await getTransport().answerPlanQuestions(
@@ -1650,6 +1657,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         thinking ?? undefined,
       );
     } catch (e) {
+      usePlanStore.getState().setGenerating(threadId, false);
       // Revert to pending on error so user can retry
       set((s) => ({
         planQuestionsStatusByThread: { ...s.planQuestionsStatusByThread, [threadId]: "pending" },
@@ -1657,6 +1665,40 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         errorByThread: { ...s.errorByThread, [threadId]: String(e) },
       }));
     }
+  },
+
+  sendPlanAction: async (threadId, content, action) => {
+    const { permissionMode, reasoningLevel, contextWindow, thinking } =
+      get().getThreadSettings(threadId);
+    const thread = useWorkspaceStore.getState().threads.find((t) => t.id === threadId);
+    const model = thread?.model ?? undefined;
+    const provider = thread?.provider ?? undefined;
+
+    if (action === "revise") {
+      usePlanStore.getState().setGenerating(threadId, true);
+    } else if (action === "implement") {
+      // Implementation runs in chat mode; leave plan mode so the composer
+      // label and future sends match the execution phase.
+      void get().setThreadSettings(threadId, { interactionMode: INTERACTION_MODES.CHAT });
+    }
+
+    await get().sendMessage(
+      threadId,
+      content,
+      model,
+      permissionMode,
+      undefined,
+      undefined,
+      reasoningLevel,
+      provider,
+      undefined,
+      contextWindow ?? undefined,
+      thinking ?? undefined,
+      undefined,
+      undefined,
+      undefined,
+      action,
+    );
   },
 
   clearPlanQuestions: (threadId) => {

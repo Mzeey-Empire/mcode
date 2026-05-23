@@ -24,6 +24,7 @@ import type {
   GitCommit,
   PlanAnswer,
   InteractionMode,
+  PlanAction,
   ProviderModelInfo,
   ProviderUsageInfo,
   ProviderAvailability,
@@ -58,6 +59,7 @@ export type {
   PartialSettings,
   GitCommit,
   PlanAnswer,
+  PlanAction,
   ProviderModelInfo,
 } from "@mcode/contracts";
 
@@ -165,6 +167,7 @@ export interface McodeTransport {
     codexFastMode?: boolean,
     replyToMessageId?: string,
     quotedText?: string,
+    planAction?: PlanAction,
   ): Promise<void>;
   createAndSendMessage(
     workspaceId: string,

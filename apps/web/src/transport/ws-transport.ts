@@ -511,6 +511,7 @@ export function createWsTransport(
       codexFastMode?,
       replyToMessageId?,
       quotedText?,
+      planAction?,
     ) => {
       const state = useSettingsStore.getState();
       const guardrails = state.loaded
@@ -532,6 +533,7 @@ export function createWsTransport(
         ...(replyToMessageId && { replyToMessageId }),
         ...(quotedText && { quotedText }),
         ...(displayContent !== undefined && { displayContent }),
+        ...(planAction !== undefined && { planAction }),
         ...guardrails,
       });
     },

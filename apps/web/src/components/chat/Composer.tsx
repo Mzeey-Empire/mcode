@@ -761,6 +761,24 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     prevThreadIdRef.current = threadId;
   }, [threadId, isNewThread, saveDraft, getDraft]);
 
+  const persistedInteractionMode = useThreadStore((s) =>
+    threadId ? s.settingsByThread[threadId]?.interactionMode : undefined,
+  );
+  const threadRecordInteractionMode = useWorkspaceStore((s) => {
+    if (!threadId) return undefined;
+    const mode = s.threads.find((t) => t.id === threadId)?.interaction_mode;
+    return mode === "plan" || mode === "chat" ? mode : undefined;
+  });
+
+  // Sync mode when thread settings change in-place (e.g. Plan tab Implement).
+  useEffect(() => {
+    if (!threadId) return;
+    const resolved = persistedInteractionMode ?? threadRecordInteractionMode;
+    if (resolved === INTERACTION_MODES.PLAN || resolved === INTERACTION_MODES.CHAT) {
+      setMode(resolved);
+    }
+  }, [threadId, persistedInteractionMode, threadRecordInteractionMode]);
+
   // Selectors needed by the branch-mode effect below — must be declared before the effect
   // to avoid temporal dead zone errors in the dependency array.
   const loadBranches = useWorkspaceStore((s) => s.loadBranches);
