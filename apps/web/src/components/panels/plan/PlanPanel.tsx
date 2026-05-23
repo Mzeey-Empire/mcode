@@ -75,19 +75,20 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
     }
   }, [nonEmptyComments, activePlan, threadId]);
 
-  const handleRevise = useCallback(() => {
+  const handleRevise = useCallback(async () => {
     if (nonEmptyComments.length > 0) {
-      void handleSendFeedback();
-    } else {
-      // Pre-fill composer - for now just focus it
-      const composer = document.querySelector<HTMLTextAreaElement>("[data-composer-input]");
-      if (composer) {
-        composer.focus();
-        composer.value = `Revise the plan "${activePlan?.title}": `;
-        composer.dispatchEvent(new Event("input", { bubbles: true }));
+      await handleSendFeedback();
+    } else if (activePlan) {
+      try {
+        await useThreadStore.getState().sendMessage(
+          threadId,
+          `Revise the plan: "${activePlan.title}".\n\nPlease update the plan and emit a new version.`,
+        );
+      } catch (err) {
+        console.error("[plan] revise failed:", err);
       }
     }
-  }, [nonEmptyComments, handleSendFeedback, activePlan]);
+  }, [nonEmptyComments, handleSendFeedback, activePlan, threadId]);
 
   const handleImplement = useCallback(async () => {
     if (!activePlan) return;
