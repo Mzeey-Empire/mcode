@@ -676,6 +676,9 @@ export function createWsTransport(
         "thread.getTasks", { threadId },
       ),
 
+    getThreadPlans: (threadId: string) =>
+      rpc<import("@mcode/contracts").PlanRecord[]>("plan.list", { threadId }),
+
     // Snapshots
     getSnapshotDiff: (snapshotId, filePath?, maxLines?) =>
       rpc<string>("snapshot.getDiff", { snapshotId, filePath, maxLines }),

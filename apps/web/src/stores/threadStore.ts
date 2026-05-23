@@ -9,6 +9,7 @@ import { useWorkspaceStore } from "./workspaceStore";
 import { useQueueStore } from "./queueStore";
 import { LruCache } from "@/lib/lru-cache";
 import { useTaskStore, coerceTaskStatus } from "./taskStore";
+import { usePlanStore } from "./planStore";
 import type { TaskItem } from "./taskStore";
 import { useToastStore } from "./toastStore";
 import { findModelById } from "@/lib/model-registry";
@@ -690,6 +691,20 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           .catch((err) => {
             console.debug("[taskHydration] Failed to load tasks for thread %s:", threadId, err);
           });
+
+        // Hydrate plans from DB so the Scope panel shows persisted plans on refresh
+        getTransport()
+          .getThreadPlans(threadId)
+          .then((plans) => {
+            if (plans && plans.length > 0) {
+              for (const plan of plans) {
+                usePlanStore.getState().addPlan(threadId, plan);
+              }
+            }
+          })
+          .catch((err: unknown) => {
+            console.debug("[planHydration] Failed to load plans for thread %s:", threadId, err);
+          });
       }
 
       // If the cached snapshot has no file-change data but the thread has changes,
@@ -910,6 +925,20 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           })
           .catch((err) => {
             console.debug("[taskHydration] Failed to load tasks for thread %s:", threadId, err);
+          });
+
+        // Hydrate plans from DB so the Scope panel shows persisted plans on refresh
+        getTransport()
+          .getThreadPlans(threadId)
+          .then((plans) => {
+            if (plans && plans.length > 0) {
+              for (const plan of plans) {
+                usePlanStore.getState().addPlan(threadId, plan);
+              }
+            }
+          })
+          .catch((err: unknown) => {
+            console.debug("[planHydration] Failed to load plans for thread %s:", threadId, err);
           });
 
         // Restore the plan question wizard if an unanswered plan-questions block

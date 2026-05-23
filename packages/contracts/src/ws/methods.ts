@@ -14,7 +14,7 @@ import { PrInfoSchema, PrDetailSchema, PrDraftSchema, CreatePrResultSchema, Chec
 import { SkillInfoSchema, SkillDiagnosticsSchema } from "../skills.js";
 import { TurnSnapshotSchema } from "../models/turn-snapshot.js";
 import { PlanAnswerSchema } from "../models/plan-questions.js";
-import { PlanStatusSchema } from "../models/plan-output.js";
+import { PlanStatusSchema, PlanRecordSchema } from "../models/plan-output.js";
 import { DiffStatsSchema } from "../models/diff-stats.js";
 import {
   SettingsSchema,
@@ -376,6 +376,12 @@ export const WS_METHODS = lazySchema(() => ({
       status: PlanStatusSchema(),
     }),
     result: z.void(),
+  },
+  "plan.list": {
+    params: z.object({
+      threadId: z.string(),
+    }),
+    result: z.array(PlanRecordSchema()),
   },
   "permission.respond": {
     params: z.object({

@@ -332,6 +332,9 @@ export interface McodeTransport {
   /** Fetch persisted task list for a thread (from last TodoWrite). */
   getThreadTasks(threadId: string): Promise<Array<{ content: string; status: "pending" | "in_progress" | "completed" | "cancelled"; group?: string }> | null>;
 
+  /** Fetch persisted plans for a thread (hydration on page load). */
+  getThreadPlans(threadId: string): Promise<import("@mcode/contracts").PlanRecord[]>;
+
   // Snapshots
   /** Get a unified diff for a specific file from a turn snapshot. */
   getSnapshotDiff(snapshotId: string, filePath?: string, maxLines?: number): Promise<string>;

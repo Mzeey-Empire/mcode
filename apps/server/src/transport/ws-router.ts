@@ -478,6 +478,8 @@ async function dispatch(
     case "plan.updateStatus":
       deps.planRepo.updateStatus(params.planId, params.status);
       return;
+    case "plan.list":
+      return deps.planRepo.listByThread(params.threadId);
 
     // Messages
     case "message.list": {
