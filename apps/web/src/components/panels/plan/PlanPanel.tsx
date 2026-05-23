@@ -4,7 +4,7 @@ import { PlanChrome } from "./PlanChrome";
 import { PlanDocument, type PlanComment } from "./PlanDocument";
 import { PlanSkeleton } from "./PlanSkeleton";
 import type { PlanRecord } from "@mcode/contracts";
-import { getTransport } from "@/transport";
+import { useThreadStore } from "@/stores/threadStore";
 
 /** Stable empty array to avoid new-reference-per-render in Zustand selectors. */
 const EMPTY_PLANS: readonly PlanRecord[] = [];
@@ -68,7 +68,7 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
     ];
 
     try {
-      await getTransport().sendMessage(threadId, lines.join("\n"));
+      await useThreadStore.getState().sendMessage(threadId, lines.join("\n"));
       setComments([]);
     } catch (err) {
       console.error("[plan] send feedback failed:", err);
@@ -92,7 +92,7 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
   const handleImplement = useCallback(async () => {
     if (!activePlan) return;
     try {
-      await getTransport().sendMessage(
+      await useThreadStore.getState().sendMessage(
         threadId,
         `Implement the plan: "${activePlan.title}".\n\nThe full plan is in the conversation above. Follow it section by section.`,
       );
