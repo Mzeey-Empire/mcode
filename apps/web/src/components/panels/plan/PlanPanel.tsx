@@ -124,7 +124,7 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
         <h1 className="px-6 pt-4 text-[17px] font-bold leading-[1.35]">
           {activePlan.title}
         </h1>
-        <p className="px-6 mt-1.5 font-mono text-[10px] tracking-[0.06em] text-muted-foreground/35">
+        <p className="px-6 mt-1.5 font-mono text-[10px] tracking-[0.06em] text-muted-foreground/60">
           Click any heading to leave feedback
         </p>
         <div className="mx-6 mt-3 h-px bg-border" />

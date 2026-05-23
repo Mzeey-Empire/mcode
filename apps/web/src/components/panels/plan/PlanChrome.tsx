@@ -60,7 +60,7 @@ export function PlanChrome({
 
       {/* Change summary for v2+ */}
       {plan.changeSummary && (
-        <span className="truncate text-[11px] text-muted-foreground/50 max-w-[140px]">
+        <span className="truncate text-[11px] text-muted-foreground max-w-[160px]">
           {plan.changeSummary}
         </span>
       )}
