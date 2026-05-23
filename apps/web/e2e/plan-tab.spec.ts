@@ -5,9 +5,9 @@ import {
 } from "./helpers/e2e-helpers";
 
 /**
- * E2E tests for the plan view inside the Tasks tab.
+ * E2E tests for the plan view inside the Scope tab.
  *
- * The plan document renders above the task list in the Tasks tab.
+ * The plan document renders above the task list in the Scope tab.
  * When no plan exists, only the task list (or empty state) shows.
  */
 
@@ -101,7 +101,7 @@ async function seedPlanStore(page: Page, threadId: string): Promise<void> {
   );
 }
 
-test.describe("Plan view in Tasks tab", () => {
+test.describe("Plan view in Scope tab", () => {
   test.beforeEach(async ({ page }) => {
     await mockWebSocketServer(page);
     await interceptZustandStores(page);
@@ -110,16 +110,14 @@ test.describe("Plan view in Tasks tab", () => {
     await setupWorkspace(page);
   });
 
-  test("tasks tab button exists in the right panel header", async ({ page }) => {
+  test("scope tab button exists in the right panel header", async ({ page }) => {
     await showRightPanel(page, THREAD.id);
 
-    const tasksTab = page.locator("button").filter({ hasText: /Tasks/i }).filter({
-      has: page.locator("svg"),
-    });
-    await expect(tasksTab.first()).toBeVisible({ timeout: 3000 });
+    const scopeTab = page.getByRole("button", { name: "Scope" });
+    await expect(scopeTab).toBeVisible({ timeout: 3000 });
   });
 
-  test("tasks tab shows empty state when no plan and no tasks exist", async ({ page }) => {
+  test("scope tab shows empty state when no plan and no tasks exist", async ({ page }) => {
     await seedPlanStore(page, THREAD.id);
     await showRightPanel(page, THREAD.id);
 

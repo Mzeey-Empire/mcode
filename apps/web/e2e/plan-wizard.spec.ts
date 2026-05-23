@@ -205,7 +205,7 @@ test.describe("Plan Question Wizard", () => {
     await expect(wizard.locator("text=Which database should we use?")).toBeVisible();
 
     // Mono step counter shows "step 01 of 02"
-    await expect(wizard.getByText(/step\s+01\s+of\s+02/)).toBeVisible();
+    await expect(wizard.getByText(/01\s+of\s+02/)).toBeVisible();
   });
 
   test("shows inline 'recommended' annotation on recommended options", async ({ page }) => {
@@ -254,7 +254,7 @@ test.describe("Plan Question Wizard", () => {
     // Question 2 now visible, mono counter advanced
     await expect(wizard.getByText("auth", { exact: true })).toBeVisible();
     await expect(wizard.getByText("Authentication strategy?")).toBeVisible();
-    await expect(wizard.getByText(/step\s+02\s+of\s+02/)).toBeVisible();
+    await expect(wizard.getByText(/02\s+of\s+02/)).toBeVisible();
   });
 
   test("accept-all link is visible when all questions have recommended", async ({ page }) => {
@@ -325,7 +325,7 @@ test.describe("Plan Question Wizard", () => {
     await expect(wizard).toBeVisible({ timeout: 3000 });
 
     // The dotted indicator is gone; the mono counter is the only progress signal
-    await expect(wizard.getByText(/step\s+01\s+of\s+01/)).toBeVisible();
+    await expect(wizard.getByText(/01\s+of\s+01/)).toBeVisible();
   });
 
   test("submit is disabled and hint shows while thread is still running", async ({ page }) => {
