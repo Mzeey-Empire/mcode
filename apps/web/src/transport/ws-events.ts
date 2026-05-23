@@ -445,10 +445,6 @@ export function startPushListeners(): void {
       if (!threadId || !plan) return;
 
       usePlanStore.getState().addPlan(threadId, plan);
-
-      // Auto-open right panel to Tasks tab (plan renders inside it)
-      useDiffStore.getState().showRightPanel(threadId);
-      useDiffStore.getState().setRightPanelTab(threadId, "tasks");
     }),
   );
 
