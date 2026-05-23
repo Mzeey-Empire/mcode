@@ -4,7 +4,9 @@
  * When `resume:` fails because the SDK's process-local session cache is empty
  * (typically after a server restart), `runSideChannelQuery` should transparently
  * retry without `resume:` when `conversationHistory` is supplied, keeping path B
- * alive instead of forcing a fall to path D.
+ * alive instead of forcing a fall to path D. When the parent has no live SDK
+ * subprocess at all, it should skip resume entirely and use sessionless path
+ * B-prime on the first call.
  *
  * NOTE: ClaudeProvider injects EnvService via tsyringe DI and spawns real SDK
  * subprocesses; unit-testing it end-to-end requires mocking both the DI
@@ -63,9 +65,49 @@ function makeAsyncIterable(messages: Record<string, unknown>[]) {
   })();
 }
 
+/** Mark the parent thread as having a live SDK subprocess (resume path eligible). */
+function withLiveParentSession(provider: ClaudeProvider, threadId = "t_parent") {
+  (provider as any).sessions.set(`mcode-${threadId}`, {
+    query: { close: vi.fn() },
+    pushMessage: vi.fn(),
+    closeQueue: vi.fn(),
+    model: "claude-sonnet-4-6",
+    permissionMode: "default",
+    contextWindowMode: undefined,
+    lastUsedAt: Date.now(),
+    pendingToolUses: new Set<string>(),
+  });
+}
+
 describe("runSideChannelQuery sessionless fallback", () => {
   beforeEach(() => {
     mockQuery.mockReset();
+  });
+
+  it("uses sessionless path immediately when parent has no live SDK session", async () => {
+    const successResult = [
+      {
+        type: "assistant",
+        message: {
+          content: [{ type: "text", text: "# Handoff\n\n## Goal\nStale session fork" }],
+        },
+      },
+    ];
+    mockQuery.mockReturnValueOnce(makeAsyncIterable(successResult));
+
+    const provider = makeProvider();
+    const result = await (provider as any).runSideChannelQuery({
+      parentThreadId: "t_parent",
+      parentSdkSessionId: "sdk_abc123",
+      prompt: "Generate a handoff document.",
+      conversationHistory: "User: hello\nAssistant: hi there",
+      cwd: "/tmp/test-cwd",
+    });
+
+    expect(result).toBe("# Handoff\n\n## Goal\nStale session fork");
+    // Must not attempt resume when no live parent session exists.
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+    expect(mockQuery.mock.calls[0][0].options).not.toHaveProperty("resume");
   });
 
   it("returns the second call's text when the first call fails with session-missing error and history is provided", async () => {
@@ -92,6 +134,7 @@ describe("runSideChannelQuery sessionless fallback", () => {
       .mockReturnValueOnce(makeAsyncIterable(successResult));
 
     const provider = makeProvider();
+    withLiveParentSession(provider);
     const result = await (provider as any).runSideChannelQuery({
       parentThreadId: "t_parent",
       parentSdkSessionId: "sdk_abc123",

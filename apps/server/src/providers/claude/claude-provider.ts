@@ -223,6 +223,9 @@ export function detectFallbackModel(
   return usedModels[0] ?? null;
 }
 
+/** Max time to wait on a resume side-channel before falling back to sessionless. */
+const SIDE_CHANNEL_RESUME_PROBE_MS = 20_000;
+
 /** Claude Agent SDK adapter implementing IAgentProvider with prompt queue pattern. */
 @injectable()
 export class ClaudeProvider extends EventEmitter implements IAgentProvider {
@@ -452,9 +455,38 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     // Resolve model from the parent thread's active session if available,
     // falling back to the default claude-sonnet model.
     const parentSessionId = `mcode-${args.parentThreadId}`;
+    const hasLiveParentSession = this.sessions.has(parentSessionId);
+
+    // Path B-prime: after a server restart (or when the user forks without
+    // sending a new message on the parent), the SDK subprocess is not running
+    // even though sdk_session_id is still in SQLite. Resume on a cold subprocess
+    // often hangs until the pipeline abort fires, leaving no time for the
+    // sessionless retry. Skip resume and bake message history into the prompt.
+    if (!hasLiveParentSession && args.conversationHistory) {
+      logger.info("Claude side-channel: no live parent session, using sessionless path B-prime", {
+        threadId: args.parentThreadId,
+      });
+      return await this.runSideChannelQuerySessionless(
+        args.conversationHistory,
+        prompt,
+        abortSignal,
+        args.parentThreadId,
+        cwd,
+      );
+    }
+
     const model = this.sessions.get(parentSessionId)?.model ?? DEFAULT_CLAUDE_MODEL;
 
     const backup = snapshotProcessEnv();
+    // Cap resume attempts so a hung subprocess does not consume the full
+    // pipeline timeout before sessionless path B-prime can run.
+    const resumeProbe = args.conversationHistory ? new AbortController() : null;
+    let resumeProbeTimer: ReturnType<typeof setTimeout> | undefined;
+    if (resumeProbe && abortSignal && !abortSignal.aborted) {
+      resumeProbeTimer = setTimeout(() => resumeProbe.abort(), SIDE_CHANNEL_RESUME_PROBE_MS);
+      abortSignal.addEventListener("abort", () => resumeProbe.abort(), { once: true });
+    }
+
     try {
       const merged = this.envService.getEnv();
       for (const [k, v] of Object.entries(merged)) {
@@ -464,17 +496,19 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       const queue = createPromptQueue();
       const ephemeralId = `side-channel-${crypto.randomUUID()}`;
 
+      const sdkAbortSource = resumeProbe?.signal ?? abortSignal;
+
       // The SDK takes an AbortController, not a bare AbortSignal. We cannot
       // overwrite `signal` on a real AbortController (it is a getter-only
       // property and Object.assign throws on modern Node). Instead, create a
       // fresh controller and forward aborts from the caller's signal to it.
       let sdkAbortController: AbortController | undefined;
-      if (abortSignal) {
+      if (sdkAbortSource) {
         sdkAbortController = new AbortController();
-        if (abortSignal.aborted) {
+        if (sdkAbortSource.aborted) {
           sdkAbortController.abort();
         } else {
-          abortSignal.addEventListener("abort", () => sdkAbortController?.abort(), { once: true });
+          sdkAbortSource.addEventListener("abort", () => sdkAbortController?.abort(), { once: true });
         }
       }
 
@@ -535,6 +569,23 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       if (!assistantText) throw new Error("Claude side-channel query returned empty output");
       return assistantText.trim();
     } catch (err) {
+      const resumeProbeTimedOut =
+        resumeProbe?.signal.aborted === true && abortSignal && !abortSignal.aborted;
+
+      // Resume hung before the pipeline timeout. Retry sessionless while budget remains.
+      if (resumeProbeTimedOut && args.conversationHistory) {
+        logger.info("Claude side-channel: resume probe timed out, retrying without resume", {
+          threadId: args.parentThreadId,
+        });
+        return await this.runSideChannelQuerySessionless(
+          args.conversationHistory,
+          args.prompt,
+          abortSignal,
+          args.parentThreadId,
+          args.cwd,
+        );
+      }
+
       // Detect session-not-found / expired errors. Includes the actual SDK
       // phrase "No conversation found with session ID: ..." seen in user logs.
       const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
@@ -564,6 +615,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       }
       throw err;
     } finally {
+      if (resumeProbeTimer) clearTimeout(resumeProbeTimer);
       restoreProcessEnv(backup);
     }
   }
