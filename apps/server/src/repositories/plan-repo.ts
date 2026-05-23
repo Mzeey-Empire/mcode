@@ -14,6 +14,7 @@ import type { PlanRecord, PlanStatus } from "@mcode/contracts";
 export class PlanRepo {
   private readonly stmtInsert;
   private readonly stmtNextVersion;
+  private readonly stmtSupersedeDrafts;
   private readonly stmtListByThread;
   private readonly stmtGetById;
   private readonly stmtUpdateStatus;
@@ -27,6 +28,10 @@ export class PlanRepo {
 
     this.stmtNextVersion = db.prepare(
       "SELECT COALESCE(MAX(version), 0) + 1 AS next FROM plans WHERE thread_id = ?",
+    );
+
+    this.stmtSupersedeDrafts = db.prepare(
+      "UPDATE plans SET status = 'superseded' WHERE thread_id = ? AND status = 'draft'",
     );
 
     this.stmtListByThread = db.prepare(
@@ -56,6 +61,8 @@ export class PlanRepo {
     const id = randomUUID();
     const version = (this.stmtNextVersion.get(threadId) as { next: number })
       .next;
+
+    this.stmtSupersedeDrafts.run(threadId);
 
     this.stmtInsert.run(
       id,

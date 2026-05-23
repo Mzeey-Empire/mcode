@@ -23,6 +23,7 @@ import type {
   PermissionDecision,
   PermissionRequest,
   PlanOutput,
+  PlanAction,
 } from "@mcode/contracts";
 import { ThreadRepo } from "../repositories/thread-repo";
 import { WorkspaceRepo } from "../repositories/workspace-repo";
@@ -166,6 +167,11 @@ export class AgentService {
   private planOutputParsers = new Map<string, PlanOutputParser>();
   /** Holds parsed plan output until the Message event provides a messageId for persistence. */
   private pendingPlanOutputs = new Map<string, PlanOutput>();
+  /** ExitPlanMode / create_plan markdown waiting for the assistant Message row. */
+  private pendingExitPlanMarkdown = new Map<string, string>();
+  /** Prevents duplicate plan records when ExitPlanMode and plan-output both fire. */
+  private planCapturedThisTurn = new Set<string>();
+
   constructor(
     @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
     @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
@@ -238,6 +244,7 @@ export class AgentService {
      * still the base for plan/reply wrapping sent to the provider.
      */
     messageDisplayContent?: string,
+    planAction?: PlanAction,
   ): Promise<void> {
     const thread = this.threadRepo.findById(threadId);
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
@@ -455,10 +462,25 @@ export class AgentService {
     // whether a provider content override exists. When branching (override present),
     // the override already carries the plan-wrapped stitched content; only wrap the
     // plain content when there is no override.
+    // Plan-tab implement/revise actions force chat mode so the prompt is not
+    // re-wrapped with the question-generation template.
     let wirePayload = content;
 
-    if (interactionMode === "plan") {
+    if (planAction === "revise") {
+      this.armPlanGenerationTurn(threadId);
+      wirePayload = `${wirePayload}\n\n${this.buildPlanOutputInstructions()}`;
+    } else if (planAction === "implement") {
+      this.setPlanQuestionModeOnProvider(threadId, false);
+    }
+
+    const effectiveInteractionMode =
+      planAction === "revise" || planAction === "implement"
+        ? undefined
+        : interactionMode;
+
+    if (effectiveInteractionMode === "plan") {
       this.planParsers.set(threadId, new PlanQuestionParser());
+      this.setPlanQuestionModeOnProvider(threadId, true);
       if (providerWireOverride === undefined) {
         wirePayload = this.buildPlanPrompt(wirePayload);
       }
@@ -710,29 +732,7 @@ export class AgentService {
         lines.push(`- **${label}**: (skipped)`);
       }
     }
-    lines.push(`
-Now generate the full implementation plan based on these decisions.
-
-Write the plan as normal markdown in your response so the user can read it in the chat.
-
-Additionally, emit the plan in a structured format inside a fenced block so it can be displayed in the Plan tab. The block must contain valid JSON matching this schema:
-
-\`\`\`plan-output
-{
-  "title": "Short plan title",
-  "changeSummary": "One-line summary of what changed (omit for first version)",
-  "sections": [
-    {
-      "id": "unique-section-id",
-      "title": "Section Heading",
-      "level": 1,
-      "content": "Full markdown content of this section."
-    }
-  ]
-}
-\`\`\`
-
-The fenced block can appear anywhere in your response. The sections should mirror the headings in your markdown plan. Level 1 = top-level heading, level 2 = subheading, level 3 = sub-subheading.`);
+    lines.push(this.buildPlanOutputInstructions());
 
     // Locate the assistant message carrying the plan-questions fence so the
     // marker is keyed on it (not just on the thread). Survives restarts and
@@ -740,15 +740,7 @@ The fenced block can appear anywhere in your response. The sections should mirro
     const markPlanAnswerForMessageId =
       this.findLatestPlanQuestionsMessageId(threadId) ?? undefined;
 
-    // Arm the plan-output parser so text deltas from the answer turn are
-    // scanned for a structured ```plan-output``` fenced block.
-    this.planOutputParsers.set(threadId, new PlanOutputParser());
-
-    // Tell the provider to allow ExitPlanMode for this thread so the
-    // Claude SDK's native plan output tool call is captured.
-    const effectiveProvider = (thread.provider as ProviderId) ?? "claude";
-    const provider = this.providerRegistry.resolve(effectiveProvider);
-    provider.setPlanAnswerMode?.(threadId, true);
+    this.armPlanGenerationTurn(threadId);
 
     // interactionMode intentionally omitted — no question wrapping for the answer turn
     await this.sendMessage(
@@ -1429,34 +1421,41 @@ The fenced block can appear anywhere in your response. The sections should mirro
           // Guarded on event.messageId so it only runs when the assistant message
           // was successfully persisted above.
           const pendingPlan = this.pendingPlanOutputs.get(event.threadId);
+          const pendingExitPlan = this.pendingExitPlanMarkdown.get(event.threadId);
           const hadOutputParser = this.planOutputParsers.has(event.threadId);
           if (pendingPlan && event.messageId) {
             this.pendingPlanOutputs.delete(event.threadId);
             this.planOutputParsers.delete(event.threadId);
-            try {
-              const contentMd = pendingPlan.sections
-                .map((s) => `${"#".repeat(s.level + 1)} ${s.title}\n\n${s.content}`)
-                .join("\n\n");
+            this.pendingExitPlanMarkdown.delete(event.threadId);
+            const contentMd = pendingPlan.sections
+              .map((s) => `${"#".repeat(s.level + 1)} ${s.title}\n\n${s.content}`)
+              .join("\n\n");
 
-              const sectionsJson = JSON.stringify(
-                pendingPlan.sections.map((s) => ({ id: s.id, title: s.title, level: s.level })),
-              );
+            const sectionsJson = JSON.stringify(
+              pendingPlan.sections.map((s) => ({ id: s.id, title: s.title, level: s.level })),
+            );
 
-              const plan = this.planRepo.create(
+            this.persistPlanRecord(
+              event.threadId,
+              event.messageId,
+              pendingPlan.title,
+              contentMd,
+              sectionsJson,
+              pendingPlan.changeSummary ?? null,
+            );
+          } else if (pendingExitPlan && event.messageId) {
+            this.pendingExitPlanMarkdown.delete(event.threadId);
+            this.planOutputParsers.delete(event.threadId);
+            const extracted = this.extractPlanFromMarkdown(pendingExitPlan);
+            if (extracted) {
+              this.persistPlanRecord(
                 event.threadId,
                 event.messageId,
-                pendingPlan.title,
-                contentMd,
-                sectionsJson,
-                pendingPlan.changeSummary ?? null,
+                extracted.title,
+                extracted.contentMd,
+                extracted.sectionsJson,
+                null,
               );
-
-              broadcast("plan.generated", { threadId: event.threadId, plan });
-            } catch (err) {
-              logger.error("Failed to persist plan output", {
-                threadId: event.threadId,
-                error: err instanceof Error ? err.message : String(err),
-              });
             }
           } else if (hadOutputParser && !pendingPlan && event.messageId && event.content) {
             // Fallback: the model didn't emit a ```plan-output block but this
@@ -1465,7 +1464,7 @@ The fenced block can appear anywhere in your response. The sections should mirro
             try {
               const extracted = this.extractPlanFromMarkdown(event.content);
               if (extracted) {
-                const plan = this.planRepo.create(
+                this.persistPlanRecord(
                   event.threadId,
                   event.messageId,
                   extracted.title,
@@ -1473,7 +1472,6 @@ The fenced block can appear anywhere in your response. The sections should mirro
                   extracted.sectionsJson,
                   null,
                 );
-                broadcast("plan.generated", { threadId: event.threadId, plan });
                 logger.info("plan-output: extracted plan from markdown fallback", {
                   threadId: event.threadId,
                   title: extracted.title,
@@ -1708,6 +1706,9 @@ The fenced block can appear anywhere in your response. The sections should mirro
           this.planParsers.delete(event.threadId);
           this.planOutputParsers.delete(event.threadId);
           this.pendingPlanOutputs.delete(event.threadId);
+          this.pendingExitPlanMarkdown.delete(event.threadId);
+          this.planCapturedThisTurn.delete(event.threadId);
+          this.setPlanQuestionModeOnProvider(event.threadId, false);
         }
 
         if (event.type === AgentEventType.Compacting && event.active) {
@@ -1777,6 +1778,9 @@ The fenced block can appear anywhere in your response. The sections should mirro
           this.planParsers.delete(event.threadId);
           this.planOutputParsers.delete(event.threadId);
           this.pendingPlanOutputs.delete(event.threadId);
+          this.pendingExitPlanMarkdown.delete(event.threadId);
+          this.planCapturedThisTurn.delete(event.threadId);
+          this.setPlanQuestionModeOnProvider(event.threadId, false);
         }
       });
     }
@@ -1789,12 +1793,6 @@ The fenced block can appear anywhere in your response. The sections should mirro
   private normalizeProviderError(message: string, provider: string): string {
     return normalizeAgentProviderError(provider, message);
   }
-
-  /**
-   * Wrap a user message with the plan-mode question-generation prompt.
-   * Instructs the model to emit a fenced plan-questions JSON block before
-   * generating the actual plan.
-   */
 
   /**
    * Fallback plan extraction from raw markdown when the model doesn't emit
@@ -1848,54 +1846,110 @@ The fenced block can appear anywhere in your response. The sections should mirro
   }
 
   /**
-   * Handle the ExitPlanMode tool call from the Claude SDK. The provider
-   * intercepts this tool call and emits an `exit_plan_mode` event with
-   * the plan markdown. We persist it and broadcast to clients.
+   * Handle the ExitPlanMode tool call from the Claude SDK (or Cursor
+   * `create_plan`). Defer persistence until the assistant Message event
+   * supplies a stable messageId.
    */
   handleExitPlanMode(threadId: string, planMarkdown: string): void {
-    // Clean up any pending parsers since we got the plan directly
-    this.planOutputParsers.delete(threadId);
-    this.pendingPlanOutputs.delete(threadId);
-
-    const extracted = this.extractPlanFromMarkdown(planMarkdown);
-    if (!extracted) {
-      logger.warn("ExitPlanMode: could not extract plan structure from markdown", { threadId });
+    if (this.planCapturedThisTurn.has(threadId)) {
+      logger.debug("ExitPlanMode: plan already captured this turn", { threadId });
       return;
     }
 
-    // Find the most recent assistant message for this thread to associate the plan with
-    const lastMessageId = this.lastPersistedMessageIdByThread.get(threadId);
-    // Use the last message or a synthetic one
-    const messageId = lastMessageId ?? `exit-plan-${Date.now()}`;
+    this.planOutputParsers.delete(threadId);
+    this.pendingPlanOutputs.delete(threadId);
+    this.pendingExitPlanMarkdown.set(threadId, planMarkdown);
+  }
+
+  /** Arm plan-output parsing and Claude ExitPlanMode capture for one generation turn. */
+  private armPlanGenerationTurn(threadId: string): void {
+    this.planOutputParsers.set(threadId, new PlanOutputParser());
+    this.planCapturedThisTurn.delete(threadId);
+    this.setPlanQuestionModeOnProvider(threadId, false);
+
+    const thread = this.threadRepo.findById(threadId);
+    const effectiveProvider = (thread?.provider as ProviderId) ?? "claude";
+    const provider = this.providerRegistry.resolve(effectiveProvider);
+    provider.setPlanAnswerMode?.(threadId, true);
+  }
+
+  /** Toggle native question UI suppression on the active provider. */
+  private setPlanQuestionModeOnProvider(threadId: string, enabled: boolean): void {
+    const thread = this.threadRepo.findById(threadId);
+    if (!thread) return;
+    const provider = this.providerRegistry.resolve(
+      (thread.provider as ProviderId) ?? "claude",
+    );
+    provider.setPlanQuestionMode?.(threadId, enabled);
+  }
+
+  /** Persist one plan version and broadcast, skipping duplicate captures per turn. */
+  private persistPlanRecord(
+    threadId: string,
+    messageId: string,
+    title: string,
+    contentMd: string,
+    sectionsJson: string,
+    changeSummary: string | null,
+  ): void {
+    if (this.planCapturedThisTurn.has(threadId)) {
+      logger.debug("plan persist skipped: already captured this turn", { threadId });
+      return;
+    }
 
     try {
       const plan = this.planRepo.create(
         threadId,
         messageId,
-        extracted.title,
-        extracted.contentMd,
-        extracted.sectionsJson,
-        null,
+        title,
+        contentMd,
+        sectionsJson,
+        changeSummary,
       );
+      this.planCapturedThisTurn.add(threadId);
       broadcast("plan.generated", { threadId, plan });
-      logger.info("ExitPlanMode: plan captured and broadcast", {
-        threadId,
-        title: extracted.title,
-        version: plan.version,
-      });
     } catch (err) {
-      logger.error("ExitPlanMode: failed to persist plan", {
+      logger.error("Failed to persist plan output", {
         threadId,
         error: err instanceof Error ? err.message : String(err),
       });
     }
   }
 
+  /** Instructions appended when the model should emit a structured plan-output block. */
+  private buildPlanOutputInstructions(): string {
+    return `
+Now generate the full implementation plan based on these decisions.
+
+Write the plan as normal markdown in your response so the user can read it in the chat.
+
+Additionally, emit the plan in a structured format inside a fenced block so it can be displayed in the Plan tab. The block must contain valid JSON matching this schema:
+
+\`\`\`plan-output
+{
+  "title": "Short plan title",
+  "changeSummary": "One-line summary of what changed (omit for first version)",
+  "sections": [
+    {
+      "id": "unique-section-id",
+      "title": "Section Heading",
+      "level": 1,
+      "content": "Full markdown content of this section."
+    }
+  ]
+}
+\`\`\`
+
+The fenced block can appear anywhere in your response. The sections should mirror the headings in your markdown plan. Level 1 = top-level heading, level 2 = subheading, level 3 = sub-subheading.`;
+  }
+
+  /** Wrap a user message with the plan-mode question-generation prompt. */
   private buildPlanPrompt(userMessage: string): string {
     return `[PLAN MODE] You are in planning mode. Your only job right now is to identify 2-5 key architectural decisions that need user input, based solely on the user's message below.
 
 Constraints:
 - Do NOT call any tools. Do NOT read files, run commands, or explore the codebase.
+- Do NOT use native ask-question or create-plan tools; Mcode renders questions from a fenced block.
 - Do NOT write any prose, preamble, or commentary.
 - Your entire response MUST be the single fenced plan-questions block shown below, then stop.
 - After the user answers, you will receive their selections in a follow-up turn and may then plan freely.

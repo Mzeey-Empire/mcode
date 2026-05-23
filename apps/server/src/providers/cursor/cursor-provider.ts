@@ -81,6 +81,7 @@ import {
   summarizeEmittedAgentEventsForTrace,
 } from "./cursor-acp-session-trace.js";
 import { cursorTaskExtToAgentEvents } from "./cursor-acp-task.js";
+import { extractCursorCreatePlanMarkdown } from "./cursor-create-plan.js";
 
 const CURSOR_STDERR_TAIL_MAX = 48;
 const EVICTION_INTERVAL_MS = 60 * 1000;
@@ -136,6 +137,8 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
    */
   private pendingStops = new Set<string>();
   private pendingPermissions = new Map<string, PendingAcpPermission>();
+  /** Threads in Mcode plan-questions phase; disables Cursor ask_question auto-picks. */
+  private planQuestionModeThreads = new Set<string>();
   private evictionTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
@@ -265,6 +268,15 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     }
   }
 
+  /** Toggle Mcode plan-questions phase for Cursor ask_question handling. */
+  setPlanQuestionMode(threadId: string, enabled: boolean): void {
+    if (enabled) {
+      this.planQuestionModeThreads.add(threadId);
+    } else {
+      this.planQuestionModeThreads.delete(threadId);
+    }
+  }
+
   /** Tear down all sessions, cancel pending permissions, and stop the eviction timer. */
   shutdown(): void {
     if (this.evictionTimer) {
@@ -276,6 +288,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       void this.teardownSessionEntry(id, entry, false);
     }
     this.sessions.clear();
+    this.planQuestionModeThreads.clear();
     this.sdkSessionIds.clear();
     logger.info("CursorProvider shutdown complete");
   }
@@ -474,9 +487,12 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
             params !== null && typeof params === "object" && !Array.isArray(params)
               ? (params as Record<string, unknown>)
               : {};
+          const inPlanQuestionMode = this.planQuestionModeThreads.has(entry.threadId);
+          const autoAnswer =
+            !inPlanQuestionMode && cursorPrefs.autoAnswerAskQuestions;
           return buildCursorAskQuestionExtResponse(
             record,
-            cursorPrefs.autoAnswerAskQuestions,
+            autoAnswer,
             (summary) => {
               logger.info("Cursor ask_question resolved automatically", {
                 threadId: entry.threadId,
@@ -494,6 +510,22 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
           );
         }
         if (method === "cursor/create_plan") {
+          const record =
+            params !== null && typeof params === "object" && !Array.isArray(params)
+              ? (params as Record<string, unknown>)
+              : {};
+          const planMarkdown = extractCursorCreatePlanMarkdown(record);
+          if (planMarkdown) {
+            this.emit("exit_plan_mode", {
+              threadId: entry.threadId,
+              planMarkdown,
+            });
+          } else {
+            logger.warn("cursor/create_plan missing plan markdown", {
+              threadId: entry.threadId,
+              keys: Object.keys(record),
+            });
+          }
           return { outcome: { outcome: "accepted" } };
         }
         if (method === "cursor/task" && entry.activeTurnState) {

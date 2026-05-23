@@ -430,6 +430,7 @@ async function dispatch(
         params.replyToMessageId,
         params.quotedText,
         params.displayContent,
+        params.planAction,
       );
       return;
     case "agent.createAndSend":
