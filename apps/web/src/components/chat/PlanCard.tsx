@@ -2,16 +2,16 @@ import { useMemo } from "react";
 import { usePlanStore } from "@/stores/planStore";
 import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
-import { ScrollText } from "lucide-react";
+import { ScrollText, ArrowUpRight } from "lucide-react";
 
 interface PlanCardProps {
   messageId: string;
 }
 
 /**
- * Compact card rendered in the chat message stream when a plan was
- * extracted from this message. Clicking opens the Scope panel to
- * the plan document. Shows title, version, and a "View plan" affordance.
+ * Compact plan artifact card in the chat message stream. Clicking
+ * opens the Scope panel to the associated plan version. Renders only
+ * when a persisted plan record exists for this message.
  */
 export function PlanCard({ messageId }: PlanCardProps) {
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
@@ -26,6 +26,8 @@ export function PlanCard({ messageId }: PlanCardProps) {
 
   if (!plan || !activeThreadId) return null;
 
+  const sectionCount = plan.sectionsJson?.length ?? 0;
+
   const handleClick = () => {
     useDiffStore.getState().showRightPanel(activeThreadId);
     useDiffStore.getState().setRightPanelTab(activeThreadId, "tasks");
@@ -36,20 +38,31 @@ export function PlanCard({ messageId }: PlanCardProps) {
     <button
       type="button"
       onClick={handleClick}
-      className="mt-3 flex w-full items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-left transition-colors hover:bg-accent/50"
+      className="group/plan mt-3 flex w-full items-center gap-3 rounded-md bg-primary/[0.04] px-4 py-3 text-left transition-all duration-150 hover:bg-primary/[0.08]"
     >
-      <ScrollText className="h-4 w-4 flex-shrink-0 text-primary/70" />
+      {/* Icon with subtle primary tint background */}
+      <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-primary/[0.08]">
+        <ScrollText className="h-4 w-4 text-primary/80" />
+      </div>
+
+      {/* Title + metadata */}
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-foreground truncate">
+        <div className="text-[13px] font-medium text-foreground truncate leading-tight">
           {plan.title}
         </div>
+        <div className="mt-0.5 flex items-center gap-2 font-mono text-[10px] tracking-[0.06em] text-muted-foreground/55">
+          <span className="uppercase text-primary/60">v{plan.version}</span>
+          {sectionCount > 0 && (
+            <>
+              <span className="text-muted-foreground/25">·</span>
+              <span>{sectionCount} {sectionCount === 1 ? "section" : "sections"}</span>
+            </>
+          )}
+        </div>
       </div>
-      <span className="flex-shrink-0 font-mono text-[10px] uppercase tracking-[0.1em] text-primary/65">
-        v{plan.version}
-      </span>
-      <span className="flex-shrink-0 font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground/50">
-        View plan
-      </span>
+
+      {/* Open affordance - appears on hover */}
+      <ArrowUpRight className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/30 transition-all duration-150 group-hover/plan:text-primary/60 group-hover/plan:translate-x-0.5 group-hover/plan:-translate-y-0.5" />
     </button>
   );
 }
