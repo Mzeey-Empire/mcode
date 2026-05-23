@@ -5,28 +5,33 @@ interface PlanChromeProps {
   plan: PlanRecord;
   allVersions: readonly PlanRecord[];
   threadId: string;
+  onRevise: () => void;
+  onImplement: () => void;
+  /** Number of pending inline comments. When > 0, Revise becomes "Send feedback". */
+  commentCount: number;
 }
 
 /**
- * Sticky chrome bar: version selector, status badge, and implement link.
+ * Sticky chrome bar: version selector, Revise, and Implement actions.
  * Mirrors the Mcode mono-uppercase chrome convention.
  */
-export function PlanChrome({ plan, allVersions, threadId }: PlanChromeProps) {
+export function PlanChrome({
+  plan,
+  allVersions,
+  threadId,
+  onRevise,
+  onImplement,
+  commentCount,
+}: PlanChromeProps) {
   const setActiveVersion = usePlanStore((s) => s.setActiveVersion);
-  const updatePlanStatus = usePlanStore((s) => s.updatePlanStatus);
 
   const handleVersionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const v = parseInt(e.target.value, 10);
     setActiveVersion(threadId, v);
   };
 
-  const handleImplement = () => {
-    updatePlanStatus(plan.id, "accepted");
-    // TODO: Wire plan.updateStatus RPC and sendMessage in follow-up
-  };
-
   return (
-    <div className="sticky top-0 z-10 flex items-baseline gap-2 border-b border-border bg-background px-6 py-3">
+    <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-background px-6 py-2.5">
       <select
         value={plan.version}
         onChange={handleVersionChange}
@@ -39,26 +44,23 @@ export function PlanChrome({ plan, allVersions, threadId }: PlanChromeProps) {
         ))}
       </select>
 
-      <span
-        className={`font-mono text-[10px] uppercase tracking-[0.1em] ${
-          plan.status === "accepted"
-            ? "text-[oklch(0.48_0.14_145)]"
-            : "text-muted-foreground"
-        }`}
-      >
-        {plan.status}
-      </span>
-
       <span className="flex-1" />
 
-      {plan.status === "draft" && (
-        <button
-          onClick={handleImplement}
-          className="cursor-pointer border-none bg-transparent font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground transition-colors hover:text-primary"
-        >
-          Implement
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={onRevise}
+        className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground/55 transition-colors hover:text-foreground bg-transparent border-none cursor-pointer"
+      >
+        {commentCount > 0 ? `Send feedback (${commentCount})` : "Revise"}
+      </button>
+
+      <button
+        type="button"
+        onClick={onImplement}
+        className="font-mono text-[10px] uppercase tracking-[0.1em] text-primary/70 transition-colors hover:text-primary bg-transparent border-none cursor-pointer"
+      >
+        Implement
+      </button>
     </div>
   );
 }
