@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
 
-/** A single section within a structured plan. */
+/** A single section within a structured plan (full content, used in plan-output blocks). */
 export const PlanSectionSchema = lazySchema(() =>
   z.object({
     id: z.string(),
@@ -12,6 +12,17 @@ export const PlanSectionSchema = lazySchema(() =>
 );
 
 export type PlanSection = z.infer<ReturnType<typeof PlanSectionSchema>>;
+
+/** Lightweight section metadata for TOC navigation (no content body). */
+export const PlanSectionNavSchema = lazySchema(() =>
+  z.object({
+    id: z.string(),
+    title: z.string(),
+    level: z.number().min(1).max(3),
+  }),
+);
+
+export type PlanSectionNav = z.infer<ReturnType<typeof PlanSectionNavSchema>>;
 
 /** Structured plan output emitted by the agent inside a ```plan-output fence. */
 export const PlanOutputSchema = lazySchema(() =>
@@ -40,7 +51,7 @@ export const PlanRecordSchema = lazySchema(() =>
     version: z.number(),
     title: z.string(),
     contentMd: z.string(),
-    sectionsJson: z.array(PlanSectionSchema()).nullable(),
+    sectionsJson: z.array(PlanSectionNavSchema()).nullable(),
     changeSummary: z.string().nullable(),
     status: PlanStatusSchema(),
     createdAt: z.string(),

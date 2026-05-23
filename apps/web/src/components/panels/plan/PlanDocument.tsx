@@ -1,5 +1,5 @@
 import { useMemo, useRef, useCallback } from "react";
-import type { PlanRecord, PlanSection } from "@mcode/contracts";
+import type { PlanRecord, PlanSectionNav } from "@mcode/contracts";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -18,7 +18,7 @@ export function PlanDocument({ plan }: PlanDocumentProps) {
   const sectionMap = useMemo(() => {
     if (!plan.sectionsJson) return new Map<string, string>();
     const map = new Map<string, string>();
-    for (const s of plan.sectionsJson as PlanSection[]) {
+    for (const s of plan.sectionsJson as PlanSectionNav[]) {
       map.set(s.title.toLowerCase(), s.id);
     }
     return map;

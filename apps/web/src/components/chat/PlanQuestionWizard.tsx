@@ -4,7 +4,7 @@ import { OptionTile } from "./plan-questions/OptionTile";
 import { AcceptRecommended } from "./plan-questions/AcceptRecommended";
 import { useWizardKeyboard } from "./plan-questions/useWizardKeyboard";
 import { cn } from "@/lib/utils";
-import type { PlanAnswer, PlanQuestion, PlanQuestionOption } from "@mcode/contracts";
+import type { PlanAnswer, PlanQuestionOption } from "@mcode/contracts";
 
 /** Sentinel ID for the user-written "Other" option. */
 export const OTHER_OPTION_ID = "__other__";
