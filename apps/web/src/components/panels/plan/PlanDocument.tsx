@@ -93,9 +93,10 @@ export function PlanDocument({
           </Tag>
           {isOpen && (
             <PlanAnnotation
+              key={`annotation-${key}`}
               sectionTitle={text}
-              value={commentMap.get(key) ?? ""}
-              onChange={(val) => onCommentChange(text, val)}
+              initialValue={commentMap.get(key) ?? ""}
+              onCommit={(val) => onCommentChange(text, val)}
               onDiscard={() => {
                 onCommentDiscard(text);
                 setActiveHeading(null);
