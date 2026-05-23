@@ -79,8 +79,12 @@ interface IWorkspaceRepo {
   findById(id: string): Promise<any> | any;
 }
 
-/** Timeout for side-channel and hidden-turn provider calls, in milliseconds. */
-const PROVIDER_CALL_TIMEOUT_MS = 60_000;
+/**
+ * Timeout for side-channel and hidden-turn provider calls, in milliseconds.
+ * Handoff generation includes a cold SDK subprocess start plus model inference;
+ * 60s was too tight after server restarts on Windows.
+ */
+const PROVIDER_CALL_TIMEOUT_MS = 120_000;
 
 @injectable()
 export class HandoffPipelineService {
