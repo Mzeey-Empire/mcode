@@ -300,9 +300,10 @@ function makeComponents(
       const langMatch = className?.match(/language-(\S+)/);
       const rawFence = langMatch ? langMatch[1] : "";
 
-      // Suppress the fenced block the model emits to signal plan questions —
-      // the wizard renders from the parsed payload, not from raw markdown.
-      if (rawFence === "plan-questions") return null;
+      // Suppress fenced blocks the model emits for plan mode. The wizard
+      // renders questions from the parsed payload, and plan-output is
+      // displayed as a card / in the Scope panel, not as raw markdown.
+      if (rawFence === "plan-questions" || rawFence === "plan-output") return null;
 
       const code = String(children).replace(/\n$/, "");
 

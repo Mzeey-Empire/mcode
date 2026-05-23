@@ -14,6 +14,7 @@ import { FileAttachmentTile } from "./FileAttachmentTile";
 import { ImageAttachmentLightbox } from "./ImageAttachmentLightbox";
 import { useThreadStore } from "@/stores/threadStore";
 import { AnsweredSummary } from "./plan-questions/AnsweredSummary";
+import { PlanCard } from "./PlanCard";
 import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts";
 
 /**
@@ -24,8 +25,10 @@ import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts";
  * ONLY the plan-questions block" obedience produces).
  */
 function isAssistantContentEmpty(content: string): boolean {
-  const withoutPlanQuestions = content.replace(/```plan-questions\n[\s\S]*?```/g, "");
-  return withoutPlanQuestions.trim().length === 0;
+  const stripped = content
+    .replace(/```plan-questions\n[\s\S]*?```/g, "")
+    .replace(/```plan-output\n[\s\S]*?```/g, "");
+  return stripped.trim().length === 0;
 }
 
 /** Parses the message content of a synthetic agent-error system message. Returns the error text, or null if not an agent error. */
@@ -614,6 +617,10 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
           <LazyMarkdownContent content={message.content} isStreaming={false} />
         </Suspense>
       </div>
+      {/* Plan card: shows when a plan was extracted from this message */}
+      {message.role === "assistant" && (
+        <PlanCard messageId={message.id} />
+      )}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1">
         {onReply && <ReplyButton onClick={() => onReply(message.id, message.content, "assistant")} />}
         {onBranch && <BranchButton onClick={() => onBranch(message.id)} />}
