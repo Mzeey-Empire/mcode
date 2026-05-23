@@ -1,8 +1,55 @@
 # Cursor SDK Migration Handoff
 
+> **Status: DEFERRED (2026-05-23)**
+>
+> Investigation completed 2026-05-23. The migration is on hold until one of the
+> two un-defer triggers below fires. The existing `cursor-agent acp` subprocess
+> plus path A handoff implementation keep working as-is; nothing in the
+> running system needs to change.
+>
+> **Why deferred:** `@cursor/sdk` v1.0.13 requires an API key, either passed as
+> `apiKey` per call or read from `process.env.CURSOR_API_KEY` (see
+> `dist/esm/local-executor.d.ts:11` and the `Agent.get` JSDoc in the SDK
+> package). It has no mechanism to read the `cursor-agent` CLI's stored login
+> token. This conflicts with the project rule that mcode never requires users
+> to set API keys directly, and reverse-engineering the CLI's token store is
+> too fragile to commit to.
+>
+> **Un-defer triggers (either resolves the blocker):**
+>
+> 1. **Cursor fixes the ACP `session/load` bug.** If this lands first, the
+>    migration is no longer needed. Flip `sessionForkOnResume` in
+>    `apps/server/src/providers/cursor/cursor-provider.ts:131` from
+>    `"mutating"` to `"clean"`, delete `runHiddenTurn` plus the path A
+>    branch in `handoff-pipeline.ts`, ship. No SDK swap required. Track:
+>    https://forum.cursor.com/t/acp-no-conversation-history-is-restored-when-loading-an-existing-session/158388
+>    (still open as of 2026-05-17; cursor-cli `2026.05.16-0338208` still
+>    affected).
+> 2. **`@cursor/sdk` gains CLI-auth support.** If a future SDK release can
+>    read the local `cursor login` token (no `CURSOR_API_KEY` env, no
+>    settings entry), the migration described below becomes viable. Track
+>    the SDK changelog and: https://forum.cursor.com/t/cursor-sdk-cloud-agents-api-updates/159284
+>
+> **Recheck on or after 2026-08-23.** To recheck:
+>
+> ```sh
+> # 1. ACP session/load bug fixed?
+> #    Read the forum thread above for new replies, then compare the
+> #    installed cursor-cli version against the version mentioned in the
+> #    latest reply.
+> cursor-agent --version
+>
+> # 2. @cursor/sdk gained CLI-auth support?
+> npm view @cursor/sdk version   # anything newer than 1.0.13?
+> npm view @cursor/sdk readme    # look for CLI-auth / cursor-login mentions
+> ```
+>
+> If neither trigger has fired, bump this recheck date by another 3 months
+> and leave the rest of the doc alone.
+
 A persistent handoff doc for whoever picks up the Cursor provider migration
-from `cursor-agent acp` subprocess to `@cursor/sdk`. Pairs with
-`docs/plans/2026-05-21-chat-branch-handoff-pipeline.md` and `CONTEXT.md`.
+from `cursor-agent acp` subprocess to `@cursor/sdk`. Pairs with `CONTEXT.md`
+and the chat-fork handoff feature shipped in PR #499 (commit `fb4e7123`).
 
 ## What this is
 
@@ -120,9 +167,6 @@ acceptable on reads from old artifacts. New artifacts only ever get
   artifacts) or removed.
 - `docs/guides/chat-fork-handoff.md` updates to reflect the simplified
   ladder.
-- The deferred-items section of `docs/plans/2026-05-21-chat-branch-handoff-pipeline.md`
-  mentions this migration; the entry should move from "deferred" to
-  "completed" once this lands.
 
 ## Auth and configuration
 
@@ -205,11 +249,11 @@ The next agent should invoke (or have access to):
 
 References, not duplicated content:
 
-- `docs/plans/2026-05-21-chat-branch-handoff-pipeline.md`. The original
-  implementation plan for the chat fork handoff feature. Section
-  "Deferred Items" at the bottom mentions this migration. Phase 17 covers
-  the robustness guards including the 10-second settle-wait that gets
-  deleted.
+- PR #499 (commit `fb4e7123`). The merged chat-fork handoff feature whose
+  original implementation plan and prototype lived under `docs/plans/`
+  pre-merge. The 10-second settle-wait and the rest of the robustness
+  guards that this migration would delete live in `cursor-provider.ts`
+  and `handoff-pipeline.ts`; read them there instead.
 - `CONTEXT.md`. Glossary of all the relevant vocabulary.
 - `apps/server/src/providers/claude/claude-provider.ts`. The implementation
   pattern Cursor will follow post-migration.
@@ -258,9 +302,6 @@ This migration is complete when:
 7. `bun run verify` passes.
 8. `CONTEXT.md` and `docs/guides/chat-fork-handoff.md` reflect the simplified
    ladder.
-9. The deferred-items entry in
-   `docs/plans/2026-05-21-chat-branch-handoff-pipeline.md` is moved to a
-   completed section.
 
 ## A note on why this isn't in the OS temp directory
 

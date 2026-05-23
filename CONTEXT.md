@@ -146,7 +146,7 @@ error (if any). Used by the View doc dialog and by the fallback banner copy.
 Swapping a thread's provider mid-conversation. Uses the same handoff
 primitive as a fork but with the implicit anchor being the thread's last
 message, and the same thread continues with the new provider. Not yet
-implemented; tracked in `docs/plans/2026-05-21-chat-branch-handoff-pipeline.md`.
+implemented; was a deferred item in the chat-fork handoff feature (PR #499).
 
 ### Compaction
 A separate mechanism that summarizes a thread's older turns into a single
