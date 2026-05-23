@@ -11,13 +11,11 @@ import {
   createDefaultRightPanelState,
   getDefaultPanelWidthPx,
 } from "@/stores/diffStore";
-import { TaskPanel } from "@/components/tasks/TaskPanel";
-import { TaskPanelHeader } from "@/components/tasks/TaskPanelHeader";
+import { ScopeSplitPane } from "./ScopeSplitPane";
 import { DiffPanel } from "@/components/diff";
 import { PreviewPanel } from "@/components/panels/PreviewPanel";
 import { TerminalTabContent } from "@/components/terminal/TerminalTabContent";
 import { TerminalPoolSlot } from "@/components/terminal/TerminalPoolSlotContext";
-import { PlanPanel } from "@/components/panels/plan";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";
 
@@ -340,18 +338,8 @@ export function RightPanel() {
           turn expand state, loaded diffs, and xterm scroll anchors survive tab
           and workspace thread switches. */}
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-        {activeTab === "tasks" && (
-          <div className="flex flex-1 flex-col min-h-0">
-            {/* Plan fills the top when one exists for this thread */}
-            {activeThreadId && (
-              <PlanPanel threadId={activeThreadId} />
-            )}
-            {/* Tasks pin at the bottom with internal scroll for overflow */}
-            <div className="flex flex-col flex-shrink-0 border-t border-border max-h-[45%] min-h-[80px]">
-              <TaskPanelHeader tasks={parentTasks} />
-              <TaskPanel />
-            </div>
-          </div>
+        {activeTab === "tasks" && activeThreadId && (
+          <ScopeSplitPane threadId={activeThreadId} parentTasks={parentTasks} />
         )}
         <div className={activeTab === "changes" ? "flex flex-1 flex-col min-h-0" : "hidden"}>
           <DiffPanel />
