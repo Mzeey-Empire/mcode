@@ -224,11 +224,11 @@ export function RightPanel() {
             : { width: panelWidth, minWidth: PANEL_MIN_WIDTH, maxWidth: `calc(100vw - ${PANEL_MIN_WIDTH}px)` }
         }
         className={cn(
-          "relative flex h-full min-h-0 min-w-0 flex-col bg-background focus:outline-none",
+          "relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background focus:outline-none",
           !panelVisible && "hidden",
           isOverlay
             ? "fixed inset-y-0 right-0 z-50 shadow-sm animate-fade-up-in"
-            : "rounded-lg shadow-sm overflow-hidden",
+            : "rounded-lg shadow-sm",
         )}
         aria-hidden={!panelVisible}
       >

@@ -381,14 +381,18 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    @apply font-sans;
+    overflow: hidden;
+    height: 100%;
+  }
   body {
     @apply bg-background text-foreground;
     margin: 0;
+    overflow: hidden;
+    height: 100%;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-  }
-  html {
-    @apply font-sans;
   }
   button, [role="button"], a, select, summary, [tabindex]:not([tabindex="-1"]) {
     cursor: pointer;
@@ -506,6 +510,14 @@ input[type="range"].settings-range::-moz-range-thumb {
 }
 .dark .scrollbar-on-hover:hover::-webkit-scrollbar-thumb {
   background: oklch(0.35 0.005 260);
+}
+
+/* Plan panel: always reserve vertical gutter so version swaps never toggle width */
+.plan-panel-viewport {
+  overflow-x: hidden;
+  overflow-y: scroll;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 @keyframes blink {

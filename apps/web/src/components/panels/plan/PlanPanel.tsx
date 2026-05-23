@@ -1,10 +1,11 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { usePlanStore } from "@/stores/planStore";
 import { PlanChrome } from "./PlanChrome";
 import { PlanDocument, type PlanComment } from "./PlanDocument";
 import { PlanSkeleton } from "./PlanSkeleton";
 import type { PlanRecord } from "@mcode/contracts";
 import { useThreadStore } from "@/stores/threadStore";
+import { Button } from "@/components/ui/button";
 
 /** Stable empty array to avoid new-reference-per-render in Zustand selectors. */
 const EMPTY_PLANS: readonly PlanRecord[] = [];
@@ -23,6 +24,9 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
   const isGenerating = usePlanStore((s) => s.generatingThreads.has(threadId));
 
   const [comments, setComments] = useState<PlanComment[]>([]);
+  const planScrollRef = useRef<HTMLDivElement>(null);
+  const feedbackBarRef = useRef<HTMLDivElement>(null);
+  const prevNoteCountRef = useRef(0);
 
   const activePlan = useMemo(() => {
     if (plans.length === 0) return null;
@@ -31,6 +35,16 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
     }
     return [...plans].reverse().find((p) => p.status !== "superseded") ?? plans[plans.length - 1];
   }, [plans, activeVersion]);
+
+  // Reset before paint so version switches never flash a stale scroll position.
+  useLayoutEffect(() => {
+    setComments((prev) => (prev.length === 0 ? prev : []));
+    const el = planScrollRef.current;
+    if (el) {
+      el.scrollTop = 0;
+      el.scrollLeft = 0;
+    }
+  }, [activePlan?.id]);
 
   const handleCommentChange = useCallback((sectionTitle: string, text: string) => {
     setComments((prev) => {
@@ -55,10 +69,17 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
     [comments],
   );
 
+  useEffect(() => {
+    const count = nonEmptyComments.length;
+    if (count > prevNoteCountRef.current) {
+      feedbackBarRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+    prevNoteCountRef.current = count;
+  }, [nonEmptyComments.length]);
+
   const handleSendFeedback = useCallback(async () => {
     if (nonEmptyComments.length === 0 || !activePlan) return;
 
-    // Build a natural-language message from the annotations
     const lines = [
       `Plan feedback for "${activePlan.title}" (v${activePlan.version}):\n`,
       ...nonEmptyComments.map(
@@ -68,9 +89,10 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
     ];
 
     try {
-      await useThreadStore.getState().sendMessage(threadId, lines.join("\n"));
+      await useThreadStore.getState().sendPlanAction(threadId, lines.join("\n"), "revise");
       setComments([]);
     } catch (err) {
+      usePlanStore.getState().setGenerating(threadId, false);
       console.error("[plan] send feedback failed:", err);
     }
   }, [nonEmptyComments, activePlan, threadId]);
@@ -80,11 +102,13 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
       await handleSendFeedback();
     } else if (activePlan) {
       try {
-        await useThreadStore.getState().sendMessage(
+        await useThreadStore.getState().sendPlanAction(
           threadId,
           `Revise the plan: "${activePlan.title}".\n\nPlease update the plan and emit a new version.`,
+          "revise",
         );
       } catch (err) {
+        usePlanStore.getState().setGenerating(threadId, false);
         console.error("[plan] revise failed:", err);
       }
     }
@@ -93,9 +117,10 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
   const handleImplement = useCallback(async () => {
     if (!activePlan) return;
     try {
-      await useThreadStore.getState().sendMessage(
+      await useThreadStore.getState().sendPlanAction(
         threadId,
         `Implement the plan: "${activePlan.title}".\n\nThe full plan is in the conversation above. Follow it section by section.`,
+        "implement",
       );
     } catch (err) {
       console.error("[plan] implement failed:", err);
@@ -109,8 +134,7 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
   if (!activePlan) return null;
 
   return (
-    <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
-      {/* Chrome pinned at top - never scrolls */}
+    <div className="flex min-h-0 flex-1 basis-0 flex-col overflow-hidden">
       <PlanChrome
         plan={activePlan}
         allVersions={plans}
@@ -120,15 +144,23 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
         commentCount={nonEmptyComments.length}
       />
 
-      {/* Scrollable plan body */}
-      <div className="flex-1 min-h-0 overflow-y-auto">
-        <h1 className="px-6 pt-4 text-[17px] font-bold leading-[1.35]">
-          {activePlan.title}
-        </h1>
-        <p className="px-6 mt-1.5 font-mono text-[10px] tracking-[0.06em] text-muted-foreground/60">
-          Click any heading to leave feedback
-        </p>
-        <div className="mx-6 mt-3 h-px bg-border" />
+      <div
+        ref={planScrollRef}
+        data-testid="plan-panel-viewport"
+        className="plan-panel-viewport min-h-0 min-w-0 flex-1 basis-0"
+      >
+        <header className="border-b border-border/40 px-4 pb-3 pt-4">
+          <h1
+            className="truncate text-[15px] font-semibold leading-snug tracking-tight text-foreground"
+            title={activePlan.title}
+          >
+            {activePlan.title}
+          </h1>
+          <p className="mt-1.5 font-mono text-[10px] leading-relaxed tracking-[0.14em] text-muted-foreground/70">
+            Click a heading to annotate. Stash by clicking away, or save to close.
+          </p>
+        </header>
+
         <PlanDocument
           plan={activePlan}
           comments={comments}
@@ -137,22 +169,50 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
         />
       </div>
 
-      {/* Send feedback bar - only visible when annotations exist */}
-      {nonEmptyComments.length > 0 && (
-        <div className="flex items-center border-t border-border bg-background px-4 py-2 flex-shrink-0">
-          <span className="font-mono text-[10px] tabular-nums tracking-[0.06em] text-muted-foreground/50">
-            {nonEmptyComments.length} {nonEmptyComments.length === 1 ? "comment" : "comments"}
-          </span>
-          <span className="flex-1" />
-          <button
-            type="button"
-            onClick={handleSendFeedback}
-            className="font-mono text-[10px] uppercase tracking-[0.1em] text-primary/70 transition-colors hover:text-primary border border-border rounded px-3 py-1"
-          >
-            Send feedback
-          </button>
-        </div>
-      )}
+      <div
+        ref={feedbackBarRef}
+        className="flex min-w-0 flex-shrink-0 items-center gap-2 border-t border-border bg-background px-3 py-2"
+      >
+        {nonEmptyComments.length > 0 ? (
+          <>
+            <span className="font-mono text-[10px] tabular-nums tracking-[0.14em] text-muted-foreground/70">
+              {nonEmptyComments.length} {nonEmptyComments.length === 1 ? "note" : "notes"} saved
+            </span>
+            <span className="font-mono text-[10px] tracking-[0.14em] text-muted-foreground/45">
+              ·
+            </span>
+            <span className="min-w-0 truncate font-mono text-[10px] tracking-[0.14em] text-muted-foreground/60">
+              Send feedback to request a revised plan
+            </span>
+            <span className="min-w-0 flex-1" aria-hidden />
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              onClick={handleSendFeedback}
+              className="font-mono text-[10px] uppercase tracking-[0.16em]"
+            >
+              Send feedback
+            </Button>
+          </>
+        ) : (
+          <>
+            <span className="font-mono text-[10px] tracking-[0.14em] text-muted-foreground/45">
+              Saved notes appear here
+            </span>
+            <span className="min-w-0 flex-1" aria-hidden />
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              disabled
+              className="font-mono text-[10px] uppercase tracking-[0.16em]"
+            >
+              Send feedback
+            </Button>
+          </>
+        )}
+      </div>
     </div>
   );
 }

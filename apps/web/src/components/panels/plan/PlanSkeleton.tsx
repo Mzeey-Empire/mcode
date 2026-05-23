@@ -14,19 +14,22 @@ export function PlanSkeleton({ title }: PlanSkeletonProps) {
       </div>
 
       {title && (
-        <h1 className="px-6 pt-4 text-[17px] font-bold leading-[1.35] opacity-35">
+        <h1
+          className="truncate px-4 pt-4 text-[15px] font-semibold leading-snug opacity-35"
+          title={title}
+        >
           {title}
         </h1>
       )}
 
-      <div className="flex items-center gap-2 px-6 pb-2 pt-4">
-        <span className="h-[5px] w-[5px] animate-pulse rounded-full bg-primary" />
-        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground/45">
-          Revising from your feedback
+      <div className="flex items-center gap-2 px-4 pb-2 pt-4">
+        <span className="h-[5px] w-[5px] animate-pulse rounded-full bg-primary" aria-hidden />
+        <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground/60">
+          Generating plan revision
         </span>
       </div>
 
-      <div className="flex flex-col gap-6 px-6">
+      <div className="flex flex-col gap-6 px-4">
         {[0, 1, 2, 3].map((i) => (
           <div key={i} className="flex flex-col gap-2">
             <div

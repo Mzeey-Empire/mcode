@@ -1,6 +1,13 @@
 import type { PlanRecord } from "@mcode/contracts";
-import { usePlanStore } from "@/stores/planStore";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { usePlanStore } from "@/stores/planStore";
+import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface PlanChromeProps {
   plan: PlanRecord;
@@ -13,8 +20,7 @@ interface PlanChromeProps {
 
 /**
  * Sticky chrome bar pinned above the scrollable plan body.
- * Version navigation uses prev/next arrows instead of a dropdown.
- * Revise and Implement are always visible.
+ * Version navigation uses prev/next arrows; Revise and Implement stay visible.
  */
 export function PlanChrome({
   plan,
@@ -28,61 +34,123 @@ export function PlanChrome({
   const maxVersion = allVersions.length > 0 ? allVersions[allVersions.length - 1].version : 1;
   const canPrev = plan.version > 1;
   const canNext = plan.version < maxVersion;
+  const hasFeedback = commentCount > 0;
 
   return (
-    <div className="flex items-center gap-1.5 border-b border-border bg-background px-4 py-2 flex-shrink-0">
-      {/* Version nav: arrows + badge */}
-      <div className="flex items-center gap-0.5">
-        <button
-          type="button"
-          disabled={!canPrev}
-          onClick={() => setActiveVersion(threadId, plan.version - 1)}
-          className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-foreground disabled:opacity-20 disabled:cursor-default"
-          aria-label="Previous version"
-        >
-          <ChevronLeft className="h-3 w-3" />
-        </button>
+    <div className="flex min-w-0 flex-shrink-0 items-center gap-2 border-b border-border bg-background px-3 py-2">
+      {/* Version nav */}
+      <div
+        className="flex shrink-0 items-center gap-0.5 rounded-md border border-border/60 bg-muted/20 px-0.5 py-0.5"
+        aria-label={`Plan version ${plan.version} of ${maxVersion}`}
+      >
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="shrink-0"
+                disabled={!canPrev}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setActiveVersion(threadId, plan.version - 1)}
+                aria-label="Previous version"
+              >
+                <ChevronLeft size={14} aria-hidden />
+              </Button>
+            }
+          />
+          <TooltipContent side="bottom" sideOffset={6} className="text-xs">
+            {canPrev ? "Previous version" : "On first version"}
+          </TooltipContent>
+        </Tooltip>
 
-        <span className="font-mono text-[10px] tabular-nums uppercase tracking-[0.1em] text-primary px-1">
+        <span
+          className="min-w-[2.25rem] px-1 text-center font-mono text-[10px] tabular-nums uppercase tracking-[0.16em] text-primary"
+          aria-hidden
+        >
           v{plan.version}
         </span>
 
-        <button
-          type="button"
-          disabled={!canNext}
-          onClick={() => setActiveVersion(threadId, plan.version + 1)}
-          className="flex h-5 w-5 items-center justify-center rounded text-muted-foreground/40 transition-colors hover:text-foreground disabled:opacity-20 disabled:cursor-default"
-          aria-label="Next version"
-        >
-          <ChevronRight className="h-3 w-3" />
-        </button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="shrink-0"
+                disabled={!canNext}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setActiveVersion(threadId, plan.version + 1)}
+                aria-label="Next version"
+              >
+                <ChevronRight size={14} aria-hidden />
+              </Button>
+            }
+          />
+          <TooltipContent side="bottom" sideOffset={6} className="text-xs">
+            {canNext ? "Next version" : "On latest version"}
+          </TooltipContent>
+        </Tooltip>
       </div>
 
-      {/* Change summary for v2+ */}
       {plan.changeSummary && (
-        <span className="truncate text-[11px] text-muted-foreground max-w-[160px]">
+        <span
+          className="min-w-0 truncate text-[11px] leading-snug text-muted-foreground"
+          title={plan.changeSummary}
+        >
           {plan.changeSummary}
         </span>
       )}
 
-      <span className="flex-1" />
+      <span className="min-w-0 flex-1" aria-hidden />
 
       {/* Actions */}
-      <button
-        type="button"
-        onClick={onRevise}
-        className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted-foreground/55 transition-colors hover:text-foreground bg-transparent border-none cursor-pointer px-1.5"
-      >
-        {commentCount > 0 ? `Feedback (${commentCount})` : "Revise"}
-      </button>
+      <div className="flex shrink-0 items-center gap-0.5">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={onRevise}
+                className={cn(
+                  "font-mono text-[10px] uppercase tracking-[0.16em]",
+                  hasFeedback && "text-foreground",
+                )}
+              >
+                {hasFeedback ? `Feedback (${commentCount})` : "Revise"}
+              </Button>
+            }
+          />
+          <TooltipContent side="bottom" sideOffset={6} className="max-w-[16rem] text-xs">
+            {hasFeedback
+              ? "Send annotated feedback and generate a new version"
+              : "Request a new plan version without section notes"}
+          </TooltipContent>
+        </Tooltip>
 
-      <button
-        type="button"
-        onClick={onImplement}
-        className="font-mono text-[10px] uppercase tracking-[0.1em] text-primary/70 transition-colors hover:text-primary bg-transparent border-none cursor-pointer px-1.5"
-      >
-        Implement
-      </button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={onImplement}
+                className="font-mono text-[10px] uppercase tracking-[0.16em] text-primary hover:text-primary"
+              >
+                Implement
+              </Button>
+            }
+          />
+          <TooltipContent side="bottom" sideOffset={6} className="max-w-[16rem] text-xs">
+            Start implementation in chat mode using this plan
+          </TooltipContent>
+        </Tooltip>
+      </div>
     </div>
   );
 }

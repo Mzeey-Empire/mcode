@@ -88,10 +88,8 @@ export function ScopeSplitPane({ threadId, parentTasks }: ScopeSplitPaneProps) {
 
   return (
     <div ref={containerRef} className="flex flex-1 flex-col min-h-0">
-      {/* Plan section: fills remaining space above the drag handle.
-          min-h-0 allows the flex child to shrink below its content
-          height so PlanPanel's overflow-y-auto can activate. */}
-      <div className="flex flex-1 flex-col min-h-0">
+      {/* Plan section: flex-1 with basis-0 so content height never expands the split pane. */}
+      <div className="flex min-h-0 flex-1 basis-0 flex-col overflow-hidden">
         <PlanPanel threadId={threadId} />
       </div>
 
