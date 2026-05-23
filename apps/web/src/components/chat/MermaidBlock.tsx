@@ -59,6 +59,62 @@ function toMermaidTheme(shikiTheme: string): "dark" | "default" {
   return shikiTheme === "github-dark" ? "dark" : "default";
 }
 
+/** Removes mermaid measurement/render nodes left on `document.body`. */
+function removeMermaidArtifacts(renderId: string): void {
+  document.getElementById(`d${renderId}`)?.remove();
+  document.getElementById(renderId)?.remove();
+}
+
+/**
+ * Waits for the next two animation frames so flex/scroll layout has settled.
+ * Mermaid's layout math produces NaN transforms when render runs mid-reflow.
+ */
+function waitForLayout(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
+}
+
+/**
+ * Waits until `element` is visible with non-zero width, or times out and proceeds.
+ * Hidden tabs and rapid plan version swaps can otherwise measure zero-width boxes.
+ */
+function waitUntilVisible(element: HTMLElement, timeoutMs = 2_000): Promise<void> {
+  if (typeof IntersectionObserver === "undefined") {
+    return Promise.resolve();
+  }
+
+  const rect = element.getBoundingClientRect();
+  if (rect.width > 0 && rect.height > 0 && element.offsetParent !== null) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      observer.disconnect();
+      clearTimeout(timeoutId);
+      resolve();
+    };
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting && entry.intersectionRect.width > 0) {
+          finish();
+        }
+      },
+      { threshold: 0 },
+    );
+    observer.observe(element);
+
+    const timeoutId = setTimeout(finish, timeoutMs);
+  });
+}
+
 /**
  * Renders a mermaid diagram from fenced code blocks.
  * Lazy-loads the mermaid library on first mount and caches it for subsequent blocks.
@@ -73,6 +129,8 @@ const MermaidBlock = memo(function MermaidBlock({ code, isStreaming }: MermaidBl
   const rawId = useId();
   // Memoized and colon-replaced with "-" (not "") to prevent ID collisions between adjacent instances.
   const mermaidId = useMemo(() => "mermaid-" + rawId.replace(/:/g, "-"), [rawId]);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const renderAttemptRef = useRef(0);
 
   const [state, setState] = useState<RenderState>({ status: "loading" });
   const [view, setView] = useState<"diagram" | "code">("diagram");
@@ -89,40 +147,52 @@ const MermaidBlock = memo(function MermaidBlock({ code, isStreaming }: MermaidBl
   useEffect(() => {
     if (isStreaming || !code.trim()) return;
 
+    const attempt = ++renderAttemptRef.current;
+    const renderId = `${mermaidId}-${attempt}`;
     let cancelled = false;
     setState({ status: "loading" });
 
     (async () => {
       try {
+        await waitForLayout();
+        if (cancelled) return;
+
+        const container = containerRef.current;
+        if (container) {
+          await waitUntilVisible(container);
+          if (cancelled) return;
+        }
+
         const mermaid = await ensureInitialized(mermaidTheme);
+        if (cancelled) return;
 
         // Validate first so invalid source never reaches the renderer.
         // mermaid.render appends a temp measurement node (#d<id>) to
         // document.body and does NOT clean it up on throw — validating
         // up front prevents those orphans from littering the page.
         const parseResult = await mermaid.parse(code, { suppressErrors: true });
+        if (cancelled) return;
         if (!parseResult) {
-          if (!cancelled) setState({ status: "error" });
+          if (attempt === renderAttemptRef.current) {
+            setState({ status: "error" });
+          }
           return;
         }
 
-        const { svg } = await mermaid.render(mermaidId, code);
-        if (!cancelled) {
-          setState({ status: "success", svg });
-        }
+        const { svg } = await mermaid.render(renderId, code);
+        if (cancelled || attempt !== renderAttemptRef.current) return;
+        setState({ status: "success", svg });
       } catch (err) {
+        removeMermaidArtifacts(renderId);
+        if (cancelled || attempt !== renderAttemptRef.current) return;
         console.error("[MermaidBlock] render failed:", err);
-        // Defensive cleanup: if render threw after a successful parse,
-        // mermaid may still have left its measurement node behind.
-        document.getElementById("d" + mermaidId)?.remove();
-        if (!cancelled) {
-          setState({ status: "error" });
-        }
+        setState({ status: "error" });
       }
     })();
 
     return () => {
       cancelled = true;
+      removeMermaidArtifacts(renderId);
     };
   }, [code, mermaidTheme, isStreaming, mermaidId]);
 
@@ -176,7 +246,7 @@ const MermaidBlock = memo(function MermaidBlock({ code, isStreaming }: MermaidBl
 
   // Loading or success state
   return (
-    <div className="my-2 rounded-lg overflow-hidden border border-border">
+    <div ref={containerRef} className="my-2 rounded-lg overflow-hidden border border-border">
       {/* Header bar - solid bg-background matches diagram view, no transparency bleed in user bubble */}
       <div className="flex items-center justify-between bg-background px-3 py-1 border-b border-border">
         <span className="text-xs text-muted-foreground">mermaid</span>

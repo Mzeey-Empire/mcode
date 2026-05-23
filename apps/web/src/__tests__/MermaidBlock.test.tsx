@@ -45,7 +45,7 @@ describe("MermaidBlock", () => {
     render(<MermaidBlock code="graph TD; A-->B;" isStreaming={false} />);
     await waitFor(() => {
       expect(mockRender).toHaveBeenCalledWith(
-        expect.stringContaining("mermaid-"),
+        expect.stringMatching(/mermaid-.*-\d+$/),
         "graph TD; A-->B;",
       );
     });
@@ -150,5 +150,37 @@ describe("MermaidBlock", () => {
 
     // Orphan must be gone after the error is handled.
     expect(document.body.querySelector("[data-testid='mermaid-orphan']")).toBeNull();
+  });
+
+  it("ignores stale render results when code changes before the prior render resolves", async () => {
+    let resolveFirst!: (value: { svg: string }) => void;
+    const firstRender = new Promise<{ svg: string }>((resolve) => {
+      resolveFirst = resolve;
+    });
+    mockRender
+      .mockReturnValueOnce(firstRender)
+      .mockResolvedValueOnce({ svg: "<svg>second</svg>" });
+
+    const { container, rerender } = render(
+      <MermaidBlock code="graph TD; A-->B;" isStreaming={false} />,
+    );
+
+    await waitFor(() => {
+      expect(mockRender).toHaveBeenCalledTimes(1);
+    });
+
+    rerender(<MermaidBlock code="graph TD; X-->Y;" isStreaming={false} />);
+
+    await waitFor(() => {
+      expect(mockRender).toHaveBeenCalledTimes(2);
+    });
+
+    resolveFirst({ svg: "<svg>stale</svg>" });
+
+    await waitFor(() => {
+      expect(container.querySelector("svg")).toBeInTheDocument();
+    });
+    expect(container.innerHTML).toContain("second");
+    expect(container.innerHTML).not.toContain("stale");
   });
 });
