@@ -174,6 +174,7 @@ export {
   PlanQuestionSchema,
   PlanAnswerSchema,
   PlanQuestionBatchSchema,
+  PLAN_ANSWER_MESSAGE_PREFIX,
 } from "./models/plan-questions.js";
 export type {
   PlanQuestionOption,
@@ -181,6 +182,24 @@ export type {
   PlanAnswer,
   PlanQuestionBatch,
 } from "./models/plan-questions.js";
+
+// Plan output
+export {
+  PlanSectionSchema,
+  PlanSectionNavSchema,
+  PlanOutputSchema,
+  PlanStatusSchema,
+  PlanActionSchema,
+  PlanRecordSchema,
+} from "./models/plan-output.js";
+export type {
+  PlanSection,
+  PlanSectionNav,
+  PlanOutput,
+  PlanStatus,
+  PlanAction,
+  PlanRecord,
+} from "./models/plan-output.js";
 
 // Permissions
 export {

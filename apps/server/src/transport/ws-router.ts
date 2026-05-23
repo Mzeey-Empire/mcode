@@ -37,6 +37,7 @@ import type { HookExecutionRepo } from "../repositories/hook-execution-repo";
 import type { TurnSnapshotRepo } from "../repositories/turn-snapshot-repo";
 import type { TaskRepo } from "../repositories/task-repo";
 import type { PlanQuestionAnswersRepo } from "../repositories/plan-question-answers-repo";
+import type { PlanRepo } from "../repositories/plan-repo";
 import type { SnapshotService } from "../services/snapshot-service";
 import type { SettingsService } from "../services/settings-service";
 import type { GitWatcherService } from "../services/git-watcher-service";
@@ -82,6 +83,8 @@ export interface RouterDeps {
   taskRepo: TaskRepo;
   /** Repository for the plan-question wizard answered marker (sidecar table). */
   planQuestionAnswersRepo: PlanQuestionAnswersRepo;
+  /** Repository for structured plan records. */
+  planRepo: PlanRepo;
   /** Registry of AI provider adapters for model discovery. */
   providerRegistry: IProviderRegistry;
   /** Tracks per-provider enabled flag and CLI verification state. */
@@ -430,6 +433,7 @@ async function dispatch(
         params.replyToMessageId,
         params.quotedText,
         params.displayContent,
+        params.planAction,
       );
       return;
     case "agent.createAndSend":
@@ -472,6 +476,14 @@ async function dispatch(
         params.thinking,
       );
       return;
+    case "agent.dismissPlanQuestions":
+      deps.agentService.dismissPlanQuestions(params.threadId);
+      return;
+    case "plan.updateStatus":
+      deps.planRepo.updateStatus(params.planId, params.status);
+      return;
+    case "plan.list":
+      return deps.planRepo.listByThread(params.threadId);
 
     // Messages
     case "message.list": {

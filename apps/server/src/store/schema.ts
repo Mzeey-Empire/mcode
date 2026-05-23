@@ -281,3 +281,27 @@ export const planQuestionAnswers = sqliteTable(
     index("idx_plan_question_answers_thread").on(table.threadId),
   ],
 );
+
+export const plans = sqliteTable(
+  "plans",
+  {
+    id: text("id").primaryKey().notNull(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    version: integer("version").notNull().default(1),
+    title: text("title").notNull(),
+    contentMd: text("content_md").notNull(),
+    sectionsJson: text("sections_json"),
+    changeSummary: text("change_summary"),
+    status: text("status").notNull().default("draft"),
+    createdAt: text("created_at").notNull().default(timestampDefault),
+  },
+  (table) => [
+    index("idx_plans_thread").on(table.threadId),
+    index("idx_plans_thread_version").on(table.threadId, table.version),
+  ],
+);

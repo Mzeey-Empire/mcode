@@ -511,6 +511,7 @@ export function createWsTransport(
       codexFastMode?,
       replyToMessageId?,
       quotedText?,
+      planAction?,
     ) => {
       const state = useSettingsStore.getState();
       const guardrails = state.loaded
@@ -532,6 +533,7 @@ export function createWsTransport(
         ...(replyToMessageId && { replyToMessageId }),
         ...(quotedText && { quotedText }),
         ...(displayContent !== undefined && { displayContent }),
+        ...(planAction !== undefined && { planAction }),
         ...guardrails,
       });
     },
@@ -588,6 +590,8 @@ export function createWsTransport(
       rpc<PermissionRequest[]>("permission.listPending", { threadId }),
     answerPlanQuestions: (threadId, answers, permissionMode?, reasoningLevel?, contextWindow?, thinking?) =>
       rpc<void>("agent.answerQuestions", { threadId, answers, permissionMode, reasoningLevel, contextWindow, thinking }),
+    dismissPlanQuestions: (threadId) =>
+      rpc<void>("agent.dismissPlanQuestions", { threadId }),
     readClipboardImage: () =>
       Promise.resolve(null as AttachmentMeta | null),
     saveClipboardFile: (data, mimeType, fileName) =>
@@ -673,6 +677,9 @@ export function createWsTransport(
       rpc<Array<{ content: string; status: "pending" | "in_progress" | "completed" | "cancelled"; group?: string }> | null>(
         "thread.getTasks", { threadId },
       ),
+
+    getThreadPlans: (threadId: string) =>
+      rpc<import("@mcode/contracts").PlanRecord[]>("plan.list", { threadId }),
 
     // Snapshots
     getSnapshotDiff: (snapshotId, filePath?, maxLines?) =>

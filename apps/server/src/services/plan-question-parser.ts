@@ -27,7 +27,7 @@ export class PlanQuestionParser {
    * extract a plan-questions block. Returns the parsed question array if a
    * valid block is found for the first time; null otherwise.
    */
-  feed(delta: string): z.infer<typeof PlanQuestionSchema>[] | null {
+  feed(delta: string): z.infer<ReturnType<typeof PlanQuestionSchema>>[] | null {
     if (this._hasQuestions) return null;
 
     this.buffer += delta;
@@ -64,7 +64,7 @@ export class PlanQuestionParser {
       return null;
     }
 
-    const parsed = z.array(PlanQuestionSchema).safeParse(raw);
+    const parsed = z.array(PlanQuestionSchema()).safeParse(raw);
     if (!parsed.success) {
       logger.warn("plan-question-parser: schema validation failed", {
         error: parsed.error.message,

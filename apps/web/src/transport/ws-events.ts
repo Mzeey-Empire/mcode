@@ -9,6 +9,7 @@ import { useTerminalStore } from "@/stores/terminalStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import { useSkillsStore } from "@/stores/skillsStore";
+import { usePlanStore } from "@/stores/planStore";
 import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
 import { emitPtyData, emitPtyExit } from "@/components/terminal/ptyDataRegistry";
 
@@ -50,6 +51,7 @@ function approxBase64DecodedBytes(encoded: string): number {
  * - `branch.changed` -- refreshes branch list and updates current branch if not manually overridden
  * - `plan.questions` -- model-proposed plan questions forwarded to threadStore wizard
  * - `plan.answered` -- server committed an answered marker; dismisses the wizard on this client
+ * - `plan.generated` -- server extracted a structured plan; updates planStore and opens Plan tab
  * - `permission.request` -- tool permission awaiting user decision
  * - `permission.resolved` -- a permission was settled (by user or session stop)
  * - `providers.availability` -- server-pushed provider availability snapshot forwarded to providerAvailabilityStore
@@ -406,7 +408,9 @@ export function startPushListeners(): void {
     }),
   );
 
-  // plan.answered: server committed an answered marker for a plan-questions message
+  // plan.answered: server committed an answered marker for a plan-questions
+  // message via the SUBMIT path. Adds to recentlyAnsweredPlanMessageIds so
+  // the AnsweredSummary marker can play its one-shot echo on first paint.
   unsubs.push(
     pushEmitter.on("plan.answered", (data) => {
       const { threadId, assistantMessageId } = data as {
@@ -415,6 +419,33 @@ export function startPushListeners(): void {
       };
       if (!threadId || !assistantMessageId) return;
       useThreadStore.getState().markPlanAnswered(threadId, assistantMessageId);
+    }),
+  );
+
+  // plan.dismissed: server committed the marker via the CANCEL path. Same
+  // state update (the batch is settled, wizard hides on other tabs) but
+  // skips the echo animation — dismiss is not submission.
+  unsubs.push(
+    pushEmitter.on("plan.dismissed", (data) => {
+      const { threadId, assistantMessageId } = data as {
+        threadId: string;
+        assistantMessageId: string;
+      };
+      if (!threadId || !assistantMessageId) return;
+      useThreadStore.getState().markPlanDismissed(threadId, assistantMessageId);
+    }),
+  );
+
+  // plan.generated: server extracted a structured plan from agent output
+  unsubs.push(
+    pushEmitter.on("plan.generated", (data) => {
+      const { threadId, plan } = data as {
+        threadId: string;
+        plan: import("@mcode/contracts").PlanRecord;
+      };
+      if (!threadId || !plan) return;
+
+      usePlanStore.getState().addPlan(threadId, plan);
     }),
   );
 

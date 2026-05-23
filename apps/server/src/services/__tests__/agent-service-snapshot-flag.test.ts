@@ -178,8 +178,9 @@ function buildService(opts: BuildServiceOptions = {}): {
     settingsService,
     availability,
     { markAnswered: vi.fn(), isAnswered: vi.fn(() => false), listAnsweredForThread: vi.fn(() => []) } as unknown as import("../../repositories/plan-question-answers-repo.js").PlanQuestionAnswersRepo,
-    { orchestrate: vi.fn() } as any,
-    { write: vi.fn(), copyAttachments: vi.fn(() => []), deleteThreadFiles: vi.fn() } as any,
+      { create: vi.fn(), updateStatus: vi.fn(), listByThread: vi.fn(() => []), getLatestForThread: vi.fn(() => null), getById: vi.fn(() => null) } as unknown as import("../../repositories/plan-repo.js").PlanRepo,
+      { orchestrate: vi.fn() } as any,
+      { write: vi.fn(), copyAttachments: vi.fn(() => []), deleteThreadFiles: vi.fn() } as any,
   );
 
   return { svc, turnSnapshotRepo, snapshotService, db, runSpy };

@@ -112,8 +112,9 @@ function buildService(db: Database.Database) {
     settingsService,
     availability,
     planQuestionAnswersRepo,
-    { orchestrate: vi.fn() } as any,
-    { write: vi.fn(), copyAttachments: vi.fn(() => []), deleteThreadFiles: vi.fn() } as any,
+      { create: vi.fn(), updateStatus: vi.fn(), listByThread: vi.fn(() => []), getLatestForThread: vi.fn(() => null), getById: vi.fn(() => null) } as unknown as import("../../repositories/plan-repo.js").PlanRepo,
+      { orchestrate: vi.fn() } as any,
+      { write: vi.fn(), copyAttachments: vi.fn(() => []), deleteThreadFiles: vi.fn() } as any,
   );
 
   return { svc, threadRepo, workspaceRepo, messageRepo, planQuestionAnswersRepo };
@@ -277,6 +278,52 @@ describe("AgentService.sendMessage — plan-questions answered marker", () => {
 
     const calls = (broadcast as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
       (c) => c[0] === "plan.answered",
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it("dismissPlanQuestions marks the latest fence answered and broadcasts plan.dismissed", () => {
+    const { svc, planQuestionAnswersRepo } = buildService(db);
+
+    svc.dismissPlanQuestions(thread.id);
+
+    expect(planQuestionAnswersRepo.isAnswered(assistantMessageId)).toBe(true);
+    expect(broadcast).toHaveBeenCalledWith("plan.dismissed", {
+      threadId: thread.id,
+      assistantMessageId,
+    });
+    // Dismiss must NOT broadcast plan.answered — that channel is reserved
+    // for submissions and triggers the AnsweredSummary echo on receivers.
+    const answeredCalls = (broadcast as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c) => c[0] === "plan.answered",
+    );
+    expect(answeredCalls).toEqual([]);
+  });
+
+  it("dismissPlanQuestions is idempotent — repeat calls don't fail and re-broadcast", () => {
+    const { svc, planQuestionAnswersRepo } = buildService(db);
+
+    svc.dismissPlanQuestions(thread.id);
+    svc.dismissPlanQuestions(thread.id);
+
+    expect(planQuestionAnswersRepo.listAnsweredForThread(thread.id)).toEqual([
+      assistantMessageId,
+    ]);
+  });
+
+  it("dismissPlanQuestions is a no-op when the thread has no plan-questions fence", () => {
+    const { svc, workspaceRepo, threadRepo, planQuestionAnswersRepo } =
+      buildService(db);
+    const ws2 = workspaceRepo.create("dismiss-ws", `${process.cwd()}#dismiss`, false);
+    const plainThread = threadRepo.create(ws2.id, "plain", "direct", "main");
+
+    svc.dismissPlanQuestions(plainThread.id);
+
+    expect(planQuestionAnswersRepo.listAnsweredForThread(plainThread.id)).toEqual([]);
+    const calls = (broadcast as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (c) =>
+        (c[0] === "plan.dismissed" || c[0] === "plan.answered") &&
+        (c[1] as { threadId: string }).threadId === plainThread.id,
     );
     expect(calls).toEqual([]);
   });

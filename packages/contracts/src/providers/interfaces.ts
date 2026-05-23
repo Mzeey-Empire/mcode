@@ -158,6 +158,17 @@ export interface IAgentProvider {
   on(event: "permission_request", handler: (request: PermissionRequest) => void): void;
   /** Subscribe to permission resolved events (emitted on session stop cancellation). */
   on(event: "permission_resolved", handler: (payload: { requestId: string; decision: PermissionDecision }) => void): void;
+  /** Subscribe to ExitPlanMode capture events (Claude SDK plan output). */
+  on(event: "exit_plan_mode", handler: (payload: { threadId: string; planMarkdown: string }) => void): void;
+
+  /** Mark a thread as expecting a plan output (enables ExitPlanMode capture). */
+  setPlanAnswerMode?(threadId: string, enabled: boolean): void;
+
+  /**
+   * Mark a thread as in the plan-questions phase. Providers with native question
+   * UIs (Cursor) should not auto-answer while this is active.
+   */
+  setPlanQuestionMode?(threadId: string, enabled: boolean): void;
 }
 
 /**

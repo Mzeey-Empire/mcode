@@ -12,7 +12,7 @@
  */
 
 import { context, build } from "esbuild";
-import { spawn } from "child_process";
+import { execSync, spawn } from "child_process";
 import { watch } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -23,6 +23,33 @@ import {
   copyClaudeSdkCliNextTo,
 } from "../../../scripts/build-server-dev-bundle.mjs";
 import { killProcessTree } from "../../../scripts/kill-process-tree.mjs";
+
+const isWindows = process.platform === "win32";
+
+/**
+ * Kill a process and its entire child tree.
+ *
+ * On Windows, `ChildProcess.kill()` only terminates the immediate process.
+ * When `shell: true` is used (required for spawning .exe under Git Bash),
+ * the actual application runs as a child of `cmd.exe`. Killing `cmd.exe`
+ * leaves the real process as an orphan. `taskkill /T /F` walks the tree.
+ *
+ * On POSIX, `process.kill(-pid)` sends the signal to the process group.
+ */
+function killProcessTree(child) {
+  if (!child || child.killed) return;
+  const pid = child.pid;
+  if (!pid) return;
+  try {
+    if (isWindows) {
+      execSync(`taskkill /PID ${pid} /T /F`, { stdio: "ignore", timeout: 5000 });
+    } else {
+      process.kill(-pid, "SIGTERM");
+    }
+  } catch {
+    // Process already exited or PID invalid
+  }
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, "..");
@@ -46,11 +73,15 @@ const shared = {
 /**
  * Spawn `tsc --watch` so server source edits re-emit apps/server/dist-tsc.
  *
+ * @param {(() => void) | undefined} onReady Called once after the initial
+ *   compilation completes (detected by "Watching for file changes" output).
+ *   Use this to defer side-effects that should not fire during the initial
+ *   (redundant) compilation pass.
  * @returns Detached subprocess handle (caller must kill via killProcessTree on shutdown).
  */
-function startServerTscWatch() {
+function startServerTscWatch(onReady) {
   const tscBin = resolveServerTscBin(serverRoot);
-  return spawn(process.execPath, [
+  const child = spawn(process.execPath, [
     tscBin,
     "--project",
     resolve(serverRoot, "tsconfig.build.json"),
@@ -58,8 +89,25 @@ function startServerTscWatch() {
     "--preserveWatchOutput",
   ], {
     cwd: serverRoot,
-    stdio: "inherit",
+    stdio: ["ignore", "pipe", "pipe"],
   });
+
+  let initialReady = false;
+  function handleOutput(data) {
+    const text = data.toString();
+    process.stdout.write(text);
+    if (!initialReady) {
+      const clean = text.replace(/\x1b\[[0-9;]*m/g, "");
+      if (clean.includes("Watching for file changes")) {
+        initialReady = true;
+        onReady?.();
+      }
+    }
+  }
+
+  child.stdout.on("data", handleOutput);
+  child.stderr.on("data", handleOutput);
+  return child;
 }
 
 /** esbuild entry point configs. */
@@ -81,8 +129,23 @@ const entries = [
 console.log("[dev] Building bundled server entry (apps/desktop/dist/server/server.cjs)...");
 await rebuildServerDevBundle();
 
-/** Must run before server `esbuild` watch so `dist-tsc` emits complete graphs per save. */
-let serverTscWatch = startServerTscWatch();
+/**
+ * Must run before server `esbuild` watch so `dist-tsc` emits complete graphs
+ * per save. The `onReady` callback defers `distTscWatcher` creation until
+ * after tsc's initial compilation finishes, preventing the redundant
+ * dist-tsc → esbuild → server.cjs cascade from restarting Electron on startup.
+ */
+let serverTscWatch = startServerTscWatch(() => {
+  startDistTscWatcher();
+});
+
+/** Safety net: if tsc --watch never reports ready within 120s, start the watcher anyway. */
+const tscReadyTimeout = setTimeout(() => {
+  if (!distTscWatcher) {
+    console.warn("[dev] tsc --watch did not report ready within 120s; starting dist-tsc watcher anyway");
+    startDistTscWatcher();
+  }
+}, 120_000);
 
 const serverEsbuildCfg = {
   ...shared,
@@ -101,6 +164,19 @@ const serverEsbuildCfg = {
 /** esbuild `watch` races `tsc --watch` when it rebuilds after the first changed file; debounce bundling. */
 let serverBundleRebuildTimer = null;
 let distTscWatcher = null;
+
+/** Idempotent: creates the dist-tsc watcher if it doesn't already exist. */
+function startDistTscWatcher() {
+  if (distTscWatcher) return;
+  try {
+    distTscWatcher = watch(resolve(serverRoot, "dist-tsc"), { recursive: true }, () => {
+      scheduleServerBundleRebuild();
+    });
+    console.log("[dev] dist-tsc watcher started (server hot-rebuild enabled)");
+  } catch (err) {
+    console.warn("[dev] Could not watch apps/server/dist-tsc; server hot-rebuild disabled:", err);
+  }
+}
 
 function scheduleServerBundleRebuild() {
   if (serverBundleRebuildTimer) clearTimeout(serverBundleRebuildTimer);
@@ -202,14 +278,6 @@ const [devServerUrl, watchContexts] = await Promise.all([
   ),
 ]);
 
-try {
-  distTscWatcher = watch(resolve(serverRoot, "dist-tsc"), { recursive: true }, () => {
-    scheduleServerBundleRebuild();
-  });
-} catch (err) {
-  console.warn("[dev] Could not watch apps/server/dist-tsc; server hot-rebuild disabled:", err);
-}
-
 if (!devServerUrl) {
   console.error("[dev] Vite dev server failed to start");
   process.exit(1);
@@ -306,6 +374,8 @@ function cleanup() {
     clearTimeout(serverBundleRebuildTimer);
     serverBundleRebuildTimer = null;
   }
+
+  clearTimeout(tscReadyTimeout);
 
   if (distTscWatcher) {
     try {

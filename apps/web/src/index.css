@@ -224,6 +224,129 @@
   }
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+ * Plan-question wizard motion system.
+ *
+ * Easing: ease-out-quart (0.25, 1, 0.5, 1) — natural deceleration. We
+ * intentionally avoid bounce/elastic curves because they read as
+ * decorative on a focused input flow.
+ *
+ * Durations follow the impeccable motion scale: 100–150ms feedback,
+ * 200–300ms state change, 500–800ms choreographed entrance.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+/* Float-rise: the floating panel enters from below with a spring-like deceleration. */
+@keyframes wizard-float-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-wizard-float-rise {
+  animation: wizard-float-rise 280ms cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+
+/* Top hairline draws outward from the center on entrance. */
+@keyframes wizard-hairline-draw {
+  from { transform: scaleX(0); opacity: 0; }
+  to   { transform: scaleX(1); opacity: 1; }
+}
+.animate-wizard-hairline {
+  transform-origin: center;
+  animation: wizard-hairline-draw 200ms cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+
+/* Question header rises on entrance. */
+@keyframes wizard-header-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-wizard-header {
+  animation: wizard-header-enter 300ms cubic-bezier(0.25, 1, 0.5, 1) 80ms both;
+}
+
+/* Each tile rises and fades in, staggered via --tile-index inline var. */
+@keyframes wizard-tile-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-wizard-tile {
+  animation: wizard-tile-enter 180ms cubic-bezier(0.25, 1, 0.5, 1) both;
+  animation-delay: calc(140ms + var(--tile-index, 0) * 40ms);
+}
+
+/* Nav bar trails the rest of the entrance. */
+@keyframes wizard-nav-enter {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.animate-wizard-nav {
+  animation: wizard-nav-enter 200ms cubic-bezier(0.25, 1, 0.5, 1) 280ms both;
+}
+
+/* Question advance: outgoing slides left, incoming slides in from the
+   right; reverse for previous. The wizard owns the direction via its
+   data attribute so the same class name handles both. */
+@keyframes wizard-question-in-forward {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes wizard-question-in-back {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.animate-wizard-question-forward {
+  animation: wizard-question-in-forward 220ms cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+.animate-wizard-question-back {
+  animation: wizard-question-in-back 220ms cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+
+/* Keyboard legend overlay enters quietly — fade + tiny rise, no horizontal
+   movement so it reads as overlay material rather than panel content. */
+@keyframes wizard-legend-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-wizard-legend {
+  animation: wizard-legend-enter 180ms cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+
+/* Accept-all sparkle: each tile briefly flashes its title to brand color
+   left to right with a staggered delay. Triggered as a one-shot when
+   the user accepts every recommended option in a single gesture. */
+@keyframes wizard-accept-flash {
+  0%   { color: var(--color-foreground); }
+  40%  { color: var(--color-primary); }
+  100% { color: var(--color-foreground); }
+}
+.animate-wizard-accept-flash {
+  animation: wizard-accept-flash 400ms cubic-bezier(0.25, 1, 0.5, 1) both;
+  animation-delay: calc(var(--tile-index, 0) * 60ms);
+}
+
+/* Submission echo: the AnsweredSummary marker pulses with the brand
+   accent the first time it persists, acknowledging the submit. */
+@keyframes wizard-marker-echo {
+  0%   { background-color: transparent; }
+  30%  { background-color: oklch(0.72 0.17 75 / 0.12); }
+  100% { background-color: transparent; }
+}
+.animate-wizard-marker-echo {
+  animation: wizard-marker-echo 600ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-wizard-hairline,
+  .animate-wizard-header,
+  .animate-wizard-tile,
+  .animate-wizard-nav,
+  .animate-wizard-question-forward,
+  .animate-wizard-question-back,
+  .animate-wizard-legend,
+  .animate-wizard-accept-flash,
+  .animate-wizard-marker-echo {
+    animation: none;
+  }
+}
 
 .glow-primary {
   box-shadow: -2px 0 8px -1px oklch(0.72 0.17 75 / 0.35);
@@ -258,14 +381,18 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html {
+    @apply font-sans;
+    overflow: hidden;
+    height: 100%;
+  }
   body {
     @apply bg-background text-foreground;
     margin: 0;
+    overflow: hidden;
+    height: 100%;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-  }
-  html {
-    @apply font-sans;
   }
   button, [role="button"], a, select, summary, [tabindex]:not([tabindex="-1"]) {
     cursor: pointer;
@@ -383,6 +510,14 @@ input[type="range"].settings-range::-moz-range-thumb {
 }
 .dark .scrollbar-on-hover:hover::-webkit-scrollbar-thumb {
   background: oklch(0.35 0.005 260);
+}
+
+/* Plan panel: always reserve vertical gutter so version swaps never toggle width */
+.plan-panel-viewport {
+  overflow-x: hidden;
+  overflow-y: scroll;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 @keyframes blink {
@@ -554,6 +689,24 @@ input[type="range"].settings-range::-moz-range-thumb {
 @media (prefers-reduced-motion: reduce) {
   .stacked-layers-animated,
   .stacked-layers-animated > path {
+    animation: none;
+  }
+}
+
+/* Plan panel skeleton animations: sliding progress bar and fading shimmer blocks. */
+@keyframes plan-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(430%); }
+}
+
+@keyframes plan-fade {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.15; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [class*="animate-[plan-slide"],
+  [class*="animate-[plan-fade"] {
     animation: none;
   }
 }

@@ -211,4 +211,31 @@ describe("per-thread settings", () => {
       .threads.find((t) => t.id === "thread-sync-3");
     expect(updated?.copilot_agent).toBeNull();
   });
+
+  it("sendPlanAction implement switches interaction mode to chat", async () => {
+    const thread = createMockThread({
+      id: "thread-implement",
+      interaction_mode: "plan",
+    });
+    useWorkspaceStore.setState({ threads: [thread] });
+
+    await useThreadStore.getState().sendPlanAction(
+      "thread-implement",
+      "Implement the plan.",
+      "implement",
+    );
+
+    expect(useThreadStore.getState().getThreadSettings("thread-implement").interactionMode).toBe("chat");
+    expect(
+      useWorkspaceStore.getState().threads.find((t) => t.id === "thread-implement")?.interaction_mode,
+    ).toBe("chat");
+    expect(mockTransport.updateThreadSettings).toHaveBeenCalledWith(
+      "thread-implement",
+      expect.objectContaining({ interactionMode: "chat" }),
+    );
+
+    const calls = vi.mocked(mockTransport.sendMessage).mock.calls;
+    const sendCall = calls[calls.length - 1];
+    expect(sendCall?.[8]).toBe("chat");
+  });
 });
