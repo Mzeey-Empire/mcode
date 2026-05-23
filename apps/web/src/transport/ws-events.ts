@@ -59,6 +59,7 @@ function approxBase64DecodedBytes(encoded: string): number {
  * - `workspace.orderChanged` -- sidebar project order changed on the server; refreshes workspace list
  * - `workspace.deleted` -- workspace hard-delete complete; removes it from local state
  * - `workspace.deleteFailed` -- workspace deletion permanently stuck; reloads workspace list
+ * - `thread.handoff` -- handoff pipeline status for a child thread (generating, ready, fallback, error)
  */
 export function startPushListeners(): void {
   // Guard against double-init
@@ -475,6 +476,24 @@ export function startPushListeners(): void {
       // Reject malformed payloads rather than overwriting the store with garbage.
       if (!Array.isArray(data)) return;
       useProviderAvailabilityStore.getState().replace(data as ProviderAvailability[]);
+    }),
+  );
+
+  // thread.handoff: handoff pipeline status for a child thread (generating -> ready/fallback/error)
+  unsubs.push(
+    pushEmitter.on("thread.handoff", (data) => {
+      const payload = data as {
+        threadId: string;
+        status: "generating" | "ready" | "fallback" | "error";
+        ladderStep?: "B" | "A" | "D";
+        providerErrorOnGenerate?: "quota" | "auth" | "context-overflow" | "transient" | "fatal" | null;
+      };
+      if (!payload.threadId || !payload.status) return;
+      useThreadStore.getState().setHandoffMeta(payload.threadId, {
+        status: payload.status,
+        ladderStep: payload.ladderStep,
+        providerErrorOnGenerate: payload.providerErrorOnGenerate,
+      });
     }),
   );
 

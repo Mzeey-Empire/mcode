@@ -239,7 +239,7 @@ export function RightPanel() {
         role="separator"
         aria-orientation="vertical"
         tabIndex={0}
-        className="absolute left-0 top-0 bottom-0 z-10 flex w-3 cursor-col-resize justify-center bg-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        className="absolute left-0 top-0 bottom-0 z-20 flex w-3 cursor-col-resize justify-center bg-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         onMouseDown={onDragStart}
         onDoubleClick={() => {
           const viewportCap = window.innerWidth - PANEL_MIN_WIDTH;

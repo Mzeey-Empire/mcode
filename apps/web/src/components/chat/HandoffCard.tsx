@@ -1,5 +1,5 @@
 import { memo, useState, useMemo } from "react";
-import { ChevronRight, GitBranch, FileCode, ListChecks, GitCommit } from "lucide-react";
+import { ChevronRight, GitFork, FileCode, ListChecks, GitCommit } from "lucide-react";
 import { parseHandoffJson } from "./handoff-utils";
 
 /** Props for HandoffCard. */
@@ -8,7 +8,7 @@ interface HandoffCardProps {
   content: string;
 }
 
-/** Collapsible card showing thread branching context. Collapsed by default. */
+/** Collapsible card showing thread fork context. Collapsed by default. */
 export const HandoffCard = memo(function HandoffCard({ content }: HandoffCardProps) {
   const [expanded, setExpanded] = useState(false);
   const metadata = useMemo(() => parseHandoffJson(content), [content]);
@@ -24,9 +24,9 @@ export const HandoffCard = memo(function HandoffCard({ content }: HandoffCardPro
         aria-controls={`handoff-${metadata.parentThreadId}`}
         className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm transition-colors hover:bg-muted/40"
       >
-        <GitBranch size={14} className="shrink-0 text-primary/70" />
+        <GitFork size={14} className="shrink-0 text-primary/70" />
         <span className="font-medium text-foreground/90">
-          Branched from <span className="text-primary/80">{metadata.parentTitle}</span>
+          Forked from <span className="text-primary/80">{metadata.parentTitle}</span>
         </span>
         <div className={`ml-auto shrink-0 text-muted-foreground/60 transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}>
           <ChevronRight size={14} />

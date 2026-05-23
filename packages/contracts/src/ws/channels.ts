@@ -114,6 +114,20 @@ export const WS_CHANNELS = {
     workspacePath: z.string(),
     reason: z.string(),
   }),
+  /**
+   * Emitted when a child thread's handoff transitions through generating, ready,
+   * fallback (deterministic), or error states. Lets the UI reflect handoff progress
+   * without polling.
+   */
+  "thread.handoff": z.object({
+    threadId: z.string(),
+    status: z.enum(["generating", "ready", "fallback", "error"]),
+    ladderStep: z.enum(["B", "A", "D"]).optional(),
+    providerErrorOnGenerate: z
+      .enum(["quota", "auth", "context-overflow", "transient", "fatal"])
+      .nullable()
+      .optional(),
+  }),
 } as const;
 
 /** Union of all push channel names. */

@@ -55,6 +55,14 @@ import { PlanOutputParser } from "./plan-output-parser.js";
 import { PlanRepo } from "../repositories/plan-repo";
 import { buildHandoffContent, buildConversationReplay, replayBudgetChars, resolveForkSnapshot } from "./handoff-builder.js";
 import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts";
+import { HandoffPipelineService } from "./handoff/handoff-pipeline.js";
+import { HandoffStorage } from "./handoff/handoff-storage.js";
+import type { AttachmentSource } from "./handoff/handoff-storage.js";
+import type { HandoffArtifact } from "./handoff/handoff-types.js";
+import { classifyProviderError } from "./handoff/error-classifier.js";
+import { getMcodeDir } from "@mcode/shared";
+import { join } from "path";
+import { storedAttachmentSuffix } from "@mcode/contracts";
 import { normalizeAgentProviderError } from "./provider-agent-error-normalize.js";
 
 /**
@@ -198,6 +206,10 @@ export class AgentService {
     @inject(PlanQuestionAnswersRepo)
     private readonly planQuestionAnswersRepo: PlanQuestionAnswersRepo,
     @inject(PlanRepo) private readonly planRepo: PlanRepo,
+    @inject(HandoffPipelineService)
+    private readonly handoffPipeline: HandoffPipelineService,
+    @inject(HandoffStorage)
+    private readonly handoffStorage: HandoffStorage,
   ) {}
 
   /**
@@ -891,12 +903,33 @@ export class AgentService {
     }
 
     this.threadRepo.updateModel(thread.id, model);
-
-    if (provider === "codex" && codexFastMode !== undefined) {
-      this.threadRepo.updateSettings(thread.id, {
-        codex_fast_mode: codexFastMode,
-      });
-    }
+    this.threadRepo.updateSettings(thread.id, {
+      ...(reasoningLevel !== undefined && { reasoning_level: reasoningLevel }),
+      ...(interactionMode !== undefined && { interaction_mode: interactionMode }),
+      ...(permissionMode !== undefined && permissionMode !== "default" && { permission_mode: permissionMode }),
+      ...(contextWindowMode !== undefined && { context_window_mode: contextWindowMode }),
+      ...(thinking !== undefined && { thinking }),
+      ...(copilotAgent !== undefined && { copilot_agent: copilotAgent }),
+      ...(provider === "codex" && codexFastMode !== undefined && { codex_fast_mode: codexFastMode }),
+    });
+    const persistedPermissionMode =
+      permissionMode === "full" || permissionMode === "supervised"
+        ? permissionMode
+        : thread.permission_mode;
+    thread = {
+      ...thread,
+      model,
+      provider,
+      reasoning_level: reasoningLevel ?? thread.reasoning_level,
+      interaction_mode: interactionMode ?? thread.interaction_mode,
+      permission_mode: persistedPermissionMode,
+      context_window_mode: contextWindowMode ?? thread.context_window_mode,
+      thinking: thinking ?? thread.thinking,
+      copilot_agent: copilotAgent ?? thread.copilot_agent,
+      codex_fast_mode: provider === "codex" && codexFastMode !== undefined
+        ? codexFastMode
+        : thread.codex_fast_mode,
+    };
 
     void this.sendMessage(
       thread.id,
@@ -1018,41 +1051,6 @@ export class AgentService {
       forkMessage.sequence,
     );
 
-    // Gather handoff data
-    // lastAssistantText comes from forkedMessages so it never leaks post-fork state.
-    const lastAssistantMsg = [...forkedMessages]
-      .reverse()
-      .find((m) => m.role === "assistant");
-    const lastAssistantText = lastAssistantMsg?.content ?? null;
-
-    // Resolve the snapshot at the fork point for historical fidelity.
-    // Only snapshots whose message_id falls within the forked message range are
-    // considered, preventing post-fork file changes and HEAD refs from leaking
-    // into the child thread's handoff context.
-    const allSnapshots = this.turnSnapshotRepo.listByThread(parentThreadId);
-    const forkedMessageIds = new Set(forkedMessages.map((m) => m.id));
-    const forkSnapshot = resolveForkSnapshot(allSnapshots, forkedMessageIds);
-    const recentFilesChanged: string[] = forkSnapshot?.files_changed ?? [];
-    const sourceHead = forkSnapshot?.ref_after ?? null;
-
-    // Task state has no historical version; include current tasks as best-effort context.
-    // Post-fork tasks on the parent may be included — this is a known limitation.
-    const rawTasks = this.taskRepo.get(parentThreadId);
-    const openTasks = (rawTasks ?? []).map((t) => ({
-      content: t.content,
-      status: t.status,
-    }));
-
-    // Build handoff content
-    const handoffContent = buildHandoffContent({
-      parentThread,
-      forkMessageId: resolvedForkMessageId,
-      lastAssistantText,
-      recentFilesChanged,
-      openTasks,
-      sourceHead,
-    });
-
     // Create child thread with lineage
     const lineage = { parentThreadId, forkedFromMessageId: resolvedForkMessageId };
     let thread: Thread;
@@ -1087,55 +1085,241 @@ export class AgentService {
       thread = this.threadRepo.create(workspaceId, title, "direct", branch, true, provider, lineage);
     }
 
-    // Insert synthetic system handoff message as sequence 1
-    this.messageRepo.create(thread.id, "system", handoffContent, 1);
-
-    // Build the conversation replay for the provider.
-    // This gives the AI real conversation history instead of a lossy summary.
-    // The handoffContent (prose + JSON metadata) is stored in the DB for the UI only.
-    const budget = replayBudgetChars(model);
-    // The `last_compact_summary` on the thread is a single rolling value that
-    // gets overwritten on each compaction. It is only safe to use when the most
-    // recent compaction in the entire thread falls within our forked range;
-    // otherwise the summary describes turns that happened after the fork point.
-    let compactSummary: string | null = null;
-    if (parentThread.last_compact_summary) {
-      const lastForkCompactionIdx = findLastIndex(
-        forkedMessages,
-        (m) => m.role === "system" && m.content === "Context compacted",
-      );
-      if (lastForkCompactionIdx !== -1) {
-        // Check whether any compaction markers exist after the fork point.
-        const { messages: postForkWindow } = this.messageRepo.listByThread(parentThreadId, 100);
-        const postForkCompaction = postForkWindow.some(
-          (m) =>
-            m.role === "system" &&
-            m.content === "Context compacted" &&
-            m.sequence > forkMessage.sequence,
-        );
-        if (!postForkCompaction) {
-          compactSummary = parentThread.last_compact_summary;
-        }
-      }
-    }
-    const replay = buildConversationReplay(forkedMessages, budget, compactSummary);
-    const replayHeader = `You are continuing work from a previous thread titled "${parentThread.title}". Here is the conversation history up to the fork point:\n\n`;
-    // When replay is empty (system-only or all-blank parent history), send the prompt alone.
-    // The seq-1 handoff message still provides context via its prose summary.
-    const stitchedContent = replay
-      ? `${replayHeader}${replay}\n\n---\n\n${content}`
-      : content;
-
-    // In plan mode, wrap the stitched content so the provider receives
-    // buildPlanPrompt(replay + userPrompt) on the first branch turn.
-    // The DB still stores the clean user prompt at seq 2 (written by sendMessage).
-    const providerInput =
-      interactionMode === "plan" ? this.buildPlanPrompt(stitchedContent) : stitchedContent;
-
     const resolvedCodexFast =
       codexFastMode !== undefined
         ? codexFastMode
         : parentThread.codex_fast_mode;
+    this.threadRepo.updateModel(thread.id, model);
+    this.threadRepo.updateSettings(thread.id, {
+      ...(reasoningLevel !== undefined && { reasoning_level: reasoningLevel }),
+      ...(interactionMode !== undefined && { interaction_mode: interactionMode }),
+      ...(permissionMode !== undefined && permissionMode !== "default" && { permission_mode: permissionMode }),
+      ...(effectiveContextWindowMode !== undefined && { context_window_mode: effectiveContextWindowMode }),
+      ...(effectiveThinking !== undefined && { thinking: effectiveThinking }),
+      ...(copilotAgent !== undefined && { copilot_agent: copilotAgent }),
+      ...(provider === "codex" && resolvedCodexFast !== null && { codex_fast_mode: resolvedCodexFast }),
+    });
+    const persistedPermissionMode =
+      permissionMode === "full" || permissionMode === "supervised"
+        ? permissionMode
+        : thread.permission_mode;
+    thread = {
+      ...thread,
+      model,
+      provider,
+      reasoning_level: reasoningLevel ?? thread.reasoning_level,
+      interaction_mode: interactionMode ?? thread.interaction_mode,
+      permission_mode: persistedPermissionMode,
+      context_window_mode: effectiveContextWindowMode ?? thread.context_window_mode,
+      thinking: effectiveThinking ?? thread.thinking,
+      copilot_agent: copilotAgent ?? thread.copilot_agent,
+      codex_fast_mode: provider === "codex" && resolvedCodexFast !== null
+        ? resolvedCodexFast
+        : thread.codex_fast_mode,
+    };
+
+    // Derive the fork anchor role for the pipeline.
+    const forkAnchorRole = forkMessage.role === "user" ? "user" : "assistant";
+
+    // Orchestrate the handoff pipeline (B->A->D ladder). On failure, fall back to the
+    // legacy inline replay so the fork always succeeds.
+    let providerWireOverride: string;
+
+    // Signal to clients that the handoff is in progress so the UI can show a spinner
+    // before the artifact lands.
+    broadcast("thread.handoff", { threadId: thread.id, status: "generating" });
+
+    try {
+      const artifact = await this.handoffPipeline.orchestrate({
+        parentThreadId,
+        forkedFromMessageId: resolvedForkMessageId,
+        forkAnchorRole,
+        childThreadId: thread.id,
+        childProviderId: provider,
+        userFollowUpMessage: content,
+      });
+
+      // Copy attachments from parent messages within the fork range into the child thread's dir.
+      // StoredAttachment has no path field; files live at {mcodeDir}/attachments/{threadId}/{id}{ext}.
+      const parentAttachmentsDir = join(getMcodeDir(), "attachments", parentThreadId);
+      const attachmentSources: AttachmentSource[] = [];
+      for (const msg of forkedMessages) {
+        if (!msg.attachments) continue;
+        for (const att of msg.attachments) {
+          const ext = storedAttachmentSuffix(att.mimeType);
+          const absolutePath = join(parentAttachmentsDir, `${att.id}${ext}`);
+          if (!existsSync(absolutePath)) {
+            logger.warn("createBranchedThread: parent attachment not found on disk, skipping", {
+              attachmentId: att.id,
+              parentThreadId,
+              absolutePath,
+            });
+            continue;
+          }
+          attachmentSources.push({
+            id: att.id,
+            absolutePath,
+            originalName: att.name,
+            mime: att.mimeType,
+            parentMessageId: msg.id,
+          });
+        }
+      }
+
+      if (attachmentSources.length > 0) {
+        artifact.meta.attachments = await this.handoffStorage.copyAttachments(thread.id, attachmentSources);
+      }
+
+      // Guard against the child thread being hard-deleted between orchestration
+      // start and artifact write (e.g. rapid user delete during a slow path B).
+      const childCheck = this.threadRepo.findById(thread.id);
+      if (!childCheck || childCheck.deleted_at) {
+        logger.info("Child thread vanished mid-handoff; dropping artifact", { childThreadId: thread.id });
+        throw new Error("Child thread deleted before handoff artifact could be written");
+      }
+
+      await this.handoffStorage.write(thread.id, artifact);
+
+      broadcast("thread.handoff", {
+        threadId: thread.id,
+        status: artifact.meta.ladderStep === "D" ? "fallback" : "ready",
+        ladderStep: artifact.meta.ladderStep,
+        providerErrorOnGenerate: artifact.meta.providerErrorOnGenerate,
+      });
+
+      // Store an internal-only system message at seq 1 as a DB anchor for the handoff.
+      // isInternal=true keeps it off the UI render path.
+      this.messageRepo.create(
+        thread.id, "system", artifact.markdown, 1,
+        undefined, undefined, undefined, undefined, /* isInternal */ true,
+      );
+
+      // Append the user's new message so the provider receives full context + the prompt.
+      providerWireOverride = `${artifact.markdown}\n\n---\n\n${content}`;
+    } catch (pipelineErr) {
+      // Re-check child thread existence before writing any fallback artifacts.
+      // The thread may have been hard-deleted between pipeline start and failure
+      // (e.g. rapid user delete during a slow path B), in which case proceeding
+      // would produce FK errors, stale files, or a misleading fallback event.
+      const childRecheck = this.threadRepo.findById(thread.id);
+      if (!childRecheck || childRecheck.deleted_at) {
+        logger.info("Child thread vanished mid-handoff; aborting fallback", {
+          childThreadId: thread.id,
+        });
+        throw pipelineErr;
+      }
+
+      // Classify the error so we know how to label the artifact and log usefully.
+      const errClass = classifyProviderError(pipelineErr);
+      logger.warn("createBranchedThread: handoff pipeline failed, falling back to legacy replay", {
+        threadId: thread.id,
+        parentThreadId,
+        errClass,
+        error: pipelineErr instanceof Error ? pipelineErr.message : String(pipelineErr),
+        stack: pipelineErr instanceof Error ? pipelineErr.stack : undefined,
+      });
+
+      // Notify clients that the handoff fell back to the deterministic legacy replay.
+      // The pipeline itself threw, so treat as the classified error (or fatal if clean).
+      broadcast("thread.handoff", {
+        threadId: thread.id,
+        status: "fallback",
+        ladderStep: "D" as const,
+        providerErrorOnGenerate: errClass === "clean" ? ("fatal" as const) : errClass,
+      });
+
+      // Legacy fallback: build handoff content + conversation replay inline.
+      const lastAssistantMsg = [...forkedMessages].reverse().find((m) => m.role === "assistant");
+      const lastAssistantText = lastAssistantMsg?.content ?? null;
+      const allSnapshots = this.turnSnapshotRepo.listByThread(parentThreadId);
+      const forkedMessageIds = new Set(forkedMessages.map((m) => m.id));
+      const forkSnapshot = resolveForkSnapshot(allSnapshots, forkedMessageIds);
+      const recentFilesChanged: string[] = forkSnapshot?.files_changed ?? [];
+      const sourceHead = forkSnapshot?.ref_after ?? null;
+      const rawTasks = this.taskRepo.get(parentThreadId);
+      const openTasks = (rawTasks ?? []).map((t) => ({ content: t.content, status: t.status }));
+      const handoffContent = buildHandoffContent({
+        parentThread,
+        forkMessageId: resolvedForkMessageId,
+        lastAssistantText,
+        recentFilesChanged,
+        openTasks,
+        sourceHead,
+      });
+
+      // isInternal=true keeps this off the UI render path, consistent with the
+      // pipeline path's system message (written below after replay is built).
+      // NOTE: we write this placeholder now; the legacy replay is stored via
+      // providerWireOverride, not as a second system message.
+      this.messageRepo.create(
+        thread.id, "system", handoffContent, 1,
+        undefined, undefined, undefined, undefined, /* isInternal */ true,
+      );
+
+      const budget = replayBudgetChars(model);
+      let compactSummary: string | null = null;
+      if (parentThread.last_compact_summary) {
+        const lastForkCompactionIdx = findLastIndex(
+          forkedMessages,
+          (m) => m.role === "system" && m.content === "Context compacted",
+        );
+        if (lastForkCompactionIdx !== -1) {
+          const { messages: postForkWindow } = this.messageRepo.listByThread(parentThreadId, 100);
+          const postForkCompaction = postForkWindow.some(
+            (m) =>
+              m.role === "system" &&
+              m.content === "Context compacted" &&
+              m.sequence > forkMessage.sequence,
+          );
+          if (!postForkCompaction) {
+            compactSummary = parentThread.last_compact_summary;
+          }
+        }
+      }
+      const replay = buildConversationReplay(forkedMessages, budget, compactSummary);
+      const replayHeader = `You are continuing work from a previous thread titled "${parentThread.title}". Here is the conversation history up to the fork point:\n\n`;
+      providerWireOverride = replay ? `${replayHeader}${replay}\n\n---\n\n${content}` : content;
+
+      // Persist a HandoffArtifact so "View doc" has something to read.
+      // The markdown is the full replay that will be sent to the provider.
+      const legacyMarkdown = (replay ? `${replayHeader}${replay}` : handoffContent).trim();
+      const legacyArtifact: HandoffArtifact = {
+        markdown: legacyMarkdown,
+        meta: {
+          schemaVersion: 1,
+          parentThreadId,
+          forkedFromMessageId: resolvedForkMessageId,
+          forkAnchorRole,
+          childThreadId: thread.id,
+          generatedBy: "deterministic",
+          provider: parentThread.provider,
+          ladderStep: "D",
+          mode: "full",
+          generatedAt: new Date().toISOString(),
+          characterCount: legacyMarkdown.length,
+          parentSdkSessionId: parentThread.sdk_session_id ?? null,
+          providerErrorOnGenerate: errClass === "clean" ? "fatal" : errClass,
+          regenerationHistory: [],
+          attachments: [],
+        },
+      };
+      try {
+        await this.handoffStorage.write(thread.id, legacyArtifact);
+      } catch (storageErr) {
+        // Non-fatal: the fork still succeeds via providerWireOverride; View doc
+        // will show "not available" rather than blocking the user.
+        logger.warn("Failed to persist legacy handoff artifact (View doc will be unavailable)", {
+          threadId: thread.id,
+          storageError: storageErr instanceof Error ? storageErr.message : String(storageErr),
+        });
+      }
+    }
+
+    // In plan mode, wrap so the provider receives buildPlanPrompt(handoff + userPrompt).
+    // The DB still stores the clean user prompt at seq 2 (written by sendMessage).
+    const providerInput =
+      interactionMode === "plan" ? this.buildPlanPrompt(providerWireOverride) : providerWireOverride;
+
     if (provider === "codex" && resolvedCodexFast !== null) {
       this.threadRepo.updateSettings(thread.id, {
         codex_fast_mode: resolvedCodexFast,
@@ -1156,7 +1340,7 @@ export class AgentService {
       copilotAgent,
       effectiveContextWindowMode,
       effectiveThinking,
-      undefined,
+      resolvedCodexFast ?? undefined,
       undefined,
       providerInput,
       undefined,

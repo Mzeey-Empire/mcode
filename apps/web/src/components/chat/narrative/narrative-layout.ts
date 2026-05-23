@@ -1,0 +1,24 @@
+/**
+ * Shared layout classes for narrative tool rows.
+ *
+ * Flex rows need `min-w-0` and `overflow-hidden` on the container (not only on
+ * the truncating child) so long unbroken command strings ellipsize instead of
+ * widening the chat column.
+ */
+
+/** Constrains a horizontal tool/meta row inside the virtualized chat column. */
+export const NARRATIVE_TOOL_ROW =
+  "flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden";
+
+/**
+ * Monospace detail text (path, command, pattern) with ellipsis when truncated.
+ *
+ * @param size - `sm` for active/sub-agent rows, `md` for expanded tool-group rows.
+ */
+export function narrativeToolDetailClass(size: "sm" | "md"): string {
+  const tone =
+    size === "md"
+      ? "text-[0.75rem] text-muted-foreground/80"
+      : "text-[0.6875rem] text-muted-foreground/50";
+  return `font-mono ${tone} truncate flex-1 min-w-0 [overflow-wrap:anywhere]`;
+}

@@ -16,6 +16,7 @@ import { resolve, dirname } from "node:path";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { rebuildServerDevBundle } from "./build-server-dev-bundle.mjs";
+import { killProcessTree } from "./kill-process-tree.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "..");
@@ -152,19 +153,19 @@ const vite = spawn("bun", ["run", "dev"], {
 
 // Clean shutdown: kill both on exit
 function cleanup() {
-  server.kill();
-  vite.kill();
+  killProcessTree(server);
+  killProcessTree(vite);
 }
 
 process.on("SIGINT", cleanup);
 process.on("SIGTERM", cleanup);
 server.on("exit", () => {
   if (!serverFailed) {
-    vite.kill();
+    killProcessTree(vite);
     process.exit();
   }
 });
 vite.on("exit", () => {
-  server.kill();
+  killProcessTree(server);
   process.exit();
 });

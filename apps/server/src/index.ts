@@ -51,6 +51,7 @@ import { WorkspaceEnricher } from "./services/workspace-enricher";
 import { FilesystemBrowser } from "./services/filesystem-browser";
 import { ModelCacheService } from "./services/model-cache-service";
 import { DiffSummaryService } from "./services/diff-summary-service";
+import { HandoffStorage } from "./services/handoff/handoff-storage";
 import { WebSocket } from "ws";
 import { resolveGracePeriodMs } from "./grace-period-ms";
 import { AgentEventType } from "@mcode/contracts";
@@ -209,6 +210,7 @@ settingsService.on("change", (next) => {
 const cleanupWorker = container.resolve(CleanupWorker);
 const prDraftService = container.resolve(PrDraftService);
 const diffSummaryService = container.resolve(DiffSummaryService);
+const handoffStorage = container.resolve(HandoffStorage);
 const db = container.resolve<Database.Database>("Database");
 const jobObject = container.resolve<JobObject>("JobObject");
 
@@ -475,6 +477,7 @@ const { httpServer, wss } = createWsServer({
   enricher,
   filesystemBrowser,
   diffSummaryService,
+  handoffStorage,
   authToken: AUTH_TOKEN,
 });
 

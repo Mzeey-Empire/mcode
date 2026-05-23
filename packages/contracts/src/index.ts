@@ -275,6 +275,7 @@ export type { HandoffMetadata } from "./handoff.js";
 // Provider interfaces
 export type {
   ProviderId,
+  SessionForkBehavior,
   IAgentProvider,
   ICompletionCapable,
   IProviderRegistry,

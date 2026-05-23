@@ -9,6 +9,7 @@ import { CleanupJobRepo } from "../repositories/cleanup-job-repo";
 import { WorkspaceService } from "../services/workspace-service";
 import { AttachmentService } from "../services/attachment-service";
 import { CleanupWorker } from "../services/cleanup-worker";
+import { HandoffStorage } from "../services/handoff/handoff-storage";
 import type { AgentService } from "../services/agent-service";
 import type { ClaudeProvider } from "../providers/claude/claude-provider";
 import type { TerminalService } from "../services/terminal-service";
@@ -209,6 +210,7 @@ describe("WorkspaceService.delete - two-phase orchestration", () => {
   let cleanupJobRepo: CleanupJobRepo;
   let workspaceService: WorkspaceService;
   let mockAttachmentService: AttachmentService;
+  let mockHandoffStorage: HandoffStorage;
 
   beforeEach(() => {
     db = openMemoryDatabase();
@@ -219,6 +221,10 @@ describe("WorkspaceService.delete - two-phase orchestration", () => {
     mockAttachmentService = {
       removeForThread: vi.fn(),
     } as unknown as AttachmentService;
+
+    mockHandoffStorage = {
+      deleteThreadFiles: vi.fn().mockResolvedValue(undefined),
+    } as unknown as HandoffStorage;
 
     workspaceService = new WorkspaceService(
       workspaceRepo,
@@ -333,6 +339,7 @@ describe("CleanupWorker - attachment cleanup and workspace finalization", () => 
   let mockTerminalService: TerminalService;
   let mockGitService: GitService;
   let mockAttachmentService: AttachmentService;
+  let mockHandoffStorage: HandoffStorage;
   let worker: CleanupWorker;
 
   beforeEach(() => {
@@ -361,6 +368,10 @@ describe("CleanupWorker - attachment cleanup and workspace finalization", () => 
       removeForThread: vi.fn(),
     } as unknown as AttachmentService;
 
+    mockHandoffStorage = {
+      deleteThreadFiles: vi.fn().mockResolvedValue(undefined),
+    } as unknown as HandoffStorage;
+
     worker = new CleanupWorker(
       db,
       cleanupJobRepo,
@@ -370,6 +381,7 @@ describe("CleanupWorker - attachment cleanup and workspace finalization", () => 
       mockGitService,
       workspaceRepo,
       mockAttachmentService,
+      mockHandoffStorage,
     );
   });
 
@@ -453,6 +465,7 @@ describe("CleanupWorker - startup reconciliation", () => {
   let mockTerminalService: TerminalService;
   let mockGitService: GitService;
   let mockAttachmentService: AttachmentService;
+  let mockHandoffStorage: HandoffStorage;
   let worker: CleanupWorker;
 
   beforeEach(() => {
@@ -480,6 +493,10 @@ describe("CleanupWorker - startup reconciliation", () => {
       removeForThread: vi.fn(),
     } as unknown as AttachmentService;
 
+    mockHandoffStorage = {
+      deleteThreadFiles: vi.fn().mockResolvedValue(undefined),
+    } as unknown as HandoffStorage;
+
     worker = new CleanupWorker(
       db,
       cleanupJobRepo,
@@ -489,6 +506,7 @@ describe("CleanupWorker - startup reconciliation", () => {
       mockGitService,
       workspaceRepo,
       mockAttachmentService,
+      mockHandoffStorage,
     );
   });
 
@@ -542,6 +560,7 @@ describe("CleanupWorker - shared branch protection", () => {
   let mockTerminalService: TerminalService;
   let mockGitService: GitService;
   let mockAttachmentService: AttachmentService;
+  let mockHandoffStorage: HandoffStorage;
   let worker: CleanupWorker;
 
   beforeEach(() => {
@@ -557,8 +576,9 @@ describe("CleanupWorker - shared branch protection", () => {
     mockTerminalService = { killByThread: vi.fn() } as unknown as TerminalService;
     mockGitService = { removeWorktree: vi.fn().mockResolvedValue(true), isRegisteredWorktreePath: vi.fn().mockReturnValue(true) } as unknown as GitService;
     mockAttachmentService = { removeForThread: vi.fn() } as unknown as AttachmentService;
+    mockHandoffStorage = { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage;
 
-    worker = new CleanupWorker(db, cleanupJobRepo, threadRepo, mockClaudeProvider, mockTerminalService, mockGitService, workspaceRepo, mockAttachmentService);
+    worker = new CleanupWorker(db, cleanupJobRepo, threadRepo, mockClaudeProvider, mockTerminalService, mockGitService, workspaceRepo, mockAttachmentService, mockHandoffStorage);
   });
 
   afterEach(() => { worker.dispose(); });
@@ -617,6 +637,7 @@ describe("WorkspaceService.delete - active session handling", () => {
   let cleanupJobRepo: CleanupJobRepo;
   let workspaceService: WorkspaceService;
   let mockAttachmentService: AttachmentService;
+  let mockHandoffStorage: HandoffStorage;
   let mockAgentService: { stopSession: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
@@ -628,6 +649,10 @@ describe("WorkspaceService.delete - active session handling", () => {
     mockAttachmentService = {
       removeForThread: vi.fn(),
     } as unknown as AttachmentService;
+
+    mockHandoffStorage = {
+      deleteThreadFiles: vi.fn().mockResolvedValue(undefined),
+    } as unknown as HandoffStorage;
 
     mockAgentService = {
       stopSession: vi.fn().mockResolvedValue(undefined),
@@ -672,6 +697,7 @@ describe("Workspace delete - cross-workspace fork lineage", () => {
   let cleanupJobRepo: CleanupJobRepo;
   let workspaceService: WorkspaceService;
   let mockAttachmentService: AttachmentService;
+  let mockHandoffStorage: HandoffStorage;
 
   beforeEach(() => {
     db = openMemoryDatabase();
@@ -781,6 +807,7 @@ describe("CleanupWorker - missing directory handling", () => {
   let mockTerminalService: TerminalService;
   let mockGitService: GitService;
   let mockAttachmentService: AttachmentService;
+  let mockHandoffStorage: HandoffStorage;
   let worker: CleanupWorker;
 
   beforeEach(() => {
@@ -796,8 +823,9 @@ describe("CleanupWorker - missing directory handling", () => {
     mockTerminalService = { killByThread: vi.fn() } as unknown as TerminalService;
     mockGitService = { removeWorktree: vi.fn().mockResolvedValue(true), isRegisteredWorktreePath: vi.fn().mockReturnValue(true) } as unknown as GitService;
     mockAttachmentService = { removeForThread: vi.fn() } as unknown as AttachmentService;
+    mockHandoffStorage = { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage;
 
-    worker = new CleanupWorker(db, cleanupJobRepo, threadRepo, mockClaudeProvider, mockTerminalService, mockGitService, workspaceRepo, mockAttachmentService);
+    worker = new CleanupWorker(db, cleanupJobRepo, threadRepo, mockClaudeProvider, mockTerminalService, mockGitService, workspaceRepo, mockAttachmentService, mockHandoffStorage);
   });
 
   afterEach(() => { worker.dispose(); });
@@ -863,6 +891,7 @@ describe("CleanupWorker - idempotent retry", () => {
   let mockTerminalService: TerminalService;
   let mockGitService: GitService;
   let mockAttachmentService: AttachmentService;
+  let mockHandoffStorage: HandoffStorage;
   let worker: CleanupWorker;
 
   beforeEach(() => {
@@ -878,8 +907,9 @@ describe("CleanupWorker - idempotent retry", () => {
     mockTerminalService = { killByThread: vi.fn() } as unknown as TerminalService;
     mockGitService = { removeWorktree: vi.fn().mockResolvedValue(true), isRegisteredWorktreePath: vi.fn().mockReturnValue(true) } as unknown as GitService;
     mockAttachmentService = { removeForThread: vi.fn() } as unknown as AttachmentService;
+    mockHandoffStorage = { deleteThreadFiles: vi.fn().mockResolvedValue(undefined) } as unknown as HandoffStorage;
 
-    worker = new CleanupWorker(db, cleanupJobRepo, threadRepo, mockClaudeProvider, mockTerminalService, mockGitService, workspaceRepo, mockAttachmentService);
+    worker = new CleanupWorker(db, cleanupJobRepo, threadRepo, mockClaudeProvider, mockTerminalService, mockGitService, workspaceRepo, mockAttachmentService, mockHandoffStorage);
   });
 
   afterEach(() => { worker.dispose(); });
@@ -924,6 +954,7 @@ describe("Workspace delete - zero-worktree fast path", () => {
   let cleanupJobRepo: CleanupJobRepo;
   let workspaceService: WorkspaceService;
   let mockAttachmentService: AttachmentService;
+  let mockHandoffStorage: HandoffStorage;
 
   beforeEach(() => {
     db = openMemoryDatabase();

@@ -61,6 +61,13 @@
     {
       "idx": 8,
       "version": "6",
+      "when": 1779404083359,
+      "tag": "0008_brave_big_bertha",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
       "when": 1779309525812,
       "tag": "0009_fancy_ben_urich",
       "breakpoints": true

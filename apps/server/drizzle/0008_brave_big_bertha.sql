@@ -1,0 +1,1 @@
+ALTER TABLE `messages` ADD `is_internal` integer DEFAULT 0 NOT NULL;
