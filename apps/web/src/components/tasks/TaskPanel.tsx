@@ -19,10 +19,8 @@ export function TaskPanel() {
     return [["Tasks", parentTasks] as const];
   }, [tasks]);
 
-  const hasTasks = tasks && tasks.length > 0;
-
-  return hasTasks ? (
-    <ScrollArea className="flex-1">
+  return groups.length > 0 ? (
+    <ScrollArea className="flex-1 min-h-0">
       <div className="flex flex-col py-1">
         {groups.map(([name, items]) => (
           <TaskGroup

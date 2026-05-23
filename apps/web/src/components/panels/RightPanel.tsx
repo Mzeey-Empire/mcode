@@ -76,6 +76,12 @@ export function RightPanel() {
     (s) => (activeThreadId ? s.tasksByThread[activeThreadId] : undefined),
   );
 
+  // Only parent-agent tasks for the header count and task list display
+  const parentTasks = useMemo(
+    () => (tasks ?? []).filter((t) => t.group === "Tasks"),
+    [tasks],
+  );
+
   // Thresholds tuned for a readable chat column next to an expanded sidebar.
   const CHAT_COMFORT_MIN = 520;
   const SIDEBAR_BUFFER = 290;
@@ -340,9 +346,9 @@ export function RightPanel() {
             {activeThreadId && (
               <PlanPanel threadId={activeThreadId} />
             )}
-            {/* Tasks pin at the bottom, always visible */}
-            <div className="flex flex-col flex-shrink-0 border-t border-border">
-              <TaskPanelHeader tasks={tasks ?? []} />
+            {/* Tasks pin at the bottom with internal scroll for overflow */}
+            <div className="flex flex-col flex-shrink-0 border-t border-border max-h-[45%] min-h-[80px]">
+              <TaskPanelHeader tasks={parentTasks} />
               <TaskPanel />
             </div>
           </div>
