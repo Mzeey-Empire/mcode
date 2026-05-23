@@ -1,4 +1,5 @@
 import type { Thread } from "@/transport";
+import type { ContextWindowMode, ReasoningLevel } from "@mcode/contracts";
 
 /**
  * Thread row in the workspace store may include client-only fields while the
@@ -72,6 +73,15 @@ export function buildPlaceholderWorkspaceThread(params: {
   transportMode: "direct" | "worktree";
   branch: string;
   clientPreparingContext: ClientPreparingContext;
+  model?: string | null;
+  provider?: string | null;
+  reasoningLevel?: ReasoningLevel | null;
+  interactionMode?: Thread["interaction_mode"];
+  permissionMode?: Thread["permission_mode"];
+  contextWindow?: ContextWindowMode | null;
+  thinking?: boolean | null;
+  codexFastMode?: boolean | null;
+  copilotAgent?: string | null;
   parentThreadId?: string | null;
   forkedFromMessageId?: string | null;
 }): WorkspaceThread {
@@ -92,18 +102,18 @@ export function buildPlaceholderWorkspaceThread(params: {
     sdk_session_id: null,
     created_at: now,
     updated_at: now,
-    model: null,
-    provider: "claude",
+    model: params.model ?? null,
+    provider: params.provider ?? "claude",
     deleted_at: null,
     last_context_tokens: null,
     context_window: null,
-    reasoning_level: null,
-    interaction_mode: null,
-    permission_mode: null,
-    context_window_mode: null,
-    thinking: null,
-    codex_fast_mode: null,
-    copilot_agent: null,
+    reasoning_level: params.reasoningLevel ?? null,
+    interaction_mode: params.interactionMode ?? null,
+    permission_mode: params.permissionMode ?? null,
+    context_window_mode: params.contextWindow ?? null,
+    thinking: params.thinking ?? null,
+    codex_fast_mode: params.codexFastMode ?? null,
+    copilot_agent: params.copilotAgent ?? null,
     parent_thread_id: params.parentThreadId ?? null,
     forked_from_message_id: params.forkedFromMessageId ?? null,
     last_compact_summary: null,

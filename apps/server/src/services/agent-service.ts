@@ -856,12 +856,33 @@ export class AgentService {
     }
 
     this.threadRepo.updateModel(thread.id, model);
-
-    if (provider === "codex" && codexFastMode !== undefined) {
-      this.threadRepo.updateSettings(thread.id, {
-        codex_fast_mode: codexFastMode,
-      });
-    }
+    this.threadRepo.updateSettings(thread.id, {
+      ...(reasoningLevel !== undefined && { reasoning_level: reasoningLevel }),
+      ...(interactionMode !== undefined && { interaction_mode: interactionMode }),
+      ...(permissionMode !== undefined && permissionMode !== "default" && { permission_mode: permissionMode }),
+      ...(contextWindowMode !== undefined && { context_window_mode: contextWindowMode }),
+      ...(thinking !== undefined && { thinking }),
+      ...(copilotAgent !== undefined && { copilot_agent: copilotAgent }),
+      ...(provider === "codex" && codexFastMode !== undefined && { codex_fast_mode: codexFastMode }),
+    });
+    const persistedPermissionMode =
+      permissionMode === "full" || permissionMode === "supervised"
+        ? permissionMode
+        : thread.permission_mode;
+    thread = {
+      ...thread,
+      model,
+      provider,
+      reasoning_level: reasoningLevel ?? thread.reasoning_level,
+      interaction_mode: interactionMode ?? thread.interaction_mode,
+      permission_mode: persistedPermissionMode,
+      context_window_mode: contextWindowMode ?? thread.context_window_mode,
+      thinking: thinking ?? thread.thinking,
+      copilot_agent: copilotAgent ?? thread.copilot_agent,
+      codex_fast_mode: provider === "codex" && codexFastMode !== undefined
+        ? codexFastMode
+        : thread.codex_fast_mode,
+    };
 
     void this.sendMessage(
       thread.id,
@@ -1016,6 +1037,39 @@ export class AgentService {
     } else {
       thread = this.threadRepo.create(workspaceId, title, "direct", branch, true, provider, lineage);
     }
+
+    const resolvedCodexFast =
+      codexFastMode !== undefined
+        ? codexFastMode
+        : parentThread.codex_fast_mode;
+    this.threadRepo.updateModel(thread.id, model);
+    this.threadRepo.updateSettings(thread.id, {
+      ...(reasoningLevel !== undefined && { reasoning_level: reasoningLevel }),
+      ...(interactionMode !== undefined && { interaction_mode: interactionMode }),
+      ...(permissionMode !== undefined && permissionMode !== "default" && { permission_mode: permissionMode }),
+      ...(effectiveContextWindowMode !== undefined && { context_window_mode: effectiveContextWindowMode }),
+      ...(effectiveThinking !== undefined && { thinking: effectiveThinking }),
+      ...(copilotAgent !== undefined && { copilot_agent: copilotAgent }),
+      ...(provider === "codex" && resolvedCodexFast !== null && { codex_fast_mode: resolvedCodexFast }),
+    });
+    const persistedPermissionMode =
+      permissionMode === "full" || permissionMode === "supervised"
+        ? permissionMode
+        : thread.permission_mode;
+    thread = {
+      ...thread,
+      model,
+      provider,
+      reasoning_level: reasoningLevel ?? thread.reasoning_level,
+      interaction_mode: interactionMode ?? thread.interaction_mode,
+      permission_mode: persistedPermissionMode,
+      context_window_mode: effectiveContextWindowMode ?? thread.context_window_mode,
+      thinking: effectiveThinking ?? thread.thinking,
+      copilot_agent: copilotAgent ?? thread.copilot_agent,
+      codex_fast_mode: provider === "codex" && resolvedCodexFast !== null
+        ? resolvedCodexFast
+        : thread.codex_fast_mode,
+    };
 
     // Derive the fork anchor role for the pipeline.
     const forkAnchorRole = forkMessage.role === "user" ? "user" : "assistant";
@@ -1219,10 +1273,6 @@ export class AgentService {
     const providerInput =
       interactionMode === "plan" ? this.buildPlanPrompt(providerWireOverride) : providerWireOverride;
 
-    const resolvedCodexFast =
-      codexFastMode !== undefined
-        ? codexFastMode
-        : parentThread.codex_fast_mode;
     if (provider === "codex" && resolvedCodexFast !== null) {
       this.threadRepo.updateSettings(thread.id, {
         codex_fast_mode: resolvedCodexFast,
@@ -1243,7 +1293,7 @@ export class AgentService {
       copilotAgent,
       effectiveContextWindowMode,
       effectiveThinking,
-      undefined,
+      resolvedCodexFast ?? undefined,
       undefined,
       providerInput,
       undefined,
