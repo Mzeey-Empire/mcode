@@ -1,8 +1,10 @@
-import { useMemo, useRef, useCallback, useState } from "react";
+import { useMemo, useRef, useCallback, useState, useLayoutEffect, lazy, Suspense } from "react";
+import type { Components } from "react-markdown";
 import type { PlanRecord, PlanSectionNav } from "@mcode/contracts";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { cn } from "@/lib/utils";
 import { PlanAnnotation } from "./PlanAnnotation";
+
+const PlanMarkdown = lazy(() => import("@/components/chat/MarkdownContent"));
 
 /** Annotation on a section heading. */
 export interface PlanComment {
@@ -20,10 +22,13 @@ interface PlanDocumentProps {
   onCommentDiscard: (sectionTitle: string) => void;
 }
 
+const HEADING_BASE =
+  "group/heading scroll-mt-14 cursor-pointer rounded-md px-1.5 -mx-1.5 transition-colors duration-100 hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50";
+
 /**
  * Renders a plan's markdown content with clickable headings for
- * Canvas-style inline annotation. Clicking a heading opens (or
- * focuses) an annotation textarea below it.
+ * Canvas-style inline annotation. Reuses {@link MarkdownContent} so
+ * Mermaid, Shiki code blocks, GFM tables, and preview links match chat.
  */
 export function PlanDocument({
   plan,
@@ -33,6 +38,10 @@ export function PlanDocument({
 }: PlanDocumentProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [activeHeading, setActiveHeading] = useState<string | null>(null);
+
+  useLayoutEffect(() => {
+    setActiveHeading((prev) => (prev === null ? prev : null));
+  }, [plan.id]);
 
   const sectionMap = useMemo(() => {
     if (!plan.sectionsJson) return new Map<string, string>();
@@ -58,17 +67,46 @@ export function PlanDocument({
         setActiveHeading(null);
       } else {
         setActiveHeading(key);
-        // If no comment exists yet, create an empty one to show the textarea
-        if (!commentMap.has(key)) {
-          onCommentChange(title, "");
-        }
       }
     },
-    [activeHeading, commentMap, onCommentChange],
+    [activeHeading],
+  );
+
+  const handleCommitNote = useCallback(
+    (title: string, value: string) => {
+      const trimmed = value.trim();
+      if (trimmed) {
+        onCommentChange(title, trimmed);
+      } else {
+        onCommentDiscard(title);
+      }
+    },
+    [onCommentChange, onCommentDiscard],
+  );
+
+  const handleSaveNote = useCallback(
+    (title: string, value: string) => {
+      const trimmed = value.trim();
+      if (trimmed) {
+        onCommentChange(title, trimmed);
+      } else {
+        onCommentDiscard(title);
+      }
+      setActiveHeading(null);
+    },
+    [onCommentChange, onCommentDiscard],
+  );
+
+  const handleDiscardNote = useCallback(
+    (title: string) => {
+      onCommentDiscard(title);
+      setActiveHeading(null);
+    },
+    [onCommentDiscard],
   );
 
   const headingRenderer = useCallback(
-    ({ level, children }: { level: number; children: React.ReactNode }) => {
+    (level: number, children: React.ReactNode) => {
       const text = typeof children === "string" ? children : String(children);
       const key = text.toLowerCase();
       const sectionId = sectionMap.get(key);
@@ -80,14 +118,34 @@ export function PlanDocument({
         <>
           <Tag
             id={sectionId ?? undefined}
-            className="group/heading scroll-mt-12 cursor-pointer rounded px-1.5 -mx-1.5 transition-colors duration-100 hover:bg-accent/60"
+            tabIndex={0}
+            aria-expanded={isOpen}
+            aria-label={`${text}. Activate to ${isOpen ? "close" : "add"} a section note.`}
+            className={cn(
+              HEADING_BASE,
+              level === 1 && "text-[14px] font-semibold",
+              level === 2 && "text-[13.5px] font-semibold",
+              level === 3 && "text-[13px] font-medium",
+            )}
             onClick={() => handleHeadingClick(text)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                handleHeadingClick(text);
+              }
+            }}
           >
             {children}
             {hasComment && (
-              <span className="ml-2 inline-block h-1.5 w-1.5 rounded-full bg-primary/70 align-middle" />
+              <span
+                className="ml-2 inline-block h-1.5 w-1.5 rounded-full bg-primary/70 align-middle"
+                aria-hidden
+              />
             )}
-            <span className="ml-2 font-mono text-[10px] font-normal text-muted-foreground/0 transition-colors group-hover/heading:text-muted-foreground/40">
+            <span
+              className="ml-2 font-mono text-[10px] font-normal text-muted-foreground/0 transition-colors group-hover/heading:text-muted-foreground/50 group-focus-visible/heading:text-muted-foreground/50"
+              aria-hidden
+            >
               +
             </span>
           </Tag>
@@ -96,32 +154,41 @@ export function PlanDocument({
               key={`annotation-${key}`}
               sectionTitle={text}
               initialValue={commentMap.get(key) ?? ""}
-              onCommit={(val) => onCommentChange(text, val)}
-              onDiscard={() => {
-                onCommentDiscard(text);
-                setActiveHeading(null);
-              }}
+              onCommit={(val) => handleCommitNote(text, val)}
+              onSave={(val) => handleSaveNote(text, val)}
+              onDiscard={() => handleDiscardNote(text)}
             />
           )}
         </>
       );
     },
-    [sectionMap, commentMap, activeHeading, handleHeadingClick, onCommentChange, onCommentDiscard],
+    [sectionMap, commentMap, activeHeading, handleHeadingClick, handleCommitNote, handleSaveNote, handleDiscardNote],
+  );
+
+  const componentOverrides = useMemo<Partial<Components>>(
+    () => ({
+      h1: ({ children }) => headingRenderer(1, children),
+      h2: ({ children }) => headingRenderer(2, children),
+      h3: ({ children }) => headingRenderer(3, children),
+    }),
+    [headingRenderer],
   );
 
   return (
-    <div ref={containerRef} className="px-6 pb-8 pt-4">
-      <article className="prose prose-sm prose-invert max-w-none [&>h2]:mt-6 [&>h2]:mb-2 [&>h2]:text-[13.5px] [&>h2]:font-semibold [&>h3]:mt-4 [&>h3]:mb-2 [&>h3]:text-[13px] [&>h3]:font-medium [&>p]:text-[13px] [&>p]:leading-[1.7] [&>p]:text-muted-foreground [&>p]:max-w-[62ch] [&>ul]:text-[13px] [&>li]:text-[13px] [&>pre]:bg-card [&>pre]:rounded-md [&>table]:text-[12.5px] [&>table]:border-collapse [&_th]:border [&_th]:border-border/50 [&_th]:px-3 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-semibold [&_td]:border [&_td]:border-border/50 [&_td]:px-3 [&_td]:py-1.5">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            h1: ({ children }) => headingRenderer({ level: 1, children }),
-            h2: ({ children }) => headingRenderer({ level: 2, children }),
-            h3: ({ children }) => headingRenderer({ level: 3, children }),
-          }}
-        >
-          {plan.contentMd}
-        </ReactMarkdown>
+    <div ref={containerRef} className="min-w-0 overflow-x-hidden px-4 pb-8 pt-4">
+      <article
+        className={cn(
+          "prose prose-sm prose-invert max-w-none min-w-0",
+          "[&>h2]:mt-6 [&>h2]:mb-2",
+          "[&>h3]:mt-4 [&>h3]:mb-2",
+          "[&>p]:max-w-[62ch] [&>p]:text-[13px] [&>p]:leading-[1.75] [&>p]:text-muted-foreground",
+          "[&>ul]:text-[13px] [&>ul]:leading-[1.7] [&>li]:text-[13px]",
+          "[&>ol]:text-[13px] [&>ol]:leading-[1.7]",
+        )}
+      >
+        <Suspense fallback={<span className="text-sm text-muted-foreground">Loading plan…</span>}>
+          <PlanMarkdown content={plan.contentMd} componentOverrides={componentOverrides} />
+        </Suspense>
       </article>
     </div>
   );

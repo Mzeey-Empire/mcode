@@ -1,5 +1,5 @@
 import { memo, useMemo, lazy, Suspense } from "react";
-import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   isMcodeWorkspacePreviewUrl,
@@ -30,6 +30,8 @@ interface MarkdownContentProps {
    * Defaults to 'assistant'.
    */
   variant?: "assistant" | "user";
+  /** Optional react-markdown component overrides merged on top of defaults. */
+  componentOverrides?: Partial<Components>;
 }
 
 /** Stable remark plugin list, hoisted to avoid re-creating on every render. */
@@ -237,11 +239,10 @@ function makeComponents(
   isStreaming: boolean,
   variant: "assistant" | "user",
   workspacePath: string | null,
+  componentOverrides?: Partial<Components>,
 ) {
   const isUser = variant === "user";
-  return {
-    ...makeStaticComponents(variant, workspacePath),
-    code: ({ children, className }: { children?: React.ReactNode; className?: string }) => {
+  const codeRenderer = ({ children, className }: { children?: React.ReactNode; className?: string }) => {
       // Detect inline vs block code. In react-markdown's HAST, fenced code
       // blocks are wrapped in a <pre> parent (even without a language tag).
       // Fenced blocks always have a trailing newline from the code fence.
@@ -328,7 +329,12 @@ function makeComponents(
           disableHighlighting={isUser}
         />
       );
-    },
+  };
+
+  return {
+    ...makeStaticComponents(variant, workspacePath),
+    ...componentOverrides,
+    code: codeRenderer,
   };
 }
 
@@ -337,6 +343,7 @@ export const MarkdownContent = memo(function MarkdownContent({
   content,
   isStreaming = false,
   variant = "assistant",
+  componentOverrides,
 }: MarkdownContentProps) {
   const workspacePath = useWorkspaceStore((s) => {
     const id = s.activeWorkspaceId;
@@ -345,8 +352,8 @@ export const MarkdownContent = memo(function MarkdownContent({
   });
 
   const components = useMemo(
-    () => makeComponents(isStreaming, variant, workspacePath),
-    [isStreaming, variant, workspacePath],
+    () => makeComponents(isStreaming, variant, workspacePath, componentOverrides),
+    [isStreaming, variant, workspacePath, componentOverrides],
   );
 
   return (
