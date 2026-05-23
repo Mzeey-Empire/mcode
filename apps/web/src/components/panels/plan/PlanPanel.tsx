@@ -119,7 +119,13 @@ export function PlanPanel({ threadId }: PlanPanelProps) {
     try {
       await useThreadStore.getState().sendPlanAction(
         threadId,
-        `Implement the plan: "${activePlan.title}".\n\nThe full plan is in the conversation above. Follow it section by section.`,
+        [
+          `Implement plan v${activePlan.version}: "${activePlan.title}".`,
+          "",
+          "Use this exact plan version as the source of truth:",
+          "",
+          activePlan.contentMd,
+        ].join("\n"),
         "implement",
       );
     } catch (err) {
