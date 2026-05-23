@@ -14,7 +14,7 @@ import { PrInfoSchema, PrDetailSchema, PrDraftSchema, CreatePrResultSchema, Chec
 import { SkillInfoSchema, SkillDiagnosticsSchema } from "../skills.js";
 import { TurnSnapshotSchema } from "../models/turn-snapshot.js";
 import { PlanAnswerSchema } from "../models/plan-questions.js";
-import { PlanStatusSchema, PlanRecordSchema } from "../models/plan-output.js";
+import { PlanStatusSchema, PlanRecordSchema, PlanActionSchema } from "../models/plan-output.js";
 import { DiffStatsSchema } from "../models/diff-stats.js";
 import {
   SettingsSchema,
@@ -77,6 +77,11 @@ export const SendMessageSchema = lazySchema(() =>
     replyToMessageId: z.string().uuid().optional(),
     /** Highlighted text excerpt from the original message. Absent for full-message replies. */
     quotedText: z.string().max(2000).optional(),
+    /**
+     * Plan-tab action hint. `revise` arms plan-output capture; `implement` runs
+     * in chat mode without the plan-questions wrapper.
+     */
+    planAction: PlanActionSchema().optional(),
   }),
 );
 

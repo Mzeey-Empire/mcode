@@ -99,6 +99,12 @@ export interface IAgentProvider {
 
   /** Mark a thread as expecting a plan output (enables ExitPlanMode capture). */
   setPlanAnswerMode?(threadId: string, enabled: boolean): void;
+
+  /**
+   * Mark a thread as in the plan-questions phase. Providers with native question
+   * UIs (Cursor) should not auto-answer while this is active.
+   */
+  setPlanQuestionMode?(threadId: string, enabled: boolean): void;
 }
 
 /**

@@ -189,6 +189,7 @@ export {
   PlanSectionNavSchema,
   PlanOutputSchema,
   PlanStatusSchema,
+  PlanActionSchema,
   PlanRecordSchema,
 } from "./models/plan-output.js";
 export type {
@@ -196,6 +197,7 @@ export type {
   PlanSectionNav,
   PlanOutput,
   PlanStatus,
+  PlanAction,
   PlanRecord,
 } from "./models/plan-output.js";
 

@@ -42,6 +42,15 @@ export const PlanStatusSchema = lazySchema(() =>
 
 export type PlanStatus = z.infer<ReturnType<typeof PlanStatusSchema>>;
 
+/**
+ * Server-side hint for plan-tab actions sent through `agent.send`.
+ * Overrides thread interaction mode so implement/revise are not re-wrapped
+ * with the plan-questions prompt.
+ */
+export const PlanActionSchema = lazySchema(() => z.enum(["revise", "implement"]));
+
+export type PlanAction = z.infer<ReturnType<typeof PlanActionSchema>>;
+
 /** A persisted plan record (returned by server to client). */
 export const PlanRecordSchema = lazySchema(() =>
   z.object({
