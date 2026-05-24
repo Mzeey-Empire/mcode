@@ -302,6 +302,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       pendingThreadCreationByPlaceholderId.delete(placeholderId);
       return;
     }
+    const pending = pendingThreadCreationByPlaceholderId.get(placeholderId);
     bumpThreadListMutationEpoch(workspaceId);
     pendingThreadCreationByPlaceholderId.delete(placeholderId);
     const startTime =
@@ -318,9 +319,25 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     set((state) => {
       const without = state.threads.filter((t) => t.id !== placeholderId);
       const deduped = without.filter((t) => t.id !== thread.id);
+      const hydratedThread: WorkspaceThread = {
+        ...thread,
+        model: pending?.model ?? thread.model ?? null,
+        provider: pending?.provider ?? thread.provider ?? "claude",
+        reasoning_level: pending?.reasoningLevel ?? thread.reasoning_level ?? null,
+        interaction_mode: pending?.interactionMode ?? thread.interaction_mode ?? null,
+        permission_mode: pending?.permissionMode ?? thread.permission_mode ?? null,
+        context_window_mode: pending?.contextWindow ?? thread.context_window_mode ?? null,
+        thinking: pending?.thinking ?? thread.thinking ?? null,
+        codex_fast_mode: (
+          pending?.provider === "codex" ? (pending.codexFastMode ?? null) : null
+        ) ?? thread.codex_fast_mode ?? null,
+        copilot_agent: (
+          pending?.provider === "copilot" ? (pending.copilotAgent ?? null) : null
+        ) ?? thread.copilot_agent ?? null,
+      };
       const wt: WorkspaceThread = warnings?.length
-        ? { ...thread, clientWarnings: warnings }
-        : thread;
+        ? { ...hydratedThread, clientWarnings: warnings }
+        : hydratedThread;
       const nextThreads: WorkspaceThread[] = [wt, ...deduped];
       const stillOnPlaceholder = state.activeThreadId === placeholderId;
       return {
@@ -736,6 +753,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       transportMode: mode,
       branch,
       clientPreparingContext,
+      model,
+      provider,
+      reasoningLevel,
+      interactionMode,
+      permissionMode,
+      contextWindow,
+      thinking,
+      codexFastMode: provider === "codex" ? (codexFastMode ?? null) : null,
+      copilotAgent: provider === "copilot" ? (copilotAgent ?? null) : null,
     });
 
     bumpThreadListMutationEpoch(workspaceId);
@@ -820,6 +846,15 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       transportMode,
       branch,
       clientPreparingContext,
+      model: params.model,
+      provider: params.provider,
+      reasoningLevel: params.reasoningLevel,
+      interactionMode: params.interactionMode,
+      permissionMode: params.permissionMode,
+      contextWindow: params.contextWindow,
+      thinking: params.thinking,
+      codexFastMode: params.provider === "codex" ? (params.codexFastMode ?? null) : null,
+      copilotAgent: params.provider === "copilot" ? (params.copilotAgent ?? null) : null,
       parentThreadId: params.sourceThreadId,
       forkedFromMessageId: params.forkedFromMessageId,
     });

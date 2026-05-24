@@ -20,6 +20,7 @@ import { TaskRepo } from "./repositories/task-repo";
 import { CleanupJobRepo } from "./repositories/cleanup-job-repo";
 import { ModelCacheRepo } from "./repositories/model-cache-repo";
 import { PlanQuestionAnswersRepo } from "./repositories/plan-question-answers-repo";
+import { PlanRepo } from "./repositories/plan-repo";
 
 // Providers
 import { ClaudeProvider } from "./providers/claude/claude-provider";
@@ -39,6 +40,8 @@ import { ConfigService } from "./services/config-service";
 import { SkillService } from "./services/skill-service";
 import { TerminalService } from "./services/terminal-service";
 import { AttachmentService } from "./services/attachment-service";
+import { HandoffStorage } from "./services/handoff/handoff-storage.js";
+import { HandoffPipelineService } from "./services/handoff/handoff-pipeline.js";
 import { SnapshotService } from "./services/snapshot-service";
 import { SettingsService } from "./services/settings-service";
 import { GitWatcherService } from "./services/git-watcher-service";
@@ -186,6 +189,14 @@ export function setupContainer(mcodeDir: string): typeof container {
   container.register("PlanQuestionAnswersRepo", {
     useFactory: (c) => c.resolve(PlanQuestionAnswersRepo),
   });
+  container.register(
+    PlanRepo,
+    { useClass: PlanRepo },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register("PlanRepo", {
+    useFactory: (c) => c.resolve(PlanRepo),
+  });
 
   // Providers
   container.register(
@@ -288,6 +299,16 @@ export function setupContainer(mcodeDir: string): typeof container {
   container.register(
     SnapshotService,
     { useClass: SnapshotService },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register(
+    HandoffStorage,
+    { useClass: HandoffStorage },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register(
+    HandoffPipelineService,
+    { useClass: HandoffPipelineService },
     { lifecycle: Lifecycle.Singleton },
   );
   container.register(

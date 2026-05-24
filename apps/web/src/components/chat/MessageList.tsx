@@ -292,6 +292,9 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   const hasMore = useThreadStore((s) =>
     activeThreadId ? s.hasMoreMessages[activeThreadId] ?? false : false,
   );
+  const handoffStatus = useThreadStore((s) =>
+    activeThreadId ? s.handoffStatus?.[activeThreadId] : undefined,
+  );
   const isLoadingMore = useThreadStore((s) =>
     activeThreadId ? s.isLoadingMore[activeThreadId] ?? false : false,
   );
@@ -975,6 +978,19 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
           })}
         </div>
       </div>
+
+      {/* Skeleton placeholder shown while the handoff context is being generated for a child thread.
+          Conditions: handoff still generating and only the initial user message has been submitted
+          (no assistant reply yet), so the user sees something happening rather than an empty thread. */}
+      {handoffStatus === "generating" && messages.filter((m) => m.role !== "system").length <= 1 && (
+        <div className="px-8 py-4">
+          <div className="mx-auto w-full max-w-4xl space-y-2">
+            <div className="h-3.5 w-3/4 animate-pulse rounded bg-muted" />
+            <div className="h-3.5 w-1/2 animate-pulse rounded bg-muted" />
+            <div className="h-3.5 w-2/3 animate-pulse rounded bg-muted" />
+          </div>
+        </div>
+      )}
 
       {/* Loading spinner overlay for scroll-up pagination */}
       {isLoadingMore && (

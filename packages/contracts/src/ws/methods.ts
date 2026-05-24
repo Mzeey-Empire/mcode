@@ -14,6 +14,7 @@ import { PrInfoSchema, PrDetailSchema, PrDraftSchema, CreatePrResultSchema, Chec
 import { SkillInfoSchema, SkillDiagnosticsSchema } from "../skills.js";
 import { TurnSnapshotSchema } from "../models/turn-snapshot.js";
 import { PlanAnswerSchema } from "../models/plan-questions.js";
+import { PlanStatusSchema, PlanRecordSchema, PlanActionSchema } from "../models/plan-output.js";
 import { DiffStatsSchema } from "../models/diff-stats.js";
 import {
   SettingsSchema,
@@ -76,6 +77,11 @@ export const SendMessageSchema = lazySchema(() =>
     replyToMessageId: z.string().uuid().optional(),
     /** Highlighted text excerpt from the original message. Absent for full-message replies. */
     quotedText: z.string().max(2000).optional(),
+    /**
+     * Plan-tab action hint. `revise` arms plan-output capture; `implement` runs
+     * in chat mode without the plan-questions wrapper.
+     */
+    planAction: PlanActionSchema().optional(),
   }),
 );
 
@@ -350,13 +356,37 @@ export const WS_METHODS = lazySchema(() => ({
   "agent.answerQuestions": {
     params: z.object({
       threadId: z.string(),
-      answers: z.array(PlanAnswerSchema),
+      answers: z.array(PlanAnswerSchema()),
       permissionMode: PermissionModeSchema.optional(),
       reasoningLevel: ReasoningLevelSchema.optional(),
       contextWindow: ContextWindowModeSchema.optional(),
       thinking: z.boolean().optional(),
     }),
     result: z.void(),
+  },
+  /**
+   * Durably mark the latest plan-questions batch for a thread as
+   * settled without submitting answers. Used by the wizard's `cancel`
+   * action so the wizard does NOT re-appear on subsequent reloads /
+   * thread switches.
+   */
+  "agent.dismissPlanQuestions": {
+    params: z.object({ threadId: z.string() }),
+    result: z.void(),
+  },
+  /** Update the status of a persisted plan (e.g. accept or supersede). */
+  "plan.updateStatus": {
+    params: z.object({
+      planId: z.string(),
+      status: PlanStatusSchema(),
+    }),
+    result: z.void(),
+  },
+  "plan.list": {
+    params: z.object({
+      threadId: z.string(),
+    }),
+    result: z.array(PlanRecordSchema()),
   },
   "permission.respond": {
     params: z.object({
@@ -666,6 +696,53 @@ export const WS_METHODS = lazySchema(() => ({
         createdAt: z.string(),
       })
       .nullable(),
+  },
+  /**
+   * v1 stub for regenerating a handoff document via the live AI path.
+   * Live regeneration is deferred to a follow-on plan.
+   */
+  "handoff.regenerate": {
+    params: z.object({ threadId: z.string() }),
+    result: z.object({ status: z.literal("not-implemented") }),
+  },
+  /**
+   * Read the latest handoff artifact for a child thread.
+   * Returns null when no handoff exists for the given thread.
+   */
+  "handoff.readLatest": {
+    params: z.object({ threadId: z.string() }),
+    result: z.object({
+      markdown: z.string(),
+      meta: z.object({
+        schemaVersion: z.literal(1),
+        parentThreadId: z.string(),
+        forkedFromMessageId: z.string(),
+        forkAnchorRole: z.enum(["user", "assistant"]),
+        childThreadId: z.string(),
+        generatedBy: z.enum(["provider", "deterministic"]),
+        provider: z.string().nullable(),
+        ladderStep: z.enum(["B", "A", "D"]),
+        mode: z.enum(["full", "minimal"]),
+        generatedAt: z.string(),
+        characterCount: z.number(),
+        parentSdkSessionId: z.string().nullable(),
+        providerErrorOnGenerate: z
+          .enum(["quota", "auth", "context-overflow", "transient", "fatal", "clean"])
+          .nullable(),
+        regenerationHistory: z.array(z.object({
+          at: z.string(),
+          ladderStep: z.enum(["B", "A", "D"]),
+          reason: z.enum(["quota", "auth", "context-overflow", "transient", "fatal", "clean", "user-requested"]),
+        })),
+        attachments: z.array(z.object({
+          id: z.string(),
+          originalName: z.string(),
+          sha256: z.string(),
+          mime: z.string(),
+          parentMessageId: z.string(),
+        })),
+      }),
+    }).nullable(),
   },
   /** Generate (or regenerate) an AI-powered diff summary for a thread. */
   "diffSummary.generate": {

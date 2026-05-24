@@ -37,6 +37,7 @@ import type { HookExecutionRepo } from "../repositories/hook-execution-repo";
 import type { TurnSnapshotRepo } from "../repositories/turn-snapshot-repo";
 import type { TaskRepo } from "../repositories/task-repo";
 import type { PlanQuestionAnswersRepo } from "../repositories/plan-question-answers-repo";
+import type { PlanRepo } from "../repositories/plan-repo";
 import type { SnapshotService } from "../services/snapshot-service";
 import type { SettingsService } from "../services/settings-service";
 import type { GitWatcherService } from "../services/git-watcher-service";
@@ -55,6 +56,7 @@ import {
 import type { ProviderAvailabilityService } from "../services/provider-availability-service.js";
 import type { ModelCacheService } from "../services/model-cache-service.js";
 import type { DiffSummaryService } from "../services/diff-summary-service.js";
+import type { HandoffStorage } from "../services/handoff/handoff-storage.js";
 
 /** Service dependencies for the router. */
 export interface RouterDeps {
@@ -81,6 +83,8 @@ export interface RouterDeps {
   taskRepo: TaskRepo;
   /** Repository for the plan-question wizard answered marker (sidecar table). */
   planQuestionAnswersRepo: PlanQuestionAnswersRepo;
+  /** Repository for structured plan records. */
+  planRepo: PlanRepo;
   /** Registry of AI provider adapters for model discovery. */
   providerRegistry: IProviderRegistry;
   /** Tracks per-provider enabled flag and CLI verification state. */
@@ -89,6 +93,8 @@ export interface RouterDeps {
   modelCacheService: ModelCacheService;
   /** Generates AI-powered PR draft titles and bodies. */
   prDraftService: PrDraftService;
+  /** Reads handoff artifacts from the filesystem. */
+  handoffStorage: HandoffStorage;
   /** CI check watcher for adaptive polling and manual refresh. */
   ciWatcherService: CiWatcherService;
   /** Thread repository for resolving worktree paths in git operations. */
@@ -427,6 +433,7 @@ async function dispatch(
         params.replyToMessageId,
         params.quotedText,
         params.displayContent,
+        params.planAction,
       );
       return;
     case "agent.createAndSend":
@@ -469,6 +476,14 @@ async function dispatch(
         params.thinking,
       );
       return;
+    case "agent.dismissPlanQuestions":
+      deps.agentService.dismissPlanQuestions(params.threadId);
+      return;
+    case "plan.updateStatus":
+      deps.planRepo.updateStatus(params.planId, params.status);
+      return;
+    case "plan.list":
+      return deps.planRepo.listByThread(params.threadId);
 
     // Messages
     case "message.list": {
@@ -866,6 +881,13 @@ async function dispatch(
     }
     case "permission.listPending":
       return deps.agentService.listPendingPermissions(params.threadId);
+
+    case "handoff.regenerate":
+      // v1 stub; live regeneration is deferred to a follow-on plan.
+      return { status: "not-implemented" as const };
+
+    case "handoff.readLatest":
+      return deps.handoffStorage.readLatest(params.threadId);
 
     default:
       throw new Error(`Unhandled method: ${method}`);

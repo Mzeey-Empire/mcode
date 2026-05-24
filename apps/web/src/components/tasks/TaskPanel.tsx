@@ -13,19 +13,14 @@ export function TaskPanel() {
 
   const groups = useMemo(() => {
     if (!tasks) return [];
-    const map = new Map<string, (typeof tasks)[number][]>();
-    for (const task of tasks) {
-      const list = map.get(task.group) ?? [];
-      list.push(task);
-      map.set(task.group, list);
-    }
-    return Array.from(map.entries());
+    // Only show top-level agent tasks; sub-agent groups are noise in the panel
+    const parentTasks = tasks.filter((t) => t.group === "Tasks");
+    if (parentTasks.length === 0) return [];
+    return [["Tasks", parentTasks] as const];
   }, [tasks]);
 
-  const hasTasks = tasks && tasks.length > 0;
-
-  return hasTasks ? (
-    <ScrollArea className="flex-1">
+  return groups.length > 0 ? (
+    <ScrollArea className="flex-1 min-h-0">
       <div className="flex flex-col py-1">
         {groups.map(([name, items]) => (
           <TaskGroup

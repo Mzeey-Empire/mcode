@@ -24,6 +24,7 @@ import type {
   GitCommit,
   PlanAnswer,
   InteractionMode,
+  PlanAction,
   ProviderModelInfo,
   ProviderUsageInfo,
   ProviderAvailability,
@@ -58,6 +59,7 @@ export type {
   PartialSettings,
   GitCommit,
   PlanAnswer,
+  PlanAction,
   ProviderModelInfo,
 } from "@mcode/contracts";
 
@@ -165,6 +167,7 @@ export interface McodeTransport {
     codexFastMode?: boolean,
     replyToMessageId?: string,
     quotedText?: string,
+    planAction?: PlanAction,
   ): Promise<void>;
   createAndSendMessage(
     workspaceId: string,
@@ -200,6 +203,12 @@ export interface McodeTransport {
     contextWindow?: ContextWindowMode,
     thinking?: boolean,
   ): Promise<void>;
+  /**
+   * Durably dismiss the latest plan-questions batch for a thread.
+   * The server marks the batch as settled and broadcasts plan.answered;
+   * the wizard does NOT re-appear on subsequent reloads.
+   */
+  dismissPlanQuestions(threadId: string): Promise<void>;
   readClipboardImage(): Promise<AttachmentMeta | null>;
   /** Save a clipboard file blob to disk via the server. Returns attachment metadata. */
   saveClipboardFile(data: ArrayBuffer, mimeType: string, fileName: string): Promise<AttachmentMeta | null>;
@@ -330,6 +339,9 @@ export interface McodeTransport {
   /** Fetch persisted task list for a thread (from last TodoWrite). */
   getThreadTasks(threadId: string): Promise<Array<{ content: string; status: "pending" | "in_progress" | "completed" | "cancelled"; group?: string }> | null>;
 
+  /** Fetch persisted plans for a thread (hydration on page load). */
+  getThreadPlans(threadId: string): Promise<import("@mcode/contracts").PlanRecord[]>;
+
   // Snapshots
   /** Get a unified diff for a specific file from a turn snapshot. */
   getSnapshotDiff(snapshotId: string, filePath?: string, maxLines?: number): Promise<string>;
@@ -406,4 +418,39 @@ export interface McodeTransport {
   // Memory pressure
   /** Notify server of window background/foreground state for memory management. */
   setBackground(background: boolean): Promise<void>;
+
+  /**
+   * Read the latest handoff artifact for a child thread.
+   * Returns null when no handoff has been written for the thread.
+   */
+  readLatestHandoff(threadId: string): Promise<{
+    markdown: string;
+    meta: {
+      schemaVersion: 1;
+      parentThreadId: string;
+      forkedFromMessageId: string;
+      forkAnchorRole: "user" | "assistant";
+      childThreadId: string;
+      generatedBy: "provider" | "deterministic";
+      provider: string | null;
+      ladderStep: "B" | "A" | "D";
+      mode: "full" | "minimal";
+      generatedAt: string;
+      characterCount: number;
+      parentSdkSessionId: string | null;
+      providerErrorOnGenerate: "quota" | "auth" | "context-overflow" | "transient" | "fatal" | "clean" | null;
+      regenerationHistory: Array<{
+        at: string;
+        ladderStep: "B" | "A" | "D";
+        reason: "quota" | "auth" | "context-overflow" | "transient" | "fatal" | "clean" | "user-requested";
+      }>;
+      attachments: Array<{
+        id: string;
+        originalName: string;
+        sha256: string;
+        mime: string;
+        parentMessageId: string;
+      }>;
+    };
+  } | null>;
 }

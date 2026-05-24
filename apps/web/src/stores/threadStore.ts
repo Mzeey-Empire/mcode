@@ -9,6 +9,7 @@ import { useWorkspaceStore } from "./workspaceStore";
 import { useQueueStore } from "./queueStore";
 import { LruCache } from "@/lib/lru-cache";
 import { useTaskStore, coerceTaskStatus } from "./taskStore";
+import { usePlanStore } from "./planStore";
 import type { TaskItem } from "./taskStore";
 import { useToastStore } from "./toastStore";
 import { findModelById } from "@/lib/model-registry";
@@ -22,6 +23,16 @@ import {
 import { shallowEqualBy } from "@/lib/shallowEqualBy";
 import { forgetScrollTop } from "@/components/chat/scrollPositionMemory";
 import { releaseBrowserCaptureSpills } from "@/lib/browser-capture-spill";
+
+/**
+ * Ephemeral metadata for a handoff artifact received via the `thread.handoff` push channel.
+ * Mirrors the server-side `HandoffMeta` fields that the UI needs, plus the pipeline status.
+ */
+export interface HandoffMeta {
+  status: "generating" | "ready" | "fallback" | "error";
+  ladderStep?: "B" | "A" | "D";
+  providerErrorOnGenerate?: "quota" | "auth" | "context-overflow" | "transient" | "fatal" | null;
+}
 
 /** A permission request with its current resolution state. */
 interface StoredPermission extends PermissionRequest {
@@ -119,6 +130,14 @@ interface ThreadState {
    * extended by the `plan.answered` push channel.
    */
   answeredPlanMessageIdsByThread: Record<string, Set<string>>;
+  /**
+   * Transient set of assistant-message IDs whose plan-questions block was
+   * JUST marked answered via the `plan.answered` push channel. Used by
+   * the AnsweredSummary marker to play a one-shot echo animation. Entries
+   * are removed automatically ~800ms after they are added so the pulse
+   * does NOT replay when a thread reloads later.
+   */
+  recentlyAnsweredPlanMessageIds: Set<string>;
   /** Pending and recently-settled permission requests per thread. */
   permissionsByThread: Record<string, StoredPermission[]>;
   /** Ephemeral hook execution state per thread. Cleared on page reload, not persisted to DB. */
@@ -163,7 +182,7 @@ interface ThreadState {
   // Message actions
   loadMessages: (threadId: string) => Promise<void>;
   loadOlderMessages: (threadId: string) => Promise<void>;
-  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean, codexFastMode?: boolean, replyToMessageId?: string, quotedText?: string) => Promise<void>;
+  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean, codexFastMode?: boolean, replyToMessageId?: string, quotedText?: string, planAction?: import("@mcode/contracts").PlanAction) => Promise<void>;
   stopAgent: (threadId: string) => Promise<void>;
   /** Replace runningThreadIds with the authoritative server snapshot. Called on WS (re)connect. */
   hydrateRunningThreads: (ids: string[]) => void;
@@ -179,6 +198,8 @@ interface ThreadState {
   setActiveQuestionIndex: (threadId: string, index: number) => void;
   /** Submit all answers to the server and dismiss the wizard. */
   submitPlanAnswers: (threadId: string) => Promise<void>;
+  /** Send a plan-tab revise or implement action without plan-questions wrapping. */
+  sendPlanAction: (threadId: string, content: string, action: import("@mcode/contracts").PlanAction) => Promise<void>;
   /** Reset plan question state for a thread (called on clear/reload). */
   clearPlanQuestions: (threadId: string) => void;
   /**
@@ -187,6 +208,14 @@ interface ThreadState {
    * the `plan.answered` push channel from `ws-events.ts`.
    */
   markPlanAnswered: (threadId: string, assistantMessageId: string) => void;
+  /**
+   * Same settle semantics as `markPlanAnswered` (adds to the answered set,
+   * dismisses the wizard) but intentionally skips the
+   * recentlyAnsweredPlanMessageIds add — dismiss is not submission, so the
+   * AnsweredSummary echo animation must not play. Wired to the
+   * `plan.dismissed` push channel.
+   */
+  markPlanDismissed: (threadId: string, assistantMessageId: string) => void;
   /** Add a new pending permission request for a thread. */
   addPermissionRequest: (request: PermissionRequest) => void;
   /** Mark a permission request as settled with its decision. */
@@ -209,6 +238,30 @@ interface ThreadState {
   clearInterruptStopFileNotice: (threadId: string) => void;
   /** Clears composer recall state for one thread after the Composer applies it. */
   clearComposerRecallFromStop: (threadId: string) => void;
+
+  /**
+   * Ephemeral handoff metadata per child thread, keyed by thread ID.
+   * Populated by the `thread.handoff` push channel. Not persisted; cleared on reload.
+   */
+  handoffMeta: Record<string, HandoffMeta>;
+  /**
+   * Derived selector: returns the handoff status for a thread from `handoffMeta`.
+   * Kept for backward compatibility with existing call sites.
+   */
+  handoffStatus: Record<string, "generating" | "ready" | "fallback" | "error">;
+  /** Update handoff metadata for a child thread. */
+  setHandoffMeta: (threadId: string, meta: HandoffMeta) => void;
+  /** @deprecated Use setHandoffMeta. Still functional for legacy callers. */
+  setHandoffStatus: (threadId: string, status: "generating" | "ready" | "fallback" | "error") => void;
+
+  /**
+   * Per-thread fork mode state. Preserved across thread navigation so the user
+   * can switch threads and return to find fork mode still active.
+   * Null means fork mode is not active for that thread.
+   */
+  forkMode: Record<string, { messageId: string; content: string | null; role: "user" | "assistant" } | null>;
+  /** Set or clear fork mode for a thread. */
+  setForkMode: (threadId: string, state: { messageId: string; content: string | null; role: "user" | "assistant" } | null) => void;
 
   // Per-thread settings
   /** Return current settings for a thread, preferring in-memory overrides over DB-persisted values. */
@@ -418,7 +471,7 @@ export function extractPendingPlanQuestions(
   try {
     const raw = JSON.parse(fenceContent);
     if (!Array.isArray(raw)) return null;
-    const results = raw.map((item) => PlanQuestionSchema.safeParse(item));
+    const results = raw.map((item) => PlanQuestionSchema().safeParse(item));
     // Reject the whole batch if any question fails — partial batches break
     // index continuity between the wizard UI and the answer map keys.
     if (results.some((r) => !r.success)) return null;
@@ -560,6 +613,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   activeQuestionIndexByThread: {},
   planQuestionsStatusByThread: {},
   answeredPlanMessageIdsByThread: {},
+  recentlyAnsweredPlanMessageIds: new Set<string>(),
   permissionsByThread: {},
   hooksByThread: {},
   thoughtSegmentsByThread: {},
@@ -568,6 +622,9 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   interruptStopFileNoticeByThread: {},
   composerRecallFromStopByThread: {},
   lastHydratedByThread: {},
+  handoffMeta: {},
+  handoffStatus: {},
+  forkMode: {},
 
   cacheToolCallRecords: (key, records) => {
     get().toolCallRecordCache.set(key, records);
@@ -672,6 +729,20 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           })
           .catch((err) => {
             console.debug("[taskHydration] Failed to load tasks for thread %s:", threadId, err);
+          });
+
+        // Hydrate plans from DB so the Scope panel shows persisted plans on refresh
+        getTransport()
+          .getThreadPlans(threadId)
+          .then((plans) => {
+            if (plans && plans.length > 0) {
+              for (const plan of plans) {
+                usePlanStore.getState().addPlan(threadId, plan);
+              }
+            }
+          })
+          .catch((err: unknown) => {
+            console.debug("[planHydration] Failed to load plans for thread %s:", threadId, err);
           });
       }
 
@@ -895,6 +966,20 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             console.debug("[taskHydration] Failed to load tasks for thread %s:", threadId, err);
           });
 
+        // Hydrate plans from DB so the Scope panel shows persisted plans on refresh
+        getTransport()
+          .getThreadPlans(threadId)
+          .then((plans) => {
+            if (plans && plans.length > 0) {
+              for (const plan of plans) {
+                usePlanStore.getState().addPlan(threadId, plan);
+              }
+            }
+          })
+          .catch((err: unknown) => {
+            console.debug("[planHydration] Failed to load plans for thread %s:", threadId, err);
+          });
+
         // Restore the plan question wizard if an unanswered plan-questions block
         // exists in the loaded messages. This handles app restart without losing wizard state.
         const existingStatus = get().planQuestionsStatusByThread[threadId];
@@ -1051,7 +1136,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
    * message to local state, marks the thread as running, then dispatches
    * to the transport layer. On failure, rolls back the running state.
    */
-  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, copilotAgent, contextWindow, thinking, codexFastMode, replyToMessageId, quotedText) => {
+  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, copilotAgent, contextWindow, thinking, codexFastMode, replyToMessageId, quotedText, planAction) => {
     evictMessageCache(threadId);
 
     // Add user message to local state immediately (optimistic)
@@ -1145,8 +1230,12 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         codexFastMode,
         replyToMessageId,
         quotedText,
+        planAction,
       );
     } catch (e) {
+      if (planAction === "revise") {
+        usePlanStore.getState().setGenerating(threadId, false);
+      }
       set((state) => {
         const next = new Set(state.runningThreadIds);
         next.delete(threadId);
@@ -1547,6 +1636,29 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     }
   },
 
+  setHandoffMeta: (threadId, meta) => {
+    set((s) => ({
+      handoffMeta: { ...s.handoffMeta, [threadId]: meta },
+      // Keep handoffStatus in sync as a derived cache for existing call sites.
+      handoffStatus: { ...s.handoffStatus, [threadId]: meta.status },
+    }));
+  },
+
+  setHandoffStatus: (threadId, status) => {
+    set((s) => ({
+      handoffStatus: { ...s.handoffStatus, [threadId]: status },
+      // Upsert into handoffMeta preserving any existing fields.
+      handoffMeta: {
+        ...s.handoffMeta,
+        [threadId]: { ...s.handoffMeta[threadId], status },
+      },
+    }));
+  },
+
+  setForkMode: (threadId, state) => {
+    set((s) => ({ forkMode: { ...s.forkMode, [threadId]: state } }));
+  },
+
   setPlanQuestions: (threadId, questions) => {
     set((state) => ({
       planQuestionsByThread: { ...state.planQuestionsByThread, [threadId]: questions },
@@ -1593,6 +1705,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       runningThreadIds: new Set([...s.runningThreadIds, threadId]),
       agentStartTimes: { ...s.agentStartTimes, [threadId]: Date.now() },
     }));
+    usePlanStore.getState().setGenerating(threadId, true);
 
     try {
       await getTransport().answerPlanQuestions(
@@ -1604,6 +1717,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         thinking ?? undefined,
       );
     } catch (e) {
+      usePlanStore.getState().setGenerating(threadId, false);
       // Revert to pending on error so user can retry
       set((s) => ({
         planQuestionsStatusByThread: { ...s.planQuestionsStatusByThread, [threadId]: "pending" },
@@ -1613,7 +1727,49 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     }
   },
 
+  sendPlanAction: async (threadId, content, action) => {
+    const { permissionMode, reasoningLevel, contextWindow, thinking } =
+      get().getThreadSettings(threadId);
+    const thread = useWorkspaceStore.getState().threads.find((t) => t.id === threadId);
+    const model = thread?.model ?? undefined;
+    const provider = thread?.provider ?? undefined;
+
+    if (action === "revise") {
+      usePlanStore.getState().setGenerating(threadId, true);
+    } else if (action === "implement") {
+      // Implementation runs in chat mode; leave plan mode so the composer
+      // label and future sends match the execution phase.
+      void get().setThreadSettings(threadId, { interactionMode: INTERACTION_MODES.CHAT });
+    }
+
+    await get().sendMessage(
+      threadId,
+      content,
+      model,
+      permissionMode,
+      undefined,
+      undefined,
+      reasoningLevel,
+      provider,
+      undefined,
+      contextWindow ?? undefined,
+      thinking ?? undefined,
+      undefined,
+      undefined,
+      undefined,
+      action,
+    );
+  },
+
   clearPlanQuestions: (threadId) => {
+    // Optimistically dismiss locally so the UI is snappy. The server
+    // RPC writes a `plan_question_answers` marker so the wizard stays
+    // dismissed across reloads / thread switches — without it the
+    // extractPendingPlanQuestions restore on the next loadMessages
+    // would see the fence again and re-open the wizard, defeating
+    // cancel. Fire-and-forget: the broadcast handler reconciles other
+    // tabs, and a failed RPC is non-fatal (worst case the wizard
+    // reappears on next load, matching prior behavior).
     set((state) => {
       const nextQuestions = { ...state.planQuestionsByThread };
       const nextAnswers = { ...state.planAnswersByThread };
@@ -1630,6 +1786,11 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         planQuestionsStatusByThread: nextStatus,
       };
     });
+    void getTransport()
+      .dismissPlanQuestions(threadId)
+      .catch((err: unknown) => {
+        console.warn("[plan] dismissPlanQuestions failed", err);
+      });
   },
 
   markPlanAnswered: (threadId, assistantMessageId) => {
@@ -1640,6 +1801,52 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       nextSet.add(assistantMessageId);
 
       // Dismiss the wizard for the thread now that the round is settled.
+      const nextQuestions = { ...state.planQuestionsByThread };
+      const nextAnswers = { ...state.planAnswersByThread };
+      const nextIndex = { ...state.activeQuestionIndexByThread };
+      const nextStatus = { ...state.planQuestionsStatusByThread };
+      delete nextQuestions[threadId];
+      delete nextAnswers[threadId];
+      delete nextIndex[threadId];
+      delete nextStatus[threadId];
+
+      const nextRecent = new Set(state.recentlyAnsweredPlanMessageIds);
+      nextRecent.add(assistantMessageId);
+
+      return {
+        answeredPlanMessageIdsByThread: {
+          ...state.answeredPlanMessageIdsByThread,
+          [threadId]: nextSet,
+        },
+        recentlyAnsweredPlanMessageIds: nextRecent,
+        planQuestionsByThread: nextQuestions,
+        planAnswersByThread: nextAnswers,
+        activeQuestionIndexByThread: nextIndex,
+        planQuestionsStatusByThread: nextStatus,
+      };
+    });
+    // Schedule removal so the echo only fires on the live submission,
+    // not on later remounts. 800ms covers the 600ms keyframe with a
+    // small buffer for the mount-to-paint gap.
+    window.setTimeout(() => {
+      set((s) => {
+        if (!s.recentlyAnsweredPlanMessageIds.has(assistantMessageId)) return {};
+        const next = new Set(s.recentlyAnsweredPlanMessageIds);
+        next.delete(assistantMessageId);
+        return { recentlyAnsweredPlanMessageIds: next };
+      });
+    }, 800);
+  },
+
+  markPlanDismissed: (threadId, assistantMessageId) => {
+    set((state) => {
+      const existing =
+        state.answeredPlanMessageIdsByThread[threadId] ?? new Set<string>();
+      const nextSet = new Set(existing);
+      nextSet.add(assistantMessageId);
+
+      // Settle the wizard without the celebratory echo set — dismiss is
+      // not submission.
       const nextQuestions = { ...state.planQuestionsByThread };
       const nextAnswers = { ...state.planAnswersByThread };
       const nextIndex = { ...state.activeQuestionIndexByThread };

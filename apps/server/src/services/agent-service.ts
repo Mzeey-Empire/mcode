@@ -22,6 +22,8 @@ import type {
   InteractionMode,
   PermissionDecision,
   PermissionRequest,
+  PlanOutput,
+  PlanAction,
 } from "@mcode/contracts";
 import { ThreadRepo } from "../repositories/thread-repo";
 import { WorkspaceRepo } from "../repositories/workspace-repo";
@@ -49,10 +51,19 @@ import {
   ProviderCliMissingError,
 } from "./provider-availability-errors.js";
 import { PlanQuestionParser } from "./plan-question-parser.js";
+import { PlanOutputParser } from "./plan-output-parser.js";
+import { PlanRepo } from "../repositories/plan-repo";
 import { buildHandoffContent, buildConversationReplay, replayBudgetChars, resolveForkSnapshot } from "./handoff-builder.js";
-import { PlanQuestionSchema } from "@mcode/contracts";
+import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts";
+import { HandoffPipelineService } from "./handoff/handoff-pipeline.js";
+import { HandoffStorage } from "./handoff/handoff-storage.js";
+import type { AttachmentSource } from "./handoff/handoff-storage.js";
+import type { HandoffArtifact } from "./handoff/handoff-types.js";
+import { classifyProviderError } from "./handoff/error-classifier.js";
+import { getMcodeDir } from "@mcode/shared";
+import { join } from "path";
+import { storedAttachmentSuffix } from "@mcode/contracts";
 import { normalizeAgentProviderError } from "./provider-agent-error-normalize.js";
-import { z } from "zod";
 
 /**
  * Escape special XML characters in a string to prevent injection into
@@ -160,10 +171,15 @@ export class AgentService {
   private streamingAssistantTextByThread = new Map<string, string>();
   /** Per-thread streaming parsers active while the model is generating questions in plan mode. */
   private planParsers = new Map<string, PlanQuestionParser>();
-  /** Buffered plan questions awaiting broadcast until the turn closes (`ended` event).
-   * Broadcasting from `ended` ensures the session is fully closed before the client
-   * can submit answers, preventing overlapping sends on the same thread. */
-  private pendingPlanQuestions = new Map<string, z.infer<typeof PlanQuestionSchema>[]>();
+  /** Per-thread streaming parsers for extracting structured plan-output blocks. */
+  private planOutputParsers = new Map<string, PlanOutputParser>();
+  /** Holds parsed plan output until the Message event provides a messageId for persistence. */
+  private pendingPlanOutputs = new Map<string, PlanOutput>();
+  /** ExitPlanMode / create_plan markdown waiting for the assistant Message row. */
+  private pendingExitPlanMarkdown = new Map<string, string>();
+  /** Prevents duplicate plan records when ExitPlanMode and plan-output both fire. */
+  private planCapturedThisTurn = new Set<string>();
+
   constructor(
     @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
     @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
@@ -189,6 +205,11 @@ export class AgentService {
     private readonly availability: ProviderAvailabilityService,
     @inject(PlanQuestionAnswersRepo)
     private readonly planQuestionAnswersRepo: PlanQuestionAnswersRepo,
+    @inject(PlanRepo) private readonly planRepo: PlanRepo,
+    @inject(HandoffPipelineService)
+    private readonly handoffPipeline: HandoffPipelineService,
+    @inject(HandoffStorage)
+    private readonly handoffStorage: HandoffStorage,
   ) {}
 
   /**
@@ -235,6 +256,7 @@ export class AgentService {
      * still the base for plan/reply wrapping sent to the provider.
      */
     messageDisplayContent?: string,
+    planAction?: PlanAction,
   ): Promise<void> {
     const thread = this.threadRepo.findById(threadId);
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
@@ -452,10 +474,25 @@ export class AgentService {
     // whether a provider content override exists. When branching (override present),
     // the override already carries the plan-wrapped stitched content; only wrap the
     // plain content when there is no override.
+    // Plan-tab implement/revise actions force chat mode so the prompt is not
+    // re-wrapped with the question-generation template.
     let wirePayload = content;
 
-    if (interactionMode === "plan") {
+    if (planAction === "revise") {
+      this.armPlanGenerationTurn(threadId);
+      wirePayload = `${wirePayload}\n\n${this.buildPlanOutputInstructions()}`;
+    } else if (planAction === "implement") {
+      this.setPlanQuestionModeOnProvider(threadId, false);
+    }
+
+    const effectiveInteractionMode =
+      planAction === "revise" || planAction === "implement"
+        ? undefined
+        : interactionMode;
+
+    if (effectiveInteractionMode === "plan") {
       this.planParsers.set(threadId, new PlanQuestionParser());
+      this.setPlanQuestionModeOnProvider(threadId, true);
       if (providerWireOverride === undefined) {
         wirePayload = this.buildPlanPrompt(wirePayload);
       }
@@ -694,7 +731,7 @@ export class AgentService {
     // follow-up message is human-readable rather than using opaque IDs.
     const questionContext = this.buildQuestionContext(threadId);
 
-    const lines: string[] = ["Here are my answers to your planning questions:\n"];
+    const lines: string[] = [`${PLAN_ANSWER_MESSAGE_PREFIX}\n`];
     for (const a of answers) {
       const qCtx = questionContext.get(a.questionId);
       const label = qCtx?.question ?? a.questionId;
@@ -707,13 +744,15 @@ export class AgentService {
         lines.push(`- **${label}**: (skipped)`);
       }
     }
-    lines.push("\nNow generate the full plan based on these decisions.");
+    lines.push(this.buildPlanOutputInstructions());
 
     // Locate the assistant message carrying the plan-questions fence so the
     // marker is keyed on it (not just on the thread). Survives restarts and
     // mid-turn errors — see docs/plans/2026-04-30-plan-question-answers-marker.md.
     const markPlanAnswerForMessageId =
       this.findLatestPlanQuestionsMessageId(threadId) ?? undefined;
+
+    this.armPlanGenerationTurn(threadId);
 
     // interactionMode intentionally omitted — no question wrapping for the answer turn
     await this.sendMessage(
@@ -749,6 +788,26 @@ export class AgentService {
       if (PLAN_QUESTIONS_RE.test(msg.content)) return msg.id;
     }
     return null;
+  }
+
+  /**
+   * Durably mark the latest plan-questions batch for the thread as
+   * settled without sending any answers to the model. Used by the
+   * wizard's `cancel` action so the batch does NOT re-surface on
+   * subsequent reloads or thread switches. Idempotent — `INSERT OR
+   * IGNORE` inside the repo absorbs repeat calls. No-ops silently
+   * when there is no fenced message to settle (e.g. dev / test
+   * harnesses that inject the wizard without a real fence in the
+   * message history).
+   */
+  dismissPlanQuestions(threadId: string): void {
+    const assistantMessageId = this.findLatestPlanQuestionsMessageId(threadId);
+    if (!assistantMessageId) return;
+    this.planQuestionAnswersRepo.markAnswered(assistantMessageId, threadId);
+    // Use `plan.dismissed` rather than `plan.answered` so other tabs settle
+    // the batch (hide the wizard, add to the answered set) without firing
+    // the "submission echo" animation reserved for actual answers.
+    broadcast("plan.dismissed", { threadId, assistantMessageId });
   }
 
   /**
@@ -844,12 +903,33 @@ export class AgentService {
     }
 
     this.threadRepo.updateModel(thread.id, model);
-
-    if (provider === "codex" && codexFastMode !== undefined) {
-      this.threadRepo.updateSettings(thread.id, {
-        codex_fast_mode: codexFastMode,
-      });
-    }
+    this.threadRepo.updateSettings(thread.id, {
+      ...(reasoningLevel !== undefined && { reasoning_level: reasoningLevel }),
+      ...(interactionMode !== undefined && { interaction_mode: interactionMode }),
+      ...(permissionMode !== undefined && permissionMode !== "default" && { permission_mode: permissionMode }),
+      ...(contextWindowMode !== undefined && { context_window_mode: contextWindowMode }),
+      ...(thinking !== undefined && { thinking }),
+      ...(copilotAgent !== undefined && { copilot_agent: copilotAgent }),
+      ...(provider === "codex" && codexFastMode !== undefined && { codex_fast_mode: codexFastMode }),
+    });
+    const persistedPermissionMode =
+      permissionMode === "full" || permissionMode === "supervised"
+        ? permissionMode
+        : thread.permission_mode;
+    thread = {
+      ...thread,
+      model,
+      provider,
+      reasoning_level: reasoningLevel ?? thread.reasoning_level,
+      interaction_mode: interactionMode ?? thread.interaction_mode,
+      permission_mode: persistedPermissionMode,
+      context_window_mode: contextWindowMode ?? thread.context_window_mode,
+      thinking: thinking ?? thread.thinking,
+      copilot_agent: copilotAgent ?? thread.copilot_agent,
+      codex_fast_mode: provider === "codex" && codexFastMode !== undefined
+        ? codexFastMode
+        : thread.codex_fast_mode,
+    };
 
     void this.sendMessage(
       thread.id,
@@ -971,41 +1051,6 @@ export class AgentService {
       forkMessage.sequence,
     );
 
-    // Gather handoff data
-    // lastAssistantText comes from forkedMessages so it never leaks post-fork state.
-    const lastAssistantMsg = [...forkedMessages]
-      .reverse()
-      .find((m) => m.role === "assistant");
-    const lastAssistantText = lastAssistantMsg?.content ?? null;
-
-    // Resolve the snapshot at the fork point for historical fidelity.
-    // Only snapshots whose message_id falls within the forked message range are
-    // considered, preventing post-fork file changes and HEAD refs from leaking
-    // into the child thread's handoff context.
-    const allSnapshots = this.turnSnapshotRepo.listByThread(parentThreadId);
-    const forkedMessageIds = new Set(forkedMessages.map((m) => m.id));
-    const forkSnapshot = resolveForkSnapshot(allSnapshots, forkedMessageIds);
-    const recentFilesChanged: string[] = forkSnapshot?.files_changed ?? [];
-    const sourceHead = forkSnapshot?.ref_after ?? null;
-
-    // Task state has no historical version; include current tasks as best-effort context.
-    // Post-fork tasks on the parent may be included — this is a known limitation.
-    const rawTasks = this.taskRepo.get(parentThreadId);
-    const openTasks = (rawTasks ?? []).map((t) => ({
-      content: t.content,
-      status: t.status,
-    }));
-
-    // Build handoff content
-    const handoffContent = buildHandoffContent({
-      parentThread,
-      forkMessageId: resolvedForkMessageId,
-      lastAssistantText,
-      recentFilesChanged,
-      openTasks,
-      sourceHead,
-    });
-
     // Create child thread with lineage
     const lineage = { parentThreadId, forkedFromMessageId: resolvedForkMessageId };
     let thread: Thread;
@@ -1040,55 +1085,241 @@ export class AgentService {
       thread = this.threadRepo.create(workspaceId, title, "direct", branch, true, provider, lineage);
     }
 
-    // Insert synthetic system handoff message as sequence 1
-    this.messageRepo.create(thread.id, "system", handoffContent, 1);
-
-    // Build the conversation replay for the provider.
-    // This gives the AI real conversation history instead of a lossy summary.
-    // The handoffContent (prose + JSON metadata) is stored in the DB for the UI only.
-    const budget = replayBudgetChars(model);
-    // The `last_compact_summary` on the thread is a single rolling value that
-    // gets overwritten on each compaction. It is only safe to use when the most
-    // recent compaction in the entire thread falls within our forked range;
-    // otherwise the summary describes turns that happened after the fork point.
-    let compactSummary: string | null = null;
-    if (parentThread.last_compact_summary) {
-      const lastForkCompactionIdx = findLastIndex(
-        forkedMessages,
-        (m) => m.role === "system" && m.content === "Context compacted",
-      );
-      if (lastForkCompactionIdx !== -1) {
-        // Check whether any compaction markers exist after the fork point.
-        const { messages: postForkWindow } = this.messageRepo.listByThread(parentThreadId, 100);
-        const postForkCompaction = postForkWindow.some(
-          (m) =>
-            m.role === "system" &&
-            m.content === "Context compacted" &&
-            m.sequence > forkMessage.sequence,
-        );
-        if (!postForkCompaction) {
-          compactSummary = parentThread.last_compact_summary;
-        }
-      }
-    }
-    const replay = buildConversationReplay(forkedMessages, budget, compactSummary);
-    const replayHeader = `You are continuing work from a previous thread titled "${parentThread.title}". Here is the conversation history up to the fork point:\n\n`;
-    // When replay is empty (system-only or all-blank parent history), send the prompt alone.
-    // The seq-1 handoff message still provides context via its prose summary.
-    const stitchedContent = replay
-      ? `${replayHeader}${replay}\n\n---\n\n${content}`
-      : content;
-
-    // In plan mode, wrap the stitched content so the provider receives
-    // buildPlanPrompt(replay + userPrompt) on the first branch turn.
-    // The DB still stores the clean user prompt at seq 2 (written by sendMessage).
-    const providerInput =
-      interactionMode === "plan" ? this.buildPlanPrompt(stitchedContent) : stitchedContent;
-
     const resolvedCodexFast =
       codexFastMode !== undefined
         ? codexFastMode
         : parentThread.codex_fast_mode;
+    this.threadRepo.updateModel(thread.id, model);
+    this.threadRepo.updateSettings(thread.id, {
+      ...(reasoningLevel !== undefined && { reasoning_level: reasoningLevel }),
+      ...(interactionMode !== undefined && { interaction_mode: interactionMode }),
+      ...(permissionMode !== undefined && permissionMode !== "default" && { permission_mode: permissionMode }),
+      ...(effectiveContextWindowMode !== undefined && { context_window_mode: effectiveContextWindowMode }),
+      ...(effectiveThinking !== undefined && { thinking: effectiveThinking }),
+      ...(copilotAgent !== undefined && { copilot_agent: copilotAgent }),
+      ...(provider === "codex" && resolvedCodexFast !== null && { codex_fast_mode: resolvedCodexFast }),
+    });
+    const persistedPermissionMode =
+      permissionMode === "full" || permissionMode === "supervised"
+        ? permissionMode
+        : thread.permission_mode;
+    thread = {
+      ...thread,
+      model,
+      provider,
+      reasoning_level: reasoningLevel ?? thread.reasoning_level,
+      interaction_mode: interactionMode ?? thread.interaction_mode,
+      permission_mode: persistedPermissionMode,
+      context_window_mode: effectiveContextWindowMode ?? thread.context_window_mode,
+      thinking: effectiveThinking ?? thread.thinking,
+      copilot_agent: copilotAgent ?? thread.copilot_agent,
+      codex_fast_mode: provider === "codex" && resolvedCodexFast !== null
+        ? resolvedCodexFast
+        : thread.codex_fast_mode,
+    };
+
+    // Derive the fork anchor role for the pipeline.
+    const forkAnchorRole = forkMessage.role === "user" ? "user" : "assistant";
+
+    // Orchestrate the handoff pipeline (B->A->D ladder). On failure, fall back to the
+    // legacy inline replay so the fork always succeeds.
+    let providerWireOverride: string;
+
+    // Signal to clients that the handoff is in progress so the UI can show a spinner
+    // before the artifact lands.
+    broadcast("thread.handoff", { threadId: thread.id, status: "generating" });
+
+    try {
+      const artifact = await this.handoffPipeline.orchestrate({
+        parentThreadId,
+        forkedFromMessageId: resolvedForkMessageId,
+        forkAnchorRole,
+        childThreadId: thread.id,
+        childProviderId: provider,
+        userFollowUpMessage: content,
+      });
+
+      // Copy attachments from parent messages within the fork range into the child thread's dir.
+      // StoredAttachment has no path field; files live at {mcodeDir}/attachments/{threadId}/{id}{ext}.
+      const parentAttachmentsDir = join(getMcodeDir(), "attachments", parentThreadId);
+      const attachmentSources: AttachmentSource[] = [];
+      for (const msg of forkedMessages) {
+        if (!msg.attachments) continue;
+        for (const att of msg.attachments) {
+          const ext = storedAttachmentSuffix(att.mimeType);
+          const absolutePath = join(parentAttachmentsDir, `${att.id}${ext}`);
+          if (!existsSync(absolutePath)) {
+            logger.warn("createBranchedThread: parent attachment not found on disk, skipping", {
+              attachmentId: att.id,
+              parentThreadId,
+              absolutePath,
+            });
+            continue;
+          }
+          attachmentSources.push({
+            id: att.id,
+            absolutePath,
+            originalName: att.name,
+            mime: att.mimeType,
+            parentMessageId: msg.id,
+          });
+        }
+      }
+
+      if (attachmentSources.length > 0) {
+        artifact.meta.attachments = await this.handoffStorage.copyAttachments(thread.id, attachmentSources);
+      }
+
+      // Guard against the child thread being hard-deleted between orchestration
+      // start and artifact write (e.g. rapid user delete during a slow path B).
+      const childCheck = this.threadRepo.findById(thread.id);
+      if (!childCheck || childCheck.deleted_at) {
+        logger.info("Child thread vanished mid-handoff; dropping artifact", { childThreadId: thread.id });
+        throw new Error("Child thread deleted before handoff artifact could be written");
+      }
+
+      await this.handoffStorage.write(thread.id, artifact);
+
+      broadcast("thread.handoff", {
+        threadId: thread.id,
+        status: artifact.meta.ladderStep === "D" ? "fallback" : "ready",
+        ladderStep: artifact.meta.ladderStep,
+        providerErrorOnGenerate: artifact.meta.providerErrorOnGenerate,
+      });
+
+      // Store an internal-only system message at seq 1 as a DB anchor for the handoff.
+      // isInternal=true keeps it off the UI render path.
+      this.messageRepo.create(
+        thread.id, "system", artifact.markdown, 1,
+        undefined, undefined, undefined, undefined, /* isInternal */ true,
+      );
+
+      // Append the user's new message so the provider receives full context + the prompt.
+      providerWireOverride = `${artifact.markdown}\n\n---\n\n${content}`;
+    } catch (pipelineErr) {
+      // Re-check child thread existence before writing any fallback artifacts.
+      // The thread may have been hard-deleted between pipeline start and failure
+      // (e.g. rapid user delete during a slow path B), in which case proceeding
+      // would produce FK errors, stale files, or a misleading fallback event.
+      const childRecheck = this.threadRepo.findById(thread.id);
+      if (!childRecheck || childRecheck.deleted_at) {
+        logger.info("Child thread vanished mid-handoff; aborting fallback", {
+          childThreadId: thread.id,
+        });
+        throw pipelineErr;
+      }
+
+      // Classify the error so we know how to label the artifact and log usefully.
+      const errClass = classifyProviderError(pipelineErr);
+      logger.warn("createBranchedThread: handoff pipeline failed, falling back to legacy replay", {
+        threadId: thread.id,
+        parentThreadId,
+        errClass,
+        error: pipelineErr instanceof Error ? pipelineErr.message : String(pipelineErr),
+        stack: pipelineErr instanceof Error ? pipelineErr.stack : undefined,
+      });
+
+      // Notify clients that the handoff fell back to the deterministic legacy replay.
+      // The pipeline itself threw, so treat as the classified error (or fatal if clean).
+      broadcast("thread.handoff", {
+        threadId: thread.id,
+        status: "fallback",
+        ladderStep: "D" as const,
+        providerErrorOnGenerate: errClass === "clean" ? ("fatal" as const) : errClass,
+      });
+
+      // Legacy fallback: build handoff content + conversation replay inline.
+      const lastAssistantMsg = [...forkedMessages].reverse().find((m) => m.role === "assistant");
+      const lastAssistantText = lastAssistantMsg?.content ?? null;
+      const allSnapshots = this.turnSnapshotRepo.listByThread(parentThreadId);
+      const forkedMessageIds = new Set(forkedMessages.map((m) => m.id));
+      const forkSnapshot = resolveForkSnapshot(allSnapshots, forkedMessageIds);
+      const recentFilesChanged: string[] = forkSnapshot?.files_changed ?? [];
+      const sourceHead = forkSnapshot?.ref_after ?? null;
+      const rawTasks = this.taskRepo.get(parentThreadId);
+      const openTasks = (rawTasks ?? []).map((t) => ({ content: t.content, status: t.status }));
+      const handoffContent = buildHandoffContent({
+        parentThread,
+        forkMessageId: resolvedForkMessageId,
+        lastAssistantText,
+        recentFilesChanged,
+        openTasks,
+        sourceHead,
+      });
+
+      // isInternal=true keeps this off the UI render path, consistent with the
+      // pipeline path's system message (written below after replay is built).
+      // NOTE: we write this placeholder now; the legacy replay is stored via
+      // providerWireOverride, not as a second system message.
+      this.messageRepo.create(
+        thread.id, "system", handoffContent, 1,
+        undefined, undefined, undefined, undefined, /* isInternal */ true,
+      );
+
+      const budget = replayBudgetChars(model);
+      let compactSummary: string | null = null;
+      if (parentThread.last_compact_summary) {
+        const lastForkCompactionIdx = findLastIndex(
+          forkedMessages,
+          (m) => m.role === "system" && m.content === "Context compacted",
+        );
+        if (lastForkCompactionIdx !== -1) {
+          const { messages: postForkWindow } = this.messageRepo.listByThread(parentThreadId, 100);
+          const postForkCompaction = postForkWindow.some(
+            (m) =>
+              m.role === "system" &&
+              m.content === "Context compacted" &&
+              m.sequence > forkMessage.sequence,
+          );
+          if (!postForkCompaction) {
+            compactSummary = parentThread.last_compact_summary;
+          }
+        }
+      }
+      const replay = buildConversationReplay(forkedMessages, budget, compactSummary);
+      const replayHeader = `You are continuing work from a previous thread titled "${parentThread.title}". Here is the conversation history up to the fork point:\n\n`;
+      providerWireOverride = replay ? `${replayHeader}${replay}\n\n---\n\n${content}` : content;
+
+      // Persist a HandoffArtifact so "View doc" has something to read.
+      // The markdown is the full replay that will be sent to the provider.
+      const legacyMarkdown = (replay ? `${replayHeader}${replay}` : handoffContent).trim();
+      const legacyArtifact: HandoffArtifact = {
+        markdown: legacyMarkdown,
+        meta: {
+          schemaVersion: 1,
+          parentThreadId,
+          forkedFromMessageId: resolvedForkMessageId,
+          forkAnchorRole,
+          childThreadId: thread.id,
+          generatedBy: "deterministic",
+          provider: parentThread.provider,
+          ladderStep: "D",
+          mode: "full",
+          generatedAt: new Date().toISOString(),
+          characterCount: legacyMarkdown.length,
+          parentSdkSessionId: parentThread.sdk_session_id ?? null,
+          providerErrorOnGenerate: errClass === "clean" ? "fatal" : errClass,
+          regenerationHistory: [],
+          attachments: [],
+        },
+      };
+      try {
+        await this.handoffStorage.write(thread.id, legacyArtifact);
+      } catch (storageErr) {
+        // Non-fatal: the fork still succeeds via providerWireOverride; View doc
+        // will show "not available" rather than blocking the user.
+        logger.warn("Failed to persist legacy handoff artifact (View doc will be unavailable)", {
+          threadId: thread.id,
+          storageError: storageErr instanceof Error ? storageErr.message : String(storageErr),
+        });
+      }
+    }
+
+    // In plan mode, wrap so the provider receives buildPlanPrompt(handoff + userPrompt).
+    // The DB still stores the clean user prompt at seq 2 (written by sendMessage).
+    const providerInput =
+      interactionMode === "plan" ? this.buildPlanPrompt(providerWireOverride) : providerWireOverride;
+
     if (provider === "codex" && resolvedCodexFast !== null) {
       this.threadRepo.updateSettings(thread.id, {
         codex_fast_mode: resolvedCodexFast,
@@ -1109,7 +1340,7 @@ export class AgentService {
       copilotAgent,
       effectiveContextWindowMode,
       effectiveThinking,
-      undefined,
+      resolvedCodexFast ?? undefined,
       undefined,
       providerInput,
       undefined,
@@ -1301,8 +1532,19 @@ export class AgentService {
           if (parser) {
             const questions = parser.feed(event.delta);
             if (questions) {
-              this.pendingPlanQuestions.set(event.threadId, questions);
+              // Broadcast immediately so the wizard renders as soon as the model
+              // finishes emitting the fenced block, even while the session keeps
+              // streaming. Submission is gated client-side on thread-running state.
+              broadcast("plan.questions", { threadId: event.threadId, questions });
               this.planParsers.delete(event.threadId);
+            }
+          }
+          const outputParser = this.planOutputParsers.get(event.threadId);
+          if (outputParser) {
+            const planOutput = outputParser.feed(event.delta);
+            if (planOutput) {
+              this.planOutputParsers.delete(event.threadId);
+              this.pendingPlanOutputs.set(event.threadId, planOutput);
             }
           }
           // NOTE: Do NOT clear agentCallStack on textDelta. The Claude SDK
@@ -1357,6 +1599,74 @@ export class AgentService {
           const stackOnMessage = this.agentCallStack.get(event.threadId);
           if (stackOnMessage && stackOnMessage.length > 0) {
             stackOnMessage.length = 0;
+          }
+
+          // Persist any pending plan-output extracted from streamed text deltas.
+          // Guarded on event.messageId so it only runs when the assistant message
+          // was successfully persisted above.
+          const pendingPlan = this.pendingPlanOutputs.get(event.threadId);
+          const pendingExitPlan = this.pendingExitPlanMarkdown.get(event.threadId);
+          const hadOutputParser = this.planOutputParsers.has(event.threadId);
+          if (pendingPlan && event.messageId) {
+            this.pendingPlanOutputs.delete(event.threadId);
+            this.planOutputParsers.delete(event.threadId);
+            this.pendingExitPlanMarkdown.delete(event.threadId);
+            const contentMd = pendingPlan.sections
+              .map((s) => `${"#".repeat(s.level + 1)} ${s.title}\n\n${s.content}`)
+              .join("\n\n");
+
+            const sectionsJson = JSON.stringify(
+              pendingPlan.sections.map((s) => ({ id: s.id, title: s.title, level: s.level })),
+            );
+
+            this.persistPlanRecord(
+              event.threadId,
+              event.messageId,
+              pendingPlan.title,
+              contentMd,
+              sectionsJson,
+              pendingPlan.changeSummary ?? null,
+            );
+          } else if (pendingExitPlan && event.messageId) {
+            this.pendingExitPlanMarkdown.delete(event.threadId);
+            this.planOutputParsers.delete(event.threadId);
+            const extracted = this.extractPlanFromMarkdown(pendingExitPlan);
+            if (extracted) {
+              this.persistPlanRecord(
+                event.threadId,
+                event.messageId,
+                extracted.title,
+                extracted.contentMd,
+                extracted.sectionsJson,
+                null,
+              );
+            }
+          } else if (hadOutputParser && !pendingPlan && event.messageId && event.content) {
+            // Fallback: the model didn't emit a ```plan-output block but this
+            // was a plan-answer turn. Extract a plan from the raw markdown.
+            this.planOutputParsers.delete(event.threadId);
+            try {
+              const extracted = this.extractPlanFromMarkdown(event.content);
+              if (extracted) {
+                this.persistPlanRecord(
+                  event.threadId,
+                  event.messageId,
+                  extracted.title,
+                  extracted.contentMd,
+                  extracted.sectionsJson,
+                  null,
+                );
+                logger.info("plan-output: extracted plan from markdown fallback", {
+                  threadId: event.threadId,
+                  title: extracted.title,
+                });
+              }
+            } catch (err) {
+              logger.warn("plan-output: markdown fallback extraction failed", {
+                threadId: event.threadId,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
           }
         }
 
@@ -1578,7 +1888,11 @@ export class AgentService {
             this.clearTurnState(event.threadId);
           }
           this.planParsers.delete(event.threadId);
-          this.pendingPlanQuestions.delete(event.threadId);
+          this.planOutputParsers.delete(event.threadId);
+          this.pendingPlanOutputs.delete(event.threadId);
+          this.pendingExitPlanMarkdown.delete(event.threadId);
+          this.planCapturedThisTurn.delete(event.threadId);
+          this.setPlanQuestionModeOnProvider(event.threadId, false);
         }
 
         if (event.type === AgentEventType.Compacting && event.active) {
@@ -1646,13 +1960,11 @@ export class AgentService {
         if (event.type === AgentEventType.Ended) {
           this.trackSessionEnded(event.threadId);
           this.planParsers.delete(event.threadId);
-          // Broadcast buffered plan questions now that the session is fully closed,
-          // ensuring the client cannot submit answers against an active session.
-          const questions = this.pendingPlanQuestions.get(event.threadId);
-          if (questions) {
-            broadcast("plan.questions", { threadId: event.threadId, questions });
-            this.pendingPlanQuestions.delete(event.threadId);
-          }
+          this.planOutputParsers.delete(event.threadId);
+          this.pendingPlanOutputs.delete(event.threadId);
+          this.pendingExitPlanMarkdown.delete(event.threadId);
+          this.planCapturedThisTurn.delete(event.threadId);
+          this.setPlanQuestionModeOnProvider(event.threadId, false);
         }
       });
     }
@@ -1667,12 +1979,166 @@ export class AgentService {
   }
 
   /**
-   * Wrap a user message with the plan-mode question-generation prompt.
-   * Instructs the model to emit a fenced plan-questions JSON block before
-   * generating the actual plan.
+   * Fallback plan extraction from raw markdown when the model doesn't emit
+   * a ```plan-output fenced block. Parses headings to build sections.
    */
+  private extractPlanFromMarkdown(
+    content: string,
+  ): { title: string; contentMd: string; sectionsJson: string } | null {
+    const lines = content.split("\n");
+
+    // Find the first H1 or H2 as the plan title
+    let title: string | null = null;
+    const sections: { id: string; title: string; level: number }[] = [];
+    let sectionCounter = 0;
+
+    for (const line of lines) {
+      const h1Match = line.match(/^#\s+(.+)/);
+      const h2Match = line.match(/^##\s+(.+)/);
+      const h3Match = line.match(/^###\s+(.+)/);
+
+      if (h1Match && !title) {
+        title = h1Match[1].trim();
+      } else if (h1Match) {
+        sectionCounter++;
+        sections.push({ id: `s${sectionCounter}`, title: h1Match[1].trim(), level: 1 });
+      }
+
+      if (h2Match) {
+        if (!title) {
+          title = h2Match[1].trim();
+        } else {
+          sectionCounter++;
+          sections.push({ id: `s${sectionCounter}`, title: h2Match[1].trim(), level: 2 });
+        }
+      }
+
+      if (h3Match) {
+        sectionCounter++;
+        sections.push({ id: `s${sectionCounter}`, title: h3Match[1].trim(), level: 3 });
+      }
+    }
+
+    // Need at least a title and one section to consider this a plan
+    if (!title || sections.length === 0) return null;
+
+    return {
+      title,
+      contentMd: content,
+      sectionsJson: JSON.stringify(sections),
+    };
+  }
+
+  /**
+   * Handle the ExitPlanMode tool call from the Claude SDK (or Cursor
+   * `create_plan`). Defer persistence until the assistant Message event
+   * supplies a stable messageId.
+   */
+  handleExitPlanMode(threadId: string, planMarkdown: string): void {
+    if (this.planCapturedThisTurn.has(threadId)) {
+      logger.debug("ExitPlanMode: plan already captured this turn", { threadId });
+      return;
+    }
+
+    this.planOutputParsers.delete(threadId);
+    this.pendingPlanOutputs.delete(threadId);
+    this.pendingExitPlanMarkdown.set(threadId, planMarkdown);
+  }
+
+  /** Arm plan-output parsing and Claude ExitPlanMode capture for one generation turn. */
+  private armPlanGenerationTurn(threadId: string): void {
+    this.planOutputParsers.set(threadId, new PlanOutputParser());
+    this.planCapturedThisTurn.delete(threadId);
+    this.setPlanQuestionModeOnProvider(threadId, false);
+
+    const thread = this.threadRepo.findById(threadId);
+    const effectiveProvider = (thread?.provider as ProviderId) ?? "claude";
+    const provider = this.providerRegistry.resolve(effectiveProvider);
+    provider.setPlanAnswerMode?.(threadId, true);
+  }
+
+  /** Toggle native question UI suppression on the active provider. */
+  private setPlanQuestionModeOnProvider(threadId: string, enabled: boolean): void {
+    const thread = this.threadRepo.findById(threadId);
+    if (!thread) return;
+    const provider = this.providerRegistry.resolve(
+      (thread.provider as ProviderId) ?? "claude",
+    );
+    provider.setPlanQuestionMode?.(threadId, enabled);
+  }
+
+  /** Persist one plan version and broadcast, skipping duplicate captures per turn. */
+  private persistPlanRecord(
+    threadId: string,
+    messageId: string,
+    title: string,
+    contentMd: string,
+    sectionsJson: string,
+    changeSummary: string | null,
+  ): void {
+    if (this.planCapturedThisTurn.has(threadId)) {
+      logger.debug("plan persist skipped: already captured this turn", { threadId });
+      return;
+    }
+
+    try {
+      const plan = this.planRepo.create(
+        threadId,
+        messageId,
+        title,
+        contentMd,
+        sectionsJson,
+        changeSummary,
+      );
+      this.planCapturedThisTurn.add(threadId);
+      broadcast("plan.generated", { threadId, plan });
+    } catch (err) {
+      logger.error("Failed to persist plan output", {
+        threadId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  /** Instructions appended when the model should emit a structured plan-output block. */
+  private buildPlanOutputInstructions(): string {
+    return `
+Now generate the full implementation plan based on these decisions.
+
+Write the plan as normal markdown in your response so the user can read it in the chat.
+
+Additionally, emit the plan in a structured format inside a fenced block so it can be displayed in the Plan tab. The block must contain valid JSON matching this schema:
+
+\`\`\`plan-output
+{
+  "title": "Short plan title",
+  "changeSummary": "One-line summary of what changed (omit for first version)",
+  "sections": [
+    {
+      "id": "unique-section-id",
+      "title": "Section Heading",
+      "level": 1,
+      "content": "Full markdown content of this section."
+    }
+  ]
+}
+\`\`\`
+
+The fenced block can appear anywhere in your response. The sections should mirror the headings in your markdown plan. Level 1 = top-level heading, level 2 = subheading, level 3 = sub-subheading.`;
+  }
+
+  /** Wrap a user message with the plan-mode question-generation prompt. */
   private buildPlanPrompt(userMessage: string): string {
-    return `[PLAN MODE] You are in planning mode. Before generating your plan, identify 2-5 key architectural decisions that need user input. Output your questions in this exact format:
+    return `[PLAN MODE] You are in planning mode. Your only job right now is to identify 2-5 key architectural decisions that need user input, based solely on the user's message below.
+
+Constraints:
+- Do NOT call any tools. Do NOT read files, run commands, or explore the codebase.
+- Do NOT use native ask-question or create-plan tools; Mcode renders questions from a fenced block.
+- Do NOT write any prose, preamble, or commentary.
+- Your entire response MUST be the single fenced plan-questions block shown below, then stop.
+- After the user answers, you will receive their selections in a follow-up turn and may then plan freely.
+
+Output format (must be valid JSON inside the fence):
 
 \`\`\`plan-questions
 [
@@ -1687,8 +2153,6 @@ export class AgentService {
   }
 ]
 \`\`\`
-
-Output ONLY the plan-questions block, then stop. Do not generate the plan until you receive the user's answers.
 
 ---
 

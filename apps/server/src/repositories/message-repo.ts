@@ -27,6 +27,7 @@ interface MessageRow {
   reply_to_message_id: string | null;
   quoted_text: string | null;
   model: string | null;
+  is_internal: number;
   tool_call_count?: number;
 }
 
@@ -59,6 +60,7 @@ function rowToMessage(row: MessageRow): Message {
     reply_to_message_id: row.reply_to_message_id,
     quoted_text: row.quoted_text,
     model: row.model,
+    is_internal: row.is_internal === 1,
   };
 
   if (row.tool_call_count && row.tool_call_count > 0) {
@@ -69,10 +71,10 @@ function rowToMessage(row: MessageRow): Message {
 }
 
 const MESSAGE_COLUMNS =
-  "id, thread_id, role, content, tool_calls, files_changed, cost_usd, tokens_used, timestamp, sequence, attachments, reply_to_message_id, quoted_text, model";
+  "id, thread_id, role, content, tool_calls, files_changed, cost_usd, tokens_used, timestamp, sequence, attachments, reply_to_message_id, quoted_text, model, is_internal";
 
 const MESSAGE_COLUMNS_PREFIXED =
-  "m.id, m.thread_id, m.role, m.content, m.tool_calls, m.files_changed, m.cost_usd, m.tokens_used, m.timestamp, m.sequence, m.attachments, m.reply_to_message_id, m.quoted_text, m.model";
+  "m.id, m.thread_id, m.role, m.content, m.tool_calls, m.files_changed, m.cost_usd, m.tokens_used, m.timestamp, m.sequence, m.attachments, m.reply_to_message_id, m.quoted_text, m.model, m.is_internal";
 
 /**
  * Per-row tool call counts via index on `message_id`.
@@ -103,6 +105,7 @@ export class MessageRepo {
     replyToMessageId?: string,
     quotedText?: string,
     model?: string | null,
+    isInternal?: boolean,
   ): Message {
     const id = randomUUID();
     const now = new Date().toISOString();
@@ -111,14 +114,15 @@ export class MessageRepo {
         ? JSON.stringify(attachments)
         : null;
     const modelValue = model ?? null;
+    const isInternalValue = isInternal ? 1 : 0;
 
     this.db
       .prepare(
-        "INSERT INTO messages (id, thread_id, role, content, timestamp, sequence, attachments, reply_to_message_id, quoted_text, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO messages (id, thread_id, role, content, timestamp, sequence, attachments, reply_to_message_id, quoted_text, model, is_internal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         id, threadId, role, content, now, sequence,
-        attachmentsJson, replyToMessageId ?? null, quotedText ?? null, modelValue,
+        attachmentsJson, replyToMessageId ?? null, quotedText ?? null, modelValue, isInternalValue,
       );
 
     return {
@@ -136,6 +140,7 @@ export class MessageRepo {
       reply_to_message_id: replyToMessageId ?? null,
       quoted_text: quotedText ?? null,
       model: modelValue,
+      is_internal: isInternal ?? false,
     };
   }
 
@@ -160,8 +165,8 @@ export class MessageRepo {
     const fetchLimit = clampedLimit + 1;
 
     const whereClause = before != null
-      ? "m.thread_id = ? AND m.sequence < ?"
-      : "m.thread_id = ?";
+      ? "m.thread_id = ? AND m.sequence < ? AND m.is_internal = 0"
+      : "m.thread_id = ? AND m.is_internal = 0";
     const queryParams = before != null
       ? [threadId, before, fetchLimit]
       : [threadId, fetchLimit];
@@ -204,7 +209,7 @@ ORDER BY m.sequence ASC`,
       .prepare(
         `SELECT ${MESSAGE_COLUMNS_PREFIXED}, ${TOOL_CALL_COUNT_SQL}
 FROM messages m
-WHERE m.thread_id = ? AND m.sequence <= ?
+WHERE m.thread_id = ? AND m.sequence <= ? AND m.is_internal = 0
 ORDER BY m.sequence ASC`,
       )
       .all(threadId, maxSequence) as MessageRow[];
@@ -216,7 +221,7 @@ ORDER BY m.sequence ASC`,
   findByIdInThread(threadId: string, messageId: string): Message | null {
     const row = this.db
       .prepare(
-        `SELECT ${MESSAGE_COLUMNS} FROM messages WHERE id = ? AND thread_id = ?`,
+        `SELECT ${MESSAGE_COLUMNS} FROM messages WHERE id = ? AND thread_id = ? AND is_internal = 0`,
       )
       .get(messageId, threadId) as MessageRow | undefined;
 
@@ -226,8 +231,29 @@ ORDER BY m.sequence ASC`,
   /** Look up a single message by its primary key. */
   findById(id: string): Message | undefined {
     const row = this.db
-      .prepare(`SELECT ${MESSAGE_COLUMNS} FROM messages WHERE id = ?`)
+      .prepare(`SELECT ${MESSAGE_COLUMNS} FROM messages WHERE id = ? AND is_internal = 0`)
       .get(id) as MessageRow | undefined;
     return row ? rowToMessage(row) : undefined;
+  }
+
+  /**
+   * Return ALL messages for a thread in ascending sequence order, including
+   * those marked `is_internal = 1`.
+   *
+   * For internal/pipeline use only (e.g. handoff reconstruction, provider
+   * session replay). Never feed this output directly to the chat UI — use
+   * `listByThread` instead, which filters out internal messages.
+   */
+  listIncludingInternal(threadId: string): Message[] {
+    const rows = this.db
+      .prepare(
+        `SELECT ${MESSAGE_COLUMNS_PREFIXED}, ${TOOL_CALL_COUNT_SQL}
+FROM messages m
+WHERE m.thread_id = ?
+ORDER BY m.sequence ASC`,
+      )
+      .all(threadId) as MessageRow[];
+
+    return rows.map(rowToMessage);
   }
 }

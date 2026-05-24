@@ -26,6 +26,22 @@ This repo is configured for four agent harnesses. All four read `AGENTS.md` (Cla
 
 All four harnesses expose the same six commands: `/verify`, `/verify-e2e`, `/verify-e2e-desktop`, `/demo`, `/demo-desktop`, `/review-pr`. Claude Code additionally has specialized subagents under `.claude/agents/` (`frontend-engineer`, `backend-engineer`, `qa-engineer`, `security-reviewer`). The shell equivalents are documented in `docs/agents/runtime.md` § Common Workflows.
 
+## Agent skills
+
+Per-repo configuration for the engineering skills (`to-issues`, `to-prd`, `triage`, `diagnose`, `tdd`, `improve-codebase-architecture`, `zoom-out`). These tell the skills how this repo tracks issues, what labels to apply during triage, and where domain docs live.
+
+### Issue tracker
+
+GitHub Issues at [Mzeey-Empire/mcode](https://github.com/Mzeey-Empire/mcode) via the `gh` CLI. See [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md).
+
+### Triage labels
+
+Canonical defaults (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See [`docs/agents/triage-labels.md`](docs/agents/triage-labels.md).
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See [`docs/agents/domain.md`](docs/agents/domain.md).
+
 ## Directory Structure
 
 ```text
@@ -172,6 +188,7 @@ Integrated terminals and provider subprocesses use **`EnvService`** plus **`Prot
 - **shadcn/ui docs:** https://ui.shadcn.com/
 - **Tailwind CSS 4:** https://tailwindcss.com/docs
 - **Codex provider docs:** `apps/server/src/providers/codex/` - uses `codex app-server` JSON-RPC 2.0 protocol (see ARCHITECTURE.md)
+- **Chat fork handoff:** [docs/guides/chat-fork-handoff.md](docs/guides/chat-fork-handoff.md)
 
 ## Performance Requirements
 

@@ -263,7 +263,7 @@ export function App() {
       }),
       registerCommand({
         id: "tasks.toggle",
-        title: "Toggle Tasks Panel",
+        title: "Toggle Scope Panel",
         category: "View",
         handler: () => {
           const tid = useWorkspaceStore.getState().activeThreadId;

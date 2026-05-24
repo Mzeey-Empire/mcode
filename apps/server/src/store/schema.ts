@@ -106,6 +106,13 @@ export const messages = sqliteTable(
      * existed — the UI falls back gracefully when absent.
      */
     model: text("model"),
+    /**
+     * When 1, this message is internal to mcode (e.g. a hidden handoff request
+     * on a Cursor parent thread) and must not render in the chat UI. The
+     * provider's session state still contains the message; mcode hides only
+     * the user-visible rendering.
+     */
+    isInternal: integer("is_internal").notNull().default(0),
   },
   (table) => [
     index("idx_messages_thread").on(table.threadId),
@@ -272,5 +279,29 @@ export const planQuestionAnswers = sqliteTable(
   },
   (table) => [
     index("idx_plan_question_answers_thread").on(table.threadId),
+  ],
+);
+
+export const plans = sqliteTable(
+  "plans",
+  {
+    id: text("id").primaryKey().notNull(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => threads.id, { onDelete: "cascade" }),
+    messageId: text("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    version: integer("version").notNull().default(1),
+    title: text("title").notNull(),
+    contentMd: text("content_md").notNull(),
+    sectionsJson: text("sections_json"),
+    changeSummary: text("change_summary"),
+    status: text("status").notNull().default("draft"),
+    createdAt: text("created_at").notNull().default(timestampDefault),
+  },
+  (table) => [
+    index("idx_plans_thread").on(table.threadId),
+    index("idx_plans_thread_version").on(table.threadId, table.version),
   ],
 );

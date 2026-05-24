@@ -34,6 +34,7 @@ import { HookExecutionRepo } from "./repositories/hook-execution-repo";
 import { TurnSnapshotRepo } from "./repositories/turn-snapshot-repo";
 import { TaskRepo } from "./repositories/task-repo";
 import { PlanQuestionAnswersRepo } from "./repositories/plan-question-answers-repo";
+import { PlanRepo } from "./repositories/plan-repo";
 import { SnapshotService } from "./services/snapshot-service";
 import { SettingsService } from "./services/settings-service";
 import { GitWatcherService } from "./services/git-watcher-service";
@@ -50,6 +51,7 @@ import { WorkspaceEnricher } from "./services/workspace-enricher";
 import { FilesystemBrowser } from "./services/filesystem-browser";
 import { ModelCacheService } from "./services/model-cache-service";
 import { DiffSummaryService } from "./services/diff-summary-service";
+import { HandoffStorage } from "./services/handoff/handoff-storage";
 import { WebSocket } from "ws";
 import { resolveGracePeriodMs } from "./grace-period-ms";
 import { AgentEventType } from "@mcode/contracts";
@@ -187,6 +189,7 @@ const skillWatcherService = container.resolve(SkillWatcherService);
 const memoryPressureService = container.resolve(MemoryPressureService);
 const taskRepo = container.resolve(TaskRepo);
 const planQuestionAnswersRepo = container.resolve(PlanQuestionAnswersRepo);
+const planRepo = container.resolve(PlanRepo);
 const workspaceRepo = container.resolve(WorkspaceRepo); // Used only for startup watcher initialization
 const enricher = container.resolve(WorkspaceEnricher);
 const filesystemBrowser = container.resolve(FilesystemBrowser);
@@ -207,6 +210,7 @@ settingsService.on("change", (next) => {
 const cleanupWorker = container.resolve(CleanupWorker);
 const prDraftService = container.resolve(PrDraftService);
 const diffSummaryService = container.resolve(DiffSummaryService);
+const handoffStorage = container.resolve(HandoffStorage);
 const db = container.resolve<Database.Database>("Database");
 const jobObject = container.resolve<JobObject>("JobObject");
 
@@ -431,6 +435,13 @@ for (const provider of providerRegistry.resolveAll()) {
       portPush.send("thread.status", erroredStatus);
     }
   });
+
+  // ExitPlanMode: Claude SDK's native plan output. The provider intercepts
+  // the tool call, captures the plan markdown, and emits this event. We
+  // persist the plan and broadcast to clients.
+  provider.on("exit_plan_mode", (data: { threadId: string; planMarkdown: string }) => {
+    agentService.handleExitPlanMode(data.threadId, data.planMarkdown);
+  });
 }
 
 // Create and start HTTP + WS server
@@ -455,6 +466,7 @@ const { httpServer, wss } = createWsServer({
   memoryPressureService,
   taskRepo,
   planQuestionAnswersRepo,
+  planRepo,
   providerRegistry,
   providerAvailability,
   modelCacheService,
@@ -465,6 +477,7 @@ const { httpServer, wss } = createWsServer({
   enricher,
   filesystemBrowser,
   diffSummaryService,
+  handoffStorage,
   authToken: AUTH_TOKEN,
 });
 

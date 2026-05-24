@@ -11,8 +11,7 @@ import {
   createDefaultRightPanelState,
   getDefaultPanelWidthPx,
 } from "@/stores/diffStore";
-import { TaskPanel } from "@/components/tasks/TaskPanel";
-import { TaskPanelHeader } from "@/components/tasks/TaskPanelHeader";
+import { ScopeSplitPane } from "./ScopeSplitPane";
 import { DiffPanel } from "@/components/diff";
 import { PreviewPanel } from "@/components/panels/PreviewPanel";
 import { TerminalTabContent } from "@/components/terminal/TerminalTabContent";
@@ -73,6 +72,12 @@ export function RightPanel() {
 
   const tasks = useTaskStore(
     (s) => (activeThreadId ? s.tasksByThread[activeThreadId] : undefined),
+  );
+
+  // Only parent-agent tasks for the header count and task list display
+  const parentTasks = useMemo(
+    () => (tasks ?? []).filter((t) => t.group === "Tasks"),
+    [tasks],
   );
 
   // Thresholds tuned for a readable chat column next to an expanded sidebar.
@@ -219,11 +224,11 @@ export function RightPanel() {
             : { width: panelWidth, minWidth: PANEL_MIN_WIDTH, maxWidth: `calc(100vw - ${PANEL_MIN_WIDTH}px)` }
         }
         className={cn(
-          "relative flex h-full min-h-0 min-w-0 flex-col bg-background focus:outline-none",
+          "relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-background focus:outline-none",
           !panelVisible && "hidden",
           isOverlay
             ? "fixed inset-y-0 right-0 z-50 shadow-sm animate-fade-up-in"
-            : "rounded-lg shadow-sm overflow-hidden",
+            : "rounded-lg shadow-sm",
         )}
         aria-hidden={!panelVisible}
       >
@@ -234,7 +239,7 @@ export function RightPanel() {
         role="separator"
         aria-orientation="vertical"
         tabIndex={0}
-        className="absolute left-0 top-0 bottom-0 z-10 flex w-3 cursor-col-resize justify-center bg-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        className="absolute left-0 top-0 bottom-0 z-20 flex w-3 cursor-col-resize justify-center bg-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         onMouseDown={onDragStart}
         onDoubleClick={() => {
           const viewportCap = window.innerWidth - PANEL_MIN_WIDTH;
@@ -278,7 +283,7 @@ export function RightPanel() {
               }`}
             >
               <ListChecks size={12} />
-              Tasks
+              Scope
             </button>
             <button
               type="button"
@@ -333,11 +338,8 @@ export function RightPanel() {
           turn expand state, loaded diffs, and xterm scroll anchors survive tab
           and workspace thread switches. */}
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-        {activeTab === "tasks" && (
-          <>
-            <TaskPanelHeader tasks={tasks ?? []} />
-            <TaskPanel />
-          </>
+        {activeTab === "tasks" && activeThreadId && (
+          <ScopeSplitPane threadId={activeThreadId} parentTasks={parentTasks} />
         )}
         <div className={activeTab === "changes" ? "flex flex-1 flex-col min-h-0" : "hidden"}>
           <DiffPanel />

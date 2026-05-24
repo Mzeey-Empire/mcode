@@ -1,6 +1,6 @@
 import { memo, useMemo, useState, useCallback, useRef, useEffect, lazy, Suspense } from "react";
 import type { Message } from "@/transport";
-import { ImageIcon, RotateCcw, Copy, Check, GitBranch, AlertCircle, Reply, Target } from "lucide-react";
+import { ImageIcon, RotateCcw, Copy, Check, GitFork, AlertCircle, Reply, Target } from "lucide-react";
 import { cn } from "@/lib/utils";
 const LazyMarkdownContent = lazy(() => import("./MarkdownContent"));
 import { stripInjectedFiles } from "@/lib/file-tags";
@@ -12,6 +12,10 @@ import { isHandoffMessage, parseHandoffJson } from "./handoff-utils";
 import { HandoffCard } from "./HandoffCard";
 import { FileAttachmentTile } from "./FileAttachmentTile";
 import { ImageAttachmentLightbox } from "./ImageAttachmentLightbox";
+import { useThreadStore } from "@/stores/threadStore";
+import { AnsweredSummary } from "./plan-questions/AnsweredSummary";
+import { PlanCard } from "./PlanCard";
+import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts";
 
 /**
  * Returns true when the assistant message body collapses to nothing visible
@@ -21,8 +25,10 @@ import { ImageAttachmentLightbox } from "./ImageAttachmentLightbox";
  * ONLY the plan-questions block" obedience produces).
  */
 function isAssistantContentEmpty(content: string): boolean {
-  const withoutPlanQuestions = content.replace(/```plan-questions\n[\s\S]*?```/g, "");
-  return withoutPlanQuestions.trim().length === 0;
+  const stripped = content
+    .replace(/```plan-questions\n[\s\S]*?```/g, "")
+    .replace(/```plan-output\n[\s\S]*?```/g, "");
+  return stripped.trim().length === 0;
 }
 
 /** Parses the message content of a synthetic agent-error system message. Returns the error text, or null if not an agent error. */
@@ -295,13 +301,13 @@ function BranchButton({ onClick }: { onClick: () => void }) {
             type="button"
             onClick={onClick}
             className="flex h-7 w-7 items-center justify-center rounded-md bg-muted/60 text-muted-foreground opacity-0 scale-90 transition-all duration-150 hover:bg-primary/10 hover:text-primary group-hover/msg:opacity-100 group-hover/msg:scale-100"
-            aria-label="Branch from this message"
+            aria-label="Fork from this message"
           >
-            <GitBranch size={14} />
+            <GitFork size={14} />
           </button>
         }
       />
-      <TooltipContent side="top" className="text-xs">Branch from here</TooltipContent>
+      <TooltipContent side="top" className="text-xs">Fork from here</TooltipContent>
     </Tooltip>
   );
 }
@@ -399,6 +405,10 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
   );
   const textContent = useMemo(() => stripInjectedFiles(message.content), [message.content]);
 
+  const isAnsweredPlanMessage = useThreadStore(
+    (s) => s.answeredPlanMessageIdsByThread[message.thread_id]?.has(message.id) ?? false,
+  );
+
   const imageSlides = useMemo(
     () =>
       imageAttachments.map((img) => ({
@@ -457,6 +467,19 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
   // to the normal user bubble below.
   const userGoal = message.role === "user" ? parseUserGoalCommand(textContent) : null;
   const hasAttachments = imageAttachments.length > 0 || fileAttachments.length > 0;
+
+  // Suppress the plan-mode answer payload that the server sends to the model
+  // on submit — the AnsweredSummary marker on the originating assistant
+  // message is the canonical UI representation for the answered batch, so
+  // also rendering the verbose user re-statement would be redundant noise
+  // when the thread reloads.
+  if (
+    message.role === "user" &&
+    !hasAttachments &&
+    textContent.startsWith(PLAN_ANSWER_MESSAGE_PREFIX)
+  ) {
+    return null;
+  }
   // Without attachments the pill replaces the whole bubble (chapter-break
   // full-width). With attachments we keep the user's images/files visible
   // and render the pill alongside, so the directive is not "stolen" from
@@ -563,9 +586,14 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
 
   // Assistant body that collapses to nothing visible (e.g. cursor-agent's
   // plan-mode output is exclusively a `plan-questions` fenced block, which
-  // the markdown renderer suppresses). Skip the bubble entirely so the
-  // wizard alone represents that turn instead of a stray empty header.
+  // the markdown renderer suppresses).
   if (isAssistantContentEmpty(message.content)) {
+    // For answered plan-questions messages, show a read-only summary
+    // instead of hiding the bubble entirely (AC-1.28).
+    if (isAnsweredPlanMessage) {
+      return <AnsweredSummary content={message.content} messageId={message.id} />;
+    }
+    // Active wizard or unanswered: the wizard component handles rendering.
     return null;
   }
 
@@ -589,6 +617,10 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
           <LazyMarkdownContent content={message.content} isStreaming={false} />
         </Suspense>
       </div>
+      {/* Plan card: shows when a plan was extracted from this message */}
+      {message.role === "assistant" && (
+        <PlanCard messageId={message.id} />
+      )}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1">
         {onReply && <ReplyButton onClick={() => onReply(message.id, message.content, "assistant")} />}
         {onBranch && <BranchButton onClick={() => onBranch(message.id)} />}

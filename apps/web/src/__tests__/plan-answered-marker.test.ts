@@ -95,4 +95,48 @@ describe("useThreadStore.markPlanAnswered", () => {
       useThreadStore.getState().answeredPlanMessageIdsByThread["t2"],
     ).toBeUndefined();
   });
+
+  it("adds the id to recentlyAnsweredPlanMessageIds so AnsweredSummary can echo", () => {
+    useThreadStore.getState().markPlanAnswered("t1", "a1");
+    expect(
+      useThreadStore.getState().recentlyAnsweredPlanMessageIds.has("a1"),
+    ).toBe(true);
+  });
+});
+
+describe("useThreadStore.markPlanDismissed", () => {
+  beforeEach(() => {
+    useThreadStore.setState({
+      answeredPlanMessageIdsByThread: {},
+      recentlyAnsweredPlanMessageIds: new Set<string>(),
+      planQuestionsByThread: {},
+      planAnswersByThread: {},
+      activeQuestionIndexByThread: {},
+      planQuestionsStatusByThread: {},
+    });
+  });
+
+  it("settles the batch the same way markPlanAnswered does", () => {
+    useThreadStore.setState({
+      planQuestionsByThread: {
+        t1: [{ id: "q1", category: "TEST", question: "?", options: [] }],
+      },
+      planQuestionsStatusByThread: { t1: "pending" },
+    });
+    useThreadStore.getState().markPlanDismissed("t1", "a1");
+
+    const set = useThreadStore.getState().answeredPlanMessageIdsByThread["t1"];
+    expect(set!.has("a1")).toBe(true);
+    expect(useThreadStore.getState().planQuestionsByThread["t1"]).toBeUndefined();
+    expect(
+      useThreadStore.getState().planQuestionsStatusByThread["t1"],
+    ).toBeUndefined();
+  });
+
+  it("does NOT add the id to recentlyAnsweredPlanMessageIds — dismiss is not submission", () => {
+    useThreadStore.getState().markPlanDismissed("t1", "a1");
+    expect(
+      useThreadStore.getState().recentlyAnsweredPlanMessageIds.has("a1"),
+    ).toBe(false);
+  });
 });
