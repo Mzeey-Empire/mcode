@@ -171,9 +171,9 @@ function makeStaticComponents(variant: "assistant" | "user", workspacePath: stri
       );
       if (!showHint) return anchor;
       return (
-        <Tooltip>
+        <Tooltip trackCursorAxis="both">
           <TooltipTrigger render={anchor} />
-          <TooltipContent side="top" className="text-xs">{previewHint}</TooltipContent>
+          <TooltipContent className="text-xs">{previewHint}</TooltipContent>
         </Tooltip>
       );
     },
@@ -274,9 +274,9 @@ function makeComponents(
           );
           if (!hasPreview()) return codeEl;
           return (
-            <Tooltip>
+            <Tooltip trackCursorAxis="both">
               <TooltipTrigger render={codeEl} />
-              <TooltipContent side="top" className="text-xs">{previewHint}</TooltipContent>
+              <TooltipContent className="text-xs">{previewHint}</TooltipContent>
             </Tooltip>
           );
         }
@@ -299,9 +299,9 @@ function makeComponents(
           );
           if (!hasPreview()) return codeEl;
           return (
-            <Tooltip>
+            <Tooltip trackCursorAxis="both">
               <TooltipTrigger render={codeEl} />
-              <TooltipContent side="top" className="text-xs">{previewHint}</TooltipContent>
+              <TooltipContent className="text-xs">{previewHint}</TooltipContent>
             </Tooltip>
           );
         }
