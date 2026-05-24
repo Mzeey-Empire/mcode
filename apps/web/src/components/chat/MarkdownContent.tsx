@@ -73,30 +73,22 @@ function handleLinkClick(e: React.MouseEvent | React.KeyboardEvent, url: string)
   if (isModifierClick && hasPreview()) {
     const threadId = useWorkspaceStore.getState().activeThreadId;
     if (threadId) {
-      const { showRightPanel, setRightPanelTab } = useDiffStore.getState();
+      const { showRightPanel, setRightPanelTab, setPreviewUrlForThread } =
+        useDiffStore.getState();
+      // Store the URL before opening the panel so that:
+      // 1. usePreviewBridge populates the omnibox immediately via storedUrl
+      // 2. pushSync sends it as resumeUrlHint, letting the main process load
+      //    the page once BrowserView bounds are established
+      setPreviewUrlForThread(threadId, url);
       showRightPanel(threadId);
       setRightPanelTab(threadId, "preview");
-      // Defer navigation so React can re-render and sync BrowserView bounds
+      // Fire-and-forget navigate for the already-open-panel case (bounds
+      // already synced). For a freshly mounted panel the sync handler's
+      // resumeUrlHint path handles navigation after bounds arrive.
       setTimeout(() => {
-        const fallback = (): void => {
-          if (isMcodeWorkspacePreviewUrl(url)) {
-            void window.desktopBridge?.openExternalUrl?.(url, workspacePath ?? undefined);
-          } else {
-            window.desktopBridge?.openExternalUrl?.(url);
-          }
-        };
-        const navigatePromise = window.desktopBridge?.preview?.navigate?.(url, workspacePath);
-        if (!navigatePromise) {
-          fallback();
-          return;
-        }
-        void navigatePromise
-          .then((r) => {
-            if (!r?.ok) fallback();
-          })
-          .catch(() => {
-            fallback();
-          });
+        void window.desktopBridge?.preview
+          ?.navigate?.(url, workspacePath ?? undefined)
+          ?.catch(() => {});
       }, 0);
       return;
     }

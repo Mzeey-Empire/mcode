@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, act } from "@testing-library/react"
 import { MarkdownContent } from "../components/chat/MarkdownContent";
 import { CodeBlock } from "../components/chat/CodeBlock";
 import { useWorkspaceStore } from "../stores/workspaceStore";
+import { useDiffStore } from "../stores/diffStore";
 import { createMockWorkspace } from "./mocks/transport";
 
 // Mock CodeBlock to avoid shiki/worker dependencies
@@ -119,6 +120,7 @@ describe("MarkdownContent workspace preview navigation", () => {
       activeWorkspaceId: null,
       activeThreadId: null,
     });
+    useDiffStore.setState({ previewUrlByThread: {} });
   });
 
   it("passes workspace path when opening mcode-workspace link with ctrl+click", async () => {
@@ -196,7 +198,7 @@ describe("MarkdownContent workspace preview navigation", () => {
     });
   });
 
-  it("falls back to openExternalUrl when preview.navigate is missing after ctrl+click", async () => {
+  it("stores URL for preview sync when preview.navigate is missing on ctrl+click", async () => {
     const mockOpenExternal = vi.fn();
     const ws = createMockWorkspace({ id: "ws-fallback", path: "/tmp/ws-fallback" });
     useWorkspaceStore.setState({
@@ -215,13 +217,14 @@ describe("MarkdownContent workspace preview navigation", () => {
     await act(async () => {
       fireEvent.click(link!, { ctrlKey: true });
     });
-    await waitFor(() => {
-      expect(mockOpenExternal).toHaveBeenCalledWith("mcode-workspace:///page.html", "/tmp/ws-fallback");
-    });
+    // URL stored for the sync mechanism; no external fallback
+    expect(useDiffStore.getState().previewUrlByThread["thread-fallback"])
+      .toBe("mcode-workspace:///page.html");
+    expect(mockOpenExternal).not.toHaveBeenCalled();
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
-  it("falls back to openExternalUrl when preview.navigate rejects", async () => {
+  it("silently catches navigate rejection on ctrl+click without external fallback", async () => {
     const mockOpenExternal = vi.fn();
     const nav = vi.fn().mockRejectedValue(new Error("nav failed"));
     const ws = createMockWorkspace({ id: "ws-rej", path: "/tmp/ws-rej" });
@@ -241,9 +244,14 @@ describe("MarkdownContent workspace preview navigation", () => {
     await act(async () => {
       fireEvent.click(link!, { ctrlKey: true });
     });
+    // URL stored for the sync mechanism
+    expect(useDiffStore.getState().previewUrlByThread["thread-rej"])
+      .toBe("https://example.com/x");
+    // Navigate was attempted but rejection is silently caught; no external fallback
     await waitFor(() => {
-      expect(mockOpenExternal).toHaveBeenCalledWith("https://example.com/x");
+      expect(nav).toHaveBeenCalled();
     });
+    expect(mockOpenExternal).not.toHaveBeenCalled();
   });
 });
 
