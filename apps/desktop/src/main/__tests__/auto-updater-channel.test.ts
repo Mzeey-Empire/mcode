@@ -38,7 +38,12 @@ vi.mock("@mcode/shared", () => ({
   getMcodeDir: vi.fn().mockReturnValue("/tmp/mcode"),
 }));
 
-import { applyChannelConfig, applyReleaseLineSwitch, isCrossChannelDowngrade } from "../auto-updater";
+import {
+  applyChannelConfig,
+  applyReleaseLineSwitch,
+  isCrossChannelDowngrade,
+  isTransientNetworkError,
+} from "../auto-updater";
 
 describe("applyChannelConfig", () => {
   beforeEach(() => {
@@ -163,6 +168,47 @@ describe("isCrossChannelDowngrade", () => {
         latestStable: "0.11.1",
       }),
     ).toBe(false);
+  });
+});
+
+describe("isTransientNetworkError", () => {
+  it("classifies Chromium net::ERR_NAME_NOT_RESOLVED as transient", () => {
+    // Regression: this was surfaced as a scary red "Update failed" banner
+    // when the app launched before WiFi reconnected. See UpdateBanner.tsx.
+    expect(isTransientNetworkError(new Error("net::ERR_NAME_NOT_RESOLVED"))).toBe(true);
+  });
+
+  it("classifies other Chromium connectivity errors as transient", () => {
+    expect(isTransientNetworkError(new Error("net::ERR_INTERNET_DISCONNECTED"))).toBe(true);
+    expect(isTransientNetworkError(new Error("net::ERR_CONNECTION_RESET"))).toBe(true);
+    expect(isTransientNetworkError(new Error("net::ERR_TIMED_OUT"))).toBe(true);
+    expect(isTransientNetworkError(new Error("net::ERR_PROXY_CONNECTION_FAILED"))).toBe(true);
+  });
+
+  it("classifies Node POSIX socket/DNS codes as transient", () => {
+    const err = Object.assign(new Error("getaddrinfo ENOTFOUND github.com"), {
+      code: "ENOTFOUND",
+    });
+    expect(isTransientNetworkError(err)).toBe(true);
+
+    const econn = Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
+    expect(isTransientNetworkError(econn)).toBe(true);
+
+    const etimeout = Object.assign(new Error("read ETIMEDOUT"), { code: "ETIMEDOUT" });
+    expect(isTransientNetworkError(etimeout)).toBe(true);
+  });
+
+  it("does not classify real update failures as transient", () => {
+    expect(isTransientNetworkError(new Error("HttpError: 404"))).toBe(false);
+    expect(isTransientNetworkError(new Error("signature verification failed"))).toBe(false);
+    expect(isTransientNetworkError(new Error("Cannot find latest.yml"))).toBe(false);
+    expect(isTransientNetworkError(new Error("Cannot parse update info"))).toBe(false);
+  });
+
+  it("handles non-Error inputs without throwing", () => {
+    expect(isTransientNetworkError(undefined)).toBe(false);
+    expect(isTransientNetworkError(null)).toBe(false);
+    expect(isTransientNetworkError("net::ERR_NAME_NOT_RESOLVED")).toBe(true);
   });
 });
 
