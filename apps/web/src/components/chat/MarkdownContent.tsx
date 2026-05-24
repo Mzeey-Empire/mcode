@@ -7,6 +7,7 @@ import {
   looksLikeWorkspaceRelativeFileRef,
 } from "@mcode/contracts";
 import { CodeBlock } from "./CodeBlock";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { resolveCodeBlockLanguage } from "@/lib/resolve-code-block-language";
 import { useDiffStore } from "@/stores/diffStore";
 import { isMac } from "@/lib/platform";
@@ -148,10 +149,9 @@ function makeStaticComponents(variant: "assistant" | "user", workspacePath: stri
           safeHref.startsWith("https:") ||
           isMcodeWorkspacePreviewUrl(safeHref));
       const showHint = isPreviewable && hasPreview();
-      return (
+      const anchor = (
         <a
           href={safeHref}
-          title={showHint ? previewHint : undefined}
           className={linkClass}
           target="_blank"
           rel="noopener noreferrer"
@@ -168,6 +168,13 @@ function makeStaticComponents(variant: "assistant" | "user", workspacePath: stri
         >
           {children}
         </a>
+      );
+      if (!showHint) return anchor;
+      return (
+        <Tooltip>
+          <TooltipTrigger render={anchor} />
+          <TooltipContent side="top" className="text-xs">{previewHint}</TooltipContent>
+        </Tooltip>
       );
     },
     blockquote: ({ children }: { children?: React.ReactNode }) => (
@@ -254,17 +261,23 @@ function makeComponents(
           const linkClass = isUser
             ? "text-primary-foreground underline decoration-dotted hover:opacity-80 cursor-pointer"
             : "text-primary underline decoration-dotted hover:text-primary cursor-pointer";
-          return (
+          const codeEl = (
             <code
               role="link"
               tabIndex={0}
-              title={hasPreview() ? previewHint : undefined}
               className={`${codeClass} ${linkClass}`}
               onClick={(e) => handleLinkClick(e, text)}
               onKeyDown={(e) => { if (e.key === "Enter") handleLinkClick(e, text); }}
             >
               {children}
             </code>
+          );
+          if (!hasPreview()) return codeEl;
+          return (
+            <Tooltip>
+              <TooltipTrigger render={codeEl} />
+              <TooltipContent side="top" className="text-xs">{previewHint}</TooltipContent>
+            </Tooltip>
           );
         }
 
@@ -273,17 +286,23 @@ function makeComponents(
           const linkClass = isUser
             ? "text-primary-foreground underline decoration-dotted hover:opacity-80 cursor-pointer"
             : "text-primary underline decoration-dotted hover:text-primary cursor-pointer";
-          return (
+          const codeEl = (
             <code
               role="link"
               tabIndex={0}
-              title={hasPreview() ? previewHint : undefined}
               className={`${codeClass} ${linkClass}`}
               onClick={(e) => handleLinkClick(e, previewUrl)}
               onKeyDown={(e) => { if (e.key === "Enter") handleLinkClick(e, previewUrl); }}
             >
               {children}
             </code>
+          );
+          if (!hasPreview()) return codeEl;
+          return (
+            <Tooltip>
+              <TooltipTrigger render={codeEl} />
+              <TooltipContent side="top" className="text-xs">{previewHint}</TooltipContent>
+            </Tooltip>
           );
         }
 
