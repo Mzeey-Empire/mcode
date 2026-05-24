@@ -22,6 +22,55 @@ import { SettingsSchema as BundledSettingsSchema } from "@mcode/contracts";
 /** Use snapshot-provided schema when available (V8 snapshot pre-initializes Zod). */
 const SettingsSchema = globalThis.__v8Snapshot?.contracts?.SettingsSchema ?? BundledSettingsSchema;
 
+/**
+ * Connectivity-class error tokens that should NOT surface as a red
+ * "Update failed" banner. These are transient: WiFi reconnecting, VPN flap,
+ * captive portal, IPv6 resolver hiccup, brief DNS outage. The next periodic
+ * check will succeed without user intervention, so the right UX is to stay
+ * quiet rather than alarm the user about a self-healing condition.
+ *
+ * Chromium `net::ERR_*` codes are emitted when the updater goes through
+ * Electron's net module; POSIX `E*` codes are emitted by Node-level DNS/socket
+ * failures (still possible inside electron-updater's HTTP layer on some paths).
+ */
+const TRANSIENT_NETWORK_TOKENS: readonly string[] = [
+  "ERR_NAME_NOT_RESOLVED",
+  "ERR_INTERNET_DISCONNECTED",
+  "ERR_NETWORK_CHANGED",
+  "ERR_PROXY_CONNECTION_FAILED",
+  "ERR_CONNECTION_RESET",
+  "ERR_CONNECTION_REFUSED",
+  "ERR_CONNECTION_TIMED_OUT",
+  "ERR_CONNECTION_ABORTED",
+  "ERR_CONNECTION_CLOSED",
+  "ERR_NETWORK_IO_SUSPENDED",
+  "ERR_TIMED_OUT",
+  "ERR_ADDRESS_UNREACHABLE",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ECONNABORTED",
+  "ETIMEDOUT",
+  "ENETUNREACH",
+  "EHOSTUNREACH",
+  "ENETDOWN",
+];
+
+/**
+ * True for connectivity-class failures that should be logged but not surfaced
+ * to the user as an update error. See `TRANSIENT_NETWORK_TOKENS` for the
+ * concrete set and the rationale.
+ */
+export function isTransientNetworkError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  const code = (err as NodeJS.ErrnoException | undefined)?.code;
+  if (typeof code === "string" && TRANSIENT_NETWORK_TOKENS.includes(code)) {
+    return true;
+  }
+  return TRANSIENT_NETWORK_TOKENS.some((token) => message.includes(token));
+}
+
 /** Map from user-friendly interval names to milliseconds. */
 const INTERVAL_MS_MAP: Record<string, number> = {
   "15min": 15 * 60 * 1000,
@@ -470,6 +519,14 @@ export function initAutoUpdater(): void {
 
   autoUpdater.on("error", (err) => {
     const message = err instanceof Error ? err.message : String(err);
+    if (isTransientNetworkError(err)) {
+      // Connectivity blips (DNS failure, captive portal, offline-at-launch)
+      // resolve themselves on the next periodic check. Log for diagnostics but
+      // do not flip the renderer to an error banner — see UpdateBanner.tsx.
+      console.warn("[auto-updater] Transient network failure, will retry:", message);
+      broadcastStatus({ state: "idle" });
+      return;
+    }
     console.error("[auto-updater] Error checking for updates:", message);
     broadcastStatus({ state: "error", message });
   });
