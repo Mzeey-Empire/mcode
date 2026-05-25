@@ -102,6 +102,31 @@ describe("SideRail", () => {
     );
   });
 
+  it("shows an error toast when the clipboard API is unavailable", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: undefined,
+    });
+    const show = vi.fn();
+    const { useToastStore } = await import("@/stores/toastStore");
+    vi.spyOn(useToastStore, "getState").mockReturnValue({ show } as never);
+
+    render(
+      <SideRail
+        filePath="apps/web/src/x.ts"
+        isMarkdown={false}
+        previewMode={false}
+        onTogglePreview={vi.fn()}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /copy file path/i }));
+    expect(show).toHaveBeenCalledWith(
+      "error",
+      "Couldn't copy path",
+      "Clipboard API is unavailable in this environment.",
+    );
+  });
+
   it("does not keep the rail expanded after a mouse click (no focus-visible pin)", async () => {
     render(
       <SideRail

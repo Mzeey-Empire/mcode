@@ -1,5 +1,7 @@
 import { useCallback, useState } from "react";
 import { Code2, FileText, ClipboardCopy, ExternalLink } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { useToastStore } from "@/stores/toastStore";
 import { FileEditorPicker } from "./FileEditorPicker";
 
@@ -63,7 +65,14 @@ export function SideRail({
     // safety fallback for the (unreachable in normal flows) state where
     // the workspace base hasn't hydrated yet.
     const payload = absolutePath ?? filePath;
-    void navigator.clipboard
+    const clipboard = navigator.clipboard;
+    if (!clipboard?.writeText) {
+      useToastStore
+        .getState()
+        .show("error", "Couldn't copy path", "Clipboard API is unavailable in this environment.");
+      return;
+    }
+    void clipboard
       .writeText(payload)
       .then(() => useToastStore.getState().show("info", "Path copied"))
       .catch((err: unknown) =>
@@ -154,8 +163,9 @@ export function SideRail({
           line={openAtLine}
           onOpenChange={setPickerOpen}
           trigger={
-            <button
+            <Button
               type="button"
+              variant="ghost"
               aria-label="Open file in editor"
               className={RAIL_BUTTON_CLASS}
             >
@@ -163,7 +173,7 @@ export function SideRail({
                 <ExternalLink size={13} />
               </span>
               <span className={RAIL_LABEL_CLASS}>Open</span>
-            </button>
+            </Button>
           }
         />
       )}
@@ -206,16 +216,13 @@ interface RailButtonProps {
  */
 function RailButton({ icon, label, pressed, onClick, ariaLabel }: RailButtonProps) {
   return (
-    <button
+    <Button
       type="button"
+      variant="ghost"
       onClick={onClick}
       aria-pressed={pressed}
       aria-label={ariaLabel}
-      className={
-        pressed
-          ? `${RAIL_BUTTON_CLASS} bg-muted/40 text-foreground`
-          : RAIL_BUTTON_CLASS
-      }
+      className={cn(RAIL_BUTTON_CLASS, pressed && "bg-muted/40 text-foreground")}
     >
       {pressed && (
         <span
@@ -227,7 +234,7 @@ function RailButton({ icon, label, pressed, onClick, ariaLabel }: RailButtonProp
         {icon}
       </span>
       <span className={RAIL_LABEL_CLASS}>{label}</span>
-    </button>
+    </Button>
   );
 }
 
