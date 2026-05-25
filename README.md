@@ -36,6 +36,13 @@ bun run dev:desktop
 
 ## Documentation
 
+**Working on this codebase (humans or AI agents)?** Start here:
+
+- **[AGENTS.md](AGENTS.md)** - Repo-wide conventions, harness setup, workflow gates. Routes to everything else.
+- **[CONTEXT.md](CONTEXT.md)** - Domain glossary (providers, threads, forks, worktrees, handoff pipeline). Read before naming or reasoning about product concepts.
+
+**Reference docs:**
+
 - **[Architecture](ARCHITECTURE.md)** - System design, data model, IPC flow, and diagrams
 - **[Provider architecture](docs/guides/provider-architecture.md)** - How providers are wired up
 - **[Settings reference](docs/settings/reference.md)** - All configurable settings
