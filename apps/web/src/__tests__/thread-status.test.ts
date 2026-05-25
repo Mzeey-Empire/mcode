@@ -44,7 +44,7 @@ describe("getStatusDisplay", () => {
     expect(result.label).toBe("");
     expect(result.color).toContain("primary");
     expect(result.dotClass).toContain("bg-primary");
-    expect(result.dotClass).toContain("animate-pulse");
+    expect(result.dotClass).toContain("status-pulse");
   });
 
   it("errored status returns Errored with diff-remove-strong color", () => {
@@ -68,7 +68,7 @@ describe("getStatusDisplay", () => {
     const result = getStatusDisplay(makeThread(), true, true);
     expect(result.shape).toBe("ring");
     expect(result.dotClass).toContain("ring-amber-500");
-    expect(result.dotClass).toContain("animate-pulse");
+    expect(result.dotClass).toContain("status-pulse");
     expect(result.dotClass).toContain("bg-transparent");
     expect(result.color).toBe("text-amber-500");
   });
@@ -104,14 +104,14 @@ describe("getStatusDisplay", () => {
     expect(result.label).toBe("Interrupted");
     expect(result.color).toContain("amber");
     expect(result.dotClass).toContain("amber");
-    expect(result.dotClass).toContain("animate-pulse");
+    expect(result.dotClass).toContain("status-pulse");
     expect(result.shape).toBe("solid");
   });
 
   it("interrupted thread shows running indicator when agent is live (resume in progress)", () => {
     const result = getStatusDisplay(makeThread({ status: "interrupted" }), true);
     expect(result.dotClass).toContain("bg-primary");
-    expect(result.dotClass).toContain("animate-pulse");
+    expect(result.dotClass).toContain("status-pulse");
   });
 });
 

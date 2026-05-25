@@ -75,7 +75,7 @@ export function getStatusDisplay(
     return {
       label: "",
       color: "text-amber-500",
-      dotClass: "ring-2 ring-inset ring-amber-500 bg-transparent animate-pulse",
+      dotClass: "ring-2 ring-inset ring-amber-500 bg-transparent status-pulse",
       shape: "ring",
     };
   }
@@ -84,7 +84,7 @@ export function getStatusDisplay(
     return {
       label: "",
       color: "text-primary/90",
-      dotClass: "bg-primary animate-pulse",
+      dotClass: "bg-primary status-pulse",
       shape: "solid",
     };
   }
@@ -109,7 +109,7 @@ export function getStatusDisplay(
       return {
         label: "Interrupted",
         color: "text-amber-500/90",
-        dotClass: "bg-amber-500/85 animate-pulse",
+        dotClass: "bg-amber-500/85 status-pulse",
         shape: "solid",
       };
     default:

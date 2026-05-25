@@ -68,7 +68,7 @@ function ProgressPills({ checks }: { checks: ChecksStatus }) {
           className={cn(
             "h-[5px] w-[5px] rounded-full transition-colors",
             slot === "fail" && "bg-[var(--diff-remove-strong)]",
-            slot === "run" && "bg-primary motion-safe:animate-pulse",
+            slot === "run" && "bg-primary status-pulse",
             slot === "pass" && "bg-[var(--diff-add-strong)]",
             slot === "other" && "bg-muted-foreground/40",
           )}
@@ -214,7 +214,7 @@ export function PrSplitButton({ pr, hasCommitsAhead, onCreatePr, onOpenPr, check
               size={11}
               className={cn(
                 "shrink-0",
-                aggregate === "pending" && "motion-safe:animate-spin",
+                aggregate === "pending" && "status-spin",
               )}
               strokeWidth={CI_ICON_STROKE}
             />
@@ -229,7 +229,7 @@ export function PrSplitButton({ pr, hasCommitsAhead, onCreatePr, onOpenPr, check
       )}
 
       {/* Indeterminate bottom-edge progress strip when running.
-       * Wrapped in motion-safe so reduced-motion users don't see a stationary
+       * Wrapped in motion-reduce:hidden so reduced-motion users don't see a stationary
        * partial bar (which would look like a broken progress indicator).
        * The Loader icon already conveys pending state without motion. */}
       {aggregate === "pending" && (

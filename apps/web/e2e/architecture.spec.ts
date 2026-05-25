@@ -768,9 +768,9 @@ test.describe("Architecture: session.turnStarted → sidebar running dot", () =>
     const statusDot = threadRow.locator("span.rounded-full").first();
 
     // Before the signal fires, the dot must NOT carry the running classes.
-    // Running state maps to `bg-primary animate-pulse` per apps/web/src/lib/thread-status.ts:83.
+    // Running state maps to `bg-primary status-pulse` per apps/web/src/lib/thread-status.ts.
     await expect(statusDot).not.toHaveClass(/bg-primary/);
-    await expect(statusDot).not.toHaveClass(/animate-pulse/);
+    await expect(statusDot).not.toHaveClass(/status-pulse/);
 
     await page.screenshot({
       path: "e2e/screenshots/running-signal-before.png",
@@ -804,7 +804,7 @@ test.describe("Architecture: session.turnStarted → sidebar running dot", () =>
     // After injection the store should flag the thread as running and the
     // sidebar dot should flip to the primary/pulsing state.
     await expect(statusDot).toHaveClass(/bg-primary/);
-    await expect(statusDot).toHaveClass(/animate-pulse/);
+    await expect(statusDot).toHaveClass(/status-pulse/);
 
     // Also confirm the store side-effect (handleAgentEvent wrote the id).
     const isRunning = await page.evaluate(
