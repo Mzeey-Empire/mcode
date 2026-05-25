@@ -1738,8 +1738,14 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       usePlanStore.getState().setGenerating(threadId, true);
     } else if (action === "implement") {
       // Implementation runs in build mode; leave plan mode so the composer
-      // label and future sends match the execution phase.
-      void get().setThreadSettings(threadId, { interactionMode: INTERACTION_MODES.BUILD });
+      // label and future sends match the execution phase. Await the
+      // persistence RPC and abort the implement turn on failure so the
+      // local UI cannot diverge from the stored thread row (a stale row
+      // would flip the thread back to Plan on reload).
+      const persisted = await get().setThreadSettings(threadId, {
+        interactionMode: INTERACTION_MODES.BUILD,
+      });
+      if (!persisted) return;
     }
 
     await get().sendMessage(
