@@ -41,7 +41,7 @@ function approxBase64DecodedBytes(encoded: string): number {
  * - Reconnect-gap banners are emitted from ws-transport after `terminal.reattach` RPC
  *   (there is no `terminal.reconnectGap` push channel on the server)
  * - `thread.status` -- thread status changes reflected in threadStore
- * - `thread.prLinked` -- PR detected for a thread, updates pr_number/pr_status
+ * - `thread.prLinked` -- PR detected for a thread, updates pr_number/pr_status and prUrlsByThreadId
  * - `thread.checksUpdated` -- CI check status polled for a thread's PR, updates checksById
  * - `thread.modelUpdated` -- thread model and provider synced after a message send (multi-client)
  * - `files.changed` -- invalidates the file autocomplete cache

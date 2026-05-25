@@ -36,6 +36,7 @@ export const WS_CHANNELS = {
     threadId: z.string(),
     prNumber: z.number(),
     prStatus: z.string(),
+    /** Non-nullable: this event only fires once a PR URL is confirmed. */
     prUrl: z.string(),
   }),
   "thread.checksUpdated": z.object({

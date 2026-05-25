@@ -65,10 +65,11 @@ export class GithubService {
   /**
    * Look up the most recently created PR for a branch in any state (open, merged, closed).
    *
-   * Uses `gh pr list --state all` instead of `gh pr view` so that:
-   * - Closed/merged PRs are returned (not silenced by the default open-only filter).
-   * - When multiple PRs exist for the same branch, the newest one (highest number) is
-   *   returned first, matching GitHub API's default `created_at DESC` sort order.
+   * Uses `gh pr list --head <branch> --state all --limit 1` instead of `gh pr view` so that:
+   * - `--head` filters to PRs whose head branch matches exactly (view uses positional lookup).
+   * - `--state all` includes closed/merged PRs (view defaults to open only).
+   * - `--limit 1` takes the first result; gh returns PRs newest-first (`createdAt DESC`),
+   *   so the highest-numbered PR is always returned when multiple exist for the branch.
    */
   getBranchPr(branch: string, cwd: string): Promise<PrInfo | null> {
     return new Promise((resolve) => {
