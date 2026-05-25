@@ -100,6 +100,14 @@ export function usePreviewBridge({
     setNavError(null);
   }, [threadId, storedUrl]);
 
+  // Notify the native layer whenever the owning thread changes. The
+  // ResizeObserver effect (primary sync driver) has empty deps and only fires
+  // on layout changes — a thread switch with identical panel bounds would
+  // otherwise leave the previous thread's WebContentsView visible.
+  useEffect(() => {
+    void pushSyncRef.current(true);
+  }, [threadId]);
+
   const refreshNav = useCallback(async () => {
     const preview = window.desktopBridge?.preview;
     if (!preview) return;

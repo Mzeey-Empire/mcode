@@ -513,6 +513,35 @@ describe("usePreviewBridge", () => {
     });
   });
 
+  describe("thread switch", () => {
+    it("calls preview.sync with the new threadId immediately when threadId changes", async () => {
+      const mockPreview = makeMockPreview();
+      window.desktopBridge = { preview: mockPreview } as unknown as typeof window.desktopBridge;
+
+      const surfaceRef = makeSurfaceRef();
+      const { rerender } = renderHook(
+        ({ threadId }: { threadId: string }) =>
+          usePreviewBridge({ threadId, workspaceId: "ws-1", surfaceRef }),
+        { initialProps: { threadId: "t-1" } },
+      );
+
+      // Flush the initial RAF so t-1's mount sync fires.
+      await flushRaf();
+      mockPreview.sync.mockClear();
+
+      // Switch to a different thread.
+      await act(async () => {
+        rerender({ threadId: "t-2" });
+      });
+
+      // The new threadId effect must fire synchronously (no RAF needed) so
+      // the native layer swaps views even when panel bounds are unchanged.
+      expect(mockPreview.sync).toHaveBeenCalledWith(
+        expect.objectContaining({ visible: true, threadId: "t-2" }),
+      );
+    });
+  });
+
   describe("ResizeObserver effect", () => {
     it("observes the surface element", () => {
       const mockPreview = makeMockPreview();
