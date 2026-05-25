@@ -225,14 +225,6 @@ const [devServerUrl, watchContexts] = await Promise.all([
   ),
 ]);
 
-try {
-  distTscWatcher = watch(resolve(serverRoot, "dist-tsc"), { recursive: true }, () => {
-    scheduleServerBundleRebuild();
-  });
-} catch (err) {
-  console.warn("[dev] Could not watch apps/server/dist-tsc; server hot-rebuild disabled:", err);
-}
-
 if (!devServerUrl) {
   console.error("[dev] Vite dev server failed to start");
   process.exit(1);
@@ -241,16 +233,26 @@ if (!devServerUrl) {
 console.log("[dev] Initial build complete, watching for changes...");
 console.log(`[dev] Web dev server is ready at ${devServerUrl}`);
 
-// Wait for tsc --watch's initial pass to settle before starting Electron.
-// `rebuildServerDevBundle()` already wrote server.cjs synchronously above, but
-// tsc --watch was spawned in parallel and takes ~60s to settle its first
-// emission. If Electron starts first, that delayed emission fires the
-// dist-tsc watcher, triggers a redundant esbuild rebundle, rewrites
-// server.cjs, and restarts a freshly-running Electron - racing the first
-// instance for cache locks and named pipes.
+// Wait for tsc --watch's initial pass to settle before starting Electron or
+// the dist-tsc watcher. `rebuildServerDevBundle()` already wrote server.cjs
+// synchronously above, but tsc --watch was spawned in parallel and takes
+// ~60s to settle its first emission. Those redundant emissions, if observed
+// by `distTscWatcher`, schedule a coalesced esbuild that rewrites server.cjs
+// after Electron has spawned and `watch(serverOutFile)` is registered -
+// triggering a spurious restart and (on Windows, where killProcessTree races
+// the old child) a second visible Electron instance.
 console.log("[dev] Waiting for tsc --watch initial pass to settle...");
 await serverTscInitialSettled;
 console.log("[dev] tsc settled; launching Electron.");
+
+// Start the dist-tsc watcher AFTER settle so only real user edits fire it.
+try {
+  distTscWatcher = watch(resolve(serverRoot, "dist-tsc"), { recursive: true }, () => {
+    scheduleServerBundleRebuild();
+  });
+} catch (err) {
+  console.warn("[dev] Could not watch apps/server/dist-tsc; server hot-rebuild disabled:", err);
+}
 
 // -------------------------------------------------------------------------
 // Step 2: Spawn Electron
