@@ -1,1 +1,1 @@
-UPDATE `threads` SET `interaction_mode` = 'build' WHERE `interaction_mode` = 'chat';--> statement-breakpoint
+UPDATE `threads` SET `interaction_mode` = 'build' WHERE `interaction_mode` = 'chat';
