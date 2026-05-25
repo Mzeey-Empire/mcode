@@ -647,6 +647,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
             return;
           }
           const resultMap = new Map(results.map((r) => [r.threadId, r]));
+          const urlPatch: Record<string, string> = {};
+          for (const r of results) {
+            if (r.prUrl) urlPatch[r.threadId] = r.prUrl;
+          }
           set((state) => ({
             threads: state.threads.map((t) => {
               const match = resultMap.get(t.id);
@@ -654,6 +658,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
               // null prNumber means the stale PR was cleared server-side
               return { ...t, pr_number: match.prNumber, pr_status: match.prStatus };
             }),
+            prUrlsByThreadId: { ...state.prUrlsByThreadId, ...urlPatch },
           }));
         }).catch(() => {});
       }

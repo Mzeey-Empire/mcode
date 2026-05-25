@@ -258,6 +258,7 @@ export const WS_METHODS = lazySchema(() => ({
       /** null signals the PR was cleared from this thread (stale data removed). */
       prNumber: z.number().nullable(),
       prStatus: z.string().nullable(),
+      prUrl: z.string().nullable(),
     })),
   },
   /** Search threads across all workspaces by title substring, with optional status/provider filters and sort order. */

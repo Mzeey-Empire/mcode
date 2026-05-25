@@ -220,15 +220,17 @@ export function startPushListeners(): void {
   // thread.prLinked: a PR was detected and linked to a thread
   unsubs.push(
     pushEmitter.on("thread.prLinked", (data) => {
-      const { threadId, prNumber, prStatus } = data as {
+      const { threadId, prNumber, prStatus, prUrl } = data as {
         threadId: string;
         prNumber: number;
         prStatus: string;
+        prUrl: string;
       };
       useWorkspaceStore.setState((ws) => ({
         threads: ws.threads.map((t) =>
           t.id === threadId ? { ...t, pr_number: prNumber, pr_status: prStatus } : t,
         ),
+        prUrlsByThreadId: { ...ws.prUrlsByThreadId, [threadId]: prUrl },
       }));
     }),
   );

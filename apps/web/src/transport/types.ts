@@ -239,7 +239,7 @@ export interface McodeTransport {
   markThreadViewed(threadId: string): Promise<void>;
   /** Scan threads for stale or missing PR data and refresh their state. Returns updated PR state
    * for all affected threads. A null prNumber/prStatus signals the PR was cleared (stale data removed). */
-  syncThreadPrs(workspaceId: string): Promise<Array<{ threadId: string; prNumber: number | null; prStatus: string | null }>>;
+  syncThreadPrs(workspaceId: string): Promise<Array<{ threadId: string; prNumber: number | null; prStatus: string | null; prUrl: string | null }>>;
 
   // Message queries
   /**

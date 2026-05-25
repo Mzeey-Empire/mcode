@@ -36,6 +36,7 @@ export const WS_CHANNELS = {
     threadId: z.string(),
     prNumber: z.number(),
     prStatus: z.string(),
+    prUrl: z.string(),
   }),
   "thread.checksUpdated": z.object({
     threadId: z.string(),

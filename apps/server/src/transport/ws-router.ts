@@ -329,7 +329,7 @@ async function dispatch(
       if (needsCheck.length === 0) return [];
       const workspace = deps.workspaceService.findById(params.workspaceId);
       if (!workspace) return [];
-      const results: Array<{ threadId: string; prNumber: number; prStatus: string }> = [];
+      const results: Array<{ threadId: string; prNumber: number; prStatus: string; prUrl: string }> = [];
       await Promise.allSettled(
         needsCheck.map(async (t) => {
           const pr = await deps.githubService.getBranchPr(t.branch, workspace.path);
@@ -338,8 +338,10 @@ async function dispatch(
             const statusChanged = t.pr_status?.toLowerCase() !== pr.state.toLowerCase();
             if (numberChanged || statusChanged) {
               deps.threadService.linkPr(t.id, pr.number, pr.state);
-              results.push({ threadId: t.id, prNumber: pr.number, prStatus: pr.state });
             }
+            // Always include prUrl in results so the client can populate
+            // prUrlsByThreadId, even when pr_number/pr_status are unchanged.
+            results.push({ threadId: t.id, prNumber: pr.number, prStatus: pr.state, prUrl: pr.url });
             // Start CI watching if PR is not in terminal state.
             // Unwatch first when the PR number changed so the watcher targets the new PR.
             const prState = pr.state.toLowerCase();
@@ -858,6 +860,7 @@ async function dispatch(
         threadId: params.threadId,
         prNumber: result.number,
         prStatus: "OPEN",
+        prUrl: result.url,
       });
 
       // Replace any stale watcher (e.g. previous PR on this thread) before registering the new one.
