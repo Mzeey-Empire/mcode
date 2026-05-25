@@ -70,18 +70,39 @@ function startServerTscWatch() {
   });
 
   let resolveSettled;
-  const initialSettled = new Promise((r) => {
-    resolveSettled = r;
+  let rejectSettled;
+  const initialSettled = new Promise((resolve, reject) => {
+    resolveSettled = resolve;
+    rejectSettled = reject;
   });
   let firstSettle = true;
+
+  const settleOnce = (fn) => {
+    if (!firstSettle) return;
+    firstSettle = false;
+    fn();
+  };
 
   proc.stdout.on("data", (data) => {
     const text = data.toString();
     process.stdout.write(text);
     if (firstSettle && /Watching for file changes\./.test(text)) {
-      firstSettle = false;
-      resolveSettled();
+      settleOnce(() => resolveSettled());
     }
+  });
+
+  proc.once("error", (err) => {
+    settleOnce(() => rejectSettled(err));
+  });
+
+  proc.once("exit", (code, signal) => {
+    settleOnce(() =>
+      rejectSettled(
+        new Error(
+          `[dev] tsc --watch exited before initial settle (code=${code}, signal=${signal ?? "none"})`,
+        ),
+      ),
+    );
   });
 
   return { proc, initialSettled };
@@ -149,6 +170,8 @@ const scheduleServerBundleRebuild = makeCoalescedAsync(async () => {
 // -------------------------------------------------------------------------
 
 let viteProcess = null;
+/** Electron child handle; declared before Vite startup so early Vite exit cannot hit TDZ. */
+let electronProcess = null;
 
 /** True while `cleanup()` is tearing children down so Vite exit is not treated as a crash. */
 let devSessionShuttingDown = false;
@@ -242,7 +265,12 @@ console.log(`[dev] Web dev server is ready at ${devServerUrl}`);
 // triggering a spurious restart and (on Windows, where killProcessTree races
 // the old child) a second visible Electron instance.
 console.log("[dev] Waiting for tsc --watch initial pass to settle...");
-await serverTscInitialSettled;
+try {
+  await serverTscInitialSettled;
+} catch (err) {
+  console.error("[dev] tsc --watch failed during initial settle:", err);
+  process.exit(1);
+}
 console.log("[dev] tsc settled; launching Electron.");
 
 // Start the dist-tsc watcher AFTER settle so only real user edits fire it.
@@ -257,8 +285,6 @@ try {
 // -------------------------------------------------------------------------
 // Step 2: Spawn Electron
 // -------------------------------------------------------------------------
-
-let electronProcess = null;
 
 /** Spawn (or restart) the Electron process. */
 function spawnElectron() {
