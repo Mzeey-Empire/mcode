@@ -60,7 +60,7 @@ async function mockWebSocketServer(
   // returning null from settings.get causes an immediate crash.
   const defaultSettings = {
     appearance: { theme: "system" },
-    agent: { maxConcurrent: 5, defaults: { mode: "chat", permission: "full" }, guardrails: { maxBudgetUsd: 0, maxTurns: 0 } },
+    agent: { maxConcurrent: 5, defaults: { mode: "build", permission: "full" }, guardrails: { maxBudgetUsd: 0, maxTurns: 0 } },
     model: { defaults: { provider: "claude", id: "claude-opus-4-7", reasoning: "high", fallbackId: "claude-sonnet-4-6" } },
     terminal: { scrollback: 250 },
     notifications: { enabled: true },

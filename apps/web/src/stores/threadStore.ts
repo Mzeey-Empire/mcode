@@ -388,7 +388,7 @@ export function countActiveSubagentCalls(calls: ToolCall[] | undefined): number 
 
 const DEFAULT_THREAD_SETTINGS: ThreadSettings = {
   permissionMode: PERMISSION_MODES.FULL,
-  interactionMode: INTERACTION_MODES.CHAT,
+  interactionMode: INTERACTION_MODES.BUILD,
 };
 
 /** Maximum entries in the tool call record LRU cache. */
@@ -1737,9 +1737,15 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     if (action === "revise") {
       usePlanStore.getState().setGenerating(threadId, true);
     } else if (action === "implement") {
-      // Implementation runs in chat mode; leave plan mode so the composer
-      // label and future sends match the execution phase.
-      void get().setThreadSettings(threadId, { interactionMode: INTERACTION_MODES.CHAT });
+      // Implementation runs in build mode; leave plan mode so the composer
+      // label and future sends match the execution phase. Await the
+      // persistence RPC and abort the implement turn on failure so the
+      // local UI cannot diverge from the stored thread row (a stale row
+      // would flip the thread back to Plan on reload).
+      const persisted = await get().setThreadSettings(threadId, {
+        interactionMode: INTERACTION_MODES.BUILD,
+      });
+      if (!persisted) return;
     }
 
     await get().sendMessage(

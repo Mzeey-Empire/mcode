@@ -1,0 +1,1 @@
+UPDATE `threads` SET `interaction_mode` = 'build' WHERE `interaction_mode` = 'chat';

@@ -474,7 +474,7 @@ export class AgentService {
     // whether a provider content override exists. When branching (override present),
     // the override already carries the plan-wrapped stitched content; only wrap the
     // plain content when there is no override.
-    // Plan-tab implement/revise actions force chat mode so the prompt is not
+    // Plan-tab implement/revise actions force build mode so the prompt is not
     // re-wrapped with the question-generation template.
     let wirePayload = content;
 

@@ -5,7 +5,7 @@ import type { PermissionMode, InteractionMode, AttachmentMeta } from "@/transpor
 import { PERMISSION_MODES, INTERACTION_MODES, getTransport } from "@/transport";
 import {
   ArrowUp,
-  MessageSquare,
+  Hammer,
   FileEdit,
   Lock,
   Unlock,
@@ -208,17 +208,17 @@ function ComposerOptionsMenu({
           <Button
             variant="ghost"
             size="xs"
-            onClick={() => onModeChange(INTERACTION_MODES.CHAT)}
-            aria-pressed={mode === INTERACTION_MODES.CHAT}
+            onClick={() => onModeChange(INTERACTION_MODES.BUILD)}
+            aria-pressed={mode === INTERACTION_MODES.BUILD}
             className={cn(
               "h-auto flex-1 gap-1.5 rounded-[5px] px-2 py-1 text-xs font-medium hover:bg-transparent",
-              mode === INTERACTION_MODES.CHAT
+              mode === INTERACTION_MODES.BUILD
                 ? "bg-background text-foreground shadow-sm hover:bg-background"
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
-            <MessageSquare size={12} />
-            Chat
+            <Hammer size={12} />
+            Build
           </Button>
           <Button
             variant="ghost"
@@ -357,15 +357,15 @@ function InlineComposerOptions({
             <Button
               variant="ghost"
               size="xs"
-              onClick={() => onModeChange(mode === INTERACTION_MODES.CHAT ? INTERACTION_MODES.PLAN : INTERACTION_MODES.CHAT)}
+              onClick={() => onModeChange(mode === INTERACTION_MODES.BUILD ? INTERACTION_MODES.PLAN : INTERACTION_MODES.BUILD)}
               className="gap-1.5 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
             >
-              {mode === INTERACTION_MODES.CHAT ? <MessageSquare size={14} /> : <FileEdit size={14} />}
-              <span className="text-sm">{mode === INTERACTION_MODES.CHAT ? "Chat" : "Plan"}</span>
+              {mode === INTERACTION_MODES.BUILD ? <Hammer size={14} /> : <FileEdit size={14} />}
+              <span className="text-sm">{mode === INTERACTION_MODES.BUILD ? "Build" : "Plan"}</span>
             </Button>
           }
         />
-        <TooltipContent>{mode === INTERACTION_MODES.CHAT ? "Chat mode" : "Plan mode"}</TooltipContent>
+        <TooltipContent>{mode === INTERACTION_MODES.BUILD ? "Build mode" : "Plan mode"}</TooltipContent>
       </Tooltip>
 
       {permissionLocked ? (
@@ -471,7 +471,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   // provider from the model ID alone is ambiguous and routes to the wrong backend.
   const [provider, setProvider] = useState<string>(getDefaultProviderId());
   const [reasoning, setReasoning] = useState<ReasoningLevel>(getDefaultReasoningLevel());
-  const [mode, setMode] = useState<InteractionMode>(INTERACTION_MODES.CHAT);
+  const [mode, setMode] = useState<InteractionMode>(INTERACTION_MODES.BUILD);
   const [copilotAgent, setCopilotAgent] = useState<string | null>(null);
   // Per-thread overrides; null/undefined means inherit from settings default.
   const [contextWindow, setContextWindow] = useState<ContextWindowMode | null>(null);
@@ -581,7 +581,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     setReasoning(normalizeReasoningLevelForModel(validModelId, settingsDefaultReasoning));
 
     if (!agentSettingsTouchedRef.current) {
-      setMode(settingsDefaultMode === "plan" ? INTERACTION_MODES.PLAN : INTERACTION_MODES.CHAT);
+      setMode(settingsDefaultMode === "plan" ? INTERACTION_MODES.PLAN : INTERACTION_MODES.BUILD);
       setAccess(settingsDefaultPermission);
     }
   }, [settingsLoaded, settingsDefaultModelId, settingsDefaultProvider, settingsDefaultReasoning, settingsDefaultMode, settingsDefaultPermission, threadId]);
@@ -711,11 +711,11 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         setMode(
           nextThread?.interaction_mode === "plan"
             ? INTERACTION_MODES.PLAN
-            : nextThread?.interaction_mode === "chat"
-              ? INTERACTION_MODES.CHAT
+            : nextThread?.interaction_mode === "build"
+              ? INTERACTION_MODES.BUILD
               : globalSettings.agent.defaults.mode === "plan"
                 ? INTERACTION_MODES.PLAN
-                : INTERACTION_MODES.CHAT,
+                : INTERACTION_MODES.BUILD,
         );
         setAccess(
           nextThread?.permission_mode
@@ -746,7 +746,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       // Reset mode/access to persisted defaults
       agentSettingsTouchedRef.current = false;
       const { settings } = useSettingsStore.getState();
-      setMode(settings.agent.defaults.mode === "plan" ? INTERACTION_MODES.PLAN : INTERACTION_MODES.CHAT);
+      setMode(settings.agent.defaults.mode === "plan" ? INTERACTION_MODES.PLAN : INTERACTION_MODES.BUILD);
       setAccess(settings.agent.defaults.permission);
       setCopilotAgent(null);
       setContextWindow(null);
@@ -777,14 +777,14 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   const threadRecordInteractionMode = useWorkspaceStore((s) => {
     if (!threadId) return undefined;
     const mode = s.threads.find((t) => t.id === threadId)?.interaction_mode;
-    return mode === "plan" || mode === "chat" ? mode : undefined;
+    return mode === "plan" || mode === "build" ? mode : undefined;
   });
 
   // Sync mode when thread settings change in-place (e.g. Plan tab Implement).
   useEffect(() => {
     if (!threadId) return;
     const resolved = persistedInteractionMode ?? threadRecordInteractionMode;
-    if (resolved === INTERACTION_MODES.PLAN || resolved === INTERACTION_MODES.CHAT) {
+    if (resolved === INTERACTION_MODES.PLAN || resolved === INTERACTION_MODES.BUILD) {
       setMode(resolved);
     }
   }, [threadId, persistedInteractionMode, threadRecordInteractionMode]);
@@ -979,7 +979,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       if (action === "toggle-plan") {
         const next =
           mode === INTERACTION_MODES.PLAN
-            ? INTERACTION_MODES.CHAT
+            ? INTERACTION_MODES.BUILD
             : INTERACTION_MODES.PLAN;
         setMode(next);
         if (threadId) void setThreadSettings(threadId, { interactionMode: next });

@@ -9,7 +9,7 @@ import { mockWebSocketServer } from "./helpers/e2e-helpers";
 function makeSettings(modelId: string, reasoning = "high") {
   return {
     appearance: { theme: "dark" },
-    agent: { maxConcurrent: 3, defaults: { mode: "chat", permission: "supervised" } },
+    agent: { maxConcurrent: 3, defaults: { mode: "build", permission: "supervised" } },
     model: {
       defaults: {
         provider: "claude",

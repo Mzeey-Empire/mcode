@@ -61,7 +61,7 @@ describe("per-thread settings", () => {
 
     const settings = useThreadStore.getState().getThreadSettings("thread-null");
 
-    expect(settings.interactionMode).toBe("chat");
+    expect(settings.interactionMode).toBe("build");
     expect(settings.permissionMode).toBe("full");
     expect(settings.reasoningLevel).toBeUndefined();
     expect(settings.codexFastMode).toBeNull();
@@ -103,7 +103,7 @@ describe("per-thread settings", () => {
       settingsByThread: {
         "thread-override": {
           permissionMode: "full",
-          interactionMode: "chat",
+          interactionMode: "build",
           reasoningLevel: undefined,
         },
       },
@@ -112,7 +112,7 @@ describe("per-thread settings", () => {
     const settings = useThreadStore.getState().getThreadSettings("thread-override");
 
     expect(settings.permissionMode).toBe("full");
-    expect(settings.interactionMode).toBe("chat");
+    expect(settings.interactionMode).toBe("build");
     expect(settings.reasoningLevel).toBeUndefined();
   });
 
@@ -143,11 +143,11 @@ describe("per-thread settings", () => {
     });
 
     // Set only interactionMode
-    useThreadStore.getState().setThreadSettings("thread-1", { interactionMode: "chat" });
+    useThreadStore.getState().setThreadSettings("thread-1", { interactionMode: "build" });
 
     // Other settings should be preserved from DB, not cleared
     const settings = useThreadStore.getState().getThreadSettings("thread-1");
-    expect(settings.interactionMode).toBe("chat");
+    expect(settings.interactionMode).toBe("build");
     expect(settings.reasoningLevel).toBe("high");
     expect(settings.permissionMode).toBe("supervised");
   });
@@ -156,7 +156,7 @@ describe("per-thread settings", () => {
     const thread = createMockThread({
       id: "thread-sync",
       reasoning_level: null,
-      interaction_mode: "chat",
+      interaction_mode: "build",
       permission_mode: "supervised",
     });
     useWorkspaceStore.setState({ threads: [thread] });
@@ -175,7 +175,7 @@ describe("per-thread settings", () => {
     const thread = createMockThread({
       id: "thread-sync-2",
       reasoning_level: "max",
-      interaction_mode: "chat",
+      interaction_mode: "build",
       permission_mode: "supervised",
       copilot_agent: "code",
     });
@@ -212,7 +212,7 @@ describe("per-thread settings", () => {
     expect(updated?.copilot_agent).toBeNull();
   });
 
-  it("sendPlanAction implement switches interaction mode to chat", async () => {
+  it("sendPlanAction implement switches interaction mode to build", async () => {
     const thread = createMockThread({
       id: "thread-implement",
       interaction_mode: "plan",
@@ -225,17 +225,17 @@ describe("per-thread settings", () => {
       "implement",
     );
 
-    expect(useThreadStore.getState().getThreadSettings("thread-implement").interactionMode).toBe("chat");
+    expect(useThreadStore.getState().getThreadSettings("thread-implement").interactionMode).toBe("build");
     expect(
       useWorkspaceStore.getState().threads.find((t) => t.id === "thread-implement")?.interaction_mode,
-    ).toBe("chat");
+    ).toBe("build");
     expect(mockTransport.updateThreadSettings).toHaveBeenCalledWith(
       "thread-implement",
-      expect.objectContaining({ interactionMode: "chat" }),
+      expect.objectContaining({ interactionMode: "build" }),
     );
 
     const calls = vi.mocked(mockTransport.sendMessage).mock.calls;
     const sendCall = calls[calls.length - 1];
-    expect(sendCall?.[8]).toBe("chat");
+    expect(sendCall?.[8]).toBe("build");
   });
 });

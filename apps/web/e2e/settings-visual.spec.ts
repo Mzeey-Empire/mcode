@@ -8,7 +8,7 @@ const SCREENSHOT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "
 // Default settings matching the schema
 const DEFAULT_SETTINGS = {
   appearance: { theme: "dark" },
-  agent: { maxConcurrent: 3, defaults: { mode: "chat", permission: "supervised" } },
+  agent: { maxConcurrent: 3, defaults: { mode: "build", permission: "supervised" } },
   model: {
     defaults: {
       provider: "claude",
