@@ -265,7 +265,11 @@ export interface McodeTransport {
 
   // Editor actions
   detectEditors(): Promise<string[]>;
-  openInEditor(editor: string, dirPath: string): Promise<void>;
+  /**
+   * Open a path (file or directory) in the given editor. If `line` is
+   * provided and the target is a file, the editor jumps to that line.
+   */
+  openInEditor(editor: string, path: string, line?: number): Promise<void>;
   openInExplorer(dirPath: string): Promise<void>;
 
   // GitHub PR

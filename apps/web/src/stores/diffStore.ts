@@ -52,6 +52,9 @@ export type RightPanelState = {
   readonly activeTab: RightPanelTab;
 };
 
+/** Default line-wrap preference for a thread with no stored override. */
+export const DEFAULT_LINE_WRAP = true;
+
 /**
  * Baseline right-panel state for a thread that has no persisted row (50% viewport width).
  */
@@ -83,12 +86,19 @@ interface DiffState {
   viewMode: DiffViewMode;
   /** Diff rendering mode. */
   renderMode: DiffRenderMode;
-  /** Whether long lines wrap instead of scrolling horizontally. */
-  lineWrap: boolean;
+  /** Per-thread line-wrap preference keyed by thread ID. */
+  readonly lineWrapByThread: Record<string, boolean>;
   /** Turn snapshots keyed by thread ID. */
   snapshotsByThread: Record<string, TurnSnapshot[]>;
   /** Whether snapshots are currently loading, keyed by thread ID. */
   snapshotsLoadingByThread: Record<string, boolean>;
+  /**
+   * Whether a deferred snapshot refresh is pending for a thread, keyed by thread ID.
+   * Set when a new turn persists while the user is actively viewing the "All" changes
+   * view; the CumulativeView surfaces a refresh affordance instead of auto-refetching
+   * so the user's scroll position and reading flow aren't disrupted.
+   */
+  snapshotsPendingByThread: Record<string, boolean>;
   /** Git commits keyed by thread ID. */
   commitsByThread: Record<string, GitCommit[]>;
   /** Whether commits are currently loading, keyed by thread ID. */
@@ -125,9 +135,12 @@ interface DiffState {
   setRightPanelTab: (threadId: string, tab: RightPanelTab) => void;
   setViewMode: (mode: DiffViewMode) => void;
   setRenderMode: (mode: DiffRenderMode) => void;
-  toggleLineWrap: () => void;
+  getLineWrap: (threadId: string) => boolean;
+  toggleLineWrap: (threadId: string) => void;
   setSnapshots: (threadId: string, snapshots: TurnSnapshot[]) => void;
   setSnapshotsLoading: (threadId: string, loading: boolean) => void;
+  /** Flag a thread's all-changes view as having upstream changes not yet reflected. */
+  markSnapshotsPending: (threadId: string, pending: boolean) => void;
   setCommits: (threadId: string, commits: GitCommit[]) => void;
   setCommitsLoading: (threadId: string, loading: boolean) => void;
   selectFile: (file: SelectedFile | null) => void;
@@ -152,9 +165,10 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   rightPanelByThread: {},
   viewMode: "by-turn",
   renderMode: "unified",
-  lineWrap: false,
+  lineWrapByThread: {},
   snapshotsByThread: {},
   snapshotsLoadingByThread: {},
+  snapshotsPendingByThread: {},
   commitsByThread: {},
   commitsLoadingByThread: {},
   inlineDiffCache: {},
@@ -224,11 +238,35 @@ export const useDiffStore = create<DiffState>((set, get) => ({
 
   setViewMode: (mode) => set({ viewMode: mode, selectedFile: null, diffContent: null }),
   setRenderMode: (mode) => set({ renderMode: mode }),
-  toggleLineWrap: () => set((s) => ({ lineWrap: !s.lineWrap })),
+  getLineWrap: (threadId) => get().lineWrapByThread[threadId] ?? DEFAULT_LINE_WRAP,
+  toggleLineWrap: (threadId) =>
+    set((state) => {
+      const current = state.lineWrapByThread[threadId] ?? DEFAULT_LINE_WRAP;
+      return {
+        lineWrapByThread: {
+          ...state.lineWrapByThread,
+          [threadId]: !current,
+        },
+      };
+    }),
   setSnapshots: (threadId, snapshots) =>
-    set((s) => ({ snapshotsByThread: { ...s.snapshotsByThread, [threadId]: snapshots } })),
+    set((s) => {
+      const nextPending = { ...s.snapshotsPendingByThread };
+      delete nextPending[threadId];
+      return {
+        snapshotsByThread: { ...s.snapshotsByThread, [threadId]: snapshots },
+        snapshotsPendingByThread: nextPending,
+      };
+    }),
   setSnapshotsLoading: (threadId, loading) =>
     set((s) => ({ snapshotsLoadingByThread: { ...s.snapshotsLoadingByThread, [threadId]: loading } })),
+  markSnapshotsPending: (threadId, pending) =>
+    set((s) => {
+      const next = { ...s.snapshotsPendingByThread };
+      if (pending) next[threadId] = true;
+      else delete next[threadId];
+      return { snapshotsPendingByThread: next };
+    }),
   setCommits: (threadId, commits) =>
     set((s) => ({ commitsByThread: { ...s.commitsByThread, [threadId]: commits } })),
   setCommitsLoading: (threadId, loading) =>
@@ -254,6 +292,8 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       delete snapshots[threadId];
       const snapshotsLoading = { ...state.snapshotsLoadingByThread };
       delete snapshotsLoading[threadId];
+      const snapshotsPending = { ...state.snapshotsPendingByThread };
+      delete snapshotsPending[threadId];
       const commits = { ...state.commitsByThread };
       delete commits[threadId];
       const commitsLoading = { ...state.commitsLoadingByThread };
@@ -262,6 +302,8 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       delete rightPanels[threadId];
       const previewUrls = { ...state.previewUrlByThread };
       delete previewUrls[threadId];
+      const lineWrapByThread = { ...state.lineWrapByThread };
+      delete lineWrapByThread[threadId];
 
       // Evict inline diff cache entries scoped to this thread.
       const prefix = `${threadId}:`;
@@ -277,10 +319,12 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       return {
         snapshotsByThread: snapshots,
         snapshotsLoadingByThread: snapshotsLoading,
+        snapshotsPendingByThread: snapshotsPending,
         commitsByThread: commits,
         commitsLoadingByThread: commitsLoading,
         rightPanelByThread: rightPanels,
         previewUrlByThread: previewUrls,
+        lineWrapByThread,
         inlineDiffCache,
         ...(selectionBelongsToThread
           ? { selectedFile: null, diffContent: null, diffLoading: false }

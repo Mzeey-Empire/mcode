@@ -297,15 +297,35 @@ export function startPushListeners(): void {
       const hasCommits = snap.commitsByThread[payload.threadId] !== undefined;
       if (!hasSnapshots && !hasCommits) return;
 
+      // Only refetch snapshots / mark the cumulative view pending when the
+      // persisted turn actually touched files. Chat-only turns (no tool
+      // writes) would otherwise surface a "New changes" affordance with
+      // nothing new to show.
+      const hasFileChanges = payload.filesChanged.length > 0;
+
       try {
         const transport = getTransport();
-        if (hasSnapshots) {
-          transport
-            .listSnapshots(payload.threadId)
-            .then((snapshots) =>
-              useDiffStore.getState().setSnapshots(payload.threadId, snapshots),
-            )
-            .catch(() => { /* non-critical */ });
+        if (hasSnapshots && hasFileChanges) {
+          // If the user is actively viewing the All-changes panel, defer the
+          // refresh and let CumulativeView surface a refresh affordance so
+          // their scroll position isn't yanked. Otherwise refetch silently
+          // so re-entry shows the latest data.
+          const panel = snap.rightPanelByThread[payload.threadId];
+          const isViewingAllChanges =
+            panel?.visible === true &&
+            panel.activeTab === "changes" &&
+            snap.viewMode === "all";
+
+          if (isViewingAllChanges) {
+            useDiffStore.getState().markSnapshotsPending(payload.threadId, true);
+          } else {
+            transport
+              .listSnapshots(payload.threadId)
+              .then((snapshots) =>
+                useDiffStore.getState().setSnapshots(payload.threadId, snapshots),
+              )
+              .catch(() => { /* non-critical */ });
+          }
         }
 
         if (hasCommits) {

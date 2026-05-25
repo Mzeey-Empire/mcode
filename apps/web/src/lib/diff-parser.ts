@@ -23,7 +23,7 @@ export function isMarkdownFile(filePath: string): boolean {
 export function reconstructNewContent(lines: ParsedDiffLine[]): string {
   return lines
     .filter((l) => l.type === "add" || l.type === "context")
-    .filter((l) => l.content !== "\\ No newline at end of file")
+    .filter((l) => !l.isNoNewlineSentinel)
     .map((l) => l.content)
     .join("\n");
 }
@@ -41,6 +41,8 @@ export interface ParsedDiffLine {
    * lines. Used to render "N unchanged lines" separator bars in the diff view.
    */
   hiddenLineCount?: number;
+  /** True for git's `\ No newline at end of file` hunk metadata line. */
+  isNoNewlineSentinel?: boolean;
 }
 
 /** Parse a unified diff string into typed lines with line numbers. */
@@ -97,6 +99,14 @@ export function parseDiffLines(diff: string): ParsedDiffLine[] {
     ) {
       // Git metadata lines — mark as header so renderers can skip them
       result.push({ type: "header", content: line, oldLineNo: null, newLineNo: null });
+    } else if (line === "\\ No newline at end of file") {
+      result.push({
+        type: "context",
+        content: line,
+        oldLineNo: null,
+        newLineNo: null,
+        isNoNewlineSentinel: true,
+      });
     } else if (line.startsWith("+")) {
       result.push({ type: "add", content: line.slice(1), oldLineNo: null, newLineNo: newLine });
       newLine++;

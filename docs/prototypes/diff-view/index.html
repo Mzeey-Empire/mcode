@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Diff View Prototypes — Mcode</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: oklch(0.155 0.008 75);
+    --panel: oklch(0.19 0.008 75);
+    --surface: oklch(0.225 0.008 75);
+    --border: oklch(0.32 0.008 75);
+    --border-subtle: oklch(0.26 0.008 75);
+    --text: oklch(0.94 0.005 75);
+    --text-muted: oklch(0.62 0.008 75);
+    --text-faint: oklch(0.42 0.008 75);
+    --accent: oklch(0.78 0.12 75);
+    --accent-dim: oklch(0.50 0.08 75);
+    --sans: "Public Sans", ui-sans-serif, system-ui, sans-serif;
+    --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+    padding: clamp(32px, 8vw, 96px) clamp(20px, 6vw, 64px);
+    min-height: 100vh;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  header { margin-bottom: 64px; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--text-faint);
+    margin-bottom: 14px;
+  }
+  h1 {
+    font-size: clamp(32px, 4.5vw, 56px);
+    font-weight: 500;
+    margin: 0 0 24px;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+  }
+  h1 em {
+    font-style: normal;
+    color: var(--accent);
+  }
+  .lede {
+    max-width: 62ch;
+    color: var(--text-muted);
+    font-size: 15.5px;
+    line-height: 1.6;
+  }
+  .lede strong { color: var(--text); font-weight: 500; }
+
+  .problem {
+    margin: 56px 0 64px;
+    padding: 28px 32px;
+    background: var(--panel);
+    border-radius: 6px;
+    border: 1px solid var(--border-subtle);
+  }
+  .problem h2 {
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--accent);
+    margin: 0 0 18px;
+    font-weight: 500;
+  }
+  .problem ul {
+    margin: 0;
+    padding-left: 18px;
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.65;
+  }
+  .problem ul li + li { margin-top: 6px; }
+  .problem code {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: var(--surface);
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: var(--text);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+    gap: 20px;
+  }
+
+  .card {
+    display: block;
+    text-decoration: none;
+    color: inherit;
+    background: var(--panel);
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    padding: 28px 28px 24px;
+    transition: border-color 220ms cubic-bezier(0.2, 0.7, 0.2, 1),
+                transform 220ms cubic-bezier(0.2, 0.7, 0.2, 1),
+                background 220ms cubic-bezier(0.2, 0.7, 0.2, 1);
+    position: relative;
+  }
+  .card:hover {
+    border-color: var(--border);
+    background: oklch(0.205 0.008 75);
+    transform: translateY(-1px);
+  }
+  .card:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .card .tag {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--accent);
+    margin-bottom: 14px;
+  }
+  .card h3 {
+    margin: 0 0 8px;
+    font-size: 22px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+  .card p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  .card .meta {
+    margin-top: 22px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    gap: 18px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-faint);
+  }
+  .card .meta span::before {
+    content: "·";
+    margin-right: 6px;
+    color: var(--text-faint);
+  }
+  .card .meta span:first-child::before { content: none; }
+
+  footer {
+    margin-top: 80px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border-subtle);
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-faint);
+    letter-spacing: 0.04em;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Diff view · interaction prototypes</div>
+    <h1>Four ways the file row can stop <em>misfiring.</em></h1>
+    <p class="lede">
+      Today, expanding a file diff makes the whole row a single button — and the
+      Markdown preview toggle is a <strong>span pretending to be a button</strong>,
+      nested inside that outer button. Misclick the icon and the row collapses.
+      These four prototypes propose distinct fixes, each preserving the
+      app's editorial / typeset feel.
+    </p>
+  </header>
+
+  <section class="problem">
+    <h2>What's broken</h2>
+    <ul>
+      <li><strong>Invalid DOM</strong> — interactive content nested inside <code>&lt;button&gt;</code> (the MD preview toggle is a <code>span role="button"</code> wrapped by the row's <code>button</code>).</li>
+      <li><strong>Hit target ~15px</strong> — an 11px icon with 2px padding, surrounded by the row's collapse area. Miss it, lose your place.</li>
+      <li><strong>Fragile event handling</strong> — every inline action needs <code>e.stopPropagation()</code> just to survive.</li>
+      <li><strong>No tab order for inline controls</strong> — accessing the preview toggle by keyboard requires shift-tab through the chevron, the filename, the stats…</li>
+      <li><strong>One row, three intents</strong> — disclosure, navigation, and per-file actions are all crammed into the same control.</li>
+    </ul>
+  </section>
+
+  <div class="grid">
+    <a class="card" href="v1-split-header.html">
+      <div class="tag">V1</div>
+      <h3>Split Header</h3>
+      <p>
+        The row keeps single-click disclosure. When expanded, a thin secondary
+        toolbar appears between the row and the diff content with real buttons
+        (Raw/Rendered, Copy path, Open externally, Collapse).
+      </p>
+      <div class="meta">
+        <span>Familiar</span>
+        <span>Low risk</span>
+        <span>Discoverable</span>
+      </div>
+    </a>
+
+    <a class="card" href="v2-side-rail.html">
+      <div class="tag">V2</div>
+      <h3>Side Rail</h3>
+      <p>
+        The row becomes pure disclosure (chevron + filename + stats). All
+        per-file actions live in a vertical rail that appears to the right of
+        the expanded diff content, with 28px hit targets and labels on hover.
+      </p>
+      <div class="meta">
+        <span>Spatial</span>
+        <span>Pencil-clean rows</span>
+        <span>Wide panels only</span>
+      </div>
+    </a>
+
+    <a class="card" href="v3-segmented.html">
+      <div class="tag">V3</div>
+      <h3>Segmented View Picker</h3>
+      <p>
+        Preview lives <em>inside</em> the diff content as a proper
+        <code>role="radiogroup"</code> segmented control (Diff · Rendered ·
+        Side-by-side). The header row never owns toggles. Arrow keys cycle modes.
+      </p>
+      <div class="meta">
+        <span>Editor-native</span>
+        <span>Keyboard cycles</span>
+        <span>Per-file mode</span>
+      </div>
+    </a>
+
+    <a class="card" href="v4-command-bar.html">
+      <div class="tag">V4</div>
+      <h3>Command Bar</h3>
+      <p>
+        A floating action bar slides in on hover / focus, pins when the row
+        expands, and surfaces single-letter shortcuts inline
+        (<code>P</code> preview, <code>C</code> copy, <code>O</code> open,
+        <code>Esc</code> collapse).
+      </p>
+      <div class="meta">
+        <span>Power-user</span>
+        <span>Keyboardable</span>
+        <span>Most novel</span>
+      </div>
+    </a>
+  </div>
+
+  <footer>
+    impeccable · mcode · diff-view interaction prototypes
+  </footer>
+</div>
+</body>
+</html>

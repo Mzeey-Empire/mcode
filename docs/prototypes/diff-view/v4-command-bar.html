@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>V4 · Command Bar — Diff View Prototype</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: oklch(0.155 0.008 75);
+    --panel: oklch(0.185 0.008 75);
+    --panel-2: oklch(0.21 0.008 75);
+    --surface: oklch(0.235 0.008 75);
+    --cmd-bg: oklch(0.245 0.008 75);
+    --border: oklch(0.32 0.008 75);
+    --border-subtle: oklch(0.255 0.008 75);
+    --text: oklch(0.94 0.005 75);
+    --text-muted: oklch(0.66 0.008 75);
+    --text-faint: oklch(0.46 0.008 75);
+    --accent: oklch(0.78 0.12 75);
+    --accent-dim: oklch(0.42 0.07 75);
+    --add: oklch(0.74 0.13 145);
+    --add-bg: oklch(0.32 0.06 145 / 0.30);
+    --remove: oklch(0.72 0.16 25);
+    --remove-bg: oklch(0.32 0.07 25 / 0.28);
+    --focus: oklch(0.78 0.12 75 / 0.55);
+    --sans: "Public Sans", ui-sans-serif, system-ui, sans-serif;
+    --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 13px;
+    line-height: 1.5;
+    min-height: 100vh;
+    display: grid;
+    place-items: start center;
+    padding: 56px 24px;
+  }
+  .frame {
+    width: 100%;
+    max-width: 1180px;
+    display: grid;
+    grid-template-columns: 1fr 580px;
+    gap: 32px;
+    align-items: start;
+  }
+  @media (max-width: 1000px) {
+    .frame { grid-template-columns: 1fr; }
+  }
+  .meta-col h1 {
+    font-size: 36px;
+    font-weight: 500;
+    margin: 0 0 14px;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+  }
+  .crumb {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.18em;
+    color: var(--text-faint); margin-bottom: 18px;
+  }
+  .crumb a { color: inherit; text-decoration: none; }
+  .crumb a:hover { color: var(--accent); }
+  .meta-col p {
+    color: var(--text-muted);
+    max-width: 50ch;
+    margin: 0 0 22px;
+    font-size: 14.5px;
+    line-height: 1.6;
+  }
+  .meta-col code, .callout code {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--panel);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .principles {
+    font-family: var(--mono); font-size: 11.5px; color: var(--text-muted);
+    list-style: none; padding: 0; margin: 0;
+  }
+  .principles li {
+    display: flex; align-items: baseline; gap: 12px;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .principles li:last-child { border-bottom: none; }
+  .principles .k {
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    font-size: 10.5px;
+    min-width: 92px;
+  }
+  .principles .v { color: var(--text); }
+
+  /* DIFF PANEL */
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    overflow: hidden;
+    font-size: 12.5px;
+  }
+  .panel-toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .view-tabs { display: flex; gap: 22px; }
+  .view-tabs button {
+    appearance: none; background: none; border: 0;
+    color: var(--text-faint);
+    font-family: inherit; font-size: 11.5px; font-weight: 500;
+    padding: 4px 0 6px; cursor: pointer; position: relative;
+  }
+  .view-tabs button:hover { color: var(--text); }
+  .view-tabs button[aria-pressed="true"] { color: var(--text); }
+  .view-tabs button[aria-pressed="true"]::after {
+    content: ""; position: absolute; left:0; right:0; bottom:0;
+    height: 1.5px; background: var(--text);
+  }
+  .cum-head {
+    display: flex; align-items: baseline; gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .cum-head .count {
+    font-family: var(--mono); font-size: 11px; color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .cum-head .label {
+    font-family: var(--mono); font-size: 10.5px;
+    text-transform: uppercase; letter-spacing: 0.14em;
+    color: var(--text-faint);
+  }
+
+  /* FILE ENTRY */
+  .file {
+    border-bottom: 1px solid var(--border-subtle);
+    position: relative;
+  }
+  .file:last-child { border-bottom: none; }
+
+  /* Disclosure row + command bar share one row visually */
+  .file-row {
+    width: 100%;
+    appearance: none; background: none; border: 0;
+    color: var(--text); font-family: inherit; text-align: left;
+    display: grid;
+    grid-template-columns: 18px 1fr auto auto;
+    align-items: center; gap: 10px;
+    padding: 8px 14px 8px 12px;
+    cursor: pointer;
+    transition: background 120ms;
+    position: relative;
+    z-index: 1;
+  }
+  .file-row:hover { background: oklch(0.21 0.008 75); }
+  .file-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+  .file-row .chev {
+    font-family: var(--mono); font-size: 12px; line-height: 1;
+    color: var(--text-faint); width: 18px; text-align: center;
+    transition: transform 150ms cubic-bezier(0.2,0.7,0.2,1);
+  }
+  .file[data-open="true"] .file-row { background: oklch(0.21 0.008 75); }
+  .file[data-open="true"] .file-row .chev { transform: rotate(90deg); color: var(--text); }
+  .file-name {
+    font-family: var(--mono); font-size: 12.5px; min-width: 0;
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .file-name .base { font-weight: 500; }
+  .file-name .dir { color: var(--text-faint); font-size: 11px; }
+  .stats {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+  }
+  .stats .bar {
+    width: 44px; height: 3px;
+    display: flex; overflow: hidden;
+    border-radius: 999px;
+    background: var(--border-subtle);
+  }
+  .stats .bar .add { background: var(--add); }
+  .stats .bar .rem { background: var(--remove); }
+  .stats .add-n { color: var(--add); }
+  .stats .rem-n { color: var(--remove); }
+  .ext-tag {
+    font-family: var(--mono); font-size: 9.5px;
+    text-transform: uppercase; letter-spacing: 0.14em;
+    color: var(--text-faint);
+    padding: 1px 6px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 3px;
+  }
+
+  /* THE COMMAND BAR — slides over the right end of the row on hover/focus */
+  .cmd-bar {
+    position: absolute;
+    top: 4px; right: 8px;
+    z-index: 2;
+    background: var(--cmd-bg);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 3px;
+    display: flex; gap: 1px;
+    box-shadow: 0 4px 16px oklch(0.10 0.008 75 / 0.5);
+    opacity: 0;
+    transform: translateY(-2px) scale(0.97);
+    pointer-events: none;
+    transition: opacity 180ms cubic-bezier(0.2,0.7,0.2,1),
+                transform 180ms cubic-bezier(0.2,0.7,0.2,1);
+  }
+  /* Reveal on hover OR keyboard focus inside the file */
+  .file:hover .cmd-bar,
+  .file:focus-within .cmd-bar {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+  }
+  /* Pin permanently when expanded */
+  .file[data-open="true"] .cmd-bar {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    pointer-events: auto;
+  }
+
+  .cbtn {
+    appearance: none; background: none; border: 0;
+    border-radius: 3px;
+    color: var(--text-muted);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.02em;
+    padding: 5px 9px;
+    min-height: 26px;
+    display: inline-flex; align-items: center; gap: 7px;
+    cursor: pointer;
+    line-height: 1;
+    transition: color 130ms, background 130ms;
+  }
+  .cbtn svg { width: 12px; height: 12px; flex-shrink: 0; }
+  .cbtn:hover { color: var(--text); background: oklch(0.30 0.008 75); }
+  .cbtn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+  .cbtn[aria-pressed="true"] {
+    color: var(--text);
+    background: oklch(0.30 0.008 75);
+  }
+  .cbtn .ck {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-faint);
+    padding: 1px 4px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 2px;
+    line-height: 1;
+    margin-left: 2px;
+  }
+  .cbtn:hover .ck { color: var(--text-muted); }
+  .cbtn.danger:hover { color: var(--remove); }
+  .csep { width: 1px; background: var(--border-subtle); margin: 4px 3px; }
+
+  /* DIFF CONTENT */
+  .file-body { border-top: 1px solid var(--border-subtle); }
+  .diff {
+    font-family: var(--mono); font-size: 12px; line-height: 1.55;
+  }
+  .diff .line { display: grid; grid-template-columns: 38px 38px 1fr; align-items: baseline; }
+  .diff .gutter {
+    text-align: right; padding: 0 8px 0 4px;
+    color: var(--text-faint); font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    user-select: none;
+  }
+  .diff .code { padding: 0 14px 0 10px; white-space: pre; color: var(--text); }
+  .diff .line.add { background: var(--add-bg); }
+  .diff .line.add .gutter { color: var(--add); }
+  .diff .line.rem { background: var(--remove-bg); }
+  .diff .line.rem .gutter { color: var(--remove); }
+  .diff .line.hunk { background: oklch(0.20 0.008 75); }
+  .diff .line.hunk .code { color: var(--text-faint); }
+
+  /* Status footer that explains the floating bar's behaviour */
+  .status {
+    padding: 8px 14px;
+    border-top: 1px solid var(--border-subtle);
+    background: oklch(0.17 0.008 75);
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--text-faint);
+    display: flex; justify-content: space-between; align-items: center;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+  }
+  .status .hint { display: inline-flex; align-items: center; gap: 6px; }
+  .status .kbd {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    color: var(--text-muted);
+    background: var(--surface);
+    border: 1px solid var(--border-subtle);
+    padding: 1px 5px;
+    border-radius: 3px;
+    line-height: 1;
+    letter-spacing: 0;
+  }
+
+  .callout {
+    margin-top: 18px;
+    padding: 14px 16px;
+    background: var(--panel);
+    border: 1px dashed var(--border);
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--text-muted);
+    line-height: 1.55;
+  }
+  .callout strong { color: var(--accent); font-weight: 500; }
+</style>
+</head>
+<body>
+
+<div class="frame">
+
+  <aside class="meta-col">
+    <div class="crumb"><a href="index.html">← All prototypes</a></div>
+    <h1>V4 · Command Bar</h1>
+    <p>
+      The boldest take: file rows stay perfectly clean — chevron, name,
+      stats, nothing else — and a small floating command bar slides in when
+      the row is <strong>hovered</strong> or <strong>keyboard-focused</strong>.
+      The moment the row expands, the bar pins, so it stays reachable while
+      reading. Every action shows its single-letter shortcut, turning the
+      diff panel into a keyboard surface.
+    </p>
+
+    <ul class="principles">
+      <li><span class="k">Reveal</span><span class="v">Hover or focus-within</span></li>
+      <li><span class="k">Pin</span><span class="v">Stays when expanded</span></li>
+      <li><span class="k">Keyboard</span><span class="v"><code style="font-family:var(--mono);font-size:11px">P</code> preview · <code style="font-family:var(--mono);font-size:11px">C</code> copy · <code style="font-family:var(--mono);font-size:11px">O</code> open · <code style="font-family:var(--mono);font-size:11px">Esc</code></span></li>
+      <li><span class="k">Hit target</span><span class="v">26 × ≥30 px per command</span></li>
+      <li><span class="k">DOM</span><span class="v">Bar is a sibling, never inside the row</span></li>
+      <li><span class="k">Trade-off</span><span class="v">Most novel — needs onboarding</span></li>
+    </ul>
+
+    <div class="callout">
+      <strong>The key idea:</strong> commands belong to the file, not the
+      row. The bar is a sibling element layered on top of the row's right
+      edge — never a descendant of the disclosure button. The pinned
+      behaviour when expanded means you never lose actions while reading.
+    </div>
+  </aside>
+
+  <section class="panel" aria-label="Changes panel preview">
+    <div class="panel-toolbar">
+      <div class="view-tabs" role="tablist" aria-label="View mode">
+        <button role="tab" aria-pressed="true">All</button>
+        <button role="tab" aria-pressed="false">By Turn</button>
+        <button role="tab" aria-pressed="false">Commits</button>
+        <button role="tab" aria-pressed="false">Summary</button>
+      </div>
+      <div style="font-family:var(--mono); font-size:10.5px; color:var(--text-faint); letter-spacing:0.14em; text-transform:uppercase;">
+        worktree · feat/diff-view
+      </div>
+    </div>
+
+    <div class="cum-head">
+      <span class="count">7</span>
+      <span class="label">files · 4 turns</span>
+    </div>
+
+    <!-- File 1 — hovered (showing the floating bar in its reveal state) -->
+    <div class="file" style="background: oklch(0.20 0.008 75);">
+      <button class="file-row" type="button" aria-expanded="false" tabindex="0">
+        <span class="chev" aria-hidden="true">›</span>
+        <span class="file-name"><span class="base">format.ts</span><span class="dir">apps/web/src/lib</span></span>
+        <span class="stats">
+          <span class="bar"><span class="add" style="width:75%"></span><span class="rem" style="width:25%"></span></span>
+          <span class="add-n">+12</span><span class="rem-n">−4</span>
+        </span>
+        <span class="ext-tag">TS</span>
+      </button>
+      <!-- Command bar SIBLING of the file-row, layered absolutely. Visible because we forced hover state. -->
+      <div class="cmd-bar" role="toolbar" aria-label="Actions for format.ts" style="opacity:1; transform:translateY(0) scale(1); pointer-events:auto;">
+        <button class="cbtn" type="button" aria-label="Copy file path">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="5" y="5" width="8" height="8" rx="1"/><path d="M3 11V4a1 1 0 011-1h7"/></svg>
+          Copy <span class="ck">C</span>
+        </button>
+        <button class="cbtn" type="button" aria-label="Open in editor">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 8v5h10V8"/><path d="M8 2v8M5 5l3-3 3 3"/></svg>
+          Open <span class="ck">O</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- File 2 EXPANDED markdown — command bar pinned -->
+    <div class="file" data-open="true">
+      <button class="file-row" type="button" aria-expanded="true">
+        <span class="chev" aria-hidden="true">›</span>
+        <span class="file-name"><span class="base">README.md</span><span class="dir">docs</span></span>
+        <span class="stats">
+          <span class="bar"><span class="add" style="width:86%"></span><span class="rem" style="width:14%"></span></span>
+          <span class="add-n">+18</span><span class="rem-n">−3</span>
+        </span>
+        <span class="ext-tag">MD</span>
+      </button>
+
+      <!-- PINNED command bar — same DOM position, just sticky because the file is open -->
+      <div class="cmd-bar" role="toolbar" aria-label="Actions for README.md">
+        <button class="cbtn" type="button" aria-pressed="false" aria-label="Toggle rendered preview">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 3h10v10H3z"/><path d="M5 6h6M5 9h4"/></svg>
+          Preview <span class="ck">P</span>
+        </button>
+        <div class="csep" aria-hidden="true"></div>
+        <button class="cbtn" type="button" aria-label="Copy file path">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="5" y="5" width="8" height="8" rx="1"/><path d="M3 11V4a1 1 0 011-1h7"/></svg>
+          Copy <span class="ck">C</span>
+        </button>
+        <button class="cbtn" type="button" aria-label="Open in editor">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 8v5h10V8"/><path d="M8 2v8M5 5l3-3 3 3"/></svg>
+          Open <span class="ck">O</span>
+        </button>
+        <div class="csep" aria-hidden="true"></div>
+        <button class="cbtn danger" type="button" aria-label="Collapse">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="m3 10 5-5 5 5"/></svg>
+          <span class="ck">Esc</span>
+        </button>
+      </div>
+
+      <div class="file-body">
+        <div class="diff">
+          <div class="line hunk"><span class="gutter"></span><span class="gutter"></span><span class="code">@@ -42,3 +42,18 @@ ## Installation</span></div>
+          <div class="line"><span class="gutter">42</span><span class="gutter">42</span><span class="code">Mcode runs as a desktop app on macOS, Windows, and Linux.</span></div>
+          <div class="line"><span class="gutter">43</span><span class="gutter">43</span><span class="code"></span></div>
+          <div class="line rem"><span class="gutter">44</span><span class="gutter"></span><span class="code">- Download the latest release from the GitHub releases page.</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">44</span><span class="code">+ ### Installing from a nightly build</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">45</span><span class="code">+</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">46</span><span class="code">+ Per-build releases are published nightly to the `nightly` channel.</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">47</span><span class="code">+ To opt in, set `mcode.update.channel = "nightly"` in your settings.</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">48</span><span class="code">+</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">49</span><span class="code">+ ```sh</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">50</span><span class="code">+ mcode update --channel nightly</span></div>
+          <div class="line add"><span class="gutter"></span><span class="gutter">51</span><span class="code">+ ```</span></div>
+        </div>
+        <div class="status">
+          <span class="hint">
+            <span class="kbd">P</span> preview ·
+            <span class="kbd">C</span> copy ·
+            <span class="kbd">O</span> open ·
+            <span class="kbd">↓ / ↑</span> next file
+          </span>
+          <span><span class="kbd">Esc</span> collapse</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- File 3 — idle, command bar hidden -->
+    <div class="file">
+      <button class="file-row" type="button" aria-expanded="false">
+        <span class="chev" aria-hidden="true">›</span>
+        <span class="file-name"><span class="base">DiffPanel.tsx</span><span class="dir">apps/web/src/components/diff</span></span>
+        <span class="stats">
+          <span class="bar"><span class="add" style="width:100%"></span></span>
+          <span class="add-n">+28</span>
+        </span>
+        <span class="ext-tag">TSX</span>
+      </button>
+      <div class="cmd-bar" role="toolbar" aria-label="Actions for DiffPanel.tsx">
+        <button class="cbtn" type="button" aria-label="Copy file path">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="5" y="5" width="8" height="8" rx="1"/><path d="M3 11V4a1 1 0 011-1h7"/></svg>
+          Copy <span class="ck">C</span>
+        </button>
+        <button class="cbtn" type="button" aria-label="Open in editor">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 8v5h10V8"/><path d="M8 2v8M5 5l3-3 3 3"/></svg>
+          Open <span class="ck">O</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- File 4 -->
+    <div class="file">
+      <button class="file-row" type="button" aria-expanded="false">
+        <span class="chev" aria-hidden="true">›</span>
+        <span class="file-name"><span class="base">diffStore.ts</span><span class="dir">apps/web/src/stores</span></span>
+        <span class="stats">
+          <span class="bar"><span class="add" style="width:91%"></span><span class="rem" style="width:9%"></span></span>
+          <span class="add-n">+29</span><span class="rem-n">−3</span>
+        </span>
+        <span class="ext-tag">TS</span>
+      </button>
+      <div class="cmd-bar" role="toolbar" aria-label="Actions for diffStore.ts">
+        <button class="cbtn" type="button" aria-label="Copy file path">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="5" y="5" width="8" height="8" rx="1"/><path d="M3 11V4a1 1 0 011-1h7"/></svg>
+          Copy <span class="ck">C</span>
+        </button>
+        <button class="cbtn" type="button" aria-label="Open in editor">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 8v5h10V8"/><path d="M8 2v8M5 5l3-3 3 3"/></svg>
+          Open <span class="ck">O</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- File 5 -->
+    <div class="file">
+      <button class="file-row" type="button" aria-expanded="false">
+        <span class="chev" aria-hidden="true">›</span>
+        <span class="file-name"><span class="base">CHANGELOG.md</span><span class="dir">root</span></span>
+        <span class="stats">
+          <span class="bar"><span class="add" style="width:100%"></span></span>
+          <span class="add-n">+6</span>
+        </span>
+        <span class="ext-tag">MD</span>
+      </button>
+      <div class="cmd-bar" role="toolbar" aria-label="Actions for CHANGELOG.md">
+        <button class="cbtn" type="button" aria-label="Toggle rendered preview">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M3 3h10v10H3z"/><path d="M5 6h6M5 9h4"/></svg>
+          Preview <span class="ck">P</span>
+        </button>
+        <button class="cbtn" type="button" aria-label="Copy file path">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="5" y="5" width="8" height="8" rx="1"/><path d="M3 11V4a1 1 0 011-1h7"/></svg>
+          Copy <span class="ck">C</span>
+        </button>
+      </div>
+    </div>
+
+  </section>
+
+</div>
+
+</body>
+</html>

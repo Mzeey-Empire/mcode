@@ -4,6 +4,7 @@ import {
   PANEL_MIN_WIDTH,
   getDefaultPanelWidthPx,
   createDefaultRightPanelState,
+  DEFAULT_LINE_WRAP,
 } from "../stores/diffStore";
 
 describe("diffStore", () => {
@@ -13,6 +14,7 @@ describe("diffStore", () => {
       rightPanelByThread: {},
       snapshotsByThread: {},
       snapshotsLoadingByThread: {},
+      snapshotsPendingByThread: {},
       commitsByThread: {},
       commitsLoadingByThread: {},
       selectedFile: null,
@@ -20,7 +22,34 @@ describe("diffStore", () => {
       diffLoading: false,
       viewMode: "by-turn",
       renderMode: "unified",
-      lineWrap: false,
+      lineWrapByThread: {},
+    });
+  });
+
+  describe("line wrap", () => {
+    it("defaults to wrapped for threads with no stored preference", () => {
+      const { getLineWrap } = useDiffStore.getState();
+      expect(getLineWrap("thread-1")).toBe(DEFAULT_LINE_WRAP);
+      expect(DEFAULT_LINE_WRAP).toBe(true);
+    });
+
+    it("toggles and stores preference per thread", () => {
+      const { toggleLineWrap, getLineWrap } = useDiffStore.getState();
+      expect(getLineWrap("thread-1")).toBe(true);
+      toggleLineWrap("thread-1");
+      expect(getLineWrap("thread-1")).toBe(false);
+      expect(getLineWrap("thread-2")).toBe(true);
+      toggleLineWrap("thread-1");
+      expect(getLineWrap("thread-1")).toBe(true);
+    });
+
+    it("clears stored preference when the thread is cleared", () => {
+      const { toggleLineWrap, getLineWrap, clearThread } = useDiffStore.getState();
+      toggleLineWrap("thread-1");
+      expect(getLineWrap("thread-1")).toBe(false);
+      clearThread("thread-1");
+      expect(getLineWrap("thread-1")).toBe(true);
+      expect(useDiffStore.getState().lineWrapByThread["thread-1"]).toBeUndefined();
     });
   });
 
@@ -192,6 +221,36 @@ describe("diffStore", () => {
       const state = useDiffStore.getState();
       expect(state.selectedFile).toEqual(file);
       expect(state.diffContent).toBe("other diff");
+    });
+  });
+
+  describe("markSnapshotsPending", () => {
+    it("sets the pending flag for the given thread", () => {
+      useDiffStore.getState().markSnapshotsPending("thread-1", true);
+      expect(useDiffStore.getState().snapshotsPendingByThread["thread-1"]).toBe(true);
+    });
+
+    it("clears the pending flag when called with false", () => {
+      useDiffStore.getState().markSnapshotsPending("thread-1", true);
+      useDiffStore.getState().markSnapshotsPending("thread-1", false);
+      expect(useDiffStore.getState().snapshotsPendingByThread["thread-1"]).toBeUndefined();
+    });
+
+    it("does not affect other threads", () => {
+      useDiffStore.getState().markSnapshotsPending("thread-1", true);
+      expect(useDiffStore.getState().snapshotsPendingByThread["thread-2"]).toBeUndefined();
+    });
+
+    it("is cleared when setSnapshots runs for the same thread", () => {
+      useDiffStore.getState().markSnapshotsPending("thread-1", true);
+      useDiffStore.getState().setSnapshots("thread-1", []);
+      expect(useDiffStore.getState().snapshotsPendingByThread["thread-1"]).toBeUndefined();
+    });
+
+    it("is cleared by clearThread", () => {
+      useDiffStore.getState().markSnapshotsPending("thread-1", true);
+      useDiffStore.getState().clearThread("thread-1");
+      expect(useDiffStore.getState().snapshotsPendingByThread["thread-1"]).toBeUndefined();
     });
   });
 

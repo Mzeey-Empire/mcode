@@ -203,8 +203,12 @@ interface DesktopBridge {
   getServerUrl(): Promise<{ url: string; ipcPath: string }>;
   /** Open a native folder-picker dialog. Returns the selected path or null. */
   showOpenDialog(options: { title?: string }): Promise<string | null>;
-  /** Launch an external editor at the given directory. */
-  openInEditor(editor: string, dirPath: string): Promise<void>;
+  /**
+   * Launch an external editor at the given path (file or directory). When
+   * `line` is provided and the target is a file, the editor jumps to that
+   * line. Valid editor IDs come from `detectEditors()`.
+   */
+  openInEditor(editor: string, path: string, line?: number): Promise<void>;
   /** Open the OS file explorer at the given directory. */
   openInExplorer(dirPath: string): Promise<void>;
   /** Open a URL in the default browser. */
