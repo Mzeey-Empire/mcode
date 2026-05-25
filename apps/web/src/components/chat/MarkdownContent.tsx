@@ -7,6 +7,7 @@ import {
   looksLikeWorkspaceRelativeFileRef,
 } from "@mcode/contracts";
 import { CodeBlock } from "./CodeBlock";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { resolveCodeBlockLanguage } from "@/lib/resolve-code-block-language";
 import { useDiffStore } from "@/stores/diffStore";
 import { isMac } from "@/lib/platform";
@@ -73,30 +74,22 @@ function handleLinkClick(e: React.MouseEvent | React.KeyboardEvent, url: string)
   if (isModifierClick && hasPreview()) {
     const threadId = useWorkspaceStore.getState().activeThreadId;
     if (threadId) {
-      const { showRightPanel, setRightPanelTab } = useDiffStore.getState();
+      const { showRightPanel, setRightPanelTab, setPreviewUrlForThread } =
+        useDiffStore.getState();
+      // Store the URL before opening the panel so that:
+      // 1. usePreviewBridge populates the omnibox immediately via storedUrl
+      // 2. pushSync sends it as resumeUrlHint, letting the main process load
+      //    the page once BrowserView bounds are established
+      setPreviewUrlForThread(threadId, url);
       showRightPanel(threadId);
       setRightPanelTab(threadId, "preview");
-      // Defer navigation so React can re-render and sync BrowserView bounds
+      // Fire-and-forget navigate for the already-open-panel case (bounds
+      // already synced). For a freshly mounted panel the sync handler's
+      // resumeUrlHint path handles navigation after bounds arrive.
       setTimeout(() => {
-        const fallback = (): void => {
-          if (isMcodeWorkspacePreviewUrl(url)) {
-            void window.desktopBridge?.openExternalUrl?.(url, workspacePath ?? undefined);
-          } else {
-            window.desktopBridge?.openExternalUrl?.(url);
-          }
-        };
-        const navigatePromise = window.desktopBridge?.preview?.navigate?.(url, workspacePath);
-        if (!navigatePromise) {
-          fallback();
-          return;
-        }
-        void navigatePromise
-          .then((r) => {
-            if (!r?.ok) fallback();
-          })
-          .catch(() => {
-            fallback();
-          });
+        void window.desktopBridge?.preview
+          ?.navigate?.(url, workspacePath ?? undefined)
+          ?.catch(() => {});
       }, 0);
       return;
     }
@@ -156,10 +149,9 @@ function makeStaticComponents(variant: "assistant" | "user", workspacePath: stri
           safeHref.startsWith("https:") ||
           isMcodeWorkspacePreviewUrl(safeHref));
       const showHint = isPreviewable && hasPreview();
-      return (
+      const anchor = (
         <a
           href={safeHref}
-          title={showHint ? previewHint : undefined}
           className={linkClass}
           target="_blank"
           rel="noopener noreferrer"
@@ -176,6 +168,13 @@ function makeStaticComponents(variant: "assistant" | "user", workspacePath: stri
         >
           {children}
         </a>
+      );
+      if (!showHint) return anchor;
+      return (
+        <Tooltip>
+          <TooltipTrigger render={anchor} />
+          <TooltipContent side="top" className="text-xs">{previewHint}</TooltipContent>
+        </Tooltip>
       );
     },
     blockquote: ({ children }: { children?: React.ReactNode }) => (
@@ -262,17 +261,23 @@ function makeComponents(
           const linkClass = isUser
             ? "text-primary-foreground underline decoration-dotted hover:opacity-80 cursor-pointer"
             : "text-primary underline decoration-dotted hover:text-primary cursor-pointer";
-          return (
+          const codeEl = (
             <code
               role="link"
               tabIndex={0}
-              title={hasPreview() ? previewHint : undefined}
-              className={`${codeClass} ${linkClass}`}
+              className={`${codeClass} ${linkClass} whitespace-nowrap`}
               onClick={(e) => handleLinkClick(e, text)}
               onKeyDown={(e) => { if (e.key === "Enter") handleLinkClick(e, text); }}
             >
               {children}
             </code>
+          );
+          if (!hasPreview()) return codeEl;
+          return (
+            <Tooltip>
+              <TooltipTrigger render={codeEl} />
+              <TooltipContent side="top" className="text-xs">{previewHint}</TooltipContent>
+            </Tooltip>
           );
         }
 
@@ -281,17 +286,23 @@ function makeComponents(
           const linkClass = isUser
             ? "text-primary-foreground underline decoration-dotted hover:opacity-80 cursor-pointer"
             : "text-primary underline decoration-dotted hover:text-primary cursor-pointer";
-          return (
+          const codeEl = (
             <code
               role="link"
               tabIndex={0}
-              title={hasPreview() ? previewHint : undefined}
-              className={`${codeClass} ${linkClass}`}
+              className={`${codeClass} ${linkClass} whitespace-nowrap`}
               onClick={(e) => handleLinkClick(e, previewUrl)}
               onKeyDown={(e) => { if (e.key === "Enter") handleLinkClick(e, previewUrl); }}
             >
               {children}
             </code>
+          );
+          if (!hasPreview()) return codeEl;
+          return (
+            <Tooltip>
+              <TooltipTrigger render={codeEl} />
+              <TooltipContent side="top" className="text-xs">{previewHint}</TooltipContent>
+            </Tooltip>
           );
         }
 
