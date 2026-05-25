@@ -253,15 +253,20 @@ export function ChecksPopover({
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
-      {/* Render the trigger AS the inner button (passed via children) instead of
-       * wrapping it. Wrapping in a <button> nests buttons (invalid HTML); wrapping
-       * in a <span> drops base-ui's native-button semantics and warns. The render
-       * prop tells base-ui to clone the child element and merge in its own props
-       * (onClick, aria-haspopup, refs) — the inner <button> stays a real button. */}
+      {/* Render the trigger as a transparent <span> (display: contents) wrapping
+       * the real <button> passed via children. The default nativeButton={true}
+       * expects the rendered element to BE a <button>, but rendering as a button
+       * here would nest two real buttons (invalid HTML). nativeButton={false} is
+       * the documented escape hatch: base-ui adds role="button" + tabindex + key
+       * handling on the span, and the click bubbles from the inner button up to
+       * the span where base-ui's open handler fires. */}
       <PopoverTrigger
-        render={children as React.ReactElement}
+        render={<span style={{ display: "contents" }} />}
+        nativeButton={false}
         aria-label="View CI check details"
-      />
+      >
+        {children}
+      </PopoverTrigger>
       <PopoverContent side="bottom" align="start" sideOffset={8} className="w-[340px] p-0 overflow-hidden">
         {/* Header chrome */}
         <div className={cn("px-4 pt-3.5 pb-3", visual.surface)}>
