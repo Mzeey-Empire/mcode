@@ -253,12 +253,15 @@ export function ChecksPopover({
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
+      {/* Render the trigger AS the inner button (passed via children) instead of
+       * wrapping it. Wrapping in a <button> nests buttons (invalid HTML); wrapping
+       * in a <span> drops base-ui's native-button semantics and warns. The render
+       * prop tells base-ui to clone the child element and merge in its own props
+       * (onClick, aria-haspopup, refs) — the inner <button> stays a real button. */}
       <PopoverTrigger
-        render={<span style={{ display: "contents" }} />}
+        render={children as React.ReactElement}
         aria-label="View CI check details"
-      >
-        {children}
-      </PopoverTrigger>
+      />
       <PopoverContent side="bottom" align="start" sideOffset={8} className="w-[340px] p-0 overflow-hidden">
         {/* Header chrome */}
         <div className={cn("px-4 pt-3.5 pb-3", visual.surface)}>
