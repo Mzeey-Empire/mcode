@@ -190,12 +190,13 @@ function openInEditor(
 
   return new Promise<void>((resolve, reject) => {
     let child: ChildProcess;
-    // On Windows, always route through cmd.exe because PATH-resolved commands
-    // (e.g. "code") are .cmd scripts that Node's spawn cannot execute directly.
+    // On Windows, editor shims (e.g. "code") are .cmd scripts. shell: true lets
+    // Node quote arguments safely instead of hand-rolling cmd.exe /c parsing.
     if (process.platform === "win32") {
-      child = spawn("cmd.exe", ["/c", cmd, ...args], {
+      child = spawn(cmd, args, {
         detached: true,
         stdio: "ignore",
+        shell: true,
       });
     } else {
       child = spawn(cmd, args, { detached: true, stdio: "ignore" });

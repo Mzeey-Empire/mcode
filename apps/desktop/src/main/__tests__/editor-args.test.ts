@@ -27,7 +27,7 @@ describe("buildEditorArgs", () => {
   });
 
   it("works on Windows paths with backslashes and spaces", () => {
-    const winPath = String.raw`C:\Users\me\project\src\file.ts`;
+    const winPath = String.raw`C:\Users\me\My Project\src\file.ts`;
     expect(buildEditorArgs("code", winPath, 12)).toEqual(["-g", `${winPath}:12`]);
   });
 });
