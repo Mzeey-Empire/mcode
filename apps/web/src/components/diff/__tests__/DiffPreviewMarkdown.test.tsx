@@ -59,4 +59,22 @@ describe("DiffPreviewMarkdown", () => {
     );
     expect(container.querySelector("[data-diff-added]")).toBeNull();
   });
+
+  it("uses innermost-only selectors so nested marked blocks do not stack gutters", () => {
+    const content = ["> **Superseded:** This plan used a Pinia auth store."].join("\n");
+    const { container } = render(
+      <DiffPreviewMarkdown content={content} addedLines={new Set([1])} />,
+    );
+
+    const wrapper = container.firstElementChild as HTMLElement;
+    const blockquote = container.querySelector("blockquote");
+    const paragraph = container.querySelector("blockquote p");
+
+    expect(blockquote).toHaveAttribute("data-diff-added", "true");
+    expect(paragraph).toHaveAttribute("data-diff-added", "true");
+
+    // Accent styles target innermost matches only — both container and child
+    // carry the attribute, but CSS must not stack on the outer blockquote.
+    expect(wrapper.className).toContain("[data-diff-added]:not(:has([data-diff-added]))");
+  });
 });

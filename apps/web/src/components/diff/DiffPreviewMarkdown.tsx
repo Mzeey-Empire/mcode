@@ -40,13 +40,19 @@ export default function DiffPreviewMarkdown({
         // we need finer control over how the diff highlight interacts with
         // block margins.
         "space-y-3 break-words",
-        // Diff-added block treatment: sage tint, full-bleed within the
-        // padded preview container, subtle radius. The negative inline
-        // margins make the highlight bleed past the surrounding paragraph
-        // indent so it reads as a touched block.
-        "[&_[data-diff-added]]:bg-[var(--diff-add-bg)]",
-        "[&_[data-diff-added]]:-mx-2 [&_[data-diff-added]]:px-2",
-        "[&_[data-diff-added]]:py-0.5 [&_[data-diff-added]]:rounded-sm",
+        // Diff-added block treatment: a thin left-edge accent bar in the
+        // add-gutter color. Rendered as an inset box-shadow because the
+        // codebase rule forbids borders > 1px for this kind of stripe.
+        // We deliberately do NOT apply a full background tint — when most
+        // of a markdown file is a single added block (new ADRs, fresh
+        // docs), full-bleed green overwhelms the content and makes the
+        // preview read as a wall of color. An edge marker keeps the
+        // "this block was touched" signal without that noise.
+        // Only style innermost marked nodes — the remark plugin tags both
+        // containers (blockquote) and their children (p), and stacking
+        // inset shadows + padding on nested matches reads as a thick blob.
+        "[&_[data-diff-added]:not(:has([data-diff-added]))]:shadow-[inset_2px_0_0_var(--diff-add-gutter)]",
+        "[&_[data-diff-added]:not(:has([data-diff-added]))]:pl-3",
         // Basic typographic defaults for unstyled tags.
         "[&_h1]:text-base [&_h1]:font-semibold [&_h1]:mt-4",
         "[&_h2]:text-[15px] [&_h2]:font-semibold [&_h2]:mt-4",
