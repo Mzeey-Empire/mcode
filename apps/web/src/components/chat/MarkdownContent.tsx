@@ -171,9 +171,9 @@ function makeStaticComponents(variant: "assistant" | "user", workspacePath: stri
       );
       if (!showHint) return anchor;
       return (
-        <Tooltip trackCursorAxis="both">
+        <Tooltip>
           <TooltipTrigger render={anchor} />
-          <TooltipContent className="text-xs">{previewHint}</TooltipContent>
+          <TooltipContent side="top" className="text-xs">{previewHint}</TooltipContent>
         </Tooltip>
       );
     },
@@ -265,7 +265,7 @@ function makeComponents(
             <code
               role="link"
               tabIndex={0}
-              className={`${codeClass} ${linkClass}`}
+              className={`${codeClass} ${linkClass} whitespace-nowrap`}
               onClick={(e) => handleLinkClick(e, text)}
               onKeyDown={(e) => { if (e.key === "Enter") handleLinkClick(e, text); }}
             >
@@ -274,9 +274,9 @@ function makeComponents(
           );
           if (!hasPreview()) return codeEl;
           return (
-            <Tooltip trackCursorAxis="both">
+            <Tooltip>
               <TooltipTrigger render={codeEl} />
-              <TooltipContent className="text-xs">{previewHint}</TooltipContent>
+              <TooltipContent side="top" className="text-xs">{previewHint}</TooltipContent>
             </Tooltip>
           );
         }
@@ -290,7 +290,7 @@ function makeComponents(
             <code
               role="link"
               tabIndex={0}
-              className={`${codeClass} ${linkClass}`}
+              className={`${codeClass} ${linkClass} whitespace-nowrap`}
               onClick={(e) => handleLinkClick(e, previewUrl)}
               onKeyDown={(e) => { if (e.key === "Enter") handleLinkClick(e, previewUrl); }}
             >
@@ -299,9 +299,9 @@ function makeComponents(
           );
           if (!hasPreview()) return codeEl;
           return (
-            <Tooltip trackCursorAxis="both">
+            <Tooltip>
               <TooltipTrigger render={codeEl} />
-              <TooltipContent className="text-xs">{previewHint}</TooltipContent>
+              <TooltipContent side="top" className="text-xs">{previewHint}</TooltipContent>
             </Tooltip>
           );
         }
