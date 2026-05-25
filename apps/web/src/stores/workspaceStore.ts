@@ -651,15 +651,27 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
           for (const r of results) {
             if (r.prUrl) urlPatch[r.threadId] = r.prUrl;
           }
-          set((state) => ({
-            threads: state.threads.map((t) => {
+          set((state) => {
+            const nextThreads = state.threads.map((t) => {
               const match = resultMap.get(t.id);
               if (!match) return t;
+              // Return the same reference when nothing changed so Zustand
+              // selectors don't see a false-positive identity change.
+              if (t.pr_number === match.prNumber && t.pr_status === match.prStatus) return t;
               // null prNumber means the stale PR was cleared server-side
               return { ...t, pr_number: match.prNumber, pr_status: match.prStatus };
-            }),
-            prUrlsByThreadId: { ...state.prUrlsByThreadId, ...urlPatch },
-          }));
+            });
+            // Only produce a new prUrlsByThreadId object when URLs actually changed.
+            const hasNewUrls = Object.entries(urlPatch).some(
+              ([id, url]) => state.prUrlsByThreadId[id] !== url,
+            );
+            return {
+              threads: nextThreads,
+              prUrlsByThreadId: hasNewUrls
+                ? { ...state.prUrlsByThreadId, ...urlPatch }
+                : state.prUrlsByThreadId,
+            };
+          });
         }).catch(() => {});
       }
     } catch (e) {
