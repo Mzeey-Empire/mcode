@@ -407,7 +407,12 @@ for (const provider of providerRegistry.resolveAll()) {
               || thread.pr_status?.toLowerCase() !== pr.state.toLowerCase();
             if (stateChanged) {
               threadService.linkPr(thread.id, pr.number, pr.state);
-              const prPayload = { threadId: thread.id, prNumber: pr.number, prStatus: pr.state };
+              const prPayload = {
+                threadId: thread.id,
+                prNumber: pr.number,
+                prStatus: pr.state,
+                prUrl: pr.url,
+              };
               broadcast("thread.prLinked", prPayload);
               portPush.send("thread.prLinked", prPayload);
             }
