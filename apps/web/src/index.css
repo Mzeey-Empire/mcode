@@ -209,6 +209,22 @@
   }
 }
 
+/* CI rails, check popovers, and sidebar agent dots — explicit classes so status
+ * motion never depends on Tailwind variant JIT (motion-safe:* can be absent on
+ * first paint in dev). Keyframes come from the tailwindcss import above. */
+.status-spin {
+  animation: spin 1s linear infinite;
+}
+.status-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .status-spin,
+  .status-pulse {
+    animation: none;
+  }
+}
+
 @keyframes flash-highlight {
   0% { background-color: color-mix(in oklch, var(--primary), transparent 85%); }
   100% { background-color: transparent; }

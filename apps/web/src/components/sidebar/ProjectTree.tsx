@@ -990,7 +990,7 @@ const CiChip = memo(function CiChip({ checks }: { checks: ChecksStatus }) {
       <Icon
         size={9}
         strokeWidth={CI_ICON_STROKE}
-        className={cn("shrink-0", agg === "pending" && "motion-safe:animate-spin")}
+        className={cn("shrink-0", agg === "pending" && "status-spin")}
       />
       <span>{text}</span>
     </span>
@@ -1047,7 +1047,7 @@ const WorkspaceCiRollupChip = memo(function WorkspaceCiRollupChip({
       <Icon
         size={9}
         strokeWidth={CI_ICON_STROKE}
-        className={cn("shrink-0", agg === "pending" && "motion-safe:animate-spin")}
+        className={cn("shrink-0", agg === "pending" && "status-spin")}
       />
       <span>{count}</span>
     </span>
@@ -1238,7 +1238,7 @@ function VirtualizedThreadList({
                               ? "-top-1 -right-1 h-2 w-2"
                               : "-top-0.5 -right-0.5 h-1.5 w-1.5 ring-1 ring-background",
                             agentDot.dotClass,
-                            agentDot.animate && "motion-safe:animate-pulse",
+                            agentDot.animate && "status-pulse",
                           )}
                         />
                       )}
@@ -1490,7 +1490,7 @@ const ProjectNode = memo(function ProjectNode({
               render={
                 <span
                   aria-hidden="true"
-                  className="shrink-0 h-1.5 w-1.5 rounded-full bg-primary animate-pulse"
+                  className="shrink-0 h-1.5 w-1.5 rounded-full bg-primary status-pulse"
                 />
               }
             />

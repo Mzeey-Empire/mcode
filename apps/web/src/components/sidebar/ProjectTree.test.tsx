@@ -384,7 +384,7 @@ describe("ProjectTree action-required indicator", () => {
     const indicator = screen.getByLabelText("Action required");
     expect(indicator.className).toContain("ring-amber-500");
     expect(indicator.className).toContain("bg-transparent");
-    expect(indicator.className).toContain("animate-pulse");
+    expect(indicator.className).toContain("status-pulse");
   });
 
   it("renders a solid dot (no action-required label) when there is no pending permission", () => {

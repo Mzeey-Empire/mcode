@@ -135,7 +135,7 @@ test.describe("sidebar action-required indicator", () => {
     await expect(indicator).toBeVisible();
     await expect(indicator).toHaveClass(/ring-amber-500/);
     await expect(indicator).toHaveClass(/bg-transparent/);
-    await expect(indicator).toHaveClass(/animate-pulse/);
+    await expect(indicator).toHaveClass(/status-pulse/);
   });
 
   test("does not show the ring indicator when no permission is pending", async ({

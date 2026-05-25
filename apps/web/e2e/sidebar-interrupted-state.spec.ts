@@ -114,7 +114,7 @@ test.describe("Sidebar: interrupted thread state", () => {
 
     // Must show amber (not idle grey, not primary blue).
     await expect(statusDot).toHaveClass(/amber/);
-    await expect(statusDot).toHaveClass(/animate-pulse/);
+    await expect(statusDot).toHaveClass(/status-pulse/);
     // Must NOT look like a running thread.
     await expect(statusDot).not.toHaveClass(/bg-primary/);
 
@@ -162,7 +162,7 @@ test.describe("Sidebar: interrupted thread state", () => {
 
     // After resume the dot must switch to primary running indicator.
     await expect(statusDot).toHaveClass(/bg-primary/);
-    await expect(statusDot).toHaveClass(/animate-pulse/);
+    await expect(statusDot).toHaveClass(/status-pulse/);
     await expect(statusDot).not.toHaveClass(/amber/);
 
     await page.screenshot({

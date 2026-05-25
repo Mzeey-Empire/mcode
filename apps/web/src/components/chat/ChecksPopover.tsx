@@ -87,7 +87,7 @@ function RunIcon({ run }: { run: CheckRun }) {
       className={cn(
         Meta.iconClass,
         "shrink-0",
-        lane === "running" && "motion-safe:animate-spin",
+        lane === "running" && "status-spin",
       )}
       strokeWidth={CI_ICON_STROKE}
     />
@@ -268,7 +268,7 @@ export function ChecksPopover({
               className={cn(
                 "shrink-0 mt-0.5",
                 visual.color,
-                checks.aggregate === "pending" && "motion-safe:animate-spin",
+                checks.aggregate === "pending" && "status-spin",
               )}
               strokeWidth={CI_ICON_STROKE}
             />
@@ -320,7 +320,7 @@ export function ChecksPopover({
                     size={10}
                     className={cn(
                       meta.iconClass,
-                      lane === "running" && "motion-safe:animate-spin",
+                      lane === "running" && "status-spin",
                     )}
                     strokeWidth={CI_ICON_STROKE}
                   />
@@ -399,7 +399,7 @@ export function ChecksPopover({
                   <RefreshCw
                     size={10}
                     strokeWidth={CI_ICON_STROKE}
-                    className={cn(refreshing && "motion-safe:animate-spin")}
+                    className={cn(refreshing && "status-spin")}
                   />
                 </Button>
               </>
