@@ -254,7 +254,7 @@ export function ChecksPopover({
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger
-        className="inline-flex cursor-pointer"
+        render={<span style={{ display: "contents" }} />}
         aria-label="View CI check details"
       >
         {children}
