@@ -30,7 +30,7 @@ export function reconstructWithChangeMap(
   const addedLines = new Set<number>();
   for (const line of lines) {
     if (line.type === "header" || line.type === "remove") continue;
-    if (line.content === "\\ No newline at end of file") continue;
+    if (line.isNoNewlineSentinel) continue;
     out.push(line.content);
     if (line.type === "add") addedLines.add(out.length); // 1-based
   }

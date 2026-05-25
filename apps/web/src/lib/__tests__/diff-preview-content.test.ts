@@ -54,6 +54,19 @@ describe("reconstructWithChangeMap", () => {
     expect(addedLines.has(2)).toBe(true);
   });
 
+  it("preserves file content that equals the no-newline sentinel text", () => {
+    const diff = `@@ -1,1 +1,2 @@
+ a
++\\ No newline at end of file`;
+    const lines = parseDiffLines(diff);
+    const sentinel = lines.find((l) => l.isNoNewlineSentinel);
+    expect(sentinel).toBeUndefined();
+
+    const { content, addedLines } = reconstructWithChangeMap(lines);
+    expect(content).toBe("a\n\\ No newline at end of file");
+    expect(addedLines.has(2)).toBe(true);
+  });
+
   it("handles a mix of added and removed lines across hunks", () => {
     const diff = `@@ -1,2 +1,3 @@
  a
