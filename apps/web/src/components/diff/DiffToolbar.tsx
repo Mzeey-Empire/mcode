@@ -18,12 +18,14 @@ const BASE_VIEW_MODES: { value: DiffViewMode; label: string; worktreeOnly: boole
 export function DiffToolbar() {
   const viewMode = useDiffStore((s) => s.viewMode);
   const renderMode = useDiffStore((s) => s.renderMode);
-  const lineWrap = useDiffStore((s) => s.lineWrap);
   const setViewMode = useDiffStore((s) => s.setViewMode);
   const setRenderMode = useDiffStore((s) => s.setRenderMode);
+  const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
+  const lineWrap = useDiffStore((s) =>
+    activeThreadId ? s.getLineWrap(activeThreadId) : true,
+  );
   const toggleLineWrap = useDiffStore((s) => s.toggleLineWrap);
 
-  const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
   const isWorktree = useWorkspaceStore((s) => {
     const thread = s.threads.find((t) => t.id === activeThreadId);
     return thread?.mode === "worktree";
@@ -81,7 +83,10 @@ export function DiffToolbar() {
               <Button
                 variant="ghost"
                 size="icon-xs"
-                onClick={toggleLineWrap}
+                onClick={() => {
+                  if (activeThreadId) toggleLineWrap(activeThreadId);
+                }}
+                disabled={!activeThreadId}
                 className={`h-6 w-6 transition-colors ${lineWrap ? "text-foreground/70" : "text-muted-foreground/40 hover:text-foreground/60"}`}
                 aria-label={lineWrap ? "Disable line wrap" : "Wrap long lines"}
               >

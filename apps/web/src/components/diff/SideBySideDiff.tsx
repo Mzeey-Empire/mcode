@@ -3,6 +3,7 @@ import type { ParsedDiffLine } from "@/lib/diff-parser";
 import { useDiffHighlighter } from "@/hooks/useDiffHighlighter";
 import { useShikiTheme } from "@/hooks/useTheme";
 import { useDiffStore } from "@/stores/diffStore";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { HunkSeparator } from "./HunkSeparator";
 
 /** Props for SideBySideDiff. */
@@ -114,7 +115,10 @@ const RIGHT_GUTTER: Record<string, string> = {
 export function SideBySideDiff({ lines, language = "text" }: SideBySideDiffProps) {
   const rows = useMemo(() => buildRows(lines), [lines]);
   const theme = useShikiTheme();
-  const lineWrap = useDiffStore((s) => s.lineWrap);
+  const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
+  const lineWrap = useDiffStore((s) =>
+    activeThreadId ? s.getLineWrap(activeThreadId) : true,
+  );
   const { getLineTokens } = useDiffHighlighter(lines, language, theme, language !== "text");
 
   return (

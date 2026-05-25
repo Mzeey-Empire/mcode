@@ -52,6 +52,9 @@ export type RightPanelState = {
   readonly activeTab: RightPanelTab;
 };
 
+/** Default line-wrap preference for a thread with no stored override. */
+export const DEFAULT_LINE_WRAP = true;
+
 /**
  * Baseline right-panel state for a thread that has no persisted row (50% viewport width).
  */
@@ -83,8 +86,8 @@ interface DiffState {
   viewMode: DiffViewMode;
   /** Diff rendering mode. */
   renderMode: DiffRenderMode;
-  /** Whether long lines wrap instead of scrolling horizontally. */
-  lineWrap: boolean;
+  /** Per-thread line-wrap preference keyed by thread ID. */
+  readonly lineWrapByThread: Record<string, boolean>;
   /** Turn snapshots keyed by thread ID. */
   snapshotsByThread: Record<string, TurnSnapshot[]>;
   /** Whether snapshots are currently loading, keyed by thread ID. */
@@ -132,7 +135,8 @@ interface DiffState {
   setRightPanelTab: (threadId: string, tab: RightPanelTab) => void;
   setViewMode: (mode: DiffViewMode) => void;
   setRenderMode: (mode: DiffRenderMode) => void;
-  toggleLineWrap: () => void;
+  getLineWrap: (threadId: string) => boolean;
+  toggleLineWrap: (threadId: string) => void;
   setSnapshots: (threadId: string, snapshots: TurnSnapshot[]) => void;
   setSnapshotsLoading: (threadId: string, loading: boolean) => void;
   /** Flag a thread's all-changes view as having upstream changes not yet reflected. */
@@ -161,7 +165,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   rightPanelByThread: {},
   viewMode: "by-turn",
   renderMode: "unified",
-  lineWrap: false,
+  lineWrapByThread: {},
   snapshotsByThread: {},
   snapshotsLoadingByThread: {},
   snapshotsPendingByThread: {},
@@ -234,7 +238,17 @@ export const useDiffStore = create<DiffState>((set, get) => ({
 
   setViewMode: (mode) => set({ viewMode: mode, selectedFile: null, diffContent: null }),
   setRenderMode: (mode) => set({ renderMode: mode }),
-  toggleLineWrap: () => set((s) => ({ lineWrap: !s.lineWrap })),
+  getLineWrap: (threadId) => get().lineWrapByThread[threadId] ?? DEFAULT_LINE_WRAP,
+  toggleLineWrap: (threadId) =>
+    set((state) => {
+      const current = state.lineWrapByThread[threadId] ?? DEFAULT_LINE_WRAP;
+      return {
+        lineWrapByThread: {
+          ...state.lineWrapByThread,
+          [threadId]: !current,
+        },
+      };
+    }),
   setSnapshots: (threadId, snapshots) =>
     set((s) => {
       const nextPending = { ...s.snapshotsPendingByThread };
@@ -288,6 +302,8 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       delete rightPanels[threadId];
       const previewUrls = { ...state.previewUrlByThread };
       delete previewUrls[threadId];
+      const lineWrapByThread = { ...state.lineWrapByThread };
+      delete lineWrapByThread[threadId];
 
       // Evict inline diff cache entries scoped to this thread.
       const prefix = `${threadId}:`;
@@ -308,6 +324,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         commitsLoadingByThread: commitsLoading,
         rightPanelByThread: rightPanels,
         previewUrlByThread: previewUrls,
+        lineWrapByThread,
         inlineDiffCache,
         ...(selectionBelongsToThread
           ? { selectedFile: null, diffContent: null, diffLoading: false }
