@@ -62,12 +62,19 @@ export class GithubService {
     }
   }
 
-  /** Look up the PR associated with a branch in the given working directory. */
+  /**
+   * Look up the most recently created PR for a branch in any state (open, merged, closed).
+   *
+   * Uses `gh pr list --state all` instead of `gh pr view` so that:
+   * - Closed/merged PRs are returned (not silenced by the default open-only filter).
+   * - When multiple PRs exist for the same branch, the newest one (highest number) is
+   *   returned first, matching GitHub API's default `created_at DESC` sort order.
+   */
   getBranchPr(branch: string, cwd: string): Promise<PrInfo | null> {
     return new Promise((resolve) => {
       execFile(
         "gh",
-        ["pr", "view", branch, "--json", "number,url,state"],
+        ["pr", "list", "--head", branch, "--state", "all", "--limit", "1", "--json", "number,url,state"],
         { cwd, encoding: "utf-8", timeout: 10_000, windowsHide: true },
         (error, stdout) => {
           if (error || !stdout) {
@@ -75,12 +82,14 @@ export class GithubService {
             return;
           }
           try {
-            const data = JSON.parse(stdout) as {
+            const items = JSON.parse(stdout) as Array<{
               number?: number;
               url?: string;
               state?: string;
-            };
+            }>;
+            const data = items[0];
             if (
+              data &&
               typeof data.number === "number" &&
               typeof data.url === "string"
             ) {
