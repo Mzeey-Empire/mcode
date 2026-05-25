@@ -71,13 +71,13 @@ test.describe("Composer options — wide viewport (md+)", () => {
     await page.setViewportSize({ width: 1280, height: 800 });
   });
 
-  test("renders Chat / Full access toggles inline and hides the overflow trigger", async ({ page }) => {
+  test("renders Build / Full access toggles inline and hides the overflow trigger", async ({ page }) => {
     await page.goto("/");
     await page.waitForLoadState("networkidle");
     await openComposerInNewThread(page);
 
     // Inline buttons are visible above the md breakpoint.
-    await expect(page.getByRole("button", { name: /^Chat$/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Build$/ })).toBeVisible();
     await expect(page.getByRole("button", { name: /^Full access$/ })).toBeVisible();
 
     // The overflow trigger is reserved for narrow viewports.
@@ -98,8 +98,8 @@ test.describe("Composer options — narrow viewport (below md)", () => {
     await page.waitForLoadState("networkidle");
     await openComposerInNewThread(page);
 
-    // Inline Chat / Full access buttons collapse below md.
-    await expect(page.getByRole("button", { name: /^Chat$/ })).toHaveCount(0);
+    // Inline Build / Full access buttons collapse below md.
+    await expect(page.getByRole("button", { name: /^Build$/ })).toHaveCount(0);
     await expect(page.getByRole("button", { name: /^Full access$/ })).toHaveCount(0);
 
     const trigger = page.getByRole("button", { name: "Composer options" });
@@ -109,7 +109,7 @@ test.describe("Composer options — narrow viewport (below md)", () => {
     // Popover exposes grouped Mode + Permissions controls.
     await expect(page.getByText("Mode", { exact: true })).toBeVisible();
     await expect(page.getByText("Permissions", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Chat" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Build" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Plan" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Full" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Supervised" })).toBeVisible();
@@ -122,15 +122,15 @@ test.describe("Composer options — narrow viewport (below md)", () => {
 
     await page.getByRole("button", { name: "Composer options" }).click();
     const planBtn = page.getByRole("button", { name: "Plan" });
-    const chatBtn = page.getByRole("button", { name: "Chat" });
+    const buildBtn = page.getByRole("button", { name: "Build" });
 
-    await expect(chatBtn).toHaveAttribute("aria-pressed", "true");
+    await expect(buildBtn).toHaveAttribute("aria-pressed", "true");
     await expect(planBtn).toHaveAttribute("aria-pressed", "false");
 
     await planBtn.click();
 
     await expect(planBtn).toHaveAttribute("aria-pressed", "true");
-    await expect(chatBtn).toHaveAttribute("aria-pressed", "false");
+    await expect(buildBtn).toHaveAttribute("aria-pressed", "false");
   });
 
   test("Tasks panel row is hidden when the thread has no tasks", async ({ page }) => {

@@ -7,7 +7,7 @@ const SCREENSHOT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "
 
 const MOCK_SETTINGS = {
   appearance: { theme: "dark" },
-  agent: { maxConcurrent: 3, defaults: { mode: "chat", permission: "supervised" } },
+  agent: { maxConcurrent: 3, defaults: { mode: "build", permission: "supervised" } },
   model: { defaults: { provider: "claude", id: "claude-sonnet-4-6", fallbackId: "claude-sonnet-4-6", reasoning: "high" } },
   provider: { cli: { codex: "", claude: "", copilot: "" } },
   prDraft: { provider: "", model: "" },

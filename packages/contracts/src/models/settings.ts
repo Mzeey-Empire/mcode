@@ -116,7 +116,7 @@ export const SettingsSchema = lazySchema(() =>
         defaults: z
           .object({
             /** Default interaction mode. */
-            mode: AgentDefaultModeSchema.default("chat"),
+            mode: AgentDefaultModeSchema.default("build"),
             /** Default permission mode. */
             permission: PermissionModeSchema.default("full"),
           })

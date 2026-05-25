@@ -41,7 +41,7 @@ export function AgentSection() {
         <SegControl
           options={[
             { value: "plan", label: "Plan" },
-            { value: "chat", label: "Chat" },
+            { value: "build", label: "Build" },
             { value: "agent", label: "Agent", disabled: true, title: "Coming soon" },
           ]}
           value={mode}

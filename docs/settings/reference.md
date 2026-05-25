@@ -10,7 +10,7 @@ Per-setting reference for Mcode's `settings.json`. For schema conventions and st
 |---------|------|---------|-------|-------------|-------------|
 | `appearance.theme` | enum | `"system"` | `"system"` \| `"dark"` \| `"light"` | - | Color theme preference |
 | `agent.maxConcurrent` | integer | `5` | > 0 | - | Maximum concurrent agent sessions |
-| `agent.defaults.mode` | enum | `"chat"` | `"plan"` \| `"chat"` \| `"agent"` | - | Default interaction mode for new agents |
+| `agent.defaults.mode` | enum | `"build"` | `"plan"` \| `"build"` \| `"agent"` | - | Default interaction mode for new agents |
 | `agent.defaults.permission` | enum | `"full"` | `"full"` \| `"supervised"` | - | Default permission mode for new agents |
 | `agent.guardrails.maxBudgetUsd` | number | `0` | >= 0 | - | Stop the agent when session cost exceeds this USD amount. `0` disables. Claude only. |
 | `agent.guardrails.maxTurns` | integer | `0` | >= 0 | - | Stop the agent after this many turns. `0` disables. Claude only. |

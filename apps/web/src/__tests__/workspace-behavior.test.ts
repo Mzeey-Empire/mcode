@@ -477,7 +477,7 @@ describe("Workspace Behavior", () => {
         forkedFromMessageId: "msg-parent",
         permissionMode: "supervised",
         reasoningLevel: "max",
-        interactionMode: "chat",
+        interactionMode: "build",
         contextWindow: "1m",
         thinking: true,
       });

@@ -11,7 +11,7 @@ let currentSettings = makeDefaultSettings("claude", "claude-sonnet-4-6", "high")
 function makeDefaultSettings(provider: string, modelId: string, reasoning: string) {
   return {
     appearance: { theme: "dark" },
-    agent: { maxConcurrent: 3, defaults: { mode: "chat", permission: "supervised" } },
+    agent: { maxConcurrent: 3, defaults: { mode: "build", permission: "supervised" } },
     model: {
       defaults: { provider, id: modelId, fallbackId: "claude-sonnet-4-6", reasoning },
     },

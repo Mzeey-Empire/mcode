@@ -40,16 +40,16 @@ export const PERMISSION_MODES = {
 
 /**
  * Interaction mode for agent sessions.
- * - "chat": normal conversation with full tool access
+ * - "build": execution mode with full tool access (edits, runs, makes changes)
  * - "plan": read-only planning mode (no writes or execution)
  */
-export const InteractionModeSchema = z.enum(["chat", "plan"]);
+export const InteractionModeSchema = z.enum(["build", "plan"]);
 /** Interaction mode for agent sessions. */
 export type InteractionMode = z.infer<typeof InteractionModeSchema>;
 
 /** Constant lookup for interaction modes. */
 export const INTERACTION_MODES = {
-  CHAT: "chat" as const,
+  BUILD: "build" as const,
   PLAN: "plan" as const,
 } satisfies Record<string, InteractionMode>;
 

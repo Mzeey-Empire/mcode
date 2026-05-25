@@ -103,11 +103,9 @@ The opposite of Plan mode: the thread state where the agent actually
 performs the work — editing files, running tools, making changes. The
 default for new threads when the user does not opt into Plan mode.
 
-> **Codebase mismatch (rename pending).** The `InteractionMode` enum still
-> uses the value `"chat"` for what the product calls "Build mode." A
-> follow-up rename to `"build"` is planned. Likewise, the
-> `AgentDefaultModeSchema` still exposes a deprecated third `"agent"`
-> value that should be dropped — the product has only Plan and Build.
+> **Codebase mismatch (rename pending).** The `AgentDefaultModeSchema`
+> still exposes a deprecated third `"agent"` value that should be dropped —
+> the product has only Plan and Build.
 
 ## Model configuration
 

@@ -30,7 +30,7 @@ If a category has multiple settings that share a common qualifier, group them un
   "agent": {
     "maxConcurrent": 5,
     "defaults": {
-      "mode": "chat",
+      "mode": "build",
       "permission": "full"
     }
   }
@@ -40,7 +40,7 @@ If a category has multiple settings that share a common qualifier, group them un
 {
   "agent": {
     "maxConcurrent": 5,
-    "defaultMode": "chat",
+    "defaultMode": "build",
     "defaultPermission": "full"
   }
 }
@@ -115,7 +115,7 @@ When adding a new setting, ask these questions in order:
   "agent": {
     "maxConcurrent": 5,
     "defaults": {
-      "mode": "chat",                  // "plan" | "chat" | "agent"
+      "mode": "build",                 // "plan" | "build" | "agent"
       "permission": "full"             // "full" | "supervised"
     },
     "guardrails": {

@@ -78,6 +78,13 @@
       "when": 1779405379838,
       "tag": "0009_plain_loki",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1779638400000,
+      "tag": "0010_clever_skin",
+      "breakpoints": true
     }
   ]
 }
