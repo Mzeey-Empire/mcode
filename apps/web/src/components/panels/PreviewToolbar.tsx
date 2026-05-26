@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ICON_HIT_SLOP } from "@/lib/ui-hit-target";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -97,8 +98,9 @@ export function PreviewToolbar({
     // Outer gap-2 separates the three semantic groups (nav cluster, action
     // cluster, lone buttons) by spacing rather than visible dividers. The
     // dense editorial register of the app prefers proximity-as-grouping over
-    // mid-row vertical rules.
-    <div className="flex min-w-0 items-center gap-2">
+    // mid-row vertical rules. overflow-x-auto keeps narrow preview panels
+    // usable without clipping the mode pills at the right edge.
+    <div className="flex min-w-0 items-center gap-2 overflow-x-auto">
       {/* Nav cluster - tightly packed */}
       <div className="flex items-center">
         <Tooltip>
@@ -108,7 +110,7 @@ export function PreviewToolbar({
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                className="shrink-0"
+                className={cn("shrink-0", ICON_HIT_SLOP)}
                 disabled={!canBack}
                 onClick={onGoBack}
                 aria-label="Back"
@@ -128,7 +130,7 @@ export function PreviewToolbar({
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                className="shrink-0"
+                className={cn("shrink-0", ICON_HIT_SLOP)}
                 disabled={!canFwd}
                 onClick={onGoForward}
                 aria-label="Forward"
@@ -148,7 +150,7 @@ export function PreviewToolbar({
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                className="shrink-0"
+                className={cn("shrink-0", ICON_HIT_SLOP)}
                 disabled={!hasLoadedPage}
                 onClick={onReload}
                 aria-label="Reload"
@@ -175,6 +177,7 @@ export function PreviewToolbar({
                 aria-pressed={designOn}
                 className={cn(
                   "shrink-0",
+                  ICON_HIT_SLOP,
                   designOn && "bg-primary/10 text-primary",
                 )}
                 // The right-side Design pill is the only exit once the mode
@@ -194,7 +197,14 @@ export function PreviewToolbar({
               </Button>
             }
           />
-          <TooltipContent side="top" sideOffset={6} className="max-w-[19rem] text-xs">
+          <TooltipContent
+            side="top"
+            sideOffset={6}
+            // Viewport-aware cap so the tooltip never overflows off-screen when
+            // the preview panel is docked narrow. min() falls back to the
+            // intended 19rem on wide layouts and shrinks to fit on narrow ones.
+            className="max-w-[min(19rem,calc(100vw-1.5rem))] text-xs"
+          >
             Design: pick an element to attach to the chat
           </TooltipContent>
         </Tooltip>
@@ -207,6 +217,7 @@ export function PreviewToolbar({
                 size="icon-sm"
                 className={cn(
                   "shrink-0",
+                  ICON_HIT_SLOP,
                   captureBusy && "bg-primary/10 text-primary",
                 )}
                 disabled={captureBusy || regionBusy || elementPickBusy || !threadId || !hasLoadedPage}
@@ -221,7 +232,11 @@ export function PreviewToolbar({
               </Button>
             }
           />
-          <TooltipContent side="top" sideOffset={6} className="max-w-[16rem] text-xs">
+          <TooltipContent
+            side="top"
+            sideOffset={6}
+            className="max-w-[min(16rem,calc(100vw-1.5rem))] text-xs"
+          >
             Screenshot the visible viewport
           </TooltipContent>
         </Tooltip>
@@ -235,7 +250,7 @@ export function PreviewToolbar({
               type="button"
               variant="ghost"
               size="icon-sm"
-              className="shrink-0"
+              className={cn("shrink-0", ICON_HIT_SLOP)}
               disabled={!hasLoadedPage}
               onClick={onOpenExternal}
               aria-label="Open in system browser"
@@ -262,6 +277,7 @@ export function PreviewToolbar({
               aria-pressed={devDockOpen}
               className={cn(
                 "shrink-0",
+                ICON_HIT_SLOP,
                 devDockOpen && "bg-muted text-foreground",
               )}
               onClick={onToggleDevDock}
@@ -284,32 +300,42 @@ export function PreviewToolbar({
       {designModeActive ? (
         <>
           <div className="flex-1" />
-          <button
-            type="button"
-            aria-label="Exit design mode"
-            title="Exit design mode"
-            className={cn(
-              "flex shrink-0 items-center gap-1.5 rounded-sm border border-primary/30 bg-primary/10 py-0.5 pl-2 pr-1 text-[11px] font-medium text-primary",
-              "transition-colors hover:bg-primary/15",
-              "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 focus-visible:ring-offset-1 focus-visible:ring-offset-background",
-            )}
-            onClick={onExitDesignMode}
-          >
-            <PenTool size={14} aria-hidden />
-            <span>Design</span>
-            <X size={13} aria-hidden className="ml-0.5 opacity-70" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  aria-label="Exit design mode"
+                  className={cn(
+                    "h-auto shrink-0 gap-1.5 rounded-sm border border-primary/30 bg-primary/10 py-0.5 pl-2 pr-1 text-[11px] font-medium text-primary",
+                    "hover:bg-primary/15 hover:text-primary",
+                  )}
+                  onClick={onExitDesignMode}
+                >
+                  <PenTool size={14} aria-hidden />
+                  <span>Design</span>
+                  <X size={13} aria-hidden className="ml-0.5 opacity-70" />
+                </Button>
+              }
+            />
+            <TooltipContent side="top" sideOffset={6} className="text-xs">
+              Exit design mode
+            </TooltipContent>
+          </Tooltip>
         </>
       ) : regionBusy ? (
         <>
           <div className="flex-1" />
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             aria-label="Cancel capture"
             className={cn(
-              "flex shrink-0 items-center gap-1 rounded-sm border border-destructive/20 bg-destructive/10 px-2 py-0.5 text-[11px] text-destructive/80",
-              "transition-colors hover:bg-destructive/15",
-              "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-destructive/60 focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+              "h-auto shrink-0 gap-1 rounded-sm border border-destructive/20 bg-destructive/10 px-2 py-0.5 text-[11px] text-destructive/80",
+              "hover:bg-destructive/15 hover:text-destructive/80",
             )}
             onClick={() => void window.desktopBridge?.preview.cancelCapture()}
           >
@@ -317,7 +343,7 @@ export function PreviewToolbar({
               Esc
             </kbd>
             Cancel
-          </button>
+          </Button>
         </>
       ) : null}
     </div>

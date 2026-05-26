@@ -85,8 +85,8 @@ export function PreviewDevDock({
       )}
     >
       <header className="flex shrink-0 items-center gap-2 border-b border-border/30 px-2 py-1">
-        <Camera size={11} aria-hidden className="text-muted-foreground/60" />
-        <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground/70">
+        <Camera size={11} aria-hidden className="text-muted-foreground" />
+        <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
           capture
         </span>
         <div className="flex-1" />
@@ -96,7 +96,7 @@ export function PreviewDevDock({
           // not the current state ("currently right"). Important because the
           // label sits next to the flip-edge button, which would otherwise
           // read as labelling the wrong thing.
-          className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground/60"
+          className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground/80"
         >
           {"\u2192 "}
           {oppositeShortLabel}
@@ -140,16 +140,16 @@ export function PreviewDevDock({
       </header>
 
       <div className="flex flex-1 flex-col gap-1 overflow-y-auto p-1.5">
-        <button
+        <Button
           type="button"
+          variant="ghost"
           data-testid="preview-dev-dock-region"
           disabled={regionDisabled}
           onClick={onAddRegionPictureReference}
           aria-busy={regionBusy}
           className={cn(
-            "group flex w-full items-center gap-2.5 rounded-sm px-1.5 py-1.5 text-left transition-colors",
+            "group h-auto w-full items-center justify-start gap-2.5 rounded-sm px-1.5 py-1.5 text-left font-normal",
             "hover:bg-muted/60",
-            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/40",
             "disabled:cursor-not-allowed disabled:opacity-60",
           )}
         >
@@ -171,23 +171,23 @@ export function PreviewDevDock({
             <span className="text-[11px] font-medium text-foreground/90">
               {regionBusy ? "Selecting region…" : "Region capture"}
             </span>
-            <span className="truncate text-[10px] text-muted-foreground/70">
+            <span className="truncate text-[10px] text-muted-foreground">
               {regionBusy
                 ? "Drag on the page · Esc to cancel"
                 : "Drag a rectangle on the page to attach as PNG"}
             </span>
           </span>
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          variant="ghost"
           data-testid="preview-dev-dock-context"
           disabled={contextDisabled}
           onClick={onAddPageContextOnly}
           aria-busy={contextBusy}
           className={cn(
-            "group flex w-full items-center gap-2.5 rounded-sm px-1.5 py-1.5 text-left transition-colors",
+            "group h-auto w-full items-center justify-start gap-2.5 rounded-sm px-1.5 py-1.5 text-left font-normal",
             "hover:bg-muted/60",
-            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/40",
             "disabled:cursor-not-allowed disabled:opacity-60",
           )}
         >
@@ -209,13 +209,13 @@ export function PreviewDevDock({
             <span className="text-[11px] font-medium text-foreground/90">
               {contextBusy ? "Collecting context…" : "Page context"}
             </span>
-            <span className="truncate text-[10px] text-muted-foreground/70">
+            <span className="truncate text-[10px] text-muted-foreground">
               {contextBusy
                 ? "Reading DOM, console, and failed requests"
                 : "Attach structured page context (no screenshot)"}
             </span>
           </span>
-        </button>
+        </Button>
       </div>
     </div>
   );

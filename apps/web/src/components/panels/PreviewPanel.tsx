@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { usePreviewDockStore } from "@/stores/previewDockStore";
+import { usePreviewDockStore, MIN_DOCK_SIZE, MAX_DOCK_SIZE } from "@/stores/previewDockStore";
 import { usePreviewDesignModeStore } from "@/stores/previewDesignModeStore";
 import { usePreviewFocusStore } from "@/stores/previewFocusStore";
 import { SmartOmnibox } from "./SmartOmnibox";
 import { PreviewToolbar } from "./PreviewToolbar";
-import { PreviewTabBar } from "./PreviewTabBar";
+import { PREVIEW_TABPANEL_ID, PreviewTabBar } from "./PreviewTabBar";
 import { PreviewPerfHud } from "./PreviewPerfHud";
 import { PreviewDevDock } from "./PreviewDevDock";
 import { usePreviewBridge } from "./hooks/usePreviewBridge";
@@ -26,6 +26,9 @@ const CAPTURE_KIND_LABEL: Record<PreviewCaptureKind, string> = {
 
 /** How long the capture confirmation badge stays visible after a successful attach. */
 const CAPTURE_CONFIRMATION_DURATION_MS = 2200;
+
+/** Keyboard resize step for the capture dock splitter (px per keypress). */
+const SPLITTER_KEYBOARD_STEP_PX = 16;
 
 export interface PreviewPanelProps {
   /** Thread that owns preview state (URL memory and future captures). */
@@ -89,9 +92,16 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
   const dockSetSize = usePreviewDockStore((s) => s.setSize);
 
   // Splitter drag state. Tracking via ref (not state) avoids a re-render
-  // on every pointermove tick; the dock's size already comes from the
-  // store and will re-render when setSize is called.
-  const splitterDragRef = useRef<{ startPos: number; startSize: number } | null>(null);
+  // on every pointermove tick. dockSetSize commits to Zustand and triggers
+  // a layout pass, so calling it on every pointermove caused a re-render
+  // burst at the pointer event rate. rAF coalesces the writes: at most one
+  // store update per frame regardless of how fast events arrive.
+  const splitterDragRef = useRef<{
+    startPos: number;
+    startSize: number;
+    pendingSize: number | null;
+    rafId: number | null;
+  } | null>(null);
   const onSplitterPointerDown = (e: React.PointerEvent<HTMLDivElement>): void => {
     if (!dock.open) return;
     e.preventDefault();
@@ -99,23 +109,59 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
     splitterDragRef.current = {
       startPos: dock.edge === "bottom" ? e.clientY : e.clientX,
       startSize: dock.size,
+      pendingSize: null,
+      rafId: null,
     };
   };
   const onSplitterPointerMove = (e: React.PointerEvent<HTMLDivElement>): void => {
-    if (!splitterDragRef.current) return;
+    const drag = splitterDragRef.current;
+    if (!drag) return;
     e.preventDefault();
-    const { startPos, startSize } = splitterDragRef.current;
     // Both dock edges grow when the user drags the splitter AWAY from
     // the surface: bottom dock grows when dragged up, right dock grows
     // when dragged left. delta is therefore startPos - currentPos.
     const currentPos = dock.edge === "bottom" ? e.clientY : e.clientX;
-    const delta = startPos - currentPos;
-    dockSetSize(threadId, startSize + delta);
+    const delta = drag.startPos - currentPos;
+    drag.pendingSize = drag.startSize + delta;
+    if (drag.rafId !== null) return;
+    drag.rafId = window.requestAnimationFrame(() => {
+      const d = splitterDragRef.current;
+      if (!d) return;
+      d.rafId = null;
+      if (d.pendingSize !== null) {
+        dockSetSize(threadId, d.pendingSize);
+        d.pendingSize = null;
+      }
+    });
   };
   const onSplitterPointerUp = (e: React.PointerEvent<HTMLDivElement>): void => {
-    if (!splitterDragRef.current) return;
+    const drag = splitterDragRef.current;
+    if (!drag) return;
     e.currentTarget.releasePointerCapture(e.pointerId);
+    if (drag.rafId !== null) {
+      window.cancelAnimationFrame(drag.rafId);
+    }
+    // Flush any pending size so the final position lands deterministically
+    // even if pointerup arrives between pointermove and the queued rAF.
+    if (drag.pendingSize !== null) {
+      dockSetSize(threadId, drag.pendingSize);
+    }
     splitterDragRef.current = null;
+  };
+  const onSplitterKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (!dock.open) return;
+    const grow =
+      dock.edge === "bottom"
+        ? e.key === "ArrowUp"
+        : e.key === "ArrowLeft";
+    const shrink =
+      dock.edge === "bottom"
+        ? e.key === "ArrowDown"
+        : e.key === "ArrowRight";
+    if (!grow && !shrink) return;
+    e.preventDefault();
+    const delta = grow ? SPLITTER_KEYBOARD_STEP_PX : -SPLITTER_KEYBOARD_STEP_PX;
+    dockSetSize(threadId, dock.size + delta);
   };
   const designModeActive = usePreviewDesignModeStore((s) => s.modes[threadId] === true);
   const designModeToggle = usePreviewDesignModeStore((s) => s.toggle);
@@ -156,7 +202,11 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
           return;
         }
         // Successful pick attached an element; loop body re-arms for the
-        // next click.
+        // next click. Yield to the event loop between iterations so the
+        // re-arm cannot starve other work if the hook ever resolves
+        // synchronously (defensive: today it waits on a guest click, but
+        // a future fast-path could resolve without a real await).
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
       }
     };
     void loop();
@@ -208,7 +258,7 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
   return (
     <div
       data-testid="preview-panel"
-      className="flex min-h-0 min-w-[20rem] flex-1 flex-col"
+      className="flex min-h-0 min-w-0 flex-1 flex-col"
     >
       <PreviewTabBar
         tabSet={tabs.tabSet}
@@ -272,6 +322,9 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
       >
         <div
           ref={surfaceRef}
+          id={PREVIEW_TABPANEL_ID}
+          role="tabpanel"
+          aria-label="Page preview"
           className={cn(
             "relative min-h-[min(40vh,20rem)] min-w-0 flex-1 rounded-md bg-muted/10",
             // Dashed border codes "drop zone / not implemented" in web vocab,
@@ -281,7 +334,6 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
               ? "border border-border/40"
               : "border border-dashed border-border/50",
           )}
-          aria-hidden
         >
           {/* Loading: thin indeterminate progress bar at top of content area.
               motion-safe gates the animation so users with prefers-reduced-motion
@@ -312,7 +364,7 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
                 // anyway, so the blur is a no-op render cost. bg-background/90
                 // gives enough contrast over any guest page color.
                 "rounded-sm border border-primary/30 bg-background/90 px-2 py-1 shadow-sm",
-                "font-mono text-[10px] uppercase tracking-[0.16em] text-primary",
+                "font-mono text-[11px] uppercase tracking-[0.14em] text-primary",
                 "motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1",
               )}
             >
@@ -327,20 +379,29 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
             // hasLoadedPage gates every capture/design action; without this hint
             // a first-timer lands on a bare Globe and never discovers the picker,
             // region drag, or context dump.
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
+            <div
+              className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center"
+              aria-hidden
+            >
               <Globe className="size-7 text-muted-foreground/15" aria-hidden />
-              <span className="font-mono text-[10px] tracking-[0.16em] uppercase text-muted-foreground/40">
+              {/* 10px mono text on bg-muted/10 needs full muted-foreground to
+                  clear WCAG AA on both themes; the prior /70 + /55 layering
+                  measured ~3.3:1, below the 4.5:1 floor. The two tiers are
+                  preserved with full vs. /80, and the action words stay
+                  text-foreground/80 so the discoverable affordances remain
+                  the most legible token in the empty state. */}
+              <span className="font-mono text-[10px] tracking-[0.16em] uppercase text-muted-foreground">
                 enter a url to preview
               </span>
-              <span className="font-mono text-[10px] tracking-[0.16em] uppercase text-muted-foreground/25">
+              <span className="font-mono text-[10px] tracking-[0.16em] uppercase text-muted-foreground/80">
                 then{" "}
-                <span className="text-muted-foreground/40">pick</span>
+                <span className="text-foreground/80">pick</span>
                 {" \u00b7 "}
-                <span className="text-muted-foreground/40">screenshot</span>
+                <span className="text-foreground/80">screenshot</span>
                 {" \u00b7 "}
-                <span className="text-muted-foreground/40">region</span>
+                <span className="text-foreground/80">region</span>
                 {" \u00b7 "}
-                <span className="text-muted-foreground/40">context</span>
+                <span className="text-foreground/80">context</span>
               </span>
             </div>
           ) : null}
@@ -351,26 +412,30 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
               role="separator"
               aria-label="Resize capture tools"
               aria-orientation={dock.edge === "bottom" ? "horizontal" : "vertical"}
+              aria-valuenow={dock.size}
+              aria-valuemin={MIN_DOCK_SIZE}
+              aria-valuemax={MAX_DOCK_SIZE}
               tabIndex={0}
               data-testid="preview-dock-splitter"
               onPointerDown={onSplitterPointerDown}
               onPointerMove={onSplitterPointerMove}
               onPointerUp={onSplitterPointerUp}
               onPointerCancel={onSplitterPointerUp}
+              onKeyDown={onSplitterKeyDown}
               className={cn(
                 // Subtle at rest so the boundary reads as a separator the
                 // user can find by sight; hover ramps to amber to confirm
                 // the affordance; active strengthens during drag for tactile
                 // feedback. Pointer Events already pin the cursor through
                 // setPointerCapture so :active stays true for the whole drag.
-                "shrink-0 bg-border/40 transition-colors",
+                "relative shrink-0 bg-border/40 transition-colors",
                 "hover:bg-primary/50 active:bg-primary/60",
                 "focus-visible:outline-none focus-visible:bg-primary/50",
-                // A 6px hit target on the splitter axis keeps the surface
-                // and dock cells flush while still being grabbable.
+                // Visual thickness stays at 6px; negative margin expands the
+                // pointer target without shifting the flex layout.
                 dock.edge === "bottom"
-                  ? "h-1.5 w-full cursor-ns-resize"
-                  : "h-full w-1.5 cursor-ew-resize",
+                  ? "-my-2 h-1.5 w-full cursor-ns-resize py-2"
+                  : "-mx-2 h-full w-1.5 cursor-ew-resize px-2",
               )}
             />
             <div
