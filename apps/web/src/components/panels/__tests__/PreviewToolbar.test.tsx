@@ -144,6 +144,12 @@ describe("PreviewToolbar -Design button state", () => {
     render(<PreviewToolbar {...defaultProps({ threadId: "" })} />);
     expect(screen.getByLabelText("Design")).toBeDisabled();
   });
+
+  it("is disabled while designModeActive so the right pill is the only exit route", () => {
+    render(<PreviewToolbar {...defaultProps({ designModeActive: true })} />);
+    expect(screen.getByLabelText("Design")).toBeDisabled();
+    expect(screen.getByLabelText("Design")).toHaveAttribute("aria-pressed", "true");
+  });
 });
 
 describe("PreviewToolbar -Screenshot disabled while other captures in flight", () => {
@@ -183,6 +189,22 @@ describe("PreviewToolbar - actions disabled until a page is loaded", () => {
     render(<PreviewToolbar {...defaultProps({ hasLoadedPage: true })} />);
     expect(screen.getByLabelText("Design")).not.toBeDisabled();
     expect(screen.getByLabelText("Screenshot")).not.toBeDisabled();
+  });
+
+  it("disables Reload when hasLoadedPage is false", () => {
+    render(<PreviewToolbar {...defaultProps({ hasLoadedPage: false })} />);
+    expect(screen.getByLabelText("Reload")).toBeDisabled();
+  });
+
+  it("disables Open in system browser when hasLoadedPage is false", () => {
+    render(<PreviewToolbar {...defaultProps({ hasLoadedPage: false })} />);
+    expect(screen.getByLabelText("Open in system browser")).toBeDisabled();
+  });
+
+  it("enables Reload and Open in system browser when a page is loaded", () => {
+    render(<PreviewToolbar {...defaultProps({ hasLoadedPage: true })} />);
+    expect(screen.getByLabelText("Reload")).not.toBeDisabled();
+    expect(screen.getByLabelText("Open in system browser")).not.toBeDisabled();
   });
 });
 

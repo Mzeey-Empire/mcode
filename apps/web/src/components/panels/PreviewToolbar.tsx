@@ -149,6 +149,7 @@ export function PreviewToolbar({
                 variant="ghost"
                 size="icon-sm"
                 className="shrink-0"
+                disabled={!hasLoadedPage}
                 onClick={onReload}
                 aria-label="Reload"
               >
@@ -176,7 +177,12 @@ export function PreviewToolbar({
                   "shrink-0",
                   designOn && "bg-primary/10 text-primary",
                 )}
-                disabled={!threadId || !hasLoadedPage}
+                // The right-side Design pill is the only exit once the mode
+                // is active; disable the left button so there are no two
+                // routes for the same action (and no Fitts gripe from a
+                // dual-affordance toolbar). Pressed visual stays so glance-
+                // back mode awareness is preserved.
+                disabled={!threadId || !hasLoadedPage || designModeActive}
                 onClick={onToggleDesign}
                 aria-label="Design"
               >
@@ -230,6 +236,7 @@ export function PreviewToolbar({
               variant="ghost"
               size="icon-sm"
               className="shrink-0"
+              disabled={!hasLoadedPage}
               onClick={onOpenExternal}
               aria-label="Open in system browser"
             >
@@ -269,9 +276,11 @@ export function PreviewToolbar({
         </TooltipContent>
       </Tooltip>
 
-      {/* Design pill: appears at right whenever design mode is active. Acts as
-          the always-visible Exit affordance. The DesignBar above the omnibox
-          owns the Pick interaction, so this pill is purely a mode-off button. */}
+      {/* Mode pills: appear at right when design mode is active or a region
+          drag is in flight. Pills share rounded-sm so the surface speaks one
+          radius (matches the capture confirmation badge). The Design pill is
+          the only mode-off affordance once active - the left toolbar button
+          disables itself - so the X reads as the single exit, not a chip. */}
       {designModeActive ? (
         <>
           <div className="flex-1" />
@@ -280,17 +289,15 @@ export function PreviewToolbar({
             aria-label="Exit design mode"
             title="Exit design mode"
             className={cn(
-              "flex shrink-0 items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary",
+              "flex shrink-0 items-center gap-1.5 rounded-sm border border-primary/30 bg-primary/10 py-0.5 pl-2 pr-1 text-[11px] font-medium text-primary",
               "transition-colors hover:bg-primary/15",
               "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 focus-visible:ring-offset-1 focus-visible:ring-offset-background",
             )}
             onClick={onExitDesignMode}
           >
             <PenTool size={14} aria-hidden />
-            Design
-            <span className="ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-primary/15 text-primary hover:bg-primary/25">
-              <X size={11} aria-hidden />
-            </span>
+            <span>Design</span>
+            <X size={13} aria-hidden className="ml-0.5 opacity-70" />
           </button>
         </>
       ) : regionBusy ? (
@@ -300,13 +307,13 @@ export function PreviewToolbar({
             type="button"
             aria-label="Cancel capture"
             className={cn(
-              "flex shrink-0 items-center gap-1 rounded border border-destructive/20 bg-destructive/10 px-2 py-0.5 text-[11px] text-destructive/80",
+              "flex shrink-0 items-center gap-1 rounded-sm border border-destructive/20 bg-destructive/10 px-2 py-0.5 text-[11px] text-destructive/80",
               "transition-colors hover:bg-destructive/15",
               "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-destructive/60 focus-visible:ring-offset-1 focus-visible:ring-offset-background",
             )}
             onClick={() => void window.desktopBridge?.preview.cancelCapture()}
           >
-            <kbd className="rounded border border-destructive/15 bg-destructive/5 px-1 py-px text-[10px] font-medium">
+            <kbd className="rounded-sm border border-destructive/15 bg-destructive/5 px-1 py-px text-[10px] font-medium">
               Esc
             </kbd>
             Cancel
