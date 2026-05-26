@@ -1,6 +1,5 @@
 import { useState } from "react";
 import {
-  Crosshair,
   Loader2,
   Maximize2,
   Monitor,
@@ -37,14 +36,17 @@ export interface PreviewDesignBarProps {
 
 /**
  * Design-mode bar. Sits above the omnibox whenever design mode is active.
- * Houses three concerns:
+ * Houses two concerns:
  *
- * 1. Viewport presets (Phone / Tablet / Desktop) that resize the embedded
- *    guest WebContents through the existing `preview.design` IPC.
- * 2. Read-only Inspect toggle that overlays element bounds inside the guest.
- * 3. Pick — the affordance that captures the next-clicked element as a PNG
+ * 1. Pick — the affordance that captures the next-clicked element as a PNG
  *    attachment. Pick lives here (not the primary toolbar) so design mode
  *    is the single surface that owns "do something with elements on the page".
+ * 2. Viewport presets (Phone / Tablet / Desktop) that resize the embedded
+ *    guest WebContents through the existing `preview.design` IPC.
+ *
+ * The legacy `Inspect` toggle was removed: Pick's in-guest highlight already
+ * shows hover bounds, so a separate read-only Inspect mode was functionally
+ * indistinguishable and confused users about which to use.
  *
  * Cancelling an active pick session uses the preview's cancelCapture IPC; the
  * design mode itself stays on so the user can keep picking, switch presets,
@@ -56,7 +58,6 @@ export function PreviewDesignBar({
   onExit,
 }: PreviewDesignBarProps) {
   const [activePreset, setActivePreset] = useState<DesignViewportPresetId | null>(null);
-  const [inspect, setInspect] = useState(false);
   const design = window.desktopBridge?.preview?.design;
   if (!design) return null;
 
@@ -73,12 +74,6 @@ export function PreviewDesignBar({
   const onReset = async () => {
     await design.resetViewport();
     setActivePreset(null);
-  };
-
-  const onToggleInspect = async () => {
-    const next = !inspect;
-    const r = await design.setInspect(next);
-    if (r.ok) setInspect(next);
   };
 
   const onPickClick = () => {
@@ -151,20 +146,6 @@ export function PreviewDesignBar({
         className="ml-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
       >
         <Maximize2 className="size-3.5" aria-hidden />
-      </button>
-      <div className="mx-2 h-4 w-px bg-border/40" />
-      <button
-        type="button"
-        aria-pressed={inspect}
-        data-testid="preview-design-inspect"
-        onClick={onToggleInspect}
-        className={cn(
-          "inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-muted",
-          inspect && "bg-muted text-foreground",
-        )}
-      >
-        <Crosshair className="size-3.5" aria-hidden />
-        <span>Inspect</span>
       </button>
       <div className="flex-1" />
       <button

@@ -46,6 +46,24 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
   const designModeToggle = usePreviewDesignModeStore((s) => s.toggle);
   const designModeSetActive = usePreviewDesignModeStore((s) => s.setActive);
 
+  // Entering design mode auto-arms Pick so the user can click an element
+  // immediately. Exiting cancels any in-flight pick session so the in-guest
+  // highlight tears down with the bar.
+  const onToggleDesignMode = () => {
+    const willActivate = !designModeActive;
+    designModeToggle(threadId);
+    if (willActivate) {
+      void capture.onAddElementPickPictureReference();
+    } else {
+      void window.desktopBridge?.preview?.cancelCapture();
+    }
+  };
+
+  const onExitDesignMode = () => {
+    designModeSetActive(threadId, false);
+    void window.desktopBridge?.preview?.cancelCapture();
+  };
+
   if (!window.desktopBridge?.preview) {
     return (
       <div
@@ -78,7 +96,7 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
         <PreviewDesignBar
           elementPickBusy={capture.elementPickBusy}
           onPick={capture.onAddElementPickPictureReference}
-          onExit={() => designModeSetActive(threadId, false)}
+          onExit={onExitDesignMode}
         />
       ) : null}
       <form
@@ -109,8 +127,8 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
           onReload={bridge.onReload}
           onOpenExternal={bridge.onOpenExternal}
           onAddPictureReference={capture.onAddPictureReference}
-          onToggleDesign={() => designModeToggle(threadId)}
-          onExitDesignMode={() => designModeSetActive(threadId, false)}
+          onToggleDesign={onToggleDesignMode}
+          onExitDesignMode={onExitDesignMode}
           onToggleDevDock={() => dockToggle(threadId)}
           onAddRegionPictureReference={capture.onAddRegionPictureReference}
           onAddElementPickPictureReference={capture.onAddElementPickPictureReference}
