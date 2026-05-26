@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { Globe } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Check, Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePreviewDockStore } from "@/stores/previewDockStore";
 import { usePreviewDesignModeStore } from "@/stores/previewDesignModeStore";
@@ -10,8 +10,22 @@ import { PreviewTabBar } from "./PreviewTabBar";
 import { PreviewPerfHud } from "./PreviewPerfHud";
 import { PreviewDevDock } from "./PreviewDevDock";
 import { usePreviewBridge } from "./hooks/usePreviewBridge";
-import { usePreviewCapture } from "./hooks/usePreviewCapture";
+import {
+  usePreviewCapture,
+  type PreviewCaptureKind,
+} from "./hooks/usePreviewCapture";
 import { usePreviewTabs } from "./hooks/usePreviewTabs";
+
+/** Human-readable label for the capture confirmation badge. */
+const CAPTURE_KIND_LABEL: Record<PreviewCaptureKind, string> = {
+  viewport: "screenshot",
+  region: "region",
+  element: "element",
+  context: "page context",
+};
+
+/** How long the capture confirmation badge stays visible after a successful attach. */
+const CAPTURE_CONFIRMATION_DURATION_MS = 2200;
 
 export interface PreviewPanelProps {
   /** Thread that owns preview state (URL memory and future captures). */
@@ -31,7 +45,36 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
   const surfaceRef = useRef<HTMLDivElement>(null);
 
   const bridge = usePreviewBridge({ threadId, workspaceId, surfaceRef });
-  const capture = usePreviewCapture({ threadId, pushSync: bridge.pushSync });
+
+  // Inline capture confirmation. The composer chip lives in another panel and
+  // may scroll off; this badge acknowledges the action where the user is
+  // looking. The timer ref lets a second capture reset the dismissal window
+  // without leaving a stale badge behind.
+  const [lastCapture, setLastCapture] = useState<PreviewCaptureKind | null>(null);
+  const captureConfirmTimerRef = useRef<number | null>(null);
+  const onCaptureSuccess = useCallback((kind: PreviewCaptureKind): void => {
+    setLastCapture(kind);
+    if (captureConfirmTimerRef.current !== null) {
+      window.clearTimeout(captureConfirmTimerRef.current);
+    }
+    captureConfirmTimerRef.current = window.setTimeout(() => {
+      setLastCapture(null);
+      captureConfirmTimerRef.current = null;
+    }, CAPTURE_CONFIRMATION_DURATION_MS);
+  }, []);
+  useEffect(() => {
+    return () => {
+      if (captureConfirmTimerRef.current !== null) {
+        window.clearTimeout(captureConfirmTimerRef.current);
+      }
+    };
+  }, []);
+
+  const capture = usePreviewCapture({
+    threadId,
+    pushSync: bridge.pushSync,
+    onSuccess: onCaptureSuccess,
+  });
   const tabs = usePreviewTabs(threadId);
   // Each selector returns a stable primitive/function reference so Zustand
   // does not re-render on unrelated store mutations.
@@ -229,7 +272,15 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
       >
         <div
           ref={surfaceRef}
-          className="relative min-h-[min(40vh,20rem)] min-w-0 flex-1 rounded-md border border-dashed border-border/50 bg-muted/10"
+          className={cn(
+            "relative min-h-[min(40vh,20rem)] min-w-0 flex-1 rounded-md bg-muted/10",
+            // Dashed border codes "drop zone / not implemented" in web vocab,
+            // which reads as a stuck loading state once a real page is showing.
+            // Keep dashed for the empty-state placeholder cue, solid once live.
+            hasLoadedPage
+              ? "border border-border/40"
+              : "border border-dashed border-border/50",
+          )}
           aria-hidden
         >
           {/* Loading: thin indeterminate progress bar at top of content area.
@@ -246,11 +297,50 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
               <div className="h-full w-1/3 motion-safe:animate-preview-loading rounded-full bg-primary/80" />
             </div>
           ) : null}
+          {lastCapture ? (
+            // Brief acknowledgement of a successful attachment. Sits in the
+            // bottom-right so it never overlaps the loading banner at the top
+            // and never blocks the page's interactive area. Auto-dismiss after
+            // ~2.2s via the host timer.
+            <div
+              role="status"
+              aria-live="polite"
+              data-testid="preview-capture-confirmation"
+              className={cn(
+                "pointer-events-none absolute right-2 bottom-2 z-10 flex items-center gap-1.5",
+                // No backdrop-blur: the BrowserView paints opaque underneath
+                // anyway, so the blur is a no-op render cost. bg-background/90
+                // gives enough contrast over any guest page color.
+                "rounded-sm border border-primary/30 bg-background/90 px-2 py-1 shadow-sm",
+                "font-mono text-[10px] uppercase tracking-[0.16em] text-primary",
+                "motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1",
+              )}
+            >
+              <Check size={11} aria-hidden />
+              <span>attached</span>
+              <span className="text-primary/60">{"\u00b7"}</span>
+              <span>{CAPTURE_KIND_LABEL[lastCapture]}</span>
+            </div>
+          ) : null}
           {!hasLoadedPage && !bridge.previewLoading ? (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+            // Empty state teaches what becomes available once a URL loads.
+            // hasLoadedPage gates every capture/design action; without this hint
+            // a first-timer lands on a bare Globe and never discovers the picker,
+            // region drag, or context dump.
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
               <Globe className="size-7 text-muted-foreground/15" aria-hidden />
               <span className="font-mono text-[10px] tracking-[0.16em] uppercase text-muted-foreground/40">
                 enter a url to preview
+              </span>
+              <span className="font-mono text-[10px] tracking-[0.16em] uppercase text-muted-foreground/25">
+                then{" "}
+                <span className="text-muted-foreground/40">pick</span>
+                {" \u00b7 "}
+                <span className="text-muted-foreground/40">screenshot</span>
+                {" \u00b7 "}
+                <span className="text-muted-foreground/40">region</span>
+                {" \u00b7 "}
+                <span className="text-muted-foreground/40">context</span>
               </span>
             </div>
           ) : null}
