@@ -83,6 +83,13 @@ interface PreviewBridge {
   openExternal(): Promise<void>;
   /** Open Chrome DevTools attached to the guest WebContents (the embedded site, not the host shell). */
   openGuestDevTools(): Promise<void>;
+  /**
+   * Subscribe to keyboard chords forwarded from the guest WebContents so the
+   * host's keybinding manager can fire app commands while the user is focused
+   * inside the preview. The combo string mirrors keybinding JSON ("mod+shift+d").
+   * Returns a disposer.
+   */
+  onShortcutFired(callback: (combo: string) => void): () => void;
   getNavigationState(): Promise<{ canGoBack: boolean; canGoForward: boolean }>;
   /** Captures the visible preview as PNG; desktop only. */
   capturePictureReference(): Promise<PreviewPictureReferenceResult>;
