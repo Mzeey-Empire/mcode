@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { BrowserTabSet } from "@mcode/contracts";
+import { usePreviewFocusStore } from "@/stores/previewFocusStore";
 
 /**
  * Renderer-side state + actions for the embedded preview tab bar.
@@ -35,7 +36,13 @@ export function usePreviewTabs(threadId: string) {
   const newTab = useCallback(async () => {
     if (!tabs) return;
     const r = await tabs.create(threadId, true);
-    if (r.ok) setTabSet(r.data.tabs);
+    if (r.ok) {
+      setTabSet(r.data.tabs);
+      // A freshly-created tab is empty. Match the panel-open shortcut's UX
+      // and put the cursor in the URL field so the user can type a URL
+      // immediately without an extra click.
+      usePreviewFocusStore.getState().requestOmniboxFocus();
+    }
   }, [tabs, threadId]);
 
   const activateTab = useCallback(
