@@ -12,16 +12,16 @@ interface PreviewDesignModeStore {
 }
 
 /**
- * Per-thread persistence for the preview Design mode surface. When active,
- * `PreviewDesignBar` is rendered below the omnibox and the toolbar's Design
- * button reads as pressed; this state survives focus changes and re-mounts
- * but is intentionally scoped to one thread so design sessions do not bleed
- * between contexts.
+ * Per-thread persistence for the preview Design mode flag. When active, the
+ * toolbar's Design button reads as pressed, the right-side Exit pill appears,
+ * and PreviewPanel auto-arms an element-pick session whenever no capture is
+ * busy. The mode is the single state behind a "next click on the page
+ * captures the element under the cursor, repeat" interaction; it stays on
+ * across successful captures and Esc-cancels until the user toggles it off
+ * via the toolbar button or pill.
  *
- * Design mode is independent of any in-flight element-pick session: the mode
- * may be on while no pick is active (user is browsing viewport presets), or
- * a one-shot pick can run while the mode stays on after the capture completes
- * so the user can pick another element without toggling the mode again.
+ * State is intentionally scoped to one thread so design sessions do not bleed
+ * between contexts when the user switches threads.
  */
 export const usePreviewDesignModeStore = create<PreviewDesignModeStore>((set, get) => ({
   modes: {},

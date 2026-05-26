@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePreviewDockStore } from "@/stores/previewDockStore";
@@ -7,7 +7,6 @@ import { SmartOmnibox } from "./SmartOmnibox";
 import { PreviewToolbar } from "./PreviewToolbar";
 import { PreviewTabBar } from "./PreviewTabBar";
 import { PreviewPerfHud } from "./PreviewPerfHud";
-import { PreviewDesignBar } from "./PreviewDesignBar";
 import { PreviewDevDock } from "./PreviewDevDock";
 import { usePreviewBridge } from "./hooks/usePreviewBridge";
 import { usePreviewCapture } from "./hooks/usePreviewCapture";
@@ -46,15 +45,15 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
   const designModeToggle = usePreviewDesignModeStore((s) => s.toggle);
   const designModeSetActive = usePreviewDesignModeStore((s) => s.setActive);
 
-  // Entering design mode auto-arms Pick so the user can click an element
-  // immediately. Exiting cancels any in-flight pick session so the in-guest
-  // highlight tears down with the bar.
+  // Design mode is a single state: "the next click on the page captures the
+  // element under the cursor, repeat until you turn the mode off." The pick
+  // session is auto-armed by the effect below whenever the mode is on and no
+  // capture is mid-flight, so success and Esc both lead back to a fresh
+  // armed session without the user having to re-press anything.
   const onToggleDesignMode = () => {
     const willActivate = !designModeActive;
     designModeToggle(threadId);
-    if (willActivate) {
-      void capture.onAddElementPickPictureReference();
-    } else {
+    if (!willActivate) {
       void window.desktopBridge?.preview?.cancelCapture();
     }
   };
@@ -63,6 +62,20 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
     designModeSetActive(threadId, false);
     void window.desktopBridge?.preview?.cancelCapture();
   };
+
+  // Auto-arm Pick whenever design mode is on and no capture is busy. Re-runs
+  // after every successful pick (the queue gets the attachment, busy flips
+  // back to false, effect fires again) so the user feels like they are in a
+  // continuous "click to attach" state until they explicitly exit the mode.
+  useEffect(() => {
+    if (designModeActive && !capture.anyCaptureActive) {
+      void capture.onAddElementPickPictureReference();
+    }
+  }, [
+    designModeActive,
+    capture.anyCaptureActive,
+    capture.onAddElementPickPictureReference,
+  ]);
 
   if (!window.desktopBridge?.preview) {
     return (
@@ -92,13 +105,6 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
         onActivate={tabs.activateTab}
         onClose={tabs.closeTab}
       />
-      {designModeActive ? (
-        <PreviewDesignBar
-          elementPickBusy={capture.elementPickBusy}
-          onPick={capture.onAddElementPickPictureReference}
-          onExit={onExitDesignMode}
-        />
-      ) : null}
       <form
         onSubmit={(e) => e.preventDefault()}
         className="flex-none space-y-1.5 border-b border-border/40 px-2 pt-1 pb-1.5"
