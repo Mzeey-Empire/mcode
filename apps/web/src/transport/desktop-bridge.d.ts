@@ -81,6 +81,8 @@ interface PreviewBridge {
   goForward(): Promise<boolean>;
   reload(): Promise<void>;
   openExternal(): Promise<void>;
+  /** Open Chrome DevTools attached to the guest WebContents (the embedded site, not the host shell). */
+  openGuestDevTools(): Promise<void>;
   getNavigationState(): Promise<{ canGoBack: boolean; canGoForward: boolean }>;
   /** Captures the visible preview as PNG; desktop only. */
   capturePictureReference(): Promise<PreviewPictureReferenceResult>;

@@ -332,6 +332,14 @@ export function App() {
           usePreviewDockStore.getState().toggle(tid);
         },
       }),
+      registerCommand({
+        id: "preview.guestDevTools.open",
+        title: "Open Guest Page DevTools",
+        category: "View",
+        handler: () => {
+          void window.desktopBridge?.preview.openGuestDevTools();
+        },
+      }),
       // Thread switching: Cmd+1 through Cmd+9
       ...Array.from({ length: 9 }, (_, i) =>
         registerCommand({

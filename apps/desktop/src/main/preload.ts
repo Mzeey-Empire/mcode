@@ -174,6 +174,9 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     openExternal(): Promise<void> {
       return ipcRenderer.invoke("preview:open-external");
     },
+    openGuestDevTools(): Promise<void> {
+      return ipcRenderer.invoke("preview:open-guest-devtools");
+    },
     getNavigationState(): Promise<{ canGoBack: boolean; canGoForward: boolean }> {
       return ipcRenderer.invoke("preview:get-navigation-state");
     },
