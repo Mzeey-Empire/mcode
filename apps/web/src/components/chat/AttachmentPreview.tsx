@@ -1,8 +1,11 @@
 import { FileText, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { McodeBrowserCapture } from "@mcode/contracts";
 import { isVirtualBrowserContextAttachment } from "@mcode/contracts";
 import { cn } from "@/lib/utils";
+import { ATTACHMENT_REMOVE_HIT_AREA } from "@/lib/ui-hit-target";
+import { useHorizontalScrollEdges } from "@/hooks/useHorizontalScrollEdges";
+import { Button } from "@/components/ui/button";
 
 import { FileAttachmentTile } from "./FileAttachmentTile";
 import { ImageAttachmentLightbox } from "./ImageAttachmentLightbox";
@@ -48,6 +51,9 @@ function getBrowserCaptureSpillHints(capture: McodeBrowserCapture | undefined): 
 
 /** Horizontal strip of pending attachment thumbnails or file tiles with per-item remove actions. */
 export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollEdges = useHorizontalScrollEdges(scrollRef, attachments.length);
+
   const previewableImages = useMemo(
     () => attachments.filter((a) => a.mimeType.startsWith("image/") && !!a.previewUrl),
     [attachments],
@@ -61,30 +67,58 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
   if (attachments.length === 0) return null;
 
   const removeButton = (name: string, id: string) => (
-    <button
+    <Button
       type="button"
+      variant="ghost"
+      size="icon-sm"
       onClick={(e) => {
         e.stopPropagation();
         onRemove(id);
       }}
       className={cn(
-        "absolute right-1 top-1 z-20 flex items-center justify-center",
-        "h-5 w-5 rounded-full",
-        "bg-foreground/75 text-background",
-        "opacity-0 transition-all duration-150",
-        "hover:bg-destructive hover:text-white",
-        "group-hover:opacity-100",
-        "focus:opacity-100 focus:outline-none focus:ring-1 focus:ring-primary",
+        ATTACHMENT_REMOVE_HIT_AREA,
+        "flex rounded-full p-0 opacity-0 transition-all duration-150",
+        "hover:bg-transparent",
+        "group-hover:opacity-100 focus-visible:opacity-100",
       )}
       aria-label={`Remove ${name}`}
     >
-      <X size={12} strokeWidth={2.5} />
-    </button>
+      <span
+        className={cn(
+          "flex h-5 w-5 items-center justify-center rounded-full",
+          "bg-foreground/75 text-background",
+          "group-hover:bg-destructive group-hover:text-white",
+          "hover:bg-destructive hover:text-white",
+        )}
+        aria-hidden
+      >
+        <X size={12} strokeWidth={2.5} />
+      </span>
+    </Button>
   );
 
   return (
     <>
-      <div className="flex gap-2 overflow-x-auto px-3 py-2">
+      <div className="relative min-w-0">
+        {scrollEdges.left ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 left-0 z-10 w-4 bg-gradient-to-r from-background to-transparent"
+          />
+        ) : null}
+        {scrollEdges.right ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 right-0 z-10 w-4 bg-gradient-to-l from-background to-transparent"
+          />
+        ) : null}
+        <div
+          ref={scrollRef}
+          className={cn(
+            "flex gap-2 overflow-x-auto px-3 py-2",
+            "[scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden",
+          )}
+        >
         {attachments.map((att) => {
           // Image tiles need a blob preview URL. Attachments rehydrated from
           // disk-side metadata (e.g. restored from the message queue) have no
@@ -107,7 +141,7 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
               >
                 <div className="flex h-[72px] w-[140px] flex-col justify-center gap-0.5 px-3 py-1">
                   <div className="flex min-h-0 items-center gap-2">
-                    <FileText size={18} className="shrink-0 text-cyan-500 dark:text-cyan-400" />
+                    <FileText size={18} className="shrink-0 text-primary" />
                     <span className="truncate text-xs font-medium text-foreground">Page context</span>
                   </div>
                   <span className="block max-w-[120px] truncate pl-[26px] text-[10px] leading-tight text-muted-foreground">
@@ -189,6 +223,7 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
             </div>
           );
         })}
+        </div>
       </div>
       <ImageAttachmentLightbox
         open={imagePreview !== null}
