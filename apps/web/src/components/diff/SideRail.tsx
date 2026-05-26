@@ -185,7 +185,12 @@ export function SideRail({
 /** Shared classes for the rail's button structure — used by both RailButton
  *  and the inline DropdownMenu trigger so they remain visually identical. */
 const RAIL_BUTTON_CLASS = [
-  "relative flex min-h-[30px] w-full items-center gap-2.5",
+  // `justify-start` overrides the shadcn Button default `justify-center`.
+  // The label span keeps its `whitespace-nowrap` width even when faded out,
+  // so centering the row would push the icon left of the collapsed rail's
+  // `w-8` frame and hide it. Left-anchoring keeps the icon at the same x
+  // position whether the rail is collapsed or expanded.
+  "relative flex min-h-[30px] w-full items-center justify-start gap-2.5",
   "px-3 py-1 text-left font-mono text-[10.5px] uppercase tracking-[0.04em]",
   "transition-colors text-muted-foreground hover:bg-muted/50 hover:text-foreground",
   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring/55",
