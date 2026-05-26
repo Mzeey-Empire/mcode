@@ -239,7 +239,9 @@ export function PreviewToolbar({
 
       <div className="mx-1 h-4 w-px bg-border/40" aria-hidden />
 
-      {/* Dev dock toggle */}
+      {/* Capture dock toggle. Houses region + page-context utilities the
+          primary toolbar deliberately omits. Real Chrome DevTools for the
+          guest page is opened separately via mod+shift+y. */}
       <Tooltip>
         <TooltipTrigger
           render={
@@ -253,14 +255,14 @@ export function PreviewToolbar({
                 devDockOpen && "bg-muted text-foreground",
               )}
               onClick={onToggleDevDock}
-              aria-label="Toggle dev tools"
+              aria-label="Toggle capture tools"
             >
               <DockIcon size={14} aria-hidden />
             </Button>
           }
         />
         <TooltipContent side="top" sideOffset={6} className="text-xs">
-          Dev tools (Ctrl+Shift+D)
+          Capture tools (Ctrl+Shift+D)
         </TooltipContent>
       </Tooltip>
 

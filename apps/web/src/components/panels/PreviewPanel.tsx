@@ -233,6 +233,8 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
               threadId={threadId}
               regionBusy={capture.regionBusy}
               onAddRegionPictureReference={capture.onAddRegionPictureReference}
+              contextBusy={capture.contextBusy}
+              onAddPageContextOnly={capture.onAddPageContextOnly}
             />
           </div>
         ) : null}

@@ -1,9 +1,10 @@
 import {
+  Camera,
+  FileText,
   Loader2,
   PanelBottom,
   PanelRight,
   SquareDashedMousePointer,
-  Wrench,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -15,7 +16,7 @@ import {
 } from "@/components/ui/tooltip";
 import type { PreviewDockEdge } from "@/stores/previewDockStore";
 
-/** Props for the dev dock chrome and its content rows. */
+/** Props for the capture dock chrome and its content rows. */
 export interface PreviewDevDockProps {
   /** Persisted edge the dock attaches to (bottom or right). */
   readonly edge: PreviewDockEdge;
@@ -30,13 +31,19 @@ export interface PreviewDevDockProps {
   readonly regionBusy: boolean;
   /** Fires the region-capture session (handled by usePreviewCapture). */
   readonly onAddRegionPictureReference: () => void;
+  /** True while a page-context dump is in progress. */
+  readonly contextBusy: boolean;
+  /** Captures structured page context (selectors, console buffer, failed
+   *  requests) without a screenshot. */
+  readonly onAddPageContextOnly: () => void;
 }
 
 /**
- * Dev dock chrome for the preview panel. A DevTools-style dockable surface
- * (bottom or right edge) that houses power-user rows the primary toolbar
- * intentionally omits. Phase 4 adds the Region capture row that drives the
- * in-guest drag marquee; Phase 5 will add a page-context dump row below it.
+ * Capture dock for the preview panel. A DevTools-style dockable surface
+ * (bottom or right edge) that houses capture utilities the primary toolbar
+ * intentionally omits. Houses two rows today: region drag-marquee and
+ * page-context dump. Real Chrome DevTools for the guest page is available
+ * separately via the mod+shift+y shortcut.
  *
  * Sizing is handled by the parent flex container; this component fills its
  * available cell. The header uses the editorial mono small-caps treatment
@@ -49,27 +56,30 @@ export function PreviewDevDock({
   threadId,
   regionBusy,
   onAddRegionPictureReference,
+  contextBusy,
+  onAddPageContextOnly,
 }: PreviewDevDockProps) {
   const OppositeEdgeIcon = edge === "right" ? PanelBottom : PanelRight;
   const oppositeEdge: PreviewDockEdge = edge === "right" ? "bottom" : "right";
   const oppositeLabel = oppositeEdge === "right" ? "Dock to right" : "Dock to bottom";
   const regionDisabled = regionBusy || !threadId;
+  const contextDisabled = contextBusy || !threadId;
 
   return (
     <div
       data-testid="preview-dev-dock"
       data-edge={edge}
       role="region"
-      aria-label="Preview developer tools"
+      aria-label="Preview capture tools"
       className={cn(
         "flex min-h-0 min-w-0 flex-col border-border/40 bg-muted/5",
         edge === "bottom" ? "border-t" : "border-l",
       )}
     >
       <header className="flex shrink-0 items-center gap-2 border-b border-border/30 px-2 py-1">
-        <Wrench size={11} aria-hidden className="text-muted-foreground/60" />
+        <Camera size={11} aria-hidden className="text-muted-foreground/60" />
         <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground/70">
-          dev tools
+          capture
         </span>
         <div className="flex-1" />
         <Tooltip>
@@ -98,22 +108,19 @@ export function PreviewDevDock({
                 variant="ghost"
                 size="icon-xs"
                 onClick={onClose}
-                aria-label="Close dev tools"
+                aria-label="Close capture tools"
               >
                 <X size={13} aria-hidden />
               </Button>
             }
           />
           <TooltipContent side="top" sideOffset={6} className="text-xs">
-            Close dev tools
+            Close capture tools
           </TooltipContent>
         </Tooltip>
       </header>
 
       <div className="flex flex-1 flex-col gap-1 overflow-y-auto p-1.5">
-        <span className="px-1.5 pt-0.5 pb-0.5 font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/50">
-          capture
-        </span>
         <button
           type="button"
           data-testid="preview-dev-dock-region"
@@ -149,6 +156,44 @@ export function PreviewDevDock({
               {regionBusy
                 ? "Drag on the page · Esc to cancel"
                 : "Drag a rectangle on the page to attach as PNG"}
+            </span>
+          </span>
+        </button>
+        <button
+          type="button"
+          data-testid="preview-dev-dock-context"
+          disabled={contextDisabled}
+          onClick={onAddPageContextOnly}
+          aria-busy={contextBusy}
+          className={cn(
+            "group flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left transition-colors",
+            "hover:bg-muted/60",
+            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/40",
+            "disabled:cursor-not-allowed disabled:opacity-60",
+          )}
+        >
+          <span
+            className={cn(
+              "flex size-7 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/30 text-muted-foreground transition-colors",
+              !contextDisabled && "group-hover:border-primary/30 group-hover:bg-primary/10 group-hover:text-primary",
+              contextBusy && "border-primary/30 bg-primary/10 text-primary",
+            )}
+            aria-hidden
+          >
+            {contextBusy ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <FileText size={13} />
+            )}
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="text-[11px] font-medium text-foreground/90">
+              {contextBusy ? "Collecting context…" : "Page context"}
+            </span>
+            <span className="truncate text-[10px] text-muted-foreground/70">
+              {contextBusy
+                ? "Reading DOM, console, and failed requests"
+                : "Attach structured page context (no screenshot)"}
             </span>
           </span>
         </button>

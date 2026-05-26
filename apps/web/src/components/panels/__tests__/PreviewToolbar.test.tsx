@@ -73,9 +73,9 @@ describe("PreviewToolbar — primary buttons rendered", () => {
     expect(screen.getByLabelText("Screenshot")).toBeInTheDocument();
   });
 
-  it("renders the Toggle dev tools button", () => {
+  it("renders the Toggle capture tools button", () => {
     render(<PreviewToolbar {...defaultProps()} />);
-    expect(screen.getByLabelText("Toggle dev tools")).toBeInTheDocument();
+    expect(screen.getByLabelText("Toggle capture tools")).toBeInTheDocument();
   });
 });
 
@@ -170,7 +170,7 @@ describe("PreviewToolbar — Screenshot disabled while other captures in flight"
 describe("PreviewToolbar — Dev dock toggle state", () => {
   it("aria-pressed reflects devDockOpen=false", () => {
     render(<PreviewToolbar {...defaultProps({ devDockOpen: false })} />);
-    expect(screen.getByLabelText("Toggle dev tools")).toHaveAttribute(
+    expect(screen.getByLabelText("Toggle capture tools")).toHaveAttribute(
       "aria-pressed",
       "false",
     );
@@ -178,7 +178,7 @@ describe("PreviewToolbar — Dev dock toggle state", () => {
 
   it("aria-pressed reflects devDockOpen=true", () => {
     render(<PreviewToolbar {...defaultProps({ devDockOpen: true })} />);
-    expect(screen.getByLabelText("Toggle dev tools")).toHaveAttribute(
+    expect(screen.getByLabelText("Toggle capture tools")).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -228,9 +228,9 @@ describe("PreviewToolbar — click handlers", () => {
     expect(props.onAddPictureReference).toHaveBeenCalledOnce();
   });
 
-  it("calls onToggleDevDock when Toggle dev tools is clicked", () => {
+  it("calls onToggleDevDock when Toggle capture tools is clicked", () => {
     render(<PreviewToolbar {...props} />);
-    fireEvent.click(screen.getByLabelText("Toggle dev tools"));
+    fireEvent.click(screen.getByLabelText("Toggle capture tools"));
     expect(props.onToggleDevDock).toHaveBeenCalledOnce();
   });
 });

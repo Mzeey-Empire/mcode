@@ -324,7 +324,7 @@ export function App() {
       }),
       registerCommand({
         id: "preview.devDock.toggle",
-        title: "Toggle Preview Dev Tools",
+        title: "Toggle Preview Capture Tools",
         category: "View",
         handler: () => {
           const tid = useWorkspaceStore.getState().activeThreadId;
