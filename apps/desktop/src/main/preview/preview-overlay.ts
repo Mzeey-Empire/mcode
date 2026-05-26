@@ -26,31 +26,247 @@ import {
   scrubHtmlExcerptForOutbound,
 } from "./preview-capture.js";
 
-/** Injected into every guest document so the element-pick highlight can use layout viewport coords. */
+/**
+ * Element-pick runs entirely inside the guest page: capture-phase event handlers block
+ * the underlying page's pointer/keyboard activity, an in-page lightweight hit-test drives
+ * the cyan highlight + tooltip, and a shared `window.__mcodeEpState` object queues the
+ * commit point or cancellation flag for the host to drain via executeJavaScript polling.
+ *
+ * Why this replaces the previous transparent child BrowserWindow overlay: on Windows,
+ * DWM cannot composite a transparent BrowserWindow over a WebContentsView — the overlay
+ * paints opaque (black), hiding the page underneath. Injecting into the guest keeps the
+ * cyan highlight visible on top of real page pixels.
+ */
 const EP_INJECT_JS = `(function(){
-  var id="__mcode_ep_hl", tid="__mcode_ep_tip";
-  if (document.getElementById(id)) return;
-  var s = document.createElement("style");
-  s.setAttribute("data-mcode-ep", "1");
-  s.textContent = "#__mcode_ep_hl{position:fixed;left:0;top:0;width:0;height:0;pointer-events:none;border:2px solid #22d3ee;box-sizing:border-box;z-index:2147483646;display:none;box-shadow:0 0 0 1px rgba(0,0,0,.35) inset;border-radius:2px}#__mcode_ep_tip{position:fixed;left:0;top:0;pointer-events:none;z-index:2147483647;display:none;max-width:min(440px,calc(100vw - 12px));font:11px/1.35 ui-sans-serif,system-ui,sans-serif;color:#e2e8f0;background:rgba(15,23,42,.94);border:1px solid #22d3ee;border-radius:4px;padding:5px 8px;box-shadow:0 2px 10px rgba(0,0,0,.35);word-break:break-all}";
-  (document.head || document.documentElement).appendChild(s);
+  if (window.__mcodeEpTeardown) return;
+  var HL_ID = "__mcode_ep_hl", TIP_ID = "__mcode_ep_tip";
+  var style = document.createElement("style");
+  style.setAttribute("data-mcode-ep", "1");
+  // Highlight: solid cyan rect around the picked element.
+  // Tip: a small tab-style badge attached to the top-left of the rect (DevTools-style).
+  // Sits flush above the rect's top border when there's room above, otherwise flips
+  // inside the rect (rounded bottom corners) so it never overflows the viewport.
+  style.textContent = "#__mcode_ep_hl{position:fixed;left:0;top:0;width:0;height:0;pointer-events:none;border:2px solid #22d3ee;box-sizing:border-box;z-index:2147483646;display:none;box-shadow:0 0 0 1px rgba(0,0,0,.35) inset;border-radius:2px}#__mcode_ep_tip{position:fixed;left:0;top:0;pointer-events:none;z-index:2147483647;display:none;max-width:min(360px,calc(100vw - 12px));font:600 11px/1.2 ui-sans-serif,system-ui,sans-serif;color:#0f172a;background:#22d3ee;border-radius:3px 3px 0 0;padding:3px 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 1px 4px rgba(0,0,0,.25)}#__mcode_ep_tip[data-flipped=\"1\"]{border-radius:0 0 3px 3px}html.__mcode_ep_active,html.__mcode_ep_active *{cursor:crosshair !important}";
+  (document.head || document.documentElement).appendChild(style);
   var box = document.createElement("div");
-  box.id = id;
+  box.id = HL_ID;
   box.setAttribute("aria-hidden", "true");
   var tip = document.createElement("div");
-  tip.id = tid;
+  tip.id = TIP_ID;
   tip.setAttribute("aria-live", "polite");
   var root = document.body || document.documentElement;
   root.appendChild(box);
   root.appendChild(tip);
+  try { document.documentElement.classList.add("__mcode_ep_active"); } catch (e0) {}
+
+  // Shared state the host drains via executeJavaScript. seq increments on any state
+  // change so the poll loop can detect activity without races.
+  window.__mcodeEpState = { commit: null, cancelled: false, seq: 0 };
+  function bump(){ try { window.__mcodeEpState.seq++; } catch (e) {} }
+
+  function isEpNode(n){
+    if (!n || n.nodeType !== 1) return false;
+    if (n.id === HL_ID || n.id === TIP_ID) return true;
+    return false;
+  }
+  function isInteractive(el){
+    var tag = (el.tagName || "").toLowerCase();
+    if (tag === "a" || tag === "button" || tag === "input" || tag === "select" || tag === "textarea" || tag === "label" || tag === "summary" || tag === "option") return true;
+    var role = el.getAttribute && el.getAttribute("role");
+    if (!role) return false;
+    role = role.toLowerCase();
+    return role === "button" || role === "link" || role === "tab" || role === "menuitem" || role === "option" || role === "checkbox" || role === "radio" || role === "switch";
+  }
+  function isHugeRect(r){
+    var de = document.documentElement;
+    var vw = Math.max(0, de.clientWidth || window.innerWidth || 0);
+    var vh = Math.max(0, de.clientHeight || window.innerHeight || 0);
+    if (vw < 1 || vh < 1) return false;
+    return (r.width * r.height) >= (vw * vh * 0.92);
+  }
+  function hoverPickAt(px, py){
+    var list;
+    try { list = document.elementsFromPoint(px, py); } catch (e1) { list = []; }
+    if (!list || !list.length) {
+      try { return document.elementFromPoint(px, py); } catch (e2) { return null; }
+    }
+    var docEl = document.documentElement;
+    var body = document.body;
+    var cands = [];
+    var maxScan = Math.min(list.length, 16);
+    for (var i = 0; i < maxScan; i++) {
+      var c = list[i];
+      if (!c || c.nodeType !== 1) continue;
+      if (c === docEl || c === body) continue;
+      if (isEpNode(c)) continue;
+      var r = c.getBoundingClientRect();
+      if (r.width < 0.5 || r.height < 0.5) continue;
+      cands.push({ el: c, area: r.width * r.height, huge: isHugeRect(r), interactive: isInteractive(c), depth: i });
+    }
+    var interact = cands.filter(function(c){ return c.interactive && !c.huge; });
+    if (!interact.length) interact = cands.filter(function(c){ return c.interactive; });
+    if (interact.length) {
+      interact.sort(function(a,b){ if (a.area !== b.area) return a.area - b.area; return a.depth - b.depth; });
+      return interact[0].el;
+    }
+    var normals = cands.filter(function(c){ return !c.huge; });
+    if (normals.length) {
+      normals.sort(function(a,b){ return a.area - b.area; });
+      return normals[0].el;
+    }
+    if (cands.length) return cands[cands.length - 1].el;
+    return null;
+  }
+  function labelFor(el){
+    if (!el || !el.tagName) return "Element";
+    var tag = el.tagName.toLowerCase();
+    try {
+      if (el.id && String(el.id).trim()) return tag + "#" + String(el.id).trim().slice(0, 48);
+      var tid = el.getAttribute && el.getAttribute("data-testid");
+      if (tid) return tag + "[data-testid=" + String(tid).slice(0, 48) + "]";
+      var al = el.getAttribute && el.getAttribute("aria-label");
+      if (al && String(al).trim()) return tag + " " + String(al).trim().slice(0, 48);
+      if (typeof el.className === "string" && el.className.trim()) {
+        var first = el.className.trim().split(/\\s+/)[0];
+        if (first) return tag + "." + first.slice(0, 48);
+      }
+    } catch (e) {}
+    return tag;
+  }
+  function paintHighlight(el){
+    if (!el) { box.style.display = "none"; tip.style.display = "none"; return; }
+    var r = el.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1) { box.style.display = "none"; tip.style.display = "none"; return; }
+    box.style.display = "block";
+    box.style.left = r.left + "px";
+    box.style.top = r.top + "px";
+    box.style.width = r.width + "px";
+    box.style.height = r.height + "px";
+    tip.textContent = labelFor(el);
+    tip.style.display = "block";
+    // Measure after content is set so flip detection uses the real tip height.
+    var pad = 4;
+    var vw = window.innerWidth || 1;
+    var th = tip.offsetHeight || 20;
+    var tw = tip.offsetWidth || 80;
+    // Anchor to rect's top-left. Sit flush above the top border (DevTools tab look).
+    // If there is no room above, flip inside the rect with rounded bottom corners.
+    var flipped = r.top - th < pad;
+    var ty = flipped ? r.top : Math.max(pad, r.top - th);
+    var tx = Math.max(pad, Math.min(r.left, vw - tw - pad));
+    tip.style.left = Math.round(tx) + "px";
+    tip.style.top = Math.round(ty) + "px";
+    if (flipped) tip.setAttribute("data-flipped", "1");
+    else tip.removeAttribute("data-flipped");
+  }
+
+  var rafPending = 0;
+  var lastX = 0, lastY = 0;
+  function scheduleHover(){
+    if (rafPending) return;
+    rafPending = requestAnimationFrame(function(){
+      rafPending = 0;
+      var el = hoverPickAt(lastX, lastY);
+      paintHighlight(el);
+    });
+  }
+
+  // All listeners are capture-phase + preventDefault + stopImmediatePropagation so the
+  // underlying page receives nothing. The seq bump on commit/cancel signals the host poll.
+  function onMouseMove(ev){
+    lastX = ev.clientX; lastY = ev.clientY;
+    scheduleHover();
+  }
+  function onClick(ev){
+    ev.preventDefault(); ev.stopImmediatePropagation(); ev.stopPropagation();
+    if (window.__mcodeEpState.commit || window.__mcodeEpState.cancelled) return;
+    window.__mcodeEpState.commit = { x: ev.clientX, y: ev.clientY };
+    bump();
+  }
+  function blockEvent(ev){
+    ev.preventDefault(); ev.stopImmediatePropagation(); ev.stopPropagation();
+  }
+  function onKeydown(ev){
+    if (ev.key === "Escape" || ev.key === "Esc") {
+      ev.preventDefault(); ev.stopImmediatePropagation(); ev.stopPropagation();
+      if (!window.__mcodeEpState.commit) {
+        window.__mcodeEpState.cancelled = true;
+        bump();
+      }
+    } else {
+      ev.preventDefault(); ev.stopImmediatePropagation(); ev.stopPropagation();
+    }
+  }
+  function onLeave(){
+    if (rafPending) { cancelAnimationFrame(rafPending); rafPending = 0; }
+    box.style.display = "none";
+    tip.style.display = "none";
+  }
+  function onScroll(){ scheduleHover(); }
+
+  var EVENTS_BLOCK = ["mousedown","mouseup","contextmenu","dblclick","auxclick","pointerdown","pointerup"];
+  document.addEventListener("mousemove", onMouseMove, true);
+  document.addEventListener("click", onClick, true);
+  document.addEventListener("keydown", onKeydown, true);
+  document.addEventListener("mouseleave", onLeave, true);
+  window.addEventListener("scroll", onScroll, true);
+  window.addEventListener("resize", onScroll, true);
+  for (var i = 0; i < EVENTS_BLOCK.length; i++) {
+    document.addEventListener(EVENTS_BLOCK[i], blockEvent, true);
+  }
+
+  window.__mcodeEpTeardown = function(){
+    try {
+      document.removeEventListener("mousemove", onMouseMove, true);
+      document.removeEventListener("click", onClick, true);
+      document.removeEventListener("keydown", onKeydown, true);
+      document.removeEventListener("mouseleave", onLeave, true);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll, true);
+      for (var j = 0; j < EVENTS_BLOCK.length; j++) {
+        document.removeEventListener(EVENTS_BLOCK[j], blockEvent, true);
+      }
+      if (rafPending) cancelAnimationFrame(rafPending);
+    } catch (e) {}
+    try { document.documentElement.classList.remove("__mcode_ep_active"); } catch (e2) {}
+    var h = document.getElementById(HL_ID);
+    var t = document.getElementById(TIP_ID);
+    if (h) h.remove();
+    if (t) t.remove();
+    var styles = document.querySelectorAll('style[data-mcode-ep="1"]');
+    for (var k = 0; k < styles.length; k++) styles[k].remove();
+    try { delete window.__mcodeEpState; } catch (e3) { window.__mcodeEpState = null; }
+    try { delete window.__mcodeEpTeardown; } catch (e4) { window.__mcodeEpTeardown = null; }
+  };
 })()`;
 
 const EP_REMOVE_JS = `(function(){
-  var h = document.getElementById("__mcode_ep_hl");
-  var t = document.getElementById("__mcode_ep_tip");
-  if (h) h.remove();
-  if (t) t.remove();
-  document.querySelectorAll('style[data-mcode-ep="1"]').forEach(function (n) { n.remove(); });
+  if (typeof window.__mcodeEpTeardown === "function") {
+    try { window.__mcodeEpTeardown(); } catch (e) {}
+  } else {
+    var h = document.getElementById("__mcode_ep_hl");
+    var t = document.getElementById("__mcode_ep_tip");
+    if (h) h.remove();
+    if (t) t.remove();
+    document.querySelectorAll('style[data-mcode-ep="1"]').forEach(function (n) { n.remove(); });
+    try { document.documentElement.classList.remove("__mcode_ep_active"); } catch (e2) {}
+  }
+})()`;
+
+/** JSON payload returned by the host poll script. */
+type EpPollPayload =
+  | { state: "idle"; seq: number }
+  | { state: "commit"; seq: number; x: number; y: number }
+  | { state: "cancelled"; seq: number }
+  | { state: "gone" };
+
+/** Polls the guest state object, returning the current commit/cancel/idle status. */
+const EP_POLL_JS = `(function(){
+  var st = window.__mcodeEpState;
+  if (!st) return JSON.stringify({ state: "gone" });
+  if (st.cancelled) return JSON.stringify({ state: "cancelled", seq: st.seq });
+  if (st.commit) return JSON.stringify({ state: "commit", seq: st.seq, x: st.commit.x, y: st.commit.y });
+  return JSON.stringify({ state: "idle", seq: st.seq });
 })()`;
 
 /**
@@ -97,71 +313,6 @@ layer.addEventListener("touchend", (ev) => { ev.preventDefault(); endDrag(); }, 
 window.addEventListener("keydown", (ev) => { if (ev.key === "Escape") void ipcRenderer.invoke("preview:region-overlay-cancel"); });
 </script></body></html>`);
 
-/**
- * Pointer-capture overlay for element pick: hit-testing and highlight run in the guest page
- * so rects match {@link Element#getBoundingClientRect}; this layer only forwards pointer events.
- */
-const ELEMENT_OVERLAY_DATA_URL =
-  "data:text/html;charset=utf-8," +
-  encodeURIComponent(`<!DOCTYPE html><html><head><meta charset="utf-8"/><style>
-html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;}
-#layer{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(15,23,42,.18);cursor:crosshair;touch-action:none;}
-</style></head><body><div id="layer"></div>
-<script>
-const { ipcRenderer } = require("electron");
-const layer = document.getElementById("layer");
-let rafHover = 0;
-let hx = 0, hy = 0;
-function scheduleHover() {
-  if (rafHover) return;
-  rafHover = requestAnimationFrame(async () => {
-    rafHover = 0;
-    try {
-      await ipcRenderer.invoke("preview:element-pick-hover", { x: hx, y: hy });
-    } catch (_e) {}
-  });
-}
-function pt(ev) {
-  if (ev.touches && ev.touches[0]) return { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
-  return { x: ev.clientX, y: ev.clientY };
-}
-function ptEnd(ev) {
-  if (ev.changedTouches && ev.changedTouches[0]) {
-    return { x: ev.changedTouches[0].clientX, y: ev.changedTouches[0].clientY };
-  }
-  return pt(ev);
-}
-layer.addEventListener("mousemove", (ev) => { hx = ev.clientX; hy = ev.clientY; scheduleHover(); });
-layer.addEventListener("mouseleave", () => {
-  if (rafHover) {
-    cancelAnimationFrame(rafHover);
-    rafHover = 0;
-  }
-  void ipcRenderer.invoke("preview:element-pick-hover", { x: -1, y: -1 });
-});
-layer.addEventListener("click", async (ev) => {
-  ev.preventDefault();
-  try { await ipcRenderer.invoke("preview:element-pick-commit", pt(ev)); } catch (_e) {}
-});
-layer.addEventListener("touchstart", (ev) => {
-  ev.preventDefault();
-  const p = { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
-  hx = p.x; hy = p.y;
-  scheduleHover();
-}, { passive: false });
-layer.addEventListener("touchmove", (ev) => {
-  ev.preventDefault();
-  const p = { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
-  hx = p.x; hy = p.y;
-  scheduleHover();
-}, { passive: false });
-layer.addEventListener("touchend", async (ev) => {
-  ev.preventDefault();
-  try { await ipcRenderer.invoke("preview:element-pick-commit", ptEnd(ev)); } catch (_e) {}
-}, { passive: false });
-window.addEventListener("keydown", (ev) => { if (ev.key === "Escape") void ipcRenderer.invoke("preview:element-pick-cancel"); });
-</script></body></html>`);
-
 /** Result type for element hit-testing against the guest page coordinate system. */
 type HitTestResult =
   | {
@@ -186,60 +337,9 @@ async function injectEpPickHighlighter(wc: WebContents): Promise<void> {
   }
 }
 
-/** Updates or clears the guest highlight box and selector tooltip. */
-async function updateEpPickHighlighter(
-  wc: WebContents,
-  bounds: Bounds | null,
-  label: string,
-): Promise<void> {
-  if (wc.isDestroyed()) return;
-  const bJson = bounds === null ? "null" : JSON.stringify(bounds);
-  const lJson = JSON.stringify(label);
-  const js = `(function(b,label){
-  var el = document.getElementById("__mcode_ep_hl");
-  var tip = document.getElementById("__mcode_ep_tip");
-  if (!el || !tip) return;
-  if (!b || b.width < 1 || b.height < 1) {
-    el.style.display = "none";
-    tip.style.display = "none";
-    return;
-  }
-  el.style.display = "block";
-  el.style.left = b.x + "px";
-  el.style.top = b.y + "px";
-  el.style.width = b.width + "px";
-  el.style.height = b.height + "px";
-  tip.textContent = label || "";
-  tip.style.display = label ? "block" : "none";
-  if (!label) return;
-  var gap = 6, pad = 6;
-  var below = b.y + b.height + gap;
-  var vw = window.innerWidth || 1;
-  var vh = window.innerHeight || 1;
-  var ty = below;
-  var est = 22;
-  if (below + est > vh - pad && b.y > est + pad) ty = b.y - est - gap;
-  tip.style.left = Math.min(b.x, Math.max(0, vw - 420)) + "px";
-  tip.style.top = Math.round(ty) + "px";
-  requestAnimationFrame(function () {
-    var h = tip.offsetHeight || est;
-    var b2 = below;
-    if (b2 + h > vh - pad && b.y > h + pad) ty = b.y - h - gap;
-    else ty = b2;
-    var tw = tip.offsetWidth || 200;
-    tip.style.left = Math.max(pad, Math.min(b.x, vw - tw - pad)) + "px";
-    tip.style.top = Math.round(ty) + "px";
-  });
-})(${bJson}, ${lJson})`;
-  try {
-    await wc.executeJavaScript(js, true);
-  } catch {
-    /* guest torn down */
-  }
-}
-
 /**
- * Removes the element-pick highlight injected by injectEpPickHighlighter from the guest page.
+ * Removes the element-pick highlight + capture-phase event handlers injected by
+ * injectEpPickHighlighter from the guest page.
  */
 export async function removeEpPickHighlighter(wc: WebContents): Promise<void> {
   if (wc.isDestroyed()) return;
@@ -627,6 +727,10 @@ export function abortOverlayCapture(s: PreviewSession, error: string): void {
   endOverlaySession(s);
   const pending = s.overlayPending;
   s.overlayPending = null;
+  if (s.elementPickPollTimer) {
+    clearTimeout(s.elementPickPollTimer);
+    s.elementPickPollTimer = null;
+  }
   if (s.view && !s.view.webContents.isDestroyed()) {
     void removeEpPickHighlighter(s.view.webContents);
   }
@@ -665,8 +769,11 @@ function beginOverlaySession(s: PreviewSession, webContents: WebContents): void 
 /**
  * Registers all overlay-related IPC handlers:
  * region-overlay-submit, region-overlay-cancel, cancel-capture,
- * element-pick-hover, element-pick-commit, element-pick-cancel,
  * capture-picture-region, capture-picture-element-pick.
+ *
+ * Element-pick has no dedicated IPC handlers anymore — the pick session runs entirely
+ * inside the guest page via {@link EP_INJECT_JS}; the host polls `window.__mcodeEpState`
+ * for commit/cancel signals.
  * Call once at app startup.
  */
 export function registerOverlayHandlers(): void {
@@ -761,151 +868,8 @@ export function registerOverlayHandlers(): void {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win.isDestroyed()) return;
     const s = getSession(win);
-    if (!s.selectionOverlay) return;
-    abortOverlayCapture(s, "cancelled");
-  });
-
-  ipcMain.handle(
-    "preview:element-pick-hover",
-    async (event, pt: { x: unknown; y: unknown }): Promise<{ ok: true } | { ok: false }> => {
-      const overlayWin = BrowserWindow.fromWebContents(event.sender);
-      const parentWin = overlayWin?.getParentWindow();
-      if (!overlayWin || overlayWin.isDestroyed() || !parentWin || parentWin.isDestroyed()) {
-        return { ok: false };
-      }
-      const s = getSession(parentWin);
-      if (s.selectionOverlay?.id !== overlayWin.id) return { ok: false };
-      if (!s.overlayPending || s.overlayPending.mode !== "element") return { ok: false };
-      if (!s.view || s.view.webContents.isDestroyed()) return { ok: false };
-
-      const x = typeof pt?.x === "number" && Number.isFinite(pt.x) ? pt.x : NaN;
-      const y = typeof pt?.y === "number" && Number.isFinite(pt.y) ? pt.y : NaN;
-      if (!Number.isFinite(x) || !Number.isFinite(y)) return { ok: false };
-
-      if (x < 0 || y < 0) {
-        await updateEpPickHighlighter(s.view.webContents, null, "");
-        return { ok: false };
-      }
-
-      const host = hostBoundsForHitTest(s);
-      const hit = await runElementHitTest(s.view.webContents, x, y, host);
-      if (!hit || !hit.ok) {
-        await updateEpPickHighlighter(s.view.webContents, null, "");
-        return { ok: false };
-      }
-      const label = hit.selectorHint && hit.selectorHint.length > 0 ? hit.selectorHint : "Element";
-      await updateEpPickHighlighter(s.view.webContents, hit.bounds, label);
-      return { ok: true };
-    },
-  );
-
-  ipcMain.handle(
-    "preview:element-pick-commit",
-    async (event, pt: { x: unknown; y: unknown }): Promise<void> => {
-      const overlayWin = BrowserWindow.fromWebContents(event.sender);
-      const parentWin = overlayWin?.getParentWindow();
-      if (!overlayWin || overlayWin.isDestroyed() || !parentWin || parentWin.isDestroyed()) return;
-
-      const s = getSession(parentWin);
-      if (s.selectionOverlay?.id !== overlayWin.id) return;
-      const pending = s.overlayPending;
-      if (!pending || pending.mode !== "element") return;
-
-      const x = typeof pt?.x === "number" && Number.isFinite(pt.x) ? pt.x : NaN;
-      const y = typeof pt?.y === "number" && Number.isFinite(pt.y) ? pt.y : NaN;
-      if (!Number.isFinite(x) || !Number.isFinite(y)) {
-        abortOverlayCapture(s, "no-hit");
-        return;
-      }
-
-      s.overlayPending = null;
-      endOverlaySession(s);
-      destroySelectionOverlayOnly(s);
-
-      if (!s.view || s.view.webContents.isDestroyed()) {
-        if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
-        pending.finish({ ok: false, error: "no-preview" });
-        return;
-      }
-
-      const lb = s.lastBounds;
-      if (!lb) {
-        await removeEpPickHighlighter(s.view.webContents);
-        if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
-        pending.finish({ ok: false, error: "no-bounds" });
-        return;
-      }
-
-      const hit = await runElementHitTest(s.view.webContents, x, y, hostBoundsForHitTest(s));
-      if (!hit || !hit.ok) {
-        await removeEpPickHighlighter(s.view.webContents);
-        if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
-        pending.finish({ ok: false, error: "no-hit" });
-        return;
-      }
-
-      const r = clampRectInPlace(hit.bounds, lb.width, lb.height);
-      if (r.width < 4 || r.height < 4) {
-        await removeEpPickHighlighter(s.view.webContents);
-        if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
-        pending.finish({ ok: false, error: "region-too-small" });
-        return;
-      }
-
-      try {
-        await removeEpPickHighlighter(s.view.webContents);
-        const image = await s.view.webContents.capturePage(r);
-        const buffer = image.toPNG();
-        if (buffer.length === 0) {
-          if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
-          pending.finish({ ok: false, error: "empty-capture" });
-          return;
-        }
-
-        const id = randomUUID();
-        const stem = previewCaptureFileStem(s.view.webContents.getURL());
-        const name = `preview-element-${stem}-${Date.now()}.png`;
-        const tempDir = join(app.getPath("temp"), "mcode-attachments");
-        await mkdir(tempDir, { recursive: true });
-        const tempPath = join(tempDir, `${id}.png`);
-        await writeFile(tempPath, buffer);
-
-        const meta: AttachmentMeta = {
-          id,
-          name,
-          mimeType: "image/png",
-          sizeBytes: buffer.length,
-          sourcePath: tempPath,
-        };
-
-        const capture = await buildBrowserCapturePayload(
-          s.view.webContents,
-          r,
-          s.consoleBuffer,
-          snapshotFailedRequestsForCapture(s),
-          s.workspaceId,
-          {
-            captureKind: "element",
-            selectorHint: hit.selectorHint,
-            htmlExcerpt: hit.htmlExcerpt,
-          },
-        );
-
-        if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
-        pending.finish({ ok: true, meta, previewBytes: Uint8Array.from(buffer), capture });
-      } catch {
-        if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
-        pending.finish({ ok: false, error: "capture-failed" });
-      }
-    },
-  );
-
-  ipcMain.handle("preview:element-pick-cancel", (event): void => {
-    const overlayWin = BrowserWindow.fromWebContents(event.sender);
-    const parentWin = overlayWin?.getParentWindow();
-    if (!overlayWin || overlayWin.isDestroyed() || !parentWin || parentWin.isDestroyed()) return;
-    const s = getSession(parentWin);
-    if (s.selectionOverlay?.id !== overlayWin.id) return;
+    // Region capture sets selectionOverlay; element-pick does not. Cancel either.
+    if (!s.selectionOverlay && !s.overlayPending) return;
     abortOverlayCapture(s, "cancelled");
   });
 
@@ -1012,57 +976,184 @@ export function registerOverlayHandlers(): void {
           resolve(r);
         };
 
-        const b = s.lastBounds!;
-        const cb = win.getContentBounds();
-        const ov = new BrowserWindow({
-          parent: win,
-          modal: false,
-          x: Math.round(cb.x + b.x),
-          y: Math.round(cb.y + b.y),
-          width: Math.max(1, Math.round(b.width)),
-          height: Math.max(1, Math.round(b.height)),
-          frame: false,
-          transparent: true,
-          hasShadow: false,
-          focusable: true,
-          resizable: false,
-          movable: false,
-          skipTaskbar: true,
-          show: false,
-          webPreferences: {
-            nodeIntegration: true,
-            contextIsolation: false,
-            sandbox: false,
-          },
-        });
-
-        s.selectionOverlay = ov;
         s.overlayPending = { mode: "element", finish: finishOnce, hostWin: win };
         beginOverlaySession(s, s.view!.webContents);
 
-        ov.once("ready-to-show", () => {
-          ov.show();
-          ov.focus();
-        });
-
-        ov.on("closed", () => {
-          s.selectionOverlay = null;
-          if (s.overlayPending) {
-            const pend = s.overlayPending;
-            s.overlayPending = null;
-            endOverlaySession(s);
-            if (!pend.hostWin.isDestroyed()) {
-              resetIdle(pend.hostWin, s);
-            }
-            finishOnce({ ok: false, error: "cancelled" });
-          }
-        });
-
         void (async (): Promise<void> => {
           await injectEpPickHighlighter(s.view!.webContents);
-          void ov.loadURL(ELEMENT_OVERLAY_DATA_URL);
+          schedulePoll(s, win);
         })();
       });
     },
   );
+}
+
+/**
+ * Schedules the next state poll in the element-pick loop. The recursive setTimeout
+ * (vs. setInterval) lets us await executeJavaScript between ticks so we never queue
+ * up overlapping polls if the guest is slow.
+ */
+function schedulePoll(s: PreviewSession, hostWin: BrowserWindow): void {
+  if (s.elementPickPollTimer) {
+    clearTimeout(s.elementPickPollTimer);
+  }
+  s.elementPickPollTimer = setTimeout(() => {
+    s.elementPickPollTimer = null;
+    void runElementPickPollTick(s, hostWin);
+  }, 60);
+}
+
+/**
+ * Drives one tick of the element-pick poll loop: reads `window.__mcodeEpState`,
+ * commits or cancels accordingly, otherwise reschedules.
+ */
+async function runElementPickPollTick(s: PreviewSession, hostWin: BrowserWindow): Promise<void> {
+  const pending = s.overlayPending;
+  if (!pending || pending.mode !== "element") return;
+  if (hostWin.isDestroyed()) {
+    abortOverlayCapture(s, "no-window");
+    return;
+  }
+  if (!s.view || s.view.webContents.isDestroyed()) {
+    abortOverlayCapture(s, "no-preview");
+    return;
+  }
+
+  let payload: EpPollPayload | null = null;
+  try {
+    const raw: unknown = await s.view.webContents.executeJavaScript(EP_POLL_JS, true);
+    const text = typeof raw === "string" ? raw : JSON.stringify(raw);
+    payload = JSON.parse(text) as EpPollPayload;
+  } catch {
+    payload = null;
+  }
+
+  // Re-read pending after the await: an earlier tick (or external abort) may have settled it.
+  if (!s.overlayPending || s.overlayPending.mode !== "element") return;
+
+  if (!payload || payload.state === "gone") {
+    // Guest reloaded / navigated. Re-inject so the next tick can resume.
+    if (s.view && !s.view.webContents.isDestroyed()) {
+      try {
+        await s.view.webContents.executeJavaScript(EP_INJECT_JS, true);
+      } catch {
+        /* navigation still in flight */
+      }
+    }
+    schedulePoll(s, hostWin);
+    return;
+  }
+
+  if (payload.state === "cancelled") {
+    abortOverlayCapture(s, "cancelled");
+    return;
+  }
+
+  if (payload.state === "commit") {
+    await finishElementPickCapture(s, payload.x, payload.y);
+    return;
+  }
+
+  schedulePoll(s, hostWin);
+}
+
+/**
+ * Runs the authoritative hit-test on the commit point and produces the capture payload.
+ * Tears down the injected handlers before capturePage so the cyan highlight isn't burned in.
+ */
+async function finishElementPickCapture(
+  s: PreviewSession,
+  x: number,
+  y: number,
+): Promise<void> {
+  const pending = s.overlayPending;
+  if (!pending || pending.mode !== "element") return;
+
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    abortOverlayCapture(s, "no-hit");
+    return;
+  }
+
+  s.overlayPending = null;
+  endOverlaySession(s);
+  if (s.elementPickPollTimer) {
+    clearTimeout(s.elementPickPollTimer);
+    s.elementPickPollTimer = null;
+  }
+
+  if (!s.view || s.view.webContents.isDestroyed()) {
+    if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
+    pending.finish({ ok: false, error: "no-preview" });
+    return;
+  }
+
+  const lb = s.lastBounds;
+  if (!lb) {
+    await removeEpPickHighlighter(s.view.webContents);
+    if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
+    pending.finish({ ok: false, error: "no-bounds" });
+    return;
+  }
+
+  const hit = await runElementHitTest(s.view.webContents, x, y, hostBoundsForHitTest(s));
+  if (!hit || !hit.ok) {
+    await removeEpPickHighlighter(s.view.webContents);
+    if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
+    pending.finish({ ok: false, error: "no-hit" });
+    return;
+  }
+
+  const r = clampRectInPlace(hit.bounds, lb.width, lb.height);
+  if (r.width < 4 || r.height < 4) {
+    await removeEpPickHighlighter(s.view.webContents);
+    if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
+    pending.finish({ ok: false, error: "region-too-small" });
+    return;
+  }
+
+  try {
+    await removeEpPickHighlighter(s.view.webContents);
+    const image = await s.view.webContents.capturePage(r);
+    const buffer = image.toPNG();
+    if (buffer.length === 0) {
+      if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
+      pending.finish({ ok: false, error: "empty-capture" });
+      return;
+    }
+
+    const id = randomUUID();
+    const stem = previewCaptureFileStem(s.view.webContents.getURL());
+    const name = `preview-element-${stem}-${Date.now()}.png`;
+    const tempDir = join(app.getPath("temp"), "mcode-attachments");
+    await mkdir(tempDir, { recursive: true });
+    const tempPath = join(tempDir, `${id}.png`);
+    await writeFile(tempPath, buffer);
+
+    const meta: AttachmentMeta = {
+      id,
+      name,
+      mimeType: "image/png",
+      sizeBytes: buffer.length,
+      sourcePath: tempPath,
+    };
+
+    const capture = await buildBrowserCapturePayload(
+      s.view.webContents,
+      r,
+      s.consoleBuffer,
+      snapshotFailedRequestsForCapture(s),
+      s.workspaceId,
+      {
+        captureKind: "element",
+        selectorHint: hit.selectorHint,
+        htmlExcerpt: hit.htmlExcerpt,
+      },
+    );
+
+    if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
+    pending.finish({ ok: true, meta, previewBytes: Uint8Array.from(buffer), capture });
+  } catch {
+    if (!pending.hostWin.isDestroyed()) resetIdle(pending.hostWin, s);
+    pending.finish({ ok: false, error: "capture-failed" });
+  }
 }

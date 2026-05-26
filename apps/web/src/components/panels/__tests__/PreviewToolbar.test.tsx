@@ -186,32 +186,34 @@ describe("PreviewToolbar — click handlers", () => {
   });
 });
 
-describe("PreviewToolbar — cancel pill visibility", () => {
-  it("shows cancel pill when regionBusy is true", () => {
+describe("PreviewToolbar — cancel/design pill visibility", () => {
+  it("shows Cancel pill when regionBusy is true", () => {
     render(<PreviewToolbar {...defaultProps({ regionBusy: true })} />);
     expect(screen.getByLabelText("Cancel capture")).toBeInTheDocument();
   });
 
-  it("shows cancel pill when elementPickBusy is true", () => {
+  it("shows Design pill when elementPickBusy is true", () => {
     render(<PreviewToolbar {...defaultProps({ elementPickBusy: true })} />);
-    expect(screen.getByLabelText("Cancel capture")).toBeInTheDocument();
+    expect(screen.getByLabelText("Exit design mode")).toBeInTheDocument();
   });
 
-  it("hides cancel pill when no capture is active", () => {
+  it("hides both pills when no capture is active", () => {
     render(
       <PreviewToolbar
         {...defaultProps({ regionBusy: false, elementPickBusy: false })}
       />,
     );
     expect(screen.queryByLabelText("Cancel capture")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Exit design mode")).not.toBeInTheDocument();
   });
 
-  it("shows cancel pill when both regionBusy and elementPickBusy are true", () => {
+  it("prefers Design pill when both regionBusy and elementPickBusy are true", () => {
     render(
       <PreviewToolbar
         {...defaultProps({ regionBusy: true, elementPickBusy: true })}
       />,
     );
-    expect(screen.getByLabelText("Cancel capture")).toBeInTheDocument();
+    expect(screen.getByLabelText("Exit design mode")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Cancel capture")).not.toBeInTheDocument();
   });
 });

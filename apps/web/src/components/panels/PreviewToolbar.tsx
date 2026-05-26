@@ -8,6 +8,7 @@ import {
   ImagePlus,
   Loader2,
   RotateCw,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -199,8 +200,27 @@ export function PreviewToolbar({
         </TooltipContent>
       </Tooltip>
 
-      {/* Cancel capture pill (visible during region/element-pick capture) */}
-      {(regionBusy || elementPickBusy) ? (
+      {/* Design pill: shows while the user is in element-pick ("design") mode.
+          The pick session runs inside the guest page itself (no overlay window),
+          so this pill is the only chrome affordance for the active mode. */}
+      {elementPickBusy ? (
+        <>
+          <div className="flex-1" />
+          <button
+            type="button"
+            aria-label="Exit design mode"
+            title="Exit design mode (Esc)"
+            className="flex shrink-0 items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/15"
+            onClick={() => void window.desktopBridge?.preview.cancelCapture()}
+          >
+            <Crosshair size={12} aria-hidden />
+            Design
+            <span className="ml-0.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary/15 text-primary hover:bg-primary/25">
+              <X size={10} aria-hidden />
+            </span>
+          </button>
+        </>
+      ) : regionBusy ? (
         <>
           <div className="flex-1" />
           <button
