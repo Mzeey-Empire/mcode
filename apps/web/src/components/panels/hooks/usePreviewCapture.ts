@@ -66,7 +66,12 @@ export interface PreviewCaptureState {
   readonly anyCaptureActive: boolean;
   readonly onAddPictureReference: () => Promise<void>;
   readonly onAddRegionPictureReference: () => Promise<void>;
-  readonly onAddElementPickPictureReference: () => Promise<void>;
+  /**
+   * Fires one element-pick session and resolves with whether the session
+   * actually attached an element. Design mode reads this so it can re-arm on
+   * success and exit on cancel / error / Esc without inspecting the queue.
+   */
+  readonly onAddElementPickPictureReference: () => Promise<{ ok: boolean }>;
   readonly onAddPageContextOnly: () => Promise<void>;
 }
 
@@ -159,9 +164,9 @@ export function usePreviewCapture({
     }
   }, [pushSync, threadId]);
 
-  const onAddElementPickPictureReference = useCallback(async () => {
+  const onAddElementPickPictureReference = useCallback(async (): Promise<{ ok: boolean }> => {
     const preview = window.desktopBridge?.preview;
-    if (!preview?.capturePictureReferenceElementPick || !threadId) return;
+    if (!preview?.capturePictureReferenceElementPick || !threadId) return { ok: false };
 
     setElementPickBusy(true);
     try {
@@ -172,11 +177,11 @@ export function usePreviewCapture({
         res = (await preview.capturePictureReferenceElementPick()) as CaptureResult;
       } catch {
         useToastStore.getState().show("error", "Could not capture preview", "Screenshot failed.");
-        return;
+        return { ok: false };
       }
 
       showCaptureErrorIfNeeded(res);
-      if (!res.ok) return;
+      if (!res.ok) return { ok: false };
 
       const copied = Uint8Array.from(res.previewBytes);
       const blob = new Blob([copied], { type: "image/png" });
@@ -191,6 +196,7 @@ export function usePreviewCapture({
         browserCapture: res.capture,
       };
       usePreviewReferenceQueueStore.getState().enqueuePreviewReference(threadId, attachment);
+      return { ok: true };
     } finally {
       setElementPickBusy(false);
     }

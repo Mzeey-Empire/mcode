@@ -45,11 +45,12 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
   const designModeToggle = usePreviewDesignModeStore((s) => s.toggle);
   const designModeSetActive = usePreviewDesignModeStore((s) => s.setActive);
 
-  // Design mode is a single state: "the next click on the page captures the
-  // element under the cursor, repeat until you turn the mode off." The pick
-  // session is auto-armed by the effect below whenever the mode is on and no
-  // capture is mid-flight, so success and Esc both lead back to a fresh
-  // armed session without the user having to re-press anything.
+  // Design mode is a single state: "next click on the page captures the
+  // element under the cursor, repeat until you turn the mode off." The chain
+  // below auto-arms pick sessions back-to-back on success and exits the mode
+  // on any non-success outcome (Esc inside the guest, user-initiated cancel,
+  // IPC error). Success and cancel both surface as the same elementPickBusy
+  // transition, so the loop relies on the hook's { ok } return to decide.
   const onToggleDesignMode = () => {
     const willActivate = !designModeActive;
     designModeToggle(threadId);
@@ -63,19 +64,52 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
     void window.desktopBridge?.preview?.cancelCapture();
   };
 
-  // Auto-arm Pick whenever design mode is on and no capture is busy. Re-runs
-  // after every successful pick (the queue gets the attachment, busy flips
-  // back to false, effect fires again) so the user feels like they are in a
-  // continuous "click to attach" state until they explicitly exit the mode.
   useEffect(() => {
-    if (designModeActive && !capture.anyCaptureActive) {
-      void capture.onAddElementPickPictureReference();
-    }
+    if (!designModeActive) return;
+    let cancelled = false;
+    const loop = async (): Promise<void> => {
+      while (!cancelled) {
+        if (!usePreviewDesignModeStore.getState().isActive(threadId)) return;
+        const result = await capture.onAddElementPickPictureReference();
+        if (cancelled) return;
+        if (!result.ok) {
+          // Cancel / error / Esc-in-guest: exit the mode entirely so the
+          // user has a single, consistent way to escape a sticky picker.
+          designModeSetActive(threadId, false);
+          return;
+        }
+        // Successful pick attached an element; loop body re-arms for the
+        // next click.
+      }
+    };
+    void loop();
+    return () => {
+      cancelled = true;
+    };
   }, [
     designModeActive,
-    capture.anyCaptureActive,
+    threadId,
     capture.onAddElementPickPictureReference,
+    designModeSetActive,
   ]);
+
+  // Esc must exit design mode no matter where focus is. The global
+  // escape.handle binding (default-keybindings.json) closes the current
+  // thread on Esc, which would yank the user out of their workspace mid
+  // pick session. We attach at capture phase with stopImmediatePropagation
+  // so this listener fires before the global keybinding-manager dispatch.
+  useEffect(() => {
+    if (!designModeActive) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      designModeSetActive(threadId, false);
+      void window.desktopBridge?.preview?.cancelCapture();
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [designModeActive, designModeSetActive, threadId]);
 
   if (!window.desktopBridge?.preview) {
     return (
