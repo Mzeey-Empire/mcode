@@ -11,6 +11,13 @@ import {
 export interface SmartOmniboxProps extends UseOmniboxStateOptions {
   /** Called when user submits a URL (Enter or Go button). */
   onNavigate: (url: string) => void;
+  /**
+   * Monotonic token that triggers focus + select-all on the input each time
+   * it changes. Used so the preview panel can pull focus into the URL field
+   * when opened via the mod+shift+b shortcut without forcing focus on every
+   * unrelated re-render.
+   */
+  focusRequest?: number;
 }
 
 /**
@@ -22,6 +29,7 @@ export function SmartOmnibox({
   pageTitle,
   faviconUrl,
   onNavigate,
+  focusRequest,
 }: SmartOmniboxProps) {
   const {
     displayValue,
@@ -41,6 +49,19 @@ export function SmartOmnibox({
   useEffect(() => {
     setFaviconError(false);
   }, [faviconUrl]);
+
+  // Honour focus requests from the parent. requestAnimationFrame defers the
+  // call until after layout so the input is mounted and visible when focus
+  // and select fire (notably when the preview panel was just opened by
+  // the shortcut and the omnibox renders in the same tick as the bump).
+  useEffect(() => {
+    if (focusRequest === undefined || focusRequest === 0) return;
+    const handle = requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
+    return () => cancelAnimationFrame(handle);
+  }, [focusRequest, inputRef]);
 
   const faviconVisible = showFavicon && !faviconError;
 

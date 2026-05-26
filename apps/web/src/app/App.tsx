@@ -15,6 +15,7 @@ import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useDiffStore } from "@/stores/diffStore";
 import { usePreviewDockStore } from "@/stores/previewDockStore";
+import { usePreviewFocusStore } from "@/stores/previewFocusStore";
 import { useUiStore } from "@/stores/uiStore";
 import { initShortcuts } from "@/lib/shortcuts";
 import { registerCommand } from "@/lib/command-registry";
@@ -315,8 +316,12 @@ export function App() {
           if (!panel.visible) {
             showRightPanel(tid);
             setRightPanelTab(tid, "preview");
+            // Pull focus into the URL field so the user can type a URL
+            // immediately after opening the preview by shortcut.
+            usePreviewFocusStore.getState().requestOmniboxFocus();
           } else if (panel.activeTab !== "preview") {
             setRightPanelTab(tid, "preview");
+            usePreviewFocusStore.getState().requestOmniboxFocus();
           } else {
             hideRightPanel(tid);
           }

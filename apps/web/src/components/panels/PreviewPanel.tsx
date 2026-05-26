@@ -3,6 +3,7 @@ import { Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePreviewDockStore } from "@/stores/previewDockStore";
 import { usePreviewDesignModeStore } from "@/stores/previewDesignModeStore";
+import { usePreviewFocusStore } from "@/stores/previewFocusStore";
 import { SmartOmnibox } from "./SmartOmnibox";
 import { PreviewToolbar } from "./PreviewToolbar";
 import { PreviewTabBar } from "./PreviewTabBar";
@@ -76,6 +77,7 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
   const designModeActive = usePreviewDesignModeStore((s) => s.modes[threadId] === true);
   const designModeToggle = usePreviewDesignModeStore((s) => s.toggle);
   const designModeSetActive = usePreviewDesignModeStore((s) => s.setActive);
+  const omniboxFocusTick = usePreviewFocusStore((s) => s.omniboxFocusTick);
 
   // Design mode is a single state: "next click on the page captures the
   // element under the cursor, repeat until you turn the mode off." The chain
@@ -180,6 +182,7 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
           pageTitle={bridge.pageTitle}
           faviconUrl={bridge.faviconUrl}
           onNavigate={bridge.onNavigate}
+          focusRequest={omniboxFocusTick}
         />
 
         <PreviewToolbar
