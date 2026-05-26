@@ -206,7 +206,12 @@ export function RightPanel() {
       {isOverlay && panelVisible && (
         <div
           role="presentation"
-          onClick={() => hideRightPanel(activeThreadId)}
+          onClick={() => {
+            // Blur first so focus inside the panel does not collide with the
+            // incoming aria-hidden on the panel container.
+            (document.activeElement as HTMLElement | null)?.blur?.();
+            hideRightPanel(activeThreadId);
+          }}
           className="fixed inset-0 z-40 bg-foreground/30 backdrop-blur-[2px] animate-fade-up-in"
         />
       )}
@@ -230,7 +235,13 @@ export function RightPanel() {
             ? "fixed inset-y-0 right-0 z-50 shadow-sm animate-fade-up-in"
             : "rounded-lg shadow-sm",
         )}
+        // Pair aria-hidden with inert: inert auto-blurs any focused
+        // descendant on apply, which avoids Chrome's "Blocked aria-hidden on
+        // an element because its descendant retained focus" warning when the
+        // user clicks the close button (focus is on the button when the
+        // panel is told to hide). Same pattern as the terminal tab below.
         aria-hidden={!panelVisible}
+        inert={!panelVisible ? true : undefined}
       >
       {/* Drag handle (left edge) — double-click snaps between default and wide.
           Kept visible in overlay mode too, so the user can shrink the panel
@@ -325,7 +336,12 @@ export function RightPanel() {
           <Button
             variant="ghost"
             size="icon-xs"
-            onClick={() => hideRightPanel(activeThreadId!)}
+            onClick={() => {
+              // Blur the close button before triggering the hide so focus is
+              // not inside the panel when aria-hidden applies on re-render.
+              (document.activeElement as HTMLElement | null)?.blur?.();
+              hideRightPanel(activeThreadId!);
+            }}
             className="h-5 w-5 text-muted-foreground/70 hover:text-foreground hover:bg-transparent transition-colors duration-150"
             aria-label="Close panel"
           >

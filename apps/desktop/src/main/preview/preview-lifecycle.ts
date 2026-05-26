@@ -115,6 +115,56 @@ export function ensureTabView(
 
   view.webContents.setBackgroundThrottling(true);
 
+  // Forward modifier-chord keystrokes from the guest WebContents to the host
+  // renderer so app shortcuts (Ctrl+Shift+D for the capture dock, Ctrl+1..9
+  // for thread switching, etc.) still work when focus is inside the preview.
+  // Without this, the host's document keydown listener never sees these keys
+  // because they are dispatched to the guest's separate process tree.
+  //
+  // Clipboard / find / page-reload chords are skipped so they keep their
+  // native behavior inside the guest (Ctrl+C copies selected text, Ctrl+F
+  // opens the page's find bar via the embedded Chromium, etc.).
+  view.webContents.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown") return;
+    const hasMod = input.control || input.meta;
+    const hasShift = input.shift;
+    const hasAlt = input.alt;
+    if (!hasMod && !hasAlt) return;
+    const key = input.key.toLowerCase();
+    // Plain Ctrl/Cmd + standard browser-page chord: leave with the page.
+    // c/v/x/a clipboard + selection, f find-in-page, s save-as,
+    // r reload, z undo in form fields.
+    if (hasMod && !hasShift && !hasAlt) {
+      if (
+        key === "c" ||
+        key === "v" ||
+        key === "x" ||
+        key === "a" ||
+        key === "f" ||
+        key === "s" ||
+        key === "r" ||
+        key === "z"
+      ) {
+        return;
+      }
+    }
+    const parts: string[] = [];
+    if (hasMod) parts.push("mod");
+    if (hasShift) parts.push("shift");
+    if (hasAlt) parts.push("alt");
+    parts.push(key);
+    const combo = parts.join("+");
+    const reservedHostChord =
+      combo === "mod+shift+b" ||
+      combo === "mod+shift+d" ||
+      combo === "mod+shift+y" ||
+      /^mod\+[1-9]$/.test(combo);
+    if (reservedHostChord) event.preventDefault();
+    if (!win.isDestroyed()) {
+      win.webContents.send("preview:shortcut-fired", combo);
+    }
+  });
+
   view.webContents.setWindowOpenHandler((details) => {
     try {
       const u = new URL(details.url);

@@ -174,6 +174,9 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     openExternal(): Promise<void> {
       return ipcRenderer.invoke("preview:open-external");
     },
+    openGuestDevTools(): Promise<void> {
+      return ipcRenderer.invoke("preview:open-guest-devtools");
+    },
     getNavigationState(): Promise<{ canGoBack: boolean; canGoForward: boolean }> {
       return ipcRenderer.invoke("preview:get-navigation-state");
     },
@@ -218,6 +221,17 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     /** Cancel any in-progress capture operation (region or element-pick). */
     cancelCapture(): Promise<void> {
       return ipcRenderer.invoke("preview:cancel-capture");
+    },
+    /**
+     * Subscribe to keyboard chords forwarded from the guest WebContents.
+     * Fires whenever the guest's `before-input-event` matches a modifier
+     * combo we want the host to handle (e.g. Ctrl+Shift+D for the capture
+     * dock). The combo string mirrors the keybinding JSON format ("mod+shift+d").
+     */
+    onShortcutFired(callback: (combo: string) => void) {
+      const listener = (_event: unknown, combo: string) => callback(combo);
+      ipcRenderer.on("preview:shortcut-fired", listener);
+      return () => ipcRenderer.removeListener("preview:shortcut-fired", listener);
     },
     /** Read the live perf counter bag (dev HUD only). */
     getPerfCounters(): Promise<unknown> {

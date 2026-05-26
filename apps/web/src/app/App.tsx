@@ -14,6 +14,8 @@ import { resizeMessageCache } from "@/stores/messageCache";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useDiffStore } from "@/stores/diffStore";
+import { usePreviewDockStore } from "@/stores/previewDockStore";
+import { usePreviewFocusStore } from "@/stores/previewFocusStore";
 import { useUiStore } from "@/stores/uiStore";
 import { initShortcuts } from "@/lib/shortcuts";
 import { registerCommand } from "@/lib/command-registry";
@@ -314,11 +316,46 @@ export function App() {
           if (!panel.visible) {
             showRightPanel(tid);
             setRightPanelTab(tid, "preview");
+            // Pull focus into the URL field so the user can type a URL
+            // immediately after opening the preview by shortcut.
+            usePreviewFocusStore.getState().requestOmniboxFocus();
           } else if (panel.activeTab !== "preview") {
             setRightPanelTab(tid, "preview");
+            usePreviewFocusStore.getState().requestOmniboxFocus();
           } else {
             hideRightPanel(tid);
           }
+        },
+      }),
+      registerCommand({
+        id: "preview.devDock.toggle",
+        title: "Toggle Preview Capture Tools",
+        category: "View",
+        handler: () => {
+          const tid = useWorkspaceStore.getState().activeThreadId;
+          if (!tid) return;
+          // The dock only renders inside PreviewPanel, which mounts only
+          // when the right panel is visible AND on the preview tab. If
+          // either is closed, ensure them first so a freshly-toggled
+          // dock has somewhere to render. Mirrors preview.toggle (mod+
+          // shift+b) so the two shortcuts feel like part of the same
+          // surface.
+          const { getRightPanel, showRightPanel, setRightPanelTab } =
+            useDiffStore.getState();
+          const panel = getRightPanel(tid);
+          if (!panel.visible || panel.activeTab !== "preview") {
+            showRightPanel(tid);
+            setRightPanelTab(tid, "preview");
+          }
+          usePreviewDockStore.getState().toggle(tid);
+        },
+      }),
+      registerCommand({
+        id: "preview.guestDevTools.open",
+        title: "Open Guest Page DevTools",
+        category: "View",
+        handler: () => {
+          void window.desktopBridge?.preview.openGuestDevTools();
         },
       }),
       // Thread switching: Cmd+1 through Cmd+9

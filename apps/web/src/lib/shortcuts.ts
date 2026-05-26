@@ -58,9 +58,36 @@ function handleKeyDown(e: KeyboardEvent): void {
 }
 
 /**
+ * Synthesize a KeyboardEvent from a "mod+shift+d"-style combo string and
+ * dispatch it on document so the same handleKeyDown path that handles real
+ * keystrokes also handles chords forwarded from the preview guest. Keeping
+ * the dispatch path uniform means when-clauses, command lookup, and
+ * preventDefault behavior stay identical for host and guest origins.
+ */
+function dispatchForwardedShortcut(combo: string): void {
+  const parts = combo.split("+");
+  if (parts.length === 0) return;
+  const key = parts[parts.length - 1]!;
+  const hasMod = parts.includes("mod");
+  const isMac = navigator.platform.toLowerCase().includes("mac");
+  const event = new KeyboardEvent("keydown", {
+    key,
+    ctrlKey: hasMod && !isMac,
+    metaKey: hasMod && isMac,
+    shiftKey: parts.includes("shift"),
+    altKey: parts.includes("alt"),
+    bubbles: true,
+    cancelable: true,
+  });
+  document.dispatchEvent(event);
+}
+
+/**
  * Initialize the keybinding system.
  * Loads default keybindings (merged with optional user overrides),
  * attaches the global keydown listener, and sets up focus tracking.
+ * Also subscribes to chords forwarded from the preview guest WebContents
+ * so app shortcuts work when the user is focused inside the preview.
  */
 export function initShortcuts(overrides?: Keybinding[]): () => void {
   loadKeybindings(defaultKeybindings as Keybinding[], overrides);
@@ -68,10 +95,16 @@ export function initShortcuts(overrides?: Keybinding[]): () => void {
   document.addEventListener("focusin", updateFocusContext);
   document.addEventListener("focusout", updateFocusContext);
 
+  const onShortcutFired = window.desktopBridge?.preview?.onShortcutFired;
+  const unsubscribePreviewShortcut = onShortcutFired
+    ? onShortcutFired(dispatchForwardedShortcut)
+    : undefined;
+
   return () => {
     document.removeEventListener("keydown", handleKeyDown);
     document.removeEventListener("focusin", updateFocusContext);
     document.removeEventListener("focusout", updateFocusContext);
+    unsubscribePreviewShortcut?.();
   };
 }
 
