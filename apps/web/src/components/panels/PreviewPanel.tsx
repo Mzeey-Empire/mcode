@@ -260,14 +260,22 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
               role="separator"
               aria-label="Resize capture tools"
               aria-orientation={dock.edge === "bottom" ? "horizontal" : "vertical"}
+              tabIndex={0}
               data-testid="preview-dock-splitter"
               onPointerDown={onSplitterPointerDown}
               onPointerMove={onSplitterPointerMove}
               onPointerUp={onSplitterPointerUp}
               onPointerCancel={onSplitterPointerUp}
               className={cn(
-                "shrink-0 bg-transparent transition-colors hover:bg-primary/30",
-                // A 4-6px hit target on the splitter axis keeps the surface
+                // Subtle at rest so the boundary reads as a separator the
+                // user can find by sight; hover ramps to amber to confirm
+                // the affordance; active strengthens during drag for tactile
+                // feedback. Pointer Events already pin the cursor through
+                // setPointerCapture so :active stays true for the whole drag.
+                "shrink-0 bg-border/40 transition-colors",
+                "hover:bg-primary/50 active:bg-primary/60",
+                "focus-visible:outline-none focus-visible:bg-primary/50",
+                // A 6px hit target on the splitter axis keeps the surface
                 // and dock cells flush while still being grabbable.
                 dock.edge === "bottom"
                   ? "h-1.5 w-full cursor-ns-resize"

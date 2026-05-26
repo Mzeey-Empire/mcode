@@ -274,7 +274,11 @@ export function PreviewToolbar({
             type="button"
             aria-label="Exit design mode"
             title="Exit design mode"
-            className="flex shrink-0 items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/15"
+            className={cn(
+              "flex shrink-0 items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary",
+              "transition-colors hover:bg-primary/15",
+              "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+            )}
             onClick={onExitDesignMode}
           >
             <PenTool size={12} aria-hidden />
@@ -290,7 +294,11 @@ export function PreviewToolbar({
           <button
             type="button"
             aria-label="Cancel capture"
-            className="flex shrink-0 items-center gap-1 rounded border border-destructive/20 bg-destructive/10 px-2 py-0.5 text-[11px] text-destructive/80 transition-colors hover:bg-destructive/15"
+            className={cn(
+              "flex shrink-0 items-center gap-1 rounded border border-destructive/20 bg-destructive/10 px-2 py-0.5 text-[11px] text-destructive/80",
+              "transition-colors hover:bg-destructive/15",
+              "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-destructive/60 focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+            )}
             onClick={() => void window.desktopBridge?.preview.cancelCapture()}
           >
             <kbd className="rounded border border-destructive/15 bg-destructive/5 px-1 py-px text-[10px] font-medium">
