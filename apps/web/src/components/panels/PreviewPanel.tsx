@@ -37,10 +37,42 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
   const dock = usePreviewDockStore((s) => s.docks[threadId]) ?? {
     open: false,
     edge: "bottom" as const,
+    size: 240,
   };
   const dockToggle = usePreviewDockStore((s) => s.toggle);
   const dockSetOpen = usePreviewDockStore((s) => s.setOpen);
   const dockSetEdge = usePreviewDockStore((s) => s.setEdge);
+  const dockSetSize = usePreviewDockStore((s) => s.setSize);
+
+  // Splitter drag state. Tracking via ref (not state) avoids a re-render
+  // on every pointermove tick; the dock's size already comes from the
+  // store and will re-render when setSize is called.
+  const splitterDragRef = useRef<{ startPos: number; startSize: number } | null>(null);
+  const onSplitterPointerDown = (e: React.PointerEvent<HTMLDivElement>): void => {
+    if (!dock.open) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    splitterDragRef.current = {
+      startPos: dock.edge === "bottom" ? e.clientY : e.clientX,
+      startSize: dock.size,
+    };
+  };
+  const onSplitterPointerMove = (e: React.PointerEvent<HTMLDivElement>): void => {
+    if (!splitterDragRef.current) return;
+    e.preventDefault();
+    const { startPos, startSize } = splitterDragRef.current;
+    // Both dock edges grow when the user drags the splitter AWAY from
+    // the surface: bottom dock grows when dragged up, right dock grows
+    // when dragged left. delta is therefore startPos - currentPos.
+    const currentPos = dock.edge === "bottom" ? e.clientY : e.clientX;
+    const delta = startPos - currentPos;
+    dockSetSize(threadId, startSize + delta);
+  };
+  const onSplitterPointerUp = (e: React.PointerEvent<HTMLDivElement>): void => {
+    if (!splitterDragRef.current) return;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    splitterDragRef.current = null;
+  };
   const designModeActive = usePreviewDesignModeStore((s) => s.modes[threadId] === true);
   const designModeToggle = usePreviewDesignModeStore((s) => s.toggle);
   const designModeSetActive = usePreviewDesignModeStore((s) => s.setActive);
@@ -196,7 +228,9 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
           className="relative min-h-[min(40vh,20rem)] min-w-0 flex-1 rounded-md border border-dashed border-border/50 bg-muted/10"
           aria-hidden
         >
-          {/* Loading: thin indeterminate progress bar at top of content area */}
+          {/* Loading: thin indeterminate progress bar at top of content area.
+              motion-safe gates the animation so users with prefers-reduced-motion
+              get a static bar instead of a perpetual sweep. */}
           {bridge.previewLoading ? (
             <div
               data-testid="preview-loading-banner"
@@ -205,7 +239,7 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
               aria-live="polite"
               aria-label="Page loading"
             >
-              <div className="h-full w-1/3 animate-preview-loading rounded-full bg-primary/80" />
+              <div className="h-full w-1/3 motion-safe:animate-preview-loading rounded-full bg-primary/80" />
             </div>
           ) : null}
           {!hasLoadedPage && !bridge.previewLoading ? (
@@ -218,25 +252,45 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
           ) : null}
         </div>
         {dock.open ? (
-          <div
-            className={cn(
-              "shrink-0 overflow-hidden rounded-md border border-border/40 bg-muted/5",
-              dock.edge === "bottom"
-                ? "h-[min(28vh,16rem)] w-full"
-                : "h-full w-[min(32vw,22rem)]",
-            )}
-          >
-            <PreviewDevDock
-              edge={dock.edge}
-              onChangeEdge={(e) => dockSetEdge(threadId, e)}
-              onClose={() => dockSetOpen(threadId, false)}
-              threadId={threadId}
-              regionBusy={capture.regionBusy}
-              onAddRegionPictureReference={capture.onAddRegionPictureReference}
-              contextBusy={capture.contextBusy}
-              onAddPageContextOnly={capture.onAddPageContextOnly}
+          <>
+            <div
+              role="separator"
+              aria-label="Resize capture tools"
+              aria-orientation={dock.edge === "bottom" ? "horizontal" : "vertical"}
+              data-testid="preview-dock-splitter"
+              onPointerDown={onSplitterPointerDown}
+              onPointerMove={onSplitterPointerMove}
+              onPointerUp={onSplitterPointerUp}
+              onPointerCancel={onSplitterPointerUp}
+              className={cn(
+                "shrink-0 bg-transparent transition-colors hover:bg-primary/30",
+                // A 4-6px hit target on the splitter axis keeps the surface
+                // and dock cells flush while still being grabbable.
+                dock.edge === "bottom"
+                  ? "h-1.5 w-full cursor-ns-resize"
+                  : "h-full w-1.5 cursor-ew-resize",
+              )}
             />
-          </div>
+            <div
+              style={
+                dock.edge === "bottom"
+                  ? { height: `${dock.size}px`, width: "100%" }
+                  : { width: `${dock.size}px`, height: "100%" }
+              }
+              className="shrink-0 overflow-hidden rounded-md border border-border/40 bg-muted/5"
+            >
+              <PreviewDevDock
+                edge={dock.edge}
+                onChangeEdge={(e) => dockSetEdge(threadId, e)}
+                onClose={() => dockSetOpen(threadId, false)}
+                threadId={threadId}
+                regionBusy={capture.regionBusy}
+                onAddRegionPictureReference={capture.onAddRegionPictureReference}
+                contextBusy={capture.contextBusy}
+                onAddPageContextOnly={capture.onAddPageContextOnly}
+              />
+            </div>
+          </>
         ) : null}
       </div>
       <PreviewPerfHud />
