@@ -11,6 +11,8 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatKeybinding } from "@/lib/keybinding-manager";
+import { isMac } from "@/lib/platform";
 import { ICON_HIT_SLOP } from "@/lib/ui-hit-target";
 import { Button } from "@/components/ui/button";
 import {
@@ -288,7 +290,7 @@ export function PreviewToolbar({
           }
         />
         <TooltipContent side="top" sideOffset={6} className="text-xs">
-          Capture tools (Ctrl+Shift+D)
+          Capture tools ({formatKeybinding("mod+shift+d", isMac)})
         </TooltipContent>
       </Tooltip>
 

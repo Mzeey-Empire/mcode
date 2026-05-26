@@ -154,7 +154,12 @@ export function ensureTabView(
     if (hasAlt) parts.push("alt");
     parts.push(key);
     const combo = parts.join("+");
-    event.preventDefault();
+    const reservedHostChord =
+      combo === "mod+shift+b" ||
+      combo === "mod+shift+d" ||
+      combo === "mod+shift+y" ||
+      /^mod\+[1-9]$/.test(combo);
+    if (reservedHostChord) event.preventDefault();
     if (!win.isDestroyed()) {
       win.webContents.send("preview:shortcut-fired", combo);
     }

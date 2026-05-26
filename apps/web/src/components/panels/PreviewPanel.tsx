@@ -379,10 +379,7 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
             // hasLoadedPage gates every capture/design action; without this hint
             // a first-timer lands on a bare Globe and never discovers the picker,
             // region drag, or context dump.
-            <div
-              className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center"
-              aria-hidden
-            >
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
               <Globe className="size-7 text-muted-foreground/15" aria-hidden />
               {/* 10px mono text on bg-muted/10 needs full muted-foreground to
                   clear WCAG AA on both themes; the prior /70 + /55 layering

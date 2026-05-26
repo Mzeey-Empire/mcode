@@ -59,7 +59,14 @@ export function PreviewTabBar({
 
   const onTabListKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
     const tabs = tabSet.tabs;
-    const currentIndex = tabs.findIndex((t) => t.id === tabSet.activeTabId);
+    const tabEls = Array.from(
+      tabListRef.current?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [],
+    );
+    const focusedIndex = tabEls.findIndex((el) => el === document.activeElement);
+    const currentIndex =
+      focusedIndex >= 0
+        ? focusedIndex
+        : tabs.findIndex((t) => t.id === tabSet.activeTabId);
     if (currentIndex === -1) return;
 
     if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
