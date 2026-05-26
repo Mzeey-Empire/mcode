@@ -1,4 +1,11 @@
-import { PanelBottom, PanelRight, Wrench, X } from "lucide-react";
+import {
+  Loader2,
+  PanelBottom,
+  PanelRight,
+  SquareDashedMousePointer,
+  Wrench,
+  X,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -8,8 +15,7 @@ import {
 } from "@/components/ui/tooltip";
 import type { PreviewDockEdge } from "@/stores/previewDockStore";
 
-/** Props for the dev dock chrome. The dock is a presentational shell; rows that
- *  call into capture handlers land in later phases. */
+/** Props for the dev dock chrome and its content rows. */
 export interface PreviewDevDockProps {
   /** Persisted edge the dock attaches to (bottom or right). */
   readonly edge: PreviewDockEdge;
@@ -17,26 +23,37 @@ export interface PreviewDevDockProps {
   readonly onChangeEdge: (edge: PreviewDockEdge) => void;
   /** Close the dock. */
   readonly onClose: () => void;
+  /** Thread id; rows disable themselves when this is empty so we never fire a
+   *  capture against a non-existent attachment queue. */
+  readonly threadId: string;
+  /** True while a region drag-marquee is in flight in the guest page. */
+  readonly regionBusy: boolean;
+  /** Fires the region-capture session (handled by usePreviewCapture). */
+  readonly onAddRegionPictureReference: () => void;
 }
 
 /**
  * Dev dock chrome for the preview panel. A DevTools-style dockable surface
  * (bottom or right edge) that houses power-user rows the primary toolbar
- * intentionally omits. Phase 2 ships the shell + edge toggle + close. Region
- * capture (Phase 4) and page-context dump (Phase 5) attach as content rows.
+ * intentionally omits. Phase 4 adds the Region capture row that drives the
+ * in-guest drag marquee; Phase 5 will add a page-context dump row below it.
  *
  * Sizing is handled by the parent flex container; this component fills its
- * available cell. Header uses the editorial mono small-caps treatment from
- * the project aesthetic.
+ * available cell. The header uses the editorial mono small-caps treatment
+ * from the project aesthetic; rows are flat, button-styled, no card chrome.
  */
 export function PreviewDevDock({
   edge,
   onChangeEdge,
   onClose,
+  threadId,
+  regionBusy,
+  onAddRegionPictureReference,
 }: PreviewDevDockProps) {
   const OppositeEdgeIcon = edge === "right" ? PanelBottom : PanelRight;
   const oppositeEdge: PreviewDockEdge = edge === "right" ? "bottom" : "right";
   const oppositeLabel = oppositeEdge === "right" ? "Dock to right" : "Dock to bottom";
+  const regionDisabled = regionBusy || !threadId;
 
   return (
     <div
@@ -93,13 +110,48 @@ export function PreviewDevDock({
         </Tooltip>
       </header>
 
-      <div className="flex flex-1 flex-col items-center justify-center gap-1.5 px-4 py-6 text-center">
-        <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground/45">
-          surface ready
+      <div className="flex flex-1 flex-col gap-1 overflow-y-auto p-1.5">
+        <span className="px-1.5 pt-0.5 pb-0.5 font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/50">
+          capture
         </span>
-        <p className="max-w-[18rem] text-balance text-[11px] leading-snug text-muted-foreground/60">
-          Region capture and page-context tools attach here as later phases land.
-        </p>
+        <button
+          type="button"
+          data-testid="preview-dev-dock-region"
+          disabled={regionDisabled}
+          onClick={onAddRegionPictureReference}
+          aria-busy={regionBusy}
+          className={cn(
+            "group flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left transition-colors",
+            "hover:bg-muted/60",
+            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/40",
+            "disabled:cursor-not-allowed disabled:opacity-60",
+          )}
+        >
+          <span
+            className={cn(
+              "flex size-7 shrink-0 items-center justify-center rounded border border-border/40 bg-muted/30 text-muted-foreground transition-colors",
+              !regionDisabled && "group-hover:border-primary/30 group-hover:bg-primary/10 group-hover:text-primary",
+              regionBusy && "border-primary/30 bg-primary/10 text-primary",
+            )}
+            aria-hidden
+          >
+            {regionBusy ? (
+              <Loader2 size={13} className="animate-spin" />
+            ) : (
+              <SquareDashedMousePointer size={13} />
+            )}
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="text-[11px] font-medium text-foreground/90">
+              {regionBusy ? "Selecting region…" : "Region capture"}
+            </span>
+            <span className="truncate text-[10px] text-muted-foreground/70">
+              {regionBusy
+                ? "Drag on the page · Esc to cancel"
+                : "Drag a rectangle on the page to attach as PNG"}
+            </span>
+          </span>
+        </button>
       </div>
     </div>
   );

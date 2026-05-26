@@ -230,6 +230,9 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
               edge={dock.edge}
               onChangeEdge={(e) => dockSetEdge(threadId, e)}
               onClose={() => dockSetOpen(threadId, false)}
+              threadId={threadId}
+              regionBusy={capture.regionBusy}
+              onAddRegionPictureReference={capture.onAddRegionPictureReference}
             />
           </div>
         ) : null}
