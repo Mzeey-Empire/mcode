@@ -284,7 +284,7 @@ const RG_INJECT_JS = `(function(){
   var LAYER_ID = "__mcode_rg_layer", BOX_ID = "__mcode_rg_box";
   var style = document.createElement("style");
   style.setAttribute("data-mcode-rg", "1");
-  style.textContent = "#__mcode_rg_layer{position:fixed;inset:0;background:rgba(15,23,42,.35);cursor:crosshair;z-index:2147483646}#__mcode_rg_box{position:fixed;left:0;top:0;width:0;height:0;border:2px dashed #fff;box-sizing:border-box;pointer-events:none;display:none;box-shadow:0 0 0 1px rgba(0,0,0,.4) inset;z-index:2147483647}html.__mcode_rg_active,html.__mcode_rg_active *{cursor:crosshair !important;user-select:none !important}";
+  style.textContent = "#__mcode_rg_layer{position:fixed;inset:0;background:rgba(15,23,42,.35);cursor:crosshair;z-index:2147483646;touch-action:none}#__mcode_rg_box{position:fixed;left:0;top:0;width:0;height:0;border:2px dashed #fff;box-sizing:border-box;pointer-events:none;display:none;box-shadow:0 0 0 1px rgba(0,0,0,.4) inset;z-index:2147483647}html.__mcode_rg_active,html.__mcode_rg_active *{cursor:crosshair !important;user-select:none !important}";
   (document.head || document.documentElement).appendChild(style);
 
   var layer = document.createElement("div");
@@ -302,7 +302,7 @@ const RG_INJECT_JS = `(function(){
   window.__mcodeRgState = { commit: null, cancelled: false, seq: 0 };
   function bump(){ try { window.__mcodeRgState.seq++; } catch (e) {} }
 
-  var dragging = false, sx = 0, sy = 0, cx = 0, cy = 0;
+  var dragging = false, activePointerId = -1, sx = 0, sy = 0, cx = 0, cy = 0;
   function lay(){
     if (!dragging) { box.style.display = "none"; return; }
     var x = Math.min(sx, cx), y = Math.min(sy, cy);
@@ -313,24 +313,35 @@ const RG_INJECT_JS = `(function(){
     box.style.height = h + "px";
     box.style.display = w > 0 && h > 0 ? "block" : "none";
   }
-  function onMouseDown(ev){
+  // Pointer Events instead of legacy MouseEvent: Chromium's input pipeline
+  // dispatches pointer events first and can suppress the compat mouse cascade
+  // when an ancestor capture-phase listener preventDefaults pointerdown (which
+  // is exactly what the legacy EVENTS_BLOCK array did). Driving the drag
+  // entirely from pointer events with setPointerCapture is the supported path
+  // and removes the mouse-compat suppression class of bugs.
+  function onPointerDown(ev){
+    if (ev.button !== 0 && ev.pointerType === "mouse") return;
     ev.preventDefault(); ev.stopImmediatePropagation(); ev.stopPropagation();
     if (window.__mcodeRgState.commit || window.__mcodeRgState.cancelled) return;
     dragging = true;
+    activePointerId = ev.pointerId;
+    try { layer.setPointerCapture(ev.pointerId); } catch (e) {}
     sx = ev.clientX; sy = ev.clientY;
     cx = sx; cy = sy;
     lay();
   }
-  function onMouseMove(ev){
-    if (!dragging) return;
+  function onPointerMove(ev){
+    if (!dragging || ev.pointerId !== activePointerId) return;
     ev.preventDefault(); ev.stopImmediatePropagation(); ev.stopPropagation();
     cx = ev.clientX; cy = ev.clientY;
     lay();
   }
-  function onMouseUp(ev){
-    if (!dragging) return;
+  function onPointerUp(ev){
+    if (!dragging || ev.pointerId !== activePointerId) return;
     ev.preventDefault(); ev.stopImmediatePropagation(); ev.stopPropagation();
     dragging = false;
+    try { layer.releasePointerCapture(ev.pointerId); } catch (e) {}
+    activePointerId = -1;
     var x = Math.min(sx, cx), y = Math.min(sy, cy);
     var w = Math.abs(cx - sx), h = Math.abs(cy - sy);
     box.style.display = "none";
@@ -343,7 +354,10 @@ const RG_INJECT_JS = `(function(){
     bump();
   }
   function blockEvent(ev){
-    ev.preventDefault(); ev.stopImmediatePropagation(); ev.stopPropagation();
+    // Stop the page from seeing secondary click types during a selection.
+    // Do not preventDefault: that can suppress the pointer / compat-mouse
+    // cascade we depend on for drag tracking.
+    ev.stopImmediatePropagation(); ev.stopPropagation();
   }
   function onKeydown(ev){
     if (ev.key === "Escape" || ev.key === "Esc") {
@@ -358,13 +372,14 @@ const RG_INJECT_JS = `(function(){
     }
   }
 
-  // mousedown originates on the layer; mousemove/mouseup live on document so
-  // dragging past the layer edge (which is the whole viewport here anyway)
-  // is still tracked. EVENTS_BLOCK keeps secondary click types out of the page.
-  var EVENTS_BLOCK = ["contextmenu","dblclick","auxclick","pointerdown","pointerup","click"];
-  layer.addEventListener("mousedown", onMouseDown, true);
-  document.addEventListener("mousemove", onMouseMove, true);
-  document.addEventListener("mouseup", onMouseUp, true);
+  // Drag handlers live on the layer (setPointerCapture pins later events to
+  // it). EVENTS_BLOCK still blocks click / contextmenu / dblclick from the
+  // page so a clean release does not trigger a link follow or context menu.
+  var EVENTS_BLOCK = ["contextmenu","dblclick","auxclick","click"];
+  layer.addEventListener("pointerdown", onPointerDown, true);
+  layer.addEventListener("pointermove", onPointerMove, true);
+  layer.addEventListener("pointerup", onPointerUp, true);
+  layer.addEventListener("pointercancel", onPointerUp, true);
   document.addEventListener("keydown", onKeydown, true);
   for (var i = 0; i < EVENTS_BLOCK.length; i++) {
     document.addEventListener(EVENTS_BLOCK[i], blockEvent, true);
@@ -372,9 +387,10 @@ const RG_INJECT_JS = `(function(){
 
   window.__mcodeRgTeardown = function(){
     try {
-      layer.removeEventListener("mousedown", onMouseDown, true);
-      document.removeEventListener("mousemove", onMouseMove, true);
-      document.removeEventListener("mouseup", onMouseUp, true);
+      layer.removeEventListener("pointerdown", onPointerDown, true);
+      layer.removeEventListener("pointermove", onPointerMove, true);
+      layer.removeEventListener("pointerup", onPointerUp, true);
+      layer.removeEventListener("pointercancel", onPointerUp, true);
       document.removeEventListener("keydown", onKeydown, true);
       for (var j = 0; j < EVENTS_BLOCK.length; j++) {
         document.removeEventListener(EVENTS_BLOCK[j], blockEvent, true);
