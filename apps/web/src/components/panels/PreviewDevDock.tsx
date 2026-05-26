@@ -88,11 +88,11 @@ export function PreviewDevDock({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-xs"
+                size="icon-sm"
                 onClick={() => onChangeEdge(oppositeEdge)}
                 aria-label={oppositeLabel}
               >
-                <OppositeEdgeIcon size={13} aria-hidden />
+                <OppositeEdgeIcon size={16} aria-hidden />
               </Button>
             }
           />
@@ -106,11 +106,11 @@ export function PreviewDevDock({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-xs"
+                size="icon-sm"
                 onClick={onClose}
                 aria-label="Close capture tools"
               >
-                <X size={13} aria-hidden />
+                <X size={16} aria-hidden />
               </Button>
             }
           />

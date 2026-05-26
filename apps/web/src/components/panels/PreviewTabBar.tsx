@@ -94,9 +94,9 @@ export function PreviewTabBar({
                   e.stopPropagation();
                   onClose(tab.id);
                 }}
-                className="ml-auto inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground/60 opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                className="ml-auto inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
               >
-                <X className="size-3" aria-hidden />
+                <X className="size-3.5" aria-hidden />
               </button>
             ) : null}
           </div>
@@ -107,9 +107,9 @@ export function PreviewTabBar({
         aria-label="New tab"
         data-testid="preview-tab-new"
         onClick={onNewTab}
-        className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+        className="inline-flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/40"
       >
-        <Plus className="size-3.5" aria-hidden />
+        <Plus className="size-4" aria-hidden />
       </button>
     </div>
   );
