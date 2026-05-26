@@ -29,24 +29,25 @@ import {
 /**
  * Element-pick runs entirely inside the guest page: capture-phase event handlers block
  * the underlying page's pointer/keyboard activity, an in-page lightweight hit-test drives
- * the cyan highlight + tooltip, and a shared `window.__mcodeEpState` object queues the
+ * the amber highlight + tooltip, and a shared `window.__mcodeEpState` object queues the
  * commit point or cancellation flag for the host to drain via executeJavaScript polling.
  *
  * Why this replaces the previous transparent child BrowserWindow overlay: on Windows,
  * DWM cannot composite a transparent BrowserWindow over a WebContentsView. The overlay
  * paints opaque (black), hiding the page underneath. Injecting into the guest keeps the
- * cyan highlight visible on top of real page pixels.
+ * amber highlight visible on top of real page pixels.
  */
 const EP_INJECT_JS = `(function(){
   if (window.__mcodeEpTeardown) return;
   var HL_ID = "__mcode_ep_hl", TIP_ID = "__mcode_ep_tip";
   var style = document.createElement("style");
   style.setAttribute("data-mcode-ep", "1");
-  // Highlight: solid cyan rect around the picked element.
-  // Tip: a small tab-style badge attached to the top-left of the rect (DevTools-style).
-  // Sits flush above the rect's top border when there's room above, otherwise flips
-  // inside the rect (rounded bottom corners) so it never overflows the viewport.
-  style.textContent = "#__mcode_ep_hl{position:fixed;left:0;top:0;width:0;height:0;pointer-events:none;border:2px solid #22d3ee;box-sizing:border-box;z-index:2147483646;display:none;box-shadow:0 0 0 1px rgba(0,0,0,.35) inset;border-radius:2px}#__mcode_ep_tip{position:fixed;left:0;top:0;pointer-events:none;z-index:2147483647;display:none;max-width:min(360px,calc(100vw - 12px));font:600 11px/1.2 ui-sans-serif,system-ui,sans-serif;color:#0f172a;background:#22d3ee;border-radius:3px 3px 0 0;padding:3px 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 1px 4px rgba(0,0,0,.25)}#__mcode_ep_tip[data-flipped=\\"1\\"]{border-radius:0 0 3px 3px}html.__mcode_ep_active,html.__mcode_ep_active *{cursor:crosshair !important}";
+  // Highlight + tip use the app's warm-amber primary (oklch(0.72 0.17 75)) so
+  // the in-guest selection reads as part of Mcode, not a stock browser-devtools
+  // cyan. Inlined as a literal because injected JS cannot read host CSS vars.
+  // The tip's foreground sits at oklch(0.18 0.01 75) - very dark, slight warm
+  // tint - which gives high contrast against the amber pill.
+  style.textContent = "#__mcode_ep_hl{position:fixed;left:0;top:0;width:0;height:0;pointer-events:none;border:2px solid oklch(0.72 0.17 75);box-sizing:border-box;z-index:2147483646;display:none;box-shadow:0 0 0 1px rgba(0,0,0,.35) inset;border-radius:2px}#__mcode_ep_tip{position:fixed;left:0;top:0;pointer-events:none;z-index:2147483647;display:none;max-width:min(360px,calc(100vw - 12px));font:600 11px/1.2 ui-sans-serif,system-ui,sans-serif;color:oklch(0.18 0.01 75);background:oklch(0.72 0.17 75);border-radius:3px 3px 0 0;padding:3px 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;box-shadow:0 1px 4px rgba(0,0,0,.25)}#__mcode_ep_tip[data-flipped=\\"1\\"]{border-radius:0 0 3px 3px}html.__mcode_ep_active,html.__mcode_ep_active *{cursor:crosshair !important}";
   (document.head || document.documentElement).appendChild(style);
   var box = document.createElement("div");
   box.id = HL_ID;
@@ -142,7 +143,11 @@ const EP_INJECT_JS = `(function(){
     box.style.top = r.top + "px";
     box.style.width = r.width + "px";
     box.style.height = r.height + "px";
-    tip.textContent = labelFor(el);
+    // Append an action hint so first-timers understand the model: clicking
+    // the page in design mode attaches the element, it does not navigate.
+    // The Esc-to-exit affordance is already carried by the top-right Design
+    // pill, so we only spell out the positive action here to keep the tip tight.
+    tip.textContent = labelFor(el) + " \u00b7 click to attach";
     tip.style.display = "block";
     // Measure after content is set so flip detection uses the real tip height.
     var pad = 4;
@@ -450,7 +455,7 @@ type HitTestResult =
 
 /**
  * Draws the element-pick highlight inside the guest page (not the shell overlay), matching layout viewport coords.
- * Must run removeEpPickHighlighter before capturePage so the cyan frame is not in the PNG.
+ * Must run removeEpPickHighlighter before capturePage so the amber frame is not in the PNG.
  */
 async function injectEpPickHighlighter(wc: WebContents): Promise<void> {
   if (wc.isDestroyed()) return;
@@ -1254,7 +1259,7 @@ async function runElementPickPollTick(s: PreviewSession, hostWin: BrowserWindow)
 
 /**
  * Runs the authoritative hit-test on the commit point and produces the capture payload.
- * Tears down the injected handlers before capturePage so the cyan highlight isn't burned in.
+ * Tears down the injected handlers before capturePage so the amber highlight isn't burned in.
  */
 async function finishElementPickCapture(
   s: PreviewSession,
