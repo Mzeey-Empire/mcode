@@ -121,45 +121,53 @@ export function AttachmentPreview({ attachments, onRemove }: AttachmentPreviewPr
 
           if (isImage) {
             const slideIndex = previewableImages.findIndex((x) => x.id === att.id);
+            // Remove control is a sibling of the preview button, not a child:
+            // <button> inside <button> is invalid HTML and triggers a React
+            // hydration warning. The wrapper div carries the "group" so
+            // group-hover still reveals the remove control.
             return (
-              <button
+              <div
                 key={att.id}
-                type="button"
-                className={cn(
-                  "group relative flex h-[72px] w-[72px] flex-shrink-0 cursor-pointer overflow-hidden rounded-lg border p-0 text-left outline-none",
-                  "border-border/60 bg-muted/60 transition-[border-color,background-color,filter]",
-                  "hover:border-primary/45 hover:bg-muted/80 hover:brightness-[1.04]",
-                  "focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                )}
+                className="group relative h-[72px] w-[72px] flex-shrink-0"
                 title={spill?.title}
-                aria-label={`Preview image ${att.name}`}
-                onClick={() =>
-                  setImagePreview({
-                    items: previewableImages.map((a) => ({
-                      src: a.previewUrl,
-                      title: a.name,
-                    })),
-                    initialIndex: slideIndex >= 0 ? slideIndex : 0,
-                  })
-                }
               >
-                {spill ? (
-                  <span
-                    className="absolute bottom-0.5 left-0.5 right-0.5 z-10 truncate rounded bg-background/85 px-0.5 text-center text-[8px] font-medium text-foreground/90 shadow-sm"
-                    title={spill.title}
-                  >
-                    + spill file
-                  </span>
-                ) : null}
-                <img
-                  src={att.previewUrl}
-                  alt={att.name}
-                  className="h-full w-full object-cover"
-                  draggable={false}
-                />
-                <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-black/25 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+                <button
+                  type="button"
+                  className={cn(
+                    "relative flex h-full w-full cursor-pointer overflow-hidden rounded-lg border p-0 text-left outline-none",
+                    "border-border/60 bg-muted/60 transition-[border-color,background-color,filter]",
+                    "hover:border-primary/45 hover:bg-muted/80 hover:brightness-[1.04]",
+                    "focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                  )}
+                  aria-label={`Preview image ${att.name}`}
+                  onClick={() =>
+                    setImagePreview({
+                      items: previewableImages.map((a) => ({
+                        src: a.previewUrl,
+                        title: a.name,
+                      })),
+                      initialIndex: slideIndex >= 0 ? slideIndex : 0,
+                    })
+                  }
+                >
+                  {spill ? (
+                    <span
+                      className="absolute bottom-0.5 left-0.5 right-0.5 z-10 truncate rounded bg-background/85 px-0.5 text-center text-[8px] font-medium text-foreground/90 shadow-sm"
+                      title={spill.title}
+                    >
+                      + spill file
+                    </span>
+                  ) : null}
+                  <img
+                    src={att.previewUrl}
+                    alt={att.name}
+                    className="h-full w-full object-cover"
+                    draggable={false}
+                  />
+                  <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-black/25 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+                </button>
                 {removeButton(att.name, att.id)}
-              </button>
+              </div>
             );
           }
 
