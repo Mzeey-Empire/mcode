@@ -89,22 +89,26 @@ export function PreviewToolbar({
   const DockIcon = devDockEdge === "right" ? PanelRight : PanelBottom;
 
   return (
-    <div className="flex min-w-0 items-center">
-      {/* Nav cluster */}
-      <div className="flex items-center gap-0.5">
+    // Outer gap-2 separates the three semantic groups (nav cluster, action
+    // cluster, lone buttons) by spacing rather than visible dividers — the
+    // dense editorial register of the app prefers proximity-as-grouping over
+    // mid-row vertical rules.
+    <div className="flex min-w-0 items-center gap-2">
+      {/* Nav cluster — tightly packed */}
+      <div className="flex items-center">
         <Tooltip>
           <TooltipTrigger
             render={
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-xs"
+                size="icon-sm"
                 className="shrink-0"
                 disabled={!canBack}
                 onClick={onGoBack}
                 aria-label="Back"
               >
-                <ArrowLeft size={14} />
+                <ArrowLeft size={16} />
               </Button>
             }
           />
@@ -118,13 +122,13 @@ export function PreviewToolbar({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-xs"
+                size="icon-sm"
                 className="shrink-0"
                 disabled={!canFwd}
                 onClick={onGoForward}
                 aria-label="Forward"
               >
-                <ArrowRight size={14} />
+                <ArrowRight size={16} />
               </Button>
             }
           />
@@ -138,12 +142,12 @@ export function PreviewToolbar({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-xs"
+                size="icon-sm"
                 className="shrink-0"
                 onClick={onReload}
                 aria-label="Reload"
               >
-                <RotateCw size={14} />
+                <RotateCw size={16} />
               </Button>
             }
           />
@@ -153,17 +157,15 @@ export function PreviewToolbar({
         </Tooltip>
       </div>
 
-      <div className="mx-1 h-4 w-px bg-border/40" aria-hidden />
-
       {/* Action cluster: Design (mode) + Screenshot (one-shot) */}
-      <div className="flex items-center gap-0.5">
+      <div className="flex items-center">
         <Tooltip>
           <TooltipTrigger
             render={
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-xs"
+                size="icon-sm"
                 aria-pressed={designOn}
                 className={cn(
                   "shrink-0",
@@ -174,9 +176,9 @@ export function PreviewToolbar({
                 aria-label="Design"
               >
                 {elementPickBusy ? (
-                  <Loader2 size={14} className="animate-spin" aria-hidden />
+                  <Loader2 size={16} className="animate-spin" aria-hidden />
                 ) : (
-                  <PenTool size={14} aria-hidden />
+                  <PenTool size={16} aria-hidden />
                 )}
               </Button>
             }
@@ -191,7 +193,7 @@ export function PreviewToolbar({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon-xs"
+                size="icon-sm"
                 className={cn(
                   "shrink-0",
                   captureBusy && "bg-primary/10 text-primary",
@@ -201,9 +203,9 @@ export function PreviewToolbar({
                 aria-label="Screenshot"
               >
                 {captureBusy ? (
-                  <Loader2 size={14} className="animate-spin" aria-hidden />
+                  <Loader2 size={16} className="animate-spin" aria-hidden />
                 ) : (
-                  <Camera size={14} aria-hidden />
+                  <Camera size={16} aria-hidden />
                 )}
               </Button>
             }
@@ -214,21 +216,19 @@ export function PreviewToolbar({
         </Tooltip>
       </div>
 
-      <div className="mx-1 h-4 w-px bg-border/40" aria-hidden />
-
-      {/* External */}
+      {/* External — lone, separated from the action cluster by parent gap-2 */}
       <Tooltip>
         <TooltipTrigger
           render={
             <Button
               type="button"
               variant="ghost"
-              size="icon-xs"
+              size="icon-sm"
               className="shrink-0"
               onClick={onOpenExternal}
               aria-label="Open in system browser"
             >
-              <ExternalLink size={14} aria-hidden />
+              <ExternalLink size={16} aria-hidden />
             </Button>
           }
         />
@@ -236,8 +236,6 @@ export function PreviewToolbar({
           Open in system browser
         </TooltipContent>
       </Tooltip>
-
-      <div className="mx-1 h-4 w-px bg-border/40" aria-hidden />
 
       {/* Capture dock toggle. Houses region + page-context utilities the
           primary toolbar deliberately omits. Real Chrome DevTools for the
@@ -248,7 +246,7 @@ export function PreviewToolbar({
             <Button
               type="button"
               variant="ghost"
-              size="icon-xs"
+              size="icon-sm"
               aria-pressed={devDockOpen}
               className={cn(
                 "shrink-0",
@@ -257,7 +255,7 @@ export function PreviewToolbar({
               onClick={onToggleDevDock}
               aria-label="Toggle capture tools"
             >
-              <DockIcon size={14} aria-hidden />
+              <DockIcon size={16} aria-hidden />
             </Button>
           }
         />

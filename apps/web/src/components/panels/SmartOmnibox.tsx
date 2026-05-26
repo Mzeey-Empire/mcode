@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import {
   useOmniboxState,
   type UseOmniboxStateOptions,
@@ -9,7 +8,7 @@ import {
 
 /** Props for the hybrid title-or-URL omnibox, including navigate callback from the preview panel. */
 export interface SmartOmniboxProps extends UseOmniboxStateOptions {
-  /** Called when user submits a URL (Enter or Go button). */
+  /** Called when the user submits a URL via Enter. */
   onNavigate: (url: string) => void;
   /**
    * Monotonic token that triggers focus + select-all on the input each time
@@ -66,59 +65,48 @@ export function SmartOmnibox({
   const faviconVisible = showFavicon && !faviconError;
 
   return (
-    <div className="flex min-w-0 items-center gap-1.5">
-      <div className="relative min-w-0 flex-1">
-        {faviconVisible ? (
-          <img
-            src={faviconUrl!}
-            alt=""
-            width={14}
-            height={14}
-            loading="eager"
-            className="pointer-events-none absolute top-1/2 left-2 z-10 -translate-y-1/2 rounded-sm"
-            onError={() => setFaviconError(true)}
-          />
-        ) : null}
-        <Input
-          ref={inputRef}
-          value={displayValue}
-          onChange={(e) => onChange(e.target.value)}
-          onFocus={onFocus}
-          onBlur={onBlur}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              const target = onSubmit();
-              if (target.trim()) onNavigate(target);
-            }
-          }}
-          placeholder={placeholder}
-          size="sm"
-          className={cn(
-            "min-w-0",
-            !showAsTitle && "font-mono",
-            faviconVisible && "pl-7",
-            showAsTitle && "cursor-default font-medium",
-          )}
-          aria-label="Preview URL"
-          title={url || undefined}
-          autoCapitalize="off"
-          autoCorrect="off"
-          spellCheck={false}
+    // The "Go" button that used to live next to the input was removed in line
+    // with modern browser address bars: Enter is the universal submit and a
+    // redundant button only adds chrome. The input now spans the row.
+    <div className="relative min-w-0">
+      {faviconVisible ? (
+        <img
+          src={faviconUrl!}
+          alt=""
+          width={14}
+          height={14}
+          loading="eager"
+          className="pointer-events-none absolute top-1/2 left-2 z-10 -translate-y-1/2 rounded-sm"
+          onError={() => setFaviconError(true)}
         />
-      </div>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="h-7 shrink-0 px-2.5 text-xs"
-        onClick={() => {
-          const target = onSubmit();
-          if (target.trim()) onNavigate(target);
+      ) : null}
+      <Input
+        ref={inputRef}
+        value={displayValue}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            const target = onSubmit();
+            if (target.trim()) onNavigate(target);
+          }
         }}
-      >
-        Go
-      </Button>
+        placeholder={placeholder}
+        size="sm"
+        className={cn(
+          "min-w-0",
+          !showAsTitle && "font-mono",
+          faviconVisible && "pl-7",
+          showAsTitle && "cursor-default font-medium",
+        )}
+        aria-label="Preview URL"
+        title={url || undefined}
+        autoCapitalize="off"
+        autoCorrect="off"
+        spellCheck={false}
+      />
     </div>
   );
 }
