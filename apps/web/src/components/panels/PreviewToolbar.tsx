@@ -90,11 +90,11 @@ export function PreviewToolbar({
 
   return (
     // Outer gap-2 separates the three semantic groups (nav cluster, action
-    // cluster, lone buttons) by spacing rather than visible dividers — the
+    // cluster, lone buttons) by spacing rather than visible dividers. The
     // dense editorial register of the app prefers proximity-as-grouping over
     // mid-row vertical rules.
     <div className="flex min-w-0 items-center gap-2">
-      {/* Nav cluster — tightly packed */}
+      {/* Nav cluster - tightly packed */}
       <div className="flex items-center">
         <Tooltip>
           <TooltipTrigger
@@ -184,7 +184,7 @@ export function PreviewToolbar({
             }
           />
           <TooltipContent side="top" sideOffset={6} className="max-w-[19rem] text-xs">
-            Design — pick an element to attach to the chat
+            Design: pick an element to attach to the chat
           </TooltipContent>
         </Tooltip>
         <Tooltip>
@@ -216,7 +216,7 @@ export function PreviewToolbar({
         </Tooltip>
       </div>
 
-      {/* External — lone, separated from the action cluster by parent gap-2 */}
+      {/* External - lone, separated from the action cluster by parent gap-2 */}
       <Tooltip>
         <TooltipTrigger
           render={
@@ -265,7 +265,7 @@ export function PreviewToolbar({
       </Tooltip>
 
       {/* Design pill: appears at right whenever design mode is active. Acts as
-          the always-visible Exit affordance — the DesignBar above the omnibox
+          the always-visible Exit affordance. The DesignBar above the omnibox
           owns the Pick interaction, so this pill is purely a mode-off button. */}
       {designModeActive ? (
         <>

@@ -8,7 +8,7 @@ export interface PreviewDockState {
   readonly open: boolean;
   readonly edge: PreviewDockEdge;
   /**
-   * Pixel size along the axis perpendicular to the dock's edge — height when
+   * Pixel size along the axis perpendicular to the dock's edge: height when
    * the dock is at the bottom, width when at the right. Resizable via the
    * draggable splitter on the surface/dock boundary.
    */
@@ -51,7 +51,7 @@ interface PreviewDockStore {
  * Per-thread persistence for the preview capture dock chrome. The dock houses
  * capture utilities (region crop, page-context dump) that the primary toolbar
  * deliberately omits, so this state is scoped to the thread the user is
- * currently working in — mirrors how URL memory lives in usePreviewBridge.
+ * currently working in. Mirrors how URL memory lives in usePreviewBridge.
  */
 export const usePreviewDockStore = create<PreviewDockStore>((set, get) => ({
   docks: {},

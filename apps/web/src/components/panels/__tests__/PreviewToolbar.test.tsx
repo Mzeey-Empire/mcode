@@ -42,7 +42,7 @@ function defaultProps(
   };
 }
 
-describe("PreviewToolbar — primary buttons rendered", () => {
+describe("PreviewToolbar -primary buttons rendered", () => {
   it("renders the Back button", () => {
     render(<PreviewToolbar {...defaultProps()} />);
     expect(screen.getByLabelText("Back")).toBeInTheDocument();
@@ -79,7 +79,7 @@ describe("PreviewToolbar — primary buttons rendered", () => {
   });
 });
 
-describe("PreviewToolbar — legacy buttons removed", () => {
+describe("PreviewToolbar -legacy buttons removed", () => {
   it("no longer renders the Crop region button", () => {
     render(<PreviewToolbar {...defaultProps()} />);
     expect(screen.queryByLabelText("Crop region")).not.toBeInTheDocument();
@@ -101,7 +101,7 @@ describe("PreviewToolbar — legacy buttons removed", () => {
   });
 });
 
-describe("PreviewToolbar — Back/Forward enabled state", () => {
+describe("PreviewToolbar -Back/Forward enabled state", () => {
   it("disables Back when canBack is false", () => {
     render(<PreviewToolbar {...defaultProps({ canBack: false })} />);
     expect(screen.getByLabelText("Back")).toBeDisabled();
@@ -123,7 +123,7 @@ describe("PreviewToolbar — Back/Forward enabled state", () => {
   });
 });
 
-describe("PreviewToolbar — Design button state", () => {
+describe("PreviewToolbar -Design button state", () => {
   it("is not pressed when designModeActive and elementPickBusy are both false", () => {
     render(<PreviewToolbar {...defaultProps()} />);
     expect(screen.getByLabelText("Design")).toHaveAttribute("aria-pressed", "false");
@@ -145,7 +145,7 @@ describe("PreviewToolbar — Design button state", () => {
   });
 });
 
-describe("PreviewToolbar — Screenshot disabled while other captures in flight", () => {
+describe("PreviewToolbar -Screenshot disabled while other captures in flight", () => {
   it("disables Screenshot when captureBusy is true", () => {
     render(<PreviewToolbar {...defaultProps({ captureBusy: true })} />);
     expect(screen.getByLabelText("Screenshot")).toBeDisabled();
@@ -167,7 +167,7 @@ describe("PreviewToolbar — Screenshot disabled while other captures in flight"
   });
 });
 
-describe("PreviewToolbar — Dev dock toggle state", () => {
+describe("PreviewToolbar -Dev dock toggle state", () => {
   it("aria-pressed reflects devDockOpen=false", () => {
     render(<PreviewToolbar {...defaultProps({ devDockOpen: false })} />);
     expect(screen.getByLabelText("Toggle capture tools")).toHaveAttribute(
@@ -185,7 +185,7 @@ describe("PreviewToolbar — Dev dock toggle state", () => {
   });
 });
 
-describe("PreviewToolbar — click handlers", () => {
+describe("PreviewToolbar -click handlers", () => {
   let props: PreviewToolbarProps;
 
   beforeEach(() => {
@@ -235,7 +235,7 @@ describe("PreviewToolbar — click handlers", () => {
   });
 });
 
-describe("PreviewToolbar — cancel/design pill visibility", () => {
+describe("PreviewToolbar -cancel/design pill visibility", () => {
   it("shows Cancel pill when regionBusy is true", () => {
     render(<PreviewToolbar {...defaultProps({ regionBusy: true })} />);
     expect(screen.getByLabelText("Cancel capture")).toBeInTheDocument();

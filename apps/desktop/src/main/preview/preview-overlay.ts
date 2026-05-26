@@ -33,7 +33,7 @@ import {
  * commit point or cancellation flag for the host to drain via executeJavaScript polling.
  *
  * Why this replaces the previous transparent child BrowserWindow overlay: on Windows,
- * DWM cannot composite a transparent BrowserWindow over a WebContentsView — the overlay
+ * DWM cannot composite a transparent BrowserWindow over a WebContentsView. The overlay
  * paints opaque (black), hiding the page underneath. Injecting into the guest keeps the
  * cyan highlight visible on top of real page pixels.
  */
@@ -936,7 +936,7 @@ function beginOverlaySession(s: PreviewSession, webContents: WebContents): void 
  * region-overlay-submit, region-overlay-cancel, cancel-capture,
  * capture-picture-region, capture-picture-element-pick.
  *
- * Element-pick has no dedicated IPC handlers anymore — the pick session runs entirely
+ * Element-pick has no dedicated IPC handlers anymore. The pick session runs entirely
  * inside the guest page via {@link EP_INJECT_JS}; the host polls `window.__mcodeEpState`
  * for commit/cancel signals.
  * Call once at app startup.
