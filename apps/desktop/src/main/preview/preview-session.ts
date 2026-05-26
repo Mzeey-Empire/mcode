@@ -57,8 +57,9 @@ export interface PreviewSession {
   /** Key from the last insertCSS call; cleared when the guest navigates or the view is destroyed. */
   scrollbarCssKey: string | null;
   /**
-   * Drag-marquee overlay used by region capture. Element-pick no longer mounts
-   * a separate overlay window; see {@link elementPickPollTimer}.
+   * Deprecated since the in-guest region-capture port; kept for backward
+   * compatibility with any external code that still reads the field. Both
+   * region and element-pick now run entirely inside the guest WebContents.
    */
   selectionOverlay: BrowserWindow | null;
   overlayPending:
@@ -75,6 +76,13 @@ export interface PreviewSession {
    * opaque (black) because DWM cannot blend the two GPU surfaces.
    */
   elementPickPollTimer: NodeJS.Timeout | null;
+  /**
+   * Active region-capture poll handle. The drag-marquee runs inside the guest
+   * WebContents (same in-guest pattern as element pick); the host polls this
+   * shared state via executeJavaScript to detect commit / cancel. Null when no
+   * region capture is in flight.
+   */
+  regionPollTimer: NodeJS.Timeout | null;
   /** Removes main-frame navigation listener registered during an overlay capture. */
   navigationAbortDisposable: (() => void) | null;
   /** Recent guest console lines for capture v2 diagnostics (cleared when the view is destroyed). */
@@ -120,6 +128,7 @@ export function getSession(win: BrowserWindow): PreviewSession {
       selectionOverlay: null,
       overlayPending: null,
       elementPickPollTimer: null,
+      regionPollTimer: null,
       navigationAbortDisposable: null,
       consoleBuffer: [],
       failedRequestBuffer: [],
