@@ -94,7 +94,11 @@ const EP_INJECT_JS = `(function(){
     var docEl = document.documentElement;
     var body = document.body;
     var cands = [];
-    var maxScan = Math.min(list.length, 16);
+    // Cap scan at 8 (was 16): each candidate triggers a getBoundingClientRect
+    // layout query, and in practice the meaningful interactive target is
+    // always in the top few elementsFromPoint entries. Halving the cap cuts
+    // worst-case layout reads per RAF tick from 16 to 8.
+    var maxScan = Math.min(list.length, 8);
     for (var i = 0; i < maxScan; i++) {
       var c = list[i];
       if (!c || c.nodeType !== 1) continue;
@@ -179,7 +183,13 @@ const EP_INJECT_JS = `(function(){
   // All listeners are capture-phase + preventDefault + stopImmediatePropagation so the
   // underlying page receives nothing. The seq bump on commit/cancel signals the host poll.
   function onMouseMove(ev){
-    lastX = ev.clientX; lastY = ev.clientY;
+    // Threshold-gate: skip RAF scheduling and rect measurements for sub-pixel
+    // jitter. lastX/lastY here track the last *accepted* cursor position, so
+    // accumulating tiny moves still triggers an update once they cross the
+    // threshold relative to the last hit-test.
+    var nx = ev.clientX, ny = ev.clientY;
+    if (Math.abs(nx - lastX) + Math.abs(ny - lastY) < 2) return;
+    lastX = nx; lastY = ny;
     scheduleHover();
   }
   function onClick(ev){
@@ -1036,6 +1046,18 @@ export function registerOverlayHandlers(): void {
  * coexist conceptually (the system only allows one at a time today, but the
  * separation keeps cancellation paths clean).
  */
+/**
+ * Steady-state poll interval (ms) for the in-guest capture state objects.
+ *
+ * Was 60ms but that produced ~16 executeJavaScript IPC round-trips per second
+ * for the entire duration of a region or element-pick session, contending with
+ * any guest-page work. 120ms halves that load with no perceptible commit-to-
+ * attach latency penalty: the user's click commits a structured value into
+ * `window.__mcodeRgState` / `window.__mcodeEpState` immediately, and a worst-
+ * case 120ms drain still lands the attach within a single interaction frame.
+ */
+const CAPTURE_POLL_MS = 120;
+
 function schedulePollRegion(s: PreviewSession, hostWin: BrowserWindow): void {
   if (s.regionPollTimer) {
     clearTimeout(s.regionPollTimer);
@@ -1043,7 +1065,7 @@ function schedulePollRegion(s: PreviewSession, hostWin: BrowserWindow): void {
   s.regionPollTimer = setTimeout(() => {
     s.regionPollTimer = null;
     void runRegionPollTick(s, hostWin);
-  }, 60);
+  }, CAPTURE_POLL_MS);
 }
 
 /**
@@ -1200,7 +1222,7 @@ function schedulePoll(s: PreviewSession, hostWin: BrowserWindow): void {
   s.elementPickPollTimer = setTimeout(() => {
     s.elementPickPollTimer = null;
     void runElementPickPollTick(s, hostWin);
-  }, 60);
+  }, CAPTURE_POLL_MS);
 }
 
 /**
