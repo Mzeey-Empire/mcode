@@ -67,6 +67,9 @@ export function PreviewDevDock({
   const OppositeEdgeIcon = edge === "right" ? PanelBottom : PanelRight;
   const oppositeEdge: PreviewDockEdge = edge === "right" ? "bottom" : "right";
   const oppositeLabel = oppositeEdge === "right" ? "Dock to right" : "Dock to bottom";
+  // Mono small-caps hint sits next to the icon so the panel-edge glyph is legible
+  // without a tooltip hover. The tooltip still carries the full label for AT.
+  const oppositeShortLabel = oppositeEdge === "right" ? "right" : "bottom";
   const regionDisabled = regionBusy || !threadId || !hasLoadedPage;
   const contextDisabled = contextBusy || !threadId || !hasLoadedPage;
 
@@ -87,6 +90,17 @@ export function PreviewDevDock({
           capture
         </span>
         <div className="flex-1" />
+        <span
+          aria-hidden
+          // The arrow makes the label read as the click action ("\u2192 right")
+          // not the current state ("currently right"). Important because the
+          // label sits next to the flip-edge button, which would otherwise
+          // read as labelling the wrong thing.
+          className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground/60"
+        >
+          {"\u2192 "}
+          {oppositeShortLabel}
+        </span>
         <Tooltip>
           <TooltipTrigger
             render={
@@ -133,7 +147,7 @@ export function PreviewDevDock({
           onClick={onAddRegionPictureReference}
           aria-busy={regionBusy}
           className={cn(
-            "group flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left transition-colors",
+            "group flex w-full items-center gap-2.5 rounded-sm px-1.5 py-1.5 text-left transition-colors",
             "hover:bg-muted/60",
             "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/40",
             "disabled:cursor-not-allowed disabled:opacity-60",
@@ -171,7 +185,7 @@ export function PreviewDevDock({
           onClick={onAddPageContextOnly}
           aria-busy={contextBusy}
           className={cn(
-            "group flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left transition-colors",
+            "group flex w-full items-center gap-2.5 rounded-sm px-1.5 py-1.5 text-left transition-colors",
             "hover:bg-muted/60",
             "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/40",
             "disabled:cursor-not-allowed disabled:opacity-60",
