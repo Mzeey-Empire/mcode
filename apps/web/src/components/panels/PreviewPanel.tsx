@@ -194,6 +194,7 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
           contextBusy={capture.contextBusy}
           anyCaptureActive={capture.anyCaptureActive}
           threadId={threadId}
+          hasLoadedPage={hasLoadedPage}
           designModeActive={designModeActive}
           devDockOpen={dock.open}
           devDockEdge={dock.edge}
@@ -295,6 +296,7 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
                 onChangeEdge={(e) => dockSetEdge(threadId, e)}
                 onClose={() => dockSetOpen(threadId, false)}
                 threadId={threadId}
+                hasLoadedPage={hasLoadedPage}
                 regionBusy={capture.regionBusy}
                 onAddRegionPictureReference={capture.onAddRegionPictureReference}
                 contextBusy={capture.contextBusy}

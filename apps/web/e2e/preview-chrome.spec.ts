@@ -105,7 +105,16 @@ async function injectPreviewBridge(page: Page): Promise<void> {
       capturePageContext: () =>
         Promise.resolve({ ok: false, error: "no-preview" } as const),
       releaseBrowserCaptureSpills: noop,
-      onDidNavigate: unsub,
+      // Fire onDidNavigate synchronously on subscribe with a fake URL so the
+      // panel's hasLoadedPage state flips to true. The capture / design
+      // buttons are now gated on hasLoadedPage to avoid no-op clicks on an
+      // empty preview, which would otherwise leave the click-based tests
+      // (Design aria-pressed, Exit pill, dock rows) firing against disabled
+      // buttons.
+      onDidNavigate: (cb: (p: { url: string; title: string; favicon?: string | null }) => void) => {
+        cb({ url: "https://example.com", title: "Example", favicon: null });
+        return () => undefined;
+      },
       onLoadingState: unsub,
       onDidUpdateFavicon: unsub,
       cancelCapture: () => {
@@ -232,6 +241,16 @@ test.describe("PreviewPanel — chrome with mocked bridge", () => {
 
   test("capture dock toggles open via mod+shift+d", async ({ page }) => {
     await expect(page.getByTestId("preview-dev-dock")).toHaveCount(0);
+    // Opening the preview via Ctrl+Shift+B in beforeEach auto-focuses the
+    // omnibox (preview.toggle requests omnibox focus on its showing branch).
+    // The omnibox is an input, so the inputFocused context flips true and
+    // would swallow Ctrl+Shift+D (gated on !inputFocused). Blur first so the
+    // shortcut reaches the keybinding manager.
+    await page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+    });
     await page.keyboard.press("Control+Shift+D");
     await expect(page.getByTestId("preview-dev-dock")).toBeVisible();
   });

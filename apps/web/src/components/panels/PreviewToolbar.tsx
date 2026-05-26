@@ -31,6 +31,10 @@ export interface PreviewToolbarProps {
   readonly contextBusy: boolean;
   readonly anyCaptureActive: boolean;
   readonly threadId: string;
+  /** True once the guest WebContents has a real http(s) URL loaded. The
+   *  capture / design affordances are gated on this: invoking them against
+   *  an empty preview just surfaces a toast, so disable them upstream. */
+  readonly hasLoadedPage: boolean;
   /** True while design mode is engaged (DesignBar visible, pick affordance armable). */
   readonly designModeActive: boolean;
   /** True while the dev dock is open at its persisted edge. */
@@ -73,6 +77,7 @@ export function PreviewToolbar({
   regionBusy,
   elementPickBusy,
   threadId,
+  hasLoadedPage,
   designModeActive,
   devDockOpen,
   devDockEdge,
@@ -171,7 +176,7 @@ export function PreviewToolbar({
                   "shrink-0",
                   designOn && "bg-primary/10 text-primary",
                 )}
-                disabled={!threadId}
+                disabled={!threadId || !hasLoadedPage}
                 onClick={onToggleDesign}
                 aria-label="Design"
               >
@@ -198,7 +203,7 @@ export function PreviewToolbar({
                   "shrink-0",
                   captureBusy && "bg-primary/10 text-primary",
                 )}
-                disabled={captureBusy || regionBusy || elementPickBusy || !threadId}
+                disabled={captureBusy || regionBusy || elementPickBusy || !threadId || !hasLoadedPage}
                 onClick={onAddPictureReference}
                 aria-label="Screenshot"
               >

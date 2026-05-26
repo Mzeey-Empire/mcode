@@ -24,6 +24,7 @@ function defaultProps(
     contextBusy: false,
     anyCaptureActive: false,
     threadId: "test-thread",
+    hasLoadedPage: true,
     designModeActive: false,
     devDockOpen: false,
     devDockEdge: "bottom",
@@ -164,6 +165,24 @@ describe("PreviewToolbar -Screenshot disabled while other captures in flight", (
   it("disables Screenshot when threadId is empty", () => {
     render(<PreviewToolbar {...defaultProps({ threadId: "" })} />);
     expect(screen.getByLabelText("Screenshot")).toBeDisabled();
+  });
+});
+
+describe("PreviewToolbar - actions disabled until a page is loaded", () => {
+  it("disables Design when hasLoadedPage is false", () => {
+    render(<PreviewToolbar {...defaultProps({ hasLoadedPage: false })} />);
+    expect(screen.getByLabelText("Design")).toBeDisabled();
+  });
+
+  it("disables Screenshot when hasLoadedPage is false", () => {
+    render(<PreviewToolbar {...defaultProps({ hasLoadedPage: false })} />);
+    expect(screen.getByLabelText("Screenshot")).toBeDisabled();
+  });
+
+  it("enables Design and Screenshot when a page is loaded and no capture is busy", () => {
+    render(<PreviewToolbar {...defaultProps({ hasLoadedPage: true })} />);
+    expect(screen.getByLabelText("Design")).not.toBeDisabled();
+    expect(screen.getByLabelText("Screenshot")).not.toBeDisabled();
   });
 });
 

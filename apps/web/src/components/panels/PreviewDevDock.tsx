@@ -27,6 +27,10 @@ export interface PreviewDevDockProps {
   /** Thread id; rows disable themselves when this is empty so we never fire a
    *  capture against a non-existent attachment queue. */
   readonly threadId: string;
+  /** True once the guest WebContents has a real http(s) URL loaded. Region
+   *  and page-context capture against an empty preview just surface a toast,
+   *  so the rows go disabled until a page is loaded. */
+  readonly hasLoadedPage: boolean;
   /** True while a region drag-marquee is in flight in the guest page. */
   readonly regionBusy: boolean;
   /** Fires the region-capture session (handled by usePreviewCapture). */
@@ -54,6 +58,7 @@ export function PreviewDevDock({
   onChangeEdge,
   onClose,
   threadId,
+  hasLoadedPage,
   regionBusy,
   onAddRegionPictureReference,
   contextBusy,
@@ -62,8 +67,8 @@ export function PreviewDevDock({
   const OppositeEdgeIcon = edge === "right" ? PanelBottom : PanelRight;
   const oppositeEdge: PreviewDockEdge = edge === "right" ? "bottom" : "right";
   const oppositeLabel = oppositeEdge === "right" ? "Dock to right" : "Dock to bottom";
-  const regionDisabled = regionBusy || !threadId;
-  const contextDisabled = contextBusy || !threadId;
+  const regionDisabled = regionBusy || !threadId || !hasLoadedPage;
+  const contextDisabled = contextBusy || !threadId || !hasLoadedPage;
 
   return (
     <div
