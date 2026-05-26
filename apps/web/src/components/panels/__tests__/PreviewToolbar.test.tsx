@@ -33,6 +33,7 @@ function defaultProps(
     onOpenExternal: vi.fn(),
     onAddPictureReference: vi.fn(),
     onToggleDesign: vi.fn(),
+    onExitDesignMode: vi.fn(),
     onToggleDevDock: vi.fn(),
     onAddRegionPictureReference: vi.fn(),
     onAddElementPickPictureReference: vi.fn(),
@@ -240,28 +241,48 @@ describe("PreviewToolbar — cancel/design pill visibility", () => {
     expect(screen.getByLabelText("Cancel capture")).toBeInTheDocument();
   });
 
-  it("shows Design pill when elementPickBusy is true", () => {
-    render(<PreviewToolbar {...defaultProps({ elementPickBusy: true })} />);
+  it("shows Design (exit) pill when designModeActive is true", () => {
+    render(<PreviewToolbar {...defaultProps({ designModeActive: true })} />);
     expect(screen.getByLabelText("Exit design mode")).toBeInTheDocument();
   });
 
-  it("hides both pills when no capture is active", () => {
+  it("does not show Design pill on elementPickBusy alone (mode owns visibility now)", () => {
+    render(<PreviewToolbar {...defaultProps({ elementPickBusy: true })} />);
+    expect(screen.queryByLabelText("Exit design mode")).not.toBeInTheDocument();
+  });
+
+  it("hides both pills when no mode/capture is active", () => {
     render(
       <PreviewToolbar
-        {...defaultProps({ regionBusy: false, elementPickBusy: false })}
+        {...defaultProps({
+          regionBusy: false,
+          elementPickBusy: false,
+          designModeActive: false,
+        })}
       />,
     );
     expect(screen.queryByLabelText("Cancel capture")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Exit design mode")).not.toBeInTheDocument();
   });
 
-  it("prefers Design pill when both regionBusy and elementPickBusy are true", () => {
+  it("prefers Design pill when both designModeActive and regionBusy are true", () => {
     render(
       <PreviewToolbar
-        {...defaultProps({ regionBusy: true, elementPickBusy: true })}
+        {...defaultProps({ designModeActive: true, regionBusy: true })}
       />,
     );
     expect(screen.getByLabelText("Exit design mode")).toBeInTheDocument();
     expect(screen.queryByLabelText("Cancel capture")).not.toBeInTheDocument();
+  });
+
+  it("calls onExitDesignMode when the Design (exit) pill is clicked", () => {
+    const onExit = vi.fn();
+    render(
+      <PreviewToolbar
+        {...defaultProps({ designModeActive: true, onExitDesignMode: onExit })}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText("Exit design mode"));
+    expect(onExit).toHaveBeenCalledOnce();
   });
 });

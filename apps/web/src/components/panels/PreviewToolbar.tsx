@@ -43,9 +43,11 @@ export interface PreviewToolbarProps {
   readonly onOpenExternal: () => void;
   /** Capture-the-whole-viewport screenshot. The everyday secondary action. */
   readonly onAddPictureReference: () => void;
-  /** Toggle Design mode. In transitional Phase 1 this also fires the element-pick session
-      so the feature keeps working until the DesignBar owns the Pick affordance. */
+  /** Toggle Design mode (opens or closes the DesignBar). Pick is owned by the
+      DesignBar, so this is a pure mode toggle; it never starts an element-pick. */
   readonly onToggleDesign: () => void;
+  /** Explicit exit-from-design-mode action, wired to the toolbar's right-side pill. */
+  readonly onExitDesignMode: () => void;
   /** Toggle the dev dock open/closed. */
   readonly onToggleDevDock: () => void;
   /** Region-crop handler. Wired in Phase 4 from the dev dock; retained here as
@@ -60,8 +62,9 @@ export interface PreviewToolbarProps {
 /**
  * Presentational toolbar for the browser preview panel. Three primary actions:
  * Design (mode toggle), Screenshot (one-shot viewport capture), and the dev dock
- * toggle. The Design pill appears at the right while an element-pick session is
- * in flight (the in-guest highlight handles the rest of the visual feedback).
+ * toggle. The Design pill appears at the right whenever design mode is active
+ * and serves as the always-visible Exit affordance; the DesignBar above the
+ * omnibox owns the Pick interaction itself.
  */
 export function PreviewToolbar({
   canBack,
@@ -79,6 +82,7 @@ export function PreviewToolbar({
   onOpenExternal,
   onAddPictureReference,
   onToggleDesign,
+  onExitDesignMode,
   onToggleDevDock,
 }: PreviewToolbarProps) {
   const designOn = designModeActive || elementPickBusy;
@@ -260,18 +264,18 @@ export function PreviewToolbar({
         </TooltipContent>
       </Tooltip>
 
-      {/* Design pill: appears at right while element-pick is in flight.
-          The pick session runs inside the guest page (no overlay window),
-          so this pill is the only chrome affordance for the active mode. */}
-      {elementPickBusy ? (
+      {/* Design pill: appears at right whenever design mode is active. Acts as
+          the always-visible Exit affordance — the DesignBar above the omnibox
+          owns the Pick interaction, so this pill is purely a mode-off button. */}
+      {designModeActive ? (
         <>
           <div className="flex-1" />
           <button
             type="button"
             aria-label="Exit design mode"
-            title="Exit design mode (Esc)"
+            title="Exit design mode"
             className="flex shrink-0 items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary transition-colors hover:bg-primary/15"
-            onClick={() => void window.desktopBridge?.preview.cancelCapture()}
+            onClick={onExitDesignMode}
           >
             <PenTool size={12} aria-hidden />
             Design

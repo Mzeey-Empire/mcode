@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { Globe } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePreviewDockStore } from "@/stores/previewDockStore";
+import { usePreviewDesignModeStore } from "@/stores/previewDesignModeStore";
 import { SmartOmnibox } from "./SmartOmnibox";
 import { PreviewToolbar } from "./PreviewToolbar";
 import { PreviewTabBar } from "./PreviewTabBar";
@@ -41,13 +42,9 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
   const dockToggle = usePreviewDockStore((s) => s.toggle);
   const dockSetOpen = usePreviewDockStore((s) => s.setOpen);
   const dockSetEdge = usePreviewDockStore((s) => s.setEdge);
-  const designEnabled = (() => {
-    try {
-      return new URLSearchParams(window.location.search).get("previewDesign") === "1";
-    } catch {
-      return false;
-    }
-  })();
+  const designModeActive = usePreviewDesignModeStore((s) => s.modes[threadId] === true);
+  const designModeToggle = usePreviewDesignModeStore((s) => s.toggle);
+  const designModeSetActive = usePreviewDesignModeStore((s) => s.setActive);
 
   if (!window.desktopBridge?.preview) {
     return (
@@ -77,7 +74,13 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
         onActivate={tabs.activateTab}
         onClose={tabs.closeTab}
       />
-      {designEnabled ? <PreviewDesignBar /> : null}
+      {designModeActive ? (
+        <PreviewDesignBar
+          elementPickBusy={capture.elementPickBusy}
+          onPick={capture.onAddElementPickPictureReference}
+          onExit={() => designModeSetActive(threadId, false)}
+        />
+      ) : null}
       <form
         onSubmit={(e) => e.preventDefault()}
         className="flex-none space-y-1.5 border-b border-border/40 px-2 pt-1 pb-1.5"
@@ -98,7 +101,7 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
           contextBusy={capture.contextBusy}
           anyCaptureActive={capture.anyCaptureActive}
           threadId={threadId}
-          designModeActive={designEnabled}
+          designModeActive={designModeActive}
           devDockOpen={dock.open}
           devDockEdge={dock.edge}
           onGoBack={bridge.onGoBack}
@@ -106,7 +109,8 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
           onReload={bridge.onReload}
           onOpenExternal={bridge.onOpenExternal}
           onAddPictureReference={capture.onAddPictureReference}
-          onToggleDesign={capture.onAddElementPickPictureReference}
+          onToggleDesign={() => designModeToggle(threadId)}
+          onExitDesignMode={() => designModeSetActive(threadId, false)}
           onToggleDevDock={() => dockToggle(threadId)}
           onAddRegionPictureReference={capture.onAddRegionPictureReference}
           onAddElementPickPictureReference={capture.onAddElementPickPictureReference}
