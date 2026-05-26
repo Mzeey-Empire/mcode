@@ -14,6 +14,7 @@ import { resizeMessageCache } from "@/stores/messageCache";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useDiffStore } from "@/stores/diffStore";
+import { usePreviewDockStore } from "@/stores/previewDockStore";
 import { useUiStore } from "@/stores/uiStore";
 import { initShortcuts } from "@/lib/shortcuts";
 import { registerCommand } from "@/lib/command-registry";
@@ -319,6 +320,16 @@ export function App() {
           } else {
             hideRightPanel(tid);
           }
+        },
+      }),
+      registerCommand({
+        id: "preview.devDock.toggle",
+        title: "Toggle Preview Dev Tools",
+        category: "View",
+        handler: () => {
+          const tid = useWorkspaceStore.getState().activeThreadId;
+          if (!tid) return;
+          usePreviewDockStore.getState().toggle(tid);
         },
       }),
       // Thread switching: Cmd+1 through Cmd+9

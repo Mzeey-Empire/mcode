@@ -1,10 +1,13 @@
 import { useRef } from "react";
 import { Globe } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { usePreviewDockStore } from "@/stores/previewDockStore";
 import { SmartOmnibox } from "./SmartOmnibox";
 import { PreviewToolbar } from "./PreviewToolbar";
 import { PreviewTabBar } from "./PreviewTabBar";
 import { PreviewPerfHud } from "./PreviewPerfHud";
 import { PreviewDesignBar } from "./PreviewDesignBar";
+import { PreviewDevDock } from "./PreviewDevDock";
 import { usePreviewBridge } from "./hooks/usePreviewBridge";
 import { usePreviewCapture } from "./hooks/usePreviewCapture";
 import { usePreviewTabs } from "./hooks/usePreviewTabs";
@@ -29,6 +32,15 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
   const bridge = usePreviewBridge({ threadId, workspaceId, surfaceRef });
   const capture = usePreviewCapture({ threadId, pushSync: bridge.pushSync });
   const tabs = usePreviewTabs(threadId);
+  // Each selector returns a stable primitive/function reference so Zustand
+  // does not re-render on unrelated store mutations.
+  const dock = usePreviewDockStore((s) => s.docks[threadId]) ?? {
+    open: false,
+    edge: "bottom" as const,
+  };
+  const dockToggle = usePreviewDockStore((s) => s.toggle);
+  const dockSetOpen = usePreviewDockStore((s) => s.setOpen);
+  const dockSetEdge = usePreviewDockStore((s) => s.setEdge);
   const designEnabled = (() => {
     try {
       return new URLSearchParams(window.location.search).get("previewDesign") === "1";
@@ -86,11 +98,16 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
           contextBusy={capture.contextBusy}
           anyCaptureActive={capture.anyCaptureActive}
           threadId={threadId}
+          designModeActive={designEnabled}
+          devDockOpen={dock.open}
+          devDockEdge={dock.edge}
           onGoBack={bridge.onGoBack}
           onGoForward={bridge.onGoForward}
           onReload={bridge.onReload}
           onOpenExternal={bridge.onOpenExternal}
           onAddPictureReference={capture.onAddPictureReference}
+          onToggleDesign={capture.onAddElementPickPictureReference}
+          onToggleDevDock={() => dockToggle(threadId)}
           onAddRegionPictureReference={capture.onAddRegionPictureReference}
           onAddElementPickPictureReference={capture.onAddElementPickPictureReference}
           onAddPageContextOnly={capture.onAddPageContextOnly}
@@ -103,30 +120,55 @@ export function PreviewPanel({ threadId, workspaceId }: PreviewPanelProps) {
         ) : null}
       </form>
 
-      {/* BrowserView placeholder / empty state */}
+      {/* Surface + (optional) dev dock. The BrowserView is positioned to surfaceRef's
+          bounding box, so shrinking surfaceRef when the dock opens automatically
+          resizes the native guest view via the bridge's ResizeObserver. */}
       <div
-        ref={surfaceRef}
-        className="relative mx-2 mb-2 mt-1 min-h-[min(40vh,20rem)] min-w-0 flex-1 rounded-md border border-dashed border-border/50 bg-muted/10"
-        aria-hidden
+        className={cn(
+          "mx-2 mb-2 mt-1 flex min-h-0 min-w-0 flex-1 gap-1.5",
+          dock.open && dock.edge === "right" ? "flex-row" : "flex-col",
+        )}
       >
-        {/* Loading: thin indeterminate progress bar at top of content area */}
-        {bridge.previewLoading ? (
+        <div
+          ref={surfaceRef}
+          className="relative min-h-[min(40vh,20rem)] min-w-0 flex-1 rounded-md border border-dashed border-border/50 bg-muted/10"
+          aria-hidden
+        >
+          {/* Loading: thin indeterminate progress bar at top of content area */}
+          {bridge.previewLoading ? (
+            <div
+              data-testid="preview-loading-banner"
+              className="absolute inset-x-0 top-0 z-10 h-0.5 overflow-hidden rounded-t-md"
+              role="status"
+              aria-live="polite"
+              aria-label="Page loading"
+            >
+              <div className="h-full w-1/3 animate-preview-loading rounded-full bg-primary/80" />
+            </div>
+          ) : null}
+          {!hasLoadedPage && !bridge.previewLoading ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+              <Globe className="size-7 text-muted-foreground/15" aria-hidden />
+              <span className="font-mono text-[10px] tracking-[0.16em] uppercase text-muted-foreground/40">
+                enter a url to preview
+              </span>
+            </div>
+          ) : null}
+        </div>
+        {dock.open ? (
           <div
-            data-testid="preview-loading-banner"
-            className="absolute inset-x-0 top-0 z-10 h-0.5 overflow-hidden rounded-t-md"
-            role="status"
-            aria-live="polite"
-            aria-label="Page loading"
+            className={cn(
+              "shrink-0 overflow-hidden rounded-md border border-border/40 bg-muted/5",
+              dock.edge === "bottom"
+                ? "h-[min(28vh,16rem)] w-full"
+                : "h-full w-[min(32vw,22rem)]",
+            )}
           >
-            <div className="h-full w-1/3 animate-preview-loading rounded-full bg-primary/80" />
-          </div>
-        ) : null}
-        {!hasLoadedPage && !bridge.previewLoading ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-            <Globe className="size-7 text-muted-foreground/15" aria-hidden />
-            <span className="font-mono text-[10px] tracking-[0.16em] uppercase text-muted-foreground/40">
-              enter a url to preview
-            </span>
+            <PreviewDevDock
+              edge={dock.edge}
+              onChangeEdge={(e) => dockSetEdge(threadId, e)}
+              onClose={() => dockSetOpen(threadId, false)}
+            />
           </div>
         ) : null}
       </div>

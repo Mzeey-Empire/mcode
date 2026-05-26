@@ -24,11 +24,16 @@ function defaultProps(
     contextBusy: false,
     anyCaptureActive: false,
     threadId: "test-thread",
+    designModeActive: false,
+    devDockOpen: false,
+    devDockEdge: "bottom",
     onGoBack: vi.fn(),
     onGoForward: vi.fn(),
     onReload: vi.fn(),
     onOpenExternal: vi.fn(),
     onAddPictureReference: vi.fn(),
+    onToggleDesign: vi.fn(),
+    onToggleDevDock: vi.fn(),
     onAddRegionPictureReference: vi.fn(),
     onAddElementPickPictureReference: vi.fn(),
     onAddPageContextOnly: vi.fn(),
@@ -36,7 +41,7 @@ function defaultProps(
   };
 }
 
-describe("PreviewToolbar — toolbar buttons rendered", () => {
+describe("PreviewToolbar — primary buttons rendered", () => {
   it("renders the Back button", () => {
     render(<PreviewToolbar {...defaultProps()} />);
     expect(screen.getByLabelText("Back")).toBeInTheDocument();
@@ -57,24 +62,41 @@ describe("PreviewToolbar — toolbar buttons rendered", () => {
     expect(screen.getByLabelText("Open in system browser")).toBeInTheDocument();
   });
 
-  it("renders the Crop region button", () => {
+  it("renders the Design button", () => {
     render(<PreviewToolbar {...defaultProps()} />);
-    expect(screen.getByLabelText("Crop region")).toBeInTheDocument();
+    expect(screen.getByLabelText("Design")).toBeInTheDocument();
   });
 
-  it("renders the Pick element button", () => {
+  it("renders the Screenshot button", () => {
     render(<PreviewToolbar {...defaultProps()} />);
-    expect(screen.getByLabelText("Pick element")).toBeInTheDocument();
+    expect(screen.getByLabelText("Screenshot")).toBeInTheDocument();
   });
 
-  it("renders the Capture viewport button", () => {
+  it("renders the Toggle dev tools button", () => {
     render(<PreviewToolbar {...defaultProps()} />);
-    expect(screen.getByLabelText("Capture viewport")).toBeInTheDocument();
+    expect(screen.getByLabelText("Toggle dev tools")).toBeInTheDocument();
+  });
+});
+
+describe("PreviewToolbar — legacy buttons removed", () => {
+  it("no longer renders the Crop region button", () => {
+    render(<PreviewToolbar {...defaultProps()} />);
+    expect(screen.queryByLabelText("Crop region")).not.toBeInTheDocument();
   });
 
-  it("renders the Attach page context button", () => {
+  it("no longer renders the Pick element button", () => {
     render(<PreviewToolbar {...defaultProps()} />);
-    expect(screen.getByLabelText("Attach page context")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Pick element")).not.toBeInTheDocument();
+  });
+
+  it("no longer renders the Capture viewport button", () => {
+    render(<PreviewToolbar {...defaultProps()} />);
+    expect(screen.queryByLabelText("Capture viewport")).not.toBeInTheDocument();
+  });
+
+  it("no longer renders the Attach page context button", () => {
+    render(<PreviewToolbar {...defaultProps()} />);
+    expect(screen.queryByLabelText("Attach page context")).not.toBeInTheDocument();
   });
 });
 
@@ -100,33 +122,65 @@ describe("PreviewToolbar — Back/Forward enabled state", () => {
   });
 });
 
-describe("PreviewToolbar — capture buttons disabled during active capture", () => {
-  it("disables Crop region when anyCaptureActive is true", () => {
-    render(<PreviewToolbar {...defaultProps({ anyCaptureActive: true })} />);
-    expect(screen.getByLabelText("Crop region")).toBeDisabled();
+describe("PreviewToolbar — Design button state", () => {
+  it("is not pressed when designModeActive and elementPickBusy are both false", () => {
+    render(<PreviewToolbar {...defaultProps()} />);
+    expect(screen.getByLabelText("Design")).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("disables Pick element when anyCaptureActive is true", () => {
-    render(<PreviewToolbar {...defaultProps({ anyCaptureActive: true })} />);
-    expect(screen.getByLabelText("Pick element")).toBeDisabled();
+  it("is pressed when designModeActive is true", () => {
+    render(<PreviewToolbar {...defaultProps({ designModeActive: true })} />);
+    expect(screen.getByLabelText("Design")).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("disables Capture viewport when anyCaptureActive is true", () => {
-    render(<PreviewToolbar {...defaultProps({ anyCaptureActive: true })} />);
-    expect(screen.getByLabelText("Capture viewport")).toBeDisabled();
+  it("is pressed when elementPickBusy is true", () => {
+    render(<PreviewToolbar {...defaultProps({ elementPickBusy: true })} />);
+    expect(screen.getByLabelText("Design")).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("disables Attach page context when anyCaptureActive is true", () => {
-    render(<PreviewToolbar {...defaultProps({ anyCaptureActive: true })} />);
-    expect(screen.getByLabelText("Attach page context")).toBeDisabled();
+  it("is disabled when threadId is empty", () => {
+    render(<PreviewToolbar {...defaultProps({ threadId: "" })} />);
+    expect(screen.getByLabelText("Design")).toBeDisabled();
+  });
+});
+
+describe("PreviewToolbar — Screenshot disabled while other captures in flight", () => {
+  it("disables Screenshot when captureBusy is true", () => {
+    render(<PreviewToolbar {...defaultProps({ captureBusy: true })} />);
+    expect(screen.getByLabelText("Screenshot")).toBeDisabled();
   });
 
-  it("enables capture buttons when anyCaptureActive is false", () => {
-    render(<PreviewToolbar {...defaultProps({ anyCaptureActive: false })} />);
-    expect(screen.getByLabelText("Crop region")).not.toBeDisabled();
-    expect(screen.getByLabelText("Pick element")).not.toBeDisabled();
-    expect(screen.getByLabelText("Capture viewport")).not.toBeDisabled();
-    expect(screen.getByLabelText("Attach page context")).not.toBeDisabled();
+  it("disables Screenshot when regionBusy is true", () => {
+    render(<PreviewToolbar {...defaultProps({ regionBusy: true })} />);
+    expect(screen.getByLabelText("Screenshot")).toBeDisabled();
+  });
+
+  it("disables Screenshot when elementPickBusy is true", () => {
+    render(<PreviewToolbar {...defaultProps({ elementPickBusy: true })} />);
+    expect(screen.getByLabelText("Screenshot")).toBeDisabled();
+  });
+
+  it("disables Screenshot when threadId is empty", () => {
+    render(<PreviewToolbar {...defaultProps({ threadId: "" })} />);
+    expect(screen.getByLabelText("Screenshot")).toBeDisabled();
+  });
+});
+
+describe("PreviewToolbar — Dev dock toggle state", () => {
+  it("aria-pressed reflects devDockOpen=false", () => {
+    render(<PreviewToolbar {...defaultProps({ devDockOpen: false })} />);
+    expect(screen.getByLabelText("Toggle dev tools")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
+  it("aria-pressed reflects devDockOpen=true", () => {
+    render(<PreviewToolbar {...defaultProps({ devDockOpen: true })} />);
+    expect(screen.getByLabelText("Toggle dev tools")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 });
 
@@ -161,28 +215,22 @@ describe("PreviewToolbar — click handlers", () => {
     expect(props.onOpenExternal).toHaveBeenCalledOnce();
   });
 
-  it("calls onAddRegionPictureReference when Crop region is clicked", () => {
+  it("calls onToggleDesign when Design is clicked", () => {
     render(<PreviewToolbar {...props} />);
-    fireEvent.click(screen.getByLabelText("Crop region"));
-    expect(props.onAddRegionPictureReference).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByLabelText("Design"));
+    expect(props.onToggleDesign).toHaveBeenCalledOnce();
   });
 
-  it("calls onAddElementPickPictureReference when Pick element is clicked", () => {
+  it("calls onAddPictureReference when Screenshot is clicked", () => {
     render(<PreviewToolbar {...props} />);
-    fireEvent.click(screen.getByLabelText("Pick element"));
-    expect(props.onAddElementPickPictureReference).toHaveBeenCalledOnce();
-  });
-
-  it("calls onAddPictureReference when Capture viewport is clicked", () => {
-    render(<PreviewToolbar {...props} />);
-    fireEvent.click(screen.getByLabelText("Capture viewport"));
+    fireEvent.click(screen.getByLabelText("Screenshot"));
     expect(props.onAddPictureReference).toHaveBeenCalledOnce();
   });
 
-  it("calls onAddPageContextOnly when Attach page context is clicked", () => {
+  it("calls onToggleDevDock when Toggle dev tools is clicked", () => {
     render(<PreviewToolbar {...props} />);
-    fireEvent.click(screen.getByLabelText("Attach page context"));
-    expect(props.onAddPageContextOnly).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByLabelText("Toggle dev tools"));
+    expect(props.onToggleDevDock).toHaveBeenCalledOnce();
   });
 });
 
