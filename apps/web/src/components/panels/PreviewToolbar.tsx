@@ -281,10 +281,10 @@ export function PreviewToolbar({
             )}
             onClick={onExitDesignMode}
           >
-            <PenTool size={12} aria-hidden />
+            <PenTool size={14} aria-hidden />
             Design
-            <span className="ml-0.5 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-primary/15 text-primary hover:bg-primary/25">
-              <X size={10} aria-hidden />
+            <span className="ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-primary/15 text-primary hover:bg-primary/25">
+              <X size={11} aria-hidden />
             </span>
           </button>
         </>
