@@ -329,6 +329,19 @@ export function App() {
         handler: () => {
           const tid = useWorkspaceStore.getState().activeThreadId;
           if (!tid) return;
+          // The dock only renders inside PreviewPanel, which mounts only
+          // when the right panel is visible AND on the preview tab. If
+          // either is closed, ensure them first so a freshly-toggled
+          // dock has somewhere to render. Mirrors preview.toggle (mod+
+          // shift+b) so the two shortcuts feel like part of the same
+          // surface.
+          const { getRightPanel, showRightPanel, setRightPanelTab } =
+            useDiffStore.getState();
+          const panel = getRightPanel(tid);
+          if (!panel.visible || panel.activeTab !== "preview") {
+            showRightPanel(tid);
+            setRightPanelTab(tid, "preview");
+          }
           usePreviewDockStore.getState().toggle(tid);
         },
       }),
