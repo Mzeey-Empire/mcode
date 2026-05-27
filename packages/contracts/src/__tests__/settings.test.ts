@@ -148,6 +148,31 @@ describe("SettingsSchema", () => {
     });
   });
 
+  describe("agent.defaults.mode", () => {
+    it("normalizes legacy chat to build", () => {
+      const result = SettingsSchema().parse({
+        agent: { defaults: { mode: "chat" } },
+      });
+      expect(result.agent.defaults.mode).toBe("build");
+    });
+
+    it("accepts build, plan, and agent unchanged", () => {
+      for (const mode of ["build", "plan", "agent"] as const) {
+        const result = SettingsSchema().parse({
+          agent: { defaults: { mode } },
+        });
+        expect(result.agent.defaults.mode).toBe(mode);
+      }
+    });
+
+    it("rejects unknown mode values", () => {
+      const result = SettingsSchema().safeParse({
+        agent: { defaults: { mode: "unknown" } },
+      });
+      expect(result.success).toBe(false);
+    });
+  });
+
   describe("model.defaults.thinking", () => {
     it("accepts thinking true", () => {
       const result = SettingsSchema().parse({

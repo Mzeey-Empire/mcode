@@ -16,11 +16,12 @@ export type Theme = z.infer<typeof ThemeSchema>;
  *
  * Extends the base InteractionMode with an "agent" option that grants
  * autonomous multi-step execution capabilities.
+ *
+ * Accepts legacy `"chat"` from pre-rename settings files and normalizes it to `"build"`.
  */
-export const AgentDefaultModeSchema = z.enum([
-  ...InteractionModeSchema.options,
-  "agent",
-]);
+export const AgentDefaultModeSchema = z
+  .enum([...InteractionModeSchema.options, "agent", "chat"])
+  .transform((mode) => (mode === "chat" ? "build" : mode));
 /** Default agent interaction mode value. */
 export type AgentDefaultMode = z.infer<typeof AgentDefaultModeSchema>;
 
