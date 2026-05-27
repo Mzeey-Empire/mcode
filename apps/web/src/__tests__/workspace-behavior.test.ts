@@ -1,3 +1,9 @@
+import {
+  applyLegacyThreadStoreSeed,
+  getTestThreadError,
+  hasTestThreadRecord,
+  readActiveThreadField,
+} from "@/stores/thread-store-test-utils";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useWorkspaceStore, __resetThreadListMutationEpochForTests, __clearPendingThreadCreationsForTests } from "@/stores/workspaceStore";
 import { useThreadStore } from "@/stores/threadStore";
@@ -244,7 +250,7 @@ describe("Workspace Behavior", () => {
 
     const state = useWorkspaceStore.getState();
     expect(state.error).toContain("network down");
-    expect(state.loading).toBe(false);
+    expect(readActiveThreadField((r) => r.loading) ?? false).toBe(false);
   });
 
   it("when deleteWorkspace RPC fails, workspace and threads remain in state", async () => {
@@ -315,7 +321,7 @@ describe("Workspace Behavior", () => {
       });
 
       // Seed per-thread maps so we can verify they get pruned.
-      useThreadStore.setState({
+      applyLegacyThreadStoreSeed({
         runningThreadIds: new Set(["t-del"]),
         errorByThread: { "t-del": "some error" },
         streamingByThread: { "t-del": "some text" },
@@ -328,10 +334,7 @@ describe("Workspace Behavior", () => {
 
       const ts = useThreadStore.getState();
       expect(ts.runningThreadIds.has("t-del")).toBe(false);
-      expect(ts.errorByThread["t-del"]).toBeUndefined();
-      expect(ts.streamingByThread["t-del"]).toBeUndefined();
-      expect(ts.toolCallsByThread["t-del"]).toBeUndefined();
-      expect(ts.agentStartTimes["t-del"]).toBeUndefined();
+      expect(hasTestThreadRecord("t-del")).toBe(false);
     });
 
     it("preserves per-thread maps for other threads when deleting one", async () => {
@@ -346,7 +349,7 @@ describe("Workspace Behavior", () => {
         activeThreadId: null,
       });
 
-      useThreadStore.setState({
+      applyLegacyThreadStoreSeed({
         runningThreadIds: new Set(["t-keep", "t-del"]),
         errorByThread: { "t-keep": "keep error", "t-del": "del error" },
         currentThreadId: null,
@@ -356,10 +359,10 @@ describe("Workspace Behavior", () => {
 
       const ts = useThreadStore.getState();
       // Deleted thread is gone.
-      expect(ts.errorByThread["t-del"]).toBeUndefined();
+      expect(hasTestThreadRecord("t-del")).toBe(false);
       expect(ts.runningThreadIds.has("t-del")).toBe(false);
       // Other thread is preserved.
-      expect(ts.errorByThread["t-keep"]).toBe("keep error");
+      expect(getTestThreadError("t-keep")).toBe("keep error");
       expect(ts.runningThreadIds.has("t-keep")).toBe(true);
     });
 
@@ -375,7 +378,7 @@ describe("Workspace Behavior", () => {
         activeThreadId: null,
       });
 
-      useThreadStore.setState({
+      applyLegacyThreadStoreSeed({
         runningThreadIds: new Set(["t-1", "t-2"]),
         errorByThread: { "t-1": "err-1", "t-2": "err-2" },
         streamingByThread: { "t-1": "text-1", "t-2": "text-2" },
@@ -387,10 +390,8 @@ describe("Workspace Behavior", () => {
       const ts = useThreadStore.getState();
       expect(ts.runningThreadIds.has("t-1")).toBe(false);
       expect(ts.runningThreadIds.has("t-2")).toBe(false);
-      expect(ts.errorByThread["t-1"]).toBeUndefined();
-      expect(ts.errorByThread["t-2"]).toBeUndefined();
-      expect(ts.streamingByThread["t-1"]).toBeUndefined();
-      expect(ts.streamingByThread["t-2"]).toBeUndefined();
+      expect(hasTestThreadRecord("t-1")).toBe(false);
+      expect(hasTestThreadRecord("t-2")).toBe(false);
     });
   });
 

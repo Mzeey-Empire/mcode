@@ -64,11 +64,11 @@ function marginClassForItem(item: NarrativeItem, index: number): string {
 function keyForItem(item: NarrativeItem, index: number): string {
   switch (item.type) {
     case "thought":
-      return `thought-${item.segment.startedAt}`;
+      return `thought-${item.segment.startedAt}-${index}`;
     case "tool-group":
       return `tool-group-${item.group.calls[0]?.id ?? index}`;
     case "hook":
-      return `hook-${item.hook.hookName}-${item.hook.startedAt}`;
+      return `hook-${item.hook.hookName}-${item.hook.startedAt}-${index}`;
     case "subagent":
       return `subagent-${item.toolCall.id}`;
     case "active-tool":

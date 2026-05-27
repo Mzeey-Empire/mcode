@@ -1,3 +1,11 @@
+import {
+  resetThreadStoreForTests,
+  applyLegacyThreadStoreSeed,
+  getTestActiveMessages,
+  getTestThreadStreaming,
+  getTestThreadStreamingPreview,
+  getTestThreadToolCalls,
+} from "@/stores/thread-store-test-utils";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 import { mockTransport, createMockThread } from "./mocks/transport";
@@ -18,14 +26,7 @@ describe("Agent Message Flow", () => {
         createMockThread({ id: "thread-b" }),
       ],
     });
-    useThreadStore.setState({
-      messages: [],
-      runningThreadIds: new Set(),
-      loading: false,
-      errorByThread: {},
-      streamingByThread: {},
-      currentThreadId: null,
-    });
+    resetThreadStoreForTests();
   });
 
   afterEach(() => {
@@ -43,11 +44,10 @@ describe("Agent Message Flow", () => {
     });
     vi.runAllTimers();
 
-    const state = useThreadStore.getState();
-    expect(state.messages).toHaveLength(1);
-    expect(state.messages[0].content).toBe("Hello world");
-    expect(state.messages[0].role).toBe("assistant");
-    expect(state.messages[0].tokens_used).toBe(42);
+    expect(getTestActiveMessages()).toHaveLength(1);
+    expect(getTestActiveMessages()[0].content).toBe("Hello world");
+    expect(getTestActiveMessages()[0].role).toBe("assistant");
+    expect(getTestActiveMessages()[0].tokens_used).toBe(42);
   });
 
   it("session.message only appends when threadId matches currentThreadId", () => {
@@ -60,7 +60,7 @@ describe("Agent Message Flow", () => {
       params: { content: "Alpha" },
     });
     vi.runAllTimers();
-    expect(useThreadStore.getState().messages).toHaveLength(1);
+    expect(getTestActiveMessages()).toHaveLength(1);
 
     // Message for a different thread is NOT added to the visible list
     handleAgentEvent("thread-b", {
@@ -68,13 +68,13 @@ describe("Agent Message Flow", () => {
       params: { content: "Beta" },
     });
     vi.runAllTimers();
-    expect(useThreadStore.getState().messages).toHaveLength(1);
-    expect(useThreadStore.getState().messages[0].content).toBe("Alpha");
+    expect(getTestActiveMessages()).toHaveLength(1);
+    expect(getTestActiveMessages()[0].content).toBe("Alpha");
   });
 
   it("when session.ended fires, running state and streaming are cleared", () => {
     const threadId = "thread-1";
-    useThreadStore.setState({
+    applyLegacyThreadStoreSeed({
       runningThreadIds: new Set([threadId]),
       streamingByThread: { [threadId]: "partial content" },
     });
@@ -86,7 +86,7 @@ describe("Agent Message Flow", () => {
 
     const state = useThreadStore.getState();
     expect(state.runningThreadIds.has(threadId)).toBe(false);
-    expect(state.streamingByThread[threadId]).toBeUndefined();
+    expect(getTestThreadStreaming(threadId)).toBeUndefined();
   });
 
   it("turnComplete without streaming content clears running state", () => {
@@ -107,7 +107,7 @@ describe("Agent Message Flow", () => {
   });
 
   it("when turnComplete fires for a non-current thread, message is not added to the list", () => {
-    useThreadStore.setState({
+    applyLegacyThreadStoreSeed({
       currentThreadId: "thread-other",
       streamingByThread: { "thread-1": "background response" },
     });
@@ -120,11 +120,10 @@ describe("Agent Message Flow", () => {
     });
     vi.runAllTimers();
 
-    const state = useThreadStore.getState();
     // Streaming content is cleared even for non-current thread
-    expect(state.streamingByThread["thread-1"]).toBeUndefined();
+    expect(getTestThreadStreaming("thread-1")).toBeUndefined();
     // But message is NOT added since it's not the current thread
-    expect(state.messages).toHaveLength(0);
+    expect(getTestActiveMessages()).toHaveLength(0);
   });
 });
 
@@ -132,7 +131,7 @@ describe("duplicate message prevention", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     useWorkspaceStore.setState({ threads: [createMockThread({ id: "thread-1" })] });
-    useThreadStore.setState({
+    applyLegacyThreadStoreSeed({
       messages: [],
       runningThreadIds: new Set(["thread-1"]),
       loading: false,
@@ -158,8 +157,8 @@ describe("duplicate message prevention", () => {
     vi.runAllTimers();
 
     // Both streaming fields must be cleared
-    expect(useThreadStore.getState().streamingByThread["thread-1"]).toBeUndefined();
-    expect(useThreadStore.getState().streamingPreviewByThread["thread-1"]).toBeUndefined();
+    expect(getTestThreadStreaming("thread-1")).toBeUndefined();
+    expect(getTestThreadStreamingPreview("thread-1")).toBeUndefined();
 
     // Now turnComplete fires — should NOT create a second message
     handleAgentEvent("thread-1", {
@@ -168,13 +167,14 @@ describe("duplicate message prevention", () => {
     });
     vi.runAllTimers();
 
-    const messages = useThreadStore.getState().messages;
+    const messages = getTestActiveMessages();
     expect(messages).toHaveLength(1);
     expect(messages[0].content).toBe("Hello world");
   });
 
   it("session.message replaces trailing optimistic assistant when content matches server message", () => {
-    useThreadStore.setState({
+    applyLegacyThreadStoreSeed({
+      currentThreadId: "thread-1",
       messages: [
         {
           id: "client-provisional-id",
@@ -202,7 +202,7 @@ describe("duplicate message prevention", () => {
     });
     vi.runAllTimers();
 
-    const messages = useThreadStore.getState().messages;
+    const messages = getTestActiveMessages();
     expect(messages).toHaveLength(1);
     expect(messages[0].id).toBe("persisted-msg-id");
     expect(messages[0].content).toBe("Hello world");
@@ -228,7 +228,7 @@ describe("session.textDelta", () => {
       return 1;
     });
     useWorkspaceStore.setState({ threads: [createMockThread({ id: "thread-1" })] });
-    useThreadStore.setState({
+    applyLegacyThreadStoreSeed({
       messages: [],
       runningThreadIds: new Set(["thread-1"]),
       loading: false,
@@ -250,29 +250,29 @@ describe("session.textDelta", () => {
     handleAgentEvent("thread-1", { method: "session.textDelta", params: { delta: " world" } });
 
     await flushRafChain();
-    expect(useThreadStore.getState().streamingByThread["thread-1"]).toBe("Hello world");
+    expect(getTestThreadStreaming("thread-1")).toBe("Hello world");
   });
 
   it("stores full text in streamingByThread and truncated preview in streamingPreviewByThread", async () => {
     const longText = "x".repeat(250);
-    useThreadStore.setState({ streamingByThread: { "thread-1": longText } });
+    applyLegacyThreadStoreSeed({ streamingByThread: { "thread-1": longText } });
     const { handleAgentEvent } = useThreadStore.getState();
 
     handleAgentEvent("thread-1", { method: "session.textDelta", params: { delta: "end" } });
 
     await flushRafChain();
-    const state = useThreadStore.getState();
     // Full buffer is preserved
-    expect(state.streamingByThread["thread-1"]).toBe(longText + "end");
-    expect(state.streamingByThread["thread-1"].length).toBe(253);
+    const streaming = getTestThreadStreaming("thread-1");
+    expect(streaming).toBe(longText + "end");
+    expect(streaming?.length).toBe(253);
     // Preview is truncated to last 200 chars
-    const preview = state.streamingPreviewByThread["thread-1"];
-    expect(preview.length).toBe(200);
-    expect(preview.endsWith("end")).toBe(true);
+    const preview = getTestThreadStreamingPreview("thread-1");
+    expect(preview?.length).toBe(200);
+    expect(preview?.endsWith("end")).toBe(true);
   });
 
   it("marks prior tool calls complete on first textDelta", async () => {
-    useThreadStore.setState({
+    applyLegacyThreadStoreSeed({
       toolCallsByThread: {
         "thread-1": [
           { id: "tc-1", toolName: "Read", toolInput: {}, output: null, isError: false, isComplete: false },
@@ -283,7 +283,7 @@ describe("session.textDelta", () => {
     handleAgentEvent("thread-1", { method: "session.textDelta", params: { delta: "Hi" } });
 
     await flushRafChain();
-    const calls = useThreadStore.getState().toolCallsByThread["thread-1"];
+    const calls = getTestThreadToolCalls("thread-1");
     expect(calls[0].isComplete).toBe(true);
   });
 
@@ -292,7 +292,7 @@ describe("session.textDelta", () => {
     handleAgentEvent("thread-1", { method: "session.textDelta", params: { delta: "ping" } });
 
     await flushRafChain();
-    expect(useThreadStore.getState().streamingByThread["thread-2"]).toBeUndefined();
+    expect(getTestThreadStreaming("thread-2")).toBeUndefined();
   });
 });
 
@@ -300,7 +300,7 @@ describe("session.toolProgress", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     useWorkspaceStore.setState({ threads: [createMockThread({ id: "thread-1" })] });
-    useThreadStore.setState({
+    applyLegacyThreadStoreSeed({
       messages: [],
       runningThreadIds: new Set(["thread-1"]),
       loading: false,
@@ -325,7 +325,7 @@ describe("session.toolProgress", () => {
       params: { toolCallId: "tc1", toolName: "Bash", elapsedSeconds: 5 },
     });
 
-    const calls = useThreadStore.getState().toolCallsByThread["thread-1"];
+    const calls = getTestThreadToolCalls("thread-1");
     expect(calls[0].elapsedSeconds).toBe(5);
   });
 
@@ -336,7 +336,7 @@ describe("session.toolProgress", () => {
       params: { toolCallId: "unknown", toolName: "Bash", elapsedSeconds: 3 },
     });
 
-    const calls = useThreadStore.getState().toolCallsByThread["thread-1"];
+    const calls = getTestThreadToolCalls("thread-1");
     expect(calls[0].elapsedSeconds).toBeUndefined();
   });
 });

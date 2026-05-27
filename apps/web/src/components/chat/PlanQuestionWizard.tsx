@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useThreadStore } from "@/stores/threadStore";
+import { useThreadRecord } from "@/stores/thread-selectors";
 import { OptionTile } from "./plan-questions/OptionTile";
 import { AcceptRecommended } from "./plan-questions/AcceptRecommended";
 import { useWizardKeyboard } from "./plan-questions/useWizardKeyboard";
@@ -31,8 +32,6 @@ interface PlanQuestionWizardProps {
  * state so the wizard can render mid-turn without risking overlapping
  * sends.
  */
-const EMPTY_MAP = new Map<string, PlanAnswer>();
-
 /** Format the step counter as two-digit mono ("01 of 05"). */
 function formatStep(current: number, total: number): string {
   const pad = (n: number): string => String(n).padStart(2, "0");
@@ -40,10 +39,10 @@ function formatStep(current: number, total: number): string {
 }
 
 export function PlanQuestionWizard({ threadId }: PlanQuestionWizardProps) {
-  const questions = useThreadStore((s) => s.planQuestionsByThread[threadId] ?? null);
-  const answersMap = useThreadStore((s) => s.planAnswersByThread[threadId] ?? EMPTY_MAP);
-  const activeIndex = useThreadStore((s) => s.activeQuestionIndexByThread[threadId] ?? 0);
-  const status = useThreadStore((s) => s.planQuestionsStatusByThread[threadId] ?? "idle");
+  const questions = useThreadRecord(threadId, (r) => r.planQuestions);
+  const answersMap = useThreadRecord(threadId, (r) => r.planAnswers);
+  const activeIndex = useThreadRecord(threadId, (r) => r.activeQuestionIndex);
+  const status = useThreadRecord(threadId, (r) => r.planQuestionsStatus);
   const isThreadRunning = useThreadStore((s) => s.runningThreadIds.has(threadId));
   const setPlanAnswer = useThreadStore((s) => s.setPlanAnswer);
   const setActiveQuestionIndex = useThreadStore((s) => s.setActiveQuestionIndex);

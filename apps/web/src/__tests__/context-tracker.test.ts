@@ -1,3 +1,8 @@
+import {
+  applyLegacyThreadStoreSeed,
+  getTestThreadContext,
+  getTestThreadIsCompacting,
+} from "@/stores/thread-store-test-utils";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 import { mockTransport, createMockThread } from "./mocks/transport";
@@ -18,7 +23,7 @@ function setup(extra: Record<string, unknown> = {}) {
   });
   // Partial state merge: Zustand merges these fields into the existing store slice.
   // Extra fields override defaults for per-test setup (e.g. isCompactingByThread).
-  useThreadStore.setState({
+  applyLegacyThreadStoreSeed({
     messages: [],
     runningThreadIds: new Set([THREAD]),
     loading: false,
@@ -47,7 +52,7 @@ describe("context tracker — Fix 2: output tokens included", () => {
       params: { reason: "end_turn", costUsd: null, tokensIn: 5000, tokensOut: 500, contextWindow: 200_000 },
     });
 
-    const ctx = useThreadStore.getState().contextByThread[THREAD];
+    const ctx = getTestThreadContext(THREAD);
     expect(ctx?.lastTokensIn).toBe(5000);
     // SDK runtime value (200K) is truthful and wins over the static map.
     // The new preference chain ranks SDK > static map > previous, so the
@@ -66,7 +71,7 @@ describe("context tracker — Fix 1: turnComplete skipped during compaction", ()
       params: { reason: "end_turn", costUsd: null, tokensIn: 195_000, tokensOut: 500, contextWindow: 200_000 },
     });
 
-    const ctx = useThreadStore.getState().contextByThread[THREAD];
+    const ctx = getTestThreadContext(THREAD);
     // Must stay empty — no flash of pre-compaction tokens
     expect(ctx).toBeUndefined();
   });
@@ -76,7 +81,7 @@ describe("context tracker — Fix 1: turnComplete skipped during compaction", ()
       params: { reason: "end_turn", costUsd: null, tokensIn: 195_000, tokensOut: 500, contextWindow: 200_000 },
     });
 
-    expect(useThreadStore.getState().isCompactingByThread[THREAD]).toBe(true);
+    expect(getTestThreadIsCompacting(THREAD)).toBe(true);
   });
 });
 
@@ -90,13 +95,13 @@ describe("context tracker — Fix 3: contextEstimate on compaction end", () => {
 
   it("contextEstimate updates contextByThread when NOT compacting", () => {
     // Simulate compaction ending: the frontend clears isCompactingByThread
-    useThreadStore.setState({ isCompactingByThread: {} });
+    applyLegacyThreadStoreSeed({ isCompactingByThread: {} });
 
     dispatch("session.contextEstimate", {
       params: { tokensIn: 100_000, contextWindow: 200_000 },
     });
 
-    const ctx = useThreadStore.getState().contextByThread[THREAD];
+    const ctx = getTestThreadContext(THREAD);
     expect(ctx?.lastTokensIn).toBe(100_000);
     expect(ctx?.contextWindow).toBe(200_000);
   });
@@ -107,7 +112,7 @@ describe("context tracker — Fix 3: contextEstimate on compaction end", () => {
       params: { tokensIn: 100_000, contextWindow: 200_000 },
     });
 
-    const ctx = useThreadStore.getState().contextByThread[THREAD];
+    const ctx = getTestThreadContext(THREAD);
     expect(ctx?.lastTokensIn).toBe(0);
   });
 });
@@ -124,7 +129,7 @@ describe("context tracker — Fix 4: live estimation during turn", () => {
       params: { tokensIn: 51_250, contextWindow: 200_000 },
     });
 
-    const ctx = useThreadStore.getState().contextByThread[THREAD];
+    const ctx = getTestThreadContext(THREAD);
     expect(ctx?.lastTokensIn).toBe(51_250);
   });
 
@@ -132,7 +137,7 @@ describe("context tracker — Fix 4: live estimation during turn", () => {
     dispatch("session.contextEstimate", { params: { tokensIn: 51_000, contextWindow: 200_000 } });
     dispatch("session.contextEstimate", { params: { tokensIn: 52_500, contextWindow: 200_000 } });
 
-    const ctx = useThreadStore.getState().contextByThread[THREAD];
+    const ctx = getTestThreadContext(THREAD);
     expect(ctx?.lastTokensIn).toBe(52_500);
   });
 
@@ -142,7 +147,7 @@ describe("context tracker — Fix 4: live estimation during turn", () => {
       params: { reason: "end_turn", costUsd: null, tokensIn: 53_100, tokensOut: 600, contextWindow: 200_000 },
     });
 
-    const ctx = useThreadStore.getState().contextByThread[THREAD];
+    const ctx = getTestThreadContext(THREAD);
     expect(ctx?.lastTokensIn).toBe(53_100);
   });
 });

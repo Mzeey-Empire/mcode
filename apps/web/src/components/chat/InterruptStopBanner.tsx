@@ -1,13 +1,14 @@
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useThreadStore } from "@/stores/threadStore";
+import { useThreadRecord } from "@/stores/thread-selectors";
 
 /**
  * One-shot banner after the user stops the agent mid-turn while file edits were
  * snapshot-persisted, reminding them that workspace changes were kept on disk.
  */
 export function InterruptStopBanner({ threadId }: { threadId: string }) {
-  const notice = useThreadStore((s) => s.interruptStopFileNoticeByThread[threadId]);
+  const notice = useThreadRecord(threadId, (r) => r.interruptStopFileNotice);
   const clear = useThreadStore((s) => s.clearInterruptStopFileNotice);
 
   if (!notice || notice.paths.length === 0) return null;

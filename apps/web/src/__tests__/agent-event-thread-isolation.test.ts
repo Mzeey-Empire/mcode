@@ -1,3 +1,15 @@
+import {
+  applyLegacyThreadStoreSeed,
+  getTestActiveMessages,
+  getTestActiveLatestTurnWithChanges,
+  getTestThreadStreaming,
+  getTestThreadToolCalls,
+  getTestThreadError,
+  getTestThreadLoadEpoch,
+  getTestThreadPlanQuestionsStatus,
+  readActiveThreadField,
+  hasTestThreadRecord,
+} from "@/stores/thread-store-test-utils";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 import { mockTransport, createMockThread } from "./mocks/transport";
@@ -20,7 +32,7 @@ describe("Agent event thread isolation", () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    useThreadStore.setState({
+    applyLegacyThreadStoreSeed({
       messages: [],
       runningThreadIds: new Set([THREAD_A, THREAD_B]),
       loading: false,
@@ -72,11 +84,10 @@ describe("Agent event thread isolation", () => {
         error: "Out of tokens",
       });
 
-      const state = useThreadStore.getState();
       // Thread B's error is recorded under its own key
-      expect(state.errorByThread[THREAD_B]).toBe("Out of tokens");
+      expect(getTestThreadError(THREAD_B)).toBe("Out of tokens");
       // Thread A has no error
-      expect(state.errorByThread[THREAD_A]).toBeUndefined();
+      expect(getTestThreadError(THREAD_A)).toBeUndefined();
     });
 
     it("session.error for active thread sets error on that thread only", () => {
@@ -87,9 +98,8 @@ describe("Agent event thread isolation", () => {
         error: "CLI not found",
       });
 
-      const state = useThreadStore.getState();
-      expect(state.errorByThread[THREAD_A]).toBe("CLI not found");
-      expect(state.errorByThread[THREAD_B]).toBeUndefined();
+      expect(getTestThreadError(THREAD_A)).toBe("CLI not found");
+      expect(getTestThreadError(THREAD_B)).toBeUndefined();
     });
 
     it("errors from two concurrent threads are tracked independently", () => {
@@ -104,13 +114,12 @@ describe("Agent event thread isolation", () => {
         error: "Error B",
       });
 
-      const state = useThreadStore.getState();
-      expect(state.errorByThread[THREAD_A]).toBe("Error A");
-      expect(state.errorByThread[THREAD_B]).toBe("Error B");
+      expect(getTestThreadError(THREAD_A)).toBe("Error A");
+      expect(getTestThreadError(THREAD_B)).toBe("Error B");
     });
 
     it("loadMessages clears error for the loaded thread", async () => {
-      useThreadStore.setState({
+      applyLegacyThreadStoreSeed({
         errorByThread: { [THREAD_A]: "stale error", [THREAD_B]: "other error" },
       });
       (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
@@ -120,10 +129,9 @@ describe("Agent event thread isolation", () => {
 
       await useThreadStore.getState().loadMessages(THREAD_A);
 
-      const state = useThreadStore.getState();
-      expect(state.errorByThread[THREAD_A]).toBeUndefined();
+      expect(getTestThreadError(THREAD_A)).toBeUndefined();
       // Thread B's error is preserved
-      expect(state.errorByThread[THREAD_B]).toBe("other error");
+      expect(getTestThreadError(THREAD_B)).toBe("other error");
     });
   });
 
@@ -213,13 +221,12 @@ describe("Agent event thread isolation", () => {
       for (let i = 0; i < 8; i++) {
         await Promise.resolve();
       }
-      const state = useThreadStore.getState();
-      expect(state.streamingByThread[THREAD_A]).toBeUndefined();
-      expect(state.streamingByThread[THREAD_B]).toBe("background text");
+      expect(getTestThreadStreaming(THREAD_A)).toBeUndefined();
+      expect(getTestThreadStreaming(THREAD_B)).toBe("background text");
     });
 
     it("turnComplete for background thread does not add message to active thread's messages", () => {
-      useThreadStore.setState({
+      applyLegacyThreadStoreSeed({
         streamingByThread: { [THREAD_B]: "background content" },
       });
 
@@ -231,11 +238,10 @@ describe("Agent event thread isolation", () => {
       });
       vi.runAllTimers();
 
-      const state = useThreadStore.getState();
       // No message added to the visible list (user is on Thread A)
-      expect(state.messages).toHaveLength(0);
+      expect(getTestActiveMessages()).toHaveLength(0);
       // Streaming state is cleaned up for Thread B
-      expect(state.streamingByThread[THREAD_B]).toBeUndefined();
+      expect(getTestThreadStreaming(THREAD_B)).toBeUndefined();
     });
   });
 
@@ -252,53 +258,31 @@ describe("Agent event thread isolation", () => {
         toolInput: { path: "/bg" },
       });
 
-      const state = useThreadStore.getState();
-      expect(state.toolCallsByThread[THREAD_A]).toBeUndefined();
-      expect(state.toolCallsByThread[THREAD_B]).toHaveLength(1);
+      expect(getTestThreadToolCalls(THREAD_A)).toEqual([]);
+      expect(getTestThreadToolCalls(THREAD_B)).toHaveLength(1);
     });
   });
 
   // ── Per-thread map cleanup on deletion ─────────────────────────────
 
   describe("clearThreadState", () => {
-    /** All *ByThread Record maps that should be pruned when a thread is deleted. */
-    const BY_THREAD_KEYS = [
-      "errorByThread",
-      "streamingByThread",
-      "streamingPreviewByThread",
-      "toolCallsByThread",
-      "agentStartTimes",
-      "settingsByThread",
-      "currentTurnMessageIdByThread",
-      "oldestLoadedSequence",
-      "hasMoreMessages",
-      "isLoadingMore",
-      "loadEpochByThread",
-      "contextByThread",
-      "isCompactingByThread",
-      "lastFallbackByThread",
-      "planQuestionsByThread",
-      "planAnswersByThread",
-      "activeQuestionIndexByThread",
-      "planQuestionsStatusByThread",
-    ] as const;
-
     it("removes all per-thread map entries for a background thread", () => {
-      // Seed every *ByThread map with a THREAD_B entry
-      const seeds: Record<string, Record<string, unknown>> = {};
-      for (const key of BY_THREAD_KEYS) {
-        seeds[key] = { [THREAD_A]: "kept", [THREAD_B]: "zombie" };
-      }
-      useThreadStore.setState(seeds as Partial<ReturnType<typeof useThreadStore.getState>>);
+      applyLegacyThreadStoreSeed({
+        errorByThread: { [THREAD_A]: "kept", [THREAD_B]: "zombie" },
+        streamingByThread: { [THREAD_A]: "kept-stream", [THREAD_B]: "zombie-stream" },
+        loadEpochByThread: { [THREAD_A]: 1, [THREAD_B]: 99 },
+        planQuestionsStatusByThread: { [THREAD_A]: "idle", [THREAD_B]: "pending" },
+        runningThreadIds: new Set([THREAD_A, THREAD_B]),
+        currentThreadId: null,
+      });
 
       useThreadStore.getState().clearThreadState(THREAD_B);
 
-      const state = useThreadStore.getState();
-      for (const key of BY_THREAD_KEYS) {
-        const map = state[key] as Record<string, unknown>;
-        expect(map[THREAD_B], `${key} should not contain deleted thread`).toBeUndefined();
-        expect(map[THREAD_A], `${key} should preserve other threads`).toBe("kept");
-      }
+      expect(hasTestThreadRecord(THREAD_B)).toBe(false);
+      expect(getTestThreadError(THREAD_A)).toBe("kept");
+      expect(getTestThreadStreaming(THREAD_A)).toBe("kept-stream");
+      expect(getTestThreadLoadEpoch(THREAD_A)).toBe(1);
+      expect(getTestThreadPlanQuestionsStatus(THREAD_A)).toBe("idle");
     });
 
     it("removes threadId from runningThreadIds", () => {
@@ -314,7 +298,7 @@ describe("Agent event thread isolation", () => {
     });
 
     it("clears visible-thread globals when deleting the current thread", () => {
-      useThreadStore.setState({
+      applyLegacyThreadStoreSeed({
         currentThreadId: THREAD_A,
         messages: [{ id: "m1", thread_id: THREAD_A, role: "user", content: "hi", tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null, timestamp: "", sequence: 1, attachments: null }],
         persistedToolCallCounts: { m1: 2 },
@@ -327,15 +311,15 @@ describe("Agent event thread isolation", () => {
 
       const state = useThreadStore.getState();
       expect(state.currentThreadId).toBeNull();
-      expect(state.messages).toHaveLength(0);
-      expect(state.persistedToolCallCounts).toEqual({});
-      expect(state.persistedFilesChanged).toEqual({});
-      expect(state.serverMessageIds).toEqual({});
-      expect(state.latestTurnWithChanges).toBeNull();
+      expect(getTestActiveMessages()).toHaveLength(0);
+      expect(readActiveThreadField((r) => r.persistedToolCallCounts) ?? {}).toEqual({});
+      expect(readActiveThreadField((r) => r.persistedFilesChanged) ?? {}).toEqual({});
+      expect(readActiveThreadField((r) => r.serverMessageIds) ?? {}).toEqual({});
+      expect(getTestActiveLatestTurnWithChanges()).toBeNull();
     });
 
     it("does not clear visible-thread globals when deleting a background thread", () => {
-      useThreadStore.setState({
+      applyLegacyThreadStoreSeed({
         currentThreadId: THREAD_A,
         messages: [{ id: "m1", thread_id: THREAD_A, role: "user", content: "hi", tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null, timestamp: "", sequence: 1, attachments: null }],
         persistedToolCallCounts: { m1: 2 },
@@ -345,8 +329,8 @@ describe("Agent event thread isolation", () => {
 
       const state = useThreadStore.getState();
       expect(state.currentThreadId).toBe(THREAD_A);
-      expect(state.messages).toHaveLength(1);
-      expect(state.persistedToolCallCounts).toEqual({ m1: 2 });
+      expect(getTestActiveMessages()).toHaveLength(1);
+      expect(readActiveThreadField((r) => r.persistedToolCallCounts) ?? {}).toEqual({ m1: 2 });
     });
   });
 });

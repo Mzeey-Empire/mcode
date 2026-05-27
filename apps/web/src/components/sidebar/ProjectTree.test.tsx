@@ -40,12 +40,21 @@ const threadStoreOverrides: {
   runningThreadIds?: Set<string>;
 } = {};
 
+function buildMockThreadStoreState() {
+  const records = new Map<string, { permissions: Array<{ settled: boolean }> }>();
+  for (const [id, perms] of Object.entries(threadStoreOverrides.permissionsByThread ?? {})) {
+    records.set(id, { permissions: perms });
+  }
+  return {
+    records,
+    runningThreadIds: threadStoreOverrides.runningThreadIds ?? new Set(),
+    currentThreadId: null,
+  };
+}
+
 vi.mock("@/stores/threadStore", () => ({
   useThreadStore: vi.fn((selector: (s: unknown) => unknown) =>
-    selector({
-      runningThreadIds: threadStoreOverrides.runningThreadIds ?? new Set(),
-      permissionsByThread: threadStoreOverrides.permissionsByThread ?? {},
-    })
+    selector(buildMockThreadStoreState()),
   ),
 }));
 

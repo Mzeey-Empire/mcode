@@ -1,3 +1,8 @@
+import {
+  applyLegacyThreadStoreSeed,
+  getTestThreadStreaming,
+  getTestThreadThoughtSegments,
+} from "@/stores/thread-store-test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 
@@ -8,7 +13,7 @@ import { useThreadStore } from "@/stores/threadStore";
  */
 describe("threadStore assistantMessageBoundary", () => {
   beforeEach(() => {
-    useThreadStore.setState({
+    applyLegacyThreadStoreSeed({
       streamingByThread: {},
       streamingPreviewByThread: {},
       toolCallsByThread: {},
@@ -46,8 +51,8 @@ describe("threadStore assistantMessageBoundary", () => {
       isFinalResponse: true,
     });
 
-    expect(useThreadStore.getState().thoughtSegmentsByThread[tid] ?? []).toEqual([]);
-    expect(useThreadStore.getState().streamingByThread[tid]).toBe(
+    expect(getTestThreadThoughtSegments(tid) ?? []).toEqual([]);
+    expect(getTestThreadStreaming(tid)).toBe(
       "Autoclave is a sealed pressure vessel.",
     );
   });
@@ -70,7 +75,7 @@ describe("threadStore assistantMessageBoundary", () => {
       isFinalResponse: false,
     });
 
-    const segs = useThreadStore.getState().thoughtSegmentsByThread[tid] ?? [];
+    const segs = getTestThreadThoughtSegments(tid) ?? [];
     expect(segs).toHaveLength(1);
     expect(segs[0]?.text).toBe("Let me look at the file.");
     expect(segs[0]?.endedAt).toBeTypeOf("number");
@@ -82,7 +87,7 @@ describe("threadStore assistantMessageBoundary", () => {
       method: "session.assistantMessageBoundary",
       isFinalResponse: true,
     });
-    expect(useThreadStore.getState().thoughtSegmentsByThread[tid]).toBeUndefined();
+    expect(getTestThreadThoughtSegments(tid) ?? []).toEqual([]);
   });
 
   it("leaves an already-closed thought segment alone", () => {
@@ -94,7 +99,7 @@ describe("threadStore assistantMessageBoundary", () => {
 
     const tid = "thread-closed";
     // Seed a closed thought segment directly.
-    useThreadStore.setState({
+    applyLegacyThreadStoreSeed({
       thoughtSegmentsByThread: {
         [tid]: [{ text: "old thought", startedAt: 1, endedAt: 2 }],
       },
@@ -105,7 +110,7 @@ describe("threadStore assistantMessageBoundary", () => {
       isFinalResponse: true,
     });
 
-    const segs = useThreadStore.getState().thoughtSegmentsByThread[tid] ?? [];
+    const segs = getTestThreadThoughtSegments(tid) ?? [];
     expect(segs).toEqual([{ text: "old thought", startedAt: 1, endedAt: 2 }]);
   });
 });

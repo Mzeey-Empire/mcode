@@ -1,3 +1,6 @@
+import {
+  applyLegacyThreadStoreSeed,
+} from "@/stores/thread-store-test-utils";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useThreadStore, TOOL_CALL_CACHE_SIZE } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
@@ -11,7 +14,7 @@ vi.mock("@/transport", async () => ({
 
 describe("per-thread settings", () => {
   beforeEach(() => {
-    useThreadStore.setState({
+    applyLegacyThreadStoreSeed({
       messages: [],
       runningThreadIds: new Set(),
       loading: false,
@@ -99,7 +102,7 @@ describe("per-thread settings", () => {
     useWorkspaceStore.setState({ threads: [thread] });
 
     // Apply an in-memory override
-    useThreadStore.setState({
+    applyLegacyThreadStoreSeed({
       settingsByThread: {
         "thread-override": {
           permissionMode: "full",

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { GitFork, Loader2 } from "lucide-react";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useThreadStore } from "@/stores/threadStore";
+import { useActiveThreadRecord, readThreadRecord } from "@/stores/thread-selectors";
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { Badge } from "@/components/ui/badge";
@@ -173,24 +174,21 @@ export function ChatView() {
   const updateThreadTitle = useWorkspaceStore((s) => s.updateThreadTitle);
   const setActiveThread = useWorkspaceStore((s) => s.setActiveThread);
   const [editingThreadId, setEditingThreadId] = useState<string | null>(null);
-  const forkModeStore = useThreadStore((s) => s.forkMode);
   const setForkMode = useThreadStore((s) => s.setForkMode);
-  const activeForkMode = activeThreadId ? (forkModeStore?.[activeThreadId] ?? null) : null;
+  const activeForkMode = useActiveThreadRecord((r) => r.forkMode);
   const branchFromMessageId = activeForkMode?.messageId;
   const branchFromMessageContent = activeForkMode?.content ?? undefined;
   const loadMessages = useThreadStore((s) => s.loadMessages);
   const clearMessages = useThreadStore((s) => s.clearMessages);
   const runningThreadIds = useThreadStore((s) => s.runningThreadIds);
-  const messageCount = useThreadStore((s) => s.messages.length);
+  const messageCount = useActiveThreadRecord((r) => r.messages.length);
   const setPendingPrefill = useComposerDraftStore((s) => s.setPendingPrefill);
 
   const isAgentRunning = activeThreadId ? runningThreadIds.has(activeThreadId) : false;
 
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const activeThread = threads.find((t) => t.id === activeThreadId);
-  const sessionError = useThreadStore((s) =>
-    activeThreadId ? s.errorByThread[activeThreadId] ?? null : null,
-  );
+  const sessionError = useActiveThreadRecord((r) => r.error);
   const [dismissedError, setDismissedError] = useState<string | null>(null);
   const [interruptedThreadIds, setInterruptedThreadIds] = useState<string[]>([]);
   const [bannerDismissed, setBannerDismissed] = useState(false);
@@ -281,8 +279,8 @@ export function ChatView() {
   /** Activates inline fork mode on the composer for the given message. */
   const handleBranch = useCallback((messageId: string) => {
     // Read messages and threadId from store at call time to avoid re-creating this callback on every streaming token.
-    const msg = useThreadStore.getState().messages.find((m) => m.id === messageId);
     const threadId = useWorkspaceStore.getState().activeThreadId;
+    const msg = threadId ? readThreadRecord(threadId).messages.find((m) => m.id === messageId) : undefined;
     if (!threadId || !msg) return;
     setForkMode(threadId, {
       messageId,

@@ -6,7 +6,7 @@
  */
 
 import { useMemo } from "react";
-import { useThreadStore } from "@/stores/threadStore";
+import { useActiveThreadRecord } from "@/stores/thread-selectors";
 import { HookRow } from "@/components/chat/narrative/HookRow";
 import type { HookExecution } from "@/transport/types";
 import type { HookExecutionRecord } from "@mcode/contracts";
@@ -43,7 +43,7 @@ function recordToExecution(record: HookExecutionRecord): HookExecution {
  * hooks exist for this message so the virtualizer item occupies zero height.
  */
 export function PersistedLateHooks({ messageId }: PersistedLateHooksProps) {
-  const records = useThreadStore((s) => s.narrativeByMessage[messageId]);
+  const records = useActiveThreadRecord((r) => r.narrativeByMessage[messageId]);
 
   const lateHooks = useMemo<HookExecutionRecord[]>(() => {
     if (!records) return [];

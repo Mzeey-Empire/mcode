@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThreadStore } from "@/stores/threadStore";
+import { useThreadRecord } from "@/stores/thread-selectors";
 import type { HandoffMeta } from "@/stores/threadStore";
 import { getTransport } from "@/transport";
 import { MarkdownContent } from "./MarkdownContent";
@@ -152,7 +153,7 @@ export function HandoffFallbackBanner({ threadId }: Props) {
   const enabled = useSettingsStore(
     (s) => s.settings.chat?.handoff?.notifyOnLocalFallback ?? true,
   );
-  const meta = useThreadStore((s) => s.handoffMeta?.[threadId]);
+  const meta = useThreadRecord(threadId, (r) => r.handoffMeta);
   const setHandoffStatus = useThreadStore((s) => s.setHandoffStatus);
   const [docOpen, setDocOpen] = useState(false);
 

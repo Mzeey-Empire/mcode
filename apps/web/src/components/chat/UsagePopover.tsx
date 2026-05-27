@@ -1,6 +1,7 @@
 // apps/web/src/components/chat/UsagePopover.tsx
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { useThreadStore } from "../../stores/threadStore";
+import { useThreadRecord } from "../../stores/thread-selectors";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import type { QuotaCategory } from "@mcode/contracts";
 import { useEffect, useRef, type ReactNode } from "react";
@@ -72,11 +73,10 @@ function QuotaRow({ category }: { category: QuotaCategory }) {
 
 /** Usage popover showing quota, context window, and last turn data. */
 export function UsagePopover({ threadId, children, onOpenChange, side = "top", align = "end" }: UsagePopoverProps) {
-  const contextEntry = useThreadStore((s) => threadId ? s.contextByThread[threadId] : undefined);
+  const contextEntry = useThreadRecord(threadId, (r) => r.context);
   const activeThread = useWorkspaceStore((s) => s.threads.find((t) => t.id === threadId));
   const providerId = activeThread?.provider ?? "claude";
-  const usageKey = threadId ? `${threadId}:${providerId}` : null;
-  const usageInfo = useThreadStore((s) => usageKey ? s.usageByProvider[usageKey] : undefined);
+  const usageInfo = useThreadRecord(threadId, (r) => r.usageByProvider[providerId]);
   const fetchProviderUsage = useThreadStore((s) => s.fetchProviderUsage);
   const hasFetched = useRef(false);
 

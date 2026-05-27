@@ -1,7 +1,15 @@
+import {
+  resetThreadStoreForTests,
+  applyLegacyThreadStoreSeed,
+  getTestActiveMessages,
+  getTestThreadStreaming,
+  getTestThreadError,
+  readActiveThreadField,
+} from "@/stores/thread-store-test-utils";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 import { mockTransport, createMockMessage } from "./mocks/transport";
-import { clearMessageCache } from "@/stores/messageCache";
+import { clearRecordCache } from "@/lib/thread-hydrator/record-cache";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -10,15 +18,8 @@ vi.mock("@/transport", async () => ({
 
 describe("Thread Lifecycle Behavior", () => {
   beforeEach(() => {
-    clearMessageCache();
-    useThreadStore.setState({
-      messages: [],
-      runningThreadIds: new Set(),
-      loading: false,
-      errorByThread: {},
-      streamingByThread: {},
-      currentThreadId: null,
-    });
+    clearRecordCache();
+    resetThreadStoreForTests();
     vi.clearAllMocks();
   });
 
@@ -57,7 +58,7 @@ describe("Thread Lifecycle Behavior", () => {
     expect(useThreadStore.getState().runningThreadIds.has(threadId)).toBe(
       false,
     );
-    expect(useThreadStore.getState().errorByThread["thread-1"]).toBeTruthy();
+    expect(getTestThreadError("thread-1")).toBeTruthy();
   });
 
   it("when sendMessage fails, the thread is no longer marked as running", async () => {
@@ -71,7 +72,7 @@ describe("Thread Lifecycle Behavior", () => {
     expect(useThreadStore.getState().runningThreadIds.has(threadId)).toBe(
       false,
     );
-    expect(useThreadStore.getState().errorByThread["thread-1"]).toBeTruthy();
+    expect(getTestThreadError("thread-1")).toBeTruthy();
   });
 
   it("when clearMessages is called, streaming state resets but running threads persist", () => {
@@ -80,7 +81,7 @@ describe("Thread Lifecycle Behavior", () => {
       thread_id: "t",
       content: "hi",
     });
-    useThreadStore.setState({
+    applyLegacyThreadStoreSeed({
       messages: [msg],
       currentThreadId: "thread-1",
       runningThreadIds: new Set(["thread-1"]),
@@ -90,9 +91,9 @@ describe("Thread Lifecycle Behavior", () => {
     useThreadStore.getState().clearMessages();
 
     const state = useThreadStore.getState();
-    expect(state.messages).toHaveLength(0);
+    expect(getTestActiveMessages()).toHaveLength(0);
     // Only the current thread's streaming entry should be pruned
-    expect(state.streamingByThread["thread-1"]).toBeUndefined();
+    expect(getTestThreadStreaming("thread-1")).toBeUndefined();
     // Running threads should NOT be cleared by clearMessages
     expect(state.runningThreadIds.has("thread-1")).toBe(true);
   });
@@ -111,8 +112,8 @@ describe("Thread Lifecycle Behavior", () => {
 
     const state = useThreadStore.getState();
     expect(state.currentThreadId).toBe(threadId);
-    expect(state.messages).toEqual(msgs);
-    expect(state.loading).toBe(false);
+    expect(getTestActiveMessages()).toEqual(msgs);
+    expect(readActiveThreadField((r) => r.loading) ?? false).toBe(false);
   });
 
   it("when loadMessages fails, the error is captured", async () => {
@@ -123,8 +124,7 @@ describe("Thread Lifecycle Behavior", () => {
 
     await useThreadStore.getState().loadMessages(threadId);
 
-    const state = useThreadStore.getState();
-    expect(state.errorByThread["thread-1"]).toContain("db connection failed");
-    expect(state.loading).toBe(false);
+    expect(getTestThreadError("thread-1")).toContain("db connection failed");
+    expect(readActiveThreadField((r) => r.loading) ?? false).toBe(false);
   });
 });

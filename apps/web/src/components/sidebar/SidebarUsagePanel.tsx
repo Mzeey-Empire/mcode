@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useThreadStore } from "@/stores/threadStore";
+import { useActiveThreadRecord } from "@/stores/thread-selectors";
 import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { cn } from "@/lib/utils";
 import type { QuotaCategory } from "@mcode/contracts";
@@ -180,11 +181,8 @@ export function SidebarUsagePanel() {
 
   const providerId = (activeThread?.provider ?? "claude") as string;
 
-  const usageKey = activeThreadId ? `${activeThreadId}:${providerId}` : null;
-  const usageInfo = useThreadStore((s) => usageKey ? s.usageByProvider[usageKey] : undefined);
-  const contextEntry = useThreadStore((s) =>
-    activeThreadId ? s.contextByThread[activeThreadId] : undefined,
-  );
+  const usageInfo = useActiveThreadRecord((r) => r.usageByProvider[providerId]);
+  const contextEntry = useActiveThreadRecord((r) => r.context);
   const fetchProviderUsage = useThreadStore((s) => s.fetchProviderUsage);
 
   // Re-fetch on every thread/provider switch so the bars reflect the active

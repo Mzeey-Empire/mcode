@@ -1,3 +1,6 @@
+import {
+  applyLegacyThreadStoreSeed,
+} from "@/stores/thread-store-test-utils";
 /**
  * Tests that loadMessages() skips the listSnapshots RPC when a thread has no
  * file changes (has_file_changes === false), and falls back to calling it when
@@ -7,7 +10,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useThreadStore, TOOL_CALL_CACHE_SIZE, MESSAGE_FETCH_SIZE } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
-import { clearMessageCache } from "@/stores/messageCache";
+import { clearRecordCache } from "@/lib/thread-hydrator/record-cache";
 import { mockTransport, createMockMessage, createMockThread } from "./mocks/transport";
 import { LruCache } from "@/lib/lru-cache";
 
@@ -26,7 +29,7 @@ const fakeMessages = [
  * Reset both stores and mock state to a clean baseline before each test.
  */
 function resetState() {
-  clearMessageCache();
+  clearRecordCache();
   vi.clearAllMocks();
 
   (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -35,7 +38,7 @@ function resetState() {
   });
   (mockTransport.listSnapshots as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
-  useThreadStore.setState({
+  applyLegacyThreadStoreSeed({
     messages: [],
     currentThreadId: null,
     runningThreadIds: new Set<string>(),
@@ -157,7 +160,7 @@ describe("loadMessages (cache-hit) - hydration staleness gate", () => {
     });
 
     // Simulate ">2s ago" by rewinding the hydration timestamp.
-    useThreadStore.setState({
+    applyLegacyThreadStoreSeed({
       currentThreadId: "other-thread",
       lastHydratedByThread: { [THREAD_ID]: Date.now() - 5000 },
     });

@@ -1,3 +1,7 @@
+import {
+  applyLegacyThreadStoreSeed,
+  getTestThreadAgentStartTime,
+} from "@/stores/thread-store-test-utils";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
@@ -5,7 +9,7 @@ import { createMockThread } from "./mocks/transport";
 
 describe("running-session signal", () => {
   beforeEach(() => {
-    useThreadStore.setState({
+    applyLegacyThreadStoreSeed({
       runningThreadIds: new Set(),
       currentThreadId: null,
       messages: [],
@@ -19,7 +23,7 @@ describe("running-session signal", () => {
       threadId: "t-1",
     });
     expect(useThreadStore.getState().runningThreadIds.has("t-1")).toBe(true);
-    expect(typeof useThreadStore.getState().agentStartTimes["t-1"]).toBe("number");
+    expect(typeof getTestThreadAgentStartTime("t-1")).toBe("number");
   });
 
   it("is idempotent: repeat turnStarted does not create duplicates", () => {
@@ -27,10 +31,10 @@ describe("running-session signal", () => {
     vi.spyOn(Date, "now").mockImplementation(() => now++);
     const store = useThreadStore.getState();
     store.handleAgentEvent("t-1", { method: "session.turnStarted", type: "turnStarted", threadId: "t-1" });
-    const firstStart = useThreadStore.getState().agentStartTimes["t-1"];
+    const firstStart = getTestThreadAgentStartTime("t-1");
     store.handleAgentEvent("t-1", { method: "session.turnStarted", type: "turnStarted", threadId: "t-1" });
     expect(useThreadStore.getState().runningThreadIds.size).toBe(1);
-    expect(useThreadStore.getState().agentStartTimes["t-1"]).toBe(firstStart);
+    expect(getTestThreadAgentStartTime("t-1")).toBe(firstStart);
     vi.restoreAllMocks();
   });
 
@@ -61,7 +65,7 @@ describe("running-session signal", () => {
 
 describe("session.turnStarted clears interrupted status", () => {
   beforeEach(() => {
-    useThreadStore.setState({ runningThreadIds: new Set(), currentThreadId: null, messages: [] });
+    applyLegacyThreadStoreSeed({ runningThreadIds: new Set(), currentThreadId: null, messages: [] });
     useWorkspaceStore.setState({
       threads: [createMockThread({ id: "t-1", status: "interrupted" })],
       activeThreadId: "t-1",
