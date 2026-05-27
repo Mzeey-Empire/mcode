@@ -84,8 +84,9 @@ A user with Mcode open sees, in priority order:
 | **Plan-mode wizard** | When Plan mode is active, the composer transforms into a step-by-step question flow before any work begins. | Structured planning, not free-form chat. |
 | **Preview panel** | Embedded browser pointed at the running app. Has a **design mode** (manual inspection, gates the main submit button) and a **capture dock** (screenshot regions or elements into the composer). | Visual loop without leaving the app. |
 | **Diff panel** | Per-turn file changes, side-rail to open in editor, whole-file Markdown preview. | Reviewing what the agent did is the second most common action after sending a prompt. |
-| **Command palette** | Cmd+K. Slash commands, settings, actions. | The keyboard discovery surface. |
+| **Command palette** | Cmd+K. Slash commands, actions, and a jump to Settings. | The keyboard discovery surface. |
 | **Right panel** | Terminal as a tab; other auxiliary tabs alongside. | Drop into a shell without leaving the workspace. |
+| **Settings** | Appearance, performance, model context overrides, provider keys, permission modes. Reached from the sidebar or the command palette. | Configuration without leaving the workspace. |
 
 ## 7. What Mcode Doesn't Do
 
