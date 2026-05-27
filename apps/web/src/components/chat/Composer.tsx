@@ -103,14 +103,12 @@ function buildAttachedBrowserCaptures(list: PendingAttachment[]): AttachedBrowse
   return rows;
 }
 
-/** Decide which caption is stored for the chat bubble vs what is sent over the agent wire. */
+/** Caption stored in the chat bubble and DB; trims edge whitespace, keeps internal newlines. */
 function resolveOutboundDisplayContent(
-  trimmed: string,
+  rawInput: string,
   displayInjected: string | undefined,
-  captureRows: AttachedBrowserCapture[],
-): string | undefined {
-  if (captureRows.length === 0) return displayInjected;
-  return displayInjected ?? trimmed;
+): string {
+  return (displayInjected ?? rawInput).trim();
 }
 
 /** `accept` list for the composer's hidden file input (mirrors {@link isFileSupported}). */
@@ -1203,7 +1201,6 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       attachmentsSnapshot: PendingAttachment[],
       inputSnapshot: string,
     ): Omit<QueuedMessage, "id" | "queuedAt"> => {
-      const cleaned = inputSnapshot.trim();
       const attachmentMetas: AttachmentMeta[] = attachmentsSnapshot.map((att) => ({
         id: att.id,
         name: att.name,
@@ -1211,9 +1208,10 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         sizeBytes: att.sizeBytes,
         sourcePath: att.filePath ?? "",
       }));
+      const trimmedInput = inputSnapshot.trim();
       return {
-        content: cleaned,
-        displayContent: cleaned,
+        content: trimmedInput,
+        displayContent: trimmedInput,
         attachments: attachmentMetas,
         model: modelId,
         permissionMode: access,
@@ -1636,9 +1634,9 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     editorRef.current?.focus();
   }, [addFiles]);
 
-  /** Resolve @file tags into injected content. */
-  const injectFileContent = useCallback(async (trimmed: string): Promise<{ content: string; display?: string }> => {
-    const refs = extractFileRefs(trimmed);
+  /** Resolve @file tags into injected content for the agent wire payload. */
+  const injectFileContent = useCallback(async (rawInput: string): Promise<{ content: string; display?: string }> => {
+    const refs = extractFileRefs(rawInput);
     if (refs.length > 0 && workspaceId) {
       try {
         const transport = getTransport();
@@ -1653,11 +1651,11 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
         const validFiles = fileContents.filter(
           (f): f is { path: string; content: string } => f !== null,
         );
-        const injected = buildInjectedMessage(trimmed, validFiles);
-        return { content: injected, display: injected !== trimmed ? trimmed : undefined };
+        const injected = buildInjectedMessage(rawInput, validFiles);
+        return { content: injected, display: injected !== rawInput ? rawInput : undefined };
       } catch { /* fall through */ }
     }
-    return { content: trimmed };
+    return { content: rawInput };
   }, [workspaceId, threadId]);
 
   /** Collect attachment metadata for RPC and revoke preview URLs. */
@@ -1698,7 +1696,8 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   }, [attachments]);
 
   const handleSend = useCallback(async () => {
-    const trimmed = input.trim();
+    const rawInput = input;
+    const trimmed = rawInput.trim();
     if (trimmed.length === 0 && attachments.length === 0) {
       // Empty submit while editing a queued message = the user emptied it
       // intentionally. Treat as "remove from queue" instead of silently
@@ -1770,17 +1769,18 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       !isGoalControlCommand(trimmed)
     ) {
       const captureRows = buildAttachedBrowserCaptures(attachments);
-      const { content: injectedContent, display: displayInjected } = await injectFileContent(trimmed);
+      const { content: injectedContent, display: displayInjected } = await injectFileContent(rawInput);
       let content: string;
       try {
         content =
           captureRows.length === 0 ? injectedContent : appendBrowserCaptureFence(injectedContent, captureRows);
+        content = content.trim();
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Invalid page preview payload";
         useToastStore.getState().show("error", "Could not send message", msg);
         return;
       }
-      const displayContentResolved = resolveOutboundDisplayContent(trimmed, displayInjected, captureRows);
+      const displayContentResolved = resolveOutboundDisplayContent(rawInput, displayInjected);
       const currentAttachments = collectAndClearAttachments();
       const browserCaptureSpillPaths = collectBrowserCaptureSpillPaths(captureRows);
 
@@ -1839,7 +1839,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       return;
     }
 
-    const { content: injectedContent, display: displayInjected } = await injectFileContent(trimmed);
+    const { content: injectedContent, display: displayInjected } = await injectFileContent(rawInput);
 
     // Validate worktree mode requirements
     if (isNewThread && newThreadMode === "worktree" && namingMode === "custom" && !customBranchName.trim()) {
@@ -1867,12 +1867,13 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     try {
       messageContent =
         captureRows.length === 0 ? injectedContent : appendBrowserCaptureFence(injectedContent, captureRows);
+      messageContent = messageContent.trim();
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Invalid page preview payload";
       useToastStore.getState().show("error", "Could not send message", msg);
       return;
     }
-    const outboundDisplay = resolveOutboundDisplayContent(trimmed, displayInjected, captureRows);
+    const outboundDisplay = resolveOutboundDisplayContent(rawInput, displayInjected);
 
     // ---- Normal send path ----
 
@@ -2011,11 +2012,11 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     setQueuedSend(null);
     useThreadStore.getState().sendMessage(
       threadId,
-      text,
+      text.trim(),
       modelId,
       access,
       undefined,
-      text,
+      text.trim(),
       reasoning,
       provider,
     );
