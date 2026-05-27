@@ -1,0 +1,54 @@
+import { describe, expect, it } from "vitest";
+import { shouldShowStickyUserMessage } from "../sticky-user-message-visibility";
+
+describe("shouldShowStickyUserMessage", () => {
+  it("returns false when the message is still visible in the viewport", () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientHeight", { value: 400 });
+    Object.defineProperty(container, "scrollTop", { value: 0, writable: true });
+
+    const message = document.createElement("div");
+    message.setAttribute("data-message-id", "msg-1");
+    container.appendChild(message);
+
+    container.getBoundingClientRect = () =>
+      ({ top: 0, bottom: 400, left: 0, right: 300, width: 300, height: 400, x: 0, y: 0, toJSON: () => ({}) });
+    message.getBoundingClientRect = () =>
+      ({ top: 40, bottom: 120, left: 0, right: 300, width: 300, height: 80, x: 0, y: 40, toJSON: () => ({}) });
+
+    expect(
+      shouldShowStickyUserMessage(container, "msg-1", 0, { getVirtualItems: () => [] }),
+    ).toBe(false);
+  });
+
+  it("returns true when the message has scrolled fully above the viewport", () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientHeight", { value: 400 });
+    Object.defineProperty(container, "scrollTop", { value: 240, writable: true });
+
+    const message = document.createElement("div");
+    message.setAttribute("data-message-id", "msg-1");
+    container.appendChild(message);
+
+    container.getBoundingClientRect = () =>
+      ({ top: 0, bottom: 400, left: 0, right: 300, width: 300, height: 400, x: 0, y: 0, toJSON: () => ({}) });
+    message.getBoundingClientRect = () =>
+      ({ top: -40, bottom: -1, left: 0, right: 300, width: 300, height: 39, x: 0, y: -40, toJSON: () => ({}) });
+
+    expect(
+      shouldShowStickyUserMessage(container, "msg-1", 0, { getVirtualItems: () => [] }),
+    ).toBe(true);
+  });
+
+  it("returns true when the virtual row is above the rendered range", () => {
+    const container = document.createElement("div");
+    Object.defineProperty(container, "clientHeight", { value: 400 });
+    Object.defineProperty(container, "scrollTop", { value: 500, writable: true });
+
+    expect(
+      shouldShowStickyUserMessage(container, "msg-1", 2, {
+        getVirtualItems: () => [{ index: 5, start: 600, size: 80 }],
+      }),
+    ).toBe(true);
+  });
+});
