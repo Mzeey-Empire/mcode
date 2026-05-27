@@ -1,0 +1,88 @@
+import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts";
+import { stripInjectedFiles } from "@/lib/file-tags";
+import type { Message } from "@/transport";
+
+/**
+ * Detect a user-typed /goal SET form (`/goal <condition>` with non-empty,
+ * non-control argument). Mirrors the user-side branch in MessageBubble.
+ */
+function parseUserGoalCommand(content: string): { condition: string } | null {
+  const m = /^\s*\/goal\b\s*([\s\S]*)$/.exec(content);
+  if (!m) return null;
+  const arg = m[1].trim();
+  if (arg === "") return null;
+  const lower = arg.toLowerCase();
+  if (lower === "clear" || lower === "reset" || lower === "show") return null;
+  return { condition: arg };
+}
+
+/** Collapses markdown noise so sticky previews stay readable in one or two lines. */
+function toPlainPreview(text: string): string {
+  const codeBlocks = [...text.matchAll(/```[\w-]*\n?([\s\S]*?)```/g)]
+    .map((match) => match[1]?.trim() ?? "")
+    .filter(Boolean);
+
+  const plain = text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/[#*_>~[\]()]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (plain) return plain;
+
+  if (codeBlocks.length > 0) {
+    const firstLine = codeBlocks[0]?.split("\n").find((line) => line.trim())?.trim();
+    if (firstLine) {
+      return firstLine.length > 120 ? `[Code] ${firstLine.slice(0, 120)}…` : `[Code] ${firstLine}`;
+    }
+    return "[Code snippet]";
+  }
+
+  return "";
+}
+
+/** Returns true when the sticky preview should offer an expand control. */
+export function isStickyPreviewExpandable(preview: string): boolean {
+  return preview.length > 140;
+}
+
+/**
+ * Resolves plain-text preview copy for the sticky last-user-message chip.
+ * Returns null when the message renders nothing user-visible in the transcript.
+ */
+export function resolveUserMessagePreview(message: Message): string | null {
+  const textContent = stripInjectedFiles(message.content);
+  const attachments = message.attachments ?? [];
+  const hasAttachments = attachments.length > 0;
+
+  if (
+    !hasAttachments
+    && textContent.startsWith(PLAN_ANSWER_MESSAGE_PREFIX)
+  ) {
+    return null;
+  }
+
+  const userGoal = parseUserGoalCommand(textContent);
+  if (userGoal) {
+    return userGoal.condition;
+  }
+
+  const trimmed = textContent.trim();
+  if (trimmed) {
+    return toPlainPreview(trimmed);
+  }
+
+  if (!hasAttachments) return null;
+
+  const images = attachments.filter((a) => a.mimeType.startsWith("image/"));
+  const files = attachments.filter((a) => !a.mimeType.startsWith("image/"));
+  if (images.length > 0 && files.length > 0) {
+    return `${images.length} image${images.length === 1 ? "" : "s"}, ${files.length} file${files.length === 1 ? "" : "s"}`;
+  }
+  if (images.length === 1) return "[Image attachment]";
+  if (images.length > 1) return `${images.length} images`;
+  if (files.length === 1) return files[0]?.name ?? "[File attachment]";
+  if (files.length > 1) return `${files.length} files`;
+  return null;
+}
