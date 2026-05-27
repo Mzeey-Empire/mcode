@@ -1,9 +1,12 @@
 import type { ToolCall, HookExecution } from "@/transport/types";
 
 /**
- * Contiguous streamed reasoning text for one timeline row, bounded by tool use or turn end.
+ * Contiguous streamed assistant narration for one timeline row, bounded by
+ * tool use or turn end. A narration segment is the agent's "thinking out
+ * loud" between tool calls — distinct from the final-response text and from
+ * SDK reasoning blocks (extended thinking).
  */
-export interface ThoughtSegment {
+export interface NarrationSegment {
   /** Accumulated textDelta content for this segment. */
   text: string;
   /** Epoch ms when the first textDelta for this segment arrived. */
@@ -21,10 +24,11 @@ export interface ToolGroup {
 }
 
 /**
- * One row in the live narrative timeline: thought, tool group, hook, subagent, active tool, or final delta.
+ * One row in the live narrative timeline: narration segment, tool group,
+ * hook, subagent, active tool, or final delta.
  */
 export type NarrativeItem =
-  | { type: "thought"; segment: ThoughtSegment; isActive: boolean }
+  | { type: "narration"; segment: NarrationSegment; isActive: boolean }
   | { type: "tool-group"; group: ToolGroup; hasError: boolean; hasCancelled: boolean }
   | { type: "hook"; hook: HookExecution }
   | { type: "subagent"; toolCall: ToolCall; children: readonly ToolCall[]; hooks: readonly HookExecution[] }
@@ -44,11 +48,11 @@ export interface NarrativeCounts {
    */
   steps: number;
   /**
-   * Number of thought segments rendered as inline timeline rows.
-   * The final streaming response is rendered as `delta`, not `thought`,
+   * Number of narration segments rendered as inline timeline rows.
+   * The final streaming response is rendered as `delta`, not `narration`,
    * so it is intentionally excluded here.
    */
-  thoughts: number;
+  narrationSegments: number;
   /**
    * Number of top-level Agent tool calls (delegated sub-agents).
    * Subset of `steps`.

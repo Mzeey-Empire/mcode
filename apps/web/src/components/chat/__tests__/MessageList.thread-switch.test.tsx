@@ -61,7 +61,7 @@ vi.mock("@/stores/threadStore", () => ({
       loadOlderMessages: vi.fn(),
       permissionsByThread: {},
       hooksByThread: {},
-      thoughtSegmentsByThread: {},
+      narrationSegmentsByThread: {},
     }),
   ),
 }));

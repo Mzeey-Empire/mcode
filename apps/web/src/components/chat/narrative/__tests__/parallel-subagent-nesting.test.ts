@@ -50,7 +50,7 @@ describe("parallel sub-agent nesting", () => {
     const { items, counts } = buildNarrativeItems({
       toolCalls: tools,
       hooks: [],
-      thoughtSegments: [],
+      narrationSegments: [],
       streamingText: "",
       isAgentRunning: false,
     });
@@ -84,7 +84,7 @@ describe("parallel sub-agent nesting", () => {
     const { items } = buildNarrativeItems({
       toolCalls: tools,
       hooks: [],
-      thoughtSegments: [],
+      narrationSegments: [],
       streamingText: "",
       isAgentRunning: false,
     });
@@ -126,7 +126,7 @@ describe("parallel sub-agent nesting", () => {
     const { items } = buildNarrativeItems({
       toolCalls: tools,
       hooks: [],
-      thoughtSegments: [],
+      narrationSegments: [],
       streamingText: "",
       isAgentRunning: false,
     });

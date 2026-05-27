@@ -222,11 +222,6 @@ event: a `stop_reason` of `tool_use` closes the buffered deltas as a
 narration segment; `end_turn` / `stop_sequence` / `max_tokens` / `refusal`
 reclassifies them as final-response text instead.
 
-> **Codebase mismatch (rename pending).** The code currently calls this
-> concept `ThoughtSegment` (table: `thought_segments`). That name is
-> misleading — these are not SDK "thoughts." A follow-up rename to
-> `NarrationSegment` is planned.
-
 ### Final response
 The text the agent produces after all tool calls in a turn have resolved,
 intended as the user-facing reply for that turn. Identified by the SDK's

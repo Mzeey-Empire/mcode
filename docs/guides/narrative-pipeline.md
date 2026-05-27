@@ -1,7 +1,7 @@
 # Narrative Pipeline Guide
 
 The narrative timeline is the chronological audit trail rendered inside each
-assistant turn: tool calls, sub-agents, thoughts, hooks, and the streaming
+assistant turn: tool calls, sub-agents, narration, hooks, and the streaming
 response. It looks simple. It is not. This guide documents the contracts and
 the specific traps we hit so the next person doesn't trip on them.
 
@@ -58,7 +58,7 @@ Every step has at least one trap. Read on.
 
 ---
 
-## Thought vs final response classification
+## Narration vs final response classification
 
 Multiple layers classify streamed text. Use this precedence when debugging
 misclassified preamble or duplicate assistant bodies:
@@ -66,19 +66,20 @@ misclassified preamble or duplicate assistant bodies:
 1. **`AssistantMessageBoundary`** (authoritative) — emitted from
    `claude-provider.ts` when an SDK `assistant` message carries text and a
    `stop_reason`. `{end_turn, stop_sequence, max_tokens}` → final response;
-   everything else (including `tool_use`) → preamble/thought.
+   everything else (including `tool_use`) → preamble/narration.
 2. **`TextDelta.isFinalResponse`** (stream hint) — best-effort flag set on
    `content_block_delta` when all tools have resolved and at least one tool
    fired this turn. May be absent on tool-free turns; boundary event wins.
 3. **Client segment routing** — `threadStore` retracts or closes the open
-   thought segment on `session.assistantMessageBoundary`. Final response text
+   narration segment on `session.assistantMessageBoundary`. Final response text
    stays in `streamingByThread` and renders via the `streaming-response`
-   virtual slot, not `thoughtSegmentsByThread`.
-4. **Persist suffix match** — `agent-service.ts` tags the last matching
-   thought row `is_final_response` before DB insert as a safety net for
-   older rows or reconnect gaps.
+   virtual slot, not `narrationSegmentsByThread`.
+4. **Persist safety net** — `agent-service.ts` calls
+   `isLikelyFinalResponseTail` (shared with the client renderer) to tag the
+   last matching narration row `is_final_response` before DB insert,
+   catching tool-free turns and older rows.
 
-**Don't break this:** dropping the boundary handler or counting thought
+**Don't break this:** dropping the boundary handler or counting narration
 segments in `NarrativeIndicator.stepCount` will diverge live counts from
 `PersistedTurnFooter` (Trap 6).
 
@@ -158,7 +159,7 @@ finished."
 each persisted assistant message that lazy-fetched tool call records from
 SQLite. We deleted that component when we introduced `TurnFooter`. But the
 client store was still clearing volatile state on `turn.persisted` — the
-narrative timeline relies on `toolCallsByThread`, `thoughtSegmentsByThread`,
+narrative timeline relies on `toolCallsByThread`, `narrationSegmentsByThread`,
 and `hooksByThread` being non-empty. With them cleared, the
 `narrative-flow` virtual item stops being emitted.
 
@@ -167,13 +168,13 @@ and `hooksByThread` being non-empty. With them cleared, the
 
 | Event                       | Action                                                     |
 | --------------------------- | ---------------------------------------------------------- |
-| `session.turnStarted` (new) | Clear toolCalls / thoughts / hooks / start fresh           |
+| `session.turnStarted` (new) | Clear toolCalls / narration / hooks / start fresh           |
 | `session.toolUse`           | Append                                                     |
 | `session.toolResult`        | Update                                                     |
-| `session.thoughtSegment`    | Append                                                     |
+| `session.narrationSegment`    | Append                                                     |
 | `session.turnComplete`      | Keep everything; mark tool calls `isComplete: true`        |
 | `turn.persisted`            | Keep everything — DB write is informational only           |
-| Next `sendMessage` call     | Clear toolCalls / thoughts / hooks (belt-and-suspenders)   |
+| Next `sendMessage` call     | Clear toolCalls / narration / hooks (belt-and-suspenders)   |
 
 `agentStartTimes[threadId]` follows the same lifecycle as the audit trail —
 **do not clear it on `turnComplete`** or `TurnFooter` will lose its
@@ -181,14 +182,14 @@ and `hooksByThread` being non-empty. With them cleared, the
 making the footer show "—" for duration.
 
 **Don't break this:** any future "cleanup on turn end" code that touches
-`toolCallsByThread`, `thoughtSegmentsByThread`, `hooksByThread`, or
+`toolCallsByThread`, `narrationSegmentsByThread`, `hooksByThread`, or
 `agentStartTimes` must clear at `turnStarted` / `sendMessage` time, not at
 `turnComplete` / `turn.persisted` time.
 
 **Known follow-up:** on a full page reload, the volatile state is lost, so
 completed-turn audit trails for previously-rendered turns don't reappear.
 The fix is to hydrate from `tool_call_records` (and a future
-`thought_segments` / `hook_executions` table) when loading messages. Not
+`narration_segments` / `hook_executions` table) when loading messages. Not
 done yet.
 
 ---
@@ -246,7 +247,7 @@ completed and the timestamps look right.
 `completedDurationMs` inside a `useMemo` using `Date.now()`. Two problems:
 (1) `useMemo` is supposed to be pure, and using a non-deterministic source
 makes the cache key meaningless; (2) on re-renders triggered by `toolCalls`
-or `thoughtSegments` array reference changes (which happen even after the
+or `narrationSegments` array reference changes (which happen even after the
 turn ends, e.g. on reconnect replay), `Date.now()` re-samples and the
 duration drifts.
 
@@ -306,13 +307,13 @@ before reporting the change done:
   appear at top level.
 - **Nested sub-agents:** Agent A dispatches Agent B. B's children nest under
   B, which nests under A.
-- **Thoughts mid-tool-call:** thought rows interleave with tool calls in
+- **Narration mid-tool-call:** narration rows interleave with tool calls in
   chronological order.
-- **Long thought:** clamps to 2 lines with `show more` toggle.
+- **Long narration:** clamps to 2 lines with `show more` toggle.
 - **Streaming response:** typing cursor sits inline at the end of the last
   word — not on its own line below the last paragraph.
 - **Turn completion:** timeline stays visible, `TurnFooter` appears with
-  steps/thoughts/sub-agents counts and a stable duration.
+  steps/narration/sub-agents counts and a stable duration.
 - **Next turn:** sending a new message clears the previous trail and starts
   a fresh timeline.
 - **Browser console:** no `NotFoundError`, no React warnings.
@@ -333,14 +334,14 @@ ship a bug:
 2. `agentCallStack` is mutated only by `bufferToolCall` (push on Agent),
    `updateBufferedToolCallOutput` (pop on Agent result), and the
    `Message`-event clear at end of turn.
-3. `toolCallsByThread`, `thoughtSegmentsByThread`, `hooksByThread`, and
+3. `toolCallsByThread`, `narrationSegmentsByThread`, `hooksByThread`, and
    `agentStartTimes` survive `turnComplete` and `turn.persisted`. They are
    cleared only at `turnStarted` / `sendMessage`.
 4. No React-rendered DOM node is moved via `appendChild` / `insertBefore` /
    etc.
 5. Wall-clock snapshots use `useState` + `useEffect`, not `useMemo`.
 6. `NarrativeCounts.steps` is the count of top-level tool calls only — not
-   thought segments. Live `narrative-indicator` must use the same definition.
+   narration segments. Live `narrative-indicator` must use the same definition.
 7. Final response text renders in the `streaming-response` virtual slot;
-   preamble text renders as thought rows inside `narrative-flow`. The
+   preamble text renders as narration rows inside `narrative-flow`. The
    `AssistantMessageBoundary` event is the authoritative split.

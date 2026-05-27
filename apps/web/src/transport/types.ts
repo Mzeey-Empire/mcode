@@ -16,7 +16,7 @@ import type {
   ReasoningLevel,
   ContextWindowMode,
   ToolCallRecord,
-  ThoughtSegmentRecord,
+  NarrationSegmentRecord,
   HookExecutionRecord,
   TurnSnapshot,
   Settings,
@@ -63,7 +63,7 @@ export type {
   ProviderModelInfo,
 } from "@mcode/contracts";
 
-export type { PaginatedMessages, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord, TurnSnapshot, CopilotSubagent } from "@mcode/contracts";
+export type { PaginatedMessages, ToolCallRecord, NarrationSegmentRecord, HookExecutionRecord, TurnSnapshot, CopilotSubagent } from "@mcode/contracts";
 
 export { PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts";
 
@@ -323,16 +323,16 @@ export interface McodeTransport {
   listToolCallRecords(messageId: string): Promise<ToolCallRecord[]>;
   /** Fetch child tool call records for a parent tool call. */
   listToolCallRecordsByParent(parentToolCallId: string): Promise<ToolCallRecord[]>;
-  /** Fetch the full persisted narrative (tools, thoughts, hooks) for an assistant message. */
+  /** Fetch the full persisted narrative (tools, narration segments, hooks) for an assistant message. */
   listNarrative(messageId: string): Promise<{
     tools: ToolCallRecord[];
-    thoughts: ThoughtSegmentRecord[];
+    narrationSegments: NarrationSegmentRecord[];
     hooks: HookExecutionRecord[];
   }>;
   /** Batch fetch narratives for multiple messages in one round-trip. */
   listNarrativeBatch(messageIds: string[]): Promise<Record<string, {
     tools: ToolCallRecord[];
-    thoughts: ThoughtSegmentRecord[];
+    narrationSegments: NarrationSegmentRecord[];
     hooks: HookExecutionRecord[];
   }>>;
 

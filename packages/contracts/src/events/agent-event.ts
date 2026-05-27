@@ -140,7 +140,7 @@ export const AgentEventSchema = lazySchema(() =>
       /**
        * Set to `true` when this delta belongs to the final user-facing response
        * (i.e. all tool calls have been resolved for this turn). The client uses
-       * this to suppress creating a ThoughtSegment row for these deltas.
+       * this to suppress creating a narration-segment row for these deltas.
        *
        * Not set for tool-free turns (no lookahead is possible at the provider
        * layer); the client fallback in `build-narrative.ts` and the
@@ -286,10 +286,10 @@ export const AgentEventSchema = lazySchema(() =>
        * - `isFinalResponse: true` when `stop_reason` ∈
        *   {`end_turn`, `stop_sequence`, `max_tokens`, `refusal`} — the deltas
        *   were the user-facing final response. The consumer should retract any
-       *   open thought segment whose content really belonged to the response.
+       *   open narration segment whose content really belonged to the response.
        * - `isFinalResponse: false` when `stop_reason` is `tool_use` (or any
        *   other non-finalizing value) — the deltas were preamble. The consumer
-       *   should close the open thought segment so it persists as a thought.
+       *   should close the open narration segment so it persists as narration.
        *
        * This is the authoritative classification signal, replacing the legacy
        * `hasFiredToolThisTurn && pendingToolUses==0` heuristic for tool-free

@@ -3,20 +3,20 @@ import { useThreadStore } from "@/stores/threadStore";
 
 /**
  * Codex turns frequently interleave very short text deltas with shell tool
- * calls. The session.toolUse handler freezes the active thought segment, so
+ * calls. The session.toolUse handler freezes the active narration segment, so
  * without coalescing we end up with rows like "the", "changed set and
  * therefore the only", "likely source of performance findings." — one logical
  * sentence chopped into 4 visible rows. flushPendingTextDeltas re-opens a
  * frozen tail when (a) the previous tail is short OR (b) the continuation
- * looks lowercase / punctuation-led so the user sees one flowing thought.
+ * looks lowercase / punctuation-led so the user sees one flowing narration.
  */
-describe("threadStore thought-segment coalescing", () => {
+describe("threadStore narration-segment coalescing", () => {
   beforeEach(() => {
     useThreadStore.setState({
       streamingByThread: {},
       streamingPreviewByThread: {},
       toolCallsByThread: {},
-      thoughtSegmentsByThread: {},
+      narrationSegmentsByThread: {},
     });
   });
 
@@ -53,14 +53,14 @@ describe("threadStore thought-segment coalescing", () => {
       params: { toolCallId: "t1", toolName: "Bash", toolInput: {} },
     });
 
-    // New delta continues the thought after the tool finishes.
+    // New delta continues the segment after the tool finishes.
     store.handleAgentEvent(tid, {
       method: "session.textDelta",
       params: { delta: " changed set", isFinalResponse: false },
     });
     flush(queue);
 
-    const segs = useThreadStore.getState().thoughtSegmentsByThread[tid] ?? [];
+    const segs = useThreadStore.getState().narrationSegmentsByThread[tid] ?? [];
     expect(segs.length).toBe(1);
     expect(segs[0]!.text).toBe("the changed set");
     expect(segs[0]!.endedAt).toBeUndefined();
@@ -89,7 +89,7 @@ describe("threadStore thought-segment coalescing", () => {
     });
     flush(queue);
 
-    const segs = useThreadStore.getState().thoughtSegmentsByThread[tid] ?? [];
+    const segs = useThreadStore.getState().narrationSegmentsByThread[tid] ?? [];
     expect(segs.length).toBe(2);
     expect(segs[0]!.text).toBe(long);
     expect(segs[1]!.text).toBe("Now I have the result.");
@@ -117,7 +117,7 @@ describe("threadStore thought-segment coalescing", () => {
     });
     flush(queue);
 
-    const segs = useThreadStore.getState().thoughtSegmentsByThread[tid] ?? [];
+    const segs = useThreadStore.getState().narrationSegmentsByThread[tid] ?? [];
     expect(segs.length).toBe(1);
     expect(segs[0]!.text.endsWith("worktree delta.")).toBe(true);
   });

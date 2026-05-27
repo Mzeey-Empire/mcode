@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 import type { ToolCall, HookExecution } from "@/transport/types";
-import type { ThoughtSegment, NarrativeItem } from "./types";
+import type { NarrationSegment, NarrativeItem } from "./types";
 import { buildNarrativeItems } from "./build-narrative";
-import { ThoughtBlock } from "./ThoughtBlock";
+import { NarrationBlock } from "./NarrationBlock";
 import { ToolSummaryLine } from "./ToolSummaryLine";
 import { HookRow } from "./HookRow";
 import { SubagentRow } from "./SubagentRow";
@@ -15,16 +15,16 @@ export interface NarrativeFlowProps {
   toolCalls: readonly ToolCall[];
   /** All hook executions for the current agent turn. */
   hooks: readonly HookExecution[];
-  /** Ordered thought segments accumulated during the agent turn. */
-  thoughtSegments: readonly ThoughtSegment[];
-  /** Partial streaming text not yet committed to a thought segment. */
+  /** Ordered narration segments accumulated during the agent turn. */
+  narrationSegments: readonly NarrationSegment[];
+  /** Partial streaming text not yet committed to a narration segment. */
   streamingText: string;
   /** Whether the agent is currently running. */
   isAgentRunning: boolean;
   /** Epoch ms when the agent turn started, used to derive elapsed time. */
   startTime?: number;
   /**
-   * When the turn ended, the rendered assistant bubble text — duplicate thought
+   * When the turn ended, the rendered assistant bubble text — duplicate narration
    * segments matching this body are suppressed until volatile state resets.
    */
   committedAssistantBody?: string;
@@ -41,7 +41,7 @@ export interface NarrativeFlowProps {
 function marginClassForItem(item: NarrativeItem, index: number): string {
   if (index === 0) return "mt-0";
   switch (item.type) {
-    case "thought":
+    case "narration":
       return "mt-3";
     case "tool-group":
     case "hook":
@@ -63,8 +63,8 @@ function marginClassForItem(item: NarrativeItem, index: number): string {
  */
 function keyForItem(item: NarrativeItem, index: number): string {
   switch (item.type) {
-    case "thought":
-      return `thought-${item.segment.startedAt}`;
+    case "narration":
+      return `narration-${item.segment.startedAt}`;
     case "tool-group":
       return `tool-group-${item.group.calls[0]?.id ?? index}`;
     case "hook":
@@ -87,8 +87,8 @@ function keyForItem(item: NarrativeItem, index: number): string {
  */
 function renderItem(item: NarrativeItem, _mostActiveSubagentId: string | null, allToolCalls: readonly ToolCall[]): React.ReactNode {
   switch (item.type) {
-    case "thought":
-      return <ThoughtBlock segment={item.segment} isActive={item.isActive} />;
+    case "narration":
+      return <NarrationBlock segment={item.segment} isActive={item.isActive} />;
     case "tool-group":
       return (
         <ToolSummaryLine
@@ -127,7 +127,7 @@ function renderItem(item: NarrativeItem, _mostActiveSubagentId: string | null, a
 export function NarrativeFlow({
   toolCalls,
   hooks,
-  thoughtSegments,
+  narrationSegments,
   streamingText,
   isAgentRunning,
   committedAssistantBody,
@@ -137,7 +137,7 @@ export function NarrativeFlow({
       buildNarrativeItems({
         toolCalls,
         hooks,
-        thoughtSegments,
+        narrationSegments,
         streamingText,
         isAgentRunning,
         committedAssistantBody,
@@ -145,7 +145,7 @@ export function NarrativeFlow({
     [
       toolCalls,
       hooks,
-      thoughtSegments,
+      narrationSegments,
       streamingText,
       isAgentRunning,
       committedAssistantBody,

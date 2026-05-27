@@ -55,8 +55,14 @@ export type {
   ToolCallStatus,
 } from "./models/tool-call-record.js";
 
-export { ThoughtSegmentRecordSchema } from "./models/thought-segment.js";
-export type { ThoughtSegmentRecord } from "./models/thought-segment.js";
+export {
+  NarrationSegmentRecordSchema,
+  isLikelyFinalResponseTail,
+} from "./models/narration-segment.js";
+export type {
+  NarrationSegmentRecord,
+  NarrationSegmentTailInput,
+} from "./models/narration-segment.js";
 
 export { HookExecutionRecordSchema } from "./models/hook-execution.js";
 export type { HookExecutionRecord } from "./models/hook-execution.js";

@@ -1370,9 +1370,9 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
               }
 
               // Anthropic message-level stop_reason is the authoritative
-              // discriminator between thoughts and final response text.
+              // discriminator between narration and final response text.
               // {end_turn, stop_sequence, max_tokens} → final response
-              // {tool_use, pause_turn, null, anything else} → preamble/thought
+              // {tool_use, pause_turn, null, anything else} → preamble/narration
               // Only emit a boundary when this message actually carried text;
               // pure tool-call messages have no streamed deltas to reclassify.
               if (text.length > 0) {

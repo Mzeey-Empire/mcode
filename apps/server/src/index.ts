@@ -29,7 +29,7 @@ import { TerminalService } from "./services/terminal-service";
 import { MessageRepo } from "./repositories/message-repo";
 import { ThreadRepo } from "./repositories/thread-repo";
 import { ToolCallRecordRepo } from "./repositories/tool-call-record-repo";
-import { ThoughtSegmentRepo } from "./repositories/thought-segment-repo";
+import { NarrationSegmentRepo } from "./repositories/narration-segment-repo";
 import { HookExecutionRepo } from "./repositories/hook-execution-repo";
 import { TurnSnapshotRepo } from "./repositories/turn-snapshot-repo";
 import { TaskRepo } from "./repositories/task-repo";
@@ -175,7 +175,7 @@ const providerRegistry = container.resolve(ProviderRegistry);
 const cursorProvider = container.resolve(CursorProvider);
 const providerAvailability = container.resolve(ProviderAvailabilityService);
 const toolCallRecordRepo = container.resolve(ToolCallRecordRepo);
-const thoughtSegmentRepo = container.resolve(ThoughtSegmentRepo);
+const narrationSegmentRepo = container.resolve(NarrationSegmentRepo);
 const hookExecutionRepo = container.resolve(HookExecutionRepo);
 const turnSnapshotRepo = container.resolve(TurnSnapshotRepo);
 const snapshotService = container.resolve(SnapshotService);
@@ -457,7 +457,7 @@ const { httpServer, wss } = createWsServer({
   terminalService,
   messageRepo,
   toolCallRecordRepo,
-  thoughtSegmentRepo,
+  narrationSegmentRepo,
   hookExecutionRepo,
   turnSnapshotRepo,
   snapshotService,

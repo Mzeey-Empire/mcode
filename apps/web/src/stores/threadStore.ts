@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport";
-import type { ThoughtSegment } from "@/components/chat/narrative/types";
+import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord, NarrationSegmentRecord, HookExecutionRecord } from "@/transport";
+import type { NarrationSegment } from "@/components/chat/narrative/types";
 import type { ContextWindowMode, ReasoningLevel, PlanQuestion, PlanAnswer, ProviderUsageInfo, QuotaCategory, TurnSnapshot } from "@mcode/contracts";
 import type { PermissionRequest, PermissionDecision } from "@mcode/contracts";
 import { PlanQuestionSchema, PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts";
@@ -142,8 +142,8 @@ interface ThreadState {
   permissionsByThread: Record<string, StoredPermission[]>;
   /** Ephemeral hook execution state per thread. Cleared on page reload, not persisted to DB. */
   hooksByThread: Record<string, HookExecution[]>;
-  /** Ephemeral thought segments for the current turn per thread. Cleared on turnComplete/ended. */
-  thoughtSegmentsByThread: Record<string, ThoughtSegment[]>;
+  /** Ephemeral narration segments for the current turn per thread. Cleared on turnComplete/ended. */
+  narrationSegmentsByThread: Record<string, NarrationSegment[]>;
   /**
    * Persisted narrative records keyed by assistant message id. Populated by
    * `loadNarrativeForMessage` (eager prefetch on thread load, lazy fetch on
@@ -152,7 +152,7 @@ interface ThreadState {
    */
   narrativeByMessage: Record<string, {
     tools: ToolCallRecord[];
-    thoughts: ThoughtSegmentRecord[];
+    narrationSegments: NarrationSegmentRecord[];
     hooks: HookExecutionRecord[];
   } | undefined>;
   /**
@@ -223,7 +223,7 @@ interface ThreadState {
   handleAgentEvent: (threadId: string, event: Record<string, unknown>) => void;
 
   /**
-   * Fetch the persisted narrative (tools, thoughts, hooks) for an assistant
+   * Fetch the persisted narrative (tools, narration segments, hooks) for an assistant
    * message and cache it under `narrativeByMessage[messageId]`. Returns the
    * existing in-flight promise on concurrent calls to avoid duplicate RPCs.
    * Idempotent: returns immediately if the message is already cached.
@@ -494,7 +494,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
 
   /**
    * Applies coalesced `session.textDelta` chunks batched on `requestAnimationFrame`.
-   * `isFinalResponse` spans update streaming buffers only so they stay out of `thoughtSegmentsByThread`.
+   * `isFinalResponse` spans update streaming buffers only so they stay out of `narrationSegmentsByThread`.
    */
   const flushPendingTextDeltas = () => {
     if (textDeltaFlushRaf != null) {
@@ -510,7 +510,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
     set((state) => {
       const nextStreaming = { ...state.streamingByThread };
       const nextPreview = { ...state.streamingPreviewByThread };
-      const nextSegments = { ...state.thoughtSegmentsByThread };
+      const nextSegments = { ...state.narrationSegmentsByThread };
       for (const [tid, chunks] of batch) {
         for (const chunk of chunks) {
           const acc = chunk.delta;
@@ -524,7 +524,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             continue;
           }
 
-          // Manage thought segments: append to the active segment or start a new one.
+          // Manage narration segments: append to the active segment or start a new one.
           // Codex turns interleave short text deltas with tools, which causes the
           // session.toolUse freeze to chop a single flowing sentence into micro
           // fragments ("the", "changed set and therefore the only", …). When the
@@ -568,7 +568,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       return {
         streamingByThread: nextStreaming,
         streamingPreviewByThread: nextPreview,
-        thoughtSegmentsByThread: nextSegments,
+        narrationSegmentsByThread: nextSegments,
       };
     });
   };
@@ -616,7 +616,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
   recentlyAnsweredPlanMessageIds: new Set<string>(),
   permissionsByThread: {},
   hooksByThread: {},
-  thoughtSegmentsByThread: {},
+  narrationSegmentsByThread: {},
   narrativeByMessage: {},
   awaitingUserStopPersistByThread: {},
   interruptStopFileNoticeByThread: {},
@@ -1174,7 +1174,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       // Clear previous turn's audit trail when the user submits a new message. Belt-and-suspenders
       // guard for cases where session.turnStarted doesn't fire (e.g. error before agent boots).
       toolCallsByThread: omitKey(state.toolCallsByThread, threadId),
-      thoughtSegmentsByThread: omitKey(state.thoughtSegmentsByThread, threadId),
+      narrationSegmentsByThread: omitKey(state.narrationSegmentsByThread, threadId),
       hooksByThread: omitKey(state.hooksByThread, threadId),
       // Persist composer-side overrides so the post-wizard answer turn forwards them
       settingsByThread: (reasoningLevel !== undefined || contextWindow !== undefined || thinking !== undefined || codexFastMode !== undefined)
@@ -1518,7 +1518,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         answeredPlanMessageIdsByThread: omitKey(state.answeredPlanMessageIdsByThread, threadId),
         permissionsByThread: omitKey(state.permissionsByThread, threadId),
         hooksByThread: omitKey(state.hooksByThread, threadId),
-        thoughtSegmentsByThread: omitKey(state.thoughtSegmentsByThread, threadId),
+        narrationSegmentsByThread: omitKey(state.narrationSegmentsByThread, threadId),
         usageByProvider: Object.fromEntries(
           Object.entries(state.usageByProvider).filter(([k]) => !k.startsWith(`${threadId}:`)),
         ),
@@ -1610,7 +1610,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         answeredPlanMessageIdsByThread: pruneAll(state.answeredPlanMessageIdsByThread),
         permissionsByThread: pruneAll(state.permissionsByThread),
         hooksByThread: pruneAll(state.hooksByThread),
-        thoughtSegmentsByThread: pruneAll(state.thoughtSegmentsByThread),
+        narrationSegmentsByThread: pruneAll(state.narrationSegmentsByThread),
         usageByProvider: Object.fromEntries(
           Object.entries(state.usageByProvider).filter(([k]) => !threadIds.some((tid) => k.startsWith(`${tid}:`))),
         ),
@@ -2052,7 +2052,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           // trail stays visible from turnComplete through turn.persisted so the
           // user can read what just happened; we only reset on the next turn.
           toolCallsByThread: omitKey(state.toolCallsByThread, threadId),
-          thoughtSegmentsByThread: omitKey(state.thoughtSegmentsByThread, threadId),
+          narrationSegmentsByThread: omitKey(state.narrationSegmentsByThread, threadId),
           hooksByThread: omitKey(state.hooksByThread, threadId),
         };
       });
@@ -2096,24 +2096,24 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           delete nextStreaming[threadId];
           const nextPreview = { ...state.streamingPreviewByThread };
           delete nextPreview[threadId];
-          // Freeze any open thought segment. Without this, the open segment
+          // Freeze any open narration segment. Without this, the open segment
           // (endedAt undefined) keeps satisfying `isFinalResponse` in
           // build-narrative, so the DeltaBlock keeps rendering alongside the
           // newly-persisted MessageBubble for one or more frames - the visible
           // flash. Closing the segment here makes the swap atomic with the
           // streamingByThread clear.
-          const segments = state.thoughtSegmentsByThread[threadId] ?? [];
+          const segments = state.narrationSegmentsByThread[threadId] ?? [];
           const lastSeg = segments[segments.length - 1];
-          const nextThoughtSegments =
+          const nextNarrationSegments =
             lastSeg && lastSeg.endedAt === undefined
               ? {
-                  ...state.thoughtSegmentsByThread,
+                  ...state.narrationSegmentsByThread,
                   [threadId]: [
                     ...segments.slice(0, -1),
                     { ...lastSeg, endedAt: Date.now() },
                   ],
                 }
-              : state.thoughtSegmentsByThread;
+              : state.narrationSegmentsByThread;
           const trackTurn = {
             currentTurnMessageIdByThread: {
               ...state.currentTurnMessageIdByThread,
@@ -2121,7 +2121,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
             },
             streamingByThread: nextStreaming,
             streamingPreviewByThread: nextPreview,
-            thoughtSegmentsByThread: nextThoughtSegments,
+            narrationSegmentsByThread: nextNarrationSegments,
           };
           if (state.currentThreadId !== threadId) return trackTurn;
           // In Electron, MessagePort and WebSocket are independent channels
@@ -2259,26 +2259,26 @@ export const useThreadStore = create<ThreadState>((set, get) => {
         startedAt: Date.now(),
       };
       set((state) => {
-        // Freeze the active thought segment so it has a definite end time.
-        const segments = state.thoughtSegmentsByThread[threadId] ?? [];
+        // Freeze the active narration segment so it has a definite end time.
+        const segments = state.narrationSegmentsByThread[threadId] ?? [];
         const last = segments[segments.length - 1];
         const froze = last && last.endedAt === undefined;
         const nextSegments =
           froze
             ? {
-                ...state.thoughtSegmentsByThread,
+                ...state.narrationSegmentsByThread,
                 [threadId]: [
                   ...segments.slice(0, -1),
                   { ...last, endedAt: Date.now() },
                 ],
               }
-            : state.thoughtSegmentsByThread;
+            : state.narrationSegmentsByThread;
         return {
           toolCallsByThread: {
             ...state.toolCallsByThread,
             [threadId]: [...(state.toolCallsByThread[threadId] ?? []), toolCall],
           },
-          thoughtSegmentsByThread: nextSegments,
+          narrationSegmentsByThread: nextSegments,
         };
       });
       return;
@@ -2359,34 +2359,34 @@ export const useThreadStore = create<ThreadState>((set, get) => {
       // assistant message, derived from the Anthropic `stop_reason`.
       //
       // - isFinalResponse=true (end_turn, stop_sequence, max_tokens, refusal):
-      //   the streamed text was the assistant's final response, not a thought.
-      //   Drop the open thought segment so it does not render alongside the
+      //   the streamed text was the assistant's final response, not narration.
+      //   Drop the open narration segment so it does not render alongside the
       //   forthcoming MessageBubble. The streaming buffer already holds the
       //   text and will be cleared by `session.message`.
       // - isFinalResponse=false (tool_use, pause_turn, anything else):
-      //   the streamed text was preamble. Close the open thought so the next
-      //   delta starts a fresh segment.
+      //   the streamed text was preamble. Close the open narration segment so
+      //   the next delta starts a fresh segment.
       const isFinalResponse = params.isFinalResponse === true;
-      // Flush any pending text delta chunks first so the open thought we
+      // Flush any pending text delta chunks first so the open segment we
       // operate on reflects every delta that arrived for this message.
       flushPendingTextDeltas();
       set((state) => {
-        const segments = state.thoughtSegmentsByThread[threadId] ?? [];
+        const segments = state.narrationSegmentsByThread[threadId] ?? [];
         const last = segments[segments.length - 1];
         if (!last || last.endedAt !== undefined) {
           return state;
         }
         if (isFinalResponse) {
           return {
-            thoughtSegmentsByThread: {
-              ...state.thoughtSegmentsByThread,
+            narrationSegmentsByThread: {
+              ...state.narrationSegmentsByThread,
               [threadId]: segments.slice(0, -1),
             },
           };
         }
         return {
-          thoughtSegmentsByThread: {
-            ...state.thoughtSegmentsByThread,
+          narrationSegmentsByThread: {
+            ...state.narrationSegmentsByThread,
             [threadId]: [
               ...segments.slice(0, -1),
               { ...last, endedAt: Date.now() },
@@ -2596,21 +2596,21 @@ export const useThreadStore = create<ThreadState>((set, get) => {
           delete nextPreview[threadId];
           const nextRunning = new Set(state.runningThreadIds);
           nextRunning.delete(threadId);
-          // Freeze any open thought segment alongside the streaming clear so
+          // Freeze any open narration segment alongside the streaming clear so
           // the persisted MessageBubble takes over cleanly without a DeltaBlock
           // shadow. See the matching block in session.message handler.
-          const segments = state.thoughtSegmentsByThread[threadId] ?? [];
+          const segments = state.narrationSegmentsByThread[threadId] ?? [];
           const lastSeg = segments[segments.length - 1];
-          const nextThoughtSegments =
+          const nextNarrationSegments =
             lastSeg && lastSeg.endedAt === undefined
               ? {
-                  ...state.thoughtSegmentsByThread,
+                  ...state.narrationSegmentsByThread,
                   [threadId]: [
                     ...segments.slice(0, -1),
                     { ...lastSeg, endedAt: Date.now() },
                   ],
                 }
-              : state.thoughtSegmentsByThread;
+              : state.narrationSegmentsByThread;
           // Mark all tool calls as complete and keep in active slot briefly
           const currentCalls = state.toolCallsByThread[threadId] ?? [];
           const completedCalls = currentCalls.map((tc) =>
@@ -2629,7 +2629,7 @@ export const useThreadStore = create<ThreadState>((set, get) => {
               : {}),
             streamingByThread: nextStreaming,
             streamingPreviewByThread: nextPreview,
-            thoughtSegmentsByThread: nextThoughtSegments,
+            narrationSegmentsByThread: nextNarrationSegments,
             runningThreadIds: nextRunning,
             toolCallsByThread: completedCalls.length > 0
               ? { ...state.toolCallsByThread, [threadId]: completedCalls }

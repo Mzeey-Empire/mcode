@@ -1,5 +1,5 @@
 import type { ToolCall, HookExecution } from "@/transport/types";
-import type { ThoughtSegment, NarrativeItem, NarrativeBuildResult } from "./types";
+import type { NarrationSegment, NarrativeItem, NarrativeBuildResult } from "./types";
 
 const AGENT_TOOL_NAME = "Agent";
 
@@ -13,19 +13,19 @@ const AGENT_TOOL_NAME = "Agent";
  * slot stay in sync. Returns "" when there is nothing to render — caller
  * suppresses the virtual item in that case.
  *
- *  - When the latest thought segment is open and no tool is running, that
+ *  - When the latest narration segment is open and no tool is running, that
  *    segment IS the live response (tool-free turn, or pre-tool preamble that
  *    will be classified by the next `AssistantMessageBoundary`).
- *  - Otherwise, the suffix of `streamingText` past the closed-thought tape is
+ *  - Otherwise, the suffix of `streamingText` past the closed-segment tape is
  *    the final-response text emitted after the last tool completed.
  */
 export function computeLiveStreamingText(params: {
-  thoughtSegments: readonly ThoughtSegment[];
+  narrationSegments: readonly NarrationSegment[];
   streamingText: string;
   isAgentRunning: boolean;
   toolCalls: readonly ToolCall[];
 }): string {
-  const { thoughtSegments, streamingText, isAgentRunning, toolCalls } = params;
+  const { narrationSegments, streamingText, isAgentRunning, toolCalls } = params;
   if (!isAgentRunning) return "";
 
   const anyToolRunning = toolCalls.some(
@@ -33,12 +33,12 @@ export function computeLiveStreamingText(params: {
   );
   if (anyToolRunning) return "";
 
-  const lastSeg = thoughtSegments[thoughtSegments.length - 1];
+  const lastSeg = narrationSegments[narrationSegments.length - 1];
   if (lastSeg && lastSeg.endedAt == null) {
     return lastSeg.text;
   }
 
-  const tape = thoughtSegments.map((s) => s.text).join("");
+  const tape = narrationSegments.map((s) => s.text).join("");
   if (streamingText.startsWith(tape) && streamingText.length > tape.length) {
     return streamingText.slice(tape.length);
   }
@@ -46,15 +46,19 @@ export function computeLiveStreamingText(params: {
 }
 
 /**
- * Removes thought segments that duplicate the committed assistant message body.
- * Mirrors the client fallbacks in `buildPersistedNarrativeItems` so the live
- * trail does not repeat the bubble after `session.turnComplete` while tool rows
- * are still in volatile state (cleared on `session.turnStarted`).
+ * Removes narration segments that duplicate the committed assistant message
+ * body. Mirrors the client fallbacks in `buildPersistedNarrativeItems` so the
+ * live trail does not repeat the bubble after `session.turnComplete` while
+ * tool rows are still in volatile state (cleared on `session.turnStarted`).
+ *
+ * Distinct from the shared `isLikelyFinalResponseTail` predicate in
+ * `@mcode/contracts`: the persisted path keys on `sortOrder`, this live path
+ * keys on `startedAt` because volatile segments don't carry a sort order.
  */
-export function filterThoughtsMatchingAssistantBody(
-  segments: readonly ThoughtSegment[],
+export function filterNarrationMatchingAssistantBody(
+  segments: readonly NarrationSegment[],
   messageBodyTrimmed: string,
-): ThoughtSegment[] {
+): NarrationSegment[] {
   if (messageBodyTrimmed.length === 0 || segments.length === 0) {
     return [...segments];
   }
@@ -84,59 +88,61 @@ function hasCancelledCall(calls: readonly ToolCall[]): boolean {
 
 /** A unified timeline event - everything that happens during a turn, sorted by startedAt. */
 type TimelineEvent =
-  | { kind: "thought"; segment: ThoughtSegment; startedAt: number }
+  | { kind: "narration"; segment: NarrationSegment; startedAt: number }
   | { kind: "tool"; call: ToolCall; startedAt: number }
   | { kind: "hook"; hook: HookExecution; startedAt: number };
 
 /**
  * Transforms raw live state into an ordered NarrativeItem[] for the timeline.
  *
- * All events (thoughts, tool calls, hooks) are placed in a single chronological
- * timeline sorted by startedAt. Consecutive completed non-Agent tool calls are
- * grouped into tool-group items.
+ * All events (narration segments, tool calls, hooks) are placed in a single
+ * chronological timeline sorted by startedAt. Consecutive completed non-Agent
+ * tool calls are grouped into tool-group items.
  *
- * A thought is rendered as "active" only when it is the latest segment AND
- * there are no running tool calls - if subagents are running, the parent
+ * A narration row is rendered as "active" only when it is the latest segment
+ * AND there are no running tool calls - if subagents are running, the parent
  * is waiting, not actively streaming.
  *
  * When the provider sends `textDelta.isFinalResponse`, final reply text stays
- * in `streamingText` but not in `thoughtSegments`; the surplus over the joined
- * segment texts is appended as a `delta` row. When `isFinalResponse` is omitted
- * (legacy tool-free turns), the last open segment is still elevated to `delta`.
+ * in `streamingText` but not in `narrationSegments`; the surplus over the
+ * joined segment texts is appended as a `delta` row. When `isFinalResponse`
+ * is omitted (legacy tool-free turns), the last open segment is still elevated
+ * to `delta`.
  *
- * When `committedAssistantBody` is set (typically the last assistant bubble after
- * `session.turnComplete`), thought rows that only repeat that body are omitted so
- * they do not stack above the message while volatile tool rows are still shown.
+ * When `committedAssistantBody` is set (typically the last assistant bubble
+ * after `session.turnComplete`), narration rows that only repeat that body are
+ * omitted so they do not stack above the message while volatile tool rows are
+ * still shown.
  *
  * @returns Ordered timeline items plus aggregate counts for `TurnFooter` and the indicator.
  */
 export function buildNarrativeItems(params: {
   toolCalls: readonly ToolCall[];
   hooks: readonly HookExecution[];
-  thoughtSegments: readonly ThoughtSegment[];
+  narrationSegments: readonly NarrationSegment[];
   streamingText: string;
   isAgentRunning: boolean;
-  /** Trimmed comparison text: duplicate thought segments are hidden when non-empty. */
+  /** Trimmed comparison text: duplicate narration segments are hidden when non-empty. */
   committedAssistantBody?: string;
 }): NarrativeBuildResult {
   const { toolCalls, hooks, streamingText, isAgentRunning, committedAssistantBody } = params;
   const assistantTrimmed = (committedAssistantBody ?? "").trim();
-  const thoughtSegments =
+  const narrationSegments =
     assistantTrimmed.length > 0
-      ? filterThoughtsMatchingAssistantBody(params.thoughtSegments, assistantTrimmed)
-      : params.thoughtSegments;
+      ? filterNarrationMatchingAssistantBody(params.narrationSegments, assistantTrimmed)
+      : params.narrationSegments;
 
-  if (thoughtSegments.length === 0 && toolCalls.length === 0 && hooks.length === 0) {
+  if (narrationSegments.length === 0 && toolCalls.length === 0 && hooks.length === 0) {
     if (isAgentRunning && streamingText.length > 0) {
       // The agent is streaming its final (and only) response — no tools were
-      // called, so this text IS the assistant reply, not a reasoning step.
-      // Render as delta (full-weight prose) instead of a thought (italic/dimmed).
+      // called, so this text IS the assistant reply, not a narration row.
+      // Render as delta (full-weight prose) instead of a narration row (italic/dimmed).
       return {
         items: [{ type: "delta", text: streamingText }],
-        counts: { steps: 0, thoughts: 0, subagents: 0 },
+        counts: { steps: 0, narrationSegments: 0, subagents: 0 },
       };
     }
-    return { items: [], counts: { steps: 0, thoughts: 0, subagents: 0 } };
+    return { items: [], counts: { steps: 0, narrationSegments: 0, subagents: 0 } };
   }
 
   // Separate top-level from child tool calls. A parent id that is null,
@@ -162,13 +168,14 @@ export function buildNarrativeItems(params: {
     (tc) => !tc.isComplete && tc.toolName !== AGENT_TOOL_NAME,
   ) ?? null;
 
-  // Check whether any tool call is running. If yes, no thought should appear "active"
-  // because the parent agent is waiting on the tool, not actively streaming.
+  // Check whether any tool call is running. If yes, no narration row should
+  // appear "active" because the parent agent is waiting on the tool, not
+  // actively streaming.
   const anyToolRunning = topLevel.some((tc) => !tc.isComplete);
   // Build a unified timeline of everything sorted by startedAt.
   const timeline: TimelineEvent[] = [];
-  for (const seg of thoughtSegments) {
-    timeline.push({ kind: "thought", segment: seg, startedAt: seg.startedAt });
+  for (const seg of narrationSegments) {
+    timeline.push({ kind: "narration", segment: seg, startedAt: seg.startedAt });
   }
   for (const tc of topLevel) {
     if (tc === activeTc) continue; // Active tool emitted at the end
@@ -193,21 +200,21 @@ export function buildNarrativeItems(params: {
     pendingGroup.length = 0;
   };
 
-  // Find the index of the last thought segment for active-state detection.
-  const lastSegmentStartedAt = thoughtSegments.length > 0
-    ? thoughtSegments[thoughtSegments.length - 1].startedAt
+  // Find the index of the last narration segment for active-state detection.
+  const lastSegmentStartedAt = narrationSegments.length > 0
+    ? narrationSegments[narrationSegments.length - 1].startedAt
     : -1;
 
-  const thoughtTape = thoughtSegments.map((s) => s.text).join("");
+  const narrationTape = narrationSegments.map((s) => s.text).join("");
   const streamingSuffix =
-    isAgentRunning && !anyToolRunning && streamingText.startsWith(thoughtTape)
-      ? streamingText.slice(thoughtTape.length)
+    isAgentRunning && !anyToolRunning && streamingText.startsWith(narrationTape)
+      ? streamingText.slice(narrationTape.length)
       : "";
 
   let emittedFinalDeltaFromTape = false;
 
   for (const evt of timeline) {
-    if (evt.kind === "thought") {
+    if (evt.kind === "narration") {
       flushGroup();
       const isLatest = evt.segment.startedAt === lastSegmentStartedAt;
       const isStreaming = evt.segment.endedAt == null;
@@ -222,8 +229,8 @@ export function buildNarrativeItems(params: {
         continue;
       }
 
-      // `isActive` drives `DeltaBlock.isStreaming` inside `ThoughtBlock`.
-      // While the agent turn is live, every thought segment (including ones
+      // `isActive` drives `DeltaBlock.isStreaming` inside `NarrationBlock`.
+      // While the agent turn is live, every narration segment (including ones
       // that have just closed because a tool_use boundary fired) animates
       // on appearance — preserving the typewriter feel for preamble text
       // that streams in, then snaps up to the timeline when its segment
@@ -231,9 +238,9 @@ export function buildNarrativeItems(params: {
       // re-animation to just the trailing edge for segments already past
       // their first paint, so the snap-up reads as "finishing typing" rather
       // than restarting from empty. Once the agent stops running, all
-      // thoughts settle to static prose.
+      // narration rows settle to static prose.
       const isActive = isAgentRunning;
-      items.push({ type: "thought", segment: evt.segment, isActive });
+      items.push({ type: "narration", segment: evt.segment, isActive });
       continue;
     }
 
@@ -279,6 +286,9 @@ export function buildNarrativeItems(params: {
 
   const subagents = topLevel.filter((tc) => tc.toolName === AGENT_TOOL_NAME).length;
   const steps = topLevel.length;
-  const thoughts = items.filter((it) => it.type === "thought").length;
-  return { items, counts: { steps, thoughts, subagents } };
+  const narrationSegmentCount = items.filter((it) => it.type === "narration").length;
+  return {
+    items,
+    counts: { steps, narrationSegments: narrationSegmentCount, subagents },
+  };
 }

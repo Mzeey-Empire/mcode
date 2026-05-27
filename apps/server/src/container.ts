@@ -13,7 +13,7 @@ import { WorkspaceRepo } from "./repositories/workspace-repo";
 import { ThreadRepo } from "./repositories/thread-repo";
 import { MessageRepo } from "./repositories/message-repo";
 import { ToolCallRecordRepo } from "./repositories/tool-call-record-repo";
-import { ThoughtSegmentRepo } from "./repositories/thought-segment-repo";
+import { NarrationSegmentRepo } from "./repositories/narration-segment-repo";
 import { HookExecutionRepo } from "./repositories/hook-execution-repo";
 import { TurnSnapshotRepo } from "./repositories/turn-snapshot-repo";
 import { TaskRepo } from "./repositories/task-repo";
@@ -142,12 +142,12 @@ export function setupContainer(mcodeDir: string): typeof container {
     useFactory: (c) => c.resolve(ToolCallRecordRepo),
   });
   container.register(
-    ThoughtSegmentRepo,
-    { useClass: ThoughtSegmentRepo },
+    NarrationSegmentRepo,
+    { useClass: NarrationSegmentRepo },
     { lifecycle: Lifecycle.Singleton },
   );
-  container.register("ThoughtSegmentRepo", {
-    useFactory: (c) => c.resolve(ThoughtSegmentRepo),
+  container.register("NarrationSegmentRepo", {
+    useFactory: (c) => c.resolve(NarrationSegmentRepo),
   });
   container.register(
     HookExecutionRepo,

@@ -9,7 +9,7 @@ import type { MessageRepo } from "../../repositories/message-repo.js";
 import type { GitService } from "../git-service.js";
 import type { AttachmentService } from "../attachment-service.js";
 import type { ToolCallRecordRepo } from "../../repositories/tool-call-record-repo.js";
-import type { ThoughtSegmentRepo } from "../../repositories/thought-segment-repo.js";
+import type { NarrationSegmentRepo } from "../../repositories/narration-segment-repo.js";
 import type { HookExecutionRepo } from "../../repositories/hook-execution-repo.js";
 import type { TurnSnapshotRepo } from "../../repositories/turn-snapshot-repo.js";
 import type { SnapshotService } from "../snapshot-service.js";
@@ -91,7 +91,7 @@ function minimalService(): AgentService {
   } as unknown as IProviderRegistry;
   const threadService = { create: vi.fn() } as unknown as ThreadService;
   const toolCallRecordRepo = { bulkCreate: vi.fn() } as unknown as ToolCallRecordRepo;
-  const thoughtSegmentRepo = { bulkCreate: vi.fn() } as unknown as ThoughtSegmentRepo;
+  const narrationSegmentRepo = { bulkCreate: vi.fn() } as unknown as NarrationSegmentRepo;
   const hookExecutionRepo = { bulkCreate: vi.fn() } as unknown as HookExecutionRepo;
   const turnSnapshotRepo = {
     listByThread: vi.fn(() => []),
@@ -134,7 +134,7 @@ function minimalService(): AgentService {
     providerRegistry,
     threadService,
     toolCallRecordRepo,
-    thoughtSegmentRepo,
+    narrationSegmentRepo,
     hookExecutionRepo,
     turnSnapshotRepo,
     snapshotService,

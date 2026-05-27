@@ -142,8 +142,8 @@ export const toolCallRecords = sqliteTable(
   ],
 );
 
-export const thoughtSegments = sqliteTable(
-  "thought_segments",
+export const narrationSegments = sqliteTable(
+  "narration_segments",
   {
     id: text("id").primaryKey().notNull(),
     messageId: text("message_id")
@@ -156,13 +156,13 @@ export const thoughtSegments = sqliteTable(
     /**
      * Non-zero when this segment is the assistant's final user-facing response
      * (set by the provider stream tag or the persistTurn suffix-match safeguard).
-     * The client suppresses rendering these as ThoughtBlock rows to avoid
+     * The client suppresses rendering these as narration rows to avoid
      * duplicating text that already appears in the assistant message body.
      */
     isFinalResponse: integer("is_final_response").notNull().default(0),
   },
   (table) => [
-    index("idx_thought_segments_message").on(table.messageId),
+    index("idx_narration_segments_message").on(table.messageId),
   ],
 );
 

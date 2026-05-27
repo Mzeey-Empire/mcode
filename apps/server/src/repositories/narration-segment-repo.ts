@@ -1,15 +1,16 @@
 /**
- * Thought segment record data access layer.
- * Provides creation and retrieval operations for persisted thought segments.
+ * Narration segment record data access layer.
+ * Provides creation and retrieval operations for persisted narration segments —
+ * contiguous groups of assistant text deltas emitted before a tool call within a turn.
  */
 
 import { randomUUID } from "crypto";
 import { injectable, inject } from "tsyringe";
 import type Database from "better-sqlite3";
-import type { ThoughtSegmentRecord } from "@mcode/contracts";
+import type { NarrationSegmentRecord } from "@mcode/contracts";
 
-/** Row shape returned by SQLite for the thought_segments table. */
-interface ThoughtSegmentRow {
+/** Row shape returned by SQLite for the narration_segments table. */
+interface NarrationSegmentRow {
   id: string;
   message_id: string;
   text: string;
@@ -19,8 +20,8 @@ interface ThoughtSegmentRow {
   is_final_response: number;
 }
 
-/** Input for creating a new thought segment record. */
-export interface CreateThoughtSegmentInput {
+/** Input for creating a new narration segment record. */
+export interface CreateNarrationSegmentInput {
   /** Optional explicit id; generated if omitted. */
   id?: string;
   messageId: string;
@@ -32,7 +33,7 @@ export interface CreateThoughtSegmentInput {
   isFinalResponse?: number;
 }
 
-function rowToRecord(row: ThoughtSegmentRow): ThoughtSegmentRecord {
+function rowToRecord(row: NarrationSegmentRow): NarrationSegmentRecord {
   return {
     id: row.id,
     message_id: row.message_id,
@@ -46,27 +47,27 @@ function rowToRecord(row: ThoughtSegmentRow): ThoughtSegmentRecord {
 
 const COLUMNS = "id, message_id, text, started_at, ended_at, sort_order, is_final_response";
 
-/** Repository for thought segment creation and retrieval against SQLite. */
+/** Repository for narration segment creation and retrieval against SQLite. */
 @injectable()
-export class ThoughtSegmentRepo {
+export class NarrationSegmentRepo {
   private readonly stmtInsert: Database.Statement;
   private readonly stmtListByMessage: Database.Statement;
   private readonly stmtCountByMessage: Database.Statement;
 
   constructor(@inject("Database") private readonly db: Database.Database) {
     this.stmtInsert = db.prepare(
-      "INSERT OR IGNORE INTO thought_segments (id, message_id, text, started_at, ended_at, sort_order, is_final_response) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT OR IGNORE INTO narration_segments (id, message_id, text, started_at, ended_at, sort_order, is_final_response) VALUES (?, ?, ?, ?, ?, ?, ?)",
     );
     this.stmtListByMessage = db.prepare(
-      `SELECT ${COLUMNS} FROM thought_segments WHERE message_id = ? ORDER BY sort_order ASC`,
+      `SELECT ${COLUMNS} FROM narration_segments WHERE message_id = ? ORDER BY sort_order ASC`,
     );
     this.stmtCountByMessage = db.prepare(
-      "SELECT COUNT(*) as count FROM thought_segments WHERE message_id = ?",
+      "SELECT COUNT(*) as count FROM narration_segments WHERE message_id = ?",
     );
   }
 
-  /** Create a single thought segment record and return the fully-populated record. */
-  create(input: CreateThoughtSegmentInput): ThoughtSegmentRecord {
+  /** Create a single narration segment record and return the fully-populated record. */
+  create(input: CreateNarrationSegmentInput): NarrationSegmentRecord {
     const id = input.id ?? randomUUID();
     const isFinalResponse = input.isFinalResponse ?? 0;
     this.stmtInsert.run(
@@ -89,10 +90,10 @@ export class ThoughtSegmentRepo {
     };
   }
 
-  /** Insert multiple thought segment records in a single transaction. */
-  bulkCreate(inputs: CreateThoughtSegmentInput[]): void {
+  /** Insert multiple narration segment records in a single transaction. */
+  bulkCreate(inputs: CreateNarrationSegmentInput[]): void {
     if (inputs.length === 0) return;
-    const tx = this.db.transaction((items: CreateThoughtSegmentInput[]) => {
+    const tx = this.db.transaction((items: CreateNarrationSegmentInput[]) => {
       for (const item of items) {
         this.stmtInsert.run(
           item.id ?? randomUUID(),
@@ -108,13 +109,13 @@ export class ThoughtSegmentRepo {
     tx(inputs);
   }
 
-  /** List all thought segments for a message, ordered by sort_order ascending. */
-  listByMessage(messageId: string): ThoughtSegmentRecord[] {
-    const rows = this.stmtListByMessage.all(messageId) as ThoughtSegmentRow[];
+  /** List all narration segments for a message, ordered by sort_order ascending. */
+  listByMessage(messageId: string): NarrationSegmentRecord[] {
+    const rows = this.stmtListByMessage.all(messageId) as NarrationSegmentRow[];
     return rows.map(rowToRecord);
   }
 
-  /** Count the number of thought segments for a message. */
+  /** Count the number of narration segments for a message. */
   countByMessage(messageId: string): number {
     const row = this.stmtCountByMessage.get(messageId) as { count: number };
     return row.count;

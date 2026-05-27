@@ -31,12 +31,12 @@ function formatDuration(ms: number | null): string {
  * omitted. The hairline rule fills the gap between the labels and the
  * duration.
  *
- * `counts.thoughts` is computed but no longer surfaced — the legacy
- * "thoughts" tally counted preamble text blocks that are now rendered as
- * agent response prose, so labelling them as thoughts would mislead. The
- * field is preserved on `NarrativeCounts` for the day extended `thinking`
- * blocks land, at which point a real "N thinking" count can be reinstated
- * here against that source.
+ * `counts.narrationSegments` is computed but no longer surfaced — the
+ * pre-tool-call narration count was originally labelled "thoughts," which
+ * misled users: those blocks are agent response prose, not reasoning. The
+ * field stays on `NarrativeCounts` for the day extended-thinking reasoning
+ * blocks land, at which point a real "N thinking" count can be surfaced here
+ * against that source.
  */
 export function TurnFooter({ counts, durationMs }: TurnFooterProps) {
   const parts: string[] = [];

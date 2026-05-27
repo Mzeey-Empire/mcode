@@ -6,7 +6,7 @@ import { PaginatedMessagesSchema } from "../models/message.js";
 import { AttachmentMetaSchema } from "../models/attachment.js";
 import { MAX_ATTACHMENTS } from "../models/file-types.js";
 import { ToolCallRecordSchema } from "../models/tool-call-record.js";
-import { ThoughtSegmentRecordSchema } from "../models/thought-segment.js";
+import { NarrationSegmentRecordSchema } from "../models/narration-segment.js";
 import { HookExecutionRecordSchema } from "../models/hook-execution.js";
 import { GitBranchSchema, WorktreeSchema } from "../git.js";
 import { GitCommitSchema } from "../models/git-commit.js";
@@ -566,12 +566,12 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({ parentToolCallId: z.string() }),
     result: z.array(ToolCallRecordSchema),
   },
-  /** Replay the full persisted narrative (tools, thoughts, hooks) for an assistant message. */
+  /** Replay the full persisted narrative (tools, narration segments, hooks) for an assistant message. */
   "narrative.list": {
     params: z.object({ messageId: z.string() }),
     result: z.object({
       tools: z.array(ToolCallRecordSchema),
-      thoughts: z.array(ThoughtSegmentRecordSchema),
+      narrationSegments: z.array(NarrationSegmentRecordSchema),
       hooks: z.array(HookExecutionRecordSchema),
     }),
   },
@@ -586,7 +586,7 @@ export const WS_METHODS = lazySchema(() => ({
       z.string(),
       z.object({
         tools: z.array(ToolCallRecordSchema),
-        thoughts: z.array(ThoughtSegmentRecordSchema),
+        narrationSegments: z.array(NarrationSegmentRecordSchema),
         hooks: z.array(HookExecutionRecordSchema),
       }),
     ),

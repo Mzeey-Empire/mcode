@@ -47,7 +47,7 @@ export interface CursorStreamAccumulator {
    * Text from {@link AgentEventType.TextDelta} chunks tagged
    * `isFinalResponse` (post-tool user-facing reply). Used to persist the
    * assistant message without repeating pre-tool text that Mcode already
-   * records as thought segments.
+   * records as narration segments.
    */
   assistantFinalText: string;
   /**

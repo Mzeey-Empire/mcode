@@ -12,7 +12,7 @@ describe("threadStore assistantMessageBoundary", () => {
       streamingByThread: {},
       streamingPreviewByThread: {},
       toolCallsByThread: {},
-      thoughtSegmentsByThread: {},
+      narrationSegmentsByThread: {},
     });
   });
 
@@ -20,7 +20,7 @@ describe("threadStore assistantMessageBoundary", () => {
     vi.restoreAllMocks();
   });
 
-  it("drops the open thought segment when isFinalResponse is true (tool-free turn)", () => {
+  it("drops the open narration segment when isFinalResponse is true (tool-free turn)", () => {
     const queue: FrameRequestCallback[] = [];
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb: FrameRequestCallback) => {
       queue.push(cb);
@@ -29,7 +29,7 @@ describe("threadStore assistantMessageBoundary", () => {
 
     const tid = "thread-final";
     // Provider could not lookahead so it streamed deltas without
-    // isFinalResponse=true — they landed in the thought segment buffer.
+    // isFinalResponse=true — they landed in the narration segment buffer.
     useThreadStore.getState().handleAgentEvent(tid, {
       method: "session.textDelta",
       params: { delta: "Autoclave is a sealed " },
@@ -40,19 +40,19 @@ describe("threadStore assistantMessageBoundary", () => {
     });
 
     // Boundary arrives with stop_reason=end_turn → the deltas were the final
-    // response, not a thought.
+    // response, not a narration segment.
     useThreadStore.getState().handleAgentEvent(tid, {
       method: "session.assistantMessageBoundary",
       isFinalResponse: true,
     });
 
-    expect(useThreadStore.getState().thoughtSegmentsByThread[tid] ?? []).toEqual([]);
+    expect(useThreadStore.getState().narrationSegmentsByThread[tid] ?? []).toEqual([]);
     expect(useThreadStore.getState().streamingByThread[tid]).toBe(
       "Autoclave is a sealed pressure vessel.",
     );
   });
 
-  it("closes the open thought segment when isFinalResponse is false (preamble before tool)", () => {
+  it("closes the open narration segment when isFinalResponse is false (preamble before tool)", () => {
     const queue: FrameRequestCallback[] = [];
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb: FrameRequestCallback) => {
       queue.push(cb);
@@ -70,22 +70,22 @@ describe("threadStore assistantMessageBoundary", () => {
       isFinalResponse: false,
     });
 
-    const segs = useThreadStore.getState().thoughtSegmentsByThread[tid] ?? [];
+    const segs = useThreadStore.getState().narrationSegmentsByThread[tid] ?? [];
     expect(segs).toHaveLength(1);
     expect(segs[0]?.text).toBe("Let me look at the file.");
     expect(segs[0]?.endedAt).toBeTypeOf("number");
   });
 
-  it("is a no-op when there is no open thought segment", () => {
+  it("is a no-op when there is no open narration segment", () => {
     const tid = "thread-empty";
     useThreadStore.getState().handleAgentEvent(tid, {
       method: "session.assistantMessageBoundary",
       isFinalResponse: true,
     });
-    expect(useThreadStore.getState().thoughtSegmentsByThread[tid]).toBeUndefined();
+    expect(useThreadStore.getState().narrationSegmentsByThread[tid]).toBeUndefined();
   });
 
-  it("leaves an already-closed thought segment alone", () => {
+  it("leaves an already-closed narration segment alone", () => {
     const queue: FrameRequestCallback[] = [];
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb: FrameRequestCallback) => {
       queue.push(cb);
@@ -93,10 +93,10 @@ describe("threadStore assistantMessageBoundary", () => {
     });
 
     const tid = "thread-closed";
-    // Seed a closed thought segment directly.
+    // Seed a closed narration segment directly.
     useThreadStore.setState({
-      thoughtSegmentsByThread: {
-        [tid]: [{ text: "old thought", startedAt: 1, endedAt: 2 }],
+      narrationSegmentsByThread: {
+        [tid]: [{ text: "old narration", startedAt: 1, endedAt: 2 }],
       },
     });
 
@@ -105,7 +105,7 @@ describe("threadStore assistantMessageBoundary", () => {
       isFinalResponse: true,
     });
 
-    const segs = useThreadStore.getState().thoughtSegmentsByThread[tid] ?? [];
-    expect(segs).toEqual([{ text: "old thought", startedAt: 1, endedAt: 2 }]);
+    const segs = useThreadStore.getState().narrationSegmentsByThread[tid] ?? [];
+    expect(segs).toEqual([{ text: "old narration", startedAt: 1, endedAt: 2 }]);
   });
 });

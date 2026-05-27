@@ -1,18 +1,19 @@
 import type {
   ToolCallRecord,
-  ThoughtSegmentRecord,
+  NarrationSegmentRecord,
   HookExecutionRecord,
   ToolCall,
   HookExecution,
 } from "@/transport/types";
-import type { ThoughtSegment, NarrativeItem } from "./types";
+import { isLikelyFinalResponseTail } from "@mcode/contracts";
+import type { NarrationSegment, NarrativeItem } from "./types";
 
 /** Inputs for `buildPersistedNarrativeItems`. */
 export interface PersistedNarrativeInputs {
   tools: readonly ToolCallRecord[];
-  thoughts: readonly ThoughtSegmentRecord[];
+  narrationSegments: readonly NarrationSegmentRecord[];
   hooks: readonly HookExecutionRecord[];
-  /** Assistant message body — used for client-side suffix-match safety net. */
+  /** Assistant message body — used for client-side safety-net filtering. */
   messageContent?: string;
 }
 
@@ -44,8 +45,8 @@ function recordToToolCall(r: ToolCallRecord): ToolCall {
   };
 }
 
-/** Map a persisted thought record to the live `ThoughtSegment` shape. */
-function recordToThoughtSegment(r: ThoughtSegmentRecord): ThoughtSegment {
+/** Map a persisted narration record to the live `NarrationSegment` shape. */
+function recordToNarrationSegment(r: NarrationSegmentRecord): NarrationSegment {
   return {
     text: r.text,
     startedAt: isoToMs(r.started_at),
@@ -73,9 +74,21 @@ function recordToHookExecution(r: HookExecutionRecord): HookExecution {
 
 /** A unified timeline event sorted by persisted `sort_order` ascending. */
 type TimelineEvent =
-  | { kind: "thought"; segment: ThoughtSegment; sortOrder: number }
+  | { kind: "narration"; segment: NarrationSegment; sortOrder: number }
   | { kind: "tool"; call: ToolCall; sortOrder: number }
   | { kind: "hook"; hook: HookExecution; sortOrder: number };
+
+/**
+ * WeakMap-based memo so `buildPersistedNarrativeItems` does not rebuild the
+ * item tree on every render when inputs are stable. Keyed by the
+ * `narrationSegments` array reference plus trimmed `messageContent` because
+ * the safety-net filter depends on the assistant body even when DB rows are
+ * unchanged.
+ */
+const _memoCache = new WeakMap<
+  readonly NarrationSegmentRecord[],
+  Map<string, NarrativeItem[]>
+>();
 
 /**
  * Build a chronological `NarrativeItem[]` from persisted DB records.
@@ -88,54 +101,38 @@ type TimelineEvent =
  * `parent_tool_call_id` field. Consecutive completed non-Agent tool calls
  * are coalesced into `tool-group` items, matching the live grouping.
  */
-/**
- * WeakMap-based memo so `buildPersistedNarrativeItems` does not rebuild the
- * item tree on every render when inputs are stable. Keyed by the `thoughts`
- * array reference plus trimmed `messageContent` because suffix-match filtering
- * depends on the assistant body even when DB rows are unchanged.
- */
-const _memoCache = new WeakMap<
-  readonly ThoughtSegmentRecord[],
-  Map<string, NarrativeItem[]>
->();
-
 export function buildPersistedNarrativeItems(
   inputs: PersistedNarrativeInputs,
 ): NarrativeItem[] {
-  const { tools, thoughts, hooks, messageContent } = inputs;
+  const { tools, narrationSegments, hooks, messageContent } = inputs;
 
-  if (tools.length === 0 && thoughts.length === 0 && hooks.length === 0) {
+  if (tools.length === 0 && narrationSegments.length === 0 && hooks.length === 0) {
     return [];
   }
 
   const msgTrimmed = (messageContent ?? "").trim();
-  const cachedByContent = _memoCache.get(thoughts);
+  const cachedByContent = _memoCache.get(narrationSegments);
   const cached = cachedByContent?.get(msgTrimmed);
   if (cached !== undefined) return cached;
 
-  // Filter out thought segments that are the assistant's final response to
-  // prevent them appearing as ThoughtBlock rows alongside the message body.
-  // Server `is_final_response` is primary; client fallbacks cover older rows:
-  // exact trimmed body match (any segment order) plus suffix match on the last
-  // segment by sort_order.
-  let filteredThoughts = thoughts;
+  // Filter out narration segments that are the assistant's final response to
+  // prevent them appearing as narration rows alongside the message body.
+  // Server `is_final_response` is primary; client backstop covers older rows
+  // persisted before the server-side tagging existed. Backstop reuses the
+  // shared classifier in `@mcode/contracts` so the rule lives in one place.
+  let filteredSegments = narrationSegments;
 
-  if (thoughts.length > 0) {
-    // Find the last segment by sort_order (chronologically last).
-    let maxSortOrder = -Infinity;
-    for (const t of thoughts) {
-      if (t.sort_order > maxSortOrder) maxSortOrder = t.sort_order;
-    }
-    filteredThoughts = thoughts.filter((t) => {
-      if (t.is_final_response) return false;
-      const segTrimmed = t.text.trim();
-      if (msgTrimmed.length > 0 && segTrimmed === msgTrimmed) return false;
-      // Client-side suffix match on the chronologically last segment only.
-      if (t.sort_order === maxSortOrder && segTrimmed.length > 0 && msgTrimmed.endsWith(segTrimmed)) {
-        return false;
-      }
-      return true;
+  if (narrationSegments.length > 0 && msgTrimmed.length > 0) {
+    const adapted = narrationSegments.map((r) => ({
+      text: r.text,
+      sortOrder: r.sort_order,
+    }));
+    filteredSegments = narrationSegments.filter((r, idx) => {
+      if (r.is_final_response) return false;
+      return !isLikelyFinalResponseTail(adapted[idx]!, adapted, msgTrimmed);
     });
+  } else if (narrationSegments.length > 0) {
+    filteredSegments = narrationSegments.filter((r) => !r.is_final_response);
   }
 
   // Split tools by parent_tool_call_id.
@@ -156,10 +153,10 @@ export function buildPersistedNarrativeItems(
 
   // Build unified timeline of TOP-LEVEL items, sorted by sort_order.
   const timeline: TimelineEvent[] = [];
-  for (const seg of filteredThoughts) {
+  for (const seg of filteredSegments) {
     timeline.push({
-      kind: "thought",
-      segment: recordToThoughtSegment(seg),
+      kind: "narration",
+      segment: recordToNarrationSegment(seg),
       sortOrder: seg.sort_order,
     });
   }
@@ -196,10 +193,10 @@ export function buildPersistedNarrativeItems(
   };
 
   for (const evt of timeline) {
-    if (evt.kind === "thought") {
+    if (evt.kind === "narration") {
       flushGroup();
-      // Persisted thoughts are always closed — never `isActive`.
-      items.push({ type: "thought", segment: evt.segment, isActive: false });
+      // Persisted narration segments are always closed — never `isActive`.
+      items.push({ type: "narration", segment: evt.segment, isActive: false });
       continue;
     }
 
@@ -233,8 +230,8 @@ export function buildPersistedNarrativeItems(
   }
   flushGroup();
 
-  const contentCache = _memoCache.get(thoughts) ?? new Map<string, NarrativeItem[]>();
+  const contentCache = _memoCache.get(narrationSegments) ?? new Map<string, NarrativeItem[]>();
   contentCache.set(msgTrimmed, items);
-  _memoCache.set(thoughts, contentCache);
+  _memoCache.set(narrationSegments, contentCache);
   return items;
 }

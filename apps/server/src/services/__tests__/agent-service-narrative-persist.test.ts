@@ -10,7 +10,7 @@ import type { MessageRepo } from "../../repositories/message-repo.js";
 import type { GitService } from "../git-service.js";
 import type { AttachmentService } from "../attachment-service.js";
 import type { ToolCallRecordRepo } from "../../repositories/tool-call-record-repo.js";
-import type { ThoughtSegmentRepo, CreateThoughtSegmentInput } from "../../repositories/thought-segment-repo.js";
+import type { NarrationSegmentRepo, CreateNarrationSegmentInput } from "../../repositories/narration-segment-repo.js";
 import type { HookExecutionRepo, CreateHookExecutionInput } from "../../repositories/hook-execution-repo.js";
 import type { TurnSnapshotRepo } from "../../repositories/turn-snapshot-repo.js";
 import type { SnapshotService } from "../snapshot-service.js";
@@ -65,7 +65,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
 interface Built {
   service: AgentService;
   providerEmitter: EventEmitter;
-  thoughtBulk: ReturnType<typeof vi.fn>;
+  narrationBulk: ReturnType<typeof vi.fn>;
   hookBulk: ReturnType<typeof vi.fn>;
   toolBulk: ReturnType<typeof vi.fn>;
 }
@@ -110,8 +110,8 @@ function build(): Built {
   const threadService = { create: vi.fn() } as unknown as ThreadService;
   const toolBulk = vi.fn();
   const toolCallRecordRepo = { bulkCreate: toolBulk } as unknown as ToolCallRecordRepo;
-  const thoughtBulk = vi.fn();
-  const thoughtSegmentRepo = { bulkCreate: thoughtBulk } as unknown as ThoughtSegmentRepo;
+  const narrationBulk = vi.fn();
+  const narrationSegmentRepo = { bulkCreate: narrationBulk } as unknown as NarrationSegmentRepo;
   const hookBulk = vi.fn();
   const hookExecutionRepo = { bulkCreate: hookBulk } as unknown as HookExecutionRepo;
   const turnSnapshotRepo = {
@@ -155,7 +155,7 @@ function build(): Built {
     providerRegistry,
     threadService,
     toolCallRecordRepo,
-    thoughtSegmentRepo,
+    narrationSegmentRepo,
     hookExecutionRepo,
     turnSnapshotRepo,
     snapshotService,
@@ -174,11 +174,11 @@ function build(): Built {
   (service as any).turnToolCalls.set(THREAD_ID, []);
   (service as any).turnSortCounters.set(THREAD_ID, 0);
   (service as any).agentCallStack.set(THREAD_ID, []);
-  (service as any).turnOpenThought.set(THREAD_ID, null);
-  (service as any).turnThoughts.set(THREAD_ID, []);
+  (service as any).turnOpenNarration.set(THREAD_ID, null);
+  (service as any).turnNarrationSegments.set(THREAD_ID, []);
   (service as any).turnOpenHooks.set(THREAD_ID, new Map());
   (service as any).turnHooks.set(THREAD_ID, []);
-  return { service, providerEmitter, thoughtBulk, hookBulk, toolBulk };
+  return { service, providerEmitter, narrationBulk, hookBulk, toolBulk };
 }
 
 describe("AgentService narrative persistence", () => {
@@ -186,8 +186,8 @@ describe("AgentService narrative persistence", () => {
     vi.clearAllMocks();
   });
 
-  it("segments thoughts split by tool calls with strictly-ordered sortOrder", async () => {
-    const { providerEmitter, thoughtBulk, toolBulk } = build();
+  it("segments narration split by tool calls with strictly-ordered sortOrder", async () => {
+    const { providerEmitter, narrationBulk, toolBulk } = build();
 
     providerEmitter.emit("event", { type: AgentEventType.TextDelta, threadId: THREAD_ID, delta: "I will " });
     providerEmitter.emit("event", { type: AgentEventType.TextDelta, threadId: THREAD_ID, delta: "read." });
@@ -212,14 +212,14 @@ describe("AgentService narrative persistence", () => {
     await new Promise((r) => setImmediate(r));
 
     expect(toolBulk).toHaveBeenCalledOnce();
-    expect(thoughtBulk).toHaveBeenCalledOnce();
-    const thoughts: CreateThoughtSegmentInput[] = thoughtBulk.mock.calls[0][0];
-    expect(thoughts).toHaveLength(2);
-    expect(thoughts[0].text).toBe("I will read.");
-    expect(thoughts[0].sortOrder).toBe(0);
-    expect(thoughts[1].text).toBe("Now respond.");
-    expect(thoughts[1].sortOrder).toBe(2);
-    expect(thoughts.every((t) => t.messageId === MSG_ID)).toBe(true);
+    expect(narrationBulk).toHaveBeenCalledOnce();
+    const segments: CreateNarrationSegmentInput[] = narrationBulk.mock.calls[0][0];
+    expect(segments).toHaveLength(2);
+    expect(segments[0].text).toBe("I will read.");
+    expect(segments[0].sortOrder).toBe(0);
+    expect(segments[1].text).toBe("Now respond.");
+    expect(segments[1].sortOrder).toBe(2);
+    expect(segments.every((t) => t.messageId === MSG_ID)).toBe(true);
 
     const toolCalls = toolBulk.mock.calls[0][0];
     expect(toolCalls[0].sortOrder).toBe(1);
@@ -325,8 +325,8 @@ describe("AgentService narrative persistence", () => {
     expect(lateHooks[0].durationMs).toBe(42);
   });
 
-  it("marks a non-final thought as isFinalResponse when its text equals the assistant message body", async () => {
-    const { providerEmitter, thoughtBulk, service } = build();
+  it("marks a non-final narration segment as isFinalResponse when its text equals the assistant message body", async () => {
+    const { providerEmitter, narrationBulk, service } = build();
     const body = "FULL USER-FACING REPLY";
     const mockMsg: Message = {
       id: MSG_ID,
@@ -359,15 +359,15 @@ describe("AgentService narrative persistence", () => {
     await new Promise((r) => setImmediate(r));
     await new Promise((r) => setImmediate(r));
 
-    expect(thoughtBulk).toHaveBeenCalledOnce();
-    const thoughts: CreateThoughtSegmentInput[] = thoughtBulk.mock.calls[0][0];
-    expect(thoughts).toHaveLength(1);
-    expect(thoughts[0].text).toBe(body);
-    expect(thoughts[0].isFinalResponse).toBe(1);
+    expect(narrationBulk).toHaveBeenCalledOnce();
+    const segments: CreateNarrationSegmentInput[] = narrationBulk.mock.calls[0][0];
+    expect(segments).toHaveLength(1);
+    expect(segments[0].text).toBe(body);
+    expect(segments[0].isFinalResponse).toBe(1);
   });
 
-  it("drops the open thought when AssistantMessageBoundary reports isFinalResponse=true", async () => {
-    const { providerEmitter, thoughtBulk } = build();
+  it("drops the open narration segment when AssistantMessageBoundary reports isFinalResponse=true", async () => {
+    const { providerEmitter, narrationBulk } = build();
 
     providerEmitter.emit("event", {
       type: AgentEventType.TextDelta,
@@ -390,11 +390,11 @@ describe("AgentService narrative persistence", () => {
     await new Promise((r) => setImmediate(r));
     await new Promise((r) => setImmediate(r));
 
-    expect(thoughtBulk).not.toHaveBeenCalled();
+    expect(narrationBulk).not.toHaveBeenCalled();
   });
 
-  it("persists preamble thought when AssistantMessageBoundary reports isFinalResponse=false", async () => {
-    const { providerEmitter, thoughtBulk } = build();
+  it("persists preamble narration when AssistantMessageBoundary reports isFinalResponse=false", async () => {
+    const { providerEmitter, narrationBulk } = build();
 
     providerEmitter.emit("event", {
       type: AgentEventType.TextDelta,
@@ -424,10 +424,10 @@ describe("AgentService narrative persistence", () => {
     await new Promise((r) => setImmediate(r));
     await new Promise((r) => setImmediate(r));
 
-    expect(thoughtBulk).toHaveBeenCalledOnce();
-    const thoughts: CreateThoughtSegmentInput[] = thoughtBulk.mock.calls[0][0];
-    expect(thoughts).toHaveLength(1);
-    expect(thoughts[0].text).toBe("Let me check that file.");
-    expect(thoughts[0].isFinalResponse).toBeUndefined();
+    expect(narrationBulk).toHaveBeenCalledOnce();
+    const segments: CreateNarrationSegmentInput[] = narrationBulk.mock.calls[0][0];
+    expect(segments).toHaveLength(1);
+    expect(segments[0].text).toBe("Let me check that file.");
+    expect(segments[0].isFinalResponse).toBeUndefined();
   });
 });

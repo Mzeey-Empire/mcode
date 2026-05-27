@@ -7,7 +7,7 @@ describe("threadStore textDelta batching", () => {
       streamingByThread: {},
       streamingPreviewByThread: {},
       toolCallsByThread: {},
-      thoughtSegmentsByThread: {},
+      narrationSegmentsByThread: {},
     });
   });
 
@@ -38,7 +38,7 @@ describe("threadStore textDelta batching", () => {
     expect(useThreadStore.getState().streamingByThread[tid]).toBe("01234567");
   });
 
-  it("updates streaming only for isFinalResponse deltas (skips thought segments)", () => {
+  it("updates streaming only for isFinalResponse deltas (skips narration segments)", () => {
     const queue: FrameRequestCallback[] = [];
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb: FrameRequestCallback) => {
       queue.push(cb);
@@ -59,8 +59,8 @@ describe("threadStore textDelta batching", () => {
     queue[0]!(0);
 
     expect(useThreadStore.getState().streamingByThread[tid]).toBe("think final");
-    expect(useThreadStore.getState().thoughtSegmentsByThread[tid]?.length).toBe(1);
-    expect(useThreadStore.getState().thoughtSegmentsByThread[tid]?.[0]?.text).toBe("think ");
+    expect(useThreadStore.getState().narrationSegmentsByThread[tid]?.length).toBe(1);
+    expect(useThreadStore.getState().narrationSegmentsByThread[tid]?.[0]?.text).toBe("think ");
   });
 
   it("flushes pending deltas before session.turnComplete reads streaming", () => {

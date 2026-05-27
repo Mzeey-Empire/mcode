@@ -40,9 +40,9 @@ const SILENT_ITEM_TYPES = new Set([
  * stack so later parent-thread child items still nest until `turn/completed` resets mapper state.
  *
  * Thinking stream: `item/reasoning/*` plus experimental `item/plan/delta` map to non-final
- * text deltas (`AgentEventType.TextDelta` with `isFinalResponse: false`) so the UI can show thought segments.
+ * text deltas (`AgentEventType.TextDelta` with `isFinalResponse: false`) so the UI can show narration segments.
  */
-/** Item types whose `item/started` marks "a tool fired this turn" for thought-vs-final classification. */
+/** Item types whose `item/started` marks "a tool fired this turn" for narration-vs-final classification. */
 const TOOL_LIKE_ITEM_TYPES = new Set([
   "commandExecution", "mcpToolCall", "dynamicToolCall",
   "fileChange", "collabAgentToolCall", "function_call", "webSearch",
@@ -57,7 +57,7 @@ export class CodexEventMapper {
   private readonly threadId: string;
   /** Per-item streaming command output buffers, keyed by itemId. */
   private readonly commandOutputBuffers = new Map<string, string>();
-  /** Open tool-like items keyed by id. Mirrors Claude/Cursor `pendingToolUses` for thought-vs-final classification. */
+  /** Open tool-like items keyed by id. Mirrors Claude/Cursor `pendingToolUses` for narration-vs-final classification. */
   private readonly pendingToolItems = new Set<string>();
   /** True once any tool-like item has fired this turn. Distinguishes pre-tool preamble from post-tool final reply. */
   private hasFiredToolThisTurn = false;
@@ -196,8 +196,8 @@ export class CodexEventMapper {
 
     // Suppress any trailing notifications that arrive AFTER turn/completed —
     // late `item/reasoning/textDelta` or `item/agentMessage/delta` events would
-    // otherwise keep growing the thought timeline after the turn footer says
-    // "done" (the visual "thoughts keep scrolling" bug).
+    // otherwise keep growing the narration timeline after the turn footer says
+    // "done" (the visual "narration keeps scrolling" bug).
     if (this.turnEnded) {
       logger.debug("Codex notification ignored after turn/completed", { method });
       return [];
@@ -231,7 +231,7 @@ export class CodexEventMapper {
     }
 
     // Streaming reasoning summaries from the Codex app-server (Responses API reasoning item).
-    // `isFinalResponse: false` routes text into thought segments like Claude extended thinking.
+    // `isFinalResponse: false` routes text into narration segments like Claude extended thinking.
     if (
       method === "item/reasoning/textDelta"
       || method === "item/reasoning/summaryTextDelta"
@@ -273,7 +273,7 @@ export class CodexEventMapper {
     // Streaming assistant text token. Codex sends pre-tool preamble AND post-tool final
     // reply on the same wire channel. Mirror Claude/Cursor: tag `isFinalResponse: true`
     // only when every tool started this turn has completed; otherwise emit as a
-    // thought delta so pre-tool / inter-tool narration shows in the thought timeline.
+    // narration delta so pre-tool / inter-tool text shows in the narration timeline.
     if (method === "item/agentMessage/delta") {
       const delta = notification.params.delta;
       if (!delta) return [];

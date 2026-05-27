@@ -579,15 +579,15 @@ input[type="range"].settings-range::-moz-range-thumb {
   animation: narrative-row-in 180ms cubic-bezier(0.25, 1, 0.5, 1) both;
 }
 
-/* Thought rows get a slightly longer, softer enter so the segment "opens"
+/* Narration rows get a slightly longer, softer enter so the segment "opens"
    into place rather than snapping in. Pair with the color transitions in
-   ThoughtBlock for a coordinated settle motion when the segment closes. */
-@keyframes thought-row-in {
+   NarrationBlock for a coordinated settle motion when the segment closes. */
+@keyframes narration-row-in {
   from {
     opacity: 0;
     transform: translateY(3px);
     /* Grid items use max-height so the row reveals as it grows; the value
-       just needs to exceed any thought row's natural height. */
+       just needs to exceed any narration row's natural height. */
     max-height: 0;
   }
   to {
@@ -597,8 +597,8 @@ input[type="range"].settings-range::-moz-range-thumb {
   }
 }
 
-.thought-row.narrative-row-enter {
-  animation: thought-row-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+.narration-row.narrative-row-enter {
+  animation: narration-row-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
   overflow: hidden;
 }
 
@@ -621,14 +621,14 @@ input[type="range"].settings-range::-moz-range-thumb {
   animation: delta-row-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-@keyframes thought-settle {
+@keyframes narration-settle {
   0%   { transform: scale(1);     opacity: 1; }
   35%  { transform: scale(0.985); opacity: 0.92; }
   100% { transform: scale(1);     opacity: 1; }
 }
 
-.thought-settling {
-  animation: thought-settle 320ms cubic-bezier(0.22, 1, 0.36, 1);
+.narration-settling {
+  animation: narration-settle 320ms cubic-bezier(0.22, 1, 0.36, 1);
   transform-origin: left center;
 }
 
@@ -643,12 +643,12 @@ input[type="range"].settings-range::-moz-range-thumb {
 
 @media (prefers-reduced-motion: reduce) {
   .narrative-row-enter,
-  .thought-row.narrative-row-enter,
+  .narration-row.narrative-row-enter,
   .delta-row-enter {
     animation: none;
   }
 
-  .thought-settling,
+  .narration-settling,
   .assistant-just-persisted {
     animation: none;
   }

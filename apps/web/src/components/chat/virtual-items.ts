@@ -1,6 +1,6 @@
 import type { PermissionDecision } from "@mcode/contracts";
 import type { Message, ToolCall, HookExecution } from "@/transport/types";
-import type { ThoughtSegment } from "./narrative/types";
+import type { NarrationSegment } from "./narrative/types";
 import { computeLiveStreamingText } from "./narrative/build-narrative";
 
 /** Compile-time exhaustive check; throws at runtime for unhandled discriminants. */
@@ -49,11 +49,11 @@ export type ChatVirtualItem =
       type: "narrative-flow";
       toolCalls: readonly ToolCall[];
       hooks: readonly HookExecution[];
-      thoughtSegments: readonly ThoughtSegment[];
+      narrationSegments: readonly NarrationSegment[];
       streamingText: string;
       isAgentRunning: boolean;
       startTime: number | undefined;
-      /** Last assistant bubble text when the turn finished; duplicate thoughts are hidden. */
+      /** Last assistant bubble text when the turn finished; duplicate narration rows are hidden. */
       committedAssistantBody?: string;
     }
   | {
@@ -61,7 +61,7 @@ export type ChatVirtualItem =
       type: "persisted-narrative";
       /** Assistant message id this persisted timeline belongs to. */
       messageId: string;
-      /** Assistant message body — passed to the safety net that suppresses final-response thoughts. */
+      /** Assistant message body — passed to the safety net that suppresses final-response narration rows. */
       messageContent: string;
     }
   | {
@@ -176,7 +176,7 @@ export function buildStableItems(
 
 /**
  * Build the volatile segment: permission requests and a single narrative-flow item
- * that consolidates tool calls, hooks, thought segments, streaming text, and indicator.
+ * that consolidates tool calls, hooks, narration segments, streaming text, and indicator.
  * This changes on every tool call event but doesn't depend on messages.
  */
 export function buildVolatileItems(
@@ -193,7 +193,7 @@ export function buildVolatileItems(
     decision?: PermissionDecision;
   }[],
   hooks?: readonly HookExecution[],
-  thoughtSegments?: readonly ThoughtSegment[],
+  narrationSegments?: readonly NarrationSegment[],
 ): ChatVirtualItem[] {
   const items: ChatVirtualItem[] = [];
 
@@ -206,7 +206,7 @@ export function buildVolatileItems(
       type: "narrative-flow",
       toolCalls,
       hooks: hooks ?? [],
-      thoughtSegments: thoughtSegments ?? [],
+      narrationSegments: narrationSegments ?? [],
       streamingText: streamingText ?? "",
       isAgentRunning,
       startTime: agentStartTime,
@@ -218,7 +218,7 @@ export function buildVolatileItems(
   // virtual-list position the persisted bubble lands in, so the swap is a
   // content replacement rather than a jump.
   const liveText = computeLiveStreamingText({
-    thoughtSegments: thoughtSegments ?? [],
+    narrationSegments: narrationSegments ?? [],
     streamingText: streamingText ?? "",
     isAgentRunning,
     toolCalls,
@@ -239,7 +239,7 @@ export function buildVolatileItems(
   if (isAgentRunning) {
     const topLevelTools = toolCalls.filter((tc) => tc.parentToolCallId == null);
     // Match `buildNarrativeItems` / `NarrativeCounts.steps`: top-level tool
-    // calls only. Thought segments are tracked separately in the footer.
+    // calls only. Narration segments are tracked separately in the footer.
     const stepCount = topLevelTools.length;
     const subagentCount = topLevelTools.filter((tc) => tc.toolName === "Agent").length;
     const activeToolCalls = toolCalls.filter(
@@ -473,7 +473,7 @@ export function estimateItemHeight(item: ChatVirtualItem): number {
       // Header (28px) + one row (28px) per hook, capped at 300px
       return Math.min(28 + item.hooks.length * 28, 300);
     case "narrative-flow": {
-      const segCount = item.thoughtSegments.length;
+      const segCount = item.narrationSegments.length;
       const toolCount = item.toolCalls.length;
       const hookCount = item.hooks.length;
       return Math.min(segCount * 60 + toolCount * 32 + hookCount * 28 + 48, 600);

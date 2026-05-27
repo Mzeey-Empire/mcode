@@ -2,7 +2,7 @@ import "reflect-metadata";
 import { describe, it, expect, beforeEach } from "vitest";
 import type Database from "better-sqlite3";
 import { openMemoryDatabase } from "../store/database";
-import { ThoughtSegmentRepo } from "../repositories/thought-segment-repo";
+import { NarrationSegmentRepo } from "../repositories/narration-segment-repo";
 
 /** Seed a workspace, thread, and assistant message so FKs resolve. */
 function seedFixtures(db: Database.Database): { messageId: string } {
@@ -19,27 +19,27 @@ function seedFixtures(db: Database.Database): { messageId: string } {
   return { messageId: "msg-1" };
 }
 
-describe("ThoughtSegmentRepo", () => {
+describe("NarrationSegmentRepo", () => {
   let db: Database.Database;
-  let repo: ThoughtSegmentRepo;
+  let repo: NarrationSegmentRepo;
   let messageId: string;
 
   beforeEach(() => {
     db = openMemoryDatabase();
-    repo = new ThoughtSegmentRepo(db);
+    repo = new NarrationSegmentRepo(db);
     ({ messageId } = seedFixtures(db));
   });
 
   it("create then listByMessage round-trips a single segment", () => {
     const rec = repo.create({
-      id: "th-1",
+      id: "ns-1",
       messageId,
       text: "I should read the file first.",
       startedAt: "2026-05-15T10:00:00.000Z",
       endedAt: "2026-05-15T10:00:01.500Z",
       sortOrder: 1,
     });
-    expect(rec.id).toBe("th-1");
+    expect(rec.id).toBe("ns-1");
     const out = repo.listByMessage(messageId);
     expect(out).toHaveLength(1);
     expect(out[0]!.text).toBe("I should read the file first.");
@@ -49,14 +49,14 @@ describe("ThoughtSegmentRepo", () => {
 
   it("bulkCreate inserts multiple and lists in sort_order ascending", () => {
     repo.bulkCreate([
-      { id: "th-b", messageId, text: "B", startedAt: "2026-05-15T10:00:00Z", endedAt: null, sortOrder: 2 },
-      { id: "th-a", messageId, text: "A", startedAt: "2026-05-15T10:00:00Z", endedAt: null, sortOrder: 1 },
+      { id: "ns-b", messageId, text: "B", startedAt: "2026-05-15T10:00:00Z", endedAt: null, sortOrder: 2 },
+      { id: "ns-a", messageId, text: "A", startedAt: "2026-05-15T10:00:00Z", endedAt: null, sortOrder: 1 },
     ]);
     const out = repo.listByMessage(messageId);
     expect(out.map((r) => r.text)).toEqual(["A", "B"]);
   });
 
-  it("cascade deletes thoughts when the message is deleted", () => {
+  it("cascade deletes narration segments when the message is deleted", () => {
     repo.create({
       messageId,
       text: "x",

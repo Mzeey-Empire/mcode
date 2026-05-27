@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { useThreadStore } from "@/stores/threadStore";
 import type { NarrativeItem } from "./types";
 import type { ToolCall } from "@/transport/types";
-import { ThoughtBlock } from "./ThoughtBlock";
+import { NarrationBlock } from "./NarrationBlock";
 import { ToolSummaryLine } from "./ToolSummaryLine";
 import { HookRow } from "./HookRow";
 import { SubagentRow } from "./SubagentRow";
@@ -13,8 +13,8 @@ export interface PersistedNarrativeProps {
   /** Assistant message id (server-side or local) whose narrative to render. */
   messageId: string;
   /**
-   * Body of the assistant message. Used by the client-side suffix-match
-   * safety net to suppress thought segments that duplicate the message body.
+   * Body of the assistant message. Used by the client-side safety-net
+   * filter to suppress narration segments that duplicate the message body.
    */
   messageContent?: string;
 }
@@ -29,7 +29,7 @@ export interface PersistedNarrativeProps {
 function marginClassForItem(item: NarrativeItem, index: number): string {
   if (index === 0) return "mt-0";
   switch (item.type) {
-    case "thought":
+    case "narration":
       return "mt-3";
     case "subagent":
       return "mt-1";
@@ -41,8 +41,8 @@ function marginClassForItem(item: NarrativeItem, index: number): string {
 /** Stable key for a persisted row. */
 function keyForItem(item: NarrativeItem, index: number): string {
   switch (item.type) {
-    case "thought":
-      return `thought-${item.segment.startedAt}-${index}`;
+    case "narration":
+      return `narration-${item.segment.startedAt}-${index}`;
     case "tool-group":
       return `tool-group-${item.group.calls[0]?.id ?? index}`;
     case "hook":
@@ -57,8 +57,8 @@ function keyForItem(item: NarrativeItem, index: number): string {
 /** Render one persisted narrative row. */
 function renderItem(item: NarrativeItem, allToolCalls: readonly ToolCall[]): React.ReactNode {
   switch (item.type) {
-    case "thought":
-      return <ThoughtBlock segment={item.segment} isActive={false} />;
+    case "narration":
+      return <NarrationBlock segment={item.segment} isActive={false} />;
     case "tool-group":
       return (
         <ToolSummaryLine

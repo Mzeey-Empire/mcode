@@ -28,10 +28,10 @@ import { PersistedTurnFooter } from "./narrative/PersistedTurnFooter";
 import { StreamingResponseRow } from "./narrative/StreamingResponseRow";
 import { NarrativeIndicator } from "./narrative/NarrativeIndicator";
 import { PersistedLateHooks } from "./PersistedLateHooks";
-import type { ThoughtSegment } from "./narrative";
+import type { NarrationSegment } from "./narrative";
 
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
-const EMPTY_THOUGHT_SEGMENTS: readonly ThoughtSegment[] = [];
+const EMPTY_NARRATION_SEGMENTS: readonly NarrationSegment[] = [];
 const EMPTY_TURN_MAP: Record<string, string> = {};
 const EMPTY_FILES_CHANGED: Record<string, string[]> = {};
 const AUTO_SCROLL_THRESHOLD = 64;
@@ -127,7 +127,7 @@ const VirtualItemRenderer = memo(function VirtualItemRenderer({
         <NarrativeFlow
           toolCalls={item.toolCalls}
           hooks={item.hooks}
-          thoughtSegments={item.thoughtSegments}
+          narrationSegments={item.narrationSegments}
           streamingText={item.streamingText}
           isAgentRunning={item.isAgentRunning}
           startTime={item.startTime}
@@ -306,8 +306,8 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   const hooks = useThreadStore(
     useShallow((s) => currentThreadId ? (s.hooksByThread[currentThreadId] ?? []) : []),
   );
-  const thoughtSegments = useThreadStore(
-    (s) => s.thoughtSegmentsByThread[currentThreadId ?? ""] ?? EMPTY_THOUGHT_SEGMENTS,
+  const narrationSegments = useThreadStore(
+    (s) => s.narrationSegmentsByThread[currentThreadId ?? ""] ?? EMPTY_NARRATION_SEGMENTS,
   );
   // Narrowed selector: subscribe only to the active thread's current-turn
   // message id (a string), not the whole per-thread map. The downstream
@@ -426,7 +426,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
       streamingText,
       permissions,
       hooks,
-      thoughtSegments,
+      narrationSegments,
     );
     const lastMsg = messages[messages.length - 1];
     const committedAssistantBody =
@@ -448,7 +448,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     streamingText,
     permissions,
     hooks,
-    thoughtSegments,
+    narrationSegments,
     messages,
     currentThreadId,
   ]);

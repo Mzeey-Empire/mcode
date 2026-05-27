@@ -12,7 +12,7 @@ import type {
   PrDetail,
   PermissionMode,
   ToolCallRecord,
-  ThoughtSegmentRecord,
+  NarrationSegmentRecord,
   HookExecutionRecord,
   Settings,
   GitCommit,
@@ -663,13 +663,13 @@ export function createWsTransport(
     listNarrative: (messageId) =>
       rpc<{
         tools: ToolCallRecord[];
-        thoughts: ThoughtSegmentRecord[];
+        narrationSegments: NarrationSegmentRecord[];
         hooks: HookExecutionRecord[];
       }>("narrative.list", { messageId }),
     listNarrativeBatch: (messageIds) =>
       rpc<Record<string, {
         tools: ToolCallRecord[];
-        thoughts: ThoughtSegmentRecord[];
+        narrationSegments: NarrationSegmentRecord[];
         hooks: HookExecutionRecord[];
       }>>("narrative.listBatch", { messageIds }),
 

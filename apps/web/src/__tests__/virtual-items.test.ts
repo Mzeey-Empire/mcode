@@ -7,7 +7,7 @@ import {
   STREAMING_CARD_COLLAPSED_HEIGHT,
 } from "@/components/chat/virtual-items";
 import type { ChatVirtualItem } from "@/components/chat/virtual-items";
-import type { ThoughtSegment } from "@/components/chat/narrative/types";
+import type { NarrationSegment } from "@/components/chat/narrative/types";
 import type { Message, ToolCall, HookExecution } from "@/transport/types";
 
 function makeMessage(overrides: Partial<Message> = {}): Message {
@@ -109,14 +109,14 @@ describe("buildVolatileItems", () => {
     expect(narrativeItem?.isAgentRunning).toBe(true);
   });
 
-  it("passes thoughtSegments through on narrative-flow items", () => {
-    const thoughtSegments: ThoughtSegment[] = [{ text: "planning", startedAt: 42, endedAt: 100 }];
-    const items = buildVolatileItems([makeToolCall({ id: "t1" })], true, 1000, undefined, undefined, [], thoughtSegments);
+  it("passes narrationSegments through on narrative-flow items", () => {
+    const narrationSegments: NarrationSegment[] = [{ text: "planning", startedAt: 42, endedAt: 100 }];
+    const items = buildVolatileItems([makeToolCall({ id: "t1" })], true, 1000, undefined, undefined, [], narrationSegments);
     const narrativeItem = items.find((i) => i.type === "narrative-flow") as Extract<
       (typeof items)[number],
       { type: "narrative-flow" }
     >;
-    expect(narrativeItem?.thoughtSegments).toEqual(thoughtSegments);
+    expect(narrativeItem?.narrationSegments).toEqual(narrationSegments);
   });
 });
 
@@ -208,12 +208,12 @@ describe("buildVirtualItems (combined)", () => {
     expect(indicatorIdx).toBeGreaterThan(streamingResponseIdx);
   });
 
-  it("indicator stepCount counts top-level tools only, not thought segments", () => {
+  it("indicator stepCount counts top-level tools only, not narration segments", () => {
     const toolCalls: ToolCall[] = [
       makeToolCall({ id: "tc-1", toolName: "Read" }),
       makeToolCall({ id: "tc-2", toolName: "Bash" }),
     ];
-    const thoughtSegments: ThoughtSegment[] = [
+    const narrationSegments: NarrationSegment[] = [
       { text: "preamble one", startedAt: 1, endedAt: 2 },
       { text: "preamble two", startedAt: 3, endedAt: 4 },
     ];
@@ -224,7 +224,7 @@ describe("buildVirtualItems (combined)", () => {
       undefined,
       undefined,
       undefined,
-      thoughtSegments,
+      narrationSegments,
     );
     const indicator = items.find((i) => i.type === "narrative-indicator") as
       | (ChatVirtualItem & { type: "narrative-indicator" })

@@ -29,7 +29,11 @@ import { ThreadRepo } from "../repositories/thread-repo";
 import { WorkspaceRepo } from "../repositories/workspace-repo";
 import { MessageRepo } from "../repositories/message-repo";
 import { ToolCallRecordRepo, type CreateToolCallRecordInput } from "../repositories/tool-call-record-repo";
-import { ThoughtSegmentRepo, type CreateThoughtSegmentInput } from "../repositories/thought-segment-repo";
+import {
+  NarrationSegmentRepo,
+  type CreateNarrationSegmentInput,
+} from "../repositories/narration-segment-repo";
+import { isLikelyFinalResponseTail } from "@mcode/contracts";
 import { HookExecutionRepo, type CreateHookExecutionInput } from "../repositories/hook-execution-repo";
 import { TurnSnapshotRepo } from "../repositories/turn-snapshot-repo";
 import type Database from "better-sqlite3";
@@ -119,15 +123,15 @@ export class AgentService {
   private turnRefBefore = new Map<string, { ref: string; cwd: string }>();
   /** Stack of active Agent tool call IDs per thread (for nesting inference). */
   private agentCallStack = new Map<string, string[]>();
-  /** Per-thread sort counter shared across tool calls, thought segments, and hook executions. */
+  /** Per-thread sort counter shared across tool calls, narration segments, and hook executions. */
   private turnSortCounters = new Map<string, number>();
-  /** In-flight thought segment being accumulated from consecutive textDelta events, per thread. */
-  private turnOpenThought = new Map<
+  /** In-flight narration segment being accumulated from consecutive textDelta events, per thread. */
+  private turnOpenNarration = new Map<
     string,
     { id: string; text: string; startedAt: string; sortOrder: number } | null
   >();
-  /** Closed thought segments awaiting persistence at turn end, per thread. */
-  private turnThoughts = new Map<string, CreateThoughtSegmentInput[]>();
+  /** Closed narration segments awaiting persistence at turn end, per thread. */
+  private turnNarrationSegments = new Map<string, CreateNarrationSegmentInput[]>();
   /** In-flight hook executions keyed by hookName, per thread. HookCompleted carries no toolName, so hookName alone matches. */
   private turnOpenHooks = new Map<
     string,
@@ -192,7 +196,8 @@ export class AgentService {
     @inject(delay(() => ThreadService))
     private readonly threadService: ThreadService,
     @inject(ToolCallRecordRepo) private readonly toolCallRecordRepo: ToolCallRecordRepo,
-    @inject(ThoughtSegmentRepo) private readonly thoughtSegmentRepo: ThoughtSegmentRepo,
+    @inject(NarrationSegmentRepo)
+    private readonly narrationSegmentRepo: NarrationSegmentRepo,
     @inject(HookExecutionRepo) private readonly hookExecutionRepo: HookExecutionRepo,
     @inject(TurnSnapshotRepo) private readonly turnSnapshotRepo: TurnSnapshotRepo,
     @inject(SnapshotService) private readonly snapshotService: SnapshotService,
@@ -526,8 +531,8 @@ export class AgentService {
     this.turnToolCalls.set(threadId, []);
     this.turnSortCounters.set(threadId, 0);
     this.agentCallStack.set(threadId, []);
-    this.turnOpenThought.set(threadId, null);
-    this.turnThoughts.set(threadId, []);
+    this.turnOpenNarration.set(threadId, null);
+    this.turnNarrationSegments.set(threadId, []);
     this.turnOpenHooks.set(threadId, new Map());
     this.turnHooks.set(threadId, []);
 
@@ -1508,17 +1513,17 @@ export class AgentService {
           this.streamingAssistantTextByThread.set(event.threadId, prev + event.delta);
           // Final-response deltas are the assistant's user-facing reply — they will
           // be stored as the message body when the Message event arrives. Do not
-          // open a ThoughtSegment for them: that would cause the text to appear
-          // twice (once as a dimmed thought block, once as the assistant message).
+          // open a narration segment for them: that would cause the text to appear
+          // twice (once as a dimmed narration block, once as the assistant message).
           if (!event.isFinalResponse) {
-            // Open or extend the current thought segment. Sort order is allocated lazily
+            // Open or extend the current narration segment. Sort order is allocated lazily
             // on first delta so consecutive deltas keep the same slot; the slot is taken
             // BEFORE any following tool call's sort order, matching the live client builder.
-            const open = this.turnOpenThought.get(event.threadId);
+            const open = this.turnOpenNarration.get(event.threadId);
             if (!open) {
               const sortOrder = this.turnSortCounters.get(event.threadId) ?? 0;
               this.turnSortCounters.set(event.threadId, sortOrder + 1);
-              this.turnOpenThought.set(event.threadId, {
+              this.turnOpenNarration.set(event.threadId, {
                 id: randomUUID(),
                 text: event.delta,
                 startedAt: new Date().toISOString(),
@@ -1673,21 +1678,21 @@ export class AgentService {
         if (event.type === AgentEventType.AssistantMessageBoundary) {
           // Authoritative classification of the just-streamed text deltas based
           // on the Anthropic message-level `stop_reason`. When `isFinalResponse`
-          // is true the open thought segment was really the final user-facing
+          // is true the open narration segment was really the final user-facing
           // response (the legacy heuristic could not detect this for tool-free
-          // turns) — drop it so it never gets persisted as a thought row, which
+          // turns) — drop it so it never gets persisted as a narration row, which
           // would otherwise render alongside the assistant message bubble.
           // Otherwise the message ended with a non-finalizing stop_reason such
-          // as `tool_use`; close the thought so it persists as preamble.
+          // as `tool_use`; close the segment so it persists as preamble.
           if (event.isFinalResponse) {
-            this.dropOpenThought(event.threadId);
+            this.dropOpenNarration(event.threadId);
           } else {
-            this.closeOpenThought(event.threadId);
+            this.closeOpenNarration(event.threadId);
           }
         }
 
         if (event.type === AgentEventType.ToolUse) {
-          this.closeOpenThought(event.threadId);
+          this.closeOpenNarration(event.threadId);
           this.bufferToolCall(event.threadId, event);
         }
 
@@ -1728,9 +1733,9 @@ export class AgentService {
           } else {
             const sortOrder = this.turnSortCounters.get(event.threadId) ?? 0;
             this.turnSortCounters.set(event.threadId, sortOrder + 1);
-            // Close any open thought so the hook sorts after the text that preceded it,
+            // Close any open narration segment so the hook sorts after the text that preceded it,
             // mirroring the tool-call branch.
-            this.closeOpenThought(event.threadId);
+            this.closeOpenNarration(event.threadId);
             const map =
               this.turnOpenHooks.get(event.threadId) ??
               new Map<
@@ -2160,14 +2165,14 @@ ${userMessage}`;
   }
 
   /**
-   * Close any in-flight thought segment for the thread and push it onto the
-   * closed-thoughts list. Called before a tool call begins (so the thought
+   * Close any in-flight narration segment for the thread and push it onto the
+   * closed-segments list. Called before a tool call begins (so the segment
    * sorts strictly before the tool) and during turn-end drain.
    */
-  private closeOpenThought(threadId: string): void {
-    const open = this.turnOpenThought.get(threadId);
+  private closeOpenNarration(threadId: string): void {
+    const open = this.turnOpenNarration.get(threadId);
     if (!open) return;
-    const list = this.turnThoughts.get(threadId) ?? [];
+    const list = this.turnNarrationSegments.get(threadId) ?? [];
     list.push({
       id: open.id,
       messageId: "",
@@ -2176,20 +2181,20 @@ ${userMessage}`;
       endedAt: new Date().toISOString(),
       sortOrder: open.sortOrder,
     });
-    this.turnThoughts.set(threadId, list);
-    this.turnOpenThought.set(threadId, null);
+    this.turnNarrationSegments.set(threadId, list);
+    this.turnOpenNarration.set(threadId, null);
   }
 
   /**
-   * Discards the open thought without persisting it.
+   * Discards the open narration segment without persisting it.
    *
    * Called when `AssistantMessageBoundary` reports `isFinalResponse: true` —
    * the streamed text was actually the final assistant response and will be
-   * persisted via the `Message` event, so keeping the matching thought row
-   * would duplicate the body as a ThoughtBlock in the narrative.
+   * persisted via the `Message` event, so keeping the matching narration row
+   * would duplicate the body as a narration block in the timeline.
    */
-  private dropOpenThought(threadId: string): void {
-    this.turnOpenThought.set(threadId, null);
+  private dropOpenNarration(threadId: string): void {
+    this.turnOpenNarration.set(threadId, null);
   }
 
   /** Buffer a tool call event for later persistence. */
@@ -2464,9 +2469,9 @@ ${userMessage}`;
         }
       }
 
-      // Drain any in-flight thought / hook before persisting so a turn that ends
-      // without a trailing tool call still records its tail thought + hook.
-      this.closeOpenThought(threadId);
+      // Drain any in-flight narration segment / hook before persisting so a turn that ends
+      // without a trailing tool call still records its tail segment + hook.
+      this.closeOpenNarration(threadId);
       const openHookMap = this.turnOpenHooks.get(threadId);
       if (openHookMap && openHookMap.size > 0) {
         const list = this.turnHooks.get(threadId) ?? [];
@@ -2490,45 +2495,29 @@ ${userMessage}`;
         openHookMap.clear();
       }
 
-      const rawThoughts = (this.turnThoughts.get(threadId) ?? []).map((t) => ({
+      const segments = (this.turnNarrationSegments.get(threadId) ?? []).map((t) => ({
         ...t,
         messageId,
       }));
-      const thoughts = rawThoughts;
-      if (thoughts.length > 0) {
-        // Suffix-match safeguard: the last chronological thought segment whose
-        // text (trimmed) is a suffix of the assistant message body is the
-        // final user-facing response — tag it so the client doesn't render it
-        // as a ThoughtBlock.  This catches provider edge cases and tool-free
-        // turns where the provider cannot set isFinalResponse at stream time.
-        const msgContent = messages[messages.length - 1].content ?? "";
-        const msgTrimmed = msgContent.trim();
-        if (msgTrimmed.length > 0) {
-          // Identify the last segment by sortOrder (suffix guard targets the tail).
-          let maxSortOrder = -Infinity;
-          for (const t of thoughts) {
-            if (t.sortOrder > maxSortOrder) maxSortOrder = t.sortOrder;
-          }
-          for (const t of thoughts) {
-            const segTrimmed = t.text.trim();
-            if (segTrimmed.length === 0) continue;
-            if (segTrimmed === msgTrimmed) {
-              t.isFinalResponse = 1;
-              continue;
-            }
-            if (
-              t.sortOrder === maxSortOrder &&
-              (t.isFinalResponse === 1 || msgTrimmed.endsWith(segTrimmed))
-            ) {
-              t.isFinalResponse = 1;
-            }
+      if (segments.length > 0) {
+        // Safety net: classify any segment whose text looks like the final
+        // assistant body and tag it `isFinalResponse=1` so the client doesn't
+        // render it as a narration row. Catches provider edge cases and
+        // tool-free turns where the provider cannot set `isFinalResponse` at
+        // stream time. Shared with `build-persisted-narrative` on the client
+        // via `isLikelyFinalResponseTail` so the rule lives in exactly one place.
+        const messageBody = messages[messages.length - 1].content ?? "";
+        for (const s of segments) {
+          if (s.isFinalResponse === 1) continue;
+          if (isLikelyFinalResponseTail(s, segments, messageBody)) {
+            s.isFinalResponse = 1;
           }
         }
 
         try {
-          this.thoughtSegmentRepo.bulkCreate(thoughts);
+          this.narrationSegmentRepo.bulkCreate(segments);
         } catch (err) {
-          logger.error("Failed to persist thought segments", {
+          logger.error("Failed to persist narration segments", {
             threadId,
             error: err instanceof Error ? err.message : String(err),
           });
@@ -2605,8 +2594,8 @@ ${userMessage}`;
     // turnSortCounters and agentCallStack are reset in the TurnStarted handler
     // so late hooks that arrive after clearTurnState can still increment the
     // sort counter for the completed turn.
-    this.turnOpenThought.delete(threadId);
-    this.turnThoughts.delete(threadId);
+    this.turnOpenNarration.delete(threadId);
+    this.turnNarrationSegments.delete(threadId);
     this.turnOpenHooks.delete(threadId);
     this.turnHooks.delete(threadId);
     this.persistingThreads.delete(threadId);

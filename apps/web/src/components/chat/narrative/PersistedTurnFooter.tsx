@@ -38,11 +38,11 @@ export function PersistedTurnFooter({ messageId }: PersistedTurnFooterProps) {
     const topLevel = records.tools.filter((t) => t.parent_tool_call_id == null);
     const counts: NarrativeCounts = {
       steps: topLevel.length,
-      thoughts: records.thoughts.length,
+      narrationSegments: records.narrationSegments.length,
       subagents: topLevel.filter((t) => t.tool_name === "Agent").length,
     };
     // Derive duration from the earliest start to the latest completion across
-    // tools and thoughts. Null when no boundary is parseable.
+    // tools and narration segments. Null when no boundary is parseable.
     const starts: number[] = [];
     const ends: number[] = [];
     for (const t of records.tools) {
@@ -53,11 +53,11 @@ export function PersistedTurnFooter({ messageId }: PersistedTurnFooterProps) {
         if (Number.isFinite(e)) ends.push(e);
       }
     }
-    for (const th of records.thoughts) {
-      const s = Date.parse(th.started_at);
+    for (const seg of records.narrationSegments) {
+      const s = Date.parse(seg.started_at);
       if (Number.isFinite(s)) starts.push(s);
-      if (th.ended_at) {
-        const e = Date.parse(th.ended_at);
+      if (seg.ended_at) {
+        const e = Date.parse(seg.ended_at);
         if (Number.isFinite(e)) ends.push(e);
       }
     }

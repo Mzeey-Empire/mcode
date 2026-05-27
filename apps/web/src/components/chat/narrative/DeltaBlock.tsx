@@ -16,9 +16,9 @@ interface DeltaBlockProps {
    * When true, the typing caret blinks at the end of the rendered text while
    * `isStreaming` is also true. Set false for segments that are *animating
    * into view* but are not actively receiving more deltas — e.g. a just-closed
-   * preamble thought re-typewriting into a `ThoughtBlock` after `tool_use`
-   * fires. Without this gate, every closed thought would park a blinking
-   * cursor at its end. Defaults to true.
+   * preamble segment re-typewriting into a `NarrationBlock` after `tool_use`
+   * fires. Without this gate, every closed narration segment would park a
+   * blinking cursor at its end. Defaults to true.
    */
   showCursor?: boolean;
 }
@@ -207,9 +207,9 @@ export function DeltaBlock({ text, isStreaming = true, showCursor = true }: Delt
   /** Tracks whether the first-paint entry flight animation has already played. */
   const hasFlownInRef = useRef<boolean>(false);
   // The cursor is rendered only when BOTH actively receiving deltas (the
-  // typewriter reveal) AND `showCursor` is true. A just-closed thought that
-  // animates into view still uses `isStreaming` for the typewriter, but turns
-  // `showCursor` off so the caret doesn't park at the end of a finished block.
+  // typewriter reveal) AND `showCursor` is true. A just-closed narration segment
+  // that animates into view still uses `isStreaming` for the typewriter, but
+  // turns `showCursor` off so the caret doesn't park at the end of a finished block.
   const renderCursor = isStreaming && showCursor;
 
   useLayoutEffect(() => {
@@ -275,7 +275,7 @@ export function DeltaBlock({ text, isStreaming = true, showCursor = true }: Delt
           true. The `.typing-cursor` class runs a CSS blink animation that
           overrides any inline opacity, so an unmounted-but-not-rendered cursor
           was previously blinking in the top-left corner of completed text
-          blocks. `showCursor=false` is used by ThoughtBlock so just-closed
+          blocks. `showCursor=false` is used by NarrationBlock so just-closed
           preamble segments don't leave a blinking caret in the timeline. */}
       {renderCursor && (
       <span

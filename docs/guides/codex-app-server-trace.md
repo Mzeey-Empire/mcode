@@ -38,10 +38,10 @@ Across both runs, Codex split "thinking" from "answer" cleanly at the wire: anyt
 | Method | Route in Mcode | Evidence |
 |---|---|---|
 | `item/agentMessage/delta` | `TextDelta` with `isFinalResponse: true` | A:13, B:17–31 stream the user-facing answer |
-| `item/reasoning/textDelta` | `TextDelta` with `isFinalResponse: false` (thought) | **unverified in this run** — low effort produced no deltas |
-| `item/reasoning/summaryTextDelta` | `TextDelta` with `isFinalResponse: false` (thought) | unverified — no deltas in either run |
+| `item/reasoning/textDelta` | `TextDelta` with `isFinalResponse: false` (narration) | **unverified in this run** — low effort produced no deltas |
+| `item/reasoning/summaryTextDelta` | `TextDelta` with `isFinalResponse: false` (narration) | unverified — no deltas in either run |
 | `item/reasoning/summaryPartAdded` | ignore (lifecycle) | unverified |
-| `item/plan/delta` | `TextDelta` with `isFinalResponse: false` (thought, experimental) | unverified |
+| `item/plan/delta` | `TextDelta` with `isFinalResponse: false` (narration, experimental) | unverified |
 | `item/completed` type `reasoning` | If `summary` or `reasoningContent` non-empty, emit `TextDelta isFinalResponse:false` as delta vs accumulator | summary was empty on A:11; mapper's diff-vs-accumulator stays correct |
 | `item/completed` type `agentMessage` | no event (text already streamed) | A:14, B:32 confirm — final text was complete by the time completed fired |
 
