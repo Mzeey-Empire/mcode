@@ -318,6 +318,15 @@ describe("MarkdownContent variant styling", () => {
         undefined,
       );
     });
+
+    it("preserves composer line breaks as visible breaks", () => {
+      const { container } = render(
+        <MarkdownContent content={"q1 hey\nq2 hello"} variant="user" />,
+      );
+      expect(container.querySelector("br")).toBeTruthy();
+      expect(container.textContent).toContain("q1 hey");
+      expect(container.textContent).toContain("q2 hello");
+    });
   });
 });
 

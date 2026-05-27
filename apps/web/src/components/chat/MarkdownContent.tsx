@@ -1,5 +1,6 @@
 import { memo, useMemo, lazy, Suspense } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
+import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import {
   isMcodeWorkspacePreviewUrl,
@@ -35,8 +36,9 @@ interface MarkdownContentProps {
   componentOverrides?: Partial<Components>;
 }
 
-/** Stable remark plugin list, hoisted to avoid re-creating on every render. */
-const plugins = [remarkGfm];
+/** GFM for assistant bubbles; user bubbles also enable single-newline line breaks. */
+const ASSISTANT_REMARK_PLUGINS = [remarkGfm];
+const USER_REMARK_PLUGINS = [remarkGfm, remarkBreaks];
 
 /** Lazy-loaded MermaidBlock - only fetched when a mermaid fence is encountered. */
 const LazyMermaidBlock = lazy(() => import("./MermaidBlock"));
@@ -367,8 +369,10 @@ export const MarkdownContent = memo(function MarkdownContent({
     [isStreaming, variant, workspacePath, componentOverrides],
   );
 
+  const remarkPlugins = variant === "user" ? USER_REMARK_PLUGINS : ASSISTANT_REMARK_PLUGINS;
+
   return (
-    <ReactMarkdown remarkPlugins={plugins} components={components} urlTransform={markdownUrlTransform}>
+    <ReactMarkdown remarkPlugins={remarkPlugins} components={components} urlTransform={markdownUrlTransform}>
       {content}
     </ReactMarkdown>
   );
