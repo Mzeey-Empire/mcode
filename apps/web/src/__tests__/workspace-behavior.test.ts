@@ -2,7 +2,6 @@ import {
   resetThreadStoreForTests,
   getTestThreadError,
   hasTestThreadRecord,
-  readActiveThreadField,
 } from "@/stores/thread-store-test-utils";
 import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -251,7 +250,7 @@ describe("Workspace Behavior", () => {
 
     const state = useWorkspaceStore.getState();
     expect(state.error).toContain("network down");
-    expect(readActiveThreadField((r) => r.loading) ?? false).toBe(false);
+    expect(state.loading).toBe(false);
   });
 
   it("when deleteWorkspace RPC fails, workspace and threads remain in state", async () => {

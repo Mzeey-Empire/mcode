@@ -82,9 +82,12 @@ export class AuxiliaryHydrator {
         const mapped = pending.map((p) => ({ ...p, settled: false }));
         const current = getThreadRecord(getState().records, threadId).permissions;
         if (!shallowEqualBy(mapped, current, ["requestId", "toolName", "settled"])) {
-          setState((s: ThreadHydratorWriteState) => ({
-            records: patchThreadRecord(s.records, threadId, { permissions: mapped }),
-          }));
+          setState((s: ThreadHydratorWriteState) => {
+            if (!s.records.has(threadId)) return {};
+            return {
+              records: patchThreadRecord(s.records, threadId, { permissions: mapped }),
+            };
+          });
         }
       })
       .catch(() => {

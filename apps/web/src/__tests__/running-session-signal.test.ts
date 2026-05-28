@@ -31,6 +31,7 @@ describe("running-session signal", () => {
     const store = useThreadStore.getState();
     store.handleAgentEvent("t-1", { method: "session.turnStarted", type: "turnStarted", threadId: "t-1" });
     const firstStart = getTestThreadAgentStartTime("t-1");
+    expect(firstStart).toBeDefined();
     store.handleAgentEvent("t-1", { method: "session.turnStarted", type: "turnStarted", threadId: "t-1" });
     expect(useThreadStore.getState().runningThreadIds.size).toBe(1);
     expect(getTestThreadAgentStartTime("t-1")).toBe(firstStart);

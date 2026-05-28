@@ -284,6 +284,7 @@ export class ThreadHydrator {
       .listNarrativeBatch(idsToFetch)
       .then((batchRes) => {
         this.deps.setState((state: ThreadHydratorWriteState) => {
+          if (!state.records.has(threadId)) return {};
           const rec = getThreadRecord(state.records, threadId);
           return {
             records: patchThreadRecord(state.records, threadId, {

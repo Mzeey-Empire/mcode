@@ -73,7 +73,7 @@ export function App() {
     return () => stopPushListeners();
   }, []);
 
-  // Mirror the user-controlled message-cache capacity into the runtime cache.
+  // Mirror the user-controlled record-cache capacity (threadCacheSize) into the runtime cache.
   // Runs on every settings change; LruCache.resize is a no-op when capacity is unchanged.
   useEffect(() => {
     resizeRecordCache(threadCacheSize);
