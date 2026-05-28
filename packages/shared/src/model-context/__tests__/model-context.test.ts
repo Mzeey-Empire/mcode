@@ -8,6 +8,7 @@ import {
 
 describe("MODEL_CONTEXT_WINDOWS_DEFAULT", () => {
   it("exposes 200K as the default for every Claude model (no opt-in)", () => {
+    expect(MODEL_CONTEXT_WINDOWS_DEFAULT["claude-opus-4-8"]).toBe(200_000);
     expect(MODEL_CONTEXT_WINDOWS_DEFAULT["claude-opus-4-7"]).toBe(200_000);
     expect(MODEL_CONTEXT_WINDOWS_DEFAULT["claude-opus-4-6"]).toBe(200_000);
     expect(MODEL_CONTEXT_WINDOWS_DEFAULT["claude-sonnet-4-6"]).toBe(200_000);
@@ -20,6 +21,9 @@ describe("MODEL_CONTEXT_WINDOWS_DEFAULT", () => {
 });
 
 describe("MODEL_CONTEXT_WINDOWS_EXTENDED", () => {
+  it("exposes 1M for Opus 4.8", () => {
+    expect(MODEL_CONTEXT_WINDOWS_EXTENDED["claude-opus-4-8"]).toBe(1_000_000);
+  });
   it("exposes 1M for Opus 4.7", () => {
     expect(MODEL_CONTEXT_WINDOWS_EXTENDED["claude-opus-4-7"]).toBe(1_000_000);
   });
@@ -40,6 +44,7 @@ describe("getModelContextWindow", () => {
   // -------------------------------------------------------------------------
 
   it("returns 200K for every supported Claude model in 200k mode", () => {
+    expect(getModelContextWindow("claude-opus-4-8", "200k")).toBe(200_000);
     expect(getModelContextWindow("claude-opus-4-7", "200k")).toBe(200_000);
     expect(getModelContextWindow("claude-opus-4-6", "200k")).toBe(200_000);
     expect(getModelContextWindow("claude-sonnet-4-6", "200k")).toBe(200_000);
@@ -55,7 +60,8 @@ describe("getModelContextWindow", () => {
   // 1M mode -- only models in the extended map honor the opt-in.
   // -------------------------------------------------------------------------
 
-  it("returns 1M for opus-4-7/4-6 and sonnet-4-6 in 1m mode", () => {
+  it("returns 1M for opus-4-8/4-7/4-6 and sonnet-4-6 in 1m mode", () => {
+    expect(getModelContextWindow("claude-opus-4-8", "1m")).toBe(1_000_000);
     expect(getModelContextWindow("claude-opus-4-7", "1m")).toBe(1_000_000);
     expect(getModelContextWindow("claude-opus-4-6", "1m")).toBe(1_000_000);
     expect(getModelContextWindow("claude-sonnet-4-6", "1m")).toBe(1_000_000);

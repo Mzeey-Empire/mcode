@@ -7,6 +7,14 @@ import {
 } from "../index.js";
 
 describe("isXhighEffortModel", () => {
+  it("returns true for claude-opus-4-8", () => {
+    expect(isXhighEffortModel("claude-opus-4-8")).toBe(true);
+  });
+
+  it("returns true for dated variant of claude-opus-4-8", () => {
+    expect(isXhighEffortModel("claude-opus-4-8-20260601")).toBe(true);
+  });
+
   it("returns true for claude-opus-4-7", () => {
     expect(isXhighEffortModel("claude-opus-4-7")).toBe(true);
   });
@@ -33,6 +41,10 @@ describe("isXhighEffortModel", () => {
 });
 
 describe("isMaxEffortModel", () => {
+  it("returns true for claude-opus-4-8", () => {
+    expect(isMaxEffortModel("claude-opus-4-8")).toBe(true);
+  });
+
   it("returns true for claude-opus-4-7", () => {
     expect(isMaxEffortModel("claude-opus-4-7")).toBe(true);
   });
@@ -85,6 +97,20 @@ describe("supportsEffortParameter", () => {
 });
 
 describe("normalizeReasoningLevelForModel", () => {
+  describe("claude-opus-4-8 (supports all tiers)", () => {
+    it("passes xhigh through unchanged", () => {
+      expect(normalizeReasoningLevelForModel("claude-opus-4-8", "xhigh")).toBe("xhigh");
+    });
+
+    it("passes max through unchanged", () => {
+      expect(normalizeReasoningLevelForModel("claude-opus-4-8", "max")).toBe("max");
+    });
+
+    it("passes ultrathink through unchanged", () => {
+      expect(normalizeReasoningLevelForModel("claude-opus-4-8", "ultrathink")).toBe("ultrathink");
+    });
+  });
+
   describe("claude-opus-4-7 (supports all tiers)", () => {
     it("passes low through unchanged", () => {
       expect(normalizeReasoningLevelForModel("claude-opus-4-7", "low")).toBe("low");
@@ -169,6 +195,10 @@ describe("normalizeReasoningLevelForModel", () => {
   });
 
   describe("dated variant normalization", () => {
+    it("claude-opus-4-8-20260601 passes xhigh through (recognized as opus-4-8)", () => {
+      expect(normalizeReasoningLevelForModel("claude-opus-4-8-20260601", "xhigh")).toBe("xhigh");
+    });
+
     it("claude-opus-4-7-20260501 passes xhigh through (recognized as opus-4-7)", () => {
       expect(normalizeReasoningLevelForModel("claude-opus-4-7-20260501", "xhigh")).toBe("xhigh");
     });
