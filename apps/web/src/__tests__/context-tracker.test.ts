@@ -1,3 +1,9 @@
+import {
+  resetThreadStoreForTests,
+  getTestThreadContext,
+  getTestThreadIsCompacting,
+} from "@/stores/thread-store-test-utils";
+import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 import { mockTransport, createMockThread } from "./mocks/transport";
@@ -10,26 +16,25 @@ vi.mock("@/transport", async () => ({
 
 const THREAD = "thread-1";
 
-function setup(extra: Record<string, unknown> = {}) {
+function setup(extra: Partial<ThreadRecord> = {}) {
   // Seed workspaceStore so handleAgentEvent's thread-membership guard passes.
   useWorkspaceStore.setState({
     activeThreadId: THREAD,
     threads: [createMockThread({ id: THREAD })],
   });
-  // Partial state merge: Zustand merges these fields into the existing store slice.
-  // Extra fields override defaults for per-test setup (e.g. isCompactingByThread).
-  useThreadStore.setState({
-    messages: [],
-    runningThreadIds: new Set([THREAD]),
-    loading: false,
-    errorByThread: {},
-    streamingByThread: {},
-    toolCallsByThread: {},
-    agentStartTimes: { [THREAD]: Date.now() },
+  resetThreadStoreForTests({
     currentThreadId: THREAD,
-    contextByThread: {},
-    isCompactingByThread: {},
-    ...extra,
+    runningThreadIds: new Set([THREAD]),
+    records: new Map<string, ThreadRecord>([
+      [
+        THREAD,
+        {
+          ...createEmptyThreadRecord(),
+          agentStartTime: Date.now(),
+          ...extra,
+        },
+      ],
+    ]),
   });
 }
 
@@ -47,7 +52,7 @@ describe("context tracker — Fix 2: output tokens included", () => {
       params: { reason: "end_turn", costUsd: null, tokensIn: 5000, tokensOut: 500, contextWindow: 200_000 },
     });
 
-    const ctx = useThreadStore.getState().contextByThread[THREAD];
+    const ctx = getTestThreadContext(THREAD);
     expect(ctx?.lastTokensIn).toBe(5000);
     // SDK runtime value (200K) is truthful and wins over the static map.
     // The new preference chain ranks SDK > static map > previous, so the
@@ -58,7 +63,7 @@ describe("context tracker — Fix 2: output tokens included", () => {
 
 describe("context tracker — Fix 1: turnComplete skipped during compaction", () => {
   beforeEach(() =>
-    setup({ isCompactingByThread: { [THREAD]: true } })
+    setup({ isCompacting: true })
   );
 
   it("turnComplete during compaction does NOT update contextByThread", () => {
@@ -66,7 +71,7 @@ describe("context tracker — Fix 1: turnComplete skipped during compaction", ()
       params: { reason: "end_turn", costUsd: null, tokensIn: 195_000, tokensOut: 500, contextWindow: 200_000 },
     });
 
-    const ctx = useThreadStore.getState().contextByThread[THREAD];
+    const ctx = getTestThreadContext(THREAD);
     // Must stay empty — no flash of pre-compaction tokens
     expect(ctx).toBeUndefined();
   });
@@ -76,27 +81,33 @@ describe("context tracker — Fix 1: turnComplete skipped during compaction", ()
       params: { reason: "end_turn", costUsd: null, tokensIn: 195_000, tokensOut: 500, contextWindow: 200_000 },
     });
 
-    expect(useThreadStore.getState().isCompactingByThread[THREAD]).toBe(true);
+    expect(getTestThreadIsCompacting(THREAD)).toBe(true);
   });
 });
 
 describe("context tracker — Fix 3: contextEstimate on compaction end", () => {
   beforeEach(() =>
     setup({
-      isCompactingByThread: { [THREAD]: true },
-      contextByThread: { [THREAD]: { lastTokensIn: 0, contextWindow: 200_000 } },
+      isCompacting: true,
+      context: { lastTokensIn: 0, contextWindow: 200_000 },
     })
   );
 
   it("contextEstimate updates contextByThread when NOT compacting", () => {
-    // Simulate compaction ending: the frontend clears isCompactingByThread
-    useThreadStore.setState({ isCompactingByThread: {} });
+    // Simulate compaction ending: clear isCompacting on the thread record.
+    resetThreadStoreForTests({
+      currentThreadId: THREAD,
+      runningThreadIds: new Set([THREAD]),
+      records: new Map<string, ThreadRecord>([
+        [THREAD, { ...createEmptyThreadRecord(), agentStartTime: Date.now() }],
+      ]),
+    });
 
     dispatch("session.contextEstimate", {
       params: { tokensIn: 100_000, contextWindow: 200_000 },
     });
 
-    const ctx = useThreadStore.getState().contextByThread[THREAD];
+    const ctx = getTestThreadContext(THREAD);
     expect(ctx?.lastTokensIn).toBe(100_000);
     expect(ctx?.contextWindow).toBe(200_000);
   });
@@ -107,7 +118,7 @@ describe("context tracker — Fix 3: contextEstimate on compaction end", () => {
       params: { tokensIn: 100_000, contextWindow: 200_000 },
     });
 
-    const ctx = useThreadStore.getState().contextByThread[THREAD];
+    const ctx = getTestThreadContext(THREAD);
     expect(ctx?.lastTokensIn).toBe(0);
   });
 });
@@ -115,7 +126,7 @@ describe("context tracker — Fix 3: contextEstimate on compaction end", () => {
 describe("context tracker — Fix 4: live estimation during turn", () => {
   beforeEach(() =>
     setup({
-      contextByThread: { [THREAD]: { lastTokensIn: 50_000, contextWindow: 200_000 } },
+      context: { lastTokensIn: 50_000, contextWindow: 200_000 },
     })
   );
 
@@ -124,7 +135,7 @@ describe("context tracker — Fix 4: live estimation during turn", () => {
       params: { tokensIn: 51_250, contextWindow: 200_000 },
     });
 
-    const ctx = useThreadStore.getState().contextByThread[THREAD];
+    const ctx = getTestThreadContext(THREAD);
     expect(ctx?.lastTokensIn).toBe(51_250);
   });
 
@@ -132,7 +143,7 @@ describe("context tracker — Fix 4: live estimation during turn", () => {
     dispatch("session.contextEstimate", { params: { tokensIn: 51_000, contextWindow: 200_000 } });
     dispatch("session.contextEstimate", { params: { tokensIn: 52_500, contextWindow: 200_000 } });
 
-    const ctx = useThreadStore.getState().contextByThread[THREAD];
+    const ctx = getTestThreadContext(THREAD);
     expect(ctx?.lastTokensIn).toBe(52_500);
   });
 
@@ -142,7 +153,7 @@ describe("context tracker — Fix 4: live estimation during turn", () => {
       params: { reason: "end_turn", costUsd: null, tokensIn: 53_100, tokensOut: 600, contextWindow: 200_000 },
     });
 
-    const ctx = useThreadStore.getState().contextByThread[THREAD];
+    const ctx = getTestThreadContext(THREAD);
     expect(ctx?.lastTokensIn).toBe(53_100);
   });
 });

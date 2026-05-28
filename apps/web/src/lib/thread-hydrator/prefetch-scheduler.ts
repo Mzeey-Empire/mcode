@@ -1,6 +1,5 @@
-import { hasCachedSnapshot, cacheSnapshot } from "@/stores/messageCache";
-import { getTransport } from "@/transport";
-import type { MessageCacheSnapshot } from "@/stores/messageCache";
+import { hasCachedRecord } from "./record-cache";
+import { getThreadHydrator } from "./thread-hydrator";
 
 /** Threads currently being prefetched, to avoid duplicate requests. */
 const inflight = new Set<string>();
@@ -10,9 +9,6 @@ let hoverTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Debounce delay before triggering prefetch on hover (ms). */
 const HOVER_DEBOUNCE_MS = 150;
-
-/** Maximum messages to prefetch per thread. */
-const PREFETCH_LIMIT = 100;
 
 /**
  * Schedule a background prefetch of messages for a thread.
@@ -24,7 +20,7 @@ export function schedulePrefetch(threadId: string): void {
   if (hoverTimer) clearTimeout(hoverTimer);
   hoverTimer = setTimeout(() => {
     hoverTimer = null;
-    prefetchThread(threadId);
+    void prefetchThread(threadId);
   }, HOVER_DEBOUNCE_MS);
 }
 
@@ -37,36 +33,15 @@ export function cancelPrefetch(): void {
 }
 
 /**
- * Immediately prefetch a thread's messages into the cache.
+ * Immediately prefetch a thread's messages into the cache via ThreadHydrator.
  * Skips if already cached or in flight. Failures are silent
  * since this is a speculative optimisation.
  */
 async function prefetchThread(threadId: string): Promise<void> {
-  if (hasCachedSnapshot(threadId) || inflight.has(threadId)) return;
+  if (hasCachedRecord(threadId) || inflight.has(threadId)) return;
   inflight.add(threadId);
   try {
-    const { messages, hasMore, answeredPlanMessageIds } = await getTransport().getMessages(threadId, PREFETCH_LIMIT);
-    // Don't overwrite a snapshot that loadMessages populated while we were in flight
-    if (hasCachedSnapshot(threadId)) return;
-
-    const counts: Record<string, number> = {};
-    for (const msg of messages) {
-      if (msg.tool_call_count && msg.tool_call_count > 0) {
-        counts[msg.id] = msg.tool_call_count;
-      }
-    }
-    const oldest = messages.length > 0 ? messages[0].sequence : 0;
-
-    const snapshot: MessageCacheSnapshot = {
-      messages,
-      oldestLoadedSequence: oldest,
-      hasMoreMessages: hasMore,
-      persistedToolCallCounts: counts,
-      persistedFilesChanged: {},
-      latestTurnWithChanges: null,
-      answeredPlanMessageIds: answeredPlanMessageIds ?? [],
-    };
-    cacheSnapshot(threadId, snapshot);
+    await getThreadHydrator().hydrate(threadId, "background");
   } catch {
     // Prefetch is speculative; swallow errors silently
   } finally {

@@ -1,6 +1,0 @@
-#!/bin/sh
-# --- chained-to-global-hooks ---
-GLOBAL_HOOK="$HOME/.git-hooks/prepare-commit-msg"
-if [ -x "$GLOBAL_HOOK" ]; then
-    "$GLOBAL_HOOK" "$@"
-fi

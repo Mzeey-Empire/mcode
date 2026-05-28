@@ -34,14 +34,27 @@ vi.mock("@/stores/workspaceStore", () => ({
 vi.mock("@/stores/threadStore", () => ({
   useThreadStore: vi.fn((selector: (s: unknown) => unknown) =>
     selector({
-      messages: [],
+      records: new Map(),
+      currentThreadId: null,
       runningThreadIds: new Set(),
       loadMessages: vi.fn(),
       clearMessages: vi.fn(),
-      errorByThread: {},
-    })
+      setForkMode: vi.fn(),
+      sendMessage: vi.fn(),
+    }),
   ),
 }));
+
+vi.mock("@/stores/thread-selectors", async () => {
+  const { createEmptyThreadRecord } = await import("@/stores/thread-record");
+  const emptyRecord = createEmptyThreadRecord();
+  return {
+    useActiveThreadRecord: (selector: (r: typeof emptyRecord) => unknown) => selector(emptyRecord),
+    useThreadRecord: (_threadId: string, selector: (r: typeof emptyRecord) => unknown) =>
+      selector(emptyRecord),
+    readThreadRecord: () => emptyRecord,
+  };
+});
 
 vi.mock("@/stores/composerDraftStore", () => ({
   useComposerDraftStore: vi.fn((selector: (s: unknown) => unknown) =>

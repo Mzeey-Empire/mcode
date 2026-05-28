@@ -1,5 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo, lazy, Suspense } from "react";
-import { useThreadStore, scheduleDrainAfterEdit } from "@/stores/threadStore";
+import { useThreadStore, scheduleDrainAfterEdit, getHandoffStatus } from "@/stores/threadStore";
+import { useThreadRecord } from "@/stores/thread-selectors";
+import { getThreadRecord } from "@/stores/thread-record";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import type { PermissionMode, InteractionMode, AttachmentMeta } from "@/transport";
 import { PERMISSION_MODES, INTERACTION_MODES, getTransport } from "@/transport";
@@ -769,9 +771,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     prevThreadIdRef.current = threadId;
   }, [threadId, isNewThread, saveDraft, getDraft]);
 
-  const persistedInteractionMode = useThreadStore((s) =>
-    threadId ? s.settingsByThread[threadId]?.interactionMode : undefined,
-  );
+  const persistedInteractionMode = useThreadRecord(threadId, (r) => r.settings.interactionMode);
   const threadRecordInteractionMode = useWorkspaceStore((s) => {
     if (!threadId) return undefined;
     const mode = s.threads.find((t) => t.id === threadId)?.interaction_mode;
@@ -845,9 +845,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     }
   }, [pendingPrefill, clearPendingPrefill]);
 
-  const composerRecallFromStop = useThreadStore((s) =>
-    threadId ? s.composerRecallFromStopByThread[threadId] : undefined,
-  );
+  const composerRecallFromStop = useThreadRecord(threadId, (r) => r.composerRecallFromStop);
   const clearComposerRecallFromStop = useThreadStore((s) => s.clearComposerRecallFromStop);
 
   useEffect(() => {
@@ -918,14 +916,18 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
       if (threadId) void setThreadSettings(threadId, { permissionMode: PERMISSION_MODES.FULL });
     }
   }, [permissionLocked, access, threadId, setThreadSettings]);
-  const contextEntry = useThreadStore((s) => threadId ? s.contextByThread[threadId] : undefined);
-  const isCompacting = useThreadStore((s) => !!(threadId && s.isCompactingByThread[threadId]));
-  const handoffStatus = useThreadStore((s) => threadId ? s.handoffStatus?.[threadId] : undefined);
-  const hasRetryState = useThreadStore(
-    (s) => !!(threadId && (s.rateLimitByThread[threadId] || s.apiRetryByThread[threadId])),
+  const contextEntry = useThreadRecord(threadId, (r) => r.context);
+  const isCompacting = useThreadRecord(threadId, (r) => r.isCompacting);
+  const handoffStatus = useThreadStore((s) =>
+    threadId ? getHandoffStatus(getThreadRecord(s.records, threadId)) : undefined,
   );
-  const planPending = useThreadStore(
-    (s) => !!threadId && (s.planQuestionsStatusByThread[threadId] ?? "idle") === "pending",
+  const hasRetryState = useThreadRecord(
+    threadId,
+    (r) => !!(r.rateLimit || r.apiRetry),
+  );
+  const planPending = useThreadRecord(
+    threadId,
+    (r) => r.planQuestionsStatus === "pending",
   );
 
   const workspaces = useWorkspaceStore((s) => s.workspaces);
@@ -938,7 +940,7 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
   );
 
   const activeProviderId = activeThread?.provider ?? "claude";
-  const usageInfo = useThreadStore((s) => s.usageByProvider[activeProviderId]);
+  const usageInfo = useThreadRecord(threadId, (r) => r.usageByProvider[activeProviderId]);
   const hasLowQuota = usageInfo?.quotaCategories.some((c) => !c.isUnlimited && c.remainingPercent < 0.2) ?? false;
 
   // For new threads (no active thread yet), fall back to the composer-selected
@@ -1741,7 +1743,9 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     // automatically; if the user types during that window before we've seen the
     // transition, queueing here would produce a duplicate message.
     if (threadId && !branchFromMessageId && !isNewThread) {
-      const status = useThreadStore.getState().handoffStatus[threadId];
+      const status = threadId
+        ? getHandoffStatus(getThreadRecord(useThreadStore.getState().records, threadId))
+        : undefined;
       if (status === "generating" && hasSeenHandoffTransition) {
         setQueuedSend(trimmed);
         return;

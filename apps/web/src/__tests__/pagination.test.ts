@@ -1,8 +1,18 @@
+import {
+  resetThreadStoreForTests,
+  getTestActiveMessages,
+  getTestThreadOldestLoadedSequence,
+  getTestThreadHasMoreMessages,
+  getTestThreadIsLoadingMore,
+  patchTestThreadLoadEpoch,
+  getTestThreadPersistedFilesChanged,
+  readThreadField,
+} from "@/stores/thread-store-test-utils";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { TurnSnapshot } from "@mcode/contracts";
-import { useThreadStore, TOOL_CALL_CACHE_SIZE } from "@/stores/threadStore";
-import { cacheSnapshot, clearMessageCache, getCachedSnapshot } from "@/stores/messageCache";
-import { LruCache } from "@/lib/lru-cache";
+import { useThreadStore } from "@/stores/threadStore";
+import { cacheRecord, clearRecordCache, getCachedRecord } from "@/lib/thread-hydrator/record-cache";
+import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { mockTransport, createMockMessage } from "./mocks/transport";
 import type { Message } from "@/transport";
 
@@ -16,28 +26,12 @@ describe("Chat Pagination", () => {
   const threadId = "thread-1";
 
   beforeEach(() => {
-    clearMessageCache();
-    useThreadStore.setState({
-      messages: [],
-      runningThreadIds: new Set(),
-      loading: false,
-      errorByThread: {},
-      streamingByThread: {},
-      toolCallsByThread: {},
+    clearRecordCache();
+    resetThreadStoreForTests({
       currentThreadId: threadId,
-      persistedToolCallCounts: {},
-      serverMessageIds: {},
-      toolCallRecordCache: new LruCache(TOOL_CALL_CACHE_SIZE),
-      currentTurnMessageIdByThread: {},
-      agentStartTimes: {},
-      settingsByThread: {},
-      oldestLoadedSequence: {},
-      hasMoreMessages: {},
-      isLoadingMore: {},
-      loadEpochByThread: {},
-      persistedFilesChanged: {},
-      latestTurnWithChanges: null,
-      answeredPlanMessageIdsByThread: {},
+      records: new Map<string, ThreadRecord>([
+        [threadId, { ...createEmptyThreadRecord() }],
+      ]),
     });
     vi.clearAllMocks();
   });
@@ -54,10 +48,9 @@ describe("Chat Pagination", () => {
 
     await useThreadStore.getState().loadMessages(threadId);
 
-    const state = useThreadStore.getState();
-    expect(state.messages).toEqual(messages);
-    expect(state.oldestLoadedSequence[threadId]).toBe(51);
-    expect(state.hasMoreMessages[threadId]).toBe(true);
+    expect(getTestActiveMessages()).toEqual(messages);
+    expect(getTestThreadOldestLoadedSequence(threadId)).toBe(51);
+    expect(getTestThreadHasMoreMessages(threadId)).toBe(true);
   });
 
   it("loadOlderMessages prepends older messages and updates cursor", async () => {
@@ -65,12 +58,16 @@ describe("Chat Pagination", () => {
       createMockMessage({ id: "m3", thread_id: threadId, sequence: 51 }),
       createMockMessage({ id: "m4", thread_id: threadId, sequence: 52 }),
     ];
-    useThreadStore.setState({
+    resetThreadStoreForTests({
       currentThreadId: threadId,
-      messages: initialMessages,
-      oldestLoadedSequence: { [threadId]: 51 },
-      hasMoreMessages: { [threadId]: true },
-      isLoadingMore: {},
+      records: new Map<string, ThreadRecord>([
+        [threadId, {
+          ...createEmptyThreadRecord(),
+          messages: initialMessages,
+          oldestLoadedSequence: 51,
+          hasMoreMessages: true,
+        }],
+      ]),
     });
 
     const olderMessages = [
@@ -84,24 +81,28 @@ describe("Chat Pagination", () => {
 
     await useThreadStore.getState().loadOlderMessages(threadId);
 
-    const state = useThreadStore.getState();
-    expect(state.messages).toHaveLength(4);
-    expect(state.messages[0].id).toBe("m1");
-    expect(state.messages[1].id).toBe("m2");
-    expect(state.messages[2].id).toBe("m3");
-    expect(state.messages[3].id).toBe("m4");
-    expect(state.oldestLoadedSequence[threadId]).toBe(1);
-    expect(state.hasMoreMessages[threadId]).toBe(false);
-    expect(state.isLoadingMore[threadId]).toBe(false);
+    expect(getTestActiveMessages()).toHaveLength(4);
+    expect(getTestActiveMessages()[0].id).toBe("m1");
+    expect(getTestActiveMessages()[1].id).toBe("m2");
+    expect(getTestActiveMessages()[2].id).toBe("m3");
+    expect(getTestActiveMessages()[3].id).toBe("m4");
+    expect(getTestThreadOldestLoadedSequence(threadId)).toBe(1);
+    expect(getTestThreadHasMoreMessages(threadId)).toBe(false);
+    expect(getTestThreadIsLoadingMore(threadId)).toBe(false);
     expect(mockTransport.getMessages).toHaveBeenCalledWith(threadId, 50, 51);
   });
 
   it("loadOlderMessages is a no-op when hasMore is false", async () => {
-    useThreadStore.setState({
+    resetThreadStoreForTests({
       currentThreadId: threadId,
-      messages: [createMockMessage({ id: "m1", thread_id: threadId, sequence: 1 })],
-      oldestLoadedSequence: { [threadId]: 1 },
-      hasMoreMessages: { [threadId]: false },
+      records: new Map<string, ThreadRecord>([
+        [threadId, {
+          ...createEmptyThreadRecord(),
+          messages: [createMockMessage({ id: "m1", thread_id: threadId, sequence: 1 })],
+          oldestLoadedSequence: 1,
+          hasMoreMessages: false,
+        }],
+      ]),
     });
 
     await useThreadStore.getState().loadOlderMessages(threadId);
@@ -110,12 +111,17 @@ describe("Chat Pagination", () => {
   });
 
   it("loadOlderMessages deduplicates concurrent calls", async () => {
-    useThreadStore.setState({
+    resetThreadStoreForTests({
       currentThreadId: threadId,
-      messages: [createMockMessage({ id: "m2", thread_id: threadId, sequence: 2 })],
-      oldestLoadedSequence: { [threadId]: 2 },
-      hasMoreMessages: { [threadId]: true },
-      isLoadingMore: { [threadId]: true },
+      records: new Map<string, ThreadRecord>([
+        [threadId, {
+          ...createEmptyThreadRecord(),
+          messages: [createMockMessage({ id: "m2", thread_id: threadId, sequence: 2 })],
+          oldestLoadedSequence: 2,
+          hasMoreMessages: true,
+          isLoadingMore: true,
+        }],
+      ]),
     });
 
     await useThreadStore.getState().loadOlderMessages(threadId);
@@ -124,11 +130,16 @@ describe("Chat Pagination", () => {
   });
 
   it("loadOlderMessages discards results for a stale thread", async () => {
-    useThreadStore.setState({
+    resetThreadStoreForTests({
       currentThreadId: threadId,
-      messages: [createMockMessage({ id: "m2", thread_id: threadId, sequence: 2 })],
-      oldestLoadedSequence: { [threadId]: 2 },
-      hasMoreMessages: { [threadId]: true },
+      records: new Map<string, ThreadRecord>([
+        [threadId, {
+          ...createEmptyThreadRecord(),
+          messages: [createMockMessage({ id: "m2", thread_id: threadId, sequence: 2 })],
+          oldestLoadedSequence: 2,
+          hasMoreMessages: true,
+        }],
+      ]),
     });
 
     let resolveGetMessages!: (result: { messages: Message[]; hasMore: boolean }) => void;
@@ -147,19 +158,24 @@ describe("Chat Pagination", () => {
     });
     await loadPromise;
 
-    const state = useThreadStore.getState();
-    expect(state.messages).toHaveLength(1);
-    expect(state.messages[0].id).toBe("m2");
-    expect(state.isLoadingMore[threadId]).toBe(false);
+    expect(getTestActiveMessages()).toHaveLength(0);
+    expect(readThreadField(threadId, (r) => r.messages)).toHaveLength(1);
+    expect(readThreadField(threadId, (r) => r.messages)[0]?.id).toBe("m2");
+    expect(getTestThreadIsLoadingMore(threadId)).toBe(false);
   });
 
   it("loadOlderMessages discards results when epoch changes (A->B->A switch)", async () => {
-    useThreadStore.setState({
+    resetThreadStoreForTests({
       currentThreadId: threadId,
-      messages: [createMockMessage({ id: "m2", thread_id: threadId, sequence: 2 })],
-      oldestLoadedSequence: { [threadId]: 2 },
-      hasMoreMessages: { [threadId]: true },
-      loadEpochByThread: { [threadId]: 1 },
+      records: new Map<string, ThreadRecord>([
+        [threadId, {
+          ...createEmptyThreadRecord(),
+          messages: [createMockMessage({ id: "m2", thread_id: threadId, sequence: 2 })],
+          oldestLoadedSequence: 2,
+          hasMoreMessages: true,
+          loadEpoch: 1,
+        }],
+      ]),
     });
 
     let resolveGetMessages!: (result: { messages: Message[]; hasMore: boolean }) => void;
@@ -170,9 +186,7 @@ describe("Chat Pagination", () => {
     const loadPromise = useThreadStore.getState().loadOlderMessages(threadId);
 
     // Simulate A->B->A: loadMessages increments epoch while fetch is in-flight
-    useThreadStore.setState((s) => ({
-      loadEpochByThread: { ...s.loadEpochByThread, [threadId]: 2 },
-    }));
+    patchTestThreadLoadEpoch(threadId, 2);
 
     resolveGetMessages({
       messages: [createMockMessage({ id: "m1", thread_id: threadId, sequence: 1 })],
@@ -181,10 +195,9 @@ describe("Chat Pagination", () => {
     await loadPromise;
 
     // Stale response should be discarded - messages unchanged
-    const state = useThreadStore.getState();
-    expect(state.messages).toHaveLength(1);
-    expect(state.messages[0].id).toBe("m2");
-    expect(state.isLoadingMore[threadId]).toBe(false);
+    expect(getTestActiveMessages()).toHaveLength(1);
+    expect(getTestActiveMessages()[0].id).toBe("m2");
+    expect(getTestThreadIsLoadingMore(threadId)).toBe(false);
   });
 
   it("loadOlderMessages writes async snapshot file lists into the message cache", async () => {
@@ -192,23 +205,26 @@ describe("Chat Pagination", () => {
     const initialMessages = [
       createMockMessage({ id: "m3", thread_id: threadId, sequence: 51 }),
     ];
-    useThreadStore.setState({
+    resetThreadStoreForTests({
       currentThreadId: threadId,
-      messages: initialMessages,
-      oldestLoadedSequence: { [threadId]: 51 },
-      hasMoreMessages: { [threadId]: true },
-      isLoadingMore: {},
-      persistedFilesChanged: { m3: ["kept.ts"] },
-      latestTurnWithChanges: "m3",
+      records: new Map<string, ThreadRecord>([
+        [threadId, {
+          ...createEmptyThreadRecord(),
+          messages: initialMessages,
+          oldestLoadedSequence: 51,
+          hasMoreMessages: true,
+          persistedFilesChanged: { m3: ["kept.ts"] },
+          latestTurnWithChanges: "m3",
+        }],
+      ]),
     });
-    cacheSnapshot(threadId, {
+    cacheRecord(threadId, {
+      ...createEmptyThreadRecord(),
       messages: initialMessages,
       oldestLoadedSequence: 51,
       hasMoreMessages: true,
-      persistedToolCallCounts: {},
       persistedFilesChanged: { m3: ["kept.ts"] },
       latestTurnWithChanges: "m3",
-      answeredPlanMessageIds: [],
     });
 
     const olderMessages = [
@@ -232,19 +248,24 @@ describe("Chat Pagination", () => {
     (mockTransport.listSnapshots as ReturnType<typeof vi.fn>).mockResolvedValueOnce([snap]);
 
     await useThreadStore.getState().loadOlderMessages(threadId);
-    expect(useThreadStore.getState().persistedFilesChanged[mOldId]).toEqual(["legacy.ts"]);
+    expect(getTestThreadPersistedFilesChanged(threadId)[mOldId]).toEqual(["legacy.ts"]);
 
-    const cached = getCachedSnapshot(threadId);
+    const cached = getCachedRecord(threadId);
     expect(cached?.persistedFilesChanged[mOldId]).toEqual(["legacy.ts"]);
     expect(cached?.persistedFilesChanged.m3).toEqual(["kept.ts"]);
   });
 
   it("loadOlderMessages resets isLoadingMore on network error", async () => {
-    useThreadStore.setState({
+    resetThreadStoreForTests({
       currentThreadId: threadId,
-      messages: [createMockMessage({ id: "m2", thread_id: threadId, sequence: 2 })],
-      oldestLoadedSequence: { [threadId]: 2 },
-      hasMoreMessages: { [threadId]: true },
+      records: new Map<string, ThreadRecord>([
+        [threadId, {
+          ...createEmptyThreadRecord(),
+          messages: [createMockMessage({ id: "m2", thread_id: threadId, sequence: 2 })],
+          oldestLoadedSequence: 2,
+          hasMoreMessages: true,
+        }],
+      ]),
     });
 
     (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
@@ -253,8 +274,7 @@ describe("Chat Pagination", () => {
 
     await useThreadStore.getState().loadOlderMessages(threadId);
 
-    const state = useThreadStore.getState();
-    expect(state.isLoadingMore[threadId]).toBe(false);
-    expect(state.messages).toHaveLength(1);
+    expect(getTestThreadIsLoadingMore(threadId)).toBe(false);
+    expect(getTestActiveMessages()).toHaveLength(1);
   });
 });

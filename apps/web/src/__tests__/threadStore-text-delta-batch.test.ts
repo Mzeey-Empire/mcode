@@ -1,14 +1,14 @@
+import {
+  resetThreadStoreForTests,
+  getTestThreadStreaming,
+  getTestThreadThoughtSegments,
+} from "@/stores/thread-store-test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 
 describe("threadStore textDelta batching", () => {
   beforeEach(() => {
-    useThreadStore.setState({
-      streamingByThread: {},
-      streamingPreviewByThread: {},
-      toolCallsByThread: {},
-      thoughtSegmentsByThread: {},
-    });
+    resetThreadStoreForTests();
   });
 
   afterEach(() => {
@@ -31,11 +31,11 @@ describe("threadStore textDelta batching", () => {
     }
 
     expect(queue).toHaveLength(1);
-    expect(useThreadStore.getState().streamingByThread[tid]).toBeUndefined();
+    expect(getTestThreadStreaming(tid)).toBeUndefined();
 
     queue[0]!(0);
 
-    expect(useThreadStore.getState().streamingByThread[tid]).toBe("01234567");
+    expect(getTestThreadStreaming(tid)).toBe("01234567");
   });
 
   it("updates streaming only for isFinalResponse deltas (skips thought segments)", () => {
@@ -58,9 +58,9 @@ describe("threadStore textDelta batching", () => {
 
     queue[0]!(0);
 
-    expect(useThreadStore.getState().streamingByThread[tid]).toBe("think final");
-    expect(useThreadStore.getState().thoughtSegmentsByThread[tid]?.length).toBe(1);
-    expect(useThreadStore.getState().thoughtSegmentsByThread[tid]?.[0]?.text).toBe("think ");
+    expect(getTestThreadStreaming(tid)).toBe("think final");
+    expect(getTestThreadThoughtSegments(tid)?.length).toBe(1);
+    expect(getTestThreadThoughtSegments(tid)?.[0]?.text).toBe("think ");
   });
 
   it("flushes pending deltas before session.turnComplete reads streaming", () => {
@@ -82,6 +82,6 @@ describe("threadStore textDelta batching", () => {
       params: { costUsd: null, tokensIn: 0, tokensOut: 0 },
     });
 
-    expect(useThreadStore.getState().streamingByThread[tid]).toBeUndefined();
+    expect(getTestThreadStreaming(tid)).toBeUndefined();
   });
 });

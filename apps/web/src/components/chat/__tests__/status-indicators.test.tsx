@@ -12,18 +12,23 @@ vi.mock("@/stores/workspaceStore", () => ({
 vi.mock("@/stores/threadStore", () => ({
   useThreadStore: vi.fn((selector: (s: unknown) => unknown) =>
     selector({
-      toolCallsByThread: {
-        "thread-1": [
-          { id: "sa1", toolName: "Agent", isComplete: false },
-          { id: "sa2", toolName: "Agent", isComplete: false },
-        ],
-      },
-    })
+      runningThreadIds: new Set(),
+    }),
   ),
   countActiveSubagentCalls: (
     calls: Array<{ toolName: string; isComplete?: boolean }> | undefined,
   ) =>
     (calls ?? []).filter((c) => c.toolName === "Agent" && !c.isComplete).length,
+}));
+
+vi.mock("@/stores/thread-selectors", () => ({
+  useThreadRecord: (_threadId: string, selector: (r: { toolCalls: Array<{ id: string; toolName: string; isComplete: boolean }> }) => unknown) =>
+    selector({
+      toolCalls: [
+        { id: "sa1", toolName: "Agent", isComplete: false },
+        { id: "sa2", toolName: "Agent", isComplete: false },
+      ],
+    }),
 }));
 
 vi.mock("@/stores/terminalStore", () => ({

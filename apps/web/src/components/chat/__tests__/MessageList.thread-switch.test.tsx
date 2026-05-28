@@ -42,27 +42,42 @@ let loadingValue = false;
 let activeThreadIdValue = "thread-A";
 let messagesValue: { id: string; sequence: number }[] = [{ id: "m1", sequence: 1 }];
 
+function buildMockRecord() {
+  return {
+    messages: messagesValue,
+    loading: loadingValue,
+    streamingPreview: "",
+    streaming: "",
+    toolCalls: [],
+    persistedToolCallCounts: {},
+    persistedFilesChanged: {},
+    latestTurnWithChanges: null,
+    hasMoreMessages: false,
+    isLoadingMore: false,
+    permissions: [],
+    hooks: [],
+    thoughtSegments: [],
+    currentTurnMessageId: "",
+    narrativeByMessage: {},
+    agentStartTime: undefined,
+  };
+}
+
 vi.mock("@/stores/threadStore", () => ({
-  useThreadStore: vi.fn((selector: (s: unknown) => unknown) =>
-    selector({
-      messages: messagesValue,
-      loading: loadingValue,
+  useThreadStore: vi.fn((selector: (s: unknown) => unknown) => {
+    const records = new Map([[activeThreadIdValue, buildMockRecord()]]);
+    return selector({
+      records,
+      currentThreadId: activeThreadIdValue,
       runningThreadIds: new Set(),
-      agentStartTimes: {},
-      streamingPreviewByThread: {},
-      streamingByThread: {},
-      toolCallsByThread: {},
-      persistedToolCallCounts: {},
-      serverMessageIds: {},
-      persistedFilesChanged: {},
-      latestTurnWithChanges: null,
-      hasMoreMessages: {},
-      isLoadingMore: {},
       loadOlderMessages: vi.fn(),
-      permissionsByThread: {},
-      hooksByThread: {},
-      thoughtSegmentsByThread: {},
-    }),
+    });
+  }),
+}));
+
+vi.mock("@/stores/thread-selectors", () => ({
+  useActiveThreadRecord: vi.fn((selector: (r: ReturnType<typeof buildMockRecord>) => unknown) =>
+    selector(buildMockRecord()),
   ),
 }));
 

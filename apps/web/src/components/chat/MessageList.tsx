@@ -7,6 +7,8 @@ import { useShallow } from "zustand/shallow";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useThreadStore } from "@/stores/threadStore";
+import { useActiveThreadRecord } from "@/stores/thread-selectors";
+import { getThreadRecord, getHandoffStatus } from "@/stores/thread-record";
 import { MessageBubble } from "./MessageBubble";
 import { ToolCallCard } from "./ToolCallCard";
 import { StreamingIndicator } from "./StreamingIndicator";
@@ -33,10 +35,8 @@ import { StickyUserMessage, STICKY_USER_MESSAGE_ESTIMATED_HEIGHT } from "./Stick
 import { registerCommand } from "@/lib/command-registry";
 import { shouldShowStickyUserMessage, type StickyVisibilityVirtualizer } from "./sticky-user-message-visibility";
 import { resolveUserMessagePreview } from "./user-message-preview";
-import type { ThoughtSegment } from "./narrative";
 
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
-const EMPTY_THOUGHT_SEGMENTS: readonly ThoughtSegment[] = [];
 const EMPTY_TURN_MAP: Record<string, string> = {};
 const EMPTY_FILES_CHANGED: Record<string, string[]> = {};
 const AUTO_SCROLL_THRESHOLD = 64;
@@ -271,65 +271,41 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   /** Latest virtualizer instance for scroll-time sticky visibility checks. */
   const virtualizerRef = useRef<StickyVisibilityVirtualizer | null>(null);
 
-  const messages = useThreadStore((s) => s.messages);
-  const loading = useThreadStore((s) => s.loading);
+  const messages = useActiveThreadRecord((r) => r.messages);
+  const loading = useActiveThreadRecord((r) => r.loading);
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
   const isAgentRunning = useThreadStore((s) =>
     activeThreadId ? s.runningThreadIds.has(activeThreadId) : false,
   );
-  const agentStartTime = useThreadStore((s) =>
-    activeThreadId ? s.agentStartTimes[activeThreadId] : undefined,
-  );
-  const streamingText = useThreadStore((s) =>
-    activeThreadId ? s.streamingPreviewByThread[activeThreadId] : undefined,
-  );
-  const toolCallsRaw = useThreadStore((s) =>
-    activeThreadId ? s.toolCallsByThread[activeThreadId] : undefined,
-  );
-  // Narrowed selector: only subscribe to entries for messages currently
-  // rendered in this thread, not the global map. Avoids re-renders when a
-  // background thread's snapshot list updates.
+  const agentStartTime = useActiveThreadRecord((r) => r.agentStartTime);
+  const streamingText = useActiveThreadRecord((r) => r.streamingPreview);
+  const toolCallsRaw = useActiveThreadRecord((r) => r.toolCalls);
   const persistedFilesChanged = useThreadStore(
     useShallow((s) => {
-      if (s.messages.length === 0) return EMPTY_FILES_CHANGED;
+      const id = s.currentThreadId;
+      if (!id) return EMPTY_FILES_CHANGED;
+      const rec = getThreadRecord(s.records, id);
+      if (rec.messages.length === 0) return EMPTY_FILES_CHANGED;
       const out: Record<string, string[]> = {};
-      for (const m of s.messages) {
-        const v = s.persistedFilesChanged[m.id];
+      for (const m of rec.messages) {
+        const v = rec.persistedFilesChanged[m.id];
         if (v) out[m.id] = v;
       }
       return out;
     }),
   );
-  const latestTurnWithChanges = useThreadStore(
-    (s) => s.latestTurnWithChanges,
-  );
-  const hasMore = useThreadStore((s) =>
-    activeThreadId ? s.hasMoreMessages[activeThreadId] ?? false : false,
-  );
+  const latestTurnWithChanges = useActiveThreadRecord((r) => r.latestTurnWithChanges);
+  const hasMore = useActiveThreadRecord((r) => r.hasMoreMessages);
   const handoffStatus = useThreadStore((s) =>
-    activeThreadId ? s.handoffStatus?.[activeThreadId] : undefined,
+    activeThreadId ? getHandoffStatus(getThreadRecord(s.records, activeThreadId)) : undefined,
   );
-  const isLoadingMore = useThreadStore((s) =>
-    activeThreadId ? s.isLoadingMore[activeThreadId] ?? false : false,
-  );
+  const isLoadingMore = useActiveThreadRecord((r) => r.isLoadingMore);
   const loadOlderMessages = useThreadStore((s) => s.loadOlderMessages);
   const currentThreadId = activeThreadId;
-  const permissions = useThreadStore(
-    useShallow((s) => currentThreadId ? (s.permissionsByThread[currentThreadId] ?? []) : []),
-  );
-  const hooks = useThreadStore(
-    useShallow((s) => currentThreadId ? (s.hooksByThread[currentThreadId] ?? []) : []),
-  );
-  const thoughtSegments = useThreadStore(
-    (s) => s.thoughtSegmentsByThread[currentThreadId ?? ""] ?? EMPTY_THOUGHT_SEGMENTS,
-  );
-  // Narrowed selector: subscribe only to the active thread's current-turn
-  // message id (a string), not the whole per-thread map. The downstream
-  // `VirtualItemRenderer` still expects the map shape, so we wrap it back
-  // up via useMemo - stable across renders unless the string actually changes.
-  const currentTurnMessageId = useThreadStore(
-    (s) => currentThreadId ? (s.currentTurnMessageIdByThread?.[currentThreadId] ?? "") : "",
-  );
+  const permissions = useActiveThreadRecord((r) => r.permissions);
+  const hooks = useActiveThreadRecord((r) => r.hooks);
+  const thoughtSegments = useActiveThreadRecord((r) => r.thoughtSegments);
+  const currentTurnMessageId = useActiveThreadRecord((r) => r.currentTurnMessageId);
   const currentTurnMessageIdByThread = useMemo(
     () => (currentThreadId && currentTurnMessageId
       ? { [currentThreadId]: currentTurnMessageId }

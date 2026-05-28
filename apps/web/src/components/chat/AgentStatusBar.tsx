@@ -1,13 +1,13 @@
 import { StackedLayersIcon } from "./narrative/StackedLayersIcon";
-import { countActiveSubagentCalls, useThreadStore } from "@/stores/threadStore";
+import { countActiveSubagentCalls } from "@/stores/threadStore";
+import { useThreadRecord } from "@/stores/thread-selectors";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 
 /** Shows "N subagents running" badge when subagents are active on the current thread. */
 export function AgentStatusBar() {
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
-  const count = useThreadStore((s) =>
-    activeThreadId ? countActiveSubagentCalls(s.toolCallsByThread[activeThreadId]) : 0,
-  );
+  const toolCalls = useThreadRecord(activeThreadId, (r) => r.toolCalls);
+  const count = countActiveSubagentCalls(toolCalls);
 
   if (count <= 0) return null;
 

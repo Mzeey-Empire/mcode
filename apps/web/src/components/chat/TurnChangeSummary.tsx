@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { ChevronRight, FileText, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDiffStore } from "@/stores/diffStore";
-import { useThreadStore } from "@/stores/threadStore";
+import { readThreadRecord } from "@/stores/thread-selectors";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { getTransport } from "@/transport";
 
@@ -70,7 +70,7 @@ export function TurnChangeSummary({ messageId, filesChanged, isLatestTurn, manua
         const threadId = useWorkspaceStore.getState().activeThreadId;
         if (!threadId) return;
 
-        const serverMsgId = useThreadStore.getState().serverMessageIds[messageId] ?? messageId;
+        const serverMsgId = readThreadRecord(threadId).serverMessageIds[messageId] ?? messageId;
 
         // Resolve snapshot — load from server if not cached in diffStore
         let snapshots = useDiffStore.getState().snapshotsByThread[threadId];

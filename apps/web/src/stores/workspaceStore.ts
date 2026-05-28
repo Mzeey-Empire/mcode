@@ -8,6 +8,7 @@ import {
 import type { ChecksStatus, CreateAndSendResult } from "@mcode/contracts";
 import { getTransport } from "@/transport";
 import { useThreadStore } from "./threadStore";
+import { deleteThreadRecord, patchThreadRecord } from "./thread-record";
 import { useTerminalStore } from "./terminalStore";
 import { useQueueStore } from "./queueStore";
 import { useTaskStore } from "./taskStore";
@@ -306,15 +307,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     bumpThreadListMutationEpoch(workspaceId);
     pendingThreadCreationByPlaceholderId.delete(placeholderId);
     const startTime =
-      useThreadStore.getState().agentStartTimes[placeholderId] ?? Date.now();
+      useThreadStore.getState().records.get(placeholderId)?.agentStartTime ?? Date.now();
     useThreadStore.setState((state) => {
       const nextRunning = new Set(state.runningThreadIds);
       nextRunning.delete(placeholderId);
       nextRunning.add(thread.id);
-      const nextTimes = { ...state.agentStartTimes };
-      delete nextTimes[placeholderId];
-      nextTimes[thread.id] = startTime;
-      return { runningThreadIds: nextRunning, agentStartTimes: nextTimes };
+      let records = deleteThreadRecord(state.records, placeholderId);
+      records = patchThreadRecord(records, thread.id, { agentStartTime: startTime });
+      return { runningThreadIds: nextRunning, records };
     });
     set((state) => {
       const without = state.threads.filter((t) => t.id !== placeholderId);
@@ -357,9 +357,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     useThreadStore.setState((state) => {
       const nextRunning = new Set(state.runningThreadIds);
       nextRunning.delete(placeholderId);
-      const nextTimes = { ...state.agentStartTimes };
-      delete nextTimes[placeholderId];
-      return { runningThreadIds: nextRunning, agentStartTimes: nextTimes };
+      return {
+        runningThreadIds: nextRunning,
+        records: deleteThreadRecord(state.records, placeholderId),
+      };
     });
     set((state) => ({
       threads: state.threads.map((t) =>
@@ -776,7 +777,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
 
     useThreadStore.setState((state) => ({
       runningThreadIds: new Set([...state.runningThreadIds, placeholderId]),
-      agentStartTimes: { ...state.agentStartTimes, [placeholderId]: Date.now() },
+      records: patchThreadRecord(state.records, placeholderId, { agentStartTime: Date.now() }),
     }));
 
     try {
@@ -871,7 +872,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
 
     useThreadStore.setState((state) => ({
       runningThreadIds: new Set([...state.runningThreadIds, placeholderId]),
-      agentStartTimes: { ...state.agentStartTimes, [placeholderId]: Date.now() },
+      records: patchThreadRecord(state.records, placeholderId, { agentStartTime: Date.now() }),
     }));
 
     try {
@@ -903,7 +904,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     }));
     useThreadStore.setState((state) => ({
       runningThreadIds: new Set([...state.runningThreadIds, placeholderId]),
-      agentStartTimes: { ...state.agentStartTimes, [placeholderId]: Date.now() },
+      records: patchThreadRecord(state.records, placeholderId, { agentStartTime: Date.now() }),
     }));
     try {
       const result = await runCreateAndSend(pending);

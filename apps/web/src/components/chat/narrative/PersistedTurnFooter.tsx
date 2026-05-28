@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useThreadStore } from "@/stores/threadStore";
+import { useActiveThreadRecord } from "@/stores/thread-selectors";
 import { TurnFooter } from "./TurnFooter";
 import type { NarrativeCounts } from "./types";
 
@@ -23,7 +24,7 @@ export interface PersistedTurnFooterProps {
  * not jump.
  */
 export function PersistedTurnFooter({ messageId }: PersistedTurnFooterProps) {
-  const records = useThreadStore((s) => s.narrativeByMessage[messageId]);
+  const records = useActiveThreadRecord((r) => r.narrativeByMessage[messageId]);
   const load = useThreadStore((s) => s.loadNarrativeForMessage);
   const triggered = useRef(false);
 

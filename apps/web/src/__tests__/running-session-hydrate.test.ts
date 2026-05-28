@@ -1,3 +1,8 @@
+import {
+  resetThreadStoreForTests,
+  getTestAgentStartTimes,
+} from "@/stores/thread-store-test-utils";
+import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 import { hydrateRunningThreadsFromServer } from "@/transport/ws-transport";
@@ -67,9 +72,8 @@ describe("hydrateRunningThreadsFromServer", () => {
 
 describe("hydrateRunningThreads (store action)", () => {
   beforeEach(() => {
-    useThreadStore.setState({
+    resetThreadStoreForTests({
       runningThreadIds: new Set(),
-      agentStartTimes: {},
     });
   });
 
@@ -108,15 +112,17 @@ describe("hydrateRunningThreads (store action)", () => {
   });
 
   it("seeds agentStartTimes for newly hydrated ids and preserves existing entries", () => {
-    useThreadStore.setState({
+    resetThreadStoreForTests({
       runningThreadIds: new Set(["t-1"]),
-      agentStartTimes: { "t-1": 100 },
+      records: new Map<string, ThreadRecord>([
+        ["t-1", { ...createEmptyThreadRecord(), agentStartTime: 100 }],
+      ]),
     });
     vi.spyOn(Date, "now").mockReturnValue(200);
 
     useThreadStore.getState().hydrateRunningThreads(["t-1", "t-2"]);
 
-    const times = useThreadStore.getState().agentStartTimes;
+    const times = getTestAgentStartTimes();
     // Existing optimistic timestamp from a user-initiated send must not be clobbered.
     expect(times["t-1"]).toBe(100);
     // New id gets seeded with Date.now() so UI elapsed readouts (MessageList
