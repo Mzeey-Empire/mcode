@@ -195,13 +195,11 @@ test.describe("Sticky user message", () => {
 
     const previewButton = page.getByRole("button", { name: "Expand your last message" });
     await previewButton.click();
-    await page.waitForTimeout(300);
     await expect(page.getByRole("button", { name: "Collapse your last message" })).toBeVisible({
       timeout: 1000,
     });
 
     await page.getByRole("button", { name: "Collapse your last message" }).click();
-    await page.waitForTimeout(300);
     await expect(page.getByRole("button", { name: "Expand your last message" })).toBeVisible({
       timeout: 1000,
     });

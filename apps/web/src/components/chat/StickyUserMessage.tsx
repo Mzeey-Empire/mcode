@@ -123,14 +123,15 @@ export function StickyUserMessage({
     >
       <div className="mx-auto w-full min-w-0 max-w-4xl">
         <div className="pointer-events-auto flex items-start gap-0.5 overflow-hidden rounded-lg bg-primary text-sm text-primary-foreground shadow-sm shadow-primary/15">
-          <button
+          <Button
             type="button"
+            variant="ghost"
             onClick={handlePreviewClick}
             onDoubleClick={handlePreviewDoubleClick}
             aria-expanded={expandable ? expanded : undefined}
             aria-describedby={expandable ? STICKY_PREVIEW_HINT_ID : undefined}
             aria-label={previewAriaLabel}
-            className="min-w-0 flex-1 cursor-pointer px-3 py-1.5 text-left transition-colors hover:bg-primary-foreground/10"
+            className="h-auto min-w-0 flex-1 cursor-pointer justify-start px-3 py-1.5 text-left font-normal text-primary-foreground transition-colors hover:bg-primary-foreground/10 hover:text-primary-foreground"
           >
             <p
               className={cn(
@@ -166,7 +167,7 @@ export function StickyUserMessage({
                 </span>
               </>
             )}
-          </button>
+          </Button>
 
           <Tooltip>
             <TooltipTrigger
