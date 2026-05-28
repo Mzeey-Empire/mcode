@@ -187,7 +187,7 @@ test("script exits 0 with skip message when run in a clean repo with no code cha
  *
  * @param {string} scriptPath
  * @param {string} cwd
- * @returns {Promise<{ code: number, stdout: string }>}
+ * @returns {Promise<{ code: number, stdout: string, signal: NodeJS.Signals | null }>}
  */
 function runScript(scriptPath, cwd) {
   return new Promise((resolve, reject) => {
@@ -203,6 +203,11 @@ function runScript(scriptPath, cwd) {
       stdout += d.toString();
     });
     child.on("error", reject);
-    child.on("close", (code) => resolve({ code: code ?? 0, stdout }));
+    // Signal-terminated runs report `code === null`. Treat them as failure
+    // (exit 1) so abnormal termination is never silently treated as success;
+    // expose the signal so callers can disambiguate if needed.
+    child.on("close", (code, signal) =>
+      resolve({ code: code === null ? 1 : code, stdout, signal }),
+    );
   });
 }
