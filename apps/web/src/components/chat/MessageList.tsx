@@ -1,6 +1,7 @@
 import { useRef, useEffect, useLayoutEffect, useMemo, useCallback, memo, useState, type WheelEvent } from "react";
 import { useReplyStore } from "@/stores/replyStore";
 import { ArrowDown, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useShallow } from "zustand/shallow";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -30,6 +31,10 @@ import { PersistedTurnFooter } from "./narrative/PersistedTurnFooter";
 import { StreamingResponseRow } from "./narrative/StreamingResponseRow";
 import { NarrativeIndicator } from "./narrative/NarrativeIndicator";
 import { PersistedLateHooks } from "./PersistedLateHooks";
+import { StickyUserMessage, STICKY_USER_MESSAGE_ESTIMATED_HEIGHT } from "./StickyUserMessage";
+import { registerCommand } from "@/lib/command-registry";
+import { shouldShowStickyUserMessage, type StickyVisibilityVirtualizer } from "./sticky-user-message-visibility";
+import { resolveUserMessagePreview } from "./user-message-preview";
 
 const EMPTY_TOOL_CALLS: ToolCall[] = [];
 const EMPTY_TURN_MAP: Record<string, string> = {};
@@ -256,6 +261,15 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   const scrollToTailIntentRef = useRef(false);
   /** Previous `scrollTop` from the last `onScroll` pass; detects upward interrupts during smooth tail scroll. */
   const prevScrollTopRef = useRef(0);
+  /** Ref mirror of sticky-user-message visibility to avoid redundant setState on scroll. */
+  const showStickyUserMessageRef = useRef(false);
+  const [showStickyUserMessage, setShowStickyUserMessage] = useState(false);
+  /** Reserved top inset while the sticky user-message bar is visible. */
+  const [stickyBarHeight, setStickyBarHeight] = useState(0);
+  /** Target message for sticky preview; kept in a ref so handleScroll stays stable. */
+  const stickyUserMessageTargetRef = useRef<{ id: string; itemIndex: number } | null>(null);
+  /** Latest virtualizer instance for scroll-time sticky visibility checks. */
+  const virtualizerRef = useRef<StickyVisibilityVirtualizer | null>(null);
 
   const messages = useActiveThreadRecord((r) => r.messages);
   const loading = useActiveThreadRecord((r) => r.loading);
@@ -304,6 +318,44 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
   useLayoutEffect(() => {
     isPositionedRef.current = isPositioned;
   }, [isPositioned]);
+
+  /** Syncs sticky preview visibility with the current scroll position. */
+  const syncStickyUserMessageVisibility = useCallback(() => {
+    if (!isPositionedRef.current) {
+      if (showStickyUserMessageRef.current) {
+        showStickyUserMessageRef.current = false;
+        setShowStickyUserMessage(false);
+      }
+      return;
+    }
+    const el = containerRef.current;
+    const virtualizerInstance = virtualizerRef.current;
+    const stickyTarget = stickyUserMessageTargetRef.current;
+    if (!el || !virtualizerInstance || !stickyTarget) {
+      if (showStickyUserMessageRef.current) {
+        showStickyUserMessageRef.current = false;
+        setShowStickyUserMessage(false);
+      }
+      return;
+    }
+    const shouldShowSticky = shouldShowStickyUserMessage(
+      el,
+      stickyTarget.id,
+      stickyTarget.itemIndex,
+      virtualizerInstance,
+    );
+    if (shouldShowSticky !== showStickyUserMessageRef.current) {
+      showStickyUserMessageRef.current = shouldShowSticky;
+      setShowStickyUserMessage(shouldShowSticky);
+      if (!shouldShowSticky) {
+        setStickyBarHeight(0);
+      }
+    }
+  }, []);
+
+  const handleStickyHeightChange = useCallback((height: number) => {
+    setStickyBarHeight((prev) => (prev === height ? prev : height));
+  }, []);
 
   const beginSuppressPassiveAutoBottomScroll = useCallback(() => {
     suppressPassiveAutoBottomScrollRef.current = true;
@@ -376,6 +428,8 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     // Clear new-content highlight once the user reaches the bottom
     if (!awayFromTail) setHasNewContent(false);
 
+    syncStickyUserMessageVisibility();
+
     // Trigger loading older messages when near the top
     if (
       el.scrollTop < PAGINATION_THRESHOLD &&
@@ -387,7 +441,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     }
 
     prevScrollTopRef.current = el.scrollTop;
-  }, [activeThreadId, hasMore, isLoadingMore, loadOlderMessages]);
+  }, [activeThreadId, hasMore, isLoadingMore, loadOlderMessages, syncStickyUserMessageVisibility]);
 
   const stableItems = useMemo(
     () => buildStableItems(messages, persistedFilesChanged, latestTurnWithChanges),
@@ -435,6 +489,62 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     [stableItems, volatileItems, hasToolCalls],
   );
 
+  const lastUserMessage = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i];
+      if (message.role === "user" && !message.is_internal) {
+        return message;
+      }
+    }
+    return null;
+  }, [messages]);
+
+  const lastUserMessagePreview = useMemo(
+    () => (lastUserMessage ? resolveUserMessagePreview(lastUserMessage) : null),
+    [lastUserMessage],
+  );
+
+  const lastUserMessageItemIndex = useMemo(() => {
+    if (!lastUserMessage) return -1;
+    for (let i = items.length - 1; i >= 0; i--) {
+      const item = items[i];
+      if (item.type === "message" && item.message.id === lastUserMessage.id) {
+        return i;
+      }
+    }
+    return -1;
+  }, [items, lastUserMessage]);
+
+  useLayoutEffect(() => {
+    if (
+      lastUserMessage
+      && lastUserMessagePreview
+      && lastUserMessageItemIndex >= 0
+    ) {
+      stickyUserMessageTargetRef.current = {
+        id: lastUserMessage.id,
+        itemIndex: lastUserMessageItemIndex,
+      };
+      return;
+    }
+    stickyUserMessageTargetRef.current = null;
+    if (showStickyUserMessageRef.current) {
+      showStickyUserMessageRef.current = false;
+      setShowStickyUserMessage(false);
+    }
+  }, [lastUserMessage, lastUserMessagePreview, lastUserMessageItemIndex]);
+
+  useLayoutEffect(() => {
+    if (!isPositioned) return;
+    syncStickyUserMessageVisibility();
+  }, [
+    isPositioned,
+    items.length,
+    lastUserMessage?.id,
+    lastUserMessagePreview,
+    syncStickyUserMessageVisibility,
+  ]);
+
   itemsLengthRef.current = items.length;
 
   // Mirror items in a ref so scrollToMessage can read the latest list
@@ -453,6 +563,7 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     getItemKey: (index) => items[index]?.key ?? String(index),
     overscan: OVERSCAN,
   });
+  virtualizerRef.current = virtualizer;
 
   // Pinned to tail: always compensate for size changes so the viewport tracks
   // the bottom as rows measure. Adjusting by +delta when at scrollOffset = oldMaxScroll
@@ -652,6 +763,30 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     }
   }, [virtualizer]);
 
+  const lastUserMessageRef = useRef(lastUserMessage);
+  lastUserMessageRef.current = lastUserMessage;
+
+  useEffect(() => {
+    const stickyVisible =
+      showStickyUserMessage && isPositioned && !!lastUserMessagePreview;
+    if (!stickyVisible) return;
+    const dispose = registerCommand({
+      id: "stickyUserMessage.jump",
+      title: "Jump to Last User Message",
+      category: "Navigation",
+      handler: () => {
+        const target = lastUserMessageRef.current;
+        if (target) scrollToMessage(target.id);
+      },
+    });
+    return dispose;
+  }, [
+    showStickyUserMessage,
+    isPositioned,
+    lastUserMessagePreview,
+    scrollToMessage,
+  ]);
+
   // Save the outgoing thread's scrollTop, then reset per-thread UI state.
   // Cache-miss vs cache-hit is inferred from `loading`: the threadStore sets
   // loading=true synchronously on miss and false synchronously on hit.
@@ -685,6 +820,9 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
       isScrolledUpRef.current = false;
       setShowScrollBtn(false);
       setHasNewContent(false);
+      showStickyUserMessageRef.current = false;
+      setShowStickyUserMessage(false);
+      setStickyBarHeight(0);
     }
 
     if (loading) {
@@ -923,14 +1061,27 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
     return () => ro.disconnect();
   }, [activeThreadId, loading]);
 
+  const stickyReservedTop =
+    showStickyUserMessage && isPositioned
+      ? stickyBarHeight > 0
+        ? stickyBarHeight
+        : STICKY_USER_MESSAGE_ESTIMATED_HEIGHT
+      : 0;
+
   return (
     <div className="relative h-full" data-testid="message-list">
       <div
         ref={containerRef}
         onScroll={handleScroll}
         onWheel={handleWheel}
-        className="h-full overflow-y-auto pt-4 transition-opacity duration-75"
-        style={{ opacity: isPositioned ? 1 : 0 }}
+        className={cn(
+          "h-full overflow-y-auto transition-opacity duration-75",
+          stickyReservedTop === 0 && "pt-4",
+        )}
+        style={{
+          opacity: isPositioned ? 1 : 0,
+          paddingTop: stickyReservedTop > 0 ? stickyReservedTop : undefined,
+        }}
       >
         <div
           className="relative w-full"
@@ -975,6 +1126,17 @@ export function MessageList({ onBranch, onReply }: MessageListProps) {
             <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground/70" />
           </div>
         </div>
+      )}
+
+      {lastUserMessagePreview && (
+        <StickyUserMessage
+          preview={lastUserMessagePreview}
+          visible={showStickyUserMessage && isPositioned}
+          onJumpToMessage={() => {
+            if (lastUserMessage) scrollToMessage(lastUserMessage.id);
+          }}
+          onHeightChange={handleStickyHeightChange}
+        />
       )}
 
       {/* Scroll-to-bottom floating button — pulses when new content arrives */}
