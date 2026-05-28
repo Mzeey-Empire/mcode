@@ -1,8 +1,0 @@
-#!/bin/sh
-# Repo-local prepare-commit-msg hook.
-#
-# The global hook at ~/.git-hooks/prepare-commit-msg already chains here
-# via chain_repo_hook(). Do NOT call back to the global hook from this
-# file — that creates infinite recursion (SHLVL spirals to 1000).
-#
-# Add any repo-specific prepare-commit-msg logic below this comment.
