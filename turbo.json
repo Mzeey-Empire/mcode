@@ -9,11 +9,9 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
-    "test": {
-      "dependsOn": ["^build"]
-    },
+    "test": {},
     "typecheck": {
-      "dependsOn": ["^build"]
+      "outputs": ["node_modules/.cache/tsbuildinfo"]
     },
     "lint": {}
   }

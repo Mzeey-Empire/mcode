@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "lint": "eslint .",
+    "lint": "eslint . --cache --cache-location node_modules/.cache/.eslintcache",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "preview": "vite preview",

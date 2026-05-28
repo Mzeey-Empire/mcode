@@ -7,7 +7,10 @@
     "declarationMap": false,
     // dist-tsc is only an esbuild input. Per-file .source maps race `tsc --watch` on Windows
     // (esbuild can read an empty .map mid-write) and break the desktop dev bundle.
-    "sourceMap": false
+    "sourceMap": false,
+    // Distinct buildinfo path so the dev:desktop emit pass (this config) doesn't clobber the
+    // typecheck pass (base tsconfig.json) that ships with the same tsBuildInfoFile.
+    "tsBuildInfoFile": "./node_modules/.cache/tsbuildinfo.build"
   },
   "exclude": ["node_modules", "dist", "dist-tsc", "src/__tests__"]
 }

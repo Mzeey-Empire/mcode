@@ -18,7 +18,9 @@
     "noFallthroughCasesInSwitch": true,
     "noEmit": true,
     "rootDir": "src",
-    "outDir": "dist"
+    "outDir": "dist",
+    "incremental": true,
+    "tsBuildInfoFile": "./node_modules/.cache/tsbuildinfo"
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist", "src/__tests__"]
