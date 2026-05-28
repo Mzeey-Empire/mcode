@@ -42,15 +42,26 @@ digraph workflow {
 
 ## Verify (mandatory, enforced)
 
-```bash
-bun run verify
-```
+Verification has two tiers. The stop hook runs the **fast gate** on every
+turn so type errors and lint violations surface in seconds; the **full gate**
+runs at commit time and adds the unit-test suite on top.
 
-Runs typecheck, lint, and unit tests. All three must pass with zero errors.
-The Stop hook runs this automatically when you try to finish a turn. If it
-fails, you get the error output and must fix before you can stop.
+| Tier | When it runs | What it runs | How to invoke |
+|------|--------------|--------------|---------------|
+| Fast gate | Every agent stop hook | Typecheck + Lint (parallel) | `node scripts/agent/verify-fast.mjs` |
+| Full gate | Before committing | Typecheck + Lint + Tests (parallel) | `bun run verify` |
 
-Do not run `tsc --noEmit` or test commands individually. Use `bun run verify`.
+Both tiers share the same `hasCodeChanges()` early-exit bypass, so
+brainstorming-only sessions with no code edits skip verification entirely.
+
+The Stop hook calls the fast gate automatically when you try to finish a
+turn. If typecheck or lint fails, you get the error output and must fix
+before you can stop. **Before committing**, run `bun run verify` yourself
+to exercise the full gate, including the unit tests. The fast gate alone
+does not certify a commit.
+
+Do not run `tsc --noEmit` or test commands individually. Use the tier
+appropriate for what you are doing.
 
 ## Visual Verify (when UI changes + Playwright MCP available)
 
@@ -88,10 +99,14 @@ evidence that checks passed.
 
 ## Before You Declare Done
 
-- [ ] `bun run verify` passes
+- [ ] `bun run verify` (the full gate, including unit tests) passes
 - [ ] UI changes verified visually (if Playwright MCP available)
 - [ ] E2E tests pass (if applicable)
 - [ ] No browser console errors on affected pages
+
+The fast gate that the stop hook ran during the turn is not sufficient on
+its own — it skips the unit test phase. Run `bun run verify` explicitly
+before committing.
 
 ## Enforcement
 
