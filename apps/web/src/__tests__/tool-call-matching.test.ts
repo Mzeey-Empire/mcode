@@ -1,11 +1,12 @@
 import {
-  applyLegacyThreadStoreSeed,
+  resetThreadStoreForTests,
   getTestThreadToolCalls,
 } from "@/stores/thread-store-test-utils";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 import { mockTransport, createMockThread } from "./mocks/transport";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -16,15 +17,11 @@ describe("Tool Call Matching", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     useWorkspaceStore.setState({ threads: [createMockThread({ id: "thread-1" })] });
-    applyLegacyThreadStoreSeed({
-      messages: [],
-      runningThreadIds: new Set(),
-      loading: false,
-      errorByThread: {},
-      streamingByThread: {},
-      toolCallsByThread: {},
-      agentStartTimes: {},
+    resetThreadStoreForTests({
       currentThreadId: "thread-1",
+      records: new Map<string, ThreadRecord>([
+        ["thread-1", createEmptyThreadRecord()],
+      ]),
     });
   });
 
@@ -34,13 +31,19 @@ describe("Tool Call Matching", () => {
 
   it("tool result with matching ID completes the correct tool call", () => {
     // Set up two pending tool calls
-    applyLegacyThreadStoreSeed({
-      toolCallsByThread: {
-        "thread-1": [
-          { id: "tc1", toolName: "Read", toolInput: {}, output: null, isError: false, isComplete: false },
-          { id: "tc2", toolName: "Write", toolInput: {}, output: null, isError: false, isComplete: false },
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        [
+          "thread-1",
+          {
+            ...createEmptyThreadRecord(),
+            toolCalls: [
+              { id: "tc1", toolName: "Read", toolInput: {}, output: null, isError: false, isComplete: false },
+              { id: "tc2", toolName: "Write", toolInput: {}, output: null, isError: false, isComplete: false },
+            ],
+          },
         ],
-      },
+      ]),
     });
 
     useThreadStore.getState().handleAgentEvent("thread-1", {
@@ -56,13 +59,19 @@ describe("Tool Call Matching", () => {
   });
 
   it("tool result with non-matching ID falls back to first incomplete", () => {
-    applyLegacyThreadStoreSeed({
-      toolCallsByThread: {
-        "thread-1": [
-          { id: "tc1", toolName: "Read", toolInput: {}, output: null, isError: false, isComplete: false },
-          { id: "tc2", toolName: "Write", toolInput: {}, output: null, isError: false, isComplete: false },
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        [
+          "thread-1",
+          {
+            ...createEmptyThreadRecord(),
+            toolCalls: [
+              { id: "tc1", toolName: "Read", toolInput: {}, output: null, isError: false, isComplete: false },
+              { id: "tc2", toolName: "Write", toolInput: {}, output: null, isError: false, isComplete: false },
+            ],
+          },
         ],
-      },
+      ]),
     });
 
     useThreadStore.getState().handleAgentEvent("thread-1", {
@@ -80,14 +89,20 @@ describe("Tool Call Matching", () => {
   });
 
   it("multiple concurrent tool calls resolve independently by ID", () => {
-    applyLegacyThreadStoreSeed({
-      toolCallsByThread: {
-        "thread-1": [
-          { id: "tc1", toolName: "Read", toolInput: {}, output: null, isError: false, isComplete: false },
-          { id: "tc2", toolName: "Write", toolInput: {}, output: null, isError: false, isComplete: false },
-          { id: "tc3", toolName: "Bash", toolInput: {}, output: null, isError: false, isComplete: false },
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        [
+          "thread-1",
+          {
+            ...createEmptyThreadRecord(),
+            toolCalls: [
+              { id: "tc1", toolName: "Read", toolInput: {}, output: null, isError: false, isComplete: false },
+              { id: "tc2", toolName: "Write", toolInput: {}, output: null, isError: false, isComplete: false },
+              { id: "tc3", toolName: "Bash", toolInput: {}, output: null, isError: false, isComplete: false },
+            ],
+          },
         ],
-      },
+      ]),
     });
 
     // Resolve out of order
@@ -108,12 +123,18 @@ describe("Tool Call Matching", () => {
   });
 
   it("all tool calls already complete: fallback does nothing", () => {
-    applyLegacyThreadStoreSeed({
-      toolCallsByThread: {
-        "thread-1": [
-          { id: "tc1", toolName: "Read", toolInput: {}, output: "done", isError: false, isComplete: true },
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        [
+          "thread-1",
+          {
+            ...createEmptyThreadRecord(),
+            toolCalls: [
+              { id: "tc1", toolName: "Read", toolInput: {}, output: "done", isError: false, isComplete: true },
+            ],
+          },
         ],
-      },
+      ]),
     });
 
     useThreadStore.getState().handleAgentEvent("thread-1", {
@@ -128,13 +149,19 @@ describe("Tool Call Matching", () => {
   });
 
   it("out-of-order results don't overwrite completed calls", () => {
-    applyLegacyThreadStoreSeed({
-      toolCallsByThread: {
-        "thread-1": [
-          { id: "tc1", toolName: "Read", toolInput: {}, output: "first-result", isError: false, isComplete: true },
-          { id: "tc2", toolName: "Write", toolInput: {}, output: null, isError: false, isComplete: false },
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        [
+          "thread-1",
+          {
+            ...createEmptyThreadRecord(),
+            toolCalls: [
+              { id: "tc1", toolName: "Read", toolInput: {}, output: "first-result", isError: false, isComplete: true },
+              { id: "tc2", toolName: "Write", toolInput: {}, output: null, isError: false, isComplete: false },
+            ],
+          },
         ],
-      },
+      ]),
     });
 
     useThreadStore.getState().handleAgentEvent("thread-1", {

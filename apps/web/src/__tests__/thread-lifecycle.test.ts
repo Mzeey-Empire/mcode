@@ -1,11 +1,11 @@
 import {
   resetThreadStoreForTests,
-  applyLegacyThreadStoreSeed,
   getTestActiveMessages,
   getTestThreadStreaming,
   getTestThreadError,
   readActiveThreadField,
 } from "@/stores/thread-store-test-utils";
+import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 import { mockTransport, createMockMessage } from "./mocks/transport";
@@ -81,11 +81,12 @@ describe("Thread Lifecycle Behavior", () => {
       thread_id: "t",
       content: "hi",
     });
-    applyLegacyThreadStoreSeed({
-      messages: [msg],
+    resetThreadStoreForTests({
       currentThreadId: "thread-1",
       runningThreadIds: new Set(["thread-1"]),
-      streamingByThread: { "thread-1": "partial" },
+      records: new Map<string, ThreadRecord>([
+        ["thread-1", { ...createEmptyThreadRecord(), messages: [msg], streaming: "partial" }],
+      ]),
     });
 
     useThreadStore.getState().clearMessages();

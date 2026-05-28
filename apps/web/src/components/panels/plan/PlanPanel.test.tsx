@@ -1,4 +1,4 @@
-import { applyLegacyThreadStoreSeed } from "@/stores/thread-store-test-utils";
+import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlanRecord } from "@mcode/contracts";
@@ -33,23 +33,9 @@ const makePlan = (version: number, contentMd: string): PlanRecord => ({
 
 describe("PlanPanel", () => {
   beforeEach(() => {
-    applyLegacyThreadStoreSeed({
-      messages: [],
-      runningThreadIds: new Set(),
-      loading: false,
-      errorByThread: {},
-      streamingByThread: {},
-      toolCallsByThread: {},
+    resetThreadStoreForTests({
       currentThreadId: null,
-      persistedToolCallCounts: {},
-      serverMessageIds: {},
-      currentTurnMessageIdByThread: {},
-      agentStartTimes: {},
-      settingsByThread: {},
-      oldestLoadedSequence: {},
-      hasMoreMessages: {},
-      isLoadingMore: {},
-      loadEpochByThread: {},
+      runningThreadIds: new Set(),
     });
     useWorkspaceStore.setState({
       threads: [

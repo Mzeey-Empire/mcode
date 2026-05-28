@@ -1,8 +1,9 @@
 import {
-  applyLegacyThreadStoreSeed,
+  resetThreadStoreForTests,
   getTestThreadContext,
   getTestThreadIsCompacting,
 } from "@/stores/thread-store-test-utils";
+import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 import { mockTransport, createMockThread } from "./mocks/transport";
@@ -15,26 +16,25 @@ vi.mock("@/transport", async () => ({
 
 const THREAD = "thread-1";
 
-function setup(extra: Record<string, unknown> = {}) {
+function setup(extra: Partial<ThreadRecord> = {}) {
   // Seed workspaceStore so handleAgentEvent's thread-membership guard passes.
   useWorkspaceStore.setState({
     activeThreadId: THREAD,
     threads: [createMockThread({ id: THREAD })],
   });
-  // Partial state merge: Zustand merges these fields into the existing store slice.
-  // Extra fields override defaults for per-test setup (e.g. isCompactingByThread).
-  applyLegacyThreadStoreSeed({
-    messages: [],
-    runningThreadIds: new Set([THREAD]),
-    loading: false,
-    errorByThread: {},
-    streamingByThread: {},
-    toolCallsByThread: {},
-    agentStartTimes: { [THREAD]: Date.now() },
+  resetThreadStoreForTests({
     currentThreadId: THREAD,
-    contextByThread: {},
-    isCompactingByThread: {},
-    ...extra,
+    runningThreadIds: new Set([THREAD]),
+    records: new Map<string, ThreadRecord>([
+      [
+        THREAD,
+        {
+          ...createEmptyThreadRecord(),
+          agentStartTime: Date.now(),
+          ...extra,
+        },
+      ],
+    ]),
   });
 }
 
@@ -63,7 +63,7 @@ describe("context tracker — Fix 2: output tokens included", () => {
 
 describe("context tracker — Fix 1: turnComplete skipped during compaction", () => {
   beforeEach(() =>
-    setup({ isCompactingByThread: { [THREAD]: true } })
+    setup({ isCompacting: true })
   );
 
   it("turnComplete during compaction does NOT update contextByThread", () => {
@@ -88,14 +88,20 @@ describe("context tracker — Fix 1: turnComplete skipped during compaction", ()
 describe("context tracker — Fix 3: contextEstimate on compaction end", () => {
   beforeEach(() =>
     setup({
-      isCompactingByThread: { [THREAD]: true },
-      contextByThread: { [THREAD]: { lastTokensIn: 0, contextWindow: 200_000 } },
+      isCompacting: true,
+      context: { lastTokensIn: 0, contextWindow: 200_000 },
     })
   );
 
   it("contextEstimate updates contextByThread when NOT compacting", () => {
-    // Simulate compaction ending: the frontend clears isCompactingByThread
-    applyLegacyThreadStoreSeed({ isCompactingByThread: {} });
+    // Simulate compaction ending: clear isCompacting on the thread record.
+    resetThreadStoreForTests({
+      currentThreadId: THREAD,
+      runningThreadIds: new Set([THREAD]),
+      records: new Map<string, ThreadRecord>([
+        [THREAD, { ...createEmptyThreadRecord(), agentStartTime: Date.now() }],
+      ]),
+    });
 
     dispatch("session.contextEstimate", {
       params: { tokensIn: 100_000, contextWindow: 200_000 },
@@ -120,7 +126,7 @@ describe("context tracker — Fix 3: contextEstimate on compaction end", () => {
 describe("context tracker — Fix 4: live estimation during turn", () => {
   beforeEach(() =>
     setup({
-      contextByThread: { [THREAD]: { lastTokensIn: 50_000, contextWindow: 200_000 } },
+      context: { lastTokensIn: 50_000, contextWindow: 200_000 },
     })
   );
 

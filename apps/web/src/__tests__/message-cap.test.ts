@@ -1,13 +1,13 @@
 import {
-  applyLegacyThreadStoreSeed,
+  resetThreadStoreForTests,
   getTestActiveMessages,
   getTestThreadHasMoreMessages,
   getTestThreadIsLoadingMore,
 } from "@/stores/thread-store-test-utils";
+import { createEmptyThreadRecord, patchThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useThreadStore, MESSAGE_WINDOW_SIZE, TOOL_CALL_CACHE_SIZE } from "@/stores/threadStore";
 import { mockTransport } from "./mocks/transport";
-import { LruCache } from "@/lib/lru-cache";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -16,16 +16,7 @@ vi.mock("@/transport", async () => ({
 
 describe("toolCallRecordCache LRU", () => {
   beforeEach(() => {
-    applyLegacyThreadStoreSeed({
-      messages: [],
-      runningThreadIds: new Set(),
-      loading: false,
-      errorByThread: {},
-      currentThreadId: null,
-      streamingByThread: {},
-      toolCallsByThread: {},
-      toolCallRecordCache: new LruCache(TOOL_CALL_CACHE_SIZE),
-    });
+    resetThreadStoreForTests();
   });
 
   it("evicts oldest cache entry when LRU capacity is exceeded", () => {
@@ -66,17 +57,11 @@ describe("toolCallRecordCache LRU", () => {
 
 describe("message sliding window", () => {
   beforeEach(() => {
-    applyLegacyThreadStoreSeed({
-      messages: [],
-      runningThreadIds: new Set(),
-      loading: false,
-      errorByThread: {},
+    resetThreadStoreForTests({
       currentThreadId: "thread-1",
-      streamingByThread: {},
-      toolCallsByThread: {},
-      persistedToolCallCounts: {},
-      serverMessageIds: {},
-      toolCallRecordCache: new LruCache(TOOL_CALL_CACHE_SIZE),
+      records: new Map<string, ThreadRecord>([
+        ["thread-1", { ...createEmptyThreadRecord() }],
+      ]),
     });
   });
 
@@ -94,7 +79,11 @@ describe("message sliding window", () => {
       sequence: i + 1,
       attachments: null,
     }));
-    applyLegacyThreadStoreSeed({ messages: msgs }, { merge: true });
+    useThreadStore.setState((s) => ({
+      records: s.currentThreadId
+        ? patchThreadRecord(s.records, s.currentThreadId, { messages: msgs })
+        : s.records,
+    }));
 
     useThreadStore.getState().addMessage({
       id: `msg-${MESSAGE_WINDOW_SIZE}`,
@@ -129,10 +118,10 @@ describe("message sliding window", () => {
       sequence: i + 1,
       attachments: null,
     }));
-    applyLegacyThreadStoreSeed(
-      { messages: msgs, hasMoreMessages: { "thread-1": false }, currentThreadId: "thread-1" },
-      { merge: true },
-    );
+    useThreadStore.setState((s) => ({
+      currentThreadId: "thread-1",
+      records: patchThreadRecord(s.records, "thread-1", { messages: msgs, hasMoreMessages: false }),
+    }));
 
     useThreadStore.getState().addMessage({
       id: "msg-overflow",
@@ -166,7 +155,11 @@ describe("message sliding window", () => {
       sequence: i + 1,
       attachments: null,
     }));
-    applyLegacyThreadStoreSeed({ messages: msgs }, { merge: true });
+    useThreadStore.setState((s) => ({
+      records: s.currentThreadId
+        ? patchThreadRecord(s.records, s.currentThreadId, { messages: msgs })
+        : s.records,
+    }));
 
     useThreadStore.getState().handleAgentEvent("thread-1", {
       method: "session.message",
@@ -183,21 +176,11 @@ describe("message sliding window", () => {
 describe("loadOlderMessages", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    applyLegacyThreadStoreSeed({
-      messages: [],
-      runningThreadIds: new Set(),
-      loading: false,
-      errorByThread: {},
+    resetThreadStoreForTests({
       currentThreadId: "thread-1",
-      streamingByThread: {},
-      toolCallsByThread: {},
-      persistedToolCallCounts: {},
-      serverMessageIds: {},
-      hasMoreMessages: { "thread-1": true },
-      isLoadingMore: {},
-      oldestLoadedSequence: { "thread-1": 51 },
-      loadEpochByThread: {},
-      toolCallRecordCache: new LruCache(TOOL_CALL_CACHE_SIZE),
+      records: new Map<string, ThreadRecord>([
+        ["thread-1", { ...createEmptyThreadRecord(), hasMoreMessages: true, oldestLoadedSequence: 51 }],
+      ]),
     });
   });
 
@@ -216,10 +199,10 @@ describe("loadOlderMessages", () => {
       sequence: i + 51,
       attachments: null,
     }));
-    applyLegacyThreadStoreSeed(
-      { messages: currentMsgs, currentThreadId: "thread-1" },
-      { merge: true },
-    );
+    useThreadStore.setState((s) => ({
+      currentThreadId: "thread-1",
+      records: patchThreadRecord(s.records, "thread-1", { messages: currentMsgs }),
+    }));
 
     // Server returns 50 older messages (sequences 1-50)
     const olderMsgs = Array.from({ length: 50 }, (_, i) => ({
@@ -258,10 +241,10 @@ describe("loadOlderMessages", () => {
       sequence: 10,
       attachments: null,
     }];
-    applyLegacyThreadStoreSeed(
-      { messages: currentMsgs, oldestLoadedSequence: { "thread-1": 10 }, currentThreadId: "thread-1" },
-      { merge: true },
-    );
+    useThreadStore.setState((s) => ({
+      currentThreadId: "thread-1",
+      records: patchThreadRecord(s.records, "thread-1", { messages: currentMsgs, oldestLoadedSequence: 10 }),
+    }));
 
     const olderMsgs = Array.from({ length: 5 }, (_, i) => ({
       id: `msg-${i}`,
@@ -284,13 +267,21 @@ describe("loadOlderMessages", () => {
   });
 
   it("does nothing when hasMoreMessages is false", async () => {
-    applyLegacyThreadStoreSeed({ hasMoreMessages: { "thread-1": false } });
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        ["thread-1", { ...createEmptyThreadRecord(), hasMoreMessages: false }],
+      ]),
+    });
     await useThreadStore.getState().loadOlderMessages("thread-1");
     expect(mockTransport.getMessages).not.toHaveBeenCalled();
   });
 
   it("does nothing when already loading older messages", async () => {
-    applyLegacyThreadStoreSeed({ isLoadingMore: { "thread-1": true } });
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        ["thread-1", { ...createEmptyThreadRecord(), isLoadingMore: true }],
+      ]),
+    });
     await useThreadStore.getState().loadOlderMessages("thread-1");
     expect(mockTransport.getMessages).not.toHaveBeenCalled();
   });
@@ -309,10 +300,10 @@ describe("loadOlderMessages", () => {
       sequence: i + 51,
       attachments: null,
     }));
-    applyLegacyThreadStoreSeed(
-      { messages: currentMsgs, currentThreadId: "thread-1" },
-      { merge: true },
-    );
+    useThreadStore.setState((s) => ({
+      currentThreadId: "thread-1",
+      records: patchThreadRecord(s.records, "thread-1", { messages: currentMsgs }),
+    }));
 
     let resolveGetMessages!: (value: unknown) => void;
     (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockReturnValueOnce(
@@ -322,7 +313,10 @@ describe("loadOlderMessages", () => {
     const promise = useThreadStore.getState().loadOlderMessages("thread-1");
 
     // Switch thread before the fetch resolves
-    applyLegacyThreadStoreSeed({ currentThreadId: "thread-2", messages: [] }, { merge: true });
+    useThreadStore.setState((s) => ({
+      currentThreadId: "thread-2",
+      records: patchThreadRecord(s.records, "thread-2", { messages: [] }),
+    }));
 
     resolveGetMessages({
       messages: Array.from({ length: 50 }, (_, i) => ({
@@ -363,10 +357,10 @@ describe("loadOlderMessages", () => {
       sequence: 51 + i,
       attachments: null,
     }));
-    applyLegacyThreadStoreSeed(
-      { messages: initial, oldestLoadedSequence: { "thread-1": 51 }, currentThreadId: "thread-1" },
-      { merge: true },
-    );
+    useThreadStore.setState((s) => ({
+      currentThreadId: "thread-1",
+      records: patchThreadRecord(s.records, "thread-1", { messages: initial, oldestLoadedSequence: 51 }),
+    }));
 
     // First pagination: 50 older messages (seq 1-50)
     const batch1 = Array.from({ length: 50 }, (_, i) => ({

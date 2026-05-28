@@ -1,10 +1,11 @@
 import {
-  applyLegacyThreadStoreSeed,
+  resetThreadStoreForTests,
   getTestActiveMessages,
   getTestThreadToolCalls,
   getTestThreadError,
   getTestThreadLastFallback,
 } from "@/stores/thread-store-test-utils";
+import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { countActiveSubagentCalls, useThreadStore } from "@/stores/threadStore";
 import { mockTransport, createMockThread } from "./mocks/transport";
@@ -23,15 +24,20 @@ describe("handleAgentEvent branches", () => {
       activeThreadId: "thread-1",
       threads: [createMockThread({ id: "thread-1" })],
     });
-    applyLegacyThreadStoreSeed({
-      messages: [],
-      runningThreadIds: new Set(["thread-1"]),
-      loading: false,
-      errorByThread: {},
-      streamingByThread: {},
-      toolCallsByThread: {},
-      agentStartTimes: { "thread-1": new Date("2026-01-01T00:00:00Z").getTime() },
+    resetThreadStoreForTests({
       currentThreadId: "thread-1",
+      runningThreadIds: new Set(["thread-1"]),
+      records: new Map<string, ThreadRecord>([
+        [
+          "thread-1",
+          {
+            ...createEmptyThreadRecord(),
+            messages: [],
+            loading: false,
+            agentStartTime: new Date("2026-01-01T00:00:00Z").getTime(),
+          },
+        ],
+      ]),
     });
   });
 
@@ -127,15 +133,21 @@ describe("handleAgentEvent branches", () => {
   });
 
   it("toolResult fallback does not mark an Agent call complete when it has active children", () => {
-    applyLegacyThreadStoreSeed({
-      toolCallsByThread: {
-        "thread-1": [
-          // Parent Agent call — should NOT be matched by fallback
-          { id: "agent-1", toolName: "Agent", toolInput: {}, output: null, isError: false, isComplete: false },
-          // Child call with no ID match — this result is for this child
-          { id: "child-1", toolName: "Read", toolInput: {}, output: null, isError: false, isComplete: false, parentToolCallId: "agent-1" },
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        [
+          "thread-1",
+          {
+            ...createEmptyThreadRecord(),
+            toolCalls: [
+              // Parent Agent call — should NOT be matched by fallback
+              { id: "agent-1", toolName: "Agent", toolInput: {}, output: null, isError: false, isComplete: false },
+              // Child call with no ID match — this result is for this child
+              { id: "child-1", toolName: "Read", toolInput: {}, output: null, isError: false, isComplete: false, parentToolCallId: "agent-1" },
+            ],
+          },
         ],
-      },
+      ]),
     });
 
     useThreadStore.getState().handleAgentEvent("thread-1", {
@@ -168,15 +180,20 @@ describe("session.modelFallback", () => {
       activeThreadId: "thread-1",
       workspaces: [],
     });
-    applyLegacyThreadStoreSeed({
-      messages: [],
-      runningThreadIds: new Set(["thread-1"]),
-      loading: false,
-      errorByThread: {},
-      streamingByThread: {},
-      toolCallsByThread: {},
-      agentStartTimes: { "thread-1": Date.now() },
+    resetThreadStoreForTests({
       currentThreadId: "thread-1",
+      runningThreadIds: new Set(["thread-1"]),
+      records: new Map<string, ThreadRecord>([
+        [
+          "thread-1",
+          {
+            ...createEmptyThreadRecord(),
+            messages: [],
+            loading: false,
+            agentStartTime: Date.now(),
+          },
+        ],
+      ]),
     });
     useToastStore.setState({ toasts: [] });
   });
@@ -271,17 +288,21 @@ describe("session.modelFallback", () => {
 describe("subagent count via markPriorToolCallsComplete", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    applyLegacyThreadStoreSeed({
-      messages: [],
-      runningThreadIds: new Set(["thread-1"]),
-      streamingByThread: {},
-      toolCallsByThread: {
-        "thread-1": [
-          { id: "agent-1", toolName: "Agent", toolInput: {}, output: null, isError: false, isComplete: false },
-        ],
-      },
-      agentStartTimes: {},
+    resetThreadStoreForTests({
       currentThreadId: "thread-1",
+      runningThreadIds: new Set(["thread-1"]),
+      records: new Map<string, ThreadRecord>([
+        [
+          "thread-1",
+          {
+            ...createEmptyThreadRecord(),
+            messages: [],
+            toolCalls: [
+              { id: "agent-1", toolName: "Agent", toolInput: {}, output: null, isError: false, isComplete: false },
+            ],
+          },
+        ],
+      ]),
     });
   });
 
@@ -306,14 +327,20 @@ describe("subagent count via markPriorToolCallsComplete", () => {
   });
 
   it("leaves multiple in-flight Agent calls untouched while sweeping non-Agent peers", () => {
-    applyLegacyThreadStoreSeed({
-      toolCallsByThread: {
-        "thread-1": [
-          { id: "agent-1", toolName: "Agent", toolInput: {}, output: null, isError: false, isComplete: false },
-          { id: "agent-2", toolName: "Agent", toolInput: {}, output: null, isError: false, isComplete: false },
-          { id: "read-1", toolName: "Read", toolInput: {}, output: null, isError: false, isComplete: false },
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        [
+          "thread-1",
+          {
+            ...createEmptyThreadRecord(),
+            toolCalls: [
+              { id: "agent-1", toolName: "Agent", toolInput: {}, output: null, isError: false, isComplete: false },
+              { id: "agent-2", toolName: "Agent", toolInput: {}, output: null, isError: false, isComplete: false },
+              { id: "read-1", toolName: "Read", toolInput: {}, output: null, isError: false, isComplete: false },
+            ],
+          },
         ],
-      },
+      ]),
     });
 
     useThreadStore.getState().handleAgentEvent("thread-1", {

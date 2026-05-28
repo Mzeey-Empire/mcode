@@ -1,5 +1,5 @@
 import {
-  applyLegacyThreadStoreSeed,
+  resetThreadStoreForTests,
   getTestActiveMessages,
   getTestThreadOldestLoadedSequence,
   getTestThreadHasMoreMessages,
@@ -12,7 +12,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { TurnSnapshot } from "@mcode/contracts";
 import { useThreadStore } from "@/stores/threadStore";
 import { cacheRecord, clearRecordCache, getCachedRecord } from "@/lib/thread-hydrator/record-cache";
-import { createEmptyThreadRecord } from "@/stores/thread-record";
+import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { mockTransport, createMockMessage } from "./mocks/transport";
 import type { Message } from "@/transport";
 
@@ -27,26 +27,11 @@ describe("Chat Pagination", () => {
 
   beforeEach(() => {
     clearRecordCache();
-    applyLegacyThreadStoreSeed({
-      messages: [],
-      runningThreadIds: new Set(),
-      loading: false,
-      errorByThread: {},
-      streamingByThread: {},
-      toolCallsByThread: {},
+    resetThreadStoreForTests({
       currentThreadId: threadId,
-      persistedToolCallCounts: {},
-      serverMessageIds: {},
-      currentTurnMessageIdByThread: {},
-      agentStartTimes: {},
-      settingsByThread: {},
-      oldestLoadedSequence: {},
-      hasMoreMessages: {},
-      isLoadingMore: {},
-      loadEpochByThread: {},
-      persistedFilesChanged: {},
-      latestTurnWithChanges: null,
-      answeredPlanMessageIdsByThread: {},
+      records: new Map<string, ThreadRecord>([
+        [threadId, { ...createEmptyThreadRecord() }],
+      ]),
     });
     vi.clearAllMocks();
   });
@@ -73,12 +58,16 @@ describe("Chat Pagination", () => {
       createMockMessage({ id: "m3", thread_id: threadId, sequence: 51 }),
       createMockMessage({ id: "m4", thread_id: threadId, sequence: 52 }),
     ];
-    applyLegacyThreadStoreSeed({
+    resetThreadStoreForTests({
       currentThreadId: threadId,
-      messages: initialMessages,
-      oldestLoadedSequence: { [threadId]: 51 },
-      hasMoreMessages: { [threadId]: true },
-      isLoadingMore: {},
+      records: new Map<string, ThreadRecord>([
+        [threadId, {
+          ...createEmptyThreadRecord(),
+          messages: initialMessages,
+          oldestLoadedSequence: 51,
+          hasMoreMessages: true,
+        }],
+      ]),
     });
 
     const olderMessages = [
@@ -104,11 +93,16 @@ describe("Chat Pagination", () => {
   });
 
   it("loadOlderMessages is a no-op when hasMore is false", async () => {
-    applyLegacyThreadStoreSeed({
+    resetThreadStoreForTests({
       currentThreadId: threadId,
-      messages: [createMockMessage({ id: "m1", thread_id: threadId, sequence: 1 })],
-      oldestLoadedSequence: { [threadId]: 1 },
-      hasMoreMessages: { [threadId]: false },
+      records: new Map<string, ThreadRecord>([
+        [threadId, {
+          ...createEmptyThreadRecord(),
+          messages: [createMockMessage({ id: "m1", thread_id: threadId, sequence: 1 })],
+          oldestLoadedSequence: 1,
+          hasMoreMessages: false,
+        }],
+      ]),
     });
 
     await useThreadStore.getState().loadOlderMessages(threadId);
@@ -117,12 +111,17 @@ describe("Chat Pagination", () => {
   });
 
   it("loadOlderMessages deduplicates concurrent calls", async () => {
-    applyLegacyThreadStoreSeed({
+    resetThreadStoreForTests({
       currentThreadId: threadId,
-      messages: [createMockMessage({ id: "m2", thread_id: threadId, sequence: 2 })],
-      oldestLoadedSequence: { [threadId]: 2 },
-      hasMoreMessages: { [threadId]: true },
-      isLoadingMore: { [threadId]: true },
+      records: new Map<string, ThreadRecord>([
+        [threadId, {
+          ...createEmptyThreadRecord(),
+          messages: [createMockMessage({ id: "m2", thread_id: threadId, sequence: 2 })],
+          oldestLoadedSequence: 2,
+          hasMoreMessages: true,
+          isLoadingMore: true,
+        }],
+      ]),
     });
 
     await useThreadStore.getState().loadOlderMessages(threadId);
@@ -131,11 +130,16 @@ describe("Chat Pagination", () => {
   });
 
   it("loadOlderMessages discards results for a stale thread", async () => {
-    applyLegacyThreadStoreSeed({
+    resetThreadStoreForTests({
       currentThreadId: threadId,
-      messages: [createMockMessage({ id: "m2", thread_id: threadId, sequence: 2 })],
-      oldestLoadedSequence: { [threadId]: 2 },
-      hasMoreMessages: { [threadId]: true },
+      records: new Map<string, ThreadRecord>([
+        [threadId, {
+          ...createEmptyThreadRecord(),
+          messages: [createMockMessage({ id: "m2", thread_id: threadId, sequence: 2 })],
+          oldestLoadedSequence: 2,
+          hasMoreMessages: true,
+        }],
+      ]),
     });
 
     let resolveGetMessages!: (result: { messages: Message[]; hasMore: boolean }) => void;
@@ -161,12 +165,17 @@ describe("Chat Pagination", () => {
   });
 
   it("loadOlderMessages discards results when epoch changes (A->B->A switch)", async () => {
-    applyLegacyThreadStoreSeed({
+    resetThreadStoreForTests({
       currentThreadId: threadId,
-      messages: [createMockMessage({ id: "m2", thread_id: threadId, sequence: 2 })],
-      oldestLoadedSequence: { [threadId]: 2 },
-      hasMoreMessages: { [threadId]: true },
-      loadEpochByThread: { [threadId]: 1 },
+      records: new Map<string, ThreadRecord>([
+        [threadId, {
+          ...createEmptyThreadRecord(),
+          messages: [createMockMessage({ id: "m2", thread_id: threadId, sequence: 2 })],
+          oldestLoadedSequence: 2,
+          hasMoreMessages: true,
+          loadEpoch: 1,
+        }],
+      ]),
     });
 
     let resolveGetMessages!: (result: { messages: Message[]; hasMore: boolean }) => void;
@@ -196,14 +205,18 @@ describe("Chat Pagination", () => {
     const initialMessages = [
       createMockMessage({ id: "m3", thread_id: threadId, sequence: 51 }),
     ];
-    applyLegacyThreadStoreSeed({
+    resetThreadStoreForTests({
       currentThreadId: threadId,
-      messages: initialMessages,
-      oldestLoadedSequence: { [threadId]: 51 },
-      hasMoreMessages: { [threadId]: true },
-      isLoadingMore: {},
-      persistedFilesChanged: { m3: ["kept.ts"] },
-      latestTurnWithChanges: "m3",
+      records: new Map<string, ThreadRecord>([
+        [threadId, {
+          ...createEmptyThreadRecord(),
+          messages: initialMessages,
+          oldestLoadedSequence: 51,
+          hasMoreMessages: true,
+          persistedFilesChanged: { m3: ["kept.ts"] },
+          latestTurnWithChanges: "m3",
+        }],
+      ]),
     });
     cacheRecord(threadId, {
       ...createEmptyThreadRecord(),
@@ -243,11 +256,16 @@ describe("Chat Pagination", () => {
   });
 
   it("loadOlderMessages resets isLoadingMore on network error", async () => {
-    applyLegacyThreadStoreSeed({
+    resetThreadStoreForTests({
       currentThreadId: threadId,
-      messages: [createMockMessage({ id: "m2", thread_id: threadId, sequence: 2 })],
-      oldestLoadedSequence: { [threadId]: 2 },
-      hasMoreMessages: { [threadId]: true },
+      records: new Map<string, ThreadRecord>([
+        [threadId, {
+          ...createEmptyThreadRecord(),
+          messages: [createMockMessage({ id: "m2", thread_id: threadId, sequence: 2 })],
+          oldestLoadedSequence: 2,
+          hasMoreMessages: true,
+        }],
+      ]),
     });
 
     (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockRejectedValueOnce(

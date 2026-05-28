@@ -1,5 +1,5 @@
 import {
-  applyLegacyThreadStoreSeed,
+  resetThreadStoreForTests,
   getTestThreadStreaming,
   getTestThreadThoughtSegments,
 } from "@/stores/thread-store-test-utils";
@@ -8,12 +8,7 @@ import { useThreadStore } from "@/stores/threadStore";
 
 describe("threadStore textDelta batching", () => {
   beforeEach(() => {
-    applyLegacyThreadStoreSeed({
-      streamingByThread: {},
-      streamingPreviewByThread: {},
-      toolCallsByThread: {},
-      thoughtSegmentsByThread: {},
-    });
+    resetThreadStoreForTests();
   });
 
   afterEach(() => {

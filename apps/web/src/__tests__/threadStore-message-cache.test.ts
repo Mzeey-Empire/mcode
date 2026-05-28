@@ -1,13 +1,16 @@
 import {
-  applyLegacyThreadStoreSeed,
+  resetThreadStoreForTests,
   getTestActiveMessages,
 } from "@/stores/thread-store-test-utils";
+import {
+  patchThreadRecord,
+  type ThreadRecord,
+} from "@/stores/thread-record";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { useThreadStore, TOOL_CALL_CACHE_SIZE, MESSAGE_FETCH_SIZE } from "@/stores/threadStore";
+import { useThreadStore, MESSAGE_FETCH_SIZE } from "@/stores/threadStore";
 import { getThreadRecord } from "@/stores/thread-record";
 import { clearRecordCache, getCachedRecord } from "@/lib/thread-hydrator/record-cache";
 import { mockTransport, createMockMessage } from "./mocks/transport";
-import { LruCache } from "@/lib/lru-cache";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -31,36 +34,10 @@ function resetThreadStoreTestState() {
   clearRecordCache();
   vi.clearAllMocks();
   (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockResolvedValue({ messages: fakeMessages, hasMore: false });
-  applyLegacyThreadStoreSeed({
-    messages: [],
+  resetThreadStoreForTests({
     currentThreadId: null,
     runningThreadIds: new Set<string>(),
-    loading: false,
-    errorByThread: {},
-    streamingByThread: {},
-    streamingPreviewByThread: {},
-    toolCallsByThread: {},
-    persistedToolCallCounts: {},
-    persistedFilesChanged: {},
-    latestTurnWithChanges: null,
-    serverMessageIds: {},
-    toolCallRecordCache: new LruCache(TOOL_CALL_CACHE_SIZE),
-    currentTurnMessageIdByThread: {},
-    agentStartTimes: {},
-    settingsByThread: {},
-    oldestLoadedSequence: {},
-    hasMoreMessages: {},
-    isLoadingMore: {},
-    loadEpochByThread: {},
-    contextByThread: {},
-    usageByProvider: {},
-    isCompactingByThread: {},
-    lastFallbackByThread: {},
-    planQuestionsByThread: {},
-    planAnswersByThread: {},
-    activeQuestionIndexByThread: {},
-    planQuestionsStatusByThread: {},
-    permissionsByThread: {},
+    records: new Map<string, ThreadRecord>(),
   });
 }
 
@@ -84,7 +61,10 @@ describe("loadMessages cache integration", () => {
     expect(mockTransport.getMessages).toHaveBeenCalledTimes(1);
 
     // Switch away
-    applyLegacyThreadStoreSeed({ currentThreadId: "t2", messages: [] }, { merge: true });
+    useThreadStore.setState((s) => ({
+      currentThreadId: "t2",
+      records: patchThreadRecord(s.records, "t2", { messages: [] }),
+    }));
 
     // Switch back -- should hit cache
     await useThreadStore.getState().loadMessages("t1");
@@ -98,7 +78,10 @@ describe("loadMessages cache integration", () => {
     useThreadStore.getState().cacheToolCallRecords("t1:m1", [
       { id: "tc1", name: "Read", args: {}, result: "ok", at_ms: 0 } as never,
     ]);
-    applyLegacyThreadStoreSeed({ currentThreadId: "t2", messages: [] }, { merge: true });
+    useThreadStore.setState((s) => ({
+      currentThreadId: "t2",
+      records: patchThreadRecord(s.records, "t2", { messages: [] }),
+    }));
 
     await useThreadStore.getState().loadMessages("t1");
     expect(useThreadStore.getState().getCachedToolCallRecords("t1:m1")).not.toBeNull();
@@ -106,7 +89,10 @@ describe("loadMessages cache integration", () => {
 
   it("never sets messages to [] when serving from cache (no blank flash)", async () => {
     await useThreadStore.getState().loadMessages("t1");
-    applyLegacyThreadStoreSeed({ currentThreadId: "t2", messages: [] }, { merge: true });
+    useThreadStore.setState((s) => ({
+      currentThreadId: "t2",
+      records: patchThreadRecord(s.records, "t2", { messages: [] }),
+    }));
 
     const snapshots: typeof fakeMessages[] = [];
     const unsub = useThreadStore.subscribe((s) => {

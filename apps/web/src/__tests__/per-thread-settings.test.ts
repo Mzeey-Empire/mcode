@@ -1,11 +1,9 @@
-import {
-  applyLegacyThreadStoreSeed,
-} from "@/stores/thread-store-test-utils";
+import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
+import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { useThreadStore, TOOL_CALL_CACHE_SIZE } from "@/stores/threadStore";
+import { useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { mockTransport, createMockThread } from "./mocks/transport";
-import { LruCache } from "@/lib/lru-cache";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -14,24 +12,9 @@ vi.mock("@/transport", async () => ({
 
 describe("per-thread settings", () => {
   beforeEach(() => {
-    applyLegacyThreadStoreSeed({
-      messages: [],
-      runningThreadIds: new Set(),
-      loading: false,
-      errorByThread: {},
-      streamingByThread: {},
-      toolCallsByThread: {},
+    resetThreadStoreForTests({
       currentThreadId: null,
-      persistedToolCallCounts: {},
-      serverMessageIds: {},
-      toolCallRecordCache: new LruCache(TOOL_CALL_CACHE_SIZE),
-      currentTurnMessageIdByThread: {},
-      agentStartTimes: {},
-      settingsByThread: {},
-      oldestLoadedSequence: {},
-      hasMoreMessages: {},
-      isLoadingMore: {},
-      loadEpochByThread: {},
+      runningThreadIds: new Set(),
     });
     useWorkspaceStore.setState({ threads: [] });
     vi.clearAllMocks();
@@ -102,14 +85,20 @@ describe("per-thread settings", () => {
     useWorkspaceStore.setState({ threads: [thread] });
 
     // Apply an in-memory override
-    applyLegacyThreadStoreSeed({
-      settingsByThread: {
-        "thread-override": {
-          permissionMode: "full",
-          interactionMode: "build",
-          reasoningLevel: undefined,
-        },
-      },
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        [
+          "thread-override",
+          {
+            ...createEmptyThreadRecord(),
+            settings: {
+              permissionMode: "full",
+              interactionMode: "build",
+              reasoningLevel: undefined,
+            },
+          },
+        ],
+      ]),
     });
 
     const settings = useThreadStore.getState().getThreadSettings("thread-override");

@@ -1,7 +1,8 @@
 import {
-  applyLegacyThreadStoreSeed,
+  resetThreadStoreForTests,
   getTestAgentStartTimes,
 } from "@/stores/thread-store-test-utils";
+import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 import { hydrateRunningThreadsFromServer } from "@/transport/ws-transport";
@@ -71,9 +72,8 @@ describe("hydrateRunningThreadsFromServer", () => {
 
 describe("hydrateRunningThreads (store action)", () => {
   beforeEach(() => {
-    applyLegacyThreadStoreSeed({
+    resetThreadStoreForTests({
       runningThreadIds: new Set(),
-      agentStartTimes: {},
     });
   });
 
@@ -112,9 +112,11 @@ describe("hydrateRunningThreads (store action)", () => {
   });
 
   it("seeds agentStartTimes for newly hydrated ids and preserves existing entries", () => {
-    applyLegacyThreadStoreSeed({
+    resetThreadStoreForTests({
       runningThreadIds: new Set(["t-1"]),
-      agentStartTimes: { "t-1": 100 },
+      records: new Map<string, ThreadRecord>([
+        ["t-1", { ...createEmptyThreadRecord(), agentStartTime: 100 }],
+      ]),
     });
     vi.spyOn(Date, "now").mockReturnValue(200);
 

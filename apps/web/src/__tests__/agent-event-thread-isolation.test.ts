@@ -1,5 +1,5 @@
 import {
-  applyLegacyThreadStoreSeed,
+  resetThreadStoreForTests,
   getTestActiveMessages,
   getTestActiveLatestTurnWithChanges,
   getTestThreadStreaming,
@@ -15,6 +15,7 @@ import { useThreadStore } from "@/stores/threadStore";
 import { mockTransport, createMockThread } from "./mocks/transport";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useToastStore } from "@/stores/toastStore";
+import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -32,23 +33,13 @@ describe("Agent event thread isolation", () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    applyLegacyThreadStoreSeed({
-      messages: [],
-      runningThreadIds: new Set([THREAD_A, THREAD_B]),
-      loading: false,
-      errorByThread: {},
-      streamingByThread: {},
-      streamingPreviewByThread: {},
-      toolCallsByThread: {},
-      agentStartTimes: {
-        [THREAD_A]: Date.now(),
-        [THREAD_B]: Date.now(),
-      },
+    resetThreadStoreForTests({
       currentThreadId: THREAD_A,
-      currentTurnMessageIdByThread: {},
-      isCompactingByThread: {},
-      lastFallbackByThread: {},
-      contextByThread: {},
+      runningThreadIds: new Set([THREAD_A, THREAD_B]),
+      records: new Map<string, ThreadRecord>([
+        [THREAD_A, { ...createEmptyThreadRecord(), agentStartTime: Date.now() }],
+        [THREAD_B, { ...createEmptyThreadRecord(), agentStartTime: Date.now() }],
+      ]),
     });
     useWorkspaceStore.setState({
       activeThreadId: THREAD_A,
@@ -119,8 +110,11 @@ describe("Agent event thread isolation", () => {
     });
 
     it("loadMessages clears error for the loaded thread", async () => {
-      applyLegacyThreadStoreSeed({
-        errorByThread: { [THREAD_A]: "stale error", [THREAD_B]: "other error" },
+      resetThreadStoreForTests({
+        records: new Map<string, ThreadRecord>([
+          [THREAD_A, { ...createEmptyThreadRecord(), error: "stale error" }],
+          [THREAD_B, { ...createEmptyThreadRecord(), error: "other error" }],
+        ]),
       });
       (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
         messages: [],
@@ -226,8 +220,10 @@ describe("Agent event thread isolation", () => {
     });
 
     it("turnComplete for background thread does not add message to active thread's messages", () => {
-      applyLegacyThreadStoreSeed({
-        streamingByThread: { [THREAD_B]: "background content" },
+      resetThreadStoreForTests({
+        records: new Map<string, ThreadRecord>([
+          [THREAD_B, { ...createEmptyThreadRecord(), streaming: "background content" }],
+        ]),
       });
 
       useThreadStore.getState().handleAgentEvent(THREAD_B, {
@@ -267,13 +263,31 @@ describe("Agent event thread isolation", () => {
 
   describe("clearThreadState", () => {
     it("removes all per-thread map entries for a background thread", () => {
-      applyLegacyThreadStoreSeed({
-        errorByThread: { [THREAD_A]: "kept", [THREAD_B]: "zombie" },
-        streamingByThread: { [THREAD_A]: "kept-stream", [THREAD_B]: "zombie-stream" },
-        loadEpochByThread: { [THREAD_A]: 1, [THREAD_B]: 99 },
-        planQuestionsStatusByThread: { [THREAD_A]: "idle", [THREAD_B]: "pending" },
-        runningThreadIds: new Set([THREAD_A, THREAD_B]),
+      resetThreadStoreForTests({
         currentThreadId: null,
+        runningThreadIds: new Set([THREAD_A, THREAD_B]),
+        records: new Map<string, ThreadRecord>([
+          [
+            THREAD_A,
+            {
+              ...createEmptyThreadRecord(),
+              error: "kept",
+              streaming: "kept-stream",
+              loadEpoch: 1,
+              planQuestionsStatus: "idle",
+            },
+          ],
+          [
+            THREAD_B,
+            {
+              ...createEmptyThreadRecord(),
+              error: "zombie",
+              streaming: "zombie-stream",
+              loadEpoch: 99,
+              planQuestionsStatus: "pending",
+            },
+          ],
+        ]),
       });
 
       useThreadStore.getState().clearThreadState(THREAD_B);
@@ -298,13 +312,21 @@ describe("Agent event thread isolation", () => {
     });
 
     it("clears visible-thread globals when deleting the current thread", () => {
-      applyLegacyThreadStoreSeed({
+      resetThreadStoreForTests({
         currentThreadId: THREAD_A,
-        messages: [{ id: "m1", thread_id: THREAD_A, role: "user", content: "hi", tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null, timestamp: "", sequence: 1, attachments: null }],
-        persistedToolCallCounts: { m1: 2 },
-        persistedFilesChanged: { m1: ["foo.ts"] },
-        serverMessageIds: { m1: "server-m1" },
-        latestTurnWithChanges: "m1",
+        records: new Map<string, ThreadRecord>([
+          [
+            THREAD_A,
+            {
+              ...createEmptyThreadRecord(),
+              messages: [{ id: "m1", thread_id: THREAD_A, role: "user", content: "hi", tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null, timestamp: "", sequence: 1, attachments: null }],
+              persistedToolCallCounts: { m1: 2 },
+              persistedFilesChanged: { m1: ["foo.ts"] },
+              serverMessageIds: { m1: "server-m1" },
+              latestTurnWithChanges: "m1",
+            },
+          ],
+        ]),
       });
 
       useThreadStore.getState().clearThreadState(THREAD_A);
@@ -319,10 +341,18 @@ describe("Agent event thread isolation", () => {
     });
 
     it("does not clear visible-thread globals when deleting a background thread", () => {
-      applyLegacyThreadStoreSeed({
+      resetThreadStoreForTests({
         currentThreadId: THREAD_A,
-        messages: [{ id: "m1", thread_id: THREAD_A, role: "user", content: "hi", tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null, timestamp: "", sequence: 1, attachments: null }],
-        persistedToolCallCounts: { m1: 2 },
+        records: new Map<string, ThreadRecord>([
+          [
+            THREAD_A,
+            {
+              ...createEmptyThreadRecord(),
+              messages: [{ id: "m1", thread_id: THREAD_A, role: "user", content: "hi", tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null, timestamp: "", sequence: 1, attachments: null }],
+              persistedToolCallCounts: { m1: 2 },
+            },
+          ],
+        ]),
       });
 
       useThreadStore.getState().clearThreadState(THREAD_B);

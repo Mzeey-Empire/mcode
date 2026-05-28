@@ -1,6 +1,4 @@
-import {
-  applyLegacyThreadStoreSeed,
-} from "@/stores/thread-store-test-utils";
+import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   getCachedRecord,
@@ -160,20 +158,12 @@ describe("selective cache eviction in handleAgentEvent", () => {
 
   beforeEach(() => {
     clearRecordCache();
-    applyLegacyThreadStoreSeed({
-      messages: [],
-      runningThreadIds: new Set([THREAD_ID]),
-      loading: false,
-      errorByThread: {},
-      streamingByThread: {},
-      streamingPreviewByThread: {},
-      toolCallsByThread: {},
-      agentStartTimes: { [THREAD_ID]: Date.now() },
+    resetThreadStoreForTests({
       currentThreadId: THREAD_ID,
-      currentTurnMessageIdByThread: {},
-      isCompactingByThread: {},
-      lastFallbackByThread: {},
-      contextByThread: {},
+      runningThreadIds: new Set([THREAD_ID]),
+      records: new Map<string, ThreadRecord>([
+        [THREAD_ID, { ...createEmptyThreadRecord(), agentStartTime: Date.now() }],
+      ]),
     });
   });
 

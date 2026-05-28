@@ -1,11 +1,11 @@
 import {
   resetThreadStoreForTests,
-  applyLegacyThreadStoreSeed,
   getTestActiveMessages,
   getTestThreadStreaming,
   getTestThreadStreamingPreview,
   getTestThreadToolCalls,
 } from "@/stores/thread-store-test-utils";
+import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 import { mockTransport, createMockThread } from "./mocks/transport";
@@ -74,9 +74,11 @@ describe("Agent Message Flow", () => {
 
   it("when session.ended fires, running state and streaming are cleared", () => {
     const threadId = "thread-1";
-    applyLegacyThreadStoreSeed({
+    resetThreadStoreForTests({
       runningThreadIds: new Set([threadId]),
-      streamingByThread: { [threadId]: "partial content" },
+      records: new Map<string, ThreadRecord>([
+        [threadId, { ...createEmptyThreadRecord(), streaming: "partial content" }],
+      ]),
     });
 
     useThreadStore.getState().handleAgentEvent(threadId, {
@@ -107,9 +109,11 @@ describe("Agent Message Flow", () => {
   });
 
   it("when turnComplete fires for a non-current thread, message is not added to the list", () => {
-    applyLegacyThreadStoreSeed({
+    resetThreadStoreForTests({
       currentThreadId: "thread-other",
-      streamingByThread: { "thread-1": "background response" },
+      records: new Map<string, ThreadRecord>([
+        ["thread-1", { ...createEmptyThreadRecord(), streaming: "background response" }],
+      ]),
     });
 
     useThreadStore.getState().handleAgentEvent("thread-1", {
@@ -131,16 +135,17 @@ describe("duplicate message prevention", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     useWorkspaceStore.setState({ threads: [createMockThread({ id: "thread-1" })] });
-    applyLegacyThreadStoreSeed({
-      messages: [],
-      runningThreadIds: new Set(["thread-1"]),
-      loading: false,
-      errorByThread: {},
-      streamingByThread: { "thread-1": "Hello world" },
-      streamingPreviewByThread: { "thread-1": "Hello world" },
-      toolCallsByThread: {},
-      agentStartTimes: { "thread-1": Date.now() },
+    resetThreadStoreForTests({
       currentThreadId: "thread-1",
+      runningThreadIds: new Set(["thread-1"]),
+      records: new Map<string, ThreadRecord>([
+        ["thread-1", {
+          ...createEmptyThreadRecord(),
+          streaming: "Hello world",
+          streamingPreview: "Hello world",
+          agentStartTime: Date.now(),
+        }],
+      ]),
     });
   });
 
@@ -173,23 +178,28 @@ describe("duplicate message prevention", () => {
   });
 
   it("session.message replaces trailing optimistic assistant when content matches server message", () => {
-    applyLegacyThreadStoreSeed({
+    resetThreadStoreForTests({
       currentThreadId: "thread-1",
-      messages: [
-        {
-          id: "client-provisional-id",
-          thread_id: "thread-1",
-          role: "assistant",
-          content: "Hello world",
-          tool_calls: null,
-          files_changed: null,
-          cost_usd: null,
-          tokens_used: null,
-          sequence: 1,
-          timestamp: new Date().toISOString(),
-          attachments: null,
-        },
-      ],
+      records: new Map<string, ThreadRecord>([
+        ["thread-1", {
+          ...createEmptyThreadRecord(),
+          messages: [
+            {
+              id: "client-provisional-id",
+              thread_id: "thread-1",
+              role: "assistant",
+              content: "Hello world",
+              tool_calls: null,
+              files_changed: null,
+              cost_usd: null,
+              tokens_used: null,
+              sequence: 1,
+              timestamp: new Date().toISOString(),
+              attachments: null,
+            },
+          ],
+        }],
+      ]),
     });
     const { handleAgentEvent } = useThreadStore.getState();
     handleAgentEvent("thread-1", {
@@ -228,15 +238,12 @@ describe("session.textDelta", () => {
       return 1;
     });
     useWorkspaceStore.setState({ threads: [createMockThread({ id: "thread-1" })] });
-    applyLegacyThreadStoreSeed({
-      messages: [],
-      runningThreadIds: new Set(["thread-1"]),
-      loading: false,
-      errorByThread: {},
-      streamingByThread: {},
-      toolCallsByThread: {},
-      agentStartTimes: {},
+    resetThreadStoreForTests({
       currentThreadId: "thread-1",
+      runningThreadIds: new Set(["thread-1"]),
+      records: new Map<string, ThreadRecord>([
+        ["thread-1", { ...createEmptyThreadRecord() }],
+      ]),
     });
   });
 
@@ -255,7 +262,11 @@ describe("session.textDelta", () => {
 
   it("stores full text in streamingByThread and truncated preview in streamingPreviewByThread", async () => {
     const longText = "x".repeat(250);
-    applyLegacyThreadStoreSeed({ streamingByThread: { "thread-1": longText } });
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        ["thread-1", { ...createEmptyThreadRecord(), streaming: longText }],
+      ]),
+    });
     const { handleAgentEvent } = useThreadStore.getState();
 
     handleAgentEvent("thread-1", { method: "session.textDelta", params: { delta: "end" } });
@@ -272,12 +283,15 @@ describe("session.textDelta", () => {
   });
 
   it("marks prior tool calls complete on first textDelta", async () => {
-    applyLegacyThreadStoreSeed({
-      toolCallsByThread: {
-        "thread-1": [
-          { id: "tc-1", toolName: "Read", toolInput: {}, output: null, isError: false, isComplete: false },
-        ],
-      },
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        ["thread-1", {
+          ...createEmptyThreadRecord(),
+          toolCalls: [
+            { id: "tc-1", toolName: "Read", toolInput: {}, output: null, isError: false, isComplete: false },
+          ],
+        }],
+      ]),
     });
     const { handleAgentEvent } = useThreadStore.getState();
     handleAgentEvent("thread-1", { method: "session.textDelta", params: { delta: "Hi" } });
@@ -300,19 +314,17 @@ describe("session.toolProgress", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     useWorkspaceStore.setState({ threads: [createMockThread({ id: "thread-1" })] });
-    applyLegacyThreadStoreSeed({
-      messages: [],
-      runningThreadIds: new Set(["thread-1"]),
-      loading: false,
-      errorByThread: {},
-      streamingByThread: {},
-      toolCallsByThread: {
-        "thread-1": [
-          { id: "tc1", toolName: "Bash", toolInput: {}, output: null, isError: false, isComplete: false },
-        ],
-      },
-      agentStartTimes: {},
+    resetThreadStoreForTests({
       currentThreadId: "thread-1",
+      runningThreadIds: new Set(["thread-1"]),
+      records: new Map<string, ThreadRecord>([
+        ["thread-1", {
+          ...createEmptyThreadRecord(),
+          toolCalls: [
+            { id: "tc1", toolName: "Bash", toolInput: {}, output: null, isError: false, isComplete: false },
+          ],
+        }],
+      ]),
     });
   });
 

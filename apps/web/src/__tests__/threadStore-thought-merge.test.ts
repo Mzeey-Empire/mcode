@@ -1,5 +1,5 @@
 import {
-  applyLegacyThreadStoreSeed,
+  resetThreadStoreForTests,
   getTestThreadThoughtSegments,
 } from "@/stores/thread-store-test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,12 +16,7 @@ import { useThreadStore } from "@/stores/threadStore";
  */
 describe("threadStore thought-segment coalescing", () => {
   beforeEach(() => {
-    applyLegacyThreadStoreSeed({
-      streamingByThread: {},
-      streamingPreviewByThread: {},
-      toolCallsByThread: {},
-      thoughtSegmentsByThread: {},
-    });
+    resetThreadStoreForTests();
   });
 
   afterEach(() => {

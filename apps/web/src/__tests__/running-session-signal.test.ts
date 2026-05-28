@@ -1,5 +1,5 @@
 import {
-  applyLegacyThreadStoreSeed,
+  resetThreadStoreForTests,
   getTestThreadAgentStartTime,
 } from "@/stores/thread-store-test-utils";
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -9,10 +9,9 @@ import { createMockThread } from "./mocks/transport";
 
 describe("running-session signal", () => {
   beforeEach(() => {
-    applyLegacyThreadStoreSeed({
+    resetThreadStoreForTests({
       runningThreadIds: new Set(),
       currentThreadId: null,
-      messages: [],
     });
   });
 
@@ -65,7 +64,7 @@ describe("running-session signal", () => {
 
 describe("session.turnStarted clears interrupted status", () => {
   beforeEach(() => {
-    applyLegacyThreadStoreSeed({ runningThreadIds: new Set(), currentThreadId: null, messages: [] });
+    resetThreadStoreForTests({ runningThreadIds: new Set(), currentThreadId: null });
     useWorkspaceStore.setState({
       threads: [createMockThread({ id: "t-1", status: "interrupted" })],
       activeThreadId: "t-1",

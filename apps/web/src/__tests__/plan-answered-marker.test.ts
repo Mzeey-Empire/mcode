@@ -1,9 +1,10 @@
 import {
-  applyLegacyThreadStoreSeed,
+  resetThreadStoreForTests,
   getTestThreadAnsweredPlanIds,
   getTestThreadPlanQuestions,
   getTestThreadPlanQuestionsStatus,
 } from "@/stores/thread-store-test-utils";
+import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   useThreadStore,
@@ -48,13 +49,7 @@ function msg(role: Message["role"], content: string, id: string): Message {
 
 describe("useThreadStore.markPlanAnswered", () => {
   beforeEach(() => {
-    applyLegacyThreadStoreSeed({
-      answeredPlanMessageIdsByThread: {},
-      planQuestionsByThread: {},
-      planAnswersByThread: {},
-      activeQuestionIndexByThread: {},
-      planQuestionsStatusByThread: {},
-    });
+    resetThreadStoreForTests();
   });
 
   it("appends the message id to answeredPlanMessageIdsByThread for the thread", () => {
@@ -65,8 +60,10 @@ describe("useThreadStore.markPlanAnswered", () => {
   });
 
   it("preserves previously-answered ids on the same thread", () => {
-    applyLegacyThreadStoreSeed({
-      answeredPlanMessageIdsByThread: { t1: new Set(["a0"]) },
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        ["t1", { ...createEmptyThreadRecord(), answeredPlanMessageIds: new Set(["a0"]) }],
+      ]),
     });
     useThreadStore.getState().markPlanAnswered("t1", "a1");
     const set = getTestThreadAnsweredPlanIds("t1");
@@ -75,9 +72,17 @@ describe("useThreadStore.markPlanAnswered", () => {
   });
 
   it("hides the wizard for the thread when called", () => {
-    applyLegacyThreadStoreSeed({
-      planQuestionsByThread: { t1: [{ id: "q1", category: "TEST", question: "?", options: [] }] },
-      planQuestionsStatusByThread: { t1: "pending" },
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        [
+          "t1",
+          {
+            ...createEmptyThreadRecord(),
+            planQuestions: [{ id: "q1", category: "TEST", question: "?", options: [] }],
+            planQuestionsStatus: "pending",
+          },
+        ],
+      ]),
     });
     useThreadStore.getState().markPlanAnswered("t1", "a1");
     expect(getTestThreadPlanQuestions("t1")).toBeNull();
@@ -110,22 +115,23 @@ describe("useThreadStore.markPlanAnswered", () => {
 
 describe("useThreadStore.markPlanDismissed", () => {
   beforeEach(() => {
-    applyLegacyThreadStoreSeed({
-      answeredPlanMessageIdsByThread: {},
+    resetThreadStoreForTests({
       recentlyAnsweredPlanMessageIds: new Set<string>(),
-      planQuestionsByThread: {},
-      planAnswersByThread: {},
-      activeQuestionIndexByThread: {},
-      planQuestionsStatusByThread: {},
     });
   });
 
   it("settles the batch the same way markPlanAnswered does", () => {
-    applyLegacyThreadStoreSeed({
-      planQuestionsByThread: {
-        t1: [{ id: "q1", category: "TEST", question: "?", options: [] }],
-      },
-      planQuestionsStatusByThread: { t1: "pending" },
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        [
+          "t1",
+          {
+            ...createEmptyThreadRecord(),
+            planQuestions: [{ id: "q1", category: "TEST", question: "?", options: [] }],
+            planQuestionsStatus: "pending",
+          },
+        ],
+      ]),
     });
     useThreadStore.getState().markPlanDismissed("t1", "a1");
 

@@ -1,6 +1,5 @@
-import {
-  applyLegacyThreadStoreSeed,
-} from "@/stores/thread-store-test-utils";
+import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
+import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 /**
  * Tests that loadMessages() skips the listSnapshots RPC when a thread has no
  * file changes (has_file_changes === false), and falls back to calling it when
@@ -8,11 +7,10 @@ import {
  * store (race condition during initial workspace load).
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { useThreadStore, TOOL_CALL_CACHE_SIZE, MESSAGE_FETCH_SIZE } from "@/stores/threadStore";
+import { useThreadStore, MESSAGE_FETCH_SIZE } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { clearRecordCache } from "@/lib/thread-hydrator/record-cache";
 import { mockTransport, createMockMessage, createMockThread } from "./mocks/transport";
-import { LruCache } from "@/lib/lru-cache";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -38,36 +36,9 @@ function resetState() {
   });
   (mockTransport.listSnapshots as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
-  applyLegacyThreadStoreSeed({
-    messages: [],
+  resetThreadStoreForTests({
     currentThreadId: null,
     runningThreadIds: new Set<string>(),
-    loading: false,
-    errorByThread: {},
-    streamingByThread: {},
-    streamingPreviewByThread: {},
-    toolCallsByThread: {},
-    persistedToolCallCounts: {},
-    persistedFilesChanged: {},
-    latestTurnWithChanges: null,
-    serverMessageIds: {},
-    toolCallRecordCache: new LruCache(TOOL_CALL_CACHE_SIZE),
-    currentTurnMessageIdByThread: {},
-    agentStartTimes: {},
-    settingsByThread: {},
-    oldestLoadedSequence: {},
-    hasMoreMessages: {},
-    isLoadingMore: {},
-    loadEpochByThread: {},
-    contextByThread: {},
-    usageByProvider: {},
-    isCompactingByThread: {},
-    lastFallbackByThread: {},
-    planQuestionsByThread: {},
-    planAnswersByThread: {},
-    activeQuestionIndexByThread: {},
-    planQuestionsStatusByThread: {},
-    permissionsByThread: {},
   });
 
   // Reset workspace store threads
@@ -160,9 +131,11 @@ describe("loadMessages (cache-hit) - hydration staleness gate", () => {
     });
 
     // Simulate ">2s ago" by rewinding the hydration timestamp.
-    applyLegacyThreadStoreSeed({
+    resetThreadStoreForTests({
       currentThreadId: "other-thread",
-      lastHydratedByThread: { [THREAD_ID]: Date.now() - 5000 },
+      records: new Map<string, ThreadRecord>([
+        [THREAD_ID, { ...createEmptyThreadRecord(), lastHydratedAt: Date.now() - 5000 }],
+      ]),
     });
     vi.clearAllMocks();
 

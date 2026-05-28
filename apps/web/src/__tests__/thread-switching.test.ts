@@ -1,5 +1,5 @@
 import {
-  applyLegacyThreadStoreSeed,
+  resetThreadStoreForTests,
   getTestActiveMessages,
   getTestActiveLoading,
   getTestThreadStreaming,
@@ -8,11 +8,11 @@ import {
   readThreadField,
 } from "@/stores/thread-store-test-utils";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { useThreadStore, TOOL_CALL_CACHE_SIZE } from "@/stores/threadStore";
+import { useThreadStore } from "@/stores/threadStore";
 import type { Message } from "@/transport/types";
 import { mockTransport, createMockMessage } from "./mocks/transport";
-import { LruCache } from "@/lib/lru-cache";
 import { clearRecordCache } from "@/lib/thread-hydrator/record-cache";
+import { createEmptyThreadRecord, patchThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -23,24 +23,9 @@ vi.mock("@/transport", async () => ({
 describe("Thread Switching", () => {
   beforeEach(() => {
     clearRecordCache();
-    applyLegacyThreadStoreSeed({
-      messages: [],
-      runningThreadIds: new Set(),
-      loading: false,
-      errorByThread: {},
-      streamingByThread: {},
-      toolCallsByThread: {},
+    resetThreadStoreForTests({
       currentThreadId: null,
-      persistedToolCallCounts: {},
-      serverMessageIds: {},
-      toolCallRecordCache: new LruCache(TOOL_CALL_CACHE_SIZE),
-      currentTurnMessageIdByThread: {},
-      agentStartTimes: {},
-      settingsByThread: {},
-      oldestLoadedSequence: {},
-      hasMoreMessages: {},
-      isLoadingMore: {},
-      loadEpochByThread: {},
+      runningThreadIds: new Set(),
     });
     vi.clearAllMocks();
   });
@@ -52,10 +37,18 @@ describe("Thread Switching", () => {
       thread_id: "thread-a",
       content: "Thread A message",
     });
-    applyLegacyThreadStoreSeed({
+    resetThreadStoreForTests({
       currentThreadId: "thread-a",
-      messages: [threadAMsg],
-      persistedToolCallCounts: { "a-1": 2 },
+      records: new Map<string, ThreadRecord>([
+        [
+          "thread-a",
+          {
+            ...createEmptyThreadRecord(),
+            messages: [threadAMsg],
+            persistedToolCallCounts: { "a-1": 2 },
+          },
+        ],
+      ]),
     });
 
     // Use a deferred promise so we can inspect state mid-flight
@@ -97,11 +90,19 @@ describe("Thread Switching", () => {
       thread_id: "thread-a",
       content: "Thread A message",
     });
-    applyLegacyThreadStoreSeed({
+    resetThreadStoreForTests({
       currentThreadId: "thread-a",
-      messages: [threadAMsg],
-      persistedToolCallCounts: { "a-1": 1 },
       runningThreadIds: new Set(["thread-b"]),
+      records: new Map<string, ThreadRecord>([
+        [
+          "thread-a",
+          {
+            ...createEmptyThreadRecord(),
+            messages: [threadAMsg],
+            persistedToolCallCounts: { "a-1": 1 },
+          },
+        ],
+      ]),
     });
 
     let resolveGetMessages!: (result: { messages: Message[]; hasMore: boolean }) => void;
@@ -127,15 +128,25 @@ describe("Thread Switching", () => {
 
   it("preserves per-thread keyed maps for background threads on switch", async () => {
     // Arrange: Thread A is running with streaming data
-    applyLegacyThreadStoreSeed({
+    resetThreadStoreForTests({
       currentThreadId: "thread-a",
-      messages: [
-        createMockMessage({ id: "a-1", thread_id: "thread-a", content: "hi" }),
-      ],
       runningThreadIds: new Set(["thread-a"]),
-      streamingByThread: { "thread-a": "partial response..." },
-      toolCallsByThread: { "thread-a": [{ id: "tc-1", toolName: "bash", toolInput: {}, output: null, isError: false, isComplete: false }] },
-      serverMessageIds: { "local-1": "server-1" },
+      records: new Map<string, ThreadRecord>([
+        [
+          "thread-a",
+          {
+            ...createEmptyThreadRecord(),
+            messages: [
+              createMockMessage({ id: "a-1", thread_id: "thread-a", content: "hi" }),
+            ],
+            streaming: "partial response...",
+            toolCalls: [
+              { id: "tc-1", toolName: "bash", toolInput: {}, output: null, isError: false, isComplete: false },
+            ],
+            serverMessageIds: { "local-1": "server-1" },
+          },
+        ],
+      ]),
     });
 
     (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ messages: [], hasMore: false });
@@ -158,10 +169,10 @@ describe("Thread Switching", () => {
       thread_id: "thread-b",
       content: "Thread B message",
     });
-    applyLegacyThreadStoreSeed({
+    useThreadStore.setState((s) => ({
       currentThreadId: "thread-b",
-      messages: [threadBMsg],
-    }, { merge: true });
+      records: patchThreadRecord(s.records, "thread-b", { messages: [threadBMsg] }),
+    }));
 
     // Act: sendMessage fires for Thread A (e.g. dequeue timer)
     await useThreadStore.getState().sendMessage(

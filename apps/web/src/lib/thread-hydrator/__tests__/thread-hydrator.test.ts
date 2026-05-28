@@ -1,5 +1,5 @@
 import {
-  applyLegacyThreadStoreSeed,
+  resetThreadStoreForTests,
   getTestActiveMessages,
   getTestThreadStreaming,
   getTestThreadToolCalls,
@@ -20,7 +20,7 @@ import {
   cacheRecord,
   getCachedRecord,
 } from "@/lib/thread-hydrator/record-cache";
-import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
+import { createEmptyThreadRecord, patchThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import {
   createThreadHydrator,
   HYDRATION_TTL_MS,
@@ -104,46 +104,10 @@ function resetStores() {
   useTaskStore.setState({ tasksByThread: {} });
   usePlanStore.setState({ plansByThread: {} });
 
-  applyLegacyThreadStoreSeed({
-    messages: [],
+  resetThreadStoreForTests({
     currentThreadId: null,
     runningThreadIds: new Set<string>(),
-    loading: false,
-    errorByThread: {},
-    streamingByThread: {},
-    streamingPreviewByThread: {},
-    toolCallsByThread: {},
-    persistedToolCallCounts: {},
-    persistedFilesChanged: {},
-    latestTurnWithChanges: null,
-    serverMessageIds: {},
-    currentTurnMessageIdByThread: {},
-    agentStartTimes: {},
-    settingsByThread: {},
-    oldestLoadedSequence: {},
-    hasMoreMessages: {},
-    isLoadingMore: {},
-    loadEpochByThread: {},
-    contextByThread: {},
-    usageByProvider: {},
-    isCompactingByThread: {},
-    lastFallbackByThread: {},
-    planQuestionsByThread: {},
-    planAnswersByThread: {},
-    activeQuestionIndexByThread: {},
-    planQuestionsStatusByThread: {},
-    answeredPlanMessageIdsByThread: {},
     recentlyAnsweredPlanMessageIds: new Set<string>(),
-    permissionsByThread: {},
-    hooksByThread: {},
-    thoughtSegmentsByThread: {},
-    narrativeByMessage: {},
-    awaitingUserStopPersistByThread: {},
-    interruptStopFileNoticeByThread: {},
-    composerRecallFromStopByThread: {},
-    lastHydratedByThread: {},
-    handoffMeta: {},
-    forkMode: {},
   });
 }
 
@@ -184,7 +148,10 @@ describe("ThreadHydrator", () => {
     });
     vi.clearAllMocks();
 
-    applyLegacyThreadStoreSeed({ currentThreadId: THREAD_B, messages: [] }, { merge: true });
+    useThreadStore.setState((s) => ({
+      currentThreadId: THREAD_B,
+      records: patchThreadRecord(s.records, THREAD_B, { messages: [] }),
+    }));
     await hydrator.hydrate(THREAD_A, "active");
     await new Promise((r) => setTimeout(r, 20));
 
@@ -194,10 +161,12 @@ describe("ThreadHydrator", () => {
 
   it("re-fans out auxiliary data once the TTL window elapses", async () => {
     await hydrator.hydrate(THREAD_A, "active");
-    applyLegacyThreadStoreSeed({
+    useThreadStore.setState((s) => ({
       currentThreadId: THREAD_B,
-      lastHydratedByThread: { [THREAD_A]: Date.now() - HYDRATION_TTL_MS - 100 },
-    }, { merge: true });
+      records: patchThreadRecord(s.records, THREAD_A, {
+        lastHydratedAt: Date.now() - HYDRATION_TTL_MS - 100,
+      }),
+    }));
     vi.clearAllMocks();
 
     await hydrator.hydrate(THREAD_A, "active");
@@ -207,12 +176,20 @@ describe("ThreadHydrator", () => {
   });
 
   it("preserves volatile state for a running thread on cache miss", async () => {
-    applyLegacyThreadStoreSeed({
+    resetThreadStoreForTests({
       runningThreadIds: new Set([THREAD_A]),
-      streamingByThread: { [THREAD_A]: "partial..." },
-      toolCallsByThread: {
-        [THREAD_A]: [{ id: "tc1", toolName: "bash", toolInput: {}, output: null, isError: false, isComplete: false }],
-      },
+      records: new Map<string, ThreadRecord>([
+        [
+          THREAD_A,
+          {
+            ...createEmptyThreadRecord(),
+            streaming: "partial...",
+            toolCalls: [
+              { id: "tc1", toolName: "bash", toolInput: {}, output: null, isError: false, isComplete: false },
+            ],
+          },
+        ],
+      ]),
     });
 
     await hydrator.hydrate(THREAD_A, "active");
@@ -248,9 +225,11 @@ describe("ThreadHydrator", () => {
   });
 
   it("background mode populates cache without touching the live store", async () => {
-    applyLegacyThreadStoreSeed({
+    resetThreadStoreForTests({
       currentThreadId: THREAD_B,
-      messages: [msgB],
+      records: new Map<string, ThreadRecord>([
+        [THREAD_B, { ...createEmptyThreadRecord(), messages: [msgB] }],
+      ]),
     });
 
     await hydrator.hydrate(THREAD_A, "background");
@@ -283,11 +262,19 @@ describe("ThreadHydrator", () => {
   });
 
   it("bumps load epoch on each hydrate so stale pagination is discarded", async () => {
-    applyLegacyThreadStoreSeed({
-      loadEpochByThread: { [THREAD_A]: 3 },
-      hasMoreMessages: { [THREAD_A]: true },
-      oldestLoadedSequence: { [THREAD_A]: 10 },
-      isLoadingMore: { [THREAD_A]: true },
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        [
+          THREAD_A,
+          {
+            ...createEmptyThreadRecord(),
+            loadEpoch: 3,
+            hasMoreMessages: true,
+            oldestLoadedSequence: 10,
+            isLoadingMore: true,
+          },
+        ],
+      ]),
     });
 
     await hydrator.hydrate(THREAD_A, "active");

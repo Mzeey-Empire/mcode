@@ -1,8 +1,9 @@
 import {
-  applyLegacyThreadStoreSeed,
+  resetThreadStoreForTests,
   getTestThreadStreaming,
   getTestThreadThoughtSegments,
 } from "@/stores/thread-store-test-utils";
+import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 
@@ -13,12 +14,7 @@ import { useThreadStore } from "@/stores/threadStore";
  */
 describe("threadStore assistantMessageBoundary", () => {
   beforeEach(() => {
-    applyLegacyThreadStoreSeed({
-      streamingByThread: {},
-      streamingPreviewByThread: {},
-      toolCallsByThread: {},
-      thoughtSegmentsByThread: {},
-    });
+    resetThreadStoreForTests();
   });
 
   afterEach(() => {
@@ -99,10 +95,16 @@ describe("threadStore assistantMessageBoundary", () => {
 
     const tid = "thread-closed";
     // Seed a closed thought segment directly.
-    applyLegacyThreadStoreSeed({
-      thoughtSegmentsByThread: {
-        [tid]: [{ text: "old thought", startedAt: 1, endedAt: 2 }],
-      },
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        [
+          tid,
+          {
+            ...createEmptyThreadRecord(),
+            thoughtSegments: [{ text: "old thought", startedAt: 1, endedAt: 2 }],
+          },
+        ],
+      ]),
     });
 
     useThreadStore.getState().handleAgentEvent(tid, {
