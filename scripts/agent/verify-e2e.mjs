@@ -54,6 +54,10 @@ if (devServerUp) {
   console.log(`=== Dev server detected at ${BASE_URL}, reusing ===`);
   env.PLAYWRIGHT_REUSE_WEB_SERVER = "1";
 } else {
+  // Explicitly clear in case the caller's shell exported it: an inherited
+  // truthy value plus no server listening would make Playwright skip its
+  // own boot and every spec would fail with ECONNREFUSED.
+  delete env.PLAYWRIGHT_REUSE_WEB_SERVER;
   console.log(`=== No dev server at ${BASE_URL}, Playwright will boot one ===`);
 }
 
