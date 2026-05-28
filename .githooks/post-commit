@@ -1,6 +1,8 @@
 #!/bin/sh
-# --- chained-to-global-hooks ---
-GLOBAL_HOOK="$HOME/.git-hooks/post-commit"
-if [ -x "$GLOBAL_HOOK" ]; then
-    "$GLOBAL_HOOK" "$@"
-fi
+# Repo-local post-commit hook.
+#
+# The global hook at ~/.git-hooks/post-commit already chains here
+# via chain_repo_hook(). Do NOT call back to the global hook from this
+# file — that creates infinite recursion (SHLVL spirals to 1000).
+#
+# Add any repo-specific post-commit logic below this comment.
