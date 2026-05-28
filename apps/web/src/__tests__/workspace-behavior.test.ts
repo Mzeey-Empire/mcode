@@ -1,3 +1,9 @@
+import {
+  resetThreadStoreForTests,
+  getTestThreadError,
+  hasTestThreadRecord,
+} from "@/stores/thread-store-test-utils";
+import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useWorkspaceStore, __resetThreadListMutationEpochForTests, __clearPendingThreadCreationsForTests } from "@/stores/workspaceStore";
 import { useThreadStore } from "@/stores/threadStore";
@@ -315,23 +321,27 @@ describe("Workspace Behavior", () => {
       });
 
       // Seed per-thread maps so we can verify they get pruned.
-      useThreadStore.setState({
-        runningThreadIds: new Set(["t-del"]),
-        errorByThread: { "t-del": "some error" },
-        streamingByThread: { "t-del": "some text" },
-        toolCallsByThread: { "t-del": [] },
-        agentStartTimes: { "t-del": Date.now() },
+      resetThreadStoreForTests({
         currentThreadId: null,
+        runningThreadIds: new Set(["t-del"]),
+        records: new Map<string, ThreadRecord>([
+          [
+            "t-del",
+            {
+              ...createEmptyThreadRecord(),
+              error: "some error",
+              streaming: "some text",
+              agentStartTime: Date.now(),
+            },
+          ],
+        ]),
       });
 
       await useWorkspaceStore.getState().deleteThread("t-del", false);
 
       const ts = useThreadStore.getState();
       expect(ts.runningThreadIds.has("t-del")).toBe(false);
-      expect(ts.errorByThread["t-del"]).toBeUndefined();
-      expect(ts.streamingByThread["t-del"]).toBeUndefined();
-      expect(ts.toolCallsByThread["t-del"]).toBeUndefined();
-      expect(ts.agentStartTimes["t-del"]).toBeUndefined();
+      expect(hasTestThreadRecord("t-del")).toBe(false);
     });
 
     it("preserves per-thread maps for other threads when deleting one", async () => {
@@ -346,20 +356,23 @@ describe("Workspace Behavior", () => {
         activeThreadId: null,
       });
 
-      useThreadStore.setState({
-        runningThreadIds: new Set(["t-keep", "t-del"]),
-        errorByThread: { "t-keep": "keep error", "t-del": "del error" },
+      resetThreadStoreForTests({
         currentThreadId: null,
+        runningThreadIds: new Set(["t-keep", "t-del"]),
+        records: new Map<string, ThreadRecord>([
+          ["t-keep", { ...createEmptyThreadRecord(), error: "keep error" }],
+          ["t-del", { ...createEmptyThreadRecord(), error: "del error" }],
+        ]),
       });
 
       await useWorkspaceStore.getState().deleteThread("t-del", false);
 
       const ts = useThreadStore.getState();
       // Deleted thread is gone.
-      expect(ts.errorByThread["t-del"]).toBeUndefined();
+      expect(hasTestThreadRecord("t-del")).toBe(false);
       expect(ts.runningThreadIds.has("t-del")).toBe(false);
       // Other thread is preserved.
-      expect(ts.errorByThread["t-keep"]).toBe("keep error");
+      expect(getTestThreadError("t-keep")).toBe("keep error");
       expect(ts.runningThreadIds.has("t-keep")).toBe(true);
     });
 
@@ -375,11 +388,13 @@ describe("Workspace Behavior", () => {
         activeThreadId: null,
       });
 
-      useThreadStore.setState({
-        runningThreadIds: new Set(["t-1", "t-2"]),
-        errorByThread: { "t-1": "err-1", "t-2": "err-2" },
-        streamingByThread: { "t-1": "text-1", "t-2": "text-2" },
+      resetThreadStoreForTests({
         currentThreadId: null,
+        runningThreadIds: new Set(["t-1", "t-2"]),
+        records: new Map<string, ThreadRecord>([
+          ["t-1", { ...createEmptyThreadRecord(), error: "err-1", streaming: "text-1" }],
+          ["t-2", { ...createEmptyThreadRecord(), error: "err-2", streaming: "text-2" }],
+        ]),
       });
 
       await useWorkspaceStore.getState().deleteWorkspace("ws-del");
@@ -387,10 +402,8 @@ describe("Workspace Behavior", () => {
       const ts = useThreadStore.getState();
       expect(ts.runningThreadIds.has("t-1")).toBe(false);
       expect(ts.runningThreadIds.has("t-2")).toBe(false);
-      expect(ts.errorByThread["t-1"]).toBeUndefined();
-      expect(ts.errorByThread["t-2"]).toBeUndefined();
-      expect(ts.streamingByThread["t-1"]).toBeUndefined();
-      expect(ts.streamingByThread["t-2"]).toBeUndefined();
+      expect(hasTestThreadRecord("t-1")).toBe(false);
+      expect(hasTestThreadRecord("t-2")).toBe(false);
     });
   });
 

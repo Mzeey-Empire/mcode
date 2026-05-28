@@ -10,7 +10,7 @@ import { ProjectSelectorLanding } from "@/components/projects/ProjectSelectorLan
 import { SidebarRevealButton } from "@/components/sidebar/SidebarRevealButton";
 import { ShortcutHelpDialog } from "@/components/ShortcutHelpDialog";
 import { useSettingsStore } from "@/stores/settingsStore";
-import { resizeMessageCache } from "@/stores/messageCache";
+import { resizeRecordCache } from "@/lib/thread-hydrator/record-cache";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useDiffStore } from "@/stores/diffStore";
@@ -73,10 +73,10 @@ export function App() {
     return () => stopPushListeners();
   }, []);
 
-  // Mirror the user-controlled message-cache capacity into the runtime cache.
+  // Mirror the user-controlled record-cache capacity (threadCacheSize) into the runtime cache.
   // Runs on every settings change; LruCache.resize is a no-op when capacity is unchanged.
   useEffect(() => {
-    resizeMessageCache(threadCacheSize);
+    resizeRecordCache(threadCacheSize);
   }, [threadCacheSize]);
 
   // Hydrate app version + auto-updater status from the Electron preload bridge.

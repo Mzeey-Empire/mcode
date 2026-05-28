@@ -1,3 +1,7 @@
+import {
+  resetThreadStoreForTests,
+  getTestThreadThoughtSegments,
+} from "@/stores/thread-store-test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useThreadStore } from "@/stores/threadStore";
 
@@ -12,12 +16,7 @@ import { useThreadStore } from "@/stores/threadStore";
  */
 describe("threadStore thought-segment coalescing", () => {
   beforeEach(() => {
-    useThreadStore.setState({
-      streamingByThread: {},
-      streamingPreviewByThread: {},
-      toolCallsByThread: {},
-      thoughtSegmentsByThread: {},
-    });
+    resetThreadStoreForTests();
   });
 
   afterEach(() => {
@@ -60,7 +59,7 @@ describe("threadStore thought-segment coalescing", () => {
     });
     flush(queue);
 
-    const segs = useThreadStore.getState().thoughtSegmentsByThread[tid] ?? [];
+    const segs = getTestThreadThoughtSegments(tid) ?? [];
     expect(segs.length).toBe(1);
     expect(segs[0]!.text).toBe("the changed set");
     expect(segs[0]!.endedAt).toBeUndefined();
@@ -89,7 +88,7 @@ describe("threadStore thought-segment coalescing", () => {
     });
     flush(queue);
 
-    const segs = useThreadStore.getState().thoughtSegmentsByThread[tid] ?? [];
+    const segs = getTestThreadThoughtSegments(tid) ?? [];
     expect(segs.length).toBe(2);
     expect(segs[0]!.text).toBe(long);
     expect(segs[1]!.text).toBe("Now I have the result.");
@@ -117,7 +116,7 @@ describe("threadStore thought-segment coalescing", () => {
     });
     flush(queue);
 
-    const segs = useThreadStore.getState().thoughtSegmentsByThread[tid] ?? [];
+    const segs = getTestThreadThoughtSegments(tid) ?? [];
     expect(segs.length).toBe(1);
     expect(segs[0]!.text.endsWith("worktree delta.")).toBe(true);
   });

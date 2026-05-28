@@ -1,3 +1,8 @@
+import {
+  resetThreadStoreForTests,
+  getTestThreadPermissions,
+} from "@/stores/thread-store-test-utils";
+import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 /**
  * Tests for the equality guards added to loadMessages() that prevent
  * redundant set() calls when listPendingPermissions and getThreadTasks
@@ -7,12 +12,11 @@
  * (post-getMessages hydration) are exercised.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { useThreadStore, TOOL_CALL_CACHE_SIZE } from "@/stores/threadStore";
+import { useThreadStore } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useTaskStore } from "@/stores/taskStore";
-import { clearMessageCache, getCachedSnapshot } from "@/stores/messageCache";
+import { clearRecordCache, getCachedRecord } from "@/lib/thread-hydrator/record-cache";
 import { mockTransport, createMockMessage } from "./mocks/transport";
-import { LruCache } from "@/lib/lru-cache";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -34,7 +38,7 @@ const fakePermission = {
 
 /** Reset all relevant stores and mocks to a clean baseline. */
 function resetState() {
-  clearMessageCache();
+  clearRecordCache();
   vi.clearAllMocks();
 
   (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -45,40 +49,10 @@ function resetState() {
   (mockTransport.listPendingPermissions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   (mockTransport.getThreadTasks as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
-  useThreadStore.setState({
-    messages: [],
-    currentThreadId: null,
-    runningThreadIds: new Set<string>(),
-    loading: false,
-    errorByThread: {},
-    streamingByThread: {},
-    streamingPreviewByThread: {},
-    toolCallsByThread: {},
-    persistedToolCallCounts: {},
-    persistedFilesChanged: {},
-    latestTurnWithChanges: null,
-    serverMessageIds: {},
-    toolCallRecordCache: new LruCache(TOOL_CALL_CACHE_SIZE),
-    currentTurnMessageIdByThread: {},
-    agentStartTimes: {},
-    settingsByThread: {},
-    oldestLoadedSequence: {},
-    hasMoreMessages: {},
-    isLoadingMore: {},
-    loadEpochByThread: {},
-    contextByThread: {},
-    usageByProvider: {},
-    isCompactingByThread: {},
-    lastFallbackByThread: {},
-    planQuestionsByThread: {},
-    planAnswersByThread: {},
-    activeQuestionIndexByThread: {},
-    planQuestionsStatusByThread: {},
-    permissionsByThread: {},
-  });
+  resetThreadStoreForTests();
 
   // Pre-populate workspace with a thread record that has no file changes so that
-  // loadMessages takes the synchronous cacheSnapshot path instead of the async
+  // loadMessages takes the synchronous cacheRecord path instead of the async
   // listSnapshots path. This is critical for warmCache() to work correctly.
   useWorkspaceStore.setState({
     threads: [
@@ -132,8 +106,10 @@ describe("loadMessages (cache-miss) - listPendingPermissions equality guard", ()
   it("does NOT update permissionsByThread when resolved permissions match existing store values", async () => {
     // Pre-populate store with the same permission that the RPC will return.
     const existingPerms = [{ ...fakePermission, settled: false }];
-    useThreadStore.setState({
-      permissionsByThread: { [THREAD_ID]: existingPerms },
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        [THREAD_ID, { ...createEmptyThreadRecord(), permissions: existingPerms }],
+      ]),
     });
 
     (mockTransport.listPendingPermissions as ReturnType<typeof vi.fn>).mockResolvedValue([
@@ -141,7 +117,7 @@ describe("loadMessages (cache-miss) - listPendingPermissions equality guard", ()
     ]);
 
     // Capture reference before load.
-    const refBefore = useThreadStore.getState().permissionsByThread[THREAD_ID];
+    const refBefore = getTestThreadPermissions(THREAD_ID);
 
     await useThreadStore.getState().loadMessages(THREAD_ID);
 
@@ -153,7 +129,7 @@ describe("loadMessages (cache-miss) - listPendingPermissions equality guard", ()
     // Allow the then() callback to flush.
     await Promise.resolve();
 
-    const refAfter = useThreadStore.getState().permissionsByThread[THREAD_ID];
+    const refAfter = getTestThreadPermissions(THREAD_ID);
 
     // Same reference means set() was NOT called with a new array.
     expect(refAfter).toBe(refBefore);
@@ -161,10 +137,13 @@ describe("loadMessages (cache-miss) - listPendingPermissions equality guard", ()
 
   it("DOES update permissionsByThread when resolved permissions differ from existing store values", async () => {
     // Pre-populate store with a different requestId.
-    useThreadStore.setState({
-      permissionsByThread: {
-        [THREAD_ID]: [{ requestId: "old-req", toolName: "bash", input: {}, threadId: THREAD_ID, settled: false }],
-      },
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        [THREAD_ID, {
+          ...createEmptyThreadRecord(),
+          permissions: [{ requestId: "old-req", toolName: "bash", input: {}, threadId: THREAD_ID, settled: false }],
+        }],
+      ]),
     });
 
     (mockTransport.listPendingPermissions as ReturnType<typeof vi.fn>).mockResolvedValue([
@@ -179,7 +158,7 @@ describe("loadMessages (cache-miss) - listPendingPermissions equality guard", ()
 
     await Promise.resolve();
 
-    const permsAfter = useThreadStore.getState().permissionsByThread[THREAD_ID];
+    const permsAfter = getTestThreadPermissions(THREAD_ID);
 
     expect(permsAfter).toHaveLength(1);
     expect(permsAfter![0].requestId).toBe("req-1");
@@ -259,7 +238,7 @@ describe("loadMessages (cache-hit) - listPendingPermissions equality guard", () 
    * will cause a cache-hit when we switch back.
    *
    * The workspace thread record has has_file_changes=false (set in resetState),
-   * so loadMessages takes the synchronous cacheSnapshot path, guaranteeing
+   * so loadMessages takes the synchronous cacheRecord path, guaranteeing
    * the cache is populated before we switch threads.
    */
   async function warmCache() {
@@ -267,13 +246,13 @@ describe("loadMessages (cache-hit) - listPendingPermissions equality guard", () 
     await useThreadStore.getState().loadMessages(THREAD_ID);
     // Wait until the cache entry is actually written.
     await vi.waitFor(() => {
-      expect(getCachedSnapshot(THREAD_ID)).toBeDefined();
+      expect(getCachedRecord(THREAD_ID)).toBeDefined();
     });
     // Switch away so that the next call to loadMessages(THREAD_ID) hits the cache.
     // Clear `lastHydratedByThread` so the cache-hit staleness gate does not skip
     // the side-effect refresh under test - these tests exercise the equality
     // guards inside the RPC handlers, not the gate itself.
-    useThreadStore.setState({ currentThreadId: "other-thread", lastHydratedByThread: {} });
+    resetThreadStoreForTests({ currentThreadId: "other-thread" });
     vi.clearAllMocks();
     // Re-set mock defaults so the cache-hit refresh calls are controlled.
     (mockTransport.listSnapshots as ReturnType<typeof vi.fn>).mockResolvedValue([]);
@@ -284,15 +263,17 @@ describe("loadMessages (cache-hit) - listPendingPermissions equality guard", () 
 
     // Pre-populate store with matching permissions.
     const existingPerms = [{ ...fakePermission, settled: false }];
-    useThreadStore.setState({
-      permissionsByThread: { [THREAD_ID]: existingPerms },
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        [THREAD_ID, { ...createEmptyThreadRecord(), permissions: existingPerms }],
+      ]),
     });
 
     (mockTransport.listPendingPermissions as ReturnType<typeof vi.fn>).mockResolvedValue([
       fakePermission,
     ]);
 
-    const refBefore = useThreadStore.getState().permissionsByThread[THREAD_ID];
+    const refBefore = getTestThreadPermissions(THREAD_ID);
 
     // This load should be a cache-hit (getMessages NOT called).
     await useThreadStore.getState().loadMessages(THREAD_ID);
@@ -305,17 +286,20 @@ describe("loadMessages (cache-hit) - listPendingPermissions equality guard", () 
 
     expect(mockTransport.getMessages).not.toHaveBeenCalled();
 
-    const refAfter = useThreadStore.getState().permissionsByThread[THREAD_ID];
+    const refAfter = getTestThreadPermissions(THREAD_ID);
     expect(refAfter).toBe(refBefore);
   });
 
   it("DOES update permissionsByThread on cache-hit when data has changed", async () => {
     await warmCache();
 
-    useThreadStore.setState({
-      permissionsByThread: {
-        [THREAD_ID]: [{ requestId: "stale-req", toolName: "bash", input: {}, threadId: THREAD_ID, settled: false }],
-      },
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        [THREAD_ID, {
+          ...createEmptyThreadRecord(),
+          permissions: [{ requestId: "stale-req", toolName: "bash", input: {}, threadId: THREAD_ID, settled: false }],
+        }],
+      ]),
     });
 
     (mockTransport.listPendingPermissions as ReturnType<typeof vi.fn>).mockResolvedValue([
@@ -330,7 +314,7 @@ describe("loadMessages (cache-hit) - listPendingPermissions equality guard", () 
 
     await Promise.resolve();
 
-    const permsAfter = useThreadStore.getState().permissionsByThread[THREAD_ID];
+    const permsAfter = getTestThreadPermissions(THREAD_ID);
     expect(permsAfter).toHaveLength(1);
     expect(permsAfter![0].requestId).toBe("req-1");
   });
@@ -345,10 +329,10 @@ describe("loadMessages (cache-hit) - getThreadTasks equality guard", () => {
   async function warmCache() {
     await useThreadStore.getState().loadMessages(THREAD_ID);
     await vi.waitFor(() => {
-      expect(getCachedSnapshot(THREAD_ID)).toBeDefined();
+      expect(getCachedRecord(THREAD_ID)).toBeDefined();
     });
     // See note in the sibling warmCache about clearing `lastHydratedByThread`.
-    useThreadStore.setState({ currentThreadId: "other-thread", lastHydratedByThread: {} });
+    resetThreadStoreForTests({ currentThreadId: "other-thread" });
     vi.clearAllMocks();
     (mockTransport.listSnapshots as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   }

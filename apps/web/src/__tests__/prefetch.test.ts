@@ -1,18 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
-  getCachedSnapshot,
-  cacheSnapshot,
-  clearMessageCache,
-  type MessageCacheSnapshot,
-} from "@/stores/messageCache";
+  getCachedRecord,
+  cacheRecord,
+  clearRecordCache,
+} from "@/lib/thread-hydrator/record-cache";
+import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { mockTransport, createMockMessage } from "./mocks/transport";
 
 vi.mock("@/transport", () => ({
   getTransport: () => mockTransport,
 }));
 
-function makeSnapshot(id: string): MessageCacheSnapshot {
+function makeRecord(id: string): ThreadRecord {
   return {
+    ...createEmptyThreadRecord(),
     messages: [
       createMockMessage({
         id: `${id}-msg-1`,
@@ -21,22 +22,17 @@ function makeSnapshot(id: string): MessageCacheSnapshot {
       }),
     ],
     oldestLoadedSequence: 1,
-    hasMoreMessages: false,
-    persistedToolCallCounts: {},
-    persistedFilesChanged: {},
-    latestTurnWithChanges: null,
-    answeredPlanMessageIds: [],
   };
 }
 
 describe("prefetch", () => {
-  let schedulePrefetch: typeof import("@/lib/prefetch").schedulePrefetch;
-  let cancelPrefetch: typeof import("@/lib/prefetch").cancelPrefetch;
-  let resetPrefetch: typeof import("@/lib/prefetch").__resetPrefetchForTests;
+  let schedulePrefetch: typeof import("@/lib/thread-hydrator/prefetch-scheduler").schedulePrefetch;
+  let cancelPrefetch: typeof import("@/lib/thread-hydrator/prefetch-scheduler").cancelPrefetch;
+  let resetPrefetch: typeof import("@/lib/thread-hydrator/prefetch-scheduler").__resetPrefetchForTests;
 
   beforeEach(async () => {
     vi.useFakeTimers();
-    clearMessageCache();
+    clearRecordCache();
     vi.mocked(mockTransport.getMessages).mockReset();
     vi.mocked(mockTransport.getMessages).mockResolvedValue({
       messages: [
@@ -45,8 +41,11 @@ describe("prefetch", () => {
       hasMore: false,
     });
 
+    // Ensure threadStore registers the hydrator before prefetch runs.
+    await import("@/stores/threadStore");
+
     // Dynamic import to get fresh module state after mocks are set up
-    const mod = await import("@/lib/prefetch");
+    const mod = await import("@/lib/thread-hydrator/prefetch-scheduler");
     schedulePrefetch = mod.schedulePrefetch;
     cancelPrefetch = mod.cancelPrefetch;
     resetPrefetch = mod.__resetPrefetchForTests;
@@ -69,7 +68,7 @@ describe("prefetch", () => {
 
     // Let the async prefetch settle
     await vi.runAllTimersAsync();
-    expect(getCachedSnapshot("t1")).toBeDefined();
+    expect(getCachedRecord("t1")).toBeDefined();
   });
 
   it("cancel stops a pending prefetch", () => {
@@ -81,7 +80,7 @@ describe("prefetch", () => {
   });
 
   it("skips threads that are already cached", () => {
-    cacheSnapshot("t1", makeSnapshot("t1"));
+    cacheRecord("t1", makeRecord("t1"));
 
     schedulePrefetch("t1");
     vi.advanceTimersByTime(150);
@@ -127,7 +126,7 @@ describe("prefetch", () => {
     await vi.runAllTimersAsync();
 
     // Cache should remain empty
-    expect(getCachedSnapshot("t1")).toBeUndefined();
+    expect(getCachedRecord("t1")).toBeUndefined();
   });
 
   it("debounces rapid successive calls", () => {

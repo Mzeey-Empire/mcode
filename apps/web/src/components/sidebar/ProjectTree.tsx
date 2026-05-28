@@ -30,7 +30,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { relativeTime } from "@/lib/time";
-import { schedulePrefetch, cancelPrefetch } from "@/lib/prefetch";
+import { schedulePrefetch, cancelPrefetch } from "@/lib/thread-hydrator/prefetch-scheduler";
 import { getStatusDisplay, getNotificationDot } from "@/lib/thread-status";
 import { getBreakdown, getCiVisual, CI_ICON_STROKE } from "@/lib/ci-status";
 import type { ChecksStatus } from "@mcode/contracts";
@@ -282,8 +282,8 @@ export function ProjectTree() {
   const pendingPermissionIds = useThreadStore(
     useShallow((s) => {
       const ids: string[] = [];
-      for (const [id, perms] of Object.entries(s.permissionsByThread ?? {})) {
-        if (perms.some((p) => !p.settled)) ids.push(id);
+      for (const [id, rec] of s.records) {
+        if (rec.permissions.some((p) => !p.settled)) ids.push(id);
       }
       return ids;
     }),

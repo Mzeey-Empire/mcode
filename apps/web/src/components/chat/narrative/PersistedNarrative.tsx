@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useThreadStore } from "@/stores/threadStore";
+import { useActiveThreadRecord } from "@/stores/thread-selectors";
 import type { NarrativeItem } from "./types";
 import type { ToolCall } from "@/transport/types";
 import { ThoughtBlock } from "./ThoughtBlock";
@@ -98,7 +99,7 @@ function renderItem(item: NarrativeItem, allToolCalls: readonly ToolCall[]): Rea
  *     visual treatment (no pulse, no primary tint)
  */
 export function PersistedNarrative({ messageId, messageContent }: PersistedNarrativeProps) {
-  const records = useThreadStore((s) => s.narrativeByMessage[messageId]);
+  const records = useActiveThreadRecord((r) => r.narrativeByMessage[messageId]);
   const load = useThreadStore((s) => s.loadNarrativeForMessage);
   const triggered = useRef(false);
 

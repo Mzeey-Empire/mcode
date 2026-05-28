@@ -5,6 +5,7 @@ import { getTransport } from "@/transport";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
 import { useDiffStore } from "@/stores/diffStore";
 import { useThreadStore } from "@/stores/threadStore";
+import { getThreadRecord, patchThreadRecord } from "@/stores/thread-record";
 import { useTerminalStore } from "@/stores/terminalStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
@@ -196,7 +197,7 @@ export function startPushListeners(): void {
         status === "paused" || status === "interrupted" || status === "errored";
       if (!isTerminal) return;
       useThreadStore.setState((state) => {
-        const calls = state.toolCallsByThread[threadId];
+        const calls = getThreadRecord(state.records, threadId).toolCalls;
         if (!calls || calls.length === 0) return state;
         let mutated = false;
         const next = calls.map((tc) => {
@@ -211,7 +212,7 @@ export function startPushListeners(): void {
         });
         if (!mutated) return state;
         return {
-          toolCallsByThread: { ...state.toolCallsByThread, [threadId]: next },
+          records: patchThreadRecord(state.records, threadId, { toolCalls: next }),
         };
       });
     }),

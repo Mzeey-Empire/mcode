@@ -1,10 +1,9 @@
+import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlanRecord } from "@mcode/contracts";
 import { usePlanStore } from "@/stores/planStore";
-import { useThreadStore, TOOL_CALL_CACHE_SIZE } from "@/stores/threadStore";
 import { useWorkspaceStore } from "@/stores/workspaceStore";
-import { LruCache } from "@/lib/lru-cache";
 import { createMockThread, mockTransport } from "@/__tests__/mocks/transport";
 import { PlanPanel } from "./PlanPanel";
 
@@ -34,24 +33,9 @@ const makePlan = (version: number, contentMd: string): PlanRecord => ({
 
 describe("PlanPanel", () => {
   beforeEach(() => {
-    useThreadStore.setState({
-      messages: [],
-      runningThreadIds: new Set(),
-      loading: false,
-      errorByThread: {},
-      streamingByThread: {},
-      toolCallsByThread: {},
+    resetThreadStoreForTests({
       currentThreadId: null,
-      persistedToolCallCounts: {},
-      serverMessageIds: {},
-      toolCallRecordCache: new LruCache(TOOL_CALL_CACHE_SIZE),
-      currentTurnMessageIdByThread: {},
-      agentStartTimes: {},
-      settingsByThread: {},
-      oldestLoadedSequence: {},
-      hasMoreMessages: {},
-      isLoadingMore: {},
-      loadEpochByThread: {},
+      runningThreadIds: new Set(),
     });
     useWorkspaceStore.setState({
       threads: [

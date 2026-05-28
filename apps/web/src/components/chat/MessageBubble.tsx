@@ -12,7 +12,7 @@ import { isHandoffMessage, parseHandoffJson } from "./handoff-utils";
 import { HandoffCard } from "./HandoffCard";
 import { FileAttachmentTile } from "./FileAttachmentTile";
 import { ImageAttachmentLightbox } from "./ImageAttachmentLightbox";
-import { useThreadStore } from "@/stores/threadStore";
+import { useThreadRecord } from "@/stores/thread-selectors";
 import { AnsweredSummary } from "./plan-questions/AnsweredSummary";
 import { PlanCard } from "./PlanCard";
 import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts";
@@ -405,8 +405,9 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
   );
   const textContent = useMemo(() => stripInjectedFiles(message.content), [message.content]);
 
-  const isAnsweredPlanMessage = useThreadStore(
-    (s) => s.answeredPlanMessageIdsByThread[message.thread_id]?.has(message.id) ?? false,
+  const isAnsweredPlanMessage = useThreadRecord(
+    message.thread_id,
+    (r) => r.answeredPlanMessageIds.has(message.id),
   );
 
   const imageSlides = useMemo(

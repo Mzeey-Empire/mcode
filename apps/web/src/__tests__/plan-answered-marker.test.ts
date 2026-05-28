@@ -1,3 +1,10 @@
+import {
+  resetThreadStoreForTests,
+  getTestThreadAnsweredPlanIds,
+  getTestThreadPlanQuestions,
+  getTestThreadPlanQuestionsStatus,
+} from "@/stores/thread-store-test-utils";
+import { createEmptyThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   useThreadStore,
@@ -42,42 +49,44 @@ function msg(role: Message["role"], content: string, id: string): Message {
 
 describe("useThreadStore.markPlanAnswered", () => {
   beforeEach(() => {
-    useThreadStore.setState({
-      answeredPlanMessageIdsByThread: {},
-      planQuestionsByThread: {},
-      planAnswersByThread: {},
-      activeQuestionIndexByThread: {},
-      planQuestionsStatusByThread: {},
-    });
+    resetThreadStoreForTests();
   });
 
   it("appends the message id to answeredPlanMessageIdsByThread for the thread", () => {
     useThreadStore.getState().markPlanAnswered("t1", "a1");
-    const set = useThreadStore.getState().answeredPlanMessageIdsByThread["t1"];
+    const set = getTestThreadAnsweredPlanIds("t1");
     expect(set).toBeInstanceOf(Set);
     expect(set!.has("a1")).toBe(true);
   });
 
   it("preserves previously-answered ids on the same thread", () => {
-    useThreadStore.setState({
-      answeredPlanMessageIdsByThread: { t1: new Set(["a0"]) },
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        ["t1", { ...createEmptyThreadRecord(), answeredPlanMessageIds: new Set(["a0"]) }],
+      ]),
     });
     useThreadStore.getState().markPlanAnswered("t1", "a1");
-    const set = useThreadStore.getState().answeredPlanMessageIdsByThread["t1"];
+    const set = getTestThreadAnsweredPlanIds("t1");
     expect(set!.has("a0")).toBe(true);
     expect(set!.has("a1")).toBe(true);
   });
 
   it("hides the wizard for the thread when called", () => {
-    useThreadStore.setState({
-      planQuestionsByThread: { t1: [{ id: "q1", category: "TEST", question: "?", options: [] }] },
-      planQuestionsStatusByThread: { t1: "pending" },
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        [
+          "t1",
+          {
+            ...createEmptyThreadRecord(),
+            planQuestions: [{ id: "q1", category: "TEST", question: "?", options: [] }],
+            planQuestionsStatus: "pending",
+          },
+        ],
+      ]),
     });
     useThreadStore.getState().markPlanAnswered("t1", "a1");
-    expect(useThreadStore.getState().planQuestionsByThread["t1"]).toBeUndefined();
-    expect(
-      useThreadStore.getState().planQuestionsStatusByThread["t1"],
-    ).toBeUndefined();
+    expect(getTestThreadPlanQuestions("t1")).toBeNull();
+    expect(getTestThreadPlanQuestionsStatus("t1")).toBe("idle");
   });
 
   it("causes extractPendingPlanQuestions to return null for the marked message", () => {
@@ -85,14 +94,14 @@ describe("useThreadStore.markPlanAnswered", () => {
     // Before marker: wizard would re-pop.
     expect(extractPendingPlanQuestions(messages, new Set())).not.toBeNull();
     useThreadStore.getState().markPlanAnswered("t1", "a1");
-    const set = useThreadStore.getState().answeredPlanMessageIdsByThread["t1"];
+    const set = getTestThreadAnsweredPlanIds("t1");
     expect(extractPendingPlanQuestions(messages, set!)).toBeNull();
   });
 
   it("only affects the targeted thread (no cross-thread leakage)", () => {
     useThreadStore.getState().markPlanAnswered("t1", "a1");
     expect(
-      useThreadStore.getState().answeredPlanMessageIdsByThread["t2"],
+      getTestThreadAnsweredPlanIds("t2"),
     ).toBeUndefined();
   });
 
@@ -106,31 +115,30 @@ describe("useThreadStore.markPlanAnswered", () => {
 
 describe("useThreadStore.markPlanDismissed", () => {
   beforeEach(() => {
-    useThreadStore.setState({
-      answeredPlanMessageIdsByThread: {},
+    resetThreadStoreForTests({
       recentlyAnsweredPlanMessageIds: new Set<string>(),
-      planQuestionsByThread: {},
-      planAnswersByThread: {},
-      activeQuestionIndexByThread: {},
-      planQuestionsStatusByThread: {},
     });
   });
 
   it("settles the batch the same way markPlanAnswered does", () => {
-    useThreadStore.setState({
-      planQuestionsByThread: {
-        t1: [{ id: "q1", category: "TEST", question: "?", options: [] }],
-      },
-      planQuestionsStatusByThread: { t1: "pending" },
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        [
+          "t1",
+          {
+            ...createEmptyThreadRecord(),
+            planQuestions: [{ id: "q1", category: "TEST", question: "?", options: [] }],
+            planQuestionsStatus: "pending",
+          },
+        ],
+      ]),
     });
     useThreadStore.getState().markPlanDismissed("t1", "a1");
 
-    const set = useThreadStore.getState().answeredPlanMessageIdsByThread["t1"];
+    const set = getTestThreadAnsweredPlanIds("t1");
     expect(set!.has("a1")).toBe(true);
-    expect(useThreadStore.getState().planQuestionsByThread["t1"]).toBeUndefined();
-    expect(
-      useThreadStore.getState().planQuestionsStatusByThread["t1"],
-    ).toBeUndefined();
+    expect(getTestThreadPlanQuestions("t1")).toBeNull();
+    expect(getTestThreadPlanQuestionsStatus("t1")).toBe("idle");
   });
 
   it("does NOT add the id to recentlyAnsweredPlanMessageIds — dismiss is not submission", () => {

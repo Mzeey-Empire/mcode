@@ -1,9 +1,18 @@
+import {
+  resetThreadStoreForTests,
+  getTestActiveMessages,
+  getTestActiveLoading,
+  getTestThreadStreaming,
+  getTestThreadToolCalls,
+  readActiveThreadField,
+  readThreadField,
+} from "@/stores/thread-store-test-utils";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { useThreadStore, TOOL_CALL_CACHE_SIZE } from "@/stores/threadStore";
+import { useThreadStore } from "@/stores/threadStore";
 import type { Message } from "@/transport/types";
 import { mockTransport, createMockMessage } from "./mocks/transport";
-import { LruCache } from "@/lib/lru-cache";
-import { clearMessageCache } from "@/stores/messageCache";
+import { clearRecordCache } from "@/lib/thread-hydrator/record-cache";
+import { createEmptyThreadRecord, patchThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 
 vi.mock("@/transport", async () => ({
   ...(await vi.importActual("@/transport")),
@@ -13,25 +22,10 @@ vi.mock("@/transport", async () => ({
 /** Verifies thread isolation: switching threads must not leak messages across views. */
 describe("Thread Switching", () => {
   beforeEach(() => {
-    clearMessageCache();
-    useThreadStore.setState({
-      messages: [],
-      runningThreadIds: new Set(),
-      loading: false,
-      errorByThread: {},
-      streamingByThread: {},
-      toolCallsByThread: {},
+    clearRecordCache();
+    resetThreadStoreForTests({
       currentThreadId: null,
-      persistedToolCallCounts: {},
-      serverMessageIds: {},
-      toolCallRecordCache: new LruCache(TOOL_CALL_CACHE_SIZE),
-      currentTurnMessageIdByThread: {},
-      agentStartTimes: {},
-      settingsByThread: {},
-      oldestLoadedSequence: {},
-      hasMoreMessages: {},
-      isLoadingMore: {},
-      loadEpochByThread: {},
+      runningThreadIds: new Set(),
     });
     vi.clearAllMocks();
   });
@@ -43,10 +37,18 @@ describe("Thread Switching", () => {
       thread_id: "thread-a",
       content: "Thread A message",
     });
-    useThreadStore.setState({
+    resetThreadStoreForTests({
       currentThreadId: "thread-a",
-      messages: [threadAMsg],
-      persistedToolCallCounts: { "a-1": 2 },
+      records: new Map<string, ThreadRecord>([
+        [
+          "thread-a",
+          {
+            ...createEmptyThreadRecord(),
+            messages: [threadAMsg],
+            persistedToolCallCounts: { "a-1": 2 },
+          },
+        ],
+      ]),
     });
 
     // Use a deferred promise so we can inspect state mid-flight
@@ -63,9 +65,9 @@ describe("Thread Switching", () => {
     // Assert: messages cleared synchronously BEFORE fetch resolves
     const midState = useThreadStore.getState();
     expect(midState.currentThreadId).toBe("thread-b");
-    expect(midState.messages).toEqual([]);
-    expect(midState.persistedToolCallCounts).toEqual({});
-    expect(midState.loading).toBe(true);
+    expect(getTestActiveMessages()).toEqual([]);
+    expect(readActiveThreadField((r) => r.persistedToolCallCounts) ?? {}).toEqual({});
+    expect(getTestActiveLoading()).toBe(true);
 
     // Resolve the fetch and let loadMessages complete
     const threadBMsg = createMockMessage({
@@ -77,9 +79,8 @@ describe("Thread Switching", () => {
     await loadPromise;
 
     // Final state has Thread B's messages
-    const finalState = useThreadStore.getState();
-    expect(finalState.messages).toEqual([threadBMsg]);
-    expect(finalState.loading).toBe(false);
+    expect(getTestActiveMessages()).toEqual([threadBMsg]);
+    expect(getTestActiveLoading()).toBe(false);
   });
 
   it("clears stale messages immediately when switching to a running thread", async () => {
@@ -89,11 +90,19 @@ describe("Thread Switching", () => {
       thread_id: "thread-a",
       content: "Thread A message",
     });
-    useThreadStore.setState({
+    resetThreadStoreForTests({
       currentThreadId: "thread-a",
-      messages: [threadAMsg],
-      persistedToolCallCounts: { "a-1": 1 },
       runningThreadIds: new Set(["thread-b"]),
+      records: new Map<string, ThreadRecord>([
+        [
+          "thread-a",
+          {
+            ...createEmptyThreadRecord(),
+            messages: [threadAMsg],
+            persistedToolCallCounts: { "a-1": 1 },
+          },
+        ],
+      ]),
     });
 
     let resolveGetMessages!: (result: { messages: Message[]; hasMore: boolean }) => void;
@@ -109,9 +118,9 @@ describe("Thread Switching", () => {
     // Assert: messages cleared even for a running thread
     const midState = useThreadStore.getState();
     expect(midState.currentThreadId).toBe("thread-b");
-    expect(midState.messages).toEqual([]);
-    expect(midState.persistedToolCallCounts).toEqual({});
-    expect(midState.loading).toBe(true);
+    expect(getTestActiveMessages()).toEqual([]);
+    expect(readActiveThreadField((r) => r.persistedToolCallCounts) ?? {}).toEqual({});
+    expect(getTestActiveLoading()).toBe(true);
 
     resolveGetMessages({ messages: [], hasMore: false });
     await loadPromise;
@@ -119,15 +128,25 @@ describe("Thread Switching", () => {
 
   it("preserves per-thread keyed maps for background threads on switch", async () => {
     // Arrange: Thread A is running with streaming data
-    useThreadStore.setState({
+    resetThreadStoreForTests({
       currentThreadId: "thread-a",
-      messages: [
-        createMockMessage({ id: "a-1", thread_id: "thread-a", content: "hi" }),
-      ],
       runningThreadIds: new Set(["thread-a"]),
-      streamingByThread: { "thread-a": "partial response..." },
-      toolCallsByThread: { "thread-a": [{ id: "tc-1", toolName: "bash", toolInput: {}, output: null, isError: false, isComplete: false }] },
-      serverMessageIds: { "local-1": "server-1" },
+      records: new Map<string, ThreadRecord>([
+        [
+          "thread-a",
+          {
+            ...createEmptyThreadRecord(),
+            messages: [
+              createMockMessage({ id: "a-1", thread_id: "thread-a", content: "hi" }),
+            ],
+            streaming: "partial response...",
+            toolCalls: [
+              { id: "tc-1", toolName: "bash", toolInput: {}, output: null, isError: false, isComplete: false },
+            ],
+            serverMessageIds: { "local-1": "server-1" },
+          },
+        ],
+      ]),
     });
 
     (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ messages: [], hasMore: false });
@@ -137,10 +156,10 @@ describe("Thread Switching", () => {
 
     // Assert: Thread A's per-thread data is intact
     const state = useThreadStore.getState();
-    expect(state.streamingByThread["thread-a"]).toBe("partial response...");
-    expect(state.toolCallsByThread["thread-a"]).toHaveLength(1);
+    expect(getTestThreadStreaming("thread-a")).toBe("partial response...");
+    expect(getTestThreadToolCalls("thread-a")).toHaveLength(1);
     expect(state.runningThreadIds.has("thread-a")).toBe(true);
-    expect(state.serverMessageIds).toEqual({ "local-1": "server-1" });
+    expect(readThreadField("thread-a", (r) => r.serverMessageIds)).toEqual({ "local-1": "server-1" });
   });
 
   it("sendMessage for a background thread does not inject into the active thread", async () => {
@@ -150,10 +169,10 @@ describe("Thread Switching", () => {
       thread_id: "thread-b",
       content: "Thread B message",
     });
-    useThreadStore.setState({
+    useThreadStore.setState((s) => ({
       currentThreadId: "thread-b",
-      messages: [threadBMsg],
-    });
+      records: patchThreadRecord(s.records, "thread-b", { messages: [threadBMsg] }),
+    }));
 
     // Act: sendMessage fires for Thread A (e.g. dequeue timer)
     await useThreadStore.getState().sendMessage(
@@ -162,8 +181,7 @@ describe("Thread Switching", () => {
     );
 
     // Assert: Thread B's messages are unchanged — no Thread A content injected
-    const state = useThreadStore.getState();
-    expect(state.messages).toEqual([threadBMsg]);
+    expect(getTestActiveMessages()).toEqual([threadBMsg]);
   });
 
   it("switching back to a thread loads its messages from the database", async () => {
@@ -173,15 +191,15 @@ describe("Thread Switching", () => {
     ];
     (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ messages: threadAMsgs, hasMore: false });
     await useThreadStore.getState().loadMessages("thread-a");
-    expect(useThreadStore.getState().messages).toEqual(threadAMsgs);
+    expect(getTestActiveMessages()).toEqual(threadAMsgs);
 
     // Act: switch to Thread B
     (mockTransport.getMessages as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ messages: [], hasMore: false });
     await useThreadStore.getState().loadMessages("thread-b");
-    expect(useThreadStore.getState().messages).toEqual([]);
+    expect(getTestActiveMessages()).toEqual([]);
 
     // Simulate: background agent adds a message to Thread A (push event would evict cache)
-    clearMessageCache();
+    clearRecordCache();
 
     // Act: switch back to Thread A (DB now has an extra message from background agent)
     const updatedThreadAMsgs = [
@@ -193,7 +211,7 @@ describe("Thread Switching", () => {
 
     // Assert: all messages shown, including those that arrived while viewing Thread B
     const state = useThreadStore.getState();
-    expect(state.messages).toEqual(updatedThreadAMsgs);
+    expect(getTestActiveMessages()).toEqual(updatedThreadAMsgs);
     expect(state.currentThreadId).toBe("thread-a");
   });
 });
