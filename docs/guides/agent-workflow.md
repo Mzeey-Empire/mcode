@@ -52,7 +52,8 @@ fails, you get the error output and must fix before you can stop.
 
 Do not run `tsc --noEmit` or test commands individually. Use `bun run verify`.
 
-**Test scope.** `bun run verify` always runs every unit test (the full gate).
+**Test scope.** `bun run verify` runs the full unit-test gate whenever
+verification runs (it still skips entirely when no code changes are detected).
 The Stop hook calls `verify-tests.mjs` directly without `--full`, so it scopes
 each workspace's vitest run to tests related to the changed files
 (`vitest related <files> --run`) for fast feedback. Any change inside

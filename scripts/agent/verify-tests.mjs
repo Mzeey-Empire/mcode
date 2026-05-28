@@ -13,7 +13,7 @@
  * (`scripts/agent/hooks/codex-stop.mjs`) and Cursor
  * (`scripts/agent/hooks/cursor-stop.mjs`) wrappers depend on this contract.
  */
-import { execSync, spawn } from "node:child_process";
+import { execFileSync, execSync, spawn } from "node:child_process";
 import { resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -83,17 +83,17 @@ export function getChangedFiles({ cwd = process.cwd() } = {}) {
     }
   };
 
-  // Use execFileSync-like behavior by routing each git invocation through
-  // execSync but passing the glob list as separate path args to git itself.
-  // `git -- <pathspecs>` accepts shell-style globs without shell interpretation.
-  const gitGlob = CODE_GLOB_ARGS.join(" ");
+  // Pass git pathspecs as argv (not a single shell-interpolated string) so
+  // POSIX shells do not glob-expand `*.ts` etc. before git sees them. git
+  // interprets the pathspec globs internally regardless of the OS.
 
   try {
     collect(
-      execSync(`git diff --name-only HEAD -- ${gitGlob}`, {
-        cwd,
-        encoding: "utf-8",
-      }),
+      execFileSync(
+        "git",
+        ["diff", "--name-only", "HEAD", "--", ...CODE_GLOB_ARGS],
+        { cwd, encoding: "utf-8" },
+      ),
     );
   } catch {
     return null;
@@ -101,26 +101,28 @@ export function getChangedFiles({ cwd = process.cwd() } = {}) {
 
   try {
     collect(
-      execSync(`git ls-files --others --exclude-standard -- ${gitGlob}`, {
-        cwd,
-        encoding: "utf-8",
-      }),
+      execFileSync(
+        "git",
+        ["ls-files", "--others", "--exclude-standard", "--", ...CODE_GLOB_ARGS],
+        { cwd, encoding: "utf-8" },
+      ),
     );
   } catch {
     return null;
   }
 
   try {
-    const mergeBase = execSync("git merge-base HEAD main", {
+    const mergeBase = execFileSync("git", ["merge-base", "HEAD", "main"], {
       cwd,
       encoding: "utf-8",
     }).trim();
     if (mergeBase.length > 0) {
       collect(
-        execSync(`git diff --name-only ${mergeBase} HEAD -- ${gitGlob}`, {
-          cwd,
-          encoding: "utf-8",
-        }),
+        execFileSync(
+          "git",
+          ["diff", "--name-only", mergeBase, "HEAD", "--", ...CODE_GLOB_ARGS],
+          { cwd, encoding: "utf-8" },
+        ),
       );
     }
   } catch {
