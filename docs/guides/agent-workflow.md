@@ -52,6 +52,14 @@ fails, you get the error output and must fix before you can stop.
 
 Do not run `tsc --noEmit` or test commands individually. Use `bun run verify`.
 
+**Test scope.** `bun run verify` always runs every unit test (the full gate).
+The Stop hook calls `verify-tests.mjs` directly without `--full`, so it scopes
+each workspace's vitest run to tests related to the changed files
+(`vitest related <files> --run`) for fast feedback. Any change inside
+`packages/contracts` or `packages/shared` falls back to the full suite because
+those packages are imported across the repo and vitest's related-file import
+graph is per-project.
+
 ## Visual Verify (when UI changes + Playwright MCP available)
 
 If Playwright MCP is connected and the change affects UI:

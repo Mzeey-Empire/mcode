@@ -13,9 +13,12 @@ import { fileURLToPath } from "node:url";
 
 import {
   DEFAULT_PHASES,
+  FULL_TEST_PHASE,
+  getChangedFiles,
   hasCodeChanges,
   runPhase,
   runPhasesInParallel,
+  selectTestPhases,
 } from "../verify-tests.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -179,6 +182,119 @@ test("script exits 0 with skip message when run in a clean repo with no code cha
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test("selectTestPhases falls back to the full suite when a packages/contracts file changed", () => {
+  const phases = selectTestPhases(["packages/contracts/src/index.ts"]);
+
+  assert.equal(phases.length, 1);
+  assert.equal(phases[0].name, FULL_TEST_PHASE.name);
+  assert.deepEqual(phases[0].args, FULL_TEST_PHASE.args);
+});
+
+test("selectTestPhases falls back to the full suite when a packages/shared file changed", () => {
+  const phases = selectTestPhases([
+    "apps/web/src/foo.ts",
+    "packages/shared/src/model-effort/index.ts",
+  ]);
+
+  assert.equal(phases.length, 1);
+  assert.equal(phases[0].name, FULL_TEST_PHASE.name);
+});
+
+test("selectTestPhases scopes a single apps/web change to that workspace's vitest related run", () => {
+  const phases = selectTestPhases(["apps/web/src/components/foo.tsx"]);
+
+  assert.equal(phases.length, 1);
+  const [phase] = phases;
+  assert.match(phase.name, /apps\/web/);
+  assert.equal(phase.cwd.endsWith("apps/web") || phase.cwd.endsWith("apps\\web"), true);
+  // Vitest 4: `vitest related <files> --run`. `--run` opts out of watch mode.
+  assert.equal(phase.command, "bunx");
+  assert.equal(phase.args[0], "vitest");
+  assert.equal(phase.args[1], "related");
+  assert.ok(phase.args.includes("--run"), `expected --run in args, got ${phase.args.join(" ")}`);
+  // The changed file is forwarded (path is relative to the package root).
+  assert.ok(
+    phase.args.some((a) => a.endsWith("foo.tsx")),
+    `expected the changed file in args, got ${phase.args.join(" ")}`,
+  );
+});
+
+test("selectTestPhases buckets multi-workspace changes into one phase per workspace", () => {
+  const phases = selectTestPhases([
+    "apps/web/src/a.ts",
+    "apps/web/src/b.ts",
+    "apps/server/src/c.ts",
+  ]);
+
+  assert.equal(phases.length, 2);
+  const names = phases.map((p) => p.name);
+  assert.ok(names.some((n) => n.includes("apps/web")));
+  assert.ok(names.some((n) => n.includes("apps/server")));
+  // The apps/web phase carries both of its changed files as positional args
+  // to `vitest related`, with `--run` somewhere in the same arg list.
+  const web = phases.find((p) => p.name.includes("apps/web"));
+  // Files are everything between `related` and `--run`.
+  const startIdx = web.args.indexOf("related") + 1;
+  const endIdx = web.args.indexOf("--run");
+  const related = web.args.slice(startIdx, endIdx);
+  assert.equal(related.length, 2);
+  assert.ok(related.some((a) => a.endsWith("a.ts")));
+  assert.ok(related.some((a) => a.endsWith("b.ts")));
+});
+
+test("selectTestPhases returns no phases when changes only touch workspaces without tests (e.g., scripts/)", () => {
+  const phases = selectTestPhases(["scripts/agent/foo.mjs", "docs/guides/x.md"]);
+  assert.deepEqual(phases, []);
+});
+
+test("selectTestPhases returns the full suite when changedFiles is null (git-error fallback)", () => {
+  const phases = selectTestPhases(null);
+  assert.equal(phases.length, 1);
+  assert.equal(phases[0].name, FULL_TEST_PHASE.name);
+});
+
+test("getChangedFiles returns null OR an array of paths from the current repo", () => {
+  const result = getChangedFiles();
+  assert.ok(result === null || Array.isArray(result));
+  if (Array.isArray(result)) {
+    for (const f of result) assert.equal(typeof f, "string");
+  }
+});
+
+test("getChangedFiles reports a code file edited in a fresh git repo", () => {
+  const tmp = mkdtempSync(resolve(tmpdir(), "verify-getchanged-"));
+  try {
+    const gitOpts = { cwd: tmp, stdio: "ignore" };
+    execSync("git init -q -b main", gitOpts);
+    execSync('git config user.email "t@t"', gitOpts);
+    execSync('git config user.name "t"', gitOpts);
+    execSync("git config commit.gpgsign false", gitOpts);
+    writeFileSync(resolve(tmp, "README.md"), "ok\n");
+    execSync("git add README.md", gitOpts);
+    execSync('git commit -q -m "init"', gitOpts);
+    // Add an uncommitted code file to be detected by `getChangedFiles`.
+    writeFileSync(resolve(tmp, "edited.ts"), "export const a = 1;\n");
+    execSync("git add edited.ts", gitOpts);
+
+    const files = getChangedFiles({ cwd: tmp });
+    assert.ok(Array.isArray(files), "expected array, got " + files);
+    assert.ok(files.includes("edited.ts"), `expected "edited.ts" in ${files.join(",")}`);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("--full flag forces the full test suite regardless of changed files", async () => {
+  // Drive the script with a tiny fixture where only apps/web/src/foo.ts was
+  // edited. Without --full, that would scope to apps/web vitest --related;
+  // with --full, the orchestrator runs `bun run test` directly.
+  // We exercise this indirectly: the exported planner should honor a
+  // `forceFull` option even when scoping is possible.
+  const phases = selectTestPhases(["apps/web/src/foo.ts"], { forceFull: true });
+  assert.equal(phases.length, 1);
+  assert.equal(phases[0].name, FULL_TEST_PHASE.name);
 });
 
 /**
