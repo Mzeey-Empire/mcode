@@ -6,6 +6,10 @@ describe("resolveSdkModelSlug", () => {
   // 1M opt-in: append [1m] suffix for supported models
   // ---------------------------------------------------------------------------
 
+  it("appends [1m] for opus-4-8 in 1m mode", () => {
+    expect(resolveSdkModelSlug("claude-opus-4-8", "1m")).toBe("claude-opus-4-8[1m]");
+  });
+
   it("appends [1m] for opus-4-7 in 1m mode", () => {
     expect(resolveSdkModelSlug("claude-opus-4-7", "1m")).toBe("claude-opus-4-7[1m]");
   });
@@ -53,6 +57,12 @@ describe("applyUltrathinkPrefix", () => {
   // ---------------------------------------------------------------------------
   // Prefix applied for ultrathink + supported model
   // ---------------------------------------------------------------------------
+
+  it("prepends 'Ultrathink:\\n' for opus-4-8 + ultrathink", () => {
+    expect(applyUltrathinkPrefix("hello", "ultrathink", "claude-opus-4-8")).toBe(
+      "Ultrathink:\nhello",
+    );
+  });
 
   it("prepends 'Ultrathink:\\n' for opus-4-7 + ultrathink", () => {
     expect(applyUltrathinkPrefix("hello", "ultrathink", "claude-opus-4-7")).toBe(

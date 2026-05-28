@@ -63,6 +63,8 @@ export const MODEL_PROVIDERS: readonly ModelProvider[] = [
     comingSoon: false,
     supportsCompletion: true,
     models: [
+      { id: "claude-opus-4-8", label: "Claude Opus 4.8", providerId: "claude",
+        contextWindow: MODEL_CONTEXT_WINDOWS_DEFAULT["claude-opus-4-8"] },
       { id: "claude-opus-4-7", label: "Claude Opus 4.7", providerId: "claude",
         contextWindow: MODEL_CONTEXT_WINDOWS_DEFAULT["claude-opus-4-7"] },
       { id: "claude-opus-4-6", label: "Claude Opus 4.6", providerId: "claude",
@@ -236,7 +238,7 @@ export function findProviderForModel(modelId: string): ModelProvider | undefined
 
 /** @deprecated Use `getDefaultModelId()` for settings-aware defaults. */
 export function getDefaultModel(): ModelDefinition {
-  return MODEL_PROVIDERS[0].models[0]; // Claude Opus 4.7
+  return MODEL_PROVIDERS[0].models[0]; // Claude Opus 4.8
 }
 
 /**

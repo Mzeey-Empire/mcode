@@ -34,11 +34,17 @@ describe("pickProviderModelsForSettings", () => {
 });
 
 describe("ModelRegistry", () => {
-  it("MODEL_PROVIDERS contains Claude with 4 models", () => {
+  it("MODEL_PROVIDERS contains Claude with 5 models", () => {
     const claude = MODEL_PROVIDERS.find((p) => p.id === "claude");
     expect(claude).toBeTruthy();
-    expect(claude?.models).toHaveLength(4);
+    expect(claude?.models).toHaveLength(5);
     expect(claude?.comingSoon).toBe(false);
+  });
+
+  it("findModelById returns Opus 4.8", () => {
+    const model = findModelById("claude-opus-4-8");
+    expect(model?.label).toBe("Claude Opus 4.8");
+    expect(model?.providerId).toBe("claude");
   });
 
   it("findModelById returns Opus 4.7", () => {
@@ -66,9 +72,9 @@ describe("ModelRegistry", () => {
     expect(findProviderForModel("nonexistent")).toBeUndefined();
   });
 
-  it("getDefaultModel returns Claude Opus 4.7", () => {
+  it("getDefaultModel returns Claude Opus 4.8", () => {
     const model = getDefaultModel();
-    expect(model.id).toBe("claude-opus-4-7");
+    expect(model.id).toBe("claude-opus-4-8");
   });
 });
 
@@ -119,8 +125,8 @@ describe("Settings-aware defaults", () => {
     expect(getDefaultModelId()).toBe("cursor-dynamic-model-xyz");
   });
 
-  it("getDefaultModelId returns opus-4-7 from default settings", () => {
-    expect(getDefaultModelId()).toBe("claude-opus-4-7");
+  it("getDefaultModelId returns opus-4-8 from default settings", () => {
+    expect(getDefaultModelId()).toBe("claude-opus-4-8");
   });
 
   it("getDefaultReasoningLevel returns settings value", () => {
@@ -233,6 +239,10 @@ describe("findProviderForModel dated variants", () => {
 });
 
 describe("isMaxEffortModel", () => {
+  it("returns true for claude-opus-4-8", () => {
+    expect(isMaxEffortModel("claude-opus-4-8")).toBe(true);
+  });
+
   it("returns true for claude-opus-4-7", () => {
     expect(isMaxEffortModel("claude-opus-4-7")).toBe(true);
   });
@@ -271,6 +281,10 @@ describe("isMaxEffortModel", () => {
 });
 
 describe("isXhighEffortModel", () => {
+  it("returns true for claude-opus-4-8", () => {
+    expect(isXhighEffortModel("claude-opus-4-8")).toBe(true);
+  });
+
   it("returns true for claude-opus-4-7", () => {
     expect(isXhighEffortModel("claude-opus-4-7")).toBe(true);
   });

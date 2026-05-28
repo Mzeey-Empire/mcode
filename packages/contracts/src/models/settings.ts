@@ -143,14 +143,14 @@ export const SettingsSchema = lazySchema(() =>
             /** Default AI provider. */
             provider: ProviderIdSchema.default("claude"),
             /** Default model identifier. */
-            id: z.string().default("claude-opus-4-7"),
+            id: z.string().default("claude-opus-4-8"),
             /** Default reasoning effort level. */
             reasoning: ReasoningLevelSchema.default("high"),
             /** Fallback model when the primary is unavailable. Empty string disables fallback. */
             fallbackId: z.string().trim().default("claude-sonnet-4-6"),
             /**
              * Default context window mode. "200k" is the universally supported tier;
-             * "1m" requests the extended 1M-token window from Opus 4.7/4.6 and Sonnet 4.6.
+             * "1m" requests the extended 1M-token window from Opus 4.8/4.7/4.6 and Sonnet 4.6.
              * Models that do not support 1M ignore this and run on 200k.
              */
             contextWindow: ContextWindowModeSchema.default("200k"),

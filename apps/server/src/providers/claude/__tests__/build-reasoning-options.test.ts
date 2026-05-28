@@ -40,6 +40,20 @@ describe("buildReasoningOptions", () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Opus 4.8: supports all tiers including xhigh and max
+  // ---------------------------------------------------------------------------
+
+  it("passes xhigh through for opus-4-8", () => {
+    const result = buildReasoningOptions("xhigh", "claude-opus-4-8");
+    expect(result).toMatchObject({ effort: "xhigh" });
+  });
+
+  it("passes max through for opus-4-8", () => {
+    const result = buildReasoningOptions("max", "claude-opus-4-8");
+    expect(result).toMatchObject({ effort: "max" });
+  });
+
+  // ---------------------------------------------------------------------------
   // Opus 4.7: supports all tiers including xhigh and max
   // ---------------------------------------------------------------------------
 
@@ -131,6 +145,11 @@ describe("buildReasoningOptions", () => {
   // ---------------------------------------------------------------------------
   // Ultrathink: virtual tier maps to effort "max" at SDK boundary
   // ---------------------------------------------------------------------------
+
+  it("maps ultrathink to effort 'max' for opus-4-8", () => {
+    const result = buildReasoningOptions("ultrathink", "claude-opus-4-8");
+    expect(result).toMatchObject({ effort: "max", thinking: { type: "adaptive" } });
+  });
 
   it("maps ultrathink to effort 'max' for opus-4-7", () => {
     const result = buildReasoningOptions("ultrathink", "claude-opus-4-7");
