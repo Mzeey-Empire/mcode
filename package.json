@@ -28,7 +28,8 @@
     "sync:cursor-models": "bun apps/server/scripts/sync-cursor-models-snapshot.ts",
     "verify": "node scripts/agent/verify-tests.mjs",
     "verify:e2e": "node scripts/agent/verify-e2e.mjs",
-    "verify:all": "node scripts/agent/verify-all.mjs"
+    "verify:all": "node scripts/agent/verify-all.mjs",
+    "test:scripts": "node --test scripts/agent/__tests__/"
   },
   "devDependencies": {
     "@types/node": "^22.19.17",
