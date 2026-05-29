@@ -8,6 +8,7 @@ import { MAX_ATTACHMENTS } from "../models/file-types.js";
 import { ToolCallRecordSchema } from "../models/tool-call-record.js";
 import { ThoughtSegmentRecordSchema } from "../models/thought-segment.js";
 import { HookExecutionRecordSchema } from "../models/hook-execution.js";
+import { NarrativeEntrySchema, TurnRangeSchema } from "../models/narrative-entry.js";
 import { GitBranchSchema, WorktreeSchema } from "../git.js";
 import { GitCommitSchema } from "../models/git-commit.js";
 import { PrInfoSchema, PrDetailSchema, PrDraftSchema, CreatePrResultSchema, ChecksStatusSchema } from "../github.js";
@@ -565,6 +566,17 @@ export const WS_METHODS = lazySchema(() => ({
   "toolCallRecord.listByParent": {
     params: z.object({ parentToolCallId: z.string() }),
     result: z.array(ToolCallRecordSchema),
+  },
+  /**
+   * Single-source hydration for a thread's persisted narrative: returns one
+   * chronologically-ordered list of entries (assistant message bodies, tool
+   * calls, narration segments, hooks) interleaved by (sequence, sortOrder).
+   * Replaces the race-prone `message.list` + `narrative.list` pair so reloaded
+   * turns render in source order (Tool calls never precede the assistant body).
+   */
+  "turn.load": {
+    params: z.object({ threadId: z.string(), range: TurnRangeSchema.optional() }),
+    result: z.array(NarrativeEntrySchema),
   },
   /** Replay the full persisted narrative (tools, thoughts, hooks) for an assistant message. */
   "narrative.list": {

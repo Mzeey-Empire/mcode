@@ -335,6 +335,8 @@ export interface McodeTransport {
     thoughts: ThoughtSegmentRecord[];
     hooks: HookExecutionRecord[];
   }>>;
+  /** Fetch a thread's full server-ordered narrative as a flat, chronological list. */
+  loadTurn(threadId: string): Promise<import("@mcode/contracts").NarrativeEntry[]>;
 
   /** Fetch persisted task list for a thread (from last TodoWrite). */
   getThreadTasks(threadId: string): Promise<Array<{ content: string; status: "pending" | "in_progress" | "completed" | "cancelled"; group?: string }> | null>;

@@ -33,6 +33,7 @@ import { ProviderRegistry } from "./providers/provider-registry";
 import { WorkspaceService } from "./services/workspace-service";
 import { ThreadService } from "./services/thread-service";
 import { AgentService } from "./services/agent-service";
+import { NarrativeStore } from "./services/narrative-store";
 import { GitService } from "./services/git-service";
 import { GithubService } from "./services/github-service";
 import { FileService } from "./services/file-service";
@@ -266,6 +267,14 @@ export function setupContainer(mcodeDir: string): typeof container {
     { useClass: AttachmentService },
     { lifecycle: Lifecycle.Singleton },
   );
+  container.register(
+    NarrativeStore,
+    { useClass: NarrativeStore },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register("NarrativeStore", {
+    useFactory: (c) => c.resolve(NarrativeStore),
+  });
   container.register(
     AgentService,
     { useClass: AgentService },

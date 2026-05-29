@@ -32,6 +32,7 @@ import type { SkillService } from "../services/skill-service";
 import type { TerminalService } from "../services/terminal-service";
 import type { MessageRepo } from "../repositories/message-repo";
 import type { ToolCallRecordRepo } from "../repositories/tool-call-record-repo";
+import type { NarrativeStore } from "../services/narrative-store";
 import type { ThoughtSegmentRepo } from "../repositories/thought-segment-repo";
 import type { HookExecutionRepo } from "../repositories/hook-execution-repo";
 import type { TurnSnapshotRepo } from "../repositories/turn-snapshot-repo";
@@ -73,6 +74,8 @@ export interface RouterDeps {
   toolCallRecordRepo: ToolCallRecordRepo;
   thoughtSegmentRepo: ThoughtSegmentRepo;
   hookExecutionRepo: HookExecutionRepo;
+  /** Single-source ordered narrative reader backing the `turn.load` RPC. */
+  narrativeStore: NarrativeStore;
   turnSnapshotRepo: TurnSnapshotRepo;
   snapshotService: SnapshotService;
   settingsService: SettingsService;
@@ -611,6 +614,8 @@ async function dispatch(
       return deps.toolCallRecordRepo.listByMessage(params.messageId);
     case "toolCallRecord.listByParent":
       return deps.toolCallRecordRepo.listByParent(params.parentToolCallId);
+    case "turn.load":
+      return deps.narrativeStore.load(params.threadId, params.range);
     case "narrative.list":
       return {
         tools: deps.toolCallRecordRepo.listByMessage(params.messageId),

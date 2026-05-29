@@ -61,6 +61,9 @@ export type { ThoughtSegmentRecord } from "./models/thought-segment.js";
 export { HookExecutionRecordSchema } from "./models/hook-execution.js";
 export type { HookExecutionRecord } from "./models/hook-execution.js";
 
+export { NarrativeEntrySchema, TurnRangeSchema } from "./models/narrative-entry.js";
+export type { NarrativeEntry, TurnRange } from "./models/narrative-entry.js";
+
 export { TurnSnapshotSchema } from "./models/turn-snapshot.js";
 export type { TurnSnapshot } from "./models/turn-snapshot.js";
 
