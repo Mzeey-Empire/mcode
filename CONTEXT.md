@@ -26,6 +26,26 @@ default provider. Handoff generation is **not** a utility-provider use case;
 handoffs route through the originating thread's own provider via the B/A/D
 pipeline.
 
+### Session runtime
+The per-Provider service that owns the uniform persistent-CLI-session
+lifecycle: the session pool, the lazy idle-eviction timer (60s sweep, 10min
+default TTL) with a `lastUsedAt + isBusy` guard, Windows `JobObject`
+attachment, the env snapshot, lazy spawn, resume-then-fallback, and the
+graceful-interrupt-then-hard-kill (`taskkill /T /F` on Windows) close. It
+treats per-session state as opaque (`SessionRuntime<TState>`) so the same
+lifecycle serves every Provider. Each Provider holds its own instance; the
+runtime is not shared, keeping per-session state type-isolated.
+
+### Protocol adapter
+The per-Provider seam carrying the protocol-specific I/O the Session runtime
+delegates to: `spawn` (returning the session state plus any child PIDs the
+runtime should attach/kill), `isBusy` (the eviction guard), `interrupt`
+(protocol-level graceful stop), `close` (provider teardown short of the OS
+kill), and `isStale` (whether a pooled session must be discarded before
+reuse). Each Provider *is* its own Protocol adapter (the Provider class
+implements the interface); composition with the Session runtime, not
+inheritance.
+
 ## Workspaces and worktrees
 
 ### Workspace

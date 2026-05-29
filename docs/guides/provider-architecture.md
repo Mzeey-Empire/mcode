@@ -2,6 +2,24 @@
 
 All agent providers must use a **persistent process per session**, not per-turn spawning.
 
+## Shared lifecycle: SessionRuntime + ProtocolAdapter
+
+The uniform session lifecycle lives in `apps/server/src/services/session-runtime.ts`.
+Each Provider holds its own `SessionRuntime<TState>` and implements
+`ProtocolAdapter<TState>` (composition, not inheritance). The runtime owns the
+session pool, the lazy 60s idle-eviction timer with a `lastUsedAt + isBusy`
+guard, Windows `JobObject` attachment, the `EnvService` env snapshot, and the
+graceful-interrupt-then-`taskkill /T /F` hard close — acting on the child PIDs
+the adapter's `spawn` surfaces. The adapter supplies only `spawn`, `isBusy`,
+`interrupt`, `close`, and `isStale`.
+
+When adding a Provider, implement the `ProtocolAdapter` seam on the Provider
+class and construct a `SessionRuntime` in its constructor; the pool, eviction,
+JobObject, and hard-kill come for free. Do not hand-roll a session map or an
+eviction timer. If the SDK hides the subprocess PID, return an empty `pids`
+array from `spawn` and the runtime's JobObject/taskkill become best-effort
+no-ops for that Provider (document it).
+
 Both the Claude and Codex providers were originally built with per-turn process spawning
 (via their respective SDKs). Both suffered the same reliability issues: stdin pipe timing
 failures on Windows, abort signal races, and opaque error messages from stderr status lines
