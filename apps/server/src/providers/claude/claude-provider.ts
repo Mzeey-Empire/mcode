@@ -1146,16 +1146,32 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider, Prot
       let retryPromise: Promise<boolean> | undefined;
       let resumeHandler: (() => void) | null = null;
       let doneHandler: (() => void) | null = null;
+      let okHandler: (() => void) | null = null;
       const failedEvent = `_resumeFailed:${sessionId}`;
       const doneEvent = `_streamDone:${sessionId}`;
+      const okEvent = `_resumeOk:${sessionId}`;
       if (doResume) {
+        // Resolve true → fall back to a fresh query; false → proceed.
+        // `_resumeOk` fires when the resumed turn is confirmed live (the first
+        // non-result event arrived) so a SUCCESSFUL resume releases the waiter
+        // immediately instead of hanging until the stream ends. `_streamDone`
+        // remains a backstop for a resume turn that completes before emitting
+        // any non-result event. `_resumeFailed` still drives the fallback.
         retryPromise = new Promise<boolean>((resolve) => {
           resumeHandler = () => resolve(true);
           doneHandler = () => resolve(false);
+          okHandler = () => resolve(false);
           this.once(failedEvent, resumeHandler);
           this.once(doneEvent, doneHandler);
+          this.once(okEvent, okHandler);
         });
       }
+
+      const removeResumeListeners = (): void => {
+        if (resumeHandler) this.removeListener(failedEvent, resumeHandler);
+        if (doneHandler) this.removeListener(doneEvent, doneHandler);
+        if (okHandler) this.removeListener(okEvent, okHandler);
+      };
 
       try {
         await this.runtime.acquire({
@@ -1166,8 +1182,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider, Prot
           resumeFrom: doResume ? resumeId : undefined,
         });
       } catch (err) {
-        if (resumeHandler) this.removeListener(failedEvent, resumeHandler);
-        if (doneHandler) this.removeListener(doneEvent, doneHandler);
+        removeResumeListeners();
         this.pendingSpawnTurns.delete(sessionId);
         throw err;
       }
@@ -1178,8 +1193,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider, Prot
         logger.info("Pending stop consumed, tearing down new session", {
           sessionId,
         });
-        if (resumeHandler) this.removeListener(failedEvent, resumeHandler);
-        if (doneHandler) this.removeListener(doneEvent, doneHandler);
+        removeResumeListeners();
         await this.runtime.stop(sessionId);
         // TurnStarted was already emitted by AgentService before calling the
         // provider, so the frontend thinks the agent is running. Emit Ended
@@ -1197,10 +1211,9 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider, Prot
       try {
         needsRetry = await retryPromise;
       } finally {
-        // Guarantee both listeners are removed regardless of how the
+        // Guarantee all listeners are removed regardless of how the
         // promise settled (resolve, reject, or upstream cancellation).
-        if (resumeHandler) this.removeListener(failedEvent, resumeHandler);
-        if (doneHandler) this.removeListener(doneEvent, doneHandler);
+        removeResumeListeners();
       }
 
       if (!needsRetry) return "ok";
@@ -1418,6 +1431,12 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider, Prot
 
           if (!sessionInitialized && anyMsg.type !== "result") {
             sessionInitialized = true;
+            // A resumed session is now confirmed live (the first non-result
+            // event arrived without a "No conversation found" error). Release
+            // the resume waiter in `runSpawn(true)` so `sendTurn` proceeds
+            // without blocking until the whole stream completes. Harmless on
+            // fresh spawns: no listener is registered there.
+            this.emit(`_resumeOk:${sessionId}`);
           }
 
           // Capture SDK session ID

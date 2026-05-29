@@ -153,7 +153,15 @@ export async function runPathDDeterministic(input: PathDInput): Promise<HandoffA
     openTasks: [] as Array<{ content: string; status: string }>,
   };
 
-  const markdown = `${body}\n\n${HANDOFF_MARKER}\n${JSON.stringify(metadata, null, 2)}\n-->\n`;
+  // Escape HTML comment terminators in the embedded JSON. User/project strings
+  // (titles, branches, paths) can contain `-->`, which would close the comment
+  // early. `\u003e` is JSON-safe: JSON.parse restores it to `>`, so the marker
+  // parser still round-trips. Also neutralise `<!--` to avoid nested-comment
+  // ambiguity in HTML renderers.
+  const metadataJson = JSON.stringify(metadata, null, 2)
+    .replace(/-->/g, "--\\u003e")
+    .replace(/<!--/g, "\\u003c!--");
+  const markdown = `${body}\n\n${HANDOFF_MARKER}\n${metadataJson}\n-->\n`;
 
   const meta: HandoffMeta = {
     schemaVersion: 1,

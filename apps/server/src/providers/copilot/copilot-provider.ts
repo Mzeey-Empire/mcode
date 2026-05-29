@@ -595,8 +595,19 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider, Pro
     this.runtime.recordUsage(sessionId);
 
     // A stop requested before the session finished spawning: `spawn` already
-    // tore it down and emitted Ended, so do not run the turn.
-    if (this.pendingStops.has(sessionId)) return;
+    // disconnected the SDK session and emitted Ended, so do not run the turn.
+    // `spawn` does not evict the runtime pool entry, and `isStale` always
+    // returns false, so without this the disconnected (dead) session would be
+    // reused on the next turn. Evict it now.
+    if (this.pendingStops.has(sessionId)) {
+      void this.runtime.stop(sessionId).catch((err: unknown) =>
+        logger.debug("CopilotProvider: stop of pending-stop session failed", {
+          sessionId,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      );
+      return;
+    }
 
     state.lastUsedAt = Date.now();
 

@@ -77,6 +77,12 @@ interface PoolEntry<TState> {
  */
 export class SessionRuntime<TState> {
   private readonly sessions = new Map<string, PoolEntry<TState>>();
+  /**
+   * In-flight spawns keyed by sessionId. Dedups overlapping `acquire` calls for
+   * the same session: the first miss creates the spawn promise, later callers
+   * await it instead of spawning a second process.
+   */
+  private readonly pendingSpawns = new Map<string, Promise<TState>>();
   private evictionTimer: ReturnType<typeof setInterval> | null = null;
   private readonly idleTtlMs: number;
 
@@ -111,20 +117,34 @@ export class SessionRuntime<TState> {
       }
     }
 
-    const env = this.deps.envService.getEnv();
-    const { state, pids } = await this.adapter.spawn({ ...args, env });
+    // Dedup concurrent spawns: a second overlapping `acquire` for the same
+    // sessionId must not call `adapter.spawn` again and start a second process.
+    const inFlight = this.pendingSpawns.get(args.sessionId);
+    if (inFlight) return inFlight;
 
-    // Converged JobObject attachment: every Provider's spawned PIDs join the
-    // Windows job so a server crash tears the whole tree down.
-    if (this.deps.jobObject.isWindowsJob) {
-      for (const pid of pids) {
-        this.deps.jobObject.assign(pid);
-        this.deps.jobObject.setDescription(pid, `mcode session ${args.sessionId}`);
+    const spawnPromise = (async () => {
+      const env = this.deps.envService.getEnv();
+      const { state, pids } = await this.adapter.spawn({ ...args, env });
+
+      // Converged JobObject attachment: every Provider's spawned PIDs join the
+      // Windows job so a server crash tears the whole tree down.
+      if (this.deps.jobObject.isWindowsJob) {
+        for (const pid of pids) {
+          this.deps.jobObject.assign(pid);
+          this.deps.jobObject.setDescription(pid, `mcode session ${args.sessionId}`);
+        }
       }
-    }
 
-    this.sessions.set(args.sessionId, { state, pids, lastUsedAt: Date.now() });
-    return state;
+      this.sessions.set(args.sessionId, { state, pids, lastUsedAt: Date.now() });
+      return state;
+    })();
+
+    this.pendingSpawns.set(args.sessionId, spawnPromise);
+    try {
+      return await spawnPromise;
+    } finally {
+      this.pendingSpawns.delete(args.sessionId);
+    }
   }
 
   /** The live state for `sessionId`, or undefined. */

@@ -114,6 +114,40 @@ describe("SessionRuntime", () => {
     expect(rt.size).toBe(0);
   });
 
+  it("dedups concurrent acquire() for the same session into a single spawn", async () => {
+    // A slow adapter whose spawn does not resolve until we release it, so both
+    // acquire() calls are genuinely in flight at the same time.
+    let releaseSpawn!: () => void;
+    const spawnGate = new Promise<void>((resolve) => {
+      releaseSpawn = resolve;
+    });
+    let spawnCount = 0;
+    const slowAdapter: ProtocolAdapter<FakeState> = {
+      async spawn(args: SpawnArgs): Promise<SpawnResult<FakeState>> {
+        spawnCount++;
+        await spawnGate;
+        return {
+          state: { id: args.sessionId, cwd: args.cwd, permissionMode: args.permissionMode, busy: false, dead: false },
+          pids: [],
+        };
+      },
+      isBusy: () => false,
+      interrupt: () => {},
+      close: () => {},
+      isStale: () => false,
+    };
+    const rt = makeRuntime(slowAdapter as FakeAdapter);
+
+    const p1 = rt.acquire({ ...ACQUIRE, sessionId: "s" });
+    const p2 = rt.acquire({ ...ACQUIRE, sessionId: "s" });
+    releaseSpawn();
+    const [a, b] = await Promise.all([p1, p2]);
+
+    expect(spawnCount).toBe(1);
+    expect(a).toBe(b);
+    expect(rt.size).toBe(1);
+  });
+
   it("shutdown() stops all sessions and clears the eviction timer", async () => {
     const rt = makeRuntime(adapter);
     await rt.acquire({ ...ACQUIRE, sessionId: "s1" });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { lazySchema } from "../utils/lazySchema.js";
 import { ToolCallRecordSchema } from "./tool-call-record.js";
 import { ThoughtSegmentRecordSchema } from "./thought-segment.js";
 import { HookExecutionRecordSchema } from "./hook-execution.js";
@@ -14,45 +15,49 @@ import { HookExecutionRecordSchema } from "./hook-execution.js";
  * (`sort_order`); the assistant message body carries the `sortOrder` of its
  * final-response segment so the body interleaves correctly with tool calls.
  */
-export const NarrativeEntrySchema = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("assistantMessage"),
-    messageId: z.string(),
-    sequence: z.number(),
-    body: z.string(),
-    sortOrder: z.number(),
-  }),
-  z.object({
-    kind: z.literal("toolCall"),
-    sequence: z.number(),
-    sortOrder: z.number(),
-    record: ToolCallRecordSchema,
-  }),
-  z.object({
-    kind: z.literal("narrationSegment"),
-    sequence: z.number(),
-    sortOrder: z.number(),
-    record: ThoughtSegmentRecordSchema,
-  }),
-  z.object({
-    kind: z.literal("hook"),
-    sequence: z.number(),
-    sortOrder: z.number(),
-    record: HookExecutionRecordSchema,
-  }),
-]);
+export const NarrativeEntrySchema = lazySchema(() =>
+  z.discriminatedUnion("kind", [
+    z.object({
+      kind: z.literal("assistantMessage"),
+      messageId: z.string(),
+      sequence: z.number(),
+      body: z.string(),
+      sortOrder: z.number(),
+    }),
+    z.object({
+      kind: z.literal("toolCall"),
+      sequence: z.number(),
+      sortOrder: z.number(),
+      record: ToolCallRecordSchema,
+    }),
+    z.object({
+      kind: z.literal("narrationSegment"),
+      sequence: z.number(),
+      sortOrder: z.number(),
+      record: ThoughtSegmentRecordSchema,
+    }),
+    z.object({
+      kind: z.literal("hook"),
+      sequence: z.number(),
+      sortOrder: z.number(),
+      record: HookExecutionRecordSchema,
+    }),
+  ]),
+);
 
 /** One chronologically-ordered narrative entry returned by `turn.load`. */
-export type NarrativeEntry = z.infer<typeof NarrativeEntrySchema>;
+export type NarrativeEntry = z.infer<ReturnType<typeof NarrativeEntrySchema>>;
 
 /**
  * Optional load window for `turn.load`. Omit for the thread's recent narrative;
  * pass a sequence cursor for pagination. Mirrors `message.list` paging.
  */
-export const TurnRangeSchema = z.object({
-  limit: z.number().optional(),
-  before: z.number().optional(),
-});
+export const TurnRangeSchema = lazySchema(() =>
+  z.object({
+    limit: z.number().optional(),
+    before: z.number().optional(),
+  }),
+);
 
 /** Optional load window for the `turn.load` RPC. */
-export type TurnRange = z.infer<typeof TurnRangeSchema>;
+export type TurnRange = z.infer<ReturnType<typeof TurnRangeSchema>>;

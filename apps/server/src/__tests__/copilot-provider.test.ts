@@ -307,6 +307,7 @@ async function waitForEnded(events: AgentEvent[]): Promise<void> {
     if (events.some((e) => e.type === "ended")) return;
     await new Promise((r) => setTimeout(r, 0));
   }
+  throw new Error("waitForEnded timed out waiting for 'ended' event");
 }
 
 // ---------------------------------------------------------------------------

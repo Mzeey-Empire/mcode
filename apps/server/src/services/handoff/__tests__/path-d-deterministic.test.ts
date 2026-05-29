@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { runPathDDeterministic, type PathDInput } from "../path-d-deterministic.js";
+import { parseHandoffJson } from "@mcode/contracts";
 import type { Thread, Message, ToolCallRecord, ThoughtSegmentRecord } from "@mcode/contracts";
 
 const parent = {
@@ -196,6 +197,27 @@ describe("runPathDDeterministic", () => {
       const long = "X".repeat(5000);
       const a = await runPathDDeterministic({ ...BASE, compactSummary: long });
       expect(a.markdown).toContain(long);
+    });
+
+    it("escapes HTML comment terminators in metadata so the marker round-trips", async () => {
+      // A parent title containing `-->` would otherwise close the HTML comment
+      // early and break the embedded JSON block.
+      const evilTitle = 'Fix bug --> done <!-- sneaky';
+      const a = await runPathDDeterministic({
+        ...BASE,
+        parentThread: { ...parent, title: evilTitle } as unknown as Thread,
+      });
+      // The metadata block must not contain a raw `-->` or `<!--` terminator.
+      const markerIdx = a.markdown.indexOf("<!-- mcode-handoff");
+      const jsonBlock = a.markdown.slice(markerIdx + "<!-- mcode-handoff".length);
+      const closeIdx = jsonBlock.lastIndexOf("-->");
+      expect(closeIdx).toBeGreaterThan(0);
+      const innerJson = jsonBlock.slice(0, closeIdx);
+      expect(innerJson).not.toContain("-->");
+      // The parser still restores the original title (\u003e parses back to >).
+      const parsed = parseHandoffJson(a.markdown);
+      expect(parsed).not.toBeNull();
+      expect(parsed?.parentTitle).toBe(evilTitle);
     });
   });
 });

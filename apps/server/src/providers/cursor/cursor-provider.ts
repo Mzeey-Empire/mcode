@@ -384,7 +384,20 @@ export class CursorProvider
 
     // Open the logical ACP session up front so reuse paths see a ready
     // `acpSessionId`. `runTurn`'s own `openLogicalSession` call then early-returns.
-    await this.openLogicalSession(state, resumeFrom !== undefined);
+    // If the handshake throws, the runtime never received the child's pid, so
+    // it cannot kill it on `stop`. Tear the child down here before rethrowing
+    // so the subprocess does not leak.
+    try {
+      await this.openLogicalSession(state, resumeFrom !== undefined);
+    } catch (err) {
+      this.liveSessionIds.delete(sessionId);
+      try {
+        state.child.kill();
+      } catch {
+        /* best-effort: the child may already be gone */
+      }
+      throw err;
+    }
 
     this.liveSessionIds.add(sessionId);
     return { state, pids: state.child.pid != null ? [state.child.pid] : [] };

@@ -575,8 +575,8 @@ export const WS_METHODS = lazySchema(() => ({
    * turns render in source order (Tool calls never precede the assistant body).
    */
   "turn.load": {
-    params: z.object({ threadId: z.string(), range: TurnRangeSchema.optional() }),
-    result: z.array(NarrativeEntrySchema),
+    params: z.object({ threadId: z.string(), range: TurnRangeSchema().optional() }),
+    result: z.array(NarrativeEntrySchema()),
   },
   /** Replay the full persisted narrative (tools, thoughts, hooks) for an assistant message. */
   "narrative.list": {
