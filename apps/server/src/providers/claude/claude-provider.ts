@@ -37,6 +37,8 @@ import { JobObject } from "../../services/job-object.js";
 import { SessionRuntime } from "../../services/session-runtime.js";
 import type { ProtocolAdapter, SpawnArgs, SpawnResult } from "../../services/session-runtime.js";
 import { listDirectChildren } from "../../services/process-kill.js";
+import { CleanForker } from "../../services/handoff/session-forker.js";
+import type { SessionForker } from "@mcode/contracts";
 
 /**
  * Default model slug used for side-channel and fallback paths.
@@ -269,6 +271,8 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider, Prot
   readonly supportsCompletion = true;
   readonly sessionForkOnResume = "clean" as const;
   readonly maxInputCharactersPerTurn = 180_000;
+  /** Path B (+ B-prime) forker; calls this provider's runSideChannelQuery. */
+  readonly forker: SessionForker = new CleanForker(this);
 
   /** Owns the session pool, idle eviction (with busy guard), and JobObject/kill. */
   private readonly runtime: SessionRuntime<ClaudeSessionState>;

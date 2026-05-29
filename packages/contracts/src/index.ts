@@ -299,6 +299,17 @@ export {
 export type { ProviderModelInfo } from "./providers/models.js";
 export { isCompletionCapable } from "./providers/interfaces.js";
 
+export type {
+  SessionForker,
+  ForkRequest,
+  HandoffArtifact,
+  HandoffMeta,
+  HandoffMode,
+  LadderStep,
+  ForkAnchorRole,
+  ProviderErrorClass,
+} from "./providers/session-forker.js";
+
 export {
   TurnUsageSchema,
   QuotaCategorySchema,

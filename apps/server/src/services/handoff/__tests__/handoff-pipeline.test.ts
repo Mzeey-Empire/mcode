@@ -2,6 +2,25 @@ import "reflect-metadata";
 import { describe, expect, it, vi } from "vitest";
 import type { IProviderRegistry } from "@mcode/contracts";
 import { HandoffPipelineService } from "../handoff-pipeline.js";
+import { CleanForker, MutatingForker, DeterministicForker } from "../session-forker.js";
+
+/**
+ * Wrap a partial Claude-like mock (with runSideChannelQuery) in a real
+ * CleanForker so tests exercise the new forker dispatch end-to-end.
+ */
+function withCleanForker<T extends { runSideChannelQuery: (...a: any[]) => any }>(p: T) {
+  return { ...p, forker: new CleanForker(p as any) };
+}
+
+/** Wrap a Cursor-like mock (with runHiddenTurn) in a real MutatingForker. */
+function withMutatingForker<T extends { runHiddenTurn: (...a: any[]) => any }>(p: T) {
+  return { ...p, forker: new MutatingForker(p as any) };
+}
+
+/** Attach a DeterministicForker to a provider with no fork capability. */
+function withDeterministicForker<T extends object>(p: T) {
+  return { ...p, forker: new DeterministicForker() };
+}
 
 function mkDeps() {
   const parent = { id: "t_parent", title: "X", provider: "claude", sdk_session_id: "sdk_1", deleted_at: null, workspace_id: "ws_1", worktree_path: null } as any;
@@ -38,11 +57,12 @@ describe("HandoffPipelineService.orchestrate", () => {
     const deps = mkDeps();
     deps.providerRegistry.resolve = vi.fn((id: string) => {
       if (id === "claude") {
-        return {
+        return withCleanForker({
           sessionForkOnResume: "clean",
           maxInputCharactersPerTurn: 180_000,
+          id: "claude",
           runSideChannelQuery: vi.fn(async () => "# Handoff\n\n## Goal\nX"),
-        };
+        });
       }
       return null;
     });
@@ -54,9 +74,10 @@ describe("HandoffPipelineService.orchestrate", () => {
 
   it("path B quota failure falls directly to D, skipping A", async () => {
     const deps = mkDeps();
-    deps.providerRegistry.resolve = vi.fn(() => ({
+    deps.providerRegistry.resolve = vi.fn(() => withCleanForker({
       sessionForkOnResume: "clean",
       maxInputCharactersPerTurn: 180_000,
+      id: "claude",
       runSideChannelQuery: vi.fn(async () => {
         throw Object.assign(new Error("rate limited"), { status: 429 });
       }),
@@ -69,9 +90,10 @@ describe("HandoffPipelineService.orchestrate", () => {
 
   it("mutating-resume provider uses path A and minimal mode", async () => {
     const deps = mkDeps();
-    deps.providerRegistry.resolve = vi.fn(() => ({
+    deps.providerRegistry.resolve = vi.fn(() => withMutatingForker({
       sessionForkOnResume: "mutating",
       maxInputCharactersPerTurn: 4_000,
+      id: "cursor",
       runHiddenTurn: vi.fn(async () => "# Handoff\n\n## Goal\nX"),
     }));
     const svc = HandoffPipelineService.forTesting(deps);
@@ -85,9 +107,10 @@ describe("HandoffPipelineService.orchestrate", () => {
 
   it("unsupported-resume provider skips to D with reason null", async () => {
     const deps = mkDeps();
-    deps.providerRegistry.resolve = vi.fn(() => ({
+    deps.providerRegistry.resolve = vi.fn(() => withDeterministicForker({
       sessionForkOnResume: "unsupported",
       maxInputCharactersPerTurn: 16_000,
+      id: "codex",
     }));
     const svc = HandoffPipelineService.forTesting(deps);
     const r = await svc.orchestrate({
@@ -105,11 +128,12 @@ describe("HandoffPipelineService.orchestrate", () => {
     // Override parent to have no session id
     const parentNoSession = { id: "t_parent", title: "X", provider: "claude", sdk_session_id: null, deleted_at: null, workspace_id: "ws_1", worktree_path: null };
     deps.threadRepo.findById = vi.fn(async (id) => (id === "t_parent" ? parentNoSession : null));
-    const provider = {
+    const provider = withCleanForker({
       sessionForkOnResume: "clean",
       maxInputCharactersPerTurn: 180_000,
+      id: "claude",
       runSideChannelQuery: vi.fn(async () => "should not be called"),
-    };
+    });
     deps.providerRegistry.resolve = vi.fn(() => provider);
     const svc = HandoffPipelineService.forTesting(deps);
     const r = await svc.orchestrate(BASE_REQ);
@@ -124,9 +148,10 @@ describe("HandoffPipelineService.orchestrate", () => {
     const deps = mkDeps();
     // Provider that rejects immediately when its signal is already aborted,
     // simulating what a real provider does when the 60s AbortController fires.
-    deps.providerRegistry.resolve = vi.fn(() => ({
+    deps.providerRegistry.resolve = vi.fn(() => withCleanForker({
       sessionForkOnResume: "clean",
       maxInputCharactersPerTurn: 180_000,
+      id: "claude",
       runSideChannelQuery: vi.fn(async (args: { abortSignal?: AbortSignal }) => {
         if (args.abortSignal?.aborted) {
           throw Object.assign(new Error("The operation was aborted"), { name: "AbortError" });
@@ -166,9 +191,10 @@ describe("HandoffPipelineService.orchestrate", () => {
 
     const deps = mkDeps();
     let callCount = 0;
-    deps.providerRegistry.resolve = vi.fn(() => ({
+    deps.providerRegistry.resolve = vi.fn(() => withMutatingForker({
       sessionForkOnResume: "mutating",
       maxInputCharactersPerTurn: 180_000,
+      id: "cursor",
       runHiddenTurn: vi.fn(async () => {
         const idx = ++callCount;
         order.push(idx);

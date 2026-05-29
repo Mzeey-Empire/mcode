@@ -21,6 +21,12 @@ import { HandoffPipelineService } from "../handoff-pipeline.js";
 import { HandoffStorage } from "../handoff-storage.js";
 import type { HandoffArtifact } from "../handoff-types.js";
 import { classifyProviderError } from "../error-classifier.js";
+import { CleanForker } from "../session-forker.js";
+
+/** Wrap a Claude-like mock (with runSideChannelQuery) in a real CleanForker. */
+function withCleanForker<T extends { runSideChannelQuery: (...a: any[]) => any }>(p: T) {
+  return { ...p, forker: new CleanForker(p as any) };
+}
 
 // ---------------------------------------------------------------------------
 // Mock the push broadcast so the pipeline's callers don't need a real WS server.
@@ -103,13 +109,14 @@ describe("fork flow with handoff pipeline (e2e)", () => {
   it("path B success persists artifact to disk with generatedBy=provider and ladderStep=B", async () => {
     const deps = makeDeps((id) => {
       if (id === "claude") {
-        return {
+        return withCleanForker({
           sessionForkOnResume: "clean",
           maxInputCharactersPerTurn: 180_000,
+          id: "claude",
           runSideChannelQuery: vi.fn(async () =>
             "# Handoff\n\n## Goal\nComplete the refactor.\n\n## Context\nSome context.",
           ),
-        };
+        });
       }
       return null;
     });
@@ -227,9 +234,10 @@ describe("fork flow with handoff pipeline (e2e)", () => {
   });
 
   it("path B quota failure (429) falls to D and artifact has ladderStep=D", async () => {
-    const deps = makeDeps((_id) => ({
+    const deps = makeDeps((_id) => withCleanForker({
       sessionForkOnResume: "clean",
       maxInputCharactersPerTurn: 180_000,
+      id: "claude",
       runSideChannelQuery: vi.fn(async () => {
         throw Object.assign(new Error("rate limited"), { status: 429 });
       }),

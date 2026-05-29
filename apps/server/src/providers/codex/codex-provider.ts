@@ -18,8 +18,10 @@ import { JobObject } from "../../services/job-object.js";
 import { EnvService } from "../../services/env-service.js";
 import { SessionRuntime } from "../../services/session-runtime.js";
 import type { ProtocolAdapter, SpawnArgs, SpawnResult } from "../../services/session-runtime.js";
+import { DeterministicForker } from "../../services/handoff/session-forker.js";
 import type {
   IAgentProvider,
+  SessionForker,
   TurnRequest,
   ProviderId,
   ReasoningLevel,
@@ -137,6 +139,8 @@ export class CodexProvider extends EventEmitter implements IAgentProvider, Proto
   readonly supportsCompletion = false;
   readonly sessionForkOnResume = "unsupported" as const;
   readonly maxInputCharactersPerTurn = 16_000;
+  /** Path D forker; Codex cannot fork a session, so handoffs are deterministic. */
+  readonly forker: SessionForker = new DeterministicForker();
 
   /** Returns the static Codex model catalog. Codex does not support dynamic model discovery. */
   async listModels(): Promise<ProviderModelInfo[]> {

@@ -26,8 +26,10 @@ import { EnvService } from "../../services/env-service.js";
 import { JobObject } from "../../services/job-object.js";
 import { SessionRuntime } from "../../services/session-runtime.js";
 import type { ProtocolAdapter, SpawnArgs, SpawnResult } from "../../services/session-runtime.js";
+import { DeterministicForker } from "../../services/handoff/session-forker.js";
 import type {
   IAgentProvider,
+  SessionForker,
   TurnRequest,
   ProviderId,
   ReasoningLevel,
@@ -153,6 +155,8 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider, Pro
   readonly supportsCompletion = true;
   readonly sessionForkOnResume = "unsupported" as const;
   readonly maxInputCharactersPerTurn = 16_000;
+  /** Path D forker; Copilot cannot fork a session, so handoffs are deterministic. */
+  readonly forker: SessionForker = new DeterministicForker();
 
   private client: CopilotClient | null = null;
   private lastCliPath: string | undefined;

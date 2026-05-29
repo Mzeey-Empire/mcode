@@ -1,14 +1,16 @@
 /**
- * Orchestrates the B->A->D ladder for chat fork handoff generation.
+ * Orchestrates chat fork handoff generation by delegating to each provider's
+ * {@link SessionForker}.
  *
- * The dispatch routes on the parent provider's `sessionForkOnResume` capability:
- * - "clean"       : path B (side-channel resume)
- * - "mutating"    : path A (hidden turn on the parent thread)
- * - "unsupported" or null parent.sdk_session_id : path D (deterministic) directly
+ * The pipeline builds a {@link ForkRequest} and calls `provider.forker.fork(req)`.
+ * Each provider owns the strategy: CleanForker (Claude, path B), MutatingForker
+ * (Cursor, path A), or DeterministicForker (Codex/Copilot, path D). The
+ * `sessionForkOnResume` field is now metadata only (provenance + the path-A
+ * mutex decision), not the dispatch key.
  *
- * On any provider failure classified by error-classifier as quota/auth/
- * context-overflow/fatal, the pipeline falls through to D rather than
- * attempting the next ladder step (the next step would hit the same wall).
+ * On a classified non-retryable provider error (quota/auth/context-overflow/
+ * fatal) or a timeout, the pipeline falls back to a shared DeterministicForker
+ * (path D) rather than retrying — the same wall would be hit again.
  */
 
 import { tmpdir } from "os";
@@ -21,9 +23,10 @@ import { MessageRepo } from "../../repositories/message-repo.js";
 import { WorkspaceRepo } from "../../repositories/workspace-repo.js";
 import { classifyProviderError } from "./error-classifier.js";
 import { buildHandoffPrompt, computeBudgetChars, pickHandoffMode, truncateAtSectionBoundary } from "./handoff-prompt.js";
-import { runPathDDeterministic } from "./path-d-deterministic.js";
+import { DeterministicForker } from "./session-forker.js";
 import { buildConversationReplay } from "../handoff-builder.js";
 import type {
+  ForkRequest,
   IAgentProvider,
   IProviderRegistry,
   ProviderId,
@@ -58,8 +61,6 @@ function describeError(err: unknown): Record<string, unknown> {
 
 import type {
   HandoffArtifact,
-  HandoffMeta,
-  HandoffMode,
   HandoffRequest,
   LadderStep,
 } from "./handoff-types.js";
@@ -94,6 +95,13 @@ export class HandoffPipelineService {
    */
   private readonly pathALocks = new Map<string, Promise<void>>();
 
+  /**
+   * Cross-forker fallback. The pipeline delegates to a provider's own forker
+   * first; on a classified non-retryable error or timeout it falls back to this
+   * deterministic forker (path D).
+   */
+  private readonly deterministicForker = new DeterministicForker();
+
   constructor(
     @inject(ThreadRepo) private readonly threadRepo: IThreadRepo,
     @inject(MessageRepo) private readonly messageRepo: IMessageRepo,
@@ -118,8 +126,10 @@ export class HandoffPipelineService {
     (svc as any).workspaceRepo = deps.workspaceRepo ?? {
       findById: async () => ({ path: process.cwd() }),
     };
-    // Initialize instance-field Maps that aren't set via the constructor.
+    // Initialize instance fields that aren't set via the constructor (Object.create
+    // bypasses field initializers).
     (svc as any).pathALocks = new Map<string, Promise<void>>();
+    (svc as any).deterministicForker = new DeterministicForker();
     return svc;
   }
 
@@ -166,114 +176,69 @@ export class HandoffPipelineService {
     const capability: string = parentProvider?.sessionForkOnResume ?? "unsupported";
     const parentSdkSession: string | null = parent.sdk_session_id ?? null;
 
-    // Path B: side-channel query against the parent provider's existing session.
-    // Requires sdk_session_id because the side-channel must resume the correct
-    // provider conversation state.
-    if (capability === "clean" && parentProvider?.runSideChannelQuery && parentSdkSession) {
+    // Build a budgeted history replay so that if a clean-resume session fails
+    // (e.g. after a server restart), the provider can retry without `resume:`
+    // and still produce a high-fidelity path-B result.
+    const replayBudget = computeBudgetChars(childCap);
+    const conversationHistory = buildConversationReplay(messagesUpToFork, replayBudget, null);
+
+    const forkReq: ForkRequest = {
+      parentThreadId: req.parentThreadId,
+      forkedFromMessageId: req.forkedFromMessageId,
+      forkAnchorRole: req.forkAnchorRole,
+      prompt,
+      cwd: parentCwd,
+      parentSdkSessionId: parentSdkSession,
+      conversationHistory,
+      messagesUpToFork,
+      parentThread: parent,
+      childThreadId: req.childThreadId,
+    };
+
+    // Providers that cannot fork a session (capability "unsupported") or a
+    // clean-resume provider with no session id to resume go straight to the
+    // deterministic forker. The DeterministicForker is also the cross-forker
+    // fallback below.
+    const canProviderFork =
+      !!parentProvider &&
+      ((capability === "clean" && !!parentSdkSession) || capability === "mutating");
+    if (!canProviderFork) {
+      return this.deterministicForker.fork({ ...forkReq, forkReason: null });
+    }
+
+    // Path A (mutating) must be serialized per parent thread because each
+    // hidden turn mutates provider session state. Path B (clean) does not.
+    const runFork = async (): Promise<HandoffArtifact> => {
       const abort = new AbortController();
       const timer = setTimeout(() => abort.abort(), PROVIDER_CALL_TIMEOUT_MS);
       try {
-        // Build a budgeted history replay so that if the session-resume fails
-        // (e.g. after a server restart), the provider can retry without `resume:`
-        // and still produce a high-fidelity path-B result.
-        const replayBudget = computeBudgetChars(childCap);
-        const conversationHistory = buildConversationReplay(messagesUpToFork, replayBudget, null);
-
-        let text: string = await parentProvider.runSideChannelQuery({
-          parentThreadId: req.parentThreadId,
-          parentSdkSessionId: parentSdkSession,
-          prompt,
-          abortSignal: abort.signal,
-          conversationHistory,
-          cwd: parentCwd,
-        });
-        text = await this.applyBudgetGuard(text, childCap, "B", req.childThreadId);
-        return this.buildProviderArtifact(req, parent, text, "B", mode);
+        const artifact = await parentProvider!.forker.fork({ ...forkReq, abortSignal: abort.signal });
+        // Apply the child's input budget to provider output, then stamp the
+        // budget-driven mode (forkers return mode "full" by default).
+        const guarded = await this.applyBudgetGuard(
+          artifact.markdown,
+          childCap,
+          artifact.meta.ladderStep,
+          req.childThreadId,
+        );
+        return { markdown: guarded, meta: { ...artifact.meta, mode, characterCount: guarded.length } };
       } catch (err) {
         if ((abort.signal as AbortSignal).aborted) {
-          logger.warn("Handoff path B timed out; falling to D", { threadId: req.parentThreadId });
-          return runPathDDeterministic({
-            parentThread: parent,
-            messagesUpToFork,
-            forkedFromMessageId: req.forkedFromMessageId,
-            forkAnchorRole: req.forkAnchorRole,
-            childThreadId: req.childThreadId,
-            reason: "transient",
-          });
+          logger.warn("Handoff provider fork timed out; falling to D", { threadId: req.parentThreadId });
+          return this.deterministicForker.fork({ ...forkReq, forkReason: "transient" });
         }
         const cls = classifyProviderError(err);
-        logger.warn("Handoff path B failed", { error: describeError(err), cls, threadId: req.parentThreadId });
-        return runPathDDeterministic({
-          parentThread: parent,
-          messagesUpToFork,
-          forkedFromMessageId: req.forkedFromMessageId,
-          forkAnchorRole: req.forkAnchorRole,
-          childThreadId: req.childThreadId,
-          reason: cls,
-        });
+        logger.warn("Handoff provider fork failed", { error: describeError(err), cls, threadId: req.parentThreadId });
+        return this.deterministicForker.fork({ ...forkReq, forkReason: cls });
       } finally {
         clearTimeout(timer);
       }
-    }
+    };
 
-    // Path A: hidden turn injected into the parent's mutable session.
-    // sdk_session_id is NOT required here because runHiddenTurn creates its own
-    // ephemeral turn rather than resuming an existing session; the hidden turn
-    // is a no-op if the parent has never started a session (the provider will
-    // simply have no prior context to draw from, which is acceptable -- path D
-    // will produce an equivalent result in that case). We intentionally do not
-    // gate path A on sdk_session_id to avoid blocking providers that defer
-    // session creation until the first real turn.
-    const runHiddenTurn = parentProvider?.runHiddenTurn?.bind(parentProvider);
-    if (capability === "mutating" && runHiddenTurn) {
-      return this.withPathALock(req.parentThreadId, async () => {
-        const abort = new AbortController();
-        const timer = setTimeout(() => abort.abort(), PROVIDER_CALL_TIMEOUT_MS);
-        try {
-          let text: string = await runHiddenTurn({
-            parentThreadId: req.parentThreadId,
-            prompt,
-            abortSignal: abort.signal,
-          });
-          text = await this.applyBudgetGuard(text, childCap, "A", req.childThreadId);
-          return this.buildProviderArtifact(req, parent, text, "A", mode);
-        } catch (err) {
-          if ((abort.signal as AbortSignal).aborted) {
-            logger.warn("Handoff path A timed out; falling to D", { threadId: req.parentThreadId });
-            return runPathDDeterministic({
-              parentThread: parent,
-              messagesUpToFork,
-              forkedFromMessageId: req.forkedFromMessageId,
-              forkAnchorRole: req.forkAnchorRole,
-              childThreadId: req.childThreadId,
-              reason: "transient",
-            });
-          }
-          const cls = classifyProviderError(err);
-          logger.warn("Handoff path A failed", { error: describeError(err), cls, threadId: req.parentThreadId });
-          return runPathDDeterministic({
-            parentThread: parent,
-            messagesUpToFork,
-            forkedFromMessageId: req.forkedFromMessageId,
-            forkAnchorRole: req.forkAnchorRole,
-            childThreadId: req.childThreadId,
-            reason: cls,
-          });
-        } finally {
-          clearTimeout(timer);
-        }
-      });
+    if (capability === "mutating") {
+      return this.withPathALock(req.parentThreadId, runFork);
     }
-
-    // Path D: deterministic fallback for unsupported providers or missing sessions
-    return runPathDDeterministic({
-      parentThread: parent,
-      messagesUpToFork: messages,
-      forkedFromMessageId: req.forkedFromMessageId,
-      forkAnchorRole: req.forkAnchorRole,
-      childThreadId: req.childThreadId,
-      reason: null,
-    });
+    return runFork();
   }
 
   /**
@@ -362,33 +327,5 @@ export class HandoffPipelineService {
       `  ${overflowPath}`,
       "Use the Read tool to access it for additional context on the parent thread.",
     ].join("\n");
-  }
-
-  /** Builds a provider-generated artifact with the given ladder step and mode. */
-  private buildProviderArtifact(
-    req: HandoffRequest,
-    parent: any,
-    markdownBody: string,
-    step: LadderStep,
-    mode: HandoffMode,
-  ): HandoffArtifact {
-    const meta: HandoffMeta = {
-      schemaVersion: 1,
-      parentThreadId: req.parentThreadId,
-      forkedFromMessageId: req.forkedFromMessageId,
-      forkAnchorRole: req.forkAnchorRole,
-      childThreadId: req.childThreadId,
-      generatedBy: "provider",
-      provider: parent.provider,
-      ladderStep: step,
-      mode,
-      generatedAt: new Date().toISOString(),
-      characterCount: markdownBody.length,
-      parentSdkSessionId: parent.sdk_session_id ?? null,
-      providerErrorOnGenerate: null,
-      regenerationHistory: [],
-      attachments: [],
-    };
-    return { markdown: markdownBody, meta };
   }
 }

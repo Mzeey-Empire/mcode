@@ -32,11 +32,13 @@ import { MessageRepo } from "../../repositories/message-repo.js";
 import { JobObject } from "../../services/job-object.js";
 import { SessionRuntime } from "../../services/session-runtime.js";
 import type { ProtocolAdapter, SpawnArgs, SpawnResult } from "../../services/session-runtime.js";
+import { MutatingForker } from "../../services/handoff/session-forker.js";
 import {
   AgentEventType,
   CURSOR_STATIC_MODEL_FALLBACK,
   getCatalogEntry,
 } from "@mcode/contracts";
+import type { SessionForker } from "@mcode/contracts";
 import type {
   AttachmentMeta,
   AgentEvent,
@@ -145,6 +147,8 @@ export class CursorProvider
   readonly supportsCompletion = false;
   readonly sessionForkOnResume = "mutating" as const;
   readonly maxInputCharactersPerTurn = 4_000;
+  /** Path A forker; calls this provider's runHiddenTurn on the parent session. */
+  readonly forker: SessionForker = new MutatingForker(this);
 
   /** Owns the session pool, idle eviction (with busy guard), and JobObject/kill. */
   private readonly runtime: SessionRuntime<CursorSessionState>;
