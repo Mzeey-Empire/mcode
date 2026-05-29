@@ -1,4 +1,5 @@
 import type { AgentEvent } from "../events/agent-event.js";
+import type { InteractionMode } from "../models/enums.js";
 import type { AttachmentMeta } from "../models/attachment.js";
 import type { PermissionDecision, PermissionRequest } from "../models/permission.js";
 import type { ContextWindowMode, ReasoningLevel } from "../models/settings.js";
@@ -13,6 +14,61 @@ export type ProviderId = "claude" | "codex" | "gemini" | "copilot" | "cursor" | 
 
 /** How a provider's `resume` mechanism behaves when used to fork a session. */
 export type SessionForkBehavior = "clean" | "mutating" | "unsupported";
+
+/**
+ * Per-Provider knobs that ride on a {@link TurnRequest}, keyed by {@link ProviderId}.
+ * Generic call sites cannot reach into the wrong Provider's knobs because the
+ * field type is selected by the request's `P` type parameter.
+ */
+export interface ProviderOptionsByProvider {
+  /** Claude: context-window tier and the Haiku thinking toggle. */
+  claude: { contextWindowMode?: ContextWindowMode; thinking?: boolean };
+  /** Codex: request the OpenAI fast service tier. */
+  codex: { fastMode?: boolean };
+  /** Copilot: sub-agent name ("interactive" | "plan" | "autopilot" | custom YAML name). */
+  copilot: { agent?: string };
+  cursor: Record<string, never>;
+  gemini: Record<string, never>;
+  opencode: Record<string, never>;
+}
+
+/**
+ * The per-Turn value object passed to {@link IAgentProvider.sendTurn}.
+ * `P` selects the Provider-specific `providerOptions` shape.
+ *
+ * Top-level fields are generic per-Turn inputs and knobs the user may change
+ * between Turns. Provider-specific knobs live only in `providerOptions`.
+ */
+export interface TurnRequest<P extends ProviderId = ProviderId> {
+  /** SDK session name, currently `mcode-${threadId}`. */
+  sessionId: string;
+  /** Owning thread id. */
+  threadId: string;
+  /** User input text (already wire-wrapped by the orchestrator when needed). */
+  message: string;
+  attachments?: AttachmentMeta[];
+  /** Working directory: the thread's effective worktree or workspace path. */
+  cwd: string;
+  model: string;
+  /** Fallback model if the primary is unavailable. Undefined disables fallback. */
+  fallbackModel?: string;
+  permissionMode: string;
+  /** Per-Turn interaction state. Plan suppresses Cursor's native auto-answer. */
+  interactionMode: InteractionMode;
+  reasoningLevel?: ReasoningLevel;
+  /** USD budget cap for this Turn. Undefined or 0 disables. */
+  maxBudgetUsd?: number;
+  /** Max agent turns for this Turn. Undefined or 0 disables. */
+  maxTurns?: number;
+  /**
+   * SDK session id to resume from. When defined the Provider resumes that
+   * session; when undefined it starts fresh. Replaces the previous
+   * `setSdkSessionId(...)` + `resume: true` two-step dance.
+   */
+  resumeFrom?: string;
+  /** Provider-specific knobs, walled off by `P`. Required; empty-knob Providers pass `{}`. */
+  providerOptions: ProviderOptionsByProvider[P];
+}
 
 /** A pluggable agent backend that can run sessions and emit events. */
 export interface IAgentProvider {
@@ -44,52 +100,16 @@ export interface IAgentProvider {
    */
   readonly maxInputCharactersPerTurn: number;
 
-  /** Start or continue a session by sending a message. */
-  sendMessage(params: {
-    sessionId: string;
-    message: string;
-    cwd: string;
-    model: string;
-    /** Fallback model to use if the primary model is unavailable. Undefined disables fallback. */
-    fallbackModel?: string;
-    resume: boolean;
-    permissionMode: string;
-    attachments?: AttachmentMeta[];
-    reasoningLevel?: ReasoningLevel;
-    /**
-     * Per-thread context window selection. "1m" appends `[1m]` to the model
-     * slug at the SDK boundary so the SDK attaches the 1M-context beta header.
-     * Undefined falls back to the model's default 200k window.
-     * Honored only by Claude provider; ignored by Codex/Gemini/Copilot.
-     */
-    contextWindowMode?: ContextWindowMode;
-    /**
-     * Boolean thinking toggle for models that expose it (Haiku 4.5).
-     * Undefined and non-Haiku models ignore this field.
-     */
-    thinking?: boolean;
-    /** USD budget cap for this session. Provider stops if exceeded. Undefined or 0 disables. */
-    maxBudgetUsd?: number;
-    /** Maximum agent turns for this session. Provider stops after this count. Undefined or 0 disables. */
-    maxTurns?: number;
-    /**
-     * Codex: request OpenAI fast tier when true. Undefined lets the provider read global settings.
-     */
-    codexFastMode?: boolean;
-    /**
-     * Copilot-specific: name of the sub-agent to activate for this session.
-     * Built-in modes: "interactive" | "plan" | "autopilot".
-     * Custom agents: any name defined in user/project YAML config.
-     * Ignored by non-Copilot providers.
-     */
-    copilotAgent?: string;
-  }): void | Promise<void>;
+  /**
+   * Start or continue a Turn. The {@link TurnRequest} carries all per-Turn
+   * input, knobs, the resume signal (`resumeFrom`), and Provider-specific
+   * options (`providerOptions`). Replaces the former 15-parameter
+   * `sendMessage` call.
+   */
+  sendTurn(req: TurnRequest): Promise<void>;
 
   /** Abort a running session. */
   stopSession(sessionId: string): void;
-
-  /** Store the SDK-assigned session ID for later resume. */
-  setSdkSessionId(sessionId: string, sdkSessionId: string): void;
 
   /** Tear down all sessions and release resources. */
   shutdown(): void;
@@ -160,15 +180,6 @@ export interface IAgentProvider {
   on(event: "permission_resolved", handler: (payload: { requestId: string; decision: PermissionDecision }) => void): void;
   /** Subscribe to ExitPlanMode capture events (Claude SDK plan output). */
   on(event: "exit_plan_mode", handler: (payload: { threadId: string; planMarkdown: string }) => void): void;
-
-  /** Mark a thread as expecting a plan output (enables ExitPlanMode capture). */
-  setPlanAnswerMode?(threadId: string, enabled: boolean): void;
-
-  /**
-   * Mark a thread as in the plan-questions phase. Providers with native question
-   * UIs (Cursor) should not auto-answer while this is active.
-   */
-  setPlanQuestionMode?(threadId: string, enabled: boolean): void;
 }
 
 /**

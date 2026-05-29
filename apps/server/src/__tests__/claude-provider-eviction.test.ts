@@ -69,13 +69,15 @@ describe("ClaudeProvider idle eviction with pending tool_use (#291)", () => {
   it("does NOT evict a session while a tool_use is still pending", async () => {
     mockQuery.mockImplementation(makeToolUseStream());
 
-    await provider.sendMessage({
+    await provider.sendTurn({
       sessionId: "mcode-t1",
+      threadId: "t1",
       message: "run something long",
       cwd: "/tmp",
       model: "claude-sonnet-4-6",
-      resume: false,
       permissionMode: "default",
+      interactionMode: "build",
+      providerOptions: {},
     });
 
     await vi.advanceTimersByTimeAsync(100);
@@ -120,13 +122,15 @@ describe("ClaudeProvider idle eviction with pending tool_use (#291)", () => {
       });
     });
 
-    await provider.sendMessage({
+    await provider.sendTurn({
       sessionId: "mcode-t2",
+      threadId: "t2",
       message: "run",
       cwd: "/tmp",
       model: "claude-sonnet-4-6",
-      resume: false,
       permissionMode: "default",
+      interactionMode: "build",
+      providerOptions: {},
     });
 
     await vi.advanceTimersByTimeAsync(100);

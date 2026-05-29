@@ -51,14 +51,15 @@ function buildService(db: Database.Database) {
   } as unknown as AttachmentService;
 
   // Provider stub: extends EventEmitter (matches real provider shape) and
-  // resolves sendMessage immediately so the turn "completes" without I/O.
+  // resolves sendTurn immediately so the turn "completes" without I/O.
   const providerStub = Object.assign(new EventEmitter(), {
     id: "claude" as const,
     supportsCompletion: true,
     sessionForkOnResume: "unsupported" as const,
     maxInputCharactersPerTurn: 16_000,
-    sendMessage: vi.fn(() => Promise.resolve()),
-    setSdkSessionId: vi.fn(),
+    sendTurn: vi.fn(() => Promise.resolve()),
+    // Claude-concrete off-interface method invoked by armPlanGenerationTurn via cast.
+    setPlanAnswerMode: vi.fn(),
   });
   const providerRegistry = {
     resolve: vi.fn(() => providerStub),

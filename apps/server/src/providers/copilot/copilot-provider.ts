@@ -25,6 +25,7 @@ import { SettingsService } from "../../services/settings-service.js";
 import { EnvService } from "../../services/env-service.js";
 import type {
   IAgentProvider,
+  TurnRequest,
   ProviderId,
   ReasoningLevel,
   AgentEvent,
@@ -465,19 +466,23 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
   private contextWindowBySession = new Map<string, number>();
 
   /** Start or continue a session by sending a message via the Copilot SDK. When `copilotAgent` is provided, routes the session to the appropriate built-in mode or custom agent before sending. */
-  async sendMessage(params: {
-    sessionId: string;
-    message: string;
-    cwd: string;
-    model: string;
-    fallbackModel?: string;
-    resume: boolean;
-    permissionMode: string;
-    attachments?: AttachmentMeta[];
-    reasoningLevel?: ReasoningLevel;
-    /** Copilot sub-agent name. Built-in modes: "interactive" | "plan" | "autopilot". Custom: any YAML agent name. */
-    copilotAgent?: string;
-  }): Promise<void> {
+  async sendTurn(req: TurnRequest<"copilot">): Promise<void> {
+    // `resumeFrom` defined ⇒ resume that SDK session; undefined ⇒ fresh.
+    if (req.resumeFrom !== undefined) {
+      this.sdkSessionIds.set(req.sessionId, req.resumeFrom);
+    }
+    const params = {
+      sessionId: req.sessionId,
+      message: req.message,
+      cwd: req.cwd,
+      model: req.model,
+      fallbackModel: req.fallbackModel,
+      resume: req.resumeFrom !== undefined,
+      permissionMode: req.permissionMode,
+      attachments: req.attachments,
+      reasoningLevel: req.reasoningLevel,
+      copilotAgent: req.providerOptions.agent,
+    };
     try {
       await this.doSendMessage(params);
     } catch (e: unknown) {
@@ -940,11 +945,6 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
         this.contextWindowBySession.delete(sessionId);
       }
     }
-  }
-
-  /** Pre-load an SDK session ID mapping (e.g. from the database on startup). */
-  setSdkSessionId(sessionId: string, sdkSessionId: string): void {
-    this.sdkSessionIds.set(sessionId, sdkSessionId);
   }
 
   /** Disconnect and remove an active session, or record a pending stop if the session hasn't been created yet. */

@@ -81,13 +81,15 @@ describe("ClaudeProvider AssistantMessageBoundary from stop_reason", () => {
       if (e.type === AgentEventType.AssistantMessageBoundary) boundaries.push(e);
     });
 
-    await provider.sendMessage({
+    await provider.sendTurn({
       sessionId: "mcode-thread-boundary-final",
+      threadId: "thread-boundary-final",
       message: "hi",
       cwd: "/tmp",
       model: "claude-sonnet-4-6",
-      resume: false,
       permissionMode: "default",
+      interactionMode: "build",
+      providerOptions: {},
     });
     await new Promise((r) => setTimeout(r, 10));
 
@@ -122,13 +124,15 @@ describe("ClaudeProvider AssistantMessageBoundary from stop_reason", () => {
       if (e.type === AgentEventType.AssistantMessageBoundary) boundaries.push(e);
     });
 
-    await provider.sendMessage({
+    await provider.sendTurn({
       sessionId: "mcode-thread-boundary-preamble",
+      threadId: "thread-boundary-preamble",
       message: "read file",
       cwd: "/tmp",
       model: "claude-sonnet-4-6",
-      resume: false,
       permissionMode: "default",
+      interactionMode: "build",
+      providerOptions: {},
     });
     await new Promise((r) => setTimeout(r, 10));
 
@@ -162,13 +166,15 @@ describe("ClaudeProvider AssistantMessageBoundary from stop_reason", () => {
       if (e.type === AgentEventType.AssistantMessageBoundary) boundaries.push(e);
     });
 
-    await provider.sendMessage({
+    await provider.sendTurn({
       sessionId: "mcode-thread-boundary-no-text",
+      threadId: "thread-boundary-no-text",
       message: "go",
       cwd: "/tmp",
       model: "claude-sonnet-4-6",
-      resume: false,
       permissionMode: "default",
+      interactionMode: "build",
+      providerOptions: {},
     });
     await new Promise((r) => setTimeout(r, 10));
 

@@ -39,11 +39,11 @@ import type {
   AttachmentMeta,
   AgentEvent,
   IAgentProvider,
+  TurnRequest,
   PermissionDecision,
   PermissionRequest,
   ProviderId,
   ProviderModelInfo,
-  ReasoningLevel,
   Settings,
 } from "@mcode/contracts";
 import {
@@ -170,32 +170,35 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
   }
 
   /** Queues an ACP `session/prompt` on the session subprocess (serialized per thread). */
-  async sendMessage(params: {
-    sessionId: string;
-    message: string;
-    cwd: string;
-    model: string;
-    fallbackModel?: string;
-    resume: boolean;
-    permissionMode: string;
-    attachments?: AttachmentMeta[];
-    reasoningLevel?: ReasoningLevel;
-  }): Promise<void> {
-    void params.fallbackModel;
-    void params.reasoningLevel;
+  async sendTurn(req: TurnRequest<"cursor">): Promise<void> {
+    void req.fallbackModel;
+    void req.reasoningLevel;
 
     const {
       sessionId,
       message,
       cwd,
       model,
-      resume,
       permissionMode,
       attachments,
-    } = params;
+    } = req;
+    // `resumeFrom` defined ⇒ resume the stored ACP session; undefined ⇒ fresh.
+    const resume = req.resumeFrom !== undefined;
+    if (req.resumeFrom !== undefined) {
+      this.sdkSessionIds.set(sessionId, req.resumeFrom);
+    }
 
     const pm: "full" | "default" = permissionMode === "full" ? "full" : "default";
     const threadId = sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;
+
+    // interactionMode absorbs the retired setPlanQuestionMode: a plan-mode Turn
+    // suppresses Cursor's native auto-answer of ask_question; build clears it.
+    // The flag is re-derived every Turn, so it is authoritative per Turn.
+    if (req.interactionMode === "plan") {
+      this.planQuestionModeThreads.add(threadId);
+    } else {
+      this.planQuestionModeThreads.delete(threadId);
+    }
 
     if (!this.evictionTimer) {
       this.evictionTimer = setInterval(() => this.evictIdleSessions(), EVICTION_INTERVAL_MS);
@@ -246,10 +249,6 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     await scheduled;
   }
 
-  /** Pre-load an SDK session ID mapping (e.g. from the database on startup). */
-  setSdkSessionId(sessionId: string, sdkSessionId: string): void {
-    this.sdkSessionIds.set(sessionId, sdkSessionId);
-  }
 
   /** Cancel the active ACP session. Records a pending stop if the session hasn't been created yet. */
   stopSession(sessionId: string): void {
@@ -272,14 +271,6 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     }
   }
 
-  /** Toggle Mcode plan-questions phase for Cursor ask_question handling. */
-  setPlanQuestionMode(threadId: string, enabled: boolean): void {
-    if (enabled) {
-      this.planQuestionModeThreads.add(threadId);
-    } else {
-      this.planQuestionModeThreads.delete(threadId);
-    }
-  }
 
   /** Tear down all sessions, cancel pending permissions, and stop the eviction timer. */
   shutdown(): void {

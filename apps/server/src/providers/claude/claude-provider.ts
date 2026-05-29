@@ -13,6 +13,7 @@ import { logger } from "@mcode/shared";
 import { AgentEventType, isVirtualBrowserContextAttachment } from "@mcode/contracts";
 import type {
   IAgentProvider,
+  TurnRequest,
   ProviderId,
   ReasoningLevel,
   ContextWindowMode,
@@ -300,26 +301,32 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
   }
 
   /** Start or continue a session by sending a message via the SDK. */
-  async sendMessage(params: {
-    sessionId: string;
-    message: string;
-    cwd: string;
-    model: string;
-    fallbackModel?: string;
-    resume: boolean;
-    permissionMode: string;
-    attachments?: AttachmentMeta[];
-    reasoningLevel?: ReasoningLevel;
-    contextWindowMode?: ContextWindowMode;
-    thinking?: boolean;
-    maxBudgetUsd?: number;
-    maxTurns?: number;
-  }): Promise<void> {
+  async sendTurn(req: TurnRequest<"claude">): Promise<void> {
+    // Seed the resume id so doSendMessage's sdkSessionIds lookup resolves it.
+    // `resumeFrom` defined ⇒ resume that SDK session; undefined ⇒ fresh.
+    if (req.resumeFrom !== undefined) {
+      this.sdkSessionIds.set(req.sessionId, req.resumeFrom);
+    }
+    const params = {
+      sessionId: req.sessionId,
+      message: req.message,
+      cwd: req.cwd,
+      model: req.model,
+      fallbackModel: req.fallbackModel,
+      resume: req.resumeFrom !== undefined,
+      permissionMode: req.permissionMode,
+      attachments: req.attachments,
+      reasoningLevel: req.reasoningLevel,
+      contextWindowMode: req.providerOptions.contextWindowMode,
+      thinking: req.providerOptions.thinking,
+      maxBudgetUsd: req.maxBudgetUsd,
+      maxTurns: req.maxTurns,
+    };
     try {
       await this.doSendMessage(params);
     } catch (e: unknown) {
-      logger.error("sendMessage error", {
-        sessionId: params.sessionId,
+      logger.error("sendTurn error", {
+        sessionId: req.sessionId,
         error: String(e),
       });
       throw e;
@@ -2006,11 +2013,6 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     }
   }
 
-  /** Pre-load an SDK session ID mapping (e.g. from the database on startup). */
-  setSdkSessionId(sessionId: string, sdkSessionId: string): void {
-    this.sdkSessionIds.set(sessionId, sdkSessionId);
-  }
-
   /**
    * Install a goal on a session. The next Stop event from the SDK will be
    * blocked with a "Goal not yet met" reason until {@link clearGoal} is
@@ -2165,6 +2167,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
    * callback captures ExitPlanMode calls instead of denying them.
    * When disabled (or after capture), the model's ExitPlanMode calls
    * are denied silently.
+   *
+   * Off-interface (like setGoal/clearGoal): no longer an IAgentProvider member;
+   * AgentService invokes it on the concrete ClaudeProvider via a cast. The
+   * question-vs-answer plan distinction cannot be carried by the binary
+   * TurnRequest.interactionMode, so this Claude-only arming stays explicit.
    */
   setPlanAnswerMode(threadId: string, enabled: boolean): void {
     if (enabled) {

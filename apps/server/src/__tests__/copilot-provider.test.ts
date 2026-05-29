@@ -194,12 +194,14 @@ describe("CopilotProvider bootstrap", () => {
       const events: AgentEvent[] = [];
       provider.on("event", (e: AgentEvent) => events.push(e));
 
-      await provider.sendMessage({
+      await provider.sendTurn({
         sessionId: "mcode-test1",
+        threadId: "test1",
         message: "hello",
         cwd: "/tmp",
         model: "gpt-4o",
-        resume: false,
+        interactionMode: "build",
+        providerOptions: {},
         permissionMode: "auto",
       });
 
@@ -220,12 +222,14 @@ describe("CopilotProvider bootstrap", () => {
       const events: AgentEvent[] = [];
       provider.on("event", (e: AgentEvent) => events.push(e));
 
-      await provider.sendMessage({
+      await provider.sendTurn({
         sessionId: "mcode-test2",
+        threadId: "test2",
         message: "hello",
         cwd: "/tmp",
         model: "gpt-4o",
-        resume: false,
+        interactionMode: "build",
+        providerOptions: {},
         permissionMode: "auto",
       });
 
@@ -271,12 +275,14 @@ async function runWithMockSession(
   const events: AgentEvent[] = [];
   provider.on("event", (e: AgentEvent) => events.push(e));
 
-  await provider.sendMessage({
+  await provider.sendTurn({
     sessionId,
+    threadId: sessionId.replace(/^mcode-/, ""),
     message: "hello",
     cwd: "/tmp",
     model: "gpt-4o",
-    resume: false,
+    interactionMode: "build",
+    providerOptions: {},
     permissionMode: "auto",
   });
 

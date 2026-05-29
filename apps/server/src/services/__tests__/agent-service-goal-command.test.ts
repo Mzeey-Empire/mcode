@@ -27,7 +27,7 @@ import { broadcast } from "../../transport/push.js";
 
 /**
  * Build an AgentService with a Claude-shaped provider stub that records
- * setGoal/clearGoal/sendMessage so we can assert which path the /goal
+ * setGoal/clearGoal/sendTurn so we can assert which path the /goal
  * intercept took (control short-circuit vs SET fall-through).
  */
 function buildService(db: Database.Database) {
@@ -56,10 +56,9 @@ function buildService(db: Database.Database) {
     supportsCompletion: true,
     sessionForkOnResume: "unsupported" as const,
     maxInputCharactersPerTurn: 16_000,
-    sendMessage: vi.fn<(params: { message: string; [k: string]: unknown }) => Promise<void>>(
+    sendTurn: vi.fn<(params: { message: string; [k: string]: unknown }) => Promise<void>>(
       () => Promise.resolve(),
     ),
-    setSdkSessionId: vi.fn(),
     setGoal: vi.fn<(sid: string, condition: string) => void>(),
     clearGoal: vi.fn<(sid: string) => void>(),
     getGoal: vi.fn<(sid: string) => string | undefined>(() => undefined),
@@ -157,8 +156,8 @@ describe("AgentService.sendMessage — /goal command", () => {
 
     // Provider was actually called — this is the regression the user hit
     // where /goal <condition> set the hook but never started the agent.
-    expect(providerStub.sendMessage).toHaveBeenCalledTimes(1);
-    const sentMessage = providerStub.sendMessage.mock.calls[0][0].message;
+    expect(providerStub.sendTurn).toHaveBeenCalledTimes(1);
+    const sentMessage = providerStub.sendTurn.mock.calls[0][0].message;
     expect(sentMessage).toContain("analyse this branch");
     expect(sentMessage.toLowerCase()).toContain("directive");
 
@@ -183,7 +182,7 @@ describe("AgentService.sendMessage — /goal command", () => {
     );
 
     expect(providerStub.clearGoal).toHaveBeenCalledWith(`mcode-${thread.id}`);
-    expect(providerStub.sendMessage).not.toHaveBeenCalled();
+    expect(providerStub.sendTurn).not.toHaveBeenCalled();
 
     // Confirmation pill persisted as an assistant message.
     const { messages } = messageRepo.listByThread(thread.id, 100);
@@ -213,7 +212,7 @@ describe("AgentService.sendMessage — /goal command", () => {
       "claude",
     );
 
-    expect(providerStub.sendMessage).not.toHaveBeenCalled();
+    expect(providerStub.sendTurn).not.toHaveBeenCalled();
     expect(providerStub.setGoal).not.toHaveBeenCalled();
 
     const { messages } = messageRepo.listByThread(thread.id, 100);
@@ -237,7 +236,7 @@ describe("AgentService.sendMessage — /goal command", () => {
 
     // Provider was still called with the raw text (no rewrite, no goal install).
     expect(providerStub.setGoal).not.toHaveBeenCalled();
-    expect(providerStub.sendMessage).toHaveBeenCalledTimes(1);
-    expect(providerStub.sendMessage.mock.calls[0][0].message).toBe("/goal something");
+    expect(providerStub.sendTurn).toHaveBeenCalledTimes(1);
+    expect(providerStub.sendTurn.mock.calls[0][0].message).toBe("/goal something");
   });
 });

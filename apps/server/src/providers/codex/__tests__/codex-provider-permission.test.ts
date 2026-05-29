@@ -221,13 +221,15 @@ describe("CodexProvider permission flow", () => {
     };
 
     vi.useRealTimers();
-    await provider.sendMessage({
+    await provider.sendTurn({
       sessionId,
+      threadId,
       message: "hi",
       cwd: "/",
       model: "gpt-5",
-      resume: false,
       permissionMode: "full",
+      interactionMode: "build",
+      providerOptions: {},
     });
 
     const response = await pendingPromise;
