@@ -111,8 +111,37 @@ const npmGlobalStrategy: Strategy = {
   },
 };
 
+/** Returns the first command source on PATH: PowerShell-aware on win32, `which` on posix. */
+function locateOnPath(io: ResolverIO): string | null {
+  if (io.platform === "win32") {
+    // `where.exe` cannot see ExternalScript/.ps1 shims; Get-Command can. Prefer
+    // it, fall back to `where` for .cmd/.exe shims.
+    const viaPwsh = io.exec("powershell", ["-NoProfile", "-Command", "(Get-Command copilot).Source"]);
+    if (viaPwsh) return viaPwsh.split(/\r?\n/)[0]?.trim() ?? null;
+    const viaWhere = io.exec("where", ["copilot"]);
+    return viaWhere ? (viaWhere.split(/\r?\n/)[0]?.trim() ?? null) : null;
+  }
+  const viaWhich = io.exec("which", ["copilot"]);
+  return viaWhich ? (viaWhich.split(/\r?\n/)[0]?.trim() ?? null) : null;
+}
+
+/**
+ * 3. PATH/shim fallback. Resolves `copilot` on PATH (PowerShell-aware on win32
+ *    so .ps1 ExternalScripts are visible), then follows to the adjacent
+ *    `node_modules/@github/copilot/index.js`. Covers non-standard layouts the
+ *    npm-global root does not surface.
+ */
+const pathShimStrategy: Strategy = {
+  source: "path-shim",
+  resolve(_ctx, io) {
+    const shim = locateOnPath(io);
+    if (!shim) return null;
+    return resolvePackageEntry(join(dirname(shim), "node_modules", "@github", "copilot"), io);
+  },
+};
+
 /** Strategy table, tried in priority order. Append a row to add a future route. */
-const STRATEGIES: Strategy[] = [configuredStrategy, npmGlobalStrategy];
+const STRATEGIES: Strategy[] = [configuredStrategy, npmGlobalStrategy, pathShimStrategy];
 
 /** Builds the not-found resolution, disambiguating `@github/copilot` from `gh copilot`. */
 function notFound(io: ResolverIO): CopilotCliNotFound {

@@ -80,6 +80,41 @@ describe("resolveCopilotCli", () => {
   it("falls through when npm is unavailable", () => {
     expect(resolveCopilotCli({}, fakeIO({ platform: "linux" })).source).toBe("not-found");
   });
+
+  it("follows a win32 .ps1 shim to the adjacent package index.js (PowerShell-aware)", () => {
+    const binDir = join("C:/scoop/bin");
+    const shim = join(binDir, "copilot.ps1");
+    const pkgDir = join(binDir, "node_modules", "@github", "copilot");
+    const entry = join(pkgDir, "index.js");
+    const io = fakeIO({
+      platform: "win32",
+      exec: { "powershell -NoProfile -Command (Get-Command copilot).Source": shim },
+      files: { [join(pkgDir, "package.json")]: JSON.stringify({ version: "1.0.24" }) },
+      existsExtra: [entry],
+    });
+    const res = resolveCopilotCli({}, io);
+    expect(res).toMatchObject({ source: "path-shim", entry, version: "1.0.24" });
+  });
+
+  it("resolves via posix which, following to the adjacent package index.js", () => {
+    const binDir = "/usr/local/bin";
+    const shim = join(binDir, "copilot");
+    const pkgDir = join(binDir, "node_modules", "@github", "copilot");
+    const entry = join(pkgDir, "index.js");
+    const io = fakeIO({
+      platform: "linux",
+      exec: { "which copilot": shim },
+      files: { [join(pkgDir, "package.json")]: JSON.stringify({ version: "1.0.24" }) },
+      existsExtra: [entry],
+    });
+    const res = resolveCopilotCli({}, io);
+    expect(res).toMatchObject({ source: "path-shim", entry, version: "1.0.24" });
+  });
+
+  it("falls through when the shim has no adjacent package", () => {
+    const io = fakeIO({ platform: "linux", exec: { "which copilot": "/usr/local/bin/copilot" } });
+    expect(resolveCopilotCli({}, io).source).toBe("not-found");
+  });
 });
 
 export { fakeIO };
