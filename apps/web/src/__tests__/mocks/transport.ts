@@ -152,6 +152,7 @@ export const mockTransport: McodeTransport = {
   listToolCallRecordsByParent: vi.fn().mockResolvedValue([]),
   listNarrative: vi.fn().mockResolvedValue({ tools: [], thoughts: [], hooks: [] }),
   listNarrativeBatch: vi.fn().mockResolvedValue({}),
+  loadTurn: vi.fn().mockResolvedValue([]),
   getThreadTasks: vi.fn().mockResolvedValue(null),
   getThreadPlans: vi.fn().mockResolvedValue([]),
   getSnapshotDiff: vi.fn().mockResolvedValue(""),

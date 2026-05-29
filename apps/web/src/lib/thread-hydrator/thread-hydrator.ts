@@ -12,11 +12,13 @@ import {
 import type { ThreadRecord } from "@/stores/thread-record";
 import type {
   HydrateMode,
+  NarrativeBatchResult,
   ThreadHydratorDeps,
   ThreadHydratorOptions,
   ThreadHydratorTransport,
   ThreadHydratorWriteState,
 } from "./types";
+import type { NarrativeEntry } from "@mcode/contracts";
 import { snapshotBuilder } from "./snapshot-builder";
 import { AuxiliaryHydrator } from "./auxiliary-hydrator";
 
@@ -270,7 +272,16 @@ export class ThreadHydrator {
     }
   }
 
-  /** Eager-prefetch persisted narrative for the last N assistant messages. */
+  /**
+   * Eager-hydrate persisted narrative for the thread via the single
+   * server-ordered `turn.load` call, then group the flat {@link NarrativeEntry}
+   * list back into the per-message {@link NarrativeBatchResult} shape that
+   * `narrativeByMessage` consumers expect (back-compat is intentional).
+   *
+   * On `turn.load` rejection we leave the lazy per-message
+   * `loadNarrativeForMessage` (`narrative.list`) path to fill in, so hydration
+   * never crashes on a transport failure.
+   */
   private prefetchNarratives(threadId: string, messages: import("@/transport").Message[]): void {
     const lastAssistants = messages.filter((m) => m.role === "assistant").slice(-NARRATIVE_PREFETCH_BATCH);
     const narrativeByMessage = getThreadRecord(this.deps.getState().records, threadId).narrativeByMessage;
@@ -281,25 +292,72 @@ export class ThreadHydrator {
     if (idsToFetch.length === 0) return;
 
     void this.transport()
-      .listNarrativeBatch(idsToFetch)
-      .then((batchRes) => {
+      .loadTurn(threadId)
+      .then((entries) => {
+        const grouped = groupNarrativeEntriesByMessage(entries);
         this.deps.setState((state: ThreadHydratorWriteState) => {
           if (!state.records.has(threadId)) return {};
           const rec = getThreadRecord(state.records, threadId);
+          // Preserve already-loaded entries: only commit messages we still need.
+          const next = { ...rec.narrativeByMessage };
+          for (const id of idsToFetch) {
+            next[id] = grouped[id] ?? { tools: [], thoughts: [], hooks: [] };
+          }
           return {
             records: patchThreadRecord(state.records, threadId, {
-              narrativeByMessage: { ...rec.narrativeByMessage, ...batchRes },
+              narrativeByMessage: next,
             }),
           };
         });
       })
       .catch((err) => {
-        console.warn("[narrative] listNarrativeBatch failed, falling back", err);
+        console.warn("[narrative] turn.load failed, falling back to lazy narrative.list", err);
         for (const m of lastAssistants) {
           void this.deps.loadNarrativeForMessage(m.id);
         }
       });
   }
+}
+
+/**
+ * Group a flat, server-ordered {@link NarrativeEntry} list into the legacy
+ * per-message {@link NarrativeBatchResult} shape keyed by `message_id`.
+ *
+ * `assistantMessage` entries are skipped: their body already lives on the
+ * message row, so they do not belong in `narrativeByMessage`. The server
+ * already orders entries by (sequence, sortOrder), so per-message arrays
+ * preserve that order without re-sorting here.
+ */
+export function groupNarrativeEntriesByMessage(
+  entries: NarrativeEntry[],
+): NarrativeBatchResult {
+  const grouped: NarrativeBatchResult = {};
+  const bucket = (messageId: string): NarrativeBatchResult[string] => {
+    let entry = grouped[messageId];
+    if (!entry) {
+      entry = { tools: [], thoughts: [], hooks: [] };
+      grouped[messageId] = entry;
+    }
+    return entry;
+  };
+
+  for (const entry of entries) {
+    switch (entry.kind) {
+      case "toolCall":
+        bucket(entry.record.message_id).tools.push(entry.record);
+        break;
+      case "narrationSegment":
+        bucket(entry.record.message_id).thoughts.push(entry.record);
+        break;
+      case "hook":
+        bucket(entry.record.message_id).hooks.push(entry.record);
+        break;
+      case "assistantMessage":
+        break;
+    }
+  }
+
+  return grouped;
 }
 
 /** Module-scoped hydrator instance registered by threadStore at init. */
