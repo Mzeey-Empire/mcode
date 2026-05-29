@@ -6,7 +6,6 @@
  */
 
 import { injectable, inject, delay } from "tsyringe";
-import { randomUUID } from "crypto";
 import { existsSync, statSync } from "fs";
 import { writeFile } from "fs/promises";
 import { tmpdir } from "os";
@@ -31,9 +30,8 @@ import type {
 import { ThreadRepo } from "../repositories/thread-repo";
 import { WorkspaceRepo } from "../repositories/workspace-repo";
 import { MessageRepo } from "../repositories/message-repo";
-import { ToolCallRecordRepo, type CreateToolCallRecordInput } from "../repositories/tool-call-record-repo";
-import { ThoughtSegmentRepo, type CreateThoughtSegmentInput } from "../repositories/thought-segment-repo";
 import { HookExecutionRepo, type CreateHookExecutionInput } from "../repositories/hook-execution-repo";
+import { NarrativeStore } from "./narrative-store.js";
 import { TurnSnapshotRepo } from "../repositories/turn-snapshot-repo";
 import type Database from "better-sqlite3";
 import { TaskRepo } from "../repositories/task-repo";
@@ -142,11 +140,6 @@ function buildOffBandHandoffPrompt(tempPath: string, markdown: string, userMessa
   ].join("\n");
 }
 
-/** Buffered tool call with raw input preserved for deferred summarization. */
-interface BufferedToolCall extends CreateToolCallRecordInput {
-  _rawToolInput?: Record<string, unknown>;
-}
-
 /** Orchestrates agent sessions, message sending, and event forwarding. */
 @injectable()
 export class AgentService {
@@ -158,39 +151,13 @@ export class AgentService {
   private lastContextWindowByThread = new Map<string, number>();
   /** Tracks threads where compaction is currently in progress to guard DB persistence in turnComplete. */
   private compactionInProgressByThread = new Set<string>();
-  /** Per-thread buffer of tool calls accumulated during the current turn. */
-  private turnToolCalls = new Map<string, BufferedToolCall[]>();
+  /**
+   * Per-thread narrative buffers (tool calls, agentCallStack, thoughts, hooks,
+   * sort counter) and their enrichment + classification + persistence logic
+   * live in {@link NarrativeStore}. AgentService delegates the write seam to it.
+   */
   /** Per-thread ref_before captured at sendMessage time. */
   private turnRefBefore = new Map<string, { ref: string; cwd: string }>();
-  /** Stack of active Agent tool call IDs per thread (for nesting inference). */
-  private agentCallStack = new Map<string, string[]>();
-  /** Per-thread sort counter shared across tool calls, thought segments, and hook executions. */
-  private turnSortCounters = new Map<string, number>();
-  /** In-flight thought segment being accumulated from consecutive textDelta events, per thread. */
-  private turnOpenThought = new Map<
-    string,
-    { id: string; text: string; startedAt: string; sortOrder: number } | null
-  >();
-  /** Closed thought segments awaiting persistence at turn end, per thread. */
-  private turnThoughts = new Map<string, CreateThoughtSegmentInput[]>();
-  /** In-flight hook executions keyed by hookName, per thread. HookCompleted carries no toolName, so hookName alone matches. */
-  private turnOpenHooks = new Map<
-    string,
-    Map<
-      string,
-      {
-        id: string;
-        hookName: string;
-        toolName: string | null;
-        phase: string;
-        payload: string;
-        startedAt: string;
-        sortOrder: number;
-      }
-    >
-  >();
-  /** Closed hook executions awaiting persistence at turn end, per thread. */
-  private turnHooks = new Map<string, CreateHookExecutionInput[]>();
   /** Threads currently running persistTurn to prevent concurrent calls. */
   private persistingThreads = new Set<string>();
   /**
@@ -236,8 +203,6 @@ export class AgentService {
     private readonly providerRegistry: IProviderRegistry,
     @inject(delay(() => ThreadService))
     private readonly threadService: ThreadService,
-    @inject(ToolCallRecordRepo) private readonly toolCallRecordRepo: ToolCallRecordRepo,
-    @inject(ThoughtSegmentRepo) private readonly thoughtSegmentRepo: ThoughtSegmentRepo,
     @inject(HookExecutionRepo) private readonly hookExecutionRepo: HookExecutionRepo,
     @inject(TurnSnapshotRepo) private readonly turnSnapshotRepo: TurnSnapshotRepo,
     @inject(SnapshotService) private readonly snapshotService: SnapshotService,
@@ -257,6 +222,8 @@ export class AgentService {
     private readonly handoffStorage: HandoffStorage,
     @inject(ScopedPreGrantService)
     private readonly scopedPreGrant: ScopedPreGrantService,
+    @inject(NarrativeStore)
+    private readonly narrativeStore: NarrativeStore,
   ) {}
 
   /**
@@ -570,13 +537,8 @@ export class AgentService {
         error: err instanceof Error ? err.message : String(err),
       });
     }
-    this.turnToolCalls.set(threadId, []);
-    this.turnSortCounters.set(threadId, 0);
-    this.agentCallStack.set(threadId, []);
-    this.turnOpenThought.set(threadId, null);
-    this.turnThoughts.set(threadId, []);
-    this.turnOpenHooks.set(threadId, new Map());
-    this.turnHooks.set(threadId, []);
+    this.narrativeStore.beginTurn(threadId);
+    this.narrativeStore.resetTurnCounters(threadId);
 
     // Initialize context tracking from the previous turn's final count.
     // For resume turns, last_context_tokens is the authoritative count from
@@ -1469,34 +1431,13 @@ export class AgentService {
     // clearTurnState already called inside persistTurn
   }
 
-  /** Get the current parent tool call ID for a thread's active Agent nesting. */
-  getCurrentParentToolCallId(threadId: string): string | undefined {
-    return this.getStackDerivedParentFallback(threadId);
-  }
-
   /**
-   * Single running Agent on the stack (buffer `status === "running"`) can
-   * serve as a parent fallback when the SDK omits `parent_tool_use_id`.
-   * Zero or multiple running Agents means the fallback is ambiguous (parallel
-   * dispatch, nested agents, or coordinator work after children); return
-   * undefined so tools do not attach under the wrong subagent row.
+   * Get the current parent tool call ID for a thread's active Agent nesting.
+   * Delegates to {@link NarrativeStore} which owns the agentCallStack and the
+   * "exactly one running Agent" fallback rule (narrative-pipeline.md Trap 1).
    */
-  private getStackDerivedParentFallback(threadId: string): string | undefined {
-    const stack = this.agentCallStack.get(threadId) ?? [];
-    if (stack.length === 0) return undefined;
-
-    const buffer = this.turnToolCalls.get(threadId) ?? [];
-    const runningAgentIds: string[] = [];
-    for (const agentId of stack) {
-      const row = buffer.find(
-        (b) => b.toolCallId === agentId && b.toolName === "Agent",
-      );
-      if (row?.status === "running") {
-        runningAgentIds.push(agentId);
-      }
-    }
-
-    return runningAgentIds.length === 1 ? runningAgentIds[0] : undefined;
+  getCurrentParentToolCallId(threadId: string): string | undefined {
+    return this.narrativeStore.getCurrentParentToolCallId(threadId);
   }
 
   /**
@@ -1507,7 +1448,7 @@ export class AgentService {
     threadId: string,
     parentToolCallId: string,
   ): string {
-    const buffer = this.turnToolCalls.get(threadId) ?? [];
+    const buffer = this.narrativeStore.getBufferedToolCalls(threadId);
     let current: string | undefined = parentToolCallId;
 
     while (current) {
@@ -1597,22 +1538,10 @@ export class AgentService {
           // open a ThoughtSegment for them: that would cause the text to appear
           // twice (once as a dimmed thought block, once as the assistant message).
           if (!event.isFinalResponse) {
-            // Open or extend the current thought segment. Sort order is allocated lazily
-            // on first delta so consecutive deltas keep the same slot; the slot is taken
-            // BEFORE any following tool call's sort order, matching the live client builder.
-            const open = this.turnOpenThought.get(event.threadId);
-            if (!open) {
-              const sortOrder = this.turnSortCounters.get(event.threadId) ?? 0;
-              this.turnSortCounters.set(event.threadId, sortOrder + 1);
-              this.turnOpenThought.set(event.threadId, {
-                id: randomUUID(),
-                text: event.delta,
-                startedAt: new Date().toISOString(),
-                sortOrder,
-              });
-            } else {
-              open.text += event.delta;
-            }
+            // Open or extend the current thought segment. NarrativeStore allocates
+            // the sort order lazily on the first delta so consecutive deltas keep
+            // the same slot, taken BEFORE any following tool call's sort order.
+            this.narrativeStore.openOrExtendThought(event.threadId, event.delta);
           }
           const parser = this.planParsers.get(event.threadId);
           if (parser) {
@@ -1681,11 +1610,8 @@ export class AgentService {
           }
           // A Message event marks the end of the turn. Any Agent calls still
           // on the stack are implicitly done - clear the stack so the next turn
-          // starts clean.
-          const stackOnMessage = this.agentCallStack.get(event.threadId);
-          if (stackOnMessage && stackOnMessage.length > 0) {
-            stackOnMessage.length = 0;
-          }
+          // starts clean (narrative-pipeline.md Trap 2 end-of-turn clear).
+          this.narrativeStore.clearAgentStackOnMessage(event.threadId);
 
           // Persist any pending plan-output extracted from streamed text deltas.
           // Guarded on event.messageId so it only runs when the assistant message
@@ -1766,14 +1692,14 @@ export class AgentService {
           // Otherwise the message ended with a non-finalizing stop_reason such
           // as `tool_use`; close the thought so it persists as preamble.
           if (event.isFinalResponse) {
-            this.dropOpenThought(event.threadId);
+            this.narrativeStore.dropOpenThought(event.threadId);
           } else {
-            this.closeOpenThought(event.threadId);
+            this.narrativeStore.closeOpenThought(event.threadId);
           }
         }
 
         if (event.type === AgentEventType.ToolUse) {
-          this.closeOpenThought(event.threadId);
+          this.narrativeStore.closeOpenThought(event.threadId);
           this.bufferToolCall(event.threadId, event);
         }
 
@@ -1781,77 +1707,40 @@ export class AgentService {
           // Late hooks (TurnComplete already seen) bypass the in-turn buffer.
           // They will be persisted directly in the paired HookCompleted handler.
           if (this.turnCompleteSeenByThread.has(event.threadId)) {
-            const sortOrder = this.turnSortCounters.get(event.threadId) ?? 0;
-            this.turnSortCounters.set(event.threadId, sortOrder + 1);
-            // Use turnOpenHooks as a scratch pad so HookCompleted can still pair
-            // with the HookStarted record even for late hooks.
-            const lateMap =
-              this.turnOpenHooks.get(event.threadId) ??
-              new Map<
-                string,
-                {
-                  id: string;
-                  hookName: string;
-                  toolName: string | null;
-                  phase: string;
-                  payload: string;
-                  startedAt: string;
-                  sortOrder: number;
-                }
-              >();
-            lateMap.set(event.hookName, {
-              id: randomUUID(),
+            const sortOrder = this.narrativeStore.nextSortOrder(event.threadId);
+            // Use the open-hook map as a scratch pad so HookCompleted can still
+            // pair with the HookStarted record even for late hooks.
+            this.narrativeStore.openHook(event.threadId, {
               hookName: event.hookName,
               toolName: event.toolName ?? null,
               // Post-turn hooks are always tagged "stop" regardless of hookType
               // because they fire after the SDK result message.
               phase: "stop",
               payload: JSON.stringify({ hookType: "stop", toolName: null }),
-              startedAt: new Date().toISOString(),
               sortOrder,
             });
-            this.turnOpenHooks.set(event.threadId, lateMap);
           } else {
-            const sortOrder = this.turnSortCounters.get(event.threadId) ?? 0;
-            this.turnSortCounters.set(event.threadId, sortOrder + 1);
+            const sortOrder = this.narrativeStore.nextSortOrder(event.threadId);
             // Close any open thought so the hook sorts after the text that preceded it,
             // mirroring the tool-call branch.
-            this.closeOpenThought(event.threadId);
-            const map =
-              this.turnOpenHooks.get(event.threadId) ??
-              new Map<
-                string,
-                {
-                  id: string;
-                  hookName: string;
-                  toolName: string | null;
-                  phase: string;
-                  payload: string;
-                  startedAt: string;
-                  sortOrder: number;
-                }
-              >();
-            map.set(event.hookName, {
-              id: randomUUID(),
+            this.narrativeStore.closeOpenThought(event.threadId);
+            this.narrativeStore.openHook(event.threadId, {
               hookName: event.hookName,
               toolName: event.toolName ?? null,
               phase: event.hookType,
               payload: JSON.stringify({ hookType: event.hookType, toolName: event.toolName ?? null }),
-              startedAt: new Date().toISOString(),
               sortOrder,
             });
-            this.turnOpenHooks.set(event.threadId, map);
           }
         }
 
         if (event.type === AgentEventType.HookCompleted) {
-          const map = this.turnOpenHooks.get(event.threadId);
-          const open = map?.get(event.hookName);
-          if (open && map) {
+          const open = this.narrativeStore.peekOpenHook(event.threadId, event.hookName);
+          if (open) {
+            const endedAt = new Date().toISOString();
             // Late hook: persist immediately to the last message row and
             // broadcast a HookCompleted event with persistedMessageId.
             if (this.turnCompleteSeenByThread.has(event.threadId)) {
-              const endedAt = new Date().toISOString();
               this.flushLateHook(event.threadId, {
                 id: open.id,
                 hookName: open.hookName,
@@ -1864,11 +1753,8 @@ export class AgentService {
                 endedAt,
                 sortOrder: open.sortOrder,
               });
-              map.delete(event.hookName);
             } else {
-              const endedAt = new Date().toISOString();
-              const list = this.turnHooks.get(event.threadId) ?? [];
-              list.push({
+              this.narrativeStore.pushClosedHook(event.threadId, {
                 id: open.id,
                 messageId: "",
                 hookName: open.hookName,
@@ -1881,14 +1767,13 @@ export class AgentService {
                 endedAt,
                 sortOrder: open.sortOrder,
               });
-              this.turnHooks.set(event.threadId, list);
-              map.delete(event.hookName);
             }
+            this.narrativeStore.removeOpenHook(event.threadId, event.hookName);
           }
         }
 
         if (event.type === AgentEventType.ToolResult) {
-          this.updateBufferedToolCallOutput(event.threadId, event.toolCallId, event.output, event.isError);
+          this.narrativeStore.updateBufferedToolCallOutput(event.threadId, event.toolCallId, event.output, event.isError);
         }
 
         if (event.type === AgentEventType.TurnStarted) {
@@ -1903,8 +1788,7 @@ export class AgentService {
           // hooks can attach to the previous turn. Re-seeding them here rather
           // than in clearTurnState ensures a fresh counter for each new turn
           // while late hooks from the prior turn can still increment the old one.
-          this.turnSortCounters.set(event.threadId, 0);
-          this.agentCallStack.set(event.threadId, []);
+          this.narrativeStore.resetTurnCounters(event.threadId);
           this.turnCompleteSeenByThread.delete(event.threadId);
         }
 
@@ -2249,39 +2133,12 @@ ${userMessage}`;
   }
 
   /**
-   * Close any in-flight thought segment for the thread and push it onto the
-   * closed-thoughts list. Called before a tool call begins (so the thought
-   * sorts strictly before the tool) and during turn-end drain.
+   * Buffer a tool call event into the narrative write seam, then perform the
+   * non-narrative side effect AgentService still owns: persisting TodoWrite
+   * task state for reconnect hydration. The narrative buffer + agentCallStack
+   * push + parent attribution (narrative-pipeline.md Trap 1) live in
+   * {@link NarrativeStore.bufferToolCall}, which returns the attributed parent.
    */
-  private closeOpenThought(threadId: string): void {
-    const open = this.turnOpenThought.get(threadId);
-    if (!open) return;
-    const list = this.turnThoughts.get(threadId) ?? [];
-    list.push({
-      id: open.id,
-      messageId: "",
-      text: open.text,
-      startedAt: open.startedAt,
-      endedAt: new Date().toISOString(),
-      sortOrder: open.sortOrder,
-    });
-    this.turnThoughts.set(threadId, list);
-    this.turnOpenThought.set(threadId, null);
-  }
-
-  /**
-   * Discards the open thought without persisting it.
-   *
-   * Called when `AssistantMessageBoundary` reports `isFinalResponse: true` —
-   * the streamed text was actually the final assistant response and will be
-   * persisted via the `Message` event, so keeping the matching thought row
-   * would duplicate the body as a ThoughtBlock in the narrative.
-   */
-  private dropOpenThought(threadId: string): void {
-    this.turnOpenThought.set(threadId, null);
-  }
-
-  /** Buffer a tool call event for later persistence. */
   private bufferToolCall(
     threadId: string,
     event: {
@@ -2291,47 +2148,7 @@ ${userMessage}`;
       parentToolCallId?: string;
     },
   ): void {
-    const buffer = this.turnToolCalls.get(threadId) ?? [];
-    const sortOrder = this.turnSortCounters.get(threadId) ?? 0;
-    this.turnSortCounters.set(threadId, sortOrder + 1);
-
-    const stack = this.agentCallStack.get(threadId) ?? [];
-    // Prefer the SDK-provided parent_tool_use_id on the event (set by the
-    // provider). Parallel subagents require it; stack fallback aligns with
-    // `getCurrentParentToolCallId` / index.ts enrichment.
-    const parentToolCallId =
-      event.toolName === "Agent"
-        ? undefined
-        : event.parentToolCallId ?? this.getStackDerivedParentFallback(threadId);
-    // Diagnostic: trace parent attribution when a mismatch is suspected.
-    if (event.toolName !== "Agent" && parentToolCallId) {
-      logger.debug("bufferToolCall: parent attribution", {
-        threadId,
-        toolCallId: event.toolCallId,
-        toolName: event.toolName,
-        sdkParent: event.parentToolCallId ?? null,
-        stackDepth: stack.length,
-        attributed: parentToolCallId,
-        source: event.parentToolCallId ? "sdk" : "stack-fallback",
-      });
-    }
-    if (event.toolName === "Agent") {
-      stack.push(event.toolCallId);
-      this.agentCallStack.set(threadId, stack);
-    }
-
-    buffer.push({
-      toolCallId: event.toolCallId,
-      messageId: "",
-      toolName: event.toolName,
-      inputSummary: "", // Deferred to persistTurn
-      outputSummary: "",
-      status: "running",
-      sortOrder,
-      parentToolCallId,
-      _rawToolInput: event.toolInput,
-    });
-    this.turnToolCalls.set(threadId, buffer);
+    const parentToolCallId = this.narrativeStore.bufferToolCall(threadId, event);
 
     // Persist TodoWrite state for hydration on reconnect
     if (event.toolName === "TodoWrite") {
@@ -2377,35 +2194,6 @@ ${userMessage}`;
             });
           }
         }
-      }
-    }
-  }
-
-  /** Update a buffered tool call with its output when result arrives. */
-  private updateBufferedToolCallOutput(
-    threadId: string,
-    toolCallId: string,
-    output: string,
-    isError: boolean,
-  ): void {
-    const stack = this.agentCallStack.get(threadId) ?? [];
-    const stackIdx = stack.indexOf(toolCallId);
-    if (stackIdx >= 0) {
-      stack.splice(stackIdx, 1);
-      this.agentCallStack.set(threadId, stack);
-      logger.debug("updateBufferedToolCallOutput: popped Agent from stack", {
-        threadId,
-        toolCallId,
-        remainingDepth: stack.length,
-      });
-    }
-
-    const buffer = this.turnToolCalls.get(threadId) ?? [];
-    for (let i = buffer.length - 1; i >= 0; i--) {
-      if (buffer[i].toolCallId === toolCallId) {
-        buffer[i].outputSummary = output.slice(0, 500);
-        buffer[i].status = isError ? "failed" : "completed";
-        break;
       }
     }
   }
@@ -2503,141 +2291,41 @@ ${userMessage}`;
     } satisfies AgentEvent);
   }
 
-  /** Persist buffered tool calls and snapshot to DB, then push turn.persisted. */
+  /**
+   * Persist the turn: the narrative rows (tool calls, thoughts, hooks) are
+   * persisted by {@link NarrativeStore.persistNarrative}; AgentService retains
+   * the turn-level concerns — the git turn_snapshot, the files_changed flag,
+   * and the `turn.persisted` broadcast — then clears the per-turn state.
+   */
   private async persistTurn(threadId: string, isError = false): Promise<void> {
     if (this.persistingThreads.has(threadId)) return;
     this.persistingThreads.add(threadId);
     try {
-      const buffer = this.turnToolCalls.get(threadId) ?? [];
+      const bufferedCount = this.narrativeStore.getBufferedToolCalls(threadId).length;
 
       const { messages } = this.messageRepo.listByThread(threadId, 1);
       if (messages.length === 0) {
-        if (buffer.length > 0) {
+        if (bufferedCount > 0) {
           logger.warn("Discarding buffered tool calls: no messages found", {
             threadId,
-            toolCallCount: buffer.length,
+            toolCallCount: bufferedCount,
           });
         }
         this.clearTurnState(threadId);
         return;
       }
-      const messageId = messages[messages.length - 1].id;
+      const lastMessage = messages[messages.length - 1];
+      const messageId = lastMessage.id;
       // Record the message ID so late hooks (Stop/SessionEnd) arriving after
       // this point can attach to the correct persisted row.
       this.lastPersistedMessageIdByThread.set(threadId, messageId);
 
-      for (const tc of buffer) {
-        if (tc.status === "running") {
-          // Tools still running when the turn ends were interrupted, not failed.
-          // A tool that actually errored already has status "failed" from
-          // updateBufferedToolCallOutput.
-          tc.status = isError ? "cancelled" : "completed";
-        }
-        tc.messageId = messageId;
-
-        // Deferred summarization: compute inputSummary from raw tool input
-        if (!tc.inputSummary && tc._rawToolInput) {
-          tc.inputSummary = this.summarizeInput(tc.toolName, tc._rawToolInput);
-          delete tc._rawToolInput;
-        }
-      }
-
-      if (buffer.length > 0) {
-        try {
-          this.toolCallRecordRepo.bulkCreate(buffer);
-        } catch (err) {
-          logger.error("Failed to persist tool call records", {
-            threadId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-
-      // Drain any in-flight thought / hook before persisting so a turn that ends
-      // without a trailing tool call still records its tail thought + hook.
-      this.closeOpenThought(threadId);
-      const openHookMap = this.turnOpenHooks.get(threadId);
-      if (openHookMap && openHookMap.size > 0) {
-        const list = this.turnHooks.get(threadId) ?? [];
-        const endedAt = new Date().toISOString();
-        for (const open of openHookMap.values()) {
-          list.push({
-            id: open.id,
-            messageId: "",
-            hookName: open.hookName,
-            toolName: open.toolName,
-            phase: open.phase,
-            payload: open.payload,
-            durationMs: Date.parse(endedAt) - Date.parse(open.startedAt),
-            didBlock: false,
-            startedAt: open.startedAt,
-            endedAt,
-            sortOrder: open.sortOrder,
-          });
-        }
-        this.turnHooks.set(threadId, list);
-        openHookMap.clear();
-      }
-
-      const rawThoughts = (this.turnThoughts.get(threadId) ?? []).map((t) => ({
-        ...t,
+      const { toolCallCount } = this.narrativeStore.persistNarrative(
+        threadId,
         messageId,
-      }));
-      const thoughts = rawThoughts;
-      if (thoughts.length > 0) {
-        // Suffix-match safeguard: the last chronological thought segment whose
-        // text (trimmed) is a suffix of the assistant message body is the
-        // final user-facing response — tag it so the client doesn't render it
-        // as a ThoughtBlock.  This catches provider edge cases and tool-free
-        // turns where the provider cannot set isFinalResponse at stream time.
-        const msgContent = messages[messages.length - 1].content ?? "";
-        const msgTrimmed = msgContent.trim();
-        if (msgTrimmed.length > 0) {
-          // Identify the last segment by sortOrder (suffix guard targets the tail).
-          let maxSortOrder = -Infinity;
-          for (const t of thoughts) {
-            if (t.sortOrder > maxSortOrder) maxSortOrder = t.sortOrder;
-          }
-          for (const t of thoughts) {
-            const segTrimmed = t.text.trim();
-            if (segTrimmed.length === 0) continue;
-            if (segTrimmed === msgTrimmed) {
-              t.isFinalResponse = 1;
-              continue;
-            }
-            if (
-              t.sortOrder === maxSortOrder &&
-              (t.isFinalResponse === 1 || msgTrimmed.endsWith(segTrimmed))
-            ) {
-              t.isFinalResponse = 1;
-            }
-          }
-        }
-
-        try {
-          this.thoughtSegmentRepo.bulkCreate(thoughts);
-        } catch (err) {
-          logger.error("Failed to persist thought segments", {
-            threadId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-
-      const hooks = (this.turnHooks.get(threadId) ?? []).map((h) => ({
-        ...h,
-        messageId,
-      }));
-      if (hooks.length > 0) {
-        try {
-          this.hookExecutionRepo.bulkCreate(hooks);
-        } catch (err) {
-          logger.error("Failed to persist hook executions", {
-            threadId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
+        lastMessage.content ?? "",
+        isError,
+      );
 
       let filesChanged: string[] = [];
       const refData = this.turnRefBefore.get(threadId);
@@ -2677,7 +2365,7 @@ ${userMessage}`;
       broadcast("turn.persisted", {
         threadId,
         messageId,
-        toolCallCount: buffer.length,
+        toolCallCount,
         filesChanged,
       });
 
@@ -2689,15 +2377,12 @@ ${userMessage}`;
 
   /** Clear per-turn buffering state. */
   private clearTurnState(threadId: string): void {
-    this.turnToolCalls.delete(threadId);
     this.turnRefBefore.delete(threadId);
-    // turnSortCounters and agentCallStack are reset in the TurnStarted handler
-    // so late hooks that arrive after clearTurnState can still increment the
-    // sort counter for the completed turn.
-    this.turnOpenThought.delete(threadId);
-    this.turnThoughts.delete(threadId);
-    this.turnOpenHooks.delete(threadId);
-    this.turnHooks.delete(threadId);
+    // The narrative buffers live in NarrativeStore. Its sort counter and
+    // agentCallStack are reset in the TurnStarted handler (not here) so late
+    // hooks that arrive after clearTurnState can still increment the completed
+    // turn's sort counter.
+    this.narrativeStore.clearTurn(threadId);
     this.persistingThreads.delete(threadId);
   }
 
@@ -2738,25 +2423,6 @@ ${userMessage}`;
       break;
     }
     return map;
-  }
-
-  /** Generate a human-readable summary of tool input. */
-  private summarizeInput(toolName: string, input: Record<string, unknown>): string {
-    switch (toolName) {
-      case "Read":
-      case "Edit":
-      case "Write":
-        return String(input.file_path ?? input.filePath ?? "");
-      case "Bash":
-        return String(input.command ?? "").slice(0, 200);
-      case "Grep":
-      case "Glob":
-        return String(input.pattern ?? "");
-      case "Agent":
-        return String(input.description ?? "").slice(0, 100);
-      default:
-        return JSON.stringify(input).slice(0, 200);
-    }
   }
 
   /** Stop all active agent sessions (for graceful shutdown). */

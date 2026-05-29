@@ -4,6 +4,7 @@ import { EventEmitter } from "events";
 import { AgentEventType } from "@mcode/contracts";
 import type { Thread, IProviderRegistry, Message } from "@mcode/contracts";
 import { AgentService } from "../agent-service.js";
+import { NarrativeStore } from "../narrative-store.js";
 import type { ThreadRepo } from "../../repositories/thread-repo.js";
 import type { WorkspaceRepo } from "../../repositories/workspace-repo.js";
 import type { MessageRepo } from "../../repositories/message-repo.js";
@@ -145,6 +146,15 @@ function build(): Built {
     prepare: vi.fn(() => ({ run: vi.fn() })),
   } as unknown as import("better-sqlite3").Database;
 
+  // The narrative write seam lives in NarrativeStore; build it from the same
+  // repo mocks so the bulkCreate spies observe what AgentService delegates.
+  const narrativeStore = new NarrativeStore(
+    messageRepo,
+    toolCallRecordRepo,
+    thoughtSegmentRepo,
+    hookExecutionRepo,
+  );
+
   const service = new AgentService(
     threadRepo,
     workspaceRepo,
@@ -153,8 +163,6 @@ function build(): Built {
     attachmentService,
     providerRegistry,
     threadService,
-    toolCallRecordRepo,
-    thoughtSegmentRepo,
     hookExecutionRepo,
     turnSnapshotRepo,
     snapshotService,
@@ -168,16 +176,14 @@ function build(): Built {
       { orchestrate: vi.fn() } as any,
       { write: vi.fn(), copyAttachments: vi.fn(() => []), deleteThreadFiles: vi.fn() } as any,
       { issue: vi.fn(), tryConsume: vi.fn(() => false), clear: vi.fn(), hasActiveGrant: vi.fn(() => false) } as any,
+      narrativeStore,
   );
   service.init();
-  // Prime per-thread state without running sendMessage's full path.
-  (service as any).turnToolCalls.set(THREAD_ID, []);
-  (service as any).turnSortCounters.set(THREAD_ID, 0);
-  (service as any).agentCallStack.set(THREAD_ID, []);
-  (service as any).turnOpenThought.set(THREAD_ID, null);
-  (service as any).turnThoughts.set(THREAD_ID, []);
-  (service as any).turnOpenHooks.set(THREAD_ID, new Map());
-  (service as any).turnHooks.set(THREAD_ID, []);
+  // Prime per-thread state without running sendMessage's full path. The buffers
+  // now live in NarrativeStore; seed them via the same public entry points
+  // sendMessage uses (beginTurn + resetTurnCounters).
+  narrativeStore.beginTurn(THREAD_ID);
+  narrativeStore.resetTurnCounters(THREAD_ID);
   return { service, providerEmitter, thoughtBulk, hookBulk, toolBulk };
 }
 

@@ -8,10 +8,10 @@ import { ThreadRepo } from "../../repositories/thread-repo.js";
 import { WorkspaceRepo } from "../../repositories/workspace-repo.js";
 import { MessageRepo } from "../../repositories/message-repo.js";
 import { PlanQuestionAnswersRepo } from "../../repositories/plan-question-answers-repo.js";
-import { ToolCallRecordRepo } from "../../repositories/tool-call-record-repo.js";
 import { TurnSnapshotRepo } from "../../repositories/turn-snapshot-repo.js";
 import { TaskRepo } from "../../repositories/task-repo.js";
 import { AgentService } from "../agent-service.js";
+import { NarrativeStore } from "../narrative-store.js";
 import { ProviderAvailabilityService } from "../provider-availability-service.js";
 import type { GitService } from "../git-service.js";
 import type { AttachmentService } from "../attachment-service.js";
@@ -37,7 +37,6 @@ function buildService(db: Database.Database) {
   const workspaceRepo = container.resolve(WorkspaceRepo);
   const messageRepo = container.resolve(MessageRepo);
   const planQuestionAnswersRepo = container.resolve(PlanQuestionAnswersRepo);
-  const toolCallRecordRepo = container.resolve(ToolCallRecordRepo);
   const turnSnapshotRepo = container.resolve(TurnSnapshotRepo);
   const taskRepo = container.resolve(TaskRepo);
 
@@ -102,8 +101,6 @@ function buildService(db: Database.Database) {
     attachmentService,
     providerRegistry,
     threadService,
-    toolCallRecordRepo,
-    { bulkCreate: () => {}, create: () => ({}), listByMessage: () => [], countByMessage: () => 0 } as unknown as import("../../repositories/thought-segment-repo.js").ThoughtSegmentRepo,
     { bulkCreate: () => {}, create: () => ({}), listByMessage: () => [], countByMessage: () => 0 } as unknown as import("../../repositories/hook-execution-repo.js").HookExecutionRepo,
     turnSnapshotRepo,
     snapshotService,
@@ -117,6 +114,7 @@ function buildService(db: Database.Database) {
       { orchestrate: vi.fn() } as any,
       { write: vi.fn(), copyAttachments: vi.fn(() => []), deleteThreadFiles: vi.fn() } as any,
       { issue: vi.fn(), tryConsume: vi.fn(() => false), clear: vi.fn(), hasActiveGrant: vi.fn(() => false) } as any,
+      container.resolve(NarrativeStore),
   );
 
   return { svc, threadRepo, workspaceRepo, messageRepo, planQuestionAnswersRepo };

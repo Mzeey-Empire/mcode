@@ -366,7 +366,7 @@ for (const provider of providerRegistry.resolveAll()) {
     if (event.type === AgentEventType.ToolUse && event.toolName !== "Agent") {
       // SDK omitted parent_tool_use_id; fill from turn buffer fallback when unique running Agent (see narrative-pipeline.md).
       if (!event.parentToolCallId) {
-        const parentId = agentService.getCurrentParentToolCallId(event.threadId);
+        const parentId = narrativeStore.getCurrentParentToolCallId(event.threadId);
         if (parentId) {
           enrichedEvent = { ...event, parentToolCallId: parentId };
         }

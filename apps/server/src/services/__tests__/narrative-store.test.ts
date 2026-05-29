@@ -115,3 +115,239 @@ describe("NarrativeStore.load (read seam)", () => {
     expect(entries.map((e) => e.kind)).toEqual(["toolCall", "toolCall", "assistantMessage"]);
   });
 });
+
+/**
+ * Write-seam integration tests. These drive the NarrativeStore enrichment +
+ * classification + persistence methods directly with synthetic events and
+ * assert on the persisted rows (via `load` / repos), guarding the six
+ * narrative-pipeline traps on the server side. The store is backed by a real
+ * in-memory SQLite DB so `persistNarrative` exercises actual bulk inserts.
+ */
+describe("NarrativeStore write seam (server-side traps)", () => {
+  const THREAD = "thread-1";
+  let db: Database.Database;
+  let store: NarrativeStore;
+
+  beforeEach(() => {
+    db = openMemoryDatabase();
+    seedThread(db);
+    store = new NarrativeStore(
+      new MessageRepo(db),
+      new ToolCallRecordRepo(db),
+      new ThoughtSegmentRepo(db),
+      new HookExecutionRepo(db),
+    );
+  });
+
+  /** Seed an assistant message row so persistNarrative's FK targets exist. */
+  function seedAssistantMessage(id: string, content: string, sequence: number): void {
+    insertMessage(db, id, "assistant", content, sequence);
+  }
+
+  function toolUse(toolCallId: string, toolName: string, parentToolCallId?: string) {
+    return { toolCallId, toolName, toolInput: {}, parentToolCallId };
+  }
+
+  describe("Trap 1: parent_tool_use_id is authoritative for parallel sub-agents", () => {
+    it("attributes each child to its SDK-supplied parent across 4 parallel Agents", () => {
+      store.beginTurn(THREAD);
+      store.resetTurnCounters(THREAD);
+
+      // Four Agents dispatched in parallel; the stack ends [a1,a2,a3,a4].
+      for (const id of ["a1", "a2", "a3", "a4"]) {
+        store.bufferToolCall(THREAD, toolUse(id, "Agent"));
+      }
+      // Each child carries its own SDK parent_tool_use_id. The naive LIFO peek
+      // would clump them all under a4; the SDK value must win instead.
+      store.bufferToolCall(THREAD, toolUse("c1", "Read", "a1"));
+      store.bufferToolCall(THREAD, toolUse("c2", "Read", "a2"));
+      store.bufferToolCall(THREAD, toolUse("c3", "Read", "a3"));
+      store.bufferToolCall(THREAD, toolUse("c4", "Read", "a4"));
+
+      const byId = new Map(
+        store.getBufferedToolCalls(THREAD).map((b) => [b.toolCallId, b.parentToolCallId]),
+      );
+      expect(byId.get("c1")).toBe("a1");
+      expect(byId.get("c2")).toBe("a2");
+      expect(byId.get("c3")).toBe("a3");
+      expect(byId.get("c4")).toBe("a4");
+      // Agent rows themselves never get a parent.
+      expect(byId.get("a1")).toBeUndefined();
+    });
+
+    it("falls back to the only running Agent when the SDK omits the parent", () => {
+      store.beginTurn(THREAD);
+      store.resetTurnCounters(THREAD);
+      store.bufferToolCall(THREAD, toolUse("solo", "Agent"));
+
+      // SDK omitted parentToolCallId; exactly one Agent is running → attributed.
+      expect(store.getCurrentParentToolCallId(THREAD)).toBe("solo");
+      const childParent = store.bufferToolCall(THREAD, toolUse("child", "Read"));
+      expect(childParent).toBe("solo");
+    });
+
+    it("returns undefined when two Agents are running (ambiguous fallback)", () => {
+      store.beginTurn(THREAD);
+      store.resetTurnCounters(THREAD);
+      store.bufferToolCall(THREAD, toolUse("a1", "Agent"));
+      store.bufferToolCall(THREAD, toolUse("a2", "Agent"));
+
+      expect(store.getCurrentParentToolCallId(THREAD)).toBeUndefined();
+      const childParent = store.bufferToolCall(THREAD, toolUse("child", "Read"));
+      expect(childParent).toBeUndefined();
+    });
+  });
+
+  describe("Trap 2: agentCallStack lifecycle", () => {
+    it("does NOT clear the stack on openOrExtendThought (textDelta analogue)", () => {
+      store.beginTurn(THREAD);
+      store.resetTurnCounters(THREAD);
+      store.bufferToolCall(THREAD, toolUse("solo", "Agent"));
+
+      // A sub-agent streams text mid-flight; the fallback parent must survive.
+      store.openOrExtendThought(THREAD, "thinking out loud");
+      expect(store.getCurrentParentToolCallId(THREAD)).toBe("solo");
+      expect(store.bufferToolCall(THREAD, toolUse("child", "Read"))).toBe("solo");
+    });
+
+    it("pops the Agent from the stack on its toolResult", () => {
+      store.beginTurn(THREAD);
+      store.resetTurnCounters(THREAD);
+      store.bufferToolCall(THREAD, toolUse("solo", "Agent"));
+      expect(store.getCurrentParentToolCallId(THREAD)).toBe("solo");
+
+      store.updateBufferedToolCallOutput(THREAD, "solo", "done", false);
+      // Agent finished → no running Agent → coordinator tools do not inherit it.
+      expect(store.getCurrentParentToolCallId(THREAD)).toBeUndefined();
+    });
+
+    it("clears the whole stack on the final Message event", () => {
+      store.beginTurn(THREAD);
+      store.resetTurnCounters(THREAD);
+      store.bufferToolCall(THREAD, toolUse("a1", "Agent"));
+      store.bufferToolCall(THREAD, toolUse("a2", "Agent"));
+
+      store.clearAgentStackOnMessage(THREAD);
+      expect(store.getCurrentParentToolCallId(THREAD)).toBeUndefined();
+    });
+  });
+
+  describe("Trap 3 (server analogue): buffers reset at beginTurn, survive through persist", () => {
+    it("resets buffered tool calls on a fresh beginTurn", () => {
+      store.beginTurn(THREAD);
+      store.resetTurnCounters(THREAD);
+      store.bufferToolCall(THREAD, toolUse("tc-1", "Read"));
+      expect(store.getBufferedToolCalls(THREAD)).toHaveLength(1);
+
+      // New turn starts → previous trail cleared.
+      store.beginTurn(THREAD);
+      expect(store.getBufferedToolCalls(THREAD)).toHaveLength(0);
+    });
+
+    it("keeps buffers populated through persistNarrative until clearTurn", () => {
+      seedAssistantMessage("m1", "final body", 1);
+      store.beginTurn(THREAD);
+      store.resetTurnCounters(THREAD);
+      store.bufferToolCall(THREAD, toolUse("tc-1", "Read"));
+
+      const result = store.persistNarrative(THREAD, "m1", "final body", false);
+      expect(result.toolCallCount).toBe(1);
+      // Buffers are NOT cleared by persistNarrative.
+      expect(store.getBufferedToolCalls(THREAD)).toHaveLength(1);
+
+      store.clearTurn(THREAD);
+      expect(store.getBufferedToolCalls(THREAD)).toHaveLength(0);
+    });
+  });
+
+  describe("Classification precedence + is_final_response safety net", () => {
+    it("drops the open thought when the boundary reports a final response (tool-free turn)", () => {
+      seedAssistantMessage("m1", "Tool-free final answer", 1);
+      store.beginTurn(THREAD);
+      store.resetTurnCounters(THREAD);
+      store.openOrExtendThought(THREAD, "Tool-free final answer");
+      // end_turn-style boundary → final response → drop, never persisted.
+      store.dropOpenThought(THREAD);
+
+      store.persistNarrative(THREAD, "m1", "Tool-free final answer", false);
+      expect(new ThoughtSegmentRepo(db).listByMessage("m1")).toHaveLength(0);
+    });
+
+    it("persists preamble as a thought when the boundary reports tool_use (non-final)", () => {
+      seedAssistantMessage("m1", "", 1);
+      store.beginTurn(THREAD);
+      store.resetTurnCounters(THREAD);
+      store.openOrExtendThought(THREAD, "Let me check that file.");
+      // tool_use stop_reason → close as preamble.
+      store.closeOpenThought(THREAD);
+      store.bufferToolCall(THREAD, toolUse("tc-read", "Read"));
+
+      store.persistNarrative(THREAD, "m1", "", false);
+      const thoughts = new ThoughtSegmentRepo(db).listByMessage("m1");
+      expect(thoughts).toHaveLength(1);
+      expect(thoughts[0].text).toBe("Let me check that file.");
+      expect(thoughts[0].is_final_response ?? 0).toBe(0);
+    });
+
+    it("tags the tail thought is_final_response via suffix-match when text equals the body", () => {
+      const body = "FULL USER-FACING REPLY";
+      seedAssistantMessage("m1", body, 1);
+      store.beginTurn(THREAD);
+      store.resetTurnCounters(THREAD);
+      store.openOrExtendThought(THREAD, body);
+      // No boundary fired (older/reconnect path) → suffix-match must catch it.
+      store.persistNarrative(THREAD, "m1", body, false);
+
+      const thoughts = new ThoughtSegmentRepo(db).listByMessage("m1");
+      expect(thoughts).toHaveLength(1);
+      expect(thoughts[0].is_final_response).toBe(1);
+      // load() surfaces the body as assistantMessage, not a duplicate narration.
+      const entries = store.load(THREAD);
+      expect(entries.filter((e) => e.kind === "narrationSegment")).toHaveLength(0);
+      const msg = entries.find((e) => e.kind === "assistantMessage");
+      expect(msg && msg.kind === "assistantMessage" && msg.body).toBe(body);
+    });
+
+    it("orders a preamble thought before its following tool call via the shared sort counter", () => {
+      seedAssistantMessage("m1", "", 1);
+      store.beginTurn(THREAD);
+      store.resetTurnCounters(THREAD);
+      store.openOrExtendThought(THREAD, "I will read.");
+      // The ToolUse handler closes the open thought before buffering the call,
+      // so the thought sorts strictly before it (sort 0 < 1).
+      store.closeOpenThought(THREAD);
+      store.bufferToolCall(THREAD, toolUse("tc-1", "Read"));
+      store.openOrExtendThought(THREAD, "Now respond.");
+
+      store.persistNarrative(THREAD, "m1", "", false);
+      const thoughts = new ThoughtSegmentRepo(db).listByMessage("m1");
+      const tools = new ToolCallRecordRepo(db).listByMessage("m1");
+      expect(thoughts.map((t) => [t.text, t.sort_order])).toEqual([
+        ["I will read.", 0],
+        ["Now respond.", 2],
+      ]);
+      expect(tools[0].sort_order).toBe(1);
+    });
+  });
+
+  describe("Trap 6: counting data preserved (semantics unchanged)", () => {
+    it("persists every top-level tool call including Agent rows, so step counts are derivable", () => {
+      seedAssistantMessage("m1", "", 1);
+      store.beginTurn(THREAD);
+      store.resetTurnCounters(THREAD);
+      store.bufferToolCall(THREAD, toolUse("r1", "Read"));
+      store.bufferToolCall(THREAD, toolUse("r2", "Read"));
+      store.bufferToolCall(THREAD, toolUse("r3", "Read"));
+      store.bufferToolCall(THREAD, toolUse("ag", "Agent"));
+
+      const { toolCallCount } = store.persistNarrative(THREAD, "m1", "", false);
+      expect(toolCallCount).toBe(4);
+
+      const tools = new ToolCallRecordRepo(db).listByMessage("m1");
+      // All four top-level calls persisted; the Agent is one of the four, not a fifth.
+      const topLevel = tools.filter((t) => t.parent_tool_call_id == null);
+      expect(topLevel).toHaveLength(4);
+      expect(topLevel.filter((t) => t.tool_name === "Agent")).toHaveLength(1);
+    });
+  });
+});
