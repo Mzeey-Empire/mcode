@@ -23,6 +23,9 @@ import { discoverCopilotAgents, COPILOT_DEFAULT_AGENTS } from "./copilot-agent-d
 import { logger } from "@mcode/shared";
 import { SettingsService } from "../../services/settings-service.js";
 import { EnvService } from "../../services/env-service.js";
+import { JobObject } from "../../services/job-object.js";
+import { SessionRuntime } from "../../services/session-runtime.js";
+import type { ProtocolAdapter, SpawnArgs, SpawnResult } from "../../services/session-runtime.js";
 import type {
   IAgentProvider,
   TurnRequest,
@@ -121,24 +124,31 @@ function inferModelGroup(modelId: string): string | undefined {
   return undefined;
 }
 
-/** Idle TTL before a session is evicted (10 minutes). */
-const IDLE_TTL_MS = 10 * 60 * 1000;
-/** How often to check for idle sessions (1 minute). */
-const EVICTION_INTERVAL_MS = 60 * 1000;
-
 /** Names of built-in Copilot session modes, derived from COPILOT_DEFAULT_AGENTS. */
 const BUILTIN_MODE_NAMES = new Set<"interactive" | "plan" | "autopilot">(
   COPILOT_DEFAULT_AGENTS.map((a) => a.name as "interactive" | "plan" | "autopilot"),
 );
 
-interface SessionEntry {
+/**
+ * Per-session state owned by the {@link SessionRuntime}. Holds the live Copilot
+ * SDK session plus the turn-active flag the runtime's busy guard reads. Copilot
+ * exposes no native busy signal, so `turnActive` is the provider-maintained
+ * substitute: set true while a turn runs, false when it settles.
+ */
+interface CopilotSessionState {
   session: CopilotSession;
   lastUsedAt: number;
+  /**
+   * True while a turn is in flight. The SDK has no busy signal, so the provider
+   * toggles this in `runTurn` to give the runtime's idle-eviction guard a real
+   * busy check (the drift this migration converges).
+   */
+  turnActive: boolean;
 }
 
 /** GitHub Copilot SDK adapter implementing IAgentProvider with callback-based event mapping. */
 @injectable()
-export class CopilotProvider extends EventEmitter implements IAgentProvider {
+export class CopilotProvider extends EventEmitter implements IAgentProvider, ProtocolAdapter<CopilotSessionState> {
   readonly id: ProviderId = "copilot";
   readonly supportsCompletion = true;
   readonly sessionForkOnResume = "unsupported" as const;
@@ -148,14 +158,21 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
   private lastCliPath: string | undefined;
   /** Cached result of `which("node")` so we don't re-probe PATH on every rebuild. */
   private cachedNodePath: string | null | undefined;
-  private sessions = new Map<string, SessionEntry>();
+  /** Owns the session pool, idle eviction (now with a real busy guard via `isBusy`), and JobObject/kill. */
+  private readonly runtime: SessionRuntime<CopilotSessionState>;
   private sdkSessionIds = new Map<string, string>();
   /**
    * Session IDs for which a stop was requested before the session was created.
    * Checked after session creation; if found the session is torn down immediately.
    */
   private pendingStops = new Set<string>();
-  private evictionTimer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * Per-turn payload carried from `sendTurn` to `spawn` so a freshly spawned
+   * session can run its first turn. The runtime's `acquire` only returns the
+   * state, so the turn message and agent routing are staged here keyed by
+   * sessionId.
+   */
+  private pendingSpawnTurns = new Map<string, { message: string; model?: string; copilotAgent?: string }>();
   /** Serialises concurrent refreshClient() calls so only one rebuild runs at a time. */
   private clientStartLock: Promise<void> = Promise.resolve();
 
@@ -166,9 +183,14 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
 
   constructor(
     @inject(SettingsService) private readonly settingsService: SettingsService,
+    @inject("JobObject") private readonly jobObject: JobObject,
     @inject(EnvService) private readonly envService: EnvService,
   ) {
     super();
+    this.runtime = new SessionRuntime<CopilotSessionState>(this, {
+      jobObject: this.jobObject,
+      envService: this.envService,
+    });
   }
 
   /**
@@ -538,44 +560,80 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
   }): Promise<void> {
     await this.refreshClient();
 
-    const { sessionId, message, cwd, model, resume, copilotAgent } = params;
-
-    if (!this.evictionTimer) {
-      this.evictionTimer = setInterval(
-        () => this.evictIdleSessions(),
-        EVICTION_INTERVAL_MS,
-      );
-    }
-
+    const { sessionId, message, cwd, model, permissionMode, resume, copilotAgent } = params;
     const threadId = this.toThreadId(sessionId);
 
-    // Double-checked locking: re-read after the async refreshClient() await so
-    // concurrent sendMessage calls that both passed the first check don't each
-    // create a new SDK session for the same sessionId.
-    const existing = this.sessions.get(sessionId);
-    if (existing) {
-      existing.lastUsedAt = Date.now();
-      // Apply agent routing so mid-thread agent changes take effect on cached sessions.
-      if (copilotAgent) {
-        if (BUILTIN_MODE_NAMES.has(copilotAgent as "interactive" | "plan" | "autopilot")) {
-          await existing.session.rpc.mode.set({ mode: copilotAgent as "interactive" | "plan" | "autopilot" });
-          logger.info("CopilotProvider: set built-in mode on cached session", { sessionId, mode: copilotAgent });
-        } else {
-          await existing.session.rpc.agent.select({ name: copilotAgent });
-          logger.info("CopilotProvider: selected custom agent on cached session", { sessionId, agent: copilotAgent });
-        }
-      }
-      // Abort in-flight turn by sending a new message on the existing session.
-      // The previous runTurn promise will resolve when session.idle fires.
-      void this.runTurn(sessionId, threadId, existing.session, message);
-      return;
+    // Re-read after the async refreshClient() await so concurrent sends that
+    // both passed the first check don't each create a new SDK session for the
+    // same sessionId.
+    const existing = this.runtime.get(sessionId);
+
+    // Stage the per-turn options (model, agent routing) so `spawn` can build a
+    // fresh session correctly. The turn itself is run here after `acquire`
+    // (uniformly for fresh and reuse paths) so it never races the runtime's
+    // post-spawn pool write.
+    this.pendingSpawnTurns.set(sessionId, { message, model, copilotAgent });
+
+    let state: CopilotSessionState;
+    try {
+      state = await this.runtime.acquire({
+        sessionId,
+        threadId,
+        cwd,
+        permissionMode,
+        resumeFrom: resume ? this.sdkSessionIds.get(sessionId) : undefined,
+      });
+    } catch (e: unknown) {
+      this.pendingSpawnTurns.delete(sessionId);
+      throw e;
     }
+    this.pendingSpawnTurns.delete(sessionId);
+    this.runtime.recordUsage(sessionId);
+
+    // A stop requested before the session finished spawning: `spawn` already
+    // tore it down and emitted Ended, so do not run the turn.
+    if (this.pendingStops.has(sessionId)) return;
+
+    state.lastUsedAt = Date.now();
+
+    // Reuse path: `spawn` did not run, so apply agent routing here so mid-thread
+    // agent changes take effect on the cached session. (Fresh sessions get
+    // routing applied in `spawn` when first created.)
+    if (existing && copilotAgent) {
+      if (BUILTIN_MODE_NAMES.has(copilotAgent as "interactive" | "plan" | "autopilot")) {
+        await state.session.rpc.mode.set({ mode: copilotAgent as "interactive" | "plan" | "autopilot" });
+        logger.info("CopilotProvider: set built-in mode on cached session", { sessionId, mode: copilotAgent });
+      } else {
+        await state.session.rpc.agent.select({ name: copilotAgent });
+        logger.info("CopilotProvider: selected custom agent on cached session", { sessionId, agent: copilotAgent });
+      }
+    }
+
+    // Run the turn. Sending a new message on an existing session implicitly
+    // aborts any in-flight turn; the prior runTurn promise resolves on idle.
+    void this.runTurn(sessionId, threadId, state.session, message);
+  }
+
+  /**
+   * Spawns a fresh Copilot SDK session: creates (or resumes) the session,
+   * applies agent routing, and captures the SDK session id. The first turn is
+   * run by the `doSendMessage` caller after the runtime stores this state, so
+   * `spawn` does not run it (avoiding a race with the runtime's pool write).
+   * Returns an empty `pids` array because the Copilot SDK manages its own
+   * subprocess and never exposes the PID; the runtime's JobObject/`taskkill`
+   * are therefore best-effort no-ops for Copilot, and teardown is delegated to
+   * `session.disconnect()` in {@link close}.
+   */
+  async spawn(args: SpawnArgs): Promise<SpawnResult<CopilotSessionState>> {
+    const { sessionId, threadId, cwd, resumeFrom } = args;
 
     const client = this.client;
     if (!client) {
       throw new Error("Copilot client not available");
     }
-    const sdkSessionId = this.sdkSessionIds.get(sessionId);
+
+    const staged = this.pendingSpawnTurns.get(sessionId);
+    const copilotAgent = staged?.copilotAgent;
 
     let session: CopilotSession;
 
@@ -594,7 +652,7 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
         prompt: "",
       }));
 
-    // TODO(#258): respect params.permissionMode. Currently approveAll is used
+    // TODO(#258): respect args.permissionMode. Currently approveAll is used
     // unconditionally because the Copilot SDK does not expose per-action gating.
     // Until the SDK adds granular permission control, all tool actions are
     // approved automatically regardless of the thread's permissionMode setting.
@@ -602,7 +660,7 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
     const skillDirs = userSkillDirectories();
     const sessionBase = {
       onPermissionRequest: approveAll,
-      model: model || undefined,
+      model: staged?.model || undefined,
       workingDirectory: cwd,
       enableConfigDiscovery: true,
       ...(customAgents.length > 0 && { customAgents }),
@@ -610,10 +668,10 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
       ...(userInstructions && { systemMessage: { content: userInstructions } }),
     };
 
-    if (resume && sdkSessionId) {
+    if (resumeFrom) {
       try {
-        session = await client.resumeSession(sdkSessionId, sessionBase);
-        logger.info("Resumed Copilot session", { sessionId, sdkSessionId });
+        session = await client.resumeSession(resumeFrom, sessionBase);
+        logger.info("Resumed Copilot session", { sessionId, sdkSessionId: resumeFrom });
       } catch (err) {
         logger.warn("CopilotProvider: resume failed, starting fresh session", {
           sessionId,
@@ -650,21 +708,65 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
       } satisfies AgentEvent);
     }
 
-    const entry: SessionEntry = {
+    const state: CopilotSessionState = {
       session,
       lastUsedAt: Date.now(),
+      turnActive: false,
     };
-    this.sessions.set(sessionId, entry);
 
-    if (this.pendingStops.delete(sessionId)) {
+    if (this.pendingStops.has(sessionId)) {
       logger.info("Pending stop consumed, tearing down new Copilot session", { sessionId });
-      entry.session.disconnect().catch(() => {});
-      this.sessions.delete(sessionId);
+      session.disconnect().catch(() => {});
       this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
-      return;
     }
 
-    void this.runTurn(sessionId, threadId, session, message);
+    return { state, pids: [] };
+  }
+
+  /**
+   * Eviction guard: a turn is in flight while `turnActive` is true. Copilot has
+   * no native busy signal, so `runTurn` toggles this flag; this converges the
+   * busy guard the old TTL-only eviction lacked.
+   */
+  isBusy(state: CopilotSessionState): boolean {
+    return state.turnActive;
+  }
+
+  /** Graceful protocol interrupt: disconnect the SDK session. Guarded so a double-disconnect is harmless. */
+  async interrupt(state: CopilotSessionState): Promise<void> {
+    try {
+      await state.session.disconnect();
+    } catch (err) {
+      logger.debug("CopilotProvider: interrupt disconnect failed (session may already be down)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  /**
+   * Provider teardown. Copilot has no separate hard kill; `disconnect()` is the
+   * teardown. The runtime calls `interrupt` then `close`, both of which
+   * disconnect, so this is guarded against a double-disconnect.
+   */
+  async close(state: CopilotSessionState): Promise<void> {
+    try {
+      await state.session.disconnect();
+    } catch (err) {
+      logger.debug("CopilotProvider: close disconnect failed (session may already be down)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  /**
+   * Whether a pooled session must be discarded before reuse. The Copilot SDK
+   * exposes no reliable per-session liveness getter and the original provider
+   * performed no cwd/model/agent staleness check before reuse (a dead session
+   * surfaces as `session.error`, which evicts it from the pool). Mirror that:
+   * never force-discard here, preserving the prior reuse behavior.
+   */
+  isStale(_state: CopilotSessionState, _args: { cwd: string; permissionMode: string }): boolean {
+    return false;
   }
 
   /**
@@ -678,6 +780,11 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
     session: CopilotSession,
     message: string,
   ): Promise<void> {
+    // Mark the session busy so the runtime's idle-eviction guard spares it for
+    // the duration of the turn (Copilot has no native busy signal).
+    const turnState = this.runtime.get(sessionId);
+    if (turnState) turnState.turnActive = true;
+
     // Track per-tool start times to derive elapsedSeconds for toolProgress events.
     const toolStartTimes = new Map<string, number>();
 
@@ -698,8 +805,9 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
         // assistant.message_delta - streaming text chunk
         unsubscribers.push(
           session.on("assistant.message_delta", (event) => {
-            const entry = this.sessions.get(sessionId);
+            const entry = this.runtime.get(sessionId);
             if (entry) entry.lastUsedAt = Date.now();
+            this.runtime.recordUsage(sessionId);
 
             this.emit("event", {
               type: "textDelta",
@@ -838,7 +946,9 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
 
         // session.error - provider-level error; resolve so cleanup runs.
         // Also evict the session entry so the next sendMessage creates a fresh
-        // session rather than reusing a potentially dead one.
+        // session rather than reusing a potentially dead one. The turn is
+        // settling, so clear `turnActive` before stopping so the runtime's
+        // busy guard does not block teardown.
         unsubscribers.push(
           session.on("session.error", (event) => {
             this.emit("event", {
@@ -846,8 +956,10 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
               threadId,
               error: event.data.message,
             } satisfies AgentEvent);
-            this.sessions.delete(sessionId);
+            const errored = this.runtime.get(sessionId);
+            if (errored) errored.turnActive = false;
             this.contextWindowBySession.delete(sessionId);
+            void this.runtime.stop(sessionId);
             resolve();
           }),
         );
@@ -918,6 +1030,10 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
         error: errorMessage,
       } satisfies AgentEvent);
     } finally {
+      // The turn has settled: clear the busy marker so the runtime's idle
+      // eviction (which reads `isBusy` → `turnActive`) can reclaim the session.
+      const settled = this.runtime.get(sessionId);
+      if (settled) settled.turnActive = false;
       // Deregister all per-turn handlers to prevent memory leaks across turns
       for (const unsub of unsubscribers) {
         unsub();
@@ -929,59 +1045,32 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider {
     }
   }
 
-  /** Evict sessions that have been idle longer than IDLE_TTL_MS. */
-  private evictIdleSessions(): void {
-    const now = Date.now();
-    for (const [sessionId, entry] of this.sessions) {
-      if (now - entry.lastUsedAt > IDLE_TTL_MS) {
-        logger.info("Evicting idle Copilot session", { sessionId });
-        entry.session.disconnect().catch((err) =>
-          logger.warn("CopilotProvider: error disconnecting evicted session", {
-            sessionId,
-            error: String(err),
-          }),
-        );
-        this.sessions.delete(sessionId);
-        this.contextWindowBySession.delete(sessionId);
-      }
-    }
-  }
-
-  /** Disconnect and remove an active session, or record a pending stop if the session hasn't been created yet. */
+  /**
+   * Disconnect and remove an active session, or record a pending stop if the
+   * session hasn't been created yet. The runtime's `stop` runs `interrupt` →
+   * `close` (both disconnect the SDK session, guarded) → hard kill (a no-op for
+   * Copilot, whose PID the SDK hides).
+   */
   stopSession(sessionId: string): void {
     this.contextWindowBySession.delete(sessionId);
-    const entry = this.sessions.get(sessionId);
-    if (entry) {
-      entry.session.disconnect().catch((err) =>
-        logger.warn("CopilotProvider: error disconnecting stopped session", {
-          sessionId,
-          error: String(err),
-        }),
+    if (this.runtime.get(sessionId) !== undefined) {
+      void this.runtime.stop(sessionId).catch((err: unknown) =>
+        logger.warn("CopilotProvider: stopSession failed", { sessionId, error: String(err) }),
       );
-      this.sessions.delete(sessionId);
     } else {
       this.pendingStops.add(sessionId);
+      this.pendingSpawnTurns.delete(sessionId);
       setTimeout(() => this.pendingStops.delete(sessionId), 10_000);
     }
   }
 
   /** Tear down all sessions, stop the client, and release resources. */
   shutdown(): void {
-    if (this.evictionTimer) {
-      clearInterval(this.evictionTimer);
-      this.evictionTimer = null;
-    }
-
-    for (const [sessionId, entry] of this.sessions) {
-      entry.session.disconnect().catch((err) =>
-        logger.warn("CopilotProvider: error disconnecting session during shutdown", {
-          sessionId,
-          error: String(err),
-        }),
-      );
-    }
-    this.sessions.clear();
+    void this.runtime.shutdown().catch((err: unknown) =>
+      logger.warn("CopilotProvider: runtime shutdown failed", { error: String(err) }),
+    );
     this.sdkSessionIds.clear();
+    this.pendingSpawnTurns.clear();
     this.contextWindowBySession.clear();
 
     if (this.client) {

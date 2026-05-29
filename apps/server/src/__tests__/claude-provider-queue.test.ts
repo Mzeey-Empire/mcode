@@ -102,7 +102,7 @@ describe("ClaudeProvider sendMessage on closed queue (#292)", () => {
 
     // Simulate race by closing the queue directly
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const entry = (provider as any).sessions.get("mcode-t1");
+    const entry = (provider as any).runtime.get("mcode-t1") as { closeQueue: () => void };
     entry.closeQueue();
 
     // Second send on same sessionId: push hits a closed queue
@@ -190,8 +190,8 @@ describe("ClaudeProvider sendMessage on closed queue (#292)", () => {
     // Critical behavior: the session entry must still exist so the next
     // delivery is not forced into a full cold-start.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sessions = (provider as any).sessions as Map<string, unknown>;
-    expect(sessions.has("mcode-overflow")).toBe(true);
+    const runtime = (provider as any).runtime as { get: (id: string) => unknown };
+    expect(runtime.get("mcode-overflow")).toBeDefined();
 
     // And an Error event surfaced to the caller, but with the raw overflow
     // message (not the "session was shutting down" closed-session wording).

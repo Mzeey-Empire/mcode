@@ -83,9 +83,12 @@ describe("ClaudeProvider idle eviction with pending tool_use (#291)", () => {
     await vi.advanceTimersByTimeAsync(100);
     await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
 
+    // Session lifecycle now lives in the SessionRuntime; the provider's
+    // `isBusy` adapter method keeps a session with pending tool_use out of
+    // idle eviction (logging the skip), so the session must still be live.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sessions = (provider as any).sessions as Map<string, unknown>;
-    expect(sessions.has("mcode-t1")).toBe(true);
+    const runtime = (provider as any).runtime as { get: (id: string) => unknown };
+    expect(runtime.get("mcode-t1")).toBeDefined();
     const { logger } = await import("@mcode/shared");
     expect(logger.debug).toHaveBeenCalledWith(
       "Skipping eviction: pending tool calls",
@@ -142,8 +145,9 @@ describe("ClaudeProvider idle eviction with pending tool_use (#291)", () => {
     // Now advance past the idle window
     await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
 
+    // The runtime's idle sweep evicts a non-busy session once its TTL lapses.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sessions = (provider as any).sessions as Map<string, unknown>;
-    expect(sessions.has("mcode-t2")).toBe(false);
+    const runtime = (provider as any).runtime as { get: (id: string) => unknown };
+    expect(runtime.get("mcode-t2")).toBeUndefined();
   });
 });

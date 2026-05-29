@@ -34,6 +34,8 @@ import { AnthropicHeaderUsageSource } from "./usage/header-usage-source.js";
 import { CompositeUsageSource } from "./usage/composite-usage-source.js";
 import { EnvService } from "../../services/env-service.js";
 import { JobObject } from "../../services/job-object.js";
+import { SessionRuntime } from "../../services/session-runtime.js";
+import type { ProtocolAdapter, SpawnArgs, SpawnResult } from "../../services/session-runtime.js";
 import { listDirectChildren } from "../../services/process-kill.js";
 
 /**
@@ -63,14 +65,21 @@ function restoreProcessEnv(backup: Record<string, string | undefined>): void {
   }
 }
 
-/** Idle TTL before a session is evicted (10 minutes). */
-const IDLE_TTL_MS = 10 * 60 * 1000;
-/** How often to check for idle sessions (1 minute). */
-const EVICTION_INTERVAL_MS = 60 * 1000;
 /** Max queued messages before push() warns and drops. */
 const MAX_QUEUE_DEPTH = 20;
 
-interface SessionEntry {
+/**
+ * Per-session state owned by the {@link SessionRuntime}. Holds the live SDK
+ * `query`, its prompt-queue handles, and the per-turn bookkeeping the stream
+ * loop and eviction guard read. The runtime owns eviction timing and JobObject/
+ * kill; `lastUsedAt` is retained here because the stream loop and
+ * `resolvePermission` stamp it so SDK activity and user attention count.
+ */
+interface ClaudeSessionState {
+  /** Session id this state belongs to; lets adapter methods reference provider maps. */
+  sessionId: string;
+  /** Working directory the SDK subprocess was spawned with. */
+  cwd: string;
   query: Query;
   pushMessage: (msg: SDKUserMessage) => void;
   closeQueue: () => void;
@@ -93,8 +102,8 @@ interface SessionEntry {
   /** When true, the finally block in startStreamLoop should not emit an "ended" event. */
   suppressEnded?: boolean;
   /** Tool-use IDs whose matching tool_result has not yet been received.
-   *  While this set is non-empty, evictIdleSessions() must skip the session
-   *  regardless of how long it has been since an SDK message arrived. */
+   *  While this set is non-empty, `isBusy` returns true so the runtime's idle
+   *  eviction skips the session regardless of how long the SDK has been quiet. */
   pendingToolUses: Set<string>;
   /**
    * True once the first tool call for this sendMessage query has been registered.
@@ -227,16 +236,44 @@ export function detectFallbackModel(
 /** Max time to wait on a resume side-channel before falling back to sessionless. */
 const SIDE_CHANNEL_RESUME_PROBE_MS = 20_000;
 
+/**
+ * Per-turn payload staged from `sendTurn`/`doSendMessage` to `spawn`. The
+ * runtime's `acquire` only hands back state, so the prompt, resume flag, and
+ * SDK options for a freshly-spawned session's first turn are carried here keyed
+ * by sessionId. Mirrors the Codex provider's `pendingSpawnTurns`.
+ */
+interface PendingSpawnTurn {
+  prompt: SDKUserMessage;
+  /** Whether this spawn should resume an existing SDK session id. */
+  resume: boolean;
+  /** SDK session id to resume from (only consulted when `resume` is true). */
+  resumeId: string;
+  /** Raw uuid (threadId) used as the `sessionId` option on a fresh (non-resume) spawn. */
+  uuid: string;
+  /** Fully-built SDK query options sans the resume/sessionId discriminator. */
+  baseOptions: Record<string, unknown>;
+  /**
+   * Bare model id (no `[1m]` suffix) stored on the session state so
+   * detectFallbackModel compares against the dated snapshot ids the SDK reports.
+   */
+  resolvedModel: string;
+  /** Context window mode the session was spawned with; gates the in-place reuse check. */
+  contextWindowMode: ContextWindowMode | undefined;
+}
+
 /** Claude Agent SDK adapter implementing IAgentProvider with prompt queue pattern. */
 @injectable()
-export class ClaudeProvider extends EventEmitter implements IAgentProvider {
+export class ClaudeProvider extends EventEmitter implements IAgentProvider, ProtocolAdapter<ClaudeSessionState> {
   readonly id: ProviderId = "claude";
   /** Claude supports one-shot text completion via sdkQuery with maxTurns: 1. */
   readonly supportsCompletion = true;
   readonly sessionForkOnResume = "clean" as const;
   readonly maxInputCharactersPerTurn = 180_000;
 
-  private sessions = new Map<string, SessionEntry>();
+  /** Owns the session pool, idle eviction (with busy guard), and JobObject/kill. */
+  private readonly runtime: SessionRuntime<ClaudeSessionState>;
+  /** Per-turn payload staged for `spawn` to run a fresh session's first turn. */
+  private pendingSpawnTurns = new Map<string, PendingSpawnTurn>();
   private sdkSessionIds = new Map<string, string>();
   /**
    * Active goals keyed by sessionId (mcode-${threadId}). When set, the SDK
@@ -266,7 +303,6 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       resolve: (decision: PermissionDecision) => void;
     }
   >();
-  private evictionTimer: ReturnType<typeof setInterval> | null = null;
   private lastSessionCostUsd?: number;
   private lastServiceTier?: "standard" | "priority" | "batch";
   private lastNumTurns?: number;
@@ -281,6 +317,10 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     @inject("JobObject") private readonly jobObject: JobObject,
   ) {
     super();
+    this.runtime = new SessionRuntime<ClaudeSessionState>(this, {
+      jobObject: this.jobObject,
+      envService: this.envService,
+    });
   }
 
   /**
@@ -464,7 +504,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     // Resolve model from the parent thread's active session if available,
     // falling back to the default claude-sonnet model.
     const parentSessionId = `mcode-${args.parentThreadId}`;
-    const hasLiveParentSession = this.sessions.has(parentSessionId);
+    const hasLiveParentSession = this.runtime.get(parentSessionId) !== undefined;
 
     // Path B-prime: after a server restart (or when the user forks without
     // sending a new message on the parent), the SDK subprocess is not running
@@ -484,7 +524,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       );
     }
 
-    const model = this.sessions.get(parentSessionId)?.model ?? DEFAULT_CLAUDE_MODEL;
+    const model = this.runtime.get(parentSessionId)?.model ?? DEFAULT_CLAUDE_MODEL;
 
     const backup = snapshotProcessEnv();
     // Cap resume attempts so a hung subprocess does not consume the full
@@ -748,14 +788,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       thinking,
     } = params;
 
-    if (!this.evictionTimer) {
-      this.evictionTimer = setInterval(
-        () => this.evictIdleSessions(),
-        EVICTION_INTERVAL_MS,
-      );
-    }
-
-    const existing = this.sessions.get(sessionId);
+    const existing = this.runtime.get(sessionId);
     const isBypass = permissionMode === "full";
     const sdkPermissionMode = isBypass
       ? ("bypassPermissions" as const)
@@ -780,42 +813,31 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
         ? await this.buildMultimodalMessage(finalMessage, attachments, sessionId)
         : toUserMessage(finalMessage, sessionId);
 
-    if (existing) {
-      // Permission mode is fixed at SDK subprocess spawn. setPermissionMode()
-      // cannot enter bypassPermissions without the --dangerously-skip-permissions
-      // flag at spawn time (mutually exclusive with canUseTool), so we match
-      // the codex provider's teardown-and-respawn pattern here. The new session
-      // resumes the same conversation via the persisted sdkSessionIds entry.
-      if (existing.permissionMode !== permissionMode) {
-        logger.info("permissionMode changed, recreating session", {
-          sessionId,
-          from: existing.permissionMode,
-          to: permissionMode,
-        });
-        existing.suppressEnded = true;
-        existing.closeQueue();
-        existing.query.close();
-        this.sessions.delete(sessionId);
-        return this.doSendMessage(params);
-      }
+    // A live session whose spawn-fixed parameters (permissionMode or
+    // contextWindowMode) still match the request can be reused in place: the
+    // model can be hot-swapped via setModel() and the prompt pushed onto the
+    // existing queue. A mismatch is detected by `isStale`, so `acquire` would
+    // discard and respawn anyway; tearing it down here (with `suppressEnded`)
+    // keeps the stream loop quiet and falls through to the fresh-spawn path,
+    // which resumes the same conversation via the persisted sdkSessionIds entry.
+    const reusable =
+      existing !== undefined &&
+      existing.permissionMode === permissionMode &&
+      existing.contextWindowMode === contextWindowMode;
 
-      // Context window mode is part of the model slug at spawn time, so the SDK
-      // subprocess must be torn down and respawned when the user toggles 200k/1M.
-      // setModel() can change the model ID but cannot toggle the [1m] suffix beta
-      // header, which is only attached at session creation.
-      if (existing.contextWindowMode !== contextWindowMode) {
-        logger.info("contextWindowMode changed, recreating session", {
-          sessionId,
-          from: existing.contextWindowMode,
-          to: contextWindowMode,
-        });
-        existing.suppressEnded = true;
-        existing.closeQueue();
-        existing.query.close();
-        this.sessions.delete(sessionId);
-        return this.doSendMessage(params);
-      }
+    if (existing && !reusable) {
+      logger.info("Session spawn parameters changed, recreating session", {
+        sessionId,
+        permissionMode: { from: existing.permissionMode, to: permissionMode },
+        contextWindowMode: { from: existing.contextWindowMode, to: contextWindowMode },
+      });
+      // Suppress the teardown's Ended emit; the fresh session takes over the id.
+      existing.suppressEnded = true;
+      await this.runtime.stop(sessionId);
+    }
 
+    if (existing && reusable) {
+      this.runtime.recordUsage(sessionId);
       existing.lastUsedAt = Date.now();
 
       if (existing.model !== resolvedModel) {
@@ -838,10 +860,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                 err instanceof Error ? err.message : String(err),
             },
           );
+          // Respawn fresh (no resume) after a setModel failure. Suppress the
+          // teardown Ended and fall through to the fresh-spawn path with a
+          // resume:false stage so the new subprocess starts a clean session.
           existing.suppressEnded = true;
-          existing.closeQueue();
-          existing.query.close();
-          this.sessions.delete(sessionId);
+          await this.runtime.stop(sessionId);
           return this.doSendMessage({ ...params, resume: false });
         }
       }
@@ -867,11 +890,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
             error: "Message could not be delivered: session was shutting down. Please try again.",
           } satisfies AgentEvent);
           // Drop the stale entry so the next send creates a fresh session.
-          // Safe to delete here even if startStreamLoop is mid-iteration: its
-          // finally block guards with `current?.query === q` before re-deleting,
-          // so a second delete is a no-op and the terminal Ended event still
-          // fires via the `(!current || current.query === q)` condition.
-          this.sessions.delete(sessionId);
+          // Safe even if startStreamLoop is mid-iteration: its finally block
+          // guards with `current?.query === q` before re-deleting, so a second
+          // stop is a no-op and the terminal Ended event still fires via the
+          // `(!current || current.query === q)` condition.
+          await this.runtime.stop(sessionId);
         } else {
           // Transient overflow: surface via Error event but keep the session.
           logger.warn("Prompt queue full on existing session", {
@@ -1069,6 +1092,125 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
         }],
       },
     };
+    // Stage the per-turn payload so `spawn` can build the SDK query, start the
+    // stream loop, and push this prompt as the fresh session's first turn.
+    // `spawn` discriminates resume vs. fresh via these staged fields.
+    const stageTurn = (doResume: boolean): void => {
+      this.pendingSpawnTurns.set(sessionId, {
+        prompt,
+        resume: doResume,
+        resumeId,
+        uuid,
+        baseOptions,
+        resolvedModel,
+        contextWindowMode,
+      });
+    };
+
+    // Spawn fresh through the runtime. Resume-failure detection needs its
+    // listeners registered BEFORE `acquire` runs `spawn` (which starts the
+    // stream loop), otherwise a `_resumeFailed` emit could race ahead of the
+    // listener attach across the `await acquire` boundary.
+    const runSpawn = async (doResume: boolean): Promise<"ok" | "stopped" | "retry"> => {
+      stageTurn(doResume);
+
+      let retryPromise: Promise<boolean> | undefined;
+      let resumeHandler: (() => void) | null = null;
+      let doneHandler: (() => void) | null = null;
+      const failedEvent = `_resumeFailed:${sessionId}`;
+      const doneEvent = `_streamDone:${sessionId}`;
+      if (doResume) {
+        retryPromise = new Promise<boolean>((resolve) => {
+          resumeHandler = () => resolve(true);
+          doneHandler = () => resolve(false);
+          this.once(failedEvent, resumeHandler);
+          this.once(doneEvent, doneHandler);
+        });
+      }
+
+      try {
+        await this.runtime.acquire({
+          sessionId,
+          threadId: tid,
+          cwd: resolvedCwd,
+          permissionMode,
+          resumeFrom: doResume ? resumeId : undefined,
+        });
+      } catch (err) {
+        if (resumeHandler) this.removeListener(failedEvent, resumeHandler);
+        if (doneHandler) this.removeListener(doneEvent, doneHandler);
+        this.pendingSpawnTurns.delete(sessionId);
+        throw err;
+      }
+      this.runtime.recordUsage(sessionId);
+
+      // A stop requested while the spawn was in flight: tear it down now.
+      if (this.pendingStops.delete(sessionId)) {
+        logger.info("Pending stop consumed, tearing down new session", {
+          sessionId,
+        });
+        if (resumeHandler) this.removeListener(failedEvent, resumeHandler);
+        if (doneHandler) this.removeListener(doneEvent, doneHandler);
+        await this.runtime.stop(sessionId);
+        // TurnStarted was already emitted by AgentService before calling the
+        // provider, so the frontend thinks the agent is running. Emit Ended
+        // to clear that state.
+        this.emit("event", {
+          type: AgentEventType.Ended,
+          threadId: tid,
+        } satisfies AgentEvent);
+        return "stopped";
+      }
+
+      if (!doResume || !retryPromise) return "ok";
+
+      let needsRetry: boolean;
+      try {
+        needsRetry = await retryPromise;
+      } finally {
+        // Guarantee both listeners are removed regardless of how the
+        // promise settled (resolve, reject, or upstream cancellation).
+        if (resumeHandler) this.removeListener(failedEvent, resumeHandler);
+        if (doneHandler) this.removeListener(doneEvent, doneHandler);
+      }
+
+      if (!needsRetry) return "ok";
+
+      logger.info("Resume failed, falling back to fresh query()", { sessionId });
+      this.sdkSessionIds.delete(sessionId);
+      // Discard the resume session so `acquire` spawns a fresh one. The failed
+      // resume already suppressed its own Ended via the stream loop.
+      await this.runtime.stop(sessionId);
+      return "retry";
+    };
+
+    const first = await runSpawn(resume);
+    if (first === "retry") {
+      await runSpawn(false);
+    }
+  }
+
+  /**
+   * Spawns a fresh Claude SDK session for the staged turn: builds the prompt
+   * queue, launches `sdkQuery` inside the env snapshot window, surfaces any new
+   * child PID to the runtime (which attaches it to the Windows JobObject and
+   * hard-kills it on stop — Claude's converged taskkill), starts the stream
+   * loop, and pushes the first prompt.
+   *
+   * Returns the discovered child PIDs (Windows only; the Claude SDK does not
+   * expose the subprocess PID directly, so they are recovered by diffing the
+   * server's direct children across the spawn). On non-Windows the array is
+   * empty and JobObject/taskkill are no-ops.
+   */
+  async spawn(args: SpawnArgs): Promise<SpawnResult<ClaudeSessionState>> {
+    const { sessionId, cwd } = args;
+    const staged = this.pendingSpawnTurns.get(sessionId);
+    if (!staged) {
+      throw new Error(`Claude spawn called with no staged turn for session ${sessionId}`);
+    }
+    this.pendingSpawnTurns.delete(sessionId);
+
+    const { prompt, resume, resumeId, uuid, baseOptions, resolvedModel, contextWindowMode } = staged;
     const options = resume
       ? { ...baseOptions, resume: resumeId }
       : { ...baseOptions, sessionId: uuid };
@@ -1079,8 +1221,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       sessionId,
       resume,
       resumeId,
-      model: resolvedModel,
-      cwd: resolvedCwd,
+      cwd,
     });
 
     let beforePids: Set<number> | undefined;
@@ -1095,11 +1236,22 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
 
     const q = this.withSdkSpawnEnv(() => sdkQuery({ prompt: queue.iterable, options }));
 
+    // Discover the newly-spawned child PID(s) so the runtime can JobObject-
+    // attach and taskkill them. Mirrors the old `labelSdkSubprocess` diff, but
+    // returns the PIDs to the runtime instead of attaching inline.
+    let pids: number[] = [];
     if (beforePids) {
-      void this.labelSdkSubprocess(beforePids);
+      try {
+        const after = await listDirectChildren(process.pid);
+        pids = after.filter((c) => !beforePids!.has(c.pid)).map((c) => c.pid);
+      } catch {
+        // Best-effort: process enumeration can fail transiently.
+      }
     }
 
-    const entry: SessionEntry = {
+    const state: ClaudeSessionState = {
+      sessionId,
+      cwd,
       query: q,
       pushMessage: queue.push,
       closeQueue: queue.close,
@@ -1107,124 +1259,63 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       // boundary so detectFallbackModel can compare against the dated snapshot
       // IDs the SDK reports in modelUsage.
       model: resolvedModel,
-      permissionMode,
+      permissionMode: args.permissionMode,
       contextWindowMode,
       lastUsedAt: Date.now(),
       pendingToolUses: new Set<string>(),
       hasFiredToolThisTurn: false,
     };
-    this.sessions.set(sessionId, entry);
 
-    // A stop was requested while sendMessage was still in flight (race
-    // between concurrent agent.send and agent.stop RPCs). Tear down
-    // immediately so the agent never starts.
-    if (this.pendingStops.delete(sessionId)) {
-      logger.info("Pending stop consumed, tearing down new session", {
-        sessionId,
+    // Start the stream loop and push the first prompt. The loop is async and
+    // reads `this.runtime.get(sessionId)` lazily on each SDK message; by the
+    // time the first message yields, `acquire` has stored `state` in the pool
+    // (the runtime stores it synchronously the moment this `spawn` resolves).
+    this.startStreamLoop(sessionId, q);
+    queue.push(prompt);
+
+    return { state, pids };
+  }
+
+  /**
+   * Eviction guard: a session is busy while a tool_use awaits its result, OR
+   * while it has a pending permission request the user may still answer (the
+   * user could be on another thread). Both keep the session out of idle
+   * eviction regardless of how long the SDK has been quiet.
+   */
+  isBusy(state: ClaudeSessionState): boolean {
+    if (state.pendingToolUses.size > 0) {
+      logger.debug("Skipping eviction: pending tool calls", {
+        sessionId: state.sessionId,
+        pending: state.pendingToolUses.size,
       });
-      this.sessions.delete(sessionId);
-      entry.closeQueue();
-      entry.query.close();
-      // TurnStarted was already emitted by AgentService before calling the
-      // provider, so the frontend thinks the agent is running. Emit Ended
-      // to clear that state.
-      this.emit("event", {
-        type: AgentEventType.Ended,
-        threadId: tid,
-      } satisfies AgentEvent);
-      return;
+      return true;
     }
+    const tid = state.sessionId.startsWith("mcode-")
+      ? state.sessionId.slice(6)
+      : state.sessionId;
+    return [...this.pendingPermissions.values()].some((p) => p.threadId === tid);
+  }
 
-    if (resume) {
-      const failedEvent = `_resumeFailed:${sessionId}`;
-      const doneEvent = `_streamDone:${sessionId}`;
+  /** Graceful protocol interrupt: close the prompt queue so the SDK iterator ends. */
+  interrupt(state: ClaudeSessionState): void {
+    state.closeQueue();
+  }
 
-      let resumeHandler: (() => void) | null = null;
-      let doneHandler: (() => void) | null = null;
+  /** Provider teardown: close the SDK query handle. */
+  close(state: ClaudeSessionState): void {
+    state.query.close();
+  }
 
-      const retryPromise = new Promise<boolean>((resolve) => {
-        resumeHandler = () => resolve(true);
-        doneHandler = () => resolve(false);
-        this.once(failedEvent, resumeHandler);
-        this.once(doneEvent, doneHandler);
-      });
-
-      this.startStreamLoop(sessionId, q);
-      queue.push(prompt);
-
-      let needsRetry: boolean;
-      try {
-        needsRetry = await retryPromise;
-      } finally {
-        // Guarantee both listeners are removed regardless of how the
-        // promise settled (resolve, reject, or upstream cancellation).
-        if (resumeHandler) this.removeListener(failedEvent, resumeHandler);
-        if (doneHandler) this.removeListener(doneEvent, doneHandler);
-      }
-
-      if (needsRetry) {
-        logger.info("Resume failed, falling back to fresh query()", {
-          sessionId,
-        });
-        this.sdkSessionIds.delete(sessionId);
-
-        const freshQueue = createPromptQueue();
-        const freshOptions = { ...baseOptions, sessionId: uuid };
-
-        let freshBeforePids: Set<number> | undefined;
-        if (this.jobObject.isWindowsJob) {
-          try {
-            const children = await listDirectChildren(process.pid);
-            freshBeforePids = new Set(children.map((c) => c.pid));
-          } catch {
-            // Best-effort
-          }
-        }
-
-        const freshQ = this.withSdkSpawnEnv(() =>
-          sdkQuery({
-            prompt: freshQueue.iterable,
-            options: freshOptions,
-          }),
-        );
-
-        if (freshBeforePids) {
-          void this.labelSdkSubprocess(freshBeforePids);
-        }
-        const freshEntry: SessionEntry = {
-          query: freshQ,
-          pushMessage: freshQueue.push,
-          closeQueue: freshQueue.close,
-          model: resolvedModel,
-          permissionMode,
-          contextWindowMode,
-          lastUsedAt: Date.now(),
-          pendingToolUses: new Set<string>(),
-          hasFiredToolThisTurn: false,
-        };
-        this.sessions.set(sessionId, freshEntry);
-
-        if (this.pendingStops.delete(sessionId)) {
-          logger.info("Pending stop consumed on resume fallback", {
-            sessionId,
-          });
-          this.sessions.delete(sessionId);
-          freshEntry.closeQueue();
-          freshEntry.query.close();
-          this.emit("event", {
-            type: AgentEventType.Ended,
-            threadId: tid,
-          } satisfies AgentEvent);
-          return;
-        }
-
-        this.startStreamLoop(sessionId, freshQ);
-        freshQueue.push(prompt);
-      }
-    } else {
-      this.startStreamLoop(sessionId, q);
-      queue.push(prompt);
-    }
+  /**
+   * A pooled session must be discarded before reuse when its spawn-fixed
+   * parameters changed. permissionMode is fixed at SDK spawn (bypass vs.
+   * default), and contextWindowMode is encoded into the model slug at spawn,
+   * so either change forces a respawn. `doSendMessage` detects the same
+   * mismatch and tears the session down explicitly (with `suppressEnded`)
+   * before reaching `acquire`; this is the runtime-side backstop.
+   */
+  isStale(state: ClaudeSessionState, args: { cwd: string; permissionMode: string }): boolean {
+    return state.permissionMode !== args.permissionMode;
   }
 
   /** Run the stream loop for a query, mapping SDK events to AgentEvent types. */
@@ -1291,7 +1382,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
         };
 
         for await (const msg of q) {
-          const entry = this.sessions.get(sessionId);
+          const entry = this.runtime.get(sessionId);
           if (entry) entry.lastUsedAt = Date.now();
 
           const anyMsg = msg as Record<string, unknown>;
@@ -1418,7 +1509,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                   }
                   if (toolId) {
                     emittedToolUseIds.add(toolId);
-                    const entry = this.sessions.get(sessionId);
+                    const entry = this.runtime.get(sessionId);
                     if (entry) {
                       entry.pendingToolUses.add(toolId);
                       entry.hasFiredToolThisTurn = true;
@@ -1664,7 +1755,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
               }
               if (toolId) {
                 emittedToolUseIds.add(toolId);
-                const entry = this.sessions.get(sessionId);
+                const entry = this.runtime.get(sessionId);
                 if (entry) {
                   entry.pendingToolUses.add(toolId);
                   entry.hasFiredToolThisTurn = true;
@@ -1717,7 +1808,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                 isError: Boolean(anyMsg.is_error),
               } satisfies AgentEvent);
               if (toolUseId) {
-                const entry = this.sessions.get(sessionId);
+                const entry = this.runtime.get(sessionId);
                 entry?.pendingToolUses.delete(toolUseId);
               }
               break;
@@ -1767,7 +1858,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
                   // (pendingToolUses empty) AND at least one tool has fired this
                   // turn — distinguishing post-tool final-response text from
                   // pre-tool preamble, both of which have pendingToolUses===0.
-                  const sessionEntry = this.sessions.get(sessionId);
+                  const sessionEntry = this.runtime.get(sessionId);
                   const isFinalResponse =
                     sessionEntry !== undefined &&
                     sessionEntry.pendingToolUses.size === 0 &&
@@ -1852,7 +1943,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
         // non-zero after its stdin is closed, which propagates here as a
         // thrown exit error. That exit is expected, not a user-visible crash,
         // because a fresh session has already taken over the sessionId.
-        const current = this.sessions.get(sessionId);
+        const current = this.runtime.get(sessionId);
         const superseded =
           (current !== undefined && current.query !== q) ||
           current?.suppressEnded === true;
@@ -1873,9 +1964,12 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
           } satisfies AgentEvent);
         }
       } finally {
-        const current = this.sessions.get(sessionId);
+        const current = this.runtime.get(sessionId);
         if (current?.query === q) {
-          this.sessions.delete(sessionId);
+          // The SDK subprocess has exited; drop the dead session from the pool.
+          // `runtime.stop` also best-effort taskkills the (already-gone) PIDs,
+          // which is harmless. Fire-and-forget: the stream loop is unwinding.
+          void this.runtime.stop(sessionId);
         }
         logger.info("Session stream ended", { sessionId });
         this.emit(`_streamDone:${sessionId}`);
@@ -1887,28 +1981,6 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
         }
       }
     })();
-  }
-
-  /**
-   * Discover and label new child PIDs spawned by sdkQuery().
-   * Compares direct children of the server process before and after the spawn.
-   * Best-effort: races with other concurrent spawns are tolerated because
-   * labelling a wrong process is harmless (the description is overwritten
-   * on the next setDescription call for that PID).
-   */
-  private async labelSdkSubprocess(beforePids: Set<number>): Promise<void> {
-    if (!this.jobObject.isWindowsJob) return;
-    try {
-      const after = await listDirectChildren(process.pid);
-      for (const child of after) {
-        if (!beforePids.has(child.pid)) {
-          this.jobObject.assign(child.pid);
-          this.jobObject.setDescription(child.pid, "Mcode Agent: Claude");
-        }
-      }
-    } catch {
-      // Best-effort: process enumeration can fail transiently
-    }
   }
 
   /** Build a multimodal SDKUserMessage from text and attachments. */
@@ -1983,36 +2055,6 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     };
   }
 
-  /** Evict sessions that have been idle longer than IDLE_TTL_MS. */
-  private evictIdleSessions(): void {
-    const now = Date.now();
-    for (const [sessionId, entry] of this.sessions) {
-      if (now - entry.lastUsedAt > IDLE_TTL_MS) {
-        // Skip sessions with in-flight tool calls: a long-running tool (build,
-        // test suite, large file op) may not emit any SDK message for minutes.
-        if (entry.pendingToolUses.size > 0) {
-          logger.debug("Skipping eviction: pending tool calls", {
-            sessionId,
-            pending: entry.pendingToolUses.size,
-          });
-          continue;
-        }
-        // Never evict a session that is actively awaiting a user permission response —
-        // the user may be on another thread and is about to respond.
-        const tid = sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;
-        const hasPending = [...this.pendingPermissions.values()].some(
-          (p) => p.threadId === tid,
-        );
-        if (hasPending) continue;
-
-        logger.info("Evicting idle session", { sessionId });
-        this.sessions.delete(sessionId);
-        entry.closeQueue();
-        entry.query.close();
-      }
-    }
-  }
-
   /**
    * Install a goal on a session. The next Stop event from the SDK will be
    * blocked with a "Goal not yet met" reason until {@link clearGoal} is
@@ -2046,11 +2088,14 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       }
     }
     this.goalsBySession.delete(sessionId);
-    const entry = this.sessions.get(sessionId);
+    const entry = this.runtime.get(sessionId);
     if (entry) {
-      this.sessions.delete(sessionId);
-      entry.closeQueue();
-      entry.query.close();
+      // The runtime's stop runs interrupt (closeQueue) → close (query.close) →
+      // hard taskkill of the spawned PID. Fire-and-forget; callers that need to
+      // await the subprocess exit use waitForSessionExit.
+      void this.runtime.stop(sessionId).catch((err: unknown) => {
+        logger.warn("Claude stopSession failed", { sessionId, error: String(err) });
+      });
     } else {
       // Session not yet created (sendMessage still in flight). Record the
       // stop so doSendMessage tears the session down immediately after
@@ -2086,16 +2131,19 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
       const timer = setTimeout(done, timeoutMs);
       this.once(`_streamDone:${sessionId}`, done);
 
-      const entry = this.sessions.get(sessionId);
+      const entry = this.runtime.get(sessionId);
       if (!entry) {
         // No active session — resolve immediately without waiting.
         done();
         return;
       }
 
-      this.sessions.delete(sessionId);
-      entry.closeQueue();
-      entry.query.close();
+      // Stop through the runtime (interrupt → close → taskkill). The interrupt
+      // closes the prompt queue, ending the SDK iterator, so the stream loop's
+      // finally emits `_streamDone`, which resolves the wait above.
+      void this.runtime.stop(sessionId).catch((err: unknown) => {
+        logger.warn("Claude waitForSessionExit stop failed", { sessionId, error: String(err) });
+      });
     });
   }
 
@@ -2137,7 +2185,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
     // Reset the session's idle timer so the 10-minute eviction clock starts
     // from the moment the user responds, not from when the request was sent.
     const sessionId = `mcode-${entry.threadId}`;
-    const session = this.sessions.get(sessionId);
+    const session = this.runtime.get(sessionId);
     if (session) session.lastUsedAt = Date.now();
 
     entry.resolve(decision);
@@ -2183,27 +2231,21 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider {
 
   /** Tear down all sessions and release resources. */
   shutdown(): void {
-    if (this.evictionTimer) {
-      clearInterval(this.evictionTimer);
-      this.evictionTimer = null;
-    }
-    // Drain all pending permission requests so their promises settle
+    // Drain all pending permission requests so their promises settle. Do this
+    // before the runtime stops sessions so any in-flight canUseTool awaits
+    // unblock and the SDK iterators can wind down cleanly.
     for (const [requestId, entry] of this.pendingPermissions) {
       this.pendingPermissions.delete(requestId);
       entry.resolve("cancelled");
       this.emit("permission_resolved", { requestId, decision: "cancelled" as const });
     }
-    for (const [sessionId, entry] of this.sessions) {
-      if (entry.pendingToolUses.size > 0) {
-        logger.warn("Shutting down session with pending tool calls", {
-          sessionId,
-          pending: entry.pendingToolUses.size,
-        });
-      }
-      entry.closeQueue();
-      entry.query.close();
-    }
-    this.sessions.clear();
+    // The runtime stops every session (interrupt → close → taskkill) and
+    // clears its eviction timer. Fire-and-forget: shutdown is synchronous and
+    // the provider-owned maps below are cleared immediately.
+    void this.runtime.shutdown().catch((err: unknown) => {
+      logger.warn("Claude runtime shutdown failed", { error: String(err) });
+    });
+    this.pendingSpawnTurns.clear();
     this.sdkSessionIds.clear();
     this.goalsBySession.clear();
     logger.info("ClaudeProvider shutdown complete");

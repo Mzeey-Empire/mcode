@@ -7,7 +7,7 @@
  */
 
 import { injectable, inject } from "tsyringe";
-import { spawn, execFile, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -30,6 +30,8 @@ import { SkillService } from "../../services/skill-service.js";
 import { EnvService } from "../../services/env-service.js";
 import { MessageRepo } from "../../repositories/message-repo.js";
 import { JobObject } from "../../services/job-object.js";
+import { SessionRuntime } from "../../services/session-runtime.js";
+import type { ProtocolAdapter, SpawnArgs, SpawnResult } from "../../services/session-runtime.js";
 import {
   AgentEventType,
   CURSOR_STATIC_MODEL_FALLBACK,
@@ -85,7 +87,6 @@ import { cursorTaskExtToAgentEvents } from "./cursor-acp-task.js";
 import { extractCursorCreatePlanMarkdown } from "./cursor-create-plan.js";
 
 const CURSOR_STDERR_TAIL_MAX = 48;
-const EVICTION_INTERVAL_MS = 60 * 1000;
 
 function cursorCliProbeBinaries(settings: Settings): string[] {
   const configured = settings.provider.cli.cursor?.trim();
@@ -124,15 +125,29 @@ interface CursorAcpSessionEntry {
   pendingUserStopAbort: boolean;
 }
 
+/**
+ * Per-session state owned by the {@link SessionRuntime}. Identical to the rich
+ * ACP session entry the provider has always carried (child process, ACP
+ * connection, logical session id, in-flight turn state, the serialized turn
+ * chain, sticky-instruction pacing, stderr tail). The runtime now owns the
+ * pool, idle eviction (with the `activeTurnState` busy guard), JobObject
+ * attachment, and the hard `taskkill` of the child PID surfaced from `spawn`.
+ */
+type CursorSessionState = CursorAcpSessionEntry;
+
 /** Cursor ACP (Agent Communication Protocol) adapter implementing IAgentProvider via a MCP subprocess per session. */
 @injectable()
-export class CursorProvider extends EventEmitter implements IAgentProvider {
+export class CursorProvider
+  extends EventEmitter
+  implements IAgentProvider, ProtocolAdapter<CursorSessionState>
+{
   readonly id: ProviderId = "cursor";
   readonly supportsCompletion = false;
   readonly sessionForkOnResume = "mutating" as const;
   readonly maxInputCharactersPerTurn = 4_000;
 
-  private sessions = new Map<string, CursorAcpSessionEntry>();
+  /** Owns the session pool, idle eviction (with busy guard), and JobObject/kill. */
+  private readonly runtime: SessionRuntime<CursorSessionState>;
   private sdkSessionIds = new Map<string, string>();
   /**
    * Session IDs for which a stop was requested before the session was created.
@@ -142,7 +157,13 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
   private pendingPermissions = new Map<string, PendingAcpPermission>();
   /** Threads in Mcode plan-questions phase; disables Cursor ask_question auto-picks. */
   private planQuestionModeThreads = new Set<string>();
-  private evictionTimer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * Mcode session ids the runtime currently holds. The runtime owns the pool
+   * but exposes only `get(id)`, so the provider mirrors the live id set to be
+   * able to iterate sessions (e.g. sticky-instruction invalidation). Populated
+   * in `spawn`, pruned in `close`.
+   */
+  private liveSessionIds = new Set<string>();
 
   constructor(
     @inject(SettingsService) private readonly settingsService: SettingsService,
@@ -152,6 +173,11 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     @inject(MessageRepo) private readonly messageRepo: MessageRepo,
   ) {
     super();
+    this.runtime = new SessionRuntime<CursorSessionState>(this, {
+      jobObject: this.jobObject,
+      envService: this.envService,
+      idleTtlMs: this.settingsService.get().provider.cursor.idleSessionTtlMinutes * 60 * 1000,
+    });
   }
 
   /** Lists models by running `cursor-agent models` (falls back when discovery fails). */
@@ -188,7 +214,6 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       this.sdkSessionIds.set(sessionId, req.resumeFrom);
     }
 
-    const pm: "full" | "default" = permissionMode === "full" ? "full" : "default";
     const threadId = sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;
 
     // interactionMode absorbs the retired setPlanQuestionMode: a plan-mode Turn
@@ -200,47 +225,38 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       this.planQuestionModeThreads.delete(threadId);
     }
 
-    if (!this.evictionTimer) {
-      this.evictionTimer = setInterval(() => this.evictIdleSessions(), EVICTION_INTERVAL_MS);
+    let entry: CursorSessionState;
+    try {
+      // The runtime discards a stale pooled session (dead child / cwd /
+      // permission-mode mismatch — see `isStale`) and spawns a fresh one,
+      // attaching the child PID to the Windows JobObject from the returned pids.
+      entry = await this.runtime.acquire({
+        sessionId,
+        threadId,
+        cwd,
+        permissionMode,
+        resumeFrom: resume ? this.sdkSessionIds.get(sessionId) : undefined,
+      });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.error("Cursor ACP spawn failed", { sessionId, error: errMsg });
+      this.emit("event", { type: AgentEventType.Error, threadId, error: errMsg } satisfies AgentEvent);
+      this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
+      return;
     }
 
-    const settings = this.settingsService.get();
-    let entry = this.sessions.get(sessionId);
-    if (entry) {
-      const dead =
-        entry.child.exitCode != null ||
-        entry.child.signalCode != null;
-      const mismatch = entry.permissionMode !== pm || entry.cwd !== cwd;
-      if (mismatch || dead) {
-        await this.teardownSessionEntry(sessionId, entry, false);
-        entry = undefined;
-      }
+    // A stop requested before the session finished spawning: tear it down now.
+    if (this.pendingStops.delete(sessionId)) {
+      logger.info("Pending stop consumed, tearing down new Cursor session", { sessionId });
+      void this.runtime.stop(sessionId);
+      this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
+      return;
     }
 
-    if (!entry) {
-      try {
-        entry = await this.spawnChild(sessionId, threadId, cwd, pm, settings);
-        this.sessions.set(sessionId, entry);
-
-        if (this.pendingStops.delete(sessionId)) {
-          logger.info("Pending stop consumed, tearing down new Cursor session", { sessionId });
-          this.sessions.delete(sessionId);
-          await this.teardownSessionEntry(sessionId, entry, false);
-          this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
-          return;
-        }
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        logger.error("Cursor ACP spawn failed", { sessionId, error: errMsg });
-        this.emit("event", { type: AgentEventType.Error, threadId, error: errMsg } satisfies AgentEvent);
-        this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
-        return;
-      }
-    }
-
+    this.runtime.recordUsage(sessionId);
     entry.lastUsedAt = Date.now();
     const scheduled = entry.turnChain.then(() =>
-      this.runTurn(entry!, { message, model, resume, attachments }),
+      this.runTurn(entry, { message, model, resume, attachments }),
     );
     entry.turnChain = scheduled.then(
       () => {},
@@ -250,9 +266,17 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
   }
 
 
-  /** Cancel the active ACP session. Records a pending stop if the session hasn't been created yet. */
+  /**
+   * Cancel the active ACP session. Once the logical ACP session is open, a stop
+   * issues a graceful ACP cancel (and flags `pendingUserStopAbort` when a prompt
+   * is in flight so the in-progress turn settles as a user stop) — the runtime
+   * is not torn down, the warm session stays pooled for the next turn, matching
+   * prior behavior. When the entry exists but the ACP session has not opened
+   * yet, hand it to `runtime.stop` (interrupt → close → hard kill). Records a
+   * pending stop if the session has not spawned at all.
+   */
   stopSession(sessionId: string): void {
-    const entry = this.sessions.get(sessionId);
+    const entry = this.runtime.get(sessionId);
     this.cancelPendingForThread(sessionId);
     if (entry?.acpSessionId && entry.activeTurnState) {
       entry.pendingUserStopAbort = true;
@@ -262,8 +286,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     } else if (entry) {
       // Entry exists but ACP session hasn't opened yet; tear down immediately.
       const threadId = sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;
-      this.sessions.delete(sessionId);
-      void this.teardownSessionEntry(sessionId, entry, false);
+      void this.runtime.stop(sessionId);
       this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
     } else {
       this.pendingStops.add(sessionId);
@@ -274,17 +297,13 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
 
   /** Tear down all sessions, cancel pending permissions, and stop the eviction timer. */
   shutdown(): void {
-    if (this.evictionTimer) {
-      clearInterval(this.evictionTimer);
-      this.evictionTimer = null;
-    }
     this.drainAllPendingCancelled();
-    for (const [id, entry] of this.sessions) {
-      void this.teardownSessionEntry(id, entry, false);
-    }
-    this.sessions.clear();
+    void this.runtime.shutdown().catch((err: unknown) => {
+      logger.warn("Cursor runtime shutdown failed", { error: String(err) });
+    });
     this.planQuestionModeThreads.clear();
     this.sdkSessionIds.clear();
+    this.liveSessionIds.clear();
     logger.info("CursorProvider shutdown complete");
   }
 
@@ -314,8 +333,9 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
    * sticky Cursor preambles can pick up regenerated skill inventories.
    */
   onSkillRegistryDebouncedInvalidation(): void {
-    for (const e of this.sessions.values()) {
-      e.stickyHeavyInstructionsSent = false;
+    for (const id of this.liveSessionIds) {
+      const e = this.runtime.get(id);
+      if (e) e.stickyHeavyInstructionsSent = false;
     }
   }
 
@@ -342,6 +362,63 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       }
     }
     this.pendingPermissions.clear();
+  }
+
+  /**
+   * Spawns a fresh Cursor ACP session for the runtime: launches the
+   * `cursor-agent acp` subprocess (probing CLI candidates), runs the ACP
+   * `initialize`/`authenticate` handshake, then opens the logical ACP session
+   * (`session/load` on resume, falling back to `session/new`). Returns the
+   * child PID in `pids` so the runtime attaches it to the Windows JobObject and
+   * hard-`taskkill`s it on close — the provider no longer does either inline.
+   */
+  async spawn(args: SpawnArgs): Promise<SpawnResult<CursorSessionState>> {
+    const { sessionId, threadId, cwd, permissionMode, resumeFrom } = args;
+    const pm: "full" | "default" = permissionMode === "full" ? "full" : "default";
+    const settings = this.settingsService.get();
+    const state = await this.spawnChild(sessionId, threadId, cwd, pm, settings);
+
+    // Open the logical ACP session up front so reuse paths see a ready
+    // `acpSessionId`. `runTurn`'s own `openLogicalSession` call then early-returns.
+    await this.openLogicalSession(state, resumeFrom !== undefined);
+
+    this.liveSessionIds.add(sessionId);
+    return { state, pids: state.child.pid != null ? [state.child.pid] : [] };
+  }
+
+  /** Eviction guard: a turn is in flight while `activeTurnState` is set. */
+  isBusy(state: CursorSessionState): boolean {
+    return state.activeTurnState != null;
+  }
+
+  /**
+   * Graceful protocol interrupt: ACP `session/cancel` for the open logical
+   * session. Does not kill the child — the runtime's hard kill handles the OS
+   * process via the surfaced PID.
+   */
+  async interrupt(state: CursorSessionState): Promise<void> {
+    state.pendingUserStopAbort = false;
+    if (state.acpSessionId) {
+      await state.connection.cancel({ sessionId: state.acpSessionId }).catch(() => {});
+    }
+  }
+
+  /**
+   * Provider teardown that is not the OS kill: cancel any pending permissions
+   * for this session (so orphaned approval cards clear) and drop it from the
+   * live-id mirror. The child process is killed by the runtime's hard kill.
+   */
+  close(state: CursorSessionState): void {
+    this.cancelPendingForThread(state.mcodeSessionId);
+    this.liveSessionIds.delete(state.mcodeSessionId);
+  }
+
+  /** A pooled session must be discarded before reuse if the child died or the cwd/permission mode changed. */
+  isStale(state: CursorSessionState, args: { cwd: string; permissionMode: string }): boolean {
+    const dead = state.child.exitCode != null || state.child.signalCode != null;
+    if (dead) return true;
+    const pm: "full" | "default" = args.permissionMode === "full" ? "full" : "default";
+    return state.permissionMode !== pm || state.cwd !== args.cwd;
   }
 
   private async spawnChild(
@@ -387,10 +464,8 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       throw new Error("Failed to spawn cursor-agent: stdio pipes unavailable");
     }
 
-    if (child.pid) {
-      this.jobObject.assign(child.pid);
-      this.jobObject.setDescription(child.pid, "Mcode Agent: Cursor");
-    }
+    // JobObject attach + hard kill are now owned by the SessionRuntime, which
+    // acts on the PID this method surfaces through `spawn`'s `pids`.
 
     const out = Writable.toWeb(child.stdin) as WritableStream<Uint8Array>;
     const inp = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>;
@@ -440,7 +515,10 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
 
     child.on("exit", () => {
       this.cancelPendingForThread(mcodeSessionId);
-      this.sessions.delete(mcodeSessionId);
+      // The child died unexpectedly; ask the runtime to drop the pooled entry
+      // (runs interrupt → close → hard kill of the already-dead PID, all no-ops
+      // here beyond removing it from the pool).
+      void this.runtime.stop(mcodeSessionId);
     });
 
     const initResult = await connection.initialize({
@@ -906,42 +984,6 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
     }
   }
 
-  private async teardownSessionEntry(
-    mcodeSessionId: string,
-    entry: CursorAcpSessionEntry,
-    clearStoredSdkId: boolean,
-  ): Promise<void> {
-    this.cancelPendingForThread(mcodeSessionId);
-    entry.pendingUserStopAbort = false;
-    if (entry.acpSessionId) {
-      await entry.connection.cancel({ sessionId: entry.acpSessionId }).catch(() => {});
-    }
-    try {
-      entry.child.kill();
-    } catch {
-      /* ignore */
-    }
-    if (process.platform === "win32" && entry.child.pid) {
-      await new Promise<void>((resolve) => {
-        execFile(
-          "taskkill",
-          ["/T", "/F", "/PID", String(entry.child.pid)],
-          () => resolve(),
-        );
-      });
-    }
-    if (clearStoredSdkId) {
-      this.sdkSessionIds.delete(mcodeSessionId);
-    }
-  }
-
-  private sessionHasPendingPermissions(mcodeSessionId: string): boolean {
-    for (const p of this.pendingPermissions.values()) {
-      if (p.mcodeSessionId === mcodeSessionId) return true;
-    }
-    return false;
-  }
-
   /**
    * Runs two hidden prompt/reply pairs on the parent thread's active Cursor session
    * to extract a handoff summary without surfacing them in the UI.
@@ -959,7 +1001,7 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
   }): Promise<string> {
     const { parentThreadId, prompt, abortSignal } = args;
     const sessionKey = `mcode-${parentThreadId}`;
-    const entry = this.sessions.get(sessionKey);
+    const entry = this.runtime.get(sessionKey);
     if (!entry) {
       throw new Error(`No active Cursor session for parent thread: ${parentThreadId}`);
     }
@@ -1041,19 +1083,6 @@ export class CursorProvider extends EventEmitter implements IAgentProvider {
       return resolveCursorAssistantMessageContent(turnState.accumulator);
     } finally {
       entry.activeTurnState = null;
-    }
-  }
-
-  private evictIdleSessions(): void {
-    const settings = this.settingsService.get();
-    const ttlMs = settings.provider.cursor.idleSessionTtlMinutes * 60 * 1000;
-    const now = Date.now();
-    for (const [id, entry] of this.sessions) {
-      if (entry.activeTurnState) continue;
-      if (now - entry.lastUsedAt <= ttlMs) continue;
-      if (this.sessionHasPendingPermissions(id)) continue;
-      void this.teardownSessionEntry(id, entry, true);
-      this.sessions.delete(id);
     }
   }
 }
