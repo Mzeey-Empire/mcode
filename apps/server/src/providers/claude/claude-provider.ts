@@ -34,6 +34,7 @@ import { AnthropicHeaderUsageSource } from "./usage/header-usage-source.js";
 import { CompositeUsageSource } from "./usage/composite-usage-source.js";
 import { EnvService } from "../../services/env-service.js";
 import { JobObject } from "../../services/job-object.js";
+import { ScopedPreGrantService } from "../../services/scoped-pre-grant.js";
 import { SessionRuntime } from "../../services/session-runtime.js";
 import type { ProtocolAdapter, SpawnArgs, SpawnResult } from "../../services/session-runtime.js";
 import { listDirectChildren } from "../../services/process-kill.js";
@@ -319,6 +320,11 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider, Prot
   constructor(
     @inject(EnvService) private readonly envService: EnvService,
     @inject("JobObject") private readonly jobObject: JobObject,
+    // Optional with a default so existing `new ClaudeProvider(env, job)` test
+    // call sites keep working; DI always supplies the shared singleton so the
+    // pipeline-issued handoff grants are visible here.
+    @inject(ScopedPreGrantService)
+    private readonly scopedPreGrant: ScopedPreGrantService = new ScopedPreGrantService(),
   ) {
     super();
     this.runtime = new SessionRuntime<ClaudeSessionState>(this, {
@@ -974,6 +980,25 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider, Prot
               behavior: "deny" as const,
               message: "Plan mode is not active. Continue with the user's request normally.",
             };
+          }
+
+          // Off-band handoff (PRD #538): if the pipeline pre-granted a one-shot
+          // Read of this exact path for this thread, auto-allow it without
+          // prompting, bypassing permissionMode. tryConsume is path-scoped and
+          // one-shot, so this never widens authority beyond the single handoff
+          // doc. All other permission behaviour is unchanged.
+          if (toolName === "Read") {
+            const readPath = typeof input?.path === "string" ? input.path : undefined;
+            if (
+              readPath !== undefined &&
+              this.scopedPreGrant.tryConsume({ threadId: tid, toolName: "Read", path: readPath })
+            ) {
+              logger.debug("canUseTool: auto-allowing pre-granted handoff Read", {
+                threadId: tid,
+                path: readPath,
+              });
+              return { behavior: "allow" as const, updatedInput: input };
+            }
           }
 
           const requestId = crypto.randomUUID();

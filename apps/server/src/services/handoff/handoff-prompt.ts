@@ -1,56 +1,24 @@
 /**
  * Builds the side-channel prompt that the parent's provider session executes
  * to produce a handoff document. Vendors the /handoff skill instructions and
- * tailors them with fork context, mode (full/minimal), and a character budget
- * derived from the child provider's per-turn input cap.
+ * tailors them with fork context.
+ *
+ * Off-band delivery (PRD #538) retired the full-vs-minimal mode selection, the
+ * child-input character budget, and the >115% truncation/overflow guard: the
+ * full doc is now written to an OS temp file and the child reads it on demand
+ * via a one-shot ScopedPreGrant, so doc-body sizing no longer needs to fit a
+ * provider's per-turn input window. The prompt therefore asks for a complete,
+ * self-contained document with no character cap.
  */
 
-import type { ForkAnchorRole, HandoffMode } from "./handoff-types.js";
-
-const MINIMAL_MODE_THRESHOLD_CHARS = 8_000;
-const RESERVED_SYSTEM_PROMPT_CHARS = 1_000;
-const RESERVED_USER_FIRST_MESSAGE_CHARS = 500;
-const RESERVED_OVERHEAD_CHARS = 500;
-const MIN_HANDOFF_BUDGET = 1_000;
-
-/**
- * Pick mode based on child provider's per-turn cap. Minimal is triggered
- * when the cap is too tight to host the full structured doc.
- */
-export function pickHandoffMode(childMaxInputCharacters: number): HandoffMode {
-  return childMaxInputCharacters < MINIMAL_MODE_THRESHOLD_CHARS ? "minimal" : "full";
-}
-
-/**
- * Truncates markdown at the last complete H2 (`## `) section boundary at or
- * before maxChars. Falls back to a hard slice when no usable H2 exists past
- * the halfway point, to avoid returning an empty or near-empty document.
- */
-export function truncateAtSectionBoundary(md: string, maxChars: number): string {
-  if (md.length <= maxChars) return md;
-  const slice = md.slice(0, maxChars);
-  const lastH2 = slice.lastIndexOf("\n## ");
-  return lastH2 > maxChars * 0.5 ? slice.slice(0, lastH2) : slice;
-}
-
-/** Character budget the handoff doc should target. */
-export function computeBudgetChars(childMaxInputCharacters: number): number {
-  const budget =
-    childMaxInputCharacters -
-    RESERVED_SYSTEM_PROMPT_CHARS -
-    RESERVED_USER_FIRST_MESSAGE_CHARS -
-    RESERVED_OVERHEAD_CHARS;
-  return Math.max(budget, MIN_HANDOFF_BUDGET);
-}
+import type { ForkAnchorRole } from "./handoff-types.js";
 
 /** Input arguments for building the handoff prompt sent to the parent provider session. */
 export interface HandoffPromptInput {
-  mode: HandoffMode;
   forkAnchorRole: ForkAnchorRole;
   parentThreadTitle: string;
   forkMessageExcerpt: string;
   childProviderId: string;
-  childMaxInputCharacters: number;
   /**
    * The user's new follow-up message in the fork composer. Passed to the
    * side-channel so the prompt can tell the model what the child agent is
@@ -66,8 +34,7 @@ export interface HandoffPromptInput {
  * passes `tools: []`, so the model must not be asked to write files.
  */
 export function buildHandoffPrompt(input: HandoffPromptInput): string {
-  const { mode, forkAnchorRole, parentThreadTitle, forkMessageExcerpt, childProviderId, userFollowUpMessage } = input;
-  const budget = computeBudgetChars(input.childMaxInputCharacters);
+  const { forkAnchorRole, parentThreadTitle, forkMessageExcerpt, childProviderId, userFollowUpMessage } = input;
 
   const anchorFraming =
     forkAnchorRole === "user"
@@ -107,10 +74,9 @@ export function buildHandoffPrompt(input: HandoffPromptInput): string {
     argumentBlock,
     "",
     "## Output constraints (mcode-specific)",
-    `- Target output: less than or equal to ${budget} characters (string.length, by character count not word count).`,
-    `- Output mode: ${mode}${mode === "minimal" ? " (the next provider has a small per-turn input window, so be concise but preserve the concrete facts that matter for the follow-up)" : ""}.`,
+    "- Write a complete, self-contained document. There is no character cap: mcode delivers the full doc to the next agent off-band (written to a file the agent reads on demand), so prefer completeness over brevity while staying focused on what matters for the follow-up.",
     "- Return the complete handoff document as your assistant text response.",
-    "- Do NOT call any tools. Do NOT write to disk. mcode handles persistence; if your output exceeds the budget, mcode automatically overflows the full doc to the user's OS temp dir.",
+    "- Do NOT call any tools. Do NOT write to disk. mcode handles persistence.",
     "- Do NOT include YAML frontmatter (the pipeline injects that).",
     "- Begin your response directly with the document's first heading.",
   ].join("\n");

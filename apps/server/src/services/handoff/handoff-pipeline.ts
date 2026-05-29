@@ -13,9 +13,6 @@
  * (path D) rather than retrying — the same wall would be hit again.
  */
 
-import { tmpdir } from "os";
-import { writeFile } from "fs/promises";
-import { join as pathJoin } from "path";
 import { inject, injectable } from "tsyringe";
 import { logger } from "@mcode/shared";
 import { ThreadRepo } from "../../repositories/thread-repo.js";
@@ -24,7 +21,7 @@ import { WorkspaceRepo } from "../../repositories/workspace-repo.js";
 import { ToolCallRecordRepo } from "../../repositories/tool-call-record-repo.js";
 import { ThoughtSegmentRepo } from "../../repositories/thought-segment-repo.js";
 import { classifyProviderError } from "./error-classifier.js";
-import { buildHandoffPrompt, computeBudgetChars, pickHandoffMode, truncateAtSectionBoundary } from "./handoff-prompt.js";
+import { buildHandoffPrompt } from "./handoff-prompt.js";
 import { DeterministicForker } from "./session-forker.js";
 import { buildConversationReplay } from "../handoff-builder.js";
 import type {
@@ -67,7 +64,6 @@ function describeError(err: unknown): Record<string, unknown> {
 import type {
   HandoffArtifact,
   HandoffRequest,
-  LadderStep,
 } from "./handoff-types.js";
 
 /**
@@ -104,6 +100,14 @@ const RECENT_ASSISTANT_MESSAGES_FOR_D = 5;
  * 60s was too tight after server restarts on Windows.
  */
 const PROVIDER_CALL_TIMEOUT_MS = 120_000;
+
+/**
+ * Character cap for the conversation-history replay used as the clean-resume
+ * B-prime fallback body sent to the PARENT provider's side-channel. Sizes the
+ * parent's resume input, not the child's delivery (which is off-band), so it is
+ * a fixed generous value rather than a function of the child's per-turn window.
+ */
+const REPLAY_BUDGET_CHARS = 100_000;
 
 @injectable()
 export class HandoffPipelineService {
@@ -179,10 +183,6 @@ export class HandoffPipelineService {
     const parentCwd: string = parent.worktree_path ?? workspace.path;
 
     const parentProvider = this.tryResolveProvider(parent.provider);
-    const childProvider = this.tryResolveProvider(req.childProviderId);
-    const childCap: number = childProvider?.maxInputCharactersPerTurn ?? 16_000;
-    const mode = pickHandoffMode(childCap);
-
     const messages = await this.messageRepo.listIncludingInternal(req.parentThreadId);
     const forkIndex = messages.findIndex((m: any) => m.id === req.forkedFromMessageId);
     if (forkIndex === -1) throw new Error(`Fork message ${req.forkedFromMessageId} not in parent`);
@@ -192,12 +192,10 @@ export class HandoffPipelineService {
     const forkMsg = messagesUpToFork[forkIndex];
 
     const prompt = buildHandoffPrompt({
-      mode,
       forkAnchorRole: req.forkAnchorRole,
       parentThreadTitle: parent.title,
       forkMessageExcerpt: forkMsg.content,
       childProviderId: req.childProviderId,
-      childMaxInputCharacters: childCap,
       userFollowUpMessage: req.userFollowUpMessage,
     });
 
@@ -206,9 +204,11 @@ export class HandoffPipelineService {
 
     // Build a budgeted history replay so that if a clean-resume session fails
     // (e.g. after a server restart), the provider can retry without `resume:`
-    // and still produce a high-fidelity path-B result.
-    const replayBudget = computeBudgetChars(childCap);
-    const conversationHistory = buildConversationReplay(messagesUpToFork, replayBudget, null);
+    // and still produce a high-fidelity path-B result. This budget sizes the
+    // PARENT provider's side-channel resume body (not the child's delivery,
+    // which is off-band), so it is a fixed generous cap rather than a function
+    // of the child provider's per-turn input window.
+    const conversationHistory = buildConversationReplay(messagesUpToFork, REPLAY_BUDGET_CHARS, null);
 
     // Pre-gather the deterministic (path-D) signals from the parent thread so
     // DeterministicForker stays stateless. These are no-ops for provider paths
@@ -246,16 +246,14 @@ export class HandoffPipelineService {
       const abort = new AbortController();
       const timer = setTimeout(() => abort.abort(), PROVIDER_CALL_TIMEOUT_MS);
       try {
+        // Off-band delivery (PRD #538): the full doc ships to the child via a
+        // temp file, so there is no inline budget to enforce here. Return the
+        // provider's markdown verbatim with the constant "full" mode.
         const artifact = await parentProvider!.forker.fork({ ...forkReq, abortSignal: abort.signal });
-        // Apply the child's input budget to provider output, then stamp the
-        // budget-driven mode (forkers return mode "full" by default).
-        const guarded = await this.applyBudgetGuard(
-          artifact.markdown,
-          childCap,
-          artifact.meta.ladderStep,
-          req.childThreadId,
-        );
-        return { markdown: guarded, meta: { ...artifact.meta, mode, characterCount: guarded.length } };
+        return {
+          markdown: artifact.markdown,
+          meta: { ...artifact.meta, mode: "full", characterCount: artifact.markdown.length },
+        };
       } catch (err) {
         if ((abort.signal as AbortSignal).aborted) {
           logger.warn("Handoff provider fork timed out; falling to D", { threadId: req.parentThreadId });
@@ -361,60 +359,5 @@ export class HandoffPipelineService {
       this.pathALocks.delete(threadId);
       release();
     }
-  }
-
-  /**
-   * Validates provider output against the child's input budget. When the
-   * provider overshoots by more than 15%, writes the full doc to OS temp dir
-   * and returns a truncated inline version with a pointer to the overflow file.
-   * Falls back to a hard truncation with a comment if the temp write fails.
-   */
-  private async applyBudgetGuard(
-    text: string,
-    childCap: number,
-    step: LadderStep,
-    childThreadId: string,
-  ): Promise<string> {
-    const budget = computeBudgetChars(childCap);
-
-    // Within budget — return as-is.
-    if (text.length <= budget * 1.15) return text;
-
-    logger.warn("Provider exceeded handoff budget; truncating + overflowing to temp", {
-      produced: text.length,
-      budget,
-      ladderStep: step,
-      threadId: childThreadId,
-    });
-
-    // Generate overflow filename in OS temp dir. Format mirrors the
-    // /handoff skill's convention (timestamped, slugged).
-    const ts = new Date().toISOString().replace(/[:.]/g, "-");
-    const overflowPath = pathJoin(tmpdir(), `mcode-handoff-overflow-${childThreadId}-${ts}.md`);
-
-    try {
-      // Write the FULL doc to temp so the next agent can Read it on demand.
-      await writeFile(overflowPath, text, "utf8");
-    } catch (err) {
-      logger.warn("Failed to write handoff overflow to temp; continuing with hard truncation only", {
-        overflowPath,
-        err: err instanceof Error ? err.message : String(err),
-      });
-      return truncateAtSectionBoundary(text, budget) + "\n\n<!-- handoff truncated at budget; overflow write failed -->";
-    }
-
-    // Truncate the inline version, leaving room for the pointer block.
-    const POINTER_BUDGET = 400;
-    const inlinedBudget = budget - POINTER_BUDGET;
-    const truncated = truncateAtSectionBoundary(text, inlinedBudget);
-
-    return [
-      truncated,
-      "",
-      "## Detailed context (overflow)",
-      "The parent thread's full handoff exceeded the inline budget. The complete doc is on the user's filesystem at:",
-      `  ${overflowPath}`,
-      "Use the Read tool to access it for additional context on the parent thread.",
-    ].join("\n");
   }
 }

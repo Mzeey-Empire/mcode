@@ -88,10 +88,12 @@ describe("HandoffPipelineService.orchestrate", () => {
     expect(r.meta.providerErrorOnGenerate).toBe("quota");
   });
 
-  it("mutating-resume provider uses path A and minimal mode", async () => {
+  it("mutating-resume provider uses path A; mode is always full after off-band delivery", async () => {
     const deps = mkDeps();
     deps.providerRegistry.resolve = vi.fn(() => withMutatingForker({
       sessionForkOnResume: "mutating",
+      // A small child cap no longer downgrades the doc: off-band delivery
+      // (PRD #538) retired the minimal mode and the per-turn char budget.
       maxInputCharactersPerTurn: 4_000,
       id: "cursor",
       runHiddenTurn: vi.fn(async () => "# Handoff\n\n## Goal\nX"),
@@ -102,7 +104,7 @@ describe("HandoffPipelineService.orchestrate", () => {
       childProviderId: "cursor",
     });
     expect(r.meta.ladderStep).toBe("A");
-    expect(r.meta.mode).toBe("minimal");
+    expect(r.meta.mode).toBe("full");
   });
 
   it("unsupported-resume provider skips to D with reason null", async () => {

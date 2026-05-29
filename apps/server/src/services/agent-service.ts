@@ -8,6 +8,8 @@
 import { injectable, inject, delay } from "tsyringe";
 import { randomUUID } from "crypto";
 import { existsSync, statSync } from "fs";
+import { writeFile } from "fs/promises";
+import { tmpdir } from "os";
 import { isAbsolute } from "path";
 import { logger } from "@mcode/shared";
 import { AgentEventType } from "@mcode/contracts";
@@ -58,6 +60,7 @@ import { buildHandoffContent, buildConversationReplay, replayBudgetChars, resolv
 import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts";
 import { HandoffPipelineService } from "./handoff/handoff-pipeline.js";
 import { HandoffStorage } from "./handoff/handoff-storage.js";
+import { ScopedPreGrantService } from "./scoped-pre-grant.js";
 import type { AttachmentSource } from "./handoff/handoff-storage.js";
 import type { HandoffArtifact } from "./handoff/handoff-types.js";
 import { classifyProviderError } from "./handoff/error-classifier.js";
@@ -96,6 +99,47 @@ function findLastIndex<T>(arr: T[], predicate: (item: T) => boolean): number {
     if (predicate(arr[i])) return i;
   }
   return -1;
+}
+
+/**
+ * Derive a short (<=2-3 sentence) graceful-degradation summary from the full
+ * handoff markdown. Uses the first non-heading, non-empty paragraph so the
+ * child still has minimal orientation even if it never reads the temp file
+ * (e.g. the file is swept, or the Read is denied). Capped so the inline prompt
+ * stays small by construction.
+ */
+function deriveHandoffSummary(markdown: string): string {
+  const SUMMARY_CAP = 280;
+  const firstParagraph = markdown
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .find((block) => block.length > 0 && !block.startsWith("#") && !block.startsWith("---"));
+  const summary = (firstParagraph ?? "").replace(/\s+/g, " ").trim();
+  if (!summary) {
+    return "A handoff document describing the parent thread's context is available at the path above; read it before continuing.";
+  }
+  return summary.length > SUMMARY_CAP ? `${summary.slice(0, SUMMARY_CAP).trimEnd()}...` : summary;
+}
+
+/**
+ * Build the small inline first-Turn prompt for off-band handoff delivery: a
+ * pointer line to the full doc on disk, a short graceful-degradation summary,
+ * then the child's first user message. The child is pre-granted a one-shot
+ * Read of the pointed-to file (see ScopedPreGrantService) so it can pull the
+ * full context without prompting. Kept small by construction so it fits any
+ * provider's per-turn input window.
+ */
+function buildOffBandHandoffPrompt(tempPath: string, markdown: string, userMessage: string): string {
+  return [
+    "You are continuing work handed off from a previous thread.",
+    `The full handoff document is on this machine at: ${tempPath}`,
+    "Read that file first with the Read tool to load the complete context (you are pre-authorized to read it once without prompting). Summary if the file is unavailable:",
+    deriveHandoffSummary(markdown),
+    "",
+    "---",
+    "",
+    userMessage,
+  ].join("\n");
 }
 
 /** Buffered tool call with raw input preserved for deferred summarization. */
@@ -211,6 +255,8 @@ export class AgentService {
     private readonly handoffPipeline: HandoffPipelineService,
     @inject(HandoffStorage)
     private readonly handoffStorage: HandoffStorage,
+    @inject(ScopedPreGrantService)
+    private readonly scopedPreGrant: ScopedPreGrantService,
   ) {}
 
   /**
@@ -1199,15 +1245,43 @@ export class AgentService {
         providerErrorOnGenerate: artifact.meta.providerErrorOnGenerate,
       });
 
-      // Store an internal-only system message at seq 1 as a DB anchor for the handoff.
-      // isInternal=true keeps it off the UI render path.
+      // Store an internal-only system message at seq 1 as a DB anchor for the
+      // handoff. We keep the FULL markdown here (not the pointer): it is not
+      // budget-bound, and a complete anchor lets reload reconstruct the doc even
+      // if the OS temp file has been swept. isInternal=true keeps it off the UI
+      // render path.
       this.messageRepo.create(
         thread.id, "system", artifact.markdown, 1,
         undefined, undefined, undefined, undefined, /* isInternal */ true,
       );
 
-      // Append the user's new message so the provider receives full context + the prompt.
-      providerWireOverride = `${artifact.markdown}\n\n---\n\n${content}`;
+      // Off-band delivery (PRD #538): write the FULL handoff doc to a stable OS
+      // temp path and shrink the child's inline first-Turn prompt to a small
+      // pointer + graceful-degradation summary + the user's message. Issue a
+      // ScopedPreGrant so the child can Read that one file on its first Turn
+      // without prompting, regardless of permissionMode.
+      const handoffTempPath = join(
+        tmpdir(),
+        `mcode-handoff-${thread.id}-${Date.now()}.md`,
+      );
+      try {
+        await writeFile(handoffTempPath, artifact.markdown, "utf8");
+        this.scopedPreGrant.issue({
+          threadId: thread.id,
+          toolName: "Read",
+          path: handoffTempPath,
+        });
+        providerWireOverride = buildOffBandHandoffPrompt(handoffTempPath, artifact.markdown, content);
+      } catch (writeErr) {
+        // If the temp write fails we cannot pre-grant a Read, so fall back to
+        // inlining the full doc (legacy behaviour) — the fork still succeeds.
+        logger.warn("Off-band handoff write failed; inlining full doc", {
+          threadId: thread.id,
+          handoffTempPath,
+          error: writeErr instanceof Error ? writeErr.message : String(writeErr),
+        });
+        providerWireOverride = `${artifact.markdown}\n\n---\n\n${content}`;
+      }
     } catch (pipelineErr) {
       // Re-check child thread existence before writing any fallback artifacts.
       // The thread may have been hard-deleted between pipeline start and failure
@@ -1899,6 +1973,9 @@ export class AgentService {
           } else {
             this.clearTurnState(event.threadId);
           }
+          // Turn-scoped cleanup of any one-shot handoff Read grant when the
+          // first Turn errors out before completing normally.
+          this.scopedPreGrant.clear(event.threadId);
           this.planParsers.delete(event.threadId);
           this.planOutputParsers.delete(event.threadId);
           this.pendingPlanOutputs.delete(event.threadId);
@@ -1970,6 +2047,9 @@ export class AgentService {
 
         if (event.type === AgentEventType.Ended) {
           this.trackSessionEnded(event.threadId);
+          // Turn-scoped cleanup of any one-shot handoff Read grant. No-op on
+          // later turns since the grant is already gone (consumed or cleared).
+          this.scopedPreGrant.clear(event.threadId);
           this.planParsers.delete(event.threadId);
           this.planOutputParsers.delete(event.threadId);
           this.pendingPlanOutputs.delete(event.threadId);

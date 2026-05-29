@@ -16,8 +16,13 @@ import type { Message, Thread, ToolCallRecord, ThoughtSegmentRecord } from "../i
 /** Which step of the B->A->D ladder produced the handoff. */
 export type LadderStep = "B" | "A" | "D";
 
-/** Full handoff has all sections; minimal targets sub-8000-char child providers. */
-export type HandoffMode = "full" | "minimal";
+/**
+ * Handoff doc mode. Retained as a constant `"full"` for provenance/frontmatter
+ * stability after off-band delivery (PRD #538) retired the full-vs-minimal
+ * sizing selection. The child receives a small pointer + summary inline and
+ * reads the full doc off-band, so doc-body sizing no longer drives a mode.
+ */
+export type HandoffMode = "full";
 
 /** Whether the parent message at the fork point was authored by the user or assistant. */
 export type ForkAnchorRole = "user" | "assistant";
