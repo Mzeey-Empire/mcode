@@ -33,6 +33,7 @@ import { ProviderRegistry } from "./providers/provider-registry";
 import { WorkspaceService } from "./services/workspace-service";
 import { ThreadService } from "./services/thread-service";
 import { AgentService } from "./services/agent-service";
+import { NarrativeStore } from "./services/narrative-store";
 import { GitService } from "./services/git-service";
 import { GithubService } from "./services/github-service";
 import { FileService } from "./services/file-service";
@@ -47,6 +48,7 @@ import { SettingsService } from "./services/settings-service";
 import { GitWatcherService } from "./services/git-watcher-service";
 import { SkillWatcherService } from "./services/skill-watcher-service";
 import { MemoryPressureService } from "./services/memory-pressure-service";
+import { ScopedPreGrantService } from "./services/scoped-pre-grant";
 import { CleanupWorker } from "./services/cleanup-worker";
 import { PrDraftService } from "./services/pr-draft-service";
 import {
@@ -267,6 +269,14 @@ export function setupContainer(mcodeDir: string): typeof container {
     { lifecycle: Lifecycle.Singleton },
   );
   container.register(
+    NarrativeStore,
+    { useClass: NarrativeStore },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register("NarrativeStore", {
+    useFactory: (c) => c.resolve(NarrativeStore),
+  });
+  container.register(
     AgentService,
     { useClass: AgentService },
     { lifecycle: Lifecycle.Singleton },
@@ -334,6 +344,14 @@ export function setupContainer(mcodeDir: string): typeof container {
     { useClass: MemoryPressureService },
     { lifecycle: Lifecycle.Singleton },
   );
+  container.register(
+    ScopedPreGrantService,
+    { useClass: ScopedPreGrantService },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register("ScopedPreGrantService", {
+    useFactory: (c) => c.resolve(ScopedPreGrantService),
+  });
   container.register(
     CleanupWorker,
     { useClass: CleanupWorker },

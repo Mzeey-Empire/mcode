@@ -89,29 +89,33 @@ describe("ClaudeProvider sendMessage on closed queue (#292)", () => {
     provider.on("event", (e: { type: string; error?: string }) => events.push(e));
 
     // First send establishes the session
-    await provider.sendMessage({
+    await provider.sendTurn({
       sessionId: "mcode-t1",
+      threadId: "t1",
       message: "first",
       cwd: "/tmp",
       model: "claude-sonnet-4-6",
-      resume: false,
       permissionMode: "default",
+      interactionMode: "build",
+      providerOptions: {},
     });
 
     // Simulate race by closing the queue directly
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const entry = (provider as any).sessions.get("mcode-t1");
+    const entry = (provider as any).runtime.get("mcode-t1") as { closeQueue: () => void };
     entry.closeQueue();
 
     // Second send on same sessionId: push hits a closed queue
     await expect(
-      provider.sendMessage({
+      provider.sendTurn({
         sessionId: "mcode-t1",
+        threadId: "t1",
         message: "second",
         cwd: "/tmp",
         model: "claude-sonnet-4-6",
-        resume: false,
         permissionMode: "default",
+        interactionMode: "build",
+        providerOptions: {},
       }),
     ).rejects.toThrow(/closed/i);
 
@@ -148,13 +152,15 @@ describe("ClaudeProvider sendMessage on closed queue (#292)", () => {
     provider.on("event", (e: { type: string; error?: string }) => events.push(e));
 
     // First send establishes the session
-    await provider.sendMessage({
+    await provider.sendTurn({
       sessionId: "mcode-overflow",
+      threadId: "overflow",
       message: "first",
       cwd: "/tmp",
       model: "claude-sonnet-4-6",
-      resume: false,
       permissionMode: "default",
+      interactionMode: "build",
+      providerOptions: {},
     });
 
     // Saturate the queue: MAX_QUEUE_DEPTH is 20, so push many more than that.
@@ -162,13 +168,15 @@ describe("ClaudeProvider sendMessage on closed queue (#292)", () => {
     let overflowErr: Error | undefined;
     for (let i = 0; i < 25; i++) {
       try {
-        await provider.sendMessage({
+        await provider.sendTurn({
           sessionId: "mcode-overflow",
+          threadId: "overflow",
           message: `msg-${i}`,
           cwd: "/tmp",
           model: "claude-sonnet-4-6",
-          resume: false,
           permissionMode: "default",
+          interactionMode: "build",
+          providerOptions: {},
         });
       } catch (e) {
         overflowErr = e as Error;
@@ -182,8 +190,8 @@ describe("ClaudeProvider sendMessage on closed queue (#292)", () => {
     // Critical behavior: the session entry must still exist so the next
     // delivery is not forced into a full cold-start.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sessions = (provider as any).sessions as Map<string, unknown>;
-    expect(sessions.has("mcode-overflow")).toBe(true);
+    const runtime = (provider as any).runtime as { get: (id: string) => unknown };
+    expect(runtime.get("mcode-overflow")).toBeDefined();
 
     // And an Error event surfaced to the caller, but with the raw overflow
     // message (not the "session was shutting down" closed-session wording).

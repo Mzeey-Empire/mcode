@@ -15,7 +15,35 @@ import { stubEnvService } from "../../../__tests__/stub-env-service.js";
  * stopSession drain, shutdown drain. They do NOT spawn a codex child
  * process; we call handleApprovalRequest directly as if CodexAppServer
  * had invoked our handler.
+ *
+ * Session lifecycle now lives in the held SessionRuntime. The provider holds
+ * `runtime`, whose private `sessions` pool keys `sessionId -> { state, pids,
+ * lastUsedAt }`. `seedSession` plants a fake-server state directly in that pool
+ * so the permission-drain paths have something to iterate without spawning a
+ * real child.
  */
+function seedSession(
+  provider: CodexProvider,
+  sessionId: string,
+  threadId: string,
+  state: Record<string, unknown>,
+): { kill: ReturnType<typeof vi.fn> } {
+  const fullState: Record<string, unknown> = {
+    sessionId,
+    threadId,
+    runTurnSeq: 0,
+    pendingTurnId: null,
+    ...state,
+  };
+  const pool = (
+    provider as unknown as {
+      runtime: { sessions: Map<string, { state: unknown; pids: number[]; lastUsedAt: number }> };
+    }
+  ).runtime.sessions;
+  pool.set(sessionId, { state: fullState, pids: [], lastUsedAt: (state.lastUsedAt as number) ?? Date.now() });
+  return fullState.server as { kill: ReturnType<typeof vi.fn> };
+}
+
 describe("CodexProvider permission flow", () => {
   let provider: CodexProvider;
   const threadId = "thread-abc";
@@ -26,12 +54,12 @@ describe("CodexProvider permission flow", () => {
     // settingsService and jobObject are unused for these paths; pass minimal stubs.
     provider = new CodexProvider(
       { get: async () => ({ provider: { cli: { codex: "codex" } } }) } as never,
-      { assign: vi.fn() } as never,
+      { assign: vi.fn(), isWindowsJob: false } as never,
       stubEnvService() as never,
     );
     // Pre-register a session entry so drain logic has something to iterate.
-    (provider as unknown as { sessions: Map<string, unknown> }).sessions.set(sessionId, {
-      server: { kill: vi.fn().mockResolvedValue(undefined), isAlive: true },
+    seedSession(provider, sessionId, threadId, {
+      server: { kill: vi.fn().mockResolvedValue(undefined), interruptTurn: vi.fn().mockResolvedValue(undefined), isAlive: true },
       mapper: { reset: vi.fn() },
       lastUsedAt: Date.now() - 1000,
       sandboxMode: "workspace-write",
@@ -139,13 +167,11 @@ describe("CodexProvider permission flow", () => {
     provider.on("permission_resolved", (p) => resolved.push(p as never));
 
     // Re-register session with a fake server that we can drive fatal from.
-    const sessions = (provider as unknown as {
-      sessions: Map<string, { server: unknown; lastUsedAt: number; sandboxMode: string; mapper: unknown }>;
-    }).sessions;
     const fakeServer = new (require("events").EventEmitter)();
     fakeServer.kill = vi.fn().mockResolvedValue(undefined);
+    fakeServer.interruptTurn = vi.fn().mockResolvedValue(undefined);
     fakeServer.isAlive = true;
-    sessions.set(sessionId, {
+    seedSession(provider, sessionId, threadId, {
       server: fakeServer,
       mapper: { reset: vi.fn() },
       lastUsedAt: Date.now(),
@@ -173,27 +199,31 @@ describe("CodexProvider permission flow", () => {
     expect(resolved[0].decision).toBe("cancelled");
   });
 
-  it("evictIdleSessions skips sessions that have pending permissions", () => {
-    // Force the session's lastUsedAt well past the idle threshold.
-    const sessions = (provider as unknown as {
-      sessions: Map<string, { lastUsedAt: number; server: { kill: () => Promise<void> } }>;
-    }).sessions;
-    const existing = sessions.get(sessionId)!;
-    existing.lastUsedAt = Date.now() - 60 * 60 * 1000; // 1 hour ago
+  it("runtime eviction spares a session with a turn in flight (busy guard)", async () => {
+    // The runtime owns idle eviction now and consults the adapter's isBusy
+    // guard. A pending permission only ever exists mid-turn, so the converged
+    // guard derives busyness from pendingTurnId: a turn in flight => not evicted.
+    const runtime = (
+      provider as unknown as {
+        runtime: {
+          sessions: Map<string, { state: { pendingTurnId: string | null }; lastUsedAt: number }>;
+          evictIdle: () => Promise<void>;
+        };
+      }
+    ).runtime;
+    const entry = runtime.sessions.get(sessionId)!;
+    entry.lastUsedAt = Date.now() - 60 * 60 * 1000; // 1 hour ago
+    entry.state.pendingTurnId = "turn-1"; // a turn is in flight => busy
 
-    // Queue a pending permission on the same thread.
-    void (provider as unknown as {
-      handleApprovalRequest: (s: string, t: string, r: unknown) => Promise<unknown>;
-    }).handleApprovalRequest(sessionId, threadId, {
-      rpcId: 99,
-      method: "item/commandExecution/requestApproval",
-      params: { command: "x", cwd: "/" },
-    });
+    await runtime.evictIdle();
 
-    (provider as unknown as { evictIdleSessions: () => void }).evictIdleSessions();
+    // Busy session must survive the sweep regardless of idle time.
+    expect(runtime.sessions.has(sessionId)).toBe(true);
 
-    // Session must NOT have been evicted while a permission is pending.
-    expect(sessions.has(sessionId)).toBe(true);
+    // Once the turn settles (pendingTurnId cleared) the same idle session is evictable.
+    entry.state.pendingTurnId = null;
+    await runtime.evictIdle();
+    expect(runtime.sessions.has(sessionId)).toBe(false);
   });
 
   it("drains pending permissions when sendMessage detects a permission mode swap", async () => {
@@ -221,13 +251,15 @@ describe("CodexProvider permission flow", () => {
     };
 
     vi.useRealTimers();
-    await provider.sendMessage({
+    await provider.sendTurn({
       sessionId,
+      threadId,
       message: "hi",
       cwd: "/",
       model: "gpt-5",
-      resume: false,
       permissionMode: "full",
+      interactionMode: "build",
+      providerOptions: {},
     });
 
     const response = await pendingPromise;

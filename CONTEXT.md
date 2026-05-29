@@ -26,6 +26,26 @@ default provider. Handoff generation is **not** a utility-provider use case;
 handoffs route through the originating thread's own provider via the B/A/D
 pipeline.
 
+### Session runtime
+The per-Provider service that owns the uniform persistent-CLI-session
+lifecycle: the session pool, the lazy idle-eviction timer (60s sweep, 10min
+default TTL) with a `lastUsedAt + isBusy` guard, Windows `JobObject`
+attachment, the env snapshot, lazy spawn, resume-then-fallback, and the
+graceful-interrupt-then-hard-kill (`taskkill /T /F` on Windows) close. It
+treats per-session state as opaque (`SessionRuntime<TState>`) so the same
+lifecycle serves every Provider. Each Provider holds its own instance; the
+runtime is not shared, keeping per-session state type-isolated.
+
+### Protocol adapter
+The per-Provider seam carrying the protocol-specific I/O the Session runtime
+delegates to: `spawn` (returning the session state plus any child PIDs the
+runtime should attach/kill), `isBusy` (the eviction guard), `interrupt`
+(protocol-level graceful stop), `close` (provider teardown short of the OS
+kill), and `isStale` (whether a pooled session must be discarded before
+reuse). Each Provider *is* its own Protocol adapter (the Provider class
+implements the interface); composition with the Session runtime, not
+inheritance.
+
 ## Workspaces and worktrees
 
 ### Workspace
@@ -246,10 +266,24 @@ what hidden messages exclude themselves from in user-visible queries.
 ## Handoff
 
 ### Handoff
-A markdown document summarizing the parent thread, written to disk and
-inlined into the child thread's first provider turn so the new agent picks
-up with the parent's context. The handoff replaces what would otherwise be a
-verbose transcript replay.
+A markdown document summarizing the parent thread so a forked child picks up
+with the parent's context, replacing a verbose transcript replay. Delivered
+**off-band by default**: the full document is written to a stable OS temp path,
+and the child's first-Turn inline prompt carries only a small payload (a pointer
+to that file, a 2-3 sentence graceful-degradation summary, and the child's first
+user message). The child Reads the full document on its first Turn under a
+one-shot Scoped pre-grant, so Handoff quality is no longer capped by the child
+Provider's per-Turn input budget. The full document is retained at the temp path
+until garbage collection so the user can inspect it later.
+
+### Scoped pre-grant
+A pipeline-issued permission bypass authorising the child to `Read` exactly one
+file (its Handoff document) on exactly one Turn (its first), consumed once. It
+is **path-scoped** (only that file), **Turn-scoped** (does not survive into the
+second Turn), and **one-shot** (a second Read of the same path on the same Turn
+is not pre-granted). It bypasses the Thread's `permissionMode` only for that
+single Read. A pipeline guarantee that makes the Handoff feel invisible — not a
+user-configurable Hook.
 
 ### Handoff pipeline
 The orchestration layer that produces a handoff for a given fork. Routes
@@ -290,6 +324,14 @@ Injects hidden turns directly into the parent thread's session. Used when
 the provider declares `sessionForkOnResume: "mutating"` (Cursor today).
 Cleaned up with a disregard turn.
 
+> **Retirement pending.** Path A (the `MutatingForker`) is queued for removal
+> once Cursor's `loadSession` is verified to carry parent context across
+> stop/resume without the hidden-turn-then-disregard dance. The verification
+> (launch Cursor, send a Turn, stop, resume, send a follow-up, confirm context
+> carried) has not been run, so `MutatingForker` and the `"mutating"` value are
+> retained as the safe default. If it passes, Cursor moves to `CleanForker` (or
+> `DeterministicForker`) and the ladder reduces to B and D.
+
 ### Path D (deterministic)
 Local builder that produces the handoff from message rows without invoking
 any provider. Used as the universal fallback. Lowest fidelity but always
@@ -300,36 +342,34 @@ A label on a produced handoff artifact (`"B" | "A" | "D"`) identifying which
 path generated it. Stored in `handoff.json` for diagnostics and the
 fallback banner copy.
 
-## Modes and budgets
+## Handoff delivery
 
-### Full mode
-The default handoff structure produced by path B / A when the child
-provider's per-turn input window is large enough (≥ 8000 characters).
-Includes the model's choice of sections. The prompt does not enforce a
-fixed list.
+Handoffs are delivered **off-band by default**: the full document lives at a
+stable OS temp path and the child Reads it on its first Turn under a one-shot
+Scoped pre-grant (see the `Handoff` and `Scoped pre-grant` terms above). Because
+the document body never has to fit inside the child's per-Turn input window, the
+legacy sizing concepts are retired:
 
-### Minimal mode
-Compact handoff structure triggered when the child provider's
-`maxInputCharactersPerTurn` is below 8000 (Cursor's 4000-char floor today).
-Drops ancillary sections to keep the inlined doc within budget.
+- **Full / Minimal mode** — removed. There is no per-budget mode switch; the
+  document is always the complete handoff. (`HandoffMeta.mode` is retained as the
+  constant `"full"` for back-compat with older `handoff.json` provenance.)
+- **Character budget** — removed as a handoff doc-body sizing driver. The inline
+  first-Turn payload (pointer + short summary + user message) is small by
+  construction.
+- **Overflow** — removed. The off-band temp file *is* the document, not a spill
+  of whatever exceeded an inline budget.
 
-### Character budget
-The size constraint applied to the inlined portion of a handoff. Sourced
-from the child provider's declared `maxInputCharactersPerTurn`, minus
-reserved overhead for system prompt + the user's first message. Used as
-characters, not tokens. Tokens vary per model and are not portable.
-
-### Overflow
-The portion of a handoff that exceeds the inline budget. Written to the
-user's OS temp directory at
-`os.tmpdir()/mcode-handoff-overflow-<threadId>-<ts>.md` with a pointer
-embedded in the inlined version. The next agent can `Read` it on demand.
+`maxInputCharactersPerTurn` remains declared per Provider but is **decorative**
+for Handoff purposes after this change.
 
 ## Provider capabilities
 
 ### Session fork behavior
-Declared per provider as `"clean" | "mutating" | "unsupported"`. Determines
-which ladder path the orchestrator dispatches to:
+Declared per provider as `"clean" | "mutating" | "unsupported"`. **Metadata
+only** since each Provider now carries a `forker: SessionForker` that the
+pipeline dispatches through (`provider.forker.fork(req)`); this label is used
+for `handoff.json` provenance and the fallback banner copy, and historically
+mapped to ladder paths as:
 
 - **clean**: `resume:` spawns a fork without mutating the original (Claude)
 - **mutating**: `resume:` mutates the session forward (Cursor today)
@@ -338,8 +378,8 @@ which ladder path the orchestrator dispatches to:
 
 ### Per-turn input cap
 The maximum input characters a provider accepts per turn. Declared as
-`maxInputCharactersPerTurn`. Drives both the handoff budget and the
-mode (full vs minimal) selection.
+`maxInputCharactersPerTurn`. Decorative for Handoff purposes since Handoff
+delivery went off-band (see `Handoff delivery`); retained as Provider metadata.
 
 ## Internal / hidden state
 

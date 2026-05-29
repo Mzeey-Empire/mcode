@@ -90,21 +90,25 @@ describe("ClaudeProvider permission mode changes", () => {
   });
 
   it("reuses the session when permissionMode is unchanged", async () => {
-    await provider.sendMessage({
+    await provider.sendTurn({
       sessionId: "mcode-thread-a",
+      threadId: "thread-a",
       message: "first",
       cwd: process.cwd(),
       model: "claude-sonnet-4-6",
-      resume: false,
       permissionMode: "supervised",
+      interactionMode: "build",
+      providerOptions: {},
     });
-    await provider.sendMessage({
+    await provider.sendTurn({
       sessionId: "mcode-thread-a",
+      threadId: "thread-a",
       message: "second",
       cwd: process.cwd(),
       model: "claude-sonnet-4-6",
-      resume: false,
       permissionMode: "supervised",
+      interactionMode: "build",
+      providerOptions: {},
     });
 
     // One underlying sdk subprocess for both messages.
@@ -112,21 +116,25 @@ describe("ClaudeProvider permission mode changes", () => {
   });
 
   it("tears down and respawns the session when permissionMode changes", async () => {
-    await provider.sendMessage({
+    await provider.sendTurn({
       sessionId: "mcode-thread-b",
+      threadId: "thread-b",
       message: "first",
       cwd: process.cwd(),
       model: "claude-sonnet-4-6",
-      resume: false,
       permissionMode: "supervised",
+      interactionMode: "build",
+      providerOptions: {},
     });
-    await provider.sendMessage({
+    await provider.sendTurn({
       sessionId: "mcode-thread-b",
+      threadId: "thread-b",
       message: "second",
       cwd: process.cwd(),
       model: "claude-sonnet-4-6",
-      resume: false,
       permissionMode: "full",
+      interactionMode: "build",
+      providerOptions: {},
     });
 
     // The SDK subprocess is respawned because permissionMode is fixed at spawn.

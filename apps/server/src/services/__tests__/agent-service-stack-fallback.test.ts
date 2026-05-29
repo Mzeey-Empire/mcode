@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EventEmitter } from "events";
 import type { Thread, IProviderRegistry } from "@mcode/contracts";
 import { AgentService } from "../agent-service.js";
+import { NarrativeStore } from "../narrative-store.js";
 import type { ThreadRepo } from "../../repositories/thread-repo.js";
 import type { WorkspaceRepo } from "../../repositories/workspace-repo.js";
 import type { MessageRepo } from "../../repositories/message-repo.js";
@@ -125,6 +126,13 @@ function minimalService(): AgentService {
     prepare: vi.fn(() => ({ run: vi.fn() })),
   } as unknown as import("better-sqlite3").Database;
 
+  const narrativeStore = new NarrativeStore(
+    messageRepo,
+    toolCallRecordRepo,
+    thoughtSegmentRepo,
+    hookExecutionRepo,
+  );
+
   return new AgentService(
     threadRepo,
     workspaceRepo,
@@ -133,8 +141,6 @@ function minimalService(): AgentService {
     attachmentService,
     providerRegistry,
     threadService,
-    toolCallRecordRepo,
-    thoughtSegmentRepo,
     hookExecutionRepo,
     turnSnapshotRepo,
     snapshotService,
@@ -147,16 +153,23 @@ function minimalService(): AgentService {
       { create: vi.fn(), updateStatus: vi.fn(), listByThread: vi.fn(() => []), getLatestForThread: vi.fn(() => null), getById: vi.fn(() => null) } as unknown as import("../../repositories/plan-repo.js").PlanRepo,
       { orchestrate: vi.fn() } as any,
       { write: vi.fn(), copyAttachments: vi.fn(() => []), deleteThreadFiles: vi.fn() } as any,
+      { issue: vi.fn(), tryConsume: vi.fn(() => false), clear: vi.fn(), hasActiveGrant: vi.fn(() => false) } as any,
+      narrativeStore,
   );
 }
 
-/** Minimal buffer row shape for `getStackDerivedParentFallback` inspection. */
+/**
+ * Seed the in-turn buffers directly on the NarrativeStore (which now owns the
+ * agentCallStack + tool-call buffer the fallback rule reads) so we can probe
+ * `getCurrentParentToolCallId`'s exactly-one-running-Agent semantics.
+ */
 function seedThreadState(
   service: AgentService,
   stack: string[],
   bufferRows: BufferedToolRow[],
 ): void {
-  (service as unknown as { agentCallStack: Map<string, string[]> }).agentCallStack.set(
+  const narrativeStore = (service as unknown as { narrativeStore: NarrativeStore }).narrativeStore;
+  (narrativeStore as unknown as { agentCallStack: Map<string, string[]> }).agentCallStack.set(
     THREAD_ID,
     stack,
   );
@@ -171,7 +184,7 @@ function seedThreadState(
     parentToolCallId: undefined as string | undefined,
     _rawToolInput: {} as Record<string, unknown>,
   }));
-  (service as unknown as { turnToolCalls: Map<string, typeof fullRows> }).turnToolCalls.set(
+  (narrativeStore as unknown as { turnToolCalls: Map<string, typeof fullRows> }).turnToolCalls.set(
     THREAD_ID,
     fullRows,
   );

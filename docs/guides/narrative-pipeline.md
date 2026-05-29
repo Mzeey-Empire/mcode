@@ -8,7 +8,12 @@ the specific traps we hit so the next person doesn't trip on them.
 If you are about to touch any of these files, **read this first**:
 
 - `apps/server/src/providers/claude/claude-provider.ts` (event source)
-- `apps/server/src/services/agent-service.ts` (event enrichment + persistence)
+- `apps/server/src/services/narrative-store.ts` (write seam: enrichment +
+  classification + persistence; owns the per-turn buffers and the
+  `agentCallStack`. Also owns the read seam, `load`.)
+- `apps/server/src/services/agent-service.ts` (event dispatch; delegates the
+  write seam to NarrativeStore and retains turn-level concerns — turn snapshots,
+  `turn.persisted` broadcast, late-hook flushing)
 - `apps/server/src/index.ts` (broadcast layer)
 - `apps/web/src/stores/threadStore.ts` (client volatile state lifecycle)
 - `apps/web/src/components/chat/narrative/*` (renderers)
@@ -25,10 +30,12 @@ SDK message (parent_tool_use_id on top level)
 claude-provider.ts emits AgentEvent { type: "toolUse", parentToolCallId? }
     │
     ▼
-agent-service.ts bufferToolCall (writes to turnToolCalls for later persist)
+agent-service.ts ToolUse handler → narrative-store.ts bufferToolCall
+  (writes to the per-turn tool-call buffer for later persist)
     │
     ▼
-index.ts on("event") enriches missing parentToolCallId via agentCallStack
+index.ts on("event") enriches missing parentToolCallId via
+  narrativeStore.getCurrentParentToolCallId (agentCallStack fallback)
     │
     ▼
 broadcast("agent.event", enrichedEvent)
@@ -74,9 +81,9 @@ misclassified preamble or duplicate assistant bodies:
    thought segment on `session.assistantMessageBoundary`. Final response text
    stays in `streamingByThread` and renders via the `streaming-response`
    virtual slot, not `thoughtSegmentsByThread`.
-4. **Persist suffix match** — `agent-service.ts` tags the last matching
-   thought row `is_final_response` before DB insert as a safety net for
-   older rows or reconnect gaps.
+4. **Persist suffix match** — `narrative-store.ts` `persistNarrative` tags the
+   last matching thought row `is_final_response` before DB insert as a safety
+   net for older rows or reconnect gaps.
 
 **Don't break this:** dropping the boundary handler or counting thought
 segments in `NarrativeIndicator.stepCount` will diverge live counts from
@@ -105,10 +112,11 @@ SDK doesn't surface this field (older paths, edge cases).
 - `claude-provider.ts` reads `anyMsg.parent_tool_use_id` and forwards it as
   `parentToolCallId` on the `ToolUse` event.
 - `index.ts` checks `if (event.parentToolCallId)` first — if set,
-  leave it. Only falls back to `agentService.getCurrentParentToolCallId`
+  leave it. Only falls back to `narrativeStore.getCurrentParentToolCallId`
   when the SDK omitted it.
-- `agent-service.ts bufferToolCall` does the same dance for the persistence
-  buffer: SDK value wins, stack is a fallback.
+- `narrative-store.ts bufferToolCall` does the same dance for the persistence
+  buffer: SDK value wins, stack is a fallback. (AgentService's `bufferToolCall`
+  is a thin wrapper that delegates here, then persists TodoWrite task state.)
 
 **Stack fallback contract:** `getCurrentParentToolCallId` does **not** return
 `stack[stack.length - 1]`. It only returns a parent when **exactly one** Agent
@@ -143,8 +151,10 @@ child `toolUse` events to lose their fallback parent ID.
 2. When a final `Message` event arrives (turn over — clear the whole stack).
 3. When the session ends.
 
-**Never on `textDelta`. Never on streaming events.** See the explanatory
-comment in `agent-service.ts:1009-1014`.
+**Never on `textDelta`. Never on streaming events.** The stack now lives on
+`narrative-store.ts`; its `openOrExtendThought` (the textDelta path) never
+touches `agentCallStack`. See the explanatory comment in the AgentService
+`TextDelta` handler.
 
 ---
 

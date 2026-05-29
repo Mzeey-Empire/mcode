@@ -63,13 +63,15 @@ describe("ClaudeProvider result is_error handling (#293)", () => {
     const events: Array<{ type: string; error?: string }> = [];
     provider.on("event", (e: { type: string; error?: string }) => events.push(e));
 
-    await provider.sendMessage({
+    await provider.sendTurn({
       sessionId: "mcode-thread-1",
+      threadId: "thread-1",
       message: "hi",
       cwd: "/tmp",
       model: "claude-sonnet-4-6",
-      resume: false,
       permissionMode: "default",
+      interactionMode: "build",
+      providerOptions: {},
     });
 
     // Allow the stream loop microtasks to drain
@@ -92,13 +94,15 @@ describe("ClaudeProvider result is_error handling (#293)", () => {
     const events: Array<{ type: string }> = [];
     provider.on("event", (e: { type: string }) => events.push(e));
 
-    await provider.sendMessage({
+    await provider.sendTurn({
       sessionId: "mcode-thread-2",
+      threadId: "thread-2",
       message: "hi",
       cwd: "/tmp",
       model: "claude-sonnet-4-6",
-      resume: false,
       permissionMode: "default",
+      interactionMode: "build",
+      providerOptions: {},
     });
     await new Promise((r) => setTimeout(r, 10));
 
@@ -115,13 +119,15 @@ describe("ClaudeProvider result is_error handling (#293)", () => {
     const events: Array<{ type: string; error?: string; content?: string }> = [];
     provider.on("event", (e: { type: string; error?: string; content?: string }) => events.push(e));
 
-    await provider.sendMessage({
+    await provider.sendTurn({
       sessionId: "mcode-thread-3",
+      threadId: "thread-3",
       message: "hi",
       cwd: "/tmp",
       model: "claude-sonnet-4-6",
-      resume: false,
       permissionMode: "default",
+      interactionMode: "build",
+      providerOptions: {},
     });
     await new Promise((r) => setTimeout(r, 10));
 

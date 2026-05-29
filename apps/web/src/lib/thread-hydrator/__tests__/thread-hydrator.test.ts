@@ -92,7 +92,7 @@ function resetStores() {
   (mockTransport.listPendingPermissions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   (mockTransport.getThreadTasks as ReturnType<typeof vi.fn>).mockResolvedValue(null);
   (mockTransport.getThreadPlans as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-  (mockTransport.listNarrativeBatch as ReturnType<typeof vi.fn>).mockResolvedValue({});
+  (mockTransport.loadTurn as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
   useWorkspaceStore.setState({
     threads: [
@@ -239,7 +239,7 @@ describe("ThreadHydrator", () => {
     expect(getTestActiveMessages()).toEqual([msgB]);
   });
 
-  it("falls back to per-message narrative fetches when batch RPC fails", async () => {
+  it("falls back to per-message narrative fetches when turn.load fails", async () => {
     const assistant = createMockMessage({
       id: "asst-1",
       thread_id: THREAD_A,
@@ -250,8 +250,8 @@ describe("ThreadHydrator", () => {
       messages: [msgA, assistant],
       hasMore: false,
     });
-    (mockTransport.listNarrativeBatch as ReturnType<typeof vi.fn>).mockRejectedValue(
-      new Error("batch unsupported"),
+    (mockTransport.loadTurn as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("turn.load unsupported"),
     );
     const listNarrativeSpy = vi.spyOn(mockTransport, "listNarrative");
 

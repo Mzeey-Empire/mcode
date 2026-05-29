@@ -20,6 +20,7 @@ import { PtyPidRegistry } from "./services/pty-pid-registry";
 import { WorkspaceService } from "./services/workspace-service";
 import { ThreadService } from "./services/thread-service";
 import { AgentService } from "./services/agent-service";
+import { NarrativeStore } from "./services/narrative-store";
 import { GitService } from "./services/git-service";
 import { GithubService } from "./services/github-service";
 import { FileService } from "./services/file-service";
@@ -177,6 +178,7 @@ const providerAvailability = container.resolve(ProviderAvailabilityService);
 const toolCallRecordRepo = container.resolve(ToolCallRecordRepo);
 const thoughtSegmentRepo = container.resolve(ThoughtSegmentRepo);
 const hookExecutionRepo = container.resolve(HookExecutionRepo);
+const narrativeStore = container.resolve(NarrativeStore);
 const turnSnapshotRepo = container.resolve(TurnSnapshotRepo);
 const snapshotService = container.resolve(SnapshotService);
 const settingsService = container.resolve(SettingsService);
@@ -364,7 +366,7 @@ for (const provider of providerRegistry.resolveAll()) {
     if (event.type === AgentEventType.ToolUse && event.toolName !== "Agent") {
       // SDK omitted parent_tool_use_id; fill from turn buffer fallback when unique running Agent (see narrative-pipeline.md).
       if (!event.parentToolCallId) {
-        const parentId = agentService.getCurrentParentToolCallId(event.threadId);
+        const parentId = narrativeStore.getCurrentParentToolCallId(event.threadId);
         if (parentId) {
           enrichedEvent = { ...event, parentToolCallId: parentId };
         }
@@ -459,6 +461,7 @@ const { httpServer, wss } = createWsServer({
   toolCallRecordRepo,
   thoughtSegmentRepo,
   hookExecutionRepo,
+  narrativeStore,
   turnSnapshotRepo,
   snapshotService,
   settingsService,

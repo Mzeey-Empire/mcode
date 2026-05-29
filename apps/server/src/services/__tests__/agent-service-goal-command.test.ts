@@ -9,10 +9,10 @@ import { ThreadRepo } from "../../repositories/thread-repo.js";
 import { WorkspaceRepo } from "../../repositories/workspace-repo.js";
 import { MessageRepo } from "../../repositories/message-repo.js";
 import { PlanQuestionAnswersRepo } from "../../repositories/plan-question-answers-repo.js";
-import { ToolCallRecordRepo } from "../../repositories/tool-call-record-repo.js";
 import { TurnSnapshotRepo } from "../../repositories/turn-snapshot-repo.js";
 import { TaskRepo } from "../../repositories/task-repo.js";
 import { AgentService } from "../agent-service.js";
+import { NarrativeStore } from "../narrative-store.js";
 import { ProviderAvailabilityService } from "../provider-availability-service.js";
 import type { GitService } from "../git-service.js";
 import type { AttachmentService } from "../attachment-service.js";
@@ -27,7 +27,7 @@ import { broadcast } from "../../transport/push.js";
 
 /**
  * Build an AgentService with a Claude-shaped provider stub that records
- * setGoal/clearGoal/sendMessage so we can assert which path the /goal
+ * setGoal/clearGoal/sendTurn so we can assert which path the /goal
  * intercept took (control short-circuit vs SET fall-through).
  */
 function buildService(db: Database.Database) {
@@ -38,7 +38,6 @@ function buildService(db: Database.Database) {
   const workspaceRepo = container.resolve(WorkspaceRepo);
   const messageRepo = container.resolve(MessageRepo);
   const planQuestionAnswersRepo = container.resolve(PlanQuestionAnswersRepo);
-  const toolCallRecordRepo = container.resolve(ToolCallRecordRepo);
   const turnSnapshotRepo = container.resolve(TurnSnapshotRepo);
   const taskRepo = container.resolve(TaskRepo);
 
@@ -56,10 +55,9 @@ function buildService(db: Database.Database) {
     supportsCompletion: true,
     sessionForkOnResume: "unsupported" as const,
     maxInputCharactersPerTurn: 16_000,
-    sendMessage: vi.fn<(params: { message: string; [k: string]: unknown }) => Promise<void>>(
+    sendTurn: vi.fn<(params: { message: string; [k: string]: unknown }) => Promise<void>>(
       () => Promise.resolve(),
     ),
-    setSdkSessionId: vi.fn(),
     setGoal: vi.fn<(sid: string, condition: string) => void>(),
     clearGoal: vi.fn<(sid: string) => void>(),
     getGoal: vi.fn<(sid: string) => string | undefined>(() => undefined),
@@ -105,8 +103,6 @@ function buildService(db: Database.Database) {
     attachmentService,
     providerRegistry,
     threadService,
-    toolCallRecordRepo,
-    { bulkCreate: () => {}, create: () => ({}), listByMessage: () => [], countByMessage: () => 0 } as unknown as import("../../repositories/thought-segment-repo.js").ThoughtSegmentRepo,
     { bulkCreate: () => {}, create: () => ({}), listByMessage: () => [], countByMessage: () => 0 } as unknown as import("../../repositories/hook-execution-repo.js").HookExecutionRepo,
     turnSnapshotRepo,
     snapshotService,
@@ -119,6 +115,8 @@ function buildService(db: Database.Database) {
       { create: vi.fn(), updateStatus: vi.fn(), listByThread: vi.fn(() => []), getLatestForThread: vi.fn(() => null), getById: vi.fn(() => null) } as unknown as import("../../repositories/plan-repo.js").PlanRepo,
       { orchestrate: vi.fn() } as any,
       { write: vi.fn(), copyAttachments: vi.fn(() => []), deleteThreadFiles: vi.fn() } as any,
+      { issue: vi.fn(), tryConsume: vi.fn(() => false), clear: vi.fn(), hasActiveGrant: vi.fn(() => false) } as any,
+      container.resolve(NarrativeStore),
   );
 
   return { svc, threadRepo, workspaceRepo, messageRepo, providerStub };
@@ -157,8 +155,8 @@ describe("AgentService.sendMessage — /goal command", () => {
 
     // Provider was actually called — this is the regression the user hit
     // where /goal <condition> set the hook but never started the agent.
-    expect(providerStub.sendMessage).toHaveBeenCalledTimes(1);
-    const sentMessage = providerStub.sendMessage.mock.calls[0][0].message;
+    expect(providerStub.sendTurn).toHaveBeenCalledTimes(1);
+    const sentMessage = providerStub.sendTurn.mock.calls[0][0].message;
     expect(sentMessage).toContain("analyse this branch");
     expect(sentMessage.toLowerCase()).toContain("directive");
 
@@ -183,7 +181,7 @@ describe("AgentService.sendMessage — /goal command", () => {
     );
 
     expect(providerStub.clearGoal).toHaveBeenCalledWith(`mcode-${thread.id}`);
-    expect(providerStub.sendMessage).not.toHaveBeenCalled();
+    expect(providerStub.sendTurn).not.toHaveBeenCalled();
 
     // Confirmation pill persisted as an assistant message.
     const { messages } = messageRepo.listByThread(thread.id, 100);
@@ -213,7 +211,7 @@ describe("AgentService.sendMessage — /goal command", () => {
       "claude",
     );
 
-    expect(providerStub.sendMessage).not.toHaveBeenCalled();
+    expect(providerStub.sendTurn).not.toHaveBeenCalled();
     expect(providerStub.setGoal).not.toHaveBeenCalled();
 
     const { messages } = messageRepo.listByThread(thread.id, 100);
@@ -237,7 +235,7 @@ describe("AgentService.sendMessage — /goal command", () => {
 
     // Provider was still called with the raw text (no rewrite, no goal install).
     expect(providerStub.setGoal).not.toHaveBeenCalled();
-    expect(providerStub.sendMessage).toHaveBeenCalledTimes(1);
-    expect(providerStub.sendMessage.mock.calls[0][0].message).toBe("/goal something");
+    expect(providerStub.sendTurn).toHaveBeenCalledTimes(1);
+    expect(providerStub.sendTurn.mock.calls[0][0].message).toBe("/goal something");
   });
 });

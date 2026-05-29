@@ -666,12 +666,8 @@ export function createWsTransport(
         thoughts: ThoughtSegmentRecord[];
         hooks: HookExecutionRecord[];
       }>("narrative.list", { messageId }),
-    listNarrativeBatch: (messageIds) =>
-      rpc<Record<string, {
-        tools: ToolCallRecord[];
-        thoughts: ThoughtSegmentRecord[];
-        hooks: HookExecutionRecord[];
-      }>>("narrative.listBatch", { messageIds }),
+    loadTurn: (threadId) =>
+      rpc<import("@mcode/contracts").NarrativeEntry[]>("turn.load", { threadId }),
 
     // Thread tasks
     getThreadTasks: (threadId: string) =>

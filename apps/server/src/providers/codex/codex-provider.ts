@@ -16,8 +16,13 @@ import { logger } from "@mcode/shared";
 import { SettingsService } from "../../services/settings-service.js";
 import { JobObject } from "../../services/job-object.js";
 import { EnvService } from "../../services/env-service.js";
+import { SessionRuntime } from "../../services/session-runtime.js";
+import type { ProtocolAdapter, SpawnArgs, SpawnResult } from "../../services/session-runtime.js";
+import { DeterministicForker } from "../../services/handoff/session-forker.js";
 import type {
   IAgentProvider,
+  SessionForker,
+  TurnRequest,
   ProviderId,
   ReasoningLevel,
   AgentEvent,
@@ -38,10 +43,6 @@ import {
 } from "./codex-permission-mapper.js";
 import type { TurnInputPart, CodexNotification } from "./codex-types.js";
 
-/** Idle TTL before a session is evicted (10 minutes). */
-const IDLE_TTL_MS = 10 * 60 * 1000;
-/** How often to check for idle sessions (1 minute). */
-const EVICTION_INTERVAL_MS = 60 * 1000;
 /**
  * Maximum wall-clock idle between Codex app-server notifications while
  * waiting for `turn/completed`. The timer resets on every notification so
@@ -58,7 +59,18 @@ class CodexTurnSupersededError extends Error {
   }
 }
 
-interface SessionEntry {
+/**
+ * Per-session state owned by the {@link SessionRuntime}. Holds the live
+ * app-server, its event mapper, and the turn-sequencing bookkeeping that the
+ * provider's `runTurn` reads. The runtime owns eviction timing, but
+ * `lastUsedAt` is retained here because `resolvePermission` stamps it so user
+ * attention on a permission card counts as activity.
+ */
+interface CodexSessionState {
+  /** Session id this state belongs to; lets `close`/drain reference provider-owned maps. */
+  sessionId: string;
+  /** Thread id derived from the session id; reused for event emission on teardown. */
+  threadId: string;
   server: CodexAppServer;
   mapper: CodexEventMapper;
   lastUsedAt: number;
@@ -121,28 +133,39 @@ function toCodexEffort(level?: ReasoningLevel): string | undefined {
 
 /** Codex provider adapter implementing IAgentProvider with a persistent app-server process per session. */
 @injectable()
-export class CodexProvider extends EventEmitter implements IAgentProvider {
+export class CodexProvider extends EventEmitter implements IAgentProvider, ProtocolAdapter<CodexSessionState> {
   readonly id: ProviderId = "codex";
   /** Codex CLI is an agentic tool with no one-shot text completion mode. */
   readonly supportsCompletion = false;
   readonly sessionForkOnResume = "unsupported" as const;
   readonly maxInputCharactersPerTurn = 16_000;
+  /** Path D forker; Codex cannot fork a session, so handoffs are deterministic. */
+  readonly forker: SessionForker = new DeterministicForker();
 
   /** Returns the static Codex model catalog. Codex does not support dynamic model discovery. */
   async listModels(): Promise<ProviderModelInfo[]> {
     return CODEX_STATIC_MODELS.map((m) => ({ ...m }));
   }
 
-  private sessions = new Map<string, SessionEntry>();
+  /** Owns the session pool, idle eviction (with busy guard), and JobObject/kill. */
+  private readonly runtime: SessionRuntime<CodexSessionState>;
   private sdkSessionIds = new Map<string, string>();
   /**
    * Session IDs for which a stop was requested before the session was created.
    * Checked after session creation; if found the session is torn down immediately.
    */
   private pendingStops = new Set<string>();
-  private evictionTimer: ReturnType<typeof setInterval> | null = null;
   /** Pending host-side permission approvals keyed by requestId. */
   private pendingPermissions = new Map<string, PendingPermissionEntry>();
+  /**
+   * Turn input + options carried from `sendTurn` to `spawn` so a freshly
+   * spawned session can run its first turn. The runtime's `acquire` only hands
+   * back the state, so the per-turn payload is staged here keyed by sessionId.
+   */
+  private pendingSpawnTurns = new Map<
+    string,
+    { input: string | TurnInputPart[]; turnOptions: { model?: string; effort?: string; serviceTier?: string } }
+  >();
 
   constructor(
     @inject(SettingsService) private readonly settingsService: SettingsService,
@@ -150,6 +173,10 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
     @inject(EnvService) private readonly envService: EnvService,
   ) {
     super();
+    this.runtime = new SessionRuntime<CodexSessionState>(this, {
+      jobObject: this.jobObject,
+      envService: this.envService,
+    });
   }
 
   /**
@@ -157,40 +184,24 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
    * For new sessions, spawns a subprocess and runs the JSON-RPC handshake first.
    * The method returns immediately; events stream via the `event` EventEmitter channel.
    */
-  async sendMessage(params: {
-    sessionId: string;
-    message: string;
-    cwd: string;
-    model: string;
-    fallbackModel?: string;
-    resume: boolean;
-    permissionMode: string;
-    attachments?: AttachmentMeta[];
-    reasoningLevel?: ReasoningLevel;
-    /** When true, pass OpenAI fast service tier; when false, standard. Undefined uses global settings. */
-    codexFastMode?: boolean;
-  }): Promise<void> {
+  async sendTurn(req: TurnRequest<"codex">): Promise<void> {
     const settings = await this.settingsService.get();
     const cliPath = settings.provider.cli.codex || "codex";
 
+    // `resumeFrom` defined ⇒ resume that Codex thread; undefined ⇒ fresh.
+    if (req.resumeFrom !== undefined) {
+      this.sdkSessionIds.set(req.sessionId, req.resumeFrom);
+    }
     const {
-      sessionId, message, cwd, model, resume, permissionMode,
-      reasoningLevel, attachments, codexFastMode,
-    } = params;
+      sessionId, message, cwd, model, permissionMode,
+      reasoningLevel, attachments,
+    } = req;
+    const codexFastMode = req.providerOptions.fastMode;
 
     const input = buildCodexInput(message, attachments);
     const threadId = sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;
 
-    if (!this.evictionTimer) {
-      this.evictionTimer = setInterval(
-        () => this.evictIdleSessions(),
-        EVICTION_INTERVAL_MS,
-      );
-    }
-
     const sandbox = permissionMode === "full" ? "danger-full-access" : "workspace-write";
-    const approvalPolicy = permissionMode === "full" ? "never" : "on-request";
-    const existing = this.sessions.get(sessionId);
 
     const useFastTier =
       codexFastMode !== undefined
@@ -204,62 +215,115 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
       ...(fastServiceTier && { serviceTier: fastServiceTier }),
     };
 
-    if (existing) {
-      // Resilience: the cached SessionEntry may point at a dead app-server
-      // (codex CLI idle-killed, host suspend/resume, or the "exit" event has
-      // not yet drained the EventEmitter queue). Reusing a dead server makes
-      // the next user message hang on a turn/start RPC until the 30s timeout
-      // fires, surfaced to the user as a generic timeout error. Detect the
-      // dead-server case and fall through to a clean respawn instead.
-      if (!existing.server.isAlive) {
-        logger.info("Codex session was dead; respawning", { sessionId });
-        this.drainPending((e) => e.sessionId === sessionId);
-        this.sessions.delete(sessionId);
-      } else if (existing.sandboxMode === sandbox) {
-        // Same permission mode - reuse the running session
-        existing.lastUsedAt = Date.now();
-        existing.mapper.reset();
-        void this.runTurn(sessionId, threadId, existing.server, input, turnOptions);
-        return;
-      } else {
-      // Permission mode changed - kill the old session so we can start fresh with the correct sandbox
+    // Permission-mode change requires a fresh thread, not just a respawn: the
+    // resumed thread would inherit the old sandbox. Clearing the stored SDK
+    // thread ID and draining the stale session is Codex-specific bookkeeping
+    // the runtime cannot do, so handle it here before acquiring.
+    const existing = this.runtime.get(sessionId);
+    if (existing && existing.server.isAlive && existing.sandboxMode !== sandbox) {
       logger.info("Codex session restarted due to permission mode change", {
         sessionId,
         from: existing.sandboxMode,
         to: sandbox,
       });
-      // Drain pending permissions for this session before kill. The app-server's
-      // graceful exit path suppresses the "fatal" emit (killRequested=true), so
-      // attachFatalDrain won't fire here; cancel any open cards explicitly so
-      // the UI doesn't keep a stale amber dot on an orphaned request.
+      // Drain synchronously here (not only via close()) so approval cards
+      // clear deterministically even if the version check below aborts before
+      // `acquire` discards the stale session. The app-server's graceful exit
+      // suppresses the "fatal" emit, so the fatal-drain listener will not fire.
       this.drainPending((e) => e.sessionId === sessionId);
-      this.sessions.delete(sessionId);
-      // Clear the stored SDK thread ID so the new session starts fresh rather than
-      // resuming the old thread (which would inherit the old sandbox mode).
+      // Clear the stored SDK thread id so the respawn starts a fresh thread
+      // rather than resuming the old one (which would inherit the old sandbox).
       this.sdkSessionIds.delete(sessionId);
-      existing.server.kill().catch((err: unknown) => {
+      // Eagerly tear the stale session down so a later abort (e.g. a failed
+      // version check below) cannot leave a wrong-sandbox process alive.
+      // `acquire` then spawns fresh. Fire-and-forget: permissions are already
+      // drained above, so the async close has nothing left to resolve.
+      void this.runtime.stop(sessionId).catch((err: unknown) => {
         logger.warn("Codex session kill on permission change failed", { error: String(err) });
       });
+    }
+
+    // Version check only when starting a new session (cached in codex-version
+    // per CLI path). Reusing a live, mode-matched session skips this. Emit
+    // user-facing errors and abort before touching the runtime so a bad CLI
+    // never spawns a child.
+    const reusable = existing && existing.server.isAlive && existing.sandboxMode === sandbox;
+    if (!reusable) {
+      const versionResult = checkCodexVersion(cliPath);
+      if (!versionResult.ok) {
+        this.emit("event", { type: AgentEventType.Error, threadId, error: versionResult.error } satisfies AgentEvent);
+        this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
+        return;
+      }
+
+      if (!meetsMinVersion(versionResult.version, "0.37.0")) {
+        const errorMsg = `Codex CLI version ${versionResult.version} is not supported. Minimum required: 0.37.0. Update with: npm install -g @openai/codex`;
+        this.emit("event", { type: AgentEventType.Error, threadId, error: errorMsg } satisfies AgentEvent);
+        this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
+        return;
       }
     }
 
-    // Version check only when starting a new session (cached in codex-version per CLI path).
-    const versionResult = checkCodexVersion(cliPath);
-    if (!versionResult.ok) {
-      this.emit("event", { type: AgentEventType.Error, threadId, error: versionResult.error } satisfies AgentEvent);
+    // Stage the per-turn payload so `spawn` can run the first turn of a fresh
+    // session; reuse reads it directly below. Keyed by sessionId.
+    this.pendingSpawnTurns.set(sessionId, { input, turnOptions });
+
+    let state: CodexSessionState;
+    try {
+      state = await this.runtime.acquire({
+        sessionId,
+        threadId,
+        cwd,
+        permissionMode,
+        resumeFrom:
+          req.resumeFrom !== undefined ? this.sdkSessionIds.get(sessionId) : undefined,
+      });
+    } catch (e: unknown) {
+      this.pendingSpawnTurns.delete(sessionId);
+      const errorMessage = e instanceof Error ? e.message : String(e);
+      logger.error("CodexAppServer start failed", { sessionId, error: errorMessage });
+      this.emit("event", { type: AgentEventType.Error, threadId, error: errorMessage } satisfies AgentEvent);
+      this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
+      return;
+    }
+    this.runtime.recordUsage(sessionId);
+
+    // A stop requested before the session finished spawning: tear it down now.
+    if (this.pendingStops.delete(sessionId)) {
+      logger.info("Pending stop consumed, tearing down new Codex session", { sessionId });
+      this.pendingSpawnTurns.delete(sessionId);
+      void this.runtime.stop(sessionId);
       this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
       return;
     }
 
-    if (!meetsMinVersion(versionResult.version, "0.37.0")) {
-      const errorMsg = `Codex CLI version ${versionResult.version} is not supported. Minimum required: 0.37.0. Update with: npm install -g @openai/codex`;
-      this.emit("event", { type: AgentEventType.Error, threadId, error: errorMsg } satisfies AgentEvent);
-      this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
+    // Reuse path: `spawn` did not run because the session already existed, so
+    // the staged turn is still pending. Reset the mapper and run it here.
+    if (reusable && this.pendingSpawnTurns.delete(sessionId)) {
+      state.lastUsedAt = Date.now();
+      state.mapper.reset();
+      void this.runTurn(sessionId, threadId, state.server, input, turnOptions);
       return;
     }
+  }
 
-    const resumeId = this.sdkSessionIds.get(sessionId);
-    const attemptResume = !!(resume && resumeId);
+  /**
+   * Spawns a fresh Codex app-server session: version-checked CLI launch, the
+   * JSON-RPC handshake, mapper + event wiring, and the first turn for the
+   * staged payload. Returns an empty `pids` array because {@link CodexAppServer}
+   * keeps its child PID private and attaches it to the Windows JobObject
+   * itself; the runtime's JobObject/taskkill are therefore best-effort no-ops
+   * for Codex and teardown is delegated to `server.kill()` in {@link close}.
+   */
+  async spawn(args: SpawnArgs): Promise<SpawnResult<CodexSessionState>> {
+    const settings = await this.settingsService.get();
+    const cliPath = settings.provider.cli.codex || "codex";
+    const { sessionId, threadId, cwd, permissionMode, resumeFrom } = args;
+
+    const sandbox = permissionMode === "full" ? "danger-full-access" : "workspace-write";
+    const approvalPolicy = permissionMode === "full" ? "never" : "on-request";
+
+    const attemptResume = !!resumeFrom;
 
     // Only register the handler in supervised mode. The CodexAppServer
     // ignores approvalHandler when approvalPolicy === "never" (auto-approve
@@ -270,15 +334,17 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
     const server = new CodexAppServer({
       cliPath,
       workingDirectory: cwd,
-      model: model || undefined,
+      // The model passed at thread/start is carried on the turn payload too;
+      // settings drive it indirectly via the staged turnOptions.
+      model: undefined,
       sandbox,
       approvalPolicy,
-      resumeThreadId: attemptResume ? resumeId : undefined,
+      resumeThreadId: attemptResume ? resumeFrom : undefined,
       approvalHandler: supervised
         ? (req) => this.handleApprovalRequest(sessionId, threadId, req)
         : undefined,
       jobObject: this.jobObject,
-      getSpawnEnv: () => this.envService.getEnv(),
+      getSpawnEnv: () => args.env,
     });
 
     const mapper = new CodexEventMapper(threadId);
@@ -287,7 +353,7 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
       const n = notification as { method?: string; params?: Record<string, unknown> };
       if (n.method === "turn/started") {
         const turn = n.params?.turn as { id?: string } | undefined;
-        const entry = this.sessions.get(sessionId);
+        const entry = this.runtime.get(sessionId);
         if (entry && turn?.id) entry.pendingTurnId = turn.id;
       }
       const events = mapper.mapNotification(notification as CodexNotification);
@@ -313,26 +379,20 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
       logger.error("CodexAppServer fatal", { sessionId, error });
       this.emit("event", { type: AgentEventType.Error, threadId, error } satisfies AgentEvent);
       this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
-      this.sessions.delete(sessionId);
+      void this.runtime.stop(sessionId);
     });
 
     this.attachFatalDrain(sessionId, server);
 
     server.on("exit", () => {
       if (!server.isAlive) {
-        this.sessions.delete(sessionId);
+        void this.runtime.stop(sessionId);
       }
     });
 
-    try {
-      await server.start();
-    } catch (e: unknown) {
-      const errorMessage = e instanceof Error ? e.message : String(e);
-      logger.error("CodexAppServer start failed", { sessionId, error: errorMessage });
-      this.emit("event", { type: AgentEventType.Error, threadId, error: errorMessage } satisfies AgentEvent);
-      this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
-      return;
-    }
+    // Propagates start failures to the runtime, which surfaces them to the
+    // `acquire` caller in `sendTurn` (emits Error/Ended there).
+    await server.start();
 
     if (server.resumeFailed) {
       logger.warn("Codex session context lost; resume failed, started fresh thread", { sessionId });
@@ -352,26 +412,58 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
       } satisfies AgentEvent);
     }
 
-    this.sessions.set(sessionId, {
+    const state: CodexSessionState = {
+      sessionId,
+      threadId,
       server,
       mapper,
       lastUsedAt: Date.now(),
       sandboxMode: sandbox,
       runTurnSeq: 0,
       pendingTurnId: null,
-    });
+    };
 
-    if (this.pendingStops.delete(sessionId)) {
-      logger.info("Pending stop consumed, tearing down new Codex session", { sessionId });
-      void server.kill().catch((err: unknown) => {
-        logger.warn("Codex pending-stop kill failed", { sessionId, error: String(err) });
+    // Run the first turn for the staged payload. `sendTurn` consults
+    // `pendingStops` after `acquire` returns; only fire the turn if no stop
+    // raced in. The runtime stores the state before this resolves, so
+    // `runTurn`'s `this.runtime.get(sessionId)` sees it.
+    const staged = this.pendingSpawnTurns.get(sessionId);
+    if (staged && !this.pendingStops.has(sessionId)) {
+      this.pendingSpawnTurns.delete(sessionId);
+      queueMicrotask(() => {
+        if (this.runtime.get(sessionId) !== state) return;
+        void this.runTurn(sessionId, threadId, server, staged.input, staged.turnOptions);
       });
-      this.sessions.delete(sessionId);
-      this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
-      return;
     }
 
-    void this.runTurn(sessionId, threadId, server, input, turnOptions);
+    return { state, pids: [] };
+  }
+
+  /** Eviction guard: a turn is in flight while `pendingTurnId` is set. */
+  isBusy(state: CodexSessionState): boolean {
+    return state.pendingTurnId != null;
+  }
+
+  /** Graceful protocol interrupt of the in-flight turn (does not kill the process). */
+  async interrupt(state: CodexSessionState): Promise<void> {
+    await state.server.interruptTurn();
+  }
+
+  /**
+   * Provider teardown: drain pending permissions for this session as
+   * cancelled (so orphaned approval cards clear), then kill the app-server.
+   * Drives every teardown path (stop, shutdown, eviction, stale-discard).
+   */
+  async close(state: CodexSessionState): Promise<void> {
+    this.drainPending((e) => e.sessionId === state.sessionId);
+    await state.server.kill();
+  }
+
+  /** A pooled session must be discarded before reuse if the process died or the sandbox/permission mode changed. */
+  isStale(state: CodexSessionState, args: { cwd: string; permissionMode: string }): boolean {
+    if (!state.server.isAlive) return true;
+    const sandbox = args.permissionMode === "full" ? "danger-full-access" : "workspace-write";
+    return state.sandboxMode !== sandbox;
   }
 
   /**
@@ -386,7 +478,7 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
     input: string | TurnInputPart[],
     turnOptions?: { model?: string; effort?: string; serviceTier?: string },
   ): Promise<void> {
-    const entry = this.sessions.get(sessionId);
+    const entry = this.runtime.get(sessionId);
     if (!entry) return;
 
     entry.abortPendingTurnWait?.();
@@ -473,6 +565,12 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
         this.emit("event", { type: AgentEventType.Error, threadId, error: errorMessage } satisfies AgentEvent);
       }
     } finally {
+      if (seq === entry.runTurnSeq) {
+        // The turn for this seq has settled: clear the in-flight marker so the
+        // runtime's busy guard (`isBusy` reads `pendingTurnId`) stops sparing
+        // the session from idle eviction. A superseding turn owns its own id.
+        entry.pendingTurnId = null;
+      }
       if (!serverDied && seq === entry.runTurnSeq && !endedEmitted) {
         endedEmitted = true;
         this.emit("event", { type: AgentEventType.Ended, threadId } satisfies AgentEvent);
@@ -525,7 +623,8 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
     this.pendingPermissions.delete(requestId);
 
     // Reset idle timer on the owning session so user attention counts as activity.
-    const session = this.sessions.get(entry.sessionId);
+    this.runtime.recordUsage(entry.sessionId);
+    const session = this.runtime.get(entry.sessionId);
     if (session) session.lastUsedAt = Date.now();
 
     const response = mapDecisionToCodexResponse(entry.method, decision, entry.params);
@@ -576,58 +675,40 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
     }
   }
 
-  /** Evicts sessions that have been idle longer than IDLE_TTL_MS. Sessions with pending permissions are spared. */
-  private evictIdleSessions(): void {
-    const now = Date.now();
-    // Build the set of sessionIds with at least one pending permission once
-    // rather than iterating the map per session.
-    const hasPending = new Set<string>();
-    for (const entry of this.pendingPermissions.values()) {
-      hasPending.add(entry.sessionId);
-    }
-    for (const [sessionId, entry] of this.sessions) {
-      if (hasPending.has(sessionId)) continue;
-      if (now - entry.lastUsedAt > IDLE_TTL_MS) {
-        logger.info("Evicted idle Codex session", { sessionId });
-        void entry.server.kill();
-        this.sessions.delete(sessionId);
-      }
-    }
-  }
-
-  /** Pre-loads an SDK session ID mapping (e.g. from the database on startup). */
-  setSdkSessionId(sessionId: string, sdkSessionId: string): void {
-    this.sdkSessionIds.set(sessionId, sdkSessionId);
-  }
-
-  /** Kills a running session's subprocess and cancels any pending permissions for its thread. */
+  /**
+   * Kills a running session's subprocess and cancels any pending permissions
+   * for its thread. The runtime's `stop` runs `interrupt` → `close` (which
+   * drains permissions for the session, see {@link close}) → hard kill. When
+   * the session has not spawned yet, record the intent so `sendTurn`/`spawn`
+   * tear it down on arrival.
+   */
   stopSession(sessionId: string): void {
-    const entry = this.sessions.get(sessionId);
-    // Drain first so handler promises resolve with the cancel response BEFORE
-    // we kill(). That way the app-server sees the cancel decision, interrupts
-    // the turn cleanly, and there is no race with the process exiting.
-    this.drainPending((e) => e.sessionId === sessionId);
-    if (entry) {
-      void entry.server.kill();
-      this.sessions.delete(sessionId);
+    const exists = this.runtime.get(sessionId) !== undefined;
+    if (exists) {
+      void this.runtime.stop(sessionId).catch((err: unknown) => {
+        logger.warn("Codex stopSession failed", { sessionId, error: String(err) });
+      });
     } else {
+      // Drain any pending permissions for a session still mid-spawn so cards
+      // clear immediately; close() will not run until/unless the session lands.
+      this.drainPending((e) => e.sessionId === sessionId);
       this.pendingStops.add(sessionId);
+      this.pendingSpawnTurns.delete(sessionId);
       setTimeout(() => this.pendingStops.delete(sessionId), 10_000);
     }
   }
 
   /** Tears down all sessions, drains pending permissions, and stops the eviction timer. */
   shutdown(): void {
-    if (this.evictionTimer) {
-      clearInterval(this.evictionTimer);
-      this.evictionTimer = null;
-    }
+    // Drain everything up front: `runtime.shutdown` stops each session
+    // (close drains per-session), but draining all here also clears any
+    // permissions whose session never landed in the pool.
     this.drainPending(() => true);
-    for (const [, entry] of this.sessions) {
-      void entry.server.kill();
-    }
-    this.sessions.clear();
+    void this.runtime.shutdown().catch((err: unknown) => {
+      logger.warn("Codex runtime shutdown failed", { error: String(err) });
+    });
     this.sdkSessionIds.clear();
+    this.pendingSpawnTurns.clear();
     logger.info("CodexProvider shutdown complete");
   }
 }

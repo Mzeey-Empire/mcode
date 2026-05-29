@@ -1,5 +1,5 @@
 import type { Message, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport";
-import type { TurnSnapshot, PermissionRequest, PlanRecord } from "@mcode/contracts";
+import type { TurnSnapshot, PermissionRequest, PlanRecord, NarrativeEntry } from "@mcode/contracts";
 import type { TaskItem } from "@/stores/taskStore";
 import type { PlanQuestion } from "@mcode/contracts";
 import type { ThreadRecord } from "@/stores/thread-record";
@@ -34,8 +34,8 @@ export type NarrativeBatchResult = Record<
 export interface ThreadHydratorTransport {
   getMessages(threadId: string, limit: number, before?: number): Promise<PaginatedMessages>;
   listSnapshots(threadId: string): Promise<TurnSnapshot[]>;
-  listNarrativeBatch(messageIds: string[]): Promise<NarrativeBatchResult>;
   listNarrative(messageId: string): Promise<NarrativeBatchResult[string]>;
+  loadTurn(threadId: string): Promise<NarrativeEntry[]>;
   listPendingPermissions(threadId: string): Promise<PermissionRequest[]>;
   getThreadTasks(
     threadId: string,
