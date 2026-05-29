@@ -89,13 +89,15 @@ describe("ClaudeProvider sendMessage on closed queue (#292)", () => {
     provider.on("event", (e: { type: string; error?: string }) => events.push(e));
 
     // First send establishes the session
-    await provider.sendMessage({
+    await provider.sendTurn({
       sessionId: "mcode-t1",
+      threadId: "t1",
       message: "first",
       cwd: "/tmp",
       model: "claude-sonnet-4-6",
-      resume: false,
       permissionMode: "default",
+      interactionMode: "build",
+      providerOptions: {},
     });
 
     // Simulate race by closing the queue directly
@@ -105,13 +107,15 @@ describe("ClaudeProvider sendMessage on closed queue (#292)", () => {
 
     // Second send on same sessionId: push hits a closed queue
     await expect(
-      provider.sendMessage({
+      provider.sendTurn({
         sessionId: "mcode-t1",
+        threadId: "t1",
         message: "second",
         cwd: "/tmp",
         model: "claude-sonnet-4-6",
-        resume: false,
         permissionMode: "default",
+        interactionMode: "build",
+        providerOptions: {},
       }),
     ).rejects.toThrow(/closed/i);
 
@@ -148,13 +152,15 @@ describe("ClaudeProvider sendMessage on closed queue (#292)", () => {
     provider.on("event", (e: { type: string; error?: string }) => events.push(e));
 
     // First send establishes the session
-    await provider.sendMessage({
+    await provider.sendTurn({
       sessionId: "mcode-overflow",
+      threadId: "overflow",
       message: "first",
       cwd: "/tmp",
       model: "claude-sonnet-4-6",
-      resume: false,
       permissionMode: "default",
+      interactionMode: "build",
+      providerOptions: {},
     });
 
     // Saturate the queue: MAX_QUEUE_DEPTH is 20, so push many more than that.
@@ -162,13 +168,15 @@ describe("ClaudeProvider sendMessage on closed queue (#292)", () => {
     let overflowErr: Error | undefined;
     for (let i = 0; i < 25; i++) {
       try {
-        await provider.sendMessage({
+        await provider.sendTurn({
           sessionId: "mcode-overflow",
+          threadId: "overflow",
           message: `msg-${i}`,
           cwd: "/tmp",
           model: "claude-sonnet-4-6",
-          resume: false,
           permissionMode: "default",
+          interactionMode: "build",
+          providerOptions: {},
         });
       } catch (e) {
         overflowErr = e as Error;

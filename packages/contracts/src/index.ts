@@ -279,6 +279,8 @@ export type {
   IAgentProvider,
   ICompletionCapable,
   IProviderRegistry,
+  TurnRequest,
+  ProviderOptionsByProvider,
 } from "./providers/interfaces.js";
 
 export * from "./providers/catalog.js";

@@ -75,9 +75,8 @@ function buildService(): {
   const thread = makeThread();
   const providerEmitter = new EventEmitter();
 
-  // sendMessage() and setSdkSessionId() are called on the resolved provider
-  (providerEmitter as any).sendMessage = vi.fn(() => Promise.resolve());
-  (providerEmitter as any).setSdkSessionId = vi.fn();
+  // sendTurn() is called on the resolved provider
+  (providerEmitter as any).sendTurn = vi.fn(() => Promise.resolve());
 
   const threadRepo = {
     findById: vi.fn(() => thread),

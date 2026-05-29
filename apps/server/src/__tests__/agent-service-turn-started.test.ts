@@ -42,7 +42,7 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
   let taskRepo: TaskRepo;
   let svc: AgentService;
   let providerStub: EventEmitter & Partial<IAgentProvider> & {
-    sendMessage: ReturnType<typeof vi.fn>;
+    sendTurn: ReturnType<typeof vi.fn>;
   };
   let capturedEvents: AgentEvent[];
   // Snapshot of capturedEvents.length taken synchronously when the provider's
@@ -70,12 +70,11 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
       // Snapshot capturedEvents.length synchronously on entry: this is the
       // load-bearing ordering signal. If the emit happened BEFORE the call
       // entered (correct order), this will be >= 1.
-      sendMessage: vi.fn(() => {
+      sendTurn: vi.fn(() => {
         eventsLengthAtSendMessageEntry = capturedEvents.length;
         return new Promise<void>(() => {});
       }),
       stopSession: vi.fn(),
-      setSdkSessionId: vi.fn(),
       shutdown: vi.fn(),
     });
     providerStub.on("event", (e: AgentEvent) => capturedEvents.push(e));
@@ -179,8 +178,8 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
 
     expect(svc.activeThreadIds()).toContain(thread.id);
 
-    // Provider.sendMessage must have been invoked. Confirms the emit happened
-    // during sendMessage flow, not via some other path.
-    expect(providerStub.sendMessage).toHaveBeenCalledTimes(1);
+    // Provider.sendTurn must have been invoked. Confirms the emit happened
+    // during sendTurn flow, not via some other path.
+    expect(providerStub.sendTurn).toHaveBeenCalledTimes(1);
   });
 });

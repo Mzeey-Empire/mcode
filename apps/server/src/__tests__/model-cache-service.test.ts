@@ -16,7 +16,7 @@ function makeProvider(models: ProviderModelInfo[]) {
   return {
     id: "test-provider",
     listModels: vi.fn().mockResolvedValue(models),
-    sendMessage: vi.fn(),
+    sendTurn: vi.fn(),
     cancelSession: vi.fn(),
     shutdown: vi.fn(),
   };
@@ -163,7 +163,7 @@ describe("ModelCacheService", () => {
     const provider = {
       id: "cursor",
       listModels: vi.fn().mockReturnValue(listPromise),
-      sendMessage: vi.fn(),
+      sendTurn: vi.fn(),
       cancelSession: vi.fn(),
       shutdown: vi.fn(),
     };
@@ -191,7 +191,7 @@ describe("ModelCacheService", () => {
   it("throws when fetching from a provider that does not implement listModels", async () => {
     const provider = {
       id: "no-list",
-      sendMessage: vi.fn(),
+      sendTurn: vi.fn(),
       cancelSession: vi.fn(),
       shutdown: vi.fn(),
     };

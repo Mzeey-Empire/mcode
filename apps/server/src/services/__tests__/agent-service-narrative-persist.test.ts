@@ -73,8 +73,7 @@ interface Built {
 function build(): Built {
   const thread = makeThread();
   const providerEmitter = new EventEmitter();
-  (providerEmitter as any).sendMessage = vi.fn(() => Promise.resolve());
-  (providerEmitter as any).setSdkSessionId = vi.fn();
+  (providerEmitter as any).sendTurn = vi.fn(() => Promise.resolve());
 
   const threadRepo = {
     findById: vi.fn(() => thread),

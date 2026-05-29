@@ -17,6 +17,7 @@ import type {
   ReasoningLevel,
   ContextWindowMode,
   IProviderRegistry,
+  TurnRequest,
   AgentEvent,
   ProviderId,
   InteractionMode,
@@ -481,9 +482,10 @@ export class AgentService {
     if (planAction === "revise") {
       this.armPlanGenerationTurn(threadId);
       wirePayload = `${wirePayload}\n\n${this.buildPlanOutputInstructions()}`;
-    } else if (planAction === "implement") {
-      this.setPlanQuestionModeOnProvider(threadId, false);
     }
+    // The retired setPlanQuestionMode toggle is gone: Cursor derives plan-question
+    // suppression from each Turn's interactionMode at sendTurn. An "implement"
+    // turn dispatches as "build", which clears the flag.
 
     const effectiveInteractionMode =
       planAction === "revise" || planAction === "implement"
@@ -492,7 +494,6 @@ export class AgentService {
 
     if (effectiveInteractionMode === "plan") {
       this.planParsers.set(threadId, new PlanQuestionParser());
-      this.setPlanQuestionModeOnProvider(threadId, true);
       if (providerWireOverride === undefined) {
         wirePayload = this.buildPlanPrompt(wirePayload);
       }
@@ -597,11 +598,10 @@ export class AgentService {
     // Only treat as resume if there is actually a session to resume.
     const isResume = nextSeq > 1 && !!thread.sdk_session_id;
 
-    // Hydrate SDK session ID mapping for resume
-    if (isResume && thread.sdk_session_id) {
-      const sdkProvider = this.providerRegistry.resolve(effectiveProvider);
-      sdkProvider.setSdkSessionId(sessionName, thread.sdk_session_id);
-    }
+    // Resume signal: defined ⇒ resume that SDK session, undefined ⇒ fresh.
+    // Replaces the former setSdkSessionId(...) + resume:true two-step dance.
+    const resumeFrom: string | undefined =
+      isResume && thread.sdk_session_id ? thread.sdk_session_id : undefined;
 
     const resolvedProvider = this.providerRegistry.resolve(effectiveProvider);
 
@@ -636,24 +636,36 @@ export class AgentService {
       });
     }
 
+    // Provider-specific knobs are walled into providerOptions, keyed by the
+    // resolved Provider. The orchestrator picks both the Provider and its
+    // matching options together; the cast at the sendTurn boundary is the one
+    // controlled point where the runtime selection meets the union type.
+    const providerOptions =
+      effectiveProvider === "claude"
+        ? { contextWindowMode: effectiveContextWindowMode, thinking: effectiveThinking }
+        : effectiveProvider === "codex"
+          ? { fastMode: effectiveCodexFastMode }
+          : effectiveProvider === "copilot"
+            ? { agent: effectiveCopilotAgent }
+            : {};
+
     try {
-      await resolvedProvider.sendMessage({
+      await resolvedProvider.sendTurn({
         sessionId: sessionName,
+        threadId,
         message: providerMessage,
         cwd,
         model: resolvedModel,
         fallbackModel,
-        resume: isResume,
         permissionMode,
+        interactionMode: effectiveInteractionMode ?? "build",
         attachments: persisted.length > 0 ? persisted : undefined,
         reasoningLevel,
-        contextWindowMode: effectiveContextWindowMode,
-        thinking: effectiveThinking,
-        ...(effectiveProvider === "codex" && { codexFastMode: effectiveCodexFastMode }),
         ...(effectiveBudget > 0 && { maxBudgetUsd: effectiveBudget }),
         ...(effectiveTurns > 0 && { maxTurns: effectiveTurns }),
-        copilotAgent: effectiveCopilotAgent,
-      });
+        resumeFrom,
+        providerOptions,
+      } as TurnRequest);
       logger.info("Message sent via provider", {
         threadId,
         session: sessionName,
@@ -1892,7 +1904,6 @@ export class AgentService {
           this.pendingPlanOutputs.delete(event.threadId);
           this.pendingExitPlanMarkdown.delete(event.threadId);
           this.planCapturedThisTurn.delete(event.threadId);
-          this.setPlanQuestionModeOnProvider(event.threadId, false);
         }
 
         if (event.type === AgentEventType.Compacting && event.active) {
@@ -1964,7 +1975,6 @@ export class AgentService {
           this.pendingPlanOutputs.delete(event.threadId);
           this.pendingExitPlanMarkdown.delete(event.threadId);
           this.planCapturedThisTurn.delete(event.threadId);
-          this.setPlanQuestionModeOnProvider(event.threadId, false);
         }
       });
     }
@@ -2049,22 +2059,21 @@ export class AgentService {
   private armPlanGenerationTurn(threadId: string): void {
     this.planOutputParsers.set(threadId, new PlanOutputParser());
     this.planCapturedThisTurn.delete(threadId);
-    this.setPlanQuestionModeOnProvider(threadId, false);
 
+    // Claude ExitPlanMode capture is a Claude-only concern that the binary
+    // TurnRequest.interactionMode cannot carry (it would conflate the
+    // question-generation turn with the answer/revise turn). It stays an
+    // off-interface arming on the concrete ClaudeProvider, invoked via a cast
+    // like setGoal/clearGoal. The revise/answer turn dispatches with
+    // interactionMode "build", so Cursor's per-Turn question mode clears itself.
     const thread = this.threadRepo.findById(threadId);
     const effectiveProvider = (thread?.provider as ProviderId) ?? "claude";
-    const provider = this.providerRegistry.resolve(effectiveProvider);
-    provider.setPlanAnswerMode?.(threadId, true);
-  }
-
-  /** Toggle native question UI suppression on the active provider. */
-  private setPlanQuestionModeOnProvider(threadId: string, enabled: boolean): void {
-    const thread = this.threadRepo.findById(threadId);
-    if (!thread) return;
-    const provider = this.providerRegistry.resolve(
-      (thread.provider as ProviderId) ?? "claude",
-    );
-    provider.setPlanQuestionMode?.(threadId, enabled);
+    if (effectiveProvider === "claude") {
+      const claudeProvider = this.providerRegistry.resolve("claude") as unknown as {
+        setPlanAnswerMode: (threadId: string, enabled: boolean) => void;
+      };
+      claudeProvider.setPlanAnswerMode(threadId, true);
+    }
   }
 
   /** Persist one plan version and broadcast, skipping duplicate captures per turn. */

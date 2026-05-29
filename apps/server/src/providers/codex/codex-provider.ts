@@ -18,6 +18,7 @@ import { JobObject } from "../../services/job-object.js";
 import { EnvService } from "../../services/env-service.js";
 import type {
   IAgentProvider,
+  TurnRequest,
   ProviderId,
   ReasoningLevel,
   AgentEvent,
@@ -157,26 +158,20 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
    * For new sessions, spawns a subprocess and runs the JSON-RPC handshake first.
    * The method returns immediately; events stream via the `event` EventEmitter channel.
    */
-  async sendMessage(params: {
-    sessionId: string;
-    message: string;
-    cwd: string;
-    model: string;
-    fallbackModel?: string;
-    resume: boolean;
-    permissionMode: string;
-    attachments?: AttachmentMeta[];
-    reasoningLevel?: ReasoningLevel;
-    /** When true, pass OpenAI fast service tier; when false, standard. Undefined uses global settings. */
-    codexFastMode?: boolean;
-  }): Promise<void> {
+  async sendTurn(req: TurnRequest<"codex">): Promise<void> {
     const settings = await this.settingsService.get();
     const cliPath = settings.provider.cli.codex || "codex";
 
+    // `resumeFrom` defined ⇒ resume that Codex thread; undefined ⇒ fresh.
+    if (req.resumeFrom !== undefined) {
+      this.sdkSessionIds.set(req.sessionId, req.resumeFrom);
+    }
     const {
-      sessionId, message, cwd, model, resume, permissionMode,
-      reasoningLevel, attachments, codexFastMode,
-    } = params;
+      sessionId, message, cwd, model, permissionMode,
+      reasoningLevel, attachments,
+    } = req;
+    const resume = req.resumeFrom !== undefined;
+    const codexFastMode = req.providerOptions.fastMode;
 
     const input = buildCodexInput(message, attachments);
     const threadId = sessionId.startsWith("mcode-") ? sessionId.slice(6) : sessionId;
@@ -595,10 +590,6 @@ export class CodexProvider extends EventEmitter implements IAgentProvider {
     }
   }
 
-  /** Pre-loads an SDK session ID mapping (e.g. from the database on startup). */
-  setSdkSessionId(sessionId: string, sdkSessionId: string): void {
-    this.sdkSessionIds.set(sessionId, sdkSessionId);
-  }
 
   /** Kills a running session's subprocess and cancels any pending permissions for its thread. */
   stopSession(sessionId: string): void {
