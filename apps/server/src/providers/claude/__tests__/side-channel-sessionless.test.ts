@@ -50,7 +50,13 @@ function makeProvider() {
   const provider = Object.create(ClaudeProvider.prototype) as ClaudeProvider;
   (provider as any).envService = makeEnvService();
   (provider as any).jobObject = makeJobObject();
-  (provider as any).sessions = new Map();
+  // The constructor is bypassed (Object.create) to avoid spawning. After the
+  // SessionRuntime migration, runSideChannelQuery reads parent liveness via
+  // this.runtime.get(...), so provide a Map-backed runtime stub. The
+  // `sessions` map remains the seeding surface used by withLiveParentSession.
+  const sessions = new Map();
+  (provider as any).sessions = sessions;
+  (provider as any).runtime = { get: (id: string) => sessions.get(id) };
   (provider as any).emitter = { emit: vi.fn(), on: vi.fn() };
   return provider;
 }
