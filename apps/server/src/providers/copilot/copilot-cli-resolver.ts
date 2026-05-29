@@ -72,8 +72,47 @@ const configuredStrategy: Strategy = {
   },
 };
 
+/**
+ * Resolves a `@github/copilot` package directory to its absolute `index.js`
+ * entry (the JS entry point the SDK runs with node) and version. Returns null
+ * when the package's `index.js` is missing. Shared by the npm-global and
+ * path-shim strategies so the entry and version come from the same package.
+ */
+function resolvePackageEntry(
+  pkgDir: string,
+  io: ResolverIO,
+): { entry: string; version: string | null } | null {
+  const entry = join(pkgDir, "index.js");
+  if (!io.exists(entry)) return null;
+  const raw = io.readFile(join(pkgDir, "package.json"));
+  let version: string | null = null;
+  if (raw) {
+    try {
+      const pkg = JSON.parse(raw) as { version?: string };
+      version = typeof pkg.version === "string" ? pkg.version : null;
+    } catch {
+      version = null;
+    }
+  }
+  return { entry, version };
+}
+
+/**
+ * 2. `@github/copilot` resolved via `npm root -g`. The primary auto-discovery
+ *    route: it finds the global install the SDK's own search misses, and yields
+ *    the absolute index.js the SDK runs with node.
+ */
+const npmGlobalStrategy: Strategy = {
+  source: "npm-global",
+  resolve(_ctx, io) {
+    const root = io.exec("npm", ["root", "-g"]);
+    if (!root) return null;
+    return resolvePackageEntry(join(root, "@github", "copilot"), io);
+  },
+};
+
 /** Strategy table, tried in priority order. Append a row to add a future route. */
-const STRATEGIES: Strategy[] = [configuredStrategy];
+const STRATEGIES: Strategy[] = [configuredStrategy, npmGlobalStrategy];
 
 /** Builds the not-found resolution, disambiguating `@github/copilot` from `gh copilot`. */
 function notFound(io: ResolverIO): CopilotCliNotFound {

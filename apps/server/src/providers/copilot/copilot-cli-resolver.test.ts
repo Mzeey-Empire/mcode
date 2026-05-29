@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { join } from "node:path";
 import { resolveCopilotCli, type ResolverIO } from "./copilot-cli-resolver.js";
 
 /** Builds a seeded ResolverIO. `exec` keys are `[command, ...args].join(" ")`. */
@@ -51,6 +52,33 @@ describe("resolveCopilotCli", () => {
   it("ignores a blank configured path and falls through", () => {
     const res = resolveCopilotCli({ configuredPath: "   " }, fakeIO({}));
     expect(res.source).toBe("not-found");
+  });
+
+  it("resolves @github/copilot via npm root -g to index.js, version from package.json", () => {
+    const pkgDir = join("/global", "@github", "copilot");
+    const entry = join(pkgDir, "index.js");
+    const io = fakeIO({
+      platform: "linux",
+      exec: { "npm root -g": "/global" },
+      files: { [join(pkgDir, "package.json")]: JSON.stringify({ version: "1.0.24" }) },
+      existsExtra: [entry],
+    });
+    const res = resolveCopilotCli({}, io);
+    expect(res).toMatchObject({ source: "npm-global", entry, version: "1.0.24" });
+  });
+
+  it("falls through when npm root -g resolves but index.js is absent", () => {
+    const pkgDir = join("/global", "@github", "copilot");
+    const io = fakeIO({
+      platform: "linux",
+      exec: { "npm root -g": "/global" },
+      files: { [join(pkgDir, "package.json")]: JSON.stringify({ version: "1.0.24" }) },
+    });
+    expect(resolveCopilotCli({}, io).source).toBe("not-found");
+  });
+
+  it("falls through when npm is unavailable", () => {
+    expect(resolveCopilotCli({}, fakeIO({ platform: "linux" })).source).toBe("not-found");
   });
 });
 
