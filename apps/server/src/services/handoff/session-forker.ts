@@ -139,6 +139,11 @@ export class DeterministicForker implements SessionForker {
       forkAnchorRole: req.forkAnchorRole,
       childThreadId: req.childThreadId,
       reason: req.forkReason ?? null,
+      compactSummary: req.compactSummary ?? null,
+      forkAnchorBody: req.forkAnchorBody ?? null,
+      toolCallRecords: req.toolCallRecords,
+      thoughtSegments: req.thoughtSegments,
+      filesChanged: req.filesChanged,
     });
   }
 }

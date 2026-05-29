@@ -11,7 +11,7 @@
  * existing server-side imports keep working unchanged.
  */
 
-import type { Message, Thread } from "../index.js";
+import type { Message, Thread, ToolCallRecord, ThoughtSegmentRecord } from "../index.js";
 
 /** Which step of the B->A->D ladder produced the handoff. */
 export type LadderStep = "B" | "A" | "D";
@@ -95,6 +95,35 @@ export interface ForkRequest {
    */
   forkReason?: ProviderErrorClass | null;
   abortSignal?: AbortSignal;
+  /**
+   * Parent thread's most recent compact summary, if one exists. Pre-gathered by
+   * the pipeline so {@link DeterministicForker} stays stateless. Used as the
+   * primary Goal/summary source for the deterministic (path-D) handoff doc.
+   */
+  compactSummary?: string | null;
+  /**
+   * Body of the fork-anchor message (the message identified by
+   * `forkedFromMessageId`). Pre-gathered by the pipeline; rendered as the
+   * fork-anchor context section and used as a summary fallback.
+   */
+  forkAnchorBody?: string | null;
+  /**
+   * Recent tool-call records from the parent thread's latest assistant
+   * messages. Pre-gathered by the pipeline; summarized into a "Recent tool
+   * activity" section of the deterministic doc.
+   */
+  toolCallRecords?: ToolCallRecord[];
+  /**
+   * Recent narration/reasoning segments from the parent thread's latest
+   * assistant messages. Pre-gathered by the pipeline; surfaced as
+   * "Narration / reasoning highlights".
+   */
+  thoughtSegments?: ThoughtSegmentRecord[];
+  /**
+   * Files changed across the parent thread's recent messages, de-duplicated.
+   * Pre-gathered by the pipeline from each message's `files_changed` JSON.
+   */
+  filesChanged?: string[];
 }
 
 /**

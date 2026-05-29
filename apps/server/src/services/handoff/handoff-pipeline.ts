@@ -21,6 +21,8 @@ import { logger } from "@mcode/shared";
 import { ThreadRepo } from "../../repositories/thread-repo.js";
 import { MessageRepo } from "../../repositories/message-repo.js";
 import { WorkspaceRepo } from "../../repositories/workspace-repo.js";
+import { ToolCallRecordRepo } from "../../repositories/tool-call-record-repo.js";
+import { ThoughtSegmentRepo } from "../../repositories/thought-segment-repo.js";
 import { classifyProviderError } from "./error-classifier.js";
 import { buildHandoffPrompt, computeBudgetChars, pickHandoffMode, truncateAtSectionBoundary } from "./handoff-prompt.js";
 import { DeterministicForker } from "./session-forker.js";
@@ -30,6 +32,9 @@ import type {
   IAgentProvider,
   IProviderRegistry,
   ProviderId,
+  ToolCallRecord,
+  ThoughtSegmentRecord,
+  Message,
 } from "@mcode/contracts";
 /**
  * Render an Error-shaped value for structured logging. Winston cannot
@@ -79,6 +84,19 @@ interface IMessageRepo {
 interface IWorkspaceRepo {
   findById(id: string): Promise<any> | any;
 }
+interface IToolCallRecordRepo {
+  listByMessage(messageId: string): Promise<ToolCallRecord[]> | ToolCallRecord[];
+}
+interface IThoughtSegmentRepo {
+  listByMessage(messageId: string): Promise<ThoughtSegmentRecord[]> | ThoughtSegmentRecord[];
+}
+
+/**
+ * How many of the parent thread's most recent assistant messages to mine for
+ * tool-call / narration / files-changed signals when composing a deterministic
+ * (path-D) handoff. Bounded so a long thread doesn't produce an unwieldy doc.
+ */
+const RECENT_ASSISTANT_MESSAGES_FOR_D = 5;
 
 /**
  * Timeout for side-channel and hidden-turn provider calls, in milliseconds.
@@ -107,6 +125,8 @@ export class HandoffPipelineService {
     @inject(MessageRepo) private readonly messageRepo: IMessageRepo,
     @inject("IProviderRegistry") private readonly providerRegistry: Pick<IProviderRegistry, "resolve">,
     @inject(WorkspaceRepo) private readonly workspaceRepo: IWorkspaceRepo,
+    @inject(ToolCallRecordRepo) private readonly toolCallRecordRepo: IToolCallRecordRepo,
+    @inject(ThoughtSegmentRepo) private readonly thoughtSegmentRepo: IThoughtSegmentRepo,
   ) {}
 
   /**
@@ -118,6 +138,8 @@ export class HandoffPipelineService {
     messageRepo: IMessageRepo;
     providerRegistry: Pick<IProviderRegistry, "resolve">;
     workspaceRepo?: IWorkspaceRepo;
+    toolCallRecordRepo?: IToolCallRecordRepo;
+    thoughtSegmentRepo?: IThoughtSegmentRepo;
   }): HandoffPipelineService {
     const svc = Object.create(HandoffPipelineService.prototype) as HandoffPipelineService;
     (svc as any).threadRepo = deps.threadRepo;
@@ -125,6 +147,12 @@ export class HandoffPipelineService {
     (svc as any).providerRegistry = deps.providerRegistry;
     (svc as any).workspaceRepo = deps.workspaceRepo ?? {
       findById: async () => ({ path: process.cwd() }),
+    };
+    (svc as any).toolCallRecordRepo = deps.toolCallRecordRepo ?? {
+      listByMessage: () => [],
+    };
+    (svc as any).thoughtSegmentRepo = deps.thoughtSegmentRepo ?? {
+      listByMessage: () => [],
     };
     // Initialize instance fields that aren't set via the constructor (Object.create
     // bypasses field initializers).
@@ -182,6 +210,11 @@ export class HandoffPipelineService {
     const replayBudget = computeBudgetChars(childCap);
     const conversationHistory = buildConversationReplay(messagesUpToFork, replayBudget, null);
 
+    // Pre-gather the deterministic (path-D) signals from the parent thread so
+    // DeterministicForker stays stateless. These are no-ops for provider paths
+    // (B/A) — the forkers simply ignore the extra fields.
+    const deterministicInputs = await this.gatherDeterministicInputs(parent, messagesUpToFork, forkMsg);
+
     const forkReq: ForkRequest = {
       parentThreadId: req.parentThreadId,
       forkedFromMessageId: req.forkedFromMessageId,
@@ -193,6 +226,7 @@ export class HandoffPipelineService {
       messagesUpToFork,
       parentThread: parent,
       childThreadId: req.childThreadId,
+      ...deterministicInputs,
     };
 
     // Providers that cannot fork a session (capability "unsupported") or a
@@ -239,6 +273,61 @@ export class HandoffPipelineService {
       return this.withPathALock(req.parentThreadId, runFork);
     }
     return runFork();
+  }
+
+  /**
+   * Gather the deterministic-handoff (path-D) signals that already exist in the
+   * database: the parent thread's last compact summary, the fork-anchor message
+   * body, recent tool-call / narration records, and the de-duplicated files
+   * changed across recent messages. Returned as a partial ForkRequest so the
+   * orchestrator can spread it onto the request. Failures degrade gracefully —
+   * a missing record just means an omitted section, never a fork failure.
+   */
+  private async gatherDeterministicInputs(
+    parent: any,
+    messagesUpToFork: Message[],
+    forkMsg: Message,
+  ): Promise<Pick<ForkRequest, "compactSummary" | "forkAnchorBody" | "toolCallRecords" | "thoughtSegments" | "filesChanged">> {
+    const compactSummary: string | null = parent.last_compact_summary ?? null;
+    const forkAnchorBody: string | null = forkMsg?.content ?? null;
+
+    // Mine the most recent assistant messages up to the fork for structured
+    // activity. Tool calls / narration are keyed by assistant message id.
+    const recentAssistant = messagesUpToFork
+      .filter((m) => m.role === "assistant")
+      .slice(-RECENT_ASSISTANT_MESSAGES_FOR_D);
+
+    const toolCallRecords: ToolCallRecord[] = [];
+    const thoughtSegments: ThoughtSegmentRecord[] = [];
+    for (const m of recentAssistant) {
+      try {
+        toolCallRecords.push(...(await this.toolCallRecordRepo.listByMessage(m.id)));
+      } catch {
+        // Tolerate repo errors; the section is simply omitted.
+      }
+      try {
+        thoughtSegments.push(...(await this.thoughtSegmentRepo.listByMessage(m.id)));
+      } catch {
+        // Tolerate repo errors; the section is simply omitted.
+      }
+    }
+
+    // Aggregate files_changed across recent messages, de-duplicated and in
+    // first-seen order. files_changed is stored as a JSON array of strings.
+    const seen = new Set<string>();
+    const filesChanged: string[] = [];
+    for (const m of messagesUpToFork) {
+      const fc = (m as { files_changed?: unknown }).files_changed;
+      if (!Array.isArray(fc)) continue;
+      for (const f of fc) {
+        if (typeof f === "string" && !seen.has(f)) {
+          seen.add(f);
+          filesChanged.push(f);
+        }
+      }
+    }
+
+    return { compactSummary, forkAnchorBody, toolCallRecords, thoughtSegments, filesChanged };
   }
 
   /**
