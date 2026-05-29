@@ -329,12 +329,6 @@ export interface McodeTransport {
     thoughts: ThoughtSegmentRecord[];
     hooks: HookExecutionRecord[];
   }>;
-  /** Batch fetch narratives for multiple messages in one round-trip. */
-  listNarrativeBatch(messageIds: string[]): Promise<Record<string, {
-    tools: ToolCallRecord[];
-    thoughts: ThoughtSegmentRecord[];
-    hooks: HookExecutionRecord[];
-  }>>;
   /** Fetch a thread's full server-ordered narrative as a flat, chronological list. */
   loadTurn(threadId: string): Promise<import("@mcode/contracts").NarrativeEntry[]>;
 

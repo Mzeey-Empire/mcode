@@ -92,7 +92,6 @@ function resetStores() {
   (mockTransport.listPendingPermissions as ReturnType<typeof vi.fn>).mockResolvedValue([]);
   (mockTransport.getThreadTasks as ReturnType<typeof vi.fn>).mockResolvedValue(null);
   (mockTransport.getThreadPlans as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-  (mockTransport.listNarrativeBatch as ReturnType<typeof vi.fn>).mockResolvedValue({});
   (mockTransport.loadTurn as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
   useWorkspaceStore.setState({

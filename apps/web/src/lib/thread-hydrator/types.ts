@@ -34,7 +34,6 @@ export type NarrativeBatchResult = Record<
 export interface ThreadHydratorTransport {
   getMessages(threadId: string, limit: number, before?: number): Promise<PaginatedMessages>;
   listSnapshots(threadId: string): Promise<TurnSnapshot[]>;
-  listNarrativeBatch(messageIds: string[]): Promise<NarrativeBatchResult>;
   listNarrative(messageId: string): Promise<NarrativeBatchResult[string]>;
   loadTurn(threadId: string): Promise<NarrativeEntry[]>;
   listPendingPermissions(threadId: string): Promise<PermissionRequest[]>;

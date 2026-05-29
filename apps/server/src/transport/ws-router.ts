@@ -622,21 +622,6 @@ async function dispatch(
         thoughts: deps.thoughtSegmentRepo.listByMessage(params.messageId),
         hooks: deps.hookExecutionRepo.listByMessage(params.messageId),
       };
-    case "narrative.listBatch": {
-      // Resolve each messageId in a single synchronous loop (SQLite is
-      // single-threaded; parallelism here would context-switch the event loop
-      // without any actual concurrency benefit). The result is a plain object
-      // keyed by messageId so the client can index directly.
-      const batchResult: Record<string, { tools: unknown[]; thoughts: unknown[]; hooks: unknown[] }> = {};
-      for (const mid of params.messageIds) {
-        batchResult[mid] = {
-          tools: deps.toolCallRecordRepo.listByMessage(mid),
-          thoughts: deps.thoughtSegmentRepo.listByMessage(mid),
-          hooks: deps.hookExecutionRepo.listByMessage(mid),
-        };
-      }
-      return batchResult;
-    }
 
     // Thread tasks
     case "thread.getTasks":

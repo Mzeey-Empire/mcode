@@ -587,22 +587,6 @@ export const WS_METHODS = lazySchema(() => ({
       hooks: z.array(HookExecutionRecordSchema),
     }),
   },
-  /**
-   * Batch variant of `narrative.list`. Returns a map of messageId →
-   * narrative records in a single round-trip. Replaces the 20-parallel-RPC
-   * prefetch pattern in threadStore with one call.
-   */
-  "narrative.listBatch": {
-    params: z.object({ messageIds: z.array(z.string()) }),
-    result: z.record(
-      z.string(),
-      z.object({
-        tools: z.array(ToolCallRecordSchema),
-        thoughts: z.array(ThoughtSegmentRecordSchema),
-        hooks: z.array(HookExecutionRecordSchema),
-      }),
-    ),
-  },
   "thread.getTasks": {
     params: z.object({ threadId: z.string() }),
     result: z
