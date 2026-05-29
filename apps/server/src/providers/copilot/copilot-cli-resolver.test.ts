@@ -115,6 +115,23 @@ describe("resolveCopilotCli", () => {
     const io = fakeIO({ platform: "linux", exec: { "which copilot": "/usr/local/bin/copilot" } });
     expect(resolveCopilotCli({}, io).source).toBe("not-found");
   });
+
+  it("disambiguates gh copilot when only the gh extension is present", () => {
+    const io = fakeIO({ platform: "linux", exec: { "gh extension list": "github/gh-copilot  v1.0.0" } });
+    const res = resolveCopilotCli({}, io);
+    expect(res.source).toBe("not-found");
+    if (res.source === "not-found") {
+      expect(res.message).toContain("gh copilot");
+      expect(res.message).toContain("@github/copilot");
+    }
+  });
+
+  it("omits the gh-copilot note when the extension is absent", () => {
+    const res = resolveCopilotCli({}, fakeIO({ platform: "linux" }));
+    if (res.source === "not-found") {
+      expect(res.message).not.toContain("gh copilot");
+    }
+  });
 });
 
 export { fakeIO };
