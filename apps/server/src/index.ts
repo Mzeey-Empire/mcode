@@ -20,6 +20,7 @@ import { PtyPidRegistry } from "./services/pty-pid-registry";
 import { WorkspaceService } from "./services/workspace-service";
 import { ThreadService } from "./services/thread-service";
 import { AgentService } from "./services/agent-service";
+import { NarrativeStore } from "./services/narrative-store";
 import { GitService } from "./services/git-service";
 import { GithubService } from "./services/github-service";
 import { FileService } from "./services/file-service";
@@ -177,6 +178,7 @@ const providerAvailability = container.resolve(ProviderAvailabilityService);
 const toolCallRecordRepo = container.resolve(ToolCallRecordRepo);
 const thoughtSegmentRepo = container.resolve(ThoughtSegmentRepo);
 const hookExecutionRepo = container.resolve(HookExecutionRepo);
+const narrativeStore = container.resolve(NarrativeStore);
 const turnSnapshotRepo = container.resolve(TurnSnapshotRepo);
 const snapshotService = container.resolve(SnapshotService);
 const settingsService = container.resolve(SettingsService);
@@ -459,6 +461,7 @@ const { httpServer, wss } = createWsServer({
   toolCallRecordRepo,
   thoughtSegmentRepo,
   hookExecutionRepo,
+  narrativeStore,
   turnSnapshotRepo,
   snapshotService,
   settingsService,
