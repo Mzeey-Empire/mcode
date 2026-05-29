@@ -57,8 +57,23 @@ function parseVersion(out: string): string | null {
   return m ? m[1]! : null;
 }
 
+/**
+ * 1. User-configured path. Highest priority, never overridden, trusted verbatim
+ *    (the SDK's own existsSync gate validates it). The --version probe only
+ *    supplies the version for display.
+ */
+const configuredStrategy: Strategy = {
+  source: "configured",
+  resolve(ctx, io) {
+    const p = ctx.configuredPath?.trim();
+    if (!p) return null;
+    const out = io.exec(p, ["--version"]);
+    return { entry: p, version: out ? parseVersion(out) : null };
+  },
+};
+
 /** Strategy table, tried in priority order. Append a row to add a future route. */
-const STRATEGIES: Strategy[] = [];
+const STRATEGIES: Strategy[] = [configuredStrategy];
 
 /** Builds the not-found resolution, disambiguating `@github/copilot` from `gh copilot`. */
 function notFound(io: ResolverIO): CopilotCliNotFound {

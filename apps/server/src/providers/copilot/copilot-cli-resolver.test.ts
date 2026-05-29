@@ -32,6 +32,26 @@ describe("resolveCopilotCli", () => {
       expect(res.message).toContain("npm install -g @github/copilot");
     }
   });
+
+  it("uses the configured path verbatim and probes its version", () => {
+    const io = fakeIO({
+      platform: "win32",
+      exec: { "C:/tools/copilot.cmd --version": "GitHub Copilot CLI 1.0.24." },
+    });
+    const res = resolveCopilotCli({ configuredPath: "C:/tools/copilot.cmd" }, io);
+    expect(res).toMatchObject({ source: "configured", entry: "C:/tools/copilot.cmd", version: "1.0.24" });
+  });
+
+  it("trusts the configured path even when --version yields no semver", () => {
+    const io = fakeIO({ platform: "linux", exec: { "/usr/bin/copilot --version": "weird output" } });
+    const res = resolveCopilotCli({ configuredPath: "/usr/bin/copilot" }, io);
+    expect(res).toMatchObject({ source: "configured", entry: "/usr/bin/copilot", version: null });
+  });
+
+  it("ignores a blank configured path and falls through", () => {
+    const res = resolveCopilotCli({ configuredPath: "   " }, fakeIO({}));
+    expect(res.source).toBe("not-found");
+  });
 });
 
 export { fakeIO };
