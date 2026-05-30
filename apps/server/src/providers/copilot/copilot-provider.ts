@@ -165,6 +165,8 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider, Pro
 
   private client: CopilotClient | null = null;
   private lastCliPath: string | undefined;
+  /** Last CLI resolution; surfaced as a user-facing error when not-found. */
+  private lastResolution: CopilotCliResolution | null = null;
   /** Cached result of `which("node")` so we don't re-probe PATH on every rebuild. */
   private cachedNodePath: string | null | undefined;
   /** Owns the session pool, idle eviction (now with a real busy guard via `isBusy`), and JobObject/kill. */
