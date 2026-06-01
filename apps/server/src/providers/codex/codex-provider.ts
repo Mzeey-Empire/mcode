@@ -363,18 +363,6 @@ export class CodexProvider extends EventEmitter implements IAgentProvider, Proto
       }
     });
 
-    // When the codex thread ID rotates mid-session (context compaction, etc.),
-    // update the in-memory map and persist the new ID so future app restarts
-    // resume the correct thread instead of a stale one.
-    server.on("threadIdChanged", (newThreadId: string) => {
-      this.sdkSessionIds.set(sessionId, newThreadId);
-      this.emit("event", {
-        type: AgentEventType.System,
-        threadId,
-        subtype: "sdk_session_id:" + newThreadId,
-      } satisfies AgentEvent);
-    });
-
     server.on("fatal", (error: string) => {
       logger.error("CodexAppServer fatal", { sessionId, error });
       this.emit("event", { type: AgentEventType.Error, threadId, error } satisfies AgentEvent);
@@ -393,6 +381,17 @@ export class CodexProvider extends EventEmitter implements IAgentProvider, Proto
     // Propagates start failures to the runtime, which surfaces them to the
     // `acquire` caller in `sendTurn` (emits Error/Ended there).
     await server.start();
+
+    // Register after a successful handshake so a mid-handshake thread/started
+    // notification cannot persist a stale SDK thread id when init later fails.
+    server.on("threadIdChanged", (newThreadId: string) => {
+      this.sdkSessionIds.set(sessionId, newThreadId);
+      this.emit("event", {
+        type: AgentEventType.System,
+        threadId,
+        subtype: "sdk_session_id:" + newThreadId,
+      } satisfies AgentEvent);
+    });
 
     if (server.resumeFailed) {
       logger.warn("Codex session context lost; resume failed, started fresh thread", { sessionId });
