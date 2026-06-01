@@ -4,6 +4,7 @@ import {
   getTestThreadStreaming,
   getTestThreadToolCalls,
   getTestThreadLoadEpoch,
+  getTestThreadAgentStartTime,
   readActiveThreadField,
 } from "@/stores/thread-store-test-utils";
 /**
@@ -196,6 +197,35 @@ describe("ThreadHydrator", () => {
 
     expect(getTestThreadStreaming(THREAD_A)).toBe("partial...");
     expect(getTestThreadToolCalls(THREAD_A)).toHaveLength(1);
+  });
+
+  it("preserves volatile state for a running thread on cache hit", async () => {
+    resetThreadStoreForTests({
+      runningThreadIds: new Set([THREAD_A]),
+      records: new Map<string, ThreadRecord>([
+        [
+          THREAD_A,
+          {
+            ...createEmptyThreadRecord(),
+            streaming: "partial...",
+            agentStartTime: 1234,
+            toolCalls: [
+              { id: "tc1", toolName: "bash", toolInput: {}, output: null, isError: false, isComplete: false },
+            ],
+          },
+        ],
+      ]),
+    });
+    // A stale snapshot — e.g. from a sidebar hover prefetch that captured
+    // messages but no in-flight narration — must not clobber the live timeline.
+    cacheRecord(THREAD_A, makeCachedRecord());
+
+    await hydrator.hydrate(THREAD_A, "active");
+
+    expect(mockTransport.getMessages).not.toHaveBeenCalled();
+    expect(getTestThreadStreaming(THREAD_A)).toBe("partial...");
+    expect(getTestThreadToolCalls(THREAD_A)).toHaveLength(1);
+    expect(getTestThreadAgentStartTime(THREAD_A)).toBe(1234);
   });
 
   it("does not commit stale RPC results after a cross-thread race", async () => {
