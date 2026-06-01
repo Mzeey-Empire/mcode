@@ -1719,21 +1719,6 @@ export function Composer({ threadId, isNewThread, workspaceId, branchFromMessage
     // Avoid duplicate submissions while a placeholder thread is still materializing.
     if (isThreadScaffold) return;
 
-    // Guard against sending a slash command that the active provider doesn't support.
-    // This catches the case where the user typed a command, changed providers, and
-    // then sent without selecting a valid replacement from the popup.
-    const slashMatch = trimmed.match(/^\/(\S+)/);
-    if (slashMatch) {
-      const cmdName = slashMatch[1];
-      const exists = slashCommand.allCommands.some((c) => c.name === cmdName);
-      if (!exists && !slashCommand.isLoading) {
-        useToastStore
-          .getState()
-          .show("error", "Unknown command", `/${cmdName} is not available for this provider`);
-        return;
-      }
-    }
-
     // ---- Handoff queue path: child thread context is still being generated ----
     // When the handoff document hasn't landed yet, queue the message locally and
     // fire it automatically once the status transitions to ready or fallback.
