@@ -20,6 +20,11 @@ import { EventEmitter } from "events";
 import { CopilotClient, approveAll } from "@github/copilot-sdk";
 import type { CopilotSession, ModelInfo } from "@github/copilot-sdk";
 import { discoverCopilotAgents, COPILOT_DEFAULT_AGENTS } from "./copilot-agent-discovery.js";
+import {
+  resolveCopilotCli,
+  createNodeResolverIO,
+  type CopilotCliResolution,
+} from "./copilot-cli-resolver.js";
 import { logger } from "@mcode/shared";
 import { SettingsService } from "../../services/settings-service.js";
 import { EnvService } from "../../services/env-service.js";
@@ -160,6 +165,8 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider, Pro
 
   private client: CopilotClient | null = null;
   private lastCliPath: string | undefined;
+  /** Last CLI resolution; surfaced as a user-facing error when not-found. */
+  private lastResolution: CopilotCliResolution | null = null;
   /** Cached result of `which("node")` so we don't re-probe PATH on every rebuild. */
   private cachedNodePath: string | null | undefined;
   /** Owns the session pool, idle eviction (now with a real busy guard via `isBusy`), and JobObject/kill. */
@@ -303,6 +310,7 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider, Pro
 
     const client = this.client;
     if (!client) {
+      if (this.lastResolution?.source === "not-found") return [];
       throw new Error("Copilot client not available");
     }
 
@@ -408,17 +416,31 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider, Pro
 
     opts.env = { ...this.envService.getEnv() };
 
-    // User-configured CLI path takes priority over all other resolution.
-    if (configuredCliPath) {
-      opts.cliPath = configuredCliPath;
+    // Ordered resolution: configured path > npm-global index.js > PATH/shim follow.
+    const resolution = resolveCopilotCli(
+      { configuredPath: configuredCliPath },
+      createNodeResolverIO(this.envService.getEnv(), process.platform),
+    );
+    this.lastResolution = resolution;
+    if (resolution.source === "not-found") {
+      // Leave this.client null; sendTurn/listModels translate lastResolution
+      // into a user-facing error via the existing error seam.
+      logger.warn("CopilotProvider: CLI not found", { message: resolution.message });
+      this.lastCliPath = configuredCliPath;
+      return;
     }
+    opts.cliPath = resolution.entry;
+    logger.info("CopilotProvider: resolved CLI", {
+      source: resolution.source,
+      version: resolution.version ?? "unknown",
+    });
 
     // Electron fix: resolve the real node binary path once. The SDK's
     // getNodeExecPath() reads process.execPath to spawn .js CLI files,
     // but in Electron that returns electron.exe which cannot host the
     // CLI's server mode. We temporarily override process.execPath during
     // client.start() and also prepend node's directory to PATH.
-    if (process.versions.electron && !configuredCliPath) {
+    if (process.versions.electron && resolution.source !== "configured") {
       if (this.cachedNodePath === undefined) {
         this.cachedNodePath = await which("node", { nothrow: true });
         if (!this.cachedNodePath) {
@@ -566,6 +588,14 @@ export class CopilotProvider extends EventEmitter implements IAgentProvider, Pro
 
     const { sessionId, message, cwd, model, permissionMode, resume, copilotAgent } = params;
     const threadId = this.toThreadId(sessionId);
+
+    // The CLI could not be resolved during refreshClient; surface the resolver's
+    // install message via the existing error seam (mirrors Codex's abort-before-spawn).
+    if (this.lastResolution?.source === "not-found") {
+      this.emit("event", { type: "error", threadId, error: this.lastResolution.message } satisfies AgentEvent);
+      this.emit("event", { type: "ended", threadId } satisfies AgentEvent);
+      return;
+    }
 
     // Re-read after the async refreshClient() await so concurrent sends that
     // both passed the first check don't each create a new SDK session for the
