@@ -438,13 +438,13 @@ export const MessageBubble = memo(function MessageBubble({ message, onBranch, on
     }
 
     return (
-      <div className="flex items-center gap-3 py-2">
-        <div className="h-px flex-1 bg-border" />
+      <div className="flex items-center gap-3 py-2" role="note">
+        <div className="h-px flex-1 bg-border" aria-hidden="true" />
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <RotateCcw size={12} />
+          <RotateCcw size={12} aria-hidden="true" />
           <span>{message.content}</span>
         </div>
-        <div className="h-px flex-1 bg-border" />
+        <div className="h-px flex-1 bg-border" aria-hidden="true" />
       </div>
     );
   }

@@ -142,6 +142,21 @@ export class ThreadHydrator {
   private restoreFromCache(threadId: string, cached: ThreadRecord): void {
     this.deps.setState((state: ThreadHydratorWriteState) => {
       const current = getThreadRecord(state.records, threadId);
+      // The cache snapshot predates in-flight narration, so for a running
+      // thread the live record wins (mirrors fetchAndCommit's isRunning guard).
+      const isRunning = state.runningThreadIds.has(threadId);
+      const liveVolatile: Partial<ThreadRecord> = isRunning
+        ? {
+            toolCalls: current.toolCalls,
+            thoughtSegments: current.thoughtSegments,
+            hooks: current.hooks,
+            streaming: current.streaming,
+            streamingPreview: current.streamingPreview,
+            agentStartTime: current.agentStartTime,
+            currentTurnMessageId: current.currentTurnMessageId,
+            isCompacting: current.isCompacting,
+          }
+        : {};
       return {
         records: patchThreadRecord(state.records, threadId, {
           ...cached,
@@ -152,6 +167,7 @@ export class ThreadHydrator {
           lastHydratedAt: current.lastHydratedAt,
           permissions: current.permissions,
           settings: this.deps.getWorkspaceThreadSettings(threadId),
+          ...liveVolatile,
         }),
         currentThreadId: threadId,
       };

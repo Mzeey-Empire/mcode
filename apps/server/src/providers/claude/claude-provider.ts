@@ -104,6 +104,12 @@ interface ClaudeSessionState {
   lastUsedAt: number;
   /** When true, the finally block in startStreamLoop should not emit an "ended" event. */
   suppressEnded?: boolean;
+  /**
+   * Set when a resume of this session's transcript hit an unrecoverable API
+   * state (see {@link isUnrecoverableThinkingBlockError}). A poisoned entry is
+   * never reused: the next send tears it down and spawns a fresh session.
+   */
+  poisoned?: boolean;
   /** Tool-use IDs whose matching tool_result has not yet been received.
    *  While this set is non-empty, `isBusy` returns true so the runtime's idle
    *  eviction skips the session regardless of how long the SDK has been quiet. */
@@ -236,8 +242,29 @@ export function detectFallbackModel(
   return usedModels[0] ?? null;
 }
 
+/**
+ * Detects the Anthropic API 400 that bricks a resumable session: with extended
+ * thinking on, `thinking`/`redacted_thinking` blocks must be replayed unmodified
+ * on every subsequent request. When a stored assistant turn's thinking block is
+ * altered (e.g. by SDK-side context compaction during a long tool-use run), the
+ * API rejects every resume of that transcript with this message, so the thread
+ * is permanently stuck until the session is abandoned.
+ *
+ * @param resultText - the SDK result payload's `result` string (the error text
+ *   lives there, not in the `errors` array, for this class of failure)
+ */
+export function isUnrecoverableThinkingBlockError(resultText: unknown): boolean {
+  if (typeof resultText !== "string") return false;
+  return /`?(?:thinking|redacted_thinking)`?[^]*?blocks in the latest assistant message cannot be modified/.test(
+    resultText,
+  );
+}
+
 /** Max time to wait on a resume side-channel before falling back to sessionless. */
 const SIDE_CHANNEL_RESUME_PROBE_MS = 20_000;
+
+/** Bytes of subprocess stderr retained per session for crash diagnostics. */
+const STDERR_CAPTURE_LIMIT = 8_000;
 
 /**
  * Per-turn payload staged from `sendTurn`/`doSendMessage` to `spawn`. The
@@ -280,6 +307,14 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider, Prot
   /** Per-turn payload staged for `spawn` to run a fresh session's first turn. */
   private pendingSpawnTurns = new Map<string, PendingSpawnTurn>();
   private sdkSessionIds = new Map<string, string>();
+  /**
+   * Tail of the most recent stderr emitted by each session's Claude Code
+   * subprocess, capped at {@link STDERR_CAPTURE_LIMIT}. The SDK's process-exit
+   * error carries only the exit code (no stderr), so without this a crash
+   * surfaces as the opaque "process exited with code 1". Captured here and
+   * attached to the Error event when the stream throws.
+   */
+  private recentStderr = new Map<string, string>();
   /**
    * Active goals keyed by sessionId (mcode-${threadId}). When set, the SDK
    * Stop hook installed in baseOptions blocks the agent from ending its turn
@@ -832,6 +867,7 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider, Prot
     // which resumes the same conversation via the persisted sdkSessionIds entry.
     const reusable =
       existing !== undefined &&
+      existing.poisoned !== true &&
       existing.permissionMode === permissionMode &&
       existing.contextWindowMode === contextWindowMode;
 
@@ -1253,9 +1289,20 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider, Prot
     this.pendingSpawnTurns.delete(sessionId);
 
     const { prompt, resume, resumeId, uuid, baseOptions, resolvedModel, contextWindowMode } = staged;
+
+    // Capture the subprocess stderr tail so a non-zero exit (which the SDK
+    // reports as a bare "process exited with code N") carries the actual CLI
+    // error instead of an opaque code. Reset per spawn so a crash is never
+    // attributed stale output from a prior turn on the same session.
+    this.recentStderr.delete(sessionId);
+    const captureStderr = (data: string): void => {
+      const next = ((this.recentStderr.get(sessionId) ?? "") + data).slice(-STDERR_CAPTURE_LIMIT);
+      this.recentStderr.set(sessionId, next);
+    };
+
     const options = resume
-      ? { ...baseOptions, resume: resumeId }
-      : { ...baseOptions, sessionId: uuid };
+      ? { ...baseOptions, resume: resumeId, stderr: captureStderr }
+      : { ...baseOptions, sessionId: uuid, stderr: captureStderr };
 
     const queue = createPromptQueue();
 
@@ -1586,6 +1633,33 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider, Prot
 
             case "result": {
               if (anyMsg.is_error === true) {
+                // Poison-pill recovery: an unmodifiable-thinking-block 400 means
+                // this session's stored transcript can never be resumed again.
+                // Abandon the session (forget the resume id, mark the live entry
+                // poisoned so it is not reused, and tell AgentService to clear
+                // the persisted sdk_session_id) so the next send starts fresh,
+                // instead of looping the same 400 forever.
+                if (isUnrecoverableThinkingBlockError(anyMsg.result)) {
+                  logger.warn("Claude session poisoned by unmodifiable thinking block; abandoning session", {
+                    sessionId,
+                    threadId,
+                  });
+                  this.sdkSessionIds.delete(sessionId);
+                  const poisonedEntry = this.runtime.get(sessionId);
+                  if (poisonedEntry) poisonedEntry.poisoned = true;
+                  // Surface the reset as a quiet system-message hairline in the
+                  // transcript (handled client-side), not a red error card. The
+                  // same event also clears the persisted sdk_session_id server-side.
+                  this.emit("event", {
+                    type: AgentEventType.System,
+                    threadId,
+                    subtype: "sdk_session_invalidated",
+                  } satisfies AgentEvent);
+                  lastAssistantText = "";
+                  lastStreamInputTokens = undefined;
+                  awaitingResume = false;
+                  break;
+                }
                 // The "No conversation found" resume-recovery branch above
                 // handles its own flow and returns early; any other is_error
                 // result lands here and must be surfaced as an Error event
@@ -1995,6 +2069,9 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider, Prot
         const superseded =
           (current !== undefined && current.query !== q) ||
           current?.suppressEnded === true;
+        // The SDK's process-exit error omits stderr; attach the captured tail
+        // so "process exited with code 1" becomes actionable.
+        const stderrTail = this.recentStderr.get(sessionId)?.trim();
         if (superseded) {
           logger.debug("SDK stream error suppressed (session superseded)", {
             sessionId,
@@ -2004,14 +2081,18 @@ export class ClaudeProvider extends EventEmitter implements IAgentProvider, Prot
           logger.error("SDK stream error", {
             sessionId,
             error: errorMessage,
+            ...(stderrTail ? { stderr: stderrTail } : {}),
           });
           this.emit("event", {
             type: AgentEventType.Error,
             threadId,
-            error: errorMessage,
+            error: stderrTail
+              ? `${errorMessage}\n\nClaude Code stderr (tail):\n${stderrTail}`
+              : errorMessage,
           } satisfies AgentEvent);
         }
       } finally {
+        this.recentStderr.delete(sessionId);
         const current = this.runtime.get(sessionId);
         if (current?.query === q) {
           // The SDK subprocess has exited; drop the dead session from the pool.

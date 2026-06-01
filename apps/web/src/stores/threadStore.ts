@@ -1276,12 +1276,23 @@ export const useThreadStore = create<ThreadState>((set, get) => {
 
     if (method === "session.system") {
       const subtype = params.subtype as string;
-      if (subtype === "session_restarted") {
+      // Both subtypes render as the quiet system-message hairline chapter-break.
+      // `session_restarted`: the SDK silently restarted (lost in-memory context).
+      // `sdk_session_invalidated`: a poison-pill provider state forced a reset;
+      // the persisted sdk_session_id is cleared server-side so the next send
+      // starts fresh. Terse, technical copy; no apology, no vendor-blame.
+      const systemNotice =
+        subtype === "session_restarted"
+          ? "Session restarted. The agent no longer has context from earlier messages."
+          : subtype === "sdk_session_invalidated"
+            ? "Session reset. Earlier context cleared. Send again to continue."
+            : null;
+      if (systemNotice) {
         const message: Message = {
           id: crypto.randomUUID(),
           thread_id: threadId,
           role: "system",
-          content: "Session restarted. The agent no longer has context from earlier messages.",
+          content: systemNotice,
           tool_calls: null,
           files_changed: null,
           cost_usd: null,

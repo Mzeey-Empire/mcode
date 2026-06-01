@@ -56,6 +56,29 @@ describe("handleAgentEvent branches", () => {
     expect(getTestThreadError("thread-1")).toBe("Out of tokens");
   });
 
+  it("session.system sdk_session_invalidated appends a reset hairline message", () => {
+    useThreadStore.getState().handleAgentEvent("thread-1", {
+      method: "session.system",
+      params: { subtype: "sdk_session_invalidated" },
+    });
+
+    const messages = getTestActiveMessages();
+    expect(messages).toHaveLength(1);
+    expect(messages[0].role).toBe("system");
+    expect(messages[0].content).toBe(
+      "Session reset. Earlier context cleared. Send again to continue.",
+    );
+  });
+
+  it("session.system with an unknown subtype appends no message", () => {
+    useThreadStore.getState().handleAgentEvent("thread-1", {
+      method: "session.system",
+      params: { subtype: "some_other_subtype" },
+    });
+
+    expect(getTestActiveMessages()).toHaveLength(0);
+  });
+
   it("session.turnComplete without streaming content clears state only", () => {
     useThreadStore.getState().handleAgentEvent("thread-1", {
       method: "session.turnComplete",

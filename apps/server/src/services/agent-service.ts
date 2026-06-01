@@ -1926,6 +1926,18 @@ export class AgentService {
                 error: err instanceof Error ? err.message : String(err),
               });
             }
+          } else if (event.subtype === "sdk_session_invalidated") {
+            // The provider abandoned an unresumable session (poison-pill 400).
+            // Clear the persisted id so the next turn spawns fresh rather than
+            // resuming the broken transcript.
+            try {
+              this.threadRepo.clearSdkSessionId(event.threadId);
+            } catch (err) {
+              logger.warn("Failed to clear sdk_session_id", {
+                threadId: event.threadId,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
           }
         }
 
