@@ -257,9 +257,19 @@ export async function performInitialize(args: {
     }
   }
 
-  const base = lastErr instanceof Error ? lastErr.message : String(lastErr);
-  const reason = getLastStderr();
-  throw new Error(reason ? `${base} (codex app-server reported: ${reason})` : base);
+  throw enrichHandshakeError(lastErr, getLastStderr());
+}
+
+/**
+ * Appends the most recent classified stderr line to a handshake failure when
+ * present, so auth/version/setup errors are legible instead of bare timeouts.
+ */
+export function enrichHandshakeError(err: unknown, stderr: string | null): Error {
+  const base = err instanceof Error ? err.message : String(err);
+  if (!stderr || base.includes(stderr)) {
+    return err instanceof Error ? err : new Error(base);
+  }
+  return new Error(`${base} (codex app-server reported: ${stderr})`);
 }
 
 /**
@@ -434,7 +444,7 @@ export class CodexAppServer extends EventEmitter {
       await this.runHandshake();
     } catch (err) {
       await this.kill();
-      throw err;
+      throw enrichHandshakeError(err, this.lastStderr);
     }
   }
 
@@ -690,6 +700,7 @@ export class CodexAppServer extends EventEmitter {
       this.rpc.on("notification", captureStarted);
 
       let startResult: ThreadStartResult | null = null;
+      let startError: unknown;
       try {
         startResult = await this.rpc.sendRequest<ThreadStartParams, ThreadStartResult>(
           "thread/start",
@@ -697,24 +708,33 @@ export class CodexAppServer extends EventEmitter {
           15000,
         );
         logger.debug("Codex thread/start response", { result: startResult });
+      } catch (err) {
+        startError = err;
       } finally {
-        // Always clean up; the notification listener is removed after resolving.
         const cleanup = () => {
           clearTimeout(startedTimeout);
           this.rpc.off("notification", captureStarted);
         };
-        // Prefer the RPC response; if missing, wait for the notification.
-        // The codex app-server returns the threadId at result.thread.id,
-        // not result.threadId. Accept both shapes for forward compatibility.
-        const r = startResult as { threadId?: string; thread?: { id?: string } } | null;
-        const responseThreadId = r?.threadId ?? r?.thread?.id;
-        if (responseThreadId) {
-          this._threadId = responseThreadId;
+        if (startError) {
           cleanup();
         } else {
-          this._threadId = await threadStartedPromise;
-          cleanup();
+          // Prefer the RPC response; if missing, wait for the notification.
+          // The codex app-server returns the threadId at result.thread.id,
+          // not result.threadId. Accept both shapes for forward compatibility.
+          const r = startResult as { threadId?: string; thread?: { id?: string } } | null;
+          const responseThreadId = r?.threadId ?? r?.thread?.id;
+          if (responseThreadId) {
+            this._threadId = responseThreadId;
+            cleanup();
+          } else {
+            this._threadId = await threadStartedPromise;
+            cleanup();
+          }
         }
+      }
+
+      if (startError) {
+        throw startError;
       }
 
       if (!this._threadId) {
