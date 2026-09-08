@@ -60,6 +60,8 @@ before fixture cleanup.
 
 Use `runtime live --scenario stop --confirm-provider-call` for the public server proof. The harness requests retained event replay after it creates the thread.
 
+For full shutdown changes, also run the [resource lifecycle proof](resource-lifecycle.md#full-shutdown-proof). It checks active Codex turns, owned process exit, and restart state.
+
 ## OpenCode restart resume and deleted upstream session
 
 1. Create an owned temporary workspace, then start two owned direct OpenCode threads with `opencode/muse-spark-1.3-contributor-free`.

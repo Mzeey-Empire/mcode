@@ -2671,17 +2671,13 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   }
 
   /** Tears down all sessions, drains pending permissions, and stops the eviction timer. */
-  shutdown(): void {
+  async shutdown(): Promise<void> {
     // Drain everything up front: `runtime.shutdown` stops each session
     // (close drains per-session), but draining all here also clears any
     // permissions whose session never landed in the pool.
     this.drainPending(() => true);
-    void this.runtime.shutdown().catch((err: unknown) => {
-      logger.warn("Codex runtime shutdown failed", { error: String(err) });
-    });
-    void this.codexPorts.catalog.shutdown().catch((err: unknown) => {
-      logger.warn("Codex catalog shutdown failed", { error: String(err) });
-    });
+    await this.runtime.shutdown();
+    await this.codexPorts.catalog.shutdown();
     this.sdkSessionIds.clear();
     this.pendingSpawnTurns.clear();
     this.pendingBrowserAccess.clear();

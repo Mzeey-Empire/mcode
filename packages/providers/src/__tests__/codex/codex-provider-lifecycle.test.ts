@@ -98,6 +98,26 @@ function createProvider() {
 afterEach(() => vi.clearAllMocks());
 
 describe("Codex provider lifecycle through native transport", () => {
+  it("interrupts an active turn and waits for process exit during shutdown", async () => {
+    const { provider, child, starts } = createProvider();
+    child.kill.mockImplementation(() => true);
+    await provider.sendTurn(request);
+    await vi.waitFor(() => expect(starts()).toHaveLength(1));
+    let settled = false;
+    const shutdown = Promise.resolve(provider.shutdown()).then(() => { settled = true; });
+    try {
+      await vi.waitFor(() => expect(child.kill).toHaveBeenCalledWith("SIGTERM"));
+      expect(child.requests.some(({ method }) => method === "turn/interrupt")).toBe(true);
+      expect(settled).toBe(false);
+      child.emit("exit", 0, null);
+      await shutdown;
+      expect(settled).toBe(true);
+    } finally {
+      child.emit("exit", 0, null);
+      await shutdown;
+    }
+  });
+
   it("keeps the process after completion and starts the next turn on the same transport", async () => {
     const { provider, child, complete } = createProvider();
     try {
@@ -110,7 +130,7 @@ describe("Codex provider lifecycle through native transport", () => {
       expect(child.kill).not.toHaveBeenCalled();
     } finally {
       await provider.discardSession(request.sessionId);
-      provider.shutdown();
+      await provider.shutdown();
     }
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
   });
@@ -134,7 +154,7 @@ describe("Codex provider lifecycle through native transport", () => {
       expect(spawn).toHaveBeenCalledTimes(1);
     } finally {
       await provider.discardSession(request.sessionId);
-      provider.shutdown();
+      await provider.shutdown();
     }
   });
 });

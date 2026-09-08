@@ -1,5 +1,5 @@
 import "reflect-metadata";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -15,6 +15,7 @@ import { setupContainer } from "../../../../application/composition/container.js
 import { CanonicalAgentBoundary } from "../../../agents/canonical/canonical-agent-boundary.js";
 import { MessageRepo } from "../../../agents/conversation/persistence/message-repo.js";
 import { ProviderRegistry } from "../provider-registry.js";
+import { SettingsService } from "../../../settings/settings-service.js";
 import { ProviderEventIngress, type ProviderEventIngressEvent } from "../provider-event-ingress.js";
 
 const EXECUTION_ID = "00000000-0000-4000-8000-000000000001";
@@ -90,8 +91,11 @@ describe("provider composition container", () => {
     database = container.resolve<Database>("Database");
   });
 
-  afterEach(() => {
-    database?.close();
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await container.resolve(ProviderRegistry).shutdown();
+    container.resolve(SettingsService).dispose();
+    database?.close(true);
     database = undefined;
     container.reset();
     if (previousDatabasePath === undefined) delete process.env.MCODE_DB_PATH;
@@ -140,5 +144,25 @@ describe("provider composition container", () => {
       event: expect.objectContaining({ delta: "canonical delivery" }),
       canonicalReceipt: expect.objectContaining({ eventId: "cursor:runtime-event-1" }),
     })]);
+  });
+
+  it("waits for provider cleanup even when another provider shutdown fails", async () => {
+    const registry = container.resolve(ProviderRegistry);
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const failure = new Error("Provider cleanup failed");
+    vi.spyOn(registry.resolve("codex"), "shutdown").mockReturnValue(pending);
+    vi.spyOn(registry.resolve("claude"), "shutdown").mockImplementation(() => { throw failure; });
+    let settled = false;
+    const shutdown = registry.shutdown().finally(() => { settled = true; });
+    const rejected = expect(shutdown).rejects.toMatchObject({ errors: [failure] });
+    try {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(settled).toBe(false);
+    } finally {
+      release();
+      await rejected;
+      vi.restoreAllMocks();
+    }
   });
 });

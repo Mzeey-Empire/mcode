@@ -39,9 +39,13 @@ export class ProviderRegistry implements IProviderRegistry {
   }
 
   /** Shut down all providers. */
-  shutdown(): void {
-    for (const provider of this.providers.values()) {
-      provider.shutdown();
+  async shutdown(): Promise<void> {
+    const results = await Promise.allSettled(
+      [...this.providers.values()].map(async (provider) => provider.shutdown()),
+    );
+    const failures = results.filter((result) => result.status === "rejected");
+    if (failures.length > 0) {
+      throw new AggregateError(failures.map((result) => result.reason), "Provider shutdown failed");
     }
   }
 }

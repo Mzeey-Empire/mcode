@@ -942,7 +942,7 @@ async function shutdown(): Promise<void> {
 
   // 2. Shutdown provider registry
   shutdownCoordinator.setPhase("shutdown providers");
-  providerRegistry.shutdown();
+  await providerRegistry.shutdown();
   browserAutomationBroker.shutdown();
   browserAutomationSessionLease.shutdown();
 
