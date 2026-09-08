@@ -36,6 +36,11 @@ const item = z.object({
   receiverThreadIds: z.array(nativeId).optional(), agentThreadId: nativeId.optional(), agentPath: z.string().optional(),
 }).passthrough();
 const usage = z.object({ input_tokens: z.number().nonnegative().optional(), cached_input_tokens: z.number().nonnegative().optional(), output_tokens: z.number().nonnegative().optional() }).passthrough();
+const tokenCount = z.number().int().nonnegative().safe();
+const tokenUsageBreakdown = z.object({ totalTokens: tokenCount, inputTokens: tokenCount, cachedInputTokens: tokenCount, outputTokens: tokenCount, reasoningOutputTokens: tokenCount });
+const threadTokenUsage = z.object({ total: tokenUsageBreakdown, last: tokenUsageBreakdown, modelContextWindow: tokenCount.nullish() });
+/** Native cumulative and latest-request token usage, validated at ingress. */
+export type CodexTokenUsage = z.infer<typeof threadTokenUsage>;
 const turn = z.object({ id: nativeId.optional(), status: z.enum(["completed", "failed", "interrupted"]), error: z.object({ message: z.string() }).passthrough().nullish(), usage: usage.optional() }).passthrough();
 const goal = z.object({
   threadId: nativeId, objective: z.string(), status: z.enum(["active", "paused", "blocked", "usageLimited", "budgetLimited", "complete"]),
@@ -76,6 +81,7 @@ const knownNotificationSchema = z.discriminatedUnion("method", [
   notificationSchema("turn/plan/updated", z.object({ plan: z.array(z.object({ step: z.string(), status: z.string() })), explanation: z.string().nullish() }).passthrough()),
   notificationSchema("thread/goal/updated", z.object({ goal }).passthrough()),
   notificationSchema("thread/settings/updated", z.object({ threadId: z.string() }).passthrough()),
+  notificationSchema("thread/tokenUsage/updated", z.object({ ...scoped, tokenUsage: threadTokenUsage })),
   notificationSchema("mcpServer/startupStatus/updated", z.object({ name: z.string(), status: z.enum(["starting", "ready", "failed", "cancelled", "error"]) }).passthrough()),
   notificationSchema("error", z.object({ error: z.object({ message: z.string().optional() }).passthrough().optional(), willRetry: z.boolean().optional() }).passthrough()),
   notificationSchema("thread/started", record),

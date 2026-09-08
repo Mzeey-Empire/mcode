@@ -143,12 +143,15 @@ export const MODEL_PROVIDERS: readonly ModelProvider[] = [
 ];
 
 /**
- * Merges live model definitions into the static Settings catalog by model ID.
+ * Uses the live Codex order; merges other providers into the static Settings catalog.
  */
 export function pickProviderModelsForSettings(
   staticModels: readonly ModelDefinition[],
   dynamicModels: readonly ModelDefinition[] | undefined,
 ): ModelDefinition[] {
+  if (dynamicModels?.some((model) => model.providerId === "codex")) {
+    return [...dynamicModels];
+  }
   if (dynamicModels != null && dynamicModels.length > 0) {
     const dynamicById = new Map(dynamicModels.map((model) => [model.id, model]));
     const merged = staticModels.map((model) => {

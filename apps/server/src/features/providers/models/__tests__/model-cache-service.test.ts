@@ -99,7 +99,7 @@ describe("ModelCacheService", () => {
     expect(service.getCached("copilot")).toEqual([{ id: "p1", name: "Copilot Model" }]);
   });
 
-  it("does not write to SQLite when model IDs are unchanged", async () => {
+  it("does not write to SQLite when model lists are unchanged", async () => {
     const models: ProviderModelInfo[] = [
       { id: "m1", name: "Model 1" },
       { id: "m2", name: "Model 2" },
@@ -119,6 +119,16 @@ describe("ModelCacheService", () => {
     // The provider was called, but since IDs match, upsert should not run
     expect(provider.listModels).toHaveBeenCalledTimes(1);
     expect(upsertSpy).not.toHaveBeenCalled();
+  });
+
+  it("persists changed order and labels across cache reconstruction", async () => {
+    repo.upsert("test-provider", [{ id: "a", name: "A" }, { id: "b", name: "B" }]);
+    const provider = makeProvider([{ id: "b", name: "Bee" }, { id: "a", name: "A" }]);
+    const registry = makeRegistry(new Map([["test-provider", provider]]));
+    await new ModelCacheService(repo, registry).refreshProvider("test-provider");
+    expect(await new ModelCacheService(repo, registry).listModels("test-provider")).toEqual([
+      { id: "b", name: "Bee" }, { id: "a", name: "A" },
+    ]);
   });
 
   it("updates SQLite when provider returns different model IDs", async () => {

@@ -287,6 +287,9 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     switch (event.type) {
       case AgentEventType.TurnStarted: return this.applyTurnStarted(event);
       case AgentEventType.TurnComplete: return this.applyTurnComplete(event);
+      case AgentEventType.ContextEstimate:
+        if (event.totalProcessedTokens !== undefined) this.recordContextUsage(event, this.compactionInProgressByThread.has(event.threadId));
+        return true;
       case AgentEventType.Error: return this.applyError(event);
       case AgentEventType.Compacting: return this.applyCompacting(event);
       case AgentEventType.CompactSummary: return this.applyCompactSummary(event);
@@ -652,7 +655,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     return true;
   }
 
-  private recordContextUsage(event: Extract<AgentEvent, { type: "turnComplete" }>, compacting: boolean): void {
+  private recordContextUsage(event: Extract<AgentEvent, { type: "turnComplete" | "contextEstimate" }>, compacting: boolean): void {
     if (event.tokensIn > 0 && !compacting) {
       try {
         this.runtimePersistence.recordContextUsage(event.threadId, event.tokensIn, event.contextWindow);

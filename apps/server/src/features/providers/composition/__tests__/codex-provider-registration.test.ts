@@ -39,6 +39,7 @@ describe("Codex Provider registration", () => {
         attachments: { persistGeneratedImageFromPath: vi.fn() },
         catalog: {
           currentSkills: vi.fn(() => []),
+          listModels: vi.fn(async () => []),
           currentPrompts: vi.fn(() => []),
           refreshCustomPrompts: vi.fn(async () => ({ prompts: [] })),
           shutdown: vi.fn(async () => undefined),

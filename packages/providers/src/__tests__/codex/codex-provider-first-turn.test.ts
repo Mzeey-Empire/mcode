@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -21,7 +21,7 @@ vi.mock("../../private/codex/codex-version.js", () => ({
   meetsMinVersion: meetsMinVersionMock,
 }));
 
-const { sendTurnMock, readConfigMock, appServers, startError } = vi.hoisted(() => ({
+const { sendTurnMock, readConfigMock, appServers, startError, startGate } = vi.hoisted(() => ({
   sendTurnMock: vi.fn().mockResolvedValue("turn-test-id"),
   readConfigMock: vi.fn(),
   appServers: [] as Array<import("node:events").EventEmitter & {
@@ -30,6 +30,7 @@ const { sendTurnMock, readConfigMock, appServers, startError } = vi.hoisted(() =
     spawnedEnv?: Record<string, string>;
   }>,
   startError: { current: null as Error | null },
+  startGate: { current: null as Promise<void> | null },
 }));
 
 vi.mock("../../private/codex/codex-app-server.js", async () => {
@@ -49,6 +50,7 @@ vi.mock("../../private/codex/codex-app-server.js", async () => {
       const getSpawnEnv = (this.options as { getSpawnEnv?: () => Record<string, string> }).getSpawnEnv;
       const env = getSpawnEnv?.();
       this.spawnedEnv = env ? { ...env } : undefined;
+      await startGate.current;
       if (startError.current) {
         this.isAlive = false;
         throw startError.current;
@@ -86,6 +88,7 @@ const schemaValidExecutionId = "00000000-0000-4000-8000-000000000001";
 function makeProvider(
   catalogService: {
     currentSkills: (cwd?: string) => unknown[];
+    listModels: () => Promise<[]>;
     currentPrompts: () => unknown[];
     refreshCustomPrompts: () => Promise<{ prompts: unknown[] }>;
     refresh: (cwd?: string) => Promise<{ skills: unknown[] }>;
@@ -93,6 +96,7 @@ function makeProvider(
     shutdown: () => Promise<void>;
   } = {
     currentSkills: vi.fn(() => []),
+    listModels: vi.fn(async () => []),
     currentPrompts: vi.fn(() => []),
     refreshCustomPrompts: vi.fn(async () => ({ prompts: [] })),
     refresh: vi.fn(async () => ({ skills: [] })),
@@ -130,10 +134,15 @@ describe("CodexProvider first turn on new session", () => {
     meetsMinVersionMock.mockClear();
     appServers.length = 0;
     startError.current = null;
+    startGate.current = null;
     readConfigMock.mockReset();
     readConfigMock.mockResolvedValue({
       config: { mcp_servers: { mcode_internal_thread_control: {} } },
     });
+  });
+
+  afterEach(() => {
+    for (const server of appServers) server.emit("fatal", "test cleanup");
   });
 
   it("pushes complete native aggregates with dispatch identity and rejects foreign native turns", async () => {
@@ -202,6 +211,8 @@ describe("CodexProvider first turn on new session", () => {
     expect(process.env.MCODE_BROWSER_MCP_TOKEN).toBe(inheritedBrowserToken);
     await new Promise<void>((resolve) => setImmediate(resolve));
     await provider.stopSession(sessionId);
+    expect(lease.credentials.size()).toBe(1);
+    await provider.discardSession(sessionId);
     expect(lease.credentials.size()).toBe(0);
   });
 
@@ -531,7 +542,7 @@ describe("CodexProvider first turn on new session", () => {
     await ended;
   });
 
-  it("drains the main terminal notification before stop clears turn ownership", async () => {
+  it("cancels the main turn and reuses its app-server for the next turn", async () => {
     const provider = makeProvider();
     const events: ProviderRuntimeEvent[] = [];
     provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
@@ -571,9 +582,96 @@ describe("CodexProvider first turn on new session", () => {
           },
         });
       });
+      expect(appServers[0]!.isAlive).toBe(true);
+      sendTurnMock.mockResolvedValueOnce("next-native-turn");
+      await provider.sendTurn({
+        turnId: "next-turn", turnExecutionId: "next-execution", sessionId,
+        workspaceId: "workspace-test", threadId, message: "continue",
+        cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+        providerOptions: {}, permissionMode: "auto",
+      });
+      await vi.waitFor(() => expect(sendTurnMock).toHaveBeenCalledTimes(2));
+      expect(appServers).toHaveLength(1);
+      appServers[0]!.emit("notification", {
+        method: "turn/completed",
+        params: { threadId: "sdk-thread-1", turn: { id: "turn-test-id", status: "completed" } },
+      });
+      expect(events.filter(({ event }) => event.type === AgentEventType.TurnComplete)).toEqual([]);
+      appServers[0]!.emit("notification", {
+        method: "turn/completed",
+        params: { threadId: "sdk-thread-1", turn: { id: "next-native-turn", status: "completed" } },
+      });
+      expect(events.filter(({ event }) => event.type === AgentEventType.TurnComplete).map(({ event }) => event.turnExecutionId)).toEqual(["next-execution"]);
     } finally {
       state?.abortPendingTurnWait?.();
+      await provider.discardSession(sessionId);
     }
+  });
+
+  it("cancels a staged turn before turn/start without closing the app-server", async () => {
+    const provider = makeProvider();
+    await provider.sendTurn({
+      turnId: "staged-turn", turnExecutionId: "staged-execution", sessionId,
+      workspaceId: "workspace-test", threadId, message: "cancel before dispatch",
+      cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "auto",
+    });
+    await provider.stopSession(sessionId);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(sendTurnMock).not.toHaveBeenCalled();
+    expect(appServers[0]!.isAlive).toBe(true);
+    await provider.discardSession(sessionId);
+    expect(appServers[0]!.isAlive).toBe(false);
+  });
+
+  it("cancels during app-server startup and keeps the session for the next turn", async () => {
+    let finishStartup!: () => void;
+    startGate.current = new Promise<void>((resolve) => { finishStartup = resolve; });
+    const provider = makeProvider();
+    const request = {
+      turnId: "spawning-turn", turnExecutionId: "spawning-execution", sessionId,
+      workspaceId: "workspace-test", threadId, message: "cancel during startup",
+      cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build" as const,
+      providerOptions: {}, permissionMode: "auto",
+    };
+    const send = provider.sendTurn(request);
+    await vi.waitFor(() => expect(appServers).toHaveLength(1));
+    await provider.stopSession(sessionId);
+    finishStartup();
+    await send;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(sendTurnMock).not.toHaveBeenCalled();
+    expect(appServers[0]!.isAlive).toBe(true);
+    await provider.sendTurn({ ...request, turnId: "next-turn", turnExecutionId: "next-execution", message: "continue" });
+    await vi.waitFor(() => expect(sendTurnMock).toHaveBeenCalledTimes(1));
+    expect(appServers).toHaveLength(1);
+    await provider.discardSession(sessionId);
+  });
+
+  it("waits for turn/start identity before cancelling without closing the app-server", async () => {
+    let finishStart!: (turnId: string) => void;
+    sendTurnMock.mockImplementationOnce(() => new Promise<string>((resolve) => { finishStart = resolve; }));
+    const provider = makeProvider();
+    const events: ProviderRuntimeEvent[] = [];
+    provider.on("event", (event: ProviderRuntimeEvent) => events.push(event));
+    await provider.sendTurn({
+      turnId: "starting-turn", turnExecutionId: "starting-execution", sessionId,
+      workspaceId: "workspace-test", threadId, message: "cancel during dispatch",
+      cwd: process.cwd(), model: "gpt-5.4", interactionMode: "build",
+      providerOptions: {}, permissionMode: "auto",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const stop = provider.stopSession(sessionId);
+    finishStart("starting-native-turn");
+    await stop;
+    expect(events).toContainEqual({ event: {
+      type: AgentEventType.Ended, threadId,
+      turnExecutionId: "starting-execution", outcome: "cancelled",
+    } });
+    expect(appServers[0]!.isAlive).toBe(true);
+    await provider.stopSession(sessionId);
+    expect(appServers[0]!.isAlive).toBe(true);
+    await provider.discardSession(sessionId);
   });
 
   it("reports provider_lost without an outcome when main-turn drain fails", async () => {
@@ -612,8 +710,9 @@ describe("CodexProvider first turn on new session", () => {
     const state = runtime.get(sessionId);
 
     try {
-      await provider.stopSession(sessionId);
+      await expect(provider.stopSession(sessionId)).rejects.toThrow();
       expect(interruptRejected).toBe(true);
+      expect(server.isAlive).toBe(true);
       expect(events).toContainEqual({
         event: {
           type: AgentEventType.Ended,
@@ -832,7 +931,7 @@ describe("CodexProvider first turn on new session", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  it("maps proactive orchestration to Ultra only on supported Codex models", async () => {
+  it.each(["low", "high", "ultra", undefined] as const)("preserves selected effort (%s) during proactive orchestration", async (reasoningLevel) => {
     const provider = makeProvider();
 
     await provider.sendTurn({
@@ -844,7 +943,7 @@ describe("CodexProvider first turn on new session", () => {
       message: "delegate this work",
       cwd: process.cwd(),
       model: "gpt-5.6-sol",
-      reasoningLevel: "high",
+      reasoningLevel,
       interactionMode: "build",
       orchestrationMode: "proactive",
       providerOptions: {},
@@ -854,7 +953,7 @@ describe("CodexProvider first turn on new session", () => {
     for (let i = 0; i < 20 && sendTurnMock.mock.calls.length === 0; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    expect(sendTurnMock.mock.calls[0]?.[1]).toMatchObject({ effort: "ultra" });
+    expect(sendTurnMock.mock.calls[0]![1]?.effort).toBe(reasoningLevel);
 
     sendTurnMock.mockClear();
     await provider.sendTurn({
@@ -866,7 +965,7 @@ describe("CodexProvider first turn on new session", () => {
       message: "delegate this work",
       cwd: process.cwd(),
       model: "gpt-5.6-luna",
-      reasoningLevel: "high",
+      reasoningLevel,
       interactionMode: "build",
       orchestrationMode: "proactive",
       providerOptions: {},
@@ -876,7 +975,7 @@ describe("CodexProvider first turn on new session", () => {
     for (let i = 0; i < 20 && sendTurnMock.mock.calls.length === 0; i++) {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    expect(sendTurnMock.mock.calls[0]?.[1]).toMatchObject({ effort: "high" });
+    expect(sendTurnMock.mock.calls[0]![1]?.effort).toBe(reasoningLevel);
   });
 
   it("did not overwrite pendingTurnId when a superseding runTurn finished sendTurn first", async () => {
@@ -943,6 +1042,7 @@ describe("CodexProvider first turn on new session", () => {
     };
     const provider = makeProvider({
       currentSkills: vi.fn(() => [nativeSkill]),
+      listModels: vi.fn(async () => []),
       currentPrompts: vi.fn(() => []),
       refreshCustomPrompts: vi.fn(async () => ({ prompts: [] })),
       refresh: vi.fn(async () => ({ skills: [nativeSkill] })),
@@ -1098,6 +1198,7 @@ describe("CodexProvider first turn on new session", () => {
       const refreshCustomPrompts = vi.fn(async () => ({ prompts: [prompt] }));
       const provider = makeProvider({
           currentSkills: vi.fn(() => []),
+          listModels: vi.fn(async () => []),
           currentPrompts: vi.fn(() => []),
           refreshCustomPrompts,
           refresh: vi.fn(async () => ({ skills: [] })),
@@ -1159,6 +1260,7 @@ describe("CodexProvider first turn on new session", () => {
       };
       const provider = makeProvider({
           currentSkills: vi.fn(() => [skill]),
+          listModels: vi.fn(async () => []),
           currentPrompts: vi.fn(() => [prompt]),
           refreshCustomPrompts: vi.fn(async () => ({ prompts: [prompt] })),
           refresh: vi.fn(async () => ({ skills: [skill] })),
@@ -1247,6 +1349,7 @@ describe("CodexProvider first turn on new session", () => {
       };
       const provider = makeProvider({
           currentSkills: vi.fn(() => []),
+          listModels: vi.fn(async () => []),
           currentPrompts: vi.fn(() => []),
           refreshCustomPrompts: vi.fn(async () => ({ prompts: [prompt] })),
           refresh: vi.fn(async () => ({ skills: [] })),

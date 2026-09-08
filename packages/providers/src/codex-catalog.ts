@@ -101,6 +101,7 @@ export interface CodexCatalogClient {
   readonly isAlive: boolean;
   on(event: "notification", listener: (notification: unknown) => void): this;
   start(): Promise<void>;
+  listModels(): Promise<import("@mcode/contracts").ProviderModelInfo[]>;
   listSkills(cwds?: string[], forceReload?: boolean): Promise<CodexCatalogSkillsResult>;
   listPlugins(cwds?: string[]): Promise<CodexCatalogPluginsResult>;
   readPlugin(params: CodexCatalogPluginReadParams): Promise<CodexCatalogPluginReadResult>;

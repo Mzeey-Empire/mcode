@@ -10,7 +10,7 @@ export type TurnRuntimePersistenceState = Pick<Thread, "provider" | "status">;
 export interface TurnRuntimePersistence {
   /** Load the provider, status, and cursor state for one runtime decision. */
   load(threadId: string): TurnRuntimePersistenceState | null;
-  /** Store context usage reported by a completed provider turn. */
+  /** Store context usage reported by a provider turn. */
   recordContextUsage(threadId: string, tokens: number, contextWindow?: number): void;
   /** Store a provider-produced compaction summary. */
   recordCompactionSummary(threadId: string, summary: string): void;

@@ -14,7 +14,6 @@ export const CODEX_IGNORED_NOTIFICATIONS: Readonly<Record<string, string>> = {
   "item/mcpToolCall/progress": "tool-completion-is-authoritative",
   "remoteControl/status/changed": "remote-control-not-used",
   "thread/status/changed": "turn-lifecycle-is-authoritative",
-  "thread/tokenUsage/updated": "turn-completion-usage-is-authoritative",
   "thread/archived": "archive-rpc-is-authoritative",
   "thread/unarchived": "archive-rpc-is-authoritative",
   "thread/closed": "session-runtime-owns-closure",

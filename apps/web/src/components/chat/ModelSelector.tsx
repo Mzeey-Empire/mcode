@@ -451,6 +451,8 @@ function useProviderModelCatalog(): ProviderModelCatalog {
         providerId,
         group: model.group,
         contextWindow: model.contextWindow,
+        supportedReasoningLevels: model.supportedReasoningEfforts,
+        defaultReasoningLevel: model.defaultReasoningEffort,
         multiplier: model.multiplier,
       }));
       const updatedModels = new Map(dynamicModelsRef.current).set(providerId, models);
