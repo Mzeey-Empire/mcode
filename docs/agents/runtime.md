@@ -68,6 +68,20 @@ The image build limits package index updates to three minutes and package
 installation to five minutes. The artifact install limits itself to three
 minutes.
 
+## Desktop startup diagnostics
+
+Desktop launches save server errors to `server-stderr.log` in `MCODE_DATA_DIR`,
+including development launches. Normal worktree development uses
+`.dev/server-stderr.log`. The next launch moves the previous log to
+`server-stderr.1.log`. The startup failure dialog includes the last 40 lines.
+Server stderr goes directly to this file; development stdout remains in the terminal.
+
+Startup checkpoint logs use past-tense messages and include the completed
+stage, server PID, and elapsed milliseconds since the bootstrap function began.
+Compare the last completed stage with the captured error. An exit before the
+first checkpoint can indicate a failure during module loading.
+The 60-second readiness timeout still starts after the server process is spawned.
+
 ## Focused verification
 
 Run the smallest test that covers the changed behavior. Follow the repository [verification rules](../../AGENTS.md#verifying) and the [agent workflow](../guides/agent-workflow.md#focused-checks). For desktop-only behavior, use the [live Electron workflow](../../.agents/skills/electorn-live-testing/SKILL.md).

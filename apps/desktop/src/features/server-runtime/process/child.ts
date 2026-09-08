@@ -31,10 +31,11 @@ export function spawnServerProcess(port: number, platform: NodeJS.Platform): Spa
       cwd: paths.cwd,
       env: createServerEnvironment(paths, port, platform),
       detached: true,
-      stdio: isDesktopDev() ? "inherit" : ["ignore", "ignore", stderrStream ? "pipe" : "ignore"],
+      // A direct file handle preserves the final error even if the child exits immediately.
+      stdio: [isDesktopDev() ? "inherit" : "ignore", isDesktopDev() ? "inherit" : "ignore", stderrStream],
     });
     child.unref();
-    if (stderrStream && child.stderr) child.stderr.pipe(stderrStream);
+    console.info("[server-manager] Server process spawned", { pid: child.pid, port, errorLog: SERVER_LOG_PATH });
     return { child, stderrStream };
   } catch (error) {
     stderrStream?.destroy();
@@ -137,13 +138,14 @@ function setGitEnvironment(env: Record<string, string>, cwd: string): void {
   }
 }
 
-function createServerStderrStream(): NodeFS.WriteStream | undefined {
-  if (isDesktopDev()) return undefined;
+function createServerStderrStream(): NodeFS.WriteStream {
   if (NodeFS.existsSync(SERVER_LOG_PATH)) {
     try {
       if (NodeFS.existsSync(SERVER_ROTATED_LOG_PATH)) NodeFS.unlinkSync(SERVER_ROTATED_LOG_PATH);
       NodeFS.renameSync(SERVER_LOG_PATH, SERVER_ROTATED_LOG_PATH);
     } catch (error) { console.warn("[server-manager] Failed to rotate previous server stderr log", error); }
   }
-  return NodeFS.createWriteStream(SERVER_LOG_PATH, { flags: "w" });
+  return NodeFS.createWriteStream(SERVER_LOG_PATH, {
+    fd: NodeFS.openSync(SERVER_LOG_PATH, "w", 0o600),
+  });
 }

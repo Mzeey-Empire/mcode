@@ -98,8 +98,7 @@ vi.mock("node:fs", () => ({
   rmdirSync: vi.fn(),
   unlinkSync: vi.fn(),
   writeFileSync: vi.fn(),
-  // createWriteStream is used in non-dev mode to route stderr to a log file.
-  // Return a minimal writable-stream stub so callers like child.stderr.pipe() work.
+  openSync: vi.fn(() => 99),
   createWriteStream: vi.fn(() => ({
     write: vi.fn(),
     end: vi.fn(),
@@ -237,10 +236,10 @@ describe("ServerManager", () => {
     expect(NodeChildProcess.spawn).toHaveBeenCalledOnce();
     const spawnCall = vi.mocked(NodeChildProcess.spawn).mock.calls[0];
     expect(spawnCall[0]).toBe("/test/bun");
-    // Options include detached: true; in non-dev mode stderr is piped to a log file
+    // The child writes directly to the log so its last error survives an early exit.
     const opts = spawnCall[2] as Record<string, unknown>;
     expect(opts.detached).toBe(true);
-    expect(opts.stdio).toEqual(["ignore", "ignore", "pipe"]);
+    expect(opts.stdio).toEqual(["ignore", "ignore", vi.mocked(NodeFS.createWriteStream).mock.results[0].value]);
     expect(result.port).toBe(19600);
     expect(result.authToken).toBe("test-auth-token");
     const portProbe = vi.mocked(NodeNet.createServer).mock.results[0]?.value;
@@ -1362,7 +1361,7 @@ describe("ServerManager", () => {
     );
     expect(NodeFS.createWriteStream).toHaveBeenCalledWith(
       NodePath.join("/tmp/mcode", "server-stderr.log"),
-      { flags: "w" },
+      { fd: 99 },
     );
   });
 
