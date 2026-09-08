@@ -81,25 +81,41 @@ export async function runFocusedEvidenceGates(repoRoot, receipt, runner = runFoc
   const failures = [];
   receipt.focusedGates = [];
   for (const gate of FOCUSED_GATES) {
-    const args = ["run", "--cwd", gate.workspace, "test", "--", ...(gate.options ?? []), ...gate.files];
-    let result;
-    try {
-      result = await runner({ command: "bun", args, cwd: repoRoot, timeoutMs: FOCUSED_GATE_TIMEOUT_MS });
-    } catch (error) {
-      result = { exitCode: null, output: safeError(error) };
-    }
-    const evidence = { name: gate.name, command: `bun ${args.join(" ")}`, rows: gate.rows, exitCode: Number.isInteger(result?.exitCode) ? result.exitCode : null, output: redactOutput(result?.output) };
+    const evidence = await collectFocusedGateEvidence(repoRoot, gate, runner);
     receipt.focusedGates.push(evidence);
-    for (const matrix of [receipt.matrix, receipt.electron.matrix]) {
-      for (const row of gate.rows) matrix[row] = { kind: evidence.exitCode === 0 ? "focused-proof" : "focused-proof-failed", gate: gate.name, command: evidence.command, exitCode: evidence.exitCode, output: evidence.output };
-    }
+    applyFocusedGateEvidence(receipt, gate, evidence);
     if (evidence.exitCode !== 0) failures.push(`${gate.name} exited ${evidence.exitCode ?? "without an exit code"}`);
   }
   return failures;
 }
 
-function focusedEvidenceFailure(failures) {
-  return failures.length ? new Error(`Condition: focused evidence gate failed: ${failures.join("; ")}.`) : null;
+async function collectFocusedGateEvidence(repoRoot, gate, runner) {
+  const args = ["run", "--cwd", gate.workspace, "test", "--", ...(gate.options ?? []), ...gate.files];
+  const result = await runFocusedGateSafely(repoRoot, args, runner);
+  return {
+    name: gate.name,
+    command: `bun ${args.join(" ")}`,
+    rows: gate.rows,
+    exitCode: Number.isInteger(result.exitCode) ? result.exitCode : null,
+    output: redactOutput(result.output),
+  };
+}
+
+async function runFocusedGateSafely(repoRoot, args, runner) {
+  try {
+    return await runner({ command: "bun", args, cwd: repoRoot, timeoutMs: FOCUSED_GATE_TIMEOUT_MS });
+  } catch (error) {
+    return { exitCode: null, output: safeError(error) };
+  }
+}
+
+function applyFocusedGateEvidence(receipt, gate, evidence) {
+  const kind = evidence.exitCode === 0 ? "focused-proof" : "focused-proof-failed";
+  for (const matrix of [receipt.matrix, receipt.electron.matrix]) {
+    for (const row of gate.rows) {
+      matrix[row] = { kind, gate: gate.name, command: evidence.command, exitCode: evidence.exitCode, output: evidence.output };
+    }
+  }
 }
 
 async function runFocusedGate({ command, args, cwd, timeoutMs }) {
@@ -122,64 +138,151 @@ export async function proof(repoRoot, dependencies = {}) {
   const receipt = createReceipt(repoRoot);
   receipt.applicationCommit = resolveApplicationCommit(repoRoot);
   const io = dependencies.io ?? NodeFS.promises;
-  let socket; let electronSocket; let web; let desktop; let electronOwner; let failure;
+  const state = { socket: null, electronSocket: null, web: null, desktop: null, electronOwner: false };
+  let failure;
   try {
-    receipt.phase = "health";
-    receipt.runtime = dependencies.health ? await dependencies.health(repoRoot) : await health(repoRoot);
-    receipt.upstreamCodex = (dependencies.resolveUpstreamCodex ?? resolveUpstreamCodex)(repoRoot);
-    receipt.phase = "focused-evidence";
-    const focusedFailures = await runFocusedEvidenceGates(repoRoot, receipt, dependencies.runner);
-    receipt.phase = "clients";
-    socket = dependencies.socket ?? await openRuntimeVerificationSocket(repoRoot);
-    const workspace = await createOwnedFixtureWorkspace(socket, repoRoot, receipt);
-    receipt.workspace = { id: workspace.id, name: workspace.name, path: workspace.path };
-    receipt.matrix = await inspectProviderPrerequisites(socket, workspace);
-    const ports = readPortsFile(repoRoot);
-    const playwright = dependencies.playwright ?? requirePlaywright(repoRoot);
-    web = dependencies.web ?? await openWeb(playwright, ports, findChromiumPath());
-    if (dependencies.desktop) desktop = dependencies.desktop;
-    else ({ desktop, owner: electronOwner } = await openDesktop(repoRoot, playwright, ports, dependencies.electron));
-    assertSeparateClients(web, desktop);
-    await reloadClient(web);
-    await assertWorkspace(web.page, workspace, socket);
-    receipt.phase = "electron-runtime";
-    const desktopServerUrl = await desktop.page.evaluate(() => window.desktopBridge.getServerUrl().then(({ url }) => url));
-    electronSocket = dependencies.electronSocket ?? await openVerificationSocketUrl(repoRoot, desktopServerUrl);
-    const electronRun = createSurfaceRun(repoRoot, receipt, "electron");
-    const electronWorkspace = await createOwnedFixtureWorkspace(electronSocket, repoRoot, electronRun);
-    receipt.electron.workspace = { id: electronWorkspace.id, name: electronWorkspace.name, path: electronWorkspace.path };
-    receipt.electron.matrix = await inspectProviderPrerequisites(electronSocket, electronWorkspace);
-    await reloadClient(desktop);
-    await assertWorkspace(desktop.page, electronWorkspace, electronSocket);
-    receipt.phase = "provider-journeys";
-    receipt.journeys.web = await runProviderJourneys({ surface: "web", client: web, socket, workspace, run: receipt, io, matrix: receipt.matrix, captureLive: dependencies.captureLive ?? captureLive, captureReview: dependencies.captureReview ?? captureReview });
-    receipt.journeys.electron = await runProviderJourneys({ surface: "electron", client: desktop, socket: electronSocket, workspace: electronWorkspace, run: electronRun, io, matrix: receipt.electron.matrix, captureLive: dependencies.captureLive ?? captureLive, captureReview: dependencies.captureReview ?? captureReview });
-    const codexJourney = receipt.journeys.web.codexNative?.journey;
-    receipt.baseline = codexJourney?.baseline ?? "not proven";
-    receipt.publicComparison = codexJourney?.comparison?.agentLive ?? "not proven";
-    receipt.fetchedPatch = codexJourney?.fetchedPatch ?? "not proven";
-    receipt.disk = codexJourney?.disk ?? "not proven";
-    receipt.comparison = codexJourney?.comparison ?? {};
-    receipt.observations = codexJourney?.observations ?? {};
-    receipt.phase = "aggregate-evidence";
-    const failures = aggregateEvidenceFailures(focusedFailures, { web: receipt.matrix, electron: receipt.electron.matrix });
-    if (failures.length > 0) throw new Error(`Condition: provider completeness evidence failed: ${failures.join("; ")}.`);
-    receipt.phase = "complete";
+    const focusedFailures = await prepareProofEnvironment(repoRoot, receipt, dependencies);
+    const runs = await openProofClients(repoRoot, receipt, dependencies, state);
+    await runProofJourneys(repoRoot, receipt, dependencies, state, runs, io);
+    completeProof(receipt, focusedFailures);
   } catch (error) {
-    failure = error; receipt.failure = { phase: receipt.phase, message: safeError(error), classification: classifyLiveDiffFailure(receipt.phase, error) };
-    await captureFailure(web?.page, receipt, "web-failure"); await captureFailure(desktop?.page, receipt, "electron-failure");
+    failure = error;
+    receipt.failure = { phase: receipt.phase, message: safeError(error), classification: classifyLiveDiffFailure(receipt.phase, error) };
+    await captureProofFailure(state, receipt);
   } finally {
-    receipt.diagnostics.codexTrace = (dependencies.captureCodexTraceEvidence ?? captureCodexTraceEvidence)(repoRoot, receipt.run.threadId);
-    receipt.phase = "cleanup";
-    receipt.cleanup = await cleanupOwned({ socket, electronSocket, web, desktop, electronOwner, io, receipt, repoRoot, reconnectElectronSocket: desktop ? async () => {
-      const serverUrl = await desktop.page.evaluate(() => window.desktopBridge.getServerUrl().then(({ url }) => url));
-      return openVerificationSocketUrl(repoRoot, serverUrl);
-    } : undefined });
-    await writeReceipt(io, receipt);
-    if (receipt.cleanup.failures.length > 0 && !failure) failure = new Error(`Condition: cleanup failed: ${receipt.cleanup.failures.join("; ")}. Run provider-completeness cleanup --confirm-cleanup.`);
+    failure = await finalizeProof(repoRoot, receipt, dependencies, state, io, failure);
   }
   if (failure) throw failure;
   return { receipt: receipt.path, journeys: receipt.journeys, matrix: receipt.matrix, electronMatrix: receipt.electron.matrix, cleanup: receipt.cleanup };
+}
+
+async function prepareProofEnvironment(repoRoot, receipt, dependencies) {
+  receipt.phase = "health";
+  receipt.runtime = await (dependencies.health ?? health)(repoRoot);
+  receipt.upstreamCodex = (dependencies.resolveUpstreamCodex ?? resolveUpstreamCodex)(repoRoot);
+  receipt.phase = "focused-evidence";
+  return runFocusedEvidenceGates(repoRoot, receipt, dependencies.runner);
+}
+
+async function openProofClients(repoRoot, receipt, dependencies, state) {
+  receipt.phase = "clients";
+  state.socket = dependencies.socket ?? await openRuntimeVerificationSocket(repoRoot);
+  const workspace = await createOwnedFixtureWorkspace(state.socket, repoRoot, receipt);
+  receipt.workspace = workspaceIdentity(workspace);
+  receipt.matrix = await inspectProviderPrerequisites(state.socket, workspace);
+  const ports = readPortsFile(repoRoot);
+  const playwright = dependencies.playwright ?? requirePlaywright(repoRoot);
+  state.web = dependencies.web ?? await openWeb(playwright, ports, findChromiumPath());
+  const desktopResult = await openProofDesktop(repoRoot, playwright, ports, dependencies);
+  state.desktop = desktopResult.desktop;
+  state.electronOwner = desktopResult.owner;
+  assertSeparateClients(state.web, state.desktop);
+  await reloadClient(state.web);
+  await assertWorkspace(state.web.page, workspace, state.socket);
+  return { workspace, ports, playwright };
+}
+
+async function openProofDesktop(repoRoot, playwright, ports, dependencies) {
+  if (dependencies.desktop) return { desktop: dependencies.desktop, owner: false };
+  return openDesktop(repoRoot, playwright, ports, dependencies.electron);
+}
+
+async function runProofJourneys(repoRoot, receipt, dependencies, state, runs, io) {
+  receipt.phase = "electron-runtime";
+  const desktopServerUrl = await getDesktopServerUrl(state.desktop);
+  state.electronSocket = dependencies.electronSocket ?? await openVerificationSocketUrl(repoRoot, desktopServerUrl);
+  const electronRun = await createSurfaceRunForProof(repoRoot, receipt, state);
+  receipt.phase = "provider-journeys";
+  receipt.journeys.web = await createProviderJourney("web", state.web, state.socket, runs.workspace, receipt, io, receipt.matrix, dependencies);
+  receipt.journeys.electron = await createProviderJourney("electron", state.desktop, state.electronSocket, receipt.electron.workspace, electronRun, io, receipt.electron.matrix, dependencies);
+  retainCodexJourneyEvidence(receipt);
+}
+
+async function getDesktopServerUrl(desktop) {
+  return desktop.page.evaluate(() => window.desktopBridge.getServerUrl().then(({ url }) => url));
+}
+
+function workspaceIdentity(workspace) {
+  return { id: workspace.id, name: workspace.name, path: workspace.path };
+}
+
+async function createSurfaceRunForProof(repoRoot, receipt, state) {
+  const electronRun = createSurfaceRun(repoRoot, receipt, "electron");
+  const electronWorkspace = await createOwnedFixtureWorkspace(state.electronSocket, repoRoot, electronRun);
+  receipt.electron.workspace = workspaceIdentity(electronWorkspace);
+  receipt.electron.matrix = await inspectProviderPrerequisites(state.electronSocket, electronWorkspace);
+  await reloadClient(state.desktop);
+  await assertWorkspace(state.desktop.page, electronWorkspace, state.electronSocket);
+  return electronRun;
+}
+
+async function createProviderJourney(surface, client, socket, workspace, run, io, matrix, dependencies) {
+  return runProviderJourneys({
+    surface,
+    client,
+    socket,
+    workspace,
+    run,
+    io,
+    matrix,
+    captureLive: dependencies.captureLive ?? captureLive,
+    captureReview: dependencies.captureReview ?? captureReview,
+  });
+}
+
+function retainCodexJourneyEvidence(receipt) {
+  const codexJourney = receipt.journeys.web.codexNative?.journey;
+  retainCodexJourneyStatus(receipt, codexJourney);
+  retainCodexJourneyDetails(receipt, codexJourney);
+}
+
+function retainCodexJourneyStatus(receipt, codexJourney) {
+  receipt.baseline = codexJourney?.baseline ?? "not proven";
+  receipt.fetchedPatch = codexJourney?.fetchedPatch ?? "not proven";
+  receipt.disk = codexJourney?.disk ?? "not proven";
+}
+
+function retainCodexJourneyDetails(receipt, codexJourney) {
+  receipt.publicComparison = codexJourney?.comparison?.agentLive ?? "not proven";
+  receipt.comparison = codexJourney?.comparison ?? {};
+  receipt.observations = codexJourney?.observations ?? {};
+}
+
+function completeProof(receipt, focusedFailures) {
+  receipt.phase = "aggregate-evidence";
+  const failures = aggregateEvidenceFailures(focusedFailures, { web: receipt.matrix, electron: receipt.electron.matrix });
+  if (failures.length > 0) throw new Error(`Condition: provider completeness evidence failed: ${failures.join("; ")}.`);
+  receipt.phase = "complete";
+}
+
+async function captureProofFailure(state, receipt) {
+  await captureFailure(state.web?.page, receipt, "web-failure");
+  await captureFailure(state.desktop?.page, receipt, "electron-failure");
+}
+
+async function finalizeProof(repoRoot, receipt, dependencies, state, io, failure) {
+  receipt.diagnostics.codexTrace = (dependencies.captureCodexTraceEvidence ?? captureCodexTraceEvidence)(repoRoot, receipt.run.threadId);
+  receipt.phase = "cleanup";
+  receipt.cleanup = await cleanupOwned({
+    socket: state.socket,
+    electronSocket: state.electronSocket,
+    web: state.web,
+    desktop: state.desktop,
+    electronOwner: state.electronOwner,
+    io,
+    receipt,
+    repoRoot,
+    reconnectElectronSocket: state.desktop ? () => reconnectProofElectronSocket(repoRoot, state.desktop) : undefined,
+  });
+  await writeReceipt(io, receipt);
+  if (receipt.cleanup.failures.length > 0 && !failure) {
+    return new Error(`Condition: cleanup failed: ${receipt.cleanup.failures.join("; ")}. Run provider-completeness cleanup --confirm-cleanup.`);
+  }
+  return failure;
+}
+
+async function reconnectProofElectronSocket(repoRoot, desktop) {
+  return openVerificationSocketUrl(repoRoot, await getDesktopServerUrl(desktop));
 }
 
 export function createReceipt(repoRoot) {
@@ -247,52 +350,148 @@ function recordWorkspaceCleanupGap(receipt, gap) {
 
 /** Records public provider prerequisites before a provider call is considered. */
 export async function inspectProviderPrerequisites(socket, workspace, execute = NodeChildProcess.execFileSync) {
-  const availabilityResult = await Promise.allSettled([socket.rpc("providers.listAvailability", {})]);
-  const availability = availabilityResult[0].status === "fulfilled" && Array.isArray(availabilityResult[0].value)
-    ? availabilityResult[0].value
-    : [];
-  const availabilityError = availabilityResult[0].status === "rejected" ? safeError(availabilityResult[0].reason) : null;
+  const availability = await fetchProviderAvailability(socket);
   const matrix = {};
   for (const provider of ["codex", "cursor", "claude"]) {
-    const observed = availability.find((candidate) => candidate?.id === provider) ?? null;
-    const [models, catalog] = await Promise.allSettled([
-      socket.rpc("provider.listModels", { providerId: provider }),
-      socket.rpc("provider.catalog", { providerId: provider, workspaceId: workspace.id }),
-    ]);
-    const available = observed?.enabled === true && observed?.hasAdapter === true && observed?.comingSoon !== true && observed?.cli?.status === "found";
-    const modelList = models.status === "fulfilled" && Array.isArray(models.value) ? models.value : [];
-    const catalogValue = catalog.status === "fulfilled" ? catalog.value : null;
-    const account = provider === "claude" && observed?.cli?.status === "found" ? inspectClaudeAccountStatus(execute) : null;
-    const observedPrerequisites = {
-      availability: observed ? { enabled: observed.enabled === true, hasAdapter: observed.hasAdapter === true, comingSoon: observed.comingSoon === true, cliStatus: observed.cli?.status ?? null } : null,
-      models: modelList.map((model) => model?.id).filter((id) => typeof id === "string").slice(0, 100),
-      catalog: catalogValue ? { freshness: catalogValue.freshness ?? null, selectableAgents: Array.isArray(catalogValue.selectableAgents) ? catalogValue.selectableAgents.length : 0 } : null,
-      account,
-      errors: [availabilityError, models.status === "rejected" ? safeError(models.reason) : null, catalog.status === "rejected" ? safeError(catalog.reason) : null].filter(Boolean),
-    };
-    const selectableModel = provider === "codex" ? modelList.find((model) => model?.id === MODEL) : modelList[0];
-    const unavailableClaudeAccount = account?.status === "not-authenticated";
-    matrix[`${provider}${provider === "claude" ? "Fallback" : "Native"}`] = available && models.status === "fulfilled" && catalog.status === "fulfilled" && selectableModel?.id && !unavailableClaudeAccount
-      ? { kind: "required-live-proof", provider, model: selectableModel.id, modelName: typeof selectableModel.name === "string" ? selectableModel.name : selectableModel.id, observedPrerequisites }
-      : { kind: "coverage-gap", provider, observedPrerequisites, coverageGap: unavailableClaudeAccount ? "Claude CLI reported no authenticated account for the public Composer journey." : "missing provider, account, model, or catalog prerequisite for the required public Composer and Review journey" };
+    matrix[providerMatrixKey(provider)] = await inspectProviderPrerequisite(socket, workspace, provider, availability, execute);
   }
   return matrix;
 }
 
+async function fetchProviderAvailability(socket) {
+  const [result] = await Promise.allSettled([socket.rpc("providers.listAvailability", {})]);
+  return {
+    values: result.status === "fulfilled" && Array.isArray(result.value) ? result.value : [],
+    error: result.status === "rejected" ? safeError(result.reason) : null,
+  };
+}
+
+async function inspectProviderPrerequisite(socket, workspace, provider, availability, execute) {
+  const observed = availability.values.find((candidate) => candidate?.id === provider) ?? null;
+  const [models, catalog] = await providerPrerequisiteRequests(socket, workspace, provider);
+  const modelList = fulfilledArray(models);
+  const catalogValue = fulfilledValue(catalog);
+  const account = claudeAccountStatus(provider, observed, execute);
+  const observedPrerequisites = createObservedPrerequisites(availability.error, observed, modelList, catalogValue, account, models, catalog);
+  return providerEvidence(provider, observed, models, catalog, modelList, account, observedPrerequisites);
+}
+
+function providerMatrixKey(provider) {
+  return `${provider}${provider === "claude" ? "Fallback" : "Native"}`;
+}
+
+function providerPrerequisiteRequests(socket, workspace, provider) {
+  return Promise.allSettled([
+    socket.rpc("provider.listModels", { providerId: provider }),
+    socket.rpc("provider.catalog", { providerId: provider, workspaceId: workspace.id }),
+  ]);
+}
+
+function fulfilledArray(result) {
+  return result.status === "fulfilled" && Array.isArray(result.value) ? result.value : [];
+}
+
+function fulfilledValue(result) {
+  return result.status === "fulfilled" ? result.value : null;
+}
+
+function claudeAccountStatus(provider, observed, execute) {
+  return provider === "claude" && observed?.cli?.status === "found" ? inspectClaudeAccountStatus(execute) : null;
+}
+
+function createObservedPrerequisites(availabilityError, observed, modelList, catalogValue, account, models, catalog) {
+  return {
+    availability: summarizeProviderAvailability(observed),
+    models: modelList.map((model) => model?.id).filter((id) => typeof id === "string").slice(0, 100),
+    catalog: summarizeProviderCatalog(catalogValue),
+    account,
+    errors: prerequisiteErrors(availabilityError, models, catalog),
+  };
+}
+
+function summarizeProviderAvailability(observed) {
+  if (!observed) return null;
+  return {
+    enabled: observed.enabled === true,
+    hasAdapter: observed.hasAdapter === true,
+    comingSoon: observed.comingSoon === true,
+    cliStatus: observed.cli?.status ?? null,
+  };
+}
+
+function summarizeProviderCatalog(catalog) {
+  if (!catalog) return null;
+  return {
+    freshness: catalog.freshness ?? null,
+    selectableAgents: Array.isArray(catalog.selectableAgents) ? catalog.selectableAgents.length : 0,
+  };
+}
+
+function prerequisiteErrors(availabilityError, models, catalog) {
+  return [
+    availabilityError,
+    models.status === "rejected" ? safeError(models.reason) : null,
+    catalog.status === "rejected" ? safeError(catalog.reason) : null,
+  ].filter(Boolean);
+}
+
+function providerEvidence(provider, observed, models, catalog, modelList, account, observedPrerequisites) {
+  const selectableModel = selectableProviderModel(provider, modelList);
+  const unavailableClaudeAccount = account?.status === "not-authenticated";
+  if (providerReady(observed, models, catalog, selectableModel, unavailableClaudeAccount)) {
+    return {
+      kind: "required-live-proof",
+      provider,
+      model: selectableModel.id,
+      modelName: typeof selectableModel.name === "string" ? selectableModel.name : selectableModel.id,
+      observedPrerequisites,
+    };
+  }
+  return { kind: "coverage-gap", provider, observedPrerequisites, coverageGap: coverageGapMessage(unavailableClaudeAccount) };
+}
+
+function selectableProviderModel(provider, modelList) {
+  return provider === "codex" ? modelList.find((model) => model?.id === MODEL) : modelList[0];
+}
+
+function providerReady(observed, models, catalog, model, unavailableClaudeAccount) {
+  return providerAvailable(observed)
+    && models.status === "fulfilled"
+    && catalog.status === "fulfilled"
+    && Boolean(model?.id)
+    && !unavailableClaudeAccount;
+}
+
+function providerAvailable(observed) {
+  return observed?.enabled === true
+    && observed?.hasAdapter === true
+    && observed?.comingSoon !== true
+    && observed?.cli?.status === "found";
+}
+
+function coverageGapMessage(unavailableClaudeAccount) {
+  return unavailableClaudeAccount
+    ? "Claude CLI reported no authenticated account for the public Composer journey."
+    : "missing provider, account, model, or catalog prerequisite for the required public Composer and Review journey";
+}
+
 /** Identifies a missing Claude CLI account without retaining command output. */
 export function inspectClaudeAccountStatus(execute = NodeChildProcess.execFileSync) {
-  let output = "";
-  try {
-    output = String(execute("claude", ["auth", "status"], { encoding: "utf8", timeout: 10_000, windowsHide: true }) ?? "");
-  } catch (error) {
-    output = error && typeof error === "object" && "stdout" in error ? String(error.stdout ?? "") : "";
-  }
+  const output = readClaudeAccountStatus(execute);
   try {
     const status = JSON.parse(output);
     if (status?.loggedIn === false) return { status: "not-authenticated", loggedIn: false };
     if (status?.loggedIn === true) return { status: "authenticated", loggedIn: true };
   } catch { /* A non-JSON CLI response cannot establish account state. */ }
   return { status: "unknown", loggedIn: null };
+}
+
+function readClaudeAccountStatus(execute) {
+  try {
+    return String(execute("claude", ["auth", "status"], { encoding: "utf8", timeout: 10_000, windowsHide: true }) ?? "");
+  } catch (error) {
+    return error && typeof error === "object" && "stdout" in error ? String(error.stdout ?? "") : "";
+  }
 }
 
 /** Rejects a receipt that silently turns an available provider into a coverage gap. */
@@ -390,14 +589,19 @@ export async function waitForLiveAgentDiff(socket, threadId, fileName, deadline 
   while (Date.now() < deadline) {
     const comparison = await socket.rpc("turnDiff.getComparison", { threadId, includeLive: true });
     recordLiveComparisonDiagnostic(diagnostics, comparison);
-    const file = comparison?.files?.find((candidate) => fileMatches(candidate, fileName));
-    if (comparison?.turnDiff?.phase === "live" && file && comparison.turnDiff.id) {
-      const patch = await socket.rpc("turnDiff.getFileDiff", { threadId, comparisonId: comparison.turnDiff.id, filePath: file.path });
-      if (typeof patch === "string" && patch.includes("AGENT_MARKER")) return { comparison, file, patch };
-    }
+    const result = await readLiveAgentDiff(socket, threadId, fileName, comparison);
+    if (result) return result;
     await delay(500);
   }
   throw new Error("Condition: exact file never appeared in a Live agent diff with AGENT_MARKER.");
+}
+
+async function readLiveAgentDiff(socket, threadId, fileName, comparison) {
+  const file = comparison?.files?.find((candidate) => fileMatches(candidate, fileName));
+  const turnDiff = comparison?.turnDiff;
+  if (turnDiff?.phase !== "live" || !file || !turnDiff.id) return null;
+  const patch = await socket.rpc("turnDiff.getFileDiff", { threadId, comparisonId: turnDiff.id, filePath: file.path });
+  return typeof patch === "string" && patch.includes("AGENT_MARKER") ? { comparison, file, patch } : null;
 }
 
 /** Retains a bounded, redacted summary of distinct public comparison states. */
@@ -410,16 +614,33 @@ export function recordLiveComparisonDiagnostic(diagnostics, comparison) {
 }
 
 function summarizeLiveComparison(comparison) {
-  const turnDiff = comparison?.turnDiff;
-  if (!comparison || typeof comparison !== "object") return { state: "null", phase: null, source: null, fidelity: null, revision: null, files: [] };
+  if (!comparison || typeof comparison !== "object") return emptyLiveComparison();
+  const turnDiff = comparison.turnDiff;
   return {
     state: "comparison",
+    ...summarizeLiveTurnDiff(turnDiff),
+    files: summarizeLiveFiles(comparison.files),
+  };
+}
+
+function emptyLiveComparison() {
+  return { state: "null", phase: null, source: null, fidelity: null, revision: null, files: [] };
+}
+
+function summarizeLiveTurnDiff(turnDiff) {
+  return {
     phase: typeof turnDiff?.phase === "string" ? turnDiff.phase : null,
     source: typeof turnDiff?.source === "string" ? turnDiff.source : null,
     fidelity: typeof turnDiff?.fidelity === "string" ? turnDiff.fidelity : null,
     revision: Number.isInteger(turnDiff?.revision) ? turnDiff.revision : null,
-    files: Array.isArray(comparison.files) ? comparison.files.slice(0, 12).map((file) => typeof file?.path === "string" ? NodePath.basename(file.path) : null).filter(Boolean) : [],
   };
+}
+
+function summarizeLiveFiles(files) {
+  if (!Array.isArray(files)) return [];
+  return files.slice(0, 12)
+    .map((file) => typeof file?.path === "string" ? NodePath.basename(file.path) : null)
+    .filter(Boolean);
 }
 
 export function classifyLiveDiffFailure(phase, error) {
@@ -432,30 +653,75 @@ export function classifyLiveDiffFailure(phase, error) {
 export function captureCodexTraceEvidence(repoRoot, mcodeThreadId, dependencies = {}) {
   const readFile = dependencies.readFile ?? NodeFS.readFileSync;
   const execute = dependencies.execute ?? NodeChildProcess.execFileSync;
-  let installedVersion = "unavailable";
-  try { installedVersion = execute("codex", ["--version"], { encoding: "utf8" }).trim(); } catch (error) { installedVersion = `unavailable: ${safeError(error)}`; }
-  const evidence = { installedVersion, traceLog: ".dev/logs/server.log", mcodeThreadId: mcodeThreadId ?? null, methods: [], nativeThreadIds: [], nativeTurnIds: [], fileChangeSeen: false, turnStartedSeen: false, turnCompletedSeen: false, turnDiffUpdatedSeen: false, emitCodexTurnDiff: "not evaluated: trace contained no turn/diff/updated notification" };
+  const evidence = createCodexTraceEvidence(mcodeThreadId, execute);
   if (!mcodeThreadId) return evidence;
   try {
     const lines = String(readFile(NodePath.join(repoRoot, ".dev", "logs", "server.log"), "utf8")).split(/\r?\n/);
-    for (const line of lines) {
-      const payload = parseCodexTraceLine(line);
-      if (!payload || payload.threadId !== mcodeThreadId) continue;
-      const method = typeof payload.method === "string" ? payload.method : undefined;
-      if (method && evidence.methods.length < 48 && !evidence.methods.includes(method)) evidence.methods.push(method);
-      if (method === "turn/started") evidence.turnStartedSeen = true;
-      if (method === "turn/completed") evidence.turnCompletedSeen = true;
-      if (method === "turn/diff/updated") evidence.turnDiffUpdatedSeen = true;
-      const raw = payload.raw && typeof payload.raw === "object" ? payload.raw : {};
-      if (raw.itemType === "fileChange") evidence.fileChangeSeen = true;
-      const rawThreadId = typeof raw.threadId === "string" ? raw.threadId : undefined;
-      const rawTurnId = typeof raw.turnId === "string" ? raw.turnId : undefined;
-      if (rawThreadId && evidence.nativeThreadIds.length < 8 && !evidence.nativeThreadIds.includes(rawThreadId)) evidence.nativeThreadIds.push(rawThreadId);
-      if (rawTurnId && evidence.nativeTurnIds.length < 8 && !evidence.nativeTurnIds.includes(rawTurnId)) evidence.nativeTurnIds.push(rawTurnId);
-    }
-    if (evidence.turnDiffUpdatedSeen) evidence.emitCodexTurnDiff = "notification arrived; inspect native turn and execution routing in the trace and provider logs";
+    captureTraceLines(lines, mcodeThreadId, evidence);
   } catch (error) { evidence.traceReadError = safeError(error); }
+  updateCodexTraceSummary(evidence);
   return evidence;
+}
+
+function createCodexTraceEvidence(mcodeThreadId, execute) {
+  return {
+    installedVersion: installedCodexVersion(execute),
+    traceLog: ".dev/logs/server.log",
+    mcodeThreadId: mcodeThreadId ?? null,
+    methods: [],
+    nativeThreadIds: [],
+    nativeTurnIds: [],
+    fileChangeSeen: false,
+    turnStartedSeen: false,
+    turnCompletedSeen: false,
+    turnDiffUpdatedSeen: false,
+    emitCodexTurnDiff: "not evaluated: trace contained no turn/diff/updated notification",
+  };
+}
+
+function installedCodexVersion(execute) {
+  try {
+    return execute("codex", ["--version"], { encoding: "utf8" }).trim();
+  } catch (error) {
+    return `unavailable: ${safeError(error)}`;
+  }
+}
+
+function captureTraceLines(lines, mcodeThreadId, evidence) {
+  for (const line of lines) {
+    const payload = parseCodexTraceLine(line);
+    if (payload?.threadId === mcodeThreadId) recordCodexTracePayload(evidence, payload);
+  }
+}
+
+function recordCodexTracePayload(evidence, payload) {
+  const method = typeof payload.method === "string" ? payload.method : undefined;
+  recordTraceMethod(evidence, method);
+  recordTraceStatus(evidence, method);
+  const raw = payload.raw && typeof payload.raw === "object" ? payload.raw : {};
+  if (raw.itemType === "fileChange") evidence.fileChangeSeen = true;
+  recordTraceId(evidence.nativeThreadIds, raw.threadId);
+  recordTraceId(evidence.nativeTurnIds, raw.turnId);
+}
+
+function recordTraceMethod(evidence, method) {
+  if (method && evidence.methods.length < 48 && !evidence.methods.includes(method)) evidence.methods.push(method);
+}
+
+function recordTraceStatus(evidence, method) {
+  if (method === "turn/started") evidence.turnStartedSeen = true;
+  if (method === "turn/completed") evidence.turnCompletedSeen = true;
+  if (method === "turn/diff/updated") evidence.turnDiffUpdatedSeen = true;
+}
+
+function recordTraceId(ids, value) {
+  if (typeof value === "string" && ids.length < 8 && !ids.includes(value)) ids.push(value);
+}
+
+function updateCodexTraceSummary(evidence) {
+  if (evidence.turnDiffUpdatedSeen) {
+    evidence.emitCodexTurnDiff = "notification arrived; inspect native turn and execution routing in the trace and provider logs";
+  }
 }
 
 function parseCodexTraceLine(line) {
@@ -467,14 +733,19 @@ function parseCodexTraceLine(line) {
 async function waitForSettledComparison(socket, threadId, fileName, deadline = Date.now() + TIMEOUT_MS) {
   while (Date.now() < deadline) {
     const comparison = await socket.rpc("turnDiff.getComparison", { threadId, includeLive: true });
-    const file = comparison?.files?.find((candidate) => fileMatches(candidate, fileName));
-    if (comparison?.turnDiff?.phase === "settled" && file && comparison.turnDiff.id) {
-      const patch = await socket.rpc("turnDiff.getFileDiff", { threadId, comparisonId: comparison.turnDiff.id, filePath: file.path });
-      if (typeof patch === "string") return { comparison, file, patch };
-    }
+    const result = await readSettledComparison(socket, threadId, fileName, comparison);
+    if (result) return result;
     await delay(500);
   }
   throw new Error("Condition: exact thread comparison did not settle.");
+}
+
+async function readSettledComparison(socket, threadId, fileName, comparison) {
+  const file = comparison?.files?.find((candidate) => fileMatches(candidate, fileName));
+  const turnDiff = comparison?.turnDiff;
+  if (turnDiff?.phase !== "settled" || !file || !turnDiff.id) return null;
+  const patch = await socket.rpc("turnDiff.getFileDiff", { threadId, comparisonId: turnDiff.id, filePath: file.path });
+  return typeof patch === "string" ? { comparison, file, patch } : null;
 }
 
 export async function readSettledPublicComparison(socket, threadId, fileName) {
@@ -602,39 +873,165 @@ async function captureFailure(page, receipt, name) { if (!page) return; const sc
 export async function cleanupOwned({ socket, electronSocket = null, web, desktop, electronOwner = false, io, receipt, repoRoot, deleteWorkspace = deleteLiveWorkspace, closeSockets = true, closeClients = true, reconnectElectronSocket }) {
   const failures = [];
   let activeElectronSocket = electronSocket;
-  const ownedRuns = () => [{ label: "web", socket, run: receipt.run }, ...(activeElectronSocket ? [{ label: "electron", socket: activeElectronSocket, run: receipt.electron?.run }] : [])].filter(({ run }) => run);
-  for (const { label, socket: runSocket, run } of ownedRuns()) {
-    const threadIds = [...new Set([run.threadId, ...(run.ownedThreadIds ?? [])].filter((id) => typeof id === "string"))];
-    for (const threadId of threadIds) if (runSocket) { try { await removeOwnedThread(runSocket, run.ownedWorkspaceId, threadId); } catch (error) { failures.push(`${label} thread ${threadId}: ${safeError(error)}`); } }
-  }
-  if (closeClients && web) { try { await withinCleanupLimit(web.browser.close()); } catch (error) { failures.push(`web: ${safeError(error)}`); } }
-  for (const { label, socket: runSocket, run } of ownedRuns()) if (label === "electron" && run.ownedWorkspaceId && runSocket) {
-    try { await removeOwnedWorkspace(deleteWorkspace, runSocket, run.ownedWorkspaceId); } catch (error) { failures.push(`${label} workspace: ${safeError(error)}`); }
-  }
-  if (failures.some((failure) => failure.startsWith("electron ")) && reconnectElectronSocket) {
-    try {
-      activeElectronSocket = await reconnectElectronSocket();
-      const electronRun = receipt.electron?.run;
-      if (electronRun) {
-        const threadIds = [...new Set([electronRun.threadId, ...(electronRun.ownedThreadIds ?? [])].filter((id) => typeof id === "string"))];
-        for (const threadId of threadIds) await removeOwnedThread(activeElectronSocket, electronRun.ownedWorkspaceId, threadId);
-        if (electronRun.ownedWorkspaceId) await removeOwnedWorkspace(deleteWorkspace, activeElectronSocket, electronRun.ownedWorkspaceId);
-      }
-      for (let index = failures.length - 1; index >= 0; index -= 1) if (failures[index].startsWith("electron ")) failures.splice(index, 1);
-    } catch (error) { failures.push(`electron reconnect cleanup: ${safeError(error)}`); }
-  }
-  if (closeClients && desktop) {
-    try { await withinCleanupLimit(desktop.sessionHelper.disconnectElectronSession(desktop.session)); } catch (error) { failures.push(`electron disconnect: ${safeError(error)}`); }
-    if (electronOwner) try { const { stopElectron } = await import(NodeURL.pathToFileURL(NodePath.join(repoRoot, ".agents", "skills", "electorn-live-testing", "scripts", "stop-electron.mjs")).href); stopElectron(repoRoot); } catch (error) { failures.push(`electron stop: ${safeError(error)}`); }
-  }
-  for (const { label, socket: runSocket, run } of ownedRuns()) {
-    if (label !== "electron" && run.ownedWorkspaceId && runSocket) { try { await removeOwnedWorkspace(deleteWorkspace, runSocket, run.ownedWorkspaceId); } catch (error) { failures.push(`${label} workspace: ${safeError(error)}`); } }
-    for (const file of [...new Set([run.ownedFile, ...(run.ownedFiles ?? [])].filter((value) => typeof value === "string"))]) { try { await withinCleanupLimit(io.rm(file, { force: true })); } catch (error) { failures.push(`${label} file: ${safeError(error)}`); } }
-    if (run.ownedFixtureDirectory) { try { await withinCleanupLimit(io.rm(run.ownedFixtureDirectory, { recursive: true, force: true })); if (NodeFS.existsSync(run.ownedFixtureDirectory)) failures.push(`${label} fixture directory still exists after deletion`); } catch (error) { failures.push(`${label} fixture directory: ${safeError(error)}`); } }
-  }
-  if (closeSockets && socket) { try { await withinCleanupLimit(socket.close()); } catch (error) { failures.push(`socket: ${safeError(error)}`); } }
-  if (closeSockets && activeElectronSocket) { try { await withinCleanupLimit(activeElectronSocket.close()); } catch (error) { failures.push(`electron socket: ${safeError(error)}`); } }
+  await cleanupOwnedThreads(ownedRuns(socket, activeElectronSocket, receipt), failures);
+  await closeOwnedWebClient(web, closeClients, failures);
+  await cleanupElectronWorkspaces(ownedRuns(socket, activeElectronSocket, receipt), deleteWorkspace, failures);
+  activeElectronSocket = await retryElectronCleanup(activeElectronSocket, receipt, deleteWorkspace, reconnectElectronSocket, failures);
+  await closeOwnedDesktopClient(desktop, electronOwner, closeClients, repoRoot, failures);
+  await cleanupOwnedArtifacts(ownedRuns(socket, activeElectronSocket, receipt), deleteWorkspace, io, failures);
+  await closeOwnedSockets(socket, activeElectronSocket, closeSockets, failures);
   return { complete: failures.length === 0, failures };
+}
+
+function ownedRuns(socket, electronSocket, receipt) {
+  const runs = [{ label: "web", socket, run: receipt.run }];
+  if (electronSocket) runs.push({ label: "electron", socket: electronSocket, run: receipt.electron?.run });
+  return runs.filter(({ run }) => run);
+}
+
+async function cleanupOwnedThreads(runs, failures) {
+  for (const run of runs) await cleanupRunThreads(run, failures);
+}
+
+async function cleanupRunThreads({ label, socket, run }, failures) {
+  if (!socket) return;
+  for (const threadId of ownedThreadIds(run)) {
+    try {
+      await removeOwnedThread(socket, run.ownedWorkspaceId, threadId);
+    } catch (error) {
+      failures.push(`${label} thread ${threadId}: ${safeError(error)}`);
+    }
+  }
+}
+
+function ownedThreadIds(run) {
+  return new Set([run.threadId, ...(run.ownedThreadIds ?? [])].filter((id) => typeof id === "string"));
+}
+
+async function closeOwnedWebClient(web, closeClients, failures) {
+  if (!closeClients || !web) return;
+  try {
+    await withinCleanupLimit(web.browser.close());
+  } catch (error) {
+    failures.push(`web: ${safeError(error)}`);
+  }
+}
+
+async function cleanupElectronWorkspaces(runs, deleteWorkspace, failures) {
+  for (const run of runs) {
+    if (run.label === "electron") await cleanupRunWorkspace(run, deleteWorkspace, failures);
+  }
+}
+
+async function retryElectronCleanup(activeElectronSocket, receipt, deleteWorkspace, reconnectElectronSocket, failures) {
+  if (!hasElectronCleanupFailure(failures) || !reconnectElectronSocket) return activeElectronSocket;
+  try {
+    const reconnected = await reconnectElectronSocket();
+    const electronRun = receipt.electron?.run;
+    if (electronRun) await removeElectronResources(reconnected, electronRun, deleteWorkspace);
+    removeElectronFailures(failures);
+    return reconnected;
+  } catch (error) {
+    failures.push(`electron reconnect cleanup: ${safeError(error)}`);
+    return activeElectronSocket;
+  }
+}
+
+function hasElectronCleanupFailure(failures) {
+  return failures.some((failure) => failure.startsWith("electron "));
+}
+
+async function removeElectronResources(socket, run, deleteWorkspace) {
+  for (const threadId of ownedThreadIds(run)) await removeOwnedThread(socket, run.ownedWorkspaceId, threadId);
+  if (run.ownedWorkspaceId) await removeOwnedWorkspace(deleteWorkspace, socket, run.ownedWorkspaceId);
+}
+
+function removeElectronFailures(failures) {
+  for (let index = failures.length - 1; index >= 0; index -= 1) {
+    if (failures[index].startsWith("electron ")) failures.splice(index, 1);
+  }
+}
+
+async function closeOwnedDesktopClient(desktop, electronOwner, closeClients, repoRoot, failures) {
+  if (!closeClients || !desktop) return;
+  await disconnectOwnedDesktop(desktop, failures);
+  if (electronOwner) await stopOwnedElectron(repoRoot, failures);
+}
+
+async function disconnectOwnedDesktop(desktop, failures) {
+  try {
+    await withinCleanupLimit(desktop.sessionHelper.disconnectElectronSession(desktop.session));
+  } catch (error) {
+    failures.push(`electron disconnect: ${safeError(error)}`);
+  }
+}
+
+async function stopOwnedElectron(repoRoot, failures) {
+  try {
+    const path = NodePath.join(repoRoot, ".agents", "skills", "electorn-live-testing", "scripts", "stop-electron.mjs");
+    const { stopElectron } = await import(NodeURL.pathToFileURL(path).href);
+    stopElectron(repoRoot);
+  } catch (error) {
+    failures.push(`electron stop: ${safeError(error)}`);
+  }
+}
+
+async function cleanupOwnedArtifacts(runs, deleteWorkspace, io, failures) {
+  for (const run of runs) await cleanupRunArtifacts(run, deleteWorkspace, io, failures);
+}
+
+async function cleanupRunArtifacts({ label, socket, run }, deleteWorkspace, io, failures) {
+  if (label !== "electron") await cleanupRunWorkspace({ label, socket, run }, deleteWorkspace, failures);
+  await deleteOwnedFiles(label, run, io, failures);
+  await deleteOwnedFixtureDirectory(label, run, io, failures);
+}
+
+async function cleanupRunWorkspace({ label, socket, run }, deleteWorkspace, failures) {
+  if (!run.ownedWorkspaceId || !socket) return;
+  try {
+    await removeOwnedWorkspace(deleteWorkspace, socket, run.ownedWorkspaceId);
+  } catch (error) {
+    failures.push(`${label} workspace: ${safeError(error)}`);
+  }
+}
+
+async function deleteOwnedFiles(label, run, io, failures) {
+  for (const file of ownedFiles(run)) {
+    try {
+      await withinCleanupLimit(io.rm(file, { force: true }));
+    } catch (error) {
+      failures.push(`${label} file: ${safeError(error)}`);
+    }
+  }
+}
+
+function ownedFiles(run) {
+  return new Set([run.ownedFile, ...(run.ownedFiles ?? [])].filter((value) => typeof value === "string"));
+}
+
+async function deleteOwnedFixtureDirectory(label, run, io, failures) {
+  if (!run.ownedFixtureDirectory) return;
+  try {
+    await withinCleanupLimit(io.rm(run.ownedFixtureDirectory, { recursive: true, force: true }));
+    if (NodeFS.existsSync(run.ownedFixtureDirectory)) failures.push(`${label} fixture directory still exists after deletion`);
+  } catch (error) {
+    failures.push(`${label} fixture directory: ${safeError(error)}`);
+  }
+}
+
+async function closeOwnedSockets(socket, electronSocket, closeSockets, failures) {
+  if (!closeSockets) return;
+  await closeOwnedSocket("socket", socket, failures);
+  await closeOwnedSocket("electron socket", electronSocket, failures);
+}
+
+async function closeOwnedSocket(label, socket, failures) {
+  if (!socket) return;
+  try {
+    await withinCleanupLimit(socket.close());
+  } catch (error) {
+    failures.push(`${label}: ${safeError(error)}`);
+  }
 }
 
 function withinCleanupLimit(operation) {
@@ -676,85 +1073,164 @@ function redactReceipt(receipt) {
     .replaceAll(/("(?:token|authorization|cookie)"\s*:\s*")[^"]+/gi, "$1[redacted]"));
 }
 export async function cleanup(repoRoot, dependencies = {}) {
-  const root = NodePath.join(repoRoot, EVIDENCE_DIRECTORY);
-  if (!NodeFS.existsSync(root)) return { receipts: 0, cleanup: "nothing to clean" };
-  const receiptPaths = NodeFS.readdirSync(root, { recursive: true }).filter((file) => file.endsWith("receipt.json")).map((file) => NodePath.join(root, file));
-  const pending = receiptPaths.map((path) => ({ path, receipt: JSON.parse(NodeFS.readFileSync(path, "utf8")) }))
-    .filter(({ path, receipt }) => isOwnedReceipt(receipt, repoRoot, path) && !receipt.cleanup?.complete)
-    .map(({ path, receipt }) => ({ path, receipt: hydrateOwnedReceipt(receipt, repoRoot) }));
+  const receipts = collectPendingReceipts(repoRoot);
+  if (!receipts.rootExists) return { receipts: 0, cleanup: "nothing to clean" };
+  const { receiptPaths, pending } = receipts;
   if (pending.length === 0) return { receipts: receiptPaths.length, cleanup: "complete" };
-  const needsSocket = pending.some(({ receipt }) => receipt.run.threadId || receipt.run.ownedWorkspaceId || receipt.run.ownedThreadIds?.length);
-  const needsElectronSocket = pending.some(({ receipt }) => receipt.electron?.run?.threadId || receipt.electron?.run?.ownedWorkspaceId || receipt.electron?.run?.ownedThreadIds?.length);
-  const socket = needsSocket ? dependencies.socket ?? await (dependencies.openSocket ?? openRuntimeVerificationSocket)(repoRoot) : undefined;
-  let electronSocket; let desktop; let electronOwner = false;
-  if (needsElectronSocket) {
-    if (dependencies.electronSocket) electronSocket = dependencies.electronSocket;
-    else {
-      const ports = readPortsFile(repoRoot);
-      const opened = await openDesktop(repoRoot, requirePlaywright(repoRoot), ports, dependencies.electron);
-      desktop = opened.desktop;
-      electronOwner = opened.owner;
-      const serverUrl = await desktop.page.evaluate(() => window.desktopBridge.getServerUrl().then(({ url }) => url));
-      electronSocket = await openVerificationSocketUrl(repoRoot, serverUrl);
-    }
-  }
+  const connections = await openCleanupConnections(repoRoot, pending, dependencies);
   const failures = [];
   try {
-    for (const { path, receipt } of pending) {
-      const result = await cleanupOwned({ socket, electronSocket, desktop, electronOwner, io: NodeFS.promises, receipt, repoRoot, closeSockets: false, closeClients: false, reconnectElectronSocket: desktop ? async () => {
-        const serverUrl = await desktop.page.evaluate(() => window.desktopBridge.getServerUrl().then(({ url }) => url));
-        return openVerificationSocketUrl(repoRoot, serverUrl);
-      } : undefined });
-      failures.push(...result.failures.map((failure) => `${NodePath.basename(NodePath.dirname(path))}: ${failure}`));
-      receipt.cleanup = result;
-      await writeReceipt(NodeFS.promises, receipt);
-    }
+    await cleanPendingReceipts(repoRoot, pending, connections, failures);
   } finally {
-    if (desktop) {
-      await desktop.sessionHelper.disconnectElectronSession(desktop.session);
-      if (electronOwner) {
-        const { stopElectron } = await import(NodeURL.pathToFileURL(NodePath.join(repoRoot, ".agents", "skills", "electorn-live-testing", "scripts", "stop-electron.mjs")).href);
-        stopElectron(repoRoot);
-      }
-    }
-    if (socket) await socket.close();
-    if (electronSocket) await electronSocket.close();
+    await closeCleanupConnections(repoRoot, connections);
   }
   if (failures.length) throw new Error(`Condition: provider-completeness cleanup failed: ${failures.join("; ")}`);
   return { receipts: receiptPaths.length, cleanup: "complete" };
 }
 
+function collectPendingReceipts(repoRoot) {
+  const root = NodePath.join(repoRoot, EVIDENCE_DIRECTORY);
+  if (!NodeFS.existsSync(root)) return { rootExists: false, receiptPaths: [], pending: [] };
+  const receiptPaths = NodeFS.readdirSync(root, { recursive: true })
+    .filter((file) => file.endsWith("receipt.json"))
+    .map((file) => NodePath.join(root, file));
+  return { rootExists: true, receiptPaths, pending: receiptPaths.map((path) => readPendingReceipt(path, repoRoot)).filter(Boolean) };
+}
+
+function readPendingReceipt(path, repoRoot) {
+  const receipt = JSON.parse(NodeFS.readFileSync(path, "utf8"));
+  if (!isOwnedReceipt(receipt, repoRoot, path) || receipt.cleanup?.complete) return null;
+  return { path, receipt: hydrateOwnedReceipt(receipt, repoRoot) };
+}
+
+async function openCleanupConnections(repoRoot, pending, dependencies) {
+  const socket = await openCleanupSocket(repoRoot, pending, dependencies);
+  const electron = await openCleanupElectronSocket(repoRoot, pending, dependencies);
+  return { socket, ...electron };
+}
+
+async function openCleanupSocket(repoRoot, pending, dependencies) {
+  if (!pending.some(({ receipt }) => runNeedsSocket(receipt.run))) return undefined;
+  return dependencies.socket ?? (dependencies.openSocket ?? openRuntimeVerificationSocket)(repoRoot);
+}
+
+function runNeedsSocket(run) {
+  if (!run) return false;
+  return Boolean(run.threadId || run.ownedWorkspaceId || run.ownedThreadIds?.length);
+}
+
+async function openCleanupElectronSocket(repoRoot, pending, dependencies) {
+  if (!pending.some(({ receipt }) => runNeedsSocket(receipt.electron?.run))) {
+    return { electronSocket: undefined, desktop: undefined, electronOwner: false };
+  }
+  if (dependencies.electronSocket) return { electronSocket: dependencies.electronSocket, desktop: undefined, electronOwner: false };
+  const opened = await openDesktop(repoRoot, requirePlaywright(repoRoot), readPortsFile(repoRoot), dependencies.electron);
+  const electronSocket = await openVerificationSocketUrl(repoRoot, await getDesktopServerUrl(opened.desktop));
+  return { electronSocket, desktop: opened.desktop, electronOwner: opened.owner };
+}
+
+async function cleanPendingReceipts(repoRoot, pending, connections, failures) {
+  for (const pendingReceipt of pending) await cleanPendingReceipt(repoRoot, pendingReceipt, connections, failures);
+}
+
+async function cleanPendingReceipt(repoRoot, { path, receipt }, connections, failures) {
+  const result = await cleanupOwned({
+    socket: connections.socket,
+    electronSocket: connections.electronSocket,
+    desktop: connections.desktop,
+    electronOwner: connections.electronOwner,
+    io: NodeFS.promises,
+    receipt,
+    repoRoot,
+    closeSockets: false,
+    closeClients: false,
+    reconnectElectronSocket: connections.desktop ? () => reconnectProofElectronSocket(repoRoot, connections.desktop) : undefined,
+  });
+  failures.push(...result.failures.map((failure) => `${NodePath.basename(NodePath.dirname(path))}: ${failure}`));
+  receipt.cleanup = result;
+  await writeReceipt(NodeFS.promises, receipt);
+}
+
+async function closeCleanupConnections(repoRoot, connections) {
+  if (connections.desktop) {
+    await connections.desktop.sessionHelper.disconnectElectronSession(connections.desktop.session);
+    if (connections.electronOwner) await stopCleanupElectron(repoRoot);
+  }
+  if (connections.socket) await connections.socket.close();
+  if (connections.electronSocket) await connections.electronSocket.close();
+}
+
+async function stopCleanupElectron(repoRoot) {
+  const path = NodePath.join(repoRoot, ".agents", "skills", "electorn-live-testing", "scripts", "stop-electron.mjs");
+  const { stopElectron } = await import(NodeURL.pathToFileURL(path).href);
+  stopElectron(repoRoot);
+}
+
 function isOwnedReceipt(receipt, repoRoot, receiptPath) {
-  if (typeof receipt?.runId !== "string" || receipt.runId.length === 0 || typeof receipt?.fixtureFile !== "string" || typeof receipt?.fixtureDirectory !== "string" || !receipt.run || typeof receipt.run !== "object") return false;
+  if (!hasOwnedReceiptShape(receipt)) return false;
   const root = NodePath.resolve(repoRoot, EVIDENCE_DIRECTORY);
   const expectedDirectory = NodePath.join(root, receipt.runId);
   const expectedReceipt = NodePath.join(expectedDirectory, "receipt.json");
   const expectedFixtureDirectory = NodePath.join(getRuntimePaths(repoRoot).fixtureRepoDir, `provider-completeness-${receipt.runId}`);
   const expectedFixture = NodePath.join(expectedFixtureDirectory, "target.txt");
   const electronFixtureDirectory = NodePath.join(getRuntimePaths(repoRoot).fixtureRepoDir, `provider-completeness-${receipt.runId}-electron`);
-  const electronFixture = NodePath.join(electronFixtureDirectory, "target.txt");
-  const electron = receipt.electron?.run;
+  return receiptPathsAreOwned(receipt, expectedDirectory, expectedReceipt, expectedFixtureDirectory, expectedFixture, root, repoRoot, receiptPath)
+    && runOwnershipIsSafe(receipt.run, expectedFixtureDirectory)
+    && electronOwnershipIsSafe(receipt.electron?.run, electronFixtureDirectory);
+}
+
+function hasOwnedReceiptShape(receipt) {
+  return typeof receipt?.runId === "string"
+    && receipt.runId.length > 0
+    && typeof receipt.fixtureFile === "string"
+    && typeof receipt.fixtureDirectory === "string"
+    && Boolean(receipt.run)
+    && typeof receipt.run === "object";
+}
+
+function receiptPathsAreOwned(receipt, expectedDirectory, expectedReceipt, expectedFixtureDirectory, expectedFixture, root, repoRoot, receiptPath) {
   return isExactOrRedacted(receipt.fixtureFile, expectedFixture)
     && isExactOrRedacted(receipt.fixtureDirectory, expectedFixtureDirectory)
-    && (receipt.run.ownedFile == null || isOwnedFixtureFile(receipt.run.ownedFile, expectedFixtureDirectory))
-    && (!Array.isArray(receipt.run.ownedFiles) || receipt.run.ownedFiles.every((file) => isOwnedFixtureFile(file, expectedFixtureDirectory)))
-    && (receipt.run.ownedFixtureDirectory == null || isExactOrRedacted(receipt.run.ownedFixtureDirectory, expectedFixtureDirectory))
     && isExactOrRedacted(receipt.path, expectedReceipt)
     && isExactOrRedacted(receipt.directory, expectedDirectory)
     && receiptPath === expectedReceipt
     && isWithin(expectedDirectory, root)
     && isWithin(expectedReceipt, root)
-    && isWithin(expectedFixture, getRuntimePaths(repoRoot).fixtureRepoDir)
-    && (receipt.run.threadId == null || typeof receipt.run.threadId === "string")
-    && (!Array.isArray(receipt.run.ownedThreadIds) || receipt.run.ownedThreadIds.every((id) => typeof id === "string"))
-    && (receipt.run.ownedWorkspaceId == null || typeof receipt.run.ownedWorkspaceId === "string")
-    && (!electron || (typeof electron === "object"
-      && (electron.ownedFile == null || isOwnedFixtureFile(electron.ownedFile, electronFixtureDirectory))
-      && (!Array.isArray(electron.ownedFiles) || electron.ownedFiles.every((file) => isOwnedFixtureFile(file, electronFixtureDirectory)))
-      && (electron.ownedFixtureDirectory == null || isExactOrRedacted(electron.ownedFixtureDirectory, electronFixtureDirectory))
-      && (electron.threadId == null || typeof electron.threadId === "string")
-      && (!Array.isArray(electron.ownedThreadIds) || electron.ownedThreadIds.every((id) => typeof id === "string"))
-      && (electron.ownedWorkspaceId == null || typeof electron.ownedWorkspaceId === "string")));
+    && isWithin(expectedFixture, getRuntimePaths(repoRoot).fixtureRepoDir);
+}
+
+function runOwnershipIsSafe(run, fixtureDirectory) {
+  return ownedFileIsSafe(run.ownedFile, fixtureDirectory)
+    && ownedFilesAreSafe(run.ownedFiles, fixtureDirectory)
+    && ownedFixtureDirectoryIsSafe(run.ownedFixtureDirectory, fixtureDirectory)
+    && optionalString(run.threadId)
+    && optionalStrings(run.ownedThreadIds)
+    && optionalString(run.ownedWorkspaceId);
+}
+
+function electronOwnershipIsSafe(electron, fixtureDirectory) {
+  if (!electron) return true;
+  return typeof electron === "object" && runOwnershipIsSafe(electron, fixtureDirectory);
+}
+
+function ownedFileIsSafe(value, fixtureDirectory) {
+  return value == null || isOwnedFixtureFile(value, fixtureDirectory);
+}
+
+function ownedFilesAreSafe(values, fixtureDirectory) {
+  return !Array.isArray(values) || values.every((file) => isOwnedFixtureFile(file, fixtureDirectory));
+}
+
+function ownedFixtureDirectoryIsSafe(value, fixtureDirectory) {
+  return value == null || isExactOrRedacted(value, fixtureDirectory);
+}
+
+function optionalString(value) {
+  return value == null || typeof value === "string";
+}
+
+function optionalStrings(values) {
+  return !Array.isArray(values) || values.every((value) => typeof value === "string");
 }
 
 function isExactOrRedacted(value, expected) { return value === expected || value === "[path]"; }
@@ -806,16 +1282,28 @@ function findChromiumPath() { return ["C:\\Program Files\\Google\\Chrome\\Applic
 function summarizeComparison(comparison, patch) {
   return {
     comparison: {
-      turnDiff: {
-        phase: comparison?.turnDiff?.phase ?? null,
-        source: comparison?.turnDiff?.source ?? null,
-        fidelity: comparison?.turnDiff?.fidelity ?? null,
-        revision: Number.isInteger(comparison?.turnDiff?.revision) ? comparison.turnDiff.revision : null,
-      },
-      files: Array.isArray(comparison?.files) ? comparison.files.map((file) => ({ path: typeof file?.path === "string" ? NodePath.basename(file.path) : null, status: typeof file?.status === "string" ? file.status : null })) : [],
+      turnDiff: summarizeComparisonTurnDiff(comparison?.turnDiff),
+      files: summarizeComparisonFiles(comparison?.files),
     },
     patch: redactPatch(patch),
   };
+}
+
+function summarizeComparisonTurnDiff(turnDiff) {
+  return {
+    phase: turnDiff?.phase ?? null,
+    source: turnDiff?.source ?? null,
+    fidelity: turnDiff?.fidelity ?? null,
+    revision: Number.isInteger(turnDiff?.revision) ? turnDiff.revision : null,
+  };
+}
+
+function summarizeComparisonFiles(files) {
+  if (!Array.isArray(files)) return [];
+  return files.map((file) => ({
+    path: typeof file?.path === "string" ? NodePath.basename(file.path) : null,
+    status: typeof file?.status === "string" ? file.status : null,
+  }));
 }
 
 function redactPatch(patch) {
@@ -825,11 +1313,128 @@ function redactPatch(patch) {
 }
 export function recordLiveObservation(receipt, rendered, result) { const observation = assertLiveObservation(rendered, result); receipt.renderedEvidence.push({ state: "live", filePath: observation.filePath, patch: observation.renderedPatch, sourceLabel: observation.sourceLabel }); return observation; }
 export async function captureLiveObservation(page, receipt, result, capture = captureLive, name = "web-live") { return recordLiveObservation(receipt, await capture(page, receipt, name, result), result); }
-export function assertLiveObservation(rendered, result) { const comparison = result?.comparison; if (!rendered?.stopVisible || comparison?.turnDiff?.phase !== "live" || !comparison?.turnDiff?.source || !comparison?.turnDiff?.fidelity || !result?.file?.path || typeof result?.patch !== "string" || rendered.filePath !== result.file.path || !hasAgentOnlyMarker(rendered.fileText) || rendered.patch !== "AGENT_MARKER" || rendered.sourceLabel == null || rendered.source !== comparison.turnDiff.source || rendered.fidelity !== comparison.turnDiff.fidelity) throw new Error("Condition: rendered Live Review evidence was incomplete."); return { ...rendered, comparisonId: comparison.turnDiff.id, phase: "live", source: comparison.turnDiff.source, fidelity: comparison.turnDiff.fidelity, filePath: result.file.path, renderedPatch: rendered.patch, patch: result.patch }; }
-export function assertObservation(rendered, result, phase) { const comparison = result?.comparison; if (rendered?.rows !== 1 || rendered?.spinners !== 0 || comparison?.turnDiff?.phase !== phase || !comparison?.turnDiff?.source || !comparison?.turnDiff?.fidelity || !result?.file?.path || typeof result?.patch !== "string" || rendered.filePath !== result.file.path || !hasAgentOnlyMarker(rendered.fileText) || rendered.patch !== "AGENT_MARKER" || rendered.sourceLabel == null || rendered.source !== comparison.turnDiff.source || rendered.fidelity !== comparison.turnDiff.fidelity) throw new Error("Condition: rendered Review or exact comparison evidence was incomplete."); return { ...rendered, comparisonId: comparison.turnDiff.id, phase, source: comparison.turnDiff.source, fidelity: comparison.turnDiff.fidelity, filePath: result.file.path, renderedPatch: rendered.patch, patch: result.patch }; }
+export function assertLiveObservation(rendered, result) {
+  if (!rendered?.stopVisible || !hasCompleteRenderedEvidence(rendered, result, "live")) {
+    throw new Error("Condition: rendered Live Review evidence was incomplete.");
+  }
+  return completeObservation(rendered, result, "live");
+}
+
+export function assertObservation(rendered, result, phase) {
+  if (!renderedReviewIsComplete(rendered) || !hasCompleteRenderedEvidence(rendered, result, phase)) {
+    throw new Error("Condition: rendered Review or exact comparison evidence was incomplete.");
+  }
+  return completeObservation(rendered, result, phase);
+}
+
+function renderedReviewIsComplete(rendered) {
+  return rendered?.rows === 1 && rendered.spinners === 0;
+}
+
+function hasCompleteRenderedEvidence(rendered, result, phase) {
+  return completeComparisonHasPhase(result, phase)
+    && hasAgentPatch(result)
+    && renderedFileMatches(rendered, result)
+    && renderedPatchIsAgentOnly(rendered)
+    && renderedSourceMatches(rendered, result);
+}
+
+function completeComparisonHasPhase(result, phase) {
+  const turnDiff = result?.comparison?.turnDiff;
+  return turnDiff?.phase === phase && Boolean(turnDiff.source) && Boolean(turnDiff.fidelity) && Boolean(result?.file?.path);
+}
+
+function hasAgentPatch(result) {
+  return typeof result?.patch === "string";
+}
+
+function renderedFileMatches(rendered, result) {
+  return rendered?.filePath === result?.file?.path && hasAgentOnlyMarker(rendered?.fileText);
+}
+
+function renderedPatchIsAgentOnly(rendered) {
+  return rendered?.patch === "AGENT_MARKER" && rendered.sourceLabel != null;
+}
+
+function renderedSourceMatches(rendered, result) {
+  return rendered?.source === result?.comparison?.turnDiff?.source
+    && rendered?.fidelity === result?.comparison?.turnDiff?.fidelity;
+}
+
+function completeObservation(rendered, result, phase) {
+  const turnDiff = result.comparison.turnDiff;
+  return {
+    ...rendered,
+    comparisonId: turnDiff.id,
+    phase,
+    source: turnDiff.source,
+    fidelity: turnDiff.fidelity,
+    filePath: result.file.path,
+    renderedPatch: rendered.patch,
+    patch: result.patch,
+  };
+}
 function hasAgentOnlyMarker(fileText) { return typeof fileText === "string" && fileText.includes("AGENT_MARKER") && !fileText.includes("EXTERNAL_MARKER"); }
 export function assertDiskContent(disk, agentMarker, externalMarker) { if (typeof disk !== "string" || !disk.includes(agentMarker) || !disk.includes(externalMarker)) throw new Error("Condition: disk did not retain both same-file markers."); return "both markers retained"; }
-export function resolveUpstreamCodex(repoRoot, execute = NodeChildProcess.execFileSync, bunExecutable = process.execPath, now = () => new Date().toISOString()) { const opensrcHome = NodePath.join(repoRoot, ".opensrc"); const command = "bunx --no-install opensrc path openai/codex"; const resolverArgs = ["x", "--no-install", "opensrc", "path", "openai/codex"]; const resolverOutput = execute(bunExecutable, resolverArgs, { cwd: repoRoot, env: { ...process.env, OPENSRC_HOME: opensrcHome }, encoding: "utf8" }).trim(); const resolvedPath = NodePath.resolve(repoRoot, resolverOutput); const appServer = NodePath.join(resolvedPath, "codex-rs", "app-server"); const protocol = NodePath.join(resolvedPath, "codex-rs", "app-server-protocol"); if (!NodeFS.existsSync(appServer) || !NodeFS.existsSync(protocol)) throw new Error("Condition: OpenSrc Codex cache lacks codex-rs/app-server or app-server-protocol."); const source = readOpenSrcSource(opensrcHome, resolvedPath); const base = { command, resolverOutput, resolvedPath, appServer: true, protocol: true, sourceVersion: source?.version ?? null, sourceFetchedAt: source?.fetchedAt ?? null }; let localFailure = "OpenSrc cache has no repository .git metadata"; if (NodeFS.existsSync(NodePath.join(resolvedPath, ".git"))) { try { const commit = execute("git", ["-C", resolvedPath, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(); if (!commit) throw new Error("git rev-parse HEAD returned no commit"); return { ...base, commit, cacheCommit: commit, commitProvenance: "OpenSrc cache git rev-parse HEAD", commitResolvedAt: now() }; } catch (error) { localFailure = `OpenSrc cache git rev-parse HEAD failed: ${safeError(error)}`; } } try { const remoteOutput = execute("git", ["ls-remote", "https://github.com/openai/codex.git", "refs/heads/main"], { encoding: "utf8" }).trim(); const commit = remoteOutput.match(/^([0-9a-f]{40})\s+refs\/heads\/main$/m)?.[1]; if (!commit) throw new Error("git ls-remote did not return refs/heads/main"); return { ...base, commit, cacheCommit: null, commitProvenance: "git ls-remote https://github.com/openai/codex.git refs/heads/main", commitResolvedAt: now() }; } catch (error) { return { ...base, commit: null, cacheCommit: null, auditBlocker: `${localFailure}; git ls-remote refs/heads/main failed: ${safeError(error)}` }; } }
+export function resolveUpstreamCodex(repoRoot, execute = NodeChildProcess.execFileSync, bunExecutable = process.execPath, now = () => new Date().toISOString()) {
+  const source = resolveOpenSrcCodex(repoRoot, execute, bunExecutable);
+  const local = resolveCachedCodexCommit(source.base, source.resolvedPath, execute, now);
+  if (local.evidence) return local.evidence;
+  return resolveRemoteCodexCommit(source.base, execute, now, local.failure);
+}
+
+function resolveOpenSrcCodex(repoRoot, execute, bunExecutable) {
+  const opensrcHome = NodePath.join(repoRoot, ".opensrc");
+  const resolverArgs = ["x", "--no-install", "opensrc", "path", "openai/codex"];
+  const resolverOutput = execute(bunExecutable, resolverArgs, { cwd: repoRoot, env: { ...process.env, OPENSRC_HOME: opensrcHome }, encoding: "utf8" }).trim();
+  const resolvedPath = NodePath.resolve(repoRoot, resolverOutput);
+  assertCodexSourceLayout(resolvedPath);
+  const source = readOpenSrcSource(opensrcHome, resolvedPath);
+  return {
+    resolvedPath,
+    base: {
+      command: "bunx --no-install opensrc path openai/codex",
+      resolverOutput,
+      resolvedPath,
+      appServer: true,
+      protocol: true,
+      sourceVersion: source?.version ?? null,
+      sourceFetchedAt: source?.fetchedAt ?? null,
+    },
+  };
+}
+
+function assertCodexSourceLayout(resolvedPath) {
+  const appServer = NodePath.join(resolvedPath, "codex-rs", "app-server");
+  const protocol = NodePath.join(resolvedPath, "codex-rs", "app-server-protocol");
+  if (!NodeFS.existsSync(appServer) || !NodeFS.existsSync(protocol)) {
+    throw new Error("Condition: OpenSrc Codex cache lacks codex-rs/app-server or app-server-protocol.");
+  }
+}
+
+function resolveCachedCodexCommit(base, resolvedPath, execute, now) {
+  if (!NodeFS.existsSync(NodePath.join(resolvedPath, ".git"))) {
+    return { evidence: null, failure: "OpenSrc cache has no repository .git metadata" };
+  }
+  try {
+    const commit = execute("git", ["-C", resolvedPath, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    if (!commit) throw new Error("git rev-parse HEAD returned no commit");
+    return { evidence: { ...base, commit, cacheCommit: commit, commitProvenance: "OpenSrc cache git rev-parse HEAD", commitResolvedAt: now() } };
+  } catch (error) {
+    return { evidence: null, failure: `OpenSrc cache git rev-parse HEAD failed: ${safeError(error)}` };
+  }
+}
+
+function resolveRemoteCodexCommit(base, execute, now, localFailure) {
+  try {
+    const remoteOutput = execute("git", ["ls-remote", "https://github.com/openai/codex.git", "refs/heads/main"], { encoding: "utf8" }).trim();
+    const commit = remoteOutput.match(/^([0-9a-f]{40})\s+refs\/heads\/main$/m)?.[1];
+    if (!commit) throw new Error("git ls-remote did not return refs/heads/main");
+    return { ...base, commit, cacheCommit: null, commitProvenance: "git ls-remote https://github.com/openai/codex.git refs/heads/main", commitResolvedAt: now() };
+  } catch (error) {
+    return { ...base, commit: null, cacheCommit: null, auditBlocker: `${localFailure}; git ls-remote refs/heads/main failed: ${safeError(error)}` };
+  }
+}
 function readOpenSrcSource(opensrcHome, resolvedPath) { try { return JSON.parse(NodeFS.readFileSync(NodePath.join(opensrcHome, "sources.json"), "utf8")).repos?.find((candidate) => NodePath.resolve(opensrcHome, candidate.path) === resolvedPath); } catch { return null; } }
 function resolveApplicationCommit(repoRoot) { try { return NodeChildProcess.execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).trim(); } catch { return "blocked: git rev-parse HEAD failed"; } }
 function pathsMatch(a, b) { return typeof a === "string" && typeof b === "string" && NodePath.resolve(a).toLowerCase() === NodePath.resolve(b).toLowerCase(); }
