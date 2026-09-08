@@ -915,6 +915,30 @@ describe("ServerManager", () => {
     }
   });
 
+  it("allows the server to finish terminal cleanup before the desktop fallback", async () => {
+    vi.useFakeTimers();
+    vi.mocked(NodeFS.existsSync).mockReturnValue(true);
+    vi.mocked(NodeFS.readFileSync).mockReset().mockReturnValue(LOCK_FILE_JSON);
+    setManagerPlatform(manager, "win32");
+    const started = Date.now();
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => {
+      if (Date.now() - started >= 30_000) {
+        throw Object.assign(new Error("ESRCH"), { code: "ESRCH" });
+      }
+      return true;
+    });
+    try {
+      const stopped = manager.stopServerHeldByLock();
+      await vi.advanceTimersByTimeAsync(30_200);
+      await stopped;
+      expect(NodeChildProcess.execFileSync).not.toHaveBeenCalled();
+      expect(NodeFS.unlinkSync).toHaveBeenCalledOnce();
+    } finally {
+      killSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects malformed lock JSON and preserves the lock file", async () => {
     vi.mocked(NodeFS.existsSync).mockReturnValue(true);
     vi.mocked(NodeFS.readFileSync).mockReset().mockReturnValue("{ malformed");

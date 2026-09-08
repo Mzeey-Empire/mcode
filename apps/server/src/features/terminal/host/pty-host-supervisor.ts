@@ -26,6 +26,8 @@ import {
 import { reapPosixProcessSession } from "./posix-process-scope.js";
 import { nodePlatformForTerminal } from "../terminal-platform.js";
 
+import { PTY_HOST_SHUTDOWN_DEADLINE_MS } from "@mcode/shared/node/shutdown-deadlines";
+
 const STARTUP_TIMEOUT_MS = 5_000;
 const REPLACEMENT_DELAY_MS = 250;
 const HEARTBEAT_DEGRADED_MS = 750;
@@ -356,7 +358,7 @@ export class PtyHostSupervisor implements PtyHostAdapter {
     }
     const timeout = setTimeout(
       resolveExit,
-      this.options.shutdownTimeoutMs ?? OPERATION_TIMEOUT_MS,
+      this.options.shutdownTimeoutMs ?? PTY_HOST_SHUTDOWN_DEADLINE_MS,
     );
     await exited;
     clearTimeout(timeout);

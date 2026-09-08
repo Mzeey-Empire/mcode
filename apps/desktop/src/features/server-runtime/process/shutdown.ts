@@ -1,5 +1,6 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
+import { DESKTOP_SHUTDOWN_DEADLINE_MS } from "@mcode/shared/node/shutdown-deadlines";
 import {
   isPortInRange,
   isProcessAlive,
@@ -129,12 +130,12 @@ async function requestGracefulShutdown(lock: ServerLock): Promise<void> {
   }
 }
 
-/** Wait up to ten seconds for a process leader and its POSIX group to exit. */
+/** Wait beyond the server watchdog for its process leader and POSIX group to exit. */
 async function waitForProcessTreeExit(
   pid: number,
   platform: NodeJS.Platform,
 ): Promise<boolean> {
-  const deadline = Date.now() + 10_000;
+  const deadline = Date.now() + DESKTOP_SHUTDOWN_DEADLINE_MS;
   while (Date.now() < deadline) {
     if (!isProcessAlive(pid) && !isProcessGroupAlive(pid, platform)) return false;
     await delay(200);

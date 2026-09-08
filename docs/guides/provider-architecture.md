@@ -2,6 +2,16 @@
 
 All agent providers must use a **persistent process per session**, not per-turn spawning.
 
+When all clients disconnect, a regular Mcode server waits for its shutdown grace
+period. Active agent turns defer shutdown. Open terminals and idle provider
+sessions do not. Graceful shutdown closes those remaining resources. Supervised
+agent runtimes stay alive until their supervisor stops them.
+
+Shutdown closes terminal process scopes concurrently through the PTY host. The
+host has 25 seconds for graceful cleanup. The server watchdog allows 35 seconds
+for the full shutdown. The desktop waits 40 seconds before forced cleanup of its
+owned server. Startup, heartbeat, and normal operation deadlines do not change.
+
 ## Shared lifecycle: SessionRuntime + ProtocolAdapter
 
 The uniform session lifecycle lives privately in `packages/providers`.

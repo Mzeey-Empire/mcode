@@ -98,6 +98,32 @@ class FakeHostChild extends NodeEvents.EventEmitter implements PtyHostChild {
 }
 
 describe("PtyHostSupervisor", () => {
+  it("waits for graceful host exit beyond the normal operation deadline", async () => {
+    vi.useFakeTimers();
+    const child = new FakeHostChild();
+    const supervisor = new PtyHostSupervisor({
+      platform: "windows",
+      spawnHost: () => child,
+      cleanupLedger: new InMemoryPtyHostCleanupLedger(),
+    });
+    try {
+      await supervisor.start();
+      child.send.mockImplementation((_message, callback) => {
+        callback?.(null);
+        return true;
+      });
+      const stopped = supervisor.shutdown();
+      await vi.advanceTimersByTimeAsync(7_600);
+      expect(child.kill).not.toHaveBeenCalled();
+      Object.defineProperty(child, "connected", { value: false });
+      child.emit("exit", 0, null);
+      await stopped;
+      expect(child.kill).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("starts one healthy generation and replaces one crashed host", async () => {
     vi.useFakeTimers();
     const children: FakeHostChild[] = [];

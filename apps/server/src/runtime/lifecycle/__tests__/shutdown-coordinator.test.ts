@@ -42,6 +42,23 @@ describe("createShutdownCoordinator", () => {
     await coordinator.requestShutdown();
 
     expect(cancel).toHaveBeenCalledOnce();
-    expect(EXPLICIT_SHUTDOWN_DEADLINE_MS).toBe(8_000);
+  });
+
+  it("allows terminal cleanup beyond eight seconds but bounds a hung shutdown", async () => {
+    vi.useFakeTimers();
+    try {
+      const exit = vi.fn(() => undefined as never);
+      const coordinator = createShutdownCoordinator({
+        shutdown: () => new Promise<void>(() => {}),
+        exit,
+      });
+      coordinator.requestShutdown();
+      await vi.advanceTimersByTimeAsync(25_000);
+      expect(exit).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(EXPLICIT_SHUTDOWN_DEADLINE_MS - 25_000);
+      expect(exit).toHaveBeenCalledWith(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
