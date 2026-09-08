@@ -13,7 +13,7 @@ export interface ServerPortBand {
 
 export interface SpawnedServerProcess {
   child: NodeChildProcess.ChildProcess;
-  stderrStream: NodeFS.WriteStream | undefined;
+  stderrStream: NodeFS.WriteStream;
 }
 export const SERVER_LOG_PATH = NodePath.join(getMcodeDir(), "server-stderr.log");
 export const SERVER_ROTATED_LOG_PATH = NodePath.join(getMcodeDir(), "server-stderr.1.log");
@@ -32,13 +32,13 @@ export function spawnServerProcess(port: number, platform: NodeJS.Platform): Spa
       env: createServerEnvironment(paths, port, platform),
       detached: true,
       // A direct file handle preserves the final error even if the child exits immediately.
-      stdio: [isDesktopDev() ? "inherit" : "ignore", isDesktopDev() ? "inherit" : "ignore", stderrStream],
+      stdio: ["ignore", "ignore", stderrStream],
     });
     child.unref();
     console.info("[server-manager] Server process spawned", { pid: child.pid, port, errorLog: SERVER_LOG_PATH });
     return { child, stderrStream };
   } catch (error) {
-    stderrStream?.destroy();
+    stderrStream.destroy();
     throw error;
   }
 }

@@ -137,8 +137,7 @@ export class PtyHostSupervisor implements PtyHostAdapter {
     if (this.state !== "stopped")
       throw new Error("PTY host is already started");
     this.state = "starting";
-    this.startPromise = this.startAfterOrphanRecovery();
-    return this.startPromise;
+    return this.trackStart(this.startAfterOrphanRecovery());
   }
 
   /** Returns the current externally visible host health. */
@@ -377,7 +376,14 @@ export class PtyHostSupervisor implements PtyHostAdapter {
     this.readyObserved = false;
     this.heartbeatObserved = false;
     const generation = this.generation.toString();
-    const child = this.options.spawnHost();
+    let child: PtyHostChild;
+    try {
+      child = this.options.spawnHost();
+    } catch (error) {
+      return Promise.reject(
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }
     this.child = child;
     child.on("message", (message) =>
       this.handleMessage(child, generation, message),
@@ -586,9 +592,18 @@ export class PtyHostSupervisor implements PtyHostAdapter {
         });
         return;
       }
-      this.startPromise = this.spawnGeneration();
-      void this.startPromise.catch(() => undefined);
+      this.trackStart(this.spawnGeneration());
     }, this.options.replacementDelayMs ?? REPLACEMENT_DELAY_MS);
+  }
+
+  private trackStart(promise: Promise<PtyHostHealth>): Promise<PtyHostHealth> {
+    this.startPromise = promise;
+    void promise.catch(() => {
+      if (this.startPromise !== promise) return;
+      this.startPromise = null;
+      if (this.state === "starting") this.state = "unhealthy";
+    });
+    return promise;
   }
 
   private sendMessage(value: PtyHostServerMessage): void {

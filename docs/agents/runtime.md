@@ -74,7 +74,7 @@ Desktop launches save server errors to `server-stderr.log` in `MCODE_DATA_DIR`,
 including development launches. Normal worktree development uses
 `.dev/server-stderr.log`. The next launch moves the previous log to
 `server-stderr.1.log`. The startup failure dialog includes the last 40 lines.
-Server stderr goes directly to this file; development stdout remains in the terminal.
+Server stderr goes directly to this file; stdin and stdout stay isolated from the desktop terminal.
 
 Startup checkpoint logs use past-tense messages and include the completed
 stage, server PID, and elapsed milliseconds since the bootstrap function began.
