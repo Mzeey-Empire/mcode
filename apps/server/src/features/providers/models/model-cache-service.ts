@@ -4,7 +4,7 @@
  * On construction, synchronously loads all cached model lists from SQLite into
  * memory so RPC responses are instant from the very first call. Stale entries
  * are served immediately while a background refresh fetches fresh data
- * (stale-while-revalidate). Cache writes are elided when the model ID set is
+ * (stale-while-revalidate). Cache writes are elided when the model list is
  * unchanged so we avoid pointless SQLite churn.
  */
 
@@ -171,11 +171,8 @@ export class ModelCacheService {
 
     const now = Date.now();
 
-    // Compare ID sets: the model array is rewritten by providers (ordering and
-    // metadata can drift) but if the ID set is identical, nothing meaningful
-    // changed and we skip the SQLite write.
     const oldModels = this.memoryCache.get(providerId);
-    const changed = !oldModels || !this.sameModelIds(oldModels, models);
+    const changed = JSON.stringify(oldModels) !== JSON.stringify(models);
 
     this.memoryCache.set(providerId, models);
     this.fetchedAt.set(providerId, now);
@@ -191,11 +188,4 @@ export class ModelCacheService {
     return models;
   }
 
-  /** Compares two model lists by sorted IDs to detect set changes. */
-  private sameModelIds(a: ProviderModelInfo[], b: ProviderModelInfo[]): boolean {
-    if (a.length !== b.length) return false;
-    const sortedA = a.map((m) => m.id).sort();
-    const sortedB = b.map((m) => m.id).sort();
-    return sortedA.every((id, i) => id === sortedB[i]);
-  }
 }

@@ -31,10 +31,11 @@ export function spawnServerProcess(port: number, platform: NodeJS.Platform): Spa
       cwd: paths.cwd,
       env: createServerEnvironment(paths, port, platform),
       detached: true,
-      stdio: ["ignore", "ignore", "pipe"],
+      // A direct file handle preserves the final error even if the child exits immediately.
+      stdio: ["ignore", "ignore", stderrStream],
     });
     child.unref();
-    if (child.stderr) child.stderr.pipe(stderrStream);
+    console.info("[server-manager] Server process spawned", { pid: child.pid, port, errorLog: SERVER_LOG_PATH });
     return { child, stderrStream };
   } catch (error) {
     stderrStream.destroy();
@@ -144,5 +145,7 @@ function createServerStderrStream(): NodeFS.WriteStream {
       NodeFS.renameSync(SERVER_LOG_PATH, SERVER_ROTATED_LOG_PATH);
     } catch (error) { console.warn("[server-manager] Failed to rotate previous server stderr log", error); }
   }
-  return NodeFS.createWriteStream(SERVER_LOG_PATH, { flags: "w" });
+  return NodeFS.createWriteStream(SERVER_LOG_PATH, {
+    fd: NodeFS.openSync(SERVER_LOG_PATH, "w", 0o600),
+  });
 }

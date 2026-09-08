@@ -2,7 +2,7 @@
  * Persistent child process manager for the `codex app-server` CLI subprocess.
  *
  * Spawns `codex app-server`, completes the JSON-RPC 2.0 handshake sequence
- * (initialize → initialized → model/list → thread/resume or thread/start),
+ * (initialize → initialized → thread/resume or thread/start),
  * and forwards server notifications to consumers via EventEmitter.
  */
 
@@ -14,6 +14,7 @@ import which from "which";
 import { resolveSubagentDisplayName } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
 import { CodexRpcClient } from "./codex-rpc-client.js";
+import { listCodexModels } from "./codex-models.js";
 import { codexIgnoredNotificationReason } from "./codex-notification-policy.js";
 import { parseCodexNotification } from "./codex-notification-validation.js";
 import { mapDecisionToCodexResponse } from "./codex-permission-mapper.js";
@@ -968,7 +969,7 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
    * Spawns `codex app-server` and runs the full handshake sequence.
    *
    * Wires stderr and exit handlers before the handshake begins. If any
-   * handshake step fails (except the best-effort `model/list`), the child
+   * handshake step fails, the child
    * process is killed and the error is re-thrown to the caller.
    *
    * @throws When spawn fails or a required handshake RPC returns an error.
@@ -1319,6 +1320,12 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     return this.rpc.sendRequest<SkillsListParams, SkillsListResult>("skills/list", params, 10000);
   }
 
+  /** Reads and validates the native model catalog from this connection. */
+  async listModels(): Promise<import("@mcode/contracts").ProviderModelInfo[]> {
+    if (!this._isAlive || !this.rpc) throw new Error("Codex app-server is not ready");
+    return listCodexModels(this.rpc);
+  }
+
   /** Reads installed plugin summaries for the effective working-directory context. */
   async listPlugins(cwds?: string[]): Promise<PluginListResult> {
     if (!this._isAlive || !this.rpc) {
@@ -1414,12 +1421,14 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
       INTERRUPT_DRAIN_TIMEOUT_MS,
     );
     try {
-      await rpc.sendRequest<TurnInterruptParams, TurnInterruptResult>(
-        "turn/interrupt",
-        { threadId: nativeThreadId, turnId: nativeTurnId },
-        5_000,
-      );
-      await drain;
+      await Promise.all([
+        drain,
+        rpc.sendRequest<TurnInterruptParams, TurnInterruptResult>(
+          "turn/interrupt",
+          { threadId: nativeThreadId, turnId: nativeTurnId },
+          5_000,
+        ),
+      ]);
     } finally {
       this.off("notification", onNotification);
       if (drainTimer) clearTimeout(drainTimer);
@@ -1513,7 +1522,6 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     });
     this.rpc.sendNotification("initialized", {});
     if (this.options.catalogOnly) return;
-    await this.requestCodexModelList();
     const instructions = await this.resolveDeveloperInstructions(
       this.options.workingDirectory,
       this.options.developerInstructions,
@@ -1522,13 +1530,6 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     if (!this.threadId) await this.startCodexThread(instructions);
   }
 
-  private async requestCodexModelList(): Promise<void> {
-    try {
-      await this.rpc.sendRequest("model/list", {}, 10000);
-    } catch (error) {
-      logger.warn("Codex model/list failed", { error: String(error) });
-    }
-  }
 
   private async resumeCodexThread(instructions: string | undefined): Promise<void> {
     const resumeThreadId = this.options.resumeThreadId;

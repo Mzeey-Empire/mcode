@@ -1,5 +1,7 @@
+import { SERVER_SHUTDOWN_DEADLINE_MS } from "@mcode/shared/node/shutdown-deadlines";
+
 /** Hard deadline for explicit shutdown before the desktop supervisor fallback. */
-export const EXPLICIT_SHUTDOWN_DEADLINE_MS = 8_000;
+export const EXPLICIT_SHUTDOWN_DEADLINE_MS = SERVER_SHUTDOWN_DEADLINE_MS;
 
 /** Testable dependencies for explicit shutdown coordination. */
 export interface ShutdownCoordinatorDependencies {

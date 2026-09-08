@@ -133,6 +133,24 @@ describe("CodexRpcClient", () => {
     await expect(p2).rejects.toThrow("RPC client disposed");
   });
 
+  it.each(["end", "close", "error", "stdin-close", "stdin-error"])("dispose removes listeners after %s and stops notifications", async (failure) => {
+    const { client, stdin, stdout } = makeClient();
+    const notifications: unknown[] = [];
+    client.on("notification", (event) => notifications.push(event));
+    const request = client.sendRequest("initialize", {});
+    const rejection = expect(request).rejects.toBeInstanceOf(Error);
+    const stream = failure.startsWith("stdin-") ? stdin : stdout;
+    stream.emit(failure.replace("stdin-", ""), new Error("transport failed"));
+    await rejection;
+    client.dispose();
+    client.dispose();
+    stdout.emit("data", '{"method":"turn/completed","params":{}}\n');
+    expect(notifications).toEqual([]);
+    expect(stdout.listenerCount("data")).toBe(0);
+    expect(stdout.listenerCount("close")).toBe(0);
+    expect(stdin.listenerCount("close")).toBe(0);
+  });
+
   it("sendRequest after dispose rejects immediately", async () => {
     const { client } = makeClient();
 

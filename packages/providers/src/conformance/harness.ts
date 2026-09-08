@@ -469,6 +469,7 @@ function createFakeCodexPorts(): NonNullable<ProviderFactoryInput["codex"]> {
     attachments: { persistGeneratedImageFromPath: () => { throw new Error("unused"); } },
     catalog: {
       currentSkills: () => [],
+      listModels: async () => [],
       currentPrompts: () => [],
       refreshCustomPrompts: async () => ({ prompts: [] }),
       shutdown: async () => undefined,

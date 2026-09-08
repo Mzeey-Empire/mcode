@@ -2120,7 +2120,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         ...record.context,
         lastTokensIn: event.tokensIn,
         contextWindow: event.contextWindow ?? record.context?.contextWindow,
-        totalProcessedTokens: record.context?.totalProcessedTokens,
+        totalProcessedTokens: event.totalProcessedTokens ?? record.context?.totalProcessedTokens,
       },
     }));
   };

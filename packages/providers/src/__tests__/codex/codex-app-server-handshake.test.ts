@@ -652,7 +652,7 @@ describe("CodexAppServer.start (failed handshake teardown)", () => {
       await server.start();
 
       const timeoutBudgets = setTimeoutSpy.mock.calls.map(([, delay]) => delay);
-      expect(timeoutBudgets).toContain(10_000);
+      expect(timeoutBudgets).not.toContain(10_000);
       expect(timeoutBudgets).toContain(3_000);
       expect(timeoutBudgets.filter((delay) => delay === 30_000)).toHaveLength(2);
       expect(timeoutBudgets).not.toContain(15_000);
@@ -678,7 +678,7 @@ describe("CodexAppServer.start (failed handshake teardown)", () => {
       await server.start();
 
       const timeoutBudgets = setTimeoutSpy.mock.calls.map(([, delay]) => delay);
-      expect(timeoutBudgets).toContain(10_000);
+      expect(timeoutBudgets).not.toContain(10_000);
       expect(timeoutBudgets.filter((delay) => delay === 30_000)).toHaveLength(2);
       expect(timeoutBudgets).not.toContain(15_000);
     } finally {

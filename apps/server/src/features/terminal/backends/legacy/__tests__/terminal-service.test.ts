@@ -394,12 +394,28 @@ describe("TerminalService host ownership", () => {
     ]);
   });
 
-  it("shuts down the host even when a session close rejects", async () => {
+  it("retains sessions until bulk host shutdown completes", async () => {
+    const { service, host, launch } = createService();
+    await service.create("thread", launch);
+    await service.create("thread", launch);
+    let finish!: () => void;
+    host.shutdown.mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
+
+    const shutdown = service.shutdown();
+    await vi.waitFor(() => expect(host.shutdown).toHaveBeenCalledOnce());
+    expect(host.closes).toEqual([]);
+    expect(service.listActiveSessions()).toHaveLength(2);
+    finish();
+    await shutdown;
+    expect(service.listActiveSessions()).toEqual([]);
+  });
+
+  it("retains sessions when bulk host shutdown fails", async () => {
     const { service, host, launch } = createService();
     const created = await service.create("thread", launch);
-    host.closeError = new Error("close failed");
+    host.shutdown.mockRejectedValue(new Error("host shutdown failed"));
 
-    await expect(service.shutdown()).rejects.toThrow("Terminal shutdown failed");
+    await expect(service.shutdown()).rejects.toThrow("host shutdown failed");
 
     expect(host.shutdown).toHaveBeenCalledOnce();
     expect(service.listActiveSessions()).toEqual([

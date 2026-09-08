@@ -3306,7 +3306,7 @@ describe("CodexEventMapper", () => {
       cacheReadTokens: 5,
       providerId: "codex",
       contextWindow: undefined,
-      totalProcessedTokens: 35,
+      totalProcessedTokens: 30,
     });
   });
 

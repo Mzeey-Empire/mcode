@@ -35,15 +35,17 @@ vi.mock("@/components/ui/tooltip", () => ({
 }));
 
 // Prevent real RPC calls triggered when a provider rail tab loads models.
+const { listProviderModels } = vi.hoisted(() => ({ listProviderModels: vi.fn() }));
 vi.mock("@/transport", () => ({
   getTransport: () => ({
-    listProviderModels: vi.fn().mockResolvedValue([]),
+    listProviderModels,
   }),
 }));
 
 import { ModelSelector } from "../ModelSelector";
 
 beforeEach(() => {
+  listProviderModels.mockReset().mockResolvedValue([]);
   useProviderAvailabilityStore.setState({
     providers: [
       {
@@ -67,6 +69,28 @@ beforeEach(() => {
 });
 
 describe("ModelSelector", () => {
+  it("renders the live Codex order and submits the original model ID", async () => {
+    useProviderAvailabilityStore.setState((state) => ({
+      providers: state.providers.map((provider) => ({ ...provider, enabled: true })),
+    }));
+    listProviderModels.mockResolvedValue([
+      { id: "gpt-9-zeta", name: "GPT-9 Zeta", group: "OpenAI" },
+      { id: "gpt-9-alpha", name: "GPT-9 Alpha", group: "OpenAI" },
+    ]);
+    const onSelect = vi.fn();
+    render(<ModelSelector selectedModelId="claude-sonnet-4-6" selectedProviderId="claude"
+      onSelect={onSelect} locked={false} />);
+    await userEvent.click(screen.getAllByRole("button")[0]);
+    await userEvent.click(screen.getByTestId("model-group-codex"));
+    const rows = await screen.findAllByRole("button", { name: /^Select GPT-9/ });
+    expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual([
+      "Select GPT-9 Zeta", "Select GPT-9 Alpha",
+    ]);
+    expect(screen.queryByRole("button", { name: "Select GPT-5.6 Sol" })).toBeNull();
+    await userEvent.click(rows[1]);
+    expect(onSelect).toHaveBeenCalledWith("gpt-9-alpha", "codex");
+  });
+
   it("marks disabled providers with data-disabled='true' on their rail button", async () => {
     render(
       <ModelSelector

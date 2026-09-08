@@ -58,6 +58,8 @@ export const useProviderModelsStore = create<ProviderModelsState>((set, get) => 
         group: m.group,
         multiplier: m.multiplier,
         contextWindow: m.contextWindow,
+        supportedReasoningLevels: m.supportedReasoningEfforts,
+        defaultReasoningLevel: m.defaultReasoningEffort,
       }));
       set((s) => ({
         models: { ...s.models, [providerId]: mapped },

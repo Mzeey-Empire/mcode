@@ -2,6 +2,11 @@ import { describe, it, expect } from "vitest";
 import { AgentEventSchema } from "../events/agent-event.js";
 
 describe("AgentEventSchema", () => {
+  it("preserves non-terminal usage across the event boundary", () => {
+    const event = { type: "contextEstimate", threadId: "thread-1", tokensIn: 100, tokensOut: 20, totalProcessedTokens: 120, cacheReadTokens: 40, contextWindow: 200_000 };
+    expect(AgentEventSchema().parse(event)).toEqual(event);
+    expect(AgentEventSchema().safeParse({ ...event, totalProcessedTokens: -1 }).success).toBe(false);
+  });
   it("parses a valid modelFallback event", () => {
     const result = AgentEventSchema().safeParse({
       type: "modelFallback",

@@ -55,6 +55,8 @@ describe("createPtyProcessScope", () => {
       expect(mocks.gracefulKillProcessTree).toHaveBeenCalledWith(123, {
         platform: "win32",
       });
+      // The native implementation reads its Job Object through this receiver.
+      expect(mocks.scope.waitForEmpty.mock.contexts[0]).toBe(mocks.scope);
       expect(mocks.scope.terminate).not.toHaveBeenCalled();
     },
   );

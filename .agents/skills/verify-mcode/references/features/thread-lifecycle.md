@@ -6,6 +6,7 @@
 - A running turn publishes `turnStarted` and later a terminal lifecycle event.
 - Two concurrent stop requests share one stop path.
 - A stopped thread clears the active session count, while `agent.listRunning` retains its cancelled snapshot for reconnect hydration.
+- Codex Stop retains the app-server process for the next turn. Shutdown and session discard still close it.
 
 ## How to get to it (user POV)
 
@@ -25,6 +26,8 @@ bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs runtime live --provider
 The harness waits for `turnStarted`. It sends two `agent.stop` RPCs together. It requires matching cancelled results with one turn execution and dispatch state. It then checks a stopped event. It requires `agent.activeCount` to reach zero. It requires `agent.listRunning` to retain the matching cancelled snapshot for reconnect hydration.
 
 ## Gotchas
+
+- For Codex session reuse, retain the thread after the stop proof. Record its native process PID before Stop and after the next `agent.send` completes. Require the same live PID and a durable reply after reconnect. An unchanged SDK session ID alone does not prove process reuse. Delete only the owned thread after this check.
 
 - The stop prompt is read-only, but a provider can finish before the stop reaches it. Treat that run as failed stop evidence.
 - The harness deletes only its direct thread unless `--keep-thread` is present.

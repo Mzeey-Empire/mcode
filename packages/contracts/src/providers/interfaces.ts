@@ -175,7 +175,7 @@ export interface IAgentProvider {
   stopSession(sessionId: string): void | Promise<void>;
 
   /** Tear down all sessions and release resources. */
-  shutdown(): void;
+  shutdown(): void | Promise<void>;
 
   /** List models available from this provider. */
   listModels(): Promise<ProviderModelInfo[]>;
@@ -339,5 +339,5 @@ export interface IProviderRegistry {
   resolveAll(): IAgentProvider[];
 
   /** Shut down all providers. */
-  shutdown(): void;
+  shutdown(): Promise<void>;
 }
