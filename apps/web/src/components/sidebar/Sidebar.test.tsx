@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hoisted = vi.hoisted(() => ({
   openCommandPalette: vi.fn(),
+  beginNewThread: vi.fn(),
 }));
 
 vi.mock("@/stores/commandPaletteStore", () => ({
@@ -22,7 +23,7 @@ vi.mock("@/stores/uiStore", () => ({
 
 vi.mock("@/features/projects/state/workspaceStore", () => ({
   useWorkspaceStore: Object.assign(vi.fn(), {
-    getState: () => ({ beginNewThread: vi.fn() }),
+    getState: () => ({ beginNewThread: hoisted.beginNewThread }),
   }),
 }));
 
@@ -50,5 +51,13 @@ describe("Sidebar", () => {
     expect(hoisted.openCommandPalette).toHaveBeenCalledWith({
       intent: "threadSearch",
     });
+  });
+
+  it("exposes the sidebar New thread action through its stable test id", () => {
+    render(<Sidebar onOpenSettings={vi.fn()} />);
+
+    fireEvent.click(screen.getByTestId("sidebar-new-thread"));
+
+    expect(hoisted.beginNewThread).toHaveBeenCalledOnce();
   });
 });

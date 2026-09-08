@@ -5,7 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
 
-import { assertRuntimeFreshness, isOpenCodeSessionInvalidatedEvent, isRuntimeHarnessEvidenceFile, runBun } from "./runtime.mjs";
+import { assertRuntimeFreshness, isOpenCodeSessionInvalidatedEvent, isRuntimeHarnessEvidenceFile, openVerificationSocketUrl, runBun } from "./runtime.mjs";
 
 const CLI = NodePath.join(import.meta.dirname, "verify-mcode.mjs");
 const BROWSER_PROOF = NodePath.join(import.meta.dirname, "browser-opencode-proof.mjs");
@@ -131,6 +131,11 @@ NodeTest.test("cleans only OpenCode resume artifacts created by the runtime veri
 NodeTest.test("recognizes the provider-neutral OpenCode session invalidation subtype", () => {
   NodeAssertStrict.equal(isOpenCodeSessionInvalidatedEvent({ type: "system", subtype: "sdk_session_invalidated" }), true);
   NodeAssertStrict.equal(isOpenCodeSessionInvalidatedEvent({ type: "system", subtype: "opencode:session-recreated" }), false);
+});
+
+NodeTest.test("rejects desktop verification sockets without loopback authentication", async () => {
+  await NodeAssertStrict.rejects(openVerificationSocketUrl(process.cwd(), "ws://example.test/?token=token"), /loopback WebSocket URL/);
+  await NodeAssertStrict.rejects(openVerificationSocketUrl(process.cwd(), "ws://localhost/"), /lacks its authentication token/);
 });
 
 function writeTimestampedFile(path, modifiedMs) {
