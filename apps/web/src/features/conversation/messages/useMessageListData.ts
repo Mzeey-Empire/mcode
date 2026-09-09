@@ -3,6 +3,7 @@ import type { ToolCall } from "@/transport/types";
 import { useShallow } from "zustand/shallow";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { useThreadStore } from "@/stores/threadStore";
+import { getCanonicalLifecycleTurn, getThreadRuntimePhase } from "@/stores/thread-lifecycle";
 import { getHandoffStatus, getThreadRecord, useThreadRecord } from "../state";
 import { isConversationVisible } from "../residency/conversation-residency";
 import {
@@ -49,8 +50,8 @@ function resolveCanonicalContent(
 ) {
   return {
     messages: preferCanonical(projection?.messages, legacy.messages),
-    agentDisplayState: preferCanonical(projection?.agentDisplayState, legacy.agentDisplayState),
-    agentStartTime: preferCanonical(projection?.agentStartTime, legacy.agentStartTime),
+    agentDisplayState: legacy.agentDisplayState,
+    agentStartTime: legacy.agentStartTime,
   };
 }
 
@@ -94,7 +95,11 @@ export function useMessageListData(displayThreadId: string | undefined) {
   );
   const legacyMessages = useThreadRecord(renderedThreadId, (record) => record.messages);
   const loading = useThreadRecord(renderedThreadId, (record) => record.loading);
-  const legacyRuntimePhase = useThreadRecord(renderedThreadId, (record) => record.runtimePhase);
+  const legacyRuntimePhase = useThreadRecord(renderedThreadId, (record) =>
+    renderedThreadId ? getThreadRuntimePhase(renderedThreadId, record) : "idle");
+  const canonicalLifecycleTurn = useThreadRecord(renderedThreadId, (record) =>
+    renderedThreadId ? getCanonicalLifecycleTurn(renderedThreadId, record) : undefined);
+  const turnExecutionId = useThreadRecord(renderedThreadId, (record) => record.turnExecutionId);
   const legacyAgentError = useThreadRecord(renderedThreadId, (record) => record.error);
   const legacyAgentStartTime = useThreadRecord(renderedThreadId, (record) => record.agentStartTime);
   const streamingText = useThreadRecord(renderedThreadId, (record) => record.streaming);
@@ -126,7 +131,7 @@ export function useMessageListData(displayThreadId: string | undefined) {
   const canonicalContent = resolveCanonicalContent(canonicalProjection, {
     messages: legacyMessages,
     agentDisplayState: legacyAgentDisplayState,
-    agentStartTime: legacyAgentStartTime,
+    agentStartTime: canonicalLifecycleTurn ? canonicalProjection?.agentStartTime : legacyAgentStartTime,
   });
   const canonicalActivity = resolveCanonicalActivity(canonicalProjection, {
     toolCalls: legacyToolCalls ?? EMPTY_TOOL_CALLS,
@@ -163,7 +168,7 @@ export function useMessageListData(displayThreadId: string | undefined) {
   const legacyCurrentTurnMessageId = useThreadRecord(renderedThreadId, (record) => record.currentTurnMessageId);
   const legacyCurrentTurnResponseKey = useThreadRecord(renderedThreadId, (record) => record.currentTurnResponseKey);
   const legacyAssistantResponseKeys = useThreadRecord(renderedThreadId, (record) => record.assistantResponseKeys);
-  const canonicalTurnIdentity = resolveCanonicalTurnIdentity(canonicalProjection, {
+  const canonicalTurnIdentity = resolveCanonicalTurnIdentity(canonicalLifecycleTurn ? canonicalProjection : undefined, {
     messageId: legacyCurrentTurnMessageId,
     responseKey: legacyCurrentTurnResponseKey,
     responseKeys: legacyAssistantResponseKeys,
@@ -203,6 +208,7 @@ export function useMessageListData(displayThreadId: string | undefined) {
     loadNarrativeForMessage,
     isNarrativeLoaded,
     currentTurnMessageId: canonicalTurnIdentity.currentTurnMessageId,
+    turnExecutionId,
     currentTurnResponseKey: canonicalTurnIdentity.currentTurnResponseKey,
     assistantResponseKeys: canonicalTurnIdentity.assistantResponseKeys,
     currentTurnMessageIdByThread,
