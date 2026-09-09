@@ -21,11 +21,11 @@ interface ContextTrackerProps {
   hasLowQuota?: boolean;
 }
 
-/** Returns the color tier class for the fill ring and label. */
+/** Returns the shared color tier for the label, ring, and usage bar. */
 function colorTier(pct: number) {
   if (pct >= 90) return { text: "text-destructive", stroke: "stroke-destructive", fill: "bg-destructive" } as const;
   if (pct >= 70) return { text: "text-amber-500", stroke: "stroke-amber-500", fill: "bg-amber-500" } as const;
-  return { text: "text-foreground", stroke: "stroke-muted-foreground/60", fill: "bg-primary" } as const;
+  return { text: "text-foreground", stroke: "stroke-primary", fill: "bg-primary" } as const;
 }
 
 /**
@@ -33,7 +33,7 @@ function colorTier(pct: number) {
  *
  * Renders a full 360° ring that fills clockwise from 12 o'clock as token usage
  * grows. Hidden when no token data exists (fresh thread). The ring color shifts
- * from muted → amber (70%) → red (90%) to signal urgency. When the provider
+ * from primary → amber (70%) → red (90%) to signal urgency. When the provider
  * compacts, the ring silently animates backward.
  */
 export function ContextTracker({ tokensIn, contextWindow, totalProcessedTokens, className, hasLowQuota }: ContextTrackerProps) {
@@ -61,15 +61,15 @@ export function ContextTracker({ tokensIn, contextWindow, totalProcessedTokens, 
               "relative flex items-center justify-center cursor-pointer rounded-full focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2",
               className,
             )}
-            style={{ width: 24, height: 24 }}
+            style={{ width: 20, height: 20 }}
             aria-label={`Context window: ${tooltipLine}`}
             role="img"
             tabIndex={0}
           >
             {/* rotate(-90deg) starts the arc at 12 o'clock */}
             <svg
-              width={24}
-              height={24}
+              width={20}
+              height={20}
               viewBox="0 0 24 24"
               className="-rotate-90"
               aria-hidden="true"
@@ -108,7 +108,7 @@ export function ContextTracker({ tokensIn, contextWindow, totalProcessedTokens, 
           </div>
         }
       />
-      <TooltipContent side="top" align="end" sideOffset={8} variant="surface" className="w-64 p-3">
+      <TooltipContent side="top" align="end" sideOffset={8} variant="surface" className="w-72 max-w-none p-3">
         <div className="flex w-full flex-col gap-3">
           <div className="flex items-center justify-between gap-4">
             <span className="font-medium">Context window</span>
@@ -126,8 +126,8 @@ export function ContextTracker({ tokensIn, contextWindow, totalProcessedTokens, 
             <div className={cn("h-full rounded-full", fill)} style={{ width: `${pct}%` }} />
           </div>
           <div className="flex items-baseline justify-between gap-4 tabular-nums">
-            <span><span className="font-medium">{abbrev(tokensIn)}</span><span className="text-muted-foreground"> / {abbrev(contextWindow)} tokens</span></span>
-            <span className="text-muted-foreground">{abbrev(Math.max(0, contextWindow - tokensIn))} left</span>
+            <span className="whitespace-nowrap"><span className="font-medium">{abbrev(tokensIn)}</span><span className="text-muted-foreground"> / {abbrev(contextWindow)} tokens</span></span>
+            <span className="whitespace-nowrap text-muted-foreground">{abbrev(Math.max(0, contextWindow - tokensIn))} left</span>
           </div>
           {totalProcessedTokens != null && totalProcessedTokens > tokensIn && (
             <div className="flex justify-between gap-4 border-t border-border pt-2 text-muted-foreground">
