@@ -75,8 +75,8 @@ async function emitTurn(notify, threadId, turnId, long, overlapping, activity, s
   const id = `${turnId}-answer`;
   const text = `Fixture answer: ${turnId}. Transcript inspection completed. This answer must remain after its user message and narrative.\n\n`.repeat(4);
   notify("item/started", { ...base, item: { id, type: "agentMessage", text: "", phase: "final_answer" } });
-  for (const delta of text.match(/.{1,80}/gs) ?? []) {
-    notify("item/agentMessage/delta", { ...base, itemId: id, delta });
+  for (const delta of text.matchAll(/.{1,80}/gs)) {
+    notify("item/agentMessage/delta", { ...base, itemId: id, delta: delta[0] });
   }
   notify("item/completed", { ...base, item: { id, type: "agentMessage", text, phase: "final_answer", memoryCitation: null } });
   notify("turn/completed", { threadId, turn: turn("completed") });
