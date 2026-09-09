@@ -246,6 +246,7 @@ function applyDevGitCheckoutEnv(): void {
         cwd,
         timeout: 3000,
         encoding: "utf8",
+        windowsHide: true,
       });
       const branch = stdout.trim();
       if (branch && branch !== "HEAD") {
@@ -261,6 +262,7 @@ function applyDevGitCheckoutEnv(): void {
         cwd,
         timeout: 3000,
         encoding: "utf8",
+        windowsHide: true,
       });
       const top = stdout.trim();
       if (top) {
