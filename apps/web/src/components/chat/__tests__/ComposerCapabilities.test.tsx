@@ -4,6 +4,7 @@ import { ListChecks } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
 import { ComposerAddMenu } from "../ComposerAddMenu";
 import { ComposerCapabilityChip } from "../ComposerCapabilityChip";
+import { ComposerOverlayLayout } from "../ComposerOverlaySurface";
 import {
   resolveComposerCapabilities,
   type ComposerCapabilityId,
@@ -30,18 +31,32 @@ function renderAddMenu({
   onAttachCapability?: (capabilityId: ComposerCapabilityId) => void;
 } = {}) {
   return render(
-    <ComposerAddMenu
-      disabled={false}
-      onAttachFiles={vi.fn()}
-      capabilities={capabilities}
-      attachedCapabilityIds={attachedCapabilityIds}
-      onAttachCapability={onAttachCapability}
-      getComposerRect={() => COMPOSER_RECT}
-    />,
+    <ComposerOverlayLayout>
+      <ComposerAddMenu
+        disabled={false}
+        onAttachFiles={vi.fn()}
+        capabilities={capabilities}
+        attachedCapabilityIds={attachedCapabilityIds}
+        onAttachCapability={onAttachCapability}
+        getComposerRect={() => COMPOSER_RECT}
+      />
+    </ComposerOverlayLayout>,
   );
 }
 
 describe("composer capabilities", () => {
+  it("floats outside the composer layout when an overlay host is available", async () => {
+    const user = userEvent.setup();
+    renderAddMenu();
+
+    await user.click(screen.getByRole("button", { name: "Add to composer" }));
+
+    const menu = screen.getByRole("menu", { name: "Add to composer" });
+    expect(menu.parentElement).toBe(document.body);
+    expect(menu).toHaveStyle({ position: "fixed" });
+    expect(screen.getByTestId("composer-overlay-host")).toBeEmptyDOMElement();
+  });
+
   it("shows the add control label in the Mcode tooltip on hover", async () => {
     const user = userEvent.setup();
     renderAddMenu();

@@ -17,8 +17,9 @@ describe("Composer submit running-state", () => {
     expect(isThreadRunningForSubmit("t-1", false)).toBe(true);
   });
 
-  it("keeps rendered running state authoritative while the store catches up", () => {
-    expect(isThreadRunningForSubmit("t-1", true)).toBe(true);
+  it("uses a terminal store update even before the running render catches up", () => {
+    expect(isThreadRunningForSubmit("t-1", true)).toBe(false);
+    expect(shouldQueueActiveThreadSubmit("t-1", true, null, false, "follow-up")).toBe(false);
   });
 
   it("does not mark a missing thread as running", () => {

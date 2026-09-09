@@ -1,5 +1,12 @@
 import type { Message } from "@/transport";
 
+/** Hides routine provider updates while retaining security and actionable diagnostics. */
+export function isRoutineProviderNotice(message: Message): boolean {
+  if (message.role !== "system") return false;
+  const kind = message.systemNotice?.kind;
+  return kind === "warning" || kind === "configuration" || kind === "deprecation" || kind === "authentication-recovered";
+}
+
 /** Visual urgency used by a Composer provider notice. */
 export type ComposerProviderNoticeTone = "attention" | "informative" | "quiet";
 
@@ -55,7 +62,7 @@ export function getComposerProviderNotice(
   message: Message,
   collectionSessionId?: string | null,
 ): ComposerProviderNotice | null {
-  if (message.role !== "system" || !message.systemNotice) return null;
+  if (message.role !== "system" || !message.systemNotice || isRoutineProviderNotice(message)) return null;
   const { kind, noticeKey, sessionId, toModel } = message.systemNotice;
   if (!isComposerNoticeKind(kind)) return null;
   const tone = COMPOSER_NOTICE_TONES[kind];

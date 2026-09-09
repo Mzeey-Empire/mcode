@@ -61,7 +61,7 @@ describe("goal notices in chat virtual items", () => {
       "The rendering bug is fixed.",
     );
 
-    const items = buildVirtualItems(stableItems, volatileItems, true);
+    const items = buildVirtualItems(stableItems, volatileItems, true, "answer-1");
     const narrativeIndex = items.findIndex((item) => item.type === "narrative-flow");
     const answerIndex = items.findIndex(
       (item) => item.type === "message" && item.message.id === "answer-1",

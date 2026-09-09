@@ -1,5 +1,7 @@
-import type { AgentItem, AgentModelState, AgentTurn, Message, TurnOutcome } from "@mcode/contracts";
+import { ToolCallRecordSchema, type AgentItem, type AgentModelState, type AgentTurn, type Message, type TurnOutcome } from "@mcode/contracts";
 import type { ToolCall } from "@/transport/types";
+import { recordToToolCall } from "../narrative/build-persisted-narrative";
+import { collapseSubagentCalls } from "../narrative/subagent-lifecycle";
 import type { ThoughtSegment, TurnFooterSummary } from "../narrative/types";
 import {
   agentDisplayStateFromCanonicalTurnStatus,
@@ -95,36 +97,40 @@ function terminalTurnOutcome(turn: AgentTurn): TurnOutcome | undefined {
   }
 }
 
-function messageOutcome(message: Message | undefined): TurnOutcome | null | undefined {
-  return message
-    ? (message as Message & { outcome?: TurnOutcome | null }).outcome
-    : undefined;
-}
-
 function messageOutcomeExecutionId(message: Message | undefined): string | null | undefined {
   return message
     ? (message as Message & { outcomeExecutionId?: string | null }).outcomeExecutionId
     : undefined;
 }
 
+function summaryToolCalls(items: readonly AgentItem[]): ToolCall[] {
+  const calls = items.flatMap((item) => {
+    if (item.kind !== "tool-call") return [];
+    if (item.payload.projection === "toolCall") {
+      return [recordToToolCall(ToolCallRecordSchema().parse(item.payload.record))];
+    }
+    return item.payload.projection === "codexChildToolCall"
+      ? [{ ...projectedToolCallStart(item, payloadString(item.payload, "nativeItemId") ?? item.id), parentToolCallId: item.parentItemId }]
+      : [];
+  });
+  return collapseSubagentCalls(calls).filter((call) => call.parentToolCallId == null);
+}
+
 function canonicalTurnSummary(turn: AgentTurn, items: readonly AgentItem[]): TurnFooterSummary {
-  const topLevelTools = items.filter((item) =>
-    item.kind === "tool-call"
-    && item.parentItemId === undefined
-    && item.payload.projection === "codexChildToolCall");
+  const topLevelTools = summaryToolCalls(items);
   const reasoningItems = items.filter((item) => item.payload.projection === "codexChildReasoning");
   const activityItems = items.filter((item) =>
     item.payload.projection === "codexChildToolCall"
     || item.payload.projection === "codexChildToolResult"
     || item.payload.projection === "codexChildReasoning");
   const answer = latestAssistantMessage(items);
-  const outcome = messageOutcome(answer) ?? terminalTurnOutcome(turn);
+  const outcome = terminalTurnOutcome(turn);
   const outcomeExecutionId = messageOutcomeExecutionId(answer);
   return {
     counts: {
       steps: topLevelTools.length,
       thoughts: reasoningItems.length,
-      subagents: topLevelTools.filter((item) => payloadString(item.payload, "toolName") === "Agent").length,
+      subagents: topLevelTools.filter((call) => call.toolName === "Agent").length,
     },
     durationMs: canonicalTurnDuration(turn, activityItems),
     ...(outcome !== undefined && outcome !== "completed" ? { outcome } : {}),

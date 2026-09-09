@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { NarrativeItem } from "../types";
 import { NarrativeRows } from "../NarrativeRows";
@@ -12,40 +12,25 @@ function thought(index: number): NarrativeItem {
 }
 
 describe("NarrativeRows", () => {
-  it("bounds dense rows and restores their chronological order on expansion", () => {
-    const items = Array.from({ length: 30 }, (_, index) => thought(index));
-    const { rerender } = render(<NarrativeRows items={items} allToolCalls={[]} />);
+  it("keeps all dense narrative text in order without browsing controls", () => {
+    render(<NarrativeRows items={Array.from({ length: 50 }, (_, index) => thought(index))} allToolCalls={[]} />);
 
-    expect(screen.getByText("Narrative row 0")).toBeTruthy();
-    expect(screen.queryByText("Narrative row 15")).toBeNull();
-    expect(screen.getByText("Narrative row 29")).toBeTruthy();
-    expect(screen.getAllByText(/^Narrative row \d+$/)).toHaveLength(4);
+    expect(screen.getAllByText(/^Narrative row \d+$/).map((row) => row.textContent))
+      .toEqual(Array.from({ length: 50 }, (_, index) => `Narrative row ${index}`));
+    expect(screen.queryByRole("button", { name: /Browse all|Previous|Next|Summary/ })).toBeNull();
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "Browse all 30 activity rows" }));
+  it("retains earlier text when streaming crosses the former summary threshold", () => {
+    const items = Array.from({ length: 24 }, (_, index) => thought(index));
+    const { rerender } = render(<NarrativeRows items={items} allToolCalls={[]} animateEntry />);
 
-    expect(screen.getByText("Narrative row 15")).toBeTruthy();
-    expect(screen.queryByText("Narrative row 29")).toBeNull();
-    expect(screen.getAllByText(/^Narrative row \d+$/)).toHaveLength(24);
-    const renderedText = screen.getAllByText(/^Narrative row \d+$/)
-      .map((row) => row.textContent);
-    expect(renderedText).toEqual(items.slice(0, 24).map((_, index) => `Narrative row ${index}`));
+    rerender(<NarrativeRows items={[...items, thought(24)]} allToolCalls={[]} animateEntry />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getAllByText(/^Narrative row \d+$/).map((row) => row.textContent))
+      .toEqual(Array.from({ length: 25 }, (_, index) => `Narrative row ${index}`));
 
-    expect(screen.queryByText("Narrative row 15")).toBeNull();
-    expect(screen.getByText("Narrative row 29")).toBeTruthy();
-    expect(screen.getAllByText(/^Narrative row \d+$/)).toHaveLength(6);
-
-    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
-
-    expect(screen.queryByText("Narrative row 15")).toBeNull();
-    expect(screen.getAllByText(/^Narrative row \d+$/)).toHaveLength(4);
-
-    fireEvent.click(screen.getByRole("button", { name: "Browse all 30 activity rows" }));
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    rerender(<NarrativeRows items={[thought(100)]} allToolCalls={[]} />);
-
-    expect(screen.getByText("Narrative row 100")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Summary" })).toBeNull();
+    rerender(<NarrativeRows items={[]} allToolCalls={[]} />);
+    expect(screen.queryAllByText(/^Narrative row \d+$/)).toEqual([]);
+    expect(screen.queryByRole("button", { name: /Browse all|Previous|Next|Summary/ })).toBeNull();
   });
 });

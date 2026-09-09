@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { SelectedTextComment } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -97,6 +97,7 @@ export function SelectedTextCommentMarkers({
       ? state.drafts[renderedThreadId]?.selectedTextComments ?? EMPTY_SELECTED_TEXT_COMMENTS
       : EMPTY_SELECTED_TEXT_COMMENTS
   ));
+  const overlayRef = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState<MarkerOverlayLayout | null>(null);
   const [hoveredCommentId, setHoveredCommentId] = useState<string | null>(null);
   const [focusedCommentId, setFocusedCommentId] = useState<string | null>(null);
@@ -126,7 +127,7 @@ export function SelectedTextCommentMarkers({
     const refresh = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        const root = viewport.parentElement?.getBoundingClientRect();
+        const root = overlayRef.current?.getBoundingClientRect();
         setLayout(root ? { root, viewport: viewport.getBoundingClientRect() } : null);
       });
     };
@@ -173,7 +174,7 @@ export function SelectedTextCommentMarkers({
 
   return (
     <>
-      <div className="pointer-events-none absolute inset-0 z-[1] overflow-hidden" aria-hidden="true">
+      <div ref={overlayRef} className="pointer-events-none absolute inset-0 z-[1] overflow-hidden" aria-hidden="true">
         {geometries.map(({ comment, rects }) => {
           const isActive = isSelectedTextCommentHighlightActive(comment.id, activeCommentId);
           return (

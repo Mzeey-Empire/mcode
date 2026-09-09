@@ -1,5 +1,7 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { createEmptyThreadRecord } from "@/stores/thread-record";
+import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
 
 vi.mock("react-markdown", () => ({
   __esModule: true,
@@ -32,6 +34,18 @@ const assistantMsg = {
 };
 
 describe("MessageBubble lazy MarkdownContent", () => {
+  beforeEach(() => {
+    resetThreadStoreForTests({ records: new Map([["t-1", {
+      ...createEmptyThreadRecord(),
+      narrativeByMessage: { "msg-1": { tools: [], thoughts: [], hooks: [] } },
+    }]]) });
+  });
+
+  afterEach(() => {
+    cleanup();
+    resetThreadStoreForTests();
+  });
+
   it("renders assistant message content via lazy-loaded MarkdownContent", async () => {
     render(<MessageBubble message={assistantMsg} />);
     expect(await screen.findByTestId("markdown")).toBeInTheDocument();

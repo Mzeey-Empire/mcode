@@ -22,6 +22,7 @@
 7. Confirm that the parent's full delegated message and the child's reply appear in the transcript.
 8. Wait for completion. Confirm that the child moves to Done and shows Completed.
 9. Stop and restart Electron, reopen the same parent thread, and confirm that the child's final text appears once and remains Done with Completed.
+10. Compare the parent and child footers with their own tool records. Each footer must count only its displayed thread and turn, before and after reload.
 
 ## Automated proof
 

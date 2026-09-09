@@ -638,7 +638,7 @@ function ComposerInputSurface({
       ref={model.composerContainerRef}
       data-testid="composer-surface"
       className={cn(
-        "relative z-10 bg-muted/50 ring-1 ring-inset ring-border/60 focus-within:ring-2 focus-within:ring-primary/70",
+        "relative z-10 bg-transparent ring-1 ring-inset ring-border/60 focus-within:ring-2 focus-within:ring-primary/70",
         model.isNewThread
           ? "-mt-px rounded-xl shadow-none"
           : "rounded-xl shadow-lg shadow-black/20",

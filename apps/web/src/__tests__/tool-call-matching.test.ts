@@ -30,6 +30,39 @@ describe("Tool Call Matching", () => {
     vi.useRealTimers();
   });
 
+  it("keeps overlapping calls active until their own results arrive", () => {
+    const send = useThreadStore.getState().handleAgentEvent;
+    for (const toolCallId of ["first", "second"]) {
+      send({ type: "toolUse", threadId: "thread-1", toolCallId, toolName: "Bash", toolInput: { command: "echo test" } });
+    }
+    expect(getTestThreadToolCalls("thread-1").map((call) => call.isComplete)).toEqual([false, false]);
+
+    send({ type: "textDelta", threadId: "thread-1", delta: "Both commands are active.", isFinalResponse: false });
+    vi.runAllTimers();
+    expect(getTestThreadToolCalls("thread-1").map((call) => call.isComplete)).toEqual([false, false]);
+
+    send({ type: "message", threadId: "thread-1", content: "Commands continue in parallel.", tokens: null });
+    expect(getTestThreadToolCalls("thread-1").map((call) => call.isComplete)).toEqual([false, false]);
+
+    send({ type: "toolResult", threadId: "thread-1", toolCallId: "second", output: "second done", isError: false });
+    expect(getTestThreadToolCalls("thread-1").map((call) => call.isComplete)).toEqual([false, true]);
+    send({ type: "toolResult", threadId: "thread-1", toolCallId: "first", output: "first done", isError: false });
+    expect(getTestThreadToolCalls("thread-1").map((call) => call.isComplete)).toEqual([true, true]);
+  });
+
+  it("settles outstanding calls when the turn ends without tool results", () => {
+    resetThreadStoreForTests({
+      records: new Map<string, ThreadRecord>([
+        ["thread-1", { ...createEmptyThreadRecord(), runtimePhase: "running" }],
+      ]),
+    });
+    const send = useThreadStore.getState().handleAgentEvent;
+    send({ type: "toolUse", threadId: "thread-1", toolCallId: "unfinished", toolName: "Bash", toolInput: {} });
+    send({ type: "turnComplete", threadId: "thread-1", reason: "end_turn", costUsd: null, tokensIn: 0, tokensOut: 0 });
+    vi.runAllTimers();
+    expect(getTestThreadToolCalls("thread-1").every((call) => call.isComplete)).toBe(true);
+  });
+
   it("tool result with matching ID completes the correct tool call", () => {
     // Set up two pending tool calls
     resetThreadStoreForTests({

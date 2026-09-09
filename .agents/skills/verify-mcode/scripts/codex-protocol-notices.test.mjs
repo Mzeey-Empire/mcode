@@ -21,7 +21,7 @@ NodeTest.test("fixture emits the exact bounded native notice sequence for one tu
     await delay(250);
     NodeAssertStrict.equal(server.notificationCount(), 0);
 
-    const notices = await server.notifications(10);
+    const notices = await server.notifications(11);
     NodeAssertStrict.deepEqual(notices, [
       { method: "turn/started", params: { threadId: "fixture-native-thread", turn: { id: "fixture-native-turn", items: [], status: "inProgress", error: null } } },
       { method: "configWarning", params: { summary: "Fixture configuration diagnostic.", details: "Fixture configuration detail.", path: "C:/mcode-fixture/config.toml", range: { start: { line: 4, column: 2 }, end: { line: 4, column: 9 } } } },
@@ -31,6 +31,11 @@ NodeTest.test("fixture emits the exact bounded native notice sequence for one tu
       { method: "model/rerouted", params: { threadId: "fixture-native-thread", turnId: "fixture-native-turn", fromModel: "fixture-source", toModel: "fixture-safe", reason: "highRiskCyberActivity" } },
       { method: "model/rerouted", params: { threadId: "fixture-native-thread", turnId: "fixture-native-turn", fromModel: "fixture-source", toModel: "fixture-safe", reason: "highRiskCyberActivity" } },
       { method: "modelProvider/authRecoveryCompleted", params: { threadId: "fixture-native-thread", turnId: "fixture-native-turn", provider: "fixture-provider", message: "Fixture authentication recovered." } },
+      { method: "thread/tokenUsage/updated", params: { threadId: "fixture-native-thread", turnId: "fixture-native-turn", tokenUsage: {
+        total: { totalTokens: 83000, inputTokens: 82000, cachedInputTokens: 0, outputTokens: 1000, reasoningOutputTokens: 0 },
+        last: { totalTokens: 83000, inputTokens: 82000, cachedInputTokens: 0, outputTokens: 1000, reasoningOutputTokens: 0 },
+        modelContextWindow: 258000,
+      } } },
       { method: "item/completed", params: { threadId: "fixture-native-thread", turnId: "fixture-native-turn", item: { id: "fixture-assistant-message", type: "agentMessage", text: "Fixture notice turn completed.", phase: "final_answer", memoryCitation: null } } },
       { method: "turn/completed", params: { threadId: "fixture-native-thread", turn: { id: "fixture-native-turn", items: [], status: "completed", error: null } } },
     ]);
