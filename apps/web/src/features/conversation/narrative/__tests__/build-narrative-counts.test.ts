@@ -23,6 +23,24 @@ function mkThought(text: string, startedAt: number, endedAt?: number): ThoughtSe
 }
 
 describe("buildNarrativeItems counts", () => {
+  it("keeps overlapping calls visible and preserves the completed command group", () => {
+    const calls = Array.from({ length: 5 }, (_, index) => ({ ...mkTool({
+      id: `command-${index}`, toolName: "Bash", startedAt: index, isComplete: false,
+    }), parentToolCallId: undefined }));
+    const project = () => buildNarrativeItems({
+      toolCalls: calls, hooks: [], thoughtSegments: [], streamingText: "", isAgentRunning: true,
+    }).items;
+    expect(project().map((item) => item.type === "active-tool" && item.toolCall.id))
+      .toEqual(calls.map((call) => call.id));
+    calls[3] = { ...calls[3]!, isComplete: true };
+    expect(project().filter((item) => item.type === "active-tool").map((item) => item.toolCall.id))
+      .toEqual(["command-0", "command-1", "command-2", "command-4"]);
+    calls.forEach((call, index) => { calls[index] = { ...call, isComplete: true }; });
+    const completed = project();
+    expect(completed).toHaveLength(1);
+    expect(completed[0]).toMatchObject({ type: "tool-group", group: { calls } });
+  });
+
   it("returns zero counts when nothing happened", () => {
     const { items, counts } = buildNarrativeItems({
       toolCalls: [],

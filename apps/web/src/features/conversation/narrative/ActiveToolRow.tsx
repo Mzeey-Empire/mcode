@@ -9,7 +9,7 @@ import {
 import type { ToolCall } from "@/transport/types";
 import { extractToolInputDetail } from "./tool-detail";
 import { NARRATIVE_TOOL_ROW, narrativeToolDetailClass } from "./narrative-layout";
-import { CommandExecutionCard } from "./CommandExecutionCard";
+import { ShellToolCallRow } from "./ShellToolCallRow";
 import { BrowserActivitySummary, isBrowserNarrativeCall } from "./BrowserActivityRow";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -27,7 +27,7 @@ export function ActiveToolRow({ toolCall }: ActiveToolRowProps) {
   }
 
   if (isShellTool(toolCall.toolName)) {
-    return <CommandExecutionCard toolCall={toolCall} isActive />;
+    return <div className="min-w-0 max-w-full pl-6"><ShellToolCallRow toolCall={toolCall} /></div>;
   }
 
   if (toolCall.toolName === "Approval review") {

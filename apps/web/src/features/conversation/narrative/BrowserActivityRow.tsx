@@ -16,6 +16,7 @@ import { NARRATIVE_TOOL_ROW } from "./narrative-layout";
 import { NarrativeSummaryLine } from "./NarrativeSummaryLine";
 
 interface BrowserActivitySummaryProps {
+  virtualExpansion?: { readonly open: boolean; readonly onToggle: () => void };
   calls: readonly ToolCall[];
   active?: boolean;
   renderOtherCall?: (toolCall: ToolCall) => ReactNode;
@@ -358,26 +359,28 @@ export function BrowserActivitySummary({
   calls,
   active = false,
   renderOtherCall,
+  virtualExpansion,
 }: BrowserActivitySummaryProps) {
-  const [open, setOpen] = useState(false);
+  const [localOpen, setOpen] = useState(false);
+  const open = virtualExpansion?.open ?? localOpen;
   return (
     <div className="min-w-0 max-w-full rounded-md">
       <NarrativeSummaryLine
         open={open}
-        onToggle={() => setOpen((current) => !current)}
+        onToggle={virtualExpansion?.onToggle ?? (() => setOpen((current) => !current))}
         icon={<SquareMousePointer className="size-4 shrink-0 text-muted-foreground/55" aria-hidden="true" />}
       >
         <span className="min-w-0 flex-1 truncate font-medium text-foreground/75">
           {buildBrowserActivitySummary(calls, active)}
         </span>
       </NarrativeSummaryLine>
-      <AnimatedCollapsible open={open}>
+      {!virtualExpansion ? <AnimatedCollapsible open={open}>
         <ul className="mt-1 min-w-0 max-w-full space-y-1 pb-2 pl-6" aria-label="Browser activity details">
           {calls.map((call) => isBrowserNarrativeCall(call)
             ? <BrowserActivityCall key={call.id} toolCall={call} active={active} />
             : renderOtherCall?.(call))}
         </ul>
-      </AnimatedCollapsible>
+      </AnimatedCollapsible> : null}
     </div>
   );
 }
