@@ -1,6 +1,7 @@
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import * as NodeEvents from "node:events";
 import * as NodeFS from "node:fs";
+import * as NodeChildProcess from "node:child_process";
 
 const fixture = await vi.hoisted(async () => {
   const fs = await import("node:fs");
@@ -17,10 +18,10 @@ vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
   return {
     ...actual,
-    spawn: (_executable: string, _args: string[], options: import("node:child_process").SpawnOptions) =>
+    spawn: vi.fn((_executable: string, _args: string[], options: import("node:child_process").SpawnOptions) =>
       actual.spawn(process.execPath, ["-e", "require('node:fs').writeSync(2, 'Startup fixture failed\\n'); process.exit(1)"], {
         ...options, cwd: fixture.directory,
-      }),
+      })),
   };
 });
 
@@ -40,6 +41,11 @@ describe("server startup error capture", () => {
     try {
       const [code] = await NodeEvents.once(child, "exit");
       expect(code).toBe(1);
+      expect(NodeChildProcess.spawn).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Array),
+        expect.objectContaining({ windowsHide: true }),
+      );
       expect(NodeFS.readFileSync(SERVER_LOG_PATH, "utf8")).toBe("Startup fixture failed\n");
       expect(NodeFS.readFileSync(SERVER_ROTATED_LOG_PATH, "utf8")).toBe("Previous startup failed\n");
     } finally {

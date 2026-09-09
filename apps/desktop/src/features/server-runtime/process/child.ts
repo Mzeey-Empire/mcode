@@ -31,6 +31,7 @@ export function spawnServerProcess(port: number, platform: NodeJS.Platform): Spa
       cwd: paths.cwd,
       env: createServerEnvironment(paths, port, platform),
       detached: true,
+      windowsHide: true,
       // A direct file handle preserves the final error even if the child exits immediately.
       stdio: ["ignore", "ignore", stderrStream],
     });
@@ -78,7 +79,7 @@ function resolveDevelopmentBunBinary(platform: NodeJS.Platform): string {
   }
   const command = platform === "win32" ? "where.exe" : "which";
   try {
-    const output = NodeChildProcess.execFileSync(command, ["bun"], { encoding: "utf8" });
+    const output = NodeChildProcess.execFileSync(command, ["bun"], { encoding: "utf8", windowsHide: true });
     const executable = output.split(/\r?\n/, 1)[0]?.trim();
     if (executable && NodeFS.existsSync(executable)) {
       return resolveBunRuntimeExecutable(executable);
@@ -93,7 +94,7 @@ function resolveBunRuntimeExecutable(candidate: string): string {
   const runtimeExecutable = NodeChildProcess.execFileSync(
     candidate,
     ["-p", "process.execPath"],
-    { encoding: "utf8" },
+    { encoding: "utf8", windowsHide: true },
   ).trim();
   if (!NodeFS.existsSync(runtimeExecutable)) {
     throw new Error(`Bun runtime executable not found: ${runtimeExecutable}`);
@@ -130,7 +131,7 @@ function setGitEnvironment(env: Record<string, string>, cwd: string): void {
   for (const [name, args] of [["MCODE_GIT_BRANCH", ["rev-parse", "--abbrev-ref", "HEAD"]], ["MCODE_GIT_TOPLEVEL", ["rev-parse", "--show-toplevel"]]] as const) {
     if (env[name] || !isDesktopDev()) continue;
     try {
-      const value = NodeChildProcess.execFileSync("git", args, { encoding: "utf-8", timeout: 3_000, cwd }).trim();
+      const value = NodeChildProcess.execFileSync("git", args, { encoding: "utf-8", timeout: 3_000, cwd, windowsHide: true }).trim();
       if (value && value !== "HEAD") env[name] = value;
     } catch {
       // Git metadata is optional outside a checkout.
