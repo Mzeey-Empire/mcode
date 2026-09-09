@@ -136,6 +136,16 @@ Usage updates reach the context tracker before completion. Failed and cancelled
 turns retain their reported usage without a successful completion event. The
 reported context count persists for reconnect.
 
+The Composer context ring has no center label. Hover or keyboard focus opens a
+usage bar with used tokens, capacity, and remaining tokens. The card separates
+processed tokens from current context usage.
+
+Routine provider warnings, configuration notices, deprecation notices, and
+authentication-recovery notices do not appear in chat or above Composer. This
+also applies to subagent chat. Notices remain persisted. Security warnings,
+model changes, actionable diagnostics, approval requests, and errors retain
+their existing surfaces.
+
 ## Revision history (informal)
 
 - **Initial**: Codex narrative parity goals, thought vs final reply, nesting contract, acceptance, and explicit limits.

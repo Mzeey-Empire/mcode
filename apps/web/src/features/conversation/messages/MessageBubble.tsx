@@ -20,6 +20,7 @@ import { useThreadRecord } from "../state";
 import { AnsweredSummary } from "@/components/chat/plan-questions/AnsweredSummary";
 import { PLAN_ANSWER_MESSAGE_PREFIX } from "@mcode/contracts";
 import { DeltaBlock } from "../narrative/DeltaBlock";
+import { PersistedTurnHooks } from "../narrative/PersistedTurnHooks";
 import { parseGoalStatusNotice } from "@/lib/goal-message";
 import { PreviewAnnotationBundleChip } from "@/components/chat/PreviewAnnotationBundleChip";
 import { useRetriableAttachmentImage } from "@/components/chat/useRetriableAttachmentImage";
@@ -914,6 +915,7 @@ function AssistantMessageActions({
     <div className="flex items-center gap-x-3 opacity-0 transition-opacity duration-150 group-hover/msg:opacity-100 group-focus-within/msg:opacity-100" data-testid="agent-message-actions">
       {onBranch && <BranchButton onClick={() => onBranch(message.id)} />}
       {textContent.trim() && <CopyButton content={textContent} />}
+      <PersistedTurnHooks threadId={message.thread_id} messageId={message.id} />
     </div>
   );
 }

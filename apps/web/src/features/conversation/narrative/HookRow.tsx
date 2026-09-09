@@ -165,7 +165,7 @@ export function HookRow({ hook }: HookRowProps) {
       >
 
         {/* Hook name */}
-        <span className="min-w-0 truncate text-muted-foreground/60 flex-1">
+        <span className="min-w-0 truncate text-foreground/80 flex-1">
           {hook.hookName}
         </span>
 

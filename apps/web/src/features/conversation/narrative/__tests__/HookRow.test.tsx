@@ -35,7 +35,7 @@ describe("HookRow", () => {
 
     expect(row).toHaveClass("text-sm");
     expect(row).toHaveClass("px-2", "py-1", "rounded-md");
-    expect(screen.getByText("SessionStart:startup")).toHaveClass("text-muted-foreground/60");
+    expect(screen.getByText("SessionStart:startup")).toHaveClass("text-foreground/80");
   });
 
   it("renders expanded output at narrative text size", async () => {

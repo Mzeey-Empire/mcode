@@ -1,5 +1,4 @@
 import { memo, type ComponentType, type RefObject } from "react";
-import { HookActivitySection } from "@/components/chat/HookActivitySection";
 import { PermissionRequestCard } from "@/components/chat/PermissionRequestCard";
 import { StreamingCard } from "@/components/chat/StreamingCard";
 import { StreamingIndicator } from "@/components/chat/StreamingIndicator";
@@ -7,7 +6,6 @@ import { ToolCallCard } from "@/components/chat/ToolCallCard";
 import { TurnChangeSummary } from "@/components/chat/TurnChangeSummary";
 import { NarrativeFlow, type SubagentRosterTarget } from "@/features/conversation/narrative";
 import { NarrativeIndicator } from "@/features/conversation/narrative/NarrativeIndicator";
-import { PersistedLateHooks } from "@/features/conversation/narrative/PersistedLateHooks";
 import { PersistedNarrative } from "@/features/conversation/narrative/PersistedNarrative";
 import { PersistedTurnFooter } from "@/features/conversation/narrative/PersistedTurnFooter";
 import { MessageBubble } from "../MessageBubble";
@@ -112,11 +110,6 @@ function PermissionRequestTranscriptItemRenderer({ item }: TranscriptItemRendere
   );
 }
 
-/** Renders hook activity. */
-function HookActivityTranscriptItemRenderer({ item }: TranscriptItemRendererProps) {
-  return <HookActivitySection hooks={(item as Extract<ChatVirtualItem, { type: "hook-activity" }>).hooks} />;
-}
-
 /** Renders the live narrative flow. */
 function NarrativeFlowTranscriptItemRenderer({ item, onSubagentSelect, onOpenSubagents }: TranscriptItemRendererProps) {
   const flow = item as Extract<ChatVirtualItem, { type: "narrative-flow" }>;
@@ -149,12 +142,6 @@ function PersistedNarrativeTranscriptItemRenderer({ item, threadId, onSubagentSe
   );
 }
 
-/** Renders durable hooks that arrived after turn persistence. */
-function PersistedLateHooksTranscriptItemRenderer({ item, threadId }: TranscriptItemRendererProps) {
-  const hooks = item as Extract<ChatVirtualItem, { type: "persisted-late-hooks" }>;
-  return <PersistedLateHooks threadId={threadId} messageId={hooks.messageId} />;
-}
-
 /** Renders the durable turn footer. */
 function PersistedTurnFooterTranscriptItemRenderer({ item, threadId }: TranscriptItemRendererProps) {
   const footer = item as Extract<ChatVirtualItem, { type: "persisted-turn-footer" }>;
@@ -175,6 +162,7 @@ function NarrativeIndicatorTranscriptItemRenderer({ item }: TranscriptItemRender
       stepCount={indicator.stepCount}
       subagentCount={indicator.subagentCount}
       activeToolCalls={indicator.activeToolCalls}
+      summaryHeading={indicator.summaryHeading}
       startTime={indicator.startTime}
       isAgentRunning={indicator.isAgentRunning}
     />
@@ -188,10 +176,8 @@ const TRANSCRIPT_ITEM_COMPONENTS: Record<ChatVirtualItem["type"], TranscriptItem
   streaming: StreamingTranscriptItemRenderer,
   "turn-changes": TurnChangesTranscriptItemRenderer,
   "permission-request": PermissionRequestTranscriptItemRenderer,
-  "hook-activity": HookActivityTranscriptItemRenderer,
   "narrative-flow": NarrativeFlowTranscriptItemRenderer,
   "persisted-narrative": PersistedNarrativeTranscriptItemRenderer,
-  "persisted-late-hooks": PersistedLateHooksTranscriptItemRenderer,
   "persisted-turn-footer": PersistedTurnFooterTranscriptItemRenderer,
   "narrative-indicator": NarrativeIndicatorTranscriptItemRenderer,
 };
