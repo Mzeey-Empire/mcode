@@ -337,6 +337,10 @@
   z-index: 40;
   transform-origin: bottom left;
 }
+.composer-add-menu-surface {
+  z-index: 45;
+}
+
 .composer-provider-notice-surface {
   /* Autocomplete must stay available while a notice is visible. */
   z-index: 30;

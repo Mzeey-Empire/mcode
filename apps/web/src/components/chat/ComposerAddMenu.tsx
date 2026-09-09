@@ -180,7 +180,7 @@ export function ComposerAddMenu({
           aria-label="Add to composer"
           anchorRect={anchorRect}
           estimatedHeight={ADD_MENU_HEIGHT}
-          attached
+          className="composer-add-menu-surface"
         >
           <div ref={menuRef} className="p-1" onKeyDown={handleMenuKeyDown}>
             <div

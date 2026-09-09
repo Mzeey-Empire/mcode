@@ -1,7 +1,25 @@
-import { forwardRef, type ComponentPropsWithoutRef, type ReactNode } from "react";
+import { createContext, forwardRef, useContext, useState, type ComponentPropsWithoutRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 import { computeFixedPopupPosition } from "./popup-position";
+
+const ComposerOverlayHost = createContext<HTMLDivElement | null>(null);
+
+/** Keeps attached overlays in the composer's layout so content reserves its own height. */
+export function ComposerOverlayLayout({ children, className }: {
+  readonly children: ReactNode;
+  readonly className?: string;
+}) {
+  const [host, setHost] = useState<HTMLDivElement | null>(null);
+  return (
+    <ComposerOverlayHost.Provider value={host}>
+      <div className={className}>
+        <div ref={setHost} data-testid="composer-overlay-host" />
+        {children}
+      </div>
+    </ComposerOverlayHost.Provider>
+  );
+}
 
 interface ComposerOverlaySurfaceProps
   extends Omit<ComponentPropsWithoutRef<"div">, "children" | "className" | "style"> {
@@ -23,7 +41,12 @@ interface ComposerOverlaySurfaceProps
   children: ReactNode;
 }
 
-/** Shared fixed overlay used by the composer autocomplete and attachment surfaces. */
+function surfaceToneClass(tone: "default" | "dark", attached: boolean): string {
+  if (tone === "dark") return "border-white/10 bg-[#1e1e1e] text-neutral-100";
+  return attached ? "text-popover-foreground" : "bg-popover text-popover-foreground";
+}
+
+/** Shared overlay with in-flow composer placement and fixed placement in other contexts. */
 export const ComposerOverlaySurface = forwardRef<HTMLDivElement, ComposerOverlaySurfaceProps>(
   function ComposerOverlaySurface(
     {
@@ -39,6 +62,8 @@ export const ComposerOverlaySurface = forwardRef<HTMLDivElement, ComposerOverlay
     },
     ref,
   ) {
+    const host = useContext(ComposerOverlayHost);
+    const attachedHost = attached ? host : null;
     const overlayAnchorRect = attached
       ? new DOMRect(
           anchorRect.left + 14,
@@ -61,23 +86,19 @@ export const ComposerOverlaySurface = forwardRef<HTMLDivElement, ComposerOverlay
         {...props}
         ref={ref}
         data-composer-autocomplete="true"
-        style={style}
+        style={attachedHost ? { width: "calc(100% - 28px)", marginLeft: 14, maxHeight: style.maxHeight } : style}
         className={cn(
           "composer-autocomplete-surface overflow-hidden animate-composer-popup-enter",
           attached
             ? "rounded-t-xl bg-popover ring-1 ring-inset ring-border/60"
             : "rounded-xl border border-border/70",
-          tone === "dark"
-            ? "border-white/10 bg-[#1e1e1e] text-neutral-100"
-            : attached
-              ? "text-popover-foreground"
-              : "bg-popover text-popover-foreground",
+          surfaceToneClass(tone, attached),
           className,
         )}
       >
         {children}
       </div>,
-      document.body,
+      attachedHost ?? document.body,
     );
   },
 );
