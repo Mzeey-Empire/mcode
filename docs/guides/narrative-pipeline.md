@@ -1,5 +1,35 @@
 # Narrative Pipeline Guide
 
+The live status line uses the latest active root tool's description, file action, or tool category.
+Without an active tool, it shows a complete summary heading from the current open thought segment, or `Thinking...`.
+The status line shows the step count only when it is greater than zero.
+Completed tools and closed segments cannot keep an old activity label visible. The label stays on one line as its text changes.
+Providers supply these details through the existing canonical tool and non-final text events. See [Activity labels](provider-architecture.md#activity-labels).
+
+Hooks appear beside Copy and Fork on the final response, not beside the turn duration or as inline narrative rows.
+Hover, click, or use Tab to open the panel. Press Escape to close it.
+The panel lists triggers, available hook names, and consecutive run counts. It does not show output or payloads.
+The icon shows a warning when a hook blocks or fails. Hooks come from the owning thread's
+narrative cache, including hooks that arrive after turn persistence. Hooks still
+separate tool groups in the chronological data; only their inline display is removed.
+
+Active and completed commands use the same expandable Shell row. Active rows
+show the activity animation in the command label and open automatically. A manual
+close remains in effect while output changes. A tool result completes its
+matched call; a new tool call or assistant message does not complete other calls.
+Turn termination settles any outstanding calls. Completed calls retain the
+existing command groups and remain available through manual expansion.
+
+New live tool rows animate open. Completed rows animate closed before joining
+their command group. This short visual transition does not delay completion
+status or other tool updates. Reduced motion removes the transition.
+
+Shell cards show the call status at the bottom right, outside the output viewport.
+Hover over the command or output to copy that section. Keyboard focus also reveals
+the copy action. Output preserves whitespace and scrolls horizontally and vertically
+inside the card. The output copy button stays fixed while the content scrolls.
+Calls without command text show a plaintext output card without a synthetic command.
+
 The narrative timeline is the chronological audit trail rendered inside each
 assistant turn: tool calls, sub-agents, thoughts, hooks, and the streaming
 response. It looks simple. It is not. This guide documents the contracts and
@@ -23,6 +53,61 @@ If you are about to touch any of these files, **read this first**:
 - `apps/web/src/components/chat/virtual-items.ts` (timeline insertion point)
 
 ---
+
+## Transcript position and turn ownership
+
+The pinned prompt uses the chat content width and leaves space for an open Thread overview.
+
+Live and saved activity render inline in chronological order. Long turns keep
+all narrative text in the chat, with no summary view or activity pagination.
+Tool groups retain their existing detail expanders.
+
+The current turn's runtime lifecycle controls its response state, footer, Stop
+control, and follow-up queue decision. Saved message outcomes and canonical
+history cannot override an active local execution. Provider-owned child threads
+use their canonical lifecycle when no local execution owns the thread.
+
+Match the current response by thread and response ID or outcome execution ID.
+Keep its terminal footer hidden during running and finalizing. Keep earlier
+turns' footers visible. On termination, use the current lifecycle outcome.
+
+The chat viewport uses vlist. React owns each row's content through a portal;
+vlist owns row placement. A continuous ResizeObserver updates row heights when
+streaming text, images, or disclosures change size.
+
+The viewport has one position: follow the tail, retain a reading row and pixel
+offset, or align a navigation target. Upward scrolling stops tail following.
+Returning to the bottom resumes it. Prepends and resident-history eviction retain
+the reading row when that row remains available. Each rendered thread has its own
+viewport, and the existing thread cache stores its reading anchor.
+
+The clipped prompt follows the turn at the top of the viewport, including older
+turns. It hides while that prompt remains visible. Its jump control returns to
+that prompt, not the latest user message. Selection uses resident row positions,
+so the original prompt does not need a mounted DOM row.
+
+Reasoning and tool groups are separate measured rows, including within one long
+turn. Only visible rows and overscan mount in the DOM. Cached transcript data
+does not require mounted rows. Narrative keys use the execution identity so
+completion and cache hydration retain the same reading anchor.
+
+Expanded tool groups insert their children into this same viewport as separate
+rows. The summary stays at its current position when it opens or closes. Group
+expansion survives row unmounts and cached thread switches. A single command's
+output remains part of that command row. Clicking a disclosure retains its row
+position, even while the viewport follows the tail. Group children animate open
+and closed without losing per-row virtualization. Reduced motion removes this
+height transition. Reopening a group during collapse reverses the transition.
+
+`components/ui/virtual-viewport.ts` owns measurement, row hosts, and scroll
+positions. `VirtualRows` mounts the visible React portals. The transcript wrapper
+adds tail-follow policy; other features start at the top and supply their own
+row data, expansion state, and renderer. Reuse these primitives for another
+virtual list without copying chat behavior or adding a nested scroll viewport.
+
+Live narrative can appear before a persisted assistant response only when the
+current turn identifies that response. Otherwise, new activity appends after the
+existing conversation. A previous answer is not an insertion point for a new turn.
 
 ## End-to-end data flow
 
@@ -71,6 +156,11 @@ PersistedTurnFooter appears after narrative.list RPC resolves
 ```
 
 Every step has at least one trap. Read on.
+
+The live status line always uses the layers icon. Its step count, optional
+subagent count, and activity label share a text shimmer while the turn runs.
+The elapsed time stays static between ticks. The shimmer and icon motion stop
+when the turn ends and are disabled when reduced motion is preferred.
 
 Provider-native identity and child evidence stay before the adapter boundary.
 The narrative pipeline, WebSocket payload, and renderer receive only

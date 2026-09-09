@@ -219,6 +219,22 @@ afterEach(() => {
 });
 
 describe("SelectedTextCommentMarkers", () => {
+  it("positions highlights from the overlay when the viewport parent has a different origin", async () => {
+    setDraft([comments[0]!]);
+    const { container } = render(<MarkerHarness onOpenComment={vi.fn()} />);
+    const highlight = await screen.findByTestId("selected-text-comment-highlight");
+    const viewport = container.querySelector(".overflow-y-auto")!;
+    vi.spyOn(viewport.parentElement!, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 60, 200, 120));
+    vi.spyOn(highlight.parentElement!, "getBoundingClientRect").mockReturnValue(new DOMRect(10, 10, 200, 180));
+
+    await act(async () => {
+      fireEvent.scroll(viewport);
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+
+    await waitFor(() => expect(highlight.firstElementChild).toHaveStyle({ top: "10px", left: "10px" }));
+  });
+
   it("renders one persistent highlight and focusable marker per saved comment in creation order", async () => {
     const onOpenComment = vi.fn();
     setDraft(comments);

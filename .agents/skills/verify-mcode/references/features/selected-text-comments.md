@@ -13,6 +13,7 @@
 - The text selection remains after the context-menu event.
 - `Add comment` opens the prototype compact editor with an empty note field and close action.
 - While the note field is open, the unsaved source remains highlighted and shows its next marker number. Closing that editor removes both pending visuals.
+- Pending and saved highlights cover the selected text when a pinned prompt offsets the transcript viewport from the overlay. Repeated paragraphs must highlight the selected occurrence.
 - The compact editor contains the note field, an icon-only close action, and conditional save. A saved comment also has a delete action.
 - The editor accepts project slash skills, workspace file mentions, line breaks, and `Ctrl+Enter` save.
 - Each saved comment keeps a reconstructed source highlight and a numbered source marker. Hover or focus a marker to strengthen only its linked highlight. Marker order follows comment creation order, even when markers overlap.
@@ -54,6 +55,10 @@ The verifier writes `.dev/verification/selected-text-comments-action.png`, `.dev
 
 The proof also opens the owned child through the Subagents panel and selects its assistant text with a pointer drag. It checks that no comment action or editor appears and captures `.dev/verification/selected-text-comments-subagent.png`. Setup creates this child and its prompt/reply pair; cleanup removes it with the parent fixture.
 
+## Highlight alignment proof
+
+Reuse the owned Electron session and a completed assistant message in `.dev/fixture-repo`. With a pinned prompt visible, drag across the last of several repeated paragraphs. Read the native range rectangles before selecting `Add comment`. After the editor opens, compare each highlight rectangle with the current source range, clipped to the transcript viewport. Require matching position and size within one CSS pixel. Keep a screenshot with the pending highlight and editor visible. Save a note, scroll, then switch to another fixture thread and back. Repeat the geometry check and confirm the saved note. Delete the verification comment. Presence-only highlight assertions do not prove alignment.
+
 ## Provider input and sent records
 
 The Electron proof does not send a provider turn. Focused server and web tests cover these flows:
@@ -65,6 +70,7 @@ The Electron proof does not send a provider turn. Focused server and web tests c
 
 ## Gotchas
 
+- The transcript uses vlist with React portals. Its scroll element is `[data-testid="transcript-viewport"]`, not the first child of `message-list`. Run this desktop proof after changes to virtual row ownership, measurement, or scroll positioning. The `messageListBehavior` renderer workload additionally checks history anchors, thread-cache restoration, sticky navigation, focus, and live-to-persisted row identity. Store-seeded performance workloads do not replace this persisted-fixture proof; console errors invalidate their timing comparisons.
 - Stop Electron before the fixture setup and cleanup commands.
 - Cleanup removes its thread, message, and owned fixture skill. It does not delete the built-in `.dev/fixture-repo` workspace.
 - Automated desktop coverage uses a real secondary pointer click and proves that the app does not prevent it. It cannot inspect native OS menu rendering.

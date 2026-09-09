@@ -1,14 +1,14 @@
 import { useMemo, useRef, type ReactNode } from "react";
 import { isGoalStatusNotice } from "@/lib/goal-message";
 import { measureMessageListPerformance } from "@/performance/message-list-performance";
-import { resolveUserMessagePreview } from "@/components/chat/user-message-preview";
 import {
   createTranscriptItemProjector,
   type CurrentTurnResponseIdentity,
 } from "./virtual-items";
 import type { MessageListData } from "./useMessageListData";
+import { expandTranscriptNarrative, expandTranscriptToolGroups } from "./transcript-narrative-items";
+import { useToolCallTransitions } from "./useToolCallTransitions";
 import {
-  findMessageListItemIndex,
   type MessageListItem,
 } from "./message-list-virtualization";
 
@@ -19,6 +19,7 @@ type MessageListItemsInput = Pick<
   | "assistantResponseKeys"
   | "currentTurnMessageId"
   | "currentTurnResponseKey"
+  | "turnExecutionId"
   | "hooks"
   | "isAgentRunning"
   | "latestTurnWithChanges"
@@ -32,6 +33,7 @@ type MessageListItemsInput = Pick<
   | "toolCalls"
   | "turnSummariesByMessageId"
 > & {
+  readonly expandedGroups: ReadonlySet<string>;
   readonly leadingContent?: ReactNode;
   readonly afterFirstUserContent?: ReactNode;
 };
@@ -62,13 +64,15 @@ function createCurrentTurn({
   currentTurnMessageId,
   currentTurnResponseKey,
   assistantResponseKeys,
+  turnExecutionId,
 }: Pick<
   MessageListItemsInput,
-  "renderedThreadId" | "currentTurnMessageId" | "currentTurnResponseKey" | "assistantResponseKeys"
+  "renderedThreadId" | "currentTurnMessageId" | "currentTurnResponseKey" | "assistantResponseKeys" | "turnExecutionId"
 >): CurrentTurnResponseIdentity | undefined {
   if (!renderedThreadId) return undefined;
   return {
     threadId: renderedThreadId,
+    executionId: turnExecutionId ?? undefined,
     messageId: currentTurnMessageId || undefined,
     responseKey: currentTurnResponseKey || undefined,
     responseKeysByMessageId: assistantResponseKeys,
@@ -86,15 +90,7 @@ function findLastAgentMessageBody(input: Pick<
     ?.content;
 }
 
-function findLastUserMessage(input: Pick<MessageListItemsInput, "messages">) {
-  for (let index = input.messages.length - 1; index >= 0; index -= 1) {
-    const message = input.messages[index];
-    if (message.role === "user" && !message.is_internal) return message;
-  }
-  return null;
-}
-
-/** Projects stateful transcript data into virtual rows and sticky-message inputs. */
+/** Projects stateful transcript data into virtual rows. */
 export function useMessageListItems(input: MessageListItemsInput) {
   const {
     agentDisplayState,
@@ -102,6 +98,7 @@ export function useMessageListItems(input: MessageListItemsInput) {
     assistantResponseKeys,
     currentTurnMessageId,
     currentTurnResponseKey,
+    turnExecutionId,
     hooks,
     isAgentRunning,
     latestTurnWithChanges,
@@ -121,12 +118,14 @@ export function useMessageListItems(input: MessageListItemsInput) {
       currentTurnMessageId,
       currentTurnResponseKey,
       assistantResponseKeys,
+      turnExecutionId,
     }),
     [
       assistantResponseKeys,
       currentTurnMessageId,
       currentTurnResponseKey,
       renderedThreadId,
+      turnExecutionId,
     ],
   );
   const transcriptProjectorRef = useRef<ReturnType<typeof createTranscriptItemProjector> | null>(null);
@@ -172,25 +171,23 @@ export function useMessageListItems(input: MessageListItemsInput) {
       turnSummariesByMessageId,
     ],
   );
+  const toolTransitions = useToolCallTransitions(toolCalls);
+  const narrativeItems = useMemo(
+    () => expandTranscriptNarrative(virtualItems, persistedNarrativeByMessage, currentTurn, toolTransitions),
+    [virtualItems, persistedNarrativeByMessage, currentTurn, toolTransitions],
+  );
+  const expandedItems = useMemo(
+    () => expandTranscriptToolGroups(narrativeItems, input.expandedGroups),
+    [narrativeItems, input.expandedGroups],
+  );
   const items = useMemo<MessageListItem[]>(
     () => insertAfterFirstUserMessage(
       input.leadingContent === undefined
-        ? virtualItems
-        : [{ key: "leading-content", type: "leading-content", content: input.leadingContent }, ...virtualItems],
+        ? expandedItems
+        : [{ key: "leading-content", type: "leading-content", content: input.leadingContent }, ...expandedItems],
       input.afterFirstUserContent,
     ),
-    [input.afterFirstUserContent, input.leadingContent, virtualItems],
+    [input.afterFirstUserContent, input.leadingContent, expandedItems],
   );
-  const lastUserMessage = useMemo(() => findLastUserMessage({ messages }), [messages]);
-  const lastUserMessagePreview = useMemo(
-    () => lastUserMessage ? resolveUserMessagePreview(lastUserMessage) : null,
-    [lastUserMessage],
-  );
-
-  return {
-    items,
-    lastUserMessage,
-    lastUserMessagePreview,
-    lastUserMessageItemIndex: findMessageListItemIndex(items, lastUserMessage?.id),
-  };
+  return { items };
 }

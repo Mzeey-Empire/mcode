@@ -1,63 +1,30 @@
-/**
- * Tests for MessageList thread-switch behavior: cache-hit detection,
- * virtualizer measurement optimization, scroll position restoration, and
- * synchronous bottom positioning when a prefetched thread has no saved offset.
- *
- * Revisits use double-requestAnimationFrame suppression so passive effects
- * that fire again after the store settles do not call smooth scrollToBottom.
- * Near-bottom remembered offsets clamp to the current max scroll when content
- * grew so a stale pixel does not sit above the tail.
- *
- * A cache hit occurs when threadStore has messages already loaded (loading: false
- * synchronously after activeThreadId changes). On cache hit, we skip virtualizer.measure()
- * to preserve cached row heights. Without a remembered scroll offset, we pin
- * `scrollTop` on switch instead of calling `scrollToIndex`, so no smooth or
- * reconcile-driven motion runs on open.
- *
- * When a cache miss finishes (`loading` true to false) on the same thread,
- * `positionAtBottom({ measureFirst: true })` calls `scrollToIndex` with
- * `behavior: "auto"` so the list anchors to the tail before rows finish measuring.
- */
 import { render, act, fireEvent, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
+import { StrictMode, useState } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createAgentModelState, type AgentItem, type AgentTurn, type Message, type SelectedTextComment } from "@mcode/contracts";
 
-const measureSpy = vi.fn();
-const scrollToIndexSpy = vi.fn();
 const loadOlderMessagesSpy = vi.fn();
 const loadNewerMessagesSpy = vi.fn();
 const loadNarrativeForMessageSpy = vi.fn();
-let totalSizeValue = 0;
-let virtualizerOptions: { count: number; onChange?: () => void } | null = null;
 
-const mockVirtualizer = {
-  getVirtualItems: () => Array.from(
-    { length: virtualizerOptions?.count ?? 0 },
-    (_, index) => ({ index, key: String(index), start: index * 80 }),
-  ),
-  getTotalSize: () => totalSizeValue,
-  measure: measureSpy,
-  scrollToIndex: scrollToIndexSpy,
-  measureElement: () => {},
-  shouldAdjustScrollPositionOnItemSizeChange: undefined,
-};
-
-vi.mock("@tanstack/react-virtual", () => ({
-  useVirtualizer: vi.fn((options: { count: number }) => {
-    virtualizerOptions = options;
-    return mockVirtualizer;
-  }),
-  defaultRangeExtractor: ({ startIndex, endIndex, overscan, count }: {
-    startIndex: number;
-    endIndex: number;
-    overscan: number;
-    count: number;
-  }) => Array.from(
-    { length: Math.min(count - 1, endIndex + overscan) - Math.max(0, startIndex - overscan) + 1 },
-    (_, index) => Math.max(0, startIndex - overscan) + index,
-  ),
-}));
+class LayoutObserver implements ResizeObserver {
+  static instances: LayoutObserver[] = [];
+  readonly observed = new Set<Element>();
+  constructor(private readonly callback: ResizeObserverCallback) { LayoutObserver.instances.push(this); }
+  observe(element: Element): void { this.observed.add(element); }
+  unobserve(element: Element): void { this.observed.delete(element); }
+  disconnect(): void { this.observed.clear(); }
+  static resize(element: Element, height: number): void {
+    const size = [{ blockSize: height, inlineSize: 1000 }];
+    const entry: ResizeObserverEntry = {
+      target: element, borderBoxSize: size, contentBoxSize: size, devicePixelContentBoxSize: size,
+      contentRect: new DOMRect(0, 0, 1000, height),
+    };
+    for (const observer of this.instances) {
+      if (observer.observed.has(element)) observer.callback([entry], observer);
+    }
+  }
+}
 
 // Minimal store mocks; control `loading` and `activeThreadId` between renders.
 let loadingValue = false;
@@ -226,15 +193,9 @@ vi.mock("@/components/chat/TurnChangeSummary", () => ({
 }));
 vi.mock("@/components/chat/PermissionRequestCard", () => ({ PermissionRequestCard: () => null }));
 vi.mock("@/components/chat/HookActivitySection", () => ({ HookActivitySection: () => null }));
-vi.mock("../../narrative", () => ({
-  NarrativeFlow: ({ isAgentRunning }: { isAgentRunning: boolean }) =>
-    isAgentRunning ? <div>Thinking</div> : null,
-}));
 
 import { MessageList, type SelectedTextCommentSourceNavigationRequest } from "../MessageList";
-import { preservePrependedVirtualRange } from "../message-list-virtualization";
 import {
-  rememberScrollTop,
   recallScrollPosition,
   recallScrollTop,
   clearScrollMemory,
@@ -251,21 +212,25 @@ function mockSelectedTextViewport(container: HTMLElement): HTMLDivElement {
 }
 
 beforeEach(() => {
-  measureSpy.mockClear();
-  scrollToIndexSpy.mockClear();
+  LayoutObserver.instances = [];
+  vi.stubGlobal("ResizeObserver", LayoutObserver);
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(800);
+  vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1000);
   loadOlderMessagesSpy.mockClear();
   loadNewerMessagesSpy.mockClear();
   loadNarrativeForMessageSpy.mockClear();
   loadingValue = false;
   activeThreadIdValue = "thread-A";
   messagesValue = [{ id: "m1", sequence: 1 }];
-  totalSizeValue = 0;
   hasMoreMessagesValue = false;
   hasNewerMessagesValue = false;
   currentThreadIdValue = "thread-A";
   runningThreadIdsValue = new Set();
   handoffStatusByThread = {};
   recordOverridesByThread = {};
+  vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (this: HTMLElement) {
+    return Number.parseFloat(this.firstElementChild instanceof HTMLElement ? this.firstElementChild.style.height : "0") || 800;
+  });
   clearScrollMemory();
   Object.defineProperty(Range.prototype, "getClientRects", {
     configurable: true,
@@ -278,6 +243,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   vi.useRealTimers();
   document.getSelection()?.removeAllRanges();
   if (rangeClientRectsDescriptor) Object.defineProperty(Range.prototype, "getClientRects", rangeClientRectsDescriptor);
@@ -291,7 +258,7 @@ afterEach(() => {
 describe("MessageList thread switch", () => {
   it("keeps virtual message rails vertically visible for sent annotation previews", () => {
     const { container } = render(<MessageList />);
-    const rail = container.querySelector("[data-index] > div");
+    const rail = container.querySelector(".overflow-x-clip");
 
     expect(rail).toHaveClass("overflow-x-clip");
     expect(rail).not.toHaveClass("overflow-x-hidden");
@@ -377,7 +344,6 @@ describe("MessageList thread switch", () => {
     await waitFor(() => expect(loadOlderMessagesSpy).toHaveBeenCalledWith("thread-A"));
     rerender(<MessageList {...props} />);
     await waitFor(() => expect(onSelectedTextCommentSourceOpened).toHaveBeenCalledWith(request));
-    expect(scrollToIndexSpy).toHaveBeenCalledWith(0, { align: "center", behavior: "smooth" });
   });
 
   it("marks a source unavailable only after its resident message fails canonical reconstruction", async () => {
@@ -555,7 +521,6 @@ describe("MessageList thread switch", () => {
     mockSelectedTextViewport(container);
 
     await waitFor(() => expect(screen.getByRole("dialog", { name: "Comment on selected text" })).toBeVisible());
-    expect(scrollToIndexSpy).toHaveBeenCalledWith(1, { align: "center", behavior: "smooth" });
   });
 
   it("does not offer selected-text comments without a comment handler", () => {
@@ -1038,66 +1003,14 @@ describe("MessageList thread switch", () => {
     expect(setupBlock.compareDocumentPosition(queuedMessage!) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   });
 
-  it("hides the sticky user message when virtualizer geometry makes the bubble visible", async () => {
-    messagesValue = [{
-      id: "last-user",
-      sequence: 1,
-      thread_id: "thread-A",
-      role: "user",
-      content: "The last user prompt",
-    }];
-    totalSizeValue = 800;
-
-    let messageVisible = false;
-    const createRect = (top: number, bottom: number): DOMRect => ({
-      top,
-      bottom,
-      left: 0,
-      right: 300,
-      width: 300,
-      height: bottom - top,
-      x: 0,
-      y: top,
-      toJSON: () => ({}),
-    });
-    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
-      .mockImplementation(function (this: HTMLElement) {
-        if (this.getAttribute("data-message-id") === "last-user") {
-          return messageVisible
-            ? createRect(80, 160)
-            : createRect(-100, -20);
-        }
-        if (this.classList.contains("overflow-y-auto")) {
-          return createRect(0, 400);
-        }
-        return createRect(0, 0);
-      });
-
-    const { container } = render(<MessageList />);
-    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement;
-    Object.defineProperty(scrollEl, "scrollHeight", { configurable: true, value: 800 });
-    Object.defineProperty(scrollEl, "clientHeight", { configurable: true, value: 400 });
-    Object.defineProperty(scrollEl, "scrollTop", { configurable: true, value: 400, writable: true });
-
-    await vi.waitFor(() => {
-      expect(scrollEl.style.opacity).toBe("1");
-      expect(container.querySelector('[data-testid="sticky-user-message"]')).not.toBeNull();
-    });
-
-    messageVisible = true;
-    act(() => {
-      virtualizerOptions?.onChange?.();
-    });
-
-    expect(container.querySelector('[data-testid="sticky-user-message"]')).toBeNull();
-    rectSpy.mockRestore();
-  });
-
-  it("does not pair a cached transcript with another thread's running narrative", () => {
+  it("does not pair a cached transcript with another thread's running narrative", async () => {
     activeThreadIdValue = "thread-B";
     currentThreadIdValue = "thread-A";
     runningThreadIdsValue = new Set(["thread-B"]);
-    recordOverridesByThread = { "thread-B": { runtimePhase: "running" } };
+    recordOverridesByThread = { "thread-B": {
+      runtimePhase: "running",
+      thoughtSegments: [{ text: "Thread B reasoning", startedAt: 1, endedAt: 2, isExplicitNonFinal: true }],
+    } };
     messagesValue = [{
       id: "a-final",
       sequence: 1,
@@ -1108,7 +1021,7 @@ describe("MessageList thread switch", () => {
     const { queryByText, rerender } = render(<MessageList displayThreadId="thread-A" />);
 
     expect(queryByText("Thread A final response")).not.toBeNull();
-    expect(queryByText("Thinking")).toBeNull();
+    expect(queryByText("Thread B reasoning")).toBeNull();
 
     currentThreadIdValue = "thread-B";
     messagesValue = [{
@@ -1120,7 +1033,7 @@ describe("MessageList thread switch", () => {
     }];
     act(() => rerender(<MessageList />));
 
-    expect(queryByText("Thinking")).not.toBeNull();
+    await waitFor(() => expect(queryByText("Thread B reasoning")).not.toBeNull());
   });
 
   it("uses the rendered transcript thread for handoff skeletons", () => {
@@ -1151,787 +1064,229 @@ describe("MessageList thread switch", () => {
     expect(container.querySelectorAll(".animate-pulse")).toHaveLength(3);
   });
 
-  it("records history posture before navigation can replace the active transcript", () => {
-    loadingValue = false;
-    activeThreadIdValue = "thread-A";
-    messagesValue = [];
+
+  it("virtualizes expanded tool children and restores them after scrolling and thread switches", () => {
+    messagesValue = [{ id: "answer", sequence: 1, role: "assistant", content: "Finished commands" }];
+    const tools = Array.from({ length: 180 }, (_, index) => ({
+      id: `command-${index}`, message_id: "answer", tool_name: "Bash",
+      tool_input: JSON.stringify({ command: `echo command-${index}` }), output: "",
+      is_error: false, is_complete: true, sort_order: index,
+      started_at: new Date(index * 1000).toISOString(),
+      completed_at: new Date(index * 1000 + 500).toISOString(),
+    }));
+    recordOverridesByThread["thread-A"] = { narrativeByMessage: { answer: { tools, hooks: [], thoughts: [] } } };
+    const groupMessages = messagesValue;
     const { container, rerender } = render(<MessageList />);
-    messagesValue = [{ id: "m1", sequence: 1, thread_id: "thread-A" }];
+    let viewport = screen.getByTestId("transcript-viewport");
+    fireEvent.click(screen.getByRole("button", { name: "Ran 180 commands" }));
+    expect(container.querySelectorAll("li").length).toBeGreaterThan(0);
+    expect(container.querySelectorAll("li").length).toBeLessThan(60);
+    expect(screen.getByRole("button", { name: "Ran 180 commands" })).toHaveAttribute("aria-expanded", "true");
+    readAt(viewport, 3000);
+    expect(screen.queryByRole("button", { name: "Ran 180 commands" })).toBeNull();
+    expect(container.querySelectorAll("li").length).toBeLessThan(60);
+    const readingAnchor = recallScrollPosition("thread-A")?.rowAnchor;
+    activeThreadIdValue = currentThreadIdValue = "thread-B";
+    messagesValue = transcriptRows("thread-B");
     act(() => rerender(<MessageList />));
-    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement;
-    Object.defineProperty(scrollEl, "scrollHeight", { configurable: true, value: 6000 });
-    Object.defineProperty(scrollEl, "clientHeight", { configurable: true, value: 400 });
-    Object.defineProperty(scrollEl, "scrollTop", { configurable: true, value: 3000, writable: true });
+    activeThreadIdValue = currentThreadIdValue = "thread-A";
+    messagesValue = groupMessages;
+    act(() => rerender(<MessageList />));
+    viewport = screen.getByTestId("transcript-viewport");
+    expect(viewport.scrollTop).toBe(3000);
+    expect(recallScrollPosition("thread-A")?.rowAnchor).toEqual(readingAnchor);
+    expect(container.querySelectorAll("li").length).toBeGreaterThan(0);
+    expect(container.querySelectorAll("li").length).toBeLessThan(60);
+    readAt(viewport, 0);
+    expect(screen.getByRole("button", { name: "Ran 180 commands" })).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Ran 180 commands" }));
+    expect(container.querySelectorAll("li")).toHaveLength(0);
+    expect(viewport.scrollTop).toBe(0);
+  });
 
-    fireEvent.wheel(scrollEl, { deltaY: -100 });
-    scrollEl.scrollTop = 3000;
-    fireEvent.scroll(scrollEl);
+  function transcriptRows(threadId = "thread-A") {
+    return Array.from({ length: 12 }, (_, sequence) => ({
+      id: `${threadId}-${sequence}`, thread_id: threadId, sequence,
+      role: "assistant" as const, content: `Message ${sequence}`,
+    }));
+  }
 
-    expect(recallScrollTop("thread-A")).toBe(3000);
+  function measureRows(container: HTMLElement, height = 100): void {
+    act(() => {
+      for (const host of container.querySelectorAll("[data-transcript-key]")) LayoutObserver.resize(host, height);
+    });
+  }
+
+  function readAt(viewport: HTMLElement, top: number): void {
+    fireEvent.wheel(viewport, { deltaY: -100 });
+    viewport.scrollTop = top;
+    fireEvent.scroll(viewport);
+  }
+
+  it("pins measured content and holds a reading anchor through prepend and eviction", () => {
+    messagesValue = transcriptRows();
+    const { container, rerender } = render(<MessageList />);
+    measureRows(container);
+    const viewport = screen.getByTestId("transcript-viewport");
+    expect(viewport.scrollTop).toBe(400);
+    readAt(viewport, 125);
+    const anchor = container.querySelector('[data-message-id="thread-A-1"]');
+    messagesValue = [{ id: "older", sequence: -1 }, ...messagesValue];
+    act(() => rerender(<MessageList />));
+    measureRows(container);
+    expect(viewport.scrollTop).toBe(225);
+    expect(container.querySelector('[data-message-id="thread-A-1"]')).toBe(anchor);
+    messagesValue = messagesValue.slice(1);
+    act(() => rerender(<MessageList />));
+    expect(viewport.scrollTop).toBe(125);
     expect(hasRememberedHistoryPosition("thread-A")).toBe(true);
   });
 
-  it("keeps the previous viewport range mounted while prepended rows are positioned", () => {
-    expect(preservePrependedVirtualRange({
-      startIndex: 0,
-      endIndex: 4,
-      overscan: 2,
-      count: 105,
-    }, 100)).toEqual([0, 1, 2, 3, 4, 5, 6, 100, 101, 102, 103, 104]);
-  });
-
-  it("keeps a retained anchor mounted when a bounded window replaces rows", () => {
-    expect(preservePrependedVirtualRange({
-      startIndex: 0,
-      endIndex: 4,
-      overscan: 2,
-      count: 200,
-    }, 0, 50)).toEqual([0, 1, 2, 3, 4, 5, 6, 50]);
-  });
-
-  it("keeps the measured transcript tail pinned as virtualized content grows", () => {
-    loadingValue = false;
-    activeThreadIdValue = "thread-A";
-    messagesValue = [{ id: "m1", sequence: 1 }];
-    totalSizeValue = 6000;
-    const { rerender, container } = render(<MessageList />);
-
-    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement;
-    let scrollHeight = 6000;
-    let scrollTop = 5600;
-    Object.defineProperty(scrollEl, "scrollHeight", {
-      configurable: true,
-      get: () => scrollHeight,
-    });
-    Object.defineProperty(scrollEl, "clientHeight", {
-      configurable: true,
-      value: 400,
-    });
-    Object.defineProperty(scrollEl, "scrollTop", {
-      configurable: true,
-      get: () => scrollTop,
-      set: (value: number) => {
-        scrollTop = value;
-      },
-    });
-
-    scrollHeight = 8000;
-    totalSizeValue = 8000;
+  it("restores a cached reading row without reusing the outgoing viewport", () => {
+    messagesValue = transcriptRows();
+    const { container, rerender } = render(<MessageList />, { wrapper: StrictMode });
+    measureRows(container);
+    const outgoing = screen.getByTestId("transcript-viewport");
+    readAt(outgoing, 125);
+    activeThreadIdValue = currentThreadIdValue = "thread-B";
+    messagesValue = transcriptRows("thread-B");
     act(() => rerender(<MessageList />));
-
-    expect(scrollTop).toBe(8000);
+    measureRows(container);
+    expect(screen.getByTestId("transcript-viewport")).not.toBe(outgoing);
+    expect(screen.getByTestId("transcript-viewport").scrollTop).toBe(400);
+    expect(container.querySelector('[data-thread-id="thread-A"]')).toBeNull();
+    activeThreadIdValue = currentThreadIdValue = "thread-A";
+    messagesValue = transcriptRows();
+    act(() => rerender(<MessageList />));
+    measureRows(container);
+    expect(screen.getByTestId("transcript-viewport").scrollTop).toBe(125);
+    expect(recallScrollPosition("thread-A")?.rowAnchor).toEqual({ key: "thread-A-1", offset: 25 });
   });
 
-  it("preserves the reading position when virtualized content grows after wheel-up", () => {
-    loadingValue = false;
-    activeThreadIdValue = "thread-A";
-    messagesValue = [{ id: "m1", sequence: 1 }];
-    totalSizeValue = 6000;
-    const { rerender, container } = render(<MessageList />);
-
-    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement;
-    let scrollHeight = 6000;
-    let scrollTop = 3000;
-    Object.defineProperty(scrollEl, "scrollHeight", {
-      configurable: true,
-      get: () => scrollHeight,
-    });
-    Object.defineProperty(scrollEl, "clientHeight", {
-      configurable: true,
-      value: 400,
-    });
-    Object.defineProperty(scrollEl, "scrollTop", {
-      configurable: true,
-      get: () => scrollTop,
-      set: (value: number) => {
-        scrollTop = value;
-      },
-    });
-
-    fireEvent.wheel(scrollEl, { deltaY: -100 });
-    scrollHeight = 8000;
-    totalSizeValue = 8000;
+  it("keeps a restored offset that exceeds the row's provisional height", () => {
+    messagesValue = transcriptRows();
+    const { container, rerender } = render(<MessageList />, { wrapper: StrictMode });
+    measureRows(container, 300);
+    readAt(screen.getByTestId("transcript-viewport"), 500);
+    activeThreadIdValue = currentThreadIdValue = "thread-B";
+    messagesValue = transcriptRows("thread-B");
     act(() => rerender(<MessageList />));
-
-    expect(scrollTop).toBe(3000);
+    activeThreadIdValue = currentThreadIdValue = "thread-A";
+    messagesValue = transcriptRows();
+    act(() => rerender(<MessageList />));
+    measureRows(container, 300);
+    expect(screen.getByTestId("transcript-viewport").scrollTop).toBe(500);
+    expect(recallScrollPosition("thread-A")?.rowAnchor).toEqual({ key: "thread-A-1", offset: 200 });
   });
 
-  it("compensates a history prepend before the next paint", () => {
-    loadingValue = false;
-    activeThreadIdValue = "thread-A";
-    messagesValue = [{ id: "m1", sequence: 1 }];
-    const { rerender, container } = render(<MessageList />);
-
-    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement;
-    let scrollHeight = 6000;
-    let scrollTop = 3000;
-    Object.defineProperty(scrollEl, "scrollHeight", {
-      configurable: true,
-      get: () => scrollHeight,
-    });
-    Object.defineProperty(scrollEl, "clientHeight", {
-      configurable: true,
-      value: 400,
-    });
-    Object.defineProperty(scrollEl, "scrollTop", {
-      configurable: true,
-      get: () => scrollTop,
-      set: (value: number) => {
-        scrollTop = value;
-      },
-    });
-
-    fireEvent.wheel(scrollEl, { deltaY: -100 });
-    fireEvent.scroll(scrollEl);
-    messagesValue = [{ id: "m1", sequence: 1 }];
-    act(() => rerender(<MessageList />));
-
-    scrollHeight = 8000;
-    messagesValue = [
-      { id: "m0", sequence: 0 },
-      { id: "m1", sequence: 1 },
-    ];
-    act(() => rerender(<MessageList />));
-
-    expect(scrollTop).toBe(5000);
-  });
-
-  it("preserves the first visible message when the initial tail does not fill the viewport", async () => {
-    loadingValue = false;
-    activeThreadIdValue = "thread-A";
-    hasMoreMessagesValue = true;
-    messagesValue = [{ id: "m1", sequence: 1 }];
-    let scrollHeight = 300;
-    let scrollTop = 0;
-    let prependedHeight = 0;
-    let activeFrame = 0;
-    let captureSettlePhases = false;
-    const anchorReadFrames: number[] = [];
-    const scrollWriteFrames: number[] = [];
-    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
-      .mockImplementation(function (this: HTMLElement) {
-        if (this.getAttribute("data-message-id") === "m1") {
-          if (captureSettlePhases) anchorReadFrames.push(activeFrame);
-          return {
-            top: 100 + prependedHeight - scrollTop,
-            bottom: 180 + prependedHeight - scrollTop,
-          } as DOMRect;
-        }
-        if (this.classList.contains("overflow-y-auto")) {
-          return { top: 0, bottom: 400 } as DOMRect;
-        }
-        return { top: 0, bottom: 0 } as DOMRect;
-      });
-    const { rerender, container } = render(<MessageList />);
-
-    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement;
-    Object.defineProperty(scrollEl, "scrollHeight", {
-      configurable: true,
-      get: () => scrollHeight,
-    });
-    Object.defineProperty(scrollEl, "clientHeight", {
-      configurable: true,
-      value: 400,
-    });
-    Object.defineProperty(scrollEl, "scrollTop", {
-      configurable: true,
-      get: () => scrollTop,
-      set: (value: number) => {
-        if (captureSettlePhases) scrollWriteFrames.push(activeFrame);
-        scrollTop = value;
-      },
-    });
-    fireEvent.wheel(scrollEl, { deltaY: -100 });
-    fireEvent.scroll(scrollEl);
-    prependedHeight = 2_000;
-    scrollHeight = 2_300;
-    messagesValue = [
-      { id: "m0", sequence: 0 },
-      { id: "m1", sequence: 1 },
-    ];
-    const animationFrames: FrameRequestCallback[] = [];
-    const animationFrameSpy = vi.spyOn(globalThis, "requestAnimationFrame")
-      .mockImplementation((callback) => {
-        animationFrames.push(callback);
-        return animationFrames.length;
-      });
-    captureSettlePhases = true;
-    act(() => rerender(<MessageList />));
-    act(() => {
-      while (animationFrames.length > 0) {
-        activeFrame += 1;
-        animationFrames.shift()?.(0);
-      }
-    });
-    captureSettlePhases = false;
-    animationFrameSpy.mockRestore();
-
-    expect(scrollTop).toBe(2_000);
-    expect(anchorReadFrames.length).toBeGreaterThan(0);
-    expect(scrollWriteFrames.length).toBeGreaterThan(0);
-    expect(scrollWriteFrames.some((frame) => anchorReadFrames.includes(frame))).toBe(false);
-    expect(container.querySelector('[data-message-id="m1"]')?.getBoundingClientRect().top).toBe(100);
-    await vi.waitFor(() => {
-      expect((container.querySelector(".relative.w-full") as HTMLDivElement).style.height).toBe("220px");
-      expect(scrollEl.style.opacity).toBe("1");
-    });
-    scrollTop = 3_000;
-    act(() => fireEvent.scroll(scrollEl));
-    await vi.waitFor(() => {
-      expect((container.querySelector(".relative.w-full") as HTMLDivElement).style.height).toBe("0px");
-    });
-    rectSpy.mockRestore();
-  });
-
-  it("preserves the visible message and pixel offset when a newer page replaces older rows", () => {
-    loadingValue = false;
-    activeThreadIdValue = "thread-A";
-    hasNewerMessagesValue = true;
-    messagesValue = [
-      { id: "m1", sequence: 1 },
-      { id: "m2", sequence: 2 },
-    ];
-    let scrollTop = 100;
-    let layoutShift = 0;
-    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
-      .mockImplementation(function (this: HTMLElement) {
-        const messageId = this.getAttribute("data-message-id");
-        if (messageId === "m1") return { top: -80, bottom: 0 } as DOMRect;
-        if (messageId === "m2") {
-          const top = 100 + layoutShift - (scrollTop - 100);
-          return { top, bottom: top + 80 } as DOMRect;
-        }
-        if (this.classList.contains("overflow-y-auto")) {
-          return { top: 0, bottom: 400 } as DOMRect;
-        }
-        return { top: 0, bottom: 0 } as DOMRect;
-      });
-    const { rerender, container } = render(<MessageList />);
-    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement;
-    Object.defineProperty(scrollEl, "scrollHeight", { configurable: true, value: 500 });
-    Object.defineProperty(scrollEl, "clientHeight", { configurable: true, value: 400 });
-    Object.defineProperty(scrollEl, "scrollTop", {
-      configurable: true,
-      get: () => scrollTop,
-      set: (value: number) => { scrollTop = value; },
-    });
-
-    fireEvent.wheel(scrollEl, { deltaY: 100 });
-    fireEvent.scroll(scrollEl);
-    layoutShift = -80;
-    messagesValue = [
-      { id: "m2", sequence: 2 },
-      { id: "m3", sequence: 3 },
-    ];
-    const animationFrames: FrameRequestCallback[] = [];
-    const animationFrameSpy = vi.spyOn(globalThis, "requestAnimationFrame")
-      .mockImplementation((callback) => {
-        animationFrames.push(callback);
-        return animationFrames.length;
-      });
-    act(() => rerender(<MessageList />));
-    act(() => {
-      while (animationFrames.length > 0) animationFrames.shift()?.(0);
-    });
-
-    expect(scrollTop).toBe(20);
-    expect(container.querySelector('[data-message-id="m2"]')?.getBoundingClientRect().top).toBe(100);
-    animationFrameSpy.mockRestore();
-    rectSpy.mockRestore();
-  });
-
-  it("preserves the visible message and pixel offset when pressure removes resident rows", () => {
-    loadingValue = false;
-    activeThreadIdValue = "thread-A";
-    messagesValue = [
-      { id: "m1", sequence: 1 },
-      { id: "m2", sequence: 2 },
-      { id: "m3", sequence: 3 },
-    ];
-    let scrollTop = 100;
-    let layoutShift = 0;
-    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
-      .mockImplementation(function (this: HTMLElement) {
-        const messageId = this.getAttribute("data-message-id");
-        if (messageId === "m1") return { top: -80, bottom: 0 } as DOMRect;
-        if (messageId === "m2") {
-          const top = 100 + layoutShift - (scrollTop - 100);
-          return { top, bottom: top + 80 } as DOMRect;
-        }
-        if (this.classList.contains("overflow-y-auto")) {
-          return { top: 0, bottom: 400 } as DOMRect;
-        }
-        return { top: 0, bottom: 0 } as DOMRect;
-      });
-    const animationFrames: FrameRequestCallback[] = [];
-    const animationFrameSpy = vi.spyOn(globalThis, "requestAnimationFrame")
-      .mockImplementation((callback) => {
-        animationFrames.push(callback);
-        return animationFrames.length;
-      });
-    const { rerender, container } = render(<MessageList />);
-    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement;
-    Object.defineProperty(scrollEl, "scrollHeight", { configurable: true, value: 1_000 });
-    Object.defineProperty(scrollEl, "clientHeight", { configurable: true, value: 400 });
-    Object.defineProperty(scrollEl, "scrollTop", {
-      configurable: true,
-      get: () => scrollTop,
-      set: (value: number) => { scrollTop = value; },
-    });
-
-    act(() => {
-      while (animationFrames.length > 0) animationFrames.shift()?.(0);
-    });
-    scrollTop = 100;
-    rememberScrollTop("thread-A", 100, false, { messageId: "m2", top: 100 });
-    layoutShift = -80;
-    messagesValue = [
-      { id: "m2", sequence: 2 },
-      { id: "m3", sequence: 3 },
-    ];
-    act(() => rerender(<MessageList />));
-    act(() => {
-      while (animationFrames.length > 0) animationFrames.shift()?.(0);
-    });
-
-    expect(scrollTop).toBe(20);
-    expect(container.querySelector('[data-message-id="m2"]')?.getBoundingClientRect().top).toBe(100);
-    animationFrameSpy.mockRestore();
-    rectSpy.mockRestore();
-  });
-
-  it("does not restore tail pin when wheel-up remains inside the bottom cushion", () => {
-    loadingValue = false;
-    activeThreadIdValue = "thread-A";
-    messagesValue = [{ id: "m1", sequence: 1 }];
-    totalSizeValue = 6000;
-    const { rerender, container } = render(<MessageList />);
-
-    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement;
-    let scrollHeight = 6000;
-    let scrollTop = 5600;
-    Object.defineProperty(scrollEl, "scrollHeight", {
-      configurable: true,
-      get: () => scrollHeight,
-    });
-    Object.defineProperty(scrollEl, "clientHeight", {
-      configurable: true,
-      value: 400,
-    });
-    Object.defineProperty(scrollEl, "scrollTop", {
-      configurable: true,
-      get: () => scrollTop,
-      set: (value: number) => {
-        scrollTop = value;
-      },
-    });
-
-    fireEvent.wheel(scrollEl, { deltaY: -100 });
-    scrollTop = 5580;
-    fireEvent.scroll(scrollEl);
-    scrollHeight = 8000;
-    totalSizeValue = 8000;
-    act(() => rerender(<MessageList />));
-
-    expect(scrollTop).toBe(5580);
-  });
-
-  it("waits for upward user intent before consuming prefetched history", async () => {
-    loadingValue = false;
-    activeThreadIdValue = "thread-A";
-    messagesValue = [{ id: "m1", sequence: 1 }];
-    hasMoreMessagesValue = true;
+  it("clips the prompt for the older turn in view", () => {
+    messagesValue = transcriptRows().map((message, index) => index === 0 || index === 6
+      ? { ...message, role: "user", content: index === 0 ? "Earlier request" : "Latest request" }
+      : message);
     const { container } = render(<MessageList />);
-
-    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement;
-    Object.defineProperty(scrollEl, "scrollHeight", {
-      configurable: true,
-      value: 2000,
-    });
-    Object.defineProperty(scrollEl, "clientHeight", {
-      configurable: true,
-      value: 400,
-    });
-    Object.defineProperty(scrollEl, "scrollTop", {
-      configurable: true,
-      value: 0,
-      writable: true,
-    });
-    await vi.waitFor(() => {
-      expect(scrollEl.style.opacity).toBe("1");
-    });
-    scrollEl.scrollTop = 0;
-
-    act(() => {
-      fireEvent.scroll(scrollEl);
-    });
-    expect(loadOlderMessagesSpy).not.toHaveBeenCalled();
-
-    act(() => {
-      fireEvent.wheel(scrollEl, { deltaY: -100 });
-      fireEvent.scroll(scrollEl);
-    });
-
-    expect(loadOlderMessagesSpy).toHaveBeenCalledOnce();
-    expect(loadOlderMessagesSpy).toHaveBeenCalledWith("thread-A");
+    measureRows(container, 200);
+    const viewport = screen.getByTestId("transcript-viewport");
+    readAt(viewport, 400);
+    expect(screen.getByTestId("sticky-user-message")).toHaveTextContent("Earlier request");
+    readAt(viewport, 1210);
+    expect(screen.queryByTestId("sticky-user-message")).not.toBeInTheDocument();
+    readAt(viewport, 400);
+    fireEvent.click(screen.getByRole("button", { name: "Jump to your message" }));
+    expect(container.querySelector('[data-transcript-key="thread-A-0"] .animate-flash-highlight')).not.toBeNull();
+    readAt(viewport, 1250);
+    expect(screen.queryByTestId("sticky-user-message")).not.toBeInTheDocument();
+    readAt(viewport, 1500);
+    expect(screen.getByTestId("sticky-user-message")).toHaveTextContent("Latest request");
+    readAt(viewport, 400);
+    expect(screen.getByTestId("sticky-user-message")).toHaveTextContent("Earlier request");
   });
 
-  it("loads evicted newer history only after a downward gesture reaches the bottom threshold", async () => {
-    hasNewerMessagesValue = true;
-    messagesValue = Array.from({ length: 20 }, (_, index) => ({
-      id: `m${index + 1}`,
-      sequence: index + 1,
-    }));
-    totalSizeValue = 1_600;
-    const { getByTestId } = render(<MessageList />);
-    const scrollEl = getByTestId("message-list").querySelector(".overflow-y-auto") as HTMLDivElement;
-    Object.defineProperty(scrollEl, "scrollHeight", { configurable: true, value: 1_600 });
-    Object.defineProperty(scrollEl, "clientHeight", { configurable: true, value: 400 });
-    Object.defineProperty(scrollEl, "scrollTop", {
-      configurable: true,
-      value: 1_200,
-      writable: true,
-    });
-    await vi.waitFor(() => expect(scrollEl.style.opacity).toBe("1"));
-
-    act(() => {
-      fireEvent.scroll(scrollEl);
-    });
-    expect(loadNewerMessagesSpy).not.toHaveBeenCalled();
-
-    act(() => {
-      fireEvent.wheel(scrollEl, { deltaY: 100 });
-      fireEvent.scroll(scrollEl);
-    });
-
-    expect(loadNewerMessagesSpy).toHaveBeenCalledOnce();
-    expect(loadNewerMessagesSpy).toHaveBeenCalledWith("thread-A");
-  });
-
-  it("does not call virtualizer.measure() on a cache-hit switch", () => {
-    loadingValue = false;            // cache hit ⇒ loading is false synchronously
-    messagesValue = [{ id: "m1", sequence: 1 }];
-    activeThreadIdValue = "thread-A";
-    const { rerender } = render(<MessageList />);
-
-    measureSpy.mockClear();          // ignore the first-mount call (allowed)
-    activeThreadIdValue = "thread-B";
-    rerender(<MessageList />);
-
-    expect(measureSpy).not.toHaveBeenCalled();
-  });
-
-  it("calls virtualizer.measure() on a cache-miss switch", () => {
-    loadingValue = false;
-    activeThreadIdValue = "thread-A";
-    const { rerender } = render(<MessageList />);
-
-    measureSpy.mockClear();
-    loadingValue = true;             // cache miss ⇒ loading flips to true
-    activeThreadIdValue = "thread-B";
-    messagesValue = [];
-    rerender(<MessageList />);
-
-    expect(measureSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it("reveals a committed tail while background history is still loading", () => {
-    loadingValue = false;
-    activeThreadIdValue = "thread-A";
-    messagesValue = [{ id: "m-a", sequence: 1, thread_id: "thread-A" }];
-    const { rerender, container } = render(<MessageList />);
-
-    loadingValue = true;
-    activeThreadIdValue = "thread-B";
-    messagesValue = [];
-    act(() => rerender(<MessageList />));
-
-    messagesValue = [{ id: "m-b", sequence: 1, thread_id: "thread-B" }];
-    act(() => rerender(<MessageList />));
-
-    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement;
-    expect(scrollEl.style.opacity).toBe("1");
-  });
-
-  it("calls scrollToIndex with auto when cache-miss hydrate completes", () => {
-    loadingValue = false;
-    activeThreadIdValue = "thread-A";
-    messagesValue = [{ id: "m-a", sequence: 1 }];
-    const { rerender } = render(<MessageList />);
-
-    measureSpy.mockClear();
-    scrollToIndexSpy.mockClear();
-
-    loadingValue = true;
-    activeThreadIdValue = "thread-B";
-    messagesValue = [];
-    act(() => {
-      rerender(<MessageList />);
-    });
-
-    expect(scrollToIndexSpy).not.toHaveBeenCalled();
-
-    loadingValue = false;
-    messagesValue = [{ id: "m-b", sequence: 1 }];
-    act(() => {
-      rerender(<MessageList />);
-    });
-
-    const autoTailCalls = scrollToIndexSpy.mock.calls.filter(
-      (call) =>
-        (call[1] as { behavior?: string; align?: string } | undefined)?.behavior === "auto" &&
-        (call[1] as { align?: string } | undefined)?.align === "end",
-    );
-    expect(autoTailCalls.length).toBe(1);
-    expect(autoTailCalls[0]?.[0]).toBeGreaterThanOrEqual(0);
-  });
-
-  it("pins scrollTop without virtualizer scrollToIndex on cache-hit switch without remembered scroll", () => {
-    loadingValue = false;
-    activeThreadIdValue = "thread-A";
-    messagesValue = [{ id: "m-a", sequence: 1 }];
-    const { rerender, container } = render(<MessageList />);
-
-    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement | null;
-    expect(scrollEl).not.toBeNull();
-
-    let scrollTop = 0;
-    Object.defineProperty(scrollEl!, "scrollHeight", {
-      configurable: true,
-      value: 10_000,
-    });
-    Object.defineProperty(scrollEl!, "clientHeight", {
-      configurable: true,
-      value: 400,
-    });
-    Object.defineProperty(scrollEl!, "scrollTop", {
-      configurable: true,
-      get: () => scrollTop,
-      set: (v: number) => {
-        scrollTop = v;
-      },
-    });
-
-    scrollToIndexSpy.mockClear();
-    activeThreadIdValue = "thread-B";
-    messagesValue = [{ id: "m-b", sequence: 1 }];
-    act(() => {
-      rerender(<MessageList />);
-    });
-
-    expect(scrollToIndexSpy).not.toHaveBeenCalled();
-    expect(scrollTop).toBe(10_000);
-  });
-
-  it("does not schedule throttled smooth scroll after cache-hit switch without remembered scroll", () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    loadingValue = false;
-    activeThreadIdValue = "thread-A";
-    messagesValue = [{ id: "m-a", sequence: 1 }];
-    const { rerender } = render(<MessageList />);
-
-    scrollToIndexSpy.mockClear();
-    activeThreadIdValue = "thread-B";
-    messagesValue = [{ id: "m-b", sequence: 1 }];
-    act(() => {
-      rerender(<MessageList />);
-    });
-
-    act(() => {
-      vi.advanceTimersByTime(500);
-    });
-
-    const smoothCalls = scrollToIndexSpy.mock.calls.filter(
-      (call) => (call[1] as { behavior?: string } | undefined)?.behavior === "smooth",
-    );
-    expect(smoothCalls.length).toBe(0);
-  });
-
-  it("keeps scroll container hidden until layout has had a chance to settle on cache-miss hydrate", () => {
-    // Long-thread regression: TanStack Virtual measures rows after mount and
-    // `scrollHeight` keeps growing for several frames. Revealing immediately
-    // (before settle) leaves the user above the true tail. Verify that on a
-    // cache-miss hydrate completion the container is still opacity:0
-    // synchronously after the rerender — settle happens in rAF.
-    loadingValue = false;
-    activeThreadIdValue = "thread-A";
-    messagesValue = [{ id: "m-a", sequence: 1 }];
-    const { rerender, container } = render(<MessageList />);
-
-    // Cache miss begins
-    loadingValue = true;
-    activeThreadIdValue = "thread-B";
-    messagesValue = [];
-    act(() => {
-      rerender(<MessageList />);
-    });
-
-    // Cache miss completes with messages
-    loadingValue = false;
-    messagesValue = [{ id: "m-b", sequence: 1 }];
-    act(() => {
-      rerender(<MessageList />);
-    });
-
-    // Scroll container is the .overflow-y-auto div; settle holds opacity at 0
-    // until the rAF chain stabilizes scrollHeight + getTotalSize.
-    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement | null;
-    expect(scrollEl).not.toBeNull();
-    expect(scrollEl!.style.opacity).toBe("0");
-  });
-
-  it("restores remembered scrollTop on a cache-hit switch", () => {
-    loadingValue = false;
-    activeThreadIdValue = "thread-A";
-    messagesValue = [{ id: "m1", sequence: 1 }];
-    const { rerender, container } = render(<MessageList />);
-
-    // Pretend the user scrolled and we returned to thread B which has memory.
-    rememberScrollTop("thread-B", 1500);
-    expect(recallScrollTop("thread-B")).toBe(1500); // verify memory works
-
-    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement | null;
-    expect(scrollEl).not.toBeNull();
-
-    Object.defineProperty(scrollEl!, "scrollHeight", {
-      configurable: true,
-      value: 5000,
-    });
-    Object.defineProperty(scrollEl!, "clientHeight", {
-      configurable: true,
-      value: 400,
-    });
-
-    // Mock scrollTop setter to track if it's called with the right value
-    let setScrollTopValue: number | null = null;
-    Object.defineProperty(scrollEl!, "scrollTop", {
-      set: (value: number) => {
-        setScrollTopValue = value;
-      },
-      get: () => setScrollTopValue ?? 0,
-      configurable: true,
-    });
-
-    activeThreadIdValue = "thread-B";
-    act(() => {
-      rerender(<MessageList />);
-    });
-
-    // The scroll restoration effect should have called scrollTop setter with 1500
-    expect(setScrollTopValue).toBe(1500);
-    expect(recallScrollTop("thread-B")).toBe(1500);
-  });
-
-  it("does not overwrite remembered posture while a cache-hit restore settles", () => {
-    loadingValue = false;
-    activeThreadIdValue = "thread-A";
-    messagesValue = [{ id: "a1", sequence: 1, thread_id: "thread-A" }];
-    const { rerender, container } = render(<MessageList />);
-    rememberScrollTop("thread-B", 1500, false, { messageId: "b1", top: 29 });
-    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement;
-    let scrollTop = 0;
-    Object.defineProperty(scrollEl, "scrollHeight", { configurable: true, value: 5000 });
-    Object.defineProperty(scrollEl, "clientHeight", { configurable: true, value: 400 });
-    Object.defineProperty(scrollEl, "scrollTop", {
-      configurable: true,
-      get: () => scrollTop,
-      set: (value: number) => {
-        scrollTop = value;
-      },
-    });
-
-    activeThreadIdValue = "thread-B";
-    messagesValue = [{ id: "b1", sequence: 1, thread_id: "thread-B" }];
-    act(() => rerender(<MessageList />));
-    scrollTop = 900;
-    fireEvent.scroll(scrollEl);
-
-    expect(recallScrollPosition("thread-B")).toEqual({
-      scrollTop: 1500,
-      atTail: false,
-      anchorMessageId: "b1",
-      anchorTop: 29,
-    });
-  });
-
-  it("waits for the selected thread transcript before applying its remembered position", () => {
-    loadingValue = false;
-    activeThreadIdValue = "thread-A";
-    messagesValue = [{ id: "a1", sequence: 1, thread_id: "thread-A" }];
-    const { rerender, container } = render(<MessageList />);
-    rememberScrollTop("thread-B", 1500);
-    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement;
-    let scrollTop = 0;
-    Object.defineProperty(scrollEl, "scrollHeight", { configurable: true, value: 5000 });
-    Object.defineProperty(scrollEl, "clientHeight", { configurable: true, value: 400 });
-    Object.defineProperty(scrollEl, "scrollTop", {
-      configurable: true,
-      get: () => scrollTop,
-      set: (value: number) => {
-        scrollTop = value;
-      },
-    });
-
-    activeThreadIdValue = "thread-B";
-    act(() => rerender(<MessageList />));
-    expect(recallScrollTop("thread-B")).toBe(1500);
-
-    messagesValue = [{ id: "b1", sequence: 1, thread_id: "thread-B" }];
-    act(() => rerender(<MessageList />));
-    expect(scrollTop).toBe(1500);
-    expect(recallScrollTop("thread-B")).toBe(1500);
-  });
-
-  it("does not re-apply remembered scroll when messages append on the same thread", () => {
-    loadingValue = false;
-    activeThreadIdValue = "thread-A";
-    messagesValue = [{ id: "m1", sequence: 1 }];
-    const { rerender, container } = render(<MessageList />);
-
-    rememberScrollTop("thread-B", 1500);
-
-    const scrollEl = container.querySelector(".overflow-y-auto") as HTMLDivElement | null;
-    expect(scrollEl).not.toBeNull();
-
-    let scrollHeight = 6000;
-    Object.defineProperty(scrollEl!, "scrollHeight", {
-      configurable: true,
-      get: () => scrollHeight,
-    });
-    Object.defineProperty(scrollEl!, "clientHeight", {
-      configurable: true,
-      value: 400,
-    });
-
-    let scrollTop = 0;
-    Object.defineProperty(scrollEl!, "scrollTop", {
-      configurable: true,
-      get: () => scrollTop,
-      set: (v: number) => {
-        scrollTop = v;
-      },
-    });
-
-    activeThreadIdValue = "thread-B";
-    act(() => {
-      rerender(<MessageList />);
-    });
-
-    expect(scrollTop).toBe(1500);
-    expect(recallScrollTop("thread-B")).toBe(1500);
-
-    // Simulate user pinned at bottom, then a new message arrives.
-    scrollTop = scrollHeight - 400;
-    scrollHeight = 8000;
-
-    messagesValue = [
-      { id: "m1", sequence: 1 },
-      { id: "m2", sequence: 2 },
+  it("does not apply the sticky prompt inset twice on a cached restore", () => {
+    const history = [
+      { id: "prompt", thread_id: "thread-A", sequence: -1, role: "user" as const, content: "Earlier request" },
+      ...transcriptRows(),
     ];
-    act(() => {
-      rerender(<MessageList />);
-    });
+    messagesValue = history;
+    const { container, rerender } = render(<MessageList />, { wrapper: StrictMode });
+    measureRows(container);
+    readAt(screen.getByTestId("transcript-viewport"), 300);
+    const before = recallScrollPosition("thread-A")?.rowAnchor;
+    activeThreadIdValue = currentThreadIdValue = "thread-B";
+    messagesValue = transcriptRows("thread-B");
+    act(() => rerender(<MessageList />));
+    activeThreadIdValue = currentThreadIdValue = "thread-A";
+    messagesValue = history;
+    act(() => rerender(<MessageList />));
+    measureRows(container);
+    expect(recallScrollPosition("thread-A")?.rowAnchor).toEqual(before);
+  });
 
-    expect(scrollTop).not.toBe(1500);
+  it("unmounts off-screen thoughts inside one long turn and remounts them in order", () => {
+    messagesValue = [{ id: "answer", sequence: 1, role: "assistant", content: "Final answer" }];
+    const thoughts = Array.from({ length: 200 }, (_, index) => ({
+      id: `thought-${index}`, message_id: "answer", text: `History thought ${index}`,
+      started_at: new Date(index * 1000).toISOString(), ended_at: new Date(index * 1000 + 500).toISOString(), sort_order: index,
+    }));
+    recordOverridesByThread["thread-A"] = { narrativeByMessage: { answer: { tools: [], hooks: [], thoughts } } };
+    const { container } = render(<MessageList />);
+    measureRows(container);
+    const tailRows = screen.getAllByText(/^History thought \d+$/);
+    expect(tailRows.length).toBeLessThan(30);
+    expect(screen.queryByText("History thought 0")).toBeNull();
+    expect(screen.getByText("History thought 199")).toBeInTheDocument();
+    readAt(screen.getByTestId("transcript-viewport"), 0);
+    measureRows(container);
+    const headRows = screen.getAllByText(/^History thought \d+$/).map((row) => row.textContent);
+    expect(headRows.length).toBeLessThan(30);
+    expect(headRows).toEqual(Array.from({ length: headRows.length }, (_, index) => `History thought ${index}`));
+    expect(screen.queryByText("History thought 199")).toBeNull();
+  });
+
+  it("holds reading posture on append until the user returns to the tail", () => {
+    messagesValue = transcriptRows();
+    const { container, rerender } = render(<MessageList />);
+    measureRows(container);
+    const viewport = screen.getByTestId("transcript-viewport");
+    readAt(viewport, 125);
+    messagesValue = [...messagesValue, { id: "new", sequence: 12 }];
+    act(() => rerender(<MessageList />));
+    measureRows(container);
+    expect(viewport.scrollTop).toBe(125);
+    expect(recallScrollTop("thread-A")).toBe(125);
+    viewport.scrollTop = 500;
+    fireEvent.scroll(viewport);
+    const tail = container.querySelector('[data-transcript-key="new"]')!;
+    act(() => LayoutObserver.resize(tail, 180));
+    expect(viewport.scrollTop).toBe(580);
+  });
+
+  it("waits for hydration and then positions the completed transcript at its measured tail", () => {
+    loadingValue = true;
+    messagesValue = [];
+    const { container, rerender } = render(<MessageList />);
+    expect(container.querySelector("[data-message-id]")).toBeNull();
+    loadingValue = false;
+    messagesValue = transcriptRows();
+    act(() => rerender(<MessageList />));
+    measureRows(container);
+    expect(screen.getByTestId("transcript-viewport").scrollTop).toBe(400);
+    expect(container.querySelector('[data-message-id="thread-A-11"]')).not.toBeNull();
+  });
+
+  it("loads older and newer history only after a gesture reaches its boundary", () => {
+    messagesValue = transcriptRows();
+    hasMoreMessagesValue = hasNewerMessagesValue = true;
+    const { container } = render(<MessageList />);
+    measureRows(container);
+    const viewport = screen.getByTestId("transcript-viewport");
+    expect(loadOlderMessagesSpy).not.toHaveBeenCalled();
+    expect(loadNewerMessagesSpy).not.toHaveBeenCalled();
+    readAt(viewport, 100);
+    expect(loadOlderMessagesSpy).toHaveBeenCalledExactlyOnceWith("thread-A");
+    fireEvent.wheel(viewport, { deltaY: 100 });
+    expect(loadNewerMessagesSpy).not.toHaveBeenCalled();
+    viewport.scrollTop = 350;
+    fireEvent.scroll(viewport);
+    expect(loadNewerMessagesSpy).toHaveBeenCalledExactlyOnceWith("thread-A");
   });
 });

@@ -2,8 +2,10 @@ import type { AgentTurnStatus, PermissionDecision, TurnOutcome, TurnRuntimePhase
 import type { Message, ToolCall, HookExecution, ToolCallRecord, ThoughtSegmentRecord, HookExecutionRecord } from "@/transport/types";
 import type { ThoughtSegment, TurnFooterSummary } from "../narrative/types";
 import { computeLiveStreamingText } from "../narrative/build-narrative";
+import { currentActivityHeading } from "../narrative/activity-label";
 import { buildPersistedNarrativeItems } from "../narrative/build-persisted-narrative";
 import { isGoalStatusNotice } from "@/lib/goal-message";
+import { isRoutineProviderNotice } from "../notices/provider-notices";
 
 /**
  * A plan-questions assistant message is a COMPLETED "ask the user" turn whose
@@ -35,6 +37,7 @@ export type PersistedNarrativeRecordsByMessage = Record<string, PersistedNarrati
 /** State that lets the current turn's live and persisted assistant rows share one React key. */
 export interface CurrentTurnResponseIdentity {
   threadId: string;
+  executionId?: string;
   messageId?: string;
   responseKey?: string;
   responseKeysByMessageId?: Record<string, string>;
@@ -245,7 +248,7 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
       input.currentTurn,
       input.committedAssistantBody,
     );
-    return buildVirtual(stableItems, volatileItems, input.toolCalls.length > 0);
+    return buildVirtual(stableItems, volatileItems, input.toolCalls.length > 0, input.currentTurn?.messageId);
   };
 }
 
@@ -285,11 +288,6 @@ export type ChatVirtualItem =
     }
   | {
       key: string;
-      type: "hook-activity";
-      hooks: readonly HookExecution[];
-    }
-  | {
-      key: string;
       type: "narrative-flow";
       toolCalls: readonly ToolCall[];
       hooks: readonly HookExecution[];
@@ -310,17 +308,6 @@ export type ChatVirtualItem =
     }
   | {
       key: string;
-      type: "persisted-late-hooks";
-      /**
-       * Assistant message id whose late hooks (Stop / SessionEnd / PreCompact)
-       * are rendered here -- i.e. between the assistant bubble and the
-       * files-changed summary, giving the render order:
-      *   narrative timeline → assistant text → stop hooks → files summary
-      */
-      messageId: string;
-    }
-  | {
-      key: string;
       type: "persisted-turn-footer";
       /**
        * Assistant message id whose turn footer (step / sub-agent counts plus
@@ -334,6 +321,7 @@ export type ChatVirtualItem =
   | {
       key: string;
       type: "narrative-indicator";
+      summaryHeading?: string;
       /**
        * "X steps · N subagents · phase…" status footer rendered BELOW the
        * live assistant response so the writing animation reads as the primary
@@ -363,7 +351,7 @@ export function buildStableItems(
   turnSummariesByMessageId?: Record<string, TurnFooterSummary>,
   currentAgentDisplayState?: AgentDisplayState,
 ): ChatVirtualItem[] {
-  return messages.flatMap((message) => stableItemsForMessage(message, {
+  return messages.flatMap((message) => isRoutineProviderNotice(message) ? [] : stableItemsForMessage(message, {
     persistedFilesChanged, latestTurnWithChanges, currentTurn, persistedNarrativeByMessage, turnSummariesByMessageId, currentAgentDisplayState,
   }));
 }
@@ -383,24 +371,42 @@ function persistedNarrativeItems(message: Message, input: StableItemInput): Chat
   return rows && rows.length > 0 ? [{ key: `persisted-narrative-${message.id}`, type: "persisted-narrative", messageId: message.id, messageContent: message.content }] : [];
 }
 
+function isCurrentResponse(message: Message, input: StableItemInput): boolean {
+  return input.currentTurn?.threadId === message.thread_id
+    && (input.currentTurn.messageId === message.id
+      || (input.currentTurn.executionId !== undefined
+        && input.currentTurn.executionId === messageOutcomeExecutionId(message)));
+}
+
+function currentResponseState(message: Message, input: StableItemInput): AgentDisplayState | undefined {
+  return isCurrentResponse(message, input) ? input.currentAgentDisplayState : undefined;
+}
+
 function messageVirtualItem(message: Message, input: StableItemInput): ChatVirtualItem {
   const summary = input.turnSummariesByMessageId?.[message.id];
   const outcome = messageOutcome(message) ?? summary?.outcome;
   const display = message.role === "assistant"
-    ? input.currentTurn?.messageId === message.id && input.currentAgentDisplayState
-      ? input.currentAgentDisplayState
-      : agentDisplayStateFromOutcome(outcome)
+    ? currentResponseState(message, input) ?? agentDisplayStateFromOutcome(outcome)
     : undefined;
   return { key: agentMessageItemKey(message, input.currentTurn), type: "message", message, ...(display ? { agentDisplayState: display } : {}) };
 }
 
 function footerSummary(message: Message, input: StableItemInput): TurnFooterSummary | undefined {
   const summary = input.turnSummariesByMessageId?.[message.id];
-  const outcome = messageOutcome(message) ?? summary?.outcome;
-  const outcomeExecutionId = messageOutcomeExecutionId(message) ?? summary?.outcomeExecutionId;
+  const currentState = currentResponseState(message, input);
+  const outcome = currentState
+    ? terminalDisplayOutcome(currentState)
+    : summary?.outcome ?? messageOutcome(message);
+  const outcomeExecutionId = currentState
+    ? input.currentTurn?.executionId
+    : summary?.outcomeExecutionId ?? messageOutcomeExecutionId(message);
   return summary
     ? summaryWithOutcome(summary, outcome, outcomeExecutionId)
     : exceptionalOutcomeSummary(outcome, outcomeExecutionId);
+}
+
+function terminalDisplayOutcome(state: AgentDisplayState): TurnOutcome | undefined {
+  return state.phase === "streaming" || state.phase === "finalizing" ? undefined : state.phase;
 }
 
 function summaryWithOutcome(summary: TurnFooterSummary, outcome: ReturnType<typeof messageOutcome>, outcomeExecutionId: string | null | undefined): TurnFooterSummary {
@@ -413,14 +419,8 @@ function exceptionalOutcomeSummary(outcome: ReturnType<typeof messageOutcome>, o
     : undefined;
 }
 
-function lateHookItem(message: Message, records: PersistedNarrativeRecordsByMessage[string] | undefined): ChatVirtualItem | undefined {
-  return records?.hooks.some((hook) => hook.phase === "stop")
-    ? { key: `persisted-late-hooks-${message.id}`, type: "persisted-late-hooks", messageId: message.id }
-    : undefined;
-}
-
 function turnFooterItem(message: Message, records: PersistedNarrativeRecordsByMessage[string] | undefined, summary: TurnFooterSummary | undefined): ChatVirtualItem | undefined {
-  return records?.tools.some((tool) => tool.parent_tool_call_id == null) || summary
+  return records?.tools.some((tool) => tool.parent_tool_call_id == null) || records?.hooks.length || summary
     ? { key: `persisted-turn-footer-${message.id}`, type: "persisted-turn-footer", messageId: message.id, ...(summary ? { summary } : {}) }
     : undefined;
 }
@@ -437,8 +437,8 @@ function assistantTailItems(message: Message, input: StableItemInput): ChatVirtu
   const records = input.persistedNarrativeByMessage?.[message.id];
   const summary = footerSummary(message, input);
   const items: Array<ChatVirtualItem | undefined> = [
-    lateHookItem(message, records),
-    turnFooterItem(message, records, summary),
+    isAgentDisplayActive(currentResponseState(message, input))
+      ? undefined : turnFooterItem(message, records, summary),
     turnChangesItem(message, input),
   ];
   return items.filter((item): item is ChatVirtualItem => item !== undefined);
@@ -486,7 +486,7 @@ export function buildVolatileItems(
   return [
     narrativeFlowItem(toolCalls, resolvedHooks, resolvedThoughtSegments, resolvedStreamingText, liveText, isAgentRunning, agentStartTime, committedAssistantBody),
     liveResponseItem(liveText, currentTurn, agentDisplayState),
-    narrativeIndicatorItem(toolCalls, isAgentRunning, agentStartTime),
+    narrativeIndicatorItem(toolCalls, isAgentRunning, agentStartTime, resolvedThoughtSegments),
     ...permissionRequestItems(permissions),
   ].filter((item): item is ChatVirtualItem => item !== undefined);
 }
@@ -502,10 +502,10 @@ function liveResponseItem(liveText: string, currentTurn: CurrentTurnResponseIden
   return { key: responseKey, type: "message", message: { id: responseKey, thread_id: threadId, role: "assistant", content: liveText, tool_calls: null, files_changed: null, cost_usd: null, tokens_used: null, timestamp: new Date(0).toISOString(), sequence: Number.MAX_SAFE_INTEGER, attachments: null }, agentDisplayState: agentDisplayState?.phase === "finalizing" ? { phase: "finalizing" } : { phase: "streaming" } };
 }
 
-function narrativeIndicatorItem(toolCalls: readonly ToolCall[], isAgentRunning: boolean, startTime: number | undefined): ChatVirtualItem | undefined {
+function narrativeIndicatorItem(toolCalls: readonly ToolCall[], isAgentRunning: boolean, startTime: number | undefined, thoughts: readonly ThoughtSegment[]): ChatVirtualItem | undefined {
   if (!isAgentRunning && toolCalls.length === 0) return undefined;
   const topLevelTools = toolCalls.filter((toolCall) => toolCall.parentToolCallId == null);
-  return { key: "narrative-indicator", type: "narrative-indicator", stepCount: topLevelTools.length, subagentCount: topLevelTools.filter((toolCall) => toolCall.toolName === "Agent").length, activeToolCalls: toolCalls.filter((toolCall) => !toolCall.isComplete && toolCall.parentToolCallId == null), startTime, isAgentRunning };
+  return { key: "narrative-indicator", type: "narrative-indicator", summaryHeading: currentActivityHeading(thoughts), stepCount: topLevelTools.length, subagentCount: topLevelTools.filter((toolCall) => toolCall.toolName === "Agent").length, activeToolCalls: toolCalls.filter((toolCall) => !toolCall.isComplete && toolCall.parentToolCallId == null), startTime, isAgentRunning };
 }
 
 function permissionRequestItems(permissions: Parameters<typeof buildVolatileItems>[4]): ChatVirtualItem[] {
@@ -580,20 +580,12 @@ function samePermissionRequestItem(left: ChatVirtualItem, right: ChatVirtualItem
   return left.type === "permission-request" && right.type === "permission-request" && [left.requestId === right.requestId, left.toolName === right.toolName, left.input === right.input, left.title === right.title, left.questions === right.questions, left.settled === right.settled, left.decision === right.decision].every(Boolean);
 }
 
-function sameHookActivityItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
-  return left.type === "hook-activity" && right.type === "hook-activity" && left.hooks === right.hooks;
-}
-
 function sameNarrativeFlowItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
   return left.type === "narrative-flow" && right.type === "narrative-flow" && [left.toolCalls === right.toolCalls, left.hooks === right.hooks, left.thoughtSegments === right.thoughtSegments, left.streamingText === right.streamingText, left.isAgentRunning === right.isAgentRunning, left.startTime === right.startTime, left.committedAssistantBody === right.committedAssistantBody].every(Boolean);
 }
 
 function samePersistedNarrativeItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
   return left.type === "persisted-narrative" && right.type === "persisted-narrative" && left.messageId === right.messageId && left.messageContent === right.messageContent;
-}
-
-function samePersistedLateHooksItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
-  return left.type === "persisted-late-hooks" && right.type === "persisted-late-hooks" && left.messageId === right.messageId;
 }
 
 function samePersistedTurnFooterItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
@@ -623,7 +615,7 @@ function sameApprovalReview(left: TurnFooterSummary | undefined, right: TurnFoot
 }
 
 function sameNarrativeIndicatorItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
-  return left.type === "narrative-indicator" && right.type === "narrative-indicator" && [left.stepCount === right.stepCount, left.subagentCount === right.subagentCount, sameArrayItems(left.activeToolCalls, right.activeToolCalls), left.startTime === right.startTime, left.isAgentRunning === right.isAgentRunning].every(Boolean);
+  return left.type === "narrative-indicator" && right.type === "narrative-indicator" && [left.summaryHeading === right.summaryHeading, left.stepCount === right.stepCount, left.subagentCount === right.subagentCount, sameArrayItems(left.activeToolCalls, right.activeToolCalls), left.startTime === right.startTime, left.isAgentRunning === right.isAgentRunning].every(Boolean);
 }
 
 const VIRTUAL_ITEM_EQUALITY: Record<ChatVirtualItem["type"], (left: ChatVirtualItem, right: ChatVirtualItem) => boolean> = {
@@ -633,10 +625,8 @@ const VIRTUAL_ITEM_EQUALITY: Record<ChatVirtualItem["type"], (left: ChatVirtualI
   streaming: sameStreamingItem,
   "turn-changes": sameTurnChangesItem,
   "permission-request": samePermissionRequestItem,
-  "hook-activity": sameHookActivityItem,
   "narrative-flow": sameNarrativeFlowItem,
   "persisted-narrative": samePersistedNarrativeItem,
-  "persisted-late-hooks": samePersistedLateHooksItem,
   "persisted-turn-footer": samePersistedTurnFooterItem,
   "narrative-indicator": sameNarrativeIndicatorItem,
 };
@@ -682,21 +672,23 @@ export function createVirtualItemsBuilder(): typeof buildVirtualItems {
   let previousStable: readonly ChatVirtualItem[] | undefined;
   let previousVolatile: readonly ChatVirtualItem[] | undefined;
   let previousHasToolCalls: boolean | undefined;
+  let previousResponseMessageId: string | undefined;
   let previousResult: readonly ChatVirtualItem[] = [];
-  return (stableItems, volatileItems, hasToolCalls) => {
+  return (stableItems, volatileItems, hasToolCalls, responseMessageId) => {
     if (
       previousStable === stableItems &&
       previousVolatile === volatileItems &&
-      previousHasToolCalls === hasToolCalls
+      previousHasToolCalls === hasToolCalls && previousResponseMessageId === responseMessageId
     ) {
       return previousResult as ChatVirtualItem[];
     }
     previousStable = stableItems;
     previousVolatile = volatileItems;
     previousHasToolCalls = hasToolCalls;
+    previousResponseMessageId = responseMessageId;
     previousResult = reuseVirtualItems(
       previousResult,
-      buildVirtualItems(stableItems, volatileItems, hasToolCalls),
+      buildVirtualItems(stableItems, volatileItems, hasToolCalls, responseMessageId),
     );
     return previousResult as ChatVirtualItem[];
   };
@@ -704,17 +696,20 @@ export function createVirtualItemsBuilder(): typeof buildVirtualItems {
 
 /**
  * Combine stable and volatile segments into the final virtual item array.
- * When tool calls exist, the narrative-flow item is placed before the last
- * assistant message while permission-request items remain after it.
+ * Active narrative can precede only its own persisted response.
+ * A new turn without a persisted response appends after the existing conversation.
  */
 export function buildVirtualItems(
   stableItems: readonly ChatVirtualItem[],
   volatileItems: readonly ChatVirtualItem[],
   hasToolCalls: boolean,
+  responseMessageId?: string,
 ): ChatVirtualItem[] {
   const deduped = dedupeVolatileItems(stableItems, volatileItems);
   if (volatileItems.length === 0 || !hasToolCalls || deduped.length === 0) return [...stableItems, ...deduped];
   const assistantIndex = lastAssistantItemIndex(stableItems);
+  const assistant = stableItems[assistantIndex];
+  if (assistant?.type !== "message" || assistant.message.id !== responseMessageId) return [...stableItems, ...deduped];
   return spliceNarrativeItems(stableItems, deduped, assistantIndex) ?? [...stableItems, ...deduped];
 }
 
@@ -724,7 +719,7 @@ function dedupeVolatileItems(stableItems: readonly ChatVirtualItem[], volatileIt
 }
 
 function trailingStableChrome(item: ChatVirtualItem): boolean {
-  return item.type === "turn-changes" || item.type === "persisted-late-hooks" || item.type === "persisted-turn-footer" || item.type === "persisted-narrative";
+  return item.type === "turn-changes" || item.type === "persisted-turn-footer" || item.type === "persisted-narrative";
 }
 
 function isSkippableStableItem(item: ChatVirtualItem): boolean {

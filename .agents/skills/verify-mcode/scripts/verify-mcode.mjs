@@ -9,6 +9,8 @@ Usage:
   bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs <area> <command> [options]
 
 Areas:
+  desktop transcript seed [turn-count] [runtime-directory]
+      Seed synthetic transcript history in an idle owned Electron runtime.
   composer-queue <check|health|proof|navigation-repro|inspect|cleanup>
       Verify the production Electron composer queue for the fixed Codex and Cursor matrix.
   runtime <health|check|inspect|live|diagnostics|cleanup>
@@ -66,7 +68,8 @@ function resolveChild(args) {
 
 function resolveDesktopChild(args) {
   const [feature, command, ...rest] = args;
-  if (feature === "--help" || feature === "-h") return { help: HELP };
+  if (["--help", "-h"].includes(feature)) return { help: HELP };
+  if (feature === "transcript") return { script: "transcript-seed.mjs", args: args.slice(1) };
   if (feature === "codex-protocol-notices") return { script: "codex-protocol-notices.mjs", args: args.slice(1) };
   if (feature !== "selected-text-comments") {
     throw usageError(`Unknown desktop feature: ${String(feature)}`);
