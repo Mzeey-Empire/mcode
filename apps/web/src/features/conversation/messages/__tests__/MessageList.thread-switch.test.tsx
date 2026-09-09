@@ -1065,7 +1065,7 @@ describe("MessageList thread switch", () => {
   });
 
 
-  it("virtualizes expanded tool children and restores them after scrolling and thread switches", () => {
+  it("virtualizes expanded tool children and restores them after scrolling and thread switches", async () => {
     messagesValue = [{ id: "answer", sequence: 1, role: "assistant", content: "Finished commands" }];
     const tools = Array.from({ length: 180 }, (_, index) => ({
       id: `command-${index}`, message_id: "answer", tool_name: "Bash",
@@ -1100,7 +1100,8 @@ describe("MessageList thread switch", () => {
     readAt(viewport, 0);
     expect(screen.getByRole("button", { name: "Ran 180 commands" })).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(screen.getByRole("button", { name: "Ran 180 commands" }));
-    expect(container.querySelectorAll("li")).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "Ran 180 commands" })).toHaveAttribute("aria-expanded", "false");
+    await waitFor(() => expect(container.querySelectorAll("li")).toHaveLength(0));
     expect(viewport.scrollTop).toBe(0);
   });
 

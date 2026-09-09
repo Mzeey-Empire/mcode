@@ -63,6 +63,8 @@ describe("narrative tool row layout classes", () => {
     const user = userEvent.setup();
     if (!commandPreview) throw new Error("Expected command tooltip trigger");
 
+    expect(button).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(button);
     expect(button).toHaveAttribute("aria-expanded", "false");
     expect(commandPreview).toHaveClass("truncate");
     await user.hover(commandPreview);
@@ -351,7 +353,7 @@ describe("narrative tool row layout classes", () => {
     expect(notice.className).toContain("text-xs");
   });
 
-  it("shows a plain shell exit code at the bottom right of the expanded panel", () => {
+  it("shows a shell exit code status badge at the bottom right of the expanded panel", () => {
     const group: ToolGroup = {
       calls: [
         makeBashCall({
@@ -376,7 +378,8 @@ describe("narrative tool row layout classes", () => {
     const panel = screen.getByRole("region", { name: "Shell output" });
     const exitCode = screen.getByText("exit code 1");
     expect(panel).toContainElement(exitCode);
-    expect(exitCode).toHaveClass("text-muted-foreground/70");
+    expect(exitCode).toHaveClass("text-muted-foreground");
+    expect(exitCode).toHaveAttribute("role", "status");
     expect(exitCode.closest("footer")).toHaveClass("justify-end");
   });
 });

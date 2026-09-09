@@ -409,7 +409,7 @@ describe("session.textDelta", () => {
     expect(preview?.endsWith("end")).toBe(true);
   });
 
-  it("marks prior tool calls complete on first textDelta", async () => {
+  it("keeps tool calls active across textDelta until their toolResult arrives", async () => {
     resetThreadStoreForTests({
       records: new Map<string, ThreadRecord>([
         ["thread-1", {
@@ -425,7 +425,13 @@ describe("session.textDelta", () => {
 
     await flushRafChain();
     const calls = getTestThreadToolCalls("thread-1");
-    expect(calls[0].isComplete).toBe(true);
+    expect(calls[0].isComplete).toBe(false);
+
+    handleAgentEvent({
+      type: "toolResult", threadId: "thread-1", toolCallId: "tc-1", output: "done", isError: false,
+    } satisfies AgentEvent);
+    await flushRafChain();
+    expect(getTestThreadToolCalls("thread-1")[0]).toMatchObject({ isComplete: true, output: "done" });
   });
 
   it("does not affect other threads", async () => {
