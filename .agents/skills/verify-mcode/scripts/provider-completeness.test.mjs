@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
-import { aggregateEvidenceFailures, applyProviderPrerequisites, assertDiskContent, assertLiveObservation, assertObservation, assertPatchAttribution, assertSeparateClients, assertWarningStabilityEvidence, captureCodexTraceEvidence, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createClientInvalidationTrace, createOwnedFixtureWorkspace, createReceipt, emptyComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runComposerReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runFourSurfaceRefreshJourney, runInterruptionJourney, runWorkspaceInvalidationJourney, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
+import { aggregateEvidenceFailures, applyProviderPrerequisites, approvedReviewComposerPrompt, assertApprovedReviewReload, assertApprovedReviewTerminal, assertDiskContent, assertExactApprovedReviewDisk, assertLiveObservation, assertObservation, assertPatchAttribution, assertSeparateClients, assertWarningStabilityEvidence, captureCodexTraceEvidence, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createClientInvalidationTrace, createOwnedFixtureWorkspace, createReceipt, emptyComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readExactApprovedReviewComparison, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runApprovedReviewJourney, runComposerReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runFourSurfaceRefreshJourney, runInterruptionJourney, runWorkspaceInvalidationJourney, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
 
 NodeTest.test("requires explicit proof and cleanup confirmations", () => {
   NodeAssertStrict.deepEqual(parseArguments(["health"]), { command: "health" });
@@ -224,7 +224,7 @@ NodeTest.test("records focused gates once under their true owner and preserves t
   applyProviderPrerequisites(receipt.electron.matrix, prerequisites);
   NodeAssertStrict.deepEqual(receipt.focusedGates.map((gate) => gate.kind), ["focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof"]);
   NodeAssertStrict.deepEqual(receipt.focusedGates.map((gate) => gate.exitCode), [0, 0, 0, 0, 0]);
-  NodeAssertStrict.equal(receipt.matrix.reviewApproved.kind, "blocked");
+  NodeAssertStrict.equal(receipt.matrix.reviewApproved.kind, "coverage-gap");
   NodeAssertStrict.equal(receipt.electron.matrix.electronRightPanel.kind, "blocked");
   NodeAssertStrict.equal(receipt.matrix.codexNative.provider, "codex");
   NodeAssertStrict.equal(receipt.electron.matrix.codexNative.provider, "codex");
@@ -336,10 +336,105 @@ NodeTest.test("opens a projectless new thread through the sidebar and selects it
 
 NodeTest.test("aggregates focused gates and every failed provider surface", () => {
   const failed = aggregateEvidenceFailures(["server-turn-diff-review exited 1"], {
-    web: { codexNative: { kind: "live-proof-failed", provider: "codex" }, claudeFallback: { kind: "live-proof-failed", provider: "claude" }, empty: { kind: "empty-proof-failed", provider: "codex" }, interruption: { kind: "interruption-proof-failed", provider: "codex" } },
+    web: { codexNative: { kind: "live-proof-failed", provider: "codex" }, claudeFallback: { kind: "live-proof-failed", provider: "claude" }, reviewApproved: { kind: "required-live-proof", provider: "codex" }, empty: { kind: "empty-proof-failed", provider: "codex" }, interruption: { kind: "interruption-proof-failed", provider: "codex" } },
     electron: { codexNative: { kind: "live-proof-failed", provider: "codex" }, claudeFallback: { kind: "live-proof-failed", provider: "claude" }, interruption: { kind: "interruption-proof-required", provider: "codex" } },
   });
-  NodeAssertStrict.deepEqual(failed, ["server-turn-diff-review exited 1", "web/codex", "web/claude", "web/empty", "web/interruption", "electron/codex", "electron/claude", "electron/interruption"]);
+  NodeAssertStrict.deepEqual(failed, ["server-turn-diff-review exited 1", "web/codex", "web/claude", "web/review-approved", "web/empty", "web/interruption", "electron/codex", "electron/claude", "electron/interruption"]);
+});
+
+NodeTest.test("requires exactly one started Approval review to finish Approved", () => {
+  const terminal = {
+    id: "approval-review:review-1",
+    tool_name: "Approval review",
+    input_summary: JSON.stringify({ reviewId: "review-1", status: "reviewing" }),
+    output_summary: "Approved",
+    status: "completed",
+    started_at: "2026-09-10T09:00:00.000Z",
+    completed_at: "2026-09-10T09:00:01.000Z",
+  };
+  NodeAssertStrict.deepEqual(assertApprovedReviewTerminal("thread-1", [terminal]), {
+    threadId: "thread-1",
+    reviewId: "review-1",
+    outcome: "Approved",
+    startedAt: terminal.started_at,
+    completedAt: terminal.completed_at,
+  });
+  NodeAssertStrict.throws(() => assertApprovedReviewTerminal("thread-1", [{ ...terminal, started_at: "" }]), /exact automatic-review start/);
+  NodeAssertStrict.throws(() => assertApprovedReviewTerminal("thread-1", [terminal, { ...terminal, id: "approval-review:review-2" }]), /more than one/);
+  NodeAssertStrict.throws(() => assertApprovedReviewTerminal("thread-1", [{ ...terminal, output_summary: "Denied", status: "failed" }]), /not exactly Approved/);
+});
+
+NodeTest.test("uses only the exact settled native agent review comparison", async () => {
+  const comparison = { turnDiff: { id: "comparison-1", phase: "settled", source: "native", fidelity: "agent" }, files: [{ path: "approved-review-codex.md", status: "modified" }] };
+  const socket = { rpc: async (method) => method === "turnDiff.getComparison" ? comparison : "AGENT_MARKER" };
+  NodeAssertStrict.equal((await readExactApprovedReviewComparison(socket, "thread-1", "approved-review-codex.md")).file.path, "approved-review-codex.md");
+  await NodeAssertStrict.rejects(readExactApprovedReviewComparison({ rpc: async () => ({ turnDiff: comparison.turnDiff, files: [] }) }, "thread-1", "approved-review-codex.md"), /one settled native agent file/);
+  await NodeAssertStrict.rejects(readExactApprovedReviewComparison({ rpc: async (method) => method === "turnDiff.getComparison" ? comparison : "AGENT_MARKER\nEXTERNAL_MARKER" }, "thread-1", "approved-review-codex.md"), /exclusively attribute/);
+});
+
+NodeTest.test("rejects a changed Automatic review identity after reload", () => {
+  const state = { reviewId: "review-1", outcome: "Approved", comparison: { id: "comparison-1", phase: "settled", source: "native", fidelity: "agent", files: [{ path: "approved-review-codex.md", status: "modified" }] } };
+  NodeAssertStrict.doesNotThrow(() => assertApprovedReviewReload(state, structuredClone(state)));
+  NodeAssertStrict.throws(() => assertApprovedReviewReload(state, { ...state, reviewId: "review-2" }), /reload changed/);
+  NodeAssertStrict.throws(() => assertApprovedReviewReload(state, { ...state, comparison: { ...state.comparison, id: "comparison-2" } }), /reload changed/);
+  NodeAssertStrict.equal(assertExactApprovedReviewDisk("BASELINE_MARKER\nAGENT_MARKER\n"), "exact approved-review mutation retained");
+  NodeAssertStrict.throws(() => assertExactApprovedReviewDisk("BASELINE_MARKER\nAGENT_MARKER\nEXTERNAL_MARKER\n"), /exact agent mutation/);
+});
+
+NodeTest.test("selects Auto before dispatching and retains the approved review across reload", async () => {
+  const events = [];
+  const approvalTerminal = {
+    id: "approval-review:review-1",
+    tool_name: "Approval review",
+    input_summary: JSON.stringify({ reviewId: "review-1", status: "reviewing" }),
+    output_summary: "Approved",
+    status: "completed",
+    started_at: "2026-09-10T09:00:00.000Z",
+    completed_at: "2026-09-10T09:00:01.000Z",
+  };
+  let threadListCalls = 0;
+  const socket = { rpc: async (method) => {
+    if (method === "thread.list") return threadListCalls++ === 0 ? [] : [{ id: "review-thread", provider: "codex", model: "model" }];
+    if (method === "conversation.page") return { narrativeByMessage: { assistant: { tools: [approvalTerminal] } } };
+    if (method === "turnDiff.getComparison") return { turnDiff: { id: "comparison-1", phase: "settled", source: "native", fidelity: "agent" }, files: [{ path: "approved-review-codex.md", status: "modified" }] };
+    if (method === "turnDiff.getFileDiff") return "AGENT_MARKER";
+    throw new Error(`unexpected ${method}`);
+  } };
+  const control = { click: async () => {}, fill: async () => {}, press: async () => {}, waitFor: async () => {}, isVisible: async () => false };
+  const dialog = { ...control, isVisible: async () => true, getByTestId: () => control, getByRole: () => control, getByText: () => control };
+  const autoTrigger = { ...control, waitFor: async () => { events.push("auto-visible"); } };
+  const footer = { isVisible: async () => true, innerText: async () => "Automatic approval review selected." };
+  const controls = new Map([
+    ["dialog:Choose model and provider", dialog],
+    ["button:Access mode: Manual", { click: async () => { events.push("manual"); } }],
+    ["button:Access mode: Auto", autoTrigger],
+    ["textbox:Message Mcode", { fill: async () => { events.push("fill"); }, press: async () => { events.push("dispatch"); } }],
+  ]);
+  const page = {
+    getByTestId: (testId) => testId === "approval-review" ? footer : control,
+    getByRole: (role, options) => controls.get(`${role}:${options?.name}`) ?? control,
+    getByText: (name) => name === "Auto" ? { click: async () => { events.push("auto"); } } : control,
+    locator: () => ({ count: async () => 0 }),
+    reload: async () => { events.push("reload"); },
+  };
+  const run = { fixtureDirectory: "fixture", run: { ownedFiles: [] }, comparison: {}, renderedEvidence: [] };
+  const result = await runApprovedReviewJourney({
+    client: { page },
+    socket,
+    workspace: { id: "workspace", name: "Fixture", path: "fixture" },
+    run,
+    io: { writeFile: async () => {}, readFile: async () => "BASELINE_MARKER\nAGENT_MARKER\n" },
+    provider: "codex",
+    model: "model",
+    modelName: "Model",
+    captureReview: async (_page, _receipt, name, review) => ({ screenshot: `${name}.png`, rows: 1, spinners: 0, filePath: review.file.path, fileText: "AGENT_MARKER", patch: "AGENT_MARKER", sourceLabel: "Agent changes", source: "native", fidelity: "agent" }),
+  });
+  NodeAssertStrict.ok(events.indexOf("auto-visible") < events.indexOf("dispatch"));
+  NodeAssertStrict.ok(events.indexOf("reload") > events.indexOf("dispatch"));
+  NodeAssertStrict.equal(result.approvalReview.reloaded.reviewId, "review-1");
+  NodeAssertStrict.equal(result.disk, "exact approved-review mutation retained");
+  NodeAssertStrict.deepEqual(run.run.ownedFiles, [NodePath.join("fixture", "approved-review-codex.md")]);
+  NodeAssertStrict.match(approvedReviewComposerPrompt("approved-review-codex.md"), /Do not edit another file/);
 });
 
 NodeTest.test("rejects a duplicate notice or changed Live diff after a provider warning", () => {

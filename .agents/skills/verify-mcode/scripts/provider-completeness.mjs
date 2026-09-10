@@ -600,7 +600,7 @@ export function assertEveryAvailableProviderWasProven(matrix) {
 export function aggregateEvidenceFailures(focusedFailures, surfaces) {
   const providerFailures = Object.entries(surfaces).flatMap(([surface, matrix]) => Object.entries(matrix)
     .filter(([, entry]) => entry?.kind === "required-live-proof" || entry?.kind === "live-proof-failed" || entry?.kind === "empty-proof-failed" || entry?.kind === "interruption-proof-required" || entry?.kind === "interruption-proof-failed")
-    .map(([row, entry]) => row === "warningStability" ? `${surface}/warning-stability` : entry.kind === "empty-proof-failed" ? `${surface}/empty` : entry.kind === "interruption-proof-required" || entry.kind === "interruption-proof-failed" ? `${surface}/interruption` : `${surface}/${entry.provider}`));
+    .map(([row, entry]) => row === "warningStability" ? `${surface}/warning-stability` : row === "reviewApproved" ? `${surface}/review-approved` : entry.kind === "empty-proof-failed" ? `${surface}/empty` : entry.kind === "interruption-proof-required" || entry.kind === "interruption-proof-failed" ? `${surface}/interruption` : `${surface}/${entry.provider}`));
   return [...focusedFailures, ...providerFailures];
 }
 
@@ -640,6 +640,7 @@ export async function runProviderJourneys({ surface, client, socket, workspace, 
   recordWarningStabilityResult(matrix, journeys);
   const codex = matrix.codexNative;
   if (codex?.provider === "codex" && codex.model && codex.modelName) {
+    await maybeRunApprovedReviewProof({ surface, client, socket, workspace, run, io, matrix, journeys, codex, captureReview });
     try {
       const journey = await runEmptyDiffJourney({ surface, client, socket, workspace, run, provider: codex.provider, model: codex.model, modelName: codex.modelName, captureEmpty });
       journeys.empty = { status: "passed", provider: codex.provider, model: codex.model, journey };
@@ -665,6 +666,29 @@ export async function runProviderJourneys({ surface, client, socket, workspace, 
     matrix.interruption = { kind: "blocked", prerequisite: "available Codex provider, model, and catalog for the public interruption journey", surface };
   }
   return journeys;
+}
+
+async function maybeRunApprovedReviewProof({ surface, ...options }) {
+  if (surface === "web") await runApprovedReviewProof(options);
+}
+
+async function runApprovedReviewProof({ client, socket, workspace, run, io, matrix, journeys, codex, captureReview }) {
+  const control = "web Composer Automatic approval review, conversation.page, Review, reload, and disk";
+  const evidence = { kind: "required-live-proof", control, provider: codex.provider, model: codex.model };
+  matrix.reviewApproved = evidence;
+  try {
+    const journey = await runApprovedReviewJourney({ client, socket, workspace, run, io, provider: codex.provider, model: codex.model, modelName: codex.modelName, captureReview });
+    journeys.reviewApproved = { status: "passed", provider: codex.provider, model: codex.model, journey };
+    matrix.reviewApproved = { ...evidence, kind: "live-proof", journey };
+  } catch (error) {
+    const message = safeError(error);
+    const coverageGap = message.includes("native automatic-review start did not persist");
+    journeys.reviewApproved = { status: coverageGap ? "coverage-gap" : "failed", provider: codex.provider, model: codex.model, failure: { message, classification: coverageGap ? "native automatic review was not emitted after an Automatic Composer dispatch" : "automatic approval review failed before durable Approved evidence" } };
+    matrix.reviewApproved = coverageGap
+      ? { kind: "coverage-gap", control, provider: codex.provider, model: codex.model, prerequisite: "native automatic-review approval terminal event", reason: journeys.reviewApproved.failure.classification }
+      : { ...evidence, kind: "live-proof-failed", failure: journeys.reviewApproved.failure };
+    await captureFailure(client.page, run, "web-review-approved-failure");
+  }
 }
 
 function primaryJourneyRows(matrix) {
@@ -725,6 +749,156 @@ export async function runComposerReviewJourney({ surface, client, socket, worksp
   }
   result.disk = await readComposerDiskEvidence(io, fixtureFile, provider);
   return result;
+}
+
+/** Runs one real Automatic Codex review and retains only durable public evidence. */
+export async function runApprovedReviewJourney({ client, socket, workspace, run, io, provider, model, modelName, captureReview: captureReviewState = captureReview }) {
+  const fileName = "approved-review-codex.md";
+  const fixtureFile = NodePath.join(run.fixtureDirectory, fileName);
+  const result = { provider, model, baseline: "BASELINE_MARKER", observations: {}, comparison: {}, approvalReview: {}, disk: null };
+  await io.writeFile(fixtureFile, "BASELINE_MARKER\n", "utf8");
+  run.run.ownedFiles = [...new Set([...(run.run.ownedFiles ?? []), fixtureFile])];
+  const beforeThreads = await listThreadIds(socket, workspace.id);
+  await driveComposer(client.page, workspace.name, provider, modelName, approvedReviewComposerPrompt(fileName), { approvalReview: "automatic" });
+  const thread = await waitForNewThread(socket, workspace.id, beforeThreads, provider, model, run.run);
+  run.run.ownedThreadIds = [...new Set([...(run.run.ownedThreadIds ?? []), thread.id])];
+  run.workspace = { id: workspace.id, name: workspace.name, path: workspace.path, selectionEvidence: { source: "thread.list scoped request", requestedWorkspaceId: workspace.id, threadId: thread.id } };
+
+  const terminal = await waitForApprovedReviewTerminal(socket, thread.id);
+  await waitForAutomaticReviewFooter(client.page);
+  const settled = await captureApprovedReviewState(socket, thread.id, fileName, client.page, run, "web-review-approved-settled", terminal, captureReviewState);
+  result.observations.settled = settled.rendered;
+  result.comparison.settled = summarizeComparison(settled.comparison, settled.patch);
+  result.approvalReview.settled = settled.snapshot;
+  result.disk = assertExactApprovedReviewDisk(await io.readFile(fixtureFile, "utf8"));
+
+  await closeReview(client.page);
+  await reloadClient(client);
+  await waitForAutomaticReviewFooter(client.page);
+  const reloadedTerminal = await waitForApprovedReviewTerminal(socket, thread.id);
+  const reloaded = await captureApprovedReviewState(socket, thread.id, fileName, client.page, run, "web-review-approved-reloaded", reloadedTerminal, captureReviewState);
+  assertApprovedReviewReload(settled.snapshot, reloaded.snapshot);
+  result.observations.reloaded = reloaded.rendered;
+  result.comparison.reloaded = summarizeComparison(reloaded.comparison, reloaded.patch);
+  result.approvalReview.reloaded = reloaded.snapshot;
+  return result;
+}
+
+/** Creates the bounded Automatic-review fixture request. */
+export function approvedReviewComposerPrompt(fileName) {
+  return `Edit ${fileName} with the apply_patch tool. Preserve BASELINE_MARKER and add AGENT_MARKER on the next line. Do not edit another file.`;
+}
+
+/** Reads the one persisted native Approval review lifecycle from the public conversation page. */
+export async function waitForApprovedReviewTerminal(socket, threadId, deadline = Date.now() + TIMEOUT_MS) {
+  let started = false;
+  while (Date.now() < deadline) {
+    const page = await socket.rpc("conversation.page", { threadId, limit: 1000 });
+    const records = approvalReviewRecords(page);
+    if (records.length === 0) {
+      await delay(200);
+      continue;
+    }
+    const terminal = assertApprovedReviewTerminal(threadId, records);
+    if (terminal) return terminal;
+    started = true;
+    await delay(200);
+  }
+  if (started) throw new Error("Condition: native automatic-review start did not reach the exact Approved terminal.");
+  throw new Error("Condition: native automatic-review start did not persist for the exact Composer thread.");
+}
+
+/** Rejects a missing, duplicated, mismatched, or non-Approved persisted review terminal. */
+export function assertApprovedReviewTerminal(threadId, records) {
+  if (!Array.isArray(records) || records.length === 0) return null;
+  if (records.length !== 1) throw new Error("Condition: public conversation persisted more than one automatic-review terminal.");
+  const record = records[0];
+  const reviewId = assertApprovedReviewStart(record);
+  if (record.status === "running") return null;
+  assertApprovedReviewOutcome(record);
+  return { threadId, reviewId, outcome: "Approved", startedAt: record.started_at, completedAt: record.completed_at };
+}
+
+/** Reads one settled native agent comparison with exactly the owned review file. */
+export async function readExactApprovedReviewComparison(socket, threadId, fileName) {
+  const comparison = await socket.rpc("turnDiff.getComparison", { threadId, includeLive: true });
+  const turnDiff = assertApprovedReviewComparison(comparison);
+  const [file] = comparison.files;
+  if (!fileMatches(file, fileName)) throw new Error("Condition: automatic-review public comparison included an unrelated file.");
+  const patch = await socket.rpc("turnDiff.getFileDiff", { threadId, comparisonId: turnDiff.id, filePath: file.path });
+  assertPatchAttribution(patch, "AGENT_MARKER", "EXTERNAL_MARKER");
+  return { comparison, file, patch };
+}
+
+/** Captures the settled Review after validating the associated public comparison. */
+export async function captureApprovedReviewState(socket, threadId, fileName, page, receipt, name, terminal, capture = captureReview) {
+  const result = await readExactApprovedReviewComparison(socket, threadId, fileName);
+  receipt.comparison[name] = summarizeComparison(result.comparison, result.patch);
+  const rendered = assertObservation(await capture(page, receipt, name, result), result, "settled");
+  return { ...result, rendered, snapshot: approvedReviewSnapshot(terminal, result.comparison) };
+}
+
+/** Requires reload to retain the same approval identity, terminal, and comparison. */
+export function assertApprovedReviewReload(initial, reloaded) {
+  if (JSON.stringify(initial) !== JSON.stringify(reloaded)) throw new Error("Condition: reload changed the automatic-review identity, outcome, or comparison semantics.");
+}
+
+/** Requires the approved fixture to contain only the expected agent mutation. */
+export function assertExactApprovedReviewDisk(content) {
+  if (content !== "BASELINE_MARKER\nAGENT_MARKER\n") throw new Error("Condition: automatic-review disk evidence was not the exact agent mutation.");
+  return "exact approved-review mutation retained";
+}
+
+function approvalReviewRecords(page) {
+  return Object.values(page?.narrativeByMessage ?? {}).flatMap((batch) => Array.isArray(batch?.tools) ? batch.tools : [])
+    .filter((record) => approvalReviewId(record?.id));
+}
+
+function approvalReviewId(value) {
+  if (typeof value !== "string" || !value.startsWith("approval-review:")) return null;
+  const reviewId = value.slice("approval-review:".length);
+  return reviewId.length > 0 ? reviewId : null;
+}
+
+function parseApprovalReviewInput(value) {
+  if (typeof value !== "string") return null;
+  try { return JSON.parse(value); } catch { return null; }
+}
+
+function isTimestamp(value) { return typeof value === "string" && value.length > 0; }
+
+function assertApprovedReviewStart(record) {
+  const reviewId = approvalReviewId(record?.id);
+  if (!reviewId || record?.tool_name !== "Approval review") throw new Error("Condition: public conversation did not retain the exact automatic-review start.");
+  const input = parseApprovalReviewInput(record?.input_summary);
+  if (input?.reviewId !== reviewId || !isTimestamp(record?.started_at)) throw new Error("Condition: public conversation did not retain the exact automatic-review start.");
+  return reviewId;
+}
+
+function assertApprovedReviewOutcome(record) {
+  if (record.status !== "completed" || record.output_summary !== "Approved" || !isTimestamp(record.completed_at)) throw new Error("Condition: native automatic-review terminal was not exactly Approved.");
+}
+
+function assertApprovedReviewComparison(comparison) {
+  const turnDiff = comparison?.turnDiff;
+  if (turnDiff?.phase !== "settled" || !turnDiff.id) throw new Error("Condition: automatic-review public comparison was not one settled native agent file.");
+  if (turnDiff.source !== "native" || turnDiff.fidelity !== "agent") throw new Error("Condition: automatic-review public comparison was not one settled native agent file.");
+  if (!Array.isArray(comparison?.files) || comparison.files.length !== 1) throw new Error("Condition: automatic-review public comparison was not one settled native agent file.");
+  return turnDiff;
+}
+
+function approvedReviewSnapshot(terminal, comparison) {
+  return {
+    reviewId: terminal.reviewId,
+    outcome: terminal.outcome,
+    comparison: {
+      id: comparison.turnDiff.id,
+      phase: comparison.turnDiff.phase,
+      source: comparison.turnDiff.source,
+      fidelity: comparison.turnDiff.fidelity,
+      files: comparison.files.map((file) => ({ path: file.path, status: file.status ?? null })),
+    },
+  };
 }
 
 async function readComposerDiskEvidence(io, fixtureFile, provider) {
@@ -1412,15 +1586,33 @@ export async function captureSettledReviewState(socket, threadId, fileName, page
 export function assertPatchAttribution(patch, agentMarker, externalMarker) { if (typeof patch !== "string" || !patch.includes(agentMarker) || patch.includes(externalMarker)) throw new Error("Condition: the public agent patch did not exclusively attribute the agent marker."); }
 function fileMatches(file, fileName) { return file?.path === fileName || file?.path?.endsWith(`/${fileName}`); }
 
-async function driveComposer(page, workspaceName, provider, modelName, message) {
+async function driveComposer(page, workspaceName, provider, modelName, message, { approvalReview } = {}) {
   await openNewThreadForWorkspace(page, workspaceName);
   const chooserDialog = page.getByRole("dialog", { name: "Choose model and provider" });
   if (!await chooserDialog.isVisible().catch(() => false)) await page.getByRole("button", { name: /GPT|Claude|Cursor/i }).last().click();
   await chooserDialog.getByTestId(`model-group-${provider}`).click();
   await chooserDialog.getByRole("textbox", { name: "Filter models by name or id. Use multiple words to narrow results." }).fill(modelName);
   await chooserDialog.getByText(modelName, { exact: true }).click({ timeout: 15_000 });
+  if (approvalReview === "automatic") await selectAutomaticReview(page);
   const editor = page.getByRole("textbox", { name: "Message Mcode" });
   await editor.fill(message); await editor.press("Enter");
+}
+
+/** Selects and confirms Automatic review before a Composer message can dispatch. */
+export async function selectAutomaticReview(page) {
+  await page.getByRole("button", { name: "Access mode: Manual", exact: true }).click();
+  await page.getByText("Auto", { exact: true }).click();
+  await page.getByRole("button", { name: "Access mode: Auto", exact: true }).waitFor({ state: "visible", timeout: 15_000 });
+}
+
+/** Waits for the frozen Automatic-review footer persisted on the completed turn. */
+export async function waitForAutomaticReviewFooter(page, deadline = Date.now() + 15_000) {
+  const footer = page.getByTestId("approval-review");
+  while (Date.now() < deadline) {
+    if (await footer.isVisible().catch(() => false) && await footer.innerText().catch(() => "") === "Automatic approval review selected.") return;
+    await delay(100);
+  }
+  throw new Error("Condition: completed turn did not retain the Automatic approval-review footer.");
 }
 
 /** Opens a new thread and selects the workspace before interacting with Composer. */
@@ -1909,7 +2101,7 @@ function optionalStrings(values) {
 }
 
 function isExactOrRedacted(value, expected) { return value === expected || value === "[path]"; }
-function isOwnedFixtureFile(value, directory) { return value === "[path]" || (typeof value === "string" && isWithin(value, directory) && /^(?:target(?:-(?:codex|cursor|claude))?\.(?:txt|md)|watch-(?:owner|observer)-sentinel\.txt)$/i.test(NodePath.basename(value))); }
+function isOwnedFixtureFile(value, directory) { return value === "[path]" || (typeof value === "string" && isWithin(value, directory) && /^(?:target(?:-(?:codex|cursor|claude))?\.(?:txt|md)|approved-review-codex\.md|watch-(?:owner|observer)-sentinel\.txt)$/i.test(NodePath.basename(value))); }
 
 function hydrateOwnedReceipt(receipt, repoRoot) {
   const fixtureDirectory = NodePath.join(getRuntimePaths(repoRoot).fixtureRepoDir, `provider-completeness-${receipt.runId}`);
@@ -1950,7 +2142,7 @@ function providerMatrix(surface) { return {
         electron: "The public Composer and turn-diff state are shared with Electron; this gap is recorded once until a native trigger can exercise the bound state.",
         fields: ["threadId", "notice.kind", "notice.identity", "before", "after", "review.rows", "review.spinners", "review.noticeCount", "review.screenshot"],
       },
-      reviewApproved: { kind: "blocked", prerequisite: "native automatic-review approval terminal event", surface: "public Composer, conversation, and Review" },
+      reviewApproved: { kind: "coverage-gap", control: "web Composer Automatic approval review, conversation.page, Review, reload, and disk", prerequisite: "available Codex provider, model, catalog, and native automatic-review approval terminal event", reason: "The verifier records a coverage gap unless an available Codex Automatic Composer dispatch emits one durable Approved review.", fields: ["threadId", "reviewId", "outcome", "comparison", "review.rows", "review.spinners", "review.screenshot", "disk"] },
       reviewDenied: { kind: "blocked", prerequisite: "native automatic-review denial terminal event", surface: "public Composer, conversation, and Review" },
       permissionHandoff: { kind: "blocked", prerequisite: "native provider PermissionRequest after strict-review routing", surface: "public Composer permission control" },
     }
