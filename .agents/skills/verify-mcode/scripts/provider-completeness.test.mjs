@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
-import { aggregateEvidenceFailures, applyProviderPrerequisites, approvedReviewComposerPrompt, assertApprovedReviewReload, assertApprovedReviewTerminal, assertDiskContent, assertExactApprovedReviewDisk, assertLiveObservation, assertObservation, assertPatchAttribution, assertSeparateClients, assertWarningStabilityEvidence, captureCodexTraceEvidence, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createClientInvalidationTrace, createOwnedFixtureWorkspace, createReceipt, emptyComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readExactApprovedReviewComparison, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runApprovedReviewJourney, runComposerReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runFourSurfaceRefreshJourney, runInterruptionJourney, runWorkspaceInvalidationJourney, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
+import { aggregateEvidenceFailures, applyProviderPrerequisites, approvedReviewComposerPrompt, assertApprovedReviewReload, assertApprovedReviewTerminal, assertDeniedReviewComparison, assertDeniedReviewTerminal, assertDiskContent, assertExactApprovedReviewDisk, assertExactDeniedReviewDisk, assertLiveObservation, assertObservation, assertPatchAttribution, assertSeparateClients, assertWarningStabilityEvidence, captureCodexTraceEvidence, captureDeniedReview, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createClientInvalidationTrace, createOwnedFixtureWorkspace, createReceipt, deniedReviewComposerPrompt, emptyComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readExactApprovedReviewComparison, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runApprovedReviewJourney, runComposerReviewJourney, runDeniedReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runFourSurfaceRefreshJourney, runInterruptionJourney, runWorkspaceInvalidationJourney, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
 
 NodeTest.test("requires explicit proof and cleanup confirmations", () => {
   NodeAssertStrict.deepEqual(parseArguments(["health"]), { command: "health" });
@@ -336,10 +336,10 @@ NodeTest.test("opens a projectless new thread through the sidebar and selects it
 
 NodeTest.test("aggregates focused gates and every failed provider surface", () => {
   const failed = aggregateEvidenceFailures(["server-turn-diff-review exited 1"], {
-    web: { codexNative: { kind: "live-proof-failed", provider: "codex" }, claudeFallback: { kind: "live-proof-failed", provider: "claude" }, reviewApproved: { kind: "required-live-proof", provider: "codex" }, empty: { kind: "empty-proof-failed", provider: "codex" }, interruption: { kind: "interruption-proof-failed", provider: "codex" } },
+    web: { codexNative: { kind: "live-proof-failed", provider: "codex" }, claudeFallback: { kind: "live-proof-failed", provider: "claude" }, reviewApproved: { kind: "required-live-proof", provider: "codex" }, reviewDenied: { kind: "live-proof-failed", provider: "codex" }, empty: { kind: "empty-proof-failed", provider: "codex" }, interruption: { kind: "interruption-proof-failed", provider: "codex" } },
     electron: { codexNative: { kind: "live-proof-failed", provider: "codex" }, claudeFallback: { kind: "live-proof-failed", provider: "claude" }, interruption: { kind: "interruption-proof-required", provider: "codex" } },
   });
-  NodeAssertStrict.deepEqual(failed, ["server-turn-diff-review exited 1", "web/codex", "web/claude", "web/review-approved", "web/empty", "web/interruption", "electron/codex", "electron/claude", "electron/interruption"]);
+  NodeAssertStrict.deepEqual(failed, ["server-turn-diff-review exited 1", "web/codex", "web/claude", "web/review-approved", "web/review-denied", "web/empty", "web/interruption", "electron/codex", "electron/claude", "electron/interruption"]);
 });
 
 NodeTest.test("requires exactly one started Approval review to finish Approved", () => {
@@ -435,6 +435,108 @@ NodeTest.test("selects Auto before dispatching and retains the approved review a
   NodeAssertStrict.equal(result.disk, "exact approved-review mutation retained");
   NodeAssertStrict.deepEqual(run.run.ownedFiles, [NodePath.join("fixture", "approved-review-codex.md")]);
   NodeAssertStrict.match(approvedReviewComposerPrompt("approved-review-codex.md"), /Do not edit another file/);
+});
+
+NodeTest.test("requires exactly one started Approval review to finish Denied without a diff", () => {
+  const terminal = {
+    id: "approval-review:review-1",
+    tool_name: "Approval review",
+    input_summary: JSON.stringify({ reviewId: "review-1", status: "reviewing" }),
+    output_summary: "Denied",
+    status: "failed",
+    started_at: "2026-09-10T09:00:00.000Z",
+    completed_at: "2026-09-10T09:00:01.000Z",
+  };
+  NodeAssertStrict.deepEqual(assertDeniedReviewTerminal("thread-1", [terminal]), {
+    threadId: "thread-1",
+    reviewId: "review-1",
+    outcome: "Denied",
+    startedAt: terminal.started_at,
+    completedAt: terminal.completed_at,
+  });
+  NodeAssertStrict.throws(() => assertDeniedReviewTerminal("thread-1", [terminal, { ...terminal, id: "approval-review:review-2" }]), /more than one/);
+  NodeAssertStrict.throws(() => assertDeniedReviewTerminal("thread-1", [{ ...terminal, output_summary: "Approved", status: "completed" }]), /not exactly Denied/);
+  NodeAssertStrict.throws(() => assertDeniedReviewComparison({ turnDiff: { id: "comparison-1", phase: "settled" }, files: [{ path: "denied-review-codex.md" }] }), /exact settled empty diff/);
+  NodeAssertStrict.doesNotThrow(() => assertDeniedReviewComparison({ turnDiff: { id: "comparison-1", phase: "settled" }, files: [] }));
+  NodeAssertStrict.equal(assertExactDeniedReviewDisk("BASELINE_MARKER\n"), "denied-review baseline retained");
+  NodeAssertStrict.throws(() => assertExactDeniedReviewDisk("BASELINE_MARKER\nAGENT_MARKER\n"), /mutated the fixture/);
+  const snapshot = { reviewId: "review-1", outcome: "Denied", comparison: { id: "comparison-1", phase: "settled", source: null, fidelity: null, files: [] } };
+  NodeAssertStrict.throws(() => assertApprovedReviewReload(snapshot, { ...snapshot, reviewId: "review-2" }), /reload changed/);
+});
+
+NodeTest.test("selects Auto before dispatching and retains the denied review with no public file diff", async () => {
+  const events = [];
+  const denialTerminal = {
+    id: "approval-review:review-1",
+    tool_name: "Approval review",
+    input_summary: JSON.stringify({ reviewId: "review-1", status: "reviewing" }),
+    output_summary: "Denied",
+    status: "failed",
+    started_at: "2026-09-10T09:00:00.000Z",
+    completed_at: "2026-09-10T09:00:01.000Z",
+  };
+  let threadListCalls = 0;
+  const socket = { rpc: async (method) => {
+    if (method === "thread.list") return threadListCalls++ === 0 ? [] : [{ id: "denied-thread", provider: "codex", model: "model" }];
+    if (method === "conversation.page") return { narrativeByMessage: { assistant: { tools: [denialTerminal] } } };
+    if (method === "turnDiff.getComparison") return { turnDiff: { id: "comparison-1", phase: "settled" }, files: [] };
+    if (method === "turnDiff.getFileDiff") throw new Error("denied review must not fetch a file diff");
+    throw new Error(`unexpected ${method}`);
+  } };
+  const control = { click: async () => {}, fill: async () => {}, press: async () => {}, waitFor: async () => {}, isVisible: async () => false };
+  const dialog = { ...control, isVisible: async () => true, getByTestId: () => control, getByRole: () => control, getByText: () => control };
+  const autoTrigger = { ...control, waitFor: async () => { events.push("auto-visible"); } };
+  const footer = { isVisible: async () => true, innerText: async () => "Automatic approval review selected." };
+  const controls = new Map([
+    ["dialog:Choose model and provider", dialog],
+    ["button:Access mode: Manual", { click: async () => { events.push("manual"); } }],
+    ["button:Access mode: Auto", autoTrigger],
+    ["textbox:Message Mcode", { fill: async () => { events.push("fill"); }, press: async () => { events.push("dispatch"); } }],
+  ]);
+  const page = {
+    getByTestId: (testId) => testId === "approval-review" ? footer : control,
+    getByRole: (role, options) => controls.get(`${role}:${options?.name}`) ?? control,
+    getByText: (name) => name === "Auto" ? { click: async () => { events.push("auto"); } } : control,
+    reload: async () => { events.push("reload"); },
+  };
+  const run = { fixtureDirectory: "fixture", run: { ownedFiles: [] }, comparison: {}, renderedEvidence: [] };
+  const result = await runDeniedReviewJourney({
+    client: { page },
+    socket,
+    workspace: { id: "workspace", name: "Fixture", path: "fixture" },
+    run,
+    io: { writeFile: async () => {}, readFile: async () => "BASELINE_MARKER\n" },
+    provider: "codex",
+    model: "model",
+    modelName: "Model",
+    captureDeniedReview: async (_page, _receipt, name, comparison) => ({ screenshot: `${name}.png`, outcome: "Denied", errored: true, noChanges: true, reviewVisible: false, rows: 0, comparisonId: comparison.turnDiff.id }),
+  });
+  NodeAssertStrict.ok(events.indexOf("auto-visible") < events.indexOf("dispatch"));
+  NodeAssertStrict.ok(events.indexOf("reload") > events.indexOf("dispatch"));
+  NodeAssertStrict.equal(result.approvalReview.reloaded.reviewId, "review-1");
+  NodeAssertStrict.equal(result.approvalReview.reloaded.outcome, "Denied");
+  NodeAssertStrict.equal(result.disk, "denied-review baseline retained");
+  NodeAssertStrict.deepEqual(run.run.ownedFiles, [NodePath.join("fixture", "denied-review-codex.md")]);
+  NodeAssertStrict.match(deniedReviewComposerPrompt("denied-review-codex.md"), /Do not use tools or modify files/);
+});
+
+NodeTest.test("captures the Denied narrative without a rendered Review row", async () => {
+  const observed = [];
+  const reviewTool = { click: async () => { observed.push("approval review"); } };
+  const page = {
+    getByRole: (_role, { name }) => name instanceof RegExp && name.source.includes("Approval")
+      ? { last: () => reviewTool }
+      : { click: async () => { observed.push("changes"); } },
+    getByText: (text) => ({ waitFor: async () => { observed.push(text); } }),
+    getByTestId: () => ({ isVisible: async () => false }),
+    screenshot: async ({ path }) => { observed.push(path); },
+  };
+  const receipt = { directory: "evidence", screenshots: [], renderedEvidence: [] };
+  const rendered = await captureDeniedReview(page, receipt, "denied", { turnDiff: { id: "comparison-1", phase: "settled" }, files: [] });
+
+  NodeAssertStrict.deepEqual(rendered, { screenshot: NodePath.join("evidence", "denied.png"), outcome: "Denied", errored: true, noChanges: true, reviewVisible: false, rows: 0, comparisonId: "comparison-1" });
+  NodeAssertStrict.deepEqual(observed.slice(0, 5), ["approval review", "Denied", "errored", "changes", "No changes yet"]);
+  NodeAssertStrict.deepEqual(receipt.renderedEvidence, [NodePath.join("evidence", "denied.png")]);
 });
 
 NodeTest.test("rejects a duplicate notice or changed Live diff after a provider warning", () => {
@@ -1117,6 +1219,27 @@ NodeTest.test("manual cleanup rewrites a redacted receipt at its run path", asyn
     await cleanup(root);
     NodeAssertStrict.equal(NodeFS.existsSync(path), true);
     NodeAssertStrict.equal(NodeFS.existsSync(NodePath.join(root, "[path]")), false);
+    NodeAssertStrict.equal(NodeFS.existsSync(fixtureDirectory), false);
+  } finally { NodeFS.rmSync(root, { recursive: true, force: true }); }
+});
+
+NodeTest.test("manual cleanup accepts the bounded denied-review fixture", async () => {
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "provider-completeness-cleanup-"));
+  try {
+    const runId = "denied-review";
+    const directory = NodePath.join(root, ".dev", "verification", "provider-completeness", runId);
+    const path = NodePath.join(directory, "receipt.json");
+    const fixtureDirectory = NodePath.join(root, ".dev", "fixture-repo", `provider-completeness-${runId}`);
+    const fixtureFile = NodePath.join(fixtureDirectory, "target.txt");
+    const deniedFile = NodePath.join(fixtureDirectory, "denied-review-codex.md");
+    NodeFS.mkdirSync(fixtureDirectory, { recursive: true });
+    NodeFS.mkdirSync(directory, { recursive: true });
+    NodeFS.writeFileSync(deniedFile, "BASELINE_MARKER\n");
+    NodeFS.writeFileSync(path, JSON.stringify({ runId, path, directory, fixtureDirectory, fixtureFile, run: { ownedFixtureDirectory: fixtureDirectory, ownedFiles: [deniedFile] }, cleanup: { complete: false, failures: [] } }));
+
+    await cleanup(root);
+
+    NodeAssertStrict.equal(NodeFS.existsSync(deniedFile), false);
     NodeAssertStrict.equal(NodeFS.existsSync(fixtureDirectory), false);
   } finally { NodeFS.rmSync(root, { recursive: true, force: true }); }
 });

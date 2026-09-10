@@ -600,7 +600,7 @@ export function assertEveryAvailableProviderWasProven(matrix) {
 export function aggregateEvidenceFailures(focusedFailures, surfaces) {
   const providerFailures = Object.entries(surfaces).flatMap(([surface, matrix]) => Object.entries(matrix)
     .filter(([, entry]) => entry?.kind === "required-live-proof" || entry?.kind === "live-proof-failed" || entry?.kind === "empty-proof-failed" || entry?.kind === "interruption-proof-required" || entry?.kind === "interruption-proof-failed")
-    .map(([row, entry]) => row === "warningStability" ? `${surface}/warning-stability` : row === "reviewApproved" ? `${surface}/review-approved` : entry.kind === "empty-proof-failed" ? `${surface}/empty` : entry.kind === "interruption-proof-required" || entry.kind === "interruption-proof-failed" ? `${surface}/interruption` : `${surface}/${entry.provider}`));
+    .map(([row, entry]) => row === "warningStability" ? `${surface}/warning-stability` : row === "reviewApproved" ? `${surface}/review-approved` : row === "reviewDenied" ? `${surface}/review-denied` : entry.kind === "empty-proof-failed" ? `${surface}/empty` : entry.kind === "interruption-proof-required" || entry.kind === "interruption-proof-failed" ? `${surface}/interruption` : `${surface}/${entry.provider}`));
   return [...focusedFailures, ...providerFailures];
 }
 
@@ -641,6 +641,7 @@ export async function runProviderJourneys({ surface, client, socket, workspace, 
   const codex = matrix.codexNative;
   if (codex?.provider === "codex" && codex.model && codex.modelName) {
     await maybeRunApprovedReviewProof({ surface, client, socket, workspace, run, io, matrix, journeys, codex, captureReview });
+    await maybeRunDeniedReviewProof({ surface, client, socket, workspace, run, io, matrix, journeys, codex });
     try {
       const journey = await runEmptyDiffJourney({ surface, client, socket, workspace, run, provider: codex.provider, model: codex.model, modelName: codex.modelName, captureEmpty });
       journeys.empty = { status: "passed", provider: codex.provider, model: codex.model, journey };
@@ -672,6 +673,10 @@ async function maybeRunApprovedReviewProof({ surface, ...options }) {
   if (surface === "web") await runApprovedReviewProof(options);
 }
 
+async function maybeRunDeniedReviewProof({ surface, ...options }) {
+  if (surface === "web") await runDeniedReviewProof(options);
+}
+
 async function runApprovedReviewProof({ client, socket, workspace, run, io, matrix, journeys, codex, captureReview }) {
   const control = "web Composer Automatic approval review, conversation.page, Review, reload, and disk";
   const evidence = { kind: "required-live-proof", control, provider: codex.provider, model: codex.model };
@@ -688,6 +693,25 @@ async function runApprovedReviewProof({ client, socket, workspace, run, io, matr
       ? { kind: "coverage-gap", control, provider: codex.provider, model: codex.model, prerequisite: "native automatic-review approval terminal event", reason: journeys.reviewApproved.failure.classification }
       : { ...evidence, kind: "live-proof-failed", failure: journeys.reviewApproved.failure };
     await captureFailure(client.page, run, "web-review-approved-failure");
+  }
+}
+
+async function runDeniedReviewProof({ client, socket, workspace, run, io, matrix, journeys, codex }) {
+  const control = "web Composer Automatic denial review, conversation.page, Review, reload, and disk";
+  const evidence = { kind: "required-live-proof", control, provider: codex.provider, model: codex.model };
+  matrix.reviewDenied = evidence;
+  try {
+    const journey = await runDeniedReviewJourney({ client, socket, workspace, run, io, provider: codex.provider, model: codex.model, modelName: codex.modelName });
+    journeys.reviewDenied = { status: "passed", provider: codex.provider, model: codex.model, journey };
+    matrix.reviewDenied = { ...evidence, kind: "live-proof", journey };
+  } catch (error) {
+    const message = safeError(error);
+    const coverageGap = message.includes("native automatic-review start did not persist");
+    journeys.reviewDenied = { status: coverageGap ? "coverage-gap" : "failed", provider: codex.provider, model: codex.model, failure: { message, classification: coverageGap ? "native automatic denial review was not emitted after an Automatic Composer dispatch" : "automatic denial review failed before durable Denied evidence" } };
+    matrix.reviewDenied = coverageGap
+      ? { kind: "coverage-gap", control, provider: codex.provider, model: codex.model, prerequisite: "native automatic-review denial terminal event", reason: journeys.reviewDenied.failure.classification }
+      : { ...evidence, kind: "live-proof-failed", failure: journeys.reviewDenied.failure };
+    await captureFailure(client.page, run, "web-review-denied-failure");
   }
 }
 
@@ -784,9 +808,49 @@ export async function runApprovedReviewJourney({ client, socket, workspace, run,
   return result;
 }
 
+/** Runs one real Automatic Codex review that must retain a native denial without a file effect. */
+export async function runDeniedReviewJourney({ client, socket, workspace, run, io, provider, model, modelName, captureDeniedReview: captureDenied = captureDeniedReview }) {
+  const fileName = "denied-review-codex.md";
+  const fixtureFile = NodePath.join(run.fixtureDirectory, fileName);
+  const result = { provider, model, baseline: "BASELINE_MARKER", observations: {}, comparison: {}, approvalReview: {}, disk: null };
+  await io.writeFile(fixtureFile, "BASELINE_MARKER\n", "utf8");
+  run.run.ownedFiles = [...new Set([...(run.run.ownedFiles ?? []), fixtureFile])];
+  const beforeThreads = await listThreadIds(socket, workspace.id);
+  await driveComposer(client.page, workspace.name, provider, modelName, deniedReviewComposerPrompt(fileName), { approvalReview: "automatic" });
+  const thread = await waitForNewThread(socket, workspace.id, beforeThreads, provider, model, run.run);
+  run.run.ownedThreadIds = [...new Set([...(run.run.ownedThreadIds ?? []), thread.id])];
+  run.workspace = { id: workspace.id, name: workspace.name, path: workspace.path, selectionEvidence: { source: "thread.list scoped request", requestedWorkspaceId: workspace.id, threadId: thread.id } };
+
+  const terminal = await waitForDeniedReviewTerminal(socket, thread.id);
+  await waitForAutomaticReviewFooter(client.page);
+  const comparison = await waitForDeniedReviewComparison(socket, thread.id);
+  const settled = await captureDeniedReviewState(client.page, run, "web-review-denied-settled", terminal, comparison, captureDenied);
+  result.observations.settled = settled.rendered;
+  result.comparison.settled = summarizeComparison(comparison, null);
+  result.approvalReview.settled = settled.snapshot;
+  result.disk = assertExactDeniedReviewDisk(await io.readFile(fixtureFile, "utf8"));
+
+  await closeReview(client.page);
+  await reloadClient(client);
+  await waitForAutomaticReviewFooter(client.page);
+  const reloadedTerminal = await waitForDeniedReviewTerminal(socket, thread.id);
+  const reloadedComparison = await waitForDeniedReviewComparison(socket, thread.id);
+  const reloaded = await captureDeniedReviewState(client.page, run, "web-review-denied-reloaded", reloadedTerminal, reloadedComparison, captureDenied);
+  assertApprovedReviewReload(settled.snapshot, reloaded.snapshot);
+  result.observations.reloaded = reloaded.rendered;
+  result.comparison.reloaded = summarizeComparison(reloadedComparison, null);
+  result.approvalReview.reloaded = reloaded.snapshot;
+  return result;
+}
+
 /** Creates the bounded Automatic-review fixture request. */
 export function approvedReviewComposerPrompt(fileName) {
   return `Edit ${fileName} with the apply_patch tool. Preserve BASELINE_MARKER and add AGENT_MARKER on the next line. Do not edit another file.`;
+}
+
+/** Creates the bounded Automatic-review request that must leave the fixture unchanged. */
+export function deniedReviewComposerPrompt(fileName) {
+  return `Read ${fileName}. Reply with exactly DENIED_REVIEW_MARKER. Do not use tools or modify files.`;
 }
 
 /** Reads the one persisted native Approval review lifecycle from the public conversation page. */
@@ -808,6 +872,25 @@ export async function waitForApprovedReviewTerminal(socket, threadId, deadline =
   throw new Error("Condition: native automatic-review start did not persist for the exact Composer thread.");
 }
 
+/** Reads the one persisted native denial lifecycle from the public conversation page. */
+export async function waitForDeniedReviewTerminal(socket, threadId, deadline = Date.now() + TIMEOUT_MS) {
+  let started = false;
+  while (Date.now() < deadline) {
+    const page = await socket.rpc("conversation.page", { threadId, limit: 1000 });
+    const records = approvalReviewRecords(page);
+    if (records.length === 0) {
+      await delay(200);
+      continue;
+    }
+    const terminal = assertDeniedReviewTerminal(threadId, records);
+    if (terminal) return terminal;
+    started = true;
+    await delay(200);
+  }
+  if (started) throw new Error("Condition: native automatic-review start did not reach the exact Denied terminal.");
+  throw new Error("Condition: native automatic-review start did not persist for the exact Composer thread.");
+}
+
 /** Rejects a missing, duplicated, mismatched, or non-Approved persisted review terminal. */
 export function assertApprovedReviewTerminal(threadId, records) {
   if (!Array.isArray(records) || records.length === 0) return null;
@@ -817,6 +900,17 @@ export function assertApprovedReviewTerminal(threadId, records) {
   if (record.status === "running") return null;
   assertApprovedReviewOutcome(record);
   return { threadId, reviewId, outcome: "Approved", startedAt: record.started_at, completedAt: record.completed_at };
+}
+
+/** Rejects a missing, duplicated, mismatched, or non-Denied persisted review terminal. */
+export function assertDeniedReviewTerminal(threadId, records) {
+  if (!Array.isArray(records) || records.length === 0) return null;
+  if (records.length !== 1) throw new Error("Condition: public conversation persisted more than one automatic-review terminal.");
+  const record = records[0];
+  const reviewId = assertApprovedReviewStart(record);
+  if (record.status === "running") return null;
+  if (record.status !== "failed" || record.output_summary !== "Denied" || !isTimestamp(record.completed_at)) throw new Error("Condition: native automatic-review terminal was not exactly Denied.");
+  return { threadId, reviewId, outcome: "Denied", startedAt: record.started_at, completedAt: record.completed_at };
 }
 
 /** Reads one settled native agent comparison with exactly the owned review file. */
@@ -838,6 +932,14 @@ export async function captureApprovedReviewState(socket, threadId, fileName, pag
   return { ...result, rendered, snapshot: approvedReviewSnapshot(terminal, result.comparison) };
 }
 
+/** Captures the denied terminal after the public comparison proves there is no Review diff. */
+export async function captureDeniedReviewState(page, receipt, name, terminal, comparison, capture = captureDeniedReview) {
+  assertDeniedReviewComparison(comparison);
+  receipt.comparison[name] = summarizeComparison(comparison, null);
+  const rendered = await capture(page, receipt, name, comparison);
+  return { rendered, snapshot: deniedReviewSnapshot(terminal, comparison) };
+}
+
 /** Requires reload to retain the same approval identity, terminal, and comparison. */
 export function assertApprovedReviewReload(initial, reloaded) {
   if (JSON.stringify(initial) !== JSON.stringify(reloaded)) throw new Error("Condition: reload changed the automatic-review identity, outcome, or comparison semantics.");
@@ -847,6 +949,12 @@ export function assertApprovedReviewReload(initial, reloaded) {
 export function assertExactApprovedReviewDisk(content) {
   if (content !== "BASELINE_MARKER\nAGENT_MARKER\n") throw new Error("Condition: automatic-review disk evidence was not the exact agent mutation.");
   return "exact approved-review mutation retained";
+}
+
+/** Requires the denied fixture to retain its baseline without an agent mutation. */
+export function assertExactDeniedReviewDisk(content) {
+  if (content !== "BASELINE_MARKER\n") throw new Error("Condition: automatic denial review mutated the fixture.");
+  return "denied-review baseline retained";
 }
 
 function approvalReviewRecords(page) {
@@ -887,6 +995,13 @@ function assertApprovedReviewComparison(comparison) {
   return turnDiff;
 }
 
+/** Requires the denial terminal's exact public comparison to remain empty. */
+export function assertDeniedReviewComparison(comparison) {
+  const turnDiff = comparison?.turnDiff;
+  if (turnDiff?.phase !== "settled" || !turnDiff.id || !Array.isArray(comparison?.files) || comparison.files.length !== 0) throw new Error("Condition: automatic denial review public comparison was not an exact settled empty diff.");
+  return turnDiff;
+}
+
 function approvedReviewSnapshot(terminal, comparison) {
   return {
     reviewId: terminal.reviewId,
@@ -897,6 +1012,20 @@ function approvedReviewSnapshot(terminal, comparison) {
       source: comparison.turnDiff.source,
       fidelity: comparison.turnDiff.fidelity,
       files: comparison.files.map((file) => ({ path: file.path, status: file.status ?? null })),
+    },
+  };
+}
+
+function deniedReviewSnapshot(terminal, comparison) {
+  return {
+    reviewId: terminal.reviewId,
+    outcome: terminal.outcome,
+    comparison: {
+      id: comparison.turnDiff.id,
+      phase: comparison.turnDiff.phase,
+      source: comparison.turnDiff.source ?? null,
+      fidelity: comparison.turnDiff.fidelity ?? null,
+      files: [],
     },
   };
 }
@@ -1560,6 +1689,16 @@ export async function waitForEmptySettledComparison(socket, threadId, deadline =
   throw new Error("Condition: completed public comparison did not report an empty file list.");
 }
 
+/** Waits for the denied review's own settled public comparison without fetching a file diff. */
+export async function waitForDeniedReviewComparison(socket, threadId, deadline = Date.now() + TIMEOUT_MS) {
+  while (Date.now() < deadline) {
+    const comparison = await socket.rpc("turnDiff.getComparison", { threadId, includeLive: true });
+    if (comparison?.turnDiff?.phase === "settled" && comparison.turnDiff.id && Array.isArray(comparison.files) && comparison.files.length === 0) return comparison;
+    await delay(500);
+  }
+  throw new Error("Condition: automatic denial review did not retain an empty public comparison.");
+}
+
 async function readSettledComparison(socket, threadId, fileName, comparison) {
   const file = comparison?.files?.find((candidate) => fileMatches(candidate, fileName));
   const turnDiff = comparison?.turnDiff;
@@ -1705,6 +1844,25 @@ export async function captureEmptyReview(page, receipt, name, comparison) {
   receipt.screenshots.push(screenshot);
   receipt.renderedEvidence.push(screenshot);
   return { screenshot, noChanges: true, reviewVisible, rows, comparisonId: comparison.turnDiff.id };
+}
+export async function captureDeniedReview(page, receipt, name, comparison) {
+  const reviewTool = page.getByRole("button", { name: /Approval review/i }).last();
+  await reviewTool.click();
+  await Promise.all([
+    page.getByText("Denied", { exact: true }).waitFor({ state: "visible", timeout: 15_000 }),
+    page.getByText("errored", { exact: true }).waitFor({ state: "visible", timeout: 15_000 }),
+  ]);
+  const review = page.getByTestId("review-last-turn");
+  if (!await review.isVisible().catch(() => false)) await page.getByRole("button", { name: /Changes/ }).click();
+  await page.getByText("No changes yet", { exact: true }).waitFor({ state: "visible", timeout: 15_000 });
+  const reviewVisible = await review.isVisible().catch(() => false);
+  const rows = reviewVisible ? await reviewRowCount(review) : 0;
+  if (reviewVisible || rows !== 0) throw new Error("Condition: automatic denial review rendered a Review file.");
+  const screenshot = NodePath.join(receipt.directory, `${name}.png`);
+  await page.screenshot({ path: screenshot });
+  receipt.screenshots.push(screenshot);
+  receipt.renderedEvidence.push(screenshot);
+  return { screenshot, outcome: "Denied", errored: true, noChanges: true, reviewVisible, rows, comparisonId: comparison.turnDiff.id };
 }
 export async function waitForExactReview(page, result, timeout = 15_000) {
   const review = page.getByTestId("review-last-turn");
@@ -2101,7 +2259,7 @@ function optionalStrings(values) {
 }
 
 function isExactOrRedacted(value, expected) { return value === expected || value === "[path]"; }
-function isOwnedFixtureFile(value, directory) { return value === "[path]" || (typeof value === "string" && isWithin(value, directory) && /^(?:target(?:-(?:codex|cursor|claude))?\.(?:txt|md)|approved-review-codex\.md|watch-(?:owner|observer)-sentinel\.txt)$/i.test(NodePath.basename(value))); }
+function isOwnedFixtureFile(value, directory) { return value === "[path]" || (typeof value === "string" && isWithin(value, directory) && /^(?:target(?:-(?:codex|cursor|claude))?\.(?:txt|md)|(?:approved|denied)-review-codex\.md|watch-(?:owner|observer)-sentinel\.txt)$/i.test(NodePath.basename(value))); }
 
 function hydrateOwnedReceipt(receipt, repoRoot) {
   const fixtureDirectory = NodePath.join(getRuntimePaths(repoRoot).fixtureRepoDir, `provider-completeness-${receipt.runId}`);
@@ -2143,7 +2301,7 @@ function providerMatrix(surface) { return {
         fields: ["threadId", "notice.kind", "notice.identity", "before", "after", "review.rows", "review.spinners", "review.noticeCount", "review.screenshot"],
       },
       reviewApproved: { kind: "coverage-gap", control: "web Composer Automatic approval review, conversation.page, Review, reload, and disk", prerequisite: "available Codex provider, model, catalog, and native automatic-review approval terminal event", reason: "The verifier records a coverage gap unless an available Codex Automatic Composer dispatch emits one durable Approved review.", fields: ["threadId", "reviewId", "outcome", "comparison", "review.rows", "review.spinners", "review.screenshot", "disk"] },
-      reviewDenied: { kind: "blocked", prerequisite: "native automatic-review denial terminal event", surface: "public Composer, conversation, and Review" },
+      reviewDenied: { kind: "coverage-gap", control: "web Composer Automatic denial review, conversation.page, Review, reload, and disk", prerequisite: "available Codex provider, model, catalog, and native automatic-review denial terminal event", reason: "The verifier records a coverage gap unless an available Codex Automatic Composer dispatch emits one durable Denied review without a file effect.", fields: ["threadId", "reviewId", "outcome", "comparison", "review.rows", "review.screenshot", "disk"] },
       permissionHandoff: { kind: "blocked", prerequisite: "native provider PermissionRequest after strict-review routing", surface: "public Composer permission control" },
     }
     : { electronRightPanel: { kind: "blocked", prerequisite: "a completed Electron Review journey", surface: "Electron", reason: "the proof starts Electron, but the native Codex Live diff did not reach public comparison" } }),
