@@ -43,6 +43,7 @@ interface ServerRuntimeManager {
   restart(): Promise<void>;
   restartPlanned?(): Promise<void>;
   forceReplace(): Promise<void>;
+  stopServerHeldByLock(): Promise<void>;
 }
 
 type ServerRuntimeRelayStarter = (
@@ -217,6 +218,15 @@ export class ServerRuntime {
   /** Force-replace the server before an application update or performance cleanup. */
   async forceReplace(): Promise<void> {
     await this.serverManager.forceReplace();
+  }
+
+  /**
+   * Gracefully stop the owned server before the dev app quits. Packaged builds
+   * keep the detached server alive for fast relaunch; dev mode tears it down so
+   * the server (and its provider subprocesses) does not leak between runs.
+   */
+  async stopServerForDevQuit(): Promise<void> {
+    await this.serverManager.stopServerHeldByLock();
   }
 
   /** Restart the server under an explicit harness command without crash recovery. */

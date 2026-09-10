@@ -546,6 +546,25 @@ app.on("window-all-closed", () => {
   }
 });
 
+// In dev mode, gracefully stop the detached server before quitting so it (and
+// its provider subprocesses) does not leak between runs. Packaged builds keep
+// the server alive for fast relaunch. before-quit supports preventDefault();
+// will-quit does not, so the async stop must hook here and re-quit afterwards.
+let devServerStopInitiated = false;
+app.on("before-quit", (event) => {
+  if (!isDesktopDev() || devServerStopInitiated) return;
+  devServerStopInitiated = true;
+  event.preventDefault();
+  void serverRuntime
+    .stopServerForDevQuit()
+    .catch((error) => {
+      console.error("Failed to stop dev server on quit", error);
+    })
+    .finally(() => {
+      app.quit();
+    });
+});
+
 app.on("will-quit", () => {
   cleanupApplicationUpdates();
 });
