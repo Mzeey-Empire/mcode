@@ -663,21 +663,27 @@ export async function runProviderJourneys({ surface, client, socket, workspace, 
   return journeys;
 }
 
-export async function runComposerReviewJourney({ surface, client, socket, workspace, run, io, provider, model, modelName, captureLive: captureLiveState, captureReview: captureReviewState, captureFourSurface: captureFourSurfaceState = captureFourSurfaceRefreshState }) {
+export async function runComposerReviewJourney({ surface, client, socket, workspace, run, io, provider, model, modelName, captureLive: captureLiveState, captureReview: captureReviewState, captureFourSurface: captureFourSurfaceState = captureFourSurfaceRefreshState, createInvalidationTrace = createClientInvalidationTrace }) {
   const fileName = provider === "codex" ? "target-codex.md" : `target-${provider}.txt`;
   const fixtureFile = NodePath.join(run.fixtureDirectory, fileName);
   const result = { provider, model, baseline: "BASELINE_MARKER", observations: {}, comparison: {}, fetchedPatch: null, disk: null };
   await io.writeFile(fixtureFile, "BASELINE_MARKER\n", "utf8");
   run.run.ownedFile ??= fixtureFile;
   run.run.ownedFiles = [...new Set([...(run.run.ownedFiles ?? []), fixtureFile])];
-  const beforeThreads = await listThreadIds(socket, workspace.id);
-  await driveComposer(client.page, workspace.name, provider, modelName, composerPrompt(fileName));
-  const thread = await waitForNewThread(socket, workspace.id, beforeThreads, provider, model, run.run);
-  run.run.threadId ??= thread.id;
-  run.run.ownedThreadIds = [...new Set([...(run.run.ownedThreadIds ?? []), thread.id])];
-  run.workspace = { id: workspace.id, name: workspace.name, path: workspace.path, selectionEvidence: { source: "thread.list scoped request", requestedWorkspaceId: workspace.id, threadId: thread.id } };
-  if (provider === "codex") {
-    await captureCodexLiveJourney({ client, socket, threadId: thread.id, run, surface, fixtureFile, fileName, io, result, captureLiveState, captureFourSurfaceState });
+  const invalidationTrace = provider === "codex" ? await createInvalidationTrace(client) : null;
+  let thread;
+  try {
+    const beforeThreads = await listThreadIds(socket, workspace.id);
+    await driveComposer(client.page, workspace.name, provider, modelName, composerPrompt(fileName));
+    thread = await waitForNewThread(socket, workspace.id, beforeThreads, provider, model, run.run);
+    run.run.threadId ??= thread.id;
+    run.run.ownedThreadIds = [...new Set([...(run.run.ownedThreadIds ?? []), thread.id])];
+    run.workspace = { id: workspace.id, name: workspace.name, path: workspace.path, selectionEvidence: { source: "thread.list scoped request", requestedWorkspaceId: workspace.id, threadId: thread.id } };
+    if (provider === "codex") {
+      await captureCodexLiveJourney({ client, socket, workspaceId: workspace.id, threadId: thread.id, run, surface, fixtureFile, fileName, io, result, captureLiveState, captureFourSurfaceState, invalidationTrace });
+    }
+  } finally {
+    if (invalidationTrace) await invalidationTrace.close();
   }
   const settled = await waitForSettledComparison(socket, thread.id, fileName);
   assertPatchAttribution(settled.patch, "AGENT_MARKER", "EXTERNAL_MARKER");
@@ -702,11 +708,11 @@ async function readComposerDiskEvidence(io, fixtureFile, provider) {
   return "agent marker retained";
 }
 
-async function captureCodexLiveJourney({ client, socket, threadId, run, surface, fixtureFile, fileName, io, result, captureLiveState, captureFourSurfaceState }) {
+async function captureCodexLiveJourney({ client, socket, workspaceId, threadId, run, surface, fixtureFile, fileName, io, result, captureLiveState, captureFourSurfaceState, invalidationTrace }) {
   run.phase = "agent-live-diff";
   const initialAgentComparison = await waitForLiveAgentDiff(socket, threadId, fileName, undefined, run.diagnostics.liveComparisons);
   assertPatchAttribution(initialAgentComparison.patch, "AGENT_MARKER", "EXTERNAL_MARKER");
-  result.fourSurfaceRefresh = await runFourSurfaceRefreshJourney({ client, socket, threadId, run, surface, fixtureFile, fileName, io, initialComparison: initialAgentComparison, capture: captureFourSurfaceState });
+  result.fourSurfaceRefresh = await runFourSurfaceRefreshJourney({ client, socket, workspaceId, threadId, run, surface, fixtureFile, fileName, io, initialComparison: initialAgentComparison, capture: captureFourSurfaceState, invalidationTrace });
   const agentComparison = await waitForLiveAgentDiff(socket, threadId, fileName, undefined, run.diagnostics.liveComparisons);
   assertPatchAttribution(agentComparison.patch, "AGENT_MARKER", "EXTERNAL_MARKER");
   result.comparison.agentLive = summarizeComparison(agentComparison.comparison, agentComparison.patch);
@@ -723,6 +729,7 @@ async function captureCodexLiveJourney({ client, socket, threadId, run, surface,
 export async function runFourSurfaceRefreshJourney({
   client,
   socket,
+  workspaceId,
   threadId,
   run,
   surface,
@@ -732,30 +739,150 @@ export async function runFourSurfaceRefreshJourney({
   marker = "EXTERNAL_MARKER",
   initialComparison,
   capture = captureFourSurfaceRefreshState,
+  invalidationTrace = null,
+  createInvalidationTrace = createClientInvalidationTrace,
 }) {
-  if (!fixtureFile || !fileName || !io?.appendFile || !io?.readFile || typeof capture !== "function") {
+  if (!workspaceId || !threadId || !fixtureFile || !fileName || !io?.appendFile || !io?.readFile || typeof capture !== "function") {
     throw new Error("Condition: four-surface refresh requires one owned fixture file, filesystem access, and a surface capture.");
   }
-  const captureInput = { client, socket, threadId, run, surface, fixtureFile, fileName, marker, initialComparison };
-  const before = await capture({ ...captureInput, phase: "before" });
-  assertFourSurfaceState(before, fileName, marker);
-  await io.appendFile(fixtureFile, `${marker}\n`, "utf8");
-  const disk = assertDiskContent(await io.readFile(fixtureFile, "utf8"), "AGENT_MARKER", marker);
-  const after = await capture({ ...captureInput, phase: "after" });
-  assertFourSurfaceState(after, fileName, marker);
-  return {
-    kind: "four-surface-refresh",
-    trigger: {
-      type: "verifier-owned-filesystem-append",
+  const trace = invalidationTrace ?? await createInvalidationTrace(client);
+  const ownsTrace = invalidationTrace === null;
+  try {
+    assertInvalidationTrace(trace);
+    const captureInput = { client, socket, threadId, run, surface, fixtureFile, fileName, marker, initialComparison };
+    const before = await capture({ ...captureInput, phase: "before" });
+    assertFourSurfaceState(before, fileName, marker);
+    const watch = await trace.waitForWatch({ workspaceId, threadId });
+    const mark = trace.mark();
+    await io.appendFile(fixtureFile, `${marker}\n`, "utf8");
+    const disk = assertDiskContent(await io.readFile(fixtureFile, "utf8"), "AGENT_MARKER", marker);
+    const invalidation = await trace.waitForInvalidation({ workspaceId, threadId, fileName, after: mark });
+    const after = await capture({ ...captureInput, phase: "after" });
+    assertFourSurfaceState(after, fileName, marker);
+    const refresh = await trace.waitForRefresh({ workspaceId, threadId, after: invalidation.sequence });
+    const causality = assertRefreshCausality({ watch, mark, invalidation, refresh, fileName });
+    return {
+      kind: "four-surface-refresh",
+      trigger: {
+        type: "verifier-owned-filesystem-append",
+        file: NodePath.basename(fixtureFile),
+        marker,
+      },
       file: NodePath.basename(fixtureFile),
-      marker,
+      before,
+      after,
+      disk,
+      causality,
+      surfaces: { files: "passed", composer: "passed", preview: "passed", lastTurn: "passed" },
+    };
+  } finally {
+    if (ownsTrace) await trace.close();
+  }
+}
+
+function assertInvalidationTrace(trace) {
+  if (!trace || typeof trace.mark !== "function" || typeof trace.waitForWatch !== "function" || typeof trace.waitForInvalidation !== "function" || typeof trace.waitForRefresh !== "function" || typeof trace.close !== "function") {
+    throw new Error("Condition: four-surface refresh requires an owning client invalidation trace.");
+  }
+}
+
+function assertRefreshCausality({ watch, mark, invalidation, refresh, fileName }) {
+  const watchSequence = traceSequence(watch, "existing client file.watch");
+  const invalidationSequence = traceSequence(invalidation, "files.changed");
+  const filesSequence = traceSequence(refresh?.files, "Files turnDiff.getComparison");
+  const composerSequence = traceSequence(refresh?.composer, "Composer file.list");
+  if (!Number.isSafeInteger(mark) || mark < watchSequence) throw new Error("Condition: the owning client did not subscribe before the external write.");
+  if (invalidationSequence <= mark) throw new Error("Condition: exact files.changed did not follow the external write.");
+  if (filesSequence <= invalidationSequence) throw new Error("Condition: Files did not refetch after exact files.changed.");
+  if (composerSequence <= invalidationSequence) throw new Error("Condition: Composer did not reload after exact files.changed.");
+  return {
+    subscription: { method: "file.watch", scope: "active-workspace-thread" },
+    invalidation: { channel: "files.changed", changedPaths: [fileName], wholeWorkspace: false },
+    refresh: {
+      files: { method: "turnDiff.getComparison" },
+      composer: { method: "file.list" },
+      preview: { method: "turnDiff.getComparison", attribution: "agent-only" },
+      lastTurn: { method: "turnDiff.getComparison", attribution: "agent-only" },
     },
-    file: NodePath.basename(fixtureFile),
-    before,
-    after,
-    disk,
-    surfaces: { files: "passed", composer: "passed", preview: "passed", lastTurn: "passed" },
+    order: ["before-capture", "external-write", "files.changed", "after-capture"],
   };
+}
+
+function traceSequence(event, name) {
+  if (!Number.isSafeInteger(event?.sequence) || event.sequence < 1) throw new Error(`Condition: ${name} trace evidence was missing its ordered event.`);
+  return event.sequence;
+}
+
+/** Captures only the active Chromium client's file-invalidation WebSocket frames. */
+export async function createClientInvalidationTrace(client, { timeoutMs = TIMEOUT_MS } = {}) {
+  const page = client?.page;
+  const context = page?.context?.();
+  if (!context?.newCDPSession) throw new Error("Condition: invalidation proof requires a Chromium client session.");
+  const session = await context.newCDPSession(page);
+  const events = [];
+  let sequence = 0;
+  const record = (direction, frame) => {
+    const event = clientInvalidationTraceEvent(direction, frame, sequence + 1);
+    if (!event) return;
+    sequence = event.sequence;
+    events.push(event);
+  };
+  await session.send("Network.enable");
+  session.on("Network.webSocketFrameSent", (event) => record("sent", event));
+  session.on("Network.webSocketFrameReceived", (event) => record("received", event));
+  return {
+    mark: () => sequence,
+    waitForWatch: ({ workspaceId, threadId }) => waitForClientInvalidationEvent(events, (event) => event.direction === "sent" && event.method === "file.watch" && event.workspaceId === workspaceId && event.threadId === threadId, "owning client file.watch", timeoutMs),
+    waitForInvalidation: ({ workspaceId, threadId, fileName, after }) => waitForClientInvalidationEvent(events, (event) => event.sequence > after && event.direction === "received" && event.channel === "files.changed" && event.workspaceId === workspaceId && event.threadId === threadId && event.wholeWorkspace === false && event.changedPaths.length === 1 && event.changedPaths[0] === fileName, "exact files.changed", timeoutMs),
+    waitForRefresh: async ({ workspaceId, threadId, after }) => ({
+      files: await waitForClientInvalidationEvent(events, (event) => event.sequence > after && event.direction === "sent" && event.method === "turnDiff.getComparison" && event.threadId === threadId, "Files turnDiff.getComparison", timeoutMs),
+      composer: await waitForClientInvalidationEvent(events, (event) => event.sequence > after && event.direction === "sent" && event.method === "file.list" && event.workspaceId === workspaceId && event.threadId === threadId, "Composer file.list", timeoutMs),
+    }),
+    close: async () => { await session.detach(); },
+  };
+}
+
+function clientInvalidationTraceEvent(direction, frame, sequence) {
+  const payload = readWebSocketFramePayload(direction, frame);
+  if (!payload || typeof payload !== "object") return null;
+  if (direction === "received" && payload.type === "push" && payload.channel === "files.changed" && payload.data && typeof payload.data === "object") {
+    const data = payload.data;
+    return {
+      sequence,
+      direction,
+      channel: "files.changed",
+      workspaceId: data.workspaceId,
+      threadId: data.threadId,
+      changedPaths: Array.isArray(data.changedPaths) ? data.changedPaths.filter((path) => typeof path === "string").slice(0, 100) : [],
+      wholeWorkspace: data.wholeWorkspace === true,
+    };
+  }
+  if (direction === "sent" && ["file.watch", "file.list", "turnDiff.getComparison"].includes(payload.method) && payload.params && typeof payload.params === "object") {
+    return {
+      sequence,
+      direction,
+      method: payload.method,
+      workspaceId: payload.params.workspaceId,
+      threadId: payload.params.threadId,
+    };
+  }
+  return null;
+}
+
+function readWebSocketFramePayload(direction, frame) {
+  const payload = direction === "sent" ? frame?.request?.payloadData : frame?.response?.payloadData;
+  if (typeof payload !== "string") return null;
+  try { return JSON.parse(payload); } catch { return null; }
+}
+
+async function waitForClientInvalidationEvent(events, matches, name, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const event = events.find(matches);
+    if (event) return event;
+    await delay(50);
+  }
+  throw new Error(`Condition: owning client did not emit ${name}.`);
 }
 
 function assertFourSurfaceState(state, fileName, marker) {

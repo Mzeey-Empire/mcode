@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
-import { aggregateEvidenceFailures, applyProviderPrerequisites, assertDiskContent, assertLiveObservation, assertObservation, assertPatchAttribution, assertSeparateClients, captureCodexTraceEvidence, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createOwnedFixtureWorkspace, createReceipt, emptyComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runComposerReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runFourSurfaceRefreshJourney, runInterruptionJourney, runWorkspaceInvalidationJourney, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
+import { aggregateEvidenceFailures, applyProviderPrerequisites, assertDiskContent, assertLiveObservation, assertObservation, assertPatchAttribution, assertSeparateClients, captureCodexTraceEvidence, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createClientInvalidationTrace, createOwnedFixtureWorkspace, createReceipt, emptyComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runComposerReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runFourSurfaceRefreshJourney, runInterruptionJourney, runWorkspaceInvalidationJourney, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
 
 NodeTest.test("requires explicit proof and cleanup confirmations", () => {
   NodeAssertStrict.deepEqual(parseArguments(["health"]), { command: "health" });
@@ -85,10 +85,20 @@ NodeTest.test("writes externally only after every four-surface baseline and befo
   const events = [];
   const fileName = "external-refresh.md";
   const marker = "EXTERNAL_REFRESH_MARKER";
+  const invalidationTrace = {
+    mark: () => { events.push("mark"); return 4; },
+    waitForWatch: async () => { events.push("watch"); return { sequence: 3 }; },
+    waitForInvalidation: async () => { events.push("invalidation"); return { sequence: 5 }; },
+    waitForRefresh: async () => { events.push("refresh"); return { files: { sequence: 6 }, composer: { sequence: 7 } }; },
+    close: async () => { events.push("trace:closed"); },
+  };
   const evidence = await runFourSurfaceRefreshJourney({
+    workspaceId: "workspace",
+    threadId: "thread",
     fixtureFile: `fixture/${fileName}`,
     fileName,
     marker,
+    invalidationTrace,
     io: {
       appendFile: async (path, content, encoding) => { events.push(`write:${path}:${content.trim()}:${encoding}`); },
       readFile: async () => `AGENT_MARKER\n${marker}\n`,
@@ -106,11 +116,73 @@ NodeTest.test("writes externally only after every four-surface baseline and befo
 
   const writeIndex = events.findIndex((event) => event.startsWith("write:"));
   NodeAssertStrict.equal(events.filter((event) => event.startsWith("write:")).length, 1);
-  NodeAssertStrict.ok(events.slice(0, writeIndex).every((event) => event === "capture:before"));
-  NodeAssertStrict.ok(events.slice(writeIndex + 1).every((event) => event === "capture:after"));
+  NodeAssertStrict.ok(writeIndex > events.indexOf("capture:before"));
+  NodeAssertStrict.ok(events.indexOf("invalidation") > writeIndex);
+  NodeAssertStrict.ok(events.indexOf("capture:after") > events.indexOf("invalidation"));
+  NodeAssertStrict.ok(events.indexOf("refresh") > events.indexOf("capture:after"));
   NodeAssertStrict.deepEqual(evidence.surfaces, { files: "passed", composer: "passed", preview: "passed", lastTurn: "passed" });
   NodeAssertStrict.equal(evidence.trigger.marker, marker);
   NodeAssertStrict.equal(evidence.disk, "both markers retained");
+  NodeAssertStrict.deepEqual(evidence.causality.order, ["before-capture", "external-write", "files.changed", "after-capture"]);
+  NodeAssertStrict.equal(events.includes("trace:closed"), false, "the caller owns an injected trace");
+});
+
+NodeTest.test("rejects a stale client refresh even when the rendered four-surface state looks current", async () => {
+  const fileName = "external-refresh.md";
+  const validState = () => ({
+    files: { content: fileName },
+    composer: { suggestion: fileName },
+    preview: { fileName, renderedPatch: "AGENT_MARKER", fileText: "AGENT_MARKER", source: "native", fidelity: "agent", revision: 1 },
+    lastTurn: { fileName, renderedPatch: "AGENT_MARKER", fileText: "AGENT_MARKER", source: "native", fidelity: "agent", revision: 1 },
+  });
+  await NodeAssertStrict.rejects(
+    runFourSurfaceRefreshJourney({
+      workspaceId: "workspace",
+      threadId: "thread",
+      fixtureFile: `fixture/${fileName}`,
+      fileName,
+      io: { appendFile: async () => {}, readFile: async () => "AGENT_MARKER\nEXTERNAL_MARKER\n" },
+      capture: async () => validState(),
+      invalidationTrace: {
+        mark: () => 4,
+        waitForWatch: async () => ({ sequence: 3 }),
+        waitForInvalidation: async () => ({ sequence: 5 }),
+        waitForRefresh: async () => ({ files: { sequence: 4 }, composer: { sequence: 6 } }),
+        close: async () => {},
+      },
+    }),
+    /Files did not refetch after exact files.changed/,
+  );
+});
+
+NodeTest.test("traces the active client subscription, exact invalidation, and post-invalidation refreshes", async () => {
+  const listeners = new Map();
+  const session = {
+    send: async () => {},
+    on: (event, listener) => listeners.set(event, listener),
+    detach: async () => { listeners.set("detached", true); },
+  };
+  const page = { context: () => ({ newCDPSession: async (target) => { NodeAssertStrict.equal(target, page); return session; } }) };
+  const trace = await createClientInvalidationTrace({ page });
+  const sent = (payload) => listeners.get("Network.webSocketFrameSent")({ request: { payloadData: JSON.stringify(payload) } });
+  const received = (payload) => listeners.get("Network.webSocketFrameReceived")({ response: { payloadData: JSON.stringify(payload) } });
+
+  sent({ method: "file.watch", params: { workspaceId: "workspace", threadId: "thread" } });
+  const watch = await trace.waitForWatch({ workspaceId: "workspace", threadId: "thread" });
+  const mark = trace.mark();
+  received({ type: "push", channel: "files.changed", data: { workspaceId: "other", threadId: "thread", changedPaths: ["external-refresh.md"], wholeWorkspace: false } });
+  received({ type: "push", channel: "files.changed", data: { workspaceId: "workspace", threadId: "thread", changedPaths: ["external-refresh.md"], wholeWorkspace: false } });
+  sent({ method: "turnDiff.getComparison", params: { threadId: "thread", includeLive: true } });
+  sent({ method: "file.list", params: { workspaceId: "workspace", threadId: "thread" } });
+
+  const invalidation = await trace.waitForInvalidation({ workspaceId: "workspace", threadId: "thread", fileName: "external-refresh.md", after: mark });
+  const refresh = await trace.waitForRefresh({ workspaceId: "workspace", threadId: "thread", after: invalidation.sequence });
+  NodeAssertStrict.ok(watch.sequence <= mark);
+  NodeAssertStrict.ok(invalidation.sequence > mark);
+  NodeAssertStrict.ok(refresh.files.sequence > invalidation.sequence);
+  NodeAssertStrict.ok(refresh.composer.sequence > invalidation.sequence);
+  await trace.close();
+  NodeAssertStrict.equal(listeners.get("detached"), true);
 });
 
 NodeTest.test("records focused gates once under their true owner and preserves them through provider prerequisite updates", async () => {
@@ -467,12 +539,24 @@ NodeTest.test("captures Codex Live proof after the same-file external edit and r
       lastTurn: { fileName, renderedPatch: "AGENT_MARKER", fileText: "AGENT_MARKER", source: "native", fidelity: "agent", revision: 1 },
     };
   };
-  const result = await runComposerReviewJourney({ surface: "web", client: { page }, socket, workspace: { id: "workspace", name: "Fixture", path: "fixture" }, run, io, provider: "codex", model: "model", modelName: "Model", captureLive: liveCapture, captureReview: reviewCapture, captureFourSurface });
+  const invalidationTrace = {
+    mark: () => { events.push("trace:mark"); return 4; },
+    waitForWatch: async () => { events.push("trace:watch"); return { sequence: 3 }; },
+    waitForInvalidation: async () => { events.push("trace:invalidation"); return { sequence: 5 }; },
+    waitForRefresh: async () => { events.push("trace:refresh"); return { files: { sequence: 6 }, composer: { sequence: 7 } }; },
+    close: async () => { events.push("trace:closed"); },
+  };
+  const result = await runComposerReviewJourney({ surface: "web", client: { page }, socket, workspace: { id: "workspace", name: "Fixture", path: "fixture" }, run, io, provider: "codex", model: "model", modelName: "Model", captureLive: liveCapture, captureReview: reviewCapture, captureFourSurface, createInvalidationTrace: async () => invalidationTrace });
 
   NodeAssertStrict.equal(result.observations.live.comparisonId, "live-after-external-edit");
   NodeAssertStrict.equal(result.fetchedPatch, "AGENT_MARKER");
   NodeAssertStrict.equal(result.disk, "both markers retained");
-  NodeAssertStrict.deepEqual(events.slice(0, 7), ["comparison:live-before-external-edit", "patch:live-before-external-edit", "four-surfaces:before", "external-edit", "four-surfaces:after", "comparison:live-after-external-edit", "patch:live-after-external-edit"]);
+  NodeAssertStrict.ok(events.indexOf("four-surfaces:before") < events.indexOf("external-edit"));
+  NodeAssertStrict.ok(events.indexOf("trace:invalidation") > events.indexOf("external-edit"));
+  NodeAssertStrict.ok(events.indexOf("four-surfaces:after") > events.indexOf("trace:invalidation"));
+  NodeAssertStrict.ok(events.indexOf("trace:refresh") > events.indexOf("four-surfaces:after"));
+  NodeAssertStrict.ok(events.indexOf("comparison:live-after-external-edit") > events.indexOf("trace:refresh"));
+  NodeAssertStrict.ok(events.indexOf("trace:closed") > events.indexOf("comparison:live-after-external-edit"));
   NodeAssertStrict.deepEqual(result.fourSurfaceRefresh.surfaces, { files: "passed", composer: "passed", preview: "passed", lastTurn: "passed" });
   NodeAssertStrict.ok(events.indexOf("rendered-live") > events.indexOf("comparison:live-after-external-edit"));
   NodeAssertStrict.equal(result.observations.reloaded.comparisonId, "settled-reloaded");
