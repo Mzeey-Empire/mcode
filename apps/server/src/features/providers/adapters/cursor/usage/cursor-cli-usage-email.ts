@@ -28,6 +28,8 @@ export interface CursorCliUsageEmailResolverOptions {
   execFileImpl?: typeof execFileAsync;
   /** Optional clock used for cache expiry tests. */
   now?: () => number;
+  /** Host platform; injected so host facts are not read at module scope. */
+  platform: NodeJS.Platform;
 }
 
 type ResolvableCliPath = string | (() => string | Promise<string>);
@@ -82,7 +84,7 @@ export class CursorCliUsageEmailResolver {
     let stdout: string;
     try {
       const result = await this.execFileImpl(cliPath, ["about", "--format", "json"], {
-        shell: process.platform === "win32",
+        shell: this.options.platform === "win32",
         maxBuffer: MAX_OUTPUT_BYTES,
         timeout: ABOUT_TIMEOUT_MS,
       });

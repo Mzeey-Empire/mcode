@@ -28,6 +28,7 @@ describe("CursorCliUsageEmailResolver", () => {
       cliPath: "cursor-agent",
       execFileImpl,
       now,
+      platform: "linux",
     });
 
     await expect(resolver.resolve()).resolves.toBe("dev@example.com");
@@ -44,6 +45,7 @@ describe("CursorCliUsageEmailResolver", () => {
       cliPath: async () => "/opt/cursor/agent",
       execFileImpl,
       now,
+      platform: "linux",
     });
 
     await expect(resolver.resolve()).resolves.toBe("dev@example.com");
@@ -59,6 +61,7 @@ describe("CursorCliUsageEmailResolver", () => {
       cliPath: "  ",
       execFileImpl,
       now,
+      platform: "linux",
     });
 
     await expect(resolver.resolve()).resolves.toBeUndefined();
@@ -71,6 +74,7 @@ describe("CursorCliUsageEmailResolver", () => {
       cliPath: "cursor-agent",
       execFileImpl,
       now,
+      platform: "linux",
     });
 
     await expect(resolver.resolve()).resolves.toBeUndefined();
@@ -82,6 +86,7 @@ describe("CursorCliUsageEmailResolver", () => {
       cliPath: "cursor-agent",
       execFileImpl,
       now,
+      platform: "linux",
     });
 
     await expect(resolver.resolve()).resolves.toBeUndefined();
@@ -99,6 +104,7 @@ describe("CursorCliUsageEmailResolver", () => {
       cliPath: "cursor-agent",
       execFileImpl,
       now,
+      platform: "linux",
     });
 
     await expect(resolver.resolve()).resolves.toBeUndefined();
@@ -114,6 +120,7 @@ describe("CursorCliUsageEmailResolver", () => {
       cliPath: "cursor-agent",
       execFileImpl,
       now,
+      platform: "linux",
     });
 
     await expect(resolver.resolve()).resolves.toBeUndefined();
@@ -128,6 +135,7 @@ describe("CursorCliUsageEmailResolver", () => {
       cliPath: "cursor-agent",
       execFileImpl,
       now,
+      platform: "linux",
     });
 
     await expect(resolver.resolve()).resolves.toBeUndefined();
@@ -142,6 +150,7 @@ describe("CursorCliUsageEmailResolver", () => {
       cliPath: "cursor-agent",
       execFileImpl,
       now,
+      platform: "linux",
     });
 
     await expect(resolver.resolve()).resolves.toBe("dev@example.com");
@@ -160,6 +169,7 @@ describe("CursorCliUsageEmailResolver", () => {
       cliPath: () => cliPath,
       execFileImpl,
       now,
+      platform: "linux",
     });
 
     await expect(resolver.resolve()).resolves.toBe("dev@example.com");
@@ -184,6 +194,7 @@ describe("CursorCliUsageEmailResolver", () => {
       cliPath: "cursor-agent",
       execFileImpl,
       now,
+      platform: "linux",
     });
 
     const first = resolver.resolve();

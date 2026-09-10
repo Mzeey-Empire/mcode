@@ -257,6 +257,7 @@ export function setupContainer(mcodeDir: string): typeof container {
   // rather than a manual setting; the resolver caches the CLI result.
   const cursorUsageEmailResolver = new CursorCliUsageEmailResolver({
     cliPath: () => container.resolve(SettingsService).get().provider.cli.cursor || "cursor-agent",
+    platform: hostRuntime.platform,
   });
   container.registerInstance(
     CursorAdminUsageSource,
