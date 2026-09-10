@@ -265,11 +265,14 @@ describe("MessageList thread switch", () => {
   });
 
   it("renders growing canonical child text before completion without duplicating its bubble", () => {
+    const completedResponseId = "child-answer";
+    const sharedResponseId = "canonical-turn-response:child-turn";
     activeThreadIdValue = "parent-thread";
     currentThreadIdValue = "parent-thread";
     messagesValue = [];
     recordOverridesByThread["child-thread"] = {
       messages: [],
+      runtimePhase: "idle",
       canonicalAgent: {
         state: canonicalChildState("First chunk", "Running"),
         revision: { conversationRevision: 1, rosterRevision: 0 },
@@ -279,10 +282,13 @@ describe("MessageList thread switch", () => {
 
     const { rerender } = render(<MessageList displayThreadId="child-thread" />);
     expect(screen.getByText("First chunk")).toBeInTheDocument();
-    expect(document.querySelectorAll('[data-message-id="child-answer"]')).toHaveLength(1);
+    expect(document.querySelectorAll(`[data-message-id="${sharedResponseId}"]`)).toHaveLength(1);
+    expect(document.querySelectorAll(`[data-message-id="${completedResponseId}"]`)).toHaveLength(0);
+    expect(document.querySelectorAll('[data-message-role="assistant"]')).toHaveLength(1);
 
     recordOverridesByThread["child-thread"] = {
       messages: [],
+      runtimePhase: "idle",
       canonicalAgent: {
         state: canonicalChildState("First chunk, second chunk", "Running"),
         revision: { conversationRevision: 2, rosterRevision: 0 },
@@ -291,10 +297,13 @@ describe("MessageList thread switch", () => {
     };
     rerender(<MessageList displayThreadId="child-thread" />);
     expect(screen.getByText("First chunk, second chunk")).toBeInTheDocument();
-    expect(document.querySelectorAll('[data-message-id="child-answer"]')).toHaveLength(1);
+    expect(document.querySelectorAll(`[data-message-id="${sharedResponseId}"]`)).toHaveLength(1);
+    expect(document.querySelectorAll(`[data-message-id="${completedResponseId}"]`)).toHaveLength(0);
+    expect(document.querySelectorAll('[data-message-role="assistant"]')).toHaveLength(1);
 
     recordOverridesByThread["child-thread"] = {
       messages: [],
+      runtimePhase: "idle",
       canonicalAgent: {
         state: canonicalChildState("First chunk, second chunk", "Completed"),
         revision: { conversationRevision: 3, rosterRevision: 0 },
@@ -303,7 +312,9 @@ describe("MessageList thread switch", () => {
     };
     rerender(<MessageList displayThreadId="child-thread" />);
     expect(screen.getByText("First chunk, second chunk")).toBeInTheDocument();
-    expect(document.querySelectorAll('[data-message-id="child-answer"]')).toHaveLength(1);
+    expect(document.querySelectorAll(`[data-message-id="${sharedResponseId}"]`)).toHaveLength(0);
+    expect(document.querySelectorAll(`[data-message-id="${completedResponseId}"]`)).toHaveLength(1);
+    expect(document.querySelectorAll('[data-message-role="assistant"]')).toHaveLength(1);
   });
 
   it("loads and scrolls a virtualized source before it reconstructs the saved range", async () => {

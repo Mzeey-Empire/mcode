@@ -1,15 +1,17 @@
 import type { AgentTurn, TurnRuntimePhase } from "@mcode/contracts";
 import type { ThreadRecord } from "./thread-record";
 
-/** Selects the provider-owned child lifecycle when no local execution owns the thread. */
+/** Selects the provider-owned child lifecycle when no local execution is active. */
 export function getCanonicalLifecycleTurn(threadId: string, record: ThreadRecord): AgentTurn | undefined {
-  if (record.turnExecutionId !== null || record.runtimePhase !== "idle") return undefined;
+  if (record.runtimePhase === "running" || record.runtimePhase === "finalizing") return undefined;
   const latest = Object.values(record.canonicalAgent.state.turns)
     .filter((turn) => turn.threadId === threadId)
     .sort((left, right) => Date.parse(left.startedAt ?? left.createdAt)
       - Date.parse(right.startedAt ?? right.createdAt) || left.id.localeCompare(right.id))
     .at(-1);
-  return latest?.trigger.kind === "child" ? latest : undefined;
+  if (latest?.trigger.kind !== "child") return undefined;
+  if (record.runtimePhase !== "idle" && (latest.status === "Pending" || latest.status === "Running")) return undefined;
+  return latest;
 }
 
 /** Resolves the lifecycle shared by transcript, Composer, and running-thread indicators. */

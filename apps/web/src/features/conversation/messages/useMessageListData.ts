@@ -128,12 +128,13 @@ export function useMessageListData(displayThreadId: string | undefined) {
     () => agentDisplayStateFromRuntimePhase(legacyRuntimePhase, legacyAgentError),
     [legacyAgentError, legacyRuntimePhase],
   );
-  const canonicalContent = resolveCanonicalContent(canonicalProjection, {
+  const canonicalLifecycleProjection = canonicalLifecycleTurn ? canonicalProjection : undefined;
+  const canonicalContent = resolveCanonicalContent(canonicalLifecycleProjection, {
     messages: legacyMessages,
     agentDisplayState: legacyAgentDisplayState,
     agentStartTime: canonicalLifecycleTurn ? canonicalProjection?.agentStartTime : legacyAgentStartTime,
   });
-  const canonicalActivity = resolveCanonicalActivity(canonicalProjection, {
+  const canonicalActivity = resolveCanonicalActivity(canonicalLifecycleProjection, {
     toolCalls: legacyToolCalls ?? EMPTY_TOOL_CALLS,
     thoughtSegments: legacyThoughtSegments,
   });
@@ -168,7 +169,7 @@ export function useMessageListData(displayThreadId: string | undefined) {
   const legacyCurrentTurnMessageId = useThreadRecord(renderedThreadId, (record) => record.currentTurnMessageId);
   const legacyCurrentTurnResponseKey = useThreadRecord(renderedThreadId, (record) => record.currentTurnResponseKey);
   const legacyAssistantResponseKeys = useThreadRecord(renderedThreadId, (record) => record.assistantResponseKeys);
-  const canonicalTurnIdentity = resolveCanonicalTurnIdentity(canonicalLifecycleTurn ? canonicalProjection : undefined, {
+  const canonicalTurnIdentity = resolveCanonicalTurnIdentity(canonicalLifecycleProjection, {
     messageId: legacyCurrentTurnMessageId,
     responseKey: legacyCurrentTurnResponseKey,
     responseKeys: legacyAssistantResponseKeys,
@@ -189,7 +190,7 @@ export function useMessageListData(displayThreadId: string | undefined) {
     agentDisplayState: canonicalContent.agentDisplayState,
     isAgentRunning: isAgentDisplayActive(canonicalContent.agentDisplayState),
     agentStartTime: canonicalContent.agentStartTime,
-    streamingText,
+    streamingText: canonicalLifecycleTurn ? canonicalProjection?.streamingText : streamingText,
     toolCalls: canonicalActivity.toolCalls,
     thoughtSegments: canonicalActivity.thoughtSegments,
     persistedFilesChanged,
