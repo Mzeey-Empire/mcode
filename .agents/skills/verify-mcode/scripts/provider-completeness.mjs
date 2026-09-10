@@ -20,6 +20,7 @@ const CONNECTION_LOST_TEXT = "Connection lost. Reconnecting to server...";
 const FOCUSED_GATES = [
   { name: "server-turn-diff-review", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism", "--testTimeout=30000"], files: ["src/features/agents/turns/__tests__/turn-diff-review.test.ts", "src/features/agents/turns/__tests__/turn-diff-service.test.ts"], rows: ["empty", "interruption"] },
   { name: "server-approval-review-policy", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/agents/turns/__tests__/approval-review-policy.test.ts"], rows: ["strictManual", "managedRequired"] },
+  { name: "server-managed-required-dispatch", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/agents/orchestration/__tests__/agent-service-gate.test.ts"], rows: ["managedRequiredDispatch"], limitation: "Public Codex does not report required; this is focused server dispatch proof." },
   { name: "server-workspace-invalidation", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/projects/files/__tests__/workspace-invalidation-service.test.ts"], rows: ["invalidation", "staleRetry", "disconnectWatchCleanup"] },
   { name: "codex-protocol", control: "packages/providers focused protocol tests", workspace: "packages/providers", files: ["src/__tests__/codex/codex-notification-validation.test.ts", "src/__tests__/codex/codex-protocol-coverage.test.ts", "src/__tests__/codex/codex-event-mapper.test.ts"], rows: ["warningsReroutes"] },
   { name: "web-composer-and-files", control: "apps/web focused component tests", workspace: "apps/web", files: ["src/features/conversation/composer/controls/__tests__/ComposerAccessControls.test.tsx", "src/features/projects/files/useWorkspaceFileInvalidation.test.tsx", "src/components/diff/__tests__/DiffPanel.files.test.tsx"], rows: ["fullAccess", "fileSurfaces"] },
@@ -98,6 +99,7 @@ async function collectFocusedGateEvidence(repoRoot, gate, runner) {
     control: gate.control,
     command: `bun ${args.join(" ")}`,
     rows: gate.rows,
+    ...(gate.limitation ? { limitation: gate.limitation } : {}),
     exitCode: Number.isInteger(result.exitCode) ? result.exitCode : null,
     output: redactOutput(result.output),
   };
@@ -2307,7 +2309,7 @@ function providerMatrix(surface) { return {
     : { electronRightPanel: { kind: "blocked", prerequisite: "a completed Electron Review journey", surface: "Electron", reason: "the proof starts Electron, but the native Codex Live diff did not reach public comparison" } }),
 }; }
 
-function focusedGateMatrix() { return FOCUSED_GATES.map(({ name, control, rows }) => ({ kind: "focused-pending", name, control, rows })); }
+function focusedGateMatrix() { return FOCUSED_GATES.map(({ name, control, rows, limitation }) => ({ kind: "focused-pending", name, control, rows, ...(limitation ? { limitation } : {}) })); }
 function requirePlaywright(repoRoot) { const pkg = NodePath.join(repoRoot, ".dev", "playwright-scratch", "package.json"); if (!NodeFS.existsSync(pkg)) throw new Error("Condition: isolated Playwright is missing. Next action: run ensure-playwright.mjs."); return NodeModule.createRequire(pkg)("playwright"); }
 function findChromiumPath() { return ["C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"].find((path) => NodeFS.existsSync(path)); }
 function summarizeComparison(comparison, patch) {

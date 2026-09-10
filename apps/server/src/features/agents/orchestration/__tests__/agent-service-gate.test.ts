@@ -1,6 +1,6 @@
 import "reflect-metadata";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Thread, IProviderRegistry } from "@mcode/contracts";
+import type { ApprovalReviewSupport, Thread, IProviderRegistry } from "@mcode/contracts";
 import { supportsInternalThreadControl } from "../../turns/turn-admission-dispatch-coordinator.js";
 import { createAgentServiceForTest } from "./agent-service-test-harness.js";
 import { createCanonicalAgentEventSinkStub } from "../../canonical/__tests__/canonical-agent-event-sink-stub.js";
@@ -68,6 +68,7 @@ function buildService({
   assertUsable = vi.fn(),
   resolveProvider = vi.fn(),
   threadStatus = "idle",
+  approvalReviewSupport,
   threadControlMcp = {
     activate: vi.fn(),
     revoke: vi.fn(),
@@ -76,6 +77,7 @@ function buildService({
   assertUsable?: ReturnType<typeof vi.fn>;
   resolveProvider?: ReturnType<typeof vi.fn>;
   threadStatus?: PersistedThreadStatus;
+  approvalReviewSupport?: ApprovalReviewSupport;
   threadControlMcp?: { activate: ReturnType<typeof vi.fn>; revoke: ReturnType<typeof vi.fn> };
 } = {}) {
   const thread = makeThread({ status: threadStatus });
@@ -121,13 +123,16 @@ function buildService({
     persist: vi.fn(() => Promise.resolve({ stored: [], persisted: [] })),
   } as unknown as AttachmentService;
 
+  const getApprovalReviewSupport = approvalReviewSupport
+    ? vi.fn(async () => approvalReviewSupport)
+    : undefined;
   const providerStub = Object.assign(new NodeEvents.EventEmitter(), {
     id: "codex" as const,
     supportsCompletion: true,
     sessionForkOnResume: "unsupported" as const,
     maxInputCharactersPerTurn: 16_000,
     sendTurn: vi.fn(() => Promise.resolve()),
-  });
+  }, getApprovalReviewSupport ? { getApprovalReviewSupport } : {});
 
   const providerRegistry = {
     resolve: resolveProvider.getMockImplementation() ? resolveProvider : vi.fn(() => providerStub),
@@ -220,10 +225,20 @@ function buildService({
       undefined,
       createCanonicalAgentEventSinkStub(db),
   );
-  return { svc, threadRepo, messageRepo, providerStub, providerRegistry, threadControlMcp };
+  return {
+    svc,
+    threadRepo,
+    messageRepo,
+    providerStub,
+    providerRegistry,
+    threadControlMcp,
+    memoryPressureService,
+    settingsService,
+    getApprovalReviewSupport,
+  };
 }
 
-describe("AgentService.sendMessage — provider availability gate", () => {
+describe("AgentService.sendMessage — admission gates", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -349,6 +364,45 @@ describe("AgentService.sendMessage — provider availability gate", () => {
 
     expect(assertUsable).not.toHaveBeenCalled();
     expect(resolveProvider).not.toHaveBeenCalled();
+  });
+
+  it("rejects a managed required review before activation, persistence, request construction, or provider delivery", async () => {
+    const requiredReview: ApprovalReviewSupport = {
+      status: "required",
+      supportedModes: ["manual", "automatic"],
+      reason: "automatic-review-required",
+      liveChangeScope: "none",
+    };
+    const {
+      svc,
+      messageRepo,
+      providerStub,
+      memoryPressureService,
+      settingsService,
+      getApprovalReviewSupport,
+    } = buildService({ approvalReviewSupport: requiredReview });
+
+    await expect(svc.sendMessage({
+      threadId: THREAD_ID,
+      content: "This must not start a turn",
+      permissionMode: "full",
+      approvalReviewMode: "automatic",
+      model: "claude-sonnet-4-6",
+      attachments: [],
+      provider: "codex",
+    })).rejects.toThrow(requiredReview.reason);
+
+    expect(getApprovalReviewSupport).toHaveBeenCalledWith({
+      permissionMode: "full",
+      interactionMode: "build",
+      requestedMode: "automatic",
+      model: "claude-sonnet-4-6",
+    });
+    expect(memoryPressureService.assertCanStartTurn).not.toHaveBeenCalled();
+    expect(memoryPressureService.markActive).not.toHaveBeenCalled();
+    expect(messageRepo.create).not.toHaveBeenCalled();
+    expect(settingsService.get).not.toHaveBeenCalled();
+    expect(providerStub.sendTurn).not.toHaveBeenCalled();
   });
 });
 
