@@ -20,6 +20,7 @@ function createRuntime(port = 43123): ServerRuntime {
       isHealthy: vi.fn(async () => true),
       restart: vi.fn(async () => undefined),
       forceReplace: vi.fn(async () => undefined),
+      stopServerHeldByLock: vi.fn(async () => undefined),
     },
     ipcMain: { handle: vi.fn() },
     getMainWindow: () => null,
