@@ -559,12 +559,14 @@ export async function runComposerReviewJourney({ surface, client, socket, worksp
   run.workspace = { id: workspace.id, name: workspace.name, path: workspace.path, selectionEvidence: { source: "thread.list scoped request", requestedWorkspaceId: workspace.id, threadId: thread.id } };
   if (provider === "codex") {
     run.phase = "agent-live-diff";
+    const initialAgentComparison = await waitForLiveAgentDiff(socket, thread.id, fileName, undefined, run.diagnostics.liveComparisons);
+    assertPatchAttribution(initialAgentComparison.patch, "AGENT_MARKER", "EXTERNAL_MARKER");
+    await io.appendFile(fixtureFile, "EXTERNAL_MARKER\n", "utf8");
     const agentComparison = await waitForLiveAgentDiff(socket, thread.id, fileName, undefined, run.diagnostics.liveComparisons);
     assertPatchAttribution(agentComparison.patch, "AGENT_MARKER", "EXTERNAL_MARKER");
     result.comparison.agentLive = summarizeComparison(agentComparison.comparison, agentComparison.patch);
     result.fetchedPatch = agentComparison.patch;
     result.observations.live = await captureLiveObservation(client.page, run, agentComparison, captureLiveState, `${surface}-${provider}-live`);
-    await io.appendFile(fixtureFile, "EXTERNAL_MARKER\n", "utf8");
   }
   const settled = await waitForSettledComparison(socket, thread.id, fileName);
   assertPatchAttribution(settled.patch, "AGENT_MARKER", "EXTERNAL_MARKER");

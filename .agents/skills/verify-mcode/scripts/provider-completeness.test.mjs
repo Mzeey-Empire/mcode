@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
-import { aggregateEvidenceFailures, assertDiskContent, assertLiveObservation, assertObservation, assertPatchAttribution, assertSeparateClients, captureCodexTraceEvidence, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createOwnedFixtureWorkspace, createReceipt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runFocusedEvidenceGates, waitForExactReview, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
+import { aggregateEvidenceFailures, assertDiskContent, assertLiveObservation, assertObservation, assertPatchAttribution, assertSeparateClients, captureCodexTraceEvidence, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createOwnedFixtureWorkspace, createReceipt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runComposerReviewJourney, runFocusedEvidenceGates, waitForExactReview, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
 
 NodeTest.test("requires explicit proof and cleanup confirmations", () => {
   NodeAssertStrict.deepEqual(parseArguments(["health"]), { command: "health" });
@@ -279,6 +279,63 @@ NodeTest.test("waits for an exact Live agent file before an external edit may fo
   NodeAssertStrict.equal(comparison.patch, "AGENT_MARKER");
   NodeAssertStrict.equal(calls, 3);
 });
+
+NodeTest.test("captures Codex Live proof only after the same-file external edit and refreshed public comparison", async () => {
+  const events = [];
+  let externalEditApplied = false;
+  let threadListCalls = 0;
+  let comparisonCalls = 0;
+  const socket = { rpc: async (method, params) => {
+    if (method === "thread.list") {
+      threadListCalls += 1;
+      return threadListCalls === 1 ? [] : [{ id: "thread", provider: "codex", model: "model" }];
+    }
+    if (method === "turnDiff.getComparison") {
+      comparisonCalls += 1;
+      const phase = comparisonCalls < 3 ? "live" : "settled";
+      const id = phase === "live" ? (externalEditApplied ? "live-after-external-edit" : "live-before-external-edit") : "settled";
+      events.push(`comparison:${id}`);
+      return { turnDiff: { id, phase, source: "native", fidelity: "agent" }, files: [{ path: "target-codex.txt" }] };
+    }
+    if (method === "turnDiff.getFileDiff") {
+      events.push(`patch:${params.comparisonId}`);
+      return "AGENT_MARKER";
+    }
+    throw new Error(`unexpected ${method}`);
+  } };
+  const run = { fixtureDirectory: "fixture", run: {}, diagnostics: { liveComparisons: { states: [], omitted: 0 } }, renderedEvidence: [], comparison: {} };
+  const io = {
+    writeFile: async () => {},
+    appendFile: async () => { externalEditApplied = true; events.push("external-edit"); },
+    readFile: async () => "BASELINE_MARKER\nAGENT_MARKER\nEXTERNAL_MARKER\n",
+  };
+  const liveCapture = async (_page, _receipt, _name, result) => {
+    NodeAssertStrict.equal(externalEditApplied, true, "the external edit must precede the accepted Live capture");
+    NodeAssertStrict.equal(result.comparison.turnDiff.id, "live-after-external-edit", "the accepted Live capture must use a refreshed public comparison");
+    events.push("rendered-live");
+    return { stopVisible: true, screenshot: "live.png", filePath: result.file.path, fileText: "AGENT_MARKER", patch: "AGENT_MARKER", sourceLabel: "Agent changes", source: "native", fidelity: "agent" };
+  };
+  const reviewCapture = async (_page, _receipt, _name, result) => ({ rows: 1, spinners: 0, screenshot: "settled.png", filePath: result.file.path, fileText: "AGENT_MARKER", patch: "AGENT_MARKER", sourceLabel: "Agent changes", source: "native", fidelity: "agent" });
+
+  const result = await runComposerReviewJourney({ surface: "web", client: { page: composerJourneyPage() }, socket, workspace: { id: "workspace", name: "Fixture", path: "fixture" }, run, io, provider: "codex", model: "model", modelName: "Model", captureLive: liveCapture, captureReview: reviewCapture });
+
+  NodeAssertStrict.equal(result.observations.live.comparisonId, "live-after-external-edit");
+  NodeAssertStrict.equal(result.fetchedPatch, "AGENT_MARKER");
+  NodeAssertStrict.equal(result.disk, "both markers retained");
+  NodeAssertStrict.deepEqual(events.slice(0, 5), ["comparison:live-before-external-edit", "patch:live-before-external-edit", "external-edit", "comparison:live-after-external-edit", "patch:live-after-external-edit"]);
+  NodeAssertStrict.ok(events.indexOf("rendered-live") > events.indexOf("comparison:live-after-external-edit"));
+});
+
+function composerJourneyPage() {
+  const control = { click: async () => {}, fill: async () => {}, press: async () => {}, waitFor: async () => {}, isVisible: async () => false };
+  const dialog = { ...control, isVisible: async () => true, getByTestId: () => control, getByRole: () => control, getByText: () => control };
+  return {
+    getByTestId: () => control,
+    getByRole: (role) => role === "dialog" ? dialog : control,
+    getByText: () => control,
+    reload: async () => {},
+  };
+}
 
 NodeTest.test("uses an explicit Windows-safe hold after the exact agent write", () => {
   const prompt = composerPrompt("target.txt");
