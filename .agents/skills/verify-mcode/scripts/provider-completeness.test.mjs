@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
-import { aggregateEvidenceFailures, applyProviderPrerequisites, assertDiskContent, assertLiveObservation, assertObservation, assertPatchAttribution, assertSeparateClients, captureCodexTraceEvidence, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createOwnedFixtureWorkspace, createReceipt, emptyComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runComposerReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, waitForExactReview, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
+import { aggregateEvidenceFailures, applyProviderPrerequisites, assertDiskContent, assertLiveObservation, assertObservation, assertPatchAttribution, assertSeparateClients, captureCodexTraceEvidence, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createOwnedFixtureWorkspace, createReceipt, emptyComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runComposerReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runInterruptionJourney, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
 
 NodeTest.test("requires explicit proof and cleanup confirmations", () => {
   NodeAssertStrict.deepEqual(parseArguments(["health"]), { command: "health" });
@@ -159,10 +159,15 @@ NodeTest.test("opens a projectless new thread through the sidebar and selects it
 
 NodeTest.test("aggregates focused gates and every failed provider surface", () => {
   const failed = aggregateEvidenceFailures(["server-turn-diff-review exited 1"], {
-    web: { codexNative: { kind: "live-proof-failed", provider: "codex" }, claudeFallback: { kind: "live-proof-failed", provider: "claude" }, empty: { kind: "empty-proof-failed", provider: "codex" } },
-    electron: { codexNative: { kind: "live-proof-failed", provider: "codex" }, claudeFallback: { kind: "live-proof-failed", provider: "claude" } },
+    web: { codexNative: { kind: "live-proof-failed", provider: "codex" }, claudeFallback: { kind: "live-proof-failed", provider: "claude" }, empty: { kind: "empty-proof-failed", provider: "codex" }, interruption: { kind: "interruption-proof-failed", provider: "codex" } },
+    electron: { codexNative: { kind: "live-proof-failed", provider: "codex" }, claudeFallback: { kind: "live-proof-failed", provider: "claude" }, interruption: { kind: "interruption-proof-required", provider: "codex" } },
   });
-  NodeAssertStrict.deepEqual(failed, ["server-turn-diff-review exited 1", "web/codex", "web/claude", "web/empty", "electron/codex", "electron/claude"]);
+  NodeAssertStrict.deepEqual(failed, ["server-turn-diff-review exited 1", "web/codex", "web/claude", "web/empty", "web/interruption", "electron/codex", "electron/claude", "electron/interruption"]);
+});
+
+NodeTest.test("accepts a retained public interrupted runtime terminal", async () => {
+  const terminal = await waitForInterruptionTerminal({ rpc: async () => [{ threadId: "interruption-thread", turnExecutionId: "execution", phase: "interrupted" }] }, "interruption-thread", Date.now() + 10);
+  NodeAssertStrict.equal(terminal.phase, "interrupted");
 });
 
 NodeTest.test("selects only the new exact Codex thread", async () => {
@@ -374,6 +379,60 @@ NodeTest.test("captures Codex Live proof after the same-file external edit and r
   NodeAssertStrict.ok(events.indexOf("rendered-reconnected") > publicState);
 });
 
+NodeTest.test("stops an in-flight Composer turn before recording its terminal runtime and truthful Review", async () => {
+  const events = [];
+  let threadListCalls = 0;
+  let stopClicked = false;
+  let comparisonCalls = 0;
+  const socket = { rpc: async (method, params) => {
+    if (method === "thread.list") {
+      threadListCalls += 1;
+      return threadListCalls === 1 ? [] : [{ id: "interruption-thread", provider: "codex", model: "model" }];
+    }
+    if (method === "turnDiff.getComparison") {
+      comparisonCalls += 1;
+      const phase = comparisonCalls === 1 ? "live" : "settled";
+      events.push(`comparison:${phase}`);
+      return { turnDiff: { id: `interruption-${phase}`, phase, source: "native", fidelity: "agent" }, files: [{ path: "interruption-codex.txt" }] };
+    }
+    if (method === "turnDiff.getFileDiff") return "AGENT_MARKER";
+    if (method === "agent.listRunning") {
+      if (!stopClicked) throw new Error("Stop must precede the public terminal runtime check");
+      events.push("runtime:cancelled");
+      return [{ threadId: "interruption-thread", turnExecutionId: "execution", phase: "cancelled" }];
+    }
+    throw new Error(`unexpected ${method}:${params?.threadId ?? ""}`);
+  } };
+  const page = interruptionJourneyPage(events, () => { stopClicked = true; });
+  const run = { fixtureDirectory: "fixture", run: {}, diagnostics: { liveComparisons: { states: [], omitted: 0 } }, renderedEvidence: [], comparison: {} };
+  const result = await runInterruptionJourney({
+    surface: "web",
+    client: { page },
+    socket,
+    workspace: { id: "workspace", name: "Fixture", path: "fixture" },
+    run,
+    io: { writeFile: async () => {}, readFile: async () => "BASELINE_MARKER\nAGENT_MARKER\n" },
+    provider: "codex",
+    model: "model",
+    modelName: "Model",
+    captureLive: async () => ({ stopVisible: true, screenshot: "live.png", filePath: "interruption-codex.txt", fileText: "AGENT_MARKER", patch: "AGENT_MARKER", sourceLabel: "Agent changes", source: "native", fidelity: "agent" }),
+    captureReview: async () => {
+      NodeAssertStrict.equal(stopClicked, true, "Review must be rendered after the user uses Stop");
+      NodeAssertStrict.ok(events.indexOf("runtime:cancelled") >= 0, "Review must follow the public terminal runtime");
+      events.push("rendered-terminal");
+      return { rows: 1, spinners: 0, screenshot: "terminal.png", filePath: "interruption-codex.txt", fileText: "AGENT_MARKER", patch: "AGENT_MARKER", sourceLabel: "Agent changes", source: "native", fidelity: "agent" };
+    },
+  });
+
+  NodeAssertStrict.equal(result.terminal.phase, "cancelled");
+  NodeAssertStrict.equal(result.disk, "agent marker retained");
+  NodeAssertStrict.ok(events.indexOf("stop:clicked") > events.indexOf("stop:visible"));
+  NodeAssertStrict.ok(events.indexOf("stop:hidden") > events.indexOf("stop:clicked"));
+  NodeAssertStrict.ok(events.indexOf("runtime:cancelled") > events.indexOf("stop:hidden"));
+  NodeAssertStrict.ok(events.indexOf("comparison:settled") > events.indexOf("runtime:cancelled"));
+  NodeAssertStrict.ok(events.indexOf("rendered-terminal") > events.indexOf("comparison:settled"));
+});
+
 function composerJourneyPage(events = []) {
   const control = { click: async () => {}, fill: async () => {}, press: async () => {}, waitFor: async () => {}, isVisible: async () => false };
   const dialog = { ...control, isVisible: async () => true, getByTestId: () => control, getByRole: () => control, getByText: () => control };
@@ -384,6 +443,20 @@ function composerJourneyPage(events = []) {
     getByText: (text) => text === "Connection lost. Reconnecting to server..." ? connectionBanner : control,
     context: () => ({ setOffline: async (offline) => { events.push(`network:${offline ? "offline" : "online"}`); } }),
     reload: async () => { events.push("reload"); },
+  };
+}
+
+function interruptionJourneyPage(events, stop) {
+  const control = { click: async () => {}, fill: async () => {}, press: async () => { events.push("composer:sent"); }, waitFor: async () => {}, isVisible: async () => false };
+  const dialog = { ...control, isVisible: async () => true, getByTestId: () => control, getByRole: () => control, getByText: () => control };
+  const stopControl = {
+    click: async () => { events.push("stop:clicked"); stop(); },
+    waitFor: async ({ state }) => { events.push(`stop:${state}`); },
+  };
+  return {
+    getByTestId: () => control,
+    getByRole: (role, options) => role === "dialog" ? dialog : options?.name === "Stop agent" ? stopControl : control,
+    getByText: () => control,
   };
 }
 

@@ -499,8 +499,8 @@ export function assertEveryAvailableProviderWasProven(matrix) {
 /** Lists focused-gate and provider-journey failures after every surface has run. */
 export function aggregateEvidenceFailures(focusedFailures, surfaces) {
   const providerFailures = Object.entries(surfaces).flatMap(([surface, matrix]) => Object.values(matrix)
-    .filter((entry) => entry?.kind === "required-live-proof" || entry?.kind === "live-proof-failed" || entry?.kind === "empty-proof-failed")
-    .map((entry) => entry.kind === "empty-proof-failed" ? `${surface}/empty` : `${surface}/${entry.provider}`));
+    .filter((entry) => entry?.kind === "required-live-proof" || entry?.kind === "live-proof-failed" || entry?.kind === "empty-proof-failed" || entry?.kind === "interruption-proof-required" || entry?.kind === "interruption-proof-failed")
+    .map((entry) => entry.kind === "empty-proof-failed" ? `${surface}/empty` : entry.kind === "interruption-proof-required" || entry.kind === "interruption-proof-failed" ? `${surface}/interruption` : `${surface}/${entry.provider}`));
   return [...focusedFailures, ...providerFailures];
 }
 
@@ -547,6 +547,19 @@ export async function runProviderJourneys({ surface, client, socket, workspace, 
       matrix.empty = { kind: "empty-proof-failed", control: `${surface} Composer, public turn comparison, and Review`, provider: codex.provider, model: codex.model, failure: journeys.empty.failure };
       await captureFailure(client.page, run, `${surface}-empty-failure`);
     }
+    matrix.interruption = { kind: "interruption-proof-required", control: `${surface} Composer Stop control, public runtime, and Review`, provider: codex.provider, model: codex.model };
+    try {
+      const journey = await runInterruptionJourney({ surface, client, socket, workspace, run, io, provider: codex.provider, model: codex.model, modelName: codex.modelName, captureLive, captureReview });
+      journeys.interruption = { status: "passed", provider: codex.provider, model: codex.model, journey };
+      matrix.interruption = { kind: "interruption-proof", control: `${surface} Composer Stop control, public runtime, and Review`, provider: codex.provider, model: codex.model, journey };
+    } catch (error) {
+      const message = safeError(error);
+      journeys.interruption = { status: "failed", provider: codex.provider, model: codex.model, failure: { message, classification: "user interruption journey failed before terminal runtime and Review evidence" } };
+      matrix.interruption = { kind: "interruption-proof-failed", control: `${surface} Composer Stop control, public runtime, and Review`, provider: codex.provider, model: codex.model, failure: journeys.interruption.failure };
+      await captureFailure(client.page, run, `${surface}-interruption-failure`);
+    }
+  } else {
+    matrix.interruption = { kind: "blocked", prerequisite: "available Codex provider, model, and catalog for the public interruption journey", surface };
   }
   return journeys;
 }
@@ -606,6 +619,62 @@ export async function runEmptyDiffJourney({ surface, client, socket, workspace, 
   run.comparison[`${surface}-empty`] = result.comparison;
   result.observations.completed = await captureEmptyState(client.page, run, `${surface}-empty`, comparison);
   return result;
+}
+
+/** Drives the public Stop control and records the terminal runtime plus truthful settled Review. */
+export async function runInterruptionJourney({ surface, client, socket, workspace, run, io, provider, model, modelName, captureLive: captureLiveState, captureReview: captureReviewState }) {
+  const fileName = `interruption-${provider}.txt`;
+  const fixtureFile = NodePath.join(run.fixtureDirectory, fileName);
+  const result = { provider, model, observations: {}, comparison: {}, terminal: null, disk: null };
+  await io.writeFile(fixtureFile, "BASELINE_MARKER\n", "utf8");
+  run.run.ownedFile ??= fixtureFile;
+  run.run.ownedFiles = [...new Set([...(run.run.ownedFiles ?? []), fixtureFile])];
+  const beforeThreads = await listThreadIds(socket, workspace.id);
+  await driveComposer(client.page, workspace.name, provider, modelName, composerPrompt(fileName));
+  const thread = await waitForNewThread(socket, workspace.id, beforeThreads, provider, model, run.run);
+  run.run.threadId ??= thread.id;
+  run.run.ownedThreadIds = [...new Set([...(run.run.ownedThreadIds ?? []), thread.id])];
+  run.phase = "interruption-live";
+  const live = await waitForLiveAgentDiff(socket, thread.id, fileName, undefined, run.diagnostics.liveComparisons);
+  assertPatchAttribution(live.patch, "AGENT_MARKER", "EXTERNAL_MARKER");
+  result.comparison.live = summarizeComparison(live.comparison, live.patch);
+  result.observations.live = await captureLiveObservation(client.page, run, live, captureLiveState, `${surface}-${provider}-interruption-live`);
+  await stopComposerAgent(client.page);
+  run.phase = "interruption-terminal";
+  result.terminal = await waitForInterruptionTerminal(socket, thread.id);
+  const settled = await waitForSettledComparison(socket, thread.id, fileName);
+  assertPatchAttribution(settled.patch, "AGENT_MARKER", "EXTERNAL_MARKER");
+  result.comparison.settled = summarizeComparison(settled.comparison, settled.patch);
+  result.observations.terminal = {
+    ...await captureSettledReviewState(socket, thread.id, fileName, client.page, run, `${surface}-${provider}-interruption-terminal`, captureReviewState),
+    stopVisible: false,
+  };
+  result.disk = assertInterruptedDisk(await io.readFile(fixtureFile, "utf8"));
+  return result;
+}
+
+/** Waits until the public runtime registry retains the Stop terminal for one exact thread. */
+export async function waitForInterruptionTerminal(socket, threadId, deadline = Date.now() + TIMEOUT_MS) {
+  while (Date.now() < deadline) {
+    const snapshots = await socket.rpc("agent.listRunning", {});
+    if (!Array.isArray(snapshots)) throw new Error("Condition: agent.listRunning returned an unexpected value.");
+    const snapshot = snapshots.find((candidate) => candidate?.threadId === threadId);
+    if (snapshot?.phase === "cancelled" || snapshot?.phase === "interrupted") return snapshot;
+    await delay(200);
+  }
+  throw new Error("Condition: Stop did not produce a retained cancelled or interrupted public runtime.");
+}
+
+async function stopComposerAgent(page) {
+  const stop = page.getByRole("button", { name: "Stop agent", exact: true });
+  await stop.waitFor({ state: "visible", timeout: 15_000 });
+  await stop.click();
+  await stop.waitFor({ state: "hidden", timeout: 15_000 });
+}
+
+function assertInterruptedDisk(content) {
+  assertPatchAttribution(content, "AGENT_MARKER", "EXTERNAL_MARKER");
+  return "agent marker retained";
 }
 
 function classifyProviderJourneyFailure(provider, message) {
