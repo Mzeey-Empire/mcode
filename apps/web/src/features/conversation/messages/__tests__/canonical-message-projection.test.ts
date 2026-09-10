@@ -1,6 +1,7 @@
 import { createAgentModelState, type AgentItem, type AgentTurn, type Message } from "@mcode/contracts";
 import { describe, expect, it } from "vitest";
 import { projectCanonicalMessageList } from "../canonical-message-projection";
+import { createTranscriptItemProjector } from "../virtual-items";
 
 const THREAD_ID = "canonical-child";
 const TURN_ID = "canonical-turn";
@@ -148,20 +149,41 @@ describe("projectCanonicalMessageList", () => {
     expect(projection?.messages.map((entry) => entry.id)).toEqual(["child-prompt"]);
   });
 
-  it("adds one terminal answer and retains the completed turn timeline", () => {
+  it("keeps completed child tools before the final answer and its footer", () => {
     const state = createAgentModelState();
     state.turns[TURN_ID] = turn("Completed", "2026-08-18T12:00:05.000Z", {
       permissionMode: "supervised",
       approvalReviewMode: "manual",
       approvalReviewReason: "provider-version-unsupported",
     });
+    const prompt = message({ sequence: -1 });
+    const opening = message({
+      id: "child-open",
+      role: "assistant",
+      content: "ACTIVE_OPEN_A71C",
+      sequence: 0,
+      timestamp: "2026-08-18T12:00:01.000Z",
+    });
     const answer = message({
       id: "child-answer",
       role: "assistant",
-      content: "ok",
+      content: "ACTIVE_STREAM_PROOF_A71C",
       sequence: 1,
       timestamp: "2026-08-18T12:00:04.000Z",
     });
+    const protocolNotice = message({
+      id: "protocol-notice",
+      role: "system",
+      content: "Codex sent an update this client does not recognize (thread/goal/cleared).",
+      sequence: 2,
+      timestamp: "2026-08-18T12:00:05.000Z",
+    });
+    state.items.opening = item(
+      "opening",
+      "message",
+      { projection: "message", message: opening },
+      opening.timestamp,
+    );
     state.items.answer = item(
       "answer",
       "message",
@@ -174,17 +196,44 @@ describe("projectCanonicalMessageList", () => {
       { projection: "codexChildReasoning", content: "Done" },
       "2026-08-18T12:00:02.000Z",
     );
+    state.items.call = item(
+      "call",
+      "tool-call",
+      {
+        projection: "codexChildToolCall",
+        nativeItemId: "native-read",
+        toolName: "Read",
+        toolInput: { path: "README.md" },
+      },
+      "2026-08-18T12:00:03.000Z",
+    );
+    state.items.result = item(
+      "result",
+      "tool-result",
+      {
+        projection: "codexChildToolResult",
+        nativeItemId: "native-read",
+        output: "contents",
+        isError: false,
+      },
+      "2026-08-18T12:00:03.500Z",
+    );
 
     const projection = projectCanonicalMessageList({
       threadId: THREAD_ID,
       state,
-      messages: [message(), answer],
+      messages: [prompt, opening, answer, protocolNotice],
       toolCalls: [],
       thoughtSegments: [],
     });
 
     expect(projection?.agentDisplayState).toEqual({ phase: "completed" });
-    expect(projection?.messages.map((entry) => entry.id)).toEqual(["child-prompt", "child-answer"]);
+    expect(projection?.messages.map((entry) => entry.id)).toEqual([
+      "child-prompt",
+      "child-open",
+      "child-answer",
+      "protocol-notice",
+    ]);
     expect(projection?.thoughtSegments).toEqual([expect.objectContaining({ text: "Done" })]);
     expect(projection?.currentTurnMessageId).toBe("child-answer");
     expect(projection?.assistantResponseKeys).toEqual({
@@ -192,11 +241,40 @@ describe("projectCanonicalMessageList", () => {
     });
     expect(projection?.turnSummariesByMessageId).toEqual({
       "child-answer": {
-        counts: { steps: 0, thoughts: 1, subagents: 0 },
+        counts: { steps: 1, thoughts: 1, subagents: 0 },
         durationMs: 5_000,
         approvalReview: { mode: "manual", reason: "provider-version-unsupported" },
       },
     });
+    const timeline = createTranscriptItemProjector()({
+      messages: projection!.messages,
+      agentDisplayState: projection!.agentDisplayState,
+      agentStartTime: projection!.agentStartTime,
+      streamingText: projection!.streamingText,
+      toolCalls: projection!.toolCalls,
+      thoughtSegments: projection!.thoughtSegments,
+      currentTurn: {
+        threadId: THREAD_ID,
+        messageId: projection!.currentTurnMessageId,
+        responseKey: projection!.currentTurnResponseKey,
+        responseKeysByMessageId: projection!.assistantResponseKeys,
+      },
+      turnSummariesByMessageId: projection!.turnSummariesByMessageId,
+    });
+    expect(timeline.map((row) => {
+      if (row.type === "message") return `message:${row.message.id}`;
+      if (row.type === "narrative-flow") return `tools:${row.toolCalls.map((call) => call.id).join(",")}`;
+      if (row.type === "persisted-turn-footer") return `footer:${row.messageId}`;
+      return row.type;
+    })).toEqual([
+      "message:child-prompt",
+      "message:child-open",
+      "tools:native-read",
+      "message:child-answer",
+      "narrative-indicator",
+      "footer:child-answer",
+      "message:protocol-notice",
+    ]);
   });
 
   it("does not project an approval-review lifecycle for Full Access", () => {
@@ -220,7 +298,7 @@ describe("projectCanonicalMessageList", () => {
     expect(projection?.turnSummariesByMessageId["child-answer"]?.approvalReview).toBeUndefined();
   });
 
-  it("projects an active child answer without summarizing its turn", () => {
+  it("projects an active child answer as live assistant text without summarizing its turn", () => {
     const state = createAgentModelState();
     state.turns[TURN_ID] = turn("Running");
     const answer = message({
@@ -245,8 +323,28 @@ describe("projectCanonicalMessageList", () => {
       thoughtSegments: [],
     });
 
-    expect(projection?.messages.map((entry) => entry.id)).toEqual(["child-prompt", "child-answer"]);
-    expect(projection?.messages.at(-1)?.content).toBe("Still working");
+    expect(projection).toMatchObject({
+      messages: [expect.objectContaining({ id: "child-prompt" })],
+      streamingText: "Still working",
+      agentDisplayState: { phase: "streaming" },
+    });
+    const timeline = createTranscriptItemProjector()({
+      messages: projection!.messages,
+      agentDisplayState: projection!.agentDisplayState,
+      agentStartTime: projection!.agentStartTime,
+      streamingText: projection!.streamingText,
+      toolCalls: projection!.toolCalls,
+      thoughtSegments: projection!.thoughtSegments,
+      currentTurn: {
+        threadId: THREAD_ID,
+        messageId: projection!.currentTurnMessageId,
+        responseKey: projection!.currentTurnResponseKey,
+        responseKeysByMessageId: projection!.assistantResponseKeys,
+      },
+      turnSummariesByMessageId: projection!.turnSummariesByMessageId,
+    });
+    expect(timeline.filter((row) => row.type === "message").map((row) => row.message.content))
+      .toEqual(["Inspect README.md", "Still working"]);
     expect(projection?.turnSummariesByMessageId).toEqual({});
   });
 

@@ -4,7 +4,6 @@ import type { ThoughtSegment, TurnFooterSummary } from "../narrative/types";
 import { computeLiveStreamingText } from "../narrative/build-narrative";
 import { currentActivityHeading } from "../narrative/activity-label";
 import { buildPersistedNarrativeItems } from "../narrative/build-persisted-narrative";
-import { isGoalStatusNotice } from "@/lib/goal-message";
 import { isRoutineProviderNotice } from "../notices/provider-notices";
 
 /**
@@ -707,7 +706,9 @@ export function buildVirtualItems(
 ): ChatVirtualItem[] {
   const deduped = dedupeVolatileItems(stableItems, volatileItems);
   if (volatileItems.length === 0 || !hasToolCalls || deduped.length === 0) return [...stableItems, ...deduped];
-  const assistantIndex = lastAssistantItemIndex(stableItems);
+  const assistantIndex = responseMessageId === undefined
+    ? -1
+    : stableItems.findIndex((item) => item.type === "message" && item.message.id === responseMessageId);
   const assistant = stableItems[assistantIndex];
   if (assistant?.type !== "message" || assistant.message.id !== responseMessageId) return [...stableItems, ...deduped];
   return spliceNarrativeItems(stableItems, deduped, assistantIndex) ?? [...stableItems, ...deduped];
@@ -716,20 +717,6 @@ export function buildVirtualItems(
 function dedupeVolatileItems(stableItems: readonly ChatVirtualItem[], volatileItems: readonly ChatVirtualItem[]): ChatVirtualItem[] {
   const stableKeys = new Set(stableItems.map((item) => item.key));
   return volatileItems.filter((item) => item.type !== "message" || !isAgentDisplayActive(item.agentDisplayState) || !stableKeys.has(item.key));
-}
-
-function trailingStableChrome(item: ChatVirtualItem): boolean {
-  return item.type === "turn-changes" || item.type === "persisted-turn-footer" || item.type === "persisted-narrative";
-}
-
-function isSkippableStableItem(item: ChatVirtualItem): boolean {
-  return trailingStableChrome(item) || (item.type === "message" && item.message.role === "assistant" && isGoalStatusNotice(item.message.content));
-}
-
-function lastAssistantItemIndex(items: readonly ChatVirtualItem[]): number {
-  let index = items.length - 1;
-  while (index >= 0 && isSkippableStableItem(items[index]!)) index--;
-  return index;
 }
 
 function isAssistantInsertionPoint(item: ChatVirtualItem | undefined): item is Extract<ChatVirtualItem, { type: "message" }> {

@@ -11,6 +11,8 @@ import {
 /** Live canonical child state adapted to the shared chat timeline inputs. */
 export interface CanonicalMessageProjection {
   messages: Message[];
+  /** Latest assistant text that belongs in the shared live response row. */
+  streamingText: string | undefined;
   agentDisplayState: AgentDisplayState;
   agentStartTime?: number;
   toolCalls: ToolCall[];
@@ -177,6 +179,21 @@ function mergedMessages(messages: readonly Message[], projected: readonly Messag
   return [...messagesById.values()].sort((left, right) => left.sequence - right.sequence || left.id.localeCompare(right.id));
 }
 
+function projectedResponse(messages: readonly Message[], projected: readonly Message[], terminal: boolean) {
+  const assistantMessage = [...projected].reverse().find((message) => message.role === "assistant");
+  if (terminal || !assistantMessage?.content) {
+    return { assistantMessage, messages: mergedMessages(messages, projected), streamingText: undefined };
+  }
+  return {
+    assistantMessage,
+    messages: mergedMessages(
+      messages.filter((message) => message.id !== assistantMessage.id),
+      projected.filter((message) => message.id !== assistantMessage.id),
+    ),
+    streamingText: assistantMessage.content,
+  };
+}
+
 function projectedToolCallStart(item: AgentItem, nativeItemId: string): ToolCall {
   const startedAt = timestamp(item.createdAt);
   return {
@@ -275,18 +292,19 @@ export function projectCanonicalMessageList({
   const projectedThoughts = projectedThoughtSegments(items, terminal);
   const toolCallById = new Map(toolCalls.map((toolCall) => [toolCall.id, toolCall]));
   for (const toolCall of projectedCalls.values()) toolCallById.set(toolCall.id, toolCall);
-  const assistantMessage = [...projected].reverse().find((message) => message.role === "assistant");
+  const response = projectedResponse(messages, projected, terminal);
   const responseKey = `canonical-turn-response:${latestTurn.id}`;
 
   return {
-    messages: mergedMessages(messages, projected),
+    messages: response.messages,
+    streamingText: response.streamingText,
     agentDisplayState,
     agentStartTime: timestamp(latestTurn.startedAt ?? latestTurn.createdAt),
     toolCalls: [...toolCallById.values()],
     thoughtSegments: projectedThoughts.length > 0 ? projectedThoughts : [...thoughtSegments],
-    currentTurnMessageId: assistantMessage?.id ?? "",
+    currentTurnMessageId: response.assistantMessage?.id ?? "",
     currentTurnResponseKey: responseKey,
-    assistantResponseKeys: assistantMessage ? { [assistantMessage.id]: responseKey } : {},
+    assistantResponseKeys: response.assistantMessage ? { [response.assistantMessage.id]: responseKey } : {},
     turnSummariesByMessageId: turnSummaries(threadTurns, threadItems),
   };
 }
