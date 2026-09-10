@@ -157,18 +157,24 @@ export class ThreadCreationCoordinator {
     return startup.startupId;
   }
 
-  /** Confirm that cancellation has not won before the queued provider turn reserves runtime ownership. */
+  /**
+   * Confirm that cancellation has not won before the queued provider turn reserves runtime ownership.
+   * A released queued Turn persists user intent, so only cancellation may veto it: when the startup
+   * already reached a terminal non-cancelled state, the Turn drains as an ordinary send rather than
+   * being dropped after claim.
+   */
   canAdmitQueuedAgent(threadId: string, startupId: string | undefined): boolean {
     const startup = this.startups()?.findByThreadId(threadId);
     if (!startup) return startupId === undefined;
-    if (startup.startupId !== startupId) return false;
-    if (startup.cancellation === "requested") {
+    if (startup.cancellation === "requested" || startup.state === "cancelled") {
       if (nonterminalStartupStates.has(startup.state)) {
         this.startups()?.markCancelled(startup.startupId);
       }
       return false;
     }
-    return startup.state === "running" && startup.phase === "agent";
+    if (startupId === undefined) return true;
+    if (startup.startupId !== startupId) return false;
+    return startup.state !== "running" || startup.phase === "agent";
   }
 
   private initialTurnParams(command: CreateAndSendCommand): BranchedInitialTurnParams {

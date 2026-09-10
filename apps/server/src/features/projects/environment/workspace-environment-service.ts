@@ -36,7 +36,7 @@ import {
   type WorkspaceEnvironmentValidationIssue,
   type WorkspaceEnvironmentValidationReason,
 } from "@mcode/contracts";
-import { getMcodeDir } from "@mcode/shared";
+import { getMcodeDir, logger } from "@mcode/shared";
 import { ZodError } from "zod";
 import type { Database } from "bun:sqlite";
 import type { ThreadStartupService } from "../../thread-startup/thread-startup-service.js";
@@ -1625,8 +1625,12 @@ export class WorkspaceEnvironmentService {
         repository.markDispatched(claimed.id);
         resolveWhenResponsive();
         await accepted.completion.catch(() => undefined);
-      } catch {
+      } catch (error) {
         // A malformed or provider-uncertain claim must never be replayed automatically.
+        logger.warn("Released automatic Setup Turn dispatch failed; the claim is left unacknowledged", {
+          threadId,
+          error: error instanceof Error ? error.message : String(error),
+        });
         resolveWhenResponsive();
         return;
       }

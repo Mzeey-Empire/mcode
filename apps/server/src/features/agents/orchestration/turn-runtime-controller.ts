@@ -246,12 +246,19 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
   /** Admit provider-originated runtime state before it can replace the active turn. */
   admitProviderTurn(threadId: string): boolean {
     const reservation = this.mutationReservations.get(threadId);
+    if (reservation?.state === "stopping") {
+      this.stopUnadmittedTurn(threadId, this.runtimePersistence.load(threadId)?.provider as ProviderId | undefined, "late TurnStarted");
+      return false;
+    }
+    // A thread holding an active mutation reservation has a server-admitted turn in flight;
+    // its provider TurnStarted must win over persisted status the previous turn's late
+    // terminal write may have left behind, or the shared session is killed mid-dispatch.
+    if (this.activeMutationReservations.has(threadId)) return true;
     const thread = this.runtimePersistence.load(threadId);
-    if (reservation?.state === "stopping" || isStoppedThread(thread?.status)) {
+    if (isStoppedThread(thread?.status)) {
       this.stopUnadmittedTurn(threadId, thread?.provider as ProviderId | undefined, "late TurnStarted");
       return false;
     }
-    if (this.activeMutationReservations.has(threadId)) return true;
     const token = this.mutationReservations.reserve(threadId, "activeTurn");
     if (!token) {
       this.stopUnadmittedTurn(threadId, thread?.provider as ProviderId | undefined, "blocked auto-resumed turn");
