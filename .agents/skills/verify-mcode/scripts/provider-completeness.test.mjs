@@ -85,7 +85,7 @@ NodeTest.test("starts every provider-completeness row with actionable evidence u
   NodeAssertStrict.equal(receipt.electron.matrix.fullAccess.kind, "coverage-gap");
 });
 
-NodeTest.test("opens Full access Review from its public turn diff action", async () => {
+NodeTest.test("opens Full access Review through the public Changes action when Overview is open", async () => {
   let reviewOpen = false;
   const events = [];
   const file = { count: async () => 1, waitFor: async () => {}, innerText: async () => "AGENT_MARKER" };
@@ -100,6 +100,45 @@ NodeTest.test("opens Full access Review from its public turn diff action", async
   const page = {
     getByTestId: (testId) => {
       if (testId === "review-last-turn") return review;
+      if (testId === "workspace-menu-changes") return { isVisible: async () => true, click: async () => { events.push("overview-changes"); } };
+      if (testId === "review-view-switcher") return { click: async () => { events.push("review-view-switcher"); } };
+      if (testId === "review-view-last-turn") return { click: async () => { events.push("review-view-last-turn"); reviewOpen = true; } };
+      throw new Error(`unexpected test id ${testId}`);
+    },
+    getByRole: (_role, options) => {
+      if (options.name === "View all diffs") {
+        return { last: () => ({ click: async () => { throw new Error("View all diffs is blocked by the open Overview menu."); } }) };
+      }
+      throw new Error(`unexpected role ${String(options.name)}`);
+    },
+    screenshot: async () => {},
+    locator: (selector) => {
+      NodeAssertStrict.equal(selector, '[data-testid*="spinner"], [data-testid="review-refresh-progress"]');
+      return { count: async () => 0 };
+    },
+  };
+  const result = await captureFullAccessReview(page, receipt, "full-access", { file: { path: "full-access-codex.md" }, comparison: { turnDiff: { source: "native", fidelity: "agent" } } });
+  NodeAssertStrict.deepEqual(events, ["overview-changes", "review-view-switcher", "review-view-last-turn"]);
+  NodeAssertStrict.equal(result.filePath, "full-access-codex.md");
+  NodeAssertStrict.equal(result.rows, 1);
+});
+
+NodeTest.test("opens Full access Review through the public turn diff action when Overview is closed", async () => {
+  let reviewOpen = false;
+  const events = [];
+  const file = { count: async () => 1, waitFor: async () => {}, innerText: async () => "AGENT_MARKER" };
+  const source = { count: async () => 1, waitFor: async () => {}, innerText: async () => "Agent changes", getAttribute: async (name) => name === "data-review-source" ? "native" : "agent" };
+  const review = {
+    isVisible: async () => reviewOpen,
+    waitFor: async () => { reviewOpen = true; },
+    locator: (selector) => selector === '[data-review-file="full-access-codex.md"]' ? file : { count: async () => 1 },
+    getByTestId: () => source,
+  };
+  const receipt = { directory: NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "provider-completeness-full-access-")), screenshots: [], renderedEvidence: [] };
+  const page = {
+    getByTestId: (testId) => {
+      if (testId === "review-last-turn") return review;
+      if (testId === "workspace-menu-changes") return { isVisible: async () => false };
       if (testId === "review-view-switcher") return { click: async () => { events.push("review-view-switcher"); } };
       if (testId === "review-view-last-turn") return { click: async () => { events.push("review-view-last-turn"); reviewOpen = true; } };
       throw new Error(`unexpected test id ${testId}`);
@@ -571,8 +610,9 @@ NodeTest.test("runs the Electron Full access journey before dispatch and retains
     approvalReviewReason: "full-access-bypasses-approval-review",
   };
   let threadListCalls = 0;
+  let threadListExpanded = false;
   const socket = { rpc: async (method, params) => {
-    if (method === "thread.list") return threadListCalls++ === 0 ? [] : [{ id: "full-thread", provider: "codex", model: "model" }];
+    if (method === "thread.list") return threadListCalls++ === 0 ? [] : [{ id: "full-thread", provider: "codex", model: "model", title: "Full access thread" }];
     if (method === "turnDiff.getComparison") return { turnDiff: { id: "comparison-1", phase: "settled", source: "native", fidelity: "agent" }, files: [{ path: "full-access-codex.md", status: "modified" }] };
     if (method === "turnDiff.getFileDiff") return "AGENT_MARKER";
     if (method === "push.setThreadSubscriptions") {
@@ -585,6 +625,21 @@ NodeTest.test("runs the Electron Full access journey before dispatch and retains
   const control = { click: async () => {}, fill: async () => {}, press: async () => {}, waitFor: async () => {}, isVisible: async () => false };
   const dialog = { ...control, isVisible: async () => true, getByTestId: () => control, getByRole: () => control, getByText: () => control };
   const fullTrigger = { ...control, waitFor: async () => { events.push("full-visible"); } };
+  const threadTitle = {
+    filter: ({ hasText }) => {
+      NodeAssertStrict.equal(hasText, "Full access thread");
+      return { waitFor: async () => { events.push("thread-visible"); }, click: async () => { events.push("thread-selected"); } };
+    },
+  };
+  const threadListToggle = {
+    getAttribute: async () => threadListExpanded ? "true" : "false",
+    click: async () => { throw new Error("The overlapping project title must not receive a pointer retry through the thread toggle."); },
+    press: async (key) => {
+      NodeAssertStrict.equal(key, "Enter");
+      threadListExpanded = !threadListExpanded;
+      events.push(threadListExpanded ? "thread-list-opened" : "thread-list-collapsed");
+    },
+  };
   const controls = new Map([
     ["dialog:Choose model and provider", dialog],
     ["button:Access mode: Manual", { click: async () => { events.push("manual"); } }],
@@ -594,8 +649,17 @@ NodeTest.test("runs the Electron Full access journey before dispatch and retains
   ]);
   const connectionLost = { waitFor: async ({ state }) => { events.push(`connection:${state}`); } };
   const page = {
-    getByTestId: (testId) => testId === "approval-review" ? { count: async () => 0 } : control,
-    getByRole: (role, options) => controls.get(`${role}:${options?.name}`) ?? control,
+    getByTestId: (testId) => {
+      if (testId === "approval-review") return { count: async () => 0 };
+      if (testId === "thread-title") return threadTitle;
+      if (testId === "thread-overview-masthead") return { waitFor: async () => { events.push("thread-opened"); } };
+      return control;
+    },
+    getByRole: (role, options) => {
+      if (options?.name === "Toggle threads for Fixture") return threadListToggle;
+      if (options?.name === "Open project Fixture") return { click: async () => { threadListExpanded = !threadListExpanded; events.push("project-opened"); } };
+      return controls.get(`${role}:${options?.name}`) ?? control;
+    },
     getByText: (name) => name === "Connection lost. Reconnecting to server..." ? connectionLost : control,
     reload: async () => { events.push("reload"); },
     context: () => ({ setOffline: async (offline) => { events.push(`offline:${offline}`); } }),
@@ -616,6 +680,9 @@ NodeTest.test("runs the Electron Full access journey before dispatch and retains
   NodeAssertStrict.ok(events.indexOf("full-visible") < events.indexOf("dispatch"));
   NodeAssertStrict.ok(events.indexOf("reload") > events.indexOf("dispatch"));
   NodeAssertStrict.deepEqual(events.filter((event) => event.startsWith("offline:")), ["offline:true", "offline:false"]);
+  NodeAssertStrict.deepEqual(events.filter((event) => ["project-opened", "thread-list-collapsed", "thread-visible", "thread-selected", "thread-opened"].includes(event)), ["project-opened", "thread-visible", "thread-selected", "thread-opened", "thread-list-collapsed", "project-opened", "thread-visible", "thread-selected", "thread-opened"]);
+  NodeAssertStrict.ok(events.indexOf("thread-list-collapsed") > events.indexOf("offline:true"));
+  NodeAssertStrict.ok(events.indexOf("project-opened", events.indexOf("thread-list-collapsed")) < events.indexOf("offline:false"));
   NodeAssertStrict.equal(events.filter((event) => event.startsWith("canonical:")).length, 3);
   NodeAssertStrict.match(result.observations.settled.screenshot, /electron-full-access-settled/);
   NodeAssertStrict.match(result.observations.reloaded.screenshot, /electron-full-access-reloaded/);

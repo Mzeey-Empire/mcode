@@ -888,13 +888,15 @@ export async function runFullAccessJourney({ surface = "web", client, socket, wo
   result.fullAccess.settled = settled;
 
   await reloadClient(client);
+  await reopenFullAccessThread(client.page, workspace, thread);
   result.observations.reloaded = await captureSettledReviewState(socket, thread.id, fileName, client.page, run, `${surface}-full-access-reloaded`, captureFullAccessState);
   const reloaded = await readFullAccessSnapshot(socket, thread.id);
   await assertNoApprovalReviewFooter(client.page);
   assertFullAccessRecovery(settled, reloaded);
   result.fullAccess.reloaded = reloaded;
 
-  await reconnectOwningClient(client);
+  await reconnectOwningClient(client, workspace);
+  await reopenFullAccessThread(client.page, workspace, thread);
   result.observations.reconnected = await captureSettledReviewState(socket, thread.id, fileName, client.page, run, `${surface}-full-access-reconnected`, captureFullAccessState);
   const reconnected = await readFullAccessSnapshot(socket, thread.id);
   await assertNoApprovalReviewFooter(client.page);
@@ -1963,23 +1965,39 @@ export async function openDesktop(repoRoot, playwright, ports, dependencies = {}
   } catch (error) { if (owner) stopElectron(repoRoot); throw error; }
 }
 async function reloadClient(client) { if (client.session?.context) client.page = await client.sessionHelper.reloadElectronAppPage(client.session.context, client.page, client.session.appUrl); else await client.page.reload({ waitUntil: "domcontentloaded" }); }
-async function reconnectOwningClient(client) {
+async function reconnectOwningClient(client, workspace) {
   const connectionLost = client.page.getByText(CONNECTION_LOST_TEXT, { exact: true });
   const context = client.page.context();
   await context.setOffline(true);
   try {
+    if (workspace) await requestThreadReload(client.page, workspace);
     await connectionLost.waitFor({ state: "visible", timeout: 15_000 });
   } finally {
     await context.setOffline(false);
   }
   await connectionLost.waitFor({ state: "hidden", timeout: 30_000 });
 }
+async function requestThreadReload(page, workspace) {
+  const threadListToggle = page.getByRole("button", { name: `Toggle threads for ${workspace.name}` });
+  if (await threadListToggle.getAttribute("aria-expanded") === "true") await threadListToggle.press("Enter");
+  await page.getByRole("button", { name: `Open project ${workspace.name}` }).click();
+}
+async function reopenFullAccessThread(page, workspace, thread) {
+  const threadListToggle = page.getByRole("button", { name: `Toggle threads for ${workspace.name}` });
+  if (await threadListToggle.getAttribute("aria-expanded") !== "true") await page.getByRole("button", { name: `Open project ${workspace.name}` }).click();
+  const threadTitle = page.getByTestId("thread-title").filter({ hasText: thread.title });
+  await threadTitle.waitFor({ state: "visible", timeout: 15_000 });
+  await threadTitle.click();
+  await page.getByTestId("thread-overview-masthead").waitFor({ state: "visible", timeout: 15_000 });
+}
 export async function closeReview(page) { const review = page.getByTestId("review-last-turn"); if (await review.isVisible().catch(() => false)) await page.getByRole("button", { name: /Changes/ }).click(); }
 export async function captureReview(page, receipt, name, result) { const review = await waitForExactReview(page, result); const rendered = await readRenderedReview(page, result.file.path); const screenshot = NodePath.join(receipt.directory, `${name}.png`); await page.screenshot({ path: screenshot }); receipt.screenshots.push(screenshot); receipt.renderedEvidence.push(screenshot); const spinners = await page.locator('[data-testid*="spinner"], [data-testid="review-refresh-progress"]').count(); const rows = await reviewRowCount(review); return { screenshot, rows, spinners, ...rendered }; }
 export async function captureFullAccessReview(page, receipt, name, result) {
   const review = page.getByTestId("review-last-turn");
   if (!await review.isVisible().catch(() => false)) {
-    await page.getByRole("button", { name: "View all diffs", exact: true }).last().click();
+    const overviewChanges = page.getByTestId("workspace-menu-changes");
+    if (await overviewChanges.isVisible().catch(() => false)) await overviewChanges.click();
+    else await page.getByRole("button", { name: "View all diffs", exact: true }).last().click();
     await page.getByTestId("review-view-switcher").click();
     await page.getByTestId("review-view-last-turn").click();
     await review.waitFor({ state: "visible", timeout: 15_000 });
