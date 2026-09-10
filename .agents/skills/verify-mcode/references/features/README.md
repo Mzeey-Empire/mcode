@@ -39,6 +39,7 @@
 | An OpenCode thread streams a pooled-serve turn to completion, stops to aborted, shares one server per worktree, routes supervised permission and question cards through the shared request flow, and renders canonical notices once | [OpenCode pooled serve](opencode-pooled-serve.md) | `runtime live --provider opencode --model <provider/model-id> --scenario completion` and `--scenario stop` |
 | Thread Overview defaults open when the right panel opens; at 824 pixels or wider its rails reserve 344 pixels independently of panel visibility, while narrower panes use an intentional overlay, and it is unavailable while the panel is maximized | [Thread Overview and right panel](thread-overview-right-panel.md) | Electron public UI proof with the stable live-testing interface |
 | An existing thread title is renamed or cancelled from the Project tree | [Thread-list inline rename](thread-list-inline-rename.md) | Electron public UI proof with the stable live-testing interface |
+| A thread workspace opens in each detected external editor without showing a Windows console window | [Open in editor](open-in-editor.md) | Electron Open in menu proof and focused Windows launch tests |
 
 Read [Multi-surface journeys](multi-surface-journeys.md) for a workflow that crosses the server, web or Electron UI, provider adapters, persistence, or managed worktrees.
 
@@ -53,7 +54,8 @@ Read [Multi-surface journeys](multi-surface-journeys.md) for a workflow that cro
 7. Run `thread-lifecycle health`, `thread-lifecycle check`, and the completed-thread proof when thread completion or worktree cleanup changed.
 8. Run the Thread Overview and right-panel workflow when shared workspace navigation or panel layout changed.
 9. Run the thread-list inline rename workflow when Project-tree thread naming changed.
-10. Run the applicable multi-surface journey last, inspect receipts, then run cleanup.
+10. Run the Open in editor workflow when external-editor discovery or launch changes.
+11. Run the applicable multi-surface journey last, inspect receipts, then run cleanup.
 
 ## Coverage gaps
 
