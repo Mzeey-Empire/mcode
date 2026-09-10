@@ -280,7 +280,7 @@ NodeTest.test("waits for an exact Live agent file before an external edit may fo
   NodeAssertStrict.equal(calls, 3);
 });
 
-NodeTest.test("captures Codex Live proof only after the same-file external edit and refreshed public comparison", async () => {
+NodeTest.test("captures Codex Live proof after the same-file external edit and reconnects the owning client before post-reconnect proof", async () => {
   const events = [];
   let externalEditApplied = false;
   let threadListCalls = 0;
@@ -293,7 +293,9 @@ NodeTest.test("captures Codex Live proof only after the same-file external edit 
     if (method === "turnDiff.getComparison") {
       comparisonCalls += 1;
       const phase = comparisonCalls < 3 ? "live" : "settled";
-      const id = phase === "live" ? (externalEditApplied ? "live-after-external-edit" : "live-before-external-edit") : "settled";
+      const id = phase === "live"
+        ? (externalEditApplied ? "live-after-external-edit" : "live-before-external-edit")
+        : ["settled", "settled-observed", "settled-reopened", "settled-reloaded", "settled-after-reconnect"][comparisonCalls - 3];
       events.push(`comparison:${id}`);
       return { turnDiff: { id, phase, source: "native", fidelity: "agent" }, files: [{ path: "target-codex.txt" }] };
     }
@@ -315,25 +317,45 @@ NodeTest.test("captures Codex Live proof only after the same-file external edit 
     events.push("rendered-live");
     return { stopVisible: true, screenshot: "live.png", filePath: result.file.path, fileText: "AGENT_MARKER", patch: "AGENT_MARKER", sourceLabel: "Agent changes", source: "native", fidelity: "agent" };
   };
-  const reviewCapture = async (_page, _receipt, _name, result) => ({ rows: 1, spinners: 0, screenshot: "settled.png", filePath: result.file.path, fileText: "AGENT_MARKER", patch: "AGENT_MARKER", sourceLabel: "Agent changes", source: "native", fidelity: "agent" });
+  const reviewCapture = async (_page, _receipt, name, result) => {
+    if (name.endsWith("reconnected")) events.push("rendered-reconnected");
+    return { rows: 1, spinners: 0, screenshot: "settled.png", filePath: result.file.path, fileText: "AGENT_MARKER", patch: "AGENT_MARKER", sourceLabel: "Agent changes", source: "native", fidelity: "agent" };
+  };
 
-  const result = await runComposerReviewJourney({ surface: "web", client: { page: composerJourneyPage() }, socket, workspace: { id: "workspace", name: "Fixture", path: "fixture" }, run, io, provider: "codex", model: "model", modelName: "Model", captureLive: liveCapture, captureReview: reviewCapture });
+  const page = composerJourneyPage(events);
+  const result = await runComposerReviewJourney({ surface: "web", client: { page }, socket, workspace: { id: "workspace", name: "Fixture", path: "fixture" }, run, io, provider: "codex", model: "model", modelName: "Model", captureLive: liveCapture, captureReview: reviewCapture });
 
   NodeAssertStrict.equal(result.observations.live.comparisonId, "live-after-external-edit");
   NodeAssertStrict.equal(result.fetchedPatch, "AGENT_MARKER");
   NodeAssertStrict.equal(result.disk, "both markers retained");
   NodeAssertStrict.deepEqual(events.slice(0, 5), ["comparison:live-before-external-edit", "patch:live-before-external-edit", "external-edit", "comparison:live-after-external-edit", "patch:live-after-external-edit"]);
   NodeAssertStrict.ok(events.indexOf("rendered-live") > events.indexOf("comparison:live-after-external-edit"));
+  NodeAssertStrict.equal(result.observations.reloaded.comparisonId, "settled-reloaded");
+  NodeAssertStrict.equal(result.observations.reconnected.comparisonId, "settled-after-reconnect");
+  const reloaded = events.indexOf("reload");
+  const offline = events.indexOf("network:offline");
+  const reconnected = events.indexOf("network:online");
+  const publicState = events.lastIndexOf("comparison:settled-after-reconnect");
+  NodeAssertStrict.ok(reloaded >= 0);
+  NodeAssertStrict.ok(events.indexOf("comparison:settled-reloaded") > reloaded);
+  NodeAssertStrict.ok(offline > events.indexOf("comparison:settled-reloaded"));
+  NodeAssertStrict.ok(events.indexOf("connection-banner:visible") > offline);
+  NodeAssertStrict.ok(reconnected > events.indexOf("connection-banner:visible"));
+  NodeAssertStrict.ok(events.indexOf("connection-banner:hidden") > reconnected);
+  NodeAssertStrict.ok(publicState > events.indexOf("connection-banner:hidden"));
+  NodeAssertStrict.ok(events.indexOf("rendered-reconnected") > publicState);
 });
 
-function composerJourneyPage() {
+function composerJourneyPage(events = []) {
   const control = { click: async () => {}, fill: async () => {}, press: async () => {}, waitFor: async () => {}, isVisible: async () => false };
   const dialog = { ...control, isVisible: async () => true, getByTestId: () => control, getByRole: () => control, getByText: () => control };
+  const connectionBanner = { waitFor: async ({ state }) => { events.push(`connection-banner:${state}`); } };
   return {
     getByTestId: () => control,
     getByRole: (role) => role === "dialog" ? dialog : control,
-    getByText: () => control,
-    reload: async () => {},
+    getByText: (text) => text === "Connection lost. Reconnecting to server..." ? connectionBanner : control,
+    context: () => ({ setOffline: async (offline) => { events.push(`network:${offline ? "offline" : "online"}`); } }),
+    reload: async () => { events.push("reload"); },
   };
 }
 

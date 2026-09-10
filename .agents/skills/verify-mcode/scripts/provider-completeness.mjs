@@ -16,6 +16,7 @@ const TIMEOUT_MS = 120_000;
 const LIVE_TIMEOUT_MS = 180_000;
 const MAX_LIVE_COMPARISON_STATES = 24;
 const FOCUSED_GATE_TIMEOUT_MS = 120_000;
+const CONNECTION_LOST_TEXT = "Connection lost. Reconnecting to server...";
 const FOCUSED_GATES = [
   { name: "server-turn-diff-review", workspace: "apps/server", options: ["--no-file-parallelism", "--testTimeout=30000"], files: ["src/features/agents/turns/__tests__/turn-diff-review.test.ts"], rows: ["empty", "interruption"] },
   { name: "server-approval-review-policy", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/agents/turns/__tests__/approval-review-policy.test.ts"], rows: ["strictManual", "managedRequired"] },
@@ -577,6 +578,8 @@ export async function runComposerReviewJourney({ surface, client, socket, worksp
     result.observations.reopened = await captureSettledReviewState(socket, thread.id, fileName, client.page, run, `${surface}-${provider}-reopened`, captureReviewState);
     await reloadClient(client);
     result.observations.reloaded = await captureSettledReviewState(socket, thread.id, fileName, client.page, run, `${surface}-${provider}-reloaded`, captureReviewState);
+    await reconnectOwningClient(client);
+    result.observations.reconnected = await captureSettledReviewState(socket, thread.id, fileName, client.page, run, `${surface}-${provider}-reconnected`, captureReviewState);
   }
   const disk = await io.readFile(fixtureFile, "utf8");
   result.disk = provider === "codex" ? assertDiskContent(disk, "AGENT_MARKER", "EXTERNAL_MARKER") : (disk.includes("AGENT_MARKER") ? "agent marker retained" : (() => { throw new Error("Condition: disk did not retain the agent marker."); })());
@@ -839,6 +842,17 @@ export async function openDesktop(repoRoot, playwright, ports, dependencies = {}
   } catch (error) { if (owner) stopElectron(repoRoot); throw error; }
 }
 async function reloadClient(client) { if (client.session?.context) client.page = await client.sessionHelper.reloadElectronAppPage(client.session.context, client.page, client.session.appUrl); else await client.page.reload({ waitUntil: "domcontentloaded" }); }
+async function reconnectOwningClient(client) {
+  const connectionLost = client.page.getByText(CONNECTION_LOST_TEXT, { exact: true });
+  const context = client.page.context();
+  await context.setOffline(true);
+  try {
+    await connectionLost.waitFor({ state: "visible", timeout: 15_000 });
+  } finally {
+    await context.setOffline(false);
+  }
+  await connectionLost.waitFor({ state: "hidden", timeout: 30_000 });
+}
 export async function closeReview(page) { const review = page.getByTestId("review-last-turn"); if (await review.isVisible().catch(() => false)) await page.getByRole("button", { name: /Changes/ }).click(); }
 export async function captureReview(page, receipt, name, result) { const review = await waitForExactReview(page, result); const rendered = await readRenderedReview(page, result.file.path); const screenshot = NodePath.join(receipt.directory, `${name}.png`); await page.screenshot({ path: screenshot }); receipt.screenshots.push(screenshot); receipt.renderedEvidence.push(screenshot); const spinners = await page.locator('[role="progressbar"], [data-testid*="spinner"]').count(); const rows = await reviewRowCount(review); return { screenshot, rows, spinners, ...rendered }; }
 export async function waitForExactReview(page, result, timeout = 15_000) {
