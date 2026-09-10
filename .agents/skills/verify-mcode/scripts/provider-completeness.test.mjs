@@ -90,13 +90,14 @@ NodeTest.test("records focused gates once under their true owner and preserves t
   NodeAssertStrict.deepEqual(failures, []);
   NodeAssertStrict.equal(calls.length, 5);
   NodeAssertStrict.deepEqual(calls.slice(0, 3).map((call) => call.args.at(-1)), [
-    "src/features/agents/turns/__tests__/turn-diff-review.test.ts",
+    "src/features/agents/turns/__tests__/turn-diff-service.test.ts",
     "src/features/agents/turns/__tests__/approval-review-policy.test.ts",
     "src/features/projects/files/__tests__/workspace-invalidation-service.test.ts",
   ]);
+  NodeAssertStrict.ok(calls[0].args.includes("src/features/agents/turns/__tests__/turn-diff-review.test.ts"));
   NodeAssertStrict.ok(calls[0].args.includes("--testTimeout=30000"));
   NodeAssertStrict.deepEqual(receipt.focusedGates.map(({ control, rows }) => ({ control, rows })), [
-    { control: "apps/server focused integration tests", rows: ["empty", "interruption"] },
+    { control: "apps/server focused integration tests", rows: ["empty", "invalidation", "interruption"] },
     { control: "apps/server focused integration tests", rows: ["strictManual", "managedRequired"] },
     { control: "apps/server focused integration tests", rows: ["invalidation", "staleRetry", "disconnectWatchCleanup"] },
     { control: "packages/providers focused protocol tests", rows: ["warningsReroutes"] },

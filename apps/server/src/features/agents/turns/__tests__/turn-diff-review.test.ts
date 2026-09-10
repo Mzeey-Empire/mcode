@@ -94,6 +94,48 @@ describe("Last turn Review public comparison boundary", () => {
     expect(await routeTurnDiffRpc("turnDiff.getFileDiff", { threadId: identity.threadId, comparisonId: result.turnDiff!.id, filePath: "../a.txt" }, deps)).toBe("");
   });
 
+  it("clears Live evidence after an empty update and selects the Git fallback when file effects remain", async () => {
+    const service = new SnapshotService(new RealGitExecutor());
+    const before = await service.captureRef(directory);
+    NodeFS.writeFileSync(NodePath.join(directory, "a.txt"), "AGENT=after\nUSER=after\n");
+    const after = await service.captureRef(directory);
+    db.prepare("INSERT INTO messages (id, thread_id, role, content, timestamp, sequence) VALUES (?, ?, ?, ?, ?, ?)")
+      .run("message-2", identity.threadId, "assistant", "Done", new Date().toISOString(), 2);
+    deps.turnSnapshotRepo.create({ messageId: "message-2", threadId: identity.threadId,
+      refBefore: before, refAfter: after, filesChanged: ["a.txt"], worktreePath: null });
+    const next = { ...identity, turnId: "turn-2", turnExecutionId: "execution-2" };
+    deps.turnDiffs.begin(next);
+    deps.turnDiffs.push({ ...next, state: "snapshot", nativeFidelity: "agent", revision: 1, patch: nativePatch });
+    expect(ReviewComparisonSchema().parse(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps)).turnDiff?.phase).toBe("live");
+    deps.turnDiffs.push({ ...next, revision: 2, state: "indeterminate-empty" });
+    expect(deps.turnDiffs.liveComparison(identity.threadId)).toBeNull();
+    const afterEmpty = ReviewComparisonSchema().parse(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
+    expect(afterEmpty.turnDiff).toMatchObject({ phase: "settled", source: "git", fidelity: "same-file-changes-possible" });
+    deps.turnDiffs.prepareFinalization(identity.threadId, next.turnExecutionId, "completed")("message-2", {
+      revision: 2, fileCount: 1, additions: 1, deletions: 1,
+      effects: [{ path: "a.txt", scope: "workspace", kind: "edited", additions: 1, deletions: 1, binary: false, toolCallIds: [] }],
+    });
+    const fallback = ReviewComparisonSchema().parse(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
+    expect(fallback.turnDiff).toMatchObject({ phase: "settled", source: "git", fidelity: "same-file-changes-possible" });
+    expect(await routeTurnDiffRpc("turnDiff.getFileDiff", { threadId: identity.threadId, comparisonId: fallback.turnDiff!.id, filePath: "a.txt" }, deps)).toContain("+USER=after");
+  });
+
+  it("keeps the previous settled Review after explicit invalidation clears the next Live diff", async () => {
+    deps.turnDiffs.begin(identity);
+    deps.turnDiffs.push({ ...identity, state: "snapshot", nativeFidelity: "agent", revision: 1, patch: nativePatch });
+    deps.turnDiffs.prepareFinalization(identity.threadId, identity.turnExecutionId, "completed")("message-1", undefined);
+    const previous = ReviewComparisonSchema().parse(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
+    const next = { ...identity, turnId: "turn-2", turnExecutionId: "execution-2" };
+    deps.turnDiffs.begin(next);
+    deps.turnDiffs.push({ ...next, state: "snapshot", nativeFidelity: "agent", revision: 1, patch: nativePatch });
+    expect(ReviewComparisonSchema().parse(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps)).turnDiff?.phase).toBe("live");
+    deps.turnDiffs.push({ ...next, revision: 2, state: "invalidated" });
+    expect(deps.turnDiffs.liveComparison(identity.threadId)).toBeNull();
+    const retained = ReviewComparisonSchema().parse(await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
+    expect(retained.turnDiff?.id).toBe(previous.turnDiff?.id);
+    expect(retained.turnDiff).toMatchObject({ phase: "settled", source: "native", fidelity: "agent" });
+  });
+
   it("reads settled evidence after reconnect without clearing another client's Live patch", async () => {
     const snapshot = await snapshotBothEdits();
     deps.turnDiffs.begin(identity);
