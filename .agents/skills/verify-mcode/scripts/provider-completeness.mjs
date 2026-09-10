@@ -663,8 +663,8 @@ export async function runProviderJourneys({ surface, client, socket, workspace, 
   return journeys;
 }
 
-export async function runComposerReviewJourney({ surface, client, socket, workspace, run, io, provider, model, modelName, captureLive: captureLiveState, captureReview: captureReviewState }) {
-  const fileName = `target-${provider}.txt`;
+export async function runComposerReviewJourney({ surface, client, socket, workspace, run, io, provider, model, modelName, captureLive: captureLiveState, captureReview: captureReviewState, captureFourSurface: captureFourSurfaceState = captureFourSurfaceRefreshState }) {
+  const fileName = provider === "codex" ? "target-codex.md" : `target-${provider}.txt`;
   const fixtureFile = NodePath.join(run.fixtureDirectory, fileName);
   const result = { provider, model, baseline: "BASELINE_MARKER", observations: {}, comparison: {}, fetchedPatch: null, disk: null };
   await io.writeFile(fixtureFile, "BASELINE_MARKER\n", "utf8");
@@ -677,15 +677,7 @@ export async function runComposerReviewJourney({ surface, client, socket, worksp
   run.run.ownedThreadIds = [...new Set([...(run.run.ownedThreadIds ?? []), thread.id])];
   run.workspace = { id: workspace.id, name: workspace.name, path: workspace.path, selectionEvidence: { source: "thread.list scoped request", requestedWorkspaceId: workspace.id, threadId: thread.id } };
   if (provider === "codex") {
-    run.phase = "agent-live-diff";
-    const initialAgentComparison = await waitForLiveAgentDiff(socket, thread.id, fileName, undefined, run.diagnostics.liveComparisons);
-    assertPatchAttribution(initialAgentComparison.patch, "AGENT_MARKER", "EXTERNAL_MARKER");
-    await io.appendFile(fixtureFile, "EXTERNAL_MARKER\n", "utf8");
-    const agentComparison = await waitForLiveAgentDiff(socket, thread.id, fileName, undefined, run.diagnostics.liveComparisons);
-    assertPatchAttribution(agentComparison.patch, "AGENT_MARKER", "EXTERNAL_MARKER");
-    result.comparison.agentLive = summarizeComparison(agentComparison.comparison, agentComparison.patch);
-    result.fetchedPatch = agentComparison.patch;
-    result.observations.live = await captureLiveObservation(client.page, run, agentComparison, captureLiveState, `${surface}-${provider}-live`);
+    await captureCodexLiveJourney({ client, socket, threadId: thread.id, run, surface, fixtureFile, fileName, io, result, captureLiveState, captureFourSurfaceState });
   }
   const settled = await waitForSettledComparison(socket, thread.id, fileName);
   assertPatchAttribution(settled.patch, "AGENT_MARKER", "EXTERNAL_MARKER");
@@ -699,9 +691,175 @@ export async function runComposerReviewJourney({ surface, client, socket, worksp
     await reconnectOwningClient(client);
     result.observations.reconnected = await captureSettledReviewState(socket, thread.id, fileName, client.page, run, `${surface}-${provider}-reconnected`, captureReviewState);
   }
-  const disk = await io.readFile(fixtureFile, "utf8");
-  result.disk = provider === "codex" ? assertDiskContent(disk, "AGENT_MARKER", "EXTERNAL_MARKER") : (disk.includes("AGENT_MARKER") ? "agent marker retained" : (() => { throw new Error("Condition: disk did not retain the agent marker."); })());
+  result.disk = await readComposerDiskEvidence(io, fixtureFile, provider);
   return result;
+}
+
+async function readComposerDiskEvidence(io, fixtureFile, provider) {
+  const disk = await io.readFile(fixtureFile, "utf8");
+  if (provider === "codex") return assertDiskContent(disk, "AGENT_MARKER", "EXTERNAL_MARKER");
+  if (!disk.includes("AGENT_MARKER")) throw new Error("Condition: disk did not retain the agent marker.");
+  return "agent marker retained";
+}
+
+async function captureCodexLiveJourney({ client, socket, threadId, run, surface, fixtureFile, fileName, io, result, captureLiveState, captureFourSurfaceState }) {
+  run.phase = "agent-live-diff";
+  const initialAgentComparison = await waitForLiveAgentDiff(socket, threadId, fileName, undefined, run.diagnostics.liveComparisons);
+  assertPatchAttribution(initialAgentComparison.patch, "AGENT_MARKER", "EXTERNAL_MARKER");
+  result.fourSurfaceRefresh = await runFourSurfaceRefreshJourney({ client, socket, threadId, run, surface, fixtureFile, fileName, io, initialComparison: initialAgentComparison, capture: captureFourSurfaceState });
+  const agentComparison = await waitForLiveAgentDiff(socket, threadId, fileName, undefined, run.diagnostics.liveComparisons);
+  assertPatchAttribution(agentComparison.patch, "AGENT_MARKER", "EXTERNAL_MARKER");
+  result.comparison.agentLive = summarizeComparison(agentComparison.comparison, agentComparison.patch);
+  result.fetchedPatch = agentComparison.patch;
+  result.observations.live = await captureLiveObservation(client.page, run, agentComparison, captureLiveState, `${surface}-codex-live`);
+}
+
+/**
+ * Records one verifier-owned disk mutation across the public file surfaces.
+ *
+ * Last turn is immutable agent evidence. The rendered preview and Last turn
+ * must therefore refresh while retaining their agent-only patch.
+ */
+export async function runFourSurfaceRefreshJourney({
+  client,
+  socket,
+  threadId,
+  run,
+  surface,
+  fixtureFile,
+  fileName,
+  io,
+  marker = "EXTERNAL_MARKER",
+  initialComparison,
+  capture = captureFourSurfaceRefreshState,
+}) {
+  if (!fixtureFile || !fileName || !io?.appendFile || !io?.readFile || typeof capture !== "function") {
+    throw new Error("Condition: four-surface refresh requires one owned fixture file, filesystem access, and a surface capture.");
+  }
+  const captureInput = { client, socket, threadId, run, surface, fixtureFile, fileName, marker, initialComparison };
+  const before = await capture({ ...captureInput, phase: "before" });
+  assertFourSurfaceState(before, fileName, marker);
+  await io.appendFile(fixtureFile, `${marker}\n`, "utf8");
+  const disk = assertDiskContent(await io.readFile(fixtureFile, "utf8"), "AGENT_MARKER", marker);
+  const after = await capture({ ...captureInput, phase: "after" });
+  assertFourSurfaceState(after, fileName, marker);
+  return {
+    kind: "four-surface-refresh",
+    trigger: {
+      type: "verifier-owned-filesystem-append",
+      file: NodePath.basename(fixtureFile),
+      marker,
+    },
+    file: NodePath.basename(fixtureFile),
+    before,
+    after,
+    disk,
+    surfaces: { files: "passed", composer: "passed", preview: "passed", lastTurn: "passed" },
+  };
+}
+
+function assertFourSurfaceState(state, fileName, marker) {
+  if (!state?.files?.content?.includes(fileName)) throw new Error("Condition: Files did not expose the exact refresh file.");
+  if (!state?.composer?.suggestion?.includes(fileName)) throw new Error("Condition: Composer autocomplete did not expose the exact refresh file.");
+  assertAgentOnlySurface(state.preview, "rendered Preview", fileName, marker);
+  assertAgentOnlySurface(state.lastTurn, "Last turn Review", fileName, marker);
+}
+
+function assertAgentOnlySurface(surface, name, fileName, marker) {
+  if (surface?.fileName !== fileName || surface.renderedPatch !== "AGENT_MARKER" || typeof surface.fileText !== "string" || !surface.fileText.includes("AGENT_MARKER") || surface.fileText.includes(marker) || !surface.source || !surface.fidelity || !Number.isInteger(surface.revision)) {
+    throw new Error(`Condition: ${name} did not retain exact agent-only source, fidelity, and revision evidence.`);
+  }
+}
+
+async function captureFourSurfaceRefreshState({ client, socket, threadId, run, surface, fileName, initialComparison, phase }) {
+  if (!client?.page || !socket || !threadId || !run) {
+    throw new Error("Condition: four-surface refresh capture requires the owning public client, socket, thread, and run.");
+  }
+  const comparison = phase === "before"
+    ? initialComparison
+    : await waitForLiveAgentDiff(socket, threadId, fileName, undefined, run.diagnostics.liveComparisons);
+  if (!comparison) throw new Error("Condition: four-surface refresh did not retain an exact public Live comparison.");
+  const page = client.page;
+  let review = await waitForExactReview(page, comparison);
+  if (phase === "after") {
+    await refreshLastTurnReview(page);
+    review = await waitForExactReview(page, comparison);
+  }
+  const [files, composer, preview, lastTurn] = await Promise.all([
+    captureFilesRefreshState(page, fileName),
+    captureComposerRefreshState(page, fileName),
+    captureRenderedPreviewRefreshState(review, fileName, comparison),
+    captureLastTurnRefreshState(page, fileName, comparison),
+  ]);
+  const screenshot = NodePath.join(run.directory, `${surface}-four-surfaces-${phase}.png`);
+  await page.screenshot({ path: screenshot });
+  run.screenshots.push(screenshot);
+  run.renderedEvidence.push(screenshot);
+  return { files, composer, preview, lastTurn, screenshot };
+}
+
+async function captureFilesRefreshState(page, fileName) {
+  const pane = page.getByTestId("dev-worktree-files-pane");
+  if (!await pane.isVisible().catch(() => false)) {
+    const toggle = page.getByRole("button", { name: "Show files", exact: true });
+    await toggle.waitFor({ state: "visible", timeout: 15_000 });
+    await toggle.click();
+  }
+  await pane.waitFor({ state: "visible", timeout: 15_000 });
+  const file = pane.getByText(fileName, { exact: true });
+  await file.waitFor({ state: "visible", timeout: 15_000 });
+  return { fileName, content: await pane.innerText() };
+}
+
+async function captureComposerRefreshState(page, fileName) {
+  const composer = page.getByRole("textbox", { name: "Message Mcode", exact: true });
+  await composer.fill(`@${fileName}`);
+  const suggestions = page.getByRole("listbox", { name: "Mention suggestions", exact: true });
+  const suggestion = suggestions.locator("[data-file-item]").filter({ hasText: fileName }).first();
+  await suggestion.waitFor({ state: "visible", timeout: 15_000 });
+  const text = await suggestion.innerText();
+  await composer.fill("");
+  return { suggestion: text };
+}
+
+async function captureRenderedPreviewRefreshState(review, fileName, comparison) {
+  const file = review.locator(`[data-review-file="${escapeAttributeValue(fileName)}"]`);
+  const preview = file.getByRole("button", { name: "Show rendered preview", exact: true });
+  if (!await preview.isVisible().catch(() => false)) {
+    await file.getByRole("button").first().click();
+    await preview.waitFor({ state: "visible", timeout: 15_000 });
+  }
+  await preview.click();
+  await preview.waitFor({ state: "visible", timeout: 15_000 });
+  if (await preview.getAttribute("aria-pressed") !== "true") throw new Error("Condition: rendered Preview did not open.");
+  const rendered = await readRenderedReviewFromFile(file);
+  return { fileName, renderedPatch: rendered.patch, fileText: rendered.fileText, ...reviewSourceEvidence(comparison) };
+}
+
+async function captureLastTurnRefreshState(page, fileName, comparison) {
+  const rendered = await readRenderedReview(page, fileName);
+  return { fileName, renderedPatch: rendered.patch, fileText: rendered.fileText, ...reviewSourceEvidence(comparison, rendered) };
+}
+
+function reviewSourceEvidence(comparison, rendered = null) {
+  const turnDiff = comparison.comparison.turnDiff;
+  if (rendered) return { source: rendered.source, fidelity: rendered.fidelity, revision: turnDiff.revision };
+  return { source: turnDiff.source, fidelity: turnDiff.fidelity, revision: turnDiff.revision };
+}
+
+async function readRenderedReviewFromFile(file) {
+  const fileText = await file.innerText();
+  return { fileText, patch: fileText.includes("AGENT_MARKER") ? "AGENT_MARKER" : null };
+}
+
+async function refreshLastTurnReview(page) {
+  await page.getByTestId("review-options-menu").click();
+  const refresh = page.getByTestId("review-option-refresh");
+  await refresh.waitFor({ state: "visible", timeout: 15_000 });
+  await refresh.click();
+  const progress = page.getByTestId("review-refresh-progress");
+  await progress.waitFor({ state: "visible", timeout: 15_000 });
+  await progress.waitFor({ state: "hidden", timeout: 15_000 });
 }
 
 /** Drives a completed Composer turn that must have no public file effects. */
@@ -1467,7 +1625,7 @@ function optionalStrings(values) {
 }
 
 function isExactOrRedacted(value, expected) { return value === expected || value === "[path]"; }
-function isOwnedFixtureFile(value, directory) { return value === "[path]" || (typeof value === "string" && isWithin(value, directory) && /^(?:target(?:-(?:codex|cursor|claude))?|watch-(?:owner|observer)-sentinel)\.txt$/i.test(NodePath.basename(value))); }
+function isOwnedFixtureFile(value, directory) { return value === "[path]" || (typeof value === "string" && isWithin(value, directory) && /^(?:target(?:-(?:codex|cursor|claude))?\.(?:txt|md)|watch-(?:owner|observer)-sentinel\.txt)$/i.test(NodePath.basename(value))); }
 
 function hydrateOwnedReceipt(receipt, repoRoot) {
   const fixtureDirectory = NodePath.join(getRuntimePaths(repoRoot).fixtureRepoDir, `provider-completeness-${receipt.runId}`);

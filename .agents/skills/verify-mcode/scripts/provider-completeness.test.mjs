@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
-import { aggregateEvidenceFailures, applyProviderPrerequisites, assertDiskContent, assertLiveObservation, assertObservation, assertPatchAttribution, assertSeparateClients, captureCodexTraceEvidence, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createOwnedFixtureWorkspace, createReceipt, emptyComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runComposerReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runInterruptionJourney, runWorkspaceInvalidationJourney, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
+import { aggregateEvidenceFailures, applyProviderPrerequisites, assertDiskContent, assertLiveObservation, assertObservation, assertPatchAttribution, assertSeparateClients, captureCodexTraceEvidence, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createOwnedFixtureWorkspace, createReceipt, emptyComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runComposerReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runFourSurfaceRefreshJourney, runInterruptionJourney, runWorkspaceInvalidationJourney, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
 
 NodeTest.test("requires explicit proof and cleanup confirmations", () => {
   NodeAssertStrict.deepEqual(parseArguments(["health"]), { command: "health" });
@@ -79,6 +79,38 @@ NodeTest.test("starts every provider-completeness row with actionable evidence u
   NodeAssertStrict.deepEqual(receipt.watcherOwnership, { kind: "live-rpc-required", control: "public file.watch RPC and files.changed push", status: "not-run" });
   NodeAssertStrict.equal(receipt.matrix.electronRightPanel, undefined);
   NodeAssertStrict.equal(receipt.electron.matrix.electronRightPanel.surface, "Electron");
+});
+
+NodeTest.test("writes externally only after every four-surface baseline and before every refreshed assertion", async () => {
+  const events = [];
+  const fileName = "external-refresh.md";
+  const marker = "EXTERNAL_REFRESH_MARKER";
+  const evidence = await runFourSurfaceRefreshJourney({
+    fixtureFile: `fixture/${fileName}`,
+    fileName,
+    marker,
+    io: {
+      appendFile: async (path, content, encoding) => { events.push(`write:${path}:${content.trim()}:${encoding}`); },
+      readFile: async () => `AGENT_MARKER\n${marker}\n`,
+    },
+    capture: async ({ phase }) => {
+      events.push(`capture:${phase}`);
+      return {
+        files: { fileName, content: `${phase}:Files:${fileName}` },
+        composer: { suggestion: `${phase}:Composer:${fileName}` },
+        preview: { fileName, renderedPatch: "AGENT_MARKER", fileText: "AGENT_MARKER", source: "native", fidelity: "agent", revision: 1 },
+        lastTurn: { fileName, renderedPatch: "AGENT_MARKER", fileText: "AGENT_MARKER", source: "native", fidelity: "agent", revision: 1 },
+      };
+    },
+  });
+
+  const writeIndex = events.findIndex((event) => event.startsWith("write:"));
+  NodeAssertStrict.equal(events.filter((event) => event.startsWith("write:")).length, 1);
+  NodeAssertStrict.ok(events.slice(0, writeIndex).every((event) => event === "capture:before"));
+  NodeAssertStrict.ok(events.slice(writeIndex + 1).every((event) => event === "capture:after"));
+  NodeAssertStrict.deepEqual(evidence.surfaces, { files: "passed", composer: "passed", preview: "passed", lastTurn: "passed" });
+  NodeAssertStrict.equal(evidence.trigger.marker, marker);
+  NodeAssertStrict.equal(evidence.disk, "both markers retained");
 });
 
 NodeTest.test("records focused gates once under their true owner and preserves them through provider prerequisite updates", async () => {
@@ -400,7 +432,7 @@ NodeTest.test("captures Codex Live proof after the same-file external edit and r
         ? (externalEditApplied ? "live-after-external-edit" : "live-before-external-edit")
         : ["settled", "settled-observed", "settled-reopened", "settled-reloaded", "settled-after-reconnect"][comparisonCalls - 3];
       events.push(`comparison:${id}`);
-      return { turnDiff: { id, phase, source: "native", fidelity: "agent" }, files: [{ path: "target-codex.txt" }] };
+      return { turnDiff: { id, phase, source: "native", fidelity: "agent" }, files: [{ path: "target-codex.md" }] };
     }
     if (method === "turnDiff.getFileDiff") {
       events.push(`patch:${params.comparisonId}`);
@@ -426,12 +458,22 @@ NodeTest.test("captures Codex Live proof after the same-file external edit and r
   };
 
   const page = composerJourneyPage(events);
-  const result = await runComposerReviewJourney({ surface: "web", client: { page }, socket, workspace: { id: "workspace", name: "Fixture", path: "fixture" }, run, io, provider: "codex", model: "model", modelName: "Model", captureLive: liveCapture, captureReview: reviewCapture });
+  const captureFourSurface = async ({ phase, fileName }) => {
+    events.push(`four-surfaces:${phase}`);
+    return {
+      files: { content: fileName },
+      composer: { suggestion: fileName },
+      preview: { fileName, renderedPatch: "AGENT_MARKER", fileText: "AGENT_MARKER", source: "native", fidelity: "agent", revision: 1 },
+      lastTurn: { fileName, renderedPatch: "AGENT_MARKER", fileText: "AGENT_MARKER", source: "native", fidelity: "agent", revision: 1 },
+    };
+  };
+  const result = await runComposerReviewJourney({ surface: "web", client: { page }, socket, workspace: { id: "workspace", name: "Fixture", path: "fixture" }, run, io, provider: "codex", model: "model", modelName: "Model", captureLive: liveCapture, captureReview: reviewCapture, captureFourSurface });
 
   NodeAssertStrict.equal(result.observations.live.comparisonId, "live-after-external-edit");
   NodeAssertStrict.equal(result.fetchedPatch, "AGENT_MARKER");
   NodeAssertStrict.equal(result.disk, "both markers retained");
-  NodeAssertStrict.deepEqual(events.slice(0, 5), ["comparison:live-before-external-edit", "patch:live-before-external-edit", "external-edit", "comparison:live-after-external-edit", "patch:live-after-external-edit"]);
+  NodeAssertStrict.deepEqual(events.slice(0, 7), ["comparison:live-before-external-edit", "patch:live-before-external-edit", "four-surfaces:before", "external-edit", "four-surfaces:after", "comparison:live-after-external-edit", "patch:live-after-external-edit"]);
+  NodeAssertStrict.deepEqual(result.fourSurfaceRefresh.surfaces, { files: "passed", composer: "passed", preview: "passed", lastTurn: "passed" });
   NodeAssertStrict.ok(events.indexOf("rendered-live") > events.indexOf("comparison:live-after-external-edit"));
   NodeAssertStrict.equal(result.observations.reloaded.comparisonId, "settled-reloaded");
   NodeAssertStrict.equal(result.observations.reconnected.comparisonId, "settled-after-reconnect");
