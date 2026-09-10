@@ -4,10 +4,11 @@ import { describe, expect, it } from "vitest";
 import { ContextTracker } from "../ContextTracker";
 
 describe("ContextTracker", () => {
-  it("keeps the ring number-free and shows capacity on hover", async () => {
+  it("keeps the ring number-free in a 32px target and shows capacity on hover", async () => {
     const user = userEvent.setup();
     render(<ContextTracker tokensIn={82_000} contextWindow={258_000} totalProcessedTokens={528_000} />);
     const ring = screen.getByRole("img", { name: /Context window: 32%/ });
+    expect(ring).toHaveStyle({ width: "3.2rem", height: "3.2rem" });
     expect(ring).toHaveTextContent("");
     await user.hover(ring);
     const bar = await screen.findByRole("progressbar", { name: "Context window usage" });

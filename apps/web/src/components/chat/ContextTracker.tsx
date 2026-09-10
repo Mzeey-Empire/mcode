@@ -61,7 +61,7 @@ export function ContextTracker({ tokensIn, contextWindow, totalProcessedTokens, 
               "relative flex items-center justify-center cursor-pointer rounded-full focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2",
               className,
             )}
-            style={{ width: 20, height: 20 }}
+            style={{ width: "3.2rem", height: "3.2rem" }}
             aria-label={`Context window: ${tooltipLine}`}
             role="img"
             tabIndex={0}
