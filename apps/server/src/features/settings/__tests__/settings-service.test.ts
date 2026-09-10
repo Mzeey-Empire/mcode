@@ -177,6 +177,21 @@ describe("SettingsService rendering-engine migration", () => {
     expect(persisted).not.toHaveProperty("preview.rendering");
   });
 
+  it("removes the retired Cursor usage email from persisted settings", () => {
+    vi.mocked(NodeFS.readFileSync).mockReturnValue(JSON.stringify({
+      provider: { cursor: { idleSessionTtlMinutes: 30, usageEmail: "dev@example.com" } },
+    }));
+
+    const settings = new SettingsService().get();
+
+    expect(settings.provider.cursor.idleSessionTtlMinutes).toBe(30);
+    expect(settings.provider.cursor).not.toHaveProperty("usageEmail");
+    const persisted = JSON.parse(
+      vi.mocked(NodeFS.writeFileSync).mock.calls[0]![1] as string,
+    ) as Record<string, unknown>;
+    expect(persisted).not.toHaveProperty("provider.cursor.usageEmail");
+  });
+
   it("removes the retired unsafe-worktree policy from persisted settings", () => {
     vi.mocked(NodeFS.readFileSync).mockReturnValue(JSON.stringify({
       thread: { completion: { retentionDays: 7, unsafeWorktreePolicy: "delete" } },

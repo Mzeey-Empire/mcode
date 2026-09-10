@@ -127,6 +127,34 @@ function removeLegacyUnsafeWorktreePolicy(value: unknown): {
   return { changed: true, document };
 }
 
+function removeLegacyCursorUsageEmailSetting(value: unknown): {
+  readonly changed: boolean;
+  readonly document: unknown;
+} {
+  if (!isRecord(value) || !isRecord(value.provider) || !isRecord(value.provider.cursor)) {
+    return { changed: false, document: value };
+  }
+  if (!Object.prototype.hasOwnProperty.call(value.provider.cursor, "usageEmail")) {
+    return { changed: false, document: value };
+  }
+
+  const cursor = { ...value.provider.cursor };
+  delete cursor.usageEmail;
+  const provider = { ...value.provider };
+  if (Object.keys(cursor).length === 0) {
+    delete provider.cursor;
+  } else {
+    provider.cursor = cursor;
+  }
+  const document = { ...value };
+  if (Object.keys(provider).length === 0) {
+    delete document.provider;
+  } else {
+    document.provider = provider;
+  }
+  return { changed: true, document };
+}
+
 function getSettingsDefaults(): Settings {
   const defaults = getDefaultSettings();
   if (process.env.MCODE_AGENT_RUNTIME !== "1") {
@@ -333,7 +361,8 @@ export class SettingsService {
   private readSettingsDocument(parsed: unknown): Settings | null {
     const previewMigration = removeLegacyPreviewRenderingSetting(parsed);
     const worktreeMigration = removeLegacyUnsafeWorktreePolicy(previewMigration.document);
-    const terminalMigration = migrateTerminalSettingsDocument(worktreeMigration.document);
+    const cursorUsageEmailMigration = removeLegacyCursorUsageEmailSetting(worktreeMigration.document);
+    const terminalMigration = migrateTerminalSettingsDocument(cursorUsageEmailMigration.document);
     if (terminalMigration.status === "blocked") {
       this.blockTerminalMigration(terminalMigration.reason, terminalMigration.original);
       logger.warn("Settings file failed Terminal migration, returning temporary defaults", {
@@ -356,7 +385,10 @@ export class SettingsService {
     this.terminalMigrationStatus = { status: terminalMigration.status };
     this.persistSettingsMigration(
       result.data,
-      previewMigration.changed || worktreeMigration.changed || migratedTerminalSettings,
+      previewMigration.changed
+        || worktreeMigration.changed
+        || cursorUsageEmailMigration.changed
+        || migratedTerminalSettings,
       migratedTerminalSettings,
     );
     return result.data;
