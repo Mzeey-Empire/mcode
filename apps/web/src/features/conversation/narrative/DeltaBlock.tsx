@@ -1,6 +1,9 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { splitStreamingBlocks, type StreamingBlockPart } from "./streaming-blocks";
+import { CodeBlock } from "@/components/chat/CodeBlock";
 
 const LazyMarkdownContent = lazy(() => import("@/components/chat/MarkdownContent"));
+const LazyMermaidBlock = lazy(() => import("@/components/chat/MermaidBlock"));
 
 interface DeltaBlockProps {
   /** The streamed response text to display. */
@@ -39,6 +42,34 @@ function findLastTextNode(root: HTMLElement): Text | null {
     node = walker.nextNode() as Text | null;
   }
   return last;
+}
+
+/**
+ * Measures where the typing caret should sit relative to `root`: at the end of
+ * the last text run when the stream ends in prose, or just below the last
+ * rendered block when it ends in a skeleton, diagram, code block, or table —
+ * those are not typing surfaces, so anchoring inside them (a skeleton caption
+ * or a diagram's SVG label) would park the caret mid-block.
+ */
+function measureCaretPosition(
+  root: HTMLElement,
+  cursor: HTMLElement,
+  lastTextNode: Text,
+): { x: number; y: number; h: number } | null {
+  const rootRect = root.getBoundingClientRect();
+  if (lastTextNode.parentElement?.closest("p")) {
+    const caretRect = getCaretRectAtEnd(lastTextNode);
+    if (!caretRect) return null;
+    return {
+      x: caretRect.right - rootRect.left,
+      y: caretRect.top - rootRect.top,
+      h: Math.min(Math.max(caretRect.height || 16, 12), 28),
+    };
+  }
+  const lastBlock = cursor.previousElementSibling;
+  if (!lastBlock) return null;
+  const blockRect = lastBlock.getBoundingClientRect();
+  return { x: blockRect.left - rootRect.left, y: blockRect.bottom - rootRect.top, h: 16 };
 }
 
 /**
@@ -197,6 +228,131 @@ function useTypewriter(target: string, isStreaming: boolean): string {
  * stays a permanent child of the root <div> (React-owned, never re-parented)
  * to avoid corrupting React's fiber tree.
  */
+/** Skeleton for a construct whose closing marker has not streamed in yet. */
+function StreamingSkeleton({ label, rows, columns }: { label: string; rows: number; columns?: number }) {
+  return (
+    <div className="my-2" data-testid="streaming-skeleton" aria-label={label}>
+      <div className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <span className="size-1.5 rounded-full bg-primary animate-pulse" />
+        {label}
+      </div>
+      {columns === undefined ? (
+        <div className="rounded-lg border border-border/60 bg-muted/30 p-4 space-y-2">
+          {Array.from({ length: Math.min(Math.max(1, rows), 8) }, (_, i) => (
+            <div
+              key={i}
+              className="h-3 rounded bg-muted-foreground/15 animate-pulse"
+              style={{ width: `${55 + ((i * 37) % 40)}%`, animationDelay: `${i * 60}ms` }}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="rounded-lg border border-border/60 overflow-hidden">
+          <div className="h-8 bg-muted/50 border-b border-border/60 animate-pulse" />
+          {Array.from({ length: Math.min(rows, 8) }, (_, r) => (
+            <div key={r} className="flex border-b border-border/40 last:border-0">
+              {Array.from({ length: Math.min(Math.max(1, columns), 8) }, (_, c) => (
+                <div key={c} className="flex-1 px-3 py-2 border-r border-border/40 last:border-0">
+                  <div
+                    className="h-3 rounded bg-muted-foreground/15 animate-pulse"
+                    style={{ animationDelay: `${(r * columns + c) * 70}ms` }}
+                  />
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A completed streamed table, matching MarkdownContent's table chrome. */
+function StreamingTable({ header, rows }: { header: string[]; rows: string[][] }) {
+  return (
+    <div className="overflow-x-auto my-2">
+      <table className="min-w-full border border-border rounded">
+        <thead>
+          <tr>
+            {header.map((cell, i) => (
+              <th key={i} className="border border-border bg-muted/50 px-3 py-1.5 text-left text-sm font-semibold">
+                {cell}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, r) => (
+            <tr key={r}>
+              {row.map((cell, c) => (
+                <td key={c} className="border border-border px-3 py-1.5 text-sm">{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function StreamingPart({ part }: { part: StreamingBlockPart }) {
+  if (part.kind === "text") {
+    return <p className="whitespace-pre-wrap text-sm leading-relaxed">{part.text}</p>;
+  }
+  if (part.kind === "table") {
+    return part.closed
+      ? <StreamingTable header={part.header} rows={part.rows} />
+      : <StreamingSkeleton label="table assembling" rows={part.rows.length} columns={part.header.length} />;
+  }
+  if (!part.closed) {
+    const label = part.lang === "mermaid" ? "diagram" : part.lang || "code";
+    return <StreamingSkeleton label={`${label} assembling`} rows={part.code.split("\n").length} />;
+  }
+  if (part.lang === "mermaid") {
+    return (
+      <Suspense
+        fallback={
+          <pre className="bg-muted/30 rounded-lg p-4 overflow-x-auto text-sm font-mono">
+            <code>{part.code}</code>
+          </pre>
+        }
+      >
+        <LazyMermaidBlock code={part.code} isStreaming={false} />
+      </Suspense>
+    );
+  }
+  // Closed fence content is stable, so `isStreaming` is false; highlighting is
+  // deferred to the settled MarkdownContent pass instead of running mid-stream.
+  return (
+    <CodeBlock
+      code={part.code}
+      language={part.lang}
+      languageLabel={part.lang || "text"}
+      isStreaming={false}
+      disableHighlighting
+    />
+  );
+}
+
+/**
+ * Streaming body: plain pre-wrapped text plus constructs whose closing marker
+ * has arrived. Full markdown stays out of the per-keystroke path; fenced blocks
+ * and tables are the exception because their source stops changing once closed,
+ * so each one renders exactly once. A construct still being typed renders as a
+ * skeleton rather than raw syntax or a failed partial render.
+ */
+function StreamingBody({ text }: { text: string }) {
+  const parts = useMemo(() => splitStreamingBlocks(text), [text]);
+  if (!parts.some((part) => part.kind !== "text")) {
+    return <p className="whitespace-pre-wrap text-sm leading-relaxed">{text}</p>;
+  }
+  return (
+    <>
+      {parts.map((part, index) => <StreamingPart key={index} part={part} />)}
+    </>
+  );
+}
+
 export function DeltaBlock({ text, isStreaming = true, showCursor = true }: DeltaBlockProps) {
   const displayed = useTypewriter(text, isStreaming);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -221,13 +377,9 @@ export function DeltaBlock({ text, isStreaming = true, showCursor = true }: Delt
     // disappear for one paint then fade back in.
     const lastTextNode = findLastTextNode(root);
     if (!lastTextNode) return;
-    const caretRect = getCaretRectAtEnd(lastTextNode);
-    if (!caretRect) return;
-
-    const rootRect = root.getBoundingClientRect();
-    const x = caretRect.right - rootRect.left;
-    const y = caretRect.top - rootRect.top;
-    const h = Math.min(Math.max(caretRect.height || 16, 12), 28);
+    const caret = measureCaretPosition(root, cursor, lastTextNode);
+    if (!caret) return;
+    const { x, y, h } = caret;
 
     // First time visible text appears: play the entry flight animation.
     // We place the cursor at an offset (above-right of the caret) with no
@@ -260,9 +412,7 @@ export function DeltaBlock({ text, isStreaming = true, showCursor = true }: Delt
   return (
     <div ref={rootRef} className="relative">
       {isStreaming ? (
-        <p className="whitespace-pre-wrap text-sm leading-relaxed">
-          {displayed}
-        </p>
+        <StreamingBody text={displayed} />
       ) : (
         <Suspense
           fallback={

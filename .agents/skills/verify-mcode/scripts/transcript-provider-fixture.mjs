@@ -42,7 +42,7 @@ if (args.command === "version") {
       const text = request.params?.input?.find((item) => item.type === "text")?.text ?? "";
       const long = text.includes("long narrative");
       reply(request.id, { turn: { id: turnId } });
-      void emitTurn(notify, threadId, turnId, long, text.includes("overlapping commands"), text.includes("activity label verification"), text.includes("shell card verification")).finally(() => {
+      void emitTurn(notify, threadId, turnId, long, text.includes("overlapping commands"), text.includes("activity label verification"), text.includes("shell card verification"), text.includes("mermaid streaming")).finally(() => {
         running.delete(threadId);
       });
   }
@@ -53,11 +53,16 @@ function fixtureThreadId(request) {
     ? request.params.threadId : NodeCrypto.randomUUID();
 }
 
-async function emitTurn(notify, threadId, turnId, long, overlapping, activity, shellCards) {
+async function emitTurn(notify, threadId, turnId, long, overlapping, activity, shellCards, mermaid) {
   await new Promise((resolve) => setTimeout(resolve, FIXTURE_TURN_DELAY_MS));
   const turn = (status) => ({ id: turnId, items: [], status, error: null });
   const base = { threadId, turnId };
   notify("turn/started", { threadId, turn: turn("inProgress") });
+  if (mermaid) {
+    await emitMermaidStream(notify, base);
+    notify("turn/completed", { threadId, turn: turn("completed") });
+    return;
+  }
   if (activity) await emitActivityLabels(notify, base);
   if (overlapping) await emitOverlappingCommands(notify, base);
   if (shellCards) await emitShellCards(notify, base);
@@ -72,6 +77,11 @@ async function emitTurn(notify, threadId, turnId, long, overlapping, activity, s
     notify("item/completed", { ...base, item: { ...command, status: "completed", aggregatedOutput: `Fixture result ${index + 1}`, exitCode: 0, durationMs: 1 } });
     await new Promise((resolve) => setTimeout(resolve, long ? 50 : 5));
   }
+  emitFinalAnswer(notify, base, turnId);
+  notify("turn/completed", { threadId, turn: turn("completed") });
+}
+
+function emitFinalAnswer(notify, base, turnId) {
   const id = `${turnId}-answer`;
   const text = `Fixture answer: ${turnId}. Transcript inspection completed. This answer must remain after its user message and narrative.\n\n`.repeat(4);
   notify("item/started", { ...base, item: { id, type: "agentMessage", text: "", phase: "final_answer" } });
@@ -79,7 +89,28 @@ async function emitTurn(notify, threadId, turnId, long, overlapping, activity, s
     notify("item/agentMessage/delta", { ...base, itemId: id, delta: delta[0] });
   }
   notify("item/completed", { ...base, item: { id, type: "agentMessage", text, phase: "final_answer", memoryCitation: null } });
-  notify("turn/completed", { threadId, turn: turn("completed") });
+}
+
+/**
+ * Streams a final answer that exercises every streaming-block state:
+ * an open mermaid fence, a closed mermaid fence plus a closed code fence, an
+ * open table, and finally a closed table with trailing prose. The holds keep
+ * the turn in progress so a renderer can be checked at each stage.
+ */
+async function emitMermaidStream(notify, base) {
+  const id = `${base.turnId}-answer`;
+  const send = (delta) => notify("item/agentMessage/delta", { ...base, itemId: id, delta });
+  const hold = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const stage1 = "Here is the requested diagram.\n\n```mermaid\ngraph TD;\n  A[Streamed] --";
+  const stage2 = "> B[Rendered];\n```\n\n```ts\ninterface Turn {\n  id: string;\n}\n```\n\n| A | B |\n| - | - |\n| 1 | 2 |";
+  const stage3 = "\n| 3 | 4 |\n\nStreaming continues after the diagram closes.";
+  notify("item/started", { ...base, item: { id, type: "agentMessage", text: "", phase: "final_answer" } });
+  send(stage1);
+  await hold(12000);
+  send(stage2);
+  await hold(15000);
+  send(stage3);
+  notify("item/completed", { ...base, item: { id, type: "agentMessage", text: stage1 + stage2 + stage3, phase: "final_answer", memoryCitation: null } });
 }
 
 async function emitShellCards(notify, base) {

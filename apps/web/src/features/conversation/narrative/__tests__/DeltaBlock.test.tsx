@@ -11,6 +11,24 @@ vi.mock("@/components/chat/MarkdownContent", () => ({
   ),
 }));
 
+vi.mock("@/components/chat/MermaidBlock", () => ({
+  __esModule: true,
+  default: ({ code, isStreaming }: { code: string; isStreaming?: boolean }) => (
+    <div data-testid="mermaid-block" data-streaming={String(isStreaming)}>
+      {code}
+    </div>
+  ),
+}));
+
+vi.mock("@/components/chat/CodeBlock", () => ({
+  __esModule: true,
+  CodeBlock: ({ code, language }: { code: string; language: string }) => (
+    <div data-testid="code-block" data-language={language}>
+      {code}
+    </div>
+  ),
+}));
+
 function makeRectList(rect: Partial<DOMRect>): DOMRectList {
   const item = {
     right: rect.right ?? 12,
@@ -41,6 +59,69 @@ describe("DeltaBlock", () => {
     expect(container.querySelector("p.whitespace-pre-wrap")?.textContent).toContain(
       "streaming text",
     );
+  });
+
+  it("renders a closed mermaid fence as a diagram part while streaming", async () => {
+    render(
+      <DeltaBlock
+        text={"before\n```mermaid\ngraph TD; A-->B;\n```\nafter"}
+        isStreaming
+        showCursor={false}
+      />,
+    );
+
+    const block = await screen.findByTestId("mermaid-block");
+    await waitFor(() => expect(block.getAttribute("data-streaming")).toBe("false"));
+    await waitFor(() => expect(block.textContent).toBe("graph TD; A-->B;"));
+  });
+
+  it("shows a skeleton for a mermaid fence still streaming", async () => {
+    render(
+      <DeltaBlock text={"intro\n```mermaid\ngraph TD; A--"} isStreaming showCursor={false} />,
+    );
+
+    const skeleton = await screen.findByTestId("streaming-skeleton");
+    await waitFor(() => expect(skeleton.getAttribute("aria-label")).toBe("diagram assembling"));
+    expect(screen.queryByTestId("mermaid-block")).toBeNull();
+  });
+
+  it("renders a closed code fence with the code block chrome while streaming", async () => {
+    render(
+      <DeltaBlock
+        text={"intro\n```ts\nconst x = 1;\n```\ntail"}
+        isStreaming
+        showCursor={false}
+      />,
+    );
+
+    const block = await screen.findByTestId("code-block");
+    await waitFor(() => expect(block.textContent).toBe("const x = 1;"));
+    expect(block.getAttribute("data-language")).toBe("ts");
+  });
+
+  it("shows a skeleton for a table still receiving rows", async () => {
+    render(
+      <DeltaBlock text={"lead\n| A | B |\n| - | - |\n| 1 |"} isStreaming showCursor={false} />,
+    );
+
+    const skeleton = await screen.findByTestId("streaming-skeleton");
+    await waitFor(() => expect(skeleton.getAttribute("aria-label")).toBe("table assembling"));
+  });
+
+  it("renders a real table once a non-table line closes it", async () => {
+    render(
+      <DeltaBlock
+        text={"| A | B |\n| - | - |\n| 1 | 2 |\n\ndone"}
+        isStreaming
+        showCursor={false}
+      />,
+    );
+
+    await waitFor(() => {
+      const cells = screen.getAllByRole("columnheader").map((cell) => cell.textContent);
+      expect(cells).toEqual(["A", "B"]);
+    });
+    expect(screen.getAllByRole("cell").map((cell) => cell.textContent)).toEqual(["1", "2"]);
   });
 
   it("uses the markdown adapter after settling", async () => {
