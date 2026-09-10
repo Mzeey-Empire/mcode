@@ -220,6 +220,7 @@ async function createProviderJourney(surface, client, socket, workspace, run, io
     matrix,
     captureLive: dependencies.captureLive ?? captureLive,
     captureReview: dependencies.captureReview ?? captureReview,
+    captureEmpty: dependencies.captureEmpty ?? captureEmptyReview,
   });
 }
 
@@ -498,8 +499,8 @@ export function assertEveryAvailableProviderWasProven(matrix) {
 /** Lists focused-gate and provider-journey failures after every surface has run. */
 export function aggregateEvidenceFailures(focusedFailures, surfaces) {
   const providerFailures = Object.entries(surfaces).flatMap(([surface, matrix]) => Object.values(matrix)
-    .filter((entry) => entry?.kind === "required-live-proof" || entry?.kind === "live-proof-failed")
-    .map((entry) => `${surface}/${entry.provider}`));
+    .filter((entry) => entry?.kind === "required-live-proof" || entry?.kind === "live-proof-failed" || entry?.kind === "empty-proof-failed")
+    .map((entry) => entry.kind === "empty-proof-failed" ? `${surface}/empty` : `${surface}/${entry.provider}`));
   return [...focusedFailures, ...providerFailures];
 }
 
@@ -519,7 +520,7 @@ export async function waitForNewThread(socket, workspaceId, previousIds, provide
 
 async function listThreadIds(socket, workspaceId) { const threads = await socket.rpc("thread.list", { workspaceId }); if (!Array.isArray(threads)) throw new Error("Condition: thread.list returned an unexpected value."); return new Set(threads.map((thread) => thread?.id).filter(Boolean)); }
 
-export async function runProviderJourneys({ surface, client, socket, workspace, run, io, matrix, captureLive, captureReview }) {
+export async function runProviderJourneys({ surface, client, socket, workspace, run, io, matrix, captureLive, captureReview, captureEmpty }) {
   const journeys = {};
   for (const [row, evidence] of Object.entries(matrix).filter(([, entry]) => entry?.kind === "required-live-proof")) {
     try {
@@ -534,6 +535,19 @@ export async function runProviderJourneys({ surface, client, socket, workspace, 
       await captureFailure(client.page, run, `${surface}-${evidence.provider}-failure`);
     }
   }
+  const codex = matrix.codexNative;
+  if (codex?.provider === "codex" && codex.model && codex.modelName) {
+    try {
+      const journey = await runEmptyDiffJourney({ surface, client, socket, workspace, run, provider: codex.provider, model: codex.model, modelName: codex.modelName, captureEmpty });
+      journeys.empty = { status: "passed", provider: codex.provider, model: codex.model, journey };
+      matrix.empty = { kind: "empty-proof", control: `${surface} Composer, public turn comparison, and Review`, provider: codex.provider, model: codex.model, journey };
+    } catch (error) {
+      const message = safeError(error);
+      journeys.empty = { status: "failed", provider: codex.provider, model: codex.model, failure: { message, classification: "empty public Composer journey failed before completed no-change evidence" } };
+      matrix.empty = { kind: "empty-proof-failed", control: `${surface} Composer, public turn comparison, and Review`, provider: codex.provider, model: codex.model, failure: journeys.empty.failure };
+      await captureFailure(client.page, run, `${surface}-empty-failure`);
+    }
+  }
   return journeys;
 }
 
@@ -545,7 +559,7 @@ export async function runComposerReviewJourney({ surface, client, socket, worksp
   run.run.ownedFile ??= fixtureFile;
   run.run.ownedFiles = [...new Set([...(run.run.ownedFiles ?? []), fixtureFile])];
   const beforeThreads = await listThreadIds(socket, workspace.id);
-  await driveComposer(client.page, workspace.name, fileName, provider, modelName);
+  await driveComposer(client.page, workspace.name, provider, modelName, composerPrompt(fileName));
   const thread = await waitForNewThread(socket, workspace.id, beforeThreads, provider, model, run.run);
   run.run.threadId ??= thread.id;
   run.run.ownedThreadIds = [...new Set([...(run.run.ownedThreadIds ?? []), thread.id])];
@@ -575,6 +589,22 @@ export async function runComposerReviewJourney({ surface, client, socket, worksp
   }
   const disk = await io.readFile(fixtureFile, "utf8");
   result.disk = provider === "codex" ? assertDiskContent(disk, "AGENT_MARKER", "EXTERNAL_MARKER") : (disk.includes("AGENT_MARKER") ? "agent marker retained" : (() => { throw new Error("Condition: disk did not retain the agent marker."); })());
+  return result;
+}
+
+/** Drives a completed Composer turn that must have no public file effects. */
+export async function runEmptyDiffJourney({ surface, client, socket, workspace, run, provider, model, modelName, captureEmpty: captureEmptyState = captureEmptyReview }) {
+  const result = { provider, model, observations: {}, comparison: null };
+  const beforeThreads = await listThreadIds(socket, workspace.id);
+  await driveComposer(client.page, workspace.name, provider, modelName, emptyComposerPrompt());
+  const thread = await waitForNewThread(socket, workspace.id, beforeThreads, provider, model, run.run);
+  run.run.threadId ??= thread.id;
+  run.run.ownedThreadIds = [...new Set([...(run.run.ownedThreadIds ?? []), thread.id])];
+  run.phase = "empty-diff";
+  const comparison = await waitForEmptySettledComparison(socket, thread.id);
+  result.comparison = summarizeComparison(comparison, null);
+  run.comparison[`${surface}-empty`] = result.comparison;
+  result.observations.completed = await captureEmptyState(client.page, run, `${surface}-empty`, comparison);
   return result;
 }
 
@@ -737,6 +767,15 @@ async function waitForSettledComparison(socket, threadId, fileName, deadline = D
   throw new Error("Condition: exact thread comparison did not settle.");
 }
 
+export async function waitForEmptySettledComparison(socket, threadId, deadline = Date.now() + TIMEOUT_MS) {
+  while (Date.now() < deadline) {
+    const comparison = await socket.rpc("turnDiff.getComparison", { threadId, includeLive: true });
+    if (comparison?.turnDiff?.phase === "settled" && comparison.turnDiff.id && Array.isArray(comparison.files) && comparison.files.length === 0) return comparison;
+    await delay(500);
+  }
+  throw new Error("Condition: completed public comparison did not report an empty file list.");
+}
+
 async function readSettledComparison(socket, threadId, fileName, comparison) {
   const file = comparison?.files?.find((candidate) => fileMatches(candidate, fileName));
   const turnDiff = comparison?.turnDiff;
@@ -763,7 +802,7 @@ export async function captureSettledReviewState(socket, threadId, fileName, page
 export function assertPatchAttribution(patch, agentMarker, externalMarker) { if (typeof patch !== "string" || !patch.includes(agentMarker) || patch.includes(externalMarker)) throw new Error("Condition: the public agent patch did not exclusively attribute the agent marker."); }
 function fileMatches(file, fileName) { return file?.path === fileName || file?.path?.endsWith(`/${fileName}`); }
 
-async function driveComposer(page, workspaceName, fileName, provider, modelName) {
+async function driveComposer(page, workspaceName, provider, modelName, message) {
   await openNewThreadForWorkspace(page, workspaceName);
   const chooserDialog = page.getByRole("dialog", { name: "Choose model and provider" });
   if (!await chooserDialog.isVisible().catch(() => false)) await page.getByRole("button", { name: /GPT|Claude|Cursor/i }).last().click();
@@ -771,7 +810,7 @@ async function driveComposer(page, workspaceName, fileName, provider, modelName)
   await chooserDialog.getByRole("textbox", { name: "Filter models by name or id. Use multiple words to narrow results." }).fill(modelName);
   await chooserDialog.getByText(modelName, { exact: true }).click({ timeout: 15_000 });
   const editor = page.getByRole("textbox", { name: "Message Mcode" });
-  await editor.fill(composerPrompt(fileName)); await editor.press("Enter");
+  await editor.fill(message); await editor.press("Enter");
 }
 
 /** Opens a new thread and selects the workspace before interacting with Composer. */
@@ -801,6 +840,11 @@ export async function waitForNewThreadWelcome(page, workspaceName) {
 /** Creates the deterministic write-then-hold prompt used for Live diff capture. */
 export function composerPrompt(fileName) {
   return `Edit ${fileName} with the apply_patch tool. Preserve BASELINE_MARKER and add AGENT_MARKER on the next line. Do not edit another file. After apply_patch reports success, run powershell.exe -NoProfile -Command "Start-Sleep -Seconds 30" and do not reply until it completes.`;
+}
+
+/** Creates a deterministic completed turn that must not create a file effect. */
+export function emptyComposerPrompt() {
+  return "Reply with exactly EMPTY_DIFF_MARKER. Do not use tools or modify files.";
 }
 
 async function assertWorkspace(page, workspace, socket) {
@@ -847,6 +891,19 @@ async function reconnectOwningClient(client) {
 }
 export async function closeReview(page) { const review = page.getByTestId("review-last-turn"); if (await review.isVisible().catch(() => false)) await page.getByRole("button", { name: /Changes/ }).click(); }
 export async function captureReview(page, receipt, name, result) { const review = await waitForExactReview(page, result); const rendered = await readRenderedReview(page, result.file.path); const screenshot = NodePath.join(receipt.directory, `${name}.png`); await page.screenshot({ path: screenshot }); receipt.screenshots.push(screenshot); receipt.renderedEvidence.push(screenshot); const spinners = await page.locator('[role="progressbar"], [data-testid*="spinner"]').count(); const rows = await reviewRowCount(review); return { screenshot, rows, spinners, ...rendered }; }
+export async function captureEmptyReview(page, receipt, name, comparison) {
+  const review = page.getByTestId("review-last-turn");
+  if (!await review.isVisible().catch(() => false)) await page.getByRole("button", { name: /Changes/ }).click();
+  await page.getByText("No changes yet", { exact: true }).waitFor({ state: "visible", timeout: 15_000 });
+  const reviewVisible = await review.isVisible().catch(() => false);
+  const rows = reviewVisible ? await reviewRowCount(review) : 0;
+  if (reviewVisible || rows !== 0) throw new Error("Condition: completed empty comparison rendered a Review file.");
+  const screenshot = NodePath.join(receipt.directory, `${name}.png`);
+  await page.screenshot({ path: screenshot });
+  receipt.screenshots.push(screenshot);
+  receipt.renderedEvidence.push(screenshot);
+  return { screenshot, noChanges: true, reviewVisible, rows, comparisonId: comparison.turnDiff.id };
+}
 export async function waitForExactReview(page, result, timeout = 15_000) {
   const review = page.getByTestId("review-last-turn");
   if (!await review.isVisible().catch(() => false)) await page.getByRole("button", { name: /Changes/ }).click();

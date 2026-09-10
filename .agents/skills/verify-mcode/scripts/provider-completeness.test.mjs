@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
-import { aggregateEvidenceFailures, applyProviderPrerequisites, assertDiskContent, assertLiveObservation, assertObservation, assertPatchAttribution, assertSeparateClients, captureCodexTraceEvidence, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createOwnedFixtureWorkspace, createReceipt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runComposerReviewJourney, runFocusedEvidenceGates, waitForExactReview, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
+import { aggregateEvidenceFailures, applyProviderPrerequisites, assertDiskContent, assertLiveObservation, assertObservation, assertPatchAttribution, assertSeparateClients, captureCodexTraceEvidence, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createOwnedFixtureWorkspace, createReceipt, emptyComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runComposerReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, waitForExactReview, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
 
 NodeTest.test("requires explicit proof and cleanup confirmations", () => {
   NodeAssertStrict.deepEqual(parseArguments(["health"]), { command: "health" });
@@ -159,10 +159,10 @@ NodeTest.test("opens a projectless new thread through the sidebar and selects it
 
 NodeTest.test("aggregates focused gates and every failed provider surface", () => {
   const failed = aggregateEvidenceFailures(["server-turn-diff-review exited 1"], {
-    web: { codexNative: { kind: "live-proof-failed", provider: "codex" }, claudeFallback: { kind: "live-proof-failed", provider: "claude" } },
+    web: { codexNative: { kind: "live-proof-failed", provider: "codex" }, claudeFallback: { kind: "live-proof-failed", provider: "claude" }, empty: { kind: "empty-proof-failed", provider: "codex" } },
     electron: { codexNative: { kind: "live-proof-failed", provider: "codex" }, claudeFallback: { kind: "live-proof-failed", provider: "claude" } },
   });
-  NodeAssertStrict.deepEqual(failed, ["server-turn-diff-review exited 1", "web/codex", "web/claude", "electron/codex", "electron/claude"]);
+  NodeAssertStrict.deepEqual(failed, ["server-turn-diff-review exited 1", "web/codex", "web/claude", "web/empty", "electron/codex", "electron/claude"]);
 });
 
 NodeTest.test("selects only the new exact Codex thread", async () => {
@@ -387,6 +387,26 @@ function composerJourneyPage(events = []) {
   };
 }
 
+function emptyComposerJourneyPage(events) {
+  const control = {
+    click: async () => {},
+    fill: async () => {},
+    press: async () => { events.push("composer:sent"); },
+    waitFor: async () => {},
+    isVisible: async () => false,
+  };
+  const review = { isVisible: async () => false, locator: () => ({ count: async () => 0 }) };
+  const dialog = { ...control, isVisible: async () => true, getByTestId: () => control, getByRole: () => control, getByText: () => control };
+  const noChanges = { waitFor: async () => { events.push("no-changes:visible"); } };
+  return {
+    getByTestId: (testId) => testId === "review-last-turn" ? review : control,
+    getByRole: (role) => role === "dialog" ? dialog : control,
+    getByText: (text) => text === "No changes yet" ? noChanges : control,
+    locator: () => ({ count: async () => 0 }),
+    screenshot: async () => { events.push("screenshot"); },
+  };
+}
+
 NodeTest.test("uses an explicit Windows-safe hold after the exact agent write", () => {
   const prompt = composerPrompt("target.txt");
   NodeAssertStrict.match(prompt, /Edit target\.txt/);
@@ -394,6 +414,35 @@ NodeTest.test("uses an explicit Windows-safe hold after the exact agent write", 
   NodeAssertStrict.match(prompt, /apply_patch tool/);
   NodeAssertStrict.match(prompt, /powershell\.exe -NoProfile -Command "Start-Sleep -Seconds 30"/);
   NodeAssertStrict.doesNotMatch(prompt, /EXTERNAL_MARKER/);
+});
+
+NodeTest.test("drives a completed empty Composer turn and records the truthful no-change Review state", async () => {
+  const events = [];
+  let threadListCalls = 0;
+  const socket = { rpc: async (method) => {
+    if (method === "thread.list") {
+      threadListCalls += 1;
+      return threadListCalls === 1 ? [] : [{ id: "empty-thread", provider: "codex", model: "model" }];
+    }
+    if (method === "turnDiff.getComparison") {
+      events.push("comparison:settled-empty");
+      return { turnDiff: { id: "empty-comparison", phase: "settled" }, files: [] };
+    }
+    throw new Error(`unexpected ${method}`);
+  } };
+  const run = { fixtureDirectory: "fixture", directory: "evidence", run: {}, renderedEvidence: [], screenshots: [], comparison: {} };
+  const page = emptyComposerJourneyPage(events);
+
+  const result = await runEmptyDiffJourney({ surface: "web", client: { page }, socket, workspace: { id: "workspace", name: "Fixture", path: "fixture" }, run, provider: "codex", model: "model", modelName: "Model" });
+
+  NodeAssertStrict.deepEqual(result.comparison.comparison.files, []);
+  NodeAssertStrict.equal(result.observations.completed.noChanges, true);
+  NodeAssertStrict.equal(result.observations.completed.reviewVisible, false);
+  NodeAssertStrict.equal(result.observations.completed.rows, 0);
+  NodeAssertStrict.ok(events.indexOf("comparison:settled-empty") > events.indexOf("composer:sent"));
+  NodeAssertStrict.ok(events.indexOf("no-changes:visible") > events.indexOf("comparison:settled-empty"));
+  NodeAssertStrict.match(emptyComposerPrompt(), /Reply with exactly EMPTY_DIFF_MARKER/);
+  NodeAssertStrict.match(emptyComposerPrompt(), /Do not use tools or modify files/);
 });
 
 NodeTest.test("retains bounded, distinct Live comparison diagnostics", () => {
