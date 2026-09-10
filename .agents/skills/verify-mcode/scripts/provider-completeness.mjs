@@ -18,7 +18,7 @@ const MAX_LIVE_COMPARISON_STATES = 24;
 const FOCUSED_GATE_TIMEOUT_MS = 120_000;
 const CONNECTION_LOST_TEXT = "Connection lost. Reconnecting to server...";
 const FOCUSED_GATES = [
-  { name: "server-turn-diff-review", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism", "--testTimeout=30000"], files: ["src/features/agents/turns/__tests__/turn-diff-review.test.ts", "src/features/agents/turns/__tests__/turn-diff-service.test.ts"], rows: ["empty", "invalidation", "interruption"] },
+  { name: "server-turn-diff-review", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism", "--testTimeout=30000"], files: ["src/features/agents/turns/__tests__/turn-diff-review.test.ts", "src/features/agents/turns/__tests__/turn-diff-service.test.ts"], rows: ["empty", "interruption"] },
   { name: "server-approval-review-policy", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/agents/turns/__tests__/approval-review-policy.test.ts"], rows: ["strictManual", "managedRequired"] },
   { name: "server-workspace-invalidation", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/projects/files/__tests__/workspace-invalidation-service.test.ts"], rows: ["invalidation", "staleRetry", "disconnectWatchCleanup"] },
   { name: "codex-protocol", control: "packages/providers focused protocol tests", workspace: "packages/providers", files: ["src/__tests__/codex/codex-notification-validation.test.ts", "src/__tests__/codex/codex-protocol-coverage.test.ts", "src/__tests__/codex/codex-event-mapper.test.ts"], rows: ["warningsReroutes"] },
@@ -185,6 +185,13 @@ async function runProofJourneys(repoRoot, receipt, dependencies, state, runs, io
   const desktopServerUrl = await getDesktopServerUrl(state.desktop);
   state.electronSocket = dependencies.electronSocket ?? await openVerificationSocketUrl(repoRoot, desktopServerUrl);
   const electronRun = await createSurfaceRunForProof(repoRoot, receipt, state);
+  receipt.watcherOwnership = await runWorkspaceInvalidationJourney({
+    repoRoot,
+    workspace: runs.workspace,
+    run: receipt,
+    io,
+    openSocket: dependencies.openRuntimeVerificationSocket ?? openRuntimeVerificationSocket,
+  });
   receipt.phase = "provider-journeys";
   receipt.journeys.web = await createProviderJourney("web", state.web, state.socket, runs.workspace, receipt, io, receipt.matrix, dependencies);
   receipt.journeys.electron = await createProviderJourney("electron", state.desktop, state.electronSocket, receipt.electron.workspace, electronRun, io, receipt.electron.matrix, dependencies);
@@ -284,7 +291,7 @@ export function createReceipt(repoRoot) {
   const directory = NodePath.join(repoRoot, EVIDENCE_DIRECTORY, runId);
   const fixtureDirectory = NodePath.join(getRuntimePaths(repoRoot).fixtureRepoDir, `provider-completeness-${runId}`);
   NodeFS.mkdirSync(directory, { recursive: true });
-  return { runId, phase: "initializing", path: NodePath.join(directory, "receipt.json"), directory, fixtureDirectory, fixtureFile: NodePath.join(fixtureDirectory, "target.txt"), applicationCommit: "not reached", upstreamCodex: "not reached", provider: "codex", model: MODEL, baseline: "not reached", publicComparison: "not reached", fetchedPatch: "not reached", disk: "not reached", renderedEvidence: [], run: { ownedWorkspaceId: null, ownedFixtureDirectory: null, ownedFile: null, threadId: null, ownedThreadIds: [] }, electron: { matrix: providerMatrix("electron") }, journeys: {}, screenshots: [], observations: {}, comparison: {}, diagnostics: { liveComparisons: { states: [], omitted: 0 } }, focusedGates: focusedGateMatrix(), matrix: providerMatrix("web"), cleanup: { complete: false, failures: [] }, failure: null };
+  return { runId, phase: "initializing", path: NodePath.join(directory, "receipt.json"), directory, fixtureDirectory, fixtureFile: NodePath.join(fixtureDirectory, "target.txt"), applicationCommit: "not reached", upstreamCodex: "not reached", provider: "codex", model: MODEL, baseline: "not reached", publicComparison: "not reached", fetchedPatch: "not reached", disk: "not reached", renderedEvidence: [], run: { ownedWorkspaceId: null, ownedFixtureDirectory: null, ownedFile: null, threadId: null, ownedThreadIds: [] }, electron: { matrix: providerMatrix("electron") }, journeys: {}, screenshots: [], observations: {}, comparison: {}, diagnostics: { liveComparisons: { states: [], omitted: 0 } }, focusedGates: focusedGateMatrix(), matrix: providerMatrix("web"), watcherOwnership: { kind: "live-rpc-required", control: "public file.watch RPC and files.changed push", status: "not-run" }, cleanup: { complete: false, failures: [] }, failure: null };
 }
 
 function createSurfaceRun(repoRoot, receipt, surface) {
@@ -316,6 +323,98 @@ export async function createOwnedFixtureWorkspace(socket, repoRoot, receipt) {
   }
   receipt.run.ownedWorkspaceId = workspace.id;
   return workspace;
+}
+
+/** Proves per-client workspace watcher ownership through the public runtime contract. */
+export async function runWorkspaceInvalidationJourney({ repoRoot, workspace, run, io, openSocket = openRuntimeVerificationSocket, timeoutMs = TIMEOUT_MS }) {
+  const { ownerFile, observerFile } = watcherFixtureFiles(run);
+  const workspaceId = watcherWorkspaceId(workspace);
+  const ownerEvents = [];
+  const observerEvents = [];
+  const { owner, observer } = await openWatcherSockets(repoRoot, openSocket, ownerEvents, observerEvents);
+  try {
+    await owner.rpc("file.watch", { workspaceId });
+    await observer.rpc("file.watch", { workspaceId });
+    recordOwnedFile(run.run, ownerFile);
+    recordOwnedFile(run.run, observerFile);
+    await io.writeFile(ownerFile, "WATCHER_OWNER_MARKER\n", "utf8");
+    await Promise.all([
+      waitForExactWorkspaceInvalidation(ownerEvents, workspaceId, NodePath.basename(ownerFile), timeoutMs),
+      waitForExactWorkspaceInvalidation(observerEvents, workspaceId, NodePath.basename(ownerFile), timeoutMs),
+    ]);
+    await owner.close();
+    const ownerEventCount = ownerEvents.length;
+    const observerStart = observerEvents.length;
+    await io.appendFile(observerFile, "WATCHER_OBSERVER_MARKER\n", "utf8");
+    await waitForExactWorkspaceInvalidation(observerEvents, workspaceId, NodePath.basename(observerFile), timeoutMs, observerStart);
+    if (ownerEvents.length !== ownerEventCount) throw new Error("Condition: disconnected watcher owner received a later files.changed push.");
+    return {
+      kind: "live-rpc-proof",
+      control: "public file.watch RPC and files.changed push",
+      workspaceId,
+      owner: { closed: true, changes: [NodePath.basename(ownerFile)] },
+      observer: { active: true, changes: [NodePath.basename(ownerFile), NodePath.basename(observerFile)] },
+    };
+  } finally {
+    await Promise.all([owner.close(), observer.close()]);
+  }
+}
+
+function watcherFixtureFiles(run) {
+  if (!run?.run || typeof run.fixtureDirectory !== "string") throw new Error("Condition: watcher proof requires one owned workspace and fixture directory.");
+  const ownerFile = NodePath.join(run.fixtureDirectory, "watch-owner-sentinel.txt");
+  const observerFile = NodePath.join(run.fixtureDirectory, "watch-observer-sentinel.txt");
+  if (!isWithin(ownerFile, run.fixtureDirectory) || !isWithin(observerFile, run.fixtureDirectory)) throw new Error("Condition: watcher sentinel escaped the owned fixture directory.");
+  return { ownerFile, observerFile };
+}
+
+function watcherWorkspaceId(workspace) {
+  if (!workspace?.id) throw new Error("Condition: watcher proof requires one owned workspace and fixture directory.");
+  return workspace.id;
+}
+
+async function openWatcherSockets(repoRoot, openSocket, ownerEvents, observerEvents) {
+  const owner = await openSocket(repoRoot, (event) => ownerEvents.push(event));
+  try {
+    const observer = await openSocket(repoRoot, (event) => observerEvents.push(event));
+    return { owner, observer };
+  } catch (error) {
+    await owner.close();
+    throw error;
+  }
+}
+
+function recordOwnedFile(run, file) {
+  run.ownedFile ??= file;
+  run.ownedFiles = [...new Set([...(run.ownedFiles ?? []), file])];
+}
+
+async function waitForExactWorkspaceInvalidation(events, workspaceId, path, timeoutMs, start = 0) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const changes = events.slice(start).filter(isFilesChangedPush);
+    if (changes.some((event) => !isExactWorkspaceInvalidation(event, workspaceId, path))) throw new Error(`Condition: files.changed push did not match the owned ${path} watcher scope.`);
+    if (changes.some((event) => isExactWorkspaceInvalidation(event, workspaceId, path))) return;
+    await delay(25);
+  }
+  throw new Error(`Condition: exact files.changed push for ${path} was not observed.`);
+}
+
+function isExactWorkspaceInvalidation(event, workspaceId, path) {
+  const data = event?.data;
+  return isFilesChangedPush(event) && isExactInvalidationScope(data, workspaceId) && isExactInvalidationPath(data, path);
+}
+
+function isFilesChangedPush(event) {
+  return event?.type === "push" && event.channel === "files.changed";
+}
+
+function isExactInvalidationScope(data, workspaceId) {
+  return data?.workspaceId === workspaceId && !("threadId" in data) && data.wholeWorkspace === false;
+}
+
+function isExactInvalidationPath(data, path) {
+  return Array.isArray(data?.changedPaths) && data.changedPaths.length === 1 && data.changedPaths[0] === path;
 }
 
 /** Reconciles an uncertain create result only when one exact owned fixture registration exists. */
@@ -1368,7 +1467,7 @@ function optionalStrings(values) {
 }
 
 function isExactOrRedacted(value, expected) { return value === expected || value === "[path]"; }
-function isOwnedFixtureFile(value, directory) { return value === "[path]" || (typeof value === "string" && isWithin(value, directory) && /^target(?:-(?:codex|cursor|claude))?\.txt$/i.test(NodePath.basename(value))); }
+function isOwnedFixtureFile(value, directory) { return value === "[path]" || (typeof value === "string" && isWithin(value, directory) && /^(?:target(?:-(?:codex|cursor|claude))?|watch-(?:owner|observer)-sentinel)\.txt$/i.test(NodePath.basename(value))); }
 
 function hydrateOwnedReceipt(receipt, repoRoot) {
   const fixtureDirectory = NodePath.join(getRuntimePaths(repoRoot).fixtureRepoDir, `provider-completeness-${receipt.runId}`);

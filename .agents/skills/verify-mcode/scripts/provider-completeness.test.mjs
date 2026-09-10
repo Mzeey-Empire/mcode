@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
-import { aggregateEvidenceFailures, applyProviderPrerequisites, assertDiskContent, assertLiveObservation, assertObservation, assertPatchAttribution, assertSeparateClients, captureCodexTraceEvidence, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createOwnedFixtureWorkspace, createReceipt, emptyComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runComposerReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runInterruptionJourney, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
+import { aggregateEvidenceFailures, applyProviderPrerequisites, assertDiskContent, assertLiveObservation, assertObservation, assertPatchAttribution, assertSeparateClients, captureCodexTraceEvidence, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createOwnedFixtureWorkspace, createReceipt, emptyComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runComposerReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runInterruptionJourney, runWorkspaceInvalidationJourney, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
 
 NodeTest.test("requires explicit proof and cleanup confirmations", () => {
   NodeAssertStrict.deepEqual(parseArguments(["health"]), { command: "health" });
@@ -76,6 +76,7 @@ NodeTest.test("starts every provider-completeness row with actionable evidence u
     NodeAssertStrict.ok(gate.control, `${gate.name} names its focused-test owner`);
   }
   NodeAssertStrict.equal(receipt.matrix.codexNative.kind, "live-proof-required");
+  NodeAssertStrict.deepEqual(receipt.watcherOwnership, { kind: "live-rpc-required", control: "public file.watch RPC and files.changed push", status: "not-run" });
   NodeAssertStrict.equal(receipt.matrix.electronRightPanel, undefined);
   NodeAssertStrict.equal(receipt.electron.matrix.electronRightPanel.surface, "Electron");
 });
@@ -97,7 +98,7 @@ NodeTest.test("records focused gates once under their true owner and preserves t
   NodeAssertStrict.ok(calls[0].args.includes("src/features/agents/turns/__tests__/turn-diff-review.test.ts"));
   NodeAssertStrict.ok(calls[0].args.includes("--testTimeout=30000"));
   NodeAssertStrict.deepEqual(receipt.focusedGates.map(({ control, rows }) => ({ control, rows })), [
-    { control: "apps/server focused integration tests", rows: ["empty", "invalidation", "interruption"] },
+    { control: "apps/server focused integration tests", rows: ["empty", "interruption"] },
     { control: "apps/server focused integration tests", rows: ["strictManual", "managedRequired"] },
     { control: "apps/server focused integration tests", rows: ["invalidation", "staleRetry", "disconnectWatchCleanup"] },
     { control: "packages/providers focused protocol tests", rows: ["warningsReroutes"] },
@@ -120,6 +121,74 @@ NodeTest.test("records focused gates once under their true owner and preserves t
   NodeAssertStrict.equal(receipt.electron.matrix.electronRightPanel.kind, "blocked");
   NodeAssertStrict.equal(receipt.matrix.codexNative.provider, "codex");
   NodeAssertStrict.equal(receipt.electron.matrix.codexNative.provider, "codex");
+});
+
+NodeTest.test("proves watcher ownership through public RPC and files.changed pushes", async () => {
+  const fixtureDirectory = NodePath.join(NodeOS.tmpdir(), "provider-completeness-watchers");
+  const run = { fixtureDirectory, run: { ownedFile: null, ownedFiles: [] } };
+  const calls = [];
+  const writes = [];
+  const sockets = [];
+  const openSocket = async (_repoRoot, onPush) => {
+    const socket = {
+      active: true,
+      watching: false,
+      rpc: async (method, params) => {
+        calls.push({ method, params, socket });
+        socket.watching = method === "file.watch";
+      },
+      close: async () => { socket.active = false; },
+      onPush,
+    };
+    sockets.push(socket);
+    return socket;
+  };
+  const emit = (path) => {
+    for (const socket of sockets.filter((candidate) => candidate.active && candidate.watching)) {
+      socket.onPush({ type: "push", channel: "files.changed", data: { workspaceId: "owned-workspace", changedPaths: [NodePath.basename(path)], wholeWorkspace: false } });
+    }
+  };
+  const io = {
+    writeFile: async (path, contents, encoding) => { writes.push({ operation: "write", path, contents, encoding }); emit(path); },
+    appendFile: async (path, contents, encoding) => { writes.push({ operation: "append", path, contents, encoding }); emit(path); },
+  };
+
+  const result = await runWorkspaceInvalidationJourney({ repoRoot: "root", workspace: { id: "owned-workspace" }, run, io, openSocket, timeoutMs: 25 });
+
+  NodeAssertStrict.deepEqual(calls.map(({ method, params }) => ({ method, params })), [
+    { method: "file.watch", params: { workspaceId: "owned-workspace" } },
+    { method: "file.watch", params: { workspaceId: "owned-workspace" } },
+  ]);
+  NodeAssertStrict.deepEqual(writes.map(({ operation, path, encoding }) => ({ operation, path: NodePath.basename(path), encoding })), [
+    { operation: "write", path: "watch-owner-sentinel.txt", encoding: "utf8" },
+    { operation: "append", path: "watch-observer-sentinel.txt", encoding: "utf8" },
+  ]);
+  NodeAssertStrict.deepEqual(run.run.ownedFiles.map((path) => NodePath.basename(path)), ["watch-owner-sentinel.txt", "watch-observer-sentinel.txt"]);
+  NodeAssertStrict.deepEqual(result, {
+    kind: "live-rpc-proof",
+    control: "public file.watch RPC and files.changed push",
+    workspaceId: "owned-workspace",
+    owner: { closed: true, changes: ["watch-owner-sentinel.txt"] },
+    observer: { active: true, changes: ["watch-owner-sentinel.txt", "watch-observer-sentinel.txt"] },
+  });
+  NodeAssertStrict.deepEqual(sockets.map((socket) => socket.active), [false, false]);
+});
+
+NodeTest.test("rejects a files.changed push outside the owned watcher scope", async () => {
+  const callbacks = [];
+  const openSocket = async (_repoRoot, onPush) => {
+    callbacks.push(onPush);
+    return { rpc: async () => {}, close: async () => {} };
+  };
+  const io = {
+    writeFile: async () => {
+      for (const onPush of callbacks) onPush({ type: "push", channel: "files.changed", data: { workspaceId: "other-workspace", changedPaths: ["watch-owner-sentinel.txt"], wholeWorkspace: false } });
+    },
+    appendFile: async () => {},
+  };
+  const run = { fixtureDirectory: NodePath.join(NodeOS.tmpdir(), "provider-completeness-watchers"), run: { ownedFile: null, ownedFiles: [] } };
+
+  await NodeAssertStrict.rejects(runWorkspaceInvalidationJourney({ repoRoot: "root", workspace: { id: "owned-workspace" }, run, io, openSocket, timeoutMs: 25 }), /did not match the owned watch-owner-sentinel\.txt watcher scope/);
 });
 
 NodeTest.test("retains all focused gate evidence before reporting nonzero gates", async () => {
