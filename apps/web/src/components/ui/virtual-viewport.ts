@@ -64,7 +64,7 @@ export class VirtualViewport {
           const row = this.rows[index];
           return row ? this.heights.get(row.id) ?? row.height : 80;
         },
-        template: (row) => this.host(row.id),
+        template: () => "",
       },
     }, [{
       name: "react-hosts",
@@ -74,7 +74,7 @@ export class VirtualViewport {
           () => context.dom.viewport.scrollTop,
           (top) => {
             const viewport = context.dom.viewport;
-            const maximum = Math.max(0, context.sizeCache.getTotalSize() - viewport.clientHeight);
+            const maximum = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
             viewport.scrollTop = Math.min(maximum, Math.max(0, top));
             // Native scroll events arrive after the synchronous row calculation.
             context.getState().scrollPosition = viewport.scrollTop;
@@ -117,15 +117,16 @@ export class VirtualViewport {
     const visible: VirtualHost[] = [];
     for (let slot = 0; slot < state.visibleCount; slot += 1) {
       const row = this.rows[state.visibleIndices[slot]];
-      const element = row && this.hosts.get(row.id);
       const wrapper = this.context.getRenderedElement(state.visibleIndices[slot]);
-      if (wrapper) {
-        wrapper.style.position = "absolute";
-        wrapper.style.top = "0";
-        wrapper.style.left = "0";
-        wrapper.style.width = "100%";
-      }
-      if (element) visible.push({ id: row.id, element });
+      if (!row || !wrapper) continue;
+      const element = this.host(row.id);
+      // Reconcile keyed hosts after vlist finishes recycling its index-based wrappers.
+      if (element.parentElement !== wrapper) wrapper.replaceChildren(element);
+      wrapper.style.position = "absolute";
+      wrapper.style.top = "0";
+      wrapper.style.left = "0";
+      wrapper.style.width = "100%";
+      visible.push({ id: row.id, element });
     }
     if (visible.length === this.publishedHosts.length && visible.every((host, index) =>
       host.id === this.publishedHosts[index].id && host.element === this.publishedHosts[index].element)) return;
@@ -183,7 +184,13 @@ export class VirtualViewport {
 
   private applyPosition(): void {
     if (this.disposed || !this.viewport) return;
-    if (!this.animating) this.context.scrollTo(Math.max(0, this.targetScrollTop()));
+    const target = Math.max(0, this.targetScrollTop());
+    // A short initial page needs its trailing space retained when history is prepended.
+    this.context.updateContentSize(Math.max(
+      this.context.sizeCache.getTotalSize(),
+      this.position.kind === "reading" ? target + this.viewport.clientHeight : 0,
+    ));
+    if (!this.animating) this.context.scrollTo(target);
     this.expectedScrollTop = this.viewport.scrollTop;
     this.context.forceRender();
     this.onPosition(this.position);

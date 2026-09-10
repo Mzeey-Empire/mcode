@@ -80,6 +80,12 @@ offset, or align a navigation target. Upward scrolling stops tail following.
 Returning to the bottom resumes it. Prepends and resident-history eviction retain
 the reading row when that row remains available. Each rendered thread has its own
 viewport, and the existing thread cache stores its reading anchor.
+When an initial page is shorter than the viewport, prepending history retains
+enough trailing space to preserve that anchor without browser scroll clamping.
+
+Subscription recovery restores unfinished parent commands, progress messages,
+and hooks from the canonical snapshot. Recovery includes these records even
+when the client already has the current canonical event revision.
 
 The clipped prompt follows the turn at the top of the viewport, including older
 turns. It hides while that prompt remains visible. Its jump control returns to
@@ -108,6 +114,9 @@ virtual list without copying chat behavior or adding a nested scroll viewport.
 Live narrative can appear before a persisted assistant response only when the
 current turn identifies that response. Otherwise, new activity appends after the
 existing conversation. A previous answer is not an insertion point for a new turn.
+The response can match by message ID or execution ID. During hydration, live tools
+and reasoning replace the saved narrative for that response so expanded rows
+retain unique identities.
 
 ## End-to-end data flow
 

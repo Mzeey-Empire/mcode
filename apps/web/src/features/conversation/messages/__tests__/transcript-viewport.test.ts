@@ -113,6 +113,34 @@ describe("transcript viewport", () => {
     expect(position).toEqual({ kind: "reading", key: "9", offset: 25 });
   });
 
+  it("preserves the reading row when history fills a previously short viewport", () => {
+    const recent = [{ id: "recent", height: 120 }];
+    view.setRows(recent);
+    view.viewport.dispatchEvent(new WheelEvent("wheel", { deltaY: -50 }));
+    view.setRows([{ id: "older", height: 300 }, ...recent]);
+    expect(view.rowTop("recent")).toBe(0);
+    expect(position).toEqual({ kind: "reading", key: "recent", offset: 0 });
+    view.moveTo({ kind: "end" });
+    expect(view.viewport.scrollTop).toBe(220);
+    expect(view.viewport.scrollHeight).toBe(420);
+  });
+
+  it("keeps every visible host attached when expanded rows move across the rendered range", () => {
+    view.moveTo({ kind: "reading", key: "9", offset: 25 });
+    const children = Array.from({ length: 40 }, (_, index) => ({ id: `tool-${index}`, height: 30 }));
+    for (const next of [
+      [...rows.slice(0, 3), ...children, ...rows.slice(3)],
+      rows,
+      [{ id: "older", height: 100 }, ...rows],
+    ]) {
+      view.setRows(next);
+      view.releaseHosts(hosts);
+      for (const host of hosts) {
+        expect(host.element.parentElement?.getAttribute("data-id"), host.id).toBe(host.id);
+      }
+    }
+  });
+
   it("does not resume tail following after an upward gesture and an append", () => {
     view.viewport.dispatchEvent(new WheelEvent("wheel", { deltaY: -100 }));
     view.viewport.scrollTop = 1700;

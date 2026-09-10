@@ -54,6 +54,11 @@ Scroll a fixture prompt above the viewport. Check that the pinned prompt has no 
 
 Scroll upward in a long fixture thread until the down-arrow button appears. With Overview open, closed, and after a window resize, assert that the button and transcript content have the same horizontal center within one pixel. Capture and inspect the centered button. Click it and confirm that the transcript reaches the bottom and the button disappears.
 
+During a controlled active turn, queue a follow-up through the Composer. Repeat the
+button check with the queue visible, then remove the queued message. Assert that
+the button stays inside the transcript viewport and above the queue in both
+states. Remove the follow-up before completion so it cannot start another turn.
+
 ## Gotchas
 
 - React StrictMode recreates the viewport. Restore state belongs to that viewport instance.
@@ -87,6 +92,25 @@ The fixture starts five commands together and completes them out of order.
 4. Expand the group. Assert that all five commands retain their matching outputs.
 
 This controlled Codex protocol check does not establish live Claude or Cursor coverage.
+
+### Active expanded-group switch
+
+Use two fixture threads, including an active turn with a completed command group.
+Keep the fixture CLI setting until the controlled turn completes so the live
+proof uses one stable provider configuration.
+
+1. Reload during the active turn and reopen it. Confirm that its existing commands
+   and progress messages return. Expand its completed group, switch to the other
+   thread, and return.
+2. Open a command output, then scroll down and up through the group. Confirm that
+   the output belongs to that command and does not overlap the next row.
+3. Inspect every mounted `.transcript-item`, including overscan. Each wrapper must
+   contain a child whose `data-transcript-key` matches the wrapper's `data-id`.
+   Require unique wrapper IDs. Checking only existing children misses empty rows.
+4. Wait for completion and repeat the switch. Assert that reasoning and commands
+   precede one assistant response row, with no repeated narrative groups.
+5. Reload and repeat the row and order assertions. Retain and inspect a screenshot
+   and the row-key assertions under `.dev/verification/`.
 
 ### Virtualized completed groups
 
