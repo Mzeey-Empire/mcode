@@ -517,7 +517,11 @@ NodeTest.test("selects Auto before dispatching and retains the denied review wit
   NodeAssertStrict.equal(result.approvalReview.reloaded.outcome, "Denied");
   NodeAssertStrict.equal(result.disk, "denied-review baseline retained");
   NodeAssertStrict.deepEqual(run.run.ownedFiles, [NodePath.join("fixture", "denied-review-codex.md")]);
-  NodeAssertStrict.match(deniedReviewComposerPrompt("denied-review-codex.md"), /Do not use tools or modify files/);
+  const prompt = deniedReviewComposerPrompt("denied-review-codex.md");
+  NodeAssertStrict.match(prompt, /Edit denied-review-codex\.md with the apply_patch tool/);
+  NodeAssertStrict.equal((prompt.match(/apply_patch/g) ?? []).length, 1);
+  NodeAssertStrict.match(prompt, /Preserve BASELINE_MARKER and add AGENT_MARKER on the next line/);
+  NodeAssertStrict.match(prompt, /Do not edit another file/);
 });
 
 NodeTest.test("captures the Denied narrative without a rendered Review row", async () => {

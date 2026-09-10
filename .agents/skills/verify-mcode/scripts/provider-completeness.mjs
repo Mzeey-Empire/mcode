@@ -850,7 +850,7 @@ export function approvedReviewComposerPrompt(fileName) {
 
 /** Creates the bounded Automatic-review request that must leave the fixture unchanged. */
 export function deniedReviewComposerPrompt(fileName) {
-  return `Read ${fileName}. Reply with exactly DENIED_REVIEW_MARKER. Do not use tools or modify files.`;
+  return `Edit ${fileName} with the apply_patch tool. Preserve BASELINE_MARKER and add AGENT_MARKER on the next line. Do not edit another file.`;
 }
 
 /** Reads the one persisted native Approval review lifecycle from the public conversation page. */
