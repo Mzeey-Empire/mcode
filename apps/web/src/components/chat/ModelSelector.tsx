@@ -1174,10 +1174,14 @@ function LockedModelLabel({
   shortLabel,
 }: Pick<SelectedModelPresentation, "icon" | "iconClass" | "shortLabel">) {
   return (
-    <span className="flex items-center gap-1 px-2 py-1 text-xs text-muted-foreground">
-      <Icon size={12} className={iconClass} aria-hidden />
-      <span>{shortLabel}</span>
-      <Lock size={10} className="ml-0.5 opacity-75" aria-hidden />
+    <span
+      className="flex flex-none max-w-full items-center gap-0.5 px-1.5 py-1 text-xs text-muted-foreground"
+      aria-label={shortLabel}
+      role="img"
+    >
+      <Icon size={12} className={cn("shrink-0", iconClass)} aria-hidden />
+      <span className="min-w-0 whitespace-normal [overflow-wrap:anywhere]">{shortLabel}</span>
+      <Lock size={10} className="ml-0.5 shrink-0 opacity-75" aria-hidden />
     </span>
   );
 }
@@ -1273,11 +1277,11 @@ export function ModelSelector({
         aria-haspopup="dialog"
         aria-controls={open ? panelId : undefined}
         onClick={() => setOpen(!open)}
-        className="text-muted-foreground hover:bg-muted/40 hover:text-foreground transition-colors"
+        className="max-w-full shrink whitespace-normal text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
       >
-        <TriggerIcon size={14} className={presentation.iconClass} aria-hidden />
-        <span className="text-sm">{presentation.shortLabel}</span>
-        <ChevronDown size={11} aria-hidden />
+        <TriggerIcon size={14} className={cn("shrink-0", presentation.iconClass)} aria-hidden />
+        <span className="min-w-0 whitespace-normal text-sm [overflow-wrap:anywhere]">{presentation.shortLabel}</span>
+        <ChevronDown size={11} className="shrink-0" aria-hidden />
       </Button>
 
       <ModelSelectorPanel

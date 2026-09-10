@@ -290,19 +290,10 @@ export function Composer({
   onOpenSelectedTextCommentSource,
   unavailableSelectedTextCommentIds = [],
 }: ComposerProps) {
-  // Mode/permissions/tasks toggles render inline when the composer's own
-  // container is wide enough; below the threshold they collapse behind a
-  // single overflow trigger so the send button never wraps to a new row.
   // Container-based (not viewport-based) so the layout responds to the right
   // panel opening, sidebar resizing, etc. — not just window resizes.
   const composerContainerRef = useRef<HTMLDivElement>(null);
   const composerWidth = useElementWidth(composerContainerRef);
-  // Threshold tuned so model + reasoning + Chat + Full access + Tasks +
-  // token-count badge + send button fit comfortably on one row with the
-  // standard gaps and breathing room. Below this the row collapses to a
-  // single "Composer options" trigger so the send button never gets clipped.
-  // Keep the compact 600px layout behind the overflow trigger while allowing
-  // the widened desktop rail to keep its inline controls.
   // Default to inline before the first measurement lands so the first frame
   // doesn't briefly render the popover trigger and snap to inline buttons.
   const showInlineComposerOptions = showComposerOptionsInline(composerWidth);
