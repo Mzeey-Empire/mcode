@@ -247,8 +247,13 @@ export function createTranscriptItemProjector(): (input: TranscriptProjectionInp
       input.currentTurn,
       input.committedAssistantBody,
     );
-    return buildVirtual(stableItems, volatileItems, input.toolCalls.length > 0, input.currentTurn?.messageId);
+    const responseMessageId = input.messages.find((message) => message.role === "assistant" && isCurrentResponse(message, stableInput))?.id;
+    return buildVirtual(stableItems, volatileItems, hasLiveNarrative(input), responseMessageId);
   };
+}
+
+function hasLiveNarrative(input: TranscriptProjectionInput): boolean {
+  return input.toolCalls.length > 0 || (input.thoughtSegments?.length ?? 0) > 0;
 }
 
 /** Represents an item rendered in the virtualized chat list: messages, tool indicators, or streaming text. */
@@ -670,24 +675,24 @@ export function createVolatileItemsBuilder(): typeof buildVolatileItems {
 export function createVirtualItemsBuilder(): typeof buildVirtualItems {
   let previousStable: readonly ChatVirtualItem[] | undefined;
   let previousVolatile: readonly ChatVirtualItem[] | undefined;
-  let previousHasToolCalls: boolean | undefined;
+  let previousHasNarrative: boolean | undefined;
   let previousResponseMessageId: string | undefined;
   let previousResult: readonly ChatVirtualItem[] = [];
-  return (stableItems, volatileItems, hasToolCalls, responseMessageId) => {
+  return (stableItems, volatileItems, hasNarrative, responseMessageId) => {
     if (
       previousStable === stableItems &&
       previousVolatile === volatileItems &&
-      previousHasToolCalls === hasToolCalls && previousResponseMessageId === responseMessageId
+      previousHasNarrative === hasNarrative && previousResponseMessageId === responseMessageId
     ) {
       return previousResult as ChatVirtualItem[];
     }
     previousStable = stableItems;
     previousVolatile = volatileItems;
-    previousHasToolCalls = hasToolCalls;
+    previousHasNarrative = hasNarrative;
     previousResponseMessageId = responseMessageId;
     previousResult = reuseVirtualItems(
       previousResult,
-      buildVirtualItems(stableItems, volatileItems, hasToolCalls, responseMessageId),
+      buildVirtualItems(stableItems, volatileItems, hasNarrative, responseMessageId),
     );
     return previousResult as ChatVirtualItem[];
   };
@@ -701,11 +706,11 @@ export function createVirtualItemsBuilder(): typeof buildVirtualItems {
 export function buildVirtualItems(
   stableItems: readonly ChatVirtualItem[],
   volatileItems: readonly ChatVirtualItem[],
-  hasToolCalls: boolean,
+  hasNarrative: boolean,
   responseMessageId?: string,
 ): ChatVirtualItem[] {
   const deduped = dedupeVolatileItems(stableItems, volatileItems);
-  if (volatileItems.length === 0 || !hasToolCalls || deduped.length === 0) return [...stableItems, ...deduped];
+  if (volatileItems.length === 0 || !hasNarrative || deduped.length === 0) return [...stableItems, ...deduped];
   const assistantIndex = responseMessageId === undefined
     ? -1
     : stableItems.findIndex((item) => item.type === "message" && item.message.id === responseMessageId);
