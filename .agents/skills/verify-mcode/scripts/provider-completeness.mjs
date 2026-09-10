@@ -19,11 +19,11 @@ const FOCUSED_GATE_TIMEOUT_MS = 120_000;
 const CONNECTION_LOST_TEXT = "Connection lost. Reconnecting to server...";
 const FOCUSED_GATES = [
   { name: "server-turn-diff-review", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism", "--testTimeout=30000"], files: ["src/features/agents/turns/__tests__/turn-diff-review.test.ts", "src/features/agents/turns/__tests__/turn-diff-service.test.ts"], rows: ["empty", "interruption"] },
-  { name: "server-approval-review-policy", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/agents/turns/__tests__/approval-review-policy.test.ts"], rows: ["strictManual", "managedRequired"] },
+  { name: "server-approval-review-policy", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/agents/turns/__tests__/approval-review-policy.test.ts", "src/features/agents/orchestration/__tests__/agent-service-turn-started.test.ts"], rows: ["strictManual", "managedRequired", "fullAccessDispatch"] },
   { name: "server-managed-required-dispatch", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/agents/orchestration/__tests__/agent-service-gate.test.ts"], rows: ["managedRequiredDispatch"], limitation: "Public Codex does not report required; this is focused server dispatch proof." },
   { name: "server-workspace-invalidation", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/projects/files/__tests__/workspace-invalidation-service.test.ts"], rows: ["invalidation", "staleRetry", "disconnectWatchCleanup"] },
   { name: "codex-protocol", control: "packages/providers focused protocol tests", workspace: "packages/providers", files: ["src/__tests__/codex/codex-notification-validation.test.ts", "src/__tests__/codex/codex-protocol-coverage.test.ts", "src/__tests__/codex/codex-event-mapper.test.ts"], rows: ["warningsReroutes"] },
-  { name: "web-composer-and-files", control: "apps/web focused component tests", workspace: "apps/web", files: ["src/features/conversation/composer/controls/__tests__/ComposerAccessControls.test.tsx", "src/features/projects/files/useWorkspaceFileInvalidation.test.tsx", "src/components/diff/__tests__/DiffPanel.files.test.tsx"], rows: ["fullAccess", "fileSurfaces"] },
+  { name: "web-composer-and-files", control: "apps/web focused component tests", workspace: "apps/web", files: ["src/features/conversation/composer/controls/__tests__/ComposerAccessControls.test.tsx", "src/features/projects/files/useWorkspaceFileInvalidation.test.tsx", "src/components/diff/__tests__/DiffPanel.files.test.tsx"], rows: ["fullAccessControl", "fileSurfaces"] },
 ];
 const HELP = `Verify provider completeness
 
@@ -602,7 +602,7 @@ export function assertEveryAvailableProviderWasProven(matrix) {
 export function aggregateEvidenceFailures(focusedFailures, surfaces) {
   const providerFailures = Object.entries(surfaces).flatMap(([surface, matrix]) => Object.entries(matrix)
     .filter(([, entry]) => entry?.kind === "required-live-proof" || entry?.kind === "live-proof-failed" || entry?.kind === "empty-proof-failed" || entry?.kind === "interruption-proof-required" || entry?.kind === "interruption-proof-failed")
-    .map(([row, entry]) => row === "warningStability" ? `${surface}/warning-stability` : row === "reviewApproved" ? `${surface}/review-approved` : row === "reviewDenied" ? `${surface}/review-denied` : entry.kind === "empty-proof-failed" ? `${surface}/empty` : entry.kind === "interruption-proof-required" || entry.kind === "interruption-proof-failed" ? `${surface}/interruption` : `${surface}/${entry.provider}`));
+    .map(([row, entry]) => row === "warningStability" ? `${surface}/warning-stability` : row === "reviewApproved" ? `${surface}/review-approved` : row === "reviewDenied" ? `${surface}/review-denied` : row === "fullAccess" ? `${surface}/full-access` : entry.kind === "empty-proof-failed" ? `${surface}/empty` : entry.kind === "interruption-proof-required" || entry.kind === "interruption-proof-failed" ? `${surface}/interruption` : `${surface}/${entry.provider}`));
   return [...focusedFailures, ...providerFailures];
 }
 
@@ -644,6 +644,7 @@ export async function runProviderJourneys({ surface, client, socket, workspace, 
   if (codex?.provider === "codex" && codex.model && codex.modelName) {
     await maybeRunApprovedReviewProof({ surface, client, socket, workspace, run, io, matrix, journeys, codex, captureReview });
     await maybeRunDeniedReviewProof({ surface, client, socket, workspace, run, io, matrix, journeys, codex });
+    await maybeRunFullAccessProof({ surface, client, socket, workspace, run, io, matrix, journeys, codex, captureReview });
     try {
       const journey = await runEmptyDiffJourney({ surface, client, socket, workspace, run, provider: codex.provider, model: codex.model, modelName: codex.modelName, captureEmpty });
       journeys.empty = { status: "passed", provider: codex.provider, model: codex.model, journey };
@@ -677,6 +678,10 @@ async function maybeRunApprovedReviewProof({ surface, ...options }) {
 
 async function maybeRunDeniedReviewProof({ surface, ...options }) {
   if (surface === "web") await runDeniedReviewProof(options);
+}
+
+async function maybeRunFullAccessProof({ surface, ...options }) {
+  if (surface === "web") await runFullAccessProof(options);
 }
 
 async function runApprovedReviewProof({ client, socket, workspace, run, io, matrix, journeys, codex, captureReview }) {
@@ -714,6 +719,22 @@ async function runDeniedReviewProof({ client, socket, workspace, run, io, matrix
       ? { kind: "coverage-gap", control, provider: codex.provider, model: codex.model, prerequisite: "native automatic-review denial terminal event", reason: journeys.reviewDenied.failure.classification }
       : { ...evidence, kind: "live-proof-failed", failure: journeys.reviewDenied.failure };
     await captureFailure(client.page, run, "web-review-denied-failure");
+  }
+}
+
+async function runFullAccessProof({ client, socket, workspace, run, io, matrix, journeys, codex }) {
+  const control = "web Composer Full access, canonical recovery, Review, reload, reconnect, and disk";
+  const evidence = { kind: "required-live-proof", control, provider: codex.provider, model: codex.model };
+  matrix.fullAccess = evidence;
+  try {
+    const journey = await runFullAccessJourney({ client, socket, workspace, run, io, provider: codex.provider, model: codex.model, modelName: codex.modelName });
+    journeys.fullAccess = { status: "passed", provider: codex.provider, model: codex.model, journey };
+    matrix.fullAccess = { ...evidence, kind: "live-proof", journey };
+  } catch (error) {
+    const message = safeError(error);
+    journeys.fullAccess = { status: "failed", provider: codex.provider, model: codex.model, failure: { message, classification: "Full access action did not retain bypass metadata without an approval-review lifecycle or footer" } };
+    matrix.fullAccess = { ...evidence, kind: "live-proof-failed", failure: journeys.fullAccess.failure };
+    await captureFailure(client.page, run, "web-full-access-failure");
   }
 }
 
@@ -845,6 +866,44 @@ export async function runDeniedReviewJourney({ client, socket, workspace, run, i
   return result;
 }
 
+/** Runs one bounded Full access Codex action and proves it bypassed approval review. */
+export async function runFullAccessJourney({ client, socket, workspace, run, io, provider, model, modelName, captureFullAccess: captureFullAccessState = captureFullAccessReview }) {
+  const fileName = "full-access-codex.md";
+  const fixtureFile = NodePath.join(run.fixtureDirectory, fileName);
+  const result = { provider, model, baseline: "BASELINE_MARKER", observations: {}, comparison: {}, fullAccess: {}, disk: null };
+  await io.writeFile(fixtureFile, "BASELINE_MARKER\n", "utf8");
+  run.run.ownedFiles = [...new Set([...(run.run.ownedFiles ?? []), fixtureFile])];
+  const beforeThreads = await listThreadIds(socket, workspace.id);
+  await driveComposer(client.page, workspace.name, provider, modelName, fullAccessComposerPrompt(fileName), { approvalReview: "full" });
+  const thread = await waitForNewThread(socket, workspace.id, beforeThreads, provider, model, run.run);
+  run.run.ownedThreadIds = [...new Set([...(run.run.ownedThreadIds ?? []), thread.id])];
+  run.workspace = { id: workspace.id, name: workspace.name, path: workspace.path, selectionEvidence: { source: "thread.list scoped request", requestedWorkspaceId: workspace.id, threadId: thread.id } };
+
+  const settledComparison = await waitForSettledComparison(socket, thread.id, fileName);
+  assertPatchAttribution(settledComparison.patch, "AGENT_MARKER", "EXTERNAL_MARKER");
+  result.comparison.settled = summarizeComparison(settledComparison.comparison, settledComparison.patch);
+  result.observations.settled = await captureSettledReviewState(socket, thread.id, fileName, client.page, run, "web-full-access-settled", captureFullAccessState);
+  const settled = await readFullAccessSnapshot(socket, thread.id);
+  await assertNoApprovalReviewFooter(client.page);
+  result.fullAccess.settled = settled;
+
+  await reloadClient(client);
+  result.observations.reloaded = await captureSettledReviewState(socket, thread.id, fileName, client.page, run, "web-full-access-reloaded", captureFullAccessState);
+  const reloaded = await readFullAccessSnapshot(socket, thread.id);
+  await assertNoApprovalReviewFooter(client.page);
+  assertFullAccessRecovery(settled, reloaded);
+  result.fullAccess.reloaded = reloaded;
+
+  await reconnectOwningClient(client);
+  result.observations.reconnected = await captureSettledReviewState(socket, thread.id, fileName, client.page, run, "web-full-access-reconnected", captureFullAccessState);
+  const reconnected = await readFullAccessSnapshot(socket, thread.id);
+  await assertNoApprovalReviewFooter(client.page);
+  assertFullAccessRecovery(settled, reconnected);
+  result.fullAccess.reconnected = reconnected;
+  result.disk = assertExactFullAccessDisk(await io.readFile(fixtureFile, "utf8"));
+  return result;
+}
+
 /** Creates the bounded Automatic-review fixture request. */
 export function approvedReviewComposerPrompt(fileName) {
   return `Edit ${fileName} with the apply_patch tool. Preserve BASELINE_MARKER and add AGENT_MARKER on the next line. Do not edit another file.`;
@@ -852,6 +911,11 @@ export function approvedReviewComposerPrompt(fileName) {
 
 /** Creates the bounded Automatic-review request that must leave the fixture unchanged. */
 export function deniedReviewComposerPrompt(fileName) {
+  return `Edit ${fileName} with the apply_patch tool. Preserve BASELINE_MARKER and add AGENT_MARKER on the next line. Do not edit another file.`;
+}
+
+/** Creates the bounded Full access action request. */
+export function fullAccessComposerPrompt(fileName) {
   return `Edit ${fileName} with the apply_patch tool. Preserve BASELINE_MARKER and add AGENT_MARKER on the next line. Do not edit another file.`;
 }
 
@@ -957,6 +1021,72 @@ export function assertExactApprovedReviewDisk(content) {
 export function assertExactDeniedReviewDisk(content) {
   if (content !== "BASELINE_MARKER\n") throw new Error("Condition: automatic denial review mutated the fixture.");
   return "denied-review baseline retained";
+}
+
+/** Requires the Full access fixture to contain only the expected agent mutation. */
+export function assertExactFullAccessDisk(content) {
+  if (content !== "BASELINE_MARKER\nAGENT_MARKER\n") throw new Error("Condition: Full access disk evidence was not the exact agent mutation.");
+  return "exact Full access mutation retained";
+}
+
+/** Reads one forced canonical snapshot and the matching public conversation page. */
+export async function readFullAccessSnapshot(socket, threadId) {
+  const revisions = { [threadId]: { conversationRevision: Number.MAX_SAFE_INTEGER, rosterRevision: Number.MAX_SAFE_INTEGER } };
+  const recoveryResult = await socket.rpc("push.setThreadSubscriptions", { threadIds: [threadId], revisions });
+  const recoveries = recoveryResult?.canonicalRecoveries;
+  if (!Array.isArray(recoveries) || recoveries.length !== 1) throw new Error("Condition: canonical recovery did not return one Full access thread snapshot.");
+  const turn = assertFullAccessSnapshot(recoveries[0], threadId);
+  const page = await socket.rpc("conversation.page", { threadId, limit: 1000 });
+  assertNoApprovalReviewLifecycle(page);
+  return { turn, approvalReviewLifecycleCount: 0 };
+}
+
+/** Validates Full access metadata only from a forced canonical recovery snapshot. */
+export function assertFullAccessSnapshot(recovery, threadId) {
+  assertExactFullAccessRecovery(recovery, threadId);
+  const turn = exactFullAccessTurn(recovery, threadId);
+  assertFullAccessBypassesApprovalReview(turn);
+  return fullAccessTurnSnapshot(turn);
+}
+
+function assertExactFullAccessRecovery(recovery, threadId) {
+  if (recovery?.mode !== "snapshot" || recovery.threadId !== threadId) throw new Error("Condition: canonical recovery did not return the exact Full access thread snapshot.");
+}
+
+function exactFullAccessTurn(recovery, threadId) {
+  const turns = Object.values(recovery.snapshot?.state?.turns ?? {}).filter((turn) => turn?.threadId === threadId);
+  if (turns.length !== 1) throw new Error("Condition: canonical recovery did not retain exactly one Full access turn.");
+  return turns[0];
+}
+
+function assertFullAccessBypassesApprovalReview(turn) {
+  if (turn.permissionMode !== "full" || turn.approvalReviewMode !== "manual" || turn.approvalReviewReason !== "full-access-bypasses-approval-review") throw new Error("Condition: canonical Full access metadata did not bypass approval review.");
+}
+
+function fullAccessTurnSnapshot(turn) {
+  return {
+    id: turn.id,
+    permissionMode: turn.permissionMode,
+    approvalReviewMode: turn.approvalReviewMode,
+    approvalReviewReason: turn.approvalReviewReason,
+  };
+}
+
+/** Rejects persisted Approval review lifecycle items for a Full access turn. */
+export function assertNoApprovalReviewLifecycle(page) {
+  const records = approvalReviewRecords(page);
+  if (records.length !== 0) throw new Error("Condition: Full access persisted an approval-review lifecycle.");
+}
+
+/** Rejects an Approval review footer, including a hidden stale instance. */
+export async function assertNoApprovalReviewFooter(page) {
+  const count = await page.getByTestId("approval-review").count();
+  if (count !== 0) throw new Error("Condition: Full access rendered an approval-review footer.");
+}
+
+/** Requires canonical Full access metadata and lifecycle absence to survive recovery. */
+export function assertFullAccessRecovery(initial, recovered) {
+  if (JSON.stringify(initial) !== JSON.stringify(recovered)) throw new Error("Condition: reload or reconnect changed the Full access bypass metadata or lifecycle.");
 }
 
 function approvalReviewRecords(page) {
@@ -1735,15 +1865,27 @@ async function driveComposer(page, workspaceName, provider, modelName, message, 
   await chooserDialog.getByRole("textbox", { name: "Filter models by name or id. Use multiple words to narrow results." }).fill(modelName);
   await chooserDialog.getByText(modelName, { exact: true }).click({ timeout: 15_000 });
   if (approvalReview === "automatic") await selectAutomaticReview(page);
+  if (approvalReview === "full") await selectFullAccess(page);
   const editor = page.getByRole("textbox", { name: "Message Mcode" });
   await editor.fill(message); await editor.press("Enter");
 }
 
 /** Selects and confirms Automatic review before a Composer message can dispatch. */
 export async function selectAutomaticReview(page) {
-  await page.getByRole("button", { name: "Access mode: Manual", exact: true }).click();
+  await accessModeButton(page).click();
   await page.getByText("Auto", { exact: true }).click();
   await page.getByRole("button", { name: "Access mode: Auto", exact: true }).waitFor({ state: "visible", timeout: 15_000 });
+}
+
+/** Selects and confirms Full access before a Composer message can dispatch. */
+export async function selectFullAccess(page) {
+  await accessModeButton(page).click();
+  await page.getByText("Full access", { exact: true }).click();
+  await page.getByRole("button", { name: "Access mode: Full access", exact: true }).waitFor({ state: "visible", timeout: 15_000 });
+}
+
+function accessModeButton(page) {
+  return page.getByRole("button", { name: /^Access mode: (Manual|Auto|Full access)$/ });
 }
 
 /** Waits for the frozen Automatic-review footer persisted on the completed turn. */
@@ -1833,7 +1975,17 @@ async function reconnectOwningClient(client) {
   await connectionLost.waitFor({ state: "hidden", timeout: 30_000 });
 }
 export async function closeReview(page) { const review = page.getByTestId("review-last-turn"); if (await review.isVisible().catch(() => false)) await page.getByRole("button", { name: /Changes/ }).click(); }
-export async function captureReview(page, receipt, name, result) { const review = await waitForExactReview(page, result); const rendered = await readRenderedReview(page, result.file.path); const screenshot = NodePath.join(receipt.directory, `${name}.png`); await page.screenshot({ path: screenshot }); receipt.screenshots.push(screenshot); receipt.renderedEvidence.push(screenshot); const spinners = await page.locator('[role="progressbar"], [data-testid*="spinner"]').count(); const rows = await reviewRowCount(review); return { screenshot, rows, spinners, ...rendered }; }
+export async function captureReview(page, receipt, name, result) { const review = await waitForExactReview(page, result); const rendered = await readRenderedReview(page, result.file.path); const screenshot = NodePath.join(receipt.directory, `${name}.png`); await page.screenshot({ path: screenshot }); receipt.screenshots.push(screenshot); receipt.renderedEvidence.push(screenshot); const spinners = await page.locator('[data-testid*="spinner"], [data-testid="review-refresh-progress"]').count(); const rows = await reviewRowCount(review); return { screenshot, rows, spinners, ...rendered }; }
+export async function captureFullAccessReview(page, receipt, name, result) {
+  const review = page.getByTestId("review-last-turn");
+  if (!await review.isVisible().catch(() => false)) {
+    await page.getByRole("button", { name: "View all diffs", exact: true }).last().click();
+    await page.getByTestId("review-view-switcher").click();
+    await page.getByTestId("review-view-last-turn").click();
+    await review.waitFor({ state: "visible", timeout: 15_000 });
+  }
+  return captureReview(page, receipt, name, result);
+}
 export async function captureEmptyReview(page, receipt, name, comparison) {
   const review = page.getByTestId("review-last-turn");
   if (!await review.isVisible().catch(() => false)) await page.getByRole("button", { name: /Changes/ }).click();
@@ -2261,7 +2413,7 @@ function optionalStrings(values) {
 }
 
 function isExactOrRedacted(value, expected) { return value === expected || value === "[path]"; }
-function isOwnedFixtureFile(value, directory) { return value === "[path]" || (typeof value === "string" && isWithin(value, directory) && /^(?:target(?:-(?:codex|cursor|claude))?\.(?:txt|md)|(?:approved|denied)-review-codex\.md|watch-(?:owner|observer)-sentinel\.txt)$/i.test(NodePath.basename(value))); }
+function isOwnedFixtureFile(value, directory) { return value === "[path]" || (typeof value === "string" && isWithin(value, directory) && /^(?:target(?:-(?:codex|cursor|claude))?\.(?:txt|md)|(?:approved|denied)-review-codex\.md|full-access-codex\.md|watch-(?:owner|observer)-sentinel\.txt)$/i.test(NodePath.basename(value))); }
 
 function hydrateOwnedReceipt(receipt, repoRoot) {
   const fixtureDirectory = NodePath.join(getRuntimePaths(repoRoot).fixtureRepoDir, `provider-completeness-${receipt.runId}`);
@@ -2304,9 +2456,13 @@ function providerMatrix(surface) { return {
       },
       reviewApproved: { kind: "coverage-gap", control: "web Composer Automatic approval review, conversation.page, Review, reload, and disk", prerequisite: "available Codex provider, model, catalog, and native automatic-review approval terminal event", reason: "The verifier records a coverage gap unless an available Codex Automatic Composer dispatch emits one durable Approved review.", fields: ["threadId", "reviewId", "outcome", "comparison", "review.rows", "review.spinners", "review.screenshot", "disk"] },
       reviewDenied: { kind: "coverage-gap", control: "web Composer Automatic denial review, conversation.page, Review, reload, and disk", prerequisite: "available Codex provider, model, catalog, and native automatic-review denial terminal event", reason: "The verifier records a coverage gap unless an available Codex Automatic Composer dispatch emits one durable Denied review without a file effect.", fields: ["threadId", "reviewId", "outcome", "comparison", "review.rows", "review.screenshot", "disk"] },
+      fullAccess: { kind: "coverage-gap", control: "web Composer Full access, canonical recovery, Review, reload, reconnect, and disk", prerequisite: "available Codex provider, model, and catalog", reason: "The verifier records a coverage gap until a bounded Full access action can prove its canonical bypass metadata and absence of approval-review lifecycle and footer.", fields: ["threadId", "permissionMode", "approvalReviewMode", "approvalReviewReason", "approvalReviewLifecycleCount", "comparison", "review.rows", "review.spinners", "review.screenshot", "disk"] },
       permissionHandoff: { kind: "blocked", prerequisite: "native provider PermissionRequest after strict-review routing", surface: "public Composer permission control" },
     }
-    : { electronRightPanel: { kind: "blocked", prerequisite: "a completed Electron Review journey", surface: "Electron", reason: "the proof starts Electron, but the native Codex Live diff did not reach public comparison" } }),
+    : {
+      electronRightPanel: { kind: "blocked", prerequisite: "a completed Electron Review journey", surface: "Electron", reason: "the proof starts Electron, but the native Codex Live diff did not reach public comparison" },
+      fullAccess: { kind: "coverage-gap", control: "Electron Composer Full access", prerequisite: "a separate Electron Full access Composer journey", reason: "The shared public control is exercised in web; Electron Full access is not independently verified." },
+    }),
 }; }
 
 function focusedGateMatrix() { return FOCUSED_GATES.map(({ name, control, rows, limitation }) => ({ kind: "focused-pending", name, control, rows, ...(limitation ? { limitation } : {}) })); }

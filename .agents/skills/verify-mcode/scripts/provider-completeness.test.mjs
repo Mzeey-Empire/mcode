@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
-import { aggregateEvidenceFailures, applyProviderPrerequisites, approvedReviewComposerPrompt, assertApprovedReviewReload, assertApprovedReviewTerminal, assertDeniedReviewComparison, assertDeniedReviewTerminal, assertDiskContent, assertExactApprovedReviewDisk, assertExactDeniedReviewDisk, assertLiveObservation, assertObservation, assertPatchAttribution, assertSeparateClients, assertWarningStabilityEvidence, captureCodexTraceEvidence, captureDeniedReview, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createClientInvalidationTrace, createOwnedFixtureWorkspace, createReceipt, deniedReviewComposerPrompt, emptyComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readExactApprovedReviewComparison, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runApprovedReviewJourney, runComposerReviewJourney, runDeniedReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runFourSurfaceRefreshJourney, runInterruptionJourney, runWorkspaceInvalidationJourney, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
+import { aggregateEvidenceFailures, applyProviderPrerequisites, approvedReviewComposerPrompt, assertApprovedReviewReload, assertApprovedReviewTerminal, assertDeniedReviewComparison, assertDeniedReviewTerminal, assertDiskContent, assertExactApprovedReviewDisk, assertExactDeniedReviewDisk, assertExactFullAccessDisk, assertFullAccessRecovery, assertFullAccessSnapshot, assertLiveObservation, assertNoApprovalReviewFooter, assertNoApprovalReviewLifecycle, assertObservation, assertPatchAttribution, assertSeparateClients, assertWarningStabilityEvidence, captureCodexTraceEvidence, captureDeniedReview, captureFullAccessReview, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createClientInvalidationTrace, createOwnedFixtureWorkspace, createReceipt, deniedReviewComposerPrompt, emptyComposerPrompt, fullAccessComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readExactApprovedReviewComparison, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runApprovedReviewJourney, runComposerReviewJourney, runDeniedReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runFourSurfaceRefreshJourney, runFullAccessJourney, runInterruptionJourney, runWorkspaceInvalidationJourney, selectAutomaticReview, selectFullAccess, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
 
 NodeTest.test("requires explicit proof and cleanup confirmations", () => {
   NodeAssertStrict.deepEqual(parseArguments(["health"]), { command: "health" });
@@ -82,6 +82,59 @@ NodeTest.test("starts every provider-completeness row with actionable evidence u
   NodeAssertStrict.deepEqual(receipt.watcherOwnership, { kind: "live-rpc-required", control: "public file.watch RPC and files.changed push", status: "not-run" });
   NodeAssertStrict.equal(receipt.matrix.electronRightPanel, undefined);
   NodeAssertStrict.equal(receipt.electron.matrix.electronRightPanel.surface, "Electron");
+});
+
+NodeTest.test("opens Full access Review from its public turn diff action", async () => {
+  let reviewOpen = false;
+  const events = [];
+  const file = { count: async () => 1, waitFor: async () => {}, innerText: async () => "AGENT_MARKER" };
+  const source = { count: async () => 1, waitFor: async () => {}, innerText: async () => "Agent changes", getAttribute: async (name) => name === "data-review-source" ? "native" : "agent" };
+  const review = {
+    isVisible: async () => reviewOpen,
+    waitFor: async () => { reviewOpen = true; },
+    locator: (selector) => selector === '[data-review-file="full-access-codex.md"]' ? file : { count: async () => 1 },
+    getByTestId: () => source,
+  };
+  const receipt = { directory: NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "provider-completeness-full-access-")), screenshots: [], renderedEvidence: [] };
+  const page = {
+    getByTestId: (testId) => {
+      if (testId === "review-last-turn") return review;
+      if (testId === "review-view-switcher") return { click: async () => { events.push("review-view-switcher"); } };
+      if (testId === "review-view-last-turn") return { click: async () => { events.push("review-view-last-turn"); reviewOpen = true; } };
+      throw new Error(`unexpected test id ${testId}`);
+    },
+    getByRole: (_role, options) => {
+      NodeAssertStrict.deepEqual(options, { name: "View all diffs", exact: true });
+      return { last: () => ({ click: async () => { events.push("view-all-diffs"); } }) };
+    },
+    screenshot: async () => {},
+    locator: (selector) => {
+      NodeAssertStrict.equal(selector, '[data-testid*="spinner"], [data-testid="review-refresh-progress"]');
+      return { count: async () => 0 };
+    },
+  };
+  const result = await captureFullAccessReview(page, receipt, "full-access", { file: { path: "full-access-codex.md" }, comparison: { turnDiff: { source: "native", fidelity: "agent" } } });
+  NodeAssertStrict.deepEqual(events, ["view-all-diffs", "review-view-switcher", "review-view-last-turn"]);
+  NodeAssertStrict.equal(result.filePath, "full-access-codex.md");
+  NodeAssertStrict.equal(result.rows, 1);
+});
+
+NodeTest.test("changes access mode from the current Full access control", async () => {
+  const events = [];
+  const page = {
+    getByRole: (_role, { name }) => {
+      if (name instanceof RegExp) return { click: async () => { events.push("open-full"); } };
+      if (name === "Access mode: Auto") return { waitFor: async () => { events.push("auto-visible"); } };
+      if (name === "Access mode: Full access") return { waitFor: async () => { events.push("full-visible"); } };
+      throw new Error(`unexpected access control ${name}`);
+    },
+    getByText: (name) => ({ click: async () => { events.push(name); } }),
+  };
+
+  await selectAutomaticReview(page);
+  await selectFullAccess(page);
+
+  NodeAssertStrict.deepEqual(events, ["open-full", "Auto", "auto-visible", "open-full", "Full access", "full-visible"]);
 });
 
 NodeTest.test("writes externally only after every four-surface baseline and before every refreshed assertion", async () => {
@@ -199,21 +252,22 @@ NodeTest.test("records focused gates once under their true owner and preserves t
   NodeAssertStrict.equal(calls.length, 6);
   NodeAssertStrict.deepEqual(calls.slice(0, 4).map((call) => call.args.at(-1)), [
     "src/features/agents/turns/__tests__/turn-diff-service.test.ts",
-    "src/features/agents/turns/__tests__/approval-review-policy.test.ts",
+    "src/features/agents/orchestration/__tests__/agent-service-turn-started.test.ts",
     "src/features/agents/orchestration/__tests__/agent-service-gate.test.ts",
     "src/features/projects/files/__tests__/workspace-invalidation-service.test.ts",
   ]);
   NodeAssertStrict.ok(calls[0].args.includes("src/features/agents/turns/__tests__/turn-diff-review.test.ts"));
+  NodeAssertStrict.ok(calls[1].args.includes("src/features/agents/turns/__tests__/approval-review-policy.test.ts"));
   NodeAssertStrict.ok(calls[0].args.includes("--testTimeout=30000"));
   NodeAssertStrict.deepEqual(receipt.focusedGates.map(({ control, rows, limitation }) => ({ control, rows, limitation })), [
     { control: "apps/server focused integration tests", rows: ["empty", "interruption"], limitation: undefined },
-    { control: "apps/server focused integration tests", rows: ["strictManual", "managedRequired"], limitation: undefined },
+    { control: "apps/server focused integration tests", rows: ["strictManual", "managedRequired", "fullAccessDispatch"], limitation: undefined },
     { control: "apps/server focused integration tests", rows: ["managedRequiredDispatch"], limitation: "Public Codex does not report required; this is focused server dispatch proof." },
     { control: "apps/server focused integration tests", rows: ["invalidation", "staleRetry", "disconnectWatchCleanup"], limitation: undefined },
     { control: "packages/providers focused protocol tests", rows: ["warningsReroutes"], limitation: undefined },
-    { control: "apps/web focused component tests", rows: ["fullAccess", "fileSurfaces"], limitation: undefined },
+    { control: "apps/web focused component tests", rows: ["fullAccessControl", "fileSurfaces"], limitation: undefined },
   ]);
-  for (const row of ["empty", "invalidation", "interruption", "warningsReroutes", "strictManual", "managedRequired", "managedRequiredDispatch", "fullAccess", "fileSurfaces", "staleRetry", "disconnectWatchCleanup"]) {
+  for (const row of ["empty", "invalidation", "interruption", "warningsReroutes", "strictManual", "managedRequired", "managedRequiredDispatch", "fullAccessDispatch", "fullAccessControl", "fileSurfaces", "staleRetry", "disconnectWatchCleanup"]) {
     NodeAssertStrict.equal(receipt.matrix[row], undefined, `${row} only belongs to its focused-test owner`);
     NodeAssertStrict.equal(receipt.electron.matrix[row], undefined, `${row} is not copied to Electron`);
   }
@@ -338,10 +392,10 @@ NodeTest.test("opens a projectless new thread through the sidebar and selects it
 
 NodeTest.test("aggregates focused gates and every failed provider surface", () => {
   const failed = aggregateEvidenceFailures(["server-turn-diff-review exited 1"], {
-    web: { codexNative: { kind: "live-proof-failed", provider: "codex" }, claudeFallback: { kind: "live-proof-failed", provider: "claude" }, reviewApproved: { kind: "required-live-proof", provider: "codex" }, reviewDenied: { kind: "live-proof-failed", provider: "codex" }, empty: { kind: "empty-proof-failed", provider: "codex" }, interruption: { kind: "interruption-proof-failed", provider: "codex" } },
+    web: { codexNative: { kind: "live-proof-failed", provider: "codex" }, claudeFallback: { kind: "live-proof-failed", provider: "claude" }, reviewApproved: { kind: "required-live-proof", provider: "codex" }, reviewDenied: { kind: "live-proof-failed", provider: "codex" }, fullAccess: { kind: "live-proof-failed", provider: "codex" }, empty: { kind: "empty-proof-failed", provider: "codex" }, interruption: { kind: "interruption-proof-failed", provider: "codex" } },
     electron: { codexNative: { kind: "live-proof-failed", provider: "codex" }, claudeFallback: { kind: "live-proof-failed", provider: "claude" }, interruption: { kind: "interruption-proof-required", provider: "codex" } },
   });
-  NodeAssertStrict.deepEqual(failed, ["server-turn-diff-review exited 1", "web/codex", "web/claude", "web/review-approved", "web/review-denied", "web/empty", "web/interruption", "electron/codex", "electron/claude", "electron/interruption"]);
+  NodeAssertStrict.deepEqual(failed, ["server-turn-diff-review exited 1", "web/codex", "web/claude", "web/review-approved", "web/review-denied", "web/full-access", "web/empty", "web/interruption", "electron/codex", "electron/claude", "electron/interruption"]);
 });
 
 NodeTest.test("requires exactly one started Approval review to finish Approved", () => {
@@ -414,7 +468,9 @@ NodeTest.test("selects Auto before dispatching and retains the approved review a
   ]);
   const page = {
     getByTestId: (testId) => testId === "approval-review" ? footer : control,
-    getByRole: (role, options) => controls.get(`${role}:${options?.name}`) ?? control,
+    getByRole: (role, options) => options?.name instanceof RegExp
+      ? controls.get("button:Access mode: Manual") ?? control
+      : controls.get(`${role}:${options?.name}`) ?? control,
     getByText: (name) => name === "Auto" ? { click: async () => { events.push("auto"); } } : control,
     locator: () => ({ count: async () => 0 }),
     reload: async () => { events.push("reload"); },
@@ -437,6 +493,94 @@ NodeTest.test("selects Auto before dispatching and retains the approved review a
   NodeAssertStrict.equal(result.disk, "exact approved-review mutation retained");
   NodeAssertStrict.deepEqual(run.run.ownedFiles, [NodePath.join("fixture", "approved-review-codex.md")]);
   NodeAssertStrict.match(approvedReviewComposerPrompt("approved-review-codex.md"), /Do not edit another file/);
+});
+
+NodeTest.test("selects Full access before dispatching and retains its bypass across reload and reconnect", async () => {
+  const events = [];
+  const fullTurn = {
+    id: "turn-full",
+    threadId: "full-thread",
+    permissionMode: "full",
+    approvalReviewMode: "manual",
+    approvalReviewReason: "full-access-bypasses-approval-review",
+  };
+  let threadListCalls = 0;
+  const socket = { rpc: async (method, params) => {
+    if (method === "thread.list") return threadListCalls++ === 0 ? [] : [{ id: "full-thread", provider: "codex", model: "model" }];
+    if (method === "turnDiff.getComparison") return { turnDiff: { id: "comparison-1", phase: "settled", source: "native", fidelity: "agent" }, files: [{ path: "full-access-codex.md", status: "modified" }] };
+    if (method === "turnDiff.getFileDiff") return "AGENT_MARKER";
+    if (method === "push.setThreadSubscriptions") {
+      events.push(`canonical:${params.revisions["full-thread"].conversationRevision}`);
+      return { canonicalRecoveries: [{ mode: "snapshot", threadId: "full-thread", snapshot: { state: { turns: { "turn-full": fullTurn } } } }] };
+    }
+    if (method === "conversation.page") return { narrativeByMessage: { assistant: { tools: [] } } };
+    throw new Error(`unexpected ${method}`);
+  } };
+  const control = { click: async () => {}, fill: async () => {}, press: async () => {}, waitFor: async () => {}, isVisible: async () => false };
+  const dialog = { ...control, isVisible: async () => true, getByTestId: () => control, getByRole: () => control, getByText: () => control };
+  const fullTrigger = { ...control, waitFor: async () => { events.push("full-visible"); } };
+  const controls = new Map([
+    ["dialog:Choose model and provider", dialog],
+    ["button:Access mode: Manual", { click: async () => { events.push("manual"); } }],
+    ["button:Access mode: Full access", fullTrigger],
+    ["textbox:Message Mcode", { fill: async () => { events.push("fill"); }, press: async () => { events.push("dispatch"); } }],
+  ]);
+  const connectionLost = { waitFor: async ({ state }) => { events.push(`connection:${state}`); } };
+  const page = {
+    getByTestId: (testId) => testId === "approval-review" ? { count: async () => 0 } : control,
+    getByRole: (role, options) => controls.get(`${role}:${options?.name}`) ?? control,
+    getByText: (name) => name === "Full access"
+      ? { click: async () => { events.push("full"); } }
+      : name === "Connection lost. Reconnecting to server..." ? connectionLost : control,
+    reload: async () => { events.push("reload"); },
+    context: () => ({ setOffline: async (offline) => { events.push(`offline:${offline}`); } }),
+  };
+  const run = { fixtureDirectory: "fixture", run: { ownedFiles: [] }, comparison: {}, renderedEvidence: [] };
+  const result = await runFullAccessJourney({
+    client: { page },
+    socket,
+    workspace: { id: "workspace", name: "Fixture", path: "fixture" },
+    run,
+    io: { writeFile: async () => {}, readFile: async () => "BASELINE_MARKER\nAGENT_MARKER\n" },
+    provider: "codex",
+    model: "model",
+    modelName: "Model",
+    captureFullAccess: async (_page, _receipt, name, review) => ({ screenshot: `${name}.png`, rows: 1, spinners: 0, filePath: review.file.path, fileText: "AGENT_MARKER", patch: "AGENT_MARKER", sourceLabel: "Agent changes", source: "native", fidelity: "agent" }),
+  });
+  NodeAssertStrict.ok(events.indexOf("full-visible") < events.indexOf("dispatch"));
+  NodeAssertStrict.ok(events.indexOf("reload") > events.indexOf("dispatch"));
+  NodeAssertStrict.deepEqual(events.filter((event) => event.startsWith("offline:")), ["offline:true", "offline:false"]);
+  NodeAssertStrict.equal(events.filter((event) => event.startsWith("canonical:")).length, 3);
+  NodeAssertStrict.deepEqual(result.fullAccess.reconnected, result.fullAccess.settled);
+  NodeAssertStrict.equal(result.disk, "exact Full access mutation retained");
+  NodeAssertStrict.deepEqual(run.run.ownedFiles, [NodePath.join("fixture", "full-access-codex.md")]);
+  NodeAssertStrict.match(fullAccessComposerPrompt("full-access-codex.md"), /Do not edit another file/);
+});
+
+NodeTest.test("rejects hidden Full access review state, changed bypass metadata, and external disk changes", async () => {
+  const fullTurn = {
+    id: "turn-full",
+    threadId: "full-thread",
+    permissionMode: "full",
+    approvalReviewMode: "manual",
+    approvalReviewReason: "full-access-bypasses-approval-review",
+  };
+  const recovery = { mode: "snapshot", threadId: "full-thread", snapshot: { state: { turns: { "turn-full": fullTurn } } } };
+  NodeAssertStrict.deepEqual(assertFullAccessSnapshot(recovery, "full-thread"), {
+    id: "turn-full",
+    permissionMode: "full",
+    approvalReviewMode: "manual",
+    approvalReviewReason: "full-access-bypasses-approval-review",
+  });
+  NodeAssertStrict.throws(() => assertFullAccessSnapshot({ ...recovery, snapshot: { state: { turns: { "turn-full": { ...fullTurn, approvalReviewReason: "automatic-review-available" } } } } }, "full-thread"), /did not bypass/);
+  NodeAssertStrict.doesNotThrow(() => assertNoApprovalReviewLifecycle({ narrativeByMessage: { assistant: { tools: [] } } }));
+  NodeAssertStrict.throws(() => assertNoApprovalReviewLifecycle({ narrativeByMessage: { assistant: { tools: [{ id: "approval-review:review-1" }] } } }), /persisted an approval-review lifecycle/);
+  await NodeAssertStrict.doesNotReject(assertNoApprovalReviewFooter({ getByTestId: () => ({ count: async () => 0 }) }));
+  await NodeAssertStrict.rejects(assertNoApprovalReviewFooter({ getByTestId: () => ({ count: async () => 1 }) }), /rendered an approval-review footer/);
+  NodeAssertStrict.doesNotThrow(() => assertFullAccessRecovery({ turn: fullTurn, approvalReviewLifecycleCount: 0 }, { turn: structuredClone(fullTurn), approvalReviewLifecycleCount: 0 }));
+  NodeAssertStrict.throws(() => assertFullAccessRecovery({ turn: fullTurn, approvalReviewLifecycleCount: 0 }, { turn: { ...fullTurn, approvalReviewMode: "automatic" }, approvalReviewLifecycleCount: 0 }), /reload or reconnect changed/);
+  NodeAssertStrict.equal(assertExactFullAccessDisk("BASELINE_MARKER\nAGENT_MARKER\n"), "exact Full access mutation retained");
+  NodeAssertStrict.throws(() => assertExactFullAccessDisk("BASELINE_MARKER\nAGENT_MARKER\nEXTERNAL_MARKER\n"), /exact agent mutation/);
 });
 
 NodeTest.test("requires exactly one started Approval review to finish Denied without a diff", () => {
