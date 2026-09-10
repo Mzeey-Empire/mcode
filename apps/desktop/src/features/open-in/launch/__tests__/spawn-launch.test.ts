@@ -14,7 +14,7 @@ vi.mock("fs", () => ({
   existsSync: existsSyncMock,
 }));
 
-import { createExecutableResolver, spawnDetached } from "../spawn-launch";
+import { commandOnPath, createExecutableResolver, spawnDetached } from "../spawn-launch";
 
 /** Fake child process that records its event handlers so a test can drive them. */
 function fakeChild() {
@@ -46,6 +46,37 @@ describe("createExecutableResolver", () => {
     expect(resolve()).toBe("code");
     // Memoized: the PATH lookup runs once even though resolve() is called twice.
     expect(execFileSyncMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [
+      "code",
+      "C:\\Users\\me\\AppData\\Local\\Programs\\Microsoft VS Code\\bin\\code\r\nC:\\Users\\me\\AppData\\Local\\Programs\\Microsoft VS Code\\bin\\code.cmd\r\n",
+      "C:\\Users\\me\\AppData\\Local\\Programs\\Microsoft VS Code\\bin\\code.cmd",
+    ],
+    [
+      "zed",
+      "C:\\Users\\me\\AppData\\Local\\Programs\\Zed\\bin\\zed\r\nC:\\Users\\me\\AppData\\Local\\Programs\\Zed\\bin\\Zed.exe\r\n",
+      "C:\\Users\\me\\AppData\\Local\\Programs\\Zed\\bin\\Zed.exe",
+    ],
+  ])("uses the first runnable Windows candidate for %s", (command, whereOutput, expected) => {
+    execFileSyncMock.mockReturnValue(whereOutput);
+    const resolve = createExecutableResolver(command, "win32");
+
+    expect(resolve()).toBe(expected);
+    expect(resolve()).toBe(expected);
+    expect(execFileSyncMock).toHaveBeenCalledTimes(1);
+    expect(execFileSyncMock).toHaveBeenCalledWith(
+      "where.exe",
+      [command],
+      expect.objectContaining({ windowsHide: true }),
+    );
+  });
+
+  it("does not report an extensionless Windows shim as a PATH command", () => {
+    execFileSyncMock.mockReturnValue("C:\\Users\\me\\AppData\\Local\\Programs\\VS Code\\bin\\code\r\n");
+
+    expect(commandOnPath("code", "win32")).toBe(false);
   });
 
   it("falls back to the first existing Windows path when not on PATH", () => {
@@ -96,6 +127,7 @@ describe("spawnDetached", () => {
       expect.objectContaining({
         shell: false,
         windowsVerbatimArguments: true,
+        windowsHide: true,
         env: expect.objectContaining({
           MCODE_OPEN_IN_COMMAND: '"probe.cmd"',
           MCODE_OPEN_IN_ARG_0: '"C:\\target folder"',
@@ -146,6 +178,7 @@ describe("spawnDetached", () => {
         detached: true,
         shell: false,
         windowsVerbatimArguments: true,
+        windowsHide: true,
         env: expect.objectContaining({
           MCODE_OPEN_IN_COMMAND: '"C:\\Program Files\\Open In Probe\\probe.cmd"',
           MCODE_OPEN_IN_ARG_0:
@@ -173,7 +206,7 @@ describe("spawnDetached", () => {
     expect(spawnMock).toHaveBeenCalledWith(
       "C:\\Program Files\\Open In Probe\\probe.exe",
       [target],
-      expect.objectContaining({ detached: true }),
+      expect.objectContaining({ detached: true, windowsHide: true }),
     );
   });
 
@@ -189,7 +222,7 @@ describe("spawnDetached", () => {
     expect(spawnMock).toHaveBeenCalledWith(
       "C:\\Program Files\\vs\\devenv.exe",
       ["C:\\my repo"],
-      expect.objectContaining({ detached: true }),
+      expect.objectContaining({ detached: true, windowsHide: true }),
     );
     expect(options).not.toHaveProperty("shell");
   });
