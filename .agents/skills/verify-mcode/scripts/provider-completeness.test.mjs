@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
-import { aggregateEvidenceFailures, applyProviderPrerequisites, approvedReviewComposerPrompt, assertApprovedReviewReload, assertApprovedReviewTerminal, assertDeniedReviewComparison, assertDeniedReviewTerminal, assertDiskContent, assertExactApprovedReviewDisk, assertExactDeniedReviewDisk, assertExactFullAccessDisk, assertFullAccessRecovery, assertFullAccessSnapshot, assertLiveObservation, assertNoApprovalReviewFooter, assertNoApprovalReviewLifecycle, assertObservation, assertPatchAttribution, assertSeparateClients, assertWarningStabilityEvidence, captureCodexTraceEvidence, captureDeniedReview, captureFullAccessReview, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createClientInvalidationTrace, createOwnedFixtureWorkspace, createReceipt, deniedReviewComposerPrompt, emptyComposerPrompt, fullAccessComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readExactApprovedReviewComparison, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runApprovedReviewJourney, runComposerReviewJourney, runDeniedReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runFourSurfaceRefreshJourney, runFullAccessJourney, runInterruptionJourney, runWorkspaceInvalidationJourney, selectAutomaticReview, selectFullAccess, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
+import { aggregateEvidenceFailures, applyProviderPrerequisites, approvedReviewComposerPrompt, assertApprovedReviewReload, assertApprovedReviewTerminal, assertDeniedReviewComparison, assertDeniedReviewTerminal, assertDiskContent, assertExactApprovedReviewDisk, assertExactDeniedReviewDisk, assertExactFullAccessDisk, assertFullAccessRecovery, assertFullAccessSnapshot, assertLiveObservation, assertNoApprovalReviewFooter, assertNoApprovalReviewLifecycle, assertObservation, assertPatchAttribution, assertSeparateClients, assertWarningStabilityEvidence, captureCodexTraceEvidence, captureDeniedReview, captureFullAccessReview, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createClientInvalidationTrace, createOwnedFixtureWorkspace, createReceipt, deniedReviewComposerPrompt, emptyComposerPrompt, fullAccessComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readExactApprovedReviewComparison, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runApprovedReviewJourney, runComposerReviewJourney, runDeniedReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runFourSurfaceRefreshJourney, runFullAccessJourney, runInterruptionJourney, runProviderJourneys, runWorkspaceInvalidationJourney, selectAutomaticReview, selectFullAccess, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
 
 NodeTest.test("requires explicit proof and cleanup confirmations", () => {
   NodeAssertStrict.deepEqual(parseArguments(["health"]), { command: "health" });
@@ -82,6 +82,7 @@ NodeTest.test("starts every provider-completeness row with actionable evidence u
   NodeAssertStrict.deepEqual(receipt.watcherOwnership, { kind: "live-rpc-required", control: "public file.watch RPC and files.changed push", status: "not-run" });
   NodeAssertStrict.equal(receipt.matrix.electronRightPanel, undefined);
   NodeAssertStrict.equal(receipt.electron.matrix.electronRightPanel.surface, "Electron");
+  NodeAssertStrict.equal(receipt.electron.matrix.fullAccess.kind, "coverage-gap");
 });
 
 NodeTest.test("opens Full access Review from its public turn diff action", async () => {
@@ -125,10 +126,14 @@ NodeTest.test("changes access mode from the current Full access control", async 
     getByRole: (_role, { name }) => {
       if (name instanceof RegExp) return { click: async () => { events.push("open-full"); } };
       if (name === "Access mode: Auto") return { waitFor: async () => { events.push("auto-visible"); } };
+      if (name === "Full access Run without approval prompts") return { click: async () => { events.push("Full access"); } };
       if (name === "Access mode: Full access") return { waitFor: async () => { events.push("full-visible"); } };
       throw new Error(`unexpected access control ${name}`);
     },
-    getByText: (name) => ({ click: async () => { events.push(name); } }),
+    getByText: (name) => {
+      if (name === "Auto") return { click: async () => { events.push("Auto"); } };
+      throw new Error("Full access must use its option button, not the current access-mode label.");
+    },
   };
 
   await selectAutomaticReview(page);
@@ -398,6 +403,67 @@ NodeTest.test("aggregates focused gates and every failed provider surface", () =
   NodeAssertStrict.deepEqual(failed, ["server-turn-diff-review exited 1", "web/codex", "web/claude", "web/review-approved", "web/review-denied", "web/full-access", "web/empty", "web/interruption", "electron/codex", "electron/claude", "electron/interruption"]);
 });
 
+function electronFullAccessProofHarness(runFullAccess) {
+  const matrix = { codexNative: { kind: "live-proof", provider: "codex", model: "model", modelName: "Model" } };
+  const run = {
+    directory: "fixture",
+    fixtureDirectory: "fixture",
+    screenshots: [],
+    renderedEvidence: [],
+    cleanup: { failures: [] },
+    comparison: {},
+    run: { ownedFiles: [] },
+  };
+  const page = {
+    getByTestId: () => ({ click: async () => { throw new Error("stop after Full access proof"); } }),
+    screenshot: async () => {},
+  };
+  return {
+    matrix,
+    options: {
+      surface: "electron",
+      client: { page },
+      socket: { rpc: async (method) => {
+        if (method === "thread.list") return [];
+        throw new Error(`unexpected ${method}`);
+      } },
+      workspace: { id: "workspace", name: "Fixture", path: "fixture" },
+      run,
+      io: { writeFile: async () => {} },
+      matrix,
+      runFullAccess,
+    },
+  };
+}
+
+NodeTest.test("runs available Codex Full access proof through the Electron Composer", async () => {
+  const calls = [];
+  const { matrix, options } = electronFullAccessProofHarness(async (input) => {
+    calls.push(input);
+    return { fullAccess: "proved" };
+  });
+  const journeys = await runProviderJourneys(options);
+  NodeAssertStrict.deepEqual(calls.map(({ surface, client, socket }) => ({ surface, client: Boolean(client?.page), socket: Boolean(socket?.rpc) })), [{ surface: "electron", client: true, socket: true }]);
+  NodeAssertStrict.deepEqual(journeys.fullAccess, { status: "passed", provider: "codex", model: "model", journey: { fullAccess: "proved" } });
+  NodeAssertStrict.deepEqual(matrix.fullAccess, {
+    kind: "live-proof",
+    control: "electron Composer Full access, canonical recovery, Review, reload, reconnect, and disk",
+    provider: "codex",
+    model: "model",
+    journey: { fullAccess: "proved" },
+  });
+});
+
+NodeTest.test("reports a failed Electron Full access proof as evidence failure", async () => {
+  const { matrix, options } = electronFullAccessProofHarness(async () => {
+    throw new Error("Full access fixture failed");
+  });
+  const journeys = await runProviderJourneys(options);
+  NodeAssertStrict.equal(journeys.fullAccess.status, "failed");
+  NodeAssertStrict.equal(matrix.fullAccess.kind, "live-proof-failed");
+  NodeAssertStrict.deepEqual(aggregateEvidenceFailures([], { electron: { fullAccess: matrix.fullAccess } }), ["electron/full-access"]);
+});
+
 NodeTest.test("requires exactly one started Approval review to finish Approved", () => {
   const terminal = {
     id: "approval-review:review-1",
@@ -495,7 +561,7 @@ NodeTest.test("selects Auto before dispatching and retains the approved review a
   NodeAssertStrict.match(approvedReviewComposerPrompt("approved-review-codex.md"), /Do not edit another file/);
 });
 
-NodeTest.test("selects Full access before dispatching and retains its bypass across reload and reconnect", async () => {
+NodeTest.test("runs the Electron Full access journey before dispatch and retains its bypass across reload and reconnect", async () => {
   const events = [];
   const fullTurn = {
     id: "turn-full",
@@ -522,6 +588,7 @@ NodeTest.test("selects Full access before dispatching and retains its bypass acr
   const controls = new Map([
     ["dialog:Choose model and provider", dialog],
     ["button:Access mode: Manual", { click: async () => { events.push("manual"); } }],
+    ["button:Full access Run without approval prompts", { click: async () => { events.push("full"); } }],
     ["button:Access mode: Full access", fullTrigger],
     ["textbox:Message Mcode", { fill: async () => { events.push("fill"); }, press: async () => { events.push("dispatch"); } }],
   ]);
@@ -529,14 +596,13 @@ NodeTest.test("selects Full access before dispatching and retains its bypass acr
   const page = {
     getByTestId: (testId) => testId === "approval-review" ? { count: async () => 0 } : control,
     getByRole: (role, options) => controls.get(`${role}:${options?.name}`) ?? control,
-    getByText: (name) => name === "Full access"
-      ? { click: async () => { events.push("full"); } }
-      : name === "Connection lost. Reconnecting to server..." ? connectionLost : control,
+    getByText: (name) => name === "Connection lost. Reconnecting to server..." ? connectionLost : control,
     reload: async () => { events.push("reload"); },
     context: () => ({ setOffline: async (offline) => { events.push(`offline:${offline}`); } }),
   };
   const run = { fixtureDirectory: "fixture", run: { ownedFiles: [] }, comparison: {}, renderedEvidence: [] };
   const result = await runFullAccessJourney({
+    surface: "electron",
     client: { page },
     socket,
     workspace: { id: "workspace", name: "Fixture", path: "fixture" },
@@ -551,6 +617,9 @@ NodeTest.test("selects Full access before dispatching and retains its bypass acr
   NodeAssertStrict.ok(events.indexOf("reload") > events.indexOf("dispatch"));
   NodeAssertStrict.deepEqual(events.filter((event) => event.startsWith("offline:")), ["offline:true", "offline:false"]);
   NodeAssertStrict.equal(events.filter((event) => event.startsWith("canonical:")).length, 3);
+  NodeAssertStrict.match(result.observations.settled.screenshot, /electron-full-access-settled/);
+  NodeAssertStrict.match(result.observations.reloaded.screenshot, /electron-full-access-reloaded/);
+  NodeAssertStrict.match(result.observations.reconnected.screenshot, /electron-full-access-reconnected/);
   NodeAssertStrict.deepEqual(result.fullAccess.reconnected, result.fullAccess.settled);
   NodeAssertStrict.equal(result.disk, "exact Full access mutation retained");
   NodeAssertStrict.deepEqual(run.run.ownedFiles, [NodePath.join("fixture", "full-access-codex.md")]);

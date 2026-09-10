@@ -622,7 +622,7 @@ export async function waitForNewThread(socket, workspaceId, previousIds, provide
 
 async function listThreadIds(socket, workspaceId) { const threads = await socket.rpc("thread.list", { workspaceId }); if (!Array.isArray(threads)) throw new Error("Condition: thread.list returned an unexpected value."); return new Set(threads.map((thread) => thread?.id).filter(Boolean)); }
 
-export async function runProviderJourneys({ surface, client, socket, workspace, run, io, matrix, captureLive, captureReview, captureEmpty, triggerProviderNotice }) {
+export async function runProviderJourneys({ surface, client, socket, workspace, run, io, matrix, captureLive, captureReview, captureEmpty, triggerProviderNotice, runFullAccess = runFullAccessJourney }) {
   const journeys = {};
   const warningStabilityTrigger = getWarningStabilityTrigger(surface, triggerProviderNotice);
   prepareWarningStabilityProof(matrix, warningStabilityTrigger);
@@ -644,7 +644,7 @@ export async function runProviderJourneys({ surface, client, socket, workspace, 
   if (codex?.provider === "codex" && codex.model && codex.modelName) {
     await maybeRunApprovedReviewProof({ surface, client, socket, workspace, run, io, matrix, journeys, codex, captureReview });
     await maybeRunDeniedReviewProof({ surface, client, socket, workspace, run, io, matrix, journeys, codex });
-    await maybeRunFullAccessProof({ surface, client, socket, workspace, run, io, matrix, journeys, codex, captureReview });
+    await maybeRunFullAccessProof({ surface, client, socket, workspace, run, io, matrix, journeys, codex, captureReview, runFullAccess });
     try {
       const journey = await runEmptyDiffJourney({ surface, client, socket, workspace, run, provider: codex.provider, model: codex.model, modelName: codex.modelName, captureEmpty });
       journeys.empty = { status: "passed", provider: codex.provider, model: codex.model, journey };
@@ -681,7 +681,7 @@ async function maybeRunDeniedReviewProof({ surface, ...options }) {
 }
 
 async function maybeRunFullAccessProof({ surface, ...options }) {
-  if (surface === "web") await runFullAccessProof(options);
+  await runFullAccessProof({ surface, ...options });
 }
 
 async function runApprovedReviewProof({ client, socket, workspace, run, io, matrix, journeys, codex, captureReview }) {
@@ -722,19 +722,19 @@ async function runDeniedReviewProof({ client, socket, workspace, run, io, matrix
   }
 }
 
-async function runFullAccessProof({ client, socket, workspace, run, io, matrix, journeys, codex }) {
-  const control = "web Composer Full access, canonical recovery, Review, reload, reconnect, and disk";
+async function runFullAccessProof({ surface, client, socket, workspace, run, io, matrix, journeys, codex, runFullAccess }) {
+  const control = `${surface} Composer Full access, canonical recovery, Review, reload, reconnect, and disk`;
   const evidence = { kind: "required-live-proof", control, provider: codex.provider, model: codex.model };
   matrix.fullAccess = evidence;
   try {
-    const journey = await runFullAccessJourney({ client, socket, workspace, run, io, provider: codex.provider, model: codex.model, modelName: codex.modelName });
+    const journey = await runFullAccess({ surface, client, socket, workspace, run, io, provider: codex.provider, model: codex.model, modelName: codex.modelName });
     journeys.fullAccess = { status: "passed", provider: codex.provider, model: codex.model, journey };
     matrix.fullAccess = { ...evidence, kind: "live-proof", journey };
   } catch (error) {
     const message = safeError(error);
     journeys.fullAccess = { status: "failed", provider: codex.provider, model: codex.model, failure: { message, classification: "Full access action did not retain bypass metadata without an approval-review lifecycle or footer" } };
     matrix.fullAccess = { ...evidence, kind: "live-proof-failed", failure: journeys.fullAccess.failure };
-    await captureFailure(client.page, run, "web-full-access-failure");
+    await captureFailure(client.page, run, `${surface}-full-access-failure`);
   }
 }
 
@@ -867,7 +867,7 @@ export async function runDeniedReviewJourney({ client, socket, workspace, run, i
 }
 
 /** Runs one bounded Full access Codex action and proves it bypassed approval review. */
-export async function runFullAccessJourney({ client, socket, workspace, run, io, provider, model, modelName, captureFullAccess: captureFullAccessState = captureFullAccessReview }) {
+export async function runFullAccessJourney({ surface = "web", client, socket, workspace, run, io, provider, model, modelName, captureFullAccess: captureFullAccessState = captureFullAccessReview }) {
   const fileName = "full-access-codex.md";
   const fixtureFile = NodePath.join(run.fixtureDirectory, fileName);
   const result = { provider, model, baseline: "BASELINE_MARKER", observations: {}, comparison: {}, fullAccess: {}, disk: null };
@@ -882,20 +882,20 @@ export async function runFullAccessJourney({ client, socket, workspace, run, io,
   const settledComparison = await waitForSettledComparison(socket, thread.id, fileName);
   assertPatchAttribution(settledComparison.patch, "AGENT_MARKER", "EXTERNAL_MARKER");
   result.comparison.settled = summarizeComparison(settledComparison.comparison, settledComparison.patch);
-  result.observations.settled = await captureSettledReviewState(socket, thread.id, fileName, client.page, run, "web-full-access-settled", captureFullAccessState);
+  result.observations.settled = await captureSettledReviewState(socket, thread.id, fileName, client.page, run, `${surface}-full-access-settled`, captureFullAccessState);
   const settled = await readFullAccessSnapshot(socket, thread.id);
   await assertNoApprovalReviewFooter(client.page);
   result.fullAccess.settled = settled;
 
   await reloadClient(client);
-  result.observations.reloaded = await captureSettledReviewState(socket, thread.id, fileName, client.page, run, "web-full-access-reloaded", captureFullAccessState);
+  result.observations.reloaded = await captureSettledReviewState(socket, thread.id, fileName, client.page, run, `${surface}-full-access-reloaded`, captureFullAccessState);
   const reloaded = await readFullAccessSnapshot(socket, thread.id);
   await assertNoApprovalReviewFooter(client.page);
   assertFullAccessRecovery(settled, reloaded);
   result.fullAccess.reloaded = reloaded;
 
   await reconnectOwningClient(client);
-  result.observations.reconnected = await captureSettledReviewState(socket, thread.id, fileName, client.page, run, "web-full-access-reconnected", captureFullAccessState);
+  result.observations.reconnected = await captureSettledReviewState(socket, thread.id, fileName, client.page, run, `${surface}-full-access-reconnected`, captureFullAccessState);
   const reconnected = await readFullAccessSnapshot(socket, thread.id);
   await assertNoApprovalReviewFooter(client.page);
   assertFullAccessRecovery(settled, reconnected);
@@ -1880,7 +1880,7 @@ export async function selectAutomaticReview(page) {
 /** Selects and confirms Full access before a Composer message can dispatch. */
 export async function selectFullAccess(page) {
   await accessModeButton(page).click();
-  await page.getByText("Full access", { exact: true }).click();
+  await page.getByRole("button", { name: "Full access Run without approval prompts", exact: true }).click();
   await page.getByRole("button", { name: "Access mode: Full access", exact: true }).waitFor({ state: "visible", timeout: 15_000 });
 }
 
@@ -2461,7 +2461,7 @@ function providerMatrix(surface) { return {
     }
     : {
       electronRightPanel: { kind: "blocked", prerequisite: "a completed Electron Review journey", surface: "Electron", reason: "the proof starts Electron, but the native Codex Live diff did not reach public comparison" },
-      fullAccess: { kind: "coverage-gap", control: "Electron Composer Full access", prerequisite: "a separate Electron Full access Composer journey", reason: "The shared public control is exercised in web; Electron Full access is not independently verified." },
+      fullAccess: { kind: "coverage-gap", control: "Electron Composer Full access, canonical recovery, Review, reload, reconnect, and disk", prerequisite: "available Codex provider, model, and catalog", reason: "The Electron Full access Composer journey has not run." },
     }),
 }; }
 
