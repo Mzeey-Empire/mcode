@@ -228,6 +228,7 @@ async function createProviderJourney(surface, client, socket, workspace, run, io
     captureLive: dependencies.captureLive ?? captureLive,
     captureReview: dependencies.captureReview ?? captureReview,
     captureEmpty: dependencies.captureEmpty ?? captureEmptyReview,
+    triggerProviderNotice: dependencies.triggerProviderNotice,
   });
 }
 
@@ -597,9 +598,9 @@ export function assertEveryAvailableProviderWasProven(matrix) {
 
 /** Lists focused-gate and provider-journey failures after every surface has run. */
 export function aggregateEvidenceFailures(focusedFailures, surfaces) {
-  const providerFailures = Object.entries(surfaces).flatMap(([surface, matrix]) => Object.values(matrix)
-    .filter((entry) => entry?.kind === "required-live-proof" || entry?.kind === "live-proof-failed" || entry?.kind === "empty-proof-failed" || entry?.kind === "interruption-proof-required" || entry?.kind === "interruption-proof-failed")
-    .map((entry) => entry.kind === "empty-proof-failed" ? `${surface}/empty` : entry.kind === "interruption-proof-required" || entry.kind === "interruption-proof-failed" ? `${surface}/interruption` : `${surface}/${entry.provider}`));
+  const providerFailures = Object.entries(surfaces).flatMap(([surface, matrix]) => Object.entries(matrix)
+    .filter(([, entry]) => entry?.kind === "required-live-proof" || entry?.kind === "live-proof-failed" || entry?.kind === "empty-proof-failed" || entry?.kind === "interruption-proof-required" || entry?.kind === "interruption-proof-failed")
+    .map(([row, entry]) => row === "warningStability" ? `${surface}/warning-stability` : entry.kind === "empty-proof-failed" ? `${surface}/empty` : entry.kind === "interruption-proof-required" || entry.kind === "interruption-proof-failed" ? `${surface}/interruption` : `${surface}/${entry.provider}`));
   return [...focusedFailures, ...providerFailures];
 }
 
@@ -619,11 +620,13 @@ export async function waitForNewThread(socket, workspaceId, previousIds, provide
 
 async function listThreadIds(socket, workspaceId) { const threads = await socket.rpc("thread.list", { workspaceId }); if (!Array.isArray(threads)) throw new Error("Condition: thread.list returned an unexpected value."); return new Set(threads.map((thread) => thread?.id).filter(Boolean)); }
 
-export async function runProviderJourneys({ surface, client, socket, workspace, run, io, matrix, captureLive, captureReview, captureEmpty }) {
+export async function runProviderJourneys({ surface, client, socket, workspace, run, io, matrix, captureLive, captureReview, captureEmpty, triggerProviderNotice }) {
   const journeys = {};
-  for (const [row, evidence] of Object.entries(matrix).filter(([, entry]) => entry?.kind === "required-live-proof")) {
+  const warningStabilityTrigger = getWarningStabilityTrigger(surface, triggerProviderNotice);
+  prepareWarningStabilityProof(matrix, warningStabilityTrigger);
+  for (const [row, evidence] of primaryJourneyRows(matrix)) {
     try {
-      const journey = await runComposerReviewJourney({ surface, client, socket, workspace, run, io, provider: evidence.provider, model: evidence.model, modelName: evidence.modelName ?? evidence.model, captureLive, captureReview });
+      const journey = await runComposerReviewJourney({ surface, client, socket, workspace, run, io, provider: evidence.provider, model: evidence.model, modelName: evidence.modelName ?? evidence.model, captureLive, captureReview, triggerProviderNotice: warningStabilityTrigger });
       journeys[row] = { status: "passed", provider: evidence.provider, model: evidence.model, journey };
       matrix[row] = { ...evidence, kind: "live-proof", journey };
     } catch (error) {
@@ -634,6 +637,7 @@ export async function runProviderJourneys({ surface, client, socket, workspace, 
       await captureFailure(client.page, run, `${surface}-${evidence.provider}-failure`);
     }
   }
+  recordWarningStabilityResult(matrix, journeys);
   const codex = matrix.codexNative;
   if (codex?.provider === "codex" && codex.model && codex.modelName) {
     try {
@@ -663,7 +667,29 @@ export async function runProviderJourneys({ surface, client, socket, workspace, 
   return journeys;
 }
 
-export async function runComposerReviewJourney({ surface, client, socket, workspace, run, io, provider, model, modelName, captureLive: captureLiveState, captureReview: captureReviewState, captureFourSurface: captureFourSurfaceState = captureFourSurfaceRefreshState, createInvalidationTrace = createClientInvalidationTrace }) {
+function primaryJourneyRows(matrix) {
+  return Object.entries(matrix).filter(([row, entry]) => row !== "warningStability" && entry?.kind === "required-live-proof");
+}
+
+function getWarningStabilityTrigger(surface, triggerProviderNotice) {
+  return surface === "web" && typeof triggerProviderNotice === "function" ? triggerProviderNotice : undefined;
+}
+
+function prepareWarningStabilityProof(matrix, triggerProviderNotice) {
+  if (!triggerProviderNotice) return;
+  matrix.warningStability = { ...matrix.warningStability, kind: "required-live-proof", provider: "codex" };
+}
+
+function recordWarningStabilityResult(matrix, journeys) {
+  const journey = journeys.codexNative?.journey;
+  if (!journey?.warningStability && !journey?.warningStabilityFailure) return;
+  const control = "web Composer provider notice, conversation.page, Review, and public turn comparison";
+  matrix.warningStability = journey.warningStability
+    ? { kind: "live-proof", control, ...journey.warningStability }
+    : { kind: "live-proof-failed", control, provider: "codex", failure: journey.warningStabilityFailure };
+}
+
+export async function runComposerReviewJourney({ surface, client, socket, workspace, run, io, provider, model, modelName, captureLive: captureLiveState, captureReview: captureReviewState, captureFourSurface: captureFourSurfaceState = captureFourSurfaceRefreshState, createInvalidationTrace = createClientInvalidationTrace, triggerProviderNotice }) {
   const fileName = provider === "codex" ? "target-codex.md" : `target-${provider}.txt`;
   const fixtureFile = NodePath.join(run.fixtureDirectory, fileName);
   const result = { provider, model, baseline: "BASELINE_MARKER", observations: {}, comparison: {}, fetchedPatch: null, disk: null };
@@ -680,7 +706,7 @@ export async function runComposerReviewJourney({ surface, client, socket, worksp
     run.run.ownedThreadIds = [...new Set([...(run.run.ownedThreadIds ?? []), thread.id])];
     run.workspace = { id: workspace.id, name: workspace.name, path: workspace.path, selectionEvidence: { source: "thread.list scoped request", requestedWorkspaceId: workspace.id, threadId: thread.id } };
     if (provider === "codex") {
-      await captureCodexLiveJourney({ client, socket, workspaceId: workspace.id, threadId: thread.id, run, surface, fixtureFile, fileName, io, result, captureLiveState, captureFourSurfaceState, invalidationTrace });
+      await captureCodexLiveJourney({ client, socket, workspaceId: workspace.id, threadId: thread.id, run, surface, fixtureFile, fileName, io, result, captureLiveState, captureFourSurfaceState, invalidationTrace, triggerProviderNotice });
     }
   } finally {
     if (invalidationTrace) await invalidationTrace.close();
@@ -708,7 +734,7 @@ async function readComposerDiskEvidence(io, fixtureFile, provider) {
   return "agent marker retained";
 }
 
-async function captureCodexLiveJourney({ client, socket, workspaceId, threadId, run, surface, fixtureFile, fileName, io, result, captureLiveState, captureFourSurfaceState, invalidationTrace }) {
+async function captureCodexLiveJourney({ client, socket, workspaceId, threadId, run, surface, fixtureFile, fileName, io, result, captureLiveState, captureFourSurfaceState, invalidationTrace, triggerProviderNotice }) {
   run.phase = "agent-live-diff";
   const initialAgentComparison = await waitForLiveAgentDiff(socket, threadId, fileName, undefined, run.diagnostics.liveComparisons);
   assertPatchAttribution(initialAgentComparison.patch, "AGENT_MARKER", "EXTERNAL_MARKER");
@@ -718,7 +744,138 @@ async function captureCodexLiveJourney({ client, socket, workspaceId, threadId, 
   result.comparison.agentLive = summarizeComparison(agentComparison.comparison, agentComparison.patch);
   result.fetchedPatch = agentComparison.patch;
   result.observations.live = await captureLiveObservation(client.page, run, agentComparison, captureLiveState, `${surface}-codex-live`);
+  if (typeof triggerProviderNotice === "function") {
+    try {
+      result.warningStability = await captureWarningStabilityJourney({ client, socket, threadId, fileName, run, triggerProviderNotice });
+    } catch (error) {
+      await captureFailure(client.page, run, `${surface}-warning-stability-failure`);
+      result.warningStabilityFailure = { message: safeError(error), classification: "provider warning or reroute changed the Live Review evidence" };
+    }
+  }
 }
+
+/** Captures the public state that must survive one native provider notice during a Live diff. */
+export async function captureWarningStabilityJourney({ client, socket, threadId, fileName, run, triggerProviderNotice }) {
+  const before = await readLiveWarningComparison(socket, threadId, fileName);
+  await triggerProviderNotice({ threadId, kind: "warning" });
+  const notice = await waitForCurrentProviderNotice(socket, threadId);
+  const after = await readLiveWarningComparison(socket, threadId, fileName);
+  const rendered = await captureWarningStabilityReview(client.page, run, `web-warning-stability`, after);
+  return assertWarningStabilityEvidence({ threadId, notice, before, after, rendered });
+}
+
+async function readLiveWarningComparison(socket, threadId, fileName) {
+  const comparison = await socket.rpc("turnDiff.getComparison", { threadId, includeLive: true });
+  const file = comparison?.files?.find((candidate) => fileMatches(candidate, fileName));
+  const turnDiff = comparison?.turnDiff;
+  if (!hasLiveWarningComparison(turnDiff, file)) {
+    throw new Error("Condition: provider notice did not have one exact Live public comparison.");
+  }
+  const patch = await socket.rpc("turnDiff.getFileDiff", { threadId, comparisonId: turnDiff.id, filePath: file.path });
+  if (typeof patch !== "string") throw new Error("Condition: provider notice did not retain the Live public file patch.");
+  return { comparison, file, patch };
+}
+
+function hasLiveWarningComparison(turnDiff, file) {
+  return isLiveTurnDiff(turnDiff) && hasTurnDiffIdentity(turnDiff) && typeof file?.path === "string";
+}
+
+function isLiveTurnDiff(turnDiff) { return turnDiff?.phase === "live"; }
+function hasTurnDiffIdentity(turnDiff) { return Boolean(turnDiff?.id && turnDiff.source && turnDiff.fidelity); }
+
+async function waitForCurrentProviderNotice(socket, threadId, deadline = Date.now() + 15_000) {
+  while (Date.now() < deadline) {
+    const page = await socket.rpc("conversation.page", { threadId, limit: 100 });
+    const notices = Array.isArray(page?.sessionNotices) ? page.sessionNotices : [];
+    const providerNotices = notices.filter((notice) => notice?.systemNotice?.kind === "warning" || notice?.systemNotice?.kind === "model-rerouted");
+    if (providerNotices.length === 1) return providerNotices[0];
+    if (providerNotices.length > 1) throw new Error("Condition: provider notice delivery duplicated the current notice collection.");
+    await delay(100);
+  }
+  throw new Error("Condition: provider warning or reroute did not reach conversation.page.");
+}
+
+async function captureWarningStabilityReview(page, receipt, name, result) {
+  const review = await waitForExactReview(page, result);
+  const rendered = await readRenderedReview(page, result.file.path);
+  const [rows, spinners] = await Promise.all([
+    reviewRowCount(review),
+    page.locator('[role="progressbar"], [data-testid*="spinner"], [data-testid="review-refresh-progress"]').count(),
+  ]);
+  const notices = page.getByTestId("composer-provider-notice");
+  await notices.first().waitFor({ state: "visible", timeout: 15_000 });
+  const screenshot = NodePath.join(receipt.directory, `${name}.png`);
+  await page.screenshot({ path: screenshot });
+  receipt.screenshots.push(screenshot);
+  receipt.renderedEvidence.push(screenshot);
+  return { ...rendered, rows, spinners, screenshot, noticeCount: await notices.count() };
+}
+
+/** Rejects duplicate notices and any changed, missing, or stale Live Review evidence. */
+export function assertWarningStabilityEvidence({ threadId, notice, before, after, rendered }) {
+  const noticeMetadata = warningNoticeMetadata(notice);
+  assertWarningNoticeIdentity(threadId, noticeMetadata.kind, noticeMetadata.identity);
+  const beforeTurnDiff = before?.comparison?.turnDiff;
+  const afterTurnDiff = after?.comparison?.turnDiff;
+  assertStableLiveDiff(before, after, beforeTurnDiff, afterTurnDiff);
+  assertStableWarningReview(rendered, after, afterTurnDiff);
+  return {
+    threadId,
+    notice: noticeMetadata,
+    before: { comparisonId: beforeTurnDiff.id, ...summarizeComparison(before.comparison, before.patch) },
+    after: { comparisonId: afterTurnDiff.id, ...summarizeComparison(after.comparison, after.patch) },
+    review: { rows: rendered.rows, spinners: rendered.spinners, noticeCount: rendered.noticeCount, screenshot: rendered.screenshot },
+  };
+}
+
+function warningNoticeMetadata(notice) {
+  return {
+    kind: notice?.systemNotice?.kind,
+    identity: notice?.systemNotice?.noticeKey ?? notice?.id,
+    sessionId: notice?.systemNotice?.sessionId ?? null,
+  };
+}
+
+function assertWarningNoticeIdentity(threadId, noticeKind, noticeIdentity) {
+  if (typeof threadId !== "string" || !threadId) throw new Error("Condition: provider warning or reroute lacked its exact public identity.");
+  if (!isWarningNoticeKind(noticeKind)) throw new Error("Condition: provider warning or reroute lacked its exact public identity.");
+  if (typeof noticeIdentity !== "string" || !noticeIdentity) throw new Error("Condition: provider warning or reroute lacked its exact public identity.");
+}
+
+function isWarningNoticeKind(kind) { return kind === "warning" || kind === "model-rerouted"; }
+
+function assertStableLiveDiff(before, after, beforeTurnDiff, afterTurnDiff) {
+  if (!isLiveTurnDiff(beforeTurnDiff) || !isLiveTurnDiff(afterTurnDiff)) throw warningStabilityError();
+  if (!hasTurnDiffIdentity(beforeTurnDiff) || !hasTurnDiffIdentity(afterTurnDiff)) throw warningStabilityError();
+  if (!sameLiveDiff(before, after, beforeTurnDiff, afterTurnDiff)) throw warningStabilityError();
+  if (!hasAgentOnlyPatch(after?.patch)) throw warningStabilityError();
+}
+
+function sameLiveDiff(before, after, beforeTurnDiff, afterTurnDiff) {
+  return beforeTurnDiff.source === afterTurnDiff.source
+    && beforeTurnDiff.fidelity === afterTurnDiff.fidelity
+    && before?.file?.path === after?.file?.path
+    && before?.patch === after?.patch;
+}
+
+function hasAgentOnlyPatch(patch) { return typeof patch === "string" && patch.includes("AGENT_MARKER") && !patch.includes("EXTERNAL_MARKER"); }
+
+function assertStableWarningReview(rendered, after, afterTurnDiff) {
+  if (!rendered) throw warningStabilityError();
+  assertSingleRenderedNotice(rendered);
+  assertStableReviewRows(rendered);
+  assertStableReviewFile(rendered, after.file.path);
+  assertStableReviewProvenance(rendered, afterTurnDiff);
+  assertWarningScreenshot(rendered);
+}
+
+function assertSingleRenderedNotice(rendered) { if (rendered.noticeCount !== 1) throw warningStabilityError(); }
+function assertStableReviewRows(rendered) { if (rendered.rows !== 1) throw warningStabilityError(); if (rendered.spinners !== 0) throw warningStabilityError(); }
+function assertStableReviewFile(rendered, filePath) { if (rendered.filePath !== filePath) throw warningStabilityError(); if (rendered.patch !== "AGENT_MARKER") throw warningStabilityError(); }
+function assertStableReviewProvenance(rendered, turnDiff) { if (rendered.source !== turnDiff.source) throw warningStabilityError(); if (rendered.fidelity !== turnDiff.fidelity) throw warningStabilityError(); }
+function assertWarningScreenshot(rendered) { if (typeof rendered.screenshot !== "string") throw warningStabilityError(); }
+
+function warningStabilityError() { return new Error("Condition: provider warning or reroute changed, erased, duplicated, or left stale the Live Review diff."); }
 
 /**
  * Records one verifier-owned disk mutation across the public file surfaces.
@@ -1784,6 +1941,15 @@ function providerMatrix(surface) { return {
   claudeFallback: { kind: "pending-observation", control: "providers.listAvailability, provider.listModels, and provider.catalog" },
   ...(surface === "web"
     ? {
+      warningStability: {
+        kind: "coverage-gap",
+        control: "web Composer provider notice, conversation.page, Review, and public turn comparison",
+        prerequisite: "a native Codex warning or model/rerouted notification while the exact public Live diff is active",
+        reason: "Mcode has no public notice trigger; the controlled Codex fixture maps notices but cannot recreate the upstream condition during a Live diff.",
+        owner: "web",
+        electron: "The public Composer and turn-diff state are shared with Electron; this gap is recorded once until a native trigger can exercise the bound state.",
+        fields: ["threadId", "notice.kind", "notice.identity", "before", "after", "review.rows", "review.spinners", "review.noticeCount", "review.screenshot"],
+      },
       reviewApproved: { kind: "blocked", prerequisite: "native automatic-review approval terminal event", surface: "public Composer, conversation, and Review" },
       reviewDenied: { kind: "blocked", prerequisite: "native automatic-review denial terminal event", surface: "public Composer, conversation, and Review" },
       permissionHandoff: { kind: "blocked", prerequisite: "native provider PermissionRequest after strict-review routing", surface: "public Composer permission control" },

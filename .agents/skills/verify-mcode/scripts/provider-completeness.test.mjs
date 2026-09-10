@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
-import { aggregateEvidenceFailures, applyProviderPrerequisites, assertDiskContent, assertLiveObservation, assertObservation, assertPatchAttribution, assertSeparateClients, captureCodexTraceEvidence, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createClientInvalidationTrace, createOwnedFixtureWorkspace, createReceipt, emptyComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runComposerReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runFourSurfaceRefreshJourney, runInterruptionJourney, runWorkspaceInvalidationJourney, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
+import { aggregateEvidenceFailures, applyProviderPrerequisites, assertDiskContent, assertLiveObservation, assertObservation, assertPatchAttribution, assertSeparateClients, assertWarningStabilityEvidence, captureCodexTraceEvidence, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createClientInvalidationTrace, createOwnedFixtureWorkspace, createReceipt, emptyComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runComposerReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runFourSurfaceRefreshJourney, runInterruptionJourney, runWorkspaceInvalidationJourney, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
 
 NodeTest.test("requires explicit proof and cleanup confirmations", () => {
   NodeAssertStrict.deepEqual(parseArguments(["health"]), { command: "health" });
@@ -76,6 +76,9 @@ NodeTest.test("starts every provider-completeness row with actionable evidence u
     NodeAssertStrict.ok(gate.control, `${gate.name} names its focused-test owner`);
   }
   NodeAssertStrict.equal(receipt.matrix.codexNative.kind, "live-proof-required");
+  NodeAssertStrict.deepEqual(receipt.matrix.warningStability.fields, ["threadId", "notice.kind", "notice.identity", "before", "after", "review.rows", "review.spinners", "review.noticeCount", "review.screenshot"]);
+  NodeAssertStrict.equal(receipt.matrix.warningStability.owner, "web");
+  NodeAssertStrict.equal(receipt.electron.matrix.warningStability, undefined);
   NodeAssertStrict.deepEqual(receipt.watcherOwnership, { kind: "live-rpc-required", control: "public file.watch RPC and files.changed push", status: "not-run" });
   NodeAssertStrict.equal(receipt.matrix.electronRightPanel, undefined);
   NodeAssertStrict.equal(receipt.electron.matrix.electronRightPanel.surface, "Electron");
@@ -337,6 +340,37 @@ NodeTest.test("aggregates focused gates and every failed provider surface", () =
     electron: { codexNative: { kind: "live-proof-failed", provider: "codex" }, claudeFallback: { kind: "live-proof-failed", provider: "claude" }, interruption: { kind: "interruption-proof-required", provider: "codex" } },
   });
   NodeAssertStrict.deepEqual(failed, ["server-turn-diff-review exited 1", "web/codex", "web/claude", "web/empty", "web/interruption", "electron/codex", "electron/claude", "electron/interruption"]);
+});
+
+NodeTest.test("rejects a duplicate notice or changed Live diff after a provider warning", () => {
+  const before = {
+    comparison: { turnDiff: { id: "live-before-91", phase: "live", source: "native", fidelity: "agent" }, files: [{ path: "nested/provider-target.md", status: "modified" }] },
+    file: { path: "nested/provider-target.md" },
+    patch: "AGENT_MARKER\n",
+  };
+  const after = {
+    comparison: { turnDiff: { id: "live-after-92", phase: "live", source: "native", fidelity: "agent" }, files: [{ path: "nested/provider-target.md", status: "modified" }] },
+    file: { path: "nested/provider-target.md" },
+    patch: "AGENT_MARKER\n",
+  };
+  const notice = { id: "notice-message-501", systemNotice: { kind: "warning", noticeKey: "native-warning-83", sessionId: "session-17" } };
+  const rendered = { noticeCount: 1, rows: 1, spinners: 0, filePath: "nested/provider-target.md", patch: "AGENT_MARKER", source: "native", fidelity: "agent", screenshot: "warning-stability.png" };
+
+  const evidence = assertWarningStabilityEvidence({ threadId: "thread-42", notice, before, after, rendered });
+  NodeAssertStrict.equal(evidence.notice.identity, "native-warning-83");
+  NodeAssertStrict.equal(evidence.before.comparison.turnDiff.phase, "live");
+  NodeAssertStrict.equal(evidence.after.comparison.turnDiff.phase, "live");
+  NodeAssertStrict.throws(() => assertWarningStabilityEvidence({ threadId: "thread-42", notice, before, after, rendered: { ...rendered, noticeCount: 2 } }), /duplicated/);
+  NodeAssertStrict.throws(() => assertWarningStabilityEvidence({ threadId: "thread-42", notice, before, after: { ...after, patch: "AGENT_MARKER\nCHANGED" }, rendered }), /changed/);
+  NodeAssertStrict.throws(() => assertWarningStabilityEvidence({ threadId: "thread-42", notice, before, after: { ...after, patch: null }, rendered }), /erased/);
+});
+
+NodeTest.test("includes an available warning stability proof failure in the aggregate result", () => {
+  const failures = aggregateEvidenceFailures([], {
+    web: { warningStability: { kind: "live-proof-failed", provider: "codex" } },
+    electron: {},
+  });
+  NodeAssertStrict.deepEqual(failures, ["web/warning-stability"]);
 });
 
 NodeTest.test("accepts a retained public interrupted runtime terminal", async () => {
