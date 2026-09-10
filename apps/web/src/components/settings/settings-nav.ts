@@ -5,7 +5,6 @@ import { AppearanceSection } from "./sections/AppearanceSection";
 import { NotificationsSection } from "./sections/NotificationsSection";
 import { TerminalSection } from "@/features/terminal";
 import { ExternalAppsSection } from "./sections/ExternalAppsSection";
-import { PerformanceSection } from "./sections/PerformanceSection";
 import { ThreadsSection } from "./sections/ThreadsSection";
 import { KeyboardShortcutsSection } from "./sections/KeyboardShortcutsSection";
 import { AboutSection } from "./sections/AboutSection";
@@ -19,7 +18,6 @@ export type SettingsSection =
   | "terminal"
   | "externalApps"
   | "keyboard"
-  | "performance"
   | "threads"
   | "about";
 
@@ -52,7 +50,6 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "System",
     items: [
       { id: "threads", label: "Threads" },
-      { id: "performance", label: "Performance" },
       { id: "about", label: "About" },
     ],
   },
@@ -67,7 +64,6 @@ export const SECTION_MAP: Record<SettingsSection, ComponentType> = {
   terminal: TerminalSection,
   externalApps: ExternalAppsSection,
   keyboard: KeyboardShortcutsSection,
-  performance: PerformanceSection,
   threads: ThreadsSection,
   about: AboutSection,
 };
