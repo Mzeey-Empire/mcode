@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
-import { aggregateEvidenceFailures, assertDiskContent, assertLiveObservation, assertObservation, assertPatchAttribution, assertSeparateClients, captureCodexTraceEvidence, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createOwnedFixtureWorkspace, createReceipt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runComposerReviewJourney, runFocusedEvidenceGates, waitForExactReview, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
+import { aggregateEvidenceFailures, applyProviderPrerequisites, assertDiskContent, assertLiveObservation, assertObservation, assertPatchAttribution, assertSeparateClients, captureCodexTraceEvidence, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createOwnedFixtureWorkspace, createReceipt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runComposerReviewJourney, runFocusedEvidenceGates, waitForExactReview, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
 
 NodeTest.test("requires explicit proof and cleanup confirmations", () => {
   NodeAssertStrict.deepEqual(parseArguments(["health"]), { command: "health" });
@@ -62,18 +62,25 @@ NodeTest.test("waits for the exact Review file with the expected source and fide
   await NodeAssertStrict.rejects(waitForExactReview(page, result, 1), /exact Review file or source marker/);
 });
 
-NodeTest.test("starts every provider-completeness row with actionable evidence or a specific control gap", () => {
-  const matrix = createReceipt(NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "provider-completeness-matrix-"))).matrix;
-  for (const [row, evidence] of Object.entries(matrix)) {
-    NodeAssertStrict.ok(evidence.kind, `${row} has an evidence kind`);
-    if (evidence.kind === "focused-pending") NodeAssertStrict.ok(evidence.gate, `${row} names its required focused gate`);
-    if (evidence.kind === "blocked") NodeAssertStrict.ok(evidence.prerequisite, `${row} names its unavailable control`);
+NodeTest.test("starts every provider-completeness row with actionable evidence under one truthful owner", () => {
+  const receipt = createReceipt(NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "provider-completeness-matrix-")));
+  for (const matrix of [receipt.matrix, receipt.electron.matrix]) {
+    for (const [row, evidence] of Object.entries(matrix)) {
+      NodeAssertStrict.ok(evidence.kind, `${row} has an evidence kind`);
+      NodeAssertStrict.notEqual(evidence.kind, "focused-pending", `${row} is not duplicated from a focused gate`);
+      if (evidence.kind === "blocked") NodeAssertStrict.ok(evidence.prerequisite, `${row} names its unavailable control`);
+    }
   }
-  NodeAssertStrict.equal(matrix.codexNative.kind, "live-proof-required");
-  NodeAssertStrict.equal(matrix.electronRightPanel.surface, "Electron");
+  for (const gate of receipt.focusedGates) {
+    NodeAssertStrict.equal(gate.kind, "focused-pending");
+    NodeAssertStrict.ok(gate.control, `${gate.name} names its focused-test owner`);
+  }
+  NodeAssertStrict.equal(receipt.matrix.codexNative.kind, "live-proof-required");
+  NodeAssertStrict.equal(receipt.matrix.electronRightPanel, undefined);
+  NodeAssertStrict.equal(receipt.electron.matrix.electronRightPanel.surface, "Electron");
 });
 
-NodeTest.test("runs each focused evidence gate through an injected runner and marks only its rows proven", async () => {
+NodeTest.test("records focused gates once under their true owner and preserves them through provider prerequisite updates", async () => {
   const receipt = createReceipt(NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "provider-completeness-gates-")));
   const calls = [];
   const failures = await runFocusedEvidenceGates("root", receipt, async (request) => {
@@ -88,11 +95,30 @@ NodeTest.test("runs each focused evidence gate through an injected runner and ma
     "src/features/projects/files/__tests__/workspace-invalidation-service.test.ts",
   ]);
   NodeAssertStrict.ok(calls[0].args.includes("--testTimeout=30000"));
-  NodeAssertStrict.equal(receipt.matrix.invalidation.kind, "focused-proof");
-  NodeAssertStrict.equal(receipt.matrix.warningsReroutes.kind, "focused-proof");
-  NodeAssertStrict.equal(receipt.matrix.fileSurfaces.kind, "focused-proof");
-  NodeAssertStrict.equal(receipt.electron.matrix.fileSurfaces.kind, "focused-proof");
+  NodeAssertStrict.deepEqual(receipt.focusedGates.map(({ control, rows }) => ({ control, rows })), [
+    { control: "apps/server focused integration tests", rows: ["empty", "interruption"] },
+    { control: "apps/server focused integration tests", rows: ["strictManual", "managedRequired"] },
+    { control: "apps/server focused integration tests", rows: ["invalidation", "staleRetry", "disconnectWatchCleanup"] },
+    { control: "packages/providers focused protocol tests", rows: ["warningsReroutes"] },
+    { control: "apps/web focused component tests", rows: ["fullAccess", "fileSurfaces"] },
+  ]);
+  for (const row of ["empty", "invalidation", "interruption", "warningsReroutes", "strictManual", "managedRequired", "fullAccess", "fileSurfaces", "staleRetry", "disconnectWatchCleanup"]) {
+    NodeAssertStrict.equal(receipt.matrix[row], undefined, `${row} only belongs to its focused-test owner`);
+    NodeAssertStrict.equal(receipt.electron.matrix[row], undefined, `${row} is not copied to Electron`);
+  }
+  const prerequisites = {
+    codexNative: { kind: "required-live-proof", provider: "codex" },
+    cursorNative: { kind: "coverage-gap", provider: "cursor" },
+    claudeFallback: { kind: "coverage-gap", provider: "claude" },
+  };
+  applyProviderPrerequisites(receipt.matrix, prerequisites);
+  applyProviderPrerequisites(receipt.electron.matrix, prerequisites);
+  NodeAssertStrict.deepEqual(receipt.focusedGates.map((gate) => gate.kind), ["focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof"]);
   NodeAssertStrict.deepEqual(receipt.focusedGates.map((gate) => gate.exitCode), [0, 0, 0, 0, 0]);
+  NodeAssertStrict.equal(receipt.matrix.reviewApproved.kind, "blocked");
+  NodeAssertStrict.equal(receipt.electron.matrix.electronRightPanel.kind, "blocked");
+  NodeAssertStrict.equal(receipt.matrix.codexNative.provider, "codex");
+  NodeAssertStrict.equal(receipt.electron.matrix.codexNative.provider, "codex");
 });
 
 NodeTest.test("retains all focused gate evidence before reporting nonzero gates", async () => {
@@ -101,7 +127,9 @@ NodeTest.test("retains all focused gate evidence before reporting nonzero gates"
   const failures = await runFocusedEvidenceGates("root", receipt, async () => ({ exitCode: calls++ === 3 ? 1 : 0, output: "failed C:\\secret\\token" }));
   NodeAssertStrict.deepEqual(failures, ["codex-protocol exited 1"]);
   NodeAssertStrict.equal(receipt.focusedGates.length, 5);
-  NodeAssertStrict.equal(receipt.matrix.warningsReroutes.kind, "focused-proof-failed");
+  NodeAssertStrict.equal(receipt.focusedGates[3].control, "packages/providers focused protocol tests");
+  NodeAssertStrict.equal(receipt.focusedGates[3].kind, "focused-proof-failed");
+  NodeAssertStrict.equal(receipt.focusedGates[3].exitCode, 1);
   NodeAssertStrict.doesNotMatch(receipt.focusedGates[1].output, /C:\\secret/);
 });
 

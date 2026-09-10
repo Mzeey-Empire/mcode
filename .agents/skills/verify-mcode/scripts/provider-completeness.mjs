@@ -18,11 +18,11 @@ const MAX_LIVE_COMPARISON_STATES = 24;
 const FOCUSED_GATE_TIMEOUT_MS = 120_000;
 const CONNECTION_LOST_TEXT = "Connection lost. Reconnecting to server...";
 const FOCUSED_GATES = [
-  { name: "server-turn-diff-review", workspace: "apps/server", options: ["--no-file-parallelism", "--testTimeout=30000"], files: ["src/features/agents/turns/__tests__/turn-diff-review.test.ts"], rows: ["empty", "interruption"] },
-  { name: "server-approval-review-policy", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/agents/turns/__tests__/approval-review-policy.test.ts"], rows: ["strictManual", "managedRequired"] },
-  { name: "server-workspace-invalidation", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/projects/files/__tests__/workspace-invalidation-service.test.ts"], rows: ["invalidation", "staleRetry", "disconnectWatchCleanup"] },
-  { name: "codex-protocol", workspace: "packages/providers", files: ["src/__tests__/codex/codex-notification-validation.test.ts", "src/__tests__/codex/codex-protocol-coverage.test.ts", "src/__tests__/codex/codex-event-mapper.test.ts"], rows: ["warningsReroutes"] },
-  { name: "web-composer-and-files", workspace: "apps/web", files: ["src/features/conversation/composer/controls/__tests__/ComposerAccessControls.test.tsx", "src/features/projects/files/useWorkspaceFileInvalidation.test.tsx", "src/components/diff/__tests__/DiffPanel.files.test.tsx"], rows: ["fullAccess", "fileSurfaces"] },
+  { name: "server-turn-diff-review", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism", "--testTimeout=30000"], files: ["src/features/agents/turns/__tests__/turn-diff-review.test.ts"], rows: ["empty", "interruption"] },
+  { name: "server-approval-review-policy", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/agents/turns/__tests__/approval-review-policy.test.ts"], rows: ["strictManual", "managedRequired"] },
+  { name: "server-workspace-invalidation", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/projects/files/__tests__/workspace-invalidation-service.test.ts"], rows: ["invalidation", "staleRetry", "disconnectWatchCleanup"] },
+  { name: "codex-protocol", control: "packages/providers focused protocol tests", workspace: "packages/providers", files: ["src/__tests__/codex/codex-notification-validation.test.ts", "src/__tests__/codex/codex-protocol-coverage.test.ts", "src/__tests__/codex/codex-event-mapper.test.ts"], rows: ["warningsReroutes"] },
+  { name: "web-composer-and-files", control: "apps/web focused component tests", workspace: "apps/web", files: ["src/features/conversation/composer/controls/__tests__/ComposerAccessControls.test.tsx", "src/features/projects/files/useWorkspaceFileInvalidation.test.tsx", "src/components/diff/__tests__/DiffPanel.files.test.tsx"], rows: ["fullAccess", "fileSurfaces"] },
 ];
 const HELP = `Verify provider completeness
 
@@ -84,7 +84,6 @@ export async function runFocusedEvidenceGates(repoRoot, receipt, runner = runFoc
   for (const gate of FOCUSED_GATES) {
     const evidence = await collectFocusedGateEvidence(repoRoot, gate, runner);
     receipt.focusedGates.push(evidence);
-    applyFocusedGateEvidence(receipt, gate, evidence);
     if (evidence.exitCode !== 0) failures.push(`${gate.name} exited ${evidence.exitCode ?? "without an exit code"}`);
   }
   return failures;
@@ -94,7 +93,9 @@ async function collectFocusedGateEvidence(repoRoot, gate, runner) {
   const args = ["run", "--cwd", gate.workspace, "test", "--", ...(gate.options ?? []), ...gate.files];
   const result = await runFocusedGateSafely(repoRoot, args, runner);
   return {
+    kind: result.exitCode === 0 ? "focused-proof" : "focused-proof-failed",
     name: gate.name,
+    control: gate.control,
     command: `bun ${args.join(" ")}`,
     rows: gate.rows,
     exitCode: Number.isInteger(result.exitCode) ? result.exitCode : null,
@@ -107,15 +108,6 @@ async function runFocusedGateSafely(repoRoot, args, runner) {
     return await runner({ command: "bun", args, cwd: repoRoot, timeoutMs: FOCUSED_GATE_TIMEOUT_MS });
   } catch (error) {
     return { exitCode: null, output: safeError(error) };
-  }
-}
-
-function applyFocusedGateEvidence(receipt, gate, evidence) {
-  const kind = evidence.exitCode === 0 ? "focused-proof" : "focused-proof-failed";
-  for (const matrix of [receipt.matrix, receipt.electron.matrix]) {
-    for (const row of gate.rows) {
-      matrix[row] = { kind, gate: gate.name, command: evidence.command, exitCode: evidence.exitCode, output: evidence.output };
-    }
   }
 }
 
@@ -170,7 +162,7 @@ async function openProofClients(repoRoot, receipt, dependencies, state) {
   state.socket = dependencies.socket ?? await openRuntimeVerificationSocket(repoRoot);
   const workspace = await createOwnedFixtureWorkspace(state.socket, repoRoot, receipt);
   receipt.workspace = workspaceIdentity(workspace);
-  receipt.matrix = await inspectProviderPrerequisites(state.socket, workspace);
+  applyProviderPrerequisites(receipt.matrix, await inspectProviderPrerequisites(state.socket, workspace));
   const ports = readPortsFile(repoRoot);
   const playwright = dependencies.playwright ?? requirePlaywright(repoRoot);
   state.web = dependencies.web ?? await openWeb(playwright, ports, findChromiumPath());
@@ -211,7 +203,7 @@ async function createSurfaceRunForProof(repoRoot, receipt, state) {
   const electronRun = createSurfaceRun(repoRoot, receipt, "electron");
   const electronWorkspace = await createOwnedFixtureWorkspace(state.electronSocket, repoRoot, electronRun);
   receipt.electron.workspace = workspaceIdentity(electronWorkspace);
-  receipt.electron.matrix = await inspectProviderPrerequisites(state.electronSocket, electronWorkspace);
+  applyProviderPrerequisites(receipt.electron.matrix, await inspectProviderPrerequisites(state.electronSocket, electronWorkspace));
   await reloadClient(state.desktop);
   await assertWorkspace(state.desktop.page, electronWorkspace, state.electronSocket);
   return electronRun;
@@ -291,7 +283,7 @@ export function createReceipt(repoRoot) {
   const directory = NodePath.join(repoRoot, EVIDENCE_DIRECTORY, runId);
   const fixtureDirectory = NodePath.join(getRuntimePaths(repoRoot).fixtureRepoDir, `provider-completeness-${runId}`);
   NodeFS.mkdirSync(directory, { recursive: true });
-  return { runId, phase: "initializing", path: NodePath.join(directory, "receipt.json"), directory, fixtureDirectory, fixtureFile: NodePath.join(fixtureDirectory, "target.txt"), applicationCommit: "not reached", upstreamCodex: "not reached", provider: "codex", model: MODEL, baseline: "not reached", publicComparison: "not reached", fetchedPatch: "not reached", disk: "not reached", renderedEvidence: [], run: { ownedWorkspaceId: null, ownedFixtureDirectory: null, ownedFile: null, threadId: null, ownedThreadIds: [] }, electron: { matrix: providerMatrix() }, journeys: {}, screenshots: [], observations: {}, comparison: {}, diagnostics: { liveComparisons: { states: [], omitted: 0 } }, matrix: providerMatrix(), cleanup: { complete: false, failures: [] }, failure: null };
+  return { runId, phase: "initializing", path: NodePath.join(directory, "receipt.json"), directory, fixtureDirectory, fixtureFile: NodePath.join(fixtureDirectory, "target.txt"), applicationCommit: "not reached", upstreamCodex: "not reached", provider: "codex", model: MODEL, baseline: "not reached", publicComparison: "not reached", fetchedPatch: "not reached", disk: "not reached", renderedEvidence: [], run: { ownedWorkspaceId: null, ownedFixtureDirectory: null, ownedFile: null, threadId: null, ownedThreadIds: [] }, electron: { matrix: providerMatrix("electron") }, journeys: {}, screenshots: [], observations: {}, comparison: {}, diagnostics: { liveComparisons: { states: [], omitted: 0 } }, focusedGates: focusedGateMatrix(), matrix: providerMatrix("web"), cleanup: { complete: false, failures: [] }, failure: null };
 }
 
 function createSurfaceRun(repoRoot, receipt, surface) {
@@ -1273,26 +1265,23 @@ function hydrateOwnedReceipt(receipt, repoRoot) {
 }
 
 function isWithin(path, parent) { const relative = NodePath.relative(parent, path); return relative !== "" && !relative.startsWith(`..${NodePath.sep}`) && relative !== ".." && !NodePath.isAbsolute(relative); }
-function providerMatrix() { return {
-  codexNative: { kind: "live-proof-required", control: "public web Composer, Review, and public turn comparison", fields: ["provider", "model", "observations.live", "observations.settled", "observations.reopened", "observations.reloaded", "observations.reconnected", "comparison", "disk"] },
+/** Applies provider prerequisite evidence without replacing surface-specific coverage. */
+export function applyProviderPrerequisites(matrix, prerequisites) { Object.assign(matrix, prerequisites); }
+
+function providerMatrix(surface) { return {
+  codexNative: { kind: "live-proof-required", control: `${surface} Composer, Review, and public turn comparison`, fields: ["provider", "model", "observations.live", "observations.settled", "observations.reopened", "observations.reloaded", "observations.reconnected", "comparison", "disk"] },
   cursorNative: { kind: "pending-observation", control: "providers.listAvailability, provider.listModels, and provider.catalog" },
   claudeFallback: { kind: "pending-observation", control: "providers.listAvailability, provider.listModels, and provider.catalog" },
-  empty: focusedGate("server-turn-diff-review"),
-  invalidation: focusedGate("server-workspace-invalidation"),
-  interruption: focusedGate("server-turn-diff-review"),
-  warningsReroutes: focusedGate("codex-protocol"),
-  reviewApproved: { kind: "blocked", prerequisite: "native automatic-review approval terminal event", surface: "public Composer, conversation, and Review" },
-  reviewDenied: { kind: "blocked", prerequisite: "native automatic-review denial terminal event", surface: "public Composer, conversation, and Review" },
-  strictManual: focusedGate("server-approval-review-policy"),
-  managedRequired: focusedGate("server-approval-review-policy"),
-  fullAccess: focusedGate("web-composer-and-files"),
-  permissionHandoff: { kind: "blocked", prerequisite: "native provider PermissionRequest after strict-review routing", surface: "public Composer permission control" },
-  staleRetry: focusedGate("server-workspace-invalidation"),
-  fileSurfaces: focusedGate("web-composer-and-files"),
-  disconnectWatchCleanup: focusedGate("server-workspace-invalidation"),
-  electronRightPanel: { kind: "blocked", prerequisite: "a completed Electron Review journey", surface: "Electron", reason: "the proof starts Electron, but the native Codex Live diff did not reach public comparison" },
+  ...(surface === "web"
+    ? {
+      reviewApproved: { kind: "blocked", prerequisite: "native automatic-review approval terminal event", surface: "public Composer, conversation, and Review" },
+      reviewDenied: { kind: "blocked", prerequisite: "native automatic-review denial terminal event", surface: "public Composer, conversation, and Review" },
+      permissionHandoff: { kind: "blocked", prerequisite: "native provider PermissionRequest after strict-review routing", surface: "public Composer permission control" },
+    }
+    : { electronRightPanel: { kind: "blocked", prerequisite: "a completed Electron Review journey", surface: "Electron", reason: "the proof starts Electron, but the native Codex Live diff did not reach public comparison" } }),
 }; }
-function focusedGate(gate) { return { kind: "focused-pending", gate }; }
+
+function focusedGateMatrix() { return FOCUSED_GATES.map(({ name, control, rows }) => ({ kind: "focused-pending", name, control, rows })); }
 function requirePlaywright(repoRoot) { const pkg = NodePath.join(repoRoot, ".dev", "playwright-scratch", "package.json"); if (!NodeFS.existsSync(pkg)) throw new Error("Condition: isolated Playwright is missing. Next action: run ensure-playwright.mjs."); return NodeModule.createRequire(pkg)("playwright"); }
 function findChromiumPath() { return ["C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"].find((path) => NodeFS.existsSync(path)); }
 function summarizeComparison(comparison, patch) {
