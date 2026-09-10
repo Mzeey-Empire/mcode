@@ -54,7 +54,7 @@ export class CanonicalAgentReadRepository {
       conversationRevision: thread?.conversationRevision ?? 0,
       rosterRevision: thread?.rosterRevision ?? 0,
     };
-    if (this.requiresSnapshot(known, through)) return this.snapshot(threadId, through);
+    if (this.requiresSnapshot(threadId, known, through)) return this.snapshot(threadId, through);
     if (this.isCurrent(known, through)) return { mode: "delta", threadId, from: known, through, events: [] };
     const events = this.eventsSince(threadId, known);
     if (!events || this.hasInboundCollaboration(threadId)) return this.snapshot(threadId, through);
@@ -136,14 +136,26 @@ export class CanonicalAgentReadRepository {
     return { mode: "snapshot", threadId, snapshot: { revision, state: this.operations.loadState(threadId) } };
   }
 
-  private requiresSnapshot(known: CanonicalAgentRevision, through: CanonicalAgentRevision): boolean {
+  private requiresSnapshot(threadId: string, known: CanonicalAgentRevision, through: CanonicalAgentRevision): boolean {
     return known.conversationRevision > through.conversationRevision
-      || known.rosterRevision > through.rosterRevision;
+      || known.rosterRevision > through.rosterRevision
+      || this.hasUnfinishedNarrative(threadId);
   }
 
   private isCurrent(known: CanonicalAgentRevision, through: CanonicalAgentRevision): boolean {
     return known.conversationRevision === through.conversationRevision
       && known.rosterRevision === through.rosterRevision;
+  }
+
+  private hasUnfinishedNarrative(threadId: string): boolean {
+    // Recovery records change without advancing the canonical event revision.
+    return this.db.prepare(`
+      SELECT 1 FROM canonical_agent_items item
+      JOIN canonical_agent_turns turn ON turn.id = item.turn_id
+      WHERE item.thread_id = ? AND turn.status IN ('Pending', 'Running')
+        AND json_extract(item.payload_json, '$.projection') = 'narrativeRecovery'
+      LIMIT 1
+    `).get(threadId) !== null;
   }
 
   private eventsSince(

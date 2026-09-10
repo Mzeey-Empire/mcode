@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
 import type { AgentEvent, CanonicalAgentEventEnvelope, CanonicalAgentReconnectRecovery, ContextWindowMode, MessageMention, ReasoningLevel, OrchestrationMode, PlanQuestion, PlanAnswer, ProviderUsageInfo, GoalLookupResult, PreviewAnnotationBundle, SelectedTextComment, TurnFileEffectSummary, TurnRuntimeSnapshot, TurnOutcome } from "@mcode/contracts";
 import type { PermissionRequest, PermissionDecision } from "@mcode/contracts";
+import { recoverParentNarrative } from "./parent-narrative-recovery";
 import {
   PERMISSION_MODES,
   INTERACTION_MODES,
@@ -2535,6 +2536,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     recentlyAnsweredPlanMessageIds: new Set<string>(),
 
   applyCanonicalReconnectRecoveries: (recoveries) => {
+    flushPendingTextDeltas();
     set((state) => {
       let records = state.records;
       let changed = false;
@@ -2542,7 +2544,11 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         const current = getThreadRecord(records, recovery.threadId);
         const update = applyCanonicalReconnectRecovery(current.canonicalAgent, recovery);
         if (update.replica === current.canonicalAgent) continue;
-        records = patchThreadRecord(records, recovery.threadId, { canonicalAgent: update.replica });
+        if (update.installedSnapshot) streamingTextByteSizes.delete(recovery.threadId);
+        records = patchThreadRecord(records, recovery.threadId, {
+          canonicalAgent: update.replica,
+          ...(update.installedSnapshot ? recoverParentNarrative(recovery.threadId, update.replica.state) : {}),
+        });
         changed = true;
       }
       return changed ? { records } : {};
