@@ -2067,7 +2067,44 @@ async function reopenFullAccessThread(page, workspace, thread) {
   await page.getByTestId("thread-overview-masthead").waitFor({ state: "visible", timeout: 15_000 });
 }
 export async function closeReview(page) { const review = page.getByTestId("review-last-turn"); if (await review.isVisible().catch(() => false)) await page.getByRole("button", { name: /Changes/ }).click(); }
-export async function captureReview(page, receipt, name, result) { const review = await waitForExactReview(page, result); const rendered = await readRenderedReview(page, result.file.path); const screenshot = NodePath.join(receipt.directory, `${name}.png`); await page.screenshot({ path: screenshot }); receipt.screenshots.push(screenshot); receipt.renderedEvidence.push(screenshot); const spinners = await page.locator('[data-testid*="spinner"], [data-testid="review-refresh-progress"]').count(); const rows = await reviewRowCount(review); return { screenshot, rows, spinners, ...rendered }; }
+const REVIEW_LOADING_INDICATOR_SELECTOR = '[data-testid="review-refresh-progress"], [data-testid="review-diff-stat-loading"]';
+
+export async function captureReview(page, receipt, name, result, timeout = 15_000) {
+  const deadline = Date.now() + timeout;
+  const review = await waitForExactReview(page, result, timeout);
+  const spinners = await waitForReviewLoadingIndicators(page, deadline);
+  const rendered = await readRenderedReview(page, result.file.path);
+  const screenshot = NodePath.join(receipt.directory, `${name}.png`);
+  await page.screenshot({ path: screenshot });
+  receipt.screenshots.push(screenshot);
+  receipt.renderedEvidence.push(screenshot);
+  const rows = await reviewRowCount(review);
+  return { screenshot, rows, spinners, ...rendered };
+}
+
+async function waitForReviewLoadingIndicators(page, deadline) {
+  const indicators = page.locator(REVIEW_LOADING_INDICATOR_SELECTOR);
+  while (true) {
+    const visibleIndicators = await visibleLocatorIndexes(indicators);
+    if (visibleIndicators.length === 0) return 0;
+
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error("Condition: Review loading indicators did not clear before capture.");
+
+    try {
+      await Promise.all(visibleIndicators.map((index) => indicators.nth(index).waitFor({ state: "hidden", timeout: remaining })));
+    } catch (error) {
+      throw new Error(`Condition: Review loading indicators did not clear before capture: ${safeError(error)}`);
+    }
+  }
+}
+
+async function visibleLocatorIndexes(locator) {
+  const count = await locator.count();
+  const visibility = await Promise.all(Array.from({ length: count }, (_, index) => locator.nth(index).isVisible()));
+  return visibility.flatMap((visible, index) => visible ? [index] : []);
+}
+
 export async function captureFullAccessReview(page, receipt, name, result) {
   const review = page.getByTestId("review-last-turn");
   if (!await review.isVisible().catch(() => false)) {

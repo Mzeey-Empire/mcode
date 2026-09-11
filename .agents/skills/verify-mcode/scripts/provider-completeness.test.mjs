@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
-import { aggregateEvidenceFailures, applyProviderPrerequisites, approvedReviewComposerPrompt, assertApprovedReviewReload, assertApprovedReviewTerminal, assertDeniedReviewComparison, assertDeniedReviewTerminal, assertDiskContent, assertExactApprovedReviewDisk, assertExactDeniedReviewDisk, assertExactFullAccessDisk, assertFullAccessRecovery, assertFullAccessSnapshot, assertLiveObservation, assertNoApprovalReviewFooter, assertNoApprovalReviewLifecycle, assertObservation, assertPatchAttribution, assertSeparateClients, assertWarningStabilityEvidence, captureCodexTraceEvidence, captureDeniedReview, captureFullAccessReview, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createClientInvalidationTrace, createOwnedFixtureWorkspace, createReceipt, deniedReviewComposerPrompt, emptyComposerPrompt, fullAccessComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, installWebSocketDisconnect, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readExactApprovedReviewComparison, readRenderedReview, readSettledPublicComparison, recordElectronRightPanelEvidence, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runApprovedReviewJourney, runComposerReviewJourney, runDeniedReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runFourSurfaceRefreshJourney, runFullAccessJourney, runInterruptionJourney, runProviderJourneys, runWorkspaceInvalidationJourney, selectAutomaticReview, selectFullAccess, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
+import { aggregateEvidenceFailures, applyProviderPrerequisites, approvedReviewComposerPrompt, assertApprovedReviewReload, assertApprovedReviewTerminal, assertDeniedReviewComparison, assertDeniedReviewTerminal, assertDiskContent, assertExactApprovedReviewDisk, assertExactDeniedReviewDisk, assertExactFullAccessDisk, assertFullAccessRecovery, assertFullAccessSnapshot, assertLiveObservation, assertNoApprovalReviewFooter, assertNoApprovalReviewLifecycle, assertObservation, assertPatchAttribution, assertSeparateClients, assertWarningStabilityEvidence, captureCodexTraceEvidence, captureDeniedReview, captureFullAccessReview, captureLiveObservation, captureReview, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createClientInvalidationTrace, createOwnedFixtureWorkspace, createReceipt, deniedReviewComposerPrompt, emptyComposerPrompt, fullAccessComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, installWebSocketDisconnect, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readExactApprovedReviewComparison, readRenderedReview, readSettledPublicComparison, recordElectronRightPanelEvidence, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runApprovedReviewJourney, runComposerReviewJourney, runDeniedReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runFourSurfaceRefreshJourney, runFullAccessJourney, runInterruptionJourney, runProviderJourneys, runWorkspaceInvalidationJourney, selectAutomaticReview, selectFullAccess, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
 
 const asRequiredEvidence = (entry) => ({ ...entry, requirement: "required" });
 
@@ -153,7 +153,7 @@ NodeTest.test("opens Full access Review through the public Changes action when O
     },
     screenshot: async () => {},
     locator: (selector) => {
-      NodeAssertStrict.equal(selector, '[data-testid*="spinner"], [data-testid="review-refresh-progress"]');
+      NodeAssertStrict.equal(selector, '[data-testid="review-refresh-progress"], [data-testid="review-diff-stat-loading"]');
       return { count: async () => 0 };
     },
   };
@@ -189,7 +189,7 @@ NodeTest.test("opens Full access Review through the public turn diff action when
     },
     screenshot: async () => {},
     locator: (selector) => {
-      NodeAssertStrict.equal(selector, '[data-testid*="spinner"], [data-testid="review-refresh-progress"]');
+      NodeAssertStrict.equal(selector, '[data-testid="review-refresh-progress"], [data-testid="review-diff-stat-loading"]');
       return { count: async () => 0 };
     },
   };
@@ -1509,6 +1509,37 @@ NodeTest.test("fetches a fresh public comparison and exact file diff for every p
   NodeAssertStrict.equal(calls.filter(({ method }) => method === "turnDiff.getFileDiff").length, 5);
 });
 
+NodeTest.test("waits for visible settled Review indicators before capturing the exact public comparison", async () => {
+  const events = [];
+  const { page, waitTimeouts } = settledReviewCapturePage(events, [
+    { visible: true, clearOnWait: true },
+    { visible: true, clearOnWait: true },
+    { visible: false, clearOnWait: false },
+  ]);
+  const socket = settledReviewSocket(events);
+  const receipt = { directory: "evidence", screenshots: [], renderedEvidence: [], comparison: {} };
+
+  const observation = await captureSettledReviewState(socket, "thread", "target.txt", page, receipt, "web-settled");
+
+  NodeAssertStrict.equal(observation.spinners, 0);
+  NodeAssertStrict.deepEqual(events, ["comparison", "file", "indicator:wait", "indicator:wait", "screenshot"]);
+  NodeAssertStrict.equal(waitTimeouts.length, 2);
+  NodeAssertStrict.deepEqual(receipt.comparison["web-settled"].comparison.turnDiff.phase, "settled");
+});
+
+NodeTest.test("fails a settled Review capture when a visible indicator does not clear before its timeout", async () => {
+  const events = [];
+  const { page, waitTimeouts } = settledReviewCapturePage(events, [{ visible: true, clearOnWait: false }]);
+  const receipt = { directory: "evidence", screenshots: [], renderedEvidence: [] };
+  const result = settledReviewResult();
+
+  await NodeAssertStrict.rejects(captureReview(page, receipt, "web-settled", result, 25), /Review loading indicators did not clear/);
+
+  NodeAssertStrict.equal(events.includes("screenshot"), false);
+  NodeAssertStrict.equal(waitTimeouts.length, 1);
+  NodeAssertStrict.ok(waitTimeouts[0] > 0 && waitTimeouts[0] <= 25);
+});
+
 NodeTest.test("rejects a mixed-marker settled public patch", async () => {
   const socket = { rpc: async (method) => method === "turnDiff.getComparison"
     ? { turnDiff: { id: "comparison", phase: "settled", source: "native", fidelity: "agent" }, files: [{ path: "target.txt" }] }
@@ -1530,6 +1561,69 @@ function reviewPage({ filePath, fileText, sourceLabel, source, fidelity }) {
     getByTestId: () => sourceLocator,
   };
   return { getByTestId: () => review };
+}
+
+function settledReviewSocket(events) {
+  return {
+    rpc: async (method) => {
+      events.push(method === "turnDiff.getComparison" ? "comparison" : "file");
+      return method === "turnDiff.getComparison"
+        ? settledReviewResult().comparison
+        : "AGENT_MARKER";
+    },
+  };
+}
+
+function settledReviewResult() {
+  return {
+    comparison: {
+      turnDiff: { id: "comparison", phase: "settled", source: "native", fidelity: "agent" },
+      files: [{ path: "target.txt" }],
+    },
+    file: { path: "target.txt" },
+    patch: "AGENT_MARKER",
+  };
+}
+
+function settledReviewCapturePage(events, indicators) {
+  const waitTimeouts = [];
+  const file = {
+    count: async () => 1,
+    innerText: async () => "AGENT_MARKER",
+    waitFor: async () => {},
+  };
+  const source = {
+    count: async () => 1,
+    getAttribute: async (name) => name === "data-review-source" ? "native" : "agent",
+    innerText: async () => "Agent changes",
+    waitFor: async () => {},
+  };
+  const loadingIndicators = {
+    count: async () => indicators.length,
+    nth: (index) => ({
+      isVisible: async () => indicators[index].visible,
+      waitFor: async ({ state, timeout }) => {
+        NodeAssertStrict.equal(state, "hidden");
+        waitTimeouts.push(timeout);
+        events.push("indicator:wait");
+        if (!indicators[index].clearOnWait) throw new Error("timed out");
+        indicators[index].visible = false;
+      },
+    }),
+  };
+  const review = {
+    getByTestId: () => source,
+    isVisible: async () => true,
+    locator: () => file,
+  };
+  return {
+    page: {
+      getByTestId: () => review,
+      locator: () => loadingIndicators,
+      screenshot: async () => { events.push("screenshot"); },
+    },
+    waitTimeouts,
+  };
 }
 
 NodeTest.test("records the resolver commit or exact no-commit audit blocker", () => {
