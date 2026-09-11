@@ -4,12 +4,16 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type * as NodeChildProcess from "node:child_process";
 import type { ClientSideConnection } from "@agentclientprotocol/sdk";
+import which from "which";
 import { getDefaultSettings, type TurnRequest } from "@mcode/contracts";
 import { afterEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import type { ProviderHostPorts } from "../../../host-ports.js";
 import { AcpSessionRuntime } from "../../protocols/acp/acp-session-runtime.js";
 import type { AcpPermissionOutcome, AcpPermissionRequest } from "../../protocols/acp/acp-session-types.js";
 import { DevinProvider } from "../devin-provider.js";
+
+vi.mock("which", () => ({ default: vi.fn() }));
+const whichMock = vi.mocked(which as unknown as (cmd: string) => Promise<string | null>);
 
 interface CapturedAcpCallbacks {
   onPermissionRequest?: (request: AcpPermissionRequest) => Promise<AcpPermissionOutcome>;
@@ -362,6 +366,19 @@ describe("DevinProvider", () => {
     expect(NodeFS.readFileSync(NodePath.join(root, "nested", "inside.txt"), "utf-8")).toBe("inside");
     expect(NodeFS.existsSync(NodePath.join(root, "..", "escape.txt"))).toBe(false);
     NodeFS.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("serves the static model catalog without spawning when the devin binary is absent", async () => {
+    const host = createHost();
+    whichMock.mockResolvedValue(null);
+    const startSpy = vi.spyOn(AcpSessionRuntime, "start");
+    starts.push(startSpy);
+    const p = createProvider(host);
+
+    const models = await p.listModels();
+
+    expect(startSpy).not.toHaveBeenCalled();
+    expect(models.map((model) => model.id)).toContain("swe-2");
   });
 
   it("rejects permission resolution for unknown request ids and cancels pending requests on stop", async () => {

@@ -2,6 +2,7 @@ import * as NodeEvents from "node:events";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import which from "which";
 import type { Provider, ProviderIdentity } from "@mcode/agent-model";
 import {
   AgentEventType,
@@ -229,7 +230,10 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   private async probeDevinModels(): Promise<ProviderModelInfo[]> {
     const env = this.host.environment.snapshot();
-    const cliPath = this.cliPath();
+    // child_process.spawn reports a missing binary through an `error` event the
+    // ACP runtime never observes, which crashes the host; bail before spawning.
+    const cliPath = await which(this.cliPath(), { nothrow: true });
+    if (!cliPath) return [];
     const runtime = await AcpSessionRuntime.start({
       spawnSpec: {
         command: cliPath,
