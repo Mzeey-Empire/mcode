@@ -5,146 +5,255 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Provider completeness: final evidence for issue 1617</title>
 <style>
-:root{color-scheme:light dark;--ink:#162b32;--muted:#52676d;--paper:#f3f6f5;--panel:#fff;--line:#bfd0cf;--teal:#076b6c;--tealSoft:#d8efed;--blue:#1d5f89;--blueSoft:#dcecf7;--amber:#8b5700;--amberSoft:#fff0cf;--red:#9a3123;--redSoft:#fbe2dc;--mono:"Cascadia Mono",Consolas,monospace;--body:"Segoe UI",Arial,sans-serif;--display:Georgia,"Times New Roman",serif}
-@media(prefers-color-scheme:dark){:root{--ink:#e8f1f0;--muted:#afc1c2;--paper:#102021;--panel:#16292a;--line:#3f595a;--teal:#78d7d2;--tealSoft:#174449;--blue:#96d4ff;--blueSoft:#173b55;--amber:#ffd17d;--amberSoft:#513d12;--red:#ffab99;--redSoft:#542d27}}
-*{box-sizing:border-box}html{background:var(--paper);color:var(--ink);font-family:var(--body)}body{margin:0}main{width:min(1180px,calc(100% - 40px));margin:0 auto;padding:44px 0 64px}header{border-bottom:3px solid var(--teal);padding-bottom:26px}.eyebrow{color:var(--teal);font:700 .78rem/1.2 var(--mono);letter-spacing:.08em;text-transform:uppercase}h1,h2,h3,p{margin:0}h1{max-width:19ch;margin-top:10px;font:700 clamp(2.1rem,5vw,4.3rem)/.98 var(--display);letter-spacing:-.035em;text-wrap:balance}h2{font:700 clamp(1.5rem,3vw,2.2rem)/1.08 var(--display);letter-spacing:-.02em;text-wrap:balance}h3{font-size:1rem;line-height:1.25}p,li,td{font-size:.98rem;line-height:1.55}.lead{max-width:65ch;margin-top:18px;color:var(--muted);font-size:1.12rem}.receipt{margin-top:18px;color:var(--muted);font:.78rem/1.5 var(--mono);overflow-wrap:anywhere}section{margin-top:42px}.section-copy{max-width:70ch;margin-top:10px;color:var(--muted)}.callout{margin-top:22px;border:1px solid var(--red);border-left:6px solid var(--red);background:var(--redSoft);padding:18px 20px}.callout strong{display:block;margin-bottom:4px}.summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:22px}.card{border:1px solid var(--line);background:var(--panel);padding:18px}.card p{margin-top:7px;color:var(--muted)}.label{display:inline-block;padding:3px 7px;font:700 .72rem/1.15 var(--mono);letter-spacing:.05em;text-transform:uppercase}.pass{background:var(--tealSoft);color:var(--teal)}.scope{background:var(--blueSoft);color:var(--blue)}.gap{background:var(--amberSoft);color:var(--amber)}.fail{background:var(--redSoft);color:var(--red)}.flow{display:grid;grid-template-columns:1fr 38px 1fr 38px 1fr;gap:10px;align-items:stretch;margin-top:22px}.flow .card{min-height:172px}.arrow{align-self:center;color:var(--teal);font:700 1.7rem/1 var(--display);text-align:center}.twocol{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(300px,.85fr);gap:18px;margin-top:22px}.stack{display:grid;gap:12px}.step{border-left:4px solid var(--teal);padding:3px 0 3px 13px}.step strong{display:block}.step p{margin-top:3px;color:var(--muted)}.gapStep{border-color:var(--amber)}.code{margin-top:14px;padding:14px;overflow-x:auto;background:#0e1c20;color:#ddf4f1;font:.78rem/1.55 var(--mono)}.tableWrap{overflow-x:auto;margin-top:20px;border:1px solid var(--line);background:var(--panel)}table{width:100%;min-width:760px;border-collapse:collapse}th,td{padding:13px 14px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}tr:last-child td{border-bottom:0}th{color:var(--muted);font:700 .75rem/1.25 var(--mono);letter-spacing:.05em;text-transform:uppercase}td:first-child{font-family:var(--mono);font-size:.84rem}.number{font-variant-numeric:tabular-nums;white-space:nowrap}.gaps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:20px}.gaps .card{border-top:4px solid var(--amber)}.gaps .failed{border-top-color:var(--red)}.gaps ul{margin:10px 0 0;padding-left:20px}details{margin-top:22px;border:1px solid var(--line);background:var(--panel);padding:14px 16px}summary{cursor:pointer;font-weight:700}details ul{margin:12px 0 0;padding-left:20px}footer{margin-top:44px;border-top:1px solid var(--line);padding-top:18px;color:var(--muted)}footer p{font-size:.84rem}code{font-family:var(--mono);font-size:.9em}@media(max-width:820px){main{width:min(100% - 28px,1180px);padding-top:28px}.summary,.gaps,.twocol{grid-template-columns:1fr}.flow{grid-template-columns:1fr}.flow .card{min-height:0}.arrow{transform:rotate(90deg);height:22px}}@media print{main{width:100%;padding:0}.card,.callout,details,.tableWrap{break-inside:avoid}}@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
+:root {
+  color-scheme: light dark;
+  --ink: #17282d;
+  --muted: #52676d;
+  --paper: #f3f7f6;
+  --panel: #ffffff;
+  --line: #bfd0cf;
+  --teal: #076b6c;
+  --teal-soft: #d8efed;
+  --blue: #1d5f89;
+  --blue-soft: #dcecf7;
+  --amber: #8b5700;
+  --amber-soft: #fff0cf;
+  --red: #9a3123;
+  --red-soft: #fbe2dc;
+  --code-paper: #0e1c20;
+  --code-ink: #ddf4f1;
+  --body: "Segoe UI", Arial, sans-serif;
+  --display: Georgia, "Times New Roman", serif;
+  --mono: "Cascadia Mono", Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e8f1f0;
+    --muted: #afc1c2;
+    --paper: #102021;
+    --panel: #16292a;
+    --line: #3f595a;
+    --teal: #78d7d2;
+    --teal-soft: #174449;
+    --blue: #96d4ff;
+    --blue-soft: #173b55;
+    --amber: #ffd17d;
+    --amber-soft: #513d12;
+    --red: #ffab99;
+    --red-soft: #542d27;
+    --code-paper: #081113;
+    --code-ink: #ddf4f1;
+  }
+}
+
+* { box-sizing: border-box; }
+html { background: var(--paper); color: var(--ink); font-family: var(--body); }
+body { margin: 0; }
+main { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 44px 0 64px; }
+header { border-bottom: 3px solid var(--teal); padding-bottom: 26px; }
+h1, h2, h3, p { margin: 0; }
+h1 { max-width: 20ch; margin-top: 10px; font: 700 clamp(2.2rem, 5vw, 4.35rem) / .98 var(--display); letter-spacing: -.035em; text-wrap: balance; }
+h2 { font: 700 clamp(1.55rem, 3vw, 2.25rem) / 1.08 var(--display); letter-spacing: -.02em; text-wrap: balance; }
+h3 { font-size: 1rem; line-height: 1.25; }
+p, li, td { font-size: .98rem; line-height: 1.55; }
+code { font-family: var(--mono); font-size: .9em; }
+section { margin-top: 44px; }
+.eyebrow { color: var(--teal); font: 700 .78rem / 1.2 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.lead { max-width: 67ch; margin-top: 18px; color: var(--muted); font-size: 1.12rem; }
+.receipt { max-width: 100%; margin-top: 18px; color: var(--muted); font: .78rem / 1.5 var(--mono); overflow-wrap: anywhere; }
+.section-copy { max-width: 72ch; margin-top: 10px; color: var(--muted); }
+.summary, .two-column, .gap-grid { display: grid; gap: 12px; margin-top: 22px; }
+.summary { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.two-column { grid-template-columns: minmax(0, 1.15fr) minmax(300px, .85fr); gap: 18px; }
+.gap-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.card { border: 1px solid var(--line); background: var(--panel); padding: 18px; }
+.card p { margin-top: 7px; color: var(--muted); }
+.label { display: inline-block; padding: 3px 7px; font: 700 .72rem / 1.15 var(--mono); letter-spacing: .05em; text-transform: uppercase; }
+.pass { background: var(--teal-soft); color: var(--teal); }
+.scope { background: var(--blue-soft); color: var(--blue); }
+.gap { background: var(--amber-soft); color: var(--amber); }
+.fail { background: var(--red-soft); color: var(--red); }
+.callout { margin-top: 22px; border: 1px solid var(--red); border-left: 6px solid var(--red); background: var(--red-soft); padding: 18px 20px; }
+.callout strong { display: block; margin-bottom: 4px; }
+.evidence-flow { display: grid; grid-template-columns: 1fr 34px 1fr 34px 1fr; gap: 10px; align-items: stretch; margin-top: 22px; }
+.evidence-flow .card { min-height: 152px; }
+.arrow { align-self: center; color: var(--teal); font: 700 1.7rem / 1 var(--display); text-align: center; }
+.step-list { display: grid; gap: 12px; margin-top: 16px; }
+.step { border-left: 4px solid var(--teal); padding: 3px 0 3px 13px; }
+.step.gap-step { border-color: var(--amber); }
+.step strong { display: block; }
+.step p { margin-top: 3px; color: var(--muted); }
+.table-wrap { margin-top: 20px; overflow-x: auto; border: 1px solid var(--line); background: var(--panel); }
+table { width: 100%; min-width: 760px; border-collapse: collapse; }
+th, td { padding: 13px 14px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { color: var(--muted); font: 700 .75rem / 1.25 var(--mono); letter-spacing: .05em; text-transform: uppercase; }
+td:first-child { font-family: var(--mono); font-size: .84rem; }
+.number { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.code { margin-top: 14px; padding: 14px; overflow-x: auto; background: var(--code-paper); color: var(--code-ink); font: .78rem / 1.55 var(--mono); }
+.gap-grid .card { border-top: 4px solid var(--amber); }
+.gap-grid .failed { border-top-color: var(--red); }
+.gap-grid ul { margin: 10px 0 0; padding-left: 20px; }
+.record { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+details { margin-top: 22px; border: 1px solid var(--line); background: var(--panel); padding: 14px 16px; }
+summary { cursor: pointer; font-weight: 700; }
+details ul { margin: 12px 0 0; padding-left: 20px; }
+footer { margin-top: 44px; border-top: 1px solid var(--line); padding-top: 18px; color: var(--muted); }
+footer p { font-size: .84rem; }
+
+@media (max-width: 820px) {
+  main { width: min(100% - 28px, 1180px); padding-top: 28px; }
+  .summary, .two-column, .gap-grid, .record { grid-template-columns: 1fr; }
+  .evidence-flow { grid-template-columns: 1fr; }
+  .evidence-flow .card { min-height: 0; }
+  .arrow { height: 22px; transform: rotate(90deg); }
+}
+
+@media print {
+  main { width: 100%; padding: 0; }
+  .card, .callout, details, .table-wrap { break-inside: avoid; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+}
 </style>
 </head>
 <body>
 <main>
-<header>
-<p class="eyebrow">Mcode · issue 1617 · final evidence</p>
-<h1>Provider completeness: what changed and what the final proof did not prove</h1>
-<p class="lead">The branch adds provider-to-Review coverage across the adapter, server, persistence, web, Electron, and the verifier. The final live run proved the Full access journey. It exited 1 because the native Codex, empty, and interruption journeys did not produce their required exact Live diffs.</p>
-<p class="receipt">Receipt: .dev/verification/provider-completeness/2026-09-11T01-34-58-099Z-07237c52-7609-46a3-80bc-f588d006afb7/receipt.json</p>
-</header>
+  <header>
+    <p class="eyebrow">Mcode · issue 1617 · final evidence</p>
+    <h1>Provider completeness: the current proof and its limits</h1>
+    <p class="lead">The branch adds provider-to-Review coverage across the adapter, server, persistence, web, Electron, and the verifier. The final run proved only the Full Access journey. The aggregate proof exited 1 because 13 required rows stayed incomplete.</p>
+    <p class="receipt">Receipt: .dev/verification/provider-completeness/2026-09-11T14-14-06-308Z-c6d71951-abb5-4614-9c11-2b6c7626fd0f/receipt.json</p>
+  </header>
 
-<section aria-labelledby="status">
-<h2 id="status">Read the evidence in four layers</h2>
-<p class="section-copy">Implementation coverage, focused gates, and live proof answer different questions. A focused gate does not replace a native public journey.</p>
-<div class="summary">
-<article class="card"><span class="label scope">Implementation</span><h3>Policy, Review, file, and provider paths changed</h3><p>The branch adds the required controls and verifier routes.</p></article>
-<article class="card"><span class="label pass">Focused gates</span><h3>All 10 focused gates passed</h3><p>They cover the controlled behavior listed below.</p></article>
-<article class="card"><span class="label pass">Live proof</span><h3>Full access passed on web and Electron</h3><p>Settled, reload, and reconnect retained one Review row and no spinner.</p></article>
-<article class="card"><span class="label fail">Final result</span><h3>The provider-completeness run exited 1</h3><p>Native Codex, empty, and interruption evidence stayed incomplete.</p></article>
-</div>
-<aside class="callout"><strong>Do not read the exit result as a pass.</strong>The verifier recorded its gaps and cleanup. It did not turn unavailable native triggers into successful proof.</aside>
-</section>
+  <section aria-labelledby="verdict">
+    <h2 id="verdict">Read the result in four parts</h2>
+    <p class="section-copy">Focused gates, a public journey, the required aggregate, and cleanup answer different questions. A green focused gate does not complete an unfinished live row.</p>
+    <div class="summary">
+      <article class="card"><span class="label pass">Focused gates</span><h3>10 gates passed</h3><p>17 test-file executions ran 452 tests.</p></article>
+      <article class="card"><span class="label pass">Live proof</span><h3>Full Access proved</h3><p>Web and Electron each retained the same Review result.</p></article>
+      <article class="card"><span class="label fail">Required aggregate</span><h3>Exited 1</h3><p>13 required rows stayed incomplete.</p></article>
+      <article class="card"><span class="label pass">Cleanup</span><h3>Completed cleanly</h3><p>No cleanup failures. Owned resources are absent.</p></article>
+    </div>
+    <aside class="callout"><strong>Do not read the final aggregate as a pass.</strong>The receipt records the Full Access live proof and every required gap. It does not turn unavailable native triggers into passed rows.</aside>
+  </section>
 
-<section aria-labelledby="changes">
-<h2 id="changes">The controls the branch now covers</h2>
-<p class="section-copy">These diagrams state the intended behavior. Their labels show whether the final receipt recorded focused coverage or live proof.</p>
-<div class="twocol">
-<article class="card">
-<span class="label scope">Automatic approval and Full access</span>
-<div class="flow" aria-label="Permission mode flow">
-<div class="card"><h3>Automatic approval</h3><p>The server applies the approval-review policy before it starts the provider turn.</p></div><div class="arrow" aria-hidden="true">→</div>
-<div class="card"><h3>Review decision</h3><p>Approved and denied results control the attempt. Strict routing stays manual.</p></div><div class="arrow" aria-hidden="true">→</div>
-<div class="card"><h3>Provider turn</h3><p>A permitted attempt reaches the provider. A denied review does not become a provider turn.</p></div>
-</div>
-<div class="stack" style="margin-top:16px">
-<div class="step"><strong>Automatic approval</strong><p>Focused policy gates cover strict manual routing, managed-required dispatch, and Full access dispatch. Native automatic approve and deny events did not appear in the final public Composer run.</p></div>
-<div class="step"><strong>Full access</strong><p>Full access bypasses approval review. The receipt recorded <code>approvalReviewLifecycleCount: 0</code> for the web and Electron journey.</p></div>
-</div>
-</article>
-<article class="card">
-<span class="label scope">Strict permission handoff</span>
-<ol>
-<li>Strict review routing shows the Composer notice.</li>
-<li>A real native <code>PermissionRequest</code> must reach the public permission control.</li>
-<li>The client lists pending requests and sends the user's response.</li>
-<li>The provider response removes the request from the pending state.</li>
-</ol>
-<div class="step gapStep"><strong>Final live state: blocked</strong><p>The native PermissionRequest trigger was unavailable. The final run did not call the public <code>permission.listPending</code> and <code>permission.respond</code> handoff.</p></div>
-</article>
-</div>
-<div class="twocol">
-<article class="card">
-<span class="label scope">Retry decision freezing</span>
-<div class="flow" aria-label="Retry decision freezing flow">
-<div class="card"><h3>First attempt</h3><p>Automatic approval produces the decision for this delivery.</p></div><div class="arrow" aria-hidden="true">→</div>
-<div class="card"><h3>Transient failure</h3><p>The attempt can fail before the provider finishes.</p></div><div class="arrow" aria-hidden="true">→</div>
-<div class="card"><h3>Retry</h3><p>The retry reuses the frozen decision. It does not make a new approval choice.</p></div>
-</div>
-<div class="step gapStep"><strong>Final live state: coverage gap</strong><p>Mcode had no deterministic public trigger for a native transient retry after an Automatic Composer dispatch.</p></div>
-</article>
-<article class="card">
-<span class="label scope">Stale retry event fencing</span>
-<div class="stack" style="margin-top:16px">
-<div class="step"><strong>Failed attempt emits late data</strong><p>A stale automatic-review or diff event can arrive after the retry begins.</p></div>
-<div class="step"><strong>Provider mapper fences the event</strong><p>The stale event cannot change the retry's review state or its diff.</p></div>
-<div class="step gapStep"><strong>Final live state: coverage gap</strong><p>Mcode had no deterministic public trigger for stale native retry events after a transient failure.</p></div>
-</div>
-</article>
-</div>
-</section>
+  <section aria-labelledby="map">
+    <h2 id="map">Evidence map</h2>
+    <p class="section-copy">The branch changed the controls below. The current receipt then separates focused coverage from the one live provider journey and the required rows that still failed.</p>
+    <div class="evidence-flow" aria-label="Evidence flow from controls to focused gates to live proof">
+      <article class="card"><span class="label scope">Controls</span><h3>Policy, Review, file, and provider paths</h3><p>Automatic approval, Full Access, permission handoff, retry freezing, and stale-event fencing have focused coverage.</p></article>
+      <div class="arrow" aria-hidden="true">→</div>
+      <article class="card"><span class="label pass">Focused coverage</span><h3>10 gates / 17 files / 452 tests</h3><p>Each gate passed at the immutable application commit below.</p></article>
+      <div class="arrow" aria-hidden="true">→</div>
+      <article class="card"><span class="label fail">Public result</span><h3>One live proof, 13 incomplete required rows</h3><p>Only Full Access reached settled, reload, and reconnect evidence on both clients.</p></article>
+    </div>
+  </section>
 
-<section aria-labelledby="live-proof">
-<h2 id="live-proof">What the final live proof passed</h2>
-<p class="section-copy">The Full access path passed in the public web and Electron clients. This is the only settled end-to-end provider journey that the final receipt marked as passed.</p>
-<div class="twocol">
-<article class="card">
-<span class="label pass">Web and Electron passed</span>
-<div class="stack" style="margin-top:16px">
-<div class="step"><strong>Dispatch</strong><p>Codex Full access edited <code>full-access-codex.md</code> and retained <code>AGENT_MARKER</code>.</p></div>
-<div class="step"><strong>Settled view</strong><p>Each client showed one Review row, zero spinners, the Git fallback label, and the exact patch.</p></div>
-<div class="step"><strong>Reload and reconnect</strong><p>The same result remained after reload and reconnect in each client.</p></div>
-</div>
-</article>
-<article class="card">
-<span class="label pass">Exact settled evidence</span>
-<pre class="code">Review: 1 row
-Spinners: 0
-File: full-access-codex.md
+  <section aria-labelledby="full-access">
+    <h2 id="full-access">What the final live proof proved</h2>
+    <p class="section-copy">Full Access is live-proof on web and Electron. This result applies only to Full Access. It does not pass the other required rows.</p>
+    <div class="two-column">
+      <article class="card">
+        <span class="label pass">Full Access live-proof</span>
+        <div class="step-list">
+          <div class="step"><strong>Dispatch</strong><p>Codex Full Access edited <code>full-access-codex.md</code>. The exact patch retained <code>AGENT_MARKER</code>.</p></div>
+          <div class="step"><strong>Each client state</strong><p>Settled, reloaded, and reconnected each showed one Review row, zero spinners, and <code>Git fallback: same-file edits may appear</code>.</p></div>
+          <div class="step"><strong>Approval state</strong><p>Every one of the six observations recorded <code>approvalReviewLifecycleCount: 0</code>. The turn reason was <code>full-access-bypasses-approval-review</code>.</p></div>
+        </div>
+      </article>
+      <article class="card">
+        <span class="label pass">Six matching observations</span>
+        <pre class="code">Web      settled     1 Review row · 0 spinners
+Web      reloaded    1 Review row · 0 spinners
+Web      reconnected 1 Review row · 0 spinners
+Electron settled     1 Review row · 0 spinners
+Electron reloaded    1 Review row · 0 spinners
+Electron reconnected 1 Review row · 0 spinners
+
 Patch: +AGENT_MARKER
-Source: Git fallback
-Fidelity: same-file-changes-possible
-Disk: exact Full access mutation retained</pre>
-<p>The receipt records Full access with manual review mode and the reason <code>full-access-bypasses-approval-review</code>.</p>
-</article>
-</div>
-</section>
+Source: Git fallback: same-file edits may appear
+Disk: exact Full Access mutation retained</pre>
+      </article>
+    </div>
+  </section>
 
-<section aria-labelledby="gates">
-<h2 id="gates">Focused automated gates</h2>
-<p class="section-copy">All ten gates passed at the final application commit. The counts are the exact counts from the final receipt.</p>
-<div class="tableWrap"><table>
-<thead><tr><th>Gate</th><th>Tests</th><th>What it covers</th></tr></thead>
-<tbody>
-<tr><td>server-turn-diff-review</td><td class="number">26</td><td>Empty and interruption Review behavior in focused server tests.</td></tr>
-<tr><td>server-approval-review-policy</td><td class="number">7</td><td>Strict manual routing, managed-required state, and Full access dispatch.</td></tr>
-<tr><td>server-managed-required-dispatch</td><td class="number">20</td><td>Managed-required dispatch. Public Codex does not report required.</td></tr>
-<tr><td>server-workspace-invalidation</td><td class="number">10</td><td>Invalidation, stale retry, and owned-watch cleanup.</td></tr>
-<tr><td>server-retry-decision-freeze</td><td class="number">21</td><td>A retry uses the frozen Automatic approval decision.</td></tr>
-<tr><td>codex-protocol</td><td class="number">163</td><td>Codex notices, reroutes, and protocol coverage.</td></tr>
-<tr><td>codex-stale-retry-events</td><td class="number">163</td><td>Stale review and diff events cannot affect a retry.</td></tr>
-<tr><td>web-composer-and-files</td><td class="number">20</td><td>Full access control and file surfaces.</td></tr>
-<tr><td>web-permission-handoff</td><td class="number">13</td><td>Strict-review notice and real provider request card.</td></tr>
-<tr><td>codex-permission-handoff</td><td class="number">9</td><td>Provider response removes the settled permission request.</td></tr>
-</tbody></table></div>
-</section>
+  <section aria-labelledby="gates">
+    <h2 id="gates">Focused automated gates</h2>
+    <p class="section-copy">All 10 focused gates passed: 17 test-file executions and 452 tests. These are focused checks, not a substitute for the incomplete public rows.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Gate</th><th>Files</th><th>Tests</th><th>What it covers</th></tr></thead>
+        <tbody>
+          <tr><td>server-turn-diff-review</td><td class="number">2</td><td class="number">26</td><td>Empty and interruption Review behavior.</td></tr>
+          <tr><td>server-approval-review-policy</td><td class="number">2</td><td class="number">7</td><td>Strict manual routing, managed-required state, and Full Access dispatch.</td></tr>
+          <tr><td>server-managed-required-dispatch</td><td class="number">1</td><td class="number">20</td><td>Managed-required dispatch. Public Codex does not report required.</td></tr>
+          <tr><td>server-workspace-invalidation</td><td class="number">1</td><td class="number">10</td><td>Invalidation, stale retry, and owned-watch cleanup.</td></tr>
+          <tr><td>server-retry-decision-freeze</td><td class="number">1</td><td class="number">21</td><td>A retry uses the frozen Automatic approval decision.</td></tr>
+          <tr><td>codex-protocol</td><td class="number">3</td><td class="number">163</td><td>Codex notices, reroutes, and protocol behavior.</td></tr>
+          <tr><td>codex-stale-retry-events</td><td class="number">2</td><td class="number">163</td><td>Stale Review and diff events cannot affect a retry.</td></tr>
+          <tr><td>web-composer-and-files</td><td class="number">3</td><td class="number">20</td><td>Full Access control and file surfaces.</td></tr>
+          <tr><td>web-permission-handoff</td><td class="number">1</td><td class="number">13</td><td>Strict-review notice and the real provider request card.</td></tr>
+          <tr><td>codex-permission-handoff</td><td class="number">1</td><td class="number">9</td><td>Provider response removes the settled permission request.</td></tr>
+          <tr><td>Total</td><td class="number">17</td><td class="number">452</td><td>10 focused gates.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
 
-<section aria-labelledby="gaps">
-<h2 id="gaps">Why the final proof exited 1</h2>
-<p class="section-copy">The receipt records missing live evidence as failure or a coverage gap. None of the items below are passes.</p>
-<div class="gaps">
-<article class="card failed"><span class="label fail">Failed proof</span><h3>Codex native, empty, and interruption</h3><ul><li>The exact Codex Live diff never appeared for native, empty, or interruption journeys.</li><li>The native held turn did not show the exact <code>AGENT_MARKER</code> file in a Live agent diff.</li><li>The empty journey timed out before completed no-change evidence, and the interruption journey did not reach terminal runtime and Review evidence.</li></ul></article>
-<article class="card"><span class="label gap">Provider access gaps</span><h3>Cursor and Claude could not run</h3><ul><li>Cursor was disabled.</li><li>Claude reported no authenticated account.</li><li>The Codex catalog was stale with zero selectable agents.</li></ul></article>
-<article class="card"><span class="label gap">Native trigger gaps</span><h3>Approval and permission events stayed unavailable</h3><ul><li>Native Automatic approval and denial events did not persist.</li><li>Native <code>PermissionRequest</code> was unavailable after strict review routing.</li><li>A native warning or reroute did not occur while the exact Live diff was active.</li></ul></article>
-<article class="card"><span class="label gap">Retry trigger gaps</span><h3>Retry replay remained unprovable live</h3><ul><li>No deterministic native transient retry followed an Automatic dispatch.</li><li>No stale native approval-review or diff event followed a retry.</li><li>Focused gates cover these controls. The receipt does not claim a live replay.</li></ul></article>
-</div>
-</section>
+  <section aria-labelledby="required-gaps">
+    <h2 id="required-gaps">Why the required aggregate exited 1</h2>
+    <p class="section-copy">The aggregate proof lists exactly 13 required incomplete rows. They remain incomplete even though Full Access and the focused gates passed.</p>
+    <div class="two-column">
+      <article class="card">
+        <span class="label fail">Web · 7 incomplete rows</span>
+        <p><code>codex</code>, <code>cursor</code>, <code>claude</code>, <code>review-approved</code>, <code>review-denied</code>, <code>empty</code>, and <code>interruption</code>.</p>
+      </article>
+      <article class="card">
+        <span class="label fail">Electron · 6 incomplete rows</span>
+        <p><code>codex</code>, <code>cursor</code>, <code>claude</code>, <code>right-panel</code>, <code>empty</code>, and <code>interruption</code>.</p>
+      </article>
+    </div>
+    <div class="gap-grid">
+      <article class="card failed"><span class="label fail">Codex and empty</span><h3>Exact Live diff absent; Changes timed out</h3><ul><li>The exact Codex Live diff with <code>AGENT_MARKER</code> did not appear.</li><li>The empty journey timed out while it waited for <code>Changes</code> before completed no-change evidence.</li><li>The interruption journey did not reach terminal runtime and Review evidence.</li></ul></article>
+      <article class="card"><span class="label gap">Provider access</span><h3>Cursor disabled; Claude unauthenticated</h3><ul><li>Cursor was disabled.</li><li>Claude reported no authenticated account.</li><li>The Codex catalog was stale with zero selectable agents.</li></ul></article>
+      <article class="card"><span class="label gap">Native review triggers</span><h3>Automatic events were unavailable</h3><ul><li>Native Automatic approval and denial did not persist after an Automatic Composer dispatch.</li><li>The Electron right panel needs a completed Electron Review journey.</li><li>The required native journey did not reach that condition.</li></ul></article>
+      <article class="card"><span class="label gap">Required result</span><h3>No matrix-wide pass</h3><ul><li>The aggregate result is exit code 1.</li><li>Full Access does not generalize to the 13 incomplete required rows.</li><li>The receipt preserves the rows as failures or coverage gaps.</li></ul></article>
+    </div>
+  </section>
 
-<section aria-labelledby="record">
-<h2 id="record">Final record</h2>
-<div class="twocol">
-<article class="card"><span class="label scope">Application</span><p><code>b1c5ffcc7892500ac179c0e5ddd6f6c61fdd64de</code></p><p>Final application commit for the proof run.</p></article>
-<article class="card"><span class="label scope">Upstream Codex main</span><p><code>dc5527481827bffec04b754bad3d12d2b4f6b5dd</code></p><p>Resolved through <code>git ls-remote</code> in the final receipt.</p></article>
-</div>
-<details><summary>Cleanup and scope</summary><ul><li>Verifier cleanup completed with zero failures.</li><li>The verifier only removed resources and fixture files that it owned.</li><li>The receipt kept screenshots, settled comparisons, gap records, gate output, and upstream source metadata.</li></ul></details>
-</section>
+  <section aria-labelledby="informational-gaps">
+    <h2 id="informational-gaps">Informational live gaps</h2>
+    <p class="section-copy">These four items are informational gaps. Focused checks cover their controls, but the current receipt does not claim live proof.</p>
+    <div class="gap-grid">
+      <article class="card"><span class="label gap">Warning stability</span><h3>No public notice trigger</h3><p>The controlled Codex fixture maps notices, but it cannot recreate the upstream condition during a Live diff.</p></article>
+      <article class="card"><span class="label gap">Permission handoff</span><h3>Native request unavailable</h3><p>The run could not call public <code>permission.listPending</code> and <code>permission.respond</code>.</p></article>
+      <article class="card"><span class="label gap">Retry freeze</span><h3>No deterministic transient retry</h3><p>The receipt records focused retry-dispatch evidence instead of a live retry claim.</p></article>
+      <article class="card"><span class="label gap">Stale retry events</span><h3>No deterministic stale event</h3><p>The receipt records focused mapper and diff-routing evidence instead of a live replay claim.</p></article>
+    </div>
+  </section>
 
-<footer><p>Authority: final provider-completeness receipt, branch history through <code>b1c5ffcc7892500ac179c0e5ddd6f6c61fdd64de</code>, and the resolved upstream Codex main commit shown above.</p></footer>
+  <section aria-labelledby="record">
+    <h2 id="record">Final record</h2>
+    <div class="record">
+      <article class="card"><span class="label scope">Application proof commit</span><p><code>fe8d0e89a288499cc7a299623f34ec036f16c7ae</code></p><p>The immutable application commit for this receipt.</p></article>
+      <article class="card"><span class="label scope">Upstream Codex main</span><p><code>7a6f469dcff1337786aae046df2d899accea59ab</code></p><p>Resolved with <code>git ls-remote</code> in the receipt.</p></article>
+      <article class="card"><span class="label scope">Rendered evidence</span><p><code>16</code> screenshots and evidence entries</p><p>The receipt keeps the rendered proof references.</p></article>
+    </div>
+    <details>
+      <summary>Watcher ownership and cleanup</summary>
+      <ul>
+        <li>Watcher ownership passed through public <code>file.watch</code> and <code>files.changed</code>.</li>
+        <li>The owner closed. The observer stayed active and saw both owner and observer sentinel changes.</li>
+        <li>Cleanup completed with no failures. The exact owned resources are absent: 2 workspaces, 10 threads, and 10 fixture files.</li>
+      </ul>
+    </details>
+  </section>
+
+  <footer><p>Authority: the final provider-completeness receipt, application commit <code>fe8d0e89a288499cc7a299623f34ec036f16c7ae</code>, and upstream Codex main <code>7a6f469dcff1337786aae046df2d899accea59ab</code>.</p></footer>
 </main>
 </body>
 </html>
