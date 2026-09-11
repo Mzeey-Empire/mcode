@@ -11,14 +11,56 @@ const call: ToolCall = {
 };
 
 describe("ShellToolCallRow automatic expansion", () => {
+  it("does not construct a completed transcript before disclosure", () => {
+    const { container } = render(<ShellToolCallRow toolCall={{ ...call, isComplete: true }} />);
+    const toggle = screen.getByRole("button", { name: /^Ran command/ });
+    expect(screen.queryByRole("region", { name: "Shell output" })).toBeNull();
+    expect(toggle).not.toHaveAttribute("aria-controls");
+    expect(container.querySelector('[data-slot="tooltip-trigger"]')).toBeNull();
+    fireEvent.pointerEnter(screen.getByText("echo hello"));
+    expect(container.querySelector('[data-slot="tooltip-trigger"]')).toHaveTextContent("echo hello");
+    fireEvent.click(toggle);
+    const panel = screen.getByRole("region", { name: "Shell output" });
+    expect(panel).toBeVisible();
+    expect(toggle).toHaveAttribute("aria-controls", panel.id);
+  });
+
   it("opens during execution and closes on completion", () => {
     const { rerender } = render(<ShellToolCallRow toolCall={call} />);
     expect(screen.getByRole("button", { name: /^Running command/ }).getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("hello")).toBeVisible();
     rerender(<ShellToolCallRow toolCall={{ ...call, isComplete: true }} />);
-    expect(screen.getByRole("button", { name: /^Ran command/ }).getAttribute("aria-expanded")).toBe("false");
+    const toggle = screen.getByRole("button", { name: /^Ran command/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle).toHaveAttribute("aria-controls");
     fireEvent.click(screen.getByRole("button", { name: /^Ran command/ }));
     expect(screen.getByRole("button", { name: /^Ran command/ }).getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("keeps a completed transcript through its collapse transition", () => {
+    const { container, rerender } = render(<ShellToolCallRow toolCall={call} />);
+    rerender(<ShellToolCallRow toolCall={{ ...call, isComplete: true }} />);
+    const toggle = screen.getByRole("button", { name: /^Ran command/ });
+    const panel = container.querySelector<HTMLElement>('[aria-label="Shell output"]');
+    expect(panel).not.toBeNull();
+    expect(toggle).toHaveAttribute("aria-controls", panel?.id);
+    const collapsible = container.querySelector(".grid");
+    if (!collapsible) throw new Error("Expected shell collapsible.");
+    fireEvent.transitionEnd(collapsible, { propertyName: "grid-template-rows" });
+    expect(container.querySelector('[aria-label="Shell output"]')).toBeNull();
+    expect(toggle).not.toHaveAttribute("aria-controls");
+  });
+
+  it("unmounts a completed transcript immediately when reduced motion is enabled", () => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const matchMedia = vi.spyOn(window, "matchMedia").mockReturnValue({ ...media, matches: true });
+    const { rerender } = render(<ShellToolCallRow toolCall={call} />);
+
+    rerender(<ShellToolCallRow toolCall={{ ...call, isComplete: true }} />);
+
+    expect(screen.queryByRole("region", { name: "Shell output" })).toBeNull();
+    expect(screen.getByRole("button", { name: /^Ran command/ })).not.toHaveAttribute("aria-controls");
+    matchMedia.mockRestore();
   });
 
   it("honors a manual close when output changes", () => {
