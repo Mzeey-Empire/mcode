@@ -646,34 +646,38 @@ export async function runProviderJourneys({ surface, client, socket, workspace, 
   recordWarningStabilityResult(matrix, journeys);
   const codex = matrix.codexNative;
   if (codex?.provider === "codex" && codex.model && codex.modelName) {
-    await maybeRunApprovedReviewProof({ surface, client, socket, workspace, run, io, matrix, journeys, codex, captureReview });
-    await maybeRunDeniedReviewProof({ surface, client, socket, workspace, run, io, matrix, journeys, codex });
-    await maybeRunFullAccessProof({ surface, client, socket, workspace, run, io, matrix, journeys, codex, captureReview, runFullAccess });
-    try {
-      const journey = await runEmptyDiffJourney({ surface, client, socket, workspace, run, provider: codex.provider, model: codex.model, modelName: codex.modelName, captureEmpty });
-      journeys.empty = { status: "passed", provider: codex.provider, model: codex.model, journey };
-      matrix.empty = { kind: "empty-proof", control: `${surface} Composer, public turn comparison, and Review`, provider: codex.provider, model: codex.model, journey };
-    } catch (error) {
-      const message = safeError(error);
-      journeys.empty = { status: "failed", provider: codex.provider, model: codex.model, failure: { message, classification: "empty public Composer journey failed before completed no-change evidence" } };
-      matrix.empty = { kind: "empty-proof-failed", control: `${surface} Composer, public turn comparison, and Review`, provider: codex.provider, model: codex.model, failure: journeys.empty.failure };
-      await captureFailure(client.page, run, `${surface}-empty-failure`);
-    }
-    matrix.interruption = { kind: "interruption-proof-required", control: `${surface} Composer Stop control, public runtime, and Review`, provider: codex.provider, model: codex.model };
-    try {
-      const journey = await runInterruptionJourney({ surface, client, socket, workspace, run, io, provider: codex.provider, model: codex.model, modelName: codex.modelName, captureLive, captureReview });
-      journeys.interruption = { status: "passed", provider: codex.provider, model: codex.model, journey };
-      matrix.interruption = { kind: "interruption-proof", control: `${surface} Composer Stop control, public runtime, and Review`, provider: codex.provider, model: codex.model, journey };
-    } catch (error) {
-      const message = safeError(error);
-      journeys.interruption = { status: "failed", provider: codex.provider, model: codex.model, failure: { message, classification: "user interruption journey failed before terminal runtime and Review evidence" } };
-      matrix.interruption = { kind: "interruption-proof-failed", control: `${surface} Composer Stop control, public runtime, and Review`, provider: codex.provider, model: codex.model, failure: journeys.interruption.failure };
-      await captureFailure(client.page, run, `${surface}-interruption-failure`);
-    }
+    await runCodexSupplementalJourneys({ surface, client, socket, workspace, run, io, matrix, journeys, codex, captureLive, captureReview, captureEmpty, runFullAccess });
   } else {
     matrix.interruption = { kind: "blocked", prerequisite: "available Codex provider, model, and catalog for the public interruption journey", surface };
   }
   return journeys;
+}
+
+async function runCodexSupplementalJourneys({ surface, client, socket, workspace, run, io, matrix, journeys, codex, captureLive, captureReview, captureEmpty, runFullAccess }) {
+  await maybeRunApprovedReviewProof({ surface, client, socket, workspace, run, io, matrix, journeys, codex, captureReview });
+  await maybeRunDeniedReviewProof({ surface, client, socket, workspace, run, io, matrix, journeys, codex });
+  await maybeRunFullAccessProof({ surface, client, socket, workspace, run, io, matrix, journeys, codex, captureReview, runFullAccess });
+  try {
+    const journey = await runEmptyDiffJourney({ surface, client, socket, workspace, run, provider: codex.provider, model: codex.model, modelName: codex.modelName, captureEmpty });
+    journeys.empty = { status: "passed", provider: codex.provider, model: codex.model, journey };
+    matrix.empty = { kind: "empty-proof", control: `${surface} Composer, public turn comparison, and Review`, provider: codex.provider, model: codex.model, journey };
+  } catch (error) {
+    const message = safeError(error);
+    journeys.empty = { status: "failed", provider: codex.provider, model: codex.model, failure: { message, classification: "empty public Composer journey failed before completed no-change evidence" } };
+    matrix.empty = { kind: "empty-proof-failed", control: `${surface} Composer, public turn comparison, and Review`, provider: codex.provider, model: codex.model, failure: journeys.empty.failure };
+    await captureFailure(client.page, run, `${surface}-empty-failure`);
+  }
+  matrix.interruption = { kind: "interruption-proof-required", control: `${surface} Composer Stop control, public runtime, and Review`, provider: codex.provider, model: codex.model };
+  try {
+    const journey = await runInterruptionJourney({ surface, client, socket, workspace, run, io, provider: codex.provider, model: codex.model, modelName: codex.modelName, captureLive, captureReview });
+    journeys.interruption = { status: "passed", provider: codex.provider, model: codex.model, journey };
+    matrix.interruption = { kind: "interruption-proof", control: `${surface} Composer Stop control, public runtime, and Review`, provider: codex.provider, model: codex.model, journey };
+  } catch (error) {
+    const message = safeError(error);
+    journeys.interruption = { status: "failed", provider: codex.provider, model: codex.model, failure: { message, classification: "user interruption journey failed before terminal runtime and Review evidence" } };
+    matrix.interruption = { kind: "interruption-proof-failed", control: `${surface} Composer Stop control, public runtime, and Review`, provider: codex.provider, model: codex.model, failure: journeys.interruption.failure };
+    await captureFailure(client.page, run, `${surface}-interruption-failure`);
+  }
 }
 
 async function maybeRunApprovedReviewProof({ surface, ...options }) {
@@ -774,12 +778,7 @@ export async function runComposerReviewJourney({ surface, client, socket, worksp
   const invalidationTrace = provider === "codex" ? await createInvalidationTrace(client) : null;
   let thread;
   try {
-    const beforeThreads = await listThreadIds(socket, workspace.id);
-    await driveComposer(client.page, workspace.name, provider, modelName, composerPrompt(fileName));
-    thread = await waitForNewThread(socket, workspace.id, beforeThreads, provider, model, run.run);
-    run.run.threadId ??= thread.id;
-    run.run.ownedThreadIds = [...new Set([...(run.run.ownedThreadIds ?? []), thread.id])];
-    run.workspace = { id: workspace.id, name: workspace.name, path: workspace.path, selectionEvidence: { source: "thread.list scoped request", requestedWorkspaceId: workspace.id, threadId: thread.id } };
+    thread = await dispatchComposerReviewJourney({ client, socket, workspace, run, provider, model, modelName, fileName });
     if (provider === "codex") {
       await captureCodexLiveJourney({ client, socket, workspaceId: workspace.id, threadId: thread.id, run, surface, fixtureFile, fileName, io, result, captureLiveState, captureFourSurfaceState, invalidationTrace, triggerProviderNotice });
     }
@@ -800,6 +799,16 @@ export async function runComposerReviewJourney({ surface, client, socket, worksp
   }
   result.disk = await readComposerDiskEvidence(io, fixtureFile, provider);
   return result;
+}
+
+async function dispatchComposerReviewJourney({ client, socket, workspace, run, provider, model, modelName, fileName }) {
+  const beforeThreads = await listThreadIds(socket, workspace.id);
+  await driveComposer(client.page, workspace.name, provider, modelName, composerPrompt(fileName));
+  const thread = await waitForNewThread(socket, workspace.id, beforeThreads, provider, model, run.run);
+  run.run.threadId ??= thread.id;
+  run.run.ownedThreadIds = [...new Set([...(run.run.ownedThreadIds ?? []), thread.id])];
+  run.workspace = { id: workspace.id, name: workspace.name, path: workspace.path, selectionEvidence: { source: "thread.list scoped request", requestedWorkspaceId: workspace.id, threadId: thread.id } };
+  return thread;
 }
 
 /** Runs one real Automatic Codex review and retains only durable public evidence. */
@@ -1340,42 +1349,50 @@ export async function runFourSurfaceRefreshJourney({
   invalidationTrace = null,
   createInvalidationTrace = createClientInvalidationTrace,
 }) {
-  if (!workspaceId || !threadId || !fixtureFile || !fileName || !io?.appendFile || !io?.readFile || typeof capture !== "function") {
-    throw new Error("Condition: four-surface refresh requires one owned fixture file, filesystem access, and a surface capture.");
-  }
+  assertFourSurfaceRefreshInput({ workspaceId, threadId, fixtureFile, fileName, io, capture });
   const trace = invalidationTrace ?? await createInvalidationTrace(client);
   const ownsTrace = invalidationTrace === null;
   try {
     assertInvalidationTrace(trace);
-    const captureInput = { client, socket, threadId, run, surface, fixtureFile, fileName, marker, initialComparison };
-    const before = await capture({ ...captureInput, phase: "before" });
-    assertFourSurfaceState(before, fileName, marker);
-    const watch = await trace.waitForWatch({ workspaceId, threadId });
-    const mark = trace.mark();
-    await io.appendFile(fixtureFile, `${marker}\n`, "utf8");
-    const disk = assertDiskContent(await io.readFile(fixtureFile, "utf8"), "AGENT_MARKER", marker);
-    const invalidation = await trace.waitForInvalidation({ workspaceId, threadId, fileName, after: mark });
-    const after = await capture({ ...captureInput, phase: "after" });
-    assertFourSurfaceState(after, fileName, marker);
-    const refresh = await trace.waitForRefresh({ workspaceId, threadId, after: invalidation.sequence });
-    const causality = assertRefreshCausality({ watch, mark, invalidation, refresh, fileName });
-    return {
-      kind: "four-surface-refresh",
-      trigger: {
-        type: "verifier-owned-filesystem-append",
-        file: NodePath.basename(fixtureFile),
-        marker,
-      },
-      file: NodePath.basename(fixtureFile),
-      before,
-      after,
-      disk,
-      causality,
-      surfaces: { files: "passed", composer: "passed", preview: "passed", lastTurn: "passed" },
-    };
+    return await captureFourSurfaceRefresh({ client, socket, workspaceId, threadId, run, surface, fixtureFile, fileName, io, marker, initialComparison, capture, trace });
   } finally {
     if (ownsTrace) await trace.close();
   }
+}
+
+function assertFourSurfaceRefreshInput({ workspaceId, threadId, fixtureFile, fileName, io, capture }) {
+  if (!workspaceId || !threadId || !fixtureFile || !fileName || !io?.appendFile || !io?.readFile || typeof capture !== "function") {
+    throw new Error("Condition: four-surface refresh requires one owned fixture file, filesystem access, and a surface capture.");
+  }
+}
+
+async function captureFourSurfaceRefresh({ client, socket, workspaceId, threadId, run, surface, fixtureFile, fileName, io, marker, initialComparison, capture, trace }) {
+  const captureInput = { client, socket, threadId, run, surface, fixtureFile, fileName, marker, initialComparison };
+  const before = await capture({ ...captureInput, phase: "before" });
+  assertFourSurfaceState(before, fileName, marker);
+  const watch = await trace.waitForWatch({ workspaceId, threadId });
+  const mark = trace.mark();
+  await io.appendFile(fixtureFile, `${marker}\n`, "utf8");
+  const disk = assertDiskContent(await io.readFile(fixtureFile, "utf8"), "AGENT_MARKER", marker);
+  const invalidation = await trace.waitForInvalidation({ workspaceId, threadId, fileName, after: mark });
+  const after = await capture({ ...captureInput, phase: "after" });
+  assertFourSurfaceState(after, fileName, marker);
+  const refresh = await trace.waitForRefresh({ workspaceId, threadId, after: invalidation.sequence });
+  const causality = assertRefreshCausality({ watch, mark, invalidation, refresh, fileName });
+  return {
+    kind: "four-surface-refresh",
+    trigger: {
+      type: "verifier-owned-filesystem-append",
+      file: NodePath.basename(fixtureFile),
+      marker,
+    },
+    file: NodePath.basename(fixtureFile),
+    before,
+    after,
+    disk,
+    causality,
+    surfaces: { files: "passed", composer: "passed", preview: "passed", lastTurn: "passed" },
+  };
 }
 
 function assertInvalidationTrace(trace) {
@@ -1443,28 +1460,34 @@ export async function createClientInvalidationTrace(client, { timeoutMs = TIMEOU
 function clientInvalidationTraceEvent(direction, frame, sequence) {
   const payload = readWebSocketFramePayload(direction, frame);
   if (!payload || typeof payload !== "object") return null;
-  if (direction === "received" && payload.type === "push" && payload.channel === "files.changed" && payload.data && typeof payload.data === "object") {
-    const data = payload.data;
-    return {
-      sequence,
-      direction,
-      channel: "files.changed",
-      workspaceId: data.workspaceId,
-      threadId: data.threadId,
-      changedPaths: Array.isArray(data.changedPaths) ? data.changedPaths.filter((path) => typeof path === "string").slice(0, 100) : [],
-      wholeWorkspace: data.wholeWorkspace === true,
-    };
-  }
-  if (direction === "sent" && ["file.watch", "file.list", "turnDiff.getComparison"].includes(payload.method) && payload.params && typeof payload.params === "object") {
-    return {
-      sequence,
-      direction,
-      method: payload.method,
-      workspaceId: payload.params.workspaceId,
-      threadId: payload.params.threadId,
-    };
-  }
+  if (direction === "received") return receivedClientInvalidationTraceEvent(payload, sequence, direction);
+  if (direction === "sent") return sentClientInvalidationTraceEvent(payload, sequence, direction);
   return null;
+}
+
+function receivedClientInvalidationTraceEvent(payload, sequence, direction) {
+  if (payload.type !== "push" || payload.channel !== "files.changed" || !payload.data || typeof payload.data !== "object") return null;
+  const data = payload.data;
+  return {
+    sequence,
+    direction,
+    channel: "files.changed",
+    workspaceId: data.workspaceId,
+    threadId: data.threadId,
+    changedPaths: Array.isArray(data.changedPaths) ? data.changedPaths.filter((path) => typeof path === "string").slice(0, 100) : [],
+    wholeWorkspace: data.wholeWorkspace === true,
+  };
+}
+
+function sentClientInvalidationTraceEvent(payload, sequence, direction) {
+  if (!["file.watch", "file.list", "turnDiff.getComparison"].includes(payload.method) || !payload.params || typeof payload.params !== "object") return null;
+  return {
+    sequence,
+    direction,
+    method: payload.method,
+    workspaceId: payload.params.workspaceId,
+    threadId: payload.params.threadId,
+  };
 }
 
 function readWebSocketFramePayload(direction, frame) {
