@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
 import type { AgentEvent, CanonicalAgentEventEnvelope, CanonicalAgentReconnectRecovery, ContextWindowMode, MessageMention, ReasoningLevel, OrchestrationMode, PlanQuestion, PlanAnswer, ProviderUsageInfo, GoalLookupResult, PreviewAnnotationBundle, SelectedTextComment, TurnFileEffectSummary, TurnRuntimeSnapshot, TurnOutcome } from "@mcode/contracts";
-import type { PermissionRequest, PermissionDecision } from "@mcode/contracts";
+import type { DevinMode, PermissionRequest, PermissionDecision } from "@mcode/contracts";
 import { recoverParentNarrative } from "./parent-narrative-recovery";
 import {
   PERMISSION_MODES,
@@ -164,7 +164,7 @@ interface ThreadState {
   // Message actions
   loadOlderMessages: (threadId: string) => Promise<HistoryPageLoadResult>;
   loadNewerMessages: (threadId: string) => Promise<HistoryPageLoadResult>;
-  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean, codexFastMode?: boolean, replyToMessageId?: string, quotedText?: string, planAction?: import("@mcode/contracts").PlanAction, mentions?: MessageMention[], previewAnnotations?: PreviewAnnotationBundle, goalObjective?: string, orchestrationMode?: OrchestrationMode, selectedTextComments?: SelectedTextComment[], approvalReviewMode?: import("@mcode/contracts").ApprovalReviewMode) => Promise<boolean>;
+  sendMessage: (threadId: string, content: string, model?: string, permissionMode?: PermissionMode, attachments?: AttachmentMeta[], displayContent?: string, reasoningLevel?: ReasoningLevel, provider?: string, copilotAgent?: string, contextWindow?: ContextWindowMode, thinking?: boolean, codexFastMode?: boolean, replyToMessageId?: string, quotedText?: string, planAction?: import("@mcode/contracts").PlanAction, mentions?: MessageMention[], previewAnnotations?: PreviewAnnotationBundle, goalObjective?: string, orchestrationMode?: OrchestrationMode, selectedTextComments?: SelectedTextComment[], approvalReviewMode?: import("@mcode/contracts").ApprovalReviewMode, devinMode?: DevinMode) => Promise<boolean>;
   /** Remove one durably cancelled message from the resident thread transcript. */
   removePersistedMessage: (threadId: string, messageId: string) => void;
   stopAgent: (threadId: string) => Promise<void>;
@@ -396,6 +396,9 @@ export function scheduleDrainAfterEdit(threadId: string): void {
             next.previewAnnotations,
             next.goalObjective,
             next.orchestrationMode,
+            undefined,
+            undefined,
+            next.devinMode,
           );
           useQueueStore.getState().settleQueuedDispatch(threadId, next.id, sent);
         } catch {
@@ -530,25 +533,33 @@ const DEFAULT_THREAD_SETTINGS: ThreadSettings = {
   interactionMode: INTERACTION_MODES.BUILD,
 };
 
+/** Maps the composer-scoped nullable fields of a workspace thread row. */
+function nullableThreadFields(
+  thread: ReturnType<typeof useWorkspaceStore.getState>["threads"][number],
+): Pick<ThreadSettings, "contextWindow" | "thinking" | "codexFastMode" | "devinMode" | "defaultOpenInApp"> {
+  return {
+    contextWindow: (thread.context_window_mode as ContextWindowMode | null) ?? null,
+    thinking: thread.thinking ?? null,
+    codexFastMode: thread.codex_fast_mode ?? null,
+    devinMode: thread.devin_mode ?? null,
+    defaultOpenInApp: thread.default_open_in_app ?? null,
+  };
+}
+
 /** Resolve thread settings from the workspace DB row (no in-memory record required). */
 export function resolveWorkspaceThreadSettings(threadId: string): ThreadSettings {
   const thread = useWorkspaceStore.getState().threads.find((t) => t.id === threadId);
-  if (thread) {
-    return {
-      permissionMode: (thread.permission_mode as PermissionMode) ?? DEFAULT_THREAD_SETTINGS.permissionMode,
-      interactionMode: (thread.interaction_mode as InteractionMode) ?? DEFAULT_THREAD_SETTINGS.interactionMode,
-      orchestrationMode: (thread.orchestration_mode as OrchestrationMode | null) ?? undefined,
-      reasoningLevel: thread.reasoning_level !== null
-        ? (thread.reasoning_level as ReasoningLevel)
-        : undefined,
-      copilotAgent: thread.copilot_agent,
-      contextWindow: (thread.context_window_mode as ContextWindowMode | null) ?? null,
-      thinking: thread.thinking ?? null,
-      codexFastMode: thread.codex_fast_mode ?? null,
-      defaultOpenInApp: thread.default_open_in_app ?? null,
-    };
-  }
-  return DEFAULT_THREAD_SETTINGS;
+  if (!thread) return DEFAULT_THREAD_SETTINGS;
+  return {
+    permissionMode: (thread.permission_mode as PermissionMode) ?? DEFAULT_THREAD_SETTINGS.permissionMode,
+    interactionMode: (thread.interaction_mode as InteractionMode) ?? DEFAULT_THREAD_SETTINGS.interactionMode,
+    orchestrationMode: (thread.orchestration_mode as OrchestrationMode | null) ?? undefined,
+    reasoningLevel: thread.reasoning_level !== null
+      ? (thread.reasoning_level as ReasoningLevel)
+      : undefined,
+    copilotAgent: thread.copilot_agent,
+    ...nullableThreadFields(thread),
+  };
 }
 
 /** Maximum entries in the tool call record LRU cache. */
@@ -2242,6 +2253,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     if ("contextWindow" in source) target.contextWindow = source.contextWindow;
     if ("thinking" in source) target.thinking = source.thinking;
     if ("codexFastMode" in source) target.codexFastMode = source.codexFastMode;
+    if ("devinMode" in source) target.devinMode = source.devinMode;
     if ("defaultOpenInApp" in source) target.defaultOpenInApp = source.defaultOpenInApp;
   };
 
@@ -2270,6 +2282,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     if ("copilotAgent" in patch) thread = { ...thread, copilot_agent: patch.copilotAgent ?? null };
     if ("contextWindow" in patch) thread = { ...thread, context_window_mode: patch.contextWindow ?? null };
     if ("thinking" in patch) thread = { ...thread, thinking: patch.thinking ?? null };
+    if ("devinMode" in patch) thread = { ...thread, devin_mode: patch.devinMode ?? null };
     return thread;
   };
 
@@ -2290,16 +2303,25 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     patch,
   );
 
-  const transportThreadSettingsPatch = (patch: Partial<ThreadSettings>) => ({
+  const definedThreadSettingsPatch = (patch: Partial<ThreadSettings>) => ({
     ...(patch.permissionMode !== undefined ? { permissionMode: patch.permissionMode } : {}),
     ...(patch.interactionMode !== undefined ? { interactionMode: patch.interactionMode } : {}),
     ...(patch.orchestrationMode !== undefined ? { orchestrationMode: patch.orchestrationMode } : {}),
     ...(patch.reasoningLevel !== undefined ? { reasoningLevel: patch.reasoningLevel } : {}),
+  });
+
+  const nullableThreadSettingsPatch = (patch: Partial<ThreadSettings>) => ({
     ...("copilotAgent" in patch ? { copilotAgent: patch.copilotAgent } : {}),
     ...("contextWindow" in patch ? { contextWindow: patch.contextWindow } : {}),
     ...("thinking" in patch ? { thinking: patch.thinking } : {}),
     ...("codexFastMode" in patch ? { codexFastMode: patch.codexFastMode } : {}),
+    ...("devinMode" in patch ? { devinMode: patch.devinMode } : {}),
     ...("defaultOpenInApp" in patch ? { defaultOpenInApp: patch.defaultOpenInApp } : {}),
+  });
+
+  const transportThreadSettingsPatch = (patch: Partial<ThreadSettings>) => ({
+    ...definedThreadSettingsPatch(patch),
+    ...nullableThreadSettingsPatch(patch),
   });
 
   const latestUserMessageContent = (threadId: string): string | null => {
@@ -2849,7 +2871,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
    * message to local state, marks the thread as running, then dispatches
    * to the transport layer. On failure, rolls back the running state.
    */
-  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, copilotAgent, contextWindow, thinking, codexFastMode, replyToMessageId, quotedText, planAction, mentions, previewAnnotations, goalObjective, orchestrationMode, selectedTextComments, approvalReviewMode) => {
+  sendMessage: async (threadId, content, model, permissionMode, attachments, displayContent, reasoningLevel, provider, copilotAgent, contextWindow, thinking, codexFastMode, replyToMessageId, quotedText, planAction, mentions, previewAnnotations, goalObjective, orchestrationMode, selectedTextComments, approvalReviewMode, devinMode) => {
     conversationResidency.invalidateConversation(threadId);
 
     const { isControlCommand, runningBeforeControl } = prepareOutgoingTurn(threadId, content);
@@ -2891,6 +2913,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         goalObjective,
         orchestrationMode,
         selectedTextComments,
+        devinMode,
       });
       return true;
     } catch (error) {

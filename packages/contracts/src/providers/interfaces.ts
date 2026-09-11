@@ -1,5 +1,5 @@
 import type { ProviderRuntimeEvent } from "../events/provider-runtime-event.js";
-import type { ApprovalReviewMode, InteractionMode, OrchestrationMode, PermissionMode } from "../models/enums.js";
+import type { ApprovalReviewMode, DevinMode, InteractionMode, OrchestrationMode, PermissionMode } from "../models/enums.js";
 import type { AttachmentMeta } from "../models/attachment.js";
 import type { MessageMention } from "../models/mention.js";
 import type { GoalLookupResult, GoalState } from "../models/goal.js";
@@ -18,7 +18,7 @@ import type { Provider } from "../compat/agent-model.js";
  * Identifier for a supported AI provider.
  * "opencode" remains catalog-only until a server adapter ships.
  */
-export type ProviderId = "claude" | "codex" | "gemini" | "copilot" | "cursor" | "opencode";
+export type ProviderId = "claude" | "codex" | "gemini" | "copilot" | "cursor" | "opencode" | "devin";
 
 /** How a provider's `resume` mechanism behaves when used to fork a session. */
 export type SessionForkBehavior = "clean" | "unsupported";
@@ -62,6 +62,8 @@ export interface ProviderOptionsByProvider {
   codex: { fastMode?: boolean };
   /** Copilot: sub-agent name ("interactive" | "plan" | "autopilot" | custom YAML name). */
   copilot: { agent?: string };
+  /** Devin: native session mode applied via `session/set_config_option`. */
+  devin: { mode?: DevinMode };
   cursor: Record<string, never>;
   gemini: Record<string, never>;
   opencode: Record<string, never>;
@@ -186,11 +188,14 @@ export interface IAgentProvider {
   /**
    * Resolve a pending permission request.
    * Returns true if the requestId was found and resolved, false otherwise.
+   * `optionId` carries the provider-native option the user picked when the
+   * request advertised verbatim {@link PermissionRequest.options}.
    */
   resolvePermission?(
     requestId: string,
     decision: PermissionDecision,
     answers?: PermissionResponseAnswers,
+    optionId?: string,
   ): boolean;
 
   /** Return all pending permission requests for a given thread. */

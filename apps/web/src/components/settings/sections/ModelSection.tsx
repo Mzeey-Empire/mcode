@@ -29,6 +29,7 @@ import {
   ClaudeIcon,
   CodexIcon,
   CursorProviderIcon,
+  DevinIcon,
   OpenCodeIcon,
   GeminiIcon,
   CopilotIcon,
@@ -41,6 +42,7 @@ const PROVIDER_ICONS: Record<string, ReactNode> = {
   codex: <CodexIcon size={12} />,
   copilot: <CopilotIcon size={12} />,
   cursor: <CursorProviderIcon size={12} />,
+  devin: <DevinIcon size={12} />,
   opencode: <OpenCodeIcon size={12} />,
   gemini: <GeminiIcon size={12} />,
 };

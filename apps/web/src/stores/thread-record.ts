@@ -12,7 +12,7 @@ import type {
   TurnRuntimePhase,
   TurnSavingStatus,
 } from "@mcode/contracts";
-import type { PermissionRequest, PermissionDecision } from "@mcode/contracts";
+import type { PermissionRequest, PermissionDecision, DevinMode } from "@mcode/contracts";
 import { PERMISSION_MODES, INTERACTION_MODES } from "@mcode/contracts";
 import type { ThoughtSegment } from "@/features/conversation/narrative/types";
 import {
@@ -39,6 +39,8 @@ export interface ThreadSettings {
   contextWindow?: ContextWindowMode | null;
   thinking?: boolean | null;
   codexFastMode?: boolean | null;
+  /** Devin-only native session mode persisted per thread. */
+  devinMode?: DevinMode | null;
   /** Thread-scoped default open-in app id (ADR-0005 tier 1). Null clears the override. */
   defaultOpenInApp?: string | null;
 }

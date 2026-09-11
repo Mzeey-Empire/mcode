@@ -2,6 +2,7 @@ import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
 import type { ComposerDraft, SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import type {
   ContextWindowMode,
+  DevinMode,
   MessageMention,
   ReasoningLevel,
   SelectedTextComment,
@@ -33,6 +34,7 @@ export interface ComposerSession {
   contextWindow: ContextWindowMode | null;
   thinking: boolean | null;
   codexFastMode: boolean | null;
+  devinMode: DevinMode | null;
 }
 
 /** Inputs for resolving a thread's composer session without React. */
@@ -47,6 +49,7 @@ export interface ResolveComposerSessionInput {
     contextWindow: ContextWindowMode | null;
     thinking: boolean | null;
     codexFastMode: boolean | null;
+    devinMode: DevinMode | null;
   };
   globalDefaults: {
     interactionMode: InteractionMode;
@@ -110,6 +113,7 @@ function buildDefaultComposerSession(
     contextWindow: null,
     thinking: null,
     codexFastMode: null,
+    devinMode: null,
   };
 }
 
@@ -139,6 +143,7 @@ function buildSavedComposerSession(
     contextWindow: threadSettings.contextWindow,
     thinking: threadSettings.thinking,
     codexFastMode: resolveSavedCodexFastMode(saved.codexFastMode, threadSettings.codexFastMode),
+    devinMode: saved.devinMode === undefined ? threadSettings.devinMode : saved.devinMode,
   };
 }
 
@@ -187,14 +192,19 @@ function buildThreadOptionSession(
   };
 }
 
+function flagOrNull<T>(value: T | null | undefined): T | null {
+  return value ?? null;
+}
+
 function buildThreadFlags(
   threadRow: WorkspaceThread | undefined,
-): Pick<ComposerSession, "copilotAgent" | "contextWindow" | "thinking" | "codexFastMode"> {
+): Pick<ComposerSession, "copilotAgent" | "contextWindow" | "thinking" | "codexFastMode" | "devinMode"> {
   return {
-    copilotAgent: threadRow?.copilot_agent ?? null,
-    contextWindow: (threadRow?.context_window_mode as ContextWindowMode | null | undefined) ?? null,
-    thinking: threadRow?.thinking ?? null,
-    codexFastMode: threadRow?.codex_fast_mode ?? null,
+    copilotAgent: flagOrNull(threadRow?.copilot_agent),
+    contextWindow: flagOrNull(threadRow?.context_window_mode as ContextWindowMode | null | undefined),
+    thinking: flagOrNull(threadRow?.thinking),
+    codexFastMode: flagOrNull(threadRow?.codex_fast_mode),
+    devinMode: flagOrNull(threadRow?.devin_mode),
   };
 }
 

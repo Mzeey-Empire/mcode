@@ -1,5 +1,5 @@
 import { useSettingsStore } from "@/stores/settingsStore";
-import { CLAUDE_STATIC_MODELS, CODEX_STATIC_MODELS, CURSOR_STATIC_MODEL_FALLBACK } from "@mcode/contracts";
+import { CLAUDE_STATIC_MODELS, CODEX_STATIC_MODELS, CURSOR_STATIC_MODEL_FALLBACK, DEVIN_STATIC_MODEL_FALLBACK, groupDevinModelFamilies } from "@mcode/contracts";
 import type { ContextWindowMode, ProviderId, ReasoningLevel } from "@mcode/contracts";
 import {
   MODEL_CONTEXT_WINDOWS_DEFAULT,
@@ -129,6 +129,23 @@ export const MODEL_PROVIDERS: readonly ModelProvider[] = [
     })),
   },
   {
+    id: "devin",
+    name: "Devin",
+    comingSoon: false,
+    // Minimal static fallback — live list comes from listProviderModels
+    // (`configOptions` on `session/new` over `devin acp`). Devin bakes
+    // reasoning effort into model ids, so rows are grouped into families
+    // whose effort becomes the reasoning pill.
+    models: groupDevinModelFamilies(DEVIN_STATIC_MODEL_FALLBACK).models.map((m) => ({
+      id: m.id,
+      label: m.name,
+      providerId: "devin",
+      group: m.group,
+      supportedReasoningLevels: m.supportedReasoningEfforts,
+      defaultReasoningLevel: m.defaultReasoningEffort,
+    })),
+  },
+  {
     id: "opencode",
     name: "OpenCode",
     comingSoon: false,
@@ -179,12 +196,29 @@ const SORTED_ALL_MODELS: readonly ModelDefinition[] = MODEL_PROVIDERS
   .sort((a, b) => b.id.length - a.id.length);
 
 /**
+ * Live catalog defs fetched per provider (ModelSelector). Registered into the
+ * module so registry lookups (`findModelById`, reasoning-level reads) resolve
+ * models that only exist in a provider's live catalog, e.g. Devin families.
+ */
+const DYNAMIC_MODEL_DEFS = new Map<string, ModelDefinition[]>();
+let dynamicModelsSorted: ModelDefinition[] = [];
+
+/** Registers a provider's fetched model defs for registry lookups. */
+export function registerProviderModels(providerId: string, defs: ModelDefinition[]): void {
+  DYNAMIC_MODEL_DEFS.set(providerId, defs);
+  dynamicModelsSorted = [...DYNAMIC_MODEL_DEFS.values()]
+    .flat()
+    .sort((a, b) => b.id.length - a.id.length);
+}
+
+/**
  * Matches a dated SDK variant ID (e.g. `claude-haiku-4-5-20251001`) to its base
  * model definition by prefix. Longest-first order ensures a more specific ID is
- * never shadowed by a shorter prefix.
+ * never shadowed by a shorter prefix. Devin effort ids (`swe-2-high`) resolve
+ * to their family (`swe-2`) through the same prefix rule.
  */
 function matchDatedVariant(id: string): ModelDefinition | undefined {
-  return SORTED_ALL_MODELS.find((m) => id.startsWith(`${m.id}-`));
+  return [...SORTED_ALL_MODELS, ...dynamicModelsSorted].find((m) => id.startsWith(`${m.id}-`));
 }
 
 /**
@@ -194,6 +228,10 @@ function matchDatedVariant(id: string): ModelDefinition | undefined {
 export function findModelById(id: string): ModelDefinition | undefined {
   for (const p of MODEL_PROVIDERS) {
     const m = p.models.find((model) => model.id === id);
+    if (m) return m;
+  }
+  for (const defs of DYNAMIC_MODEL_DEFS.values()) {
+    const m = defs.find((model) => model.id === id);
     if (m) return m;
   }
   return matchDatedVariant(id);
@@ -376,16 +414,30 @@ export function providerSupportsSendNow(provider: ProviderId | string | undefine
 }
 
 /**
+ * Returns the per-model reasoning levels declared on the registry def, or null
+ * if the model uses mcode's standard reasoning levels. Codex and Devin models
+ * carry explicit `supportedReasoningLevels`.
+ */
+export function getModelReasoningLevels(modelId: string): readonly CodexReasoningLevel[] | null {
+  return findModelById(modelId)?.supportedReasoningLevels ?? null;
+}
+
+/** Returns the model's default reasoning level, or null when undeclared. */
+export function getModelDefaultReasoningLevel(modelId: string): CodexReasoningLevel | null {
+  return findModelById(modelId)?.defaultReasoningLevel ?? null;
+}
+
+/**
  * Returns the Codex-specific reasoning levels for a model, or null if the model
  * uses mcode's standard reasoning levels (i.e. is not a Codex model).
  */
 export function getCodexReasoningLevels(modelId: string): readonly CodexReasoningLevel[] | null {
-  return findModelById(modelId)?.supportedReasoningLevels ?? null;
+  return getModelReasoningLevels(modelId);
 }
 
 /** Returns the Codex model's default reasoning level, or null for non-Codex models. */
 export function getCodexDefaultReasoningLevel(modelId: string): CodexReasoningLevel | null {
-  return findModelById(modelId)?.defaultReasoningLevel ?? null;
+  return getModelDefaultReasoningLevel(modelId);
 }
 
 /**

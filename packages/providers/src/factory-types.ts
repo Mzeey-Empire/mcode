@@ -19,6 +19,7 @@ export interface ProviderFactoryInput {
   host: ProviderHostPorts;
   codex?: CodexProviderPorts;
   cursor?: CursorProviderPorts;
+  devin?: DevinProviderPorts;
 }
 
 /** Server-owned authorities required by the Codex Provider. */
@@ -48,9 +49,16 @@ export interface CursorProviderPorts {
   };
 }
 
+/** Server-owned authorities required by the Devin Provider. */
+export interface DevinProviderPorts {
+  settings: {
+    get(): Settings;
+  };
+}
+
 /** Prepared Provider boundary returned without CLI inspection or process startup. */
 export interface ProviderBoundary {
-  readonly id: "claude" | "codex" | "copilot" | "cursor";
+  readonly id: "claude" | "codex" | "copilot" | "cursor" | "devin";
   readonly descriptor: Provider;
 }
 
@@ -61,3 +69,6 @@ export type CodexProviderBoundary = IAgentProvider & ProviderBoundary;
 export type CursorProviderBoundary = IAgentProvider & ProviderBoundary & {
   onSkillRegistryDebouncedInvalidation(): void;
 };
+
+/** Usable Devin Provider returned by its public factory. */
+export type DevinProviderBoundary = IAgentProvider & ProviderBoundary;

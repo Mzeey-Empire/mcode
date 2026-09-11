@@ -72,6 +72,7 @@ describe("PermissionRequestCard question flow", () => {
       "que_1",
       "allow",
       [["Yes"], ["East", "West"], ["ship after review"]],
+      undefined,
     );
   });
 
@@ -82,7 +83,7 @@ describe("PermissionRequestCard question flow", () => {
 
     await user.click(screen.getByRole("button", { name: "Deny" }));
 
-    expect(respondToPermission).toHaveBeenCalledWith("que_1", "deny");
+    expect(respondToPermission).toHaveBeenCalledWith("que_1", "deny", undefined, undefined);
   });
 
   it("keeps same-index radio answers independent across simultaneous cards", async () => {
@@ -101,5 +102,49 @@ describe("PermissionRequestCard question flow", () => {
 
     expect(yesOptions[0]).toBeChecked();
     expect(yesOptions[1]).toBeChecked();
+  });
+});
+
+describe("PermissionRequestCard provider-native options", () => {
+  beforeEach(() => {
+    respondToPermission.mockClear();
+  });
+
+  it("renders provider options verbatim and responds with the selected optionId", async () => {
+    const user = userEvent.setup();
+    render(
+      <PermissionRequestCard
+        requestId="req-1"
+        toolName="Bash"
+        input={{ command: "rm -rf build" }}
+        options={[
+          { id: "allow_once", label: "Allow once" },
+          { id: "reject_once", label: "Reject" },
+        ]}
+        settled={false}
+      />,
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Allow once" })).toBeEnabled());
+
+    await user.click(screen.getByRole("button", { name: "Reject" }));
+
+    expect(respondToPermission).toHaveBeenCalledWith("req-1", "allow", undefined, "reject_once");
+  });
+
+  it("falls back to generic allow/deny controls when no options are provided", async () => {
+    const user = userEvent.setup();
+    render(
+      <PermissionRequestCard
+        requestId="req-2"
+        toolName="Bash"
+        input={{ command: "ls" }}
+        settled={false}
+      />,
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "Allow" })).toBeEnabled());
+
+    await user.click(screen.getByRole("button", { name: "Deny" }));
+
+    expect(respondToPermission).toHaveBeenCalledWith("req-2", "deny", undefined, undefined);
   });
 });

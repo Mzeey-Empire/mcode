@@ -831,6 +831,7 @@ export function createWsTransport(
         contextWindow: settings.contextWindow,
         thinking: settings.thinking,
         codexFastMode: settings.codexFastMode,
+        devinMode: settings.devinMode,
         defaultOpenInApp: settings.defaultOpenInApp,
       }),
     markThreadViewed: (threadId) => rpc<void>("thread.markViewed", { threadId }),
@@ -886,10 +887,13 @@ export function createWsTransport(
     stopAgent: (threadId) => rpc<import("@mcode/contracts").AgentStopResult>("agent.stop", { threadId }),
     continueWithoutSaving: (executionId) =>
       rpc<void>("agent.continueWithoutSaving", { executionId }),
-    respondToPermission: (requestId, decision, answers) =>
-      rpc<void>("permission.respond", answers === undefined
-        ? { requestId, decision }
-        : { requestId, decision, answers }),
+    respondToPermission: (requestId, decision, answers, optionId) =>
+      rpc<void>("permission.respond", {
+        requestId,
+        decision,
+        ...(answers === undefined ? {} : { answers }),
+        ...(optionId === undefined ? {} : { optionId }),
+      }),
     listPendingPermissions: (threadId) =>
       rpc<PermissionRequest[]>("permission.listPending", { threadId }),
     answerPlanQuestions: (threadId, answers, permissionMode?, reasoningLevel?, contextWindow?, thinking?) =>

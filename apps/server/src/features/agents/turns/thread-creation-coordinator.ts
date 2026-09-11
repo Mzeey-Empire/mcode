@@ -3,6 +3,7 @@ import type {
   ContextWindowMode,
   CreateAndSendInput,
   ApprovalReviewMode,
+  DevinMode,
   InteractionMode,
   OrchestrationMode,
   PermissionMode,
@@ -59,6 +60,7 @@ export interface CreateThreadForTurnInput {
   thinking?: boolean;
   copilotAgent?: string;
   codexFastMode?: boolean;
+  devinMode?: DevinMode;
 }
 
 interface BranchedInitialTurnParams {
@@ -86,6 +88,7 @@ interface BranchedInitialTurnParams {
   contextWindowMode?: ContextWindowMode;
   thinking?: boolean;
   codexFastMode?: boolean;
+  devinMode?: DevinMode;
   displayContent?: string;
   mentions: SendMessageCommand["mentions"];
   previewAnnotations?: SendMessageCommand["previewAnnotations"];
@@ -196,6 +199,7 @@ export class ThreadCreationCoordinator {
       contextWindow: contextWindowMode,
       thinking,
       codexFastMode,
+      devinMode,
       displayContent,
       mentions = [],
       previewAnnotations,
@@ -208,7 +212,7 @@ export class ThreadCreationCoordinator {
       existingWorktreePath, existingWorktreeBaseBranch, attachments, reasoningLevel,
       provider, interactionMode, parentThreadId, forkedFromMessageId,
       title: titleFrom(displayContent ?? content), maxBudgetUsd, maxTurns, copilotAgent,
-      contextWindowMode, thinking, codexFastMode, displayContent, mentions,
+      contextWindowMode, thinking, codexFastMode, devinMode, displayContent, mentions,
       previewAnnotations, selectedTextComments, goalObjective, orchestrationMode,
     };
     return params;
@@ -236,6 +240,7 @@ export class ThreadCreationCoordinator {
       thinking: params.thinking,
       copilotAgent: params.copilotAgent,
       codexFastMode: params.codexFastMode,
+      devinMode: params.devinMode,
     };
     try {
       const thread = await this.createStandaloneThread(params, creation, startup?.startupId);
@@ -312,6 +317,7 @@ export class ThreadCreationCoordinator {
       goalObjective: params.goalObjective,
       orchestrationMode: params.orchestrationMode,
       codexFastMode: params.codexFastMode,
+      devinMode: params.devinMode,
     });
   }
 
@@ -349,6 +355,7 @@ export class ThreadCreationCoordinator {
         selectedTextComments: params.selectedTextComments,
         goalObjective: params.goalObjective,
         orchestrationMode: params.orchestrationMode,
+        devinMode: params.devinMode,
         ...(automatic.kind === "ready" ? {
           persistedAttachmentData: automatic.attachments,
           cleanupPersistedAttachmentsOnHandledCommand: true,
@@ -454,6 +461,7 @@ export class ThreadCreationCoordinator {
       context_window_mode: input.contextWindowMode ?? created.context_window_mode,
       thinking: input.thinking ?? created.thinking,
       copilot_agent: input.copilotAgent ?? created.copilot_agent,
+      devin_mode: input.devinMode ?? created.devin_mode,
     };
   }
 
@@ -469,16 +477,7 @@ export class ThreadCreationCoordinator {
     return created.warnings?.length ? { warnings: created.warnings } : {};
   }
 
-  private settings(input: CreateThreadForTurnInput): {
-    reasoning_level?: string;
-    interaction_mode?: string;
-    orchestration_mode?: string;
-    permission_mode?: string;
-    context_window_mode?: ContextWindowMode;
-    thinking?: boolean;
-    copilot_agent?: string;
-    codex_fast_mode?: boolean;
-  } {
+  private coreSettings(input: CreateThreadForTurnInput) {
     return {
       ...(input.reasoningLevel !== undefined && { reasoning_level: input.reasoningLevel }),
       ...(input.interactionMode !== undefined && { interaction_mode: input.interactionMode }),
@@ -487,7 +486,20 @@ export class ThreadCreationCoordinator {
       ...(input.contextWindowMode !== undefined && { context_window_mode: input.contextWindowMode }),
       ...(input.thinking !== undefined && { thinking: input.thinking }),
       ...(input.copilotAgent !== undefined && { copilot_agent: input.copilotAgent }),
+    };
+  }
+
+  private providerScopedSettings(input: CreateThreadForTurnInput) {
+    return {
       ...(input.provider === "codex" && input.codexFastMode !== undefined && { codex_fast_mode: input.codexFastMode }),
+      ...(input.provider === "devin" && input.devinMode !== undefined && { devin_mode: input.devinMode }),
+    };
+  }
+
+  private settings(input: CreateThreadForTurnInput) {
+    return {
+      ...this.coreSettings(input),
+      ...this.providerScopedSettings(input),
     };
   }
 
@@ -516,6 +528,7 @@ export class ThreadCreationCoordinator {
       contextWindowMode: params.contextWindowMode,
       thinking: params.thinking,
       codexFastMode: params.codexFastMode,
+      devinMode: params.devinMode,
       orchestrationMode: params.orchestrationMode,
     });
     const providerWireOverride = params.interactionMode === "plan"
@@ -543,6 +556,7 @@ export class ThreadCreationCoordinator {
         contextWindow: provisioned.contextWindowMode,
         thinking: provisioned.thinking,
         codexFastMode: provisioned.codexFastMode,
+        devinMode: provisioned.devinMode,
         providerWireOverride,
         displayContent: params.displayContent,
         mentions: params.mentions,

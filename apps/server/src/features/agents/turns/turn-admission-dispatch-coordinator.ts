@@ -6,6 +6,7 @@ import {
   previewAnnotationSnapshotAttachments,
   type AttachmentMeta,
   type ContextWindowMode,
+  type DevinMode,
   type IAgentProvider,
   type IProviderRegistry,
   type InteractionMode,
@@ -831,6 +832,7 @@ export class TurnAdmissionDispatchCoordinator {
     this.assignSetting(settings, "thinking", command.thinking);
     this.assignSetting(settings, "copilot_agent", command.copilotAgent);
     this.assignCodexFastMode(settings, command.codexFastMode, providerId);
+    this.assignDevinMode(settings, command.devinMode, providerId);
     return settings;
   }
 
@@ -844,6 +846,10 @@ export class TurnAdmissionDispatchCoordinator {
 
   private assignCodexFastMode(target: Record<string, unknown>, value: boolean | undefined, providerId: ProviderId): void {
     if (providerId === "codex" && value !== undefined) target.codex_fast_mode = value;
+  }
+
+  private assignDevinMode(target: Record<string, unknown>, value: DevinMode | undefined, providerId: ProviderId): void {
+    if (providerId === "devin" && value !== undefined) target.devin_mode = value;
   }
 
   private buildWirePayload(prepared: PreparedCommand): string {
@@ -956,6 +962,7 @@ export class TurnAdmissionDispatchCoordinator {
       thinking: this.thinkingDefault(command, prepared, settings),
       fastMode: this.fastModeDefault(command, prepared, settings),
       copilotAgent: command.copilotAgent ?? prepared.thread.copilot_agent ?? undefined,
+      devinMode: command.devinMode ?? prepared.thread.devin_mode ?? undefined,
     };
   }
 
@@ -990,11 +997,12 @@ export class TurnAdmissionDispatchCoordinator {
 
   private providerSpecificOptions(
     providerId: ProviderId,
-    defaults: { contextWindow: ContextWindowMode; thinking: boolean; fastMode: boolean; copilotAgent: string | undefined },
+    defaults: { contextWindow: ContextWindowMode; thinking: boolean; fastMode: boolean; copilotAgent: string | undefined; devinMode: DevinMode | undefined },
   ) {
     if (providerId === "claude") return { contextWindowMode: defaults.contextWindow, thinking: defaults.thinking };
     if (providerId === "codex") return { fastMode: defaults.fastMode };
     if (providerId === "copilot") return { agent: defaults.copilotAgent };
+    if (providerId === "devin") return { mode: defaults.devinMode };
     return {};
   }
 

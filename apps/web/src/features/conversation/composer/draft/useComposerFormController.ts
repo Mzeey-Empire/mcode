@@ -11,6 +11,7 @@ import type { AttachmentMeta, Thread } from "@/transport";
 import { INTERACTION_MODES } from "@/transport";
 import type {
   ContextWindowMode,
+  DevinMode,
   MessageMention,
   SelectedTextComment,
 } from "@mcode/contracts";
@@ -183,6 +184,7 @@ export function useComposerFormController({
     contextWindow: undefined as ContextWindowMode | undefined,
     thinking: undefined as boolean | undefined,
     codexFastMode: null as boolean | null,
+    devinMode: null as DevinMode | null,
   });
   const agentSettingsTouchedRef = useRef(false);
   const submissionRevisionRef = useRef(0);
@@ -420,6 +422,7 @@ export function useComposerFormController({
       contextWindow: selection.contextWindow ?? undefined,
       thinking: selection.thinking ?? undefined,
       codexFastMode: selection.codexFastMode,
+      devinMode: selection.devinMode,
     };
   });
 
@@ -441,6 +444,7 @@ export function useComposerFormController({
     selectedTextComments,
     selection.codexFastMode,
     selection.contextWindow,
+    selection.devinMode,
     selection.modelId,
     selection.provider,
     selection.reasoning,
@@ -568,6 +572,7 @@ export function useComposerFormController({
       contextWindow: session.contextWindow,
       thinking: session.thinking,
       codexFastMode: session.codexFastMode,
+      devinMode: session.devinMode,
     }));
     if (editorRef.current) {
       writeComposerContent(editorRef.current, session.input, session.mentions);

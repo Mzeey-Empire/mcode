@@ -52,7 +52,7 @@ import type {
   WorkspaceEnvironmentActionSlotInput,
 } from "../models/workspace-environment.js";
 import { ThreadSchema, RecentThreadSchema } from "../models/thread.js";
-import { ApprovalReviewModeSchema, ThreadModeSchema, PermissionModeSchema, InteractionModeSchema, OrchestrationModeSchema } from "../models/enums.js";
+import { ApprovalReviewModeSchema, DevinModeSchema, ThreadModeSchema, PermissionModeSchema, InteractionModeSchema, OrchestrationModeSchema } from "../models/enums.js";
 import { PaginatedMessagesSchema } from "../models/message.js";
 import { MessageMentionsSchema } from "../models/mention.js";
 import { SelectedTextCommentsSchema } from "../models/selected-text-comment.js";
@@ -345,6 +345,11 @@ export const SendMessageSchema = lazySchema(() => z.object({
      * then global default.
      */
     codexFastMode: z.boolean().optional(),
+    /**
+     * Devin: native session mode for this message. When set, persisted on the
+     * thread like other per-send composer overrides.
+     */
+    devinMode: DevinModeSchema.optional(),
     /** ID of the message being replied to. */
     replyToMessageId: z.string().uuid().optional(),
     /** Highlighted text excerpt from the original message. Absent for full-message replies. */
@@ -406,6 +411,11 @@ export const CreateAndSendSchema = lazySchema(() =>
      * Undefined leaves `codex_fast_mode` null (inherit global on each turn).
      */
     codexFastMode: z.boolean().optional(),
+    /**
+     * Devin: persist the native session mode on the new thread before the
+     * first message. Undefined leaves `devin_mode` null (Devin CLI default).
+     */
+    devinMode: DevinModeSchema.optional(),
     /** Objective installed as a provider goal immediately before the first turn dispatches. */
     goalObjective: GoalObjectiveSchema().optional(),
     /** Source thread ID when branching from an existing thread. */
@@ -795,6 +805,11 @@ export const WS_METHODS = lazySchema(() => ({
        */
       codexFastMode: z.boolean().nullable().optional(),
       /**
+       * Devin native session mode persisted on the thread. Pass null to clear
+       * back to the Devin CLI default (normal).
+       */
+      devinMode: DevinModeSchema.nullable().optional(),
+      /**
        * Thread-scoped default open-in app id (ADR-0005 tier 1). Pass null to clear
        * the override so the thread inherits the global default.
        */
@@ -809,6 +824,7 @@ export const WS_METHODS = lazySchema(() => ({
         data.contextWindow !== undefined ||
         data.thinking !== undefined ||
         data.codexFastMode !== undefined ||
+        data.devinMode !== undefined ||
         data.defaultOpenInApp !== undefined,
       { message: "Must provide at least one setting to update" },
     ),
@@ -1144,6 +1160,8 @@ export const WS_METHODS = lazySchema(() => ({
       requestId: z.string(),
       decision: PermissionDecisionSchema,
       answers: PermissionResponseAnswersSchema().optional(),
+      /** Provider-native option id selected from the request's verbatim options. */
+      optionId: z.string().min(1).max(200).optional(),
     }),
     result: z.void(),
   },

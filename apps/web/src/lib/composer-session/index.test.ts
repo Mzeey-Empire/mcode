@@ -15,6 +15,7 @@ const threadSettings = {
   contextWindow: "1m" as const,
   thinking: true,
   codexFastMode: false,
+  devinMode: null,
 };
 
 describe("resolveComposerSession", () => {

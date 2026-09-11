@@ -15,6 +15,7 @@ const selection: ComposerAgentSelection = {
   contextWindow: null,
   thinking: null,
   codexFastMode: null,
+  devinMode: null,
 };
 
 function renderControls(overrides: Partial<React.ComponentProps<typeof ComposerAccessControls>> = {}) {
@@ -88,5 +89,29 @@ describe("ComposerAccessControls", () => {
     fireEvent.click(screen.getByRole("button", { name: /Access mode: Manual/ }));
 
     expect(screen.queryByRole("button", { name: /^Auto/ })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["Normal", { devinMode: "normal", permissionMode: "supervised" }],
+    ["Accept Edits", { devinMode: "accept-edits", permissionMode: "supervised" }],
+    ["Smart", { devinMode: "smart", permissionMode: "supervised" }],
+    ["Bypass", { devinMode: "bypass", permissionMode: "full" }],
+  ] as const)("maps Devin %s to a native mode plus permission mode", (label, patch) => {
+    const onSelectionChange = renderControls({
+      selection: { ...selection, provider: "devin", devinMode: "smart" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Access mode: Smart/ }));
+    fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${label}`) }));
+
+    expect(onSelectionChange).toHaveBeenCalledWith(patch);
+  });
+
+  it("derives the Devin access label from permissionMode when devinMode is unset", () => {
+    renderControls({
+      selection: { ...selection, provider: "devin", permissionMode: "full" },
+    });
+
+    expect(screen.getByRole("button", { name: /Access mode: Bypass/ })).toBeInTheDocument();
   });
 });

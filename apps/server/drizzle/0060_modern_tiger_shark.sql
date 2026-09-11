@@ -1,0 +1,1 @@
+ALTER TABLE `threads` ADD `devin_mode` text;

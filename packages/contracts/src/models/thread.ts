@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { lazySchema } from "../utils/lazySchema.js";
-import { ThreadStatusSchema, ThreadModeSchema, InteractionModeSchema, OrchestrationModeSchema, PermissionModeSchema } from "./enums.js";
+import { DevinModeSchema, ThreadStatusSchema, ThreadModeSchema, InteractionModeSchema, OrchestrationModeSchema, PermissionModeSchema } from "./enums.js";
 import { ContextWindowModeSchema, ReasoningLevelSchema } from "./settings.js";
 
 /** Whether a worktree thread is on a named branch or still branchless on HEAD. */
@@ -71,6 +71,11 @@ export const ThreadSchema = lazySchema(() =>
   codex_fast_mode: z.boolean().nullable(),
   /** Selected Copilot sub-agent name. Null means provider default (interactive). */
   copilot_agent: z.string().nullable(),
+  /**
+   * Devin native session mode restored when a thread returns to build from
+   * plan. Null means the Devin CLI default (normal).
+   */
+  devin_mode: DevinModeSchema.nullable(),
   /**
    * Thread-scoped default open-in app id (registry id, e.g. "code"). Tier 1 of
    * the three-tier resolution in ADR-0005. Null means no override, so the app

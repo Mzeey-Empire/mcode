@@ -8,12 +8,14 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { getTransport } from "@/transport";
 import { TOOL_ICONS } from "./tool-renderers/constants";
 import type {
   PermissionDecision,
   PermissionQuestion,
+  PermissionRequestOption,
   PermissionResponseAnswers,
 } from "@mcode/contracts";
 
@@ -29,6 +31,8 @@ interface PermissionRequestCardProps {
   title?: string;
   /** Questions that must be answered before the provider can continue. */
   questions?: PermissionQuestion[];
+  /** Provider-native selectable options rendered verbatim when present. */
+  options?: PermissionRequestOption[];
   /** Whether this request has already been resolved. */
   settled: boolean;
   /** The user's decision, present when settled. */
@@ -135,6 +139,77 @@ function PendingPermissionRequest({
           <X size={11} />
           Deny
         </button>
+      </div>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+function OptionButton({
+  option,
+  disabled,
+  onRespond,
+}: {
+  option: PermissionRequestOption;
+  disabled: boolean;
+  onRespond: (decision: PermissionDecision, optionId: string) => void;
+}) {
+  const button = (
+    <button
+      disabled={disabled}
+      onClick={() => onRespond("allow", option.id)}
+      className={cn("inline-flex h-6 items-center gap-1 px-2 text-xs font-medium rounded-md", "bg-primary text-primary-foreground", "hover:bg-primary/90 transition-colors", "cursor-pointer disabled:pointer-events-none disabled:opacity-50")}
+    >
+      {option.label}
+    </button>
+  );
+  if (!option.description) return button;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={button} />
+      <TooltipContent>{option.description}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function PendingOptionsRequest({
+  icon,
+  label,
+  inputPreview,
+  options,
+  responding,
+  ready,
+  error,
+  onRespond,
+}: {
+  icon: ReactNode;
+  label: string;
+  inputPreview: string | undefined;
+  options: PermissionRequestOption[];
+  responding: boolean;
+  ready: boolean;
+  error: string | null;
+  onRespond: (decision: PermissionDecision, optionId: string) => void;
+}) {
+  const controlsDisabled = responding || !ready;
+  return (
+    <div className="border-l-2 border-amber-500/60 pl-3 py-2 flex flex-col gap-2">
+      <div className="flex items-center gap-2 text-xs font-medium text-amber-600 dark:text-amber-400">
+        {icon}
+        <span>Permission requested: {label}</span>
+      </div>
+      <pre className={cn("text-xs leading-relaxed text-muted-foreground/80", "bg-muted/30 rounded px-2 py-1.5", "max-h-[120px] overflow-y-auto scrollbar-on-hover", "whitespace-pre-wrap break-all font-mono")}>
+        {inputPreview}
+      </pre>
+      <div className="flex flex-wrap items-center gap-2">
+        {options.map((option) => (
+          <OptionButton
+            key={option.id}
+            option={option}
+            disabled={controlsDisabled}
+            onRespond={onRespond}
+          />
+        ))}
       </div>
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
@@ -257,6 +332,7 @@ export function PermissionRequestCard({
   input,
   title,
   questions,
+  options,
   settled,
   decision,
 }: PermissionRequestCardProps) {
@@ -274,12 +350,11 @@ export function PermissionRequestCard({
   }, []);
 
   const respond = useCallback(
-    async (d: PermissionDecision, answers?: PermissionResponseAnswers) => {
+    async (d: PermissionDecision, answers?: PermissionResponseAnswers, optionId?: string) => {
       setResponding(true);
       try {
         setError(null);
-        if (answers === undefined) await getTransport().respondToPermission(requestId, d);
-        else await getTransport().respondToPermission(requestId, d, answers);
+        await getTransport().respondToPermission(requestId, d, answers, optionId);
       } catch {
         setError("Failed to send response. Please try again.");
       } finally {
@@ -287,6 +362,11 @@ export function PermissionRequestCard({
       }
     },
     [requestId],
+  );
+
+  const respondWithOption = useCallback(
+    (d: PermissionDecision, optionId: string) => respond(d, undefined, optionId),
+    [respond],
   );
 
   const Icon = TOOL_ICONS[toolName] ?? Shield;
@@ -301,6 +381,9 @@ export function PermissionRequestCard({
   }
   if (questions) {
     return <PendingQuestionRequest requestId={requestId} icon={<Icon size={13} className="shrink-0" />} label={label} questions={questions} responding={responding} ready={ready} error={error} onRespond={respond} />;
+  }
+  if (options && options.length > 0) {
+    return <PendingOptionsRequest icon={<Icon size={13} className="shrink-0" />} label={label} inputPreview={inputPreview} options={options} responding={responding} ready={ready} error={error} onRespond={respondWithOption} />;
   }
   return <PendingPermissionRequest icon={<Icon size={13} className="shrink-0" />} label={label} inputPreview={inputPreview} responding={responding} ready={ready} allowMode={allowMode} error={error} onRespond={respond} onAllowMode={setAllowMode} />;
 }

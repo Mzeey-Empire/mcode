@@ -23,6 +23,7 @@ import {
   MODEL_PROVIDERS,
   findModelById,
   isModelAvailable,
+  registerProviderModels,
   type ModelProvider,
 } from "@/lib/model-registry";
 import { getTransport } from "@/transport";
@@ -36,6 +37,7 @@ import {
   ClaudeIcon,
   CodexIcon,
   CursorProviderIcon,
+  DevinIcon,
   OpenCodeIcon,
   GeminiIcon,
   CopilotIcon,
@@ -51,6 +53,7 @@ const PROVIDER_META: Record<string, { icon: IconComponent; color: string }> = {
   codex: { icon: CodexIcon, color: "text-foreground" },
   copilot: { icon: CopilotIcon, color: "text-violet-400 dark:text-violet-300" },
   cursor: { icon: CursorProviderIcon, color: "" },
+  devin: { icon: DevinIcon, color: "" },
   opencode: { icon: OpenCodeIcon, color: "text-violet-400" },
   gemini: { icon: GeminiIcon, color: "text-sky-400" },
 };
@@ -458,6 +461,7 @@ function useProviderModelCatalog(): ProviderModelCatalog {
       const updatedModels = new Map(dynamicModelsRef.current).set(providerId, models);
       dynamicModelsRef.current = updatedModels;
       setDynamicModels(updatedModels);
+      registerProviderModels(providerId, models);
     } catch {
       fetchFailedAtRef.current.set(providerId, Date.now());
     } finally {

@@ -42,6 +42,7 @@ import type {
   CreatePrResult,
   ChecksStatus,
   CopilotSubagent,
+  DevinMode,
   GitRemoteUrl,
   PermissionDecision,
   PermissionRequest,
@@ -426,6 +427,7 @@ export interface McodeTransport {
     requestId: string,
     decision: PermissionDecision,
     answers?: PermissionResponseAnswers,
+    optionId?: string,
   ): Promise<void>;
   /** List pending permission requests for a thread (used to re-hydrate after reconnect). */
   listPendingPermissions(threadId: string): Promise<PermissionRequest[]>;
@@ -487,6 +489,7 @@ export interface McodeTransport {
       contextWindow?: ContextWindowMode | null;
       thinking?: boolean | null;
       codexFastMode?: boolean | null;
+      devinMode?: DevinMode | null;
       defaultOpenInApp?: string | null;
     },
   ): Promise<boolean>;

@@ -42,6 +42,7 @@ function createHandoffQueuePayload(queued: HandoffQueuedSend) {
     contextWindow: selection.contextWindow ?? undefined,
     thinking: selection.thinking ?? undefined,
     codexFastMode: selection.provider === "codex" ? selection.codexFastMode ?? undefined : undefined,
+    devinMode: selection.provider === "devin" ? selection.devinMode ?? undefined : undefined,
     goalObjective: queued.goalObjective,
     browserCaptureSpillPaths: queued.browserCaptureSpillPaths,
   };

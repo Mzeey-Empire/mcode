@@ -31,7 +31,7 @@ import {
   releaseBrowserAutomationThreadScope,
   releaseBrowserAutomationWorkspaceScopes,
 } from "@/features/preview/automation/browserAutomationStore";
-import type { ApprovalReviewMode, ContextWindowMode, ReasoningLevel, InteractionMode, OrchestrationMode } from "@mcode/contracts";
+import type { ApprovalReviewMode, ContextWindowMode, DevinMode, ReasoningLevel, InteractionMode, OrchestrationMode } from "@mcode/contracts";
 import { sanitizeCustomBranchInput } from "@/lib/branch-name";
 import { isDetachedWorktree, normalizeWorktreePath } from "@/lib/worktree";
 import { readRememberedComposerMode } from "@/lib/composer-mode-preference";
@@ -139,6 +139,7 @@ function createdThreadProviderSettings(
   return {
     codex_fast_mode: createdCodexFastMode(thread, pending),
     copilot_agent: createdCopilotAgent(thread, pending),
+    devin_mode: createdDevinMode(thread, pending),
   };
 }
 
@@ -157,6 +158,15 @@ function createdCopilotAgent(
 ): string | null {
   return (pending?.provider === "copilot" ? pending.copilotAgent ?? null : null)
     ?? thread.copilot_agent
+    ?? null;
+}
+
+function createdDevinMode(
+  thread: Omit<CreateAndSendResult, "runtimeSnapshot" | "warnings">,
+  pending: PendingThreadCreation | undefined,
+): DevinMode | null {
+  return (pending?.provider === "devin" ? pending.devinMode ?? null : null)
+    ?? thread.devin_mode
     ?? null;
 }
 
@@ -238,6 +248,7 @@ interface PendingThreadCreation {
   contextWindow?: ContextWindowMode;
   thinking?: boolean;
   codexFastMode?: boolean;
+  devinMode?: DevinMode;
   /** Goal objective installed atomically with this thread's first turn. */
   goalObjective?: string;
   /** Client-generated identity for the current authoritative startup attempt. */
@@ -275,6 +286,7 @@ interface BranchThreadParams {
   contextWindow?: ContextWindowMode;
   thinking?: boolean;
   codexFastMode?: boolean;
+  devinMode?: DevinMode;
   mentions?: MessageMention[];
   previewAnnotations?: PreviewAnnotationBundle;
   selectedTextComments?: SelectedTextComment[];
@@ -394,6 +406,7 @@ function placeholderProviderSettings(pending: PendingThreadCreation) {
   return {
     codexFastMode: pending.provider === "codex" ? (pending.codexFastMode ?? null) : null,
     copilotAgent: pending.provider === "copilot" ? (pending.copilotAgent ?? null) : null,
+    devinMode: pending.provider === "devin" ? (pending.devinMode ?? null) : null,
   };
 }
 
@@ -453,6 +466,7 @@ async function runCreateAndSend(pending: PendingThreadCreation): Promise<CreateA
     contextWindow: pending.contextWindow,
     thinking: pending.thinking,
     codexFastMode: pending.codexFastMode,
+    devinMode: pending.devinMode,
     displayContent: pending.displayContent,
     mentions: pending.mentions,
     previewAnnotations: pending.previewAnnotations,
@@ -503,6 +517,7 @@ function pendingCreationWithCurrentDraft(
     reasoningLevel: draft.reasoning,
     contextWindow: draft.contextWindow,
     codexFastMode: draft.provider === "codex" ? draft.codexFastMode ?? undefined : undefined,
+    devinMode: draft.provider === "devin" ? draft.devinMode ?? undefined : undefined,
     composerDraft: draft,
   };
 }
@@ -601,6 +616,7 @@ interface WorkspaceState {
     selectedTextComments?: SelectedTextComment[],
     composerDraft?: ComposerDraft,
     approvalReviewMode?: ApprovalReviewMode,
+    devinMode?: DevinMode,
   ) => Promise<Thread>;
   /** Branch an existing thread into a new child with handoff context. */
   branchThread: (params: BranchThreadParams) => Promise<Thread>;
@@ -1278,6 +1294,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     selectedTextComments,
     composerDraft,
     approvalReviewMode,
+    devinMode,
   ) => {
     const workspaceId = get().activeWorkspaceId;
     if (!workspaceId) throw new Error("No workspace selected");
@@ -1312,6 +1329,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       contextWindow,
       thinking,
       codexFastMode,
+      devinMode,
       mentions,
       previewAnnotations,
       selectedTextComments,
@@ -1345,6 +1363,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       contextWindow: params.contextWindow,
       thinking: params.thinking,
       codexFastMode: params.codexFastMode,
+      devinMode: params.devinMode,
       mentions: params.mentions,
       previewAnnotations: params.previewAnnotations,
       selectedTextComments: params.selectedTextComments,

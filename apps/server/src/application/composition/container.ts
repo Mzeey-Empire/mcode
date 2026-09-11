@@ -10,6 +10,7 @@ import { hostRuntime, type HostRuntime } from "@mcode/shared/node/host-runtime";
 import { openDatabase } from "../../runtime/persistence/sqlite/database.js";
 import { registerCodexProvider } from "../../features/providers/composition/codex-provider-registration.js";
 import { registerCursorProvider } from "../../features/providers/composition/cursor-provider-registration.js";
+import { registerDevinProvider } from "../../features/providers/composition/devin-provider-registration.js";
 import { CursorAdminUsageSource } from "../../features/providers/adapters/cursor/usage/cursor-admin-usage-source.js";
 import { CursorCliUsageEmailResolver } from "../../features/providers/adapters/cursor/usage/cursor-cli-usage-email.js";
 
@@ -278,6 +279,19 @@ export function setupContainer(mcodeDir: string): typeof container {
     },
   });
   container.registerInstance("CursorProvider", cursorProvider);
+
+  const devinProvider = registerDevinProvider(container, {
+    configuration: {
+      cliPath: cursorSettings.provider.cli.devin || "devin",
+      // Devin mode is session-scoped config, so a long idle window is safe.
+      idleSessionTtlMs: 20 * 60 * 1_000,
+    },
+    host: container.resolve("ProviderHostPorts"),
+    devin: {
+      settings: { get: () => container.resolve(SettingsService).get() },
+    },
+  });
+  container.registerInstance("DevinProvider", devinProvider);
 
   return container;
 }
