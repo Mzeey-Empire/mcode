@@ -105,6 +105,37 @@ interface DevinFamilyAccumulator extends DevinModelFamily {
 }
 
 /**
+ * Folds a bare catalog row (`swe-1-7`) into its effort-suffixed family. A bare
+ * id's effort lives only in its display name (`SWE-1.7 Max`), so registering
+ * the implicit effort lets the reasoning pill round-trip back to the bare
+ * variant.
+ */
+function mergeBareModelRow(
+  family: DevinFamilyAccumulator,
+  models: ProviderModelInfo[],
+  bareRowIndex: Map<string, number>,
+): void {
+  const bareIndex = bareRowIndex.get(family.id);
+  if (bareIndex === undefined) return;
+  const bare = models[bareIndex];
+  family.bareModelId = bare.id;
+  const implicit = implicitEffortFromName(bare.name);
+  if (implicit) {
+    family.implicitBareEffort = implicit;
+    family.effortModelIds[implicit] = bare.id;
+    family.name = stripEffortFromName(bare.name, implicit);
+  } else {
+    family.name = bare.name;
+  }
+  models.splice(bareIndex, 1);
+  bareRowIndex.delete(family.id);
+  // Removal shifts later indexes; rebuild to keep lookups correct.
+  bareRowIndex.forEach((index, id) => {
+    if (index > bareIndex) bareRowIndex.set(id, index - 1);
+  });
+}
+
+/**
  * Groups Devin's flat catalog ids into selectable families. Devin encodes
  * reasoning effort inside the model id (`{base}-{effort}[-{tail}]`), so ids
  * like `swe-2-medium`/`swe-2-high` collapse into one `swe-2` row that carries
@@ -152,27 +183,7 @@ export function groupDevinModelFamilies(rows: readonly ProviderModelInfo[]): {
 
   const familyRows: ProviderModelInfo[] = [];
   for (const family of families.values()) {
-    const bareIndex = bareRowIndex.get(family.id);
-    if (bareIndex !== undefined) {
-      const bare = models[bareIndex];
-      family.bareModelId = bare.id;
-      // A bare id's effort lives only in its name (`SWE-1.7 Max`); register it
-      // so the reasoning pill can round-trip back to the bare variant.
-      const implicit = implicitEffortFromName(bare.name);
-      if (implicit) {
-        family.implicitBareEffort = implicit;
-        family.effortModelIds[implicit] = bare.id;
-        family.name = stripEffortFromName(bare.name, implicit);
-      } else {
-        family.name = bare.name;
-      }
-      models.splice(bareIndex, 1);
-      bareRowIndex.delete(family.id);
-      // Removal shifts later indexes; rebuild to keep lookups correct.
-      bareRowIndex.forEach((index, id) => {
-        if (index > bareIndex) bareRowIndex.set(id, index - 1);
-      });
-    }
+    mergeBareModelRow(family, models, bareRowIndex);
     family.supportedReasoningEfforts = orderEfforts(Object.keys(family.effortModelIds) as ReasoningLevel[]);
     family.defaultReasoningEffort = family.implicitBareEffort
       ?? (family.supportedReasoningEfforts.includes("high")
