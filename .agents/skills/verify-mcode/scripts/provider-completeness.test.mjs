@@ -3,7 +3,9 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
-import { aggregateEvidenceFailures, applyProviderPrerequisites, approvedReviewComposerPrompt, assertApprovedReviewReload, assertApprovedReviewTerminal, assertDeniedReviewComparison, assertDeniedReviewTerminal, assertDiskContent, assertExactApprovedReviewDisk, assertExactDeniedReviewDisk, assertExactFullAccessDisk, assertFullAccessRecovery, assertFullAccessSnapshot, assertLiveObservation, assertNoApprovalReviewFooter, assertNoApprovalReviewLifecycle, assertObservation, assertPatchAttribution, assertSeparateClients, assertWarningStabilityEvidence, captureCodexTraceEvidence, captureDeniedReview, captureFullAccessReview, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createClientInvalidationTrace, createOwnedFixtureWorkspace, createReceipt, deniedReviewComposerPrompt, emptyComposerPrompt, fullAccessComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, installWebSocketDisconnect, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readExactApprovedReviewComparison, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runApprovedReviewJourney, runComposerReviewJourney, runDeniedReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runFourSurfaceRefreshJourney, runFullAccessJourney, runInterruptionJourney, runProviderJourneys, runWorkspaceInvalidationJourney, selectAutomaticReview, selectFullAccess, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
+import { aggregateEvidenceFailures, applyProviderPrerequisites, approvedReviewComposerPrompt, assertApprovedReviewReload, assertApprovedReviewTerminal, assertDeniedReviewComparison, assertDeniedReviewTerminal, assertDiskContent, assertExactApprovedReviewDisk, assertExactDeniedReviewDisk, assertExactFullAccessDisk, assertFullAccessRecovery, assertFullAccessSnapshot, assertLiveObservation, assertNoApprovalReviewFooter, assertNoApprovalReviewLifecycle, assertObservation, assertPatchAttribution, assertSeparateClients, assertWarningStabilityEvidence, captureCodexTraceEvidence, captureDeniedReview, captureFullAccessReview, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createClientInvalidationTrace, createOwnedFixtureWorkspace, createReceipt, deniedReviewComposerPrompt, emptyComposerPrompt, fullAccessComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, installWebSocketDisconnect, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readExactApprovedReviewComparison, readRenderedReview, readSettledPublicComparison, recordElectronRightPanelEvidence, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runApprovedReviewJourney, runComposerReviewJourney, runDeniedReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runFourSurfaceRefreshJourney, runFullAccessJourney, runInterruptionJourney, runProviderJourneys, runWorkspaceInvalidationJourney, selectAutomaticReview, selectFullAccess, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
+
+const asRequiredEvidence = (entry) => ({ ...entry, requirement: "required" });
 
 NodeTest.test("requires explicit proof and cleanup confirmations", () => {
   NodeAssertStrict.deepEqual(parseArguments(["health"]), { command: "health" });
@@ -102,6 +104,7 @@ NodeTest.test("starts every provider-completeness row with actionable evidence u
   for (const matrix of [receipt.matrix, receipt.electron.matrix]) {
     for (const [row, evidence] of Object.entries(matrix)) {
       NodeAssertStrict.ok(evidence.kind, `${row} has an evidence kind`);
+      NodeAssertStrict.ok(["required", "informational"].includes(evidence.requirement), `${row} declares whether it is required`);
       NodeAssertStrict.notEqual(evidence.kind, "focused-pending", `${row} is not duplicated from a focused gate`);
       if (evidence.kind === "blocked") NodeAssertStrict.ok(evidence.prerequisite, `${row} names its unavailable control`);
     }
@@ -111,6 +114,8 @@ NodeTest.test("starts every provider-completeness row with actionable evidence u
     NodeAssertStrict.ok(gate.control, `${gate.name} names its focused-test owner`);
   }
   NodeAssertStrict.equal(receipt.matrix.codexNative.kind, "live-proof-required");
+  NodeAssertStrict.equal(receipt.matrix.codexNative.requirement, "required");
+  NodeAssertStrict.equal(receipt.matrix.warningStability.requirement, "informational");
   NodeAssertStrict.deepEqual(receipt.matrix.warningStability.fields, ["threadId", "notice.kind", "notice.identity", "before", "after", "review.rows", "review.spinners", "review.noticeCount", "review.screenshot"]);
   NodeAssertStrict.equal(receipt.matrix.warningStability.owner, "web");
   NodeAssertStrict.equal(receipt.electron.matrix.warningStability, undefined);
@@ -522,14 +527,109 @@ NodeTest.test("opens a projectless new thread through the sidebar and selects it
 
 NodeTest.test("aggregates focused gates and every failed provider surface", () => {
   const failed = aggregateEvidenceFailures(["server-turn-diff-review exited 1"], {
-    web: { codexNative: { kind: "live-proof-failed", provider: "codex" }, claudeFallback: { kind: "live-proof-failed", provider: "claude" }, reviewApproved: { kind: "required-live-proof", provider: "codex" }, reviewDenied: { kind: "live-proof-failed", provider: "codex" }, fullAccess: { kind: "live-proof-failed", provider: "codex" }, empty: { kind: "empty-proof-failed", provider: "codex" }, interruption: { kind: "interruption-proof-failed", provider: "codex" } },
-    electron: { codexNative: { kind: "live-proof-failed", provider: "codex" }, claudeFallback: { kind: "live-proof-failed", provider: "claude" }, interruption: { kind: "interruption-proof-required", provider: "codex" } },
+    web: {
+      codexNative: asRequiredEvidence({ kind: "live-proof-failed", provider: "codex" }),
+      claudeFallback: asRequiredEvidence({ kind: "live-proof-failed", provider: "claude" }),
+      reviewApproved: asRequiredEvidence({ kind: "required-live-proof", provider: "codex" }),
+      reviewDenied: asRequiredEvidence({ kind: "live-proof-failed", provider: "codex" }),
+      fullAccess: asRequiredEvidence({ kind: "live-proof-failed", provider: "codex" }),
+      empty: asRequiredEvidence({ kind: "empty-proof-failed", provider: "codex" }),
+      interruption: asRequiredEvidence({ kind: "interruption-proof-failed", provider: "codex" }),
+    },
+    electron: {
+      codexNative: asRequiredEvidence({ kind: "live-proof-failed", provider: "codex" }),
+      claudeFallback: asRequiredEvidence({ kind: "live-proof-failed", provider: "claude" }),
+      interruption: asRequiredEvidence({ kind: "interruption-proof-required", provider: "codex" }),
+    },
   });
   NodeAssertStrict.deepEqual(failed, ["server-turn-diff-review exited 1", "web/codex", "web/claude", "web/review-approved", "web/review-denied", "web/full-access", "web/empty", "web/interruption", "electron/codex", "electron/claude", "electron/interruption"]);
 });
 
+NodeTest.test("does not treat an informational coverage gap as a completion blocker", () => {
+  const failures = aggregateEvidenceFailures([], {
+    web: { warningStability: { requirement: "informational", kind: "coverage-gap" } },
+    electron: {},
+  });
+  NodeAssertStrict.deepEqual(failures, []);
+});
+
+NodeTest.test("blocks completion when the required Electron right-panel evidence is blocked", () => {
+  const failures = aggregateEvidenceFailures([], {
+    web: {},
+    electron: { electronRightPanel: { requirement: "required", kind: "blocked", reason: "Review did not settle" } },
+  });
+  NodeAssertStrict.deepEqual(failures, ["electron/right-panel"]);
+});
+
+NodeTest.test("blocks completion when a required provider prerequisite is a coverage gap", () => {
+  const failures = aggregateEvidenceFailures([], {
+    web: { cursorNative: { requirement: "required", kind: "coverage-gap", provider: "cursor", coverageGap: "No model is available" } },
+    electron: {},
+  });
+  NodeAssertStrict.deepEqual(failures, ["web/cursor"]);
+});
+
+NodeTest.test("records only settled Electron right-panel facts from an existing Codex Review observation", () => {
+  const matrix = {
+    electronRightPanel: {
+      requirement: "required",
+      kind: "blocked",
+      prerequisite: "a completed Electron Review journey",
+      surface: "Electron",
+      reason: "the proof starts Electron, but the native Codex Live diff did not reach public comparison",
+    },
+  };
+  const journey = {
+    provider: "codex",
+    model: "gpt-5.6-terra",
+    comparison: {
+      settled: {
+        comparison: {
+          turnDiff: { phase: "settled", source: "native", fidelity: "agent" },
+          files: [{ path: "target-codex.md", status: "modified" }],
+        },
+        patch: "AGENT_MARKER",
+      },
+    },
+    observations: {
+      settled: {
+        screenshot: "electron-codex-settled.png",
+        filePath: "target-codex.md",
+        patch: "AGENT_MARKER",
+        source: "native",
+        fidelity: "agent",
+        rows: 1,
+        spinners: 0,
+      },
+      reloaded: { screenshot: "electron-codex-reloaded.png" },
+      reconnected: { screenshot: "electron-codex-reconnected.png" },
+    },
+  };
+
+  recordElectronRightPanelEvidence(matrix, journey);
+
+  NodeAssertStrict.deepEqual(matrix.electronRightPanel, {
+    requirement: "required",
+    kind: "live-proof",
+    control: "Electron Composer and settled Review right panel",
+    provider: "codex",
+    model: "gpt-5.6-terra",
+    settled: {
+      file: { path: "target-codex.md", status: "modified" },
+      source: "native",
+      fidelity: "agent",
+      renderedPatch: "AGENT_MARKER",
+      rows: 1,
+      spinners: 0,
+      screenshot: "electron-codex-settled.png",
+    },
+  });
+  NodeAssertStrict.equal("reloaded" in matrix.electronRightPanel, false);
+  NodeAssertStrict.equal("reconnected" in matrix.electronRightPanel, false);
+});
+
 function electronFullAccessProofHarness(runFullAccess) {
-  const matrix = { codexNative: { kind: "live-proof", provider: "codex", model: "model", modelName: "Model" } };
+  const matrix = { codexNative: asRequiredEvidence({ kind: "live-proof", provider: "codex", model: "model", modelName: "Model" }) };
   const run = {
     directory: "fixture",
     fixtureDirectory: "fixture",
@@ -571,6 +671,7 @@ NodeTest.test("runs available Codex Full access proof through the Electron Compo
   NodeAssertStrict.deepEqual(calls.map(({ surface, client, socket }) => ({ surface, client: Boolean(client?.page), socket: Boolean(socket?.rpc) })), [{ surface: "electron", client: true, socket: true }]);
   NodeAssertStrict.deepEqual(journeys.fullAccess, { status: "passed", provider: "codex", model: "model", journey: { fullAccess: "proved" } });
   NodeAssertStrict.deepEqual(matrix.fullAccess, {
+    requirement: "required",
     kind: "live-proof",
     control: "electron Composer Full access, canonical recovery, Review, reload, reconnect, and disk",
     provider: "codex",
@@ -932,7 +1033,7 @@ NodeTest.test("rejects a duplicate notice or changed Live diff after a provider 
 
 NodeTest.test("includes an available warning stability proof failure in the aggregate result", () => {
   const failures = aggregateEvidenceFailures([], {
-    web: { warningStability: { kind: "live-proof-failed", provider: "codex" } },
+    web: { warningStability: asRequiredEvidence({ kind: "live-proof-failed", provider: "codex" }) },
     electron: {},
   });
   NodeAssertStrict.deepEqual(failures, ["web/warning-stability"]);
@@ -1145,11 +1246,15 @@ NodeTest.test("captures Codex Live proof after the same-file external edit and r
     waitForRefresh: async () => { events.push("trace:refresh"); return { files: { sequence: 6 }, composer: { sequence: 7 } }; },
     close: async () => { events.push("trace:closed"); },
   };
-  const result = await runComposerReviewJourney({ surface: "web", client: { page, disconnect: async () => { events.push("connection:dropped"); } }, socket, workspace: { id: "workspace", name: "Fixture", path: "fixture" }, run, io, provider: "codex", model: "model", modelName: "Model", captureLive: liveCapture, captureReview: reviewCapture, captureFourSurface, createInvalidationTrace: async () => invalidationTrace });
+  let settledSnapshot;
+  const result = await runComposerReviewJourney({ surface: "web", client: { page, disconnect: async () => { events.push("connection:dropped"); } }, socket, workspace: { id: "workspace", name: "Fixture", path: "fixture" }, run, io, provider: "codex", model: "model", modelName: "Model", captureLive: liveCapture, captureReview: reviewCapture, captureFourSurface, createInvalidationTrace: async () => invalidationTrace, onSettled: (journey) => { settledSnapshot = structuredClone(journey); events.push("settled-callback"); } });
 
   NodeAssertStrict.equal(result.observations.live.comparisonId, "live-after-external-edit");
   NodeAssertStrict.equal(result.fetchedPatch, "AGENT_MARKER");
   NodeAssertStrict.equal(result.disk, "both markers retained");
+  NodeAssertStrict.equal(settledSnapshot.observations.settled.comparisonId, "settled-observed");
+  NodeAssertStrict.equal(settledSnapshot.observations.reloaded, undefined);
+  NodeAssertStrict.ok(events.indexOf("settled-callback") < events.indexOf("reload"));
   NodeAssertStrict.ok(events.indexOf("four-surfaces:before") < events.indexOf("external-edit"));
   NodeAssertStrict.ok(events.indexOf("trace:invalidation") > events.indexOf("external-edit"));
   NodeAssertStrict.ok(events.indexOf("four-surfaces:after") > events.indexOf("trace:invalidation"));

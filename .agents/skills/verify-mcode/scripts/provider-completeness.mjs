@@ -17,6 +17,9 @@ const LIVE_TIMEOUT_MS = 180_000;
 const MAX_LIVE_COMPARISON_STATES = 24;
 const FOCUSED_GATE_TIMEOUT_MS = 120_000;
 const CONNECTION_LOST_TEXT = "Connection lost. Reconnecting to server...";
+const REQUIRED_EVIDENCE = "required";
+const INFORMATIONAL_EVIDENCE = "informational";
+const COMPLETE_REQUIRED_EVIDENCE_KINDS = new Set(["live-proof", "empty-proof", "interruption-proof"]);
 const FOCUSED_GATES = [
   { name: "server-turn-diff-review", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism", "--testTimeout=30000"], files: ["src/features/agents/turns/__tests__/turn-diff-review.test.ts", "src/features/agents/turns/__tests__/turn-diff-service.test.ts"], rows: ["empty", "interruption"] },
   { name: "server-approval-review-policy", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/agents/turns/__tests__/approval-review-policy.test.ts", "src/features/agents/orchestration/__tests__/agent-service-turn-started.test.ts"], rows: ["strictManual", "managedRequired", "fullAccessDispatch"] },
@@ -539,15 +542,15 @@ function providerEvidence(provider, observed, models, catalog, modelList, accoun
   const selectableModel = selectableProviderModel(provider, modelList);
   const unavailableClaudeAccount = account?.status === "not-authenticated";
   if (providerReady(observed, models, catalog, selectableModel, unavailableClaudeAccount)) {
-    return {
+    return requiredEvidence({
       kind: "required-live-proof",
       provider,
       model: selectableModel.id,
       modelName: typeof selectableModel.name === "string" ? selectableModel.name : selectableModel.id,
       observedPrerequisites,
-    };
+    });
   }
-  return { kind: "coverage-gap", provider, observedPrerequisites, coverageGap: coverageGapMessage(unavailableClaudeAccount) };
+  return requiredEvidence({ kind: "coverage-gap", provider, observedPrerequisites, coverageGap: coverageGapMessage(unavailableClaudeAccount) });
 }
 
 function selectableProviderModel(provider, modelList) {
@@ -605,9 +608,17 @@ export function assertEveryAvailableProviderWasProven(matrix) {
 /** Lists focused-gate and provider-journey failures after every surface has run. */
 export function aggregateEvidenceFailures(focusedFailures, surfaces) {
   const providerFailures = Object.entries(surfaces).flatMap(([surface, matrix]) => Object.entries(matrix)
-    .filter(([, entry]) => entry?.kind === "required-live-proof" || entry?.kind === "live-proof-failed" || entry?.kind === "empty-proof-failed" || entry?.kind === "interruption-proof-required" || entry?.kind === "interruption-proof-failed")
-    .map(([row, entry]) => row === "warningStability" ? `${surface}/warning-stability` : row === "reviewApproved" ? `${surface}/review-approved` : row === "reviewDenied" ? `${surface}/review-denied` : row === "fullAccess" ? `${surface}/full-access` : entry.kind === "empty-proof-failed" ? `${surface}/empty` : entry.kind === "interruption-proof-required" || entry.kind === "interruption-proof-failed" ? `${surface}/interruption` : `${surface}/${entry.provider}`));
+    .filter(([, entry]) => evidenceIsRequired(entry) && !COMPLETE_REQUIRED_EVIDENCE_KINDS.has(entry.kind))
+    .map(([row, entry]) => `${surface}/${evidenceFailureRow(row, entry)}`));
   return [...focusedFailures, ...providerFailures];
+}
+
+function requiredEvidence(evidence) { return { ...evidence, requirement: REQUIRED_EVIDENCE }; }
+function informationalEvidence(evidence) { return { ...evidence, requirement: INFORMATIONAL_EVIDENCE }; }
+function evidenceIsRequired(entry) { return entry?.requirement === REQUIRED_EVIDENCE; }
+function evidenceFailureRow(row, entry) {
+  if (row === "electronRightPanel") return "right-panel";
+  return row === providerMatrixKey(entry?.provider) ? entry.provider : row.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
 }
 
 export async function waitForNewThread(socket, workspaceId, previousIds, provider, model, run, deadline = Date.now() + 30_000) {
@@ -632,7 +643,8 @@ export async function runProviderJourneys({ surface, client, socket, workspace, 
   prepareWarningStabilityProof(matrix, warningStabilityTrigger);
   for (const [row, evidence] of primaryJourneyRows(matrix)) {
     try {
-      const journey = await runComposerReviewJourney({ surface, client, socket, workspace, run, io, provider: evidence.provider, model: evidence.model, modelName: evidence.modelName ?? evidence.model, captureLive, captureReview, triggerProviderNotice: warningStabilityTrigger });
+      const onSettled = electronRightPanelRecorder(surface, row, matrix);
+      const journey = await runComposerReviewJourney({ surface, client, socket, workspace, run, io, provider: evidence.provider, model: evidence.model, modelName: evidence.modelName ?? evidence.model, captureLive, captureReview, triggerProviderNotice: warningStabilityTrigger, onSettled });
       journeys[row] = { status: "passed", provider: evidence.provider, model: evidence.model, journey };
       matrix[row] = { ...evidence, kind: "live-proof", journey };
     } catch (error) {
@@ -648,9 +660,15 @@ export async function runProviderJourneys({ surface, client, socket, workspace, 
   if (codex?.provider === "codex" && codex.model && codex.modelName) {
     await runCodexSupplementalJourneys({ surface, client, socket, workspace, run, io, matrix, journeys, codex, captureLive, captureReview, captureEmpty, runFullAccess });
   } else {
-    matrix.interruption = { kind: "blocked", prerequisite: "available Codex provider, model, and catalog for the public interruption journey", surface };
+    matrix.interruption = requiredEvidence({ kind: "blocked", prerequisite: "available Codex provider, model, and catalog for the public interruption journey", surface });
   }
   return journeys;
+}
+
+function electronRightPanelRecorder(surface, row, matrix) {
+  return surface === "electron" && row === "codexNative"
+    ? (journey) => recordElectronRightPanelEvidence(matrix, journey)
+    : undefined;
 }
 
 async function runCodexSupplementalJourneys({ surface, client, socket, workspace, run, io, matrix, journeys, codex, captureLive, captureReview, captureEmpty, runFullAccess }) {
@@ -660,22 +678,22 @@ async function runCodexSupplementalJourneys({ surface, client, socket, workspace
   try {
     const journey = await runEmptyDiffJourney({ surface, client, socket, workspace, run, provider: codex.provider, model: codex.model, modelName: codex.modelName, captureEmpty });
     journeys.empty = { status: "passed", provider: codex.provider, model: codex.model, journey };
-    matrix.empty = { kind: "empty-proof", control: `${surface} Composer, public turn comparison, and Review`, provider: codex.provider, model: codex.model, journey };
+    matrix.empty = requiredEvidence({ kind: "empty-proof", control: `${surface} Composer, public turn comparison, and Review`, provider: codex.provider, model: codex.model, journey });
   } catch (error) {
     const message = safeError(error);
     journeys.empty = { status: "failed", provider: codex.provider, model: codex.model, failure: { message, classification: "empty public Composer journey failed before completed no-change evidence" } };
-    matrix.empty = { kind: "empty-proof-failed", control: `${surface} Composer, public turn comparison, and Review`, provider: codex.provider, model: codex.model, failure: journeys.empty.failure };
+    matrix.empty = requiredEvidence({ kind: "empty-proof-failed", control: `${surface} Composer, public turn comparison, and Review`, provider: codex.provider, model: codex.model, failure: journeys.empty.failure });
     await captureFailure(client.page, run, `${surface}-empty-failure`);
   }
-  matrix.interruption = { kind: "interruption-proof-required", control: `${surface} Composer Stop control, public runtime, and Review`, provider: codex.provider, model: codex.model };
+  matrix.interruption = requiredEvidence({ kind: "interruption-proof-required", control: `${surface} Composer Stop control, public runtime, and Review`, provider: codex.provider, model: codex.model });
   try {
     const journey = await runInterruptionJourney({ surface, client, socket, workspace, run, io, provider: codex.provider, model: codex.model, modelName: codex.modelName, captureLive, captureReview });
     journeys.interruption = { status: "passed", provider: codex.provider, model: codex.model, journey };
-    matrix.interruption = { kind: "interruption-proof", control: `${surface} Composer Stop control, public runtime, and Review`, provider: codex.provider, model: codex.model, journey };
+    matrix.interruption = requiredEvidence({ kind: "interruption-proof", control: `${surface} Composer Stop control, public runtime, and Review`, provider: codex.provider, model: codex.model, journey });
   } catch (error) {
     const message = safeError(error);
     journeys.interruption = { status: "failed", provider: codex.provider, model: codex.model, failure: { message, classification: "user interruption journey failed before terminal runtime and Review evidence" } };
-    matrix.interruption = { kind: "interruption-proof-failed", control: `${surface} Composer Stop control, public runtime, and Review`, provider: codex.provider, model: codex.model, failure: journeys.interruption.failure };
+    matrix.interruption = requiredEvidence({ kind: "interruption-proof-failed", control: `${surface} Composer Stop control, public runtime, and Review`, provider: codex.provider, model: codex.model, failure: journeys.interruption.failure });
     await captureFailure(client.page, run, `${surface}-interruption-failure`);
   }
 }
@@ -694,7 +712,7 @@ async function maybeRunFullAccessProof({ surface, ...options }) {
 
 async function runApprovedReviewProof({ client, socket, workspace, run, io, matrix, journeys, codex, captureReview }) {
   const control = "web Composer Automatic approval review, conversation.page, Review, reload, and disk";
-  const evidence = { kind: "required-live-proof", control, provider: codex.provider, model: codex.model };
+  const evidence = requiredEvidence({ kind: "required-live-proof", control, provider: codex.provider, model: codex.model });
   matrix.reviewApproved = evidence;
   try {
     const journey = await runApprovedReviewJourney({ client, socket, workspace, run, io, provider: codex.provider, model: codex.model, modelName: codex.modelName, captureReview });
@@ -705,7 +723,7 @@ async function runApprovedReviewProof({ client, socket, workspace, run, io, matr
     const coverageGap = message.includes("native automatic-review start did not persist");
     journeys.reviewApproved = { status: coverageGap ? "coverage-gap" : "failed", provider: codex.provider, model: codex.model, failure: { message, classification: coverageGap ? "native automatic review was not emitted after an Automatic Composer dispatch" : "automatic approval review failed before durable Approved evidence" } };
     matrix.reviewApproved = coverageGap
-      ? { kind: "coverage-gap", control, provider: codex.provider, model: codex.model, prerequisite: "native automatic-review approval terminal event", reason: journeys.reviewApproved.failure.classification }
+      ? { ...evidence, kind: "coverage-gap", prerequisite: "native automatic-review approval terminal event", reason: journeys.reviewApproved.failure.classification }
       : { ...evidence, kind: "live-proof-failed", failure: journeys.reviewApproved.failure };
     await captureFailure(client.page, run, "web-review-approved-failure");
   }
@@ -713,7 +731,7 @@ async function runApprovedReviewProof({ client, socket, workspace, run, io, matr
 
 async function runDeniedReviewProof({ client, socket, workspace, run, io, matrix, journeys, codex }) {
   const control = "web Composer Automatic denial review, conversation.page, Review, reload, and disk";
-  const evidence = { kind: "required-live-proof", control, provider: codex.provider, model: codex.model };
+  const evidence = requiredEvidence({ kind: "required-live-proof", control, provider: codex.provider, model: codex.model });
   matrix.reviewDenied = evidence;
   try {
     const journey = await runDeniedReviewJourney({ client, socket, workspace, run, io, provider: codex.provider, model: codex.model, modelName: codex.modelName });
@@ -724,7 +742,7 @@ async function runDeniedReviewProof({ client, socket, workspace, run, io, matrix
     const coverageGap = message.includes("native automatic-review start did not persist");
     journeys.reviewDenied = { status: coverageGap ? "coverage-gap" : "failed", provider: codex.provider, model: codex.model, failure: { message, classification: coverageGap ? "native automatic denial review was not emitted after an Automatic Composer dispatch" : "automatic denial review failed before durable Denied evidence" } };
     matrix.reviewDenied = coverageGap
-      ? { kind: "coverage-gap", control, provider: codex.provider, model: codex.model, prerequisite: "native automatic-review denial terminal event", reason: journeys.reviewDenied.failure.classification }
+      ? { ...evidence, kind: "coverage-gap", prerequisite: "native automatic-review denial terminal event", reason: journeys.reviewDenied.failure.classification }
       : { ...evidence, kind: "live-proof-failed", failure: journeys.reviewDenied.failure };
     await captureFailure(client.page, run, "web-review-denied-failure");
   }
@@ -732,7 +750,7 @@ async function runDeniedReviewProof({ client, socket, workspace, run, io, matrix
 
 async function runFullAccessProof({ surface, client, socket, workspace, run, io, matrix, journeys, codex, runFullAccess }) {
   const control = `${surface} Composer Full access, canonical recovery, Review, reload, reconnect, and disk`;
-  const evidence = { kind: "required-live-proof", control, provider: codex.provider, model: codex.model };
+  const evidence = requiredEvidence({ kind: "required-live-proof", control, provider: codex.provider, model: codex.model });
   matrix.fullAccess = evidence;
   try {
     const journey = await runFullAccess({ surface, client, socket, workspace, run, io, provider: codex.provider, model: codex.model, modelName: codex.modelName });
@@ -756,7 +774,7 @@ function getWarningStabilityTrigger(surface, triggerProviderNotice) {
 
 function prepareWarningStabilityProof(matrix, triggerProviderNotice) {
   if (!triggerProviderNotice) return;
-  matrix.warningStability = { ...matrix.warningStability, kind: "required-live-proof", provider: "codex" };
+  matrix.warningStability = requiredEvidence({ ...matrix.warningStability, kind: "required-live-proof", provider: "codex" });
 }
 
 function recordWarningStabilityResult(matrix, journeys) {
@@ -764,11 +782,33 @@ function recordWarningStabilityResult(matrix, journeys) {
   if (!journey?.warningStability && !journey?.warningStabilityFailure) return;
   const control = "web Composer provider notice, conversation.page, Review, and public turn comparison";
   matrix.warningStability = journey.warningStability
-    ? { kind: "live-proof", control, ...journey.warningStability }
-    : { kind: "live-proof-failed", control, provider: "codex", failure: journey.warningStabilityFailure };
+    ? requiredEvidence({ kind: "live-proof", control, ...journey.warningStability })
+    : requiredEvidence({ kind: "live-proof-failed", control, provider: "codex", failure: journey.warningStabilityFailure });
 }
 
-export async function runComposerReviewJourney({ surface, client, socket, workspace, run, io, provider, model, modelName, captureLive: captureLiveState, captureReview: captureReviewState, captureFourSurface: captureFourSurfaceState = captureFourSurfaceRefreshState, createInvalidationTrace = createClientInvalidationTrace, triggerProviderNotice }) {
+/** Records the completed Electron Review panel without borrowing later recovery evidence. */
+export function recordElectronRightPanelEvidence(matrix, journey) {
+  const rendered = journey.observations.settled;
+  const comparison = journey.comparison.settled.comparison;
+  const [file] = comparison.files;
+  matrix.electronRightPanel = requiredEvidence({
+    kind: "live-proof",
+    control: "Electron Composer and settled Review right panel",
+    provider: journey.provider,
+    model: journey.model,
+    settled: {
+      file: { path: rendered.filePath, status: file.status },
+      source: rendered.source,
+      fidelity: rendered.fidelity,
+      renderedPatch: rendered.patch,
+      rows: rendered.rows,
+      spinners: rendered.spinners,
+      screenshot: rendered.screenshot,
+    },
+  });
+}
+
+export async function runComposerReviewJourney({ surface, client, socket, workspace, run, io, provider, model, modelName, captureLive: captureLiveState, captureReview: captureReviewState, captureFourSurface: captureFourSurfaceState = captureFourSurfaceRefreshState, createInvalidationTrace = createClientInvalidationTrace, triggerProviderNotice, onSettled }) {
   const fileName = provider === "codex" ? "target-codex.md" : `target-${provider}.txt`;
   const fixtureFile = NodePath.join(run.fixtureDirectory, fileName);
   const result = { provider, model, baseline: "BASELINE_MARKER", observations: {}, comparison: {}, fetchedPatch: null, disk: null };
@@ -789,6 +829,7 @@ export async function runComposerReviewJourney({ surface, client, socket, worksp
   assertPatchAttribution(settled.patch, "AGENT_MARKER", "EXTERNAL_MARKER");
   result.comparison.settled = summarizeComparison(settled.comparison, settled.patch);
   result.observations.settled = await captureSettledReviewState(socket, thread.id, fileName, client.page, run, `${surface}-${provider}-settled`, captureReviewState);
+  recordSettledJourney(onSettled, result);
   if (provider === "codex") {
     await closeReview(client.page);
     result.observations.reopened = await captureSettledReviewState(socket, thread.id, fileName, client.page, run, `${surface}-${provider}-reopened`, captureReviewState);
@@ -799,6 +840,10 @@ export async function runComposerReviewJourney({ surface, client, socket, worksp
   }
   result.disk = await readComposerDiskEvidence(io, fixtureFile, provider);
   return result;
+}
+
+function recordSettledJourney(onSettled, result) {
+  if (onSettled) onSettled(result);
 }
 
 async function dispatchComposerReviewJourney({ client, socket, workspace, run, provider, model, modelName, fileName }) {
@@ -2489,12 +2534,12 @@ function isWithin(path, parent) { const relative = NodePath.relative(parent, pat
 export function applyProviderPrerequisites(matrix, prerequisites) { Object.assign(matrix, prerequisites); }
 
 function providerMatrix(surface) { return {
-  codexNative: { kind: "live-proof-required", control: `${surface} Composer, Review, and public turn comparison`, fields: ["provider", "model", "observations.live", "observations.settled", "observations.reopened", "observations.reloaded", "observations.reconnected", "comparison", "disk"] },
-  cursorNative: { kind: "pending-observation", control: "providers.listAvailability, provider.listModels, and provider.catalog" },
-  claudeFallback: { kind: "pending-observation", control: "providers.listAvailability, provider.listModels, and provider.catalog" },
+  codexNative: requiredEvidence({ kind: "live-proof-required", control: `${surface} Composer, Review, and public turn comparison`, fields: ["provider", "model", "observations.live", "observations.settled", "observations.reopened", "observations.reloaded", "observations.reconnected", "comparison", "disk"] }),
+  cursorNative: requiredEvidence({ kind: "pending-observation", control: "providers.listAvailability, provider.listModels, and provider.catalog" }),
+  claudeFallback: requiredEvidence({ kind: "pending-observation", control: "providers.listAvailability, provider.listModels, and provider.catalog" }),
   ...(surface === "web"
     ? {
-      warningStability: {
+      warningStability: informationalEvidence({
         kind: "coverage-gap",
         control: "web Composer provider notice, conversation.page, Review, and public turn comparison",
         prerequisite: "a native Codex warning or model/rerouted notification while the exact public Live diff is active",
@@ -2502,11 +2547,11 @@ function providerMatrix(surface) { return {
         owner: "web",
         electron: "The public Composer and turn-diff state are shared with Electron; this gap is recorded once until a native trigger can exercise the bound state.",
         fields: ["threadId", "notice.kind", "notice.identity", "before", "after", "review.rows", "review.spinners", "review.noticeCount", "review.screenshot"],
-      },
-      reviewApproved: { kind: "coverage-gap", control: "web Composer Automatic approval review, conversation.page, Review, reload, and disk", prerequisite: "available Codex provider, model, catalog, and native automatic-review approval terminal event", reason: "The verifier records a coverage gap unless an available Codex Automatic Composer dispatch emits one durable Approved review.", fields: ["threadId", "reviewId", "outcome", "comparison", "review.rows", "review.spinners", "review.screenshot", "disk"] },
-      reviewDenied: { kind: "coverage-gap", control: "web Composer Automatic denial review, conversation.page, Review, reload, and disk", prerequisite: "available Codex provider, model, catalog, and native automatic-review denial terminal event", reason: "The verifier records a coverage gap unless an available Codex Automatic Composer dispatch emits one durable Denied review without a file effect.", fields: ["threadId", "reviewId", "outcome", "comparison", "review.rows", "review.screenshot", "disk"] },
-      fullAccess: { kind: "coverage-gap", control: "web Composer Full access, canonical recovery, Review, reload, reconnect, and disk", prerequisite: "available Codex provider, model, and catalog", reason: "The verifier records a coverage gap until a bounded Full access action can prove its canonical bypass metadata and absence of approval-review lifecycle and footer.", fields: ["threadId", "permissionMode", "approvalReviewMode", "approvalReviewReason", "approvalReviewLifecycleCount", "comparison", "review.rows", "review.spinners", "review.screenshot", "disk"] },
-      permissionHandoff: {
+      }),
+      reviewApproved: requiredEvidence({ kind: "coverage-gap", control: "web Composer Automatic approval review, conversation.page, Review, reload, and disk", prerequisite: "available Codex provider, model, catalog, and native automatic-review approval terminal event", reason: "The verifier records a coverage gap unless an available Codex Automatic Composer dispatch emits one durable Approved review.", fields: ["threadId", "reviewId", "outcome", "comparison", "review.rows", "review.spinners", "review.screenshot", "disk"] }),
+      reviewDenied: requiredEvidence({ kind: "coverage-gap", control: "web Composer Automatic denial review, conversation.page, Review, reload, and disk", prerequisite: "available Codex provider, model, catalog, and native automatic-review denial terminal event", reason: "The verifier records a coverage gap unless an available Codex Automatic Composer dispatch emits one durable Denied review without a file effect.", fields: ["threadId", "reviewId", "outcome", "comparison", "review.rows", "review.screenshot", "disk"] }),
+      fullAccess: requiredEvidence({ kind: "coverage-gap", control: "web Composer Full access, canonical recovery, Review, reload, reconnect, and disk", prerequisite: "available Codex provider, model, and catalog", reason: "The verifier records a coverage gap until a bounded Full access action can prove its canonical bypass metadata and absence of approval-review lifecycle and footer.", fields: ["threadId", "permissionMode", "approvalReviewMode", "approvalReviewReason", "approvalReviewLifecycleCount", "comparison", "review.rows", "review.spinners", "review.screenshot", "disk"] }),
+      permissionHandoff: informationalEvidence({
         kind: "blocked",
         prerequisite: "native provider PermissionRequest after strict-review routing",
         surface: "public Composer permission control",
@@ -2516,15 +2561,15 @@ function providerMatrix(surface) { return {
           realProviderRequestCard: "web-permission-handoff",
           providerResponseSettlementRemoval: "codex-permission-handoff",
         },
-      },
-      retryFreeze: {
+      }),
+      retryFreeze: informationalEvidence({
         kind: "coverage-gap",
         control: "web Composer Automatic approval review retry",
         prerequisite: "a deterministic native transient failure after an Automatic Composer dispatch",
         reason: "Mcode has no deterministic public trigger for a native transient retry, so the verifier records focused retry-dispatch evidence instead of claiming a live retry.",
         focusedEvidence: { frozenRetryDecision: "server-retry-decision-freeze" },
-      },
-      staleRetryEvents: {
+      }),
+      staleRetryEvents: informationalEvidence({
         kind: "coverage-gap",
         control: "web Composer retry event stream",
         prerequisite: "a deterministic native transient failure followed by stale approval-review and diff events",
@@ -2533,11 +2578,11 @@ function providerMatrix(surface) { return {
           staleRetryReview: "codex-stale-retry-events",
           staleRetryDiff: "codex-stale-retry-events",
         },
-      },
+      }),
     }
     : {
-      electronRightPanel: { kind: "blocked", prerequisite: "a completed Electron Review journey", surface: "Electron", reason: "the proof starts Electron, but the native Codex Live diff did not reach public comparison" },
-      fullAccess: { kind: "coverage-gap", control: "Electron Composer Full access, canonical recovery, Review, reload, reconnect, and disk", prerequisite: "available Codex provider, model, and catalog", reason: "The Electron Full access Composer journey has not run." },
+      electronRightPanel: requiredEvidence({ kind: "blocked", prerequisite: "a completed Electron Review journey", surface: "Electron", reason: "the proof starts Electron, but the native Codex Live diff did not reach public comparison" }),
+      fullAccess: requiredEvidence({ kind: "coverage-gap", control: "Electron Composer Full access, canonical recovery, Review, reload, reconnect, and disk", prerequisite: "available Codex provider, model, and catalog", reason: "The Electron Full access Composer journey has not run." }),
     }),
 }; }
 
