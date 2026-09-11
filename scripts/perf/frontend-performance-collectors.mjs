@@ -28,15 +28,29 @@ export function summarizeDurationSamples(samples) {
 export async function createPageSignalCollector(page) {
   const consoleErrors = [];
   const pageErrors = [];
+  const requestErrors = [];
   const onConsole = (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
   };
   const onPageError = (error) => pageErrors.push(String(error));
+  const onRequestFailed = (request) => requestErrors.push(
+    `${request.method()} ${request.url()}: ${request.failure()?.errorText ?? "request failed"}`,
+  );
+  const onResponse = (response) => {
+    if (response.status() < 400) return;
+    const path = new URL(response.url()).pathname;
+    if (path === "/api" || path.startsWith("/api/")) {
+      requestErrors.push(`${response.request().method()} ${response.url()}: HTTP ${response.status()}`);
+    }
+  };
   page.on("console", onConsole);
   page.on("pageerror", onPageError);
+  page.on("requestfailed", onRequestFailed);
+  page.on("response", onResponse);
 
-  await page.evaluate(() => {
+  const install = () => page.evaluate(() => {
     window.__mcodeFrontendPerformanceSignals = {
+      installed: true,
       longTasks: [],
       layoutShifts: [],
     };
@@ -51,12 +65,17 @@ export async function createPageSignalCollector(page) {
       );
     }).observe({ type: "layout-shift", buffered: true });
   });
+  await install();
 
   return {
+    /** Reinstalls page-local observers after a navigation replaces the document. */
+    install,
+
     /** Reads the current signals as serializable data. */
     async read() {
       const browserSignals = await page.evaluate(() => ({
         documentDescendants: document.querySelectorAll("*").length,
+        pageSignalsInstalled: window.__mcodeFrontendPerformanceSignals?.installed === true,
         layoutShifts: window.__mcodeFrontendPerformanceSignals?.layoutShifts ?? [],
         longTasks: window.__mcodeFrontendPerformanceSignals?.longTasks ?? [],
         pageState: {
@@ -71,6 +90,7 @@ export async function createPageSignalCollector(page) {
         ...browserSignals,
         consoleErrors: [...consoleErrors],
         pageErrors: [...pageErrors],
+        requestErrors: [...requestErrors],
       };
     },
 
@@ -78,6 +98,8 @@ export async function createPageSignalCollector(page) {
     dispose() {
       page.off("console", onConsole);
       page.off("pageerror", onPageError);
+      page.off("requestfailed", onRequestFailed);
+      page.off("response", onResponse);
     },
   };
 }
@@ -104,6 +126,7 @@ async function installAttributionRuntime(page) {
       commits: [],
       frameTimes: [],
       longTasks: [],
+      longTaskTimestampsSupported: PerformanceObserver.supportedEntryTypes?.includes("longtask") === true,
       rowRenders: {},
     };
     window.__mcodePerformanceAttribution = state;
@@ -115,9 +138,14 @@ async function installAttributionRuntime(page) {
         state.rowRenders[rowId] = (state.rowRenders[rowId] ?? 0) + 1;
       },
     };
-    new PerformanceObserver((list) => {
-      state.longTasks.push(...list.getEntries().map((entry) => entry.duration));
-    }).observe({ type: "longtask", buffered: true });
+    if (state.longTaskTimestampsSupported) {
+      new PerformanceObserver((list) => {
+        state.longTasks.push(...list.getEntries().map((entry) => ({
+          startTime: entry.startTime,
+          duration: entry.duration,
+        })));
+      }).observe({ type: "longtask", buffered: true });
+    }
     const recordFrame = (timestamp) => {
       state.frameTimes.push(timestamp);
       if (state.frameTimes.length > 10_000) state.frameTimes.splice(0, 5_000);
@@ -148,6 +176,7 @@ async function readAttributionRuntime(page, indexes) {
       commits: [...state.commits],
       frameTimes: state.frameTimes.slice(frameIndex),
       longTasks: state.longTasks.slice(longTaskIndex),
+      longTaskTimestampsSupported: state.longTaskTimestampsSupported,
       rowRenders: { ...state.rowRenders },
     };
   }, indexes);
@@ -223,18 +252,23 @@ async function stopTrace(trace) {
 }
 
 function buildChromiumAttribution(mode, traceEnabled, before, after, signals, traceEvents) {
+  const longTaskAttribution = {
+    longTasksMs: signals.longTasks.map((entry) => entry.duration),
+    longTasks: signals.longTasks,
+    longTaskTimestampsSupported: signals.longTaskTimestampsSupported,
+  };
   if (mode === "production") {
     return {
       scriptingMs: metricDelta(before, after, "ScriptDuration"),
       layoutMs: metricDelta(before, after, "LayoutDuration"),
       taskMs: metricDelta(before, after, "TaskDuration"),
-      longTasksMs: signals.longTasks,
+      ...longTaskAttribution,
       frameCadence: summarizeFrames(signals.frameTimes),
       ...summarizeTrace(traceEvents),
     };
   }
-  if (traceEnabled) return { ...summarizeTrace(traceEvents), longTasksMs: signals.longTasks };
-  return null;
+  if (traceEnabled) return { ...summarizeTrace(traceEvents), ...longTaskAttribution };
+  return longTaskAttribution;
 }
 
 function buildReactAttribution(mode, signals) {
@@ -254,6 +288,11 @@ export async function createModeSignalCollector(page, mode) {
     return session;
   };
   return {
+    /** Restores page-local attribution after a workload intentionally reloads the renderer. */
+    async install() {
+      await installAttributionRuntime(page);
+    },
+
     /** Measures one sample and optionally extracts trace-only browser stages. */
     async measure(operation, options = {}) {
       const indexes = await resetAttributionRuntime(page);

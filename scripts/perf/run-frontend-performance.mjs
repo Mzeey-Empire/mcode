@@ -243,17 +243,37 @@ function printShikiAttribution(attribution) {
 export async function runFrontendPerformance(repoRoot = process.cwd()) {
   const root = NodePath.resolve(repoRoot);
   const options = readFrontendPerformanceOptions(root);
-  const state = { startedRuntime: false, startedElectron: false, rendererServer: null };
+  const state = {
+    startedRuntime: false,
+    startedElectron: false,
+    rendererServer: null,
+    subagentDetailFixture: false,
+    electronSubagentDetailFixture: null,
+  };
+  let result;
+  let primaryError = null;
+  let cleanupError = null;
   try {
     const electronRecord = await startFrontendPerformanceResources(root, options, state);
-    const result = await runFrontendPerformanceWorker(root, options, state.rendererServer, electronRecord);
+    result = await runFrontendPerformanceWorker(root, options, state.rendererServer, electronRecord);
     const exitCode = getFrontendPerformanceExitCode(result);
     printResult(result, options.outputFile);
     if (exitCode !== 0) process.exitCode = exitCode;
-    return result;
+  } catch (error) {
+    primaryError = error;
   } finally {
-    await stopFrontendPerformanceResources(root, options, state);
+    try {
+      await stopFrontendPerformanceResources(root, options, state);
+    } catch (error) {
+      cleanupError = error;
+    }
   }
+  if (primaryError && cleanupError) {
+    throw new AggregateError([primaryError, cleanupError], "Frontend performance run and cleanup both failed.");
+  }
+  if (primaryError) throw primaryError;
+  if (cleanupError) throw cleanupError;
+  return result;
 }
 
 function readFrontendPerformanceOptions(root) {
@@ -275,12 +295,28 @@ function readFrontendPerformanceOptions(root) {
 
 async function startFrontendPerformanceResources(root, options, state) {
   state.startedRuntime = await ensureRuntime(root);
+  if (options.workloads.includes("subagentDetailExpand") && options.runtimes.includes("standalone-web")) {
+    seedSubagentDetailFixture(root);
+    state.subagentDetailFixture = true;
+  }
   ensurePlaywright(root);
   await buildFrontendPerformanceApp(root, options.mode);
   state.rendererServer = await startRendererPerformanceServer(root);
   if (!options.runtimes.includes("electron")) return undefined;
   const sessionPath = NodePath.join(root, ".dev", options.sessionFileName);
   if (NodeFS.existsSync(sessionPath)) stopElectron(root, { sessionFileName: options.sessionFileName });
+  if (options.workloads.includes("subagentDetailExpand")) {
+    const electronDbPath = NodePath.join(
+      root,
+      ".dev",
+      options.sessionFileName.slice(0, -".json".length),
+      "runtime",
+      "db",
+      "app.sqlite",
+    );
+    seedSubagentDetailFixture(root, "subagent-detail-fixture-electron.json", electronDbPath);
+    state.electronSubagentDetailFixture = { dbPath: electronDbPath };
+  }
   const record = await startElectron(root, {
     performanceMode: options.mode,
     rendererUrl: null,
@@ -345,9 +381,55 @@ function frontendPerformanceWorkerArguments(root, options, webUrl) {
 }
 
 async function stopFrontendPerformanceResources(root, options, state) {
-  if (state.startedElectron) stopElectron(root, { sessionFileName: options.sessionFileName });
-  if (state.rendererServer?.child && state.rendererServer.child.exitCode === null) state.rendererServer.child.kill();
-  if (state.startedRuntime) await agentDown(root);
+  const failures = [];
+  const clean = async (step) => {
+    try {
+      await step();
+    } catch (error) {
+      failures.push(error);
+    }
+  };
+  await clean(() => {
+    if (state.startedElectron) stopElectron(root, { sessionFileName: options.sessionFileName });
+  });
+  await clean(() => {
+    if (state.rendererServer?.child && state.rendererServer.child.exitCode === null) state.rendererServer.child.kill();
+  });
+  await clean(() => {
+    if (state.electronSubagentDetailFixture) {
+      cleanupSubagentDetailFixture(
+        root,
+        "subagent-detail-fixture-electron.json",
+        state.electronSubagentDetailFixture.dbPath,
+      );
+    }
+  });
+  await clean(() => {
+    if (state.subagentDetailFixture) cleanupSubagentDetailFixture(root);
+  });
+  await clean(async () => {
+    if (state.startedRuntime) await agentDown(root);
+  });
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1) throw new AggregateError(failures, "Frontend performance cleanup was incomplete.");
+}
+
+function runSubagentDetailFixture(root, action, descriptor = "subagent-detail-fixture.json", dbPath) {
+  const args = [
+    NodePath.join(root, "scripts", "perf", "subagent-detail-fixture.ts"),
+    "--action", action,
+    "--descriptor", `.dev/verification/performance/${descriptor}`,
+  ];
+  if (dbPath) args.push("--db-path", NodePath.relative(root, dbPath));
+  return NodeChildProcess.execFileSync("bun", args, { cwd: root, encoding: "utf8" });
+}
+
+function seedSubagentDetailFixture(root, descriptor, dbPath) {
+  JSON.parse(runSubagentDetailFixture(root, "seed", descriptor, dbPath));
+}
+
+function cleanupSubagentDetailFixture(root, descriptor, dbPath) {
+  runSubagentDetailFixture(root, "cleanup", descriptor, dbPath);
 }
 
 if (import.meta.main) {

@@ -123,6 +123,14 @@ async function run() {
   let browserResult;
   let electronResult;
   try {
+    if (context.workloads.includes("subagentDetailExpand")) {
+      if (context.runtimes.includes("standalone-web")) {
+        context.subagentDetailFixture = await readSubagentDetailFixture(context.repoRoot, "subagent-detail-fixture.json");
+      }
+      if (context.runtimes.includes("electron")) {
+        context.electronSubagentDetailFixture = await readSubagentDetailFixture(context.repoRoot, "subagent-detail-fixture-electron.json");
+      }
+    }
     ({ browser, result: browserResult } = await runStandaloneWeb(context));
     ({ electronSession, result: electronResult } = await runElectron(context));
     const result = buildWorkerResult(context, browserResult, electronResult);
@@ -140,6 +148,15 @@ async function run() {
     if (browser) await browser.close();
   }
   await NodeFSPromises.writeFile(`${context.outputFile}.complete`, "complete\n", "utf8");
+}
+
+async function readSubagentDetailFixture(repoRoot, name) {
+  const path = NodePath.join(repoRoot, ".dev", "verification", "performance", name);
+  const fixture = JSON.parse(await NodeFSPromises.readFile(path, "utf8"));
+  if (fixture?.marker !== "__mcode_perf_subagent_detail__") {
+    throw new Error("subagentDetailExpand fixture is missing or invalid.");
+  }
+  return fixture;
 }
 
 async function prepareWorkerContext() {
@@ -182,6 +199,7 @@ async function runStandaloneWeb(context) {
   const result = decorateRuntimeResult(
     await runRendererMatrix(page, "standalone-web", context.sampleCount, context.mode, {
       workload: context.workloads.join(","),
+      subagentDetailFixture: context.subagentDetailFixture,
     }),
     context.runEnvironment,
     await collectPageEnvironment(page),
@@ -213,6 +231,7 @@ async function runElectron(context) {
   const result = decorateRuntimeResult(
     await runRendererMatrix(electronSession.page, "electron", context.sampleCount, context.mode, {
       workload: context.workloads.join(","),
+      subagentDetailFixture: context.electronSubagentDetailFixture,
     }),
     context.runEnvironment,
     await collectPageEnvironment(electronSession.page),

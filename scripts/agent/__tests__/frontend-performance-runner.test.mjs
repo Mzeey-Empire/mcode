@@ -1,12 +1,14 @@
 import * as NodeAssertStrict from "node:assert/strict";
 import * as NodeTest from "node:test";
 import {
+  createPageSignalCollector,
   summarizeDurationSamples,
   summarizeTrace,
 } from "../../perf/frontend-performance-collectors.mjs";
 import {
   aggregateMessageListPerformanceAttribution,
   aggregateShikiStageAttribution,
+  collectPageFailures,
   extractShikiLongTasks,
   FRONTEND_RENDERER_EXPLICIT_WORKLOADS,
   FRONTEND_RENDERER_WORKLOADS,
@@ -242,6 +244,39 @@ function createExpectedVListLifecycleFacts() {
 }
 
 NodeTest.describe("frontend performance runner", () => {
+  NodeTest.it("reinstalls page signals after a reload and rejects a missing post-reload observer", async () => {
+    const evaluations = [];
+    const page = {
+      on() {},
+      off() {},
+      async reload() {},
+      async evaluate(callback) {
+        evaluations.push(callback);
+        return {
+          documentDescendants: 1,
+          pageSignalsInstalled: false,
+          layoutShifts: [],
+          longTasks: [],
+          pageState: { title: "Mcode", url: "http://127.0.0.1:4173", visibility: "visible" },
+          totalJsHeapBytes: null,
+          usedJsHeapBytes: null,
+        };
+      },
+    };
+    const collector = await createPageSignalCollector(page);
+    await page.reload();
+    await collector.install();
+    const observations = await collector.read();
+
+    NodeAssertStrict.default.equal(evaluations.length, 3);
+    NodeAssertStrict.default.ok(
+      collectPageFailures(observations, "http://127.0.0.1:4173").includes(
+        "page signal observers are not installed",
+      ),
+    );
+    collector.dispose();
+  });
+
   NodeTest.it("uses the approved workload order", () => {
     NodeAssertStrict.default.deepEqual(FRONTEND_RENDERER_WORKLOADS, [
       "message100",
@@ -255,8 +290,8 @@ NodeTest.describe("frontend performance runner", () => {
     ]);
   });
 
-  NodeTest.it("requires explicit selection and accepts only the vlist lifecycle phase ordering", () => {
-    NodeAssertStrict.default.deepEqual(FRONTEND_RENDERER_EXPLICIT_WORKLOADS, ["vlistLifecycle"]);
+  NodeTest.it("requires explicit selection for opt-in renderer probes", () => {
+    NodeAssertStrict.default.deepEqual(FRONTEND_RENDERER_EXPLICIT_WORKLOADS, ["vlistLifecycle", "subagentDetailExpand"]);
     NodeAssertStrict.default.deepEqual(normalizeFrontendRendererWorkloads(null), FRONTEND_RENDERER_WORKLOADS);
     NodeAssertStrict.default.deepEqual(normalizeFrontendRendererWorkloads("vlistLifecycle"), ["vlistLifecycle"]);
     NodeAssertStrict.default.throws(
@@ -455,6 +490,45 @@ NodeTest.describe("frontend performance runner", () => {
       terminalShell: true,
       visible: true,
     }), ["Terminal is not the active panel"]);
+    const subagentDetail = {
+      detailVisible: true,
+      canonicalReplicaComplete: true,
+      promptVisible: true,
+      aggregateSemantics: true,
+      stableCompletedOrder: true,
+      stableActiveOrder: true,
+      firstToolVisible: true,
+      lastToolVisible: true,
+      oneErrorRetained: true,
+      activeToolsVisible: true,
+      completedToolCount: 250,
+      activeToolCount: 2,
+      mountedHostCount: 12,
+      mountedHostBound: 24,
+      aggregateRetainsFocus: true,
+      collapsedAfterReset: true,
+      expansionTimingValid: true,
+      longTaskTimestampsSupported: true,
+      longTaskTimestampsValid: true,
+      longTasksOver50Ms: [],
+    };
+    NodeAssertStrict.default.deepEqual(validateWorkloadCheck("subagentDetailExpand", subagentDetail), []);
+    NodeAssertStrict.default.deepEqual(validateWorkloadCheck("subagentDetailExpand", {
+      ...subagentDetail,
+      canonicalReplicaComplete: false,
+    }), ["canonical child replica did not recover 250 completed and two active tools"]);
+    NodeAssertStrict.default.deepEqual(validateWorkloadCheck("subagentDetailExpand", {
+      ...subagentDetail,
+      expansionTimingValid: false,
+      longTaskTimestampsValid: false,
+    }), [
+      "subagent expansion timing interval is invalid",
+      "Long Task timestamps are invalid",
+    ]);
+    NodeAssertStrict.default.deepEqual(validateWorkloadCheck("subagentDetailExpand", {
+      ...subagentDetail,
+      longTasksOver50Ms: [51],
+    }, "production"), ["subagent expansion exceeded the 50ms long-task gate"]);
   });
 
   NodeTest.it("rejects a message-list behavior sample when a cache-miss does not render the restored record", () => {
@@ -540,6 +614,12 @@ NodeTest.describe("frontend performance runner", () => {
     NodeAssertStrict.default.deepEqual(validateMessageListPerformanceAttribution([
       { stage: "narrativeItemProjection", durationMs: 0.5 },
     ]), ["missing MessageList performance stage: vlistRows"]);
+    NodeAssertStrict.default.deepEqual(validateMessageListPerformanceAttribution([
+      { stage: "vlistRows", durationMs: 0.25 },
+    ], ["vlistRows"]), []);
+    NodeAssertStrict.default.deepEqual(validateMessageListPerformanceAttribution([], ["vlistRows"]), [
+      "missing MessageList performance stage: vlistRows",
+    ]);
     NodeAssertStrict.default.deepEqual(aggregateMessageListPerformanceAttribution([
       [
         { stage: "narrativeItemProjection", durationMs: 4 },
