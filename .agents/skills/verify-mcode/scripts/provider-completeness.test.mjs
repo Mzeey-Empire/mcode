@@ -293,7 +293,7 @@ NodeTest.test("records focused gates once under their true owner and preserves t
     return { exitCode: 0, output: "all passed" };
   });
   NodeAssertStrict.deepEqual(failures, []);
-  NodeAssertStrict.equal(calls.length, 6);
+  NodeAssertStrict.equal(calls.length, 8);
   NodeAssertStrict.deepEqual(calls.slice(0, 4).map((call) => call.args.at(-1)), [
     "src/features/agents/turns/__tests__/turn-diff-service.test.ts",
     "src/features/agents/orchestration/__tests__/agent-service-turn-started.test.ts",
@@ -303,6 +303,8 @@ NodeTest.test("records focused gates once under their true owner and preserves t
   NodeAssertStrict.ok(calls[0].args.includes("src/features/agents/turns/__tests__/turn-diff-review.test.ts"));
   NodeAssertStrict.ok(calls[1].args.includes("src/features/agents/turns/__tests__/approval-review-policy.test.ts"));
   NodeAssertStrict.ok(calls[0].args.includes("--testTimeout=30000"));
+  NodeAssertStrict.ok(calls[6].args.includes("src/transport/ws-events.test.ts"));
+  NodeAssertStrict.ok(calls[7].args.includes("src/__tests__/codex/codex-provider-permission.test.ts"));
   NodeAssertStrict.deepEqual(receipt.focusedGates.map(({ control, rows, limitation }) => ({ control, rows, limitation })), [
     { control: "apps/server focused integration tests", rows: ["empty", "interruption"], limitation: undefined },
     { control: "apps/server focused integration tests", rows: ["strictManual", "managedRequired", "fullAccessDispatch"], limitation: undefined },
@@ -310,8 +312,10 @@ NodeTest.test("records focused gates once under their true owner and preserves t
     { control: "apps/server focused integration tests", rows: ["invalidation", "staleRetry", "disconnectWatchCleanup"], limitation: undefined },
     { control: "packages/providers focused protocol tests", rows: ["warningsReroutes"], limitation: undefined },
     { control: "apps/web focused component tests", rows: ["fullAccessControl", "fileSurfaces"], limitation: undefined },
+    { control: "apps/web focused permission handoff tests", rows: ["strictReviewNoticeOnly", "realProviderRequestCard"], limitation: undefined },
+    { control: "packages/providers focused permission handoff tests", rows: ["providerResponseSettlementRemoval"], limitation: undefined },
   ]);
-  for (const row of ["empty", "invalidation", "interruption", "warningsReroutes", "strictManual", "managedRequired", "managedRequiredDispatch", "fullAccessDispatch", "fullAccessControl", "fileSurfaces", "staleRetry", "disconnectWatchCleanup"]) {
+  for (const row of ["empty", "invalidation", "interruption", "warningsReroutes", "strictManual", "managedRequired", "managedRequiredDispatch", "fullAccessDispatch", "fullAccessControl", "fileSurfaces", "staleRetry", "disconnectWatchCleanup", "strictReviewNoticeOnly", "realProviderRequestCard", "providerResponseSettlementRemoval"]) {
     NodeAssertStrict.equal(receipt.matrix[row], undefined, `${row} only belongs to its focused-test owner`);
     NodeAssertStrict.equal(receipt.electron.matrix[row], undefined, `${row} is not copied to Electron`);
   }
@@ -322,8 +326,8 @@ NodeTest.test("records focused gates once under their true owner and preserves t
   };
   applyProviderPrerequisites(receipt.matrix, prerequisites);
   applyProviderPrerequisites(receipt.electron.matrix, prerequisites);
-  NodeAssertStrict.deepEqual(receipt.focusedGates.map((gate) => gate.kind), ["focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof"]);
-  NodeAssertStrict.deepEqual(receipt.focusedGates.map((gate) => gate.exitCode), [0, 0, 0, 0, 0, 0]);
+  NodeAssertStrict.deepEqual(receipt.focusedGates.map((gate) => gate.kind), ["focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof"]);
+  NodeAssertStrict.deepEqual(receipt.focusedGates.map((gate) => gate.exitCode), [0, 0, 0, 0, 0, 0, 0, 0]);
   NodeAssertStrict.equal(receipt.matrix.reviewApproved.kind, "coverage-gap");
   NodeAssertStrict.equal(receipt.electron.matrix.electronRightPanel.kind, "blocked");
   NodeAssertStrict.equal(receipt.matrix.codexNative.provider, "codex");
@@ -381,6 +385,27 @@ NodeTest.test("proves watcher ownership through public RPC and files.changed pus
   NodeAssertStrict.deepEqual(sockets.map((socket) => socket.active), [false, false]);
 });
 
+NodeTest.test("keeps focused permission handoff evidence separate from the unavailable native trigger", () => {
+  const receipt = createReceipt(NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "provider-completeness-permission-handoff-")));
+  NodeAssertStrict.deepEqual(
+    receipt.focusedGates
+      .filter((gate) => ["web-permission-handoff", "codex-permission-handoff"].includes(gate.name))
+      .map(({ name, control, rows }) => ({ name, control, rows })),
+    [
+      { name: "web-permission-handoff", control: "apps/web focused permission handoff tests", rows: ["strictReviewNoticeOnly", "realProviderRequestCard"] },
+      { name: "codex-permission-handoff", control: "packages/providers focused permission handoff tests", rows: ["providerResponseSettlementRemoval"] },
+    ],
+  );
+  NodeAssertStrict.equal(receipt.matrix.permissionHandoff.kind, "blocked");
+  NodeAssertStrict.match(receipt.matrix.permissionHandoff.prerequisite, /native provider PermissionRequest/);
+  NodeAssertStrict.match(receipt.matrix.permissionHandoff.reason, /permission\.listPending and permission\.respond/);
+  NodeAssertStrict.deepEqual(receipt.matrix.permissionHandoff.focusedEvidence, {
+    strictReviewNoticeOnly: "web-permission-handoff",
+    realProviderRequestCard: "web-permission-handoff",
+    providerResponseSettlementRemoval: "codex-permission-handoff",
+  });
+});
+
 NodeTest.test("rejects a files.changed push outside the owned watcher scope", async () => {
   const callbacks = [];
   const openSocket = async (_repoRoot, onPush) => {
@@ -403,7 +428,7 @@ NodeTest.test("retains all focused gate evidence before reporting nonzero gates"
   let calls = 0;
   const failures = await runFocusedEvidenceGates("root", receipt, async () => ({ exitCode: calls++ === 4 ? 1 : 0, output: "failed C:\\secret\\token" }));
   NodeAssertStrict.deepEqual(failures, ["codex-protocol exited 1"]);
-  NodeAssertStrict.equal(receipt.focusedGates.length, 6);
+  NodeAssertStrict.equal(receipt.focusedGates.length, 8);
   NodeAssertStrict.equal(receipt.focusedGates[4].control, "packages/providers focused protocol tests");
   NodeAssertStrict.equal(receipt.focusedGates[4].kind, "focused-proof-failed");
   NodeAssertStrict.equal(receipt.focusedGates[4].exitCode, 1);

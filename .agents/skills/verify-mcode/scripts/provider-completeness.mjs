@@ -24,6 +24,8 @@ const FOCUSED_GATES = [
   { name: "server-workspace-invalidation", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/projects/files/__tests__/workspace-invalidation-service.test.ts"], rows: ["invalidation", "staleRetry", "disconnectWatchCleanup"] },
   { name: "codex-protocol", control: "packages/providers focused protocol tests", workspace: "packages/providers", files: ["src/__tests__/codex/codex-notification-validation.test.ts", "src/__tests__/codex/codex-protocol-coverage.test.ts", "src/__tests__/codex/codex-event-mapper.test.ts"], rows: ["warningsReroutes"] },
   { name: "web-composer-and-files", control: "apps/web focused component tests", workspace: "apps/web", files: ["src/features/conversation/composer/controls/__tests__/ComposerAccessControls.test.tsx", "src/features/projects/files/useWorkspaceFileInvalidation.test.tsx", "src/components/diff/__tests__/DiffPanel.files.test.tsx"], rows: ["fullAccessControl", "fileSurfaces"] },
+  { name: "web-permission-handoff", control: "apps/web focused permission handoff tests", workspace: "apps/web", files: ["src/transport/ws-events.test.ts"], rows: ["strictReviewNoticeOnly", "realProviderRequestCard"] },
+  { name: "codex-permission-handoff", control: "packages/providers focused permission handoff tests", workspace: "packages/providers", files: ["src/__tests__/codex/codex-provider-permission.test.ts"], rows: ["providerResponseSettlementRemoval"] },
 ];
 const HELP = `Verify provider completeness
 
@@ -2475,7 +2477,17 @@ function providerMatrix(surface) { return {
       reviewApproved: { kind: "coverage-gap", control: "web Composer Automatic approval review, conversation.page, Review, reload, and disk", prerequisite: "available Codex provider, model, catalog, and native automatic-review approval terminal event", reason: "The verifier records a coverage gap unless an available Codex Automatic Composer dispatch emits one durable Approved review.", fields: ["threadId", "reviewId", "outcome", "comparison", "review.rows", "review.spinners", "review.screenshot", "disk"] },
       reviewDenied: { kind: "coverage-gap", control: "web Composer Automatic denial review, conversation.page, Review, reload, and disk", prerequisite: "available Codex provider, model, catalog, and native automatic-review denial terminal event", reason: "The verifier records a coverage gap unless an available Codex Automatic Composer dispatch emits one durable Denied review without a file effect.", fields: ["threadId", "reviewId", "outcome", "comparison", "review.rows", "review.screenshot", "disk"] },
       fullAccess: { kind: "coverage-gap", control: "web Composer Full access, canonical recovery, Review, reload, reconnect, and disk", prerequisite: "available Codex provider, model, and catalog", reason: "The verifier records a coverage gap until a bounded Full access action can prove its canonical bypass metadata and absence of approval-review lifecycle and footer.", fields: ["threadId", "permissionMode", "approvalReviewMode", "approvalReviewReason", "approvalReviewLifecycleCount", "comparison", "review.rows", "review.spinners", "review.screenshot", "disk"] },
-      permissionHandoff: { kind: "blocked", prerequisite: "native provider PermissionRequest after strict-review routing", surface: "public Composer permission control" },
+      permissionHandoff: {
+        kind: "blocked",
+        prerequisite: "native provider PermissionRequest after strict-review routing",
+        surface: "public Composer permission control",
+        reason: "The native trigger is unavailable, so the verifier cannot run the public permission.listPending and permission.respond handoff.",
+        focusedEvidence: {
+          strictReviewNoticeOnly: "web-permission-handoff",
+          realProviderRequestCard: "web-permission-handoff",
+          providerResponseSettlementRemoval: "codex-permission-handoff",
+        },
+      },
     }
     : {
       electronRightPanel: { kind: "blocked", prerequisite: "a completed Electron Review journey", surface: "Electron", reason: "the proof starts Electron, but the native Codex Live diff did not reach public comparison" },
