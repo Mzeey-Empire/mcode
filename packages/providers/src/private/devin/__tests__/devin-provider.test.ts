@@ -381,6 +381,48 @@ describe("DevinProvider", () => {
     expect(models.map((model) => model.id)).toContain("swe-2");
   });
 
+  it("tracks switch_bypass so later prompts in the session auto-allow and the mode is not re-applied", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    starts.push(mockAcpStart([fake]));
+    const p = createProvider(host);
+    const permissionEvents: { requestId: string }[] = [];
+    p.on("permission_request", (request) => permissionEvents.push(request));
+
+    let call = 0;
+    vi.mocked(fake.runtime.prompt).mockImplementation(async () => {
+      call += 1;
+      const outcome = await fake.callbacks.onPermissionRequest?.({
+        sessionId: "devin-acp-1",
+        toolCall: { toolCallId: `tc-${call}` },
+        options: [
+          { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
+          { optionId: "switch_bypass", name: "Switch to Bypass", kind: "allow_always" },
+          { optionId: "reject_once", name: "Reject", kind: "reject_once" },
+        ],
+      } as AcpPermissionRequest);
+      if (call === 1) {
+        expect(outcome).toEqual({ outcome: { outcome: "selected", optionId: "switch_bypass" } });
+      } else {
+        // bypass is active session-side: no card, straight to the allow option.
+        expect(outcome).toEqual({ outcome: { outcome: "selected", optionId: "allow_once" } });
+      }
+      return { stopReason: "end_turn", usage: {} };
+    });
+
+    const first = p.sendTurn(turn());
+    await vi.waitFor(() => expect(permissionEvents).toHaveLength(1));
+    expect(p.resolvePermission(permissionEvents[0].requestId, "allow", undefined, "switch_bypass")).toBe(true);
+    await first;
+    await p.sendTurn(turn({ providerOptions: { mode: "bypass" } }));
+
+    expect(permissionEvents).toHaveLength(1);
+    const modeCalls = fake.connection.setSessionConfigOption.mock.calls
+      .filter(([args]) => (args as { configId: string }).configId === "mode")
+      .map(([args]) => (args as { value: string }).value);
+    expect(modeCalls).toEqual(["normal"]);
+  });
+
   it("rejects permission resolution for unknown request ids and cancels pending requests on stop", async () => {
     const host = createHost();
     const fake = createFakeRuntime("devin-acp-1", 101);

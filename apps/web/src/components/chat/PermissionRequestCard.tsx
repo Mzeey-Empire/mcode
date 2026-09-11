@@ -11,6 +11,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { getTransport } from "@/transport";
+import { useThreadStore } from "../../stores/threadStore";
 import { TOOL_ICONS } from "./tool-renderers/constants";
 import type {
   PermissionDecision,
@@ -37,6 +38,8 @@ interface PermissionRequestCardProps {
   settled: boolean;
   /** The user's decision, present when settled. */
   decision?: PermissionDecision;
+  /** Owning thread; used to reflect provider-side mode changes (e.g. Devin's `switch_bypass`). */
+  threadId?: string | null;
 }
 
 /** Maps a PermissionDecision to its Badge variant. */
@@ -335,6 +338,7 @@ export function PermissionRequestCard({
   options,
   settled,
   decision,
+  threadId,
 }: PermissionRequestCardProps) {
   const [responding, setResponding] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -355,13 +359,18 @@ export function PermissionRequestCard({
       try {
         setError(null);
         await getTransport().respondToPermission(requestId, d, answers, optionId);
+        // Devin's `switch_bypass` flips the session to Bypass on the provider
+        // side; persist it so the composer shows the mode Devin is now in.
+        if (optionId === "switch_bypass" && threadId) {
+          void useThreadStore.getState().setThreadSettings(threadId, { devinMode: "bypass" });
+        }
       } catch {
         setError("Failed to send response. Please try again.");
       } finally {
         setResponding(false);
       }
     },
-    [requestId],
+    [requestId, threadId],
   );
 
   const respondWithOption = useCallback(

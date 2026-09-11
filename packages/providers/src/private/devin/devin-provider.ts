@@ -7,6 +7,7 @@ import type { Provider, ProviderIdentity } from "@mcode/agent-model";
 import {
   AgentEventType,
   DEVIN_STATIC_MODEL_FALLBACK,
+  DevinModeSchema,
   getCatalogEntry,
   groupDevinModelFamilies,
   providerRuntimeEvent,
@@ -408,6 +409,20 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     }
   }
 
+  /**
+   * Records a mode Devin changed on its own side (a `current_mode_update`
+   * notification or a `switch_bypass` permission pick) so `applyMode` does not
+   * re-apply a mode Devin has already left.
+   */
+  private applyObservedDevinMode(entry: DevinAcpSessionEntry, modeId: unknown): void {
+    const parsed = DevinModeSchema.safeParse(modeId);
+    if (!parsed.success || parsed.data === "plan") return;
+    entry.devinMode = parsed.data;
+    entry.modeAppliedPair = entry.acpSessionId
+      ? { acpSessionId: entry.acpSessionId, mode: parsed.data }
+      : null;
+  }
+
   private emitSuccessfulTurn(
     entry: DevinAcpSessionEntry,
     response: { stopReason?: string; usage?: Record<string, number> },
@@ -431,7 +446,6 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
       costUsd: null,
       tokensIn: usage.inputTokens ?? 0,
       tokensOut: usage.outputTokens ?? 0,
-      ...(typeof usage.totalTokens === "number" ? { totalProcessedTokens: usage.totalTokens } : {}),
       ...(typeof usage.cachedReadTokens === "number" ? { cacheReadTokens: usage.cachedReadTokens } : {}),
       providerId: this.id,
     });
@@ -494,6 +508,10 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     if (!pending) return false;
     this.pendingPermissions.delete(requestId);
     pending.resolve(this.outcomeForDecision(pending.acpOptions, decision, optionId));
+    // `switch_bypass` flips Devin's own session mode; track it locally so the
+    // next turn does not re-apply the stale thread mode. The same sync happens
+    // via `current_mode_update` when Devin emits one.
+    if (optionId === "switch_bypass") this.applyObservedDevinMode(pending.entry, "bypass");
     const selectedKind = optionId
       ? pending.acpOptions.find((option) => option.optionId === optionId)?.kind
       : undefined;
@@ -770,6 +788,8 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
   ): Promise<void> {
     const params = update as unknown as { sessionId?: string };
     if (params.sessionId !== entry.acpSessionId) return;
+    const raw = update.update as Record<string, unknown>;
+    if (raw.sessionUpdate === "current_mode_update") this.applyObservedDevinMode(entry, raw.currentModeId);
     const state = entry.activeTurnState ?? entry.replayTurnState;
     if (!state) return;
     const routing = this.pendingTurnRoutings.get(entry.mcodeSessionId);
