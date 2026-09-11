@@ -293,7 +293,7 @@ NodeTest.test("records focused gates once under their true owner and preserves t
     return { exitCode: 0, output: "all passed" };
   });
   NodeAssertStrict.deepEqual(failures, []);
-  NodeAssertStrict.equal(calls.length, 8);
+  NodeAssertStrict.equal(calls.length, 10);
   NodeAssertStrict.deepEqual(calls.slice(0, 4).map((call) => call.args.at(-1)), [
     "src/features/agents/turns/__tests__/turn-diff-service.test.ts",
     "src/features/agents/orchestration/__tests__/agent-service-turn-started.test.ts",
@@ -303,19 +303,23 @@ NodeTest.test("records focused gates once under their true owner and preserves t
   NodeAssertStrict.ok(calls[0].args.includes("src/features/agents/turns/__tests__/turn-diff-review.test.ts"));
   NodeAssertStrict.ok(calls[1].args.includes("src/features/agents/turns/__tests__/approval-review-policy.test.ts"));
   NodeAssertStrict.ok(calls[0].args.includes("--testTimeout=30000"));
-  NodeAssertStrict.ok(calls[6].args.includes("src/transport/ws-events.test.ts"));
-  NodeAssertStrict.ok(calls[7].args.includes("src/__tests__/codex/codex-provider-permission.test.ts"));
+  NodeAssertStrict.ok(calls[4].args.includes("src/features/agents/orchestration/__tests__/agent-service-transient-retry.test.ts"));
+  NodeAssertStrict.ok(calls[6].args.includes("src/__tests__/codex/codex-provider-first-turn.test.ts"));
+  NodeAssertStrict.ok(calls[8].args.includes("src/transport/ws-events.test.ts"));
+  NodeAssertStrict.ok(calls[9].args.includes("src/__tests__/codex/codex-provider-permission.test.ts"));
   NodeAssertStrict.deepEqual(receipt.focusedGates.map(({ control, rows, limitation }) => ({ control, rows, limitation })), [
     { control: "apps/server focused integration tests", rows: ["empty", "interruption"], limitation: undefined },
     { control: "apps/server focused integration tests", rows: ["strictManual", "managedRequired", "fullAccessDispatch"], limitation: undefined },
     { control: "apps/server focused integration tests", rows: ["managedRequiredDispatch"], limitation: "Public Codex does not report required; this is focused server dispatch proof." },
     { control: "apps/server focused integration tests", rows: ["invalidation", "staleRetry", "disconnectWatchCleanup"], limitation: undefined },
+    { control: "apps/server focused retry tests", rows: ["frozenRetryDecision"], limitation: undefined },
     { control: "packages/providers focused protocol tests", rows: ["warningsReroutes"], limitation: undefined },
+    { control: "packages/providers focused retry event tests", rows: ["staleRetryReview", "staleRetryDiff"], limitation: undefined },
     { control: "apps/web focused component tests", rows: ["fullAccessControl", "fileSurfaces"], limitation: undefined },
     { control: "apps/web focused permission handoff tests", rows: ["strictReviewNoticeOnly", "realProviderRequestCard"], limitation: undefined },
     { control: "packages/providers focused permission handoff tests", rows: ["providerResponseSettlementRemoval"], limitation: undefined },
   ]);
-  for (const row of ["empty", "invalidation", "interruption", "warningsReroutes", "strictManual", "managedRequired", "managedRequiredDispatch", "fullAccessDispatch", "fullAccessControl", "fileSurfaces", "staleRetry", "disconnectWatchCleanup", "strictReviewNoticeOnly", "realProviderRequestCard", "providerResponseSettlementRemoval"]) {
+  for (const row of ["empty", "invalidation", "interruption", "warningsReroutes", "strictManual", "managedRequired", "managedRequiredDispatch", "fullAccessDispatch", "fullAccessControl", "fileSurfaces", "staleRetry", "disconnectWatchCleanup", "frozenRetryDecision", "staleRetryReview", "staleRetryDiff", "strictReviewNoticeOnly", "realProviderRequestCard", "providerResponseSettlementRemoval"]) {
     NodeAssertStrict.equal(receipt.matrix[row], undefined, `${row} only belongs to its focused-test owner`);
     NodeAssertStrict.equal(receipt.electron.matrix[row], undefined, `${row} is not copied to Electron`);
   }
@@ -326,8 +330,8 @@ NodeTest.test("records focused gates once under their true owner and preserves t
   };
   applyProviderPrerequisites(receipt.matrix, prerequisites);
   applyProviderPrerequisites(receipt.electron.matrix, prerequisites);
-  NodeAssertStrict.deepEqual(receipt.focusedGates.map((gate) => gate.kind), ["focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof"]);
-  NodeAssertStrict.deepEqual(receipt.focusedGates.map((gate) => gate.exitCode), [0, 0, 0, 0, 0, 0, 0, 0]);
+  NodeAssertStrict.deepEqual(receipt.focusedGates.map((gate) => gate.kind), ["focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof", "focused-proof"]);
+  NodeAssertStrict.deepEqual(receipt.focusedGates.map((gate) => gate.exitCode), [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
   NodeAssertStrict.equal(receipt.matrix.reviewApproved.kind, "coverage-gap");
   NodeAssertStrict.equal(receipt.electron.matrix.electronRightPanel.kind, "blocked");
   NodeAssertStrict.equal(receipt.matrix.codexNative.provider, "codex");
@@ -406,6 +410,28 @@ NodeTest.test("keeps focused permission handoff evidence separate from the unava
   });
 });
 
+NodeTest.test("records retry freeze and stale retry events as focused evidence with a live trigger gap", () => {
+  const receipt = createReceipt(NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "provider-completeness-retry-")));
+  NodeAssertStrict.deepEqual(
+    receipt.focusedGates
+      .filter((gate) => ["server-retry-decision-freeze", "codex-stale-retry-events"].includes(gate.name))
+      .map(({ name, control, rows }) => ({ name, control, rows })),
+    [
+      { name: "server-retry-decision-freeze", control: "apps/server focused retry tests", rows: ["frozenRetryDecision"] },
+      { name: "codex-stale-retry-events", control: "packages/providers focused retry event tests", rows: ["staleRetryReview", "staleRetryDiff"] },
+    ],
+  );
+  NodeAssertStrict.equal(receipt.matrix.retryFreeze.kind, "coverage-gap");
+  NodeAssertStrict.match(receipt.matrix.retryFreeze.reason, /no deterministic public trigger for a native transient retry/);
+  NodeAssertStrict.deepEqual(receipt.matrix.retryFreeze.focusedEvidence, { frozenRetryDecision: "server-retry-decision-freeze" });
+  NodeAssertStrict.equal(receipt.matrix.staleRetryEvents.kind, "coverage-gap");
+  NodeAssertStrict.match(receipt.matrix.staleRetryEvents.reason, /no deterministic public trigger for stale native retry events/);
+  NodeAssertStrict.deepEqual(receipt.matrix.staleRetryEvents.focusedEvidence, {
+    staleRetryReview: "codex-stale-retry-events",
+    staleRetryDiff: "codex-stale-retry-events",
+  });
+});
+
 NodeTest.test("rejects a files.changed push outside the owned watcher scope", async () => {
   const callbacks = [];
   const openSocket = async (_repoRoot, onPush) => {
@@ -426,12 +452,12 @@ NodeTest.test("rejects a files.changed push outside the owned watcher scope", as
 NodeTest.test("retains all focused gate evidence before reporting nonzero gates", async () => {
   const receipt = createReceipt(NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "provider-completeness-gates-")));
   let calls = 0;
-  const failures = await runFocusedEvidenceGates("root", receipt, async () => ({ exitCode: calls++ === 4 ? 1 : 0, output: "failed C:\\secret\\token" }));
+  const failures = await runFocusedEvidenceGates("root", receipt, async () => ({ exitCode: calls++ === 5 ? 1 : 0, output: "failed C:\\secret\\token" }));
   NodeAssertStrict.deepEqual(failures, ["codex-protocol exited 1"]);
-  NodeAssertStrict.equal(receipt.focusedGates.length, 8);
-  NodeAssertStrict.equal(receipt.focusedGates[4].control, "packages/providers focused protocol tests");
-  NodeAssertStrict.equal(receipt.focusedGates[4].kind, "focused-proof-failed");
-  NodeAssertStrict.equal(receipt.focusedGates[4].exitCode, 1);
+  NodeAssertStrict.equal(receipt.focusedGates.length, 10);
+  NodeAssertStrict.equal(receipt.focusedGates[5].control, "packages/providers focused protocol tests");
+  NodeAssertStrict.equal(receipt.focusedGates[5].kind, "focused-proof-failed");
+  NodeAssertStrict.equal(receipt.focusedGates[5].exitCode, 1);
   NodeAssertStrict.doesNotMatch(receipt.focusedGates[1].output, /C:\\secret/);
 });
 

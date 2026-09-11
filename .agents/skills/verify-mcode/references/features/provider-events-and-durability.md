@@ -194,7 +194,7 @@ Verify approval review through the public Composer and public conversation APIs.
 6. Confirm one settled review result only. Check the public canonical turn includes the resolved `approvalReviewMode` and its stable reason. Repeat with Full access and confirm that no review label or lifecycle appears.
 7. Reopen the thread or reconnect the public socket. Read the same canonical turn and confirm the review result does not duplicate.
 8. Persist Auto, switch to an unsupported provider before dispatch, and confirm the dispatch resolves to Manual with a provider-unavailable reason. For a managed-required provider, confirm Full access and incompatible review modes are blocked before dispatch. Public Codex does not report `required`. Record focused server dispatch proof for this case. It does not prove a live Codex response.
-9. Stop, fail, and time out an Auto turn where the provider exposes each path. Confirm each active review has one terminal result, then replay a stale review event and confirm it cannot add another result to the replacement attempt.
+9. Stop, fail, and time out an Auto turn where the provider exposes each path. Confirm each active review has one terminal result. If the provider can deterministically trigger a retry, replay stale review and diff events and confirm they cannot affect the replacement attempt. Otherwise record the native retry trigger as a coverage gap; the focused retry gates prove dispatch freezing and stale-event rejection.
 10. Delete only the verifier-owned workspace and thread after recording screenshots and the public receipt.
 
 Store approval-review screenshots and the redacted receipt under

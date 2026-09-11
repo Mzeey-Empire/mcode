@@ -22,7 +22,9 @@ const FOCUSED_GATES = [
   { name: "server-approval-review-policy", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/agents/turns/__tests__/approval-review-policy.test.ts", "src/features/agents/orchestration/__tests__/agent-service-turn-started.test.ts"], rows: ["strictManual", "managedRequired", "fullAccessDispatch"] },
   { name: "server-managed-required-dispatch", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/agents/orchestration/__tests__/agent-service-gate.test.ts"], rows: ["managedRequiredDispatch"], limitation: "Public Codex does not report required; this is focused server dispatch proof." },
   { name: "server-workspace-invalidation", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/projects/files/__tests__/workspace-invalidation-service.test.ts"], rows: ["invalidation", "staleRetry", "disconnectWatchCleanup"] },
+  { name: "server-retry-decision-freeze", control: "apps/server focused retry tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/agents/orchestration/__tests__/agent-service-transient-retry.test.ts"], rows: ["frozenRetryDecision"] },
   { name: "codex-protocol", control: "packages/providers focused protocol tests", workspace: "packages/providers", files: ["src/__tests__/codex/codex-notification-validation.test.ts", "src/__tests__/codex/codex-protocol-coverage.test.ts", "src/__tests__/codex/codex-event-mapper.test.ts"], rows: ["warningsReroutes"] },
+  { name: "codex-stale-retry-events", control: "packages/providers focused retry event tests", workspace: "packages/providers", files: ["src/__tests__/codex/codex-event-mapper.test.ts", "src/__tests__/codex/codex-provider-first-turn.test.ts"], rows: ["staleRetryReview", "staleRetryDiff"] },
   { name: "web-composer-and-files", control: "apps/web focused component tests", workspace: "apps/web", files: ["src/features/conversation/composer/controls/__tests__/ComposerAccessControls.test.tsx", "src/features/projects/files/useWorkspaceFileInvalidation.test.tsx", "src/components/diff/__tests__/DiffPanel.files.test.tsx"], rows: ["fullAccessControl", "fileSurfaces"] },
   { name: "web-permission-handoff", control: "apps/web focused permission handoff tests", workspace: "apps/web", files: ["src/transport/ws-events.test.ts"], rows: ["strictReviewNoticeOnly", "realProviderRequestCard"] },
   { name: "codex-permission-handoff", control: "packages/providers focused permission handoff tests", workspace: "packages/providers", files: ["src/__tests__/codex/codex-provider-permission.test.ts"], rows: ["providerResponseSettlementRemoval"] },
@@ -2486,6 +2488,23 @@ function providerMatrix(surface) { return {
           strictReviewNoticeOnly: "web-permission-handoff",
           realProviderRequestCard: "web-permission-handoff",
           providerResponseSettlementRemoval: "codex-permission-handoff",
+        },
+      },
+      retryFreeze: {
+        kind: "coverage-gap",
+        control: "web Composer Automatic approval review retry",
+        prerequisite: "a deterministic native transient failure after an Automatic Composer dispatch",
+        reason: "Mcode has no deterministic public trigger for a native transient retry, so the verifier records focused retry-dispatch evidence instead of claiming a live retry.",
+        focusedEvidence: { frozenRetryDecision: "server-retry-decision-freeze" },
+      },
+      staleRetryEvents: {
+        kind: "coverage-gap",
+        control: "web Composer retry event stream",
+        prerequisite: "a deterministic native transient failure followed by stale approval-review and diff events",
+        reason: "Mcode has no deterministic public trigger for stale native retry events, so the verifier records focused mapper and diff-routing evidence instead of claiming a live replay.",
+        focusedEvidence: {
+          staleRetryReview: "codex-stale-retry-events",
+          staleRetryDiff: "codex-stale-retry-events",
         },
       },
     }
