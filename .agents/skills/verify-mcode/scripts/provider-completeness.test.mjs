@@ -3,13 +3,30 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
-import { aggregateEvidenceFailures, applyProviderPrerequisites, approvedReviewComposerPrompt, assertApprovedReviewReload, assertApprovedReviewTerminal, assertDeniedReviewComparison, assertDeniedReviewTerminal, assertDiskContent, assertExactApprovedReviewDisk, assertExactDeniedReviewDisk, assertExactFullAccessDisk, assertFullAccessRecovery, assertFullAccessSnapshot, assertLiveObservation, assertNoApprovalReviewFooter, assertNoApprovalReviewLifecycle, assertObservation, assertPatchAttribution, assertSeparateClients, assertWarningStabilityEvidence, captureCodexTraceEvidence, captureDeniedReview, captureFullAccessReview, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createClientInvalidationTrace, createOwnedFixtureWorkspace, createReceipt, deniedReviewComposerPrompt, emptyComposerPrompt, fullAccessComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readExactApprovedReviewComparison, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runApprovedReviewJourney, runComposerReviewJourney, runDeniedReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runFourSurfaceRefreshJourney, runFullAccessJourney, runInterruptionJourney, runProviderJourneys, runWorkspaceInvalidationJourney, selectAutomaticReview, selectFullAccess, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
+import { aggregateEvidenceFailures, applyProviderPrerequisites, approvedReviewComposerPrompt, assertApprovedReviewReload, assertApprovedReviewTerminal, assertDeniedReviewComparison, assertDeniedReviewTerminal, assertDiskContent, assertExactApprovedReviewDisk, assertExactDeniedReviewDisk, assertExactFullAccessDisk, assertFullAccessRecovery, assertFullAccessSnapshot, assertLiveObservation, assertNoApprovalReviewFooter, assertNoApprovalReviewLifecycle, assertObservation, assertPatchAttribution, assertSeparateClients, assertWarningStabilityEvidence, captureCodexTraceEvidence, captureDeniedReview, captureFullAccessReview, captureLiveObservation, captureSettledReviewState, classifyLiveDiffFailure, cleanup, cleanupOwned, closeReview, composerPrompt, createClientInvalidationTrace, createOwnedFixtureWorkspace, createReceipt, deniedReviewComposerPrompt, emptyComposerPrompt, fullAccessComposerPrompt, inspectClaudeAccountStatus, inspectProviderPrerequisites, installWebSocketDisconnect, openDesktop, openNewThreadForWorkspace, parseArguments, proof, readExactApprovedReviewComparison, readRenderedReview, readSettledPublicComparison, recordLiveComparisonDiagnostic, resolveUpstreamCodex, reviewRowCount, runApprovedReviewJourney, runComposerReviewJourney, runDeniedReviewJourney, runEmptyDiffJourney, runFocusedEvidenceGates, runFourSurfaceRefreshJourney, runFullAccessJourney, runInterruptionJourney, runProviderJourneys, runWorkspaceInvalidationJourney, selectAutomaticReview, selectFullAccess, waitForExactReview, waitForInterruptionTerminal, waitForLiveAgentDiff, waitForNewThread, waitForNewThreadWelcome, writeReceipt } from "./provider-completeness.mjs";
 
 NodeTest.test("requires explicit proof and cleanup confirmations", () => {
   NodeAssertStrict.deepEqual(parseArguments(["health"]), { command: "health" });
   NodeAssertStrict.deepEqual(parseArguments(["proof", "--confirm-cleanup", "--confirm-provider-call"]), { command: "proof" });
   NodeAssertStrict.throws(() => parseArguments(["proof", "--confirm-provider-call"]), /requires health, proof/);
   NodeAssertStrict.throws(() => parseArguments(["cleanup"]), /requires health, proof/);
+});
+
+NodeTest.test("closes only the captured worktree runtime WebSocket for reconnection proof", async () => {
+  let routeHandler;
+  const context = {
+    routeWebSocket: async (matches, handler) => {
+      NodeAssertStrict.equal(matches(new URL("ws://127.0.0.1:41539/")), true);
+      NodeAssertStrict.equal(matches(new URL("ws://127.0.0.1:41540/")), false);
+      routeHandler = handler;
+    },
+  };
+  const disconnect = await installWebSocketDisconnect(context, 41539);
+  await NodeAssertStrict.rejects(disconnect(), /did not create the runtime WebSocket/);
+  const calls = [];
+  routeHandler({ connectToServer: () => calls.push("connect"), close: async (options) => calls.push(options) });
+  await disconnect();
+  NodeAssertStrict.deepEqual(calls, ["connect", { code: 1012 }]);
 });
 
 NodeTest.test("writes the receipt to its original path while redacting serialized paths", async () => {
@@ -713,12 +730,11 @@ NodeTest.test("runs the Electron Full access journey before dispatch and retains
     },
     getByText: (name) => name === "Connection lost. Reconnecting to server..." ? connectionLost : control,
     reload: async () => { events.push("reload"); },
-    context: () => ({ setOffline: async (offline) => { events.push(`offline:${offline}`); } }),
   };
   const run = { fixtureDirectory: "fixture", run: { ownedFiles: [] }, comparison: {}, renderedEvidence: [] };
   const result = await runFullAccessJourney({
     surface: "electron",
-    client: { page },
+    client: { page, disconnect: async () => { events.push("connection:dropped"); } },
     socket,
     workspace: { id: "workspace", name: "Fixture", path: "fixture" },
     run,
@@ -730,10 +746,7 @@ NodeTest.test("runs the Electron Full access journey before dispatch and retains
   });
   NodeAssertStrict.ok(events.indexOf("full-visible") < events.indexOf("dispatch"));
   NodeAssertStrict.ok(events.indexOf("reload") > events.indexOf("dispatch"));
-  NodeAssertStrict.deepEqual(events.filter((event) => event.startsWith("offline:")), ["offline:true", "offline:false"]);
-  NodeAssertStrict.deepEqual(events.filter((event) => ["project-opened", "thread-list-collapsed", "thread-visible", "thread-selected", "thread-opened"].includes(event)), ["project-opened", "thread-visible", "thread-selected", "thread-opened", "thread-list-collapsed", "project-opened", "thread-visible", "thread-selected", "thread-opened"]);
-  NodeAssertStrict.ok(events.indexOf("thread-list-collapsed") > events.indexOf("offline:true"));
-  NodeAssertStrict.ok(events.indexOf("project-opened", events.indexOf("thread-list-collapsed")) < events.indexOf("offline:false"));
+  NodeAssertStrict.ok(events.indexOf("connection:dropped") > events.indexOf("reload"));
   NodeAssertStrict.equal(events.filter((event) => event.startsWith("canonical:")).length, 3);
   NodeAssertStrict.match(result.observations.settled.screenshot, /electron-full-access-settled/);
   NodeAssertStrict.match(result.observations.reloaded.screenshot, /electron-full-access-reloaded/);
@@ -1114,7 +1127,7 @@ NodeTest.test("captures Codex Live proof after the same-file external edit and r
     waitForRefresh: async () => { events.push("trace:refresh"); return { files: { sequence: 6 }, composer: { sequence: 7 } }; },
     close: async () => { events.push("trace:closed"); },
   };
-  const result = await runComposerReviewJourney({ surface: "web", client: { page }, socket, workspace: { id: "workspace", name: "Fixture", path: "fixture" }, run, io, provider: "codex", model: "model", modelName: "Model", captureLive: liveCapture, captureReview: reviewCapture, captureFourSurface, createInvalidationTrace: async () => invalidationTrace });
+  const result = await runComposerReviewJourney({ surface: "web", client: { page, disconnect: async () => { events.push("connection:dropped"); } }, socket, workspace: { id: "workspace", name: "Fixture", path: "fixture" }, run, io, provider: "codex", model: "model", modelName: "Model", captureLive: liveCapture, captureReview: reviewCapture, captureFourSurface, createInvalidationTrace: async () => invalidationTrace });
 
   NodeAssertStrict.equal(result.observations.live.comparisonId, "live-after-external-edit");
   NodeAssertStrict.equal(result.fetchedPatch, "AGENT_MARKER");
@@ -1130,15 +1143,13 @@ NodeTest.test("captures Codex Live proof after the same-file external edit and r
   NodeAssertStrict.equal(result.observations.reloaded.comparisonId, "settled-reloaded");
   NodeAssertStrict.equal(result.observations.reconnected.comparisonId, "settled-after-reconnect");
   const reloaded = events.indexOf("reload");
-  const offline = events.indexOf("network:offline");
-  const reconnected = events.indexOf("network:online");
+  const disconnected = events.indexOf("connection:dropped");
   const publicState = events.lastIndexOf("comparison:settled-after-reconnect");
   NodeAssertStrict.ok(reloaded >= 0);
   NodeAssertStrict.ok(events.indexOf("comparison:settled-reloaded") > reloaded);
-  NodeAssertStrict.ok(offline > events.indexOf("comparison:settled-reloaded"));
-  NodeAssertStrict.ok(events.indexOf("connection-banner:visible") > offline);
-  NodeAssertStrict.ok(reconnected > events.indexOf("connection-banner:visible"));
-  NodeAssertStrict.ok(events.indexOf("connection-banner:hidden") > reconnected);
+  NodeAssertStrict.ok(disconnected > events.indexOf("comparison:settled-reloaded"));
+  NodeAssertStrict.ok(events.indexOf("connection-banner:visible") > disconnected);
+  NodeAssertStrict.ok(events.indexOf("connection-banner:hidden") > events.indexOf("connection-banner:visible"));
   NodeAssertStrict.ok(publicState > events.indexOf("connection-banner:hidden"));
   NodeAssertStrict.ok(events.indexOf("rendered-reconnected") > publicState);
 });

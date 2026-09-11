@@ -1951,7 +1951,7 @@ async function assertWorkspace(page, workspace, socket) {
 }
 
 export function assertSeparateClients(web, desktop) { if (!web?.browser || !desktop?.session?.browser || web.browser === desktop.session.browser || web.context === desktop.session.context) throw new Error("Condition: web and Electron must use separate browser clients."); }
-async function openWeb(playwright, ports, executablePath) { const browser = await playwright.chromium.launch({ headless: true, executablePath }); const context = await browser.newContext(); await context.addCookies([{ name: ports.seedLogin.cookieName, value: ports.seedLogin.token, url: ports.appUrl }]); const page = await context.newPage(); await page.goto(ports.appUrl, { waitUntil: "domcontentloaded" }); return { browser, context, page }; }
+async function openWeb(playwright, ports, executablePath) { const browser = await playwright.chromium.launch({ headless: true, executablePath }); const context = await browser.newContext(); const disconnect = await installWebSocketDisconnect(context, ports.serverPort); await context.addCookies([{ name: ports.seedLogin.cookieName, value: ports.seedLogin.token, url: ports.appUrl }]); const page = await context.newPage(); await page.goto(ports.appUrl, { waitUntil: "domcontentloaded" }); return { browser, context, page, disconnect }; }
 export async function openDesktop(repoRoot, playwright, ports, dependencies = {}) {
   const root = NodePath.join(repoRoot, ".agents", "skills", "electorn-live-testing", "scripts");
   const { startElectron } = dependencies.startElectron ? dependencies : await import(NodeURL.pathToFileURL(NodePath.join(root, "start-electron.mjs")).href);
@@ -1962,29 +1962,32 @@ export async function openDesktop(repoRoot, playwright, ports, dependencies = {}
   await startElectron(repoRoot);
   try {
   const session = await sessionHelper.connectElectronSession({ playwright, repoRoot });
+  const disconnect = await installWebSocketDisconnect(session.context, ports.serverPort);
   await session.page.evaluate((token) => localStorage.setItem("mcode-auth-token", token), ports.seedLogin.token);
   const page = await sessionHelper.reloadElectronAppPage(session.context, session.page, ports.appUrl);
   await page.getByText("Connecting to server...").waitFor({ state: "hidden", timeout: 30_000 });
-  return { desktop: { page, session, sessionHelper }, owner };
+  return { desktop: { page, session, sessionHelper, disconnect }, owner };
   } catch (error) { if (owner) stopElectron(repoRoot); throw error; }
 }
 async function reloadClient(client) { if (client.session?.context) client.page = await client.sessionHelper.reloadElectronAppPage(client.session.context, client.page, client.session.appUrl); else await client.page.reload({ waitUntil: "domcontentloaded" }); }
-async function reconnectOwningClient(client, workspace) {
-  const connectionLost = client.page.getByText(CONNECTION_LOST_TEXT, { exact: true });
-  const context = client.page.context();
-  await context.setOffline(true);
-  try {
-    if (workspace) await requestThreadReload(client.page, workspace);
-    await connectionLost.waitFor({ state: "visible", timeout: 15_000 });
-  } finally {
-    await context.setOffline(false);
-  }
-  await connectionLost.waitFor({ state: "hidden", timeout: 30_000 });
+/** Installs a bounded disconnect control for the client runtime WebSocket. */
+export async function installWebSocketDisconnect(context, serverPort) {
+  let socket = null;
+  await context.routeWebSocket((url) => url.protocol === "ws:" && url.port === String(serverPort), (route) => {
+    socket = route;
+    route.connectToServer();
+  });
+  return async () => {
+    if (!socket) throw new Error("Condition: owning client did not create the runtime WebSocket.");
+    await socket.close({ code: 1012 });
+  };
 }
-async function requestThreadReload(page, workspace) {
-  const threadListToggle = page.getByRole("button", { name: `Toggle threads for ${workspace.name}` });
-  if (await threadListToggle.getAttribute("aria-expanded") === "true") await threadListToggle.press("Enter");
-  await page.getByRole("button", { name: `Open project ${workspace.name}` }).click();
+async function reconnectOwningClient(client) {
+  const connectionLost = client.page.getByText(CONNECTION_LOST_TEXT, { exact: true });
+  if (typeof client.disconnect !== "function") throw new Error("Condition: owning client cannot close its runtime WebSocket.");
+  await client.disconnect();
+  await connectionLost.waitFor({ state: "visible", timeout: 15_000 });
+  await connectionLost.waitFor({ state: "hidden", timeout: 30_000 });
 }
 async function reopenFullAccessThread(page, workspace, thread) {
   const threadListToggle = page.getByRole("button", { name: `Toggle threads for ${workspace.name}` });
