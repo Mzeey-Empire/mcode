@@ -27,6 +27,8 @@ For pipeline traps and shared behavior with Claude, see [narrative-pipeline.md](
 
 ## 2. User-visible behavior
 
+Codex models come from the app-server `model/list` catalog. The model picker and Settings keep the provider's order and use readable display names without changing the model IDs. Hidden models are excluded. The existing model cache retains the last successful list when a refresh fails; static models remain the initial UI fallback. Model discovery uses the shared catalog connection, not the turn startup handshake.
+
 | Element | Expected behavior |
 |--------|-------------------|
 | Thought rows | Dimmed / “thinking” style blocks built from non-final `TextDelta` events. |
@@ -106,6 +108,43 @@ When behavior changes (new Codex notification types, nesting rules, or UX), upda
 - [codex-app-server-trace.md](./codex-app-server-trace.md) when the change depends on observed Codex protocol behavior.
 
 ---
+
+## Stop and session reuse
+
+Stop cancels the current Codex turn through `turn/interrupt` and keeps the
+app-server available for the next message. A stop during startup cancels the
+staged turn or waits for its native turn ID before interruption. Pending approval
+cards clear before the interrupt request. Shutdown, eviction, and explicit
+session discard still close the app-server.
+
+Normal turn completion also keeps the app-server available. Stop during settings
+or input preparation cancels that request before dispatch, including on a reused
+session. An interrupt timeout rejects Stop without an unhandled promise rejection.
+
+Late events from a previous main turn cannot reset the next turn's mapper.
+
+## Reasoning effort and token usage
+
+Codex uses the selected reasoning effort in both standard and proactive
+orchestration. Proactive orchestration does not select Ultra automatically.
+If no effort is selected, Mcode leaves the effort field unset.
+
+Mcode reads `thread/tokenUsage/updated` for native token usage. The latest
+request's input count represents context usage. Turn totals exclude previous
+turns and include cached tokens once. Duplicate updates do not add consumption.
+Usage updates reach the context tracker before completion. Failed and cancelled
+turns retain their reported usage without a successful completion event. The
+reported context count persists for reconnect.
+
+The Composer context ring has no center label. Hover or keyboard focus opens a
+usage bar with used tokens, capacity, and remaining tokens. The card separates
+processed tokens from current context usage.
+
+Routine provider warnings, configuration notices, deprecation notices, and
+authentication-recovery notices do not appear in chat or above Composer. This
+also applies to subagent chat. Notices remain persisted. Security warnings,
+model changes, actionable diagnostics, approval requests, and errors retain
+their existing surfaces.
 
 ## Revision history (informal)
 

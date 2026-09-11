@@ -30,9 +30,27 @@ describe("NarrativeIndicator exit lifecycle", () => {
   }
 
   it("renders the status line while the agent is running", () => {
-    renderRunning();
+    const { container } = renderRunning();
     const bar = screen.getByText(/3 steps/).closest("[data-state]");
     expect(bar?.getAttribute("data-state")).toBe("running");
+    expect(container.querySelector("svg.stacked-layers-animated")).not.toBeNull();
+    expect(container.querySelector("[data-startup-activity-shimmer-text]"))
+      .toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("shows steps only after the count becomes positive", () => {
+    const props = { subagentCount: 0, activeToolCalls: [], startTime: Date.now() - 23000, isAgentRunning: true };
+    const { rerender } = render(<NarrativeIndicator {...props} stepCount={0} />);
+    expect(screen.getByText("Thinking...")).toBeInTheDocument();
+    expect(screen.getByText("(23s)")).toBeInTheDocument();
+    expect(screen.queryByText(/0 steps/)).not.toBeInTheDocument();
+
+    rerender(<NarrativeIndicator {...props} stepCount={1} />);
+    expect(screen.getByText("1 step · Thinking...")).toBeInTheDocument();
+    rerender(<NarrativeIndicator {...props} stepCount={2} />);
+    expect(screen.getByText("2 steps · Thinking...")).toBeInTheDocument();
+    rerender(<NarrativeIndicator {...props} stepCount={0} subagentCount={1} />);
+    expect(screen.getByText("1 subagent · Thinking...")).toBeInTheDocument();
   });
 
   it("plays the exit transition when the agent stops, then renders nothing", () => {
@@ -51,6 +69,10 @@ describe("NarrativeIndicator exit lifecycle", () => {
     const exiting = container.querySelector('[data-state="exiting"]');
     expect(exiting).not.toBeNull();
     expect(exiting?.classList.contains("narrative-indicator-exit")).toBe(true);
+    expect(exiting).toHaveTextContent("3 steps · Done");
+    expect(exiting?.querySelector(".startup-activity-shimmer")).toBeNull();
+    expect(exiting?.querySelector("svg")).not.toBeNull();
+    expect(exiting?.querySelector(".stacked-layers-animated")).toBeNull();
 
     act(() => {
       vi.advanceTimersByTime(300);

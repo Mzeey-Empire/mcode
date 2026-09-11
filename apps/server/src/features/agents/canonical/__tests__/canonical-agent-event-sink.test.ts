@@ -265,6 +265,19 @@ describe("CanonicalAgentEventSink", () => {
     expect(sink.loadParentNarrativeRecovery(TURN_ID)).toEqual(items);
   });
 
+  it("restores unfinished narrative even when the reconnect revision is current", () => {
+    startCanonicalParent(sink, db);
+    const thread = sink.loadThread(THREAD_ID)!;
+    sink.recordParentNarrativeRecovery({ executionId: EXECUTION_ID, items: [parentNarrativeToolCall(0)] });
+    const recovery = sink.recoverThread(THREAD_ID, {
+      conversationRevision: thread.conversationRevision, rosterRevision: thread.rosterRevision,
+    });
+    expect(recovery.mode).toBe("snapshot");
+    if (recovery.mode !== "snapshot") throw new Error("Missing active narrative snapshot");
+    expect(recovery.snapshot.state.items["toolCall:recovery-tool-0"]?.payload)
+      .toEqual({ projection: "narrativeRecovery", narrative: parentNarrativeToolCall(0) });
+  });
+
   it("rejects aggregate parent recovery overflow before it writes", () => {
     startCanonicalParent(sink, db);
     const recordCount = Math.floor(PARENT_ASSISTANT_TEXT_RETAINED_LIMITS.maxBytes / 4_000) + 2;

@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { useRef } from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockMessage } from "@/__tests__/mocks/transport";
 import { createEmptyThreadRecord, patchThreadRecord } from "@/stores/thread-record";
 import { resetThreadStoreForTests } from "@/stores/thread-store-test-utils";
@@ -11,6 +11,7 @@ import { ComposerProviderNoticeSurface } from "./ComposerProviderNoticeSurface";
 const THREAD_A = "thread-a";
 const THREAD_B = "thread-b";
 const originalResizeObserver = Object.getOwnPropertyDescriptor(globalThis, "ResizeObserver");
+const originalVisualViewport = Object.getOwnPropertyDescriptor(window, "visualViewport");
 
 class ResizeObserverMock {
   observe(): void {}
@@ -66,7 +67,7 @@ function NoticeHarness({
   const composerRef = useRef<HTMLDivElement>(null);
   return (
     <>
-      <div ref={composerRef} />
+      <div ref={composerRef} data-testid="composer-anchor" />
       <ComposerProviderNoticeSurface
         threadId={threadId}
         composerContainerRef={composerRef}
@@ -85,6 +86,10 @@ describe("ComposerProviderNoticeSurface", () => {
       configurable: true,
       value: ResizeObserverMock,
     });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: { width: 1600, height: 900 },
+    });
     resetThreadStoreForTests({
       records: new Map([
         [THREAD_A, createEmptyThreadRecord()],
@@ -96,11 +101,15 @@ describe("ComposerProviderNoticeSurface", () => {
   afterEach(() => {
     if (originalResizeObserver) Object.defineProperty(globalThis, "ResizeObserver", originalResizeObserver);
     else Reflect.deleteProperty(globalThis, "ResizeObserver");
+    if (originalVisualViewport) Object.defineProperty(window, "visualViewport", originalVisualViewport);
+    else Reflect.deleteProperty(window, "visualViewport");
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("removes dismissed notices instead of offering them for review", () => {
-    const first = providerNotice("warning-1", THREAD_A, "warning", "same-warning");
-    const configuration = providerNotice("config-1", THREAD_A, "configuration", "configuration-warning");
+    const first = providerNotice("warning-1", THREAD_A, "security", "same-warning");
+    const configuration = providerNotice("config-1", THREAD_A, "model-rerouted", "configuration-warning");
     seedThread(THREAD_A, [first]);
     render(<NoticeHarness />);
 
@@ -109,14 +118,14 @@ describe("ComposerProviderNoticeSurface", () => {
     expect(screen.queryByTestId("composer-provider-notice")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Review provider notices" })).not.toBeInTheDocument();
 
-    act(() => seedThread(THREAD_A, [first, providerNotice("warning-2", THREAD_A, "warning", "same-warning")]));
+    act(() => seedThread(THREAD_A, [first, providerNotice("warning-2", THREAD_A, "security", "same-warning")]));
     expect(screen.queryByTestId("composer-provider-notice")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Review provider notices" })).not.toBeInTheDocument();
 
     act(() => seedThread(THREAD_A, [configuration]));
-    fireEvent.click(screen.getByRole("button", { name: "Review provider notices" }));
-    expect(screen.getByText("configuration evidence config-1")).toBeInTheDocument();
-    expect(screen.queryByText("warning evidence warning-1")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Model changed" }));
+    expect(screen.getByText("model-rerouted evidence config-1")).toBeInTheDocument();
+    expect(screen.queryByText("security evidence warning-1")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Other notice" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Dismiss notice" }));
@@ -126,7 +135,7 @@ describe("ComposerProviderNoticeSurface", () => {
   });
 
   it("surfaces a new issue after dismissal and keeps dismissed state isolated by thread", () => {
-    const first = providerNotice("warning-a", THREAD_A, "warning", "issue-a");
+    const first = providerNotice("warning-a", THREAD_A, "security", "issue-a");
     seedThread(THREAD_A, [first]);
     seedThread(THREAD_B, [providerNotice("warning-b", THREAD_B, "security", "issue-b")]);
     const { rerender } = render(<NoticeHarness />);
@@ -160,14 +169,18 @@ describe("ComposerProviderNoticeSurface", () => {
     expect(screen.getByTestId("composer-provider-notice")).toBeInTheDocument();
   });
 
-  it("keeps configuration notices quiet until the user asks to review them", () => {
-    seedThread(THREAD_A, [], [providerNotice("config", THREAD_A, "configuration")]);
+  it("does not render routine provider notices or a review trigger", () => {
+    seedThread(THREAD_A, [], [
+      providerNotice("config", THREAD_A, "configuration"),
+      providerNotice("warning", THREAD_A, "warning"),
+      providerNotice("deprecated", THREAD_A, "deprecation"),
+      providerNotice("recovered", THREAD_A, "authentication-recovered"),
+    ]);
     render(<NoticeHarness />);
 
     expect(screen.queryByTestId("composer-provider-notice")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Review provider notices" }));
-    expect(screen.getByTestId("composer-provider-notice")).toBeInTheDocument();
-    expect(screen.getByText("configuration evidence config")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Review provider notices" })).not.toBeInTheDocument();
+    expect(screen.queryByText("configuration evidence config")).not.toBeInTheDocument();
   });
 
   it("prioritizes attention and lets the user inspect other collected notice evidence", () => {
@@ -189,7 +202,7 @@ describe("ComposerProviderNoticeSurface", () => {
   it("keeps notice header children transparent so the header owns hover feedback", () => {
     seedThread(THREAD_A, [
       providerNotice("security", THREAD_A, "security"),
-      providerNotice("warning", THREAD_A, "warning"),
+      providerNotice("warning", THREAD_A, "model-rerouted"),
     ]);
     render(<NoticeHarness />);
 
@@ -212,15 +225,41 @@ describe("ComposerProviderNoticeSurface", () => {
   });
 
   it("presents an unscoped provider notice", () => {
-    seedThread(THREAD_A, [providerNotice("unscoped-warning", THREAD_A, "warning", "warning", null)]);
+    seedThread(THREAD_A, [providerNotice("unscoped-warning", THREAD_A, "security", "warning", null)]);
 
     render(<NoticeHarness />);
 
     expect(screen.getByTestId("composer-provider-notice")).toBeInTheDocument();
   });
 
+  it("keeps the fixed notice aligned when a layout transition moves Composer", () => {
+    seedThread(THREAD_A, [providerNotice("warning", THREAD_A, "security")]);
+    let anchorRect = new DOMRect(334, 700, 960, 40);
+    let animationFrameCallback: FrameRequestCallback | undefined;
+    vi.stubGlobal("requestAnimationFrame", vi.fn((callback: FrameRequestCallback) => {
+      animationFrameCallback = callback;
+      return 1;
+    }));
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    render(<NoticeHarness />);
+
+    const composer = screen.getByTestId("composer-anchor");
+    vi.spyOn(composer, "getBoundingClientRect").mockImplementation(() => anchorRect);
+    act(() => window.dispatchEvent(new Event("resize")));
+    expect(screen.getByTestId("composer-provider-notice")).toHaveStyle({ left: "348px", width: "932px" });
+
+    anchorRect = new DOMRect(498, 700, 960, 40);
+    act(() => {
+      document.dispatchEvent(new Event("transitionrun"));
+      animationFrameCallback?.(0);
+    });
+    expect(screen.getByTestId("composer-provider-notice")).toHaveStyle({ left: "512px", width: "932px" });
+    act(() => document.dispatchEvent(new Event("transitionend")));
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(1);
+  });
+
   it("hides beneath mention and slash pickers, then restores after either closes", () => {
-    seedThread(THREAD_A, [providerNotice("warning", THREAD_A, "warning")]);
+    seedThread(THREAD_A, [providerNotice("warning", THREAD_A, "security")]);
     const { rerender } = render(<NoticeHarness />);
 
     expect(screen.getByTestId("composer-provider-notice")).toBeInTheDocument();

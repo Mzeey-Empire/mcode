@@ -573,7 +573,12 @@ function ComposerControlBar({
   const disabled = model.setupBlocked || model.planPending || model.isStaleWorktree || Boolean(model.providerReason);
 
   return (
-    <div className="flex items-center gap-x-1.5 sm:gap-x-2.5 border-t border-border/20 px-3 py-1.5">
+    <div
+      className={cn(
+        "flex flex-wrap items-center gap-1 border-t border-border/20 py-1.5",
+        model.showInlineComposerOptions ? "px-3 sm:gap-2.5" : "px-2",
+      )}
+    >
       <input
         ref={model.attachmentInputRef}
         type="file"
@@ -584,47 +589,50 @@ function ComposerControlBar({
         data-testid="composer-attachment-input"
         onChange={actions.onAttachmentInputChange}
       />
-      <ComposerAddMenu
-        disabled={disabled}
-        onAttachFiles={actions.onAttachPick}
-        capabilities={model.agentControls.capabilities}
-        attachedCapabilityIds={model.agentControls.attachedCapabilityIds}
-        onAttachCapability={actions.onAttachCapability}
-        getComposerRect={() => model.composerContainerRef.current?.getBoundingClientRect() ?? null}
-      />
-      <ComposerAgentControls
-        threadId={model.threadId}
-        workspaceId={model.workspaceId}
-        branchFromMessageId={model.branchFromMessageId}
-        isNewThread={model.isNewThread}
-        selection={model.selection}
-        defaults={model.defaults}
-        reasoningLevels={model.agentControls.reasoningLevels}
-        capabilities={model.agentControls.capabilities}
-        activeGoal={model.activeGoal}
-        goalPending={model.goalPending}
-        isModelLocked={model.isModelFullyLocked}
-        isProviderLocked={model.isProviderLocked}
-        permissionLocked={model.agentControls.permissionLocked}
-        approvalReviewSupported={model.agentControls.approvalReviewSupported}
-        showInlineOptions={model.showInlineComposerOptions}
-        showModelPreferences
-        onSelectionChange={actions.onSelectionChange}
-        onSelectionTouched={actions.onSelectionTouched}
-        onDetachPlan={actions.onDetachPlan}
-        onDetachGoal={actions.onDetachGoal}
-        onDetachOrchestration={actions.onDetachOrchestration}
-      />
-      {model.providerNoticeTrigger}
-      <div className="flex-1" />
-      <ComposerThreadScaffoldStatus isThreadScaffold={model.isThreadScaffold} />
-      <ComposerInlineStopButton model={model} actions={actions} />
-      <ComposerContextWindowTracker model={model} />
-      <ComposerSendButton
-        model={model}
-        actions={actions}
-        needsWorkspace={model.needsWorkspace}
-      />
+      <div className={cn("flex max-w-full flex-wrap items-center gap-1", !model.showInlineComposerOptions && "basis-full")}>
+        <ComposerAddMenu
+          disabled={disabled}
+          onAttachFiles={actions.onAttachPick}
+          capabilities={model.agentControls.capabilities}
+          attachedCapabilityIds={model.agentControls.attachedCapabilityIds}
+          onAttachCapability={actions.onAttachCapability}
+          getComposerRect={() => model.composerContainerRef.current?.getBoundingClientRect() ?? null}
+        />
+        <ComposerAgentControls
+          threadId={model.threadId}
+          workspaceId={model.workspaceId}
+          branchFromMessageId={model.branchFromMessageId}
+          isNewThread={model.isNewThread}
+          selection={model.selection}
+          defaults={model.defaults}
+          reasoningLevels={model.agentControls.reasoningLevels}
+          capabilities={model.agentControls.capabilities}
+          activeGoal={model.activeGoal}
+          goalPending={model.goalPending}
+          isModelLocked={model.isModelFullyLocked}
+          isProviderLocked={model.isProviderLocked}
+          permissionLocked={model.agentControls.permissionLocked}
+          approvalReviewSupported={model.agentControls.approvalReviewSupported}
+          showInlineOptions={model.showInlineComposerOptions}
+          showModelPreferences
+          onSelectionChange={actions.onSelectionChange}
+          onSelectionTouched={actions.onSelectionTouched}
+          onDetachPlan={actions.onDetachPlan}
+          onDetachGoal={actions.onDetachGoal}
+          onDetachOrchestration={actions.onDetachOrchestration}
+        />
+        {model.providerNoticeTrigger}
+      </div>
+      <div className={cn("ml-auto flex max-w-full flex-wrap items-center justify-end gap-1", !model.showInlineComposerOptions && "basis-full")}>
+        <ComposerThreadScaffoldStatus isThreadScaffold={model.isThreadScaffold} />
+        <ComposerInlineStopButton model={model} actions={actions} />
+        <ComposerContextWindowTracker model={model} />
+        <ComposerSendButton
+          model={model}
+          actions={actions}
+          needsWorkspace={model.needsWorkspace}
+        />
+      </div>
     </div>
   );
 }
@@ -638,7 +646,7 @@ function ComposerInputSurface({
       ref={model.composerContainerRef}
       data-testid="composer-surface"
       className={cn(
-        "relative z-10 bg-muted/50 ring-1 ring-inset ring-border/60 focus-within:ring-2 focus-within:ring-primary/70",
+        "relative z-10 bg-transparent ring-1 ring-inset ring-border/60 focus-within:ring-2 focus-within:ring-primary/70",
         model.isNewThread
           ? "-mt-px rounded-xl shadow-none"
           : "rounded-xl shadow-lg shadow-black/20",

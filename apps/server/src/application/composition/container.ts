@@ -10,6 +10,8 @@ import { hostRuntime, type HostRuntime } from "@mcode/shared/node/host-runtime";
 import { openDatabase } from "../../runtime/persistence/sqlite/database.js";
 import { registerCodexProvider } from "../../features/providers/composition/codex-provider-registration.js";
 import { registerCursorProvider } from "../../features/providers/composition/cursor-provider-registration.js";
+import { CursorAdminUsageSource } from "../../features/providers/adapters/cursor/usage/cursor-admin-usage-source.js";
+import { CursorCliUsageEmailResolver } from "../../features/providers/adapters/cursor/usage/cursor-cli-usage-email.js";
 
 // Services
 import {
@@ -251,6 +253,19 @@ export function setupContainer(mcodeDir: string): typeof container {
   container.registerInstance("CodexProvider", codexProvider);
 
   const cursorSettings = container.resolve(SettingsService).get();
+  // The usage email is auto-derived from the Cursor CLI (`about --format json`)
+  // rather than a manual setting; the resolver caches the CLI result.
+  const cursorUsageEmailResolver = new CursorCliUsageEmailResolver({
+    cliPath: () => container.resolve(SettingsService).get().provider.cli.cursor || "cursor-agent",
+    platform: hostRuntime.platform,
+  });
+  container.registerInstance(
+    CursorAdminUsageSource,
+    new CursorAdminUsageSource({
+      apiKey: () => process.env.MCODE_CURSOR_ADMIN_API_KEY,
+      usageEmail: () => cursorUsageEmailResolver.resolve(),
+    }),
+  );
   const cursorProvider = registerCursorProvider(container, {
     configuration: {
       cliPath: cursorSettings.provider.cli.cursor || "cursor-agent",

@@ -27,17 +27,6 @@ function legacyTheme(value: unknown): Settings["appearance"]["theme"] | undefine
   }
 }
 
-function legacyNamingMode(value: unknown): Settings["worktree"]["naming"]["mode"] | undefined {
-  switch (value) {
-    case "auto":
-    case "custom":
-    case "ai":
-      return value;
-    default:
-      return undefined;
-  }
-}
-
 function legacyTopLevelPatch(state: Record<string, unknown>): DeepPartial<Settings> {
   const theme = legacyTheme(state.theme);
   const appearance = theme ? { theme } : undefined;
@@ -46,19 +35,10 @@ function legacyTopLevelPatch(state: Record<string, unknown>): DeepPartial<Settin
   return { ...(appearance ? { appearance } : {}), ...(agent ? { agent } : {}), ...(notifications ? { notifications } : {}) };
 }
 
-function legacyWorktreePatch(value: unknown): DeepPartial<Settings> {
-  if (!value || typeof value !== "object") return {};
-  const global = value as Record<string, unknown>;
-  const mode = legacyNamingMode(global.defaultNamingMode);
-  const aiConfirmation = typeof global.aiConfirmation === "boolean" ? global.aiConfirmation : undefined;
-  const naming = { ...(mode === undefined ? {} : { mode }), ...(aiConfirmation === undefined ? {} : { aiConfirmation }) };
-  return Object.keys(naming).length > 0 ? { worktree: { naming } } : {};
-}
-
 function legacySettingsPatch(value: unknown): DeepPartial<Settings> {
   const parsed = value && typeof value === "object" ? value as Record<string, unknown> : {};
   const state = parsed.state && typeof parsed.state === "object" ? parsed.state as Record<string, unknown> : parsed;
-  return { ...legacyTopLevelPatch(state), ...legacyWorktreePatch(parsed.global) };
+  return legacyTopLevelPatch(state);
 }
 
 /**

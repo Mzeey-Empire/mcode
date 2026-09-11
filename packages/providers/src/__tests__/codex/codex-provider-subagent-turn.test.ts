@@ -101,6 +101,7 @@ function makeProvider(): CodexProvider {
     { persistGeneratedImageFromPath: vi.fn() } as never,
     {
       currentSkills: vi.fn(() => []),
+      listModels: vi.fn(async () => []),
       currentPrompts: vi.fn(() => []),
       refreshCustomPrompts: vi.fn(async () => ({ prompts: [] })),
       refresh: vi.fn(async () => ({ skills: [] })),
@@ -1106,8 +1107,8 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
       params: { threadId: "sdk-thread-1", turn: { id: "turn-b" } },
     });
 
-    // Replay known A lifecycle ids after B is active. These duplicates must
-    // remain attributed to A and never overwrite either native map.
+    // Replayed A lifecycle ids must not overwrite either native map or leak
+    // completed main-turn text into B.
     entry.server.emit("notification", {
       method: "turn/started",
       params: { threadId: "sdk-thread-1", turn: { id: "turn-a" } },
@@ -1148,9 +1149,9 @@ describe("CodexProvider sub-agent turn lifecycle isolation", () => {
     });
     await new Promise<void>((resolve) => setImmediate(resolve));
 
-    const lateA = events.find((runtimeEvent) => runtimeEvent.event.type === AgentEventType.TextDelta && runtimeEvent.event.delta === "late A");
+    const lateA = events.filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.TextDelta && runtimeEvent.event.delta === "late A");
     const bText = events.find((runtimeEvent) => runtimeEvent.event.type === AgentEventType.TextDelta && runtimeEvent.event.delta === "B");
-    expect(lateA?.event.turnExecutionId).toBe("exec-mcode-origin-immutable");
+    expect(lateA).toEqual([]);
     expect(bText?.event.turnExecutionId).toBe("exec-b");
     expect(events.filter((runtimeEvent) => runtimeEvent.event.type === AgentEventType.Ended).at(-1)?.event.turnExecutionId).toBe("exec-b");
   });

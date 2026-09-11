@@ -531,23 +531,23 @@ NodeTest.describe("frontend performance runner", () => {
   NodeTest.it("rejects missing MessageList timing stages before a virtualizer attribution becomes incomplete", () => {
     NodeAssertStrict.default.deepEqual(MESSAGE_LIST_PERFORMANCE_STAGE_NAMES, [
       "narrativeItemProjection",
-      "tanstackVirtualItems",
+      "vlistRows",
     ]);
     NodeAssertStrict.default.deepEqual(validateMessageListPerformanceAttribution([
       { stage: "narrativeItemProjection", durationMs: 0.5 },
-      { stage: "tanstackVirtualItems", durationMs: 0.25 },
+      { stage: "vlistRows", durationMs: 0.25 },
     ]), []);
     NodeAssertStrict.default.deepEqual(validateMessageListPerformanceAttribution([
       { stage: "narrativeItemProjection", durationMs: 0.5 },
-    ]), ["missing MessageList performance stage: tanstackVirtualItems"]);
+    ]), ["missing MessageList performance stage: vlistRows"]);
     NodeAssertStrict.default.deepEqual(aggregateMessageListPerformanceAttribution([
       [
         { stage: "narrativeItemProjection", durationMs: 4 },
-        { stage: "tanstackVirtualItems", durationMs: 1 },
+        { stage: "vlistRows", durationMs: 1 },
       ],
       [
         { stage: "narrativeItemProjection", durationMs: 2 },
-        { stage: "tanstackVirtualItems", durationMs: 3 },
+        { stage: "vlistRows", durationMs: 3 },
       ],
     ]), {
       narrativeItemProjection: {
@@ -557,7 +557,7 @@ NodeTest.describe("frontend performance runner", () => {
         p95Ms: 4,
         maxMs: 4,
       },
-      tanstackVirtualItems: {
+      vlistRows: {
         sampleCount: 2,
         minMs: 1,
         medianMs: 1,
@@ -727,13 +727,11 @@ NodeTest.describe("frontend performance runner", () => {
     }), []);
   });
 
-  NodeTest.it("enforces the dense narrative DOM and disclosure contract", () => {
+  NodeTest.it("requires dense narrative text inline without browse controls", () => {
     const accepted = {
       sourceRows: 90,
-      descendants: 499,
-      browseDescendants: 499,
-      browsed: true,
-      returnedToSummary: true,
+      allThoughtsVisible: true,
+      hasBrowseControls: false,
       visible: true,
       assistantVisible: true,
       thoughtVisible: true,
@@ -746,8 +744,12 @@ NodeTest.describe("frontend performance runner", () => {
     NodeAssertStrict.default.deepEqual(validateWorkloadCheck("denseNarrative", accepted), []);
     NodeAssertStrict.default.deepEqual(validateWorkloadCheck("denseNarrative", {
       ...accepted,
-      descendants: 500,
-    }), ["dense narrative viewport exceeded 499 descendants"]);
+      allThoughtsVisible: false,
+    }), ["dense narrative text is not fully inline"]);
+    NodeAssertStrict.default.deepEqual(validateWorkloadCheck("denseNarrative", {
+      ...accepted,
+      hasBrowseControls: true,
+    }), ["dense narrative still has browse controls"]);
   });
 
   NodeTest.it("accepts only profiling and production modes", () => {

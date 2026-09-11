@@ -38,7 +38,7 @@ export interface LiveNarrativePreparation {
   childrenByParent: ReadonlyMap<string, readonly ToolCall[]>;
   thoughtSegments: readonly ThoughtSegment[];
   timeline: readonly LiveTimelineEvent[];
-  activeToolCall: ToolCall | null;
+  activeToolCalls: readonly ToolCall[];
   hasRunningTopLevelTool: boolean;
 }
 
@@ -56,7 +56,9 @@ export function prepareLiveNarrative(
     (toolCall) => toolCall.parentToolCallId,
     true,
   );
-  const activeToolCall = findActiveToolCall(hierarchy.topLevel);
+  const activeToolCalls = hierarchy.topLevel.filter(
+    (toolCall) => !toolCall.isComplete && toolCall.toolName !== AGENT_TOOL_NAME,
+  );
   const hasRunningTopLevelTool = hierarchy.topLevel.some((toolCall) => !toolCall.isComplete);
   return {
     toolCalls,
@@ -69,9 +71,8 @@ export function prepareLiveNarrative(
       hierarchy.childrenByParent,
       thoughtSegments,
       inputs.hooks,
-      activeToolCall,
     ),
-    activeToolCall,
+    activeToolCalls,
     hasRunningTopLevelTool,
   };
 }
@@ -97,8 +98,8 @@ export function projectLiveNarrativeItems(
     inputs.isAgentRunning,
     streamingSuffix,
   );
-  if (preparation.activeToolCall) {
-    items.push({ type: "active-tool", toolCall: preparation.activeToolCall });
+  for (const toolCall of preparation.activeToolCalls) {
+    items.push({ type: "active-tool", toolCall });
   }
   if (shouldAppendStreamingSuffix(emittedFinalDeltaFromTape, streamingSuffix, inputs.isAgentRunning)) {
     items.push({ type: "delta", text: streamingSuffix });
@@ -116,22 +117,15 @@ function filterLiveThoughtSegments(
     : thoughtSegments;
 }
 
-function findActiveToolCall(topLevelCalls: readonly ToolCall[]): ToolCall | null {
-  return [...topLevelCalls].reverse().find(
-    (toolCall) => !toolCall.isComplete && toolCall.toolName !== AGENT_TOOL_NAME,
-  ) ?? null;
-}
-
 function createLiveTimeline(
   toolCalls: readonly ToolCall[],
   topLevelCalls: readonly ToolCall[],
   childrenByParent: ReadonlyMap<string, readonly ToolCall[]>,
   thoughtSegments: readonly ThoughtSegment[],
   hooks: readonly HookExecution[],
-  activeToolCall: ToolCall | null,
 ): LiveTimelineEvent[] {
   const timeline = createThoughtEvents(thoughtSegments)
-    .concat(createTopLevelToolEvents(topLevelCalls, activeToolCall))
+    .concat(createTopLevelToolEvents(topLevelCalls))
     .concat(createSubagentEvents(toolCalls, childrenByParent))
     .concat(createHookEvents(hooks));
   return timeline.sort((left, right) => left.startedAt - right.startedAt);
@@ -149,10 +143,9 @@ function createThoughtEvents(
 
 function createTopLevelToolEvents(
   topLevelCalls: readonly ToolCall[],
-  activeToolCall: ToolCall | null,
 ): LiveTimelineEvent[] {
   return topLevelCalls.flatMap((toolCall) => {
-    if (toolCall === activeToolCall || toolCall.toolName === AGENT_TOOL_NAME) return [];
+    if (toolCall.toolName === AGENT_TOOL_NAME) return [];
     return [{ kind: "tool" as const, call: toolCall, startedAt: liveEventStartedAt(toolCall) }];
   });
 }

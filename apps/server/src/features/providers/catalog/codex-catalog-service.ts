@@ -685,6 +685,17 @@ export class CodexCatalogService {
     };
   }
 
+  /** Reads live models through the shared catalog connection. */
+  async listModels(): Promise<import("@mcode/contracts").ProviderModelInfo[]> {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    try {
+      const { client } = await this.acquireClient();
+      return await client.listModels();
+    } finally {
+      this.armIdleTimer();
+    }
+  }
+
   private async acquireClient(
     cwd?: string,
     requestedEnvironment?: Record<string, string>,

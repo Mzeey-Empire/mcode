@@ -20,6 +20,14 @@ import {
 } from "@/lib/model-registry";
 
 describe("pickProviderModelsForSettings", () => {
+  it("keeps Codex provider order and excludes stale static entries", () => {
+    const staticModels = [{ id: "a", label: "A", providerId: "codex" }];
+    const dynamic = [
+      { id: "z", label: "Z", providerId: "codex" },
+      { id: "b", label: "B", providerId: "codex" },
+    ];
+    expect(pickProviderModelsForSettings(staticModels, dynamic)).toEqual(dynamic);
+  });
   const staticModels = [{ id: "a", label: "A", providerId: "cursor" }];
 
   it("merges a non-empty dynamic list without hiding static models", () => {

@@ -99,7 +99,7 @@ export function PersistedTurnFooter({
   const triggered = useRef(false);
 
   useEffect(() => {
-    if (summary || records || triggered.current) return;
+    if (records || triggered.current) return;
     triggered.current = true;
     void load(messageId, threadId ?? undefined);
   }, [messageId, records, load, summary, threadId]);

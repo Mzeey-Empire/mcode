@@ -16,6 +16,23 @@ import type { Message, ToolCall, HookExecution, ToolCallRecord, HookExecutionRec
 const STREAMING_AGENT = { phase: "streaming" } as const;
 const COMPLETED_AGENT = { phase: "completed" } as const;
 
+describe("activity heading row identity", () => {
+  it("updates for heading changes and closure but preserves the row during body deltas", () => {
+    const build = createVolatileItemsBuilder();
+    const indicator = (text: string, endedAt?: number) => build(
+      [], STREAMING_AGENT, 1000, undefined, undefined, undefined,
+      [{ text, startedAt: 1000, ...(endedAt === undefined ? {} : { endedAt }) }],
+    ).find((item) => item.type === "narrative-indicator");
+    const first = indicator("**Inspecting layout**");
+    expect(first).toMatchObject({ summaryHeading: "Inspecting layout" });
+    expect(indicator("**Inspecting layout**\nMore body text")).toBe(first);
+    const next = indicator("**Checking tests**");
+    expect(next).not.toBe(first);
+    expect(next).toMatchObject({ summaryHeading: "Checking tests" });
+    expect(indicator("**Checking tests**", 2000)).toMatchObject({ summaryHeading: undefined });
+  });
+});
+
 function makeMessage(overrides: Partial<Message> = {}): Message {
   return {
     id: "msg-1",
@@ -85,13 +102,51 @@ function buildAll(
   streamingText: string | undefined,
   agentDisplayState: typeof STREAMING_AGENT | typeof COMPLETED_AGENT,
   agentStartTime: number | undefined,
+  responseMessageId?: string,
 ): ChatVirtualItem[] {
   const stable = buildStableItems(messages);
   const volatile = buildVolatileItems(toolCalls, agentDisplayState, agentStartTime, streamingText);
-  return buildVirtualItems(stable, volatile, toolCalls.length > 0);
+  return buildVirtualItems(stable, volatile, toolCalls.length > 0, responseMessageId);
 }
 
 describe("buildStableItems", () => {
+  it("omits routine notice rows while preserving security, approvals, and errors", () => {
+    const routineKinds = ["warning", "configuration", "deprecation", "authentication-recovered"] as const;
+    const routine = routineKinds.map((kind) => makeMessage({
+      id: kind, role: "system", systemNotice: { kind, presentation: "timeline" },
+    }));
+    const retained = [
+      makeMessage({ id: "security", role: "system", systemNotice: { kind: "security", presentation: "timeline" } }),
+      makeMessage({ id: "approval", role: "system", content: "Manual approval is required before Codex can continue.", systemNotice: { kind: "diagnostic", presentation: "timeline" } }),
+      makeMessage({ id: "error", role: "system", content: "Provider failed to start" }),
+    ];
+    expect(buildStableItems([...routine, ...retained])).toEqual(buildStableItems(retained));
+    expect(buildStableItems(retained)).toHaveLength(3);
+  });
+
+  it("does not add a separate hook row before the final response", () => {
+    const hooks = [{ hookName: "Setup", hookType: "permission" as const, status: "completed" as const, startedAt: 1, outputLines: [], fullOutput: [] }];
+    const active = buildVolatileItems([], STREAMING_AGENT, 1, "Answer", [], hooks);
+    expect(active.map((item) => item.type)).toEqual(["narrative-flow", "message", "narrative-indicator"]);
+    const completed = buildVolatileItems([], COMPLETED_AGENT, 1, undefined, [], hooks);
+    expect(completed).toEqual([]);
+  });
+
+  it("appends new turn activity after a prior answer until its own response persists", () => {
+    const stable = buildStableItems([makeMessage({ id: "prior-answer" })]);
+    const volatile = buildVolatileItems([makeToolCall()], STREAMING_AGENT, 1, undefined);
+    const project = createVirtualItemsBuilder();
+    expect(project(stable, volatile, true).map((item) => item.key)).toEqual([
+      "prior-answer", "narrative-flow", "narrative-indicator",
+    ]);
+    expect(project(stable, volatile, true, "new-answer").map((item) => item.key)).toEqual([
+      "prior-answer", "narrative-flow", "narrative-indicator",
+    ]);
+    expect(project(stable, volatile, true, "prior-answer").map((item) => item.key)).toEqual([
+      "narrative-flow", "prior-answer", "narrative-indicator",
+    ]);
+  });
+
   it("maps each runtime phase into an explicit agent display state", () => {
     expect(agentDisplayStateFromRuntimePhase("running")).toEqual({ phase: "streaming" });
     expect(agentDisplayStateFromRuntimePhase("finalizing")).toEqual({ phase: "finalizing" });
@@ -126,7 +181,7 @@ describe("buildStableItems", () => {
       },
     });
     expect(items.filter((i) => i.type === "persisted-narrative")).toHaveLength(1);
-    expect(items.filter((i) => i.type === "persisted-late-hooks")).toHaveLength(1);
+    expect(items.map((i) => i.type)).toEqual(["message", "persisted-narrative", "message", "persisted-turn-footer"]);
     expect(items.filter((i) => i.type === "persisted-turn-footer")).toHaveLength(1);
   });
 
@@ -146,7 +201,7 @@ describe("buildStableItems", () => {
     expect(items.map((i) => i.type)).toEqual([
       "message",
       "message",
-      "persisted-late-hooks",
+      "persisted-turn-footer",
     ]);
   });
 
@@ -547,7 +602,7 @@ describe("buildVirtualItems (combined)", () => {
       makeMessage({ id: "msg-2", sequence: 2, role: "assistant", content: "thinking" }),
     ];
     const toolCalls = [makeToolCall({ id: "tc-1" })];
-    const result = buildAll(messages, toolCalls, undefined, COMPLETED_AGENT, undefined);
+    const result = buildAll(messages, toolCalls, undefined, COMPLETED_AGENT, undefined, "msg-2");
 
     const types = result.map((item) => item.type);
     // Persisted chrome is absent until records load and contain visible rows.
@@ -815,7 +870,7 @@ describe("buildVirtualItems (combined)", () => {
       makeToolCall({ id: "tc-1", toolName: "Read" }),
       makeToolCall({ id: "tc-2", toolName: "Write" }),
     ];
-    const result = buildAll(messages, toolCalls, "Here is my answer...", STREAMING_AGENT, 99999);
+    const result = buildAll(messages, toolCalls, "Here is my answer...", STREAMING_AGENT, 99999, "msg-2");
 
     const types = result.map((item) => item.type);
     // user msg, narrative-flow (before split assistant msg), split assistant
@@ -888,7 +943,7 @@ describe("buildVirtualItems (combined)", () => {
       }),
     ];
     const toolCalls = [makeToolCall({ id: "tc-1" })];
-    const result = buildAll(messages, toolCalls, undefined, COMPLETED_AGENT, undefined);
+    const result = buildAll(messages, toolCalls, undefined, COMPLETED_AGENT, undefined, "a1");
 
     const a1Idx = result.findIndex((i) => i.type === "message" && i.key === "a1");
     const narrativeIdx = result.findIndex((i) => i.type === "narrative-flow");

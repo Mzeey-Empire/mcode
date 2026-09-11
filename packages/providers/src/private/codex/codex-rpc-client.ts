@@ -173,7 +173,6 @@ export class CodexRpcClient extends NodeEvents.EventEmitter {
    * After disposal, calling `sendRequest` throws immediately.
    */
   dispose(): void {
-    if (this.disposed) return;
     this.disposed = true;
 
     this.stdout.off("data", this.onData);

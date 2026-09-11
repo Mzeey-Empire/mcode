@@ -20,7 +20,7 @@ describe("StickyUserMessage", () => {
     expect(screen.getByTestId("sticky-user-message")).toBeInTheDocument();
     expect(screen.getByText("Refactor the scroll container")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Jump to your last message" }));
+    fireEvent.click(screen.getByRole("button", { name: "Jump to your message" }));
     expect(onJumpToMessage).toHaveBeenCalledTimes(1);
   });
 
@@ -34,7 +34,7 @@ describe("StickyUserMessage", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Jump to your last message in transcript" }));
+    fireEvent.click(screen.getByRole("button", { name: "Jump to your message in transcript" }));
     expect(onJumpToMessage).toHaveBeenCalledTimes(1);
   });
 
@@ -50,13 +50,13 @@ describe("StickyUserMessage", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Expand your last message" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand your message" }));
     act(() => {
       vi.advanceTimersByTime(250);
     });
 
     expect(onJumpToMessage).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Collapse your last message" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse your message" })).toBeInTheDocument();
     expect(screen.getByText("Collapse")).toBeInTheDocument();
   });
 
@@ -72,13 +72,13 @@ describe("StickyUserMessage", () => {
       />,
     );
 
-    fireEvent.doubleClick(screen.getByRole("button", { name: "Expand your last message" }));
+    fireEvent.doubleClick(screen.getByRole("button", { name: "Expand your message" }));
     act(() => {
       vi.advanceTimersByTime(250);
     });
 
     expect(onJumpToMessage).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button", { name: "Expand your last message" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Expand your message" })).toBeInTheDocument();
   });
 
   it("collapses an expanded long preview on single click", () => {
@@ -92,16 +92,16 @@ describe("StickyUserMessage", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Expand your last message" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand your message" }));
     act(() => {
       vi.advanceTimersByTime(250);
     });
-    fireEvent.click(screen.getByRole("button", { name: "Collapse your last message" }));
+    fireEvent.click(screen.getByRole("button", { name: "Collapse your message" }));
     act(() => {
       vi.advanceTimersByTime(250);
     });
 
-    expect(screen.getByRole("button", { name: "Expand your last message" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Expand your message" })).toBeInTheDocument();
   });
 
   it("exposes screen-reader hint for double-click jump on long previews", () => {
@@ -114,7 +114,7 @@ describe("StickyUserMessage", () => {
       />,
     );
 
-    const previewButton = screen.getByRole("button", { name: "Expand your last message" });
+    const previewButton = screen.getByRole("button", { name: "Expand your message" });
     expect(previewButton).toHaveAttribute(
       "aria-describedby",
       "sticky-user-message-preview-hint",
@@ -134,7 +134,7 @@ describe("StickyUserMessage", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Jump to your last message in transcript" }));
+    fireEvent.click(screen.getByRole("button", { name: "Jump to your message in transcript" }));
     rerender(
       <StickyUserMessage
         preview="Short prompt"

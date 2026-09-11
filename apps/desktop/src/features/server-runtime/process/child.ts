@@ -31,10 +31,12 @@ export function spawnServerProcess(port: number, platform: NodeJS.Platform): Spa
       cwd: paths.cwd,
       env: createServerEnvironment(paths, port, platform),
       detached: true,
-      stdio: ["ignore", "ignore", "pipe"],
+      windowsHide: true,
+      // A direct file handle preserves the final error even if the child exits immediately.
+      stdio: ["ignore", "ignore", stderrStream],
     });
     child.unref();
-    if (child.stderr) child.stderr.pipe(stderrStream);
+    console.info("[server-manager] Server process spawned", { pid: child.pid, port, errorLog: SERVER_LOG_PATH });
     return { child, stderrStream };
   } catch (error) {
     stderrStream.destroy();
@@ -77,7 +79,7 @@ function resolveDevelopmentBunBinary(platform: NodeJS.Platform): string {
   }
   const command = platform === "win32" ? "where.exe" : "which";
   try {
-    const output = NodeChildProcess.execFileSync(command, ["bun"], { encoding: "utf8" });
+    const output = NodeChildProcess.execFileSync(command, ["bun"], { encoding: "utf8", windowsHide: true });
     const executable = output.split(/\r?\n/, 1)[0]?.trim();
     if (executable && NodeFS.existsSync(executable)) {
       return resolveBunRuntimeExecutable(executable);
@@ -92,7 +94,7 @@ function resolveBunRuntimeExecutable(candidate: string): string {
   const runtimeExecutable = NodeChildProcess.execFileSync(
     candidate,
     ["-p", "process.execPath"],
-    { encoding: "utf8" },
+    { encoding: "utf8", windowsHide: true },
   ).trim();
   if (!NodeFS.existsSync(runtimeExecutable)) {
     throw new Error(`Bun runtime executable not found: ${runtimeExecutable}`);
@@ -126,14 +128,33 @@ function createServerEnvironment(paths: ServerPaths, port: number, platform: Nod
 }
 
 function setGitEnvironment(env: Record<string, string>, cwd: string): void {
+  if (!isDesktopDev()) return;
+  if (!env.MCODE_GIT_BRANCH && !env.MCODE_GIT_TOPLEVEL) {
+    setCombinedGitEnvironment(env, cwd);
+    return;
+  }
   for (const [name, args] of [["MCODE_GIT_BRANCH", ["rev-parse", "--abbrev-ref", "HEAD"]], ["MCODE_GIT_TOPLEVEL", ["rev-parse", "--show-toplevel"]]] as const) {
-    if (env[name] || !isDesktopDev()) continue;
+    if (env[name]) continue;
     try {
-      const value = NodeChildProcess.execFileSync("git", args, { encoding: "utf-8", timeout: 3_000, cwd }).trim();
+      const value = NodeChildProcess.execFileSync("git", args, { encoding: "utf-8", timeout: 3_000, cwd, windowsHide: true }).trim();
       if (value && value !== "HEAD") env[name] = value;
     } catch {
       // Git metadata is optional outside a checkout.
     }
+  }
+}
+
+function setCombinedGitEnvironment(env: Record<string, string>, cwd: string): void {
+  try {
+    const [branch, topLevel] = NodeChildProcess.execFileSync(
+      "git",
+      ["rev-parse", "--abbrev-ref", "HEAD", "--show-toplevel"],
+      { encoding: "utf-8", timeout: 3_000, cwd, windowsHide: true },
+    ).trim().split(/\r?\n/);
+    if (branch && branch !== "HEAD") env.MCODE_GIT_BRANCH = branch;
+    if (topLevel && topLevel !== "HEAD") env.MCODE_GIT_TOPLEVEL = topLevel;
+  } catch {
+    // Git metadata is optional outside a checkout.
   }
 }
 
@@ -144,5 +165,7 @@ function createServerStderrStream(): NodeFS.WriteStream {
       NodeFS.renameSync(SERVER_LOG_PATH, SERVER_ROTATED_LOG_PATH);
     } catch (error) { console.warn("[server-manager] Failed to rotate previous server stderr log", error); }
   }
-  return NodeFS.createWriteStream(SERVER_LOG_PATH, { flags: "w" });
+  return NodeFS.createWriteStream(SERVER_LOG_PATH, {
+    fd: NodeFS.openSync(SERVER_LOG_PATH, "w", 0o600),
+  });
 }

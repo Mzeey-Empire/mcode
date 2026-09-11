@@ -135,6 +135,18 @@ describe("context tracker — Fix 4: live estimation during turn", () => {
     expect(ctx?.lastTokensIn).toBe(51_250);
   });
 
+  it.each(["cancelled", "errored"] as const)("retains reported usage when the turn ends %s", (outcome) => {
+    dispatch({ type: "contextEstimate", threadId: THREAD, turnExecutionId: "exec-context", tokensIn: 100, tokensOut: 20, totalProcessedTokens: 120, cacheReadTokens: 40, contextWindow: 200_000 });
+    dispatch({ type: "ended", threadId: THREAD, turnExecutionId: "exec-context", outcome });
+    expect(getTestThreadContext(THREAD)).toMatchObject({ lastTokensIn: 100, totalProcessedTokens: 120, contextWindow: 200_000 });
+  });
+
+  it("keeps measured totals when a later estimate has no usage", () => {
+    dispatch({ type: "contextEstimate", threadId: THREAD, tokensIn: 100, totalProcessedTokens: 120 });
+    dispatch({ type: "contextEstimate", threadId: THREAD, tokensIn: 110 });
+    expect(getTestThreadContext(THREAD)).toMatchObject({ lastTokensIn: 110, totalProcessedTokens: 120 });
+  });
+
   it("multiple contextEstimates accumulate sequentially", () => {
     dispatch({ type: "contextEstimate", threadId: THREAD, tokensIn: 51_000, contextWindow: 200_000 });
     dispatch({ type: "contextEstimate", threadId: THREAD, tokensIn: 52_500, contextWindow: 200_000 });

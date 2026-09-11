@@ -21,11 +21,11 @@ interface ContextTrackerProps {
   hasLowQuota?: boolean;
 }
 
-/** Returns the color tier class for the fill ring and label. */
+/** Returns the shared color tier for the label, ring, and usage bar. */
 function colorTier(pct: number) {
-  if (pct >= 90) return { text: "text-destructive", stroke: "stroke-destructive" } as const;
-  if (pct >= 70) return { text: "text-amber-500", stroke: "stroke-amber-500" } as const;
-  return { text: "text-muted-foreground", stroke: "stroke-muted-foreground/60" } as const;
+  if (pct >= 90) return { text: "text-destructive", stroke: "stroke-destructive", fill: "bg-destructive" } as const;
+  if (pct >= 70) return { text: "text-amber-500", stroke: "stroke-amber-500", fill: "bg-amber-500" } as const;
+  return { text: "text-foreground", stroke: "stroke-primary", fill: "bg-primary" } as const;
 }
 
 /**
@@ -33,7 +33,7 @@ function colorTier(pct: number) {
  *
  * Renders a full 360° ring that fills clockwise from 12 o'clock as token usage
  * grows. Hidden when no token data exists (fresh thread). The ring color shifts
- * from muted → amber (70%) → red (90%) to signal urgency. When the provider
+ * from primary → amber (70%) → red (90%) to signal urgency. When the provider
  * compacts, the ring silently animates backward.
  */
 export function ContextTracker({ tokensIn, contextWindow, totalProcessedTokens, className, hasLowQuota }: ContextTrackerProps) {
@@ -42,7 +42,7 @@ export function ContextTracker({ tokensIn, contextWindow, totalProcessedTokens, 
   const pct = Math.min(100, contextWindow > 0 ? (tokensIn / contextWindow) * 100 : 0);
   const filled = CIRCUMFERENCE * (pct / 100);
   const gap = CIRCUMFERENCE - filled;
-  const { text, stroke } = colorTier(pct);
+  const { text, stroke, fill } = colorTier(pct);
 
   const roundedPct = Math.round(pct);
   const displayPct = pct > 0 && pct < 1 ? "<1" : `${roundedPct}`;
@@ -58,17 +58,18 @@ export function ContextTracker({ tokensIn, contextWindow, totalProcessedTokens, 
         render={
           <div
             className={cn(
-              "relative flex items-center justify-center cursor-pointer",
+              "relative flex items-center justify-center cursor-pointer rounded-full focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2",
               className,
             )}
-            style={{ width: 24, height: 24 }}
+            style={{ width: "3.2rem", height: "3.2rem" }}
             aria-label={`Context window: ${tooltipLine}`}
             role="img"
+            tabIndex={0}
           >
             {/* rotate(-90deg) starts the arc at 12 o'clock */}
             <svg
-              width={24}
-              height={24}
+              width={20}
+              height={20}
               viewBox="0 0 24 24"
               className="-rotate-90"
               aria-hidden="true"
@@ -93,7 +94,7 @@ export function ContextTracker({ tokensIn, contextWindow, totalProcessedTokens, 
                 strokeLinecap="round"
                 className={cn(
                   stroke,
-                  "transition-[stroke-dasharray] duration-[600ms] ease-[cubic-bezier(0.4,0,0.2,1)]",
+                  "transition-[stroke-dasharray] duration-[600ms] ease-[cubic-bezier(0.4,0,0.2,1)] motion-reduce:transition-none",
                 )}
               />
             </svg>
@@ -104,29 +105,35 @@ export function ContextTracker({ tokensIn, contextWindow, totalProcessedTokens, 
               </div>
             )}
 
-            {/* Centre percentage — positioned absolutely so it doesn't rotate */}
-            <span
-              className={cn(
-                "absolute inset-0 flex items-center justify-center",
-                "text-xs font-semibold leading-none select-none",
-                text,
-              )}
-            >
-              {displayPct}
-            </span>
           </div>
         }
       />
-      <TooltipContent side="top" sideOffset={6}>
-        <div className="flex flex-col gap-1">
-          <span className="text-xs font-semibold tracking-widest uppercase opacity-50">
-            Context Window
-          </span>
-          <span className="text-xs font-medium">{tooltipLine}</span>
+      <TooltipContent side="top" align="end" sideOffset={8} variant="surface" className="w-72 max-w-none p-3">
+        <div className="flex w-full flex-col gap-3">
+          <div className="flex items-center justify-between gap-4">
+            <span className="font-medium">Context window</span>
+            <span className={cn("tabular-nums font-medium", text)}>{displayPct}% used</span>
+          </div>
+          <div
+            role="progressbar"
+            aria-label="Context window usage"
+            aria-valuenow={pct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuetext={tooltipLine}
+            className="h-2 overflow-hidden rounded-full bg-muted"
+          >
+            <div className={cn("h-full rounded-full", fill)} style={{ width: `${pct}%` }} />
+          </div>
+          <div className="flex items-baseline justify-between gap-4 tabular-nums">
+            <span className="whitespace-nowrap"><span className="font-medium">{abbrev(tokensIn)}</span><span className="text-muted-foreground"> / {abbrev(contextWindow)} tokens</span></span>
+            <span className="whitespace-nowrap text-muted-foreground">{abbrev(Math.max(0, contextWindow - tokensIn))} left</span>
+          </div>
           {totalProcessedTokens != null && totalProcessedTokens > tokensIn && (
-            <span className="text-xs text-muted-foreground">
-              Total processed: {abbrev(totalProcessedTokens)} tokens
-            </span>
+            <div className="flex justify-between gap-4 border-t border-border pt-2 text-muted-foreground">
+              <span>Total processed</span>
+              <span className="tabular-nums">{abbrev(totalProcessedTokens)} tokens</span>
+            </div>
           )}
         </div>
       </TooltipContent>

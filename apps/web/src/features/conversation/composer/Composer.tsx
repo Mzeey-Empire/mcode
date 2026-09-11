@@ -32,6 +32,7 @@ import { useDiffStore } from "@/stores/diffStore";
 import { handleSlashCommandPopupKey, useSlashCommand } from "@/components/chat/useSlashCommand";
 import type { Command } from "@/components/chat/useSlashCommand";
 import { SlashCommandPopup } from "@/components/chat/SlashCommandPopup";
+import { ComposerOverlayLayout } from "@/components/chat/ComposerOverlaySurface";
 import { useQueueStore } from "@/stores/queueStore";
 import { attachmentAcceptAttribute, isGoalOpen } from "@mcode/contracts";
 import type { MessageMention, SelectedTextComment } from "@mcode/contracts";
@@ -91,11 +92,6 @@ function resetPendingGoal(
   setGoalPending: (value: boolean) => void,
 ): void {
   if (isGoalOpen(activeGoal) && goalPending) setGoalPending(false);
-}
-
-function ComposerTopFade({ isNewThread }: { isNewThread: boolean | undefined }) {
-  if (isNewThread) return null;
-  return <div className="pointer-events-none absolute inset-x-0 -top-3 h-3 bg-gradient-to-t from-background/70 to-transparent" />;
 }
 
 function ComposerQueueToast({ toast }: { toast: string | null }) {
@@ -294,19 +290,10 @@ export function Composer({
   onOpenSelectedTextCommentSource,
   unavailableSelectedTextCommentIds = [],
 }: ComposerProps) {
-  // Mode/permissions/tasks toggles render inline when the composer's own
-  // container is wide enough; below the threshold they collapse behind a
-  // single overflow trigger so the send button never wraps to a new row.
   // Container-based (not viewport-based) so the layout responds to the right
   // panel opening, sidebar resizing, etc. — not just window resizes.
   const composerContainerRef = useRef<HTMLDivElement>(null);
   const composerWidth = useElementWidth(composerContainerRef);
-  // Threshold tuned so model + reasoning + Chat + Full access + Tasks +
-  // token-count badge + send button fit comfortably on one row with the
-  // standard gaps and breathing room. Below this the row collapses to a
-  // single "Composer options" trigger so the send button never gets clipped.
-  // Keep the compact 600px layout behind the overflow trigger while allowing
-  // the widened desktop rail to keep its inline controls.
   // Default to inline before the first measurement lands so the first frame
   // doesn't briefly render the popover trigger and snap to inline buttons.
   const showInlineComposerOptions = showComposerOptionsInline(composerWidth);
@@ -646,11 +633,10 @@ export function Composer({
 
   return (
     <div className="relative px-4 py-4 sm:px-8">
-      <ComposerTopFade isNewThread={isNewThread} />
       <ComposerQueueToast toast={toast} />
 
       {/* Max-width wrapper to align with message list column */}
-      <div className={PRIMARY_CONTENT_RAIL_CLASS}>
+      <ComposerOverlayLayout className={PRIMARY_CONTENT_RAIL_CLASS}>
         <ComposerProviderNoticeSurface
           threadId={threadId}
           composerContainerRef={composerContainerRef}
@@ -791,8 +777,8 @@ export function Composer({
           onComposerModeChange={setComposerMode}
           onBranchModeChange={setBranchExecMode}
         />
-      </div>{/* end max-width wrapper */}
 
+      </ComposerOverlayLayout>
       <SlashCommandPopup
         state={slashCommand.state}
         selectedIndex={slashCommand.selectedIndex}

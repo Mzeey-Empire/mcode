@@ -1406,7 +1406,7 @@ describe("session.modelFallback", () => {
   });
 });
 
-describe("subagent count via markPriorToolCallsComplete", () => {
+describe("subagent count during overlapping tool calls", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     resetThreadStoreForTests({
@@ -1444,7 +1444,7 @@ describe("subagent count via markPriorToolCallsComplete", () => {
     );
   });
 
-  it("leaves multiple in-flight Agent calls untouched while sweeping non-Agent peers", () => {
+  it("leaves in-flight Agent calls and non-Agent peers active until their results", () => {
     resetThreadStoreForTests({
       records: new Map<string, ThreadRecord>([
         [
@@ -1468,8 +1468,7 @@ describe("subagent count via markPriorToolCallsComplete", () => {
     // Both Agent calls remain live
     expect(calls.find((c) => c.id === "agent-1")?.isComplete).toBe(false);
     expect(calls.find((c) => c.id === "agent-2")?.isComplete).toBe(false);
-    // The non-Agent peer is swept as expected
-    expect(calls.find((c) => c.id === "read-1")?.isComplete).toBe(true);
+    expect(calls.find((c) => c.id === "read-1")?.isComplete).toBe(false);
     expect(countActiveSubagentCalls(getTestThreadToolCalls("thread-1"))).toBe(
       2,
     );

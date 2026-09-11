@@ -106,6 +106,15 @@ function emitFixtureTurn(notify) {
       notify(notice.method, notice.params);
     }
   }
+  notify("thread/tokenUsage/updated", {
+    threadId: FIXTURE_NATIVE_THREAD_ID,
+    turnId: FIXTURE_NATIVE_TURN_ID,
+    tokenUsage: {
+      total: { totalTokens: 83000, inputTokens: 82000, cachedInputTokens: 0, outputTokens: 1000, reasoningOutputTokens: 0 },
+      last: { totalTokens: 83000, inputTokens: 82000, cachedInputTokens: 0, outputTokens: 1000, reasoningOutputTokens: 0 },
+      modelContextWindow: 258000,
+    },
+  });
   notify("item/completed", {
     threadId: FIXTURE_NATIVE_THREAD_ID,
     turnId: FIXTURE_NATIVE_TURN_ID,

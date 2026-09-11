@@ -9,7 +9,7 @@
 - Runtime inspection exposes active count and authoritative runtime snapshots without provider payloads.
 - Codex protocol notices use bounded canonical events. Reroutes, warnings, configuration, deprecation, workspace-security, recovery, and unknown notices never expose raw protocol payloads.
 - Codex automatic approval review renders one reviewing tool call and one durable terminal result for each native review identity.
-- Current provider notices use one expandable surface above Composer. Configuration and deprecation notices remain quiet until requested.
+- Security and model-change notices use one expandable surface above Composer. Routine warnings, configuration, deprecation, and authentication recovery remain persisted but do not render in chat or Composer.
 - Public conversation page and first-paint tail queries restore the bounded current-session notice collection separately from transcript messages.
 
 ## How to get to it (user POV)
@@ -20,6 +20,17 @@
 4. Reload or reopen the conversation and confirm that the reply remains.
 
 ## Driving it with verify-mcode
+
+### Activity label check
+
+Use `scripts/transcript-provider-fixture.mjs` as the Codex CLI in the owned Electron runtime.
+Send `activity label verification` in a fresh thread under `.dev/fixture-repo`.
+Observe `Inspecting layout`, `Reading settings.ts`, `Thinking...`, then `Checking tests`.
+Each stage lasts eight seconds after the initial fixture delay. The tool description must replace the heading while the tool is active.
+Confirm that the indicator disappears after completion and remains absent when you reopen the thread. Restore the original CLI path afterward.
+This fixture checks the production Codex event boundary, not a real model run or another provider's adapter.
+
+## Runtime checks
 
 Run `runtime health`, then run:
 
@@ -38,13 +49,13 @@ app-server protocol; Mcode has no notice-trigger button.
 
 | Native notification | Trigger evidence to capture | Expected desktop surface |
 | --- | --- | --- |
-| `warning` | Codex reports a warning | A Provider warning above Composer |
+| `warning` | Codex reports a warning | No chat row or Composer notice |
 | `guardianWarning` | Codex reports a security warning | A Security warning above Composer |
 | `windows/worldWritableWarning` | Codex reports writable paths or an incomplete scan | Expand the Security warning for bounded path samples |
-| `configWarning` | Codex reports a configuration diagnostic | Review notices, including the supplied path and line range |
-| `deprecationNotice` | Codex reports a deprecation diagnostic | Review notices |
+| `configWarning` | Codex reports a configuration diagnostic | No chat row or Composer notice |
+| `deprecationNotice` | Codex reports a deprecation diagnostic | No chat row or Composer notice |
 | `model/rerouted` | Codex supplies the source model, destination model, and `highRiskCyberActivity` reason | One Composer notice without a duplicate toast |
-| `modelProvider/authRecoveryCompleted` | Codex confirms provider authentication recovery | A system notice in chat |
+| `modelProvider/authRecoveryCompleted` | Codex confirms provider authentication recovery | No chat row or Composer notice |
 
 1. Start an owned Codex thread from the desktop Composer. Record the actual
    provider condition and notification method without credentials or raw payloads.
@@ -70,7 +81,7 @@ Set the returned path as the owned Electron runtime's Codex CLI path. Start a
 fresh direct Codex thread and send one message. One fixture process supports one
 turn. It drives the native app-server boundary, then emits duplicate
 configuration and reroute deliveries plus one guardian security warning, plain
-warning, authentication-recovery notice, and terminal answer. The duplicate
+warning, authentication-recovery notice, token usage, and terminal answer. The duplicate
 deliveries prove the existing deduplication path. It does not recreate a real
 upstream condition. It does not cover deprecation notices or Windows
 writable-path scans. Restore the prior CLI path before you run `desktop
@@ -90,8 +101,11 @@ or picker state through the DOM, client store, or database.
    notice is hidden, press Escape, then assert that the notice returns and the
    exact draft remains. The picker and notice do not coexist by design.
 3. Open Add to composer while a notice remains visible. Record the Add menu at
-   `z-index` `40` and, where their rectangles overlap, use `elementFromPoint`
-   to confirm that an Add-menu descendant receives the hit.
+   `z-index` `45`, fixed positioning, and its `document.body` portal parent.
+   Confirm that opening the menu does not move the editor. Focus the editor
+   and type `/` while Add remains open. Where the menus overlap, use
+   `elementFromPoint` to confirm that an Add-menu descendant receives the hit
+   above the slash picker at `z-index` `40`.
 4. Open a real application overlay primitive without changing fixture state.
    Record its `z-index` `50` and a hit test or screenshot showing that it
    covers the notice. The check may use a dialog, popover, tooltip, dropdown,
@@ -106,7 +120,7 @@ Portal-backed composer overlays are not constrained by that local stacking
 context. The desktop title-bar root uses `z-index` `60`; its descendants share
 that root context.
 
-The current controlled Electron receipt is
+The earlier controlled Electron receipt is
 `.dev/verification/composer-layering/receipt.json`. It records a `BODY` notice
 portal at `z-index` `30`; slash and mention pickers at `40`; coexisting Add menu
 and notice surfaces at `40` and `30`; and a Command palette dialog at `50` that

@@ -220,6 +220,10 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
       tokensIn: z.number(),
       /** Model context window size, forwarded from SDK when available. */
       contextWindow: z.number().optional(),
+      /** Usage reported so far, independent of the turn's terminal outcome. */
+      tokensOut: z.number().nonnegative().optional(),
+      totalProcessedTokens: z.number().nonnegative().optional(),
+      cacheReadTokens: z.number().nonnegative().optional(),
     }),
     z.object({
       type: z.literal(AgentEventType.QuotaUpdate),

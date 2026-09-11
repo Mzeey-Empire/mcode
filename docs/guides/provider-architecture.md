@@ -2,6 +2,16 @@
 
 All agent providers must use a **persistent process per session**, not per-turn spawning.
 
+When all clients disconnect, a regular Mcode server waits for its shutdown grace
+period. Active agent turns defer shutdown. Open terminals and idle provider
+sessions do not. Graceful shutdown closes those remaining resources. Supervised
+agent runtimes stay alive until their supervisor stops them.
+
+Shutdown closes terminal process scopes concurrently through the PTY host. The
+host has 25 seconds for graceful cleanup. The server watchdog allows 35 seconds
+for the full shutdown. The desktop waits 40 seconds before forced cleanup of its
+owned server. Startup, heartbeat, and normal operation deadlines do not change.
+
 ## Shared lifecycle: SessionRuntime + ProtocolAdapter
 
 The uniform session lifecycle lives privately in `packages/providers`.
@@ -39,6 +49,16 @@ When adding a new provider:
   surface raw stderr as user-facing error messages
 
 ## Event boundary
+
+### Activity labels
+
+Providers use the existing canonical events for the live activity label. No provider-specific UI branch is required.
+Set `toolInput.description` on `ToolUse` to supply a short action label. Keep credentials and raw command arguments out of this description.
+Without a description, the UI uses a file action or the tool category. `ToolResult` ends that action.
+Non-final `TextDelta` events can supply a Markdown summary heading, such as `**Inspecting layout**`.
+The label uses the latest active root tool first, then a complete heading from the current open thought segment, then `Thinking...`.
+Completed tools, child tools, and closed thought segments do not supply the label. Plain narration does not become an inferred activity.
+Codex already forwards non-final summary deltas. Claude and Cursor use the same tool and narration events; adapters can add descriptions without a wire-schema change.
 
 A provider emits a `ProviderRuntimeEvent`. Its `event` is provider-neutral data
 that may reach the renderer. Its optional extension contains provider-native

@@ -128,6 +128,14 @@ import { createReliabilityHarnessAdapter } from "../../runtime/reliability-harne
 
 /** Start the server runtime and install its shutdown handlers. */
 export async function startServer(): Promise<void> {
+const startupStartedAt = performance.now();
+/** Records completed startup boundaries without environment values or credentials. */
+function recordStartupCheckpoint(stage: string): void {
+  logger.info("Server startup checkpoint completed", {
+    stage, pid: process.pid, elapsedMs: Math.round(performance.now() - startupStartedAt),
+  });
+}
+recordStartupCheckpoint("bootstrap entered");
 // process.title affects `ps`/`top`/`htop` output on Unix and the console window
 // title. On Windows, Task Manager pulls the display name from the binary's
 // VERSIONINFO instead — that's set at packaging time by the build-server-binary
@@ -226,6 +234,7 @@ function inspectCleanShutdownMarker(): void {
 }
 
 inspectCleanShutdownMarker();
+recordStartupCheckpoint("configuration resolved and shutdown marker inspected");
 
 /** Standalone dev: populate MCODE_GIT_BRANCH / MCODE_GIT_TOPLEVEL before DB path selection. */
 function applyDevGitCheckoutEnv(): void {
@@ -237,6 +246,7 @@ function applyDevGitCheckoutEnv(): void {
         cwd,
         timeout: 3000,
         encoding: "utf8",
+        windowsHide: true,
       });
       const branch = stdout.trim();
       if (branch && branch !== "HEAD") {
@@ -252,6 +262,7 @@ function applyDevGitCheckoutEnv(): void {
         cwd,
         timeout: 3000,
         encoding: "utf8",
+        windowsHide: true,
       });
       const top = stdout.trim();
       if (top) {
@@ -264,9 +275,11 @@ function applyDevGitCheckoutEnv(): void {
 }
 
 applyDevGitCheckoutEnv();
+recordStartupCheckpoint("checkout environment resolved");
 
 // Initialize DI container (PtyPidRegistry needs the data dir path at construction time)
 const container = setupContainer(getMcodeDir());
+recordStartupCheckpoint("dependency container initialized");
 
 const browserAutomationCredentials = container.resolve(BrowserAutomationCredentialRegistry);
 const browserAutomationSessionLease = container.resolve(BrowserAutomationSessionLease);
@@ -353,6 +366,7 @@ const enricher = container.resolve(WorkspaceEnricher);
 const filesystemBrowser = container.resolve(FilesystemBrowser);
 const modelCacheService = container.resolve(ModelCacheService);
 const providerUsageWarmup = container.resolve(ProviderUsageWarmupService);
+recordStartupCheckpoint("services resolved");
 
 seedAgentRuntimeWorkspace({
   MCODE_AGENT_RUNTIME: process.env.MCODE_AGENT_RUNTIME,
@@ -567,6 +581,7 @@ function recoverTurnsAtStartup(): void {
 }
 
 recoverTurnsAtStartup();
+recordStartupCheckpoint("turn recovery completed");
 
 /** Marks startup records interrupted because no process survives server restart. */
 function interruptThreadStartupsAtStartup(): void {
@@ -796,7 +811,8 @@ function listen(port: number): void {
     },
     onListening: (listeningPort) => {
       externalThreadControlMcpRuntime.setPort(listeningPort);
-      logger.info(`Mcode server listening on ${HOST}:${listeningPort}`);
+      logger.info(`Mcode server started on ${HOST}:${listeningPort}`);
+      recordStartupCheckpoint("HTTP listener opened");
 
       const browserMcpHost = HOST === "::1" ? "[::1]" : "127.0.0.1";
       browserAutomationSessionLease.configure({
@@ -834,11 +850,8 @@ let graceController: ReturnType<typeof createGraceController> | null = null;
 function startServerAndSubscribe(): void {
   listen(PREFERRED_PORT);
 
-  // isBusy guards against shutting down mid-turn or mid-terminal session.
-  // Both services are resolved from the container before this function is called.
-  const isBusy = () =>
-    agentService.runtimeAccess().activeCount() > 0 ||
-    terminalService.listActiveSessions().length > 0;
+  // Idle terminals must not retain a server after every client disconnects.
+  const isBusy = () => agentService.runtimeAccess().activeCount() > 0;
 
   graceController = createGraceController({
     graceMs: GRACE_PERIOD_MS,
@@ -868,14 +881,18 @@ killOrphanedServer({ lockFilePath: LOCK_FILE_PATH, logger, platform: hostRuntime
 const pidRegistry = container.resolve<PtyPidRegistry>("PtyPidRegistry");
 reapOrphanedPtys(pidRegistry, logger, { platform: hostRuntime.platform });
 projectActionService.recoverStaleRuns();
+recordStartupCheckpoint("orphan cleanup and stale action recovery completed");
 
 async function bootstrapServer(): Promise<void> {
   try {
     await threadControlService.recoverApprovals();
+    recordStartupCheckpoint("approval recovery completed");
     externalThreadControlMcpRuntime.reconcileOnStartup();
+    recordStartupCheckpoint("external thread control reconciled");
     await workspaceEnvironmentService.reconcileAutomaticSetup();
+    recordStartupCheckpoint("automatic workspace setup reconciled");
   } catch (err) {
-    logger.error("Startup recovery failed; refusing to accept work", {
+    logger.error("Startup recovery failed; server startup stopped", {
       error: err instanceof Error ? err.message : String(err),
     });
     process.exit(1);
@@ -883,6 +900,7 @@ async function bootstrapServer(): Promise<void> {
 
   try {
     await ipcServer.listen(ipcPath);
+    recordStartupCheckpoint("IPC listener opened");
   } catch (err) {
     logger.error("IPC server failed to start, fell back to WebSocket-only push", {
       error: err instanceof Error ? err.message : String(err),
@@ -926,7 +944,7 @@ async function shutdown(): Promise<void> {
 
   // 2. Shutdown provider registry
   shutdownCoordinator.setPhase("shutdown providers");
-  providerRegistry.shutdown();
+  await providerRegistry.shutdown();
   browserAutomationBroker.shutdown();
   browserAutomationSessionLease.shutdown();
 

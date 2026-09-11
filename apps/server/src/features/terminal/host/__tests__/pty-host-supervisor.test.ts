@@ -98,6 +98,32 @@ class FakeHostChild extends NodeEvents.EventEmitter implements PtyHostChild {
 }
 
 describe("PtyHostSupervisor", () => {
+  it("waits for graceful host exit beyond the normal operation deadline", async () => {
+    vi.useFakeTimers();
+    const child = new FakeHostChild();
+    const supervisor = new PtyHostSupervisor({
+      platform: "windows",
+      spawnHost: () => child,
+      cleanupLedger: new InMemoryPtyHostCleanupLedger(),
+    });
+    try {
+      await supervisor.start();
+      child.send.mockImplementation((_message, callback) => {
+        callback?.(null);
+        return true;
+      });
+      const stopped = supervisor.shutdown();
+      await vi.advanceTimersByTimeAsync(7_600);
+      expect(child.kill).not.toHaveBeenCalled();
+      Object.defineProperty(child, "connected", { value: false });
+      child.emit("exit", 0, null);
+      await stopped;
+      expect(child.kill).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("starts one healthy generation and replaces one crashed host", async () => {
     vi.useFakeTimers();
     const children: FakeHostChild[] = [];
@@ -307,6 +333,59 @@ describe("PtyHostSupervisor", () => {
       "PTY host channel is unavailable",
     );
     expect(supervisor.health().state).toBe("unhealthy");
+  });
+
+  it("clears a rejected startup when spawning the host throws", async () => {
+    const spawnError = new Error("PTY host executable is unavailable");
+    const supervisor = new PtyHostSupervisor({
+      platform: "windows",
+      cleanupLedger: new InMemoryPtyHostCleanupLedger(),
+      spawnHost: () => {
+        throw spawnError;
+      },
+    });
+
+    const starting = supervisor.start();
+    await expect(starting).rejects.toBe(spawnError);
+    expect(supervisor.health().state).toBe("unhealthy");
+    const whenHealthy = supervisor.whenHealthy();
+    expect(whenHealthy).not.toBe(starting);
+    await expect(whenHealthy).rejects.toBeInstanceOf(Error);
+    await supervisor.shutdown();
+  });
+
+  it("settles a synchronous replacement spawn failure without retaining its rejection", async () => {
+    vi.useFakeTimers();
+    const children: FakeHostChild[] = [];
+    const spawnHost = vi.fn(() => {
+      if (children.length > 0) {
+        throw new Error("PTY host executable is unavailable");
+      }
+      const child = new FakeHostChild();
+      children.push(child);
+      return child;
+    });
+    const supervisor = new PtyHostSupervisor({
+      platform: "windows",
+      cleanupLedger: new InMemoryPtyHostCleanupLedger(),
+      spawnHost,
+    });
+
+    await supervisor.start();
+    children[0]!.crash();
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(supervisor.health()).toEqual({
+      hostGeneration: "2",
+      state: "unhealthy",
+    });
+    expect(children[0]!.disposeContainment).toHaveBeenCalledOnce();
+    await expect(supervisor.whenHealthy()).rejects.toBeInstanceOf(Error);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(spawnHost).toHaveBeenCalledTimes(2);
+    await supervisor.shutdown();
+    expect(children[0]!.disposeContainment).toHaveBeenCalledOnce();
+    vi.useRealTimers();
   });
 
   it("rejects child inspection when the session exits before the host responds", async () => {

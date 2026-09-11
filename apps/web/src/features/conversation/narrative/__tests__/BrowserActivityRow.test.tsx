@@ -45,6 +45,20 @@ function editCall(): ToolCall {
 }
 
 describe("BrowserActivityRow", () => {
+  it("leaves virtual group children to the viewport instead of mounting a hidden list", () => {
+    const { container } = render(
+      <ToolSummaryLine
+        group={{ calls: Array.from({ length: 180 }, (_, index) => browserCall({ id: `browser-${index}` })) }}
+        hasError={false}
+        hasCancelled={false}
+        virtualExpansion={{ open: true, onToggle: () => undefined }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Used the browser" })).toHaveAttribute("aria-expanded", "true");
+    expect(container.querySelectorAll("li")).toHaveLength(0);
+    expect(container.textContent).not.toContain("Clicked the page");
+  });
+
   it("renders the accepted grouped summary and chronological safe details", () => {
     const { container } = render(
       <ToolSummaryLine

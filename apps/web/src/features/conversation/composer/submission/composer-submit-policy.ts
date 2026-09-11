@@ -1,13 +1,12 @@
 import { isGoalControlCommand } from "@/lib/goal-command";
 import { useThreadStore } from "@/stores/threadStore";
 
-/** Resolve submit state from both the rendered value and the newest thread-store snapshot. */
+/** Resolve submit state from the newest snapshot, not an earlier render. */
 export function isThreadRunningForSubmit(
   threadId: string | undefined,
   renderedIsAgentRunning: boolean,
 ): boolean {
-  if (renderedIsAgentRunning) return true;
-  return threadId ? useThreadStore.getState().runningThreadIds.has(threadId) : false;
+  return threadId ? useThreadStore.getState().runningThreadIds.has(threadId) : renderedIsAgentRunning;
 }
 
 /** Decide whether an existing-thread submit must wait behind the active turn. */

@@ -64,7 +64,7 @@ export function normalizeFrontendRendererRuntimes(value) {
 /** Performance-build MessageList timing stages that are intentionally narrower than whole React commits. */
 export const MESSAGE_LIST_PERFORMANCE_STAGE_NAMES = Object.freeze([
   "narrativeItemProjection",
-  "tanstackVirtualItems",
+  "vlistRows",
 ]);
 
 /** The worker contract is the producer; runner validation mirrors this serialized boundary. */
@@ -1070,7 +1070,7 @@ const MESSAGE_LIST_BEHAVIOR_ASSERTIONS = [
 ];
 
 function validateDenseNarrative(check) {
-  return failuresForChecks(check, [[check.sourceRows === 90, "dense narrative fixture row count differs"], [check.descendants < 500, "dense narrative viewport exceeded 499 descendants"], [check.browseDescendants < 500, "dense narrative browser exceeded 499 descendants"], [check.browsed === true, "dense narrative browser did not reach every page"], [check.returnedToSummary === true, "dense narrative browser did not return to summary"], [check.visible === true, "dense narrative message is not visible"], [check.assistantVisible === true, "dense narrative response content is missing"], [check.thoughtVisible === true, "dense narrative thought content is missing"], [check.lastThoughtVisible === true, "dense narrative final thought is missing"], [check.toolVisible === true, "dense narrative tool content is missing"], [check.lastToolVisible === true, "dense narrative final tool is missing"], [check.hookVisible === true, "dense narrative hook content is missing"]]);
+  return failuresForChecks(check, [[check.sourceRows === 90, "dense narrative fixture row count differs"], [check.allThoughtsVisible === true, "dense narrative text is not fully inline"], [check.hasBrowseControls === false, "dense narrative still has browse controls"], [check.visible === true, "dense narrative message is not visible"], [check.assistantVisible === true, "dense narrative response content is missing"], [check.thoughtVisible === true, "dense narrative thought content is missing"], [check.lastThoughtVisible === true, "dense narrative final thought is missing"], [check.toolVisible === true, "dense narrative tool content is missing"], [check.lastToolVisible === true, "dense narrative final tool is missing"], [check.hookVisible === true, "dense narrative hook content is missing"]]);
 }
 
 /** Returns profiling failures for one measured narrative-row update. */
@@ -1113,51 +1113,6 @@ function collectPageFailures(observations, expectedPageUrl) {
   return failures;
 }
 
-/** Add dense-narrative disclosure observations and reset the fixture afterwards. */
-async function addDenseNarrativeDisclosureCheck(page, denseNarrative) {
-  if (!denseNarrative) return;
-  let denseDisclosureCheck;
-  try {
-    denseDisclosureCheck = await page.evaluate(async function collectDenseNarrativeDisclosure() {
-      const list = document.querySelector('[data-testid="message-list"]');
-      const expand = [...document.querySelectorAll("button")].find((button) =>
-        button.textContent?.startsWith("Browse all "),
-      );
-      expand?.click();
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      let browseDescendants = list?.querySelectorAll("*").length ?? 0;
-      let pageCount = 0;
-      while (pageCount < 20) {
-        pageCount += 1;
-        const next = [...document.querySelectorAll("button")].find((button) =>
-          button.textContent === "Next" && !button.disabled,
-        );
-        if (!next) break;
-        next.click();
-        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-        browseDescendants = Math.max(
-          browseDescendants,
-          list?.querySelectorAll("*").length ?? 0,
-        );
-      }
-      const summary = [...document.querySelectorAll("button")].find((button) =>
-        button.textContent === "Summary",
-      );
-      summary?.click();
-      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      return {
-        browsed: pageCount > 1,
-        returnedToSummary: [...document.querySelectorAll("button")].some((button) =>
-          button.textContent?.startsWith("Browse all "),
-        ),
-        browseDescendants,
-      };
-    });
-  } finally {
-    await resetFixtureRuntime(page);
-  }
-  for (const check of denseNarrative.checks) Object.assign(check, denseDisclosureCheck);
-}
 
 /** Run the shared frontend renderer matrix against one Playwright page. */
 export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "production", options = {}) {
@@ -1335,7 +1290,7 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
       const visualStreamingCommitted = await waitForStreamingCommit(expectedText)
         && await waitForVisibleStreamingUpdate("token-199");
       unsubscribe();
-      const list = document.querySelector('[data-testid="message-list"]')?.firstElementChild;
+      const list = document.querySelector('[data-testid="transcript-viewport"]');
       const tailFollowed = list instanceof HTMLElement
         && Math.abs(list.scrollHeight - list.scrollTop - list.clientHeight) <= 4;
       const awayTop = list instanceof HTMLElement
@@ -1421,7 +1376,7 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
         }
         return false;
       };
-      const list = () => document.querySelector('[data-testid="message-list"]')?.firstElementChild;
+      const list = () => document.querySelector('[data-testid="transcript-viewport"]');
       const scroll = (element) => element?.dispatchEvent(new Event("scroll", { bubbles: true }));
       const visibleAnchor = (element) => {
         if (!(element instanceof HTMLElement)) return null;
@@ -2078,6 +2033,10 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
 
         createNarrativeVisibilityOracle(list) {
           return {
+            allThoughtsVisible: Array.from({ length: 20 }, (_, index) => index)
+              .every((index) => this.listTextIncludes(list, `Narration segment ${index} `)),
+            hasBrowseControls: [...(list?.querySelectorAll("button") ?? [])]
+              .some((button) => /^(Browse all .* activity rows|Previous|Next|Summary)$/.test(button.textContent ?? "")),
             assistantVisible: this.listTextIncludes(list, "Dense narrative fixture completed."),
             thoughtVisible: this.listTextIncludes(list, "Narration segment 0"),
             lastThoughtVisible: this.listTextIncludes(list, "Narration segment 19"),
@@ -2118,9 +2077,7 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
 
       return new DenseNarrativeWorkload().run();
     }, { sampleIndex: sample, profileUpdate: mode === "profiling" && sample >= 0 });
-    }, modeCollector, { deferFinalReset: true }));
-
-  await addDenseNarrativeDisclosureCheck(page, denseNarrative);
+    }, modeCollector));
 
   const markdownShiki = await runSelectedWorkload(selectedWorkloads, "markdownShiki", () =>
     timeFixture(page, sampleCount, async (sample) => {
@@ -2367,7 +2324,7 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
     sampleCount,
     workloads,
     attributionSignals: {
-      tanstackVirtualItems: "Duration of TanStack Virtual getVirtualItems(), not total virtualizer cost.",
+      vlistRows: "Duration of vlist row reconciliation and position calculation, excluding React rendering.",
       narrativeItemProjection: "Duration of MessageList buildStableItems(), including narrative-item construction, not total narrative rendering.",
       resizeObserverCallbackTraceMs: "Chromium trace duration for ResizeObserver-named events; null when Chromium does not expose them.",
       gcTraceMs: "Chromium trace duration for GC-named events; null when Chromium does not expose them.",

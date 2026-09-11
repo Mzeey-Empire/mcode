@@ -22,6 +22,8 @@ import {
 import { NarrativeSummaryLine } from "./NarrativeSummaryLine";
 
 interface ToolSummaryLineProps {
+  /** Keeps expansion in the owning viewport when children are separate virtual rows. */
+  virtualExpansion?: { readonly open: boolean; readonly onToggle: () => void };
   /** The group of consecutive tool calls to summarize. */
   group: ToolGroup;
   /** Whether any call in the group errored. */
@@ -81,7 +83,8 @@ function ApprovalReviewDetailRow({ toolCall }: { toolCall: ToolCall }) {
   );
 }
 
-function ToolCallDetailRow({ toolCall: tc }: { toolCall: ToolCall }) {
+/** Renders one completed tool call inside a semantic list. */
+export function ToolCallDetailRow({ toolCall: tc }: { toolCall: ToolCall }) {
   if (tc.toolName === "Approval review") return <ApprovalReviewDetailRow toolCall={tc} />;
   if (isShellTool(tc.toolName)) return (
     <li className="min-w-0 max-w-full">
@@ -128,23 +131,30 @@ function ToolCallDetailRow({ toolCall: tc }: { toolCall: ToolCall }) {
  * expands an indented list of individual tool calls with per-call icons,
  * labels, detail text, status badges, and optional inline output blocks.
  */
-export function ToolSummaryLine({
-  group,
-  hasError,
-  hasCancelled,
-}: ToolSummaryLineProps) {
-  const [open, setOpen] = useState(false);
-  const hasBrowserActivity = group.calls.some(isBrowserNarrativeCall);
-
-  if (hasBrowserActivity) {
+export function ToolSummaryLine(props: ToolSummaryLineProps) {
+  const [localOpen, setOpen] = useState(false);
+  const open = props.virtualExpansion?.open ?? localOpen;
+  const onToggle = props.virtualExpansion?.onToggle ?? (() => setOpen((previous) => !previous));
+  if (props.group.calls.some(isBrowserNarrativeCall)) {
     return (
       <BrowserActivitySummary
-        calls={group.calls}
+        calls={props.group.calls}
+        virtualExpansion={props.virtualExpansion}
         renderOtherCall={(call) => <ToolCallDetailRow key={call.id} toolCall={call} />}
       />
     );
   }
+  return <ToolGroupDetails {...props} open={open} onToggle={onToggle} />;
+}
 
+function ToolGroupDetails({
+  group,
+  hasError,
+  hasCancelled,
+  virtualExpansion,
+  open,
+  onToggle,
+}: ToolSummaryLineProps & { open: boolean; onToggle: () => void }) {
   const firstCall = group.calls[0];
   const LeadingIcon = firstCall
     ? (TOOL_ICONS[resolveToolName(firstCall.toolName)] ?? DEFAULT_ICON)
@@ -167,7 +177,7 @@ export function ToolSummaryLine({
       {/* Summary row */}
       <NarrativeSummaryLine
         open={open}
-        onToggle={() => setOpen((prev) => !prev)}
+        onToggle={onToggle}
         icon={<LeadingIcon className="h-3 w-3 shrink-0 text-muted-foreground/55" />}
         badge={worstBadge ? <StatusBadge status={worstBadge} /> : undefined}
       >
@@ -177,7 +187,7 @@ export function ToolSummaryLine({
       </NarrativeSummaryLine>
 
       {/* Expanded detail list */}
-      {open ? (
+      {open && !virtualExpansion ? (
         <AnimatedCollapsible open>
           <ul className="mt-1 min-w-0 max-w-full space-y-1 pb-2 pl-6">
             {group.calls.map((tc) => <ToolCallDetailRow key={tc.id} toolCall={tc} />)}

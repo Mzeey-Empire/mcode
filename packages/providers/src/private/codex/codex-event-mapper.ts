@@ -1,6 +1,6 @@
 import * as NodeCrypto from "node:crypto";
 import { mapCodexNotice } from "./codex-notices.js";
-import { parseCodexNotification } from "./codex-notification-validation.js";
+import { parseCodexNotification, type CodexTokenUsage } from "./codex-notification-validation.js";
 import { codexIgnoredNotificationReason, type CodexNotificationDisposition } from "./codex-notification-policy.js";
 import { logger } from "@mcode/shared";
 import { AgentEventType } from "@mcode/contracts";
@@ -133,6 +133,8 @@ export class CodexEventMapper {
   private mainCodexThreadId: string | undefined;
   /** Native turn identity that owns direct approval-review notifications. */
   private activeMainTurnId: string | undefined;
+  private turnTokenUsage: CodexTokenUsage | undefined;
+  private turnTokenBaseline: Pick<CodexTokenUsage["total"], "totalTokens" | "cachedInputTokens" | "outputTokens"> | undefined;
   /** Per-item streaming command output buffers, keyed by itemId. */
   private readonly commandOutputBuffers = new Map<string, BoundedToolOutputBuffer>();
   /** Start-time ToolUse signatures, so completion enrichment only emits when details changed. */
@@ -568,6 +570,7 @@ export class CodexEventMapper {
     if (notice) return this.withChildNotificationEvidence(notice, context, undefined, "notice");
     const handlers: Record<string, () => CodexMappedEvent[]> = {
       "turn/started": () => this.mapChildTurnStarted(context),
+      "thread/tokenUsage/updated": () => [],
       "item/commandExecution/outputDelta": () => this.mapChildCommandOutputDelta(notification),
       "item/agentMessage/delta": () => this.mapChildAssistantDelta(notification, context),
       "item/reasoning/textDelta": () => [],
@@ -1775,6 +1778,10 @@ export class CodexEventMapper {
   }
 
   private mapMainNotification(notification: CodexNotification): CodexMappedEvent[] {
+    if (notification.method === "turn/completed") {
+      const turnId = (notification.params as { turn?: { id?: string } }).turn?.id;
+      if (this.activeMainTurnId && turnId && turnId !== this.activeMainTurnId) return [];
+    }
     const lifecycle = this.mapMainLifecycleNotification(notification);
     if (lifecycle) return lifecycle;
     if (this.turnEnded && TURN_CONTENT_METHODS.has(notification.method)) return this.ignoreEndedMainNotification(notification.method);
@@ -1841,6 +1848,7 @@ export class CodexEventMapper {
       "item/commandExecution/outputDelta": () => this.mapCommandOutputDelta(notification),
       "item/completed": () => this.mapMainItemCompleted(notification),
       "turn/completed": () => this.mapMainTurnCompleted(notification),
+      "thread/tokenUsage/updated": () => this.recordMainTokenUsage(notification),
       error: () => this.mapMainError(notification),
     };
     const events = dispatchNativeHandler<CodexMappedEvent[]>(handlers, notification.method);
@@ -1994,13 +2002,39 @@ export class CodexEventMapper {
     return events;
   }
 
+  private recordMainTokenUsage(notification: CodexNotification): CodexMappedEvent[] {
+    if (notification.unrecognized || notification.method !== "thread/tokenUsage/updated") return [];
+    if (this.turnEnded || notification.params.turnId !== this.activeMainTurnId) return [];
+    const usage = notification.params.tokenUsage;
+    // The first update can include earlier turns from a resumed native thread.
+    this.turnTokenBaseline ??= {
+      totalTokens: usage.total.totalTokens - usage.last.totalTokens,
+      cachedInputTokens: usage.total.cachedInputTokens - usage.last.cachedInputTokens,
+      outputTokens: usage.total.outputTokens - usage.last.outputTokens,
+    };
+    this.turnTokenUsage = usage;
+    return [{ type: AgentEventType.ContextEstimate, threadId: this.threadId, ...this.currentTokenUsage() }];
+  }
+
+  private currentTokenUsage(usage: { input_tokens?: number; cached_input_tokens?: number; output_tokens?: number } = {}) {
+    const native = this.turnTokenUsage;
+    const baseline = this.turnTokenBaseline;
+    if (native && baseline) return {
+      tokensIn: native.last.inputTokens,
+      tokensOut: native.total.outputTokens - baseline.outputTokens,
+      totalProcessedTokens: native.total.totalTokens - baseline.totalTokens,
+      cacheReadTokens: native.total.cachedInputTokens - baseline.cachedInputTokens || undefined,
+      contextWindow: native.modelContextWindow ?? undefined,
+    };
+    const tokensIn = usage.input_tokens ?? 0;
+    const tokensOut = usage.output_tokens ?? 0;
+    return { tokensIn, tokensOut, totalProcessedTokens: tokensIn + tokensOut, cacheReadTokens: usage.cached_input_tokens || undefined, contextWindow: undefined };
+  }
+
   private finishCompletedMainTurn(usage: { input_tokens?: number; cached_input_tokens?: number; output_tokens?: number } | undefined): CodexMappedEvent[] {
-    const inputTokens = usage?.input_tokens ?? 0;
-    const cachedInputTokens = usage?.cached_input_tokens ?? 0;
-    const tokensOut = usage?.output_tokens ?? 0;
     const events = [...this.drainPendingAssistantBoundary(true), ...this.finishActiveApprovalReviews("Review aborted")];
     if (this.lastCompletedAssistantText) events.push({ type: AgentEventType.Message, threadId: this.threadId, content: this.lastCompletedAssistantText, tokens: null });
-    events.push({ type: AgentEventType.TurnComplete, threadId: this.threadId, reason: "end_turn", costUsd: null, tokensIn: inputTokens, tokensOut, contextWindow: undefined, totalProcessedTokens: inputTokens + cachedInputTokens + tokensOut, cacheReadTokens: cachedInputTokens || undefined, providerId: "codex" });
+    events.push({ type: AgentEventType.TurnComplete, threadId: this.threadId, reason: "end_turn", costUsd: null, ...this.currentTokenUsage(usage), providerId: "codex" });
     this.completeMainTurnState();
     return events;
   }
@@ -2036,6 +2070,8 @@ export class CodexEventMapper {
 
   /** Resets per-turn accumulated state between turns. */
   reset(): void {
+    this.turnTokenUsage = undefined;
+    this.turnTokenBaseline = undefined;
     this.assistantTextByItemId.clear();
     this.currentAssistantItemId = undefined;
     this.currentAssistantItemText = "";

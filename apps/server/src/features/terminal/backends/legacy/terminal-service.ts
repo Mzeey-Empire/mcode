@@ -517,23 +517,15 @@ export class TerminalService {
   async shutdown(): Promise<void> {
     this.unsubscribeSettings();
     this.unsubscribeHost();
-    const results = await Promise.allSettled(
-      [...this.sessions.keys()].map((ptyId) => this.kill(ptyId, "app-shutdown")),
-    );
+    const sessions = [...this.sessions.values()];
+    await Promise.allSettled(sessions.map(async (session) => {
+      await session.creationPromise;
+      await session.commandTail;
+    }));
+    // The host closes all process scopes concurrently in one shutdown request.
+    await this.host.shutdown();
+    for (const session of sessions) this.finalizePty(session);
     this.completedHeadlessSessions.clear();
-    let shutdownError: unknown;
-    try {
-      await this.host.shutdown();
-    } catch (error) {
-      shutdownError = error;
-    }
-    const failures = results
-      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
-      .map((result) => result.reason);
-    if (shutdownError !== undefined) failures.push(shutdownError);
-    if (failures.length > 0) {
-      throw new AggregateError(failures, "Terminal shutdown failed");
-    }
   }
 
   /**

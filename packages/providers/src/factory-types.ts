@@ -30,6 +30,7 @@ export interface CodexProviderPorts {
     persistGeneratedImageFromPath(threadId: string, sourcePath: string): StoredAttachment;
   };
   catalog: {
+    listModels(): Promise<import("@mcode/contracts").ProviderModelInfo[]>;
     currentSkills(cwd?: string): SkillInfo[];
     currentPrompts(): SkillInfo[];
     refreshCustomPrompts(): Promise<{ prompts: SkillInfo[] }>;

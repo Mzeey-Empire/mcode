@@ -5,7 +5,7 @@ const performanceBuild =
 const MAX_MESSAGE_LIST_PERFORMANCE_OBSERVATIONS = 10_000;
 
 /** The performance-only MessageList stages collected by the frontend runner. */
-export type MessageListPerformanceStage = "narrativeItemProjection" | "tanstackVirtualItems";
+export type MessageListPerformanceStage = "narrativeItemProjection" | "vlistRows";
 
 /** One bounded performance-only MessageList timing observation. */
 export interface MessageListPerformanceObservation {

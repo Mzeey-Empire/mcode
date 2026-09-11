@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import * as NodeStream from "node:stream";
+import { CodexRpcClient } from "../../private/codex/codex-rpc-client.js";
 import {
   CodexAppServer as NativeCodexAppServer,
   type CodexAppServerOptions,
@@ -11,6 +13,31 @@ class CodexAppServer extends NativeCodexAppServer {
 }
 
 describe("CodexAppServer interrupt drains", () => {
+  it.each(["main", "child"])("handles both timeouts when the %s interrupt receives no response", async (kind) => {
+    vi.useFakeTimers();
+    const stdin = new NodeStream.PassThrough();
+    const stdout = new NodeStream.PassThrough();
+    const rpc = new CodexRpcClient(stdin, stdout);
+    const server = new CodexAppServer({ cliPath: "codex", workingDirectory: process.cwd() });
+    Reflect.set(server, "rpc", rpc);
+    Reflect.set(server, "_threadId", "native-thread");
+    try {
+      const stopping = kind === "main"
+        ? server.interruptTurnAndDrain("native-turn")
+        : server.interruptChildTurn("native-thread", "native-turn");
+      const rejection = expect(stopping).rejects.toBeInstanceOf(Error);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await rejection;
+      expect(server.listenerCount("notification")).toBe(0);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      rpc.dispose();
+      stdin.destroy();
+      stdout.destroy();
+      vi.useRealTimers();
+    }
+  });
+
   it("drains the matching main terminal notification after acknowledgement", async () => {
     const sendRequest = vi.fn().mockResolvedValue({});
     const server = new CodexAppServer({

@@ -1,5 +1,7 @@
-import type { AgentItem, AgentModelState, AgentTurn, Message, TurnOutcome } from "@mcode/contracts";
+import { ToolCallRecordSchema, type AgentItem, type AgentModelState, type AgentTurn, type Message, type TurnOutcome } from "@mcode/contracts";
 import type { ToolCall } from "@/transport/types";
+import { recordToToolCall } from "../narrative/build-persisted-narrative";
+import { collapseSubagentCalls } from "../narrative/subagent-lifecycle";
 import type { ThoughtSegment, TurnFooterSummary } from "../narrative/types";
 import {
   agentDisplayStateFromCanonicalTurnStatus,
@@ -9,6 +11,8 @@ import {
 /** Live canonical child state adapted to the shared chat timeline inputs. */
 export interface CanonicalMessageProjection {
   messages: Message[];
+  /** Latest assistant text that belongs in the shared live response row. */
+  streamingText: string | undefined;
   agentDisplayState: AgentDisplayState;
   agentStartTime?: number;
   toolCalls: ToolCall[];
@@ -95,36 +99,40 @@ function terminalTurnOutcome(turn: AgentTurn): TurnOutcome | undefined {
   }
 }
 
-function messageOutcome(message: Message | undefined): TurnOutcome | null | undefined {
-  return message
-    ? (message as Message & { outcome?: TurnOutcome | null }).outcome
-    : undefined;
-}
-
 function messageOutcomeExecutionId(message: Message | undefined): string | null | undefined {
   return message
     ? (message as Message & { outcomeExecutionId?: string | null }).outcomeExecutionId
     : undefined;
 }
 
+function summaryToolCalls(items: readonly AgentItem[]): ToolCall[] {
+  const calls = items.flatMap((item) => {
+    if (item.kind !== "tool-call") return [];
+    if (item.payload.projection === "toolCall") {
+      return [recordToToolCall(ToolCallRecordSchema().parse(item.payload.record))];
+    }
+    return item.payload.projection === "codexChildToolCall"
+      ? [{ ...projectedToolCallStart(item, payloadString(item.payload, "nativeItemId") ?? item.id), parentToolCallId: item.parentItemId }]
+      : [];
+  });
+  return collapseSubagentCalls(calls).filter((call) => call.parentToolCallId == null);
+}
+
 function canonicalTurnSummary(turn: AgentTurn, items: readonly AgentItem[]): TurnFooterSummary {
-  const topLevelTools = items.filter((item) =>
-    item.kind === "tool-call"
-    && item.parentItemId === undefined
-    && item.payload.projection === "codexChildToolCall");
+  const topLevelTools = summaryToolCalls(items);
   const reasoningItems = items.filter((item) => item.payload.projection === "codexChildReasoning");
   const activityItems = items.filter((item) =>
     item.payload.projection === "codexChildToolCall"
     || item.payload.projection === "codexChildToolResult"
     || item.payload.projection === "codexChildReasoning");
   const answer = latestAssistantMessage(items);
-  const outcome = messageOutcome(answer) ?? terminalTurnOutcome(turn);
+  const outcome = terminalTurnOutcome(turn);
   const outcomeExecutionId = messageOutcomeExecutionId(answer);
   return {
     counts: {
       steps: topLevelTools.length,
       thoughts: reasoningItems.length,
-      subagents: topLevelTools.filter((item) => payloadString(item.payload, "toolName") === "Agent").length,
+      subagents: topLevelTools.filter((call) => call.toolName === "Agent").length,
     },
     durationMs: canonicalTurnDuration(turn, activityItems),
     ...(outcome !== undefined && outcome !== "completed" ? { outcome } : {}),
@@ -169,6 +177,21 @@ function mergedMessages(messages: readonly Message[], projected: readonly Messag
   const messagesById = new Map(messages.map((message) => [message.id, message]));
   for (const message of projected) messagesById.set(message.id, message);
   return [...messagesById.values()].sort((left, right) => left.sequence - right.sequence || left.id.localeCompare(right.id));
+}
+
+function projectedResponse(messages: readonly Message[], projected: readonly Message[], terminal: boolean) {
+  const assistantMessage = [...projected].reverse().find((message) => message.role === "assistant");
+  if (terminal || !assistantMessage?.content) {
+    return { assistantMessage, messages: mergedMessages(messages, projected), streamingText: undefined };
+  }
+  return {
+    assistantMessage,
+    messages: mergedMessages(
+      messages.filter((message) => message.id !== assistantMessage.id),
+      projected.filter((message) => message.id !== assistantMessage.id),
+    ),
+    streamingText: assistantMessage.content,
+  };
 }
 
 function projectedToolCallStart(item: AgentItem, nativeItemId: string): ToolCall {
@@ -269,18 +292,19 @@ export function projectCanonicalMessageList({
   const projectedThoughts = projectedThoughtSegments(items, terminal);
   const toolCallById = new Map(toolCalls.map((toolCall) => [toolCall.id, toolCall]));
   for (const toolCall of projectedCalls.values()) toolCallById.set(toolCall.id, toolCall);
-  const assistantMessage = [...projected].reverse().find((message) => message.role === "assistant");
+  const response = projectedResponse(messages, projected, terminal);
   const responseKey = `canonical-turn-response:${latestTurn.id}`;
 
   return {
-    messages: mergedMessages(messages, projected),
+    messages: response.messages,
+    streamingText: response.streamingText,
     agentDisplayState,
     agentStartTime: timestamp(latestTurn.startedAt ?? latestTurn.createdAt),
     toolCalls: [...toolCallById.values()],
     thoughtSegments: projectedThoughts.length > 0 ? projectedThoughts : [...thoughtSegments],
-    currentTurnMessageId: assistantMessage?.id ?? "",
+    currentTurnMessageId: response.assistantMessage?.id ?? "",
     currentTurnResponseKey: responseKey,
-    assistantResponseKeys: assistantMessage ? { [assistantMessage.id]: responseKey } : {},
+    assistantResponseKeys: response.assistantMessage ? { [response.assistantMessage.id]: responseKey } : {},
     turnSummariesByMessageId: turnSummaries(threadTurns, threadItems),
   };
 }

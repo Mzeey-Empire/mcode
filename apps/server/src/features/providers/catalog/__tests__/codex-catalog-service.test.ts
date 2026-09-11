@@ -14,6 +14,7 @@ import type {
 } from "@mcode/providers";
 
 class ControlledCatalogClient extends NodeEvents.EventEmitter {
+  readonly listModels = vi.fn(async () => [{ id: "live-model", name: "Live Model" }]);
   isAlive = true;
   readonly start = vi.fn(async () => undefined);
   readonly kill = vi.fn(async () => {
@@ -138,6 +139,18 @@ describe("CodexCatalogService", () => {
       (directory) => NodeFSPromises.rm(directory, { recursive: true, force: true }),
     ));
     vi.useRealTimers();
+  });
+
+  it("reuses the catalog process for model reads and propagates discovery failure", async () => {
+    const client = new ControlledCatalogClient();
+    const create = vi.fn(() => client);
+    const service = createService(client, create);
+    expect(await service.listModels()).toEqual([{ id: "live-model", name: "Live Model" }]);
+    expect(await service.listModels()).toEqual([{ id: "live-model", name: "Live Model" }]);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(client.start).toHaveBeenCalledTimes(1);
+    client.listModels.mockRejectedValueOnce(new Error("discovery unavailable"));
+    await expect(service.listModels()).rejects.toThrow();
   });
 
   it("keeps standalone suggestions as the baseline when configuration names collide", async () => {

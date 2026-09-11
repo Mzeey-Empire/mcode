@@ -49,7 +49,7 @@ export function createPtyProcessScope(
       },
       close: async (graceful = false) => {
         const cleanupErrors: unknown[] = [];
-        if (await closeGracefully(graceful, rootPid, hostRuntime.platform, scope.waitForEmpty)) {
+        if (await closeGracefully(graceful, rootPid, hostRuntime.platform, (timeoutMs) => scope.waitForEmpty(timeoutMs))) {
           return;
         }
         cleanupErrors.push(

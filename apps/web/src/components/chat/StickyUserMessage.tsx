@@ -22,13 +22,13 @@ export const STICKY_USER_MESSAGE_ESTIMATED_HEIGHT = 56;
 const STICKY_PREVIEW_HINT_ID = "sticky-user-message-preview-hint";
 
 function getPreviewAriaLabel(expandable: boolean, expanded: boolean): string {
-  if (!expandable) return "Jump to your last message in transcript";
-  return expanded ? "Collapse your last message" : "Expand your last message";
+  if (!expandable) return "Jump to your message in transcript";
+  return expanded ? "Collapse your message" : "Expand your message";
 }
 
 /** Props for {@link StickyUserMessage}. */
 export interface StickyUserMessageProps {
-  /** Plain-text preview of the user's last visible message. */
+  /** Plain-text preview of the prompt for the turn in view. */
   preview: string;
   /** When true, the chip is pinned above the scrolling transcript. */
   visible: boolean;
@@ -36,10 +36,12 @@ export interface StickyUserMessageProps {
   onJumpToMessage: () => void;
   /** Reports rendered height so the list can reserve scroll space beneath the bar. */
   onHeightChange?: (height: number) => void;
+  /** Space reserved for Overview, shared with the transcript rows. */
+  contentPaddingRight?: string;
 }
 
 /**
- * Sticky chip that keeps the user's last prompt visible while they read
+ * Sticky chip that keeps the current turn's prompt visible while users read
  * long assistant output below it in the transcript.
  */
 export function StickyUserMessage({
@@ -47,6 +49,7 @@ export function StickyUserMessage({
   visible,
   onJumpToMessage,
   onHeightChange,
+  contentPaddingRight,
 }: StickyUserMessageProps) {
   const [expanded, setExpanded] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -121,11 +124,12 @@ export function StickyUserMessage({
   return (
     <div
       ref={rootRef}
-      className="pointer-events-none absolute inset-x-0 top-0 z-10 border-b border-border/25 bg-background/90 px-4 pb-2 pt-1 backdrop-blur-sm sm:px-8"
+      className="pointer-events-none absolute inset-x-0 top-0 z-10 px-4 pb-2 pt-1 sm:px-8"
       data-testid="sticky-user-message"
     >
+      <div className="w-full" style={{ paddingRight: contentPaddingRight }}>
       <div className={cn(PRIMARY_CONTENT_RAIL_CLASS, "min-w-0")}>
-        <div className="pointer-events-auto flex items-start gap-0.5 overflow-hidden rounded-lg border border-border/60 bg-accent text-sm text-accent-foreground shadow-sm">
+        <div className="pointer-events-auto flex items-start gap-0.5 overflow-hidden rounded-lg bg-accent text-sm text-accent-foreground">
           <Button
             type="button"
             variant="ghost"
@@ -181,7 +185,7 @@ export function StickyUserMessage({
                   size="icon-sm"
                   onClick={onJumpToMessage}
                   className="mt-0.5 mr-0.5 size-11 shrink-0 text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-                  aria-label="Jump to your last message"
+                  aria-label="Jump to your message"
                 >
                   <ArrowUp size={15} aria-hidden />
                 </Button>
@@ -192,6 +196,7 @@ export function StickyUserMessage({
             </TooltipContent>
           </Tooltip>
         </div>
+      </div>
       </div>
     </div>
   );

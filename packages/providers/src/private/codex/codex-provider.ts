@@ -47,10 +47,8 @@ import type {
 } from "@mcode/contracts";
 import {
   AgentEventType,
-  CODEX_STATIC_MODELS,
   isGoalOpen,
   providerRuntimeEvent,
-  supportsCodexUltraOrchestration,
 } from "@mcode/contracts";
 import { checkCodexVersion, meetsMinVersion } from "./codex-version.js";
 import { CodexAppServer, warmCodexAppServer } from "./codex-app-server.js";
@@ -73,7 +71,6 @@ import type {
   SandboxMode,
   ThreadGoal,
 } from "./codex-types.js";
-import { toCodexEffort } from "./codex-types.js";
 import {
   mapDecisionToCodexResponse,
   synthesizeCodexPermissionRequest,
@@ -320,6 +317,8 @@ interface CodexSessionState {
   turnBindingPhase: "idle" | "awaiting" | "bound";
   /** True until the current `turn/start` RPC response arrives. */
   turnStartResponsePending: boolean;
+  turnStartPromise?: Promise<void>;
+  cancelledTurnExecutionId?: string;
   /** Native turn notification buffered until the authoritative RPC response arrives. */
   pendingTurnStartNotification?: { nativeTurnId: string; executionId: string };
   /** Immutable Mcode execution identity keyed by native Codex turn id. */
@@ -612,9 +611,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   /** Path B forker; calls this provider's throwaway app-server side channel. */
   readonly forker: SessionForker = new CleanForker(this);
 
-  /** Returns the static Codex model catalog. Codex does not support dynamic model discovery. */
+  /** Returns the live Codex model catalog in provider order. */
   async listModels(): Promise<ProviderModelInfo[]> {
-    return CODEX_STATIC_MODELS.map((m) => ({ ...m }));
+    return this.codexPorts.catalog.listModels();
   }
 
   /** Return the latest Codex account rate-limit state pushed by the app-server. */
@@ -1036,8 +1035,11 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
    * The method returns immediately; events stream via the `event` EventEmitter channel.
    */
   async sendTurn(req: TurnRequest<"codex">): Promise<void> {
+    const preparingSession = this.runtime.get(req.sessionId);
+    if (preparingSession) preparingSession.nextTurnExecutionId = req.turnExecutionId;
     const turn = await this.prepareCodexTurn(req);
     if (!turn) return;
+    if (this.consumePendingCodexStop(turn)) return;
     const existing = await this.reconcileCodexSession(turn);
     const reusable = this.isReusableCodexSession(existing, turn.sandbox);
     if (!this.canStartCodexTurn(turn, reusable)) return;
@@ -1092,10 +1094,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   private codexTurnOptions(request: TurnRequest<"codex">, defaultFastMode: boolean): CodexTurnOptions {
     const fastMode = request.providerOptions.fastMode ?? defaultFastMode;
-    const orchestrationMode = request.orchestrationMode === "proactive" && supportsCodexUltraOrchestration(request.model)
-      ? "proactive"
-      : "standard";
-    const effort = toCodexEffort(request.reasoningLevel, orchestrationMode);
+    const effort = request.reasoningLevel;
     return {
       model: request.model || undefined,
       approvalsReviewer: request.approvalReviewMode === "automatic" ? "auto_review" : "user",
@@ -1200,16 +1199,19 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   private consumePendingCodexStop(turn: PreparedCodexTurn): boolean {
     const sessionId = turn.request.sessionId;
-    if (!this.pendingStops.delete(sessionId)) return false;
-    logger.info("Pending stop consumed, tearing down new Codex session", { sessionId });
+    const state = this.runtime.get(sessionId);
+    const pendingStop = this.pendingStops.delete(sessionId);
+    if (!pendingStop && state?.cancelledTurnExecutionId !== turn.request.turnExecutionId) return false;
+    logger.info("Pending stop consumed, cancelling staged Codex turn", { sessionId });
     this.pendingSpawnTurns.delete(sessionId);
-    void this.runtime.stop(sessionId);
+    if (state) state.cancelledTurnExecutionId = turn.request.turnExecutionId;
     this.emitRuntimeEvent(providerRuntimeEvent({ type: AgentEventType.Ended, threadId: turn.threadId, turnExecutionId: turn.request.turnExecutionId } satisfies AgentEvent));
     return true;
   }
 
   private runReusedCodexTurn(turn: PreparedCodexTurn, state: CodexSessionState): void {
     state.lastUsedAt = Date.now();
+    state.nextTurnExecutionId = turn.request.turnExecutionId;
     state.turnDiffRouting = { turnId: turn.request.turnId, turnExecutionId: turn.request.turnExecutionId, deliveryAttempt: turn.request.deliveryAttempt ?? 1 };
     state.turnDiffRevision = 0;
     void this.runTurnAfterGoal(turn.request.sessionId, turn.threadId, state.server, turn.input, turn.turnOptions, turn.request.turnExecutionId);
@@ -1253,6 +1255,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const internalMcpSetup = await this.bootstrapCodexInternalMcp(args, threadControlEligible, pendingSpawn?.turnExecutionId);
     const browserAccess = this.pendingBrowserAccess.get(args.sessionId);
     const browserGrant = browserAccess ? this.host.browser.issue(browserAccess.stage) : null;
+    this.pendingBrowserAccess.delete(args.sessionId);
     const spawnEnv = { ...args.env };
     if (browserGrant) spawnEnv.MCODE_BROWSER_MCP_TOKEN = browserGrant.token;
     return {
@@ -1379,6 +1382,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     const mainNotification = isMainThreadNotification(server, rawNotification.params);
     const nativeThreadId = nativeThreadIdFromParams(rawNotification.params);
     const nativeTurnId = nativeTurnIdFromParams(rawNotification.params);
+    const knownExecutionId = nativeTurnId ? entry?.turnExecutionIdsByNativeTurn.get(nativeTurnId) : undefined;
+    // Reject old main-turn events before they can reset the shared mapper for a new dispatch.
+    if (mainNotification && knownExecutionId && knownExecutionId !== entry?.currentTurnExecutionId) return;
     this.handleCodexUsageNotification(rawNotification, server, context.threadId);
     const replayThreadId = this.bindCodexTurnStarted(entry, rawNotification.method, mainNotification, nativeThreadId, nativeTurnId);
     const events = this.mapCodexNotificationEvents(context.threadId, notification, mapper, rawNotification);
@@ -1512,6 +1518,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   private createCodexSessionState(context: CodexSpawnContext, server: CodexAppServer, mapper: CodexEventMapper): CodexSessionState {
     const state: CodexSessionState = {
       sessionId: context.sessionId, threadId: context.threadId, cwd: context.cwd, server, mapper,
+      nextTurnExecutionId: this.pendingSpawnTurns.get(context.sessionId)?.turnExecutionId,
       lastUsedAt: Date.now(), sandboxMode: context.sandbox, runTurnSeq: 0, pendingTurnId: null,
       turnBindingPhase: "idle", turnStartResponsePending: false, turnExecutionIdsByNativeTurn: new Map(),
       nativeThreadExecutionIds: new Map(), nativeExecutionConflictKeys: new Set(), childExecutionGenerations: new Map(), turnDiffRevision: 0,
@@ -1979,7 +1986,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   /**
    * Provider teardown: drain pending permissions for this session as
    * cancelled (so orphaned approval cards clear), then kill the app-server.
-   * Drives every teardown path (stop, shutdown, eviction, stale-discard).
+   * Drives shutdown, eviction, and stale-discard, but not turn cancellation.
    */
   async close(state: CodexSessionState): Promise<void> {
     await this.host.threadControl.close(state.sessionId);
@@ -2173,6 +2180,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     turnOptions: CodexTurnOptions | undefined,
     turnExecutionId: string,
   ): Promise<void> {
+    if (this.runtime.get(sessionId)?.cancelledTurnExecutionId === turnExecutionId) return;
     try {
       await this.applyPendingGoal(sessionId, server);
     } catch (err) {
@@ -2182,6 +2190,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       this.emitTurnFailure(threadId, error, "errored", true, turnExecutionId);
       return;
     }
+    if (this.runtime.get(sessionId)?.cancelledTurnExecutionId === turnExecutionId) return;
     await this.runTurn(sessionId, threadId, server, input, turnOptions, turnExecutionId);
   }
 
@@ -2286,7 +2295,7 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       server.on("notification", onNotification);
       server.on("activity", onActivity);
       server.once("fatal", onFatal);
-      void this.sendCodexTurnStart(run, server, input, turnOptions, turnExecutionId, completion, cleanup, resolve, reject);
+      run.entry.turnStartPromise = this.sendCodexTurnStart(run, server, input, turnOptions, turnExecutionId, completion, cleanup, resolve, reject);
     });
   }
 
@@ -2618,24 +2627,19 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   }
 
   /**
-   * Kills a running session's subprocess and cancels any pending permissions
-   * for its thread. The runtime's `stop` runs `interrupt` → `close` (which
-   * drains permissions for the session, see {@link close}) → hard kill. When
-   * the session has not spawned yet, record the intent so `sendTurn`/`spawn`
-   * tear it down on arrival.
+   * Cancels the current turn and its approvals while retaining the app-server.
+   * A stop before spawn prevents the staged turn from starting.
    */
   async stopSession(sessionId: string): Promise<void> {
-    const exists = this.runtime.get(sessionId) !== undefined;
-    // Resolve host approvals before teardown can block on provider I/O. The
-    // close path repeats this drain defensively, but the stop contract must
-    // settle waiting requests even when interrupt/close is slow or stuck.
+    const state = this.runtime.get(sessionId);
+    // Approval cards must clear even if the native interrupt is slow or fails.
     this.drainPending((e) => e.sessionId === sessionId);
-    if (exists) {
-      await this.runtime.stop(sessionId);
+    if (state) {
+      state.cancelledTurnExecutionId = state.nextTurnExecutionId;
+      await state.turnStartPromise;
+      if (this.isBusy(state)) await this.interrupt(state);
+      this.runtime.recordUsage(sessionId);
     } else {
-      // Drain any pending permissions for a session still mid-spawn so cards
-      // clear immediately; close() will not run until/unless the session lands.
-      this.drainPending((e) => e.sessionId === sessionId);
       this.pendingStops.add(sessionId);
       this.pendingSpawnTurns.delete(sessionId);
       const stagedBrowser = this.pendingBrowserAccess.get(sessionId);
@@ -2667,17 +2671,13 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   }
 
   /** Tears down all sessions, drains pending permissions, and stops the eviction timer. */
-  shutdown(): void {
+  async shutdown(): Promise<void> {
     // Drain everything up front: `runtime.shutdown` stops each session
     // (close drains per-session), but draining all here also clears any
     // permissions whose session never landed in the pool.
     this.drainPending(() => true);
-    void this.runtime.shutdown().catch((err: unknown) => {
-      logger.warn("Codex runtime shutdown failed", { error: String(err) });
-    });
-    void this.codexPorts.catalog.shutdown().catch((err: unknown) => {
-      logger.warn("Codex catalog shutdown failed", { error: String(err) });
-    });
+    await this.runtime.shutdown();
+    await this.codexPorts.catalog.shutdown();
     this.sdkSessionIds.clear();
     this.pendingSpawnTurns.clear();
     this.pendingBrowserAccess.clear();

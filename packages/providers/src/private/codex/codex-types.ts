@@ -5,7 +5,6 @@
  * in https://github.com/openai/codex
  */
 
-import type { OrchestrationMode, ReasoningLevel } from "@mcode/contracts";
 import type { z } from "zod";
 import type { codexNoticeSchemas } from "./codex-notification-validation.js";
 
@@ -41,16 +40,6 @@ export type AskForApproval = "untrusted" | "on-failure" | "on-request" | "never"
 
 /** Reasoning effort levels for the codex app-server. */
 export type ReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
-
-/** Maps mcode reasoning levels to the Codex app-server effort field. */
-export function toCodexEffort(
-  level?: ReasoningLevel,
-  orchestrationMode: OrchestrationMode = "standard",
-): ReasoningEffort | undefined {
-  if (orchestrationMode === "proactive") return "ultra";
-  if (!level) return undefined;
-  return level;
-}
 
 /** Parameters for the `thread/start` RPC method. */
 export interface ThreadStartParams {
@@ -245,8 +234,6 @@ export interface ThreadGoalClearResult { cleared: boolean }
 
 // Handshake RPCs
 
-/** Result returned by the `model/list` RPC method. */
-export interface ModelListResult { models: Array<{ id: string; name?: string }> }
 /** Result returned by the `account/read` RPC method. */
 export interface AccountReadResult { id?: string; email?: string; name?: string }
 /** Result returned by the `account/rateLimits/read` RPC method. */

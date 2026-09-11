@@ -1,4 +1,4 @@
-import type { AgentItem, CanonicalAgentEventEnvelope, Message } from "@mcode/contracts";
+import { createAgentModelState, type AgentItem, type CanonicalAgentEventEnvelope, type Message } from "@mcode/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getConversationResidency } from "@/features/conversation/residency/conversation-residency";
 import { projectCanonicalMessageList } from "@/features/conversation/messages/canonical-message-projection";
@@ -100,6 +100,37 @@ describe("canonical agent event residency guards", () => {
     resetThreadStoreForTests({ currentThreadId: null, records: new Map() });
   });
 
+  it("restores parent activity missed before subscription without duplicating resident rows", () => {
+    const threadId = "running-parent";
+    const state = createAgentModelState();
+    state.turns.parent = {
+      id: "parent", threadId, status: "Running", trigger: { kind: "user" },
+      permissionMode: "full", approvalReviewMode: "manual", approvalReviewReason: "manual-requested",
+      providerIdentities: [], startedAt: NOW, endedAt: null, createdAt: NOW, updatedAt: NOW,
+    };
+    state.items.tool = {
+      id: "tool", threadId, turnId: "parent", kind: "tool-call", providerIdentities: [], createdAt: NOW, updatedAt: NOW,
+      payload: { projection: "narrativeRecovery", narrative: { kind: "toolCall", record: {
+        id: "missed-read", message_id: "", parent_tool_call_id: null, tool_name: "Read", input_summary: "{}", output_summary: "recovered output",
+        status: "completed", started_at: NOW, completed_at: NOW, sort_order: 1,
+      } } },
+    };
+    state.items.thought = {
+      id: "thought", threadId, turnId: "parent", kind: "reasoning", providerIdentities: [], createdAt: NOW, updatedAt: NOW,
+      payload: { projection: "narrativeRecovery", narrative: { kind: "narrationSegment", record: {
+        id: "missed-thought", message_id: "", text: "Before the read", started_at: NOW, ended_at: NOW, sort_order: 0,
+      } } },
+    };
+    const recovery = { mode: "snapshot" as const, threadId, snapshot: {
+      revision: { conversationRevision: 1, rosterRevision: 0 }, state,
+    } };
+    useThreadStore.getState().applyCanonicalReconnectRecoveries([recovery]);
+    useThreadStore.getState().applyCanonicalReconnectRecoveries([recovery]);
+    const record = useThreadStore.getState().records.get(threadId)!;
+    expect(record.toolCalls).toMatchObject([{ id: "missed-read", output: "recovered output", isComplete: true }]);
+    expect(record.thoughtSegments).toEqual([{ text: "Before the read", startedAt: Date.parse(NOW), endedAt: Date.parse(NOW), isExplicitNonFinal: true }]);
+  });
+
   it("rejects a late child push after its display lease is released", () => {
     const threadId = "child-released";
     const residency = getConversationResidency();
@@ -189,7 +220,8 @@ describe("canonical agent event residency guards", () => {
     });
     expect(useThreadStore.getState().records.get(threadId)!.canonicalAgent.recoveryRequired).toBe(false);
     expect(Object.keys(useThreadStore.getState().records.get(threadId)!.canonicalAgent.state.items)).toEqual(["child-answer-first"]);
-    expect(projection?.messages.map((message) => message.content)).toEqual(["First chunk"]);
+    expect(projection?.messages).toEqual([]);
+    expect(projection?.streamingText).toBe("First chunk");
 
     useThreadStore.getState().handleCanonicalAgentEvents(threadId, [
       envelope(threadId, "child-answer-second", 5, 3, {
@@ -204,7 +236,8 @@ describe("canonical agent event residency guards", () => {
       toolCalls: [],
       thoughtSegments: [],
     });
-    expect(projection?.messages.map((message) => message.content)).toEqual(["First chunk, second chunk"]);
+    expect(projection?.messages).toEqual([]);
+    expect(projection?.streamingText).toBe("First chunk, second chunk");
 
     useThreadStore.getState().handleCanonicalAgentEvents(threadId, [
       envelope(threadId, "turn-completed", 6, 4, { type: "turn.completed", endedAt: NOW }),
@@ -217,5 +250,6 @@ describe("canonical agent event residency guards", () => {
       thoughtSegments: [],
     });
     expect(projection?.messages.map((message) => message.content)).toEqual(["First chunk, second chunk"]);
+    expect(projection?.streamingText).toBeUndefined();
   });
 });

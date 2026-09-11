@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
 import type { AgentEvent, CanonicalAgentEventEnvelope, CanonicalAgentReconnectRecovery, ContextWindowMode, MessageMention, ReasoningLevel, OrchestrationMode, PlanQuestion, PlanAnswer, ProviderUsageInfo, GoalLookupResult, PreviewAnnotationBundle, SelectedTextComment, TurnFileEffectSummary, TurnRuntimeSnapshot, TurnOutcome } from "@mcode/contracts";
 import type { PermissionRequest, PermissionDecision } from "@mcode/contracts";
+import { recoverParentNarrative } from "./parent-narrative-recovery";
 import {
   PERMISSION_MODES,
   INTERACTION_MODES,
@@ -103,10 +104,12 @@ import {
 } from "./thread-store/usage";
 export { mergeProviderUsageSnapshot } from "./thread-store/usage";
 
+import { isThreadRuntimeActive } from "./thread-lifecycle";
+
 function deriveRunningThreadIds(records: Map<string, ThreadRecord>): Set<string> {
   return new Set(
     [...records]
-      .filter(([, record]) => record.runtimePhase === "running" || record.runtimePhase === "finalizing")
+      .filter(([id, record]) => isThreadRuntimeActive(id, record))
       .map(([id]) => id),
   );
 }
@@ -902,25 +905,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     });
   };
 
-  const markPriorToolCallsComplete = (threadId: string): void => {
-    const calls = getRec(threadId).toolCalls;
-    if (!calls.some((toolCall) => !toolCall.isComplete)) return;
-    set((state) => {
-      const current = getThreadRecord(state.records, threadId).toolCalls;
-      const children = (agentId: string) => current.filter((call) => call.parentToolCallId === agentId);
-      const isAgentDone = (agentId: string) => {
-        const agentChildren = children(agentId);
-        return agentChildren.length > 0 && !agentChildren.some((call) => !call.isComplete);
-      };
-      const toolCalls = current.map((toolCall) => {
-        if (toolCall.isComplete) return toolCall;
-        if (toolCall.toolName !== "Agent") return { ...toolCall, isComplete: true };
-        return isAgentDone(toolCall.id) ? { ...toolCall, isComplete: true } : toolCall;
-      });
-      return { records: patchThreadRecord(state.records, threadId, { toolCalls }) };
-    });
-  };
-
   const messageSequenceFor = (threadId: string) =>
     getRec(threadId).messages.reduce(
       (latestSequence, message) => Math.max(latestSequence, message.sequence),
@@ -1386,7 +1370,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
 
   const handleMessageEvent = (event: Extract<AgentEvent, { type: "message" }>): void => {
     clearStreamingTextUsage(event.threadId);
-    markPriorToolCallsComplete(event.threadId);
     const content = typeof event.content === "string" ? event.content : "";
     const attachments = parseStoredAttachments(event.attachments);
     const messageId = typeof event.messageId === "string" && event.messageId.length > 0
@@ -1581,7 +1564,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       return;
     }
     if (existing) return;
-    if (!event.parentToolCallId) markPriorToolCallsComplete(event.threadId);
     const toolCall = newToolCall(event, toolName, toolInput);
     projectTaskToolUse(event.threadId, toolCall.id, toolName, toolInput, getRec(event.threadId).toolCalls, event.parentToolCallId);
     appendToolCall(event.threadId, toolCall);
@@ -1724,9 +1706,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       : [...chunks, { delta, isFinalResponse, deferNarrative }];
     pendingTextDeltaByThread.set(event.threadId, next);
     if (!runtime.isActiveThread) queueDeferredNarrativeEvent(event.threadId, normalizedEvent);
-    if (!deferNarrative && (chunks.length === 0 || chunks.some((chunk) => chunk.deferNarrative))) {
-      markPriorToolCallsComplete(event.threadId);
-    }
     scheduleTextDeltaFlush();
   };
 
@@ -2120,7 +2099,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         ...record.context,
         lastTokensIn: event.tokensIn,
         contextWindow: event.contextWindow ?? record.context?.contextWindow,
-        totalProcessedTokens: record.context?.totalProcessedTokens,
+        totalProcessedTokens: event.totalProcessedTokens ?? record.context?.totalProcessedTokens,
       },
     }));
   };
@@ -2557,6 +2536,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     recentlyAnsweredPlanMessageIds: new Set<string>(),
 
   applyCanonicalReconnectRecoveries: (recoveries) => {
+    flushPendingTextDeltas();
     set((state) => {
       let records = state.records;
       let changed = false;
@@ -2564,7 +2544,11 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         const current = getThreadRecord(records, recovery.threadId);
         const update = applyCanonicalReconnectRecovery(current.canonicalAgent, recovery);
         if (update.replica === current.canonicalAgent) continue;
-        records = patchThreadRecord(records, recovery.threadId, { canonicalAgent: update.replica });
+        if (update.installedSnapshot) streamingTextByteSizes.delete(recovery.threadId);
+        records = patchThreadRecord(records, recovery.threadId, {
+          canonicalAgent: update.replica,
+          ...(update.installedSnapshot ? recoverParentNarrative(recovery.threadId, update.replica.state) : {}),
+        });
         changed = true;
       }
       return changed ? { records } : {};

@@ -30,8 +30,9 @@ interface MessageListOverlaysProps {
   /** Thread whose transcript is currently rendered in the viewport. */
   readonly renderedThreadId: string | null | undefined;
   readonly stickyPreview: string | null;
+  readonly contentPaddingRight?: string;
   readonly isStickyVisible: boolean;
-  readonly onJumpToLastUserMessage: () => void;
+  readonly onJumpToUserMessage: () => void;
   readonly onStickyHeightChange: (height: number) => void;
   readonly showScrollToBottom: boolean;
   readonly hasNewContent: boolean;
@@ -57,8 +58,9 @@ export function MessageListOverlays({
   viewportRef,
   renderedThreadId,
   stickyPreview,
+  contentPaddingRight,
   isStickyVisible,
-  onJumpToLastUserMessage,
+  onJumpToUserMessage,
   onStickyHeightChange,
   showScrollToBottom,
   hasNewContent,
@@ -102,17 +104,24 @@ export function MessageListOverlays({
       )}
       {stickyPreview && (
         <StickyUserMessage
+          key={stickyPreview}
           preview={stickyPreview}
+          contentPaddingRight={contentPaddingRight}
           visible={isStickyVisible}
-          onJumpToMessage={onJumpToLastUserMessage}
+          onJumpToMessage={onJumpToUserMessage}
           onHeightChange={onStickyHeightChange}
         />
       )}
       {showScrollToBottom && (
-        <ScrollToBottomButton
-          hasNewContent={hasNewContent}
-          onScrollToBottom={onScrollToBottom}
-        />
+        <div
+          className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center overflow-y-hidden [scrollbar-gutter:stable]"
+          style={{ paddingRight: contentPaddingRight }}
+        >
+          <ScrollToBottomButton
+            hasNewContent={hasNewContent}
+            onScrollToBottom={onScrollToBottom}
+          />
+        </div>
       )}
     </>
   );

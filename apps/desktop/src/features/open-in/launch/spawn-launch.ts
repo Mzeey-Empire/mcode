@@ -8,15 +8,30 @@
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 
+const WINDOWS_EXECUTABLE_SUFFIX = /\.(?:exe|cmd|bat|com)$/i;
+
+function resolvePathCommand(cmd: string, platform: NodeJS.Platform): string | null {
+  const checkCmd = platform === "win32" ? "where.exe" : "which";
+  try {
+    const output = NodeChildProcess.execFileSync(checkCmd, [cmd], {
+      stdio: "pipe",
+      encoding: "utf-8",
+      ...(platform === "win32" ? { windowsHide: true } : {}),
+    });
+    if (platform !== "win32") return cmd;
+
+    return String(output)
+      .split(/\r?\n/)
+      .map((path) => path.trim())
+      .find((path) => WINDOWS_EXECUTABLE_SUFFIX.test(path)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** Check whether a CLI command exists on the system PATH. */
 export function commandOnPath(cmd: string, platform: NodeJS.Platform): boolean {
-  const checkCmd = platform === "win32" ? "where" : "which";
-  try {
-    NodeChildProcess.execFileSync(checkCmd, [cmd], { stdio: "pipe", encoding: "utf-8" });
-    return true;
-  } catch {
-    return false;
-  }
+  return resolvePathCommand(cmd, platform) !== null;
 }
 
 /**
@@ -34,8 +49,9 @@ export function createExecutableResolver(
   let resolved: string | null | undefined;
   return () => {
     if (resolved !== undefined) return resolved;
-    if (commandOnPath(command, platform)) {
-      resolved = command;
+    const pathCommand = resolvePathCommand(command, platform);
+    if (pathCommand) {
+      resolved = pathCommand;
       return resolved;
     }
     if (platform === "win32" && windowsPaths) {
@@ -79,6 +95,7 @@ function spawnWindowsCommand(
     stdio: "ignore",
     shell: false,
     windowsVerbatimArguments: true,
+    windowsHide: true,
     env,
   });
 }
@@ -104,7 +121,7 @@ export function spawnDetached(
   return new Promise<void>((resolve, reject) => {
     let child: NodeChildProcess.ChildProcess;
     if (platform === "win32" && /\.exe$/i.test(cmd)) {
-      child = spawnProcess(cmd, args, { detached: true, stdio: "ignore" });
+      child = spawnProcess(cmd, args, { detached: true, stdio: "ignore", windowsHide: true });
     } else if (platform === "win32") {
       child = spawnWindowsCommand(cmd, args, spawnProcess);
     } else {

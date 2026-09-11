@@ -23,7 +23,7 @@ export interface GraceDeps {
   sessionCount(): number;
   /**
    * Returns true when the server has in-flight work that must not be
-   * interrupted (active agent turns or running terminal sessions).
+   * interrupted (active agent turns).
    */
   isBusy(): boolean;
   /** Initiates a graceful server shutdown. */
@@ -58,7 +58,7 @@ export interface GraceController {
  * the timer fires it checks three conditions before allowing shutdown:
  *
  * - Sessions have reconnected → clear and ignore.
- * - Server is busy (agents or terminals) → re-arm and wait.
+ * - An agent turn is active → re-arm and wait.
  * - Wall-clock elapsed > graceMs * 2 → machine probably slept through the
  *   countdown; re-arm so the full grace period runs from a clean wake.
  *
@@ -118,9 +118,9 @@ export function createGraceController(deps: GraceDeps): GraceController {
       return;
     }
 
-    // An agent or terminal is still running. Re-arm and wait.
+    // Do not interrupt an active agent turn after its client disconnects.
     if (isBusy()) {
-      reArm("server is busy (active agents or terminals)");
+      reArm("server is busy (active agent turns)");
       return;
     }
 

@@ -21,6 +21,7 @@
 
 | User-visible area | Feature file | Primary proof |
 | --- | --- | --- |
+| Thread cache restores the reading position and mounts only a transcript window | [Thread transcript](thread-transcript.md) | Electron scroll and cache proof, active turn, and reload |
 | External local edits refresh Files, autocomplete, Mcode Browser Preview, and live Review without changing Last turn attribution | [Local workspace file invalidation](workspace-file-invalidation.md) | Runtime health and check, Mcode Browser journey, and focused watcher tests |
 | Last turn shows native agent changes, settles durably, and identifies Git fallback | [Last turn native diff](turn-diff-review.md) | Codex composer and Review Electron proof, plus focused Git/RPC and migration checks |
 | A thread starts, runs, stops, clears active state, and retains a cancelled reconnect snapshot | [Thread lifecycle](thread-lifecycle.md) | `runtime live --scenario stop` |
@@ -35,9 +36,11 @@
 | Local, managed-worktree, and PR-created threads show truthful startup progress and remove it after success | [Thread startup progress](thread-startup-progress.md) | Electron public UI proof and focused startup tests |
 | A user completes a worktree thread and the app schedules its cleanup | [Completed-thread cleanup](completed-thread-cleanup.md) | `thread-lifecycle proof --confirm-cleanup` and `thread-lifecycle check` |
 | Queued composer messages continue in FIFO order after completion and stay paused after Stop | [Composer queue](composer-queue.md) | `composer-queue proof --cursor-model <id> --allow-enable-cursor --confirm-provider-calls --confirm-cleanup` |
+| Composer context usage shows a compact ring and tooltip whose ring and usage bar share normal, warning, and critical color tiers | [Composer context tracker](context-tracker.md) | Electron Composer tooltip proof with the stable live-testing interface |
 | An OpenCode thread streams a pooled-serve turn to completion, stops to aborted, shares one server per worktree, routes supervised permission and question cards through the shared request flow, and renders canonical notices once | [OpenCode pooled serve](opencode-pooled-serve.md) | `runtime live --provider opencode --model <provider/model-id> --scenario completion` and `--scenario stop` |
 | Thread Overview defaults open when the right panel opens; at 824 pixels or wider its rails reserve 344 pixels independently of panel visibility, while narrower panes use an intentional overlay, and it is unavailable while the panel is maximized | [Thread Overview and right panel](thread-overview-right-panel.md) | Electron public UI proof with the stable live-testing interface |
 | An existing thread title is renamed or cancelled from the Project tree | [Thread-list inline rename](thread-list-inline-rename.md) | Electron public UI proof with the stable live-testing interface |
+| A thread workspace opens in each detected external editor without showing a Windows console window | [Open in editor](open-in-editor.md) | Electron Open in menu proof and focused Windows launch tests |
 
 Read [Multi-surface journeys](multi-surface-journeys.md) for a workflow that crosses the server, web or Electron UI, provider adapters, persistence, or managed worktrees.
 
@@ -53,7 +56,8 @@ Read [Multi-surface journeys](multi-surface-journeys.md) for a workflow that cro
 8. Run `thread-lifecycle health`, `thread-lifecycle check`, and the completed-thread proof when thread completion or worktree cleanup changed.
 9. Run the Thread Overview and right-panel workflow when shared workspace navigation or panel layout changed.
 10. Run the thread-list inline rename workflow when Project-tree thread naming changed.
-11. Run the applicable multi-surface journey last, inspect receipts, then run cleanup.
+11. Run the Open in editor workflow when external-editor discovery or launch changes.
+12. Run the applicable multi-surface journey last, inspect receipts, then run cleanup.
 
 ## Coverage gaps
 

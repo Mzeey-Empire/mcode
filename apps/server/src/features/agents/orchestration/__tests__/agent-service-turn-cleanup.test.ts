@@ -1389,6 +1389,22 @@ describe("AgentService Ended finalization", () => {
     });
   });
 
+  it.each(["cancelled", "errored"] as const)("persists reported context without completing a turn before %s", async (outcome) => {
+    const workspace = workspaceRepo.create("Test", process.cwd());
+    const thread = threadRepo.create(workspace.id, "Usage before stop", "direct", "main", true, "codex");
+    await service.sendMessage({ threadId: thread.id, content: "work", permissionMode: "default", model: "gpt-5", attachments: [], provider: "codex" });
+    const turnExecutionId = activeExecutionId(service, thread.id);
+    providerEmitter.emit("event", {
+      type: AgentEventType.ContextEstimate, threadId: thread.id, turnExecutionId,
+      tokensIn: 100, tokensOut: 20, totalProcessedTokens: 120, cacheReadTokens: 40, contextWindow: 200_000,
+    } satisfies AgentEvent);
+    expect(service.runtimeAccess().activeThreadIds()).toContain(thread.id);
+    expect(threadRepo.findById(thread.id)).toMatchObject({ last_context_tokens: 100, context_window: 200_000 });
+    providerEmitter.emit("event", { type: AgentEventType.Ended, threadId: thread.id, turnExecutionId, outcome } satisfies AgentEvent);
+    expect(service.runtimeAccess().activeThreadIds()).not.toContain(thread.id);
+    expect(threadRepo.findById(thread.id)).toMatchObject({ last_context_tokens: 100, context_window: 200_000 });
+  });
+
   it.each(["error", "turnComplete", "ended"] as const)(
     "keeps an explicit stop authoritative when provider emits %s synchronously",
     async (terminalType) => {

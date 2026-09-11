@@ -1,5 +1,5 @@
-import { afterEach, describe, it, expect, vi } from "vitest";
-import { act, fireEvent, render, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Message, StoredAttachment } from "@/transport";
 import type { PreviewAnnotationBundle } from "@mcode/contracts";
@@ -10,6 +10,21 @@ import {
   clearAttachmentTransportWsUrlCache,
   setAttachmentTransportWsUrl,
 } from "@/lib/attachment-url";
+
+beforeEach(() => {
+  resetThreadStoreForTests({ records: new Map([["thread-1", {
+    ...createEmptyThreadRecord(),
+    narrativeByMessage: {
+      "msg-1": { tools: [], thoughts: [], hooks: [] },
+      "msg-asst": { tools: [], thoughts: [], hooks: [] },
+    },
+  }]]) });
+});
+
+afterEach(() => {
+  cleanup();
+  resetThreadStoreForTests();
+});
 
 // Mock MarkdownContent to detect when it's used
 vi.mock("@/components/chat/MarkdownContent", () => ({
@@ -512,6 +527,38 @@ describe("MessageBubble user messages", () => {
 });
 
 describe("MessageBubble agent response state", () => {
+  it("adds Hooks beside copy and fork only after the final response completes", async () => {
+    resetThreadStoreForTests({
+      records: new Map([["thread-1", {
+        ...createEmptyThreadRecord(),
+        narrativeByMessage: { "msg-1": { tools: [], thoughts: [], hooks: [{
+          id: "hook-1", message_id: "msg-1", hook_name: "SessionStart:startup",
+          tool_name: null, phase: "stop", payload: "Hidden hook output",
+          duration_ms: 1, did_block: false, started_at: "2026-08-27T11:12:00.000Z",
+          ended_at: "2026-08-27T11:12:00.001Z", sort_order: 1,
+        }] } },
+      }]]),
+    });
+    const user = userEvent.setup();
+    const message = { ...makeMessage("Final answer"), role: "assistant" as const };
+    const onBranch = vi.fn();
+    const view = render(<MessageBubble message={message} onBranch={onBranch} agentDisplayState={{ phase: "streaming" }} />);
+    expect(view.queryByRole("button", { name: "Hooks" })).not.toBeInTheDocument();
+    view.rerender(<MessageBubble message={message} onBranch={onBranch} agentDisplayState={{ phase: "finalizing" }} />);
+    expect(view.queryByRole("button", { name: "Hooks" })).not.toBeInTheDocument();
+    view.rerender(<MessageBubble message={message} onBranch={onBranch} agentDisplayState={{ phase: "completed" }} />);
+    const actions = within(view.getByTestId("agent-message-actions"));
+    expect(actions.getByRole("button", { name: /copy/i })).toBeInTheDocument();
+    expect(actions.getByRole("button", { name: /fork/i })).toBeInTheDocument();
+    expect(view.getAllByRole("button", { name: "Hooks" })).toHaveLength(1);
+    await user.hover(actions.getByRole("button", { name: "Hooks" }));
+    const dialog = await view.findByRole("dialog", { name: "Hooks" });
+    expect(dialog).toHaveTextContent("SessionStart");
+    expect(dialog).toHaveTextContent("startup");
+    expect(dialog).toHaveTextContent("1 run");
+    expect(dialog).not.toHaveTextContent("Hidden hook output");
+  });
+
   const makeAgentMessage = (): Message => ({
     ...makeMessage("Completed response"),
     role: "assistant",

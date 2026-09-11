@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { formatDuration } from "@/lib/time";
 import type { ToolCall } from "@/transport/types";
-import { TOOL_PHASE_LABELS } from "@/components/chat/tool-renderers/constants";
+import { narrativeActivityLabel } from "./activity-label";
 import { StackedLayersIcon, stackedLayersIconClassName } from "@/components/ui/StackedLayersIcon";
 
 /**
@@ -13,19 +13,6 @@ const EXIT_DURATION_MS = 240;
 
 /** Lifecycle of the indicator: live → animating out → unrendered. */
 type IndicatorPhase = "running" | "exiting" | "done";
-
-/** Derive the current phase label from active tool calls. */
-function derivePhaseLabel(toolCalls: readonly ToolCall[]): string {
-  if (toolCalls.length === 0) return "Thinking...";
-
-  const incomplete = toolCalls.filter((tc) => !tc.isComplete);
-  if (incomplete.length > 0) {
-    const latest = incomplete[incomplete.length - 1];
-    return TOOL_PHASE_LABELS[latest.toolName] ?? "Working...";
-  }
-
-  return "Preparing...";
-}
 
 function elapsedSeconds(startTime: number | undefined): number {
   return startTime ? Math.floor((Date.now() - startTime) / 1000) : 0;
@@ -100,6 +87,8 @@ interface NarrativeIndicatorProps {
   subagentCount: number;
   /** Currently active (possibly incomplete) tool calls. */
   activeToolCalls: readonly ToolCall[];
+  /** Complete heading supplied by the current open narration segment. */
+  summaryHeading?: string;
   /** Epoch ms when the agent turn started, used to compute elapsed time. */
   startTime?: number;
   /** Whether the agent is still running; flipping to false plays the exit transition. */
@@ -111,9 +100,9 @@ interface NarrativeIndicatorProps {
  * count, phase label, and elapsed time into a single compact status line.
  *
  * Example outputs:
- *   ● 6 steps · Thinking... (0:22)
- *   ● 4 steps · 2 subagents · Thinking deeper... (0:15)
- *   ● 5 steps · Running a command... (0:38)
+ *   6 steps · Thinking... (0:22)
+ *   4 steps · 2 subagents · Thinking deeper... (0:15)
+ *   5 steps · Running a command... (0:38)
  *
  * When the turn ends the bar collapses and fades out over
  * {@link EXIT_DURATION_MS} instead of vanishing in a single frame, then
@@ -124,17 +113,23 @@ export function NarrativeIndicator({
   stepCount,
   subagentCount,
   activeToolCalls,
+  summaryHeading,
   startTime,
   isAgentRunning,
 }: NarrativeIndicatorProps) {
   const { elapsed, phase } = useNarrativeIndicatorLifecycle(startTime, isAgentRunning);
 
-  const phaseLabel = useMemo(() => derivePhaseLabel(activeToolCalls), [activeToolCalls]);
+  const phaseLabel = useMemo(() => narrativeActivityLabel(activeToolCalls, summaryHeading), [activeToolCalls, summaryHeading]);
 
   if (phase === "done") return null;
 
   const subagentLabel =
     subagentCount === 1 ? "1 subagent" : `${subagentCount} subagents`;
+  const statusLabel = [
+    ...(stepCount > 0 ? [`${stepCount} ${stepCount === 1 ? "step" : "steps"}`] : []),
+    ...(subagentCount > 0 ? [subagentLabel] : []),
+    phase === "exiting" ? "Done" : phaseLabel,
+  ].join(" · ");
 
   return (
     <div
@@ -144,28 +139,24 @@ export function NarrativeIndicator({
       )}
       data-state={phase}
     >
-      <span className="flex items-center gap-2 text-sm text-muted-foreground">
-        {/* When sub-agents are dispatched, the stacked-layers icon (with its
-            float + per-layer ripple) becomes the "agent working" mark — more
-            semantic than a generic dot because it mirrors the same glyph used
-            on each sub-agent row. Otherwise a quiet pulsing dot. */}
-        {subagentCount > 0 ? (
-          <StackedLayersIcon animated className={stackedLayersIconClassName(true)} />
-        ) : (
-          <span className="size-1.5 shrink-0 rounded-full bg-primary animate-pulse" />
-        )}
-        {stepCount} {stepCount === 1 ? "step" : "steps"}
-        {subagentCount > 0 && (
-          <>
-            <span className="text-muted-foreground/45">·</span>
-            {subagentLabel}
-          </>
-        )}
-        <span className="text-muted-foreground/45">·</span>
-        {phase === "exiting" ? "Done" : phaseLabel}
+      <span className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
+        <StackedLayersIcon
+          animated={phase === "running"}
+          className={stackedLayersIconClassName(phase === "running")}
+        />
+        <span className="relative min-w-0 truncate">
+          {statusLabel}
+          {phase === "running" && (
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 text-foreground startup-activity-shimmer startup-activity-shimmer-text"
+              data-startup-activity-shimmer-text={statusLabel}
+            />
+          )}
+        </span>
       </span>
       {startTime !== undefined && (
-        <span className="text-xs text-muted-foreground/50">
+        <span className="shrink-0 text-xs text-muted-foreground/50">
           ({formatDuration(elapsed)})
         </span>
       )}

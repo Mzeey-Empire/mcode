@@ -17,6 +17,7 @@ import { ParentAssistantTextCheckpointService } from "../../turns/parent-assista
 import { NarrativeStore } from "../../conversation/narrative/narrative-store.js";
 import { ThreadStartupRepo } from "../../../thread-startup/persistence/thread-startup-repo.js";
 import { ThreadStartupService } from "../../../thread-startup/thread-startup-service.js";
+import type { TerminalCommandCompletion } from "../../../terminal/commands/terminal-command-service.js";
 
 const roots: string[] = [];
 
@@ -117,7 +118,7 @@ function createAgentServiceHarness(automaticSetup?:
     availability as never,
     {} as never,
     {} as never,
-    {} as never,
+    { clear: vi.fn() } as never,
     new NarrativeStore(
       messageRepo,
       { bulkCreate: vi.fn(), bulkCreateBatched: vi.fn() } as never,
@@ -232,6 +233,71 @@ describe("AgentService.createAndSend defaults", () => {
       ],
     });
     providerCompletion.resolve();
+  });
+
+  it("dispatches a follow-up Turn queued behind automatic Setup after the first Turn completes its startup", async () => {
+    const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-agent-queued-drain-"));
+    roots.push(root);
+    const setupCompletion = deferred<TerminalCommandCompletion>();
+    const { threadRepo, workspaceRepo, threadService, service, provider, automaticSetup, threadStartups } = createAgentServiceHarness(({ db, threadRepo: threads, threadStartups: startups }) =>
+      new WorkspaceEnvironmentService({
+        mcodeDir: root,
+        database: db,
+        threads: { findById: (id) => threads.findById(id) },
+        terminalCommands: {
+          prepare: async () => ({
+            kind: "ready" as const,
+            command: {
+              snapshot: { checkoutPath: "/repo/.worktrees/managed", terminal: { executable: "sh", arguments: ["-c", "bun run setup"] } },
+              start: async () => await setupCompletion.promise,
+              close: async () => ({ kind: "contained" as const }),
+              waitForRelease: async () => await new Promise<never>(() => undefined),
+            },
+          }),
+        },
+        threadStartups: startups,
+        platform: "linux",
+      }),
+    );
+    const workspace = workspaceRepo.create("Repo", "/repo");
+    const managed = threadRepo.create(workspace.id, "Managed first Turn", "worktree", "feature/managed", true, "claude");
+    vi.mocked(threadService.create).mockImplementation(async (_workspaceId, _title, _mode, _branch, options) => {
+      options.lifecycle?.onThreadPersisted(managed);
+      return managed;
+    });
+    const environment = automaticSetup as WorkspaceEnvironmentService;
+    environment.setAutomaticSetupDispatcher({ dispatch: (submission) => service.dispatchQueuedAutomaticTurn(submission) });
+    const startupId = "00000000-0000-4000-8000-000000000005";
+    await environment.save({
+      workspaceId: workspace.id,
+      sourceRevision: null,
+      document: { version: "0.0.1", setup: { linux: "bun run setup" }, actions: [] },
+    });
+
+    const creating = service.createAndSend({
+      workspaceId: workspace.id,
+      content: "First blocked Turn",
+      mode: "worktree",
+      branch: "feature/managed",
+      startupId,
+    });
+    await eventually(() => expect(environment.getAutomaticSetup({ threadId: managed.id }).attempt?.state).toBe("running"));
+    await service.sendMessage({ threadId: managed.id, content: "Second blocked Turn" });
+    expect(environment.getAutomaticSetup({ threadId: managed.id }).queuedTurns).toHaveLength(2);
+
+    setupCompletion.resolve({ kind: "exited", exitCode: 0, output: "", outputTruncated: false });
+    await creating;
+    await eventually(() => expect(provider.sendTurn).toHaveBeenCalledOnce());
+    expect(threadStartups.get(startupId)).toMatchObject({ state: "completed", phase: "agent" });
+
+    // Ending the first session releases the drain loop so it claims the second queued Turn.
+    await service.stopSession(managed.id);
+
+    await eventually(() => expect(provider.sendTurn).toHaveBeenCalledTimes(2));
+    expect(environment.getAutomaticSetup({ threadId: managed.id }).queuedTurns).toEqual([
+      expect.objectContaining({ state: "dispatched" }),
+      expect.objectContaining({ state: "dispatched" }),
+    ]);
   });
 
   it("does not admit the queued provider turn when cancellation wins during admission", async () => {
