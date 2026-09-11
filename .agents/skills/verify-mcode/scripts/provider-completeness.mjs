@@ -1951,7 +1951,7 @@ async function assertWorkspace(page, workspace, socket) {
 }
 
 export function assertSeparateClients(web, desktop) { if (!web?.browser || !desktop?.session?.browser || web.browser === desktop.session.browser || web.context === desktop.session.context) throw new Error("Condition: web and Electron must use separate browser clients."); }
-async function openWeb(playwright, ports, executablePath) { const browser = await playwright.chromium.launch({ headless: true, executablePath }); const context = await browser.newContext(); const disconnect = await installWebSocketDisconnect(context, ports.serverPort); await context.addCookies([{ name: ports.seedLogin.cookieName, value: ports.seedLogin.token, url: ports.appUrl }]); const page = await context.newPage(); await page.goto(ports.appUrl, { waitUntil: "domcontentloaded" }); return { browser, context, page, disconnect }; }
+async function openWeb(playwright, ports, executablePath) { const browser = await playwright.chromium.launch({ headless: true, executablePath }); const context = await browser.newContext(); const disconnect = await installWebSocketDisconnect(context, `ws://127.0.0.1:${ports.serverPort}`); await context.addCookies([{ name: ports.seedLogin.cookieName, value: ports.seedLogin.token, url: ports.appUrl }]); const page = await context.newPage(); await page.goto(ports.appUrl, { waitUntil: "domcontentloaded" }); return { browser, context, page, disconnect }; }
 export async function openDesktop(repoRoot, playwright, ports, dependencies = {}) {
   const root = NodePath.join(repoRoot, ".agents", "skills", "electorn-live-testing", "scripts");
   const { startElectron } = dependencies.startElectron ? dependencies : await import(NodeURL.pathToFileURL(NodePath.join(root, "start-electron.mjs")).href);
@@ -1962,7 +1962,7 @@ export async function openDesktop(repoRoot, playwright, ports, dependencies = {}
   await startElectron(repoRoot);
   try {
   const session = await sessionHelper.connectElectronSession({ playwright, repoRoot });
-  const disconnect = await installWebSocketDisconnect(session.context, ports.serverPort);
+  const disconnect = await installWebSocketDisconnect(session.context, await getDesktopServerUrl({ page: session.page }));
   await session.page.evaluate((token) => localStorage.setItem("mcode-auth-token", token), ports.seedLogin.token);
   const page = await sessionHelper.reloadElectronAppPage(session.context, session.page, ports.appUrl);
   await page.getByText("Connecting to server...").waitFor({ state: "hidden", timeout: 30_000 });
@@ -1971,9 +1971,10 @@ export async function openDesktop(repoRoot, playwright, ports, dependencies = {}
 }
 async function reloadClient(client) { if (client.session?.context) client.page = await client.sessionHelper.reloadElectronAppPage(client.session.context, client.page, client.session.appUrl); else await client.page.reload({ waitUntil: "domcontentloaded" }); }
 /** Installs a bounded disconnect control for the client runtime WebSocket. */
-export async function installWebSocketDisconnect(context, serverPort) {
+export async function installWebSocketDisconnect(context, runtimeUrl) {
+  const target = new URL(runtimeUrl);
   let socket = null;
-  await context.routeWebSocket((url) => url.protocol === "ws:" && url.port === String(serverPort), (route) => {
+  await context.routeWebSocket((url) => url.protocol === target.protocol && url.hostname === target.hostname && url.port === target.port, (route) => {
     socket = route;
     route.connectToServer();
   });

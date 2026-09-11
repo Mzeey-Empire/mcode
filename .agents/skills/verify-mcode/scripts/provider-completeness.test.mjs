@@ -12,17 +12,35 @@ NodeTest.test("requires explicit proof and cleanup confirmations", () => {
   NodeAssertStrict.throws(() => parseArguments(["cleanup"]), /requires health, proof/);
 });
 
-NodeTest.test("closes only the captured worktree runtime WebSocket for reconnection proof", async () => {
+NodeTest.test("closes only the exact client runtime WebSocket for reconnection proof", async () => {
   let routeHandler;
   const context = {
     routeWebSocket: async (matches, handler) => {
       NodeAssertStrict.equal(matches(new URL("ws://127.0.0.1:41539/")), true);
       NodeAssertStrict.equal(matches(new URL("ws://127.0.0.1:41540/")), false);
+      NodeAssertStrict.equal(matches(new URL("ws://localhost:19500/")), false);
       routeHandler = handler;
     },
   };
-  const disconnect = await installWebSocketDisconnect(context, 41539);
+  const disconnect = await installWebSocketDisconnect(context, "ws://127.0.0.1:41539/?token=runtime-token");
   await NodeAssertStrict.rejects(disconnect(), /did not create the runtime WebSocket/);
+  const calls = [];
+  routeHandler({ connectToServer: () => calls.push("connect"), close: async (options) => calls.push(options) });
+  await disconnect();
+  NodeAssertStrict.deepEqual(calls, ["connect", { code: 1012 }]);
+});
+
+NodeTest.test("captures the Electron runtime socket instead of the web development socket", async () => {
+  let routeHandler;
+  const context = {
+    routeWebSocket: async (matches, handler) => {
+      NodeAssertStrict.equal(matches(new URL("ws://localhost:19500/?token=desktop-token")), true);
+      NodeAssertStrict.equal(matches(new URL("ws://127.0.0.1:41539/?token=runtime-token")), false);
+      NodeAssertStrict.equal(matches(new URL("ws://127.0.0.1:41540/?token=hmr-token")), false);
+      routeHandler = handler;
+    },
+  };
+  const disconnect = await installWebSocketDisconnect(context, "ws://localhost:19500/?token=desktop-token");
   const calls = [];
   routeHandler({ connectToServer: () => calls.push("connect"), close: async (options) => calls.push(options) });
   await disconnect();
