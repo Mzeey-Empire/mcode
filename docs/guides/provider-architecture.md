@@ -129,7 +129,9 @@ covers off-PATH installs.
   Access Mode control and persists as `threads.devin_mode`; the coarse
   `permissionMode` fallback maps `supervised` -> `normal` and `full` ->
   `bypass`. Mcode's Plan interaction mode sends `plan` and restores the
-  thread's native mode on return to Build.
+  thread's native mode on return to Build. The adapter tracks the `mode`
+  select each session advertises, skips unadvertised values, and surfaces
+  them through `provider.listModes` so the picker drops account-gated modes.
 - **File access is scoped.** The mandatory `fs/read_text_file` and
   `fs/write_text_file` client callbacks allow the session cwd plus Devin's
   canonical `~/.devin/plans/` directory (where `write_plan` lands); everything
@@ -148,6 +150,7 @@ covers off-PATH installs.
   hidden because it writes outside the worktree. `switch_bypass` updates the
   thread's `devin_mode` so the composer reflects the mode Devin actually
   entered.
-- **No cost data.** Devin reports token usage only: `costUsd` stays `null`,
-  `contextEstimate` comes from `usage_update`, and token counts come from the
-  `session/prompt` response.
+- **Conditional cost data.** `contextEstimate` comes from `usage_update` and
+  token counts from the `session/prompt` response. If Devin ever sends a
+  `usage_update.cost` payload, its USD amount lands on `turnComplete.costUsd`;
+  otherwise `costUsd` stays `null`.

@@ -14,6 +14,7 @@ import type { ComposerAgentSelection } from "../draft/useComposerFormController"
 import type { PermissionMode } from "@/transport";
 import { PERMISSION_MODES } from "@/transport";
 import { useThreadStore } from "@/stores/threadStore";
+import { useProviderModelsStore } from "@/stores/providerModelsStore";
 
 /** Props for Composer's provider-specific access controls. */
 export interface ComposerAccessControlsProps {
@@ -83,12 +84,19 @@ function DevinAccessControls({
   const devinMode = selection.devinMode && selection.devinMode !== "plan"
     ? selection.devinMode
     : selection.permissionMode === PERMISSION_MODES.FULL ? "bypass" : "normal";
+  // The session's `mode` select gates account-restricted modes (e.g. bypass on
+  // plans that forbid it); while unknown, fall back to the static list.
+  const advertised = useProviderModelsStore((s) => s.modes.devin);
+  const advertisedModes = advertised
+    ? DEVIN_ACCESS_MODES.filter((mode) => advertised.includes(mode.id))
+    : DEVIN_ACCESS_MODES;
+  const modes = advertisedModes.length > 0 ? advertisedModes : DEVIN_ACCESS_MODES;
   return (
     <AccessModeSelector
       accessMode={devinMode}
       permissionLocked={false}
       approvalReviewSupported={false}
-      modes={DEVIN_ACCESS_MODES}
+      modes={modes}
       onAccessModeChange={(next) => {
         const mode = next as DevinMode;
         const permissionMode = mode === "bypass" ? PERMISSION_MODES.FULL : PERMISSION_MODES.SUPERVISED;

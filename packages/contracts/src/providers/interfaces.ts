@@ -182,6 +182,13 @@ export interface IAgentProvider {
   /** List models available from this provider. */
   listModels(): Promise<ProviderModelInfo[]>;
 
+  /**
+   * List the provider-native modes this account advertises (for example
+   * Devin's access-mode select). Returns `null` when the provider cannot
+   * report modes, so callers keep their static defaults.
+   */
+  listModes?(): Promise<string[] | null>;
+
   /** Return current usage/quota state for this provider. */
   getUsage?(): Promise<ProviderUsageInfo>;
 

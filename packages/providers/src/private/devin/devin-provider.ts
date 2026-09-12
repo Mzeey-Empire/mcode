@@ -134,6 +134,8 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
   /** Seeded from the static fallback so `applyModel` never blocks on a probe. */
   private devinFamilies: DevinModelFamily[] =
     groupDevinModelFamilies(DEVIN_STATIC_MODEL_FALLBACK).families;
+  /** Access modes last advertised by any session's `mode` select; `null` until probed. */
+  private advertisedModes: string[] | null = null;
 
   constructor(
     private readonly host: ProviderHostPorts,
@@ -212,6 +214,17 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
   }
 
   /**
+   * Lists the native access modes Devin advertises for this account, learned
+   * from the model probe's `mode` select and refreshed by live
+   * `config_option_update` notifications. `null` when nothing has been
+   * advertised yet, so callers keep the full static list.
+   */
+  async listModes(): Promise<string[] | null> {
+    if (!this.advertisedModes) await this.modelCatalog();
+    return this.advertisedModes;
+  }
+
+  /**
    * Devin encodes reasoning effort inside the model id (`swe-2-high`), so the
    * catalog is grouped into effort-carrying families before it reaches the UI.
    * The family map is retained for {@link applyModel} to recompose wire ids.
@@ -264,14 +277,9 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
       const modelOption = created.configOptions?.find(
         (option: { id: string }) => option.id === "model",
       ) as { type: string; options?: unknown[] } | undefined;
+      this.observeProbedModes(created.configOptions);
       if (!modelOption || modelOption.type !== "select" || !modelOption.options) return [];
-      // ACP select options may be flat values or named groups of values.
-      const values = (modelOption.options as Record<string, unknown>[]).flatMap(
-        (option) => typeof option.value === "string"
-          ? [option]
-          : (option.options as Record<string, unknown>[] | undefined) ?? [],
-      );
-      return values
+      return flattenSelectOptions(modelOption.options)
         .map((option: Record<string, unknown>) => ({
           id: String(option.value ?? ""),
           name: String(option.name ?? option.value ?? ""),
@@ -439,28 +447,30 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   /**
    * Records the access modes a session advertises through `config_option_update`
-   * so {@link applyMode} never sends a value Devin cannot accept. Mode select
-   * options arrive as flat `{value}` entries or named groups of entries.
+   * so {@link applyMode} never sends a value Devin cannot accept.
    */
   private observeAdvertisedModes(entry: DevinAcpSessionEntry, update: Record<string, unknown>): void {
-    const configOptions = update.configOptions;
-    if (!Array.isArray(configOptions)) return;
-    const modeOption = configOptions.find(
-      (option) => typeof option === "object" && option !== null
-        && (option as Record<string, unknown>).id === "mode",
-    ) as { options?: unknown[] } | undefined;
-    if (!modeOption || !Array.isArray(modeOption.options)) return;
-    const flat = (modeOption.options as Record<string, unknown>[]).flatMap(
-      (option) => typeof option.value === "string"
-        ? [option]
-        : (option.options as Record<string, unknown>[] | undefined) ?? [],
-    );
-    const modes = new Set<DevinMode>();
-    for (const option of flat) {
-      const parsed = DevinModeSchema.safeParse(option.value);
-      if (parsed.success) modes.add(parsed.data);
-    }
-    if (modes.size > 0) entry.advertisedModes = modes;
+    const modes = parseAdvertisedModes(update.configOptions);
+    if (modes.size === 0) return;
+    entry.advertisedModes = modes;
+    this.advertisedModes = [...modes];
+  }
+
+  /** Records the mode select advertised in a probe session's `session/new` result. */
+  private observeProbedModes(configOptions: unknown): void {
+    const modes = parseAdvertisedModes(configOptions);
+    if (modes.size > 0) this.advertisedModes = [...modes];
+  }
+
+  /**
+   * Retains `usage_update.cost` on the session so {@link emitSuccessfulTurn}
+   * can report it as `costUsd`. Devin has not been observed emitting this
+   * field; only a numeric USD amount is accepted when it does.
+   */
+  private observeUsageCost(entry: DevinAcpSessionEntry, update: Record<string, unknown>): void {
+    const cost = update.cost as { amount?: unknown; currency?: unknown } | undefined;
+    if (typeof cost?.amount !== "number" || cost.currency !== "USD") return;
+    entry.lastCostUsd = cost.amount;
   }
 
   private emitSuccessfulTurn(
@@ -483,7 +493,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
       type: AgentEventType.TurnComplete,
       threadId: entry.threadId,
       reason: response.stopReason ?? "end_turn",
-      costUsd: null,
+      costUsd: entry.lastCostUsd,
       tokensIn: usage.inputTokens ?? 0,
       tokensOut: usage.outputTokens ?? 0,
       ...(typeof usage.cachedReadTokens === "number" ? { cacheReadTokens: usage.cachedReadTokens } : {}),
@@ -620,7 +630,9 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
         ...(command ? { command } : {}),
       },
       ...(snapshot?.title ? { title: snapshot.title } : {}),
-      options: options.map((option) => ({
+      // `allow_always_global` grants outside the worktree, so it is hidden
+      // from the card even though Devin advertises it verbatim.
+      options: options.filter((option) => option.optionId !== "allow_always_global").map((option) => ({
         id: option.optionId,
         label: option.name,
         ...(option.kind ? { kind: option.kind } : {}),
@@ -798,6 +810,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
       pendingSubagentCallIds: [],
       subagentParentByAgentId: new Map(),
       stoppedModelLabel: null,
+      lastCostUsd: null,
       stderrTailLines: [],
     };
     child.stderr?.on("data", (chunk: Buffer) => {
@@ -850,6 +863,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     const raw = update.update as Record<string, unknown>;
     if (raw.sessionUpdate === "current_mode_update") this.applyObservedDevinMode(entry, raw.currentModeId);
     if (raw.sessionUpdate === "config_option_update") this.observeAdvertisedModes(entry, raw);
+    if (raw.sessionUpdate === "usage_update") this.observeUsageCost(entry, raw);
     const state = entry.activeTurnState ?? entry.replayTurnState;
     if (!state) return;
     const routing = this.pendingTurnRoutings.get(entry.mcodeSessionId);
@@ -936,6 +950,31 @@ function resolveAssistantText(state: ReturnType<typeof createDevinAcpTurnState> 
   if (!state) return "";
   const { assistantText, assistantFinalText } = state.accumulator;
   return (assistantFinalText || assistantText).trim();
+}
+
+/** ACP select options arrive as flat `{value}` entries or named groups of entries. */
+function flattenSelectOptions(options: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(options)) return [];
+  return (options as Record<string, unknown>[]).flatMap(
+    (option) => typeof option?.value === "string"
+      ? [option]
+      : (option?.options as Record<string, unknown>[] | undefined) ?? [],
+  );
+}
+
+/** Extracts the advertised `mode` select values from a configOptions array. */
+function parseAdvertisedModes(configOptions: unknown): Set<DevinMode> {
+  const modes = new Set<DevinMode>();
+  if (!Array.isArray(configOptions)) return modes;
+  const modeOption = configOptions.find(
+    (option) => typeof option === "object" && option !== null
+      && (option as Record<string, unknown>).id === "mode",
+  ) as { options?: unknown } | undefined;
+  for (const option of flattenSelectOptions(modeOption?.options)) {
+    const parsed = DevinModeSchema.safeParse(option.value);
+    if (parsed.success) modes.add(parsed.data);
+  }
+  return modes;
 }
 
 function inferDevinModelGroup(modelId: string): string {

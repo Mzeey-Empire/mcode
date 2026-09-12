@@ -297,6 +297,7 @@ describe("DevinProvider", () => {
         toolCall: { toolCallId: "tc-perm", title: "Bash", _meta: { "cognition.ai/editableCommand": "rm -rf build" } },
         options: [
           { optionId: "allow_once", name: "Allow once", kind: "allow_once" },
+          { optionId: "allow_always_global", name: "Always allow in all projects", kind: "allow_always" },
           { optionId: "reject_once", name: "Reject", kind: "reject_once" },
         ],
       } as AcpPermissionRequest);
@@ -370,6 +371,68 @@ describe("DevinProvider", () => {
     expect(NodeFS.readFileSync(NodePath.join(root, "nested", "inside.txt"), "utf-8")).toBe("inside");
     expect(NodeFS.existsSync(NodePath.join(root, "..", "escape.txt"))).toBe(false);
     NodeFS.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("forwards usage_update cost onto the turn's costUsd", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    starts.push(mockAcpStart([fake]));
+    createProvider(host);
+
+    vi.mocked(fake.runtime.prompt).mockImplementation(async () => {
+      await fake.callbacks.onSessionUpdate?.({
+        sessionId: "devin-acp-1",
+        update: {
+          sessionUpdate: "usage_update",
+          used: 1_000,
+          size: 200_000,
+          cost: { amount: 0.42, currency: "USD" },
+        },
+      });
+      return { stopReason: "end_turn", usage: { inputTokens: 3, outputTokens: 5 } };
+    });
+
+    await provider!.sendTurn(turn());
+
+    expect(submittedRuntimeEvents(host)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "turnComplete", costUsd: 0.42 }),
+    ]));
+  });
+
+  it("reports the mode select advertised by the probe session", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    starts.push(mockAcpStart([fake]));
+    createProvider(host);
+    fake.connection.newSession.mockResolvedValue({
+      sessionId: "devin-acp-1",
+      configOptions: [
+        {
+          id: "model",
+          type: "select",
+          options: [{ value: "swe-2-high", name: "SWE-2 High" }],
+        },
+        {
+          id: "mode",
+          type: "select",
+          options: [
+            { value: "normal", name: "Normal" },
+            { value: "bypass", name: "Bypass" },
+          ],
+        },
+      ],
+    });
+
+    expect(await provider!.listModes()).toEqual(["normal", "bypass"]);
+  });
+
+  it("reports null modes without a probe when the devin binary is absent", async () => {
+    const host = createHost();
+    whichMock.mockResolvedValue(null);
+    starts.push(vi.spyOn(AcpSessionRuntime, "start"));
+    const p = createProvider(host);
+
+    expect(await p.listModes()).toBeNull();
   });
 
   it("serves the static model catalog without spawning when the devin binary is absent", async () => {

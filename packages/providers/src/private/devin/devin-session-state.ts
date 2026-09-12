@@ -49,6 +49,8 @@ export interface DevinAcpSessionEntry {
   subagentParentByAgentId: Map<string, string>;
   /** Model label reported by `_cognition.ai/agent_stopped` for the active turn. */
   stoppedModelLabel: string | null;
+  /** Latest `usage_update.cost` seen on this session; `null` until Devin emits one. */
+  lastCostUsd: number | null;
   stderrTailLines: string[];
 }
 

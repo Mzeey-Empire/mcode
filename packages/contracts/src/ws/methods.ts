@@ -1467,6 +1467,11 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({ providerId: ProviderIdSchema }),
     result: z.array(ProviderModelInfoSchema()),
   },
+  /** Returns the provider-native mode ids this account advertises, or `null` when unknown. */
+  "provider.listModes": {
+    params: z.object({ providerId: ProviderIdSchema }),
+    result: z.array(z.string()).nullable(),
+  },
   "provider.getUsage": {
     params: z.object({ providerId: ProviderIdSchema }),
     result: ProviderUsageInfoSchema(),

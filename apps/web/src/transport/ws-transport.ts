@@ -1170,6 +1170,8 @@ export function createWsTransport(
     // Provider models
     listProviderModels: (providerId) =>
       rpc<ProviderModelInfo[]>("provider.listModels", { providerId }),
+    listProviderModes: (providerId) =>
+      rpc<string[] | null>("provider.listModes", { providerId }),
     getProviderUsage: (providerId) =>
       rpc<ProviderUsageInfo>("provider.getUsage", { providerId }),
     /** Fetches all available Copilot sub-agents for the given workspace (built-in + user + project). */
