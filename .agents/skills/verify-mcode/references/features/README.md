@@ -41,6 +41,8 @@
 | An existing thread title is renamed or cancelled from the Project tree | [Thread-list inline rename](thread-list-inline-rename.md) | Electron public UI proof with the stable live-testing interface |
 | A thread workspace opens in each detected external editor without showing a Windows console window | [Open in editor](open-in-editor.md) | Electron Open in menu proof and focused Windows launch tests |
 | A Devin thread authenticates headlessly, streams a turn over local ACP, resumes via session/load, and reports tokens without cost | [Devin provider over local ACP](devin-provider.md) | `runtime live --provider devin --model <id> --scenario completion --confirm-provider-call --allow-enable-devin` |
+| ACP reasoning renders as thought segments and tool cards hold invocation order through out-of-order completions | [ACP narrative ordering](acp-narrative.md) | `desktop acp-narrative` fixture through owned Electron proof, plus `runtime check --phase acp` |
+| Server startup, provider children, and cleanup tasks never open a visible Windows console window | [Windows console hygiene](windows-console-hygiene.md) | `runtime console-audit` snapshot and `--watch` during restart |
 
 Read [Multi-surface journeys](multi-surface-journeys.md) for a workflow that crosses the server, web or Electron UI, provider adapters, persistence, or managed worktrees.
 
@@ -56,7 +58,9 @@ Read [Multi-surface journeys](multi-surface-journeys.md) for a workflow that cro
 8. Run the Thread Overview and right-panel workflow when shared workspace navigation or panel layout changed.
 9. Run the thread-list inline rename workflow when Project-tree thread naming changed.
 10. Run the Open in editor workflow when external-editor discovery or launch changes.
-11. Run the applicable multi-surface journey last, inspect receipts, then run cleanup.
+11. Run `runtime check --phase acp` and the ACP narrative Electron proof when ACP mapping, narrative projection, or tool-call ordering changed.
+12. Run `runtime console-audit` (snapshot, then `--watch` across a restart) when any child-process spawn, startup path, or process cleanup changed on Windows.
+13. Run the applicable multi-surface journey last, inspect receipts, then run cleanup.
 
 ## Coverage gaps
 
@@ -70,3 +74,5 @@ Read [Multi-surface journeys](multi-surface-journeys.md) for a workflow that cro
 - Thread retention has a minimum of one day. The live proof shows the scheduled deletion, while focused integration checks show later worktree cleanup.
 - If `agent.createAndSend` creates a thread but its response is lost before the ID arrives, the public RPC has no safe cleanup identifier. Record this as a coverage gap. Do not delete threads by heuristic.
 - If `thread.create` creates a managed-worktree thread but its response is lost before the ID arrives, the lifecycle verifier has no safe cleanup identifier. Record this as a coverage gap. Do not delete threads by heuristic.
+- The ACP narrative fixture does not emit permission prompts, plans, subagents, or usage updates; those paths still need live provider coverage or focused tests.
+- The Windows console audit cannot attribute Windows Terminal-hosted console windows to a process tree; watch-mode sightings need manual correlation, and an uncorrelated sighting is a gap rather than a pass or defect.

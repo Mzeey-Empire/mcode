@@ -61,6 +61,7 @@ states. Remove the follow-up before completion so it cannot start another turn.
 
 ## Gotchas
 
+- For ACP-provider reasoning and tool-card ordering, the deterministic boundary check is the [ACP narrative fixture](acp-narrative.md) plus `runtime check --phase acp`; the seeded history here covers transcript layout, not provider event mapping.
 - React StrictMode recreates the viewport. Restore state belongs to that viewport instance.
 - Save a row key and offset while row heights are provisional. A raw scrollTop cannot survive inserted history.
 - Restore the sticky prompt inset with the reading position. Applying it twice shifts narration by one row.

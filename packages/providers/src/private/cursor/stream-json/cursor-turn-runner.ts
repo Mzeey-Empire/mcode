@@ -96,6 +96,7 @@ export async function runCursorTurn(
   const child = deps.spawn(options.cliPath, args, {
     stdio: ["pipe", "pipe", "pipe"],
     shell: options.platform === "win32",
+    windowsHide: true,
     cwd: options.cwd,
     env: options.env ?? processEnvironmentSnapshot(),
   });

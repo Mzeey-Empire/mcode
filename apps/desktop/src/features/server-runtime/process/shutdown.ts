@@ -220,6 +220,7 @@ function forceKillServerProcessTree(pid: number, platform: NodeJS.Platform): voi
       NodeChildProcess.execFileSync("taskkill", ["/T", "/F", "/PID", String(pid)], {
         stdio: "ignore",
         timeout: 5_000,
+        windowsHide: true,
       });
       return;
     }

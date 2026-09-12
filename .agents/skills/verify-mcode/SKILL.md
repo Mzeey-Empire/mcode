@@ -50,9 +50,10 @@ Run `thread-lifecycle health` before the completed-thread workflow. It also chec
 The public commands use these namespaces:
 
 ```sh
-bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs runtime <health|check|inspect|live|worktree-setup|worktree-setup-cleanup|diagnostics|cleanup>
+bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs runtime <health|check|inspect|live|console-audit|worktree-setup|worktree-setup-cleanup|diagnostics|cleanup>
 bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs thread-lifecycle <health|check|proof|inspect|cleanup>
 bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs composer-queue <check|health|proof|navigation-repro|inspect|cleanup>
+bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs desktop acp-narrative <check|setup|inspect|cleanup>
 bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs desktop codex-protocol-notices <check|setup|inspect|cleanup>
 bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs desktop selected-text-comments <setup|proof|cleanup>
 ```
@@ -66,6 +67,10 @@ Composer-queue `check` runs the deterministic verifier checks. Its tests do not 
 Use `runtime live --provider codex --model gpt-5.6-terra --scenario subagent --confirm-provider-call` for the Codex V2 subagent persistence journey. Read `references/features/codex-subagent-view.md` and complete its Electron steps for navigation, color, and reload proof.
 
 Run `runtime worktree-setup --confirm-cleanup` after changes to managed-worktree creation or automatic Setup. It creates an owned Git project, starts a queued New-worktree turn, proves automatic Setup reads the completed checkout, and removes all generated state without making a provider call. If a proof is interrupted, run `runtime worktree-setup-cleanup --confirm-cleanup` before retrying.
+
+Run `runtime console-audit` after changes to child-process spawn, startup, or cleanup code on Windows. It lists visible windows owned by runtime-process descendants; the server tree must never own one. Use `--watch <seconds>` across a runtime restart or packaged launch to catch transient flashes, and read `references/features/windows-console-hygiene.md` for proof and Terminal-hosting limits.
+
+Run `runtime check --phase acp` for the deterministic ACP narrative regression gate. For the production-boundary Electron proof, run `desktop acp-narrative setup`, set the returned path as the Cursor (or Devin) CLI path in the owned Electron runtime, and follow `references/features/acp-narrative.md`. The fixture emits reasoning chunks, three invocation-ordered tool markers, and out-of-order completions without needing a provider account.
 
 ## Evidence and cleanup
 

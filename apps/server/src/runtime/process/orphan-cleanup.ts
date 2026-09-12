@@ -40,6 +40,7 @@ function defaultGetProcessName(pid: number, platform: NodeJS.Platform): string |
       const out = NodeChildProcess.execSync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, {
         timeout: 3000,
         encoding: "utf-8",
+        windowsHide: true,
       } as Parameters<typeof NodeChildProcess.execSync>[1]);
       const match = /^"([^"]+)"/.exec(String(out).trim());
       return match ? match[1] : null;
@@ -69,7 +70,10 @@ export interface OrphanCleanupDeps {
    * Runs a shell command synchronously.
    * Defaults to execSync from child_process.
    */
-  execSync?: (cmd: string, opts?: { stdio?: "ignore"; timeout?: number }) => Buffer | string;
+  execSync?: (
+    cmd: string,
+    opts?: { stdio?: "ignore"; timeout?: number; windowsHide?: boolean },
+  ) => Buffer | string;
   /**
    * Returns the process image name for the given PID, or null if the name
    * cannot be determined. Used to verify the PID belongs to a server process
@@ -86,7 +90,10 @@ export interface OrphanCleanupDeps {
 /** Injectable dependencies for {@link reapOrphanedPtys}. */
 export interface ReapOrphanedPtysDeps {
   processKill?: (pid: number, signal: number | string) => void;
-  execSync?: (cmd: string, opts?: { stdio?: "ignore"; timeout?: number }) => Buffer | string;
+  execSync?: (
+    cmd: string,
+    opts?: { stdio?: "ignore"; timeout?: number; windowsHide?: boolean },
+  ) => Buffer | string;
   getProcessName?: (pid: number) => string | null;
   /** Current platform string. */
   platform: NodeJS.Platform;
@@ -211,7 +218,7 @@ function killWindowsOrphanedPty(
   execSyncFn: ReapContext["execSync"],
 ): boolean {
   try {
-    execSyncFn(`taskkill /T /F /PID ${entry.pid}`, { stdio: "ignore", timeout: 5000 });
+    execSyncFn(`taskkill /T /F /PID ${entry.pid}`, { stdio: "ignore", timeout: 5000, windowsHide: true });
     return true;
   } catch (error) {
     if (isWindowsProcessGone(error)) return true;
@@ -368,7 +375,7 @@ function killOrphanedServerProcess(
 /** Kills a Windows server process tree after its identity check. */
 function killWindowsServerTree(pid: number, execSyncFn: ServerCleanupContext["execSync"]): void {
   try {
-    execSyncFn(`taskkill /T /F /PID ${pid}`, { stdio: "ignore", timeout: 5000 });
+    execSyncFn(`taskkill /T /F /PID ${pid}`, { stdio: "ignore", timeout: 5000, windowsHide: true });
   } catch {
     // The process can exit after its liveness check.
   }
