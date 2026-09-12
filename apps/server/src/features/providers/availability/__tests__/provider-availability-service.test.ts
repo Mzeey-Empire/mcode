@@ -53,10 +53,10 @@ describe("ProviderAvailabilityService.listAvailability", () => {
     expect(list.find((p) => p.id === "gemini")?.hasAdapter).toBe(false);
   });
 
-  it("returns catalog order: claude, codex, copilot, gemini, cursor, opencode", () => {
+  it("returns catalog order: claude, codex, copilot, gemini, cursor, opencode, devin", () => {
     const svc = new ProviderAvailabilityService(stubSettings(), stubRegistry([]));
     expect(svc.listAvailability().map((p) => p.id)).toEqual([
-      "claude", "codex", "copilot", "gemini", "cursor", "opencode",
+      "claude", "codex", "copilot", "gemini", "cursor", "opencode", "devin",
     ]);
   });
 
