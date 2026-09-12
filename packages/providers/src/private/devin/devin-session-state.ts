@@ -39,6 +39,8 @@ export interface DevinAcpSessionEntry {
   modelAppliedPair: { acpSessionId: string; modelId: string } | null;
   /** Dedupe pair: native mode already applied to this logical session. */
   modeAppliedPair: { acpSessionId: string; mode: DevinMode } | null;
+  /** Modes the session advertises via `config_option_update`; null until known. */
+  advertisedModes: Set<DevinMode> | null;
   /** toolCallId -> snapshot for permission-request correlation. */
   toolCallById: Map<string, DevinToolCallSnapshot>;
   /** Unresolved `run_subagent` toolCallIds for orphan subagent updates. */

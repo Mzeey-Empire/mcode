@@ -45,6 +45,14 @@ import {
 import type { DevinAcpSessionEntry } from "./devin-session-state.js";
 
 const STDERR_TAIL_MAX = 48;
+
+/** Thrown when a spawn site cannot resolve an executable Devin CLI. */
+class DevinCliMissingError extends Error {
+  constructor(cliPath: string) {
+    super(`Devin CLI not found (${cliPath}). Install devin or set provider.cli.devin in Settings.`);
+    this.name = "DevinCliMissingError";
+  }
+}
 const WORKSPACE_FILE_READ_MAX_BYTES = 8 * 1024 * 1024;
 
 /** Server-owned authorities required by the Devin Provider. */
@@ -58,7 +66,7 @@ interface DevinPendingPermission {
   entry: DevinAcpSessionEntry;
   request: PermissionRequest;
   /** Raw ACP options, retained so `optionId` and `kind` survive to the reply. */
-  acpOptions: readonly { optionId: string; kind?: string | null }[];
+  acpOptions: readonly { optionId: string; name: string; kind?: string | null }[];
   resolve: (outcome: AcpPermissionOutcome) => void;
 }
 
@@ -109,10 +117,8 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
       { name: "build", support: "supported" },
       { name: "plan", support: "supported" },
       { name: "permissions", support: "supported" },
-      { name: "usage", support: "supported" },
       { name: "session-eviction", support: "supported" },
-      { name: "provider-continuation", support: "supported" },
-      { name: "orchestration", support: "supported" },
+      { name: "clean-fork", support: "supported" },
     ],
   };
   readonly supportsCompletion = false;
@@ -231,9 +237,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
 
   private async probeDevinModels(): Promise<ProviderModelInfo[]> {
     const env = this.host.environment.snapshot();
-    // child_process.spawn reports a missing binary through an `error` event the
-    // ACP runtime never observes, which crashes the host; bail before spawning.
-    const cliPath = await which(this.cliPath(), { nothrow: true });
+    const cliPath = await this.resolveCliPath();
     if (!cliPath) return [];
     const runtime = await AcpSessionRuntime.start({
       spawnSpec: {
@@ -393,6 +397,16 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
   private async applyMode(entry: DevinAcpSessionEntry, mode: DevinMode): Promise<void> {
     const pair = entry.modeAppliedPair;
     if (pair && pair.acpSessionId === entry.acpSessionId && pair.mode === mode) return;
+    // `plan` rides the interaction-mode axis, not the access-mode select, so
+    // it is applied optimistically; the guard only gates access modes Devin
+    // did not advertise for this session.
+    if (mode !== "plan" && entry.advertisedModes && !entry.advertisedModes.has(mode)) {
+      logger.warn("Devin mode not advertised by this session; skipping set_config_option", {
+        threadId: entry.threadId,
+        mode,
+      });
+      return;
+    }
     try {
       await entry.acpRuntime.state.connection.setSessionConfigOption({
         sessionId: entry.acpRuntime.state.sessionId,
@@ -421,6 +435,32 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     entry.modeAppliedPair = entry.acpSessionId
       ? { acpSessionId: entry.acpSessionId, mode: parsed.data }
       : null;
+  }
+
+  /**
+   * Records the access modes a session advertises through `config_option_update`
+   * so {@link applyMode} never sends a value Devin cannot accept. Mode select
+   * options arrive as flat `{value}` entries or named groups of entries.
+   */
+  private observeAdvertisedModes(entry: DevinAcpSessionEntry, update: Record<string, unknown>): void {
+    const configOptions = update.configOptions;
+    if (!Array.isArray(configOptions)) return;
+    const modeOption = configOptions.find(
+      (option) => typeof option === "object" && option !== null
+        && (option as Record<string, unknown>).id === "mode",
+    ) as { options?: unknown[] } | undefined;
+    if (!modeOption || !Array.isArray(modeOption.options)) return;
+    const flat = (modeOption.options as Record<string, unknown>[]).flatMap(
+      (option) => typeof option.value === "string"
+        ? [option]
+        : (option.options as Record<string, unknown>[] | undefined) ?? [],
+    );
+    const modes = new Set<DevinMode>();
+    for (const option of flat) {
+      const parsed = DevinModeSchema.safeParse(option.value);
+      if (parsed.success) modes.add(parsed.data);
+    }
+    if (modes.size > 0) entry.advertisedModes = modes;
   }
 
   private emitSuccessfulTurn(
@@ -512,11 +552,15 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     // next turn does not re-apply the stale thread mode. The same sync happens
     // via `current_mode_update` when Devin emits one.
     if (optionId === "switch_bypass") this.applyObservedDevinMode(pending.entry, "bypass");
-    const selectedKind = optionId
-      ? pending.acpOptions.find((option) => option.optionId === optionId)?.kind
+    const selected = optionId
+      ? pending.acpOptions.find((option) => option.optionId === optionId)
       : undefined;
-    const resolvedDecision = selectedKind?.startsWith("reject") ? "deny" : decision;
-    this.emit("permission_resolved", { requestId, decision: resolvedDecision });
+    const resolvedDecision = selected?.kind?.startsWith("reject") ? "deny" : decision;
+    this.emit("permission_resolved", {
+      requestId,
+      decision: resolvedDecision,
+      ...(selected?.name ? { optionLabel: selected.name } : {}),
+    });
     return true;
   }
 
@@ -633,10 +677,12 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     cwd: string;
   }): Promise<string> {
     const env = this.host.environment.snapshot();
+    const cliPath = await this.resolveCliPath();
+    if (!cliPath) throw new DevinCliMissingError(this.cliPath());
     let text = "";
     const runtime = await AcpSessionRuntime.start({
       spawnSpec: {
-        command: this.cliPath(),
+        command: cliPath,
         args: ["acp"],
         cwd: args.cwd,
         env: { ...env },
@@ -677,12 +723,24 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     return configured || getCatalogEntry("devin").cliBinary;
   }
 
+  /**
+   * Resolves the Devin CLI binary, or undefined when it cannot execute.
+   * `child_process.spawn` reports a missing binary through an `error` event on
+   * the child that the ACP runtime never observes; without this guard it
+   * escapes as an uncaught exception and crashes the host.
+   */
+  private async resolveCliPath(): Promise<string | undefined> {
+    return (await which(this.cliPath(), { nothrow: true })) ?? undefined;
+  }
+
   private async spawnSession(args: SpawnArgs): Promise<SpawnResult<DevinAcpSessionEntry>> {
     const env = args.env;
+    const cliPath = await this.resolveCliPath();
+    if (!cliPath) throw new DevinCliMissingError(this.cliPath());
     let entry: DevinAcpSessionEntry | undefined;
     const runtime = await AcpSessionRuntime.start({
       spawnSpec: {
-        command: this.cliPath(),
+        command: cliPath,
         args: ["acp"],
         cwd: args.cwd,
         env: { ...env },
@@ -735,6 +793,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
       pendingUserStopAbort: false,
       modelAppliedPair: null,
       modeAppliedPair: null,
+      advertisedModes: null,
       toolCallById: new Map(),
       pendingSubagentCallIds: [],
       subagentParentByAgentId: new Map(),
@@ -790,6 +849,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     if (params.sessionId !== entry.acpSessionId) return;
     const raw = update.update as Record<string, unknown>;
     if (raw.sessionUpdate === "current_mode_update") this.applyObservedDevinMode(entry, raw.currentModeId);
+    if (raw.sessionUpdate === "config_option_update") this.observeAdvertisedModes(entry, raw);
     const state = entry.activeTurnState ?? entry.replayTurnState;
     if (!state) return;
     const routing = this.pendingTurnRoutings.get(entry.mcodeSessionId);

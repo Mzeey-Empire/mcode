@@ -6,7 +6,7 @@ import type * as NodeChildProcess from "node:child_process";
 import type { ClientSideConnection } from "@agentclientprotocol/sdk";
 import which from "which";
 import { getDefaultSettings, type TurnRequest } from "@mcode/contracts";
-import { afterEach, describe, expect, it, vi, type MockInstance } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import type { ProviderHostPorts } from "../../../host-ports.js";
 import { AcpSessionRuntime } from "../../protocols/acp/acp-session-runtime.js";
 import type { AcpPermissionOutcome, AcpPermissionRequest } from "../../protocols/acp/acp-session-types.js";
@@ -168,6 +168,10 @@ describe("DevinProvider", () => {
   let provider: DevinProvider | undefined;
   const starts: MockInstance[] = [];
 
+  beforeEach(() => {
+    whichMock.mockResolvedValue("devin");
+  });
+
   afterEach(async () => {
     for (const spy of starts) spy.mockRestore();
     starts.length = 0;
@@ -315,7 +319,7 @@ describe("DevinProvider", () => {
 
     expect(p.resolvePermission(request.requestId, "allow", undefined, "reject_once")).toBe(true);
     await sending;
-    expect(resolvedEvents).toEqual([{ requestId: request.requestId, decision: "deny" }]);
+    expect(resolvedEvents).toEqual([{ requestId: request.requestId, decision: "deny", optionLabel: "Reject" }]);
   });
 
   it("auto-allows permission requests while bypass mode is active", async () => {
@@ -379,6 +383,53 @@ describe("DevinProvider", () => {
 
     expect(startSpy).not.toHaveBeenCalled();
     expect(models.map((model) => model.id)).toContain("swe-2");
+  });
+
+  it("fails the turn without spawning when the devin binary is absent", async () => {
+    const host = createHost();
+    whichMock.mockResolvedValue(null);
+    const startSpy = vi.spyOn(AcpSessionRuntime, "start");
+    starts.push(startSpy);
+    const p = createProvider(host);
+
+    await expect(p.sendTurn(turn())).rejects.toThrow("Devin CLI not found");
+    expect(startSpy).not.toHaveBeenCalled();
+  });
+
+  it("skips access modes the session did not advertise while still applying plan", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    starts.push(mockAcpStart([fake]));
+    const p = createProvider(host);
+
+    vi.mocked(fake.runtime.prompt).mockImplementation(async () => {
+      await fake.callbacks.onSessionUpdate?.({
+        sessionId: "devin-acp-1",
+        update: {
+          sessionUpdate: "config_option_update",
+          configOptions: [
+            {
+              id: "mode",
+              type: "select",
+              options: [
+                { value: "normal", name: "Normal" },
+                { value: "bypass", name: "Bypass" },
+              ],
+            },
+          ],
+        },
+      });
+      return { stopReason: "end_turn", usage: {} };
+    });
+
+    await p.sendTurn(turn());
+    await p.sendTurn(turn({ providerOptions: { mode: "smart" } }));
+    await p.sendTurn(turn({ interactionMode: "plan" }));
+
+    const modeCalls = fake.connection.setSessionConfigOption.mock.calls
+      .filter(([args]) => (args as { configId: string }).configId === "mode")
+      .map(([args]) => (args as { value: string }).value);
+    expect(modeCalls).toEqual(["normal", "plan"]);
   });
 
   it("tracks switch_bypass so later prompts in the session auto-allow and the mode is not re-applied", async () => {
