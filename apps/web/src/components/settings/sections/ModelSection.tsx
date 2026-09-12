@@ -10,7 +10,7 @@ import {
   supportsEffortParameter,
   supports1MContextWindow,
   supportsThinkingToggle,
-  normalizeReasoningLevelForModel,
+  normalizeReasoningLevel,
   getCodexReasoningLevels,
   getCodexDefaultReasoningLevel,
   pickProviderModelsForSettings,
@@ -378,7 +378,7 @@ export function ModelSection() {
             ? reasoning
             : (getCodexDefaultReasoningLevel(firstModel.id) ?? "medium");
         } else {
-          newReasoning = normalizeReasoningLevelForModel(firstModel.id, reasoning);
+          newReasoning = normalizeReasoningLevel(v, firstModel.id, reasoning);
         }
       }
       void update({
@@ -402,7 +402,7 @@ export function ModelSection() {
         newReasoning = getCodexDefaultReasoningLevel(v) ?? "medium";
       }
     } else {
-      newReasoning = normalizeReasoningLevelForModel(v, reasoning);
+      newReasoning = normalizeReasoningLevel(provider, v, reasoning);
     }
     void update({
       model: {

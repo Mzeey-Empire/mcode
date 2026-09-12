@@ -5,6 +5,7 @@ import {
   MODEL_CONTEXT_WINDOWS_DEFAULT,
   getModelContextWindow as sharedGetModelContextWindow,
 } from "@mcode/shared/model-context";
+import { normalizeReasoningLevelForModel } from "@mcode/shared/model-effort";
 
 // Import from the subpath, NOT the barrel. The barrel re-exports
 // winston-bound logging at the top of index.ts, which throws
@@ -420,6 +421,28 @@ export function providerSupportsSendNow(provider: ProviderId | string | undefine
  */
 export function getModelReasoningLevels(modelId: string): readonly CodexReasoningLevel[] | null {
   return findModelById(modelId)?.supportedReasoningLevels ?? null;
+}
+
+/**
+ * Normalizes a requested reasoning level for the selected provider's model.
+ * Devin encodes effort inside the wire model id, so its levels come from the
+ * family def's declared `supportedReasoningLevels` — the Claude-style effort
+ * ladder in `normalizeReasoningLevelForModel` would snap `max` back to `high`.
+ * Devin models without declared levels keep the requested level; the adapter
+ * recomposes or falls back when it builds the wire id.
+ */
+export function normalizeReasoningLevel(
+  provider: string | undefined,
+  modelId: string,
+  level: ReasoningLevel,
+): ReasoningLevel {
+  if (provider !== "devin") return normalizeReasoningLevelForModel(modelId, level);
+  const declared = findModelById(modelId)?.supportedReasoningLevels;
+  if (!declared || declared.length === 0) return level;
+  if (declared.includes(level)) return level;
+  return findModelById(modelId)?.defaultReasoningLevel
+    ?? declared[declared.length - 1]
+    ?? level;
 }
 
 /** Returns the model's default reasoning level, or null when undeclared. */

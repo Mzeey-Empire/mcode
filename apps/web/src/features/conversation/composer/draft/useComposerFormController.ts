@@ -18,7 +18,7 @@ import type {
 import { ORCHESTRATION_MODES } from "@mcode/contracts";
 import {
   getDefaultModelId,
-  normalizeReasoningLevelForModel,
+  normalizeReasoningLevel,
 } from "@/lib/model-registry";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import {
@@ -519,7 +519,7 @@ export function useComposerFormController({
     const defaults = {
       modelId: validModelId,
       provider: settingsDefaultProvider ?? "claude",
-      reasoning: normalizeReasoningLevelForModel(validModelId, settingsDefaultReasoning),
+      reasoning: normalizeReasoningLevel(settingsDefaultProvider, validModelId, settingsDefaultReasoning),
     };
     updateSelection(agentSettingsTouchedRef.current
       ? defaults
@@ -588,7 +588,8 @@ export function useComposerFormController({
 
   useEffect(() => {
     setSelection((current) => {
-      const normalizedReasoning = normalizeReasoningLevelForModel(
+      const normalizedReasoning = normalizeReasoningLevel(
+        current.provider,
         current.modelId,
         current.reasoning,
       );
@@ -596,7 +597,7 @@ export function useComposerFormController({
         ? current
         : { ...current, reasoning: normalizedReasoning };
     });
-  }, [selection.modelId, selection.reasoning, setSelection]);
+  }, [selection.modelId, selection.provider, selection.reasoning, setSelection]);
 
   useEffect(() => {
     if (!threadId) return;

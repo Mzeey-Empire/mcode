@@ -14,7 +14,7 @@ import {
   getDefaultModelId,
   getDefaultProviderId,
   getDefaultReasoningLevel,
-  normalizeReasoningLevelForModel,
+  normalizeReasoningLevel,
   resolveThreadModelId,
 } from "@/lib/model-registry";
 
@@ -95,6 +95,7 @@ function buildDefaultComposerSession(
   defaults: ResolveComposerSessionInput["globalDefaults"],
 ): ComposerSession {
   const modelId = getDefaultModelId();
+  const provider = getDefaultProviderId();
   return {
     input: "",
     mentions: [],
@@ -102,8 +103,8 @@ function buildDefaultComposerSession(
     selectedTextCommentEditor: undefined,
     attachments: [],
     modelId,
-    provider: getDefaultProviderId(),
-    reasoning: normalizeReasoningLevelForModel(modelId, getDefaultReasoningLevel()),
+    provider,
+    reasoning: normalizeReasoningLevel(provider, modelId, getDefaultReasoningLevel()),
     interactionMode:
       defaults.interactionMode === INTERACTION_MODES.PLAN
         ? INTERACTION_MODES.PLAN
@@ -136,7 +137,7 @@ function buildSavedComposerSession(
     attachments: saved.attachments.map((attachment) => ({ ...attachment })),
     modelId: saved.modelId,
     provider: saved.provider ?? getDefaultProviderId(),
-    reasoning: normalizeReasoningLevelForModel(saved.modelId, saved.reasoning),
+    reasoning: normalizeReasoningLevel(saved.provider, saved.modelId, saved.reasoning),
     interactionMode: threadSettings.interactionMode,
     permissionMode: threadSettings.permissionMode,
     copilotAgent: threadSettings.copilotAgent,
@@ -169,14 +170,15 @@ function buildThreadModelSession(
   threadRow: WorkspaceThread | undefined,
 ): Pick<ComposerSession, "modelId" | "provider" | "reasoning"> {
   const modelId = resolveThreadModelId(threadRow?.model, getDefaultModelId());
+  const provider = (threadRow?.provider as string | undefined) ?? getDefaultProviderId();
   const reasoning = threadRow?.reasoning_level
     ? (threadRow.reasoning_level as ReasoningLevel)
     : getDefaultReasoningLevel();
 
   return {
     modelId,
-    provider: (threadRow?.provider as string | undefined) ?? getDefaultProviderId(),
-    reasoning: normalizeReasoningLevelForModel(modelId, reasoning),
+    provider,
+    reasoning: normalizeReasoningLevel(provider, modelId, reasoning),
   };
 }
 
