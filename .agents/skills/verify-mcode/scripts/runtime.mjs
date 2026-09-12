@@ -42,7 +42,7 @@ const RUNTIME_SOURCE_DIRECTORIES = [
   ["packages", "shared", "src"],
   ["packages", "thread-orchestration", "src"],
 ];
-const PROVIDERS = new Set(["codex", "claude", "cursor", "opencode"]);
+const PROVIDERS = new Set(["codex", "claude", "cursor", "opencode", "devin"]);
 const SCENARIOS = new Set(["completion", "stop", "subagent", "opencode-resume"]);
 const OPENCODE_RESUME_MODEL = "opencode/muse-spark-1.3-contributor-free";
 const OPENCODE_RESUME_WORKSPACE_NAME = "Verify OpenCode resume";
@@ -97,8 +97,9 @@ Commands:
       Run all focused AgentService, provider, contract, and UI tests by default. Repeat --phase to select related areas.
   inspect
       Read active runtime and workspace summaries through the authenticated WebSocket RPC API.
-  live --provider <codex|claude|cursor|opencode> --model <id> --scenario <completion|stop|subagent|opencode-resume> --confirm-provider-call [--keep-thread]
+  live --provider <codex|claude|cursor|opencode|devin> --model <id> --scenario <completion|stop|subagent|opencode-resume> --confirm-provider-call [--keep-thread] [--allow-enable-devin]
       Make one confirmed provider call in an owned or registered workspace. Does not start a runtime.
+      Devin defaults to disabled; --allow-enable-devin enables it for the proof and restores the original setting.
   worktree-setup --confirm-cleanup
       Create an owned Git project, verify its held automatic Setup gate, cancel Setup through the public API, then remove the project, workspace, thread, and worktree. Does not make a provider call.
   worktree-setup-cleanup --confirm-cleanup
@@ -175,7 +176,7 @@ function parseLiveArguments(rest) {
   const model = options.get("--model");
   const scenario = options.get("--scenario");
   validateLiveOptions(options, provider, model, scenario);
-  return { command: "live", provider, model, scenario, keepThread: options.has("--keep-thread") };
+  return { command: "live", provider, model, scenario, keepThread: options.has("--keep-thread"), allowEnableDevin: options.has("--allow-enable-devin") };
 }
 
 function parseCleanupConfirmedCommand(command, rest) {
@@ -194,7 +195,7 @@ function readLiveOptions(rest) {
 
 function readLiveOption(rest, index, options) {
   const option = rest[index];
-  if (["--confirm-provider-call", "--keep-thread"].includes(option)) {
+  if (["--confirm-provider-call", "--keep-thread", "--allow-enable-devin"].includes(option)) {
     setLiveOption(options, option, true);
     return index + 1;
   }
@@ -211,7 +212,8 @@ function setLiveOption(options, option, value) {
 }
 
 function validateLiveOptions(options, provider, model, scenario) {
-  if (!PROVIDERS.has(provider)) throw cliError("--provider must be codex, claude, cursor, or opencode");
+  if (!PROVIDERS.has(provider)) throw cliError("--provider must be codex, claude, cursor, opencode, or devin");
+  if (options.has("--allow-enable-devin") && provider !== "devin") throw cliError("--allow-enable-devin applies only to --provider devin");
   if (typeof model !== "string" || !/^[^\s]{1,256}$/.test(model)) throw cliError("--model must be a non-empty ID of at most 256 non-space characters");
   validateLiveScenario(provider, model, scenario);
   if (options.has("--confirm-provider-call")) return;
@@ -1198,7 +1200,9 @@ function createLiveReport(options) {
     sharedStopResult: null,
     activeCountCleared: false,
     cancelledSnapshotRetained: false,
-    cleanup: { attempted: false, deleted: null, workspaceDeleted: null, retained: options.keepThread },
+    devinOriginalEnabled: null,
+    devinRestorePending: false,
+    cleanup: { attempted: false, deleted: null, workspaceDeleted: null, devinRestored: null, retained: options.keepThread },
     events: [],
     failure: null,
   };
@@ -1207,6 +1211,7 @@ function createLiveReport(options) {
 async function prepareLiveRun(repoRoot, options, run) {
   await health(repoRoot);
   run.socket = await openSocket(repoRoot, readRuntime(repoRoot), (push) => recordPush(run, push));
+  await prepareDevinForLive(run.socket, options, run);
   run.proofDeadline = Date.now() + LIVE_TIMEOUT_MS;
   const workspace = await findLiveWorkspace(run.socket, repoRoot, options.scenario, run);
   run.workspace = workspace;
@@ -1611,9 +1616,48 @@ async function disposeLiveRun(run, keepThread) {
   try {
     await deleteLiveThread(run, keepThread);
     await deleteLiveWorkspace(run, keepThread);
+    await restoreDevinAfterLive(run);
   } finally {
     if (run.socket) await run.socket.close();
   }
+}
+
+function devinEnabledFromSettings(settings, method) {
+  const enabled = settings?.provider?.enabled?.devin;
+  if (typeof enabled === "boolean") return enabled;
+  throw new Error(`${method} returned an invalid Devin enabled state`);
+}
+
+/** Enables Devin for a live proof only with explicit consent and records a restore handle. */
+async function prepareDevinForLive(socket, options, run) {
+  if (options.provider !== "devin") return;
+  const enabled = devinEnabledFromSettings(await socket.rpc("settings.get", {}), "settings.get");
+  run.report.devinOriginalEnabled = enabled;
+  if (enabled) return;
+  if (!options.allowEnableDevin) {
+    throw actionable("Devin is disabled in this runtime", "Pass --allow-enable-devin to enable it temporarily; the verifier restores the original setting after the proof.");
+  }
+  const updated = await socket.rpc("settings.update", { provider: { enabled: { devin: true } } });
+  if (!devinEnabledFromSettings(updated, "settings.update")) {
+    throw new Error("settings.update did not enable Devin for live verification");
+  }
+  run.report.devinRestorePending = true;
+}
+
+/** Restores Devin's disabled state only when this proof enabled it. */
+async function restoreDevinAfterLive(run) {
+  if (!run.report.devinRestorePending || !run.socket) return;
+  try {
+    const updated = await run.socket.rpc("settings.update", { provider: { enabled: { devin: false } } });
+    run.report.cleanup.devinRestored = devinEnabledFromSettings(updated, "settings.update") === false;
+    if (!run.report.cleanup.devinRestored) {
+      run.report.cleanup.failure ??= safeError(actionable("settings.update did not restore Devin to its original disabled state", "Re-disable Devin in Mcode Settings, then inspect the retained receipt."));
+    }
+  } catch (error) {
+    run.report.cleanup.devinRestored = false;
+    run.report.cleanup.failure ??= safeError(error);
+  }
+  run.report.devinRestorePending = false;
 }
 
 async function deleteLiveThread(run, keepThread) {

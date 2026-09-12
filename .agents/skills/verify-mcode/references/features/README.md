@@ -40,6 +40,7 @@
 | Thread Overview defaults open when the right panel opens; at 824 pixels or wider its rails reserve 344 pixels independently of panel visibility, while narrower panes use an intentional overlay, and it is unavailable while the panel is maximized | [Thread Overview and right panel](thread-overview-right-panel.md) | Electron public UI proof with the stable live-testing interface |
 | An existing thread title is renamed or cancelled from the Project tree | [Thread-list inline rename](thread-list-inline-rename.md) | Electron public UI proof with the stable live-testing interface |
 | A thread workspace opens in each detected external editor without showing a Windows console window | [Open in editor](open-in-editor.md) | Electron Open in menu proof and focused Windows launch tests |
+| A Devin thread authenticates headlessly, streams a turn over local ACP, resumes via session/load, and reports tokens without cost | [Devin provider over local ACP](devin-provider.md) | `runtime live --provider devin --model <id> --scenario completion --confirm-provider-call --allow-enable-devin` |
 
 Read [Multi-surface journeys](multi-surface-journeys.md) for a workflow that crosses the server, web or Electron UI, provider adapters, persistence, or managed worktrees.
 
