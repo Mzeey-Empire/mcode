@@ -107,6 +107,7 @@ function PermissionRequestTranscriptItemRenderer({ item, threadId }: TranscriptI
       options={request.options}
       settled={request.settled}
       decision={request.decision}
+      optionLabel={request.optionLabel}
       threadId={threadId}
     />
   );

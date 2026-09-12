@@ -40,6 +40,8 @@ interface PermissionRequestCardProps {
   decision?: PermissionDecision;
   /** Owning thread; used to reflect provider-side mode changes (e.g. Devin's `switch_bypass`). */
   threadId?: string | null;
+  /** Verbatim label of the provider-native option the user picked; overrides the generic decision label when settled. */
+  optionLabel?: string;
 }
 
 /** Maps a PermissionDecision to its Badge variant. */
@@ -65,13 +67,13 @@ function decisionLabel(decision: PermissionDecision): string {
   }
 }
 
-function SettledPermissionRequest({ icon, label, decision }: { icon: ReactNode; label: string; decision: PermissionDecision }) {
+function SettledPermissionRequest({ icon, label, decision, optionLabel }: { icon: ReactNode; label: string; decision: PermissionDecision; optionLabel?: string }) {
   return (
     <div className="flex items-center gap-2 border-l-2 border-border/30 pl-3 py-1 text-xs text-muted-foreground/70">
       {icon}
       <span className="font-medium">{label}</span>
       <Badge variant={badgeVariantFor(decision)} size="sm" className="ml-1">
-        {decisionLabel(decision)}
+        {optionLabel ?? decisionLabel(decision)}
       </Badge>
     </div>
   );
@@ -339,6 +341,7 @@ export function PermissionRequestCard({
   settled,
   decision,
   threadId,
+  optionLabel,
 }: PermissionRequestCardProps) {
   const [responding, setResponding] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -386,7 +389,7 @@ export function PermissionRequestCard({
   );
 
   if (settled && decision) {
-    return <SettledPermissionRequest icon={<Icon size={13} className="shrink-0 text-muted-foreground/50" />} label={label} decision={decision} />;
+    return <SettledPermissionRequest icon={<Icon size={13} className="shrink-0 text-muted-foreground/50" />} label={label} decision={decision} optionLabel={optionLabel} />;
   }
   if (questions) {
     return <PendingQuestionRequest requestId={requestId} icon={<Icon size={13} className="shrink-0" />} label={label} questions={questions} responding={responding} ready={ready} error={error} onRespond={respond} />;

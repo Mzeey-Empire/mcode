@@ -49,6 +49,8 @@ export interface ThreadSettings {
 export interface StoredPermission extends PermissionRequest {
   settled: boolean;
   decision?: PermissionDecision;
+  /** Verbatim label of the provider-native option the user picked, when one was offered. */
+  optionLabel?: string;
 }
 
 /** Per-thread token/usage snapshot for one provider (keys are providerId). */

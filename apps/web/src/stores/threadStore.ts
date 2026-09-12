@@ -216,7 +216,7 @@ interface ThreadState {
   /** Add a new pending permission request for a thread. */
   addPermissionRequest: (request: PermissionRequest) => void;
   /** Mark a permission request as settled with its decision. */
-  resolvePermissionRequest: (requestId: string, decision: PermissionDecision) => void;
+  resolvePermissionRequest: (requestId: string, decision: PermissionDecision, optionLabel?: string) => void;
   handleAgentEvent: (event: AgentEvent) => void;
   /** Install ordered canonical reconnect results before later push revisions. */
   applyCanonicalReconnectRecoveries: (
@@ -3465,7 +3465,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     });
   },
 
-  resolvePermissionRequest: (requestId, decision) => {
+  resolvePermissionRequest: (requestId, decision, optionLabel) => {
     for (const [threadId, rec] of get().records) {
       if (rec.permissions.some((permission) => permission.requestId === requestId)) {
         threadHydrator.invalidatePermissionSnapshots(threadId);
@@ -3479,7 +3479,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         if (idx >= 0) {
           records = patchThreadRecord(records, threadId, {
             permissions: rec.permissions.map((p, i) =>
-              i === idx ? { ...p, settled: true, decision } : p,
+              i === idx ? { ...p, settled: true, decision, ...(optionLabel ? { optionLabel } : {}) } : p,
             ),
           });
           break;
