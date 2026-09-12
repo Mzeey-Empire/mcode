@@ -6,7 +6,7 @@ describe("settings.provider.enabled", () => {
     const s = getDefaultSettings();
     expect(s.provider.enabled).toEqual({
       claude: true, codex: true, copilot: true,
-      gemini: false, cursor: false, opencode: false,
+      gemini: false, cursor: false, opencode: false, devin: false,
     });
   });
 
