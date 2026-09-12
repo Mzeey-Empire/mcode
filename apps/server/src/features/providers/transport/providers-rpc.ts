@@ -2,8 +2,13 @@ import type {
   IProviderRegistry,
   ProviderCapabilityKind,
   ProviderCatalogContext,
+  ProviderCatalogFreshness,
   ProviderCatalogRequest,
+  ProviderCatalogSourceDiagnostic,
+  ProviderPluginCapability,
   ProviderUsageInfo,
+  SelectableProviderAgent,
+  SkillInfo,
   WsMethodName,
 } from "@mcode/contracts";
 import { logger } from "@mcode/shared";
@@ -14,6 +19,7 @@ import type {
   CodexCatalogRefreshResult,
   CodexCatalogService,
 } from "../catalog/codex-catalog-service.js";
+import type { DevinCatalogService } from "../catalog/devin-catalog-service.js";
 import type { ProviderCatalogService } from "../catalog/provider-catalog-service.js";
 import type { ConfigService } from "../configuration/config-service.js";
 import type { ModelCacheService } from "../models/model-cache-service.js";
@@ -57,6 +63,7 @@ export interface ProviderRouterDeps {
   gitWorktrees: Pick<GitWorktreeService, "resolveWorkingDir">;
   skillService: Pick<SkillService, "list">;
   codexCatalogService: Pick<CodexCatalogService, "currentSnapshot" | "refresh">;
+  devinCatalogService: Pick<DevinCatalogService, "refresh">;
   providerCatalogService: Pick<ProviderCatalogService, "request">;
   providerAvailability: Pick<
     ProviderAvailabilityService,
@@ -111,7 +118,7 @@ function routeProviderCatalog(
   const workspaceRoot = params.workspaceId
     ? deps.workspaceService.findById(params.workspaceId)?.path
     : undefined;
-  const buildSnapshot = (catalog?: CodexCatalogRefreshResult) => buildCatalogSnapshot(
+  const buildSnapshot = (catalog?: ProviderCatalogRefreshData) => buildCatalogSnapshot(
     deps,
     params,
     context,
@@ -130,33 +137,58 @@ function routeProviderCatalog(
   });
 }
 
+/** Minimal refresh shape native catalog services expose to the snapshot builder. */
+interface ProviderCatalogRefreshData {
+  readonly skills: readonly SkillInfo[];
+  readonly prompts?: readonly SkillInfo[];
+  readonly plugins?: readonly ProviderPluginCapability[];
+  readonly agents?: readonly SelectableProviderAgent[];
+  readonly diagnostics?: readonly ProviderCatalogSourceDiagnostic[];
+  readonly freshness?: ProviderCatalogFreshness;
+}
+
 function buildCatalogSnapshot(
   deps: ProviderRouterDeps,
   params: ProviderCatalogRequest,
   context: ProviderCatalogContext,
   cwd: string | undefined,
-  catalog?: CodexCatalogRefreshResult,
+  catalog?: ProviderCatalogRefreshData,
 ) {
-  const skills = catalog
-    ? [...catalog.skills, ...catalog.prompts]
-    : deps.skillService.list(cwd, params.providerId);
   return buildProviderCatalogSnapshot({
     providerId: params.providerId,
     context,
-    skills,
-    ...(catalog?.plugins ? { entries: catalog.plugins } : {}),
-    ...(catalog?.agents ? { agents: catalog.agents } : {}),
-    ...(catalog?.diagnostics ? { diagnostics: catalog.diagnostics } : {}),
-    ...(catalog?.freshness ? { freshness: catalog.freshness } : {}),
+    skills: catalogSkills(deps, params, cwd, catalog),
+    entries: catalog?.plugins,
+    agents: catalog?.agents,
+    diagnostics: catalog?.diagnostics,
+    freshness: catalog?.freshness,
   });
+}
+
+function catalogSkills(
+  deps: ProviderRouterDeps,
+  params: ProviderCatalogRequest,
+  cwd: string | undefined,
+  catalog?: ProviderCatalogRefreshData,
+): SkillInfo[] {
+  return catalog
+    ? [...catalog.skills, ...(catalog.prompts ?? [])]
+    : deps.skillService.list(cwd, params.providerId);
 }
 
 async function refreshProviderCatalog(
   deps: ProviderRouterDeps,
   params: ProviderCatalogRequest,
   cwd: string | undefined,
-  buildSnapshot: (catalog?: CodexCatalogRefreshResult) => ReturnType<typeof buildProviderCatalogSnapshot>,
+  buildSnapshot: (catalog?: ProviderCatalogRefreshData) => ReturnType<typeof buildProviderCatalogSnapshot>,
 ) {
+  if (params.providerId === "devin") {
+    const catalog = await deps.devinCatalogService.refresh(cwd);
+    return {
+      snapshot: buildSnapshot(catalog),
+      confirmedEntryKinds: catalog.skillsAvailable ? ["skill"] as const : [],
+    };
+  }
   if (params.providerId !== "codex") return buildSnapshot();
   const catalog = await deps.codexCatalogService.refresh(cwd);
   return {
