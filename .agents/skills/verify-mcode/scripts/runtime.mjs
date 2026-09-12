@@ -43,7 +43,7 @@ const RUNTIME_SOURCE_DIRECTORIES = [
   ["packages", "thread-orchestration", "src"],
 ];
 const PROVIDERS = new Set(["codex", "claude", "cursor", "opencode", "devin"]);
-const SCENARIOS = new Set(["completion", "stop", "subagent", "opencode-resume"]);
+const SCENARIOS = new Set(["completion", "stop", "subagent", "opencode-resume", "devin-permission"]);
 const OPENCODE_RESUME_MODEL = "opencode/muse-spark-1.3-contributor-free";
 const OPENCODE_RESUME_WORKSPACE_NAME = "Verify OpenCode resume";
 const OPENCODE_SESSION_INVALIDATED_SUBTYPE = "sdk_session_invalidated";
@@ -83,6 +83,7 @@ const FIXED_PROMPTS = {
   stop: "Inspect this repository with read-only file-search and file-reading tools. Do not write files, change settings, or run mutating commands. Explain the repository structure in detail.",
   subagent: "Use exactly one subagent through provider-native collaboration. Give it this task: VERIFY_SUBAGENT_PARENT_TASK: wait five seconds without modifying files, then reply exactly VERIFY_SUBAGENT_CHILD_MESSAGE. After it finishes, reply exactly VERIFY_SUBAGENT_PARENT_DONE.",
   "opencode-resume": "Reply with exactly: Agent runtime verification complete. Do not edit files or invoke tools.",
+  "devin-permission": "Run this exact shell command once: mkdir verify_devin_permission_tmp. Do not use file tools or edit files. After the command finishes, reply with exactly: VERIFY_DEVIN_PERMISSION_DONE.",
 };
 
 const HELP = `Verify Mcode runtime
@@ -97,9 +98,12 @@ Commands:
       Run all focused AgentService, provider, contract, and UI tests by default. Repeat --phase to select related areas.
   inspect
       Read active runtime and workspace summaries through the authenticated WebSocket RPC API.
-  live --provider <codex|claude|cursor|opencode|devin> --model <id> --scenario <completion|stop|subagent|opencode-resume> --confirm-provider-call [--keep-thread] [--allow-enable-devin]
+  live --provider <codex|claude|cursor|opencode|devin> --model <id> --scenario <completion|stop|subagent|opencode-resume|devin-permission> --confirm-provider-call [--keep-thread] [--allow-enable-devin]
       Make one confirmed provider call in an owned or registered workspace. Does not start a runtime.
       Devin defaults to disabled; --allow-enable-devin enables it for the proof and restores the original setting.
+      The devin-permission scenario runs supervised: it answers Devin's real permission prompt
+      with the project-scoped always-allow option, records the .devin config file it writes, and
+      removes that grant after the proof.
   worktree-setup --confirm-cleanup
       Create an owned Git project, verify its held automatic Setup gate, cancel Setup through the public API, then remove the project, workspace, thread, and worktree. Does not make a provider call.
   worktree-setup-cleanup --confirm-cleanup
@@ -221,7 +225,10 @@ function validateLiveOptions(options, provider, model, scenario) {
 }
 
 function validateLiveScenario(provider, model, scenario) {
-  if (!SCENARIOS.has(scenario)) throw cliError("--scenario must be completion, stop, subagent, or opencode-resume");
+  if (!SCENARIOS.has(scenario)) throw cliError("--scenario must be completion, stop, subagent, opencode-resume, or devin-permission");
+  if (scenario === "devin-permission" && provider !== "devin") {
+    throw cliError("the devin-permission scenario requires --provider devin");
+  }
   if (scenario === "subagent" && (provider !== "codex" || model !== "gpt-5.6-terra")) {
     throw cliError("the subagent scenario requires --provider codex --model gpt-5.6-terra");
   }
@@ -484,6 +491,7 @@ async function live(repoRoot, options) {
   } catch (error) {
     run.report.failure = safeError(error);
   } finally {
+    if (options.provider === "devin") await recordDevinModes(run);
     await disposeLiveRun(run, options.keepThread);
   }
   return writeLiveArtifacts(repoRoot, artifacts, run.report);
@@ -1202,6 +1210,8 @@ function createLiveReport(options) {
     cancelledSnapshotRetained: false,
     devinOriginalEnabled: null,
     devinRestorePending: false,
+    devinPermission: null,
+    devinAdvertisedModes: null,
     cleanup: { attempted: false, deleted: null, workspaceDeleted: null, devinRestored: null, retained: options.keepThread },
     events: [],
     failure: null,
@@ -1243,7 +1253,11 @@ async function createLiveThread(socket, workspace, repoRoot, options, deadline) 
     provider: options.provider,
     mode: "direct",
     branch: resolveOptionalBranch(repoRoot),
-    permissionMode: "full",
+    // devin-permission needs a prompting access mode; every other scenario runs
+    // bypass. `accept-edits` is used because live sessions do not advertise `normal`.
+    ...(options.scenario === "devin-permission"
+      ? { permissionMode: "supervised", devinMode: "accept-edits" }
+      : { permissionMode: "full" }),
   }, deadline);
   if (typeof created?.id === "string" && created.id.length > 0) return created.id;
   throw actionable("agent.createAndSend did not return a thread ID", "Run bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs runtime diagnostics, then inspect the server response.");
@@ -1264,6 +1278,7 @@ function trackLiveThread(run, threadId) {
 }
 
 async function proveLiveScenario(repoRoot, scenario, run) {
+  if (scenario === "devin-permission") return proveDevinPermission(repoRoot, run);
   if (scenario === "completion") return proveCompletion(run);
   if (scenario === "subagent") return proveSubagent(run);
   if (scenario === "opencode-resume") return proveOpenCodeResume(repoRoot, run);
@@ -1337,6 +1352,85 @@ function hasDescriptiveSubagentTask(child) {
 async function proveCompletion(run) {
   await requireTerminalEvent(run.report, run.proofDeadline);
   await requireDurableAssistant(run.socket, run.threadId, run.report, run.proofDeadline);
+}
+
+/**
+ * Drives a supervised Devin turn into a real permission prompt, answers it with
+ * the project-scoped always-allow option, then records which `.devin/` config
+ * file the CLI wrote so the adapter's allow_always target is verified live.
+ */
+async function proveDevinPermission(repoRoot, run) {
+  const devinDir = NodePath.join(repoRoot, ".devin");
+  const existedBefore = NodeFS.existsSync(devinDir);
+  const filesBefore = existedBefore ? NodeFS.readdirSync(devinDir) : [];
+  const proof = {
+    requestSeen: false,
+    pickedOptionId: null,
+    allowAlwaysConfigFile: null,
+    allowAlwaysGrantRemoved: false,
+  };
+  run.report.devinPermission = proof;
+  try {
+    const request = await waitFor(() => findPermissionRequest(run), run.proofDeadline);
+    if (!request) {
+      throw actionable("No permission.request arrived before the live deadline", "Inspect the redacted receipt; Devin may not prompt for this prompt's tools in supervised mode.");
+    }
+    proof.requestSeen = true;
+    const option = pickAllowAlwaysOption(request.options);
+    if (!option) {
+      throw actionable("The permission request offered no project-scoped allow-always option", "Inspect the request options in the redacted receipt, then update the adapter's option table.");
+    }
+    proof.pickedOptionId = option.id;
+    await run.socket.rpc("permission.respond", {
+      requestId: request.requestId,
+      decision: "allow",
+      optionId: option.id,
+    }, run.proofDeadline);
+    await requireTerminalEvent(run.report, run.proofDeadline);
+    await requireDurableAssistant(run.socket, run.threadId, run.report, run.proofDeadline);
+    proof.allowAlwaysConfigFile = findAllowAlwaysConfigFile(devinDir, filesBefore);
+  } finally {
+    proof.allowAlwaysGrantRemoved = removeVerifierAllowAlwaysGrant(devinDir, filesBefore, existedBefore);
+  }
+  if (!proof.allowAlwaysConfigFile) {
+    throw actionable("Devin wrote no project-scoped allow-always config file", "Inspect the session worktree's .devin directory; the adapter docs assume config.local.json.");
+  }
+}
+
+function findPermissionRequest(run) {
+  const events = run.eventsByThread.get(run.threadId) ?? [];
+  const found = events.find((event) => event.kind === "permission");
+  return found ? { requestId: found.requestId, options: found.options ?? [] } : null;
+}
+
+/**
+ * Picks the project-scoped always-allow option. Session and global grants share
+ * the `allow_always` kind, so only the literal `allow_always` id targets the
+ * project config file.
+ */
+function pickAllowAlwaysOption(options) {
+  return options.find((option) => option?.id === "allow_always") ?? null;
+}
+
+/** Reports which .devin config file appeared after the always-allow decision. */
+function findAllowAlwaysConfigFile(devinDir, filesBefore) {
+  if (!NodeFS.existsSync(devinDir)) return null;
+  const filesAfter = NodeFS.readdirSync(devinDir);
+  return filesAfter.find((name) => !filesBefore.includes(name) && name.endsWith(".json")) ?? null;
+}
+
+/** Removes the allow-always grant the proof created, restoring prior state. */
+function removeVerifierAllowAlwaysGrant(devinDir, filesBefore, existedBefore) {
+  if (!NodeFS.existsSync(devinDir)) return true;
+  try {
+    for (const name of NodeFS.readdirSync(devinDir)) {
+      if (!filesBefore.includes(name)) NodeFS.rmSync(NodePath.join(devinDir, name), { force: true });
+    }
+    if (!existedBefore && NodeFS.readdirSync(devinDir).length === 0) NodeFS.rmdirSync(devinDir);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function proveOpenCodeResume(repoRoot, run) {
@@ -1644,6 +1738,16 @@ async function prepareDevinForLive(socket, options, run) {
   run.report.devinRestorePending = true;
 }
 
+/** Records the modes Devin advertised over provider.listModes; never fails the run. */
+async function recordDevinModes(run) {
+  if (!run.socket) return;
+  try {
+    run.report.devinAdvertisedModes = await run.socket.rpc("provider.listModes", { providerId: "devin" });
+  } catch {
+    run.report.devinAdvertisedModes = null;
+  }
+}
+
 /** Restores Devin's disabled state only when this proof enabled it. */
 async function restoreDevinAfterLive(run) {
   if (!run.report.devinRestorePending || !run.socket) return;
@@ -1727,7 +1831,25 @@ function liveEventFromPush(push) {
   if (push.channel === "thread.status" && typeof push.data.status === "string") {
     return { kind: "status", status: push.data.status, elapsedMs: Date.now() };
   }
+  if (push.channel === "permission.request" && typeof push.data.requestId === "string") {
+    return {
+      kind: "permission",
+      requestId: push.data.requestId,
+      options: summarizePermissionOptions(push.data.options),
+      elapsedMs: Date.now(),
+    };
+  }
   return null;
+}
+
+/** Keeps only the safe identity fields of provider-native permission options. */
+function summarizePermissionOptions(options) {
+  if (!Array.isArray(options)) return [];
+  return options.map((option) => ({
+    id: typeof option?.id === "string" ? option.id : "",
+    label: typeof option?.label === "string" ? option.label : "",
+    kind: typeof option?.kind === "string" ? option.kind : "",
+  }));
 }
 
 function includeInReceipt(run, threadId, event) {
@@ -1802,6 +1924,8 @@ function redactReceipt(report) {
     sharedStopResult: report.sharedStopResult,
     activeCountCleared: report.activeCountCleared,
     cancelledSnapshotRetained: report.cancelledSnapshotRetained,
+    devinPermission: report.devinPermission,
+    devinAdvertisedModes: report.devinAdvertisedModes,
     cleanup: report.cleanup,
     failure: report.failure,
     events: report.events.map((event) => ({ ...event, elapsedMs: startedAt === null ? 0 : event.elapsedMs - startedAt })),

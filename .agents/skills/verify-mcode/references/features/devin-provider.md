@@ -5,9 +5,9 @@
 - Each thread owns one long-lived `devin acp` process behind the shared `AcpSessionRuntime`; sessions resume across idle eviction and restart through `session/load`.
 - Auth is headless: the adapter resolves `WINDSURF_API_KEY` / `DEVIN_API_KEY` / `windsurf_api_key` env vars or `credentials.toml` and calls ACP `authenticate` (`methodId: "windsurf-api-key"`, `_meta.headless`). A failed authenticate fails that turn only.
 - Models come from `session/new` `configOptions` with a static fallback; effort is part of the wire model id (`swe-2` + `high` -> `swe-2-high`). Model and mode changes apply through `session/set_config_option` without a respawn.
-- Devin's flattened mode axis (Normal / Accept Edits / Smart / Bypass) renders in the shared Access Mode control and persists as `threads.devin_mode`; Plan interaction mode sends `plan` and restores the prior native mode.
+- Devin's flattened mode axis (Normal / Accept Edits / Smart / Bypass) renders in the shared Access Mode control and persists as `threads.devin_mode`; `provider.listModes` exposes the mode select Devin advertised so account-gated modes filter out of the picker. Plan interaction mode sends `plan` and restores the prior native mode.
 - Permission prompts render Devin's real options; `switch_bypass` updates the thread's `devin_mode` so the composer reflects the mode Devin entered. `allow_always_global` is hidden.
-- Usage reporting is tokens only: `usage_update` drives `contextEstimate`, the `session/prompt` response fills `turnComplete` tokens, and `costUsd` stays `null`.
+- Usage reporting is tokens plus conditional cost: `usage_update` drives `contextEstimate`, its `cost` payload (when Devin sends one) lands on `turnComplete.costUsd`, and the `session/prompt` response fills `turnComplete` tokens.
 - Handoff uses the history-replay side channel (path B-prime); Devin has no session-fork API.
 - On Windows there is no OS sandbox: `full` maps to unsandboxed Bypass.
 
@@ -31,9 +31,10 @@ Devin defaults to disabled; `--allow-enable-devin` enables it through `settings.
 
 The focused adapter tests (`vitest run devin` in `packages/providers`) cover the ACP boundary: authenticate credentials, model and mode `set_config_option` sequences including plan-mode restore, `session/load` resume, fs scoping refusals, permission option passthrough, and the event mapper. Use them when no Devin account is logged in.
 
+The `devin-permission` scenario proves the permission round trip live: it runs a supervised turn that prompts, answers with the project-scoped allow-always option, and records which `.devin/` config file Devin wrote (`allowAlwaysConfigFile` in the receipt). The grant the proof creates is removed afterwards.
+
 ## Gotchas
 
 - A missing `devin` binary makes the provider report `cli_missing`; `listModels` then serves the static fallback catalog rather than failing.
 - Devin authentication resolves per spawned process. Record a live authentication error as a blocked provider and rerun after `devin auth login` or setting `WINDSURF_API_KEY`.
-- `allow_always` writes a project-local config file (`.devin/config.json` or `config.local.json`); inspect the session worktree's `.devin/` after a live permission prompt to confirm which file it uses.
-- The Access Mode picker lists all Devin modes statically. The adapter tracks modes the session advertises and skips an unadvertised `set_config_option`, but account-gated modes are not yet filtered out of the picker.
+- `allow_always` writes a project-local config file under the session worktree's `.devin/`; the `devin-permission` scenario reports the exact file name it created.
