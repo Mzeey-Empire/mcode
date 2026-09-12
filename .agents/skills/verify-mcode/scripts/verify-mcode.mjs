@@ -17,6 +17,8 @@ Areas:
       Verify AgentService, provider events, turn runtime, and runtime cleanup.
   thread-lifecycle <health|check|proof|inspect|cleanup>
       Verify desktop thread completion and managed-worktree cleanup.
+  desktop acp-narrative <check|setup|inspect|cleanup>
+      Prepare the fixture-driven ACP boundary that proves thought rendering and invocation-ordered tool cards for owned Electron proof.
   desktop codex-protocol-notices <check|setup|inspect|cleanup>
       Prepare the fixture-driven Codex app-server notice boundary for owned Electron proof.
   desktop selected-text-comments <setup|proof|cleanup>
@@ -66,11 +68,17 @@ function resolveChild(args) {
   throw usageError(`Unknown verification area: ${String(area)}`);
 }
 
+const DESKTOP_SCRIPTS = {
+  "transcript": "transcript-seed.mjs",
+  "acp-narrative": "acp-narrative.mjs",
+  "codex-protocol-notices": "codex-protocol-notices.mjs",
+};
+
 function resolveDesktopChild(args) {
   const [feature, command, ...rest] = args;
   if (["--help", "-h"].includes(feature)) return { help: HELP };
-  if (feature === "transcript") return { script: "transcript-seed.mjs", args: args.slice(1) };
-  if (feature === "codex-protocol-notices") return { script: "codex-protocol-notices.mjs", args: args.slice(1) };
+  const script = DESKTOP_SCRIPTS[feature];
+  if (script) return { script, args: args.slice(1) };
   if (feature !== "selected-text-comments") {
     throw usageError(`Unknown desktop feature: ${String(feature)}`);
   }

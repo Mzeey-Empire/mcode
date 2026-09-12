@@ -75,6 +75,7 @@ const FOCUSED_TEST_FILES = [
 const CHECK_PHASES = [
   { selector: "runtime", name: "focused-agent-runtime", args: ["run", "--cwd", "apps/server", "test", "--", ...FOCUSED_TEST_FILES] },
   { selector: "provider", name: "codex-subagent-protocol", args: ["run", "--cwd", "packages/providers", "test", "--", "src/__tests__/codex/codex-app-server-handshake.test.ts", "src/__tests__/codex/codex-provider-subagent-turn.test.ts"] },
+  { selector: "acp", name: "acp-narrative-mapping", args: ["run", "--cwd", "packages/providers", "test", "--", "src/private/cursor/acp/__tests__/cursor-acp-event-mapper.test.ts", "src/private/devin/__tests__/devin-acp-event-mapper.test.ts", "src/private/protocols/acp/__tests__/acp-session-runtime.test.ts"] },
   { selector: "contract", name: "subagent-presentation-contract", args: ["run", "--cwd", "packages/contracts", "test", "--", "src/__tests__/subagent-presentation.test.ts"] },
   { selector: "ui", name: "subagent-ui", args: ["run", "--cwd", "apps/web", "test", "--", "src/features/conversation/narrative/__tests__/build-persisted-narrative.test.ts", "src/features/conversation/narrative/__tests__/SubagentRow.test.tsx", "src/features/subagents/roster/__tests__/subagent-projection.test.ts", "src/features/subagents/roster/__tests__/SubagentsPanel.test.tsx"] },
 ];
@@ -94,8 +95,13 @@ Usage:
 Commands:
   health
       Validate this worktree's .dev/ports.json and GET /health. Does not start a runtime.
-  check [--phase <runtime|provider|contract|ui>]
+  check [--phase <runtime|provider|acp|contract|ui>]
       Run all focused AgentService, provider, contract, and UI tests by default. Repeat --phase to select related areas.
+  console-audit [--tree <server|desktop|all>] [--watch <seconds>]
+      On Windows, list visible windows owned by descendants of this worktree's
+      runtime processes from .dev/pids. The server tree should never own one;
+      a visible console window there means a child spawn missed windowsHide.
+      --watch polls while the runtime starts or stops to catch transient flashes.
   inspect
       Read active runtime and workspace summaries through the authenticated WebSocket RPC API.
   live --provider <codex|claude|cursor|opencode|devin> --model <id> --scenario <completion|stop|subagent|opencode-resume|devin-permission> --confirm-provider-call [--keep-thread] [--allow-enable-devin]
@@ -145,8 +151,31 @@ function parseArguments(argv) {
   validateCommand(command);
   if (command === "live") return parseLiveArguments(rest);
   if (command === "check") return parseCheckArguments(rest);
+  if (command === "console-audit") return parseConsoleAuditArguments(rest);
   if (["worktree-setup", "worktree-setup-cleanup"].includes(command)) return parseCleanupConfirmedCommand(command, rest);
   return parseOptionlessCommand(command, rest);
+}
+
+function parseConsoleAuditArguments(rest) {
+  const options = { tree: "all", watchSeconds: 0 };
+  for (let index = 0; index < rest.length; index += 2) {
+    const option = rest[index];
+    const value = rest[index + 1];
+    if (!value || value.startsWith("--")) throw cliError(`Missing value for ${String(option)}`);
+    if (option === "--tree") {
+      if (!["server", "desktop", "all"].includes(value)) throw cliError("--tree must be server, desktop, or all");
+      options.tree = value;
+      continue;
+    }
+    if (option === "--watch") {
+      const seconds = Number(value);
+      if (!Number.isInteger(seconds) || seconds < 0 || seconds > 600) throw cliError("--watch must be an integer between 0 and 600 seconds");
+      options.watchSeconds = seconds;
+      continue;
+    }
+    throw cliError(`Unknown option ${String(option)}`);
+  }
+  return { command: "console-audit", ...options };
 }
 
 function parseCheckArguments(rest) {
@@ -156,7 +185,7 @@ function parseCheckArguments(rest) {
     const selector = rest[index + 1];
     if (!selector || selector.startsWith("--")) throw cliError("Missing value for --phase");
     if (!CHECK_PHASES.some((phase) => phase.selector === selector)) {
-      throw cliError("--phase must be runtime, provider, contract, or ui");
+      throw cliError("--phase must be runtime, provider, acp, contract, or ui");
     }
     if (phaseSelectors.includes(selector)) throw cliError(`Duplicate phase ${selector}`);
     phaseSelectors.push(selector);
@@ -165,7 +194,7 @@ function parseCheckArguments(rest) {
 }
 
 function validateCommand(command) {
-  if (["health", "check", "inspect", "live", "worktree-setup", "worktree-setup-cleanup", "diagnostics", "cleanup"].includes(command)) return;
+  if (["health", "check", "inspect", "live", "console-audit", "worktree-setup", "worktree-setup-cleanup", "diagnostics", "cleanup"].includes(command)) return;
   throw cliError(`Unknown command "${String(command)}"`);
 }
 
@@ -243,6 +272,7 @@ async function execute(parsed, repoRoot) {
     if (parsed.command === "check") return await check(repoRoot, parsed.phaseSelectors);
     if (parsed.command === "inspect") return success(await inspect(repoRoot));
     if (parsed.command === "live") return await live(repoRoot, parsed);
+    if (parsed.command === "console-audit") return await consoleAuditResult(repoRoot, parsed);
     if (parsed.command === "worktree-setup") return await worktreeSetup(repoRoot);
     if (parsed.command === "worktree-setup-cleanup") return success(await worktreeSetupCleanup(repoRoot));
     if (parsed.command === "diagnostics") return success(diagnostics(repoRoot));
@@ -1944,6 +1974,83 @@ function diagnostics(repoRoot) {
     command: "diagnostics",
     receipts: summarizeFiles(evidenceDirectory, 20),
     note: "Receipt file names, sizes, and modification times are shown. Raw receipt contents are not emitted.",
+  };
+}
+
+const CONSOLE_AUDIT_SCRIPT = NodePath.join(import.meta.dirname, "console-audit.ps1");
+
+/** A visible descendant window is a defect, so findings yield a nonzero exit. */
+async function consoleAuditResult(repoRoot, parsed) {
+  const audit = await consoleAudit(repoRoot, parsed);
+  const ok = audit.findings.length === 0;
+  return { exitCode: ok ? 0 : 1, output: { ok, ...audit } };
+}
+
+/**
+ * Lists visible windows owned by descendants of this worktree's runtime
+ * processes. The server is spawned console-less, so any visible window in its
+ * tree means a child process spawn missed windowsHide.
+ */
+async function consoleAudit(repoRoot, options) {
+  if (process.platform !== "win32") {
+    return { command: "console-audit", skipped: "non-Windows platform", findings: [] };
+  }
+  const paths = getRuntimePaths(repoRoot);
+  const names = options.tree === "all" ? ["server", "desktop"] : [options.tree];
+  const trees = [];
+  const missingPidFiles = [];
+  for (const name of names) {
+    const pid = readRuntimePidFile(NodePath.join(paths.pidsDir, `${name}.pid`));
+    if (pid) trees.push({ name, pid });
+    else missingPidFiles.push(name);
+  }
+  if (trees.length === 0) {
+    throw actionable(
+      "No runtime PID files found for the requested tree",
+      "Start this worktree runtime with bun run --shell system agent:up, then retry.",
+    );
+  }
+  const audit = await runConsoleAudit(trees.map((tree) => tree.pid), options.watchSeconds);
+  return {
+    command: "console-audit",
+    trees,
+    missingPidFiles,
+    watchSeconds: options.watchSeconds,
+    findings: audit.findings,
+    consoleWindowSightings: audit.consoleWindowSightings,
+    note: "findings are visible windows attributed to the audited tree; sightings are new console-class windows anywhere in the session, needing manual correlation",
+  };
+}
+
+function readRuntimePidFile(pidFile) {
+  try {
+    const pid = Number(NodeFS.readFileSync(pidFile, "utf8").trim());
+    return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+async function runConsoleAudit(rootPids, watchSeconds) {
+  const args = [
+    "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+    "-File", CONSOLE_AUDIT_SCRIPT,
+    "-RootPids", rootPids.join(","),
+    "-WatchSeconds", String(watchSeconds),
+  ];
+  const result = NodeChildProcess.spawnSync("powershell.exe", args, {
+    encoding: "utf8",
+    timeout: Math.max(15_000, watchSeconds * 1_000 + 15_000),
+    windowsHide: true,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`Console audit failed: ${String(result.stderr || result.stdout).slice(0, MAX_ERROR_CHARS)}`);
+  }
+  const parsed = JSON.parse(result.stdout.trim() || "{}");
+  return {
+    findings: Array.isArray(parsed?.findings) ? parsed.findings : [],
+    consoleWindowSightings: Array.isArray(parsed?.consoleWindowSightings) ? parsed.consoleWindowSightings : [],
   };
 }
 
