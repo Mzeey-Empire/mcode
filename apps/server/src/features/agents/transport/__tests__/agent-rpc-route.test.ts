@@ -121,7 +121,7 @@ describe("routeMessage Agent RPCs", () => {
       params: { requestId: "que_1", decision: "allow", answers: [[" staging "]] },
     }), deps);
     expect(accepted).toEqual({ id: "question-1", result: undefined });
-    expect(respondToPermission).toHaveBeenCalledWith("que_1", "allow", [[" staging "]]);
+    expect(respondToPermission).toHaveBeenCalledWith("que_1", "allow", [[" staging "]], undefined);
 
     const rejected = await routeMessage(JSON.stringify({
       id: "question-2",

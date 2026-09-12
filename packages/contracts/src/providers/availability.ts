@@ -23,7 +23,7 @@ export const ProviderCliInfoSchema = lazySchema(() =>
 /** Runtime availability snapshot for a single provider, broadcast to the frontend. */
 export const ProviderAvailabilitySchema = lazySchema(() =>
   z.object({
-    id: z.enum(["claude", "codex", "gemini", "copilot", "cursor", "opencode"]),
+    id: z.enum(["claude", "codex", "gemini", "copilot", "cursor", "opencode", "devin"]),
     enabled: z.boolean(),
     /** True when a runtime adapter is registered for this provider. */
     hasAdapter: z.boolean(),

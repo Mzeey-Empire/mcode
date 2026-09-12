@@ -44,6 +44,22 @@ export const PermissionResponseAnswersSchema = lazySchema(() => z.array(
 /** Ordered responses to a provider-neutral inline question request. */
 export type PermissionResponseAnswers = z.infer<ReturnType<typeof PermissionResponseAnswersSchema>>;
 
+/**
+ * A provider-native selectable permission option, carried verbatim so the UI
+ * can render provider-specific choices (e.g. Devin's `switch_bypass`) that do
+ * not map onto the generic allow/deny decision set.
+ */
+export const PermissionRequestOptionSchema = lazySchema(() => z.object({
+  /** Provider-assigned option identifier returned on the response. */
+  id: z.string().min(1).max(200),
+  label: z.string().min(1).max(200),
+  description: z.string().min(1).max(500).optional(),
+  /** Provider-reported option kind (e.g. ACP `allow_once`, `reject_always`) for display hints. */
+  kind: z.string().min(1).max(60).optional(),
+}).strict());
+/** A provider-native selectable permission option. */
+export type PermissionRequestOption = z.infer<ReturnType<typeof PermissionRequestOptionSchema>>;
+
 /** A pending permission request pushed to the frontend. */
 export const PermissionRequestSchema = lazySchema(() => z.object({
   requestId: z.string(),
@@ -60,6 +76,11 @@ export const PermissionRequestSchema = lazySchema(() => z.object({
   operation: z.enum(["thread_create_batch", "thread_send", "thread_stop"]).optional(),
   /** Questions requiring an explicit answer before this request can resolve. */
   questions: z.array(PermissionQuestionSchema()).min(1).max(10).optional(),
+  /**
+   * Provider-native selectable options rendered verbatim when present. The
+   * response carries the chosen `optionId` alongside the generic decision.
+   */
+  options: z.array(PermissionRequestOptionSchema()).min(1).max(10).optional(),
 }));
 /** A pending tool permission request awaiting user decision. */
 export type PermissionRequest = z.infer<ReturnType<typeof PermissionRequestSchema>>;

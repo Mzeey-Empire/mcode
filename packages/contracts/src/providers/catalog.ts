@@ -29,6 +29,7 @@ export const PROVIDER_CATALOG: readonly ProviderCatalogEntry[] = [
   { id: "gemini",   name: "Gemini",         beta: false, comingSoon: true,  cliBinary: "gemini"   },
   { id: "cursor",   name: "Cursor",         beta: true,  comingSoon: false, cliBinary: "cursor-agent" },
   { id: "opencode", name: "OpenCode",       beta: true,  comingSoon: false, cliBinary: "opencode" },
+  { id: "devin",    name: "Devin",          beta: true,  comingSoon: false, cliBinary: "devin"    },
 ] as const;
 
 /** Look up a catalog entry by provider id. Throws if the id is not in the catalog. */

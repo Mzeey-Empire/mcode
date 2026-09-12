@@ -9,6 +9,7 @@ import type { PreparedComposerSubmission } from "./composer-submission-types";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import {
   createPreparedThreadMessagePayload,
+  providerScopedSelection,
   sendComposerThreadMessage,
 } from "./composer-thread-message";
 
@@ -48,6 +49,7 @@ function composerDraftForPendingCreation(
     reasoning: snapshot.selection.reasoning,
     contextWindow: snapshot.selection.contextWindow ?? undefined,
     codexFastMode: snapshot.selection.codexFastMode,
+    devinMode: snapshot.selection.devinMode,
   });
 }
 
@@ -75,6 +77,37 @@ export function isComposerTargetReady(target: ComposerExecutionTarget): boolean 
   return true;
 }
 
+/** Issues the create-thread RPC for a prepared new-thread submission. */
+function createThreadForSubmission(
+  submission: PreparedComposerSubmission,
+): Promise<Thread> {
+  const { snapshot, prepared } = submission;
+  const selection = snapshot.selection;
+  const scoped = providerScopedSelection(selection);
+  return useWorkspaceStore.getState().createAndSendMessage(
+    prepared.content,
+    selection.modelId,
+    selection.permissionMode,
+    submission.attachmentMetas.length > 0 ? submission.attachmentMetas : undefined,
+    selection.reasoning,
+    selection.provider,
+    selection.interactionMode,
+    scoped.copilotAgent,
+    selection.contextWindow ?? undefined,
+    selection.thinking ?? undefined,
+    scoped.codexFastMode,
+    prepared.displayContent,
+    snapshot.mentions,
+    submission.previewAnnotations,
+    submission.goalObjective,
+    selection.orchestrationMode,
+    savedCommentsForTransport(snapshot.selectedTextComments),
+    composerDraftForPendingCreation(submission),
+    selection.approvalReviewMode,
+    scoped.devinMode,
+  );
+}
+
 /** Creates and sends the initial message for a new thread. */
 async function dispatchNewThread(
   options: DispatchComposerTargetOptions,
@@ -89,30 +122,7 @@ async function dispatchNewThread(
   } = options;
   if (target.kind !== "new-thread") return;
   synchronizeNewThreadTarget(execution, target);
-  const { snapshot, prepared } = submission;
-  const selection = snapshot.selection;
-  const workspace = useWorkspaceStore.getState();
-  const creatingThread = workspace.createAndSendMessage(
-    prepared.content,
-    selection.modelId,
-    selection.permissionMode,
-    submission.attachmentMetas.length > 0 ? submission.attachmentMetas : undefined,
-    selection.reasoning,
-    selection.provider,
-    selection.interactionMode,
-    selection.provider === "copilot" ? selection.copilotAgent ?? undefined : undefined,
-    selection.contextWindow ?? undefined,
-    selection.thinking ?? undefined,
-    selection.provider === "codex" ? selection.codexFastMode ?? undefined : undefined,
-    prepared.displayContent,
-    snapshot.mentions,
-    submission.previewAnnotations,
-    submission.goalObjective,
-    selection.orchestrationMode,
-    savedCommentsForTransport(snapshot.selectedTextComments),
-    composerDraftForPendingCreation(submission),
-    selection.approvalReviewMode,
-  );
+  const creatingThread = createThreadForSubmission(submission);
   notifyThreadPreparing(onThreadPreparing);
   await completeNewThreadCreation(creatingThread, onThreadCreated, onThreadCreationFailed);
 }
@@ -211,6 +221,7 @@ function branchThreadAgentOptions(selection: ComposerAgentSelection) {
     contextWindow: selection.contextWindow ?? undefined,
     thinking: selection.thinking ?? undefined,
     codexFastMode: selection.provider === "codex" ? selection.codexFastMode ?? undefined : undefined,
+    devinMode: selection.provider === "devin" ? selection.devinMode ?? undefined : undefined,
     orchestrationMode: selection.orchestrationMode,
   };
 }

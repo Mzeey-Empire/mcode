@@ -11,13 +11,14 @@ import type { AttachmentMeta, Thread } from "@/transport";
 import { INTERACTION_MODES } from "@/transport";
 import type {
   ContextWindowMode,
+  DevinMode,
   MessageMention,
   SelectedTextComment,
 } from "@mcode/contracts";
 import { ORCHESTRATION_MODES } from "@mcode/contracts";
 import {
   getDefaultModelId,
-  normalizeReasoningLevelForModel,
+  normalizeReasoningLevel,
 } from "@/lib/model-registry";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import {
@@ -183,6 +184,7 @@ export function useComposerFormController({
     contextWindow: undefined as ContextWindowMode | undefined,
     thinking: undefined as boolean | undefined,
     codexFastMode: null as boolean | null,
+    devinMode: null as DevinMode | null,
   });
   const agentSettingsTouchedRef = useRef(false);
   const submissionRevisionRef = useRef(0);
@@ -420,6 +422,7 @@ export function useComposerFormController({
       contextWindow: selection.contextWindow ?? undefined,
       thinking: selection.thinking ?? undefined,
       codexFastMode: selection.codexFastMode,
+      devinMode: selection.devinMode,
     };
   });
 
@@ -441,6 +444,7 @@ export function useComposerFormController({
     selectedTextComments,
     selection.codexFastMode,
     selection.contextWindow,
+    selection.devinMode,
     selection.modelId,
     selection.provider,
     selection.reasoning,
@@ -515,7 +519,7 @@ export function useComposerFormController({
     const defaults = {
       modelId: validModelId,
       provider: settingsDefaultProvider ?? "claude",
-      reasoning: normalizeReasoningLevelForModel(validModelId, settingsDefaultReasoning),
+      reasoning: normalizeReasoningLevel(settingsDefaultProvider, validModelId, settingsDefaultReasoning),
     };
     updateSelection(agentSettingsTouchedRef.current
       ? defaults
@@ -568,6 +572,7 @@ export function useComposerFormController({
       contextWindow: session.contextWindow,
       thinking: session.thinking,
       codexFastMode: session.codexFastMode,
+      devinMode: session.devinMode,
     }));
     if (editorRef.current) {
       writeComposerContent(editorRef.current, session.input, session.mentions);
@@ -583,7 +588,8 @@ export function useComposerFormController({
 
   useEffect(() => {
     setSelection((current) => {
-      const normalizedReasoning = normalizeReasoningLevelForModel(
+      const normalizedReasoning = normalizeReasoningLevel(
+        current.provider,
         current.modelId,
         current.reasoning,
       );
@@ -591,7 +597,7 @@ export function useComposerFormController({
         ? current
         : { ...current, reasoning: normalizedReasoning };
     });
-  }, [selection.modelId, selection.reasoning, setSelection]);
+  }, [selection.modelId, selection.provider, selection.reasoning, setSelection]);
 
   useEffect(() => {
     if (!threadId) return;

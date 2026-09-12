@@ -68,6 +68,31 @@ export const ORCHESTRATION_MODES = {
   PROACTIVE: "proactive" as const,
 } satisfies Record<string, OrchestrationMode>;
 
+/**
+ * Devin's flattened native session mode. Applied through ACP
+ * `session/set_config_option` with `configId: "mode"`. "ask" is excluded
+ * because Mcode's plan/build axes cover it; "autonomous" requires sandbox
+ * support that is unavailable on Windows.
+ */
+export const DevinModeSchema = z.enum([
+  "normal",
+  "accept-edits",
+  "smart",
+  "bypass",
+  "plan",
+]);
+/** Devin native session mode value. */
+export type DevinMode = z.infer<typeof DevinModeSchema>;
+
+/** Constant lookup for Devin modes. */
+export const DEVIN_MODES = {
+  NORMAL: "normal" as const,
+  ACCEPT_EDITS: "accept-edits" as const,
+  SMART: "smart" as const,
+  BYPASS: "bypass" as const,
+  PLAN: "plan" as const,
+} satisfies Record<string, DevinMode>;
+
 /** Discriminates where a Copilot sub-agent was discovered from. */
 export const CopilotSubagentSourceSchema = z.enum(["default", "user", "project"]);
 /** Copilot sub-agent source value. */

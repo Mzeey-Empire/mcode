@@ -3,6 +3,7 @@ import type { AttachmentMeta, PermissionMode } from "@/transport";
 import type {
   ApprovalReviewMode,
   ContextWindowMode,
+  DevinMode,
   MessageMention,
   PreviewAnnotationBundle,
   ReasoningLevel,
@@ -38,6 +39,8 @@ export interface QueuedMessage {
   thinking?: boolean;
   /** Codex OpenAI fast tier for this queued send; undefined inherits at dequeue. */
   codexFastMode?: boolean;
+  /** Devin native mode for this queued send; undefined inherits at dequeue. */
+  devinMode?: DevinMode;
   /** Goal objective installed atomically when this queued turn dispatches. */
   goalObjective?: string;
   /** Preview spill paths to unlink when this item is permanently removed from the queue. */

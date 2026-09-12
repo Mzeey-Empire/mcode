@@ -60,7 +60,7 @@ export const ContextWindowModeSchema = z.enum(["200k", "1m"]);
 export type ContextWindowMode = z.infer<typeof ContextWindowModeSchema>;
 
 /** Supported AI provider identifier for settings. */
-export const ProviderIdSchema = z.enum(["claude", "codex", "gemini", "copilot", "cursor", "opencode"]);
+export const ProviderIdSchema = z.enum(["claude", "codex", "gemini", "copilot", "cursor", "opencode", "devin"]);
 /** Supported AI provider identifier value. */
 export type SettingsProviderId = z.infer<typeof ProviderIdSchema>;
 
@@ -282,6 +282,7 @@ export const SettingsSchema = lazySchema(() =>
             gemini: z.boolean().default(false),
             cursor: z.boolean().default(false),
             opencode: z.boolean().default(false),
+            devin: z.boolean().default(false),
           })
           .default({}),
         /** CLI binary paths. Empty string means auto-discover from PATH. */
@@ -297,6 +298,8 @@ export const SettingsSchema = lazySchema(() =>
             cursor: z.string().default(""),
             /** Path to the OpenCode CLI (`opencode`). Empty uses PATH lookup. */
             opencode: z.string().default(""),
+            /** Path to the Devin CLI (`devin`). Empty uses PATH lookup. */
+            devin: z.string().default(""),
           })
           .default({}),
         /** OpenAI Codex CLI (`codex app-server`) tuning (`provider` + `codex` keeps depth ≤ 3). */
@@ -580,6 +583,7 @@ export const PartialSettingsSchema = lazySchema(() =>
             gemini: z.boolean().optional(),
             cursor: z.boolean().optional(),
             opencode: z.boolean().optional(),
+            devin: z.boolean().optional(),
           })
           .optional(),
         cli: z
@@ -589,6 +593,7 @@ export const PartialSettingsSchema = lazySchema(() =>
             copilot: z.string().optional(),
             cursor: z.string().optional(),
             opencode: z.string().optional(),
+            devin: z.string().optional(),
           })
           .optional(),
         cursor: z

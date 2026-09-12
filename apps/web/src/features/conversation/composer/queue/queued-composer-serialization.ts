@@ -42,6 +42,7 @@ function serializeQueuedSelection(
   | "contextWindow"
   | "thinking"
   | "codexFastMode"
+  | "devinMode"
 > {
   return {
     model: selection.modelId,
@@ -56,6 +57,8 @@ function serializeQueuedSelection(
     thinking: selection.thinking ?? undefined,
     codexFastMode:
       selection.provider === "codex" ? selection.codexFastMode ?? undefined : undefined,
+    devinMode:
+      selection.provider === "devin" ? selection.devinMode ?? undefined : undefined,
   };
 }
 

@@ -3,6 +3,7 @@ import { validateBranchName } from "@mcode/shared";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import type {
   ContextWindowMode,
+  DevinMode,
   ForkHistoryBudget,
   InteractionMode,
   Message,
@@ -43,6 +44,7 @@ export interface CreateBranchedThreadInput {
   contextWindowMode?: ContextWindowMode;
   thinking?: boolean;
   codexFastMode?: boolean;
+  devinMode?: DevinMode;
   orchestrationMode?: OrchestrationMode;
 }
 
@@ -53,6 +55,7 @@ export interface ProvisionedBranchedThread {
   contextWindowMode?: ContextWindowMode;
   thinking?: boolean;
   codexFastMode?: boolean;
+  devinMode?: DevinMode;
   warnings?: string[];
 }
 
@@ -68,6 +71,7 @@ type InheritedThreadSettings = {
   contextWindowMode: ContextWindowMode | undefined;
   thinking: boolean | undefined;
   codexFastMode: boolean | undefined;
+  devinMode: DevinMode | undefined;
 };
 
 /** Owns branch validation, workspace creation, lineage persistence, and handoff setup. */
@@ -104,6 +108,7 @@ export class ThreadBranchingService {
       contextWindowMode: inherited.contextWindowMode,
       thinking: inherited.thinking,
       codexFastMode: inherited.codexFastMode,
+      devinMode: inherited.devinMode,
       warnings: "warnings" in created ? created.warnings : undefined,
     };
   }
@@ -136,6 +141,8 @@ export class ThreadBranchingService {
       contextWindowMode: input.contextWindowMode ?? parent.context_window_mode as ContextWindowMode | null ?? undefined,
       thinking: input.thinking ?? (parent.thinking === null ? undefined : Boolean(parent.thinking)),
       codexFastMode: input.codexFastMode ?? parent.codex_fast_mode ?? undefined,
+      devinMode: input.devinMode
+        ?? (input.provider === "devin" ? parent.devin_mode ?? undefined : undefined),
     };
   }
 
@@ -223,6 +230,7 @@ function threadSettings(
     ...thinkingSetting(inherited),
     ...copilotAgentSetting(input),
     ...codexFastModeSetting(input, inherited),
+    ...devinModeSetting(input, inherited),
   };
 }
 
@@ -262,6 +270,14 @@ function codexFastModeSetting(
   return { codex_fast_mode: inherited.codexFastMode };
 }
 
+function devinModeSetting(
+  input: CreateBranchedThreadInput,
+  inherited: InheritedThreadSettings,
+) {
+  if (input.provider !== "devin" || inherited.devinMode === undefined) return {};
+  return { devin_mode: inherited.devinMode };
+}
+
 function configuredChildThread(
   thread: Thread,
   input: CreateBranchedThreadInput,
@@ -279,6 +295,7 @@ function configuredChildThread(
     thinking: inherited.thinking ?? thread.thinking,
     copilot_agent: input.copilotAgent ?? thread.copilot_agent,
     codex_fast_mode: configuredCodexFastMode(thread, input, inherited),
+    devin_mode: configuredDevinMode(thread, input, inherited),
   };
 }
 
@@ -291,4 +308,15 @@ function configuredCodexFastMode(
     return inherited.codexFastMode;
   }
   return thread.codex_fast_mode;
+}
+
+function configuredDevinMode(
+  thread: Thread,
+  input: CreateBranchedThreadInput,
+  inherited: InheritedThreadSettings,
+) {
+  if (input.provider === "devin" && inherited.devinMode !== undefined) {
+    return inherited.devinMode;
+  }
+  return thread.devin_mode;
 }

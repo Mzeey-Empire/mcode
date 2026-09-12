@@ -12,6 +12,8 @@ const MODEL_CACHE_TTL_MS = 60 * 60 * 1000;
 interface ProviderModelsState {
   /** Dynamically fetched models keyed by provider ID. */
   models: Record<string, ModelDefinition[]>;
+  /** Provider-native mode ids advertised by the account; absent until fetched. */
+  modes: Record<string, string[] | null>;
   /** Timestamp of last successful fetch per provider. */
   lastFetched: Record<string, number>;
   /** Providers currently being fetched. */
@@ -31,6 +33,7 @@ interface ProviderModelsState {
 /** Zustand store for dynamically fetched provider models with TTL caching. */
 export const useProviderModelsStore = create<ProviderModelsState>((set, get) => ({
   models: {},
+  modes: {},
   lastFetched: {},
   loading: {},
 
@@ -47,7 +50,11 @@ export const useProviderModelsStore = create<ProviderModelsState>((set, get) => 
     });
     if (!shouldFetch) return;
     try {
-      const info = await getTransport().listProviderModels(providerId);
+      const transport = getTransport();
+      const [info, modes] = await Promise.all([
+        transport.listProviderModels(providerId),
+        transport.listProviderModes(providerId).catch(() => null),
+      ]);
       if (!Array.isArray(info)) {
         throw new Error("provider.listModels returned a non-array payload");
       }
@@ -63,6 +70,7 @@ export const useProviderModelsStore = create<ProviderModelsState>((set, get) => 
       }));
       set((s) => ({
         models: { ...s.models, [providerId]: mapped },
+        modes: { ...s.modes, [providerId]: modes },
         lastFetched: { ...s.lastFetched, [providerId]: Date.now() },
         loading: { ...s.loading, [providerId]: false },
       }));

@@ -10,6 +10,8 @@ export {
   INTERACTION_MODES,
   OrchestrationModeSchema,
   ORCHESTRATION_MODES,
+  DevinModeSchema,
+  DEVIN_MODES,
   CopilotSubagentSourceSchema,
   COPILOT_SUBAGENT_SOURCES,
 } from "./models/enums.js";
@@ -21,6 +23,7 @@ export type {
   ApprovalReviewMode,
   InteractionMode,
   OrchestrationMode,
+  DevinMode,
   CopilotSubagentSource,
 } from "./models/enums.js";
 
@@ -863,6 +866,7 @@ export {
   PermissionQuestionOptionSchema,
   PermissionQuestionSchema,
   PermissionResponseAnswersSchema,
+  PermissionRequestOptionSchema,
   PermissionRequestSchema,
 } from "./models/permission.js";
 export type {
@@ -870,6 +874,7 @@ export type {
   PermissionQuestionOption,
   PermissionQuestion,
   PermissionResponseAnswers,
+  PermissionRequestOption,
   PermissionRequest,
 } from "./models/permission.js";
 
@@ -1397,6 +1402,13 @@ export type {
 export * from "./providers/catalog.js";
 export * from "./providers/availability.js";
 export { CURSOR_STATIC_MODEL_FALLBACK } from "./providers/cursor-static-fallback.js";
+export {
+  DEVIN_STATIC_MODEL_FALLBACK,
+  DEVIN_EFFORT_ORDER,
+  groupDevinModelFamilies,
+  resolveDevinModelId,
+  type DevinModelFamily,
+} from "./providers/devin-models.js";
 export { CURSOR_CLI_MODEL_SNAPSHOT } from "./providers/cursor-cli-models-snapshot.js";
 export { CODEX_STATIC_MODELS, supportsCodexUltraOrchestration } from "./providers/codex-static-fallback.js";
 export { CLAUDE_STATIC_MODELS } from "./providers/claude-static-fallback.js";

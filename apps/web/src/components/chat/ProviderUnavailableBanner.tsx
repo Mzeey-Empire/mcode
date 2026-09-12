@@ -9,6 +9,7 @@ const NAMES: Record<ProviderId, string> = {
   gemini: "Gemini",
   cursor: "Cursor",
   opencode: "OpenCode",
+  devin: "Devin",
 };
 
 /** Props for the ProviderUnavailableBanner component. */

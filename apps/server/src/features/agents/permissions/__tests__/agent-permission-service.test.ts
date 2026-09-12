@@ -9,7 +9,7 @@ describe("AgentPermissionService", () => {
 
     permissions.respondToPermission("request-1", "allow");
 
-    expect(provider.resolvePermission).toHaveBeenCalledWith("request-1", "allow");
+    expect(provider.resolvePermission).toHaveBeenCalledWith("request-1", "allow", undefined, undefined);
     expect(() => permissions.respondToPermission("request-1", "invalid" as never)).toThrow();
   });
 
@@ -19,7 +19,7 @@ describe("AgentPermissionService", () => {
 
     permissions.respondToPermission("question-1", "allow", [[" staging "]]);
 
-    expect(provider.resolvePermission).toHaveBeenCalledWith("question-1", "allow", [[" staging "]]);
+    expect(provider.resolvePermission).toHaveBeenCalledWith("question-1", "allow", [[" staging "]], undefined);
     expect(() => permissions.respondToPermission("question-1", "allow", [["  "]] as never)).toThrow();
   });
 
@@ -35,6 +35,15 @@ describe("AgentPermissionService", () => {
 
     expect(permissions.listPendingPermissions("thread-1")).toEqual([pendingRequest]);
     expect(provider.listPendingPermissions).toHaveBeenCalledWith("thread-1");
+  });
+
+  it("forwards a provider-native option id to the owning provider", () => {
+    const provider = { resolvePermission: vi.fn(() => true) };
+    const permissions = new AgentPermissionService({ resolveAll: vi.fn(() => [provider]) } as never);
+
+    permissions.respondToPermission("request-1", "allow", undefined, "switch_bypass");
+
+    expect(provider.resolvePermission).toHaveBeenCalledWith("request-1", "allow", undefined, "switch_bypass");
   });
 
   it("rejects malformed pending requests returned by providers", () => {

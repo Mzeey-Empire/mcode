@@ -3,6 +3,7 @@ export {
   createCodexProvider,
   createCopilotProvider,
   createCursorProvider,
+  createDevinProvider,
 } from "./factories.js";
 export type {
   ProviderBoundary,
@@ -10,6 +11,8 @@ export type {
   CodexProviderPorts,
   CursorProviderBoundary,
   CursorProviderPorts,
+  DevinProviderBoundary,
+  DevinProviderPorts,
   ProviderFactoryConfiguration,
   ProviderFactoryInput,
 } from "./factory-types.js";

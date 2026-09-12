@@ -28,6 +28,7 @@ type ProviderRpcMethod = Extract<
   | "config.discover"
   | "provider.catalog"
   | "provider.listModels"
+  | "provider.listModes"
   | "provider.getUsage"
   | "providers.listAvailability"
   | "provider.copilotAgents"
@@ -41,6 +42,7 @@ type ProviderRpcParamsByMethod = {
   "config.discover": { workspacePath: string };
   "provider.catalog": ProviderCatalogRequest;
   "provider.listModels": ProviderIdParams;
+  "provider.listModes": ProviderIdParams;
   "provider.getUsage": ProviderIdParams;
   "providers.listAvailability": Record<never, never>;
   "provider.copilotAgents": { workspaceId: string };
@@ -77,6 +79,10 @@ const providerRpcHandlers: ProviderRpcHandlerMap = {
   "provider.listModels": (deps, params) => {
     deps.providerAvailability.assertEnabled(params.providerId);
     return deps.modelCacheService.listModels(params.providerId);
+  },
+  "provider.listModes": (deps, params) => {
+    deps.providerAvailability.assertEnabled(params.providerId);
+    return deps.providerRegistry.resolve(params.providerId).listModes?.() ?? null;
   },
   "provider.getUsage": (deps, params) => routeProviderUsage(deps, params.providerId),
   "providers.listAvailability": (deps) => deps.providerAvailability.listAvailability(),

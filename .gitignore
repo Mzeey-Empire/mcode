@@ -49,6 +49,9 @@ Thumbs.db
 
 # External Playwright
 .playwright-mcp/
+apps/web/playwright-report/
+apps/web/test-results/
+apps/web/e2e/screenshots/
 
 # External source cache
 .opensrc/
