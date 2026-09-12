@@ -136,7 +136,7 @@ describe("killOrphanedServer", () => {
       execSync,
     });
     killOrphanedServer(deps);
-    expect(execSync).toHaveBeenCalledWith("taskkill /T /F /PID 99999", { stdio: "ignore", timeout: 5000 });
+    expect(execSync).toHaveBeenCalledWith("taskkill /T /F /PID 99999", { stdio: "ignore", timeout: 5000, windowsHide: true });
   });
 
   it("logs a warning but does not throw when lock file contains invalid JSON", () => {
@@ -182,7 +182,7 @@ describe("killOrphanedServer", () => {
       const getProcessName = vi.fn().mockReturnValue("bun.exe");
       const deps = makeDeps({ lockFilePath, currentPid: 12345, platform: "win32", processKill, execSync, getProcessName });
       killOrphanedServer(deps);
-      expect(execSync).toHaveBeenCalledWith("taskkill /T /F /PID 99999", { stdio: "ignore", timeout: 5000 });
+      expect(execSync).toHaveBeenCalledWith("taskkill /T /F /PID 99999", { stdio: "ignore", timeout: 5000, windowsHide: true });
     });
 
     it("skips kill for substring-matching names like 'nodemon' (exact basename required)", () => {

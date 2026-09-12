@@ -204,14 +204,14 @@ class FakeChild extends NodeEvents.EventEmitter {
 interface FakeSpawnHarness {
   spawn: SpawnLike;
   child: FakeChild;
-  calls: Array<{ command: string; args: readonly string[] }>;
+  calls: Array<{ command: string; args: readonly string[]; options: unknown }>;
 }
 
 function fakeSpawn(): FakeSpawnHarness {
   const child = new FakeChild();
-  const calls: Array<{ command: string; args: readonly string[] }> = [];
-  const spawn: SpawnLike = (command, args) => {
-    calls.push({ command, args });
+  const calls: Array<{ command: string; args: readonly string[]; options: unknown }> = [];
+  const spawn: SpawnLike = (command, args, options) => {
+    calls.push({ command, args, options });
     // The "spawn" event is what node would emit asynchronously after fork.
     queueMicrotask(() => child.emit("spawn"));
     return child as unknown as NodeChildProcess.ChildProcess;
@@ -255,6 +255,10 @@ describe("runCursorTurn", () => {
     expect(harness.calls[0]!.command).toBe("/opt/cursor-agent");
     expect(harness.calls[0]!.args).toContain("--print");
     expect(harness.calls[0]!.args).toContain("--model");
+    // The CLI is a console-subsystem child; without windowsHide it would pop a
+    // terminal window whenever the host process has no console (packaged app,
+    // detached dev server).
+    expect(harness.calls[0]!.options).toMatchObject({ windowsHide: true });
   });
 
   it("writes the prompt to stdin and ends it", async () => {

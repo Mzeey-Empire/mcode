@@ -35,7 +35,7 @@ describe("CursorCliUsageEmailResolver", () => {
     expect(execFileImpl).toHaveBeenCalledWith(
       "cursor-agent",
       ["about", "--format", "json"],
-      expect.objectContaining({ timeout: expect.any(Number) }),
+      expect.objectContaining({ timeout: expect.any(Number), windowsHide: true }),
     );
   });
 

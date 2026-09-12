@@ -362,7 +362,7 @@ async function killWindowsProcessTreeRoot(
   const beforeKill = indexWindowsSnapshot(await context.getSnapshot());
   if (!root || beforeKill.get(root.pid)?.startMarker !== root.startMarker) return;
   try {
-    await context.execFile("taskkill", ["/T", "/F", "/PID", String(pid)], { timeout: TASKKILL_TIMEOUT_MS });
+    await context.execFile("taskkill", ["/T", "/F", "/PID", String(pid)], { timeout: TASKKILL_TIMEOUT_MS, windowsHide: true });
   } catch (error) {
     if (isProcessGoneError(error)) {
       logger.debug("killProcessTree: process already gone", { pid });
@@ -383,7 +383,7 @@ async function killWindowsSurvivors(
   const survivors = await classifyMatchingWindowsProcesses(captured, context);
   for (const identity of [...survivors].sort((left, right) => right.depth - left.depth)) {
     try {
-      await context.execFile("taskkill", ["/F", "/PID", String(identity.pid)], { timeout: TASKKILL_TIMEOUT_MS });
+      await context.execFile("taskkill", ["/F", "/PID", String(identity.pid)], { timeout: TASKKILL_TIMEOUT_MS, windowsHide: true });
       signaled.push(identity);
     } catch (error) {
       if (!isProcessGoneError(error)) throw error;
@@ -694,7 +694,7 @@ export interface GracefulKillDeps {
   execFile?: (
     cmd: string,
     args: string[],
-    opts: { timeout?: number },
+    opts: { timeout?: number; windowsHide?: boolean },
   ) => Promise<{ stdout: string; stderr: string }>;
   platform: NodeJS.Platform;
   sleep?: (ms: number) => Promise<void>;
@@ -752,13 +752,13 @@ async function gracefulKillWindowsProcessTree(
   sleep: (ms: number) => Promise<void>,
 ): Promise<void> {
   try {
-    await execFileForProcess("taskkill", ["/T", "/PID", String(pid)], { timeout: TASKKILL_TIMEOUT_MS });
+    await execFileForProcess("taskkill", ["/T", "/PID", String(pid)], { timeout: TASKKILL_TIMEOUT_MS, windowsHide: true });
     return;
   } catch {
     await sleep(GRACEFUL_KILL_STEP_MS);
   }
   try {
-    await execFileForProcess("taskkill", ["/T", "/F", "/PID", String(pid)], { timeout: TASKKILL_TIMEOUT_MS });
+    await execFileForProcess("taskkill", ["/T", "/F", "/PID", String(pid)], { timeout: TASKKILL_TIMEOUT_MS, windowsHide: true });
   } catch {
     // The process may already be gone.
   }
