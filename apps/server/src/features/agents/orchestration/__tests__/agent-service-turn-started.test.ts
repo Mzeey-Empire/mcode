@@ -292,4 +292,48 @@ describe("AgentService.sendMessage emits TurnStarted", () => {
     });
 
   });
+
+  it("dispatches Full Access as manual approval review without creating an approval lifecycle", async () => {
+    Object.assign(providerStub, {
+      id: "cursor" as ProviderId,
+      descriptor: {
+        id: "cursor",
+        capabilities: [{ name: "approval-review", support: "supported" }],
+      },
+      getApprovalReviewSupport: async () => ({
+        status: "available" as const,
+        supportedModes: ["manual", "automatic"] as const,
+        reason: "automatic-review-available",
+        liveChangeScope: "none" as const,
+      }),
+    });
+    startAgentServiceIngressForTest(svc);
+    const workspace = workspaceRepo.create("test-ws", process.cwd());
+    const thread = threadRepo.create(workspace.id, "Full Access Cursor Thread", "direct", "main", true, "cursor");
+    void svc.sendMessage({
+      threadId: thread.id,
+      content: "hello",
+      permissionMode: "full",
+      approvalReviewMode: "automatic",
+      sourceTurnId: "full-access-cursor-turn",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(providerStub.sendTurn).toHaveBeenCalledWith(expect.objectContaining({
+      turnId: "full-access-cursor-turn",
+      permissionMode: "full",
+      approvalReviewMode: "manual",
+    }));
+    const request = providerStub.sendTurn.mock.calls[0]?.[0];
+    expect(request).toBeDefined();
+    expect(canonicalSink.loadTurnByExecution(request!.turnExecutionId)).toMatchObject({
+      permissionMode: "full",
+      approvalReviewMode: "manual",
+      approvalReviewReason: "full-access-bypasses-approval-review",
+    });
+    const reviewItems = db.prepare(
+      "SELECT id FROM canonical_agent_items WHERE id LIKE 'toolCall:approval-review:%'",
+    ).all();
+    expect(reviewItems).toHaveLength(0);
+  });
 });

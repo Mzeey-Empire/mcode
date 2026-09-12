@@ -386,6 +386,17 @@ export async function openRuntimeVerificationSocket(repoRoot, onPush = () => {})
   return await openSocket(repoRoot, readRuntime(repoRoot), onPush);
 }
 
+/** Opens a verifier RPC socket for an authenticated desktop server URL. */
+export async function openVerificationSocketUrl(repoRoot, serverUrl, onPush = () => {}) {
+  const endpoint = new URL(serverUrl);
+  if (endpoint.protocol !== "ws:" || !["127.0.0.1", "localhost", "::1"].includes(endpoint.hostname)) {
+    throw actionable("The desktop server URL is not a loopback WebSocket URL", "Restart Electron from this worktree, then retry the verification.");
+  }
+  const token = endpoint.searchParams.get("token");
+  if (!token) throw actionable("The desktop server URL lacks its authentication token", "Restart Electron from this worktree, then retry the verification.");
+  return await openSocketUrl(repoRoot, endpoint, token, onPush);
+}
+
 async function inspect(repoRoot) {
   const healthResult = await health(repoRoot);
   const ports = readRuntime(repoRoot);
@@ -1782,7 +1793,7 @@ async function deleteLiveThread(run, keepThread) {
   run.report.cleanup.deleted = deletedEveryThread;
 }
 
-async function deleteLiveWorkspace(run, keepThread) {
+export async function deleteLiveWorkspace(run, keepThread) {
   if (!run.ownedWorkspaceId || !run.socket || keepThread) return;
   try {
     const deleted = await run.socket.rpc("workspace.forceDelete", { id: run.ownedWorkspaceId });
@@ -2026,12 +2037,16 @@ function relativePath(path) {
 }
 
 async function openSocket(repoRoot, ports, onPush = () => {}) {
-  const serverRequire = NodeModule.createRequire(NodePath.join(repoRoot, "apps", "server", "package.json"));
-  const { WebSocket } = serverRequire("ws");
   const endpoint = new URL(`ws://127.0.0.1:${ports.serverPort}/`);
   endpoint.searchParams.set("instanceToken", ports.instanceToken);
   endpoint.searchParams.set("worktree", ports.worktreeIdentity);
-  const ws = new WebSocket(endpoint, { headers: { Authorization: `Bearer ${ports.seedLogin.token}` } });
+  return await openSocketUrl(repoRoot, endpoint, ports.seedLogin.token, onPush);
+}
+
+async function openSocketUrl(repoRoot, endpoint, token, onPush = () => {}) {
+  const serverRequire = NodeModule.createRequire(NodePath.join(repoRoot, "apps", "server", "package.json"));
+  const { WebSocket } = serverRequire("ws");
+  const ws = new WebSocket(endpoint, { headers: { Authorization: `Bearer ${token}` } });
   const pending = new Map();
   const state = { failure: null, closing: false, counter: 0, openState: WebSocket.OPEN };
   attachSocketHandlers(ws, state, pending, onPush);

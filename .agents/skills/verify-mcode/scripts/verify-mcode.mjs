@@ -15,6 +15,8 @@ Areas:
       Verify the production Electron composer queue for the fixed Codex and Cursor matrix.
   runtime <health|check|inspect|live|diagnostics|cleanup>
       Verify AgentService, provider events, turn runtime, and runtime cleanup.
+  provider-completeness <health|proof|cleanup>
+      Drive the Codex Composer and Last turn Review journey in web and Electron.
   thread-lifecycle <health|check|proof|inspect|cleanup>
       Verify desktop thread completion and managed-worktree cleanup.
   desktop codex-protocol-notices <check|setup|inspect|cleanup>
@@ -61,6 +63,7 @@ function resolveChild(args) {
   const [area, ...rest] = args;
   if (area === "composer-queue") return { script: "composer-queue.mjs", args: rest };
   if (area === "runtime") return { script: "runtime.mjs", args: rest };
+  if (area === "provider-completeness") return { script: "provider-completeness.mjs", args: rest };
   if (area === "thread-lifecycle") return { script: "thread-lifecycle.mjs", args: rest };
   if (area === "desktop") return resolveDesktopChild(rest);
   throw usageError(`Unknown verification area: ${String(area)}`);

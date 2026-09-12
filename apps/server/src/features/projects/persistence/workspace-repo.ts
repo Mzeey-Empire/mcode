@@ -17,7 +17,7 @@ interface WorkspaceRow {
   created_at: string;
   updated_at: string;
   pinned: number;
-  last_opened_at: number | null;
+  last_opened_at: number | string | null;
   sort_order: number;
   deleted_at: string | null;
 }
@@ -35,10 +35,17 @@ function rowToWorkspace(row: WorkspaceRow): Workspace {
     created_at: row.created_at,
     updated_at: row.updated_at,
     pinned: row.pinned === 1,
-    last_opened_at: row.last_opened_at ?? null,
+    last_opened_at: normalizeLastOpenedAt(row.last_opened_at),
     sort_order: row.sort_order,
     deleted_at: row.deleted_at ?? null,
   };
+}
+
+function normalizeLastOpenedAt(value: WorkspaceRow["last_opened_at"]): number | null {
+  if (value === null || typeof value === "number") return value;
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) throw new Error("Workspace last_opened_at is not a Unix timestamp or ISO date.");
+  return timestamp;
 }
 
 /** Repository for workspace CRUD operations against SQLite. */

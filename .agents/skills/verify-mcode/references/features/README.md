@@ -28,6 +28,7 @@
 | Provider events become durable assistant conversation data | [Provider events and durability](provider-events-and-durability.md) | `runtime live --scenario completion` |
 | Codex reroutes, warnings, diagnostics, and authentication recovery remain bounded, durable, and thread-scoped | [Provider events and durability](provider-events-and-durability.md) | Composer notice journey and `runtime health` |
 | Approval review offers only valid access modes, waits for a real permission request, and keeps Full Access review-free | [Provider events and durability](provider-events-and-durability.md) | Approval review journey and focused policy and mapper tests |
+| Provider-complete Review preserves native or fallback evidence, review safety, and local file refreshes across web and Electron | [Multi-surface journeys](multi-surface-journeys.md#provider-completeness) | Provider-completeness matrix, public state, web and Electron evidence, and owned-resource cleanup |
 | Codex subagents retain task, state, transcript, navigation, and identity color across both protocol shapes | [Codex subagent view](codex-subagent-view.md) | `runtime check`, Terra `runtime live --scenario subagent`, and Electron UI proof |
 | Thread deletion and provider-session cleanup retain runtime ownership | [Resource lifecycle](resource-lifecycle.md) | `runtime check` and controlled thread cleanup |
 | Pointer-selected assistant text opens a compact comment editor and retains native copy actions | [Selected text comments](selected-text-comments.md) | Electron public UI proof |
@@ -47,20 +48,22 @@ Read [Multi-surface journeys](multi-surface-journeys.md) for a workflow that cro
 ## Broad regression order
 
 1. Run `runtime health`, then `runtime inspect`.
-2. Run `runtime check`, then the affected completion or stop provider proofs.
-3. Run the selected-text-comments workflow when its desktop surface changed.
-4. Run the Codex subagent workflow when collaboration mapping or the Subagents UI changed.
-5. Run `runtime worktree-setup --confirm-cleanup` when managed-worktree checkout, automatic Setup, or Setup cancellation changed.
-6. Run the thread startup progress journey when thread creation, checkout, Setup, or PR fork UI changed.
-7. Run `thread-lifecycle health`, `thread-lifecycle check`, and the completed-thread proof when thread completion or worktree cleanup changed.
-8. Run the Thread Overview and right-panel workflow when shared workspace navigation or panel layout changed.
-9. Run the thread-list inline rename workflow when Project-tree thread naming changed.
-10. Run the Open in editor workflow when external-editor discovery or launch changes.
-11. Run the applicable multi-surface journey last, inspect receipts, then run cleanup.
+2. For a provider-completeness change, run the Provider completeness journey before individual completion or stop proofs.
+3. Run `runtime check`, then the affected completion or stop provider proofs.
+4. Run the selected-text-comments workflow when its desktop surface changed.
+5. Run the Codex subagent workflow when collaboration mapping or the Subagents UI changed.
+6. Run `runtime worktree-setup --confirm-cleanup` when managed-worktree checkout, automatic Setup, or Setup cancellation changed.
+7. Run the thread startup progress journey when thread creation, checkout, Setup, or PR fork UI changed.
+8. Run `thread-lifecycle health`, `thread-lifecycle check`, and the completed-thread proof when thread completion or worktree cleanup changed.
+9. Run the Thread Overview and right-panel workflow when shared workspace navigation or panel layout changed.
+10. Run the thread-list inline rename workflow when Project-tree thread naming changed.
+11. Run the Open in editor workflow when external-editor discovery or launch changes.
+12. Run the applicable multi-surface journey last, inspect receipts, then run cleanup.
 
 ## Coverage gaps
 
 - The live completion and stop matrix remains incomplete for Codex, Claude, and Cursor.
+- Provider completeness requires a registered verifier-owned workspace, live web and Electron controls, and an authenticated model for each provider. Record every unavailable prerequisite, its surface, and its affected matrix row in the retained receipt. Do not use another client or provider as a substitute.
 - OpenCode live completion, stop, resume, permission, and question proof is blocked for #1624 because the available OpenCode quota is exhausted. An authenticated account and quota are required before the primary public-path proof can run. Focused tests support component behavior only.
 - Provider discovery does not prove provider account login.
 - The public subscription RPC cannot prove a pre-create subscription without a caller-supplied thread ID or workspace subscription.

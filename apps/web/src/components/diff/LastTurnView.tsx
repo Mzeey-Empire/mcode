@@ -33,7 +33,7 @@ export function LastTurnView({ threadId, comparison, cacheVersion, refreshing, o
   }
 
   return (
-    <div className="flex flex-col">
+    <div data-testid="review-last-turn" className="flex flex-col">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border/15">
         <span className="font-mono text-[11px] tabular-nums text-foreground/70">
           {comparison.files.length}
@@ -66,7 +66,12 @@ function turnLabel(comparison: ReviewComparison): string {
 
 function TurnDiffSource({ comparison }: { comparison: ReviewComparison }) {
   if (!comparison.turnDiff) return null;
-  return <Badge variant="secondary">
+  return <Badge
+    variant="secondary"
+    data-testid="review-turn-source"
+    data-review-source={comparison.turnDiff.source}
+    data-review-fidelity={comparison.turnDiff.fidelity}
+  >
     {comparison.turnDiff.source === "git" ? "Git fallback: same-file edits may appear" : comparison.turnDiff.source === "tracked" ? "Tracked file evidence" : "Agent changes"}
   </Badge>;
 }

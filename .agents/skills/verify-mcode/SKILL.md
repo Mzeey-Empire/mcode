@@ -45,12 +45,15 @@ the command runs every area and retains its normal failure behavior.
 
 Run `runtime health` before AgentService, provider-event, turn-runtime, or selected-text-comments proof. The runtime area rejects a missing or stale server bundle or runtime contract before it calls `/health`.
 
+Run `provider-completeness health`, then `provider-completeness proof --confirm-provider-call --confirm-cleanup`, for the Codex web and Electron Last turn Review journey. The proof creates a unique fixture workspace for each client and deletes only registrations it owns. It uses the isolated Playwright helper and owns the Electron process it starts. It captures the same-file agent and external markers, public comparison, source label, screenshots, and reload observations; it records unsupported native states as gaps.
+
 Run `thread-lifecycle health` before the completed-thread workflow. It also checks the desktop bundle, Playwright, and disposable fixture repository.
 
 The public commands use these namespaces:
 
 ```sh
 bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs runtime <health|check|inspect|live|worktree-setup|worktree-setup-cleanup|diagnostics|cleanup>
+bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs provider-completeness <health|proof|cleanup>
 bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs thread-lifecycle <health|check|proof|inspect|cleanup>
 bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs composer-queue <check|health|proof|navigation-repro|inspect|cleanup>
 bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs desktop codex-protocol-notices <check|setup|inspect|cleanup>

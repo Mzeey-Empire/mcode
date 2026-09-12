@@ -4285,6 +4285,34 @@ describe("CodexEventMapper", () => {
     expect(stale).toEqual([]);
   });
 
+  it("rejects a failed attempt's stale automatic review after its retry starts", () => {
+    mapper.mapNotification({ jsonrpc: "2.0", method: "turn/started", params: { turn: { id: "turn-failed" } } });
+    mapper.setApprovalReviewVisible(true);
+    mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "turn/completed",
+      params: { threadId: "codex-thread", turn: { id: "turn-failed", status: "failed" } },
+    });
+    mapper.mapNotification({ jsonrpc: "2.0", method: "turn/started", params: { turn: { id: "turn-retry" } } });
+
+    const stale = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "autoApprovalReview/strictReviewRequired",
+      params: { threadId: "codex-thread", turnId: "turn-failed", startedAtMs: 1 },
+    });
+    const retry = mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "autoApprovalReview/strictReviewRequired",
+      params: { threadId: "codex-thread", turnId: "turn-retry", startedAtMs: 2 },
+    });
+
+    expect(stale).toEqual([]);
+    expect(retry.map((mapped) => mapped.event)).toEqual([expect.objectContaining({
+      type: "system",
+      subtype: "approval.review.manual-required",
+    })]);
+  });
+
   it("suppresses native review events for a frozen Full Access dispatch", () => {
     mapper.mapNotification({ jsonrpc: "2.0", method: "turn/started", params: { turn: { id: "turn-full" } } });
 
