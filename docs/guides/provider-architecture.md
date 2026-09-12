@@ -108,3 +108,46 @@ copying raw payloads. Its dispatch receipt distinguishes mapped events,
 internal state updates, diagnostics, and intentionally ignored methods with a
 stable reason. Known child-thread notices retain child attribution. A notice
 from an unlinked native thread is logged rather than shown in the chat.
+
+## Devin (ACP)
+
+Devin runs over the local `devin acp` binary behind the shared
+`AcpSessionRuntime` (`packages/providers/src/private/devin/`). It is a beta
+provider, enabled through `provider.enabled.devin`; `provider.cli.devin`
+covers off-PATH installs.
+
+- **Headless auth only.** Mcode never opens a browser and stores no Devin
+  secret. Each spawned process authenticates via ACP `authenticate`
+  (`methodId: "windsurf-api-key"`, `_meta.headless`, `_meta.api_key`) from
+  `WINDSURF_API_KEY` / `DEVIN_API_KEY` / `windsurf_api_key` env vars or Devin's
+  own `credentials.toml`. A failed authenticate kills that spawn and fails the
+  turn; the next turn retries.
+- **Model and mode are session config, not spawn flags.** Both go through
+  `session/set_config_option` (`configId: "model"` / `"mode"`) so neither
+  change respawns the process. Devin's flattened mode axis
+  (normal / accept-edits / smart / bypass / plan) renders inside the shared
+  Access Mode control and persists as `threads.devin_mode`; the coarse
+  `permissionMode` fallback maps `supervised` -> `normal` and `full` ->
+  `bypass`. Mcode's Plan interaction mode sends `plan` and restores the
+  thread's native mode on return to Build.
+- **File access is scoped.** The mandatory `fs/read_text_file` and
+  `fs/write_text_file` client callbacks allow the session cwd plus Devin's
+  canonical `~/.devin/plans/` directory (where `write_plan` lands); everything
+  else outside cwd is refused.
+- **No OS sandbox on Windows.** Devin sandboxes only inside WSL 2, so on
+  Windows `full` means unsandboxed Bypass. Outside WSL there is no
+  sandboxed-autonomy tier; `autonomous` is not offered.
+- **Resume without forking.** `session/load` resumes across eviction and
+  restart (`threads.sdk_session_id` is the cursor); there is no
+  `session/resume`/`session/close`, and teardown is `session/cancel` plus
+  process kill. Handoff uses the history-replay side channel (path B-prime),
+  not a session fork.
+- **Permissions pass through verbatim.** `session/request_permission` options
+  (allow once / allow for session / always allow in project / switch to
+  bypass / reject) render as real option buttons; `allow_always_global` is
+  hidden because it writes outside the worktree. `switch_bypass` updates the
+  thread's `devin_mode` so the composer reflects the mode Devin actually
+  entered.
+- **No cost data.** Devin reports token usage only: `costUsd` stays `null`,
+  `contextEstimate` comes from `usage_update`, and token counts come from the
+  `session/prompt` response.
