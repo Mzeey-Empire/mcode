@@ -6,7 +6,7 @@
   "provenance": "synthetic",
   "requiredProfiles": ["core", "build", "plan", "permissions", "session-eviction", "clean-fork", "browser-access", "thread-control"],
   "scenario": "synthetic Cursor ACP lifecycle and unsupported extension replay",
-  "sourceHash": "1faa635664f7fd22b7a1c1eea23e23d8890615cd73daf4e6aa119d1a4754d82a",
+  "sourceHash": "6f28a6271f5307b03290e02db7df504c1de1bcf3373d6c6993167a779fb06bb7",
   "redaction": { "reviewed": true, "removedFields": ["prompt", "response", "environment", "tool output", "absolute paths"] },
   "input": {
     "events": [
@@ -30,8 +30,8 @@
         { "sequence": 10, "kind": "ext-method", "method": "cursor/continue", "params": {} }
       ],
       "expected": {
-        "emittedEventTypes": ["toolUse", "toolResult", "toolUse", "toolUse", "toolResult"],
-        "toolNames": ["Read", "Agent", "Agent"],
+        "emittedEventTypes": ["toolUse", "toolUse", "toolResult", "toolUse", "toolUse", "toolResult"],
+        "toolNames": ["Read", "Read", "Agent", "Agent"],
         "planExitCount": 1,
         "permissionOutcomes": ["selected"],
         "unsupportedMethods": ["cursor/task", "cursor/continue"],

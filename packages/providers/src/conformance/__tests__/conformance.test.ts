@@ -87,15 +87,15 @@ describe("Provider conformance registry", () => {
       {
         scenario: "synthetic Cursor ACP lifecycle and unsupported extension replay",
         coveredProfiles: cursor.requiredProfiles,
-        emittedEventTypes: ["toolUse", "toolResult", "toolUse", "toolUse", "toolResult"],
-        toolNames: ["Read", "Agent", "Agent"],
+        emittedEventTypes: ["toolUse", "toolUse", "toolResult", "toolUse", "toolUse", "toolResult"],
+        toolNames: ["Read", "Read", "Agent", "Agent"],
         unsupportedMethods: ["cursor/task", "cursor/continue"],
       },
       {
         scenario: "captured Cursor ACP tool and child lifecycle envelope replay",
         coveredProfiles: ["core", "build"],
-        emittedEventTypes: ["toolUse", "toolUse", "toolResult", "toolUse", "toolResult"],
-        toolNames: ["Agent", "Agent", "Read"],
+        emittedEventTypes: ["toolUse", "toolUse", "toolResult", "toolUse", "toolUse", "toolResult"],
+        toolNames: ["Agent", "Agent", "Read", "Read"],
         unsupportedMethods: [],
       },
     ]);
