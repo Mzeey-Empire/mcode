@@ -6,6 +6,10 @@ import {
   CodexCatalogService,
 } from "../catalog/codex-catalog-service.js";
 import { CodexCustomPromptService } from "../catalog/codex-custom-prompt-service.js";
+import {
+  DevinCatalogService,
+  DevinSkillsProbe,
+} from "../catalog/devin-catalog-service.js";
 import { ProviderCatalogService } from "../catalog/provider-catalog-service.js";
 import {
   ProviderAvailabilityService,
@@ -38,6 +42,16 @@ export function registerProviderCatalogServices(container: DependencyContainer):
   container.register(
     CodexCatalogService,
     { useClass: CodexCatalogService },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register(
+    DevinSkillsProbe,
+    { useClass: DevinSkillsProbe },
+    { lifecycle: Lifecycle.Singleton },
+  );
+  container.register(
+    DevinCatalogService,
+    { useClass: DevinCatalogService },
     { lifecycle: Lifecycle.Singleton },
   );
   container.register(

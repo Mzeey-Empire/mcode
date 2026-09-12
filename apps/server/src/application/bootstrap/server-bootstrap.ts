@@ -82,6 +82,7 @@ import { WorkspaceInvalidationService } from "../../features/projects/files/work
 import { ConfigService } from "../../features/providers/configuration/config-service.js";
 import { SkillService } from "../../features/agents/skills/catalog/skill-service.js";
 import { CodexCatalogService } from "../../features/providers/catalog/codex-catalog-service.js";
+import { DevinCatalogService } from "../../features/providers/catalog/devin-catalog-service.js";
 import { ProviderCatalogService } from "../../features/providers/catalog/provider-catalog-service.js";
 import { TerminalBackend, TERMINAL_BACKEND_TOKEN } from "../../features/terminal/backends/terminal-backend.js";
 import { TerminalProfileService } from "../../features/terminal/profiles/terminal-profile-service.js";
@@ -332,6 +333,7 @@ const workspaceInvalidations = container.resolve(WorkspaceInvalidationService);
 const configService = container.resolve(ConfigService);
 const skillService = container.resolve(SkillService);
 const codexCatalogService = container.resolve(CodexCatalogService);
+const devinCatalogService = container.resolve(DevinCatalogService);
 const providerCatalogService = container.resolve(ProviderCatalogService);
 const terminalService = container.resolve<TerminalBackend>(TERMINAL_BACKEND_TOKEN);
 const terminalProfileService = container.resolve(TerminalProfileService);
@@ -740,6 +742,7 @@ const { httpServer, wss } = createWsServer({
   configService,
   skillService,
   codexCatalogService,
+  devinCatalogService,
   providerCatalogService,
   terminalService,
   terminalProfileService,
