@@ -76,7 +76,7 @@ export interface DevinAcpTurnState {
   toolNameByCallId: Map<string, string>;
   /** Bounded in-progress result text kept until the terminal update. */
   retainedToolResultByCallId: Map<string, string>;
-  /** toolCallIds whose tool_call had no input; ToolUse is deferred to updates. */
+  /** toolCallIds whose tool_call marker emitted a sparse ToolUse; a merge ToolUse follows once rawInput arrives. */
   deferredToolCallIds: Set<string>;
   /** Latest model label from `_cognition.ai/agent_stopped`. */
   stoppedModelLabel: string | null;
@@ -138,6 +138,7 @@ function mapMessageChunk(
       type: AgentEventType.TextDelta,
       threadId,
       delta: content.text,
+      isFinalResponse: false,
     }];
   }
   acc.assistantText += content.text;
@@ -204,15 +205,15 @@ function mapToolCallStarted(
     state.pendingSubagentCallIds.push(toolCallId);
   }
 
-  if (Object.keys(rawInput).length === 0) {
-    // Lifecycle marker only; the first update carrying data emits ToolUse.
-    state.deferredToolCallIds.add(toolCallId);
-    return [];
-  }
-
   state.accumulator.toolStartTimes.set(toolCallId, Date.now());
   state.accumulator.pendingToolCalls.add(toolCallId);
   state.accumulator.hasFiredToolThisTurn = true;
+
+  if (Object.keys(rawInput).length === 0) {
+    // Marker-only tool_call: emit ToolUse now so the timeline keeps invocation
+    // order; a merge ToolUse follows once an update carries rawInput.
+    state.deferredToolCallIds.add(toolCallId);
+  }
   return [{
     type: AgentEventType.ToolUse,
     threadId,
@@ -326,7 +327,7 @@ function mapSubagentUpdate(
   return null;
 }
 
-/** Deferred or orphan tool call: emits its ToolUse now that data exists. */
+/** Orphan terminal update with no preceding marker: synthesizes its ToolUse. */
 function lateToolUseEvent(
   update: Record<string, unknown>,
   toolCallId: string,
@@ -400,7 +401,7 @@ function mapTerminalToolUpdate(
 ): AgentEvent[] {
   const events: AgentEvent[] = [];
   const toolName = state.toolNameByCallId.get(toolCallId) ?? resolveToolName(update);
-  if (state.deferredToolCallIds.delete(toolCallId) || !state.accumulator.toolStartTimes.has(toolCallId)) {
+  if (!state.accumulator.toolStartTimes.has(toolCallId)) {
     events.push(lateToolUseEvent(update, toolCallId, toolName, threadId, state));
   }
   events.push(terminalToolResultEvent(update, toolCallId, threadId, state));
@@ -419,14 +420,40 @@ function mapToolCallUpdated(
   const toolCallId = typeof update.toolCallId === "string" ? update.toolCallId : undefined;
   if (!toolCallId) return [];
 
+  const mergeEvents = mergeDeferredToolInput(update, toolCallId, threadId, state);
+
   if (update.status === "in_progress") {
     retainInProgressResult(update, toolCallId, state);
-    return [];
+    return mergeEvents;
   }
 
   const isStatuslessResult = update.status === undefined && hasResultData(update);
-  if (!isTerminalStatus(update.status) && !isStatuslessResult) return [];
-  return mapTerminalToolUpdate(update, toolCallId, threadId, state);
+  if (!isTerminalStatus(update.status) && !isStatuslessResult) return mergeEvents;
+  return [...mergeEvents, ...mapTerminalToolUpdate(update, toolCallId, threadId, state)];
+}
+
+/**
+ * Emits a merge ToolUse when an update carries rawInput for a call whose marker
+ * went out without args; the client folds it into the existing card.
+ */
+function mergeDeferredToolInput(
+  update: Record<string, unknown>,
+  toolCallId: string,
+  threadId: string,
+  state: DevinAcpTurnState,
+): AgentEvent[] {
+  if (!state.deferredToolCallIds.has(toolCallId)) return [];
+  const rawInput = asRecord(update.rawInput);
+  if (!rawInput || Object.keys(rawInput).length === 0) return [];
+  state.deferredToolCallIds.delete(toolCallId);
+  const toolName = state.toolNameByCallId.get(toolCallId) ?? resolveToolName(update);
+  return [{
+    type: AgentEventType.ToolUse,
+    threadId,
+    toolCallId,
+    toolName,
+    toolInput: rawInput,
+  }];
 }
 
 // ---------------------------------------------------------------------------

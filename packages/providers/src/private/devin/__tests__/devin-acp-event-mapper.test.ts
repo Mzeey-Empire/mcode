@@ -50,7 +50,9 @@ describe("mapDevinAcpSessionNotification", () => {
       THREAD,
       state,
     );
-    expect(events).toEqual([{ type: "textDelta", threadId: THREAD, delta: "thinking" }]);
+    expect(events).toEqual([
+      { type: "textDelta", threadId: THREAD, delta: "thinking", isFinalResponse: false },
+    ]);
     expect(state.accumulator.assistantText).toBe("");
   });
 
@@ -128,33 +130,69 @@ describe("mapDevinAcpSessionNotification", () => {
     expect(state.pendingSubagentCallIds).toEqual(["tc-agent"]);
   });
 
-  it("defers ToolUse for marker-only tool calls until data arrives", () => {
+  it("emits ToolUse at a marker-only tool call and merges late rawInput on update", () => {
     const state = createDevinAcpTurnState();
     const started = mapDevinAcpSessionNotification(
       notification({ sessionUpdate: "tool_call", toolCallId: "tc-2", title: "Read", kind: "read" }),
       THREAD,
       state,
     );
-    expect(started).toEqual([]);
+    expect(started).toEqual([
+      {
+        type: "toolUse",
+        threadId: THREAD,
+        toolCallId: "tc-2",
+        toolName: "Read",
+        toolInput: {},
+      },
+    ]);
 
     const events = mapDevinAcpSessionNotification(
       notification({
         sessionUpdate: "tool_call_update",
         toolCallId: "tc-2",
         status: "completed",
+        rawInput: { path: "a.ts" },
         rawOutput: "file contents",
       }),
       THREAD,
       state,
     );
     expect(events).toHaveLength(2);
-    expect(events[0]).toMatchObject({ type: "toolUse", toolCallId: "tc-2", toolName: "Read" });
+    expect(events[0]).toMatchObject({
+      type: "toolUse",
+      toolCallId: "tc-2",
+      toolName: "Read",
+      toolInput: { path: "a.ts" },
+    });
     expect(events[1]).toMatchObject({
       type: "toolResult",
       toolCallId: "tc-2",
       output: "file contents",
       isError: false,
     });
+  });
+
+  it("keeps tool calls at their invocation position ahead of later text", () => {
+    const state = createDevinAcpTurnState();
+    const published: string[] = [];
+    const collect = (update: Record<string, unknown>) => {
+      for (const event of mapDevinAcpSessionNotification(notification(update), THREAD, state)) {
+        published.push(event.type);
+      }
+    };
+    collect({ sessionUpdate: "tool_call", toolCallId: "tc-a", title: "Read", kind: "read" });
+    collect({
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "Reading now." },
+    });
+    collect({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "tc-a",
+      status: "completed",
+      rawOutput: "done",
+    });
+    expect(published).toEqual(["toolUse", "textDelta", "toolResult"]);
   });
 
   it("emits ToolUse + ToolResult for orphan terminal updates", () => {
