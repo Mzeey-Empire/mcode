@@ -174,4 +174,47 @@ describe("useComposerSubmissionController selected-text comments", () => {
     })));
     expect(result.current.form.state.selectedTextCommentEditor).toBeUndefined();
   });
+
+  it("accepts a second Enter while the previous dispatch is still in flight", async () => {
+    let releaseFirst!: () => void;
+    routeMocks.dispatchComposerTarget
+      .mockReturnValueOnce(new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      }))
+      .mockResolvedValueOnce(undefined);
+
+    const { result } = renderHook(useHarness);
+
+    act(() => {
+      result.current.form.replaceDraft("first message");
+    });
+    await waitFor(() => expect(result.current.form.state.text).toBe("first message"));
+    act(() => {
+      void result.current.controller.submit();
+    });
+
+    await waitFor(() => expect(routeMocks.dispatchComposerTarget).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(result.current.form.state.text).toBe(""));
+
+    act(() => {
+      result.current.form.replaceDraft("second message");
+    });
+    await waitFor(() => expect(result.current.form.state.text).toBe("second message"));
+    act(() => {
+      void result.current.controller.submit();
+    });
+
+    await waitFor(() => expect(routeMocks.dispatchComposerTarget).toHaveBeenCalledTimes(2));
+    expect(routeMocks.dispatchComposerTarget.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        submission: expect.objectContaining({
+          snapshot: expect.objectContaining({ rawInput: "second message" }),
+        }),
+      }),
+    );
+
+    await act(async () => {
+      releaseFirst();
+    });
+  });
 });

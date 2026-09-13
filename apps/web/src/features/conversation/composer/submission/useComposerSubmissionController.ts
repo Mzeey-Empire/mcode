@@ -141,6 +141,8 @@ export function useComposerSubmissionController({
         onThreadCreationFailed,
       });
       const draftCleared = form.clearSubmittedDraft(submission.snapshot);
+      // Release before the RPC settles so a follow-up Enter is not silently dropped.
+      submitInFlightRef.current = false;
       try {
         await dispatch;
       } catch (error) {
@@ -180,7 +182,14 @@ export function useComposerSubmissionController({
       return "complete";
     }
     const target = execution.target;
-    if (!isComposerTargetReady(target)) return "complete";
+    if (!isComposerTargetReady(target)) {
+      useToastStore.getState().show(
+        "error",
+        "Choose a worktree",
+        "Select an existing worktree before sending.",
+      );
+      return "complete";
+    }
     const checkoutPending = await requestCheckoutConfirmation({
       workspaceId,
       execution,
