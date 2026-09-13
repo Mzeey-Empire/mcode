@@ -638,4 +638,51 @@ describe("threadStore reconnect and queued follow-ups", () => {
     expect(useQueueStore.getState().autoDrainSuppressedThreadIds.has(THREAD_ID)).toBe(false);
     expect(releaseBrowserCaptureSpills).toHaveBeenCalledWith(["browser-capture-spill/thread-delete.json"]);
   });
+
+  it("drains a queued follow-up when the turn ends via an outcome Ended event", async () => {
+    vi.useFakeTimers();
+    queueMessage("queued follow-up after ended");
+    useThreadStore.setState({
+      records: new Map<string, ThreadRecord>([[THREAD_ID, {
+        ...createEmptyThreadRecord(),
+        runtimePhase: "running",
+        turnExecutionId: "execution-1",
+      }]]),
+      runningThreadIds: new Set([THREAD_ID]),
+    });
+
+    useThreadStore.getState().handleAgentEvent({
+      type: "ended",
+      threadId: THREAD_ID,
+      turnExecutionId: "execution-1",
+      outcome: "interrupted",
+    } satisfies AgentEvent);
+    await vi.advanceTimersByTimeAsync(400);
+
+    expect(mockTransport.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: THREAD_ID, content: "queued follow-up after ended" }),
+    );
+    expect(useQueueStore.getState().queues[THREAD_ID]).toEqual([]);
+  });
+
+  it("drains a queued follow-up after hydration reconciles the thread to idle", async () => {
+    vi.useFakeTimers();
+    queueMessage("queued follow-up after reconnect");
+    useThreadStore.setState({
+      records: new Map<string, ThreadRecord>([[THREAD_ID, {
+        ...createEmptyThreadRecord(),
+        runtimePhase: "running",
+        turnExecutionId: "execution-1",
+      }]]),
+      runningThreadIds: new Set([THREAD_ID]),
+    });
+
+    useThreadStore.getState().hydrateRunningThreads([]);
+    await vi.advanceTimersByTimeAsync(400);
+
+    expect(mockTransport.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: THREAD_ID, content: "queued follow-up after reconnect" }),
+    );
+    expect(useQueueStore.getState().queues[THREAD_ID]).toEqual([]);
+  });
 });
