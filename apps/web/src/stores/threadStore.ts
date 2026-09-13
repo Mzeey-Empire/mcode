@@ -2058,7 +2058,7 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     conversationResidency.retainInactiveConversation(event.threadId);
     if (event.type === "turnComplete") updateTurnContext(event);
     cleanupTerminalRuntime(event.threadId, phase);
-    if (event.type === "turnComplete" && !guardrail) scheduleDrainAfterEdit(event.threadId);
+    if (!guardrail) scheduleDrainAfterEdit(event.threadId);
   };
 
   const releaseProviderLostTerminal = (
@@ -3045,6 +3045,9 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       clearStreamingTextUsage(threadId);
       invalidateDeferredNarrativeEvents(threadId);
       threadHydrator.invalidatePermissionSnapshots(threadId);
+      // Threads that left the running set may hold queued follow-ups; drains are
+      // otherwise only scheduled by turnComplete, which reconnect can miss.
+      if (!get().runningThreadIds.has(threadId)) scheduleDrainAfterEdit(threadId);
     }
   },
 
