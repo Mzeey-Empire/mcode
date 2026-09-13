@@ -6,7 +6,7 @@
  */
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
-import { createRequire } from "node:module";
+import * as NodeModule from "node:module";
 
 const ROOT = NodePath.resolve(import.meta.dirname, "../../../../");
 const EVIDENCE_DIR = NodePath.join(ROOT, ".dev/verification/composer-enter-send");
@@ -15,7 +15,7 @@ const AFTER_FIRST = NodePath.join(EVIDENCE_DIR, "after-first-enter.png");
 const AFTER_SECOND = NodePath.join(EVIDENCE_DIR, "after-second-enter.png");
 const PLAYWRIGHT_ENTRY = NodePath.join(ROOT, ".dev/playwright-scratch/package.json");
 
-const require = createRequire(PLAYWRIGHT_ENTRY);
+const require = NodeModule.createRequire(PLAYWRIGHT_ENTRY);
 const playwright = require("playwright");
 const { connectElectronSession, disconnectElectronSession } = await import(
   NodePath.join(ROOT, ".agents/skills/electorn-live-testing/scripts/electron-session.mjs")
