@@ -113,4 +113,27 @@ describe("ComposerEditor", () => {
     expect(onPopupKeyDown).not.toHaveBeenCalled();
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
+
+  it("does not submit Enter while an IME composition is active", async () => {
+    const onSubmit = vi.fn();
+    render(
+      <ComposerEditor
+        onChange={() => {}}
+        onSubmit={onSubmit}
+        onMentionTrigger={() => {}}
+        onMentionDismiss={() => {}}
+        isMentionPopupOpen={false}
+        onSlashTrigger={() => {}}
+        onSlashDismiss={() => {}}
+        isSlashPopupOpen={false}
+        ariaLabel="Composer"
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Composer" }), {
+      key: "Enter",
+      isComposing: true,
+    });
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
 });

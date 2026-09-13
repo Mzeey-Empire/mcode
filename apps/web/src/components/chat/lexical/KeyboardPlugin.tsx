@@ -50,15 +50,20 @@ function handlePopupKey(event: KeyboardEvent | null, key: string, refs: Keyboard
   return true;
 }
 
+/** True while an IME composition is active or confirming on Enter. */
+function isImeEnter(event: KeyboardEvent): boolean {
+  return event.isComposing || event.keyCode === 229;
+}
+
 /** Handles Enter for an open Composer popup. */
 function handlePopupEnter(event: KeyboardEvent | null, refs: KeyboardRefs): boolean {
-  if (!event || event.shiftKey || event.ctrlKey || event.metaKey) return false;
+  if (!event || event.shiftKey || event.ctrlKey || event.metaKey || isImeEnter(event)) return false;
   return handlePopupKey(event, "Enter", refs);
 }
 
 /** Submits the Composer for an unhandled Enter key. */
 function handleSubmitEnter(event: KeyboardEvent | null, refs: KeyboardRefs): boolean {
-  if (!event) return false;
+  if (!event || isImeEnter(event)) return false;
   const submitOnEnter = refs.submitOnEnter.current ?? true;
   const shouldSubmit = submitOnEnter
     ? !event.shiftKey
