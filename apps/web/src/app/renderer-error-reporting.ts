@@ -8,6 +8,11 @@ function reportRendererError(report: RendererCrashReport): void {
   }
 }
 
+// ResizeObserver fires window.onerror when a callback resizes an observed
+// element; the browser still delivers the deferred notifications next frame.
+// Reporting it as a crash would spend the rate-limited crash channel on noise.
+const BENIGN_WINDOW_ERROR = /^ResizeObserver loop/;
+
 /**
  * Sends uncaught exceptions and unhandled promise rejections to the desktop
  * logger through the renderer crash channel. React boundary errors are caught
@@ -16,6 +21,7 @@ function reportRendererError(report: RendererCrashReport): void {
  */
 export function initRendererErrorReporting(): void {
   window.addEventListener("error", (event) => {
+    if (typeof event.message === "string" && BENIGN_WINDOW_ERROR.test(event.message)) return;
     reportRendererError({
       errorName: event.error instanceof Error ? event.error.name : "Error",
       errorMessage: event.message || undefined,
