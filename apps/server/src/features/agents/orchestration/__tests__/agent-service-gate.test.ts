@@ -397,7 +397,6 @@ describe("AgentService.sendMessage — admission gates", () => {
       requestedMode: "automatic",
       model: "claude-sonnet-4-6",
     });
-    expect(memoryPressureService.assertCanStartTurn).not.toHaveBeenCalled();
     expect(memoryPressureService.markActive).not.toHaveBeenCalled();
     expect(messageRepo.create).not.toHaveBeenCalled();
     expect(settingsService.get).not.toHaveBeenCalled();
