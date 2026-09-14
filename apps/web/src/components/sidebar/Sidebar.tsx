@@ -51,7 +51,7 @@ function SidebarBody({ settingsOpen, settingsSection, onSettingsSection, primary
   const settingsNavProps = getSettingsNavProps(settingsOpen, settingsSection, onSettingsSection);
   return <div data-testid="sidebar-body" className="flex min-h-0 flex-1 flex-col overflow-hidden">
     {settingsNavProps ? <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain"><SettingsNav {...settingsNavProps} /></div> : <><div className="grid shrink-0 gap-0.5 px-1.5 py-2">
-      <Button variant="ghost" size="sm" className="h-8 justify-start gap-2 rounded-md px-1.5 text-[13px] font-normal text-muted-foreground shadow-none hover:text-foreground" onClick={onNewThread}><SquarePen size={15} aria-hidden />New thread</Button>
+      <Button data-testid="sidebar-new-thread" variant="ghost" size="sm" className="h-8 justify-start gap-2 rounded-md px-1.5 text-[13px] font-normal text-muted-foreground shadow-none hover:text-foreground" onClick={onNewThread}><SquarePen size={15} aria-hidden />New thread</Button>
       <Button variant="ghost" size="sm" className="h-8 justify-start gap-2 rounded-md px-1.5 text-[13px] font-normal text-muted-foreground hover:text-foreground" onClick={onOpenThreadSearch}><Search size={15} aria-hidden />Search threads</Button>
       <Button variant="ghost" size="sm" aria-current={primarySurface === "pullRequests" ? "page" : undefined} className={cn("h-8 justify-start gap-2 rounded-md px-1.5 text-[13px] font-normal shadow-none", primarySurface === "pullRequests" ? "bg-accent/55 text-foreground" : "text-muted-foreground hover:text-foreground")} onClick={onOpenPullRequests}><GitPullRequest size={15} aria-hidden />Pull requests</Button>
     </div><ProjectTree /></>}

@@ -922,6 +922,44 @@ describe("AgentService transient-failure auto-retry", () => {
     expect((sendTurn.mock.calls[1][0] as TurnRequest).resumeFrom).toBeUndefined();
   });
 
+  it("retries a frozen automatic approval decision after a transient stream Error", async () => {
+    const { service, sendTurn, providerEmitter } = buildService();
+    const getApprovalReviewSupport = vi.fn(async () => ({
+      status: "available" as const,
+      supportedModes: ["manual", "automatic"] as const,
+      reason: "automatic-review-available",
+    }));
+    (providerEmitter as unknown as { getApprovalReviewSupport: typeof getApprovalReviewSupport }).getApprovalReviewSupport = getApprovalReviewSupport;
+    startAgentServiceIngressForTest(service, );
+
+    sendTurn.mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
+    await service.sendMessage({
+      threadId: THREAD_ID,
+      content: "keep the selected review policy",
+      permissionMode: "supervised",
+      approvalReviewMode: "automatic",
+      model: "claude-sonnet-4-6",
+      attachments: [],
+      provider: "claude",
+    });
+
+    const firstAttempt = sendTurn.mock.calls[0][0] as TurnRequest;
+    providerEmitter.emit("event", {
+      type: "error",
+      threadId: THREAD_ID,
+      turnExecutionId: firstAttempt.turnExecutionId,
+      error: "read ECONNRESET",
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const retry = sendTurn.mock.calls[1][0] as TurnRequest;
+    expect(sendTurn).toHaveBeenCalledTimes(2);
+    expect(getApprovalReviewSupport).toHaveBeenCalledTimes(1);
+    expect(firstAttempt).toMatchObject({ permissionMode: "supervised", approvalReviewMode: "automatic" });
+    expect(retry).toMatchObject({ permissionMode: "supervised", approvalReviewMode: "automatic", deliveryAttempt: 2 });
+    expect(retry.resumeFrom).toBeUndefined();
+  });
+
   it("retries when a failed completion emits an identified transient Error", async () => {
     const { service, sendTurn, providerEmitter, threadRepo } = buildService();
     startAgentServiceIngressForTest(service, );
