@@ -104,11 +104,15 @@ function buildMockThreadStoreState() {
   return {
     records,
     runningThreadIds: threadStoreOverrides.runningThreadIds ?? new Set(),
+    pendingStopCounts: {},
     currentThreadId: null,
   };
 }
 
-vi.mock("@/stores/threadStore", () => ({
+vi.mock("@/stores/threadStore", async (importActual) => ({
+  // Keep pure helpers (isThreadExecuting, getThreadRecord, ...) real; only the
+  // reactive store hook is mocked.
+  ...(await importActual<typeof import("@/stores/threadStore")>()),
   useThreadStore: vi.fn((selector: (s: unknown) => unknown) =>
     selector(buildMockThreadStoreState()),
   ),
@@ -511,6 +515,23 @@ describe("ProjectTree thread interactions", () => {
     await act(async () => {
       resolveComplete();
     });
+  });
+
+  it("clears the lifecycle pending state when completion rejects", async () => {
+    const completeThread = vi.fn().mockRejectedValue(
+      new Error("Thread has a pending mutation: thread-1"),
+    );
+    setupStoreMocks({ completeThread });
+
+    render(<ProjectTree />);
+    const action = screen.getByRole("button", { name: "Complete My Thread" });
+    fireEvent.click(action);
+
+    await vi.waitFor(() => expect(completeThread).toHaveBeenCalledWith("thread-1"));
+    await act(async () => {});
+    // The rejection is swallowed by the row handler (the store surfaces it via
+    // `error`); the control must leave its pending state instead of sticking.
+    await vi.waitFor(() => expect(action).not.toBeDisabled());
   });
 
   it("switches to completed threads and reopens one by keyboard", async () => {
