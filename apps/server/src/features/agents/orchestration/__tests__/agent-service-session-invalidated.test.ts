@@ -134,7 +134,6 @@ describe("AgentService clears sdk_session_id on session invalidation", () => {
     const memoryPressureServiceStub = {
       markActive: vi.fn(),
       markIdle: vi.fn(),
-      assertCanStartTurn: vi.fn(),
       onPressureChange: vi.fn(),
     } as unknown as MemoryPressureService;
     const settingsServiceStub = {

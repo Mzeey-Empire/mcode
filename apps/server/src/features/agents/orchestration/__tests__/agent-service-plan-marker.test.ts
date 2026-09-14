@@ -79,7 +79,6 @@ function buildService(db: Database) {
   const memoryPressureService = {
     markActive: vi.fn(),
     markIdle: vi.fn(),
-    assertCanStartTurn: vi.fn(),
     onPressureChange: vi.fn(),
   } as unknown as MemoryPressureService;
 

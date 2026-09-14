@@ -471,7 +471,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     if (!this.ownsTurnAdmission(lease)) {
       throw new Error(`Turn admission lost runtime ownership: ${lease.threadId}`);
     }
-    this.memoryPressureService.assertCanStartTurn();
     this.memoryPressureService.markActive(lease.threadId);
   }
 

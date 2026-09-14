@@ -834,7 +834,7 @@ Behavior changes are also exercised against the running app. Agents prefer brows
 | Eager web chunk | <= 500 KiB gzipped |
 | Pull request virtual viewport | < 500 descendants at legal data bounds |
 | Pull request selector or store update p95 | < 2 ms |
-| Server heap limit | 512 MB (configurable via `server.memory.heapMb`) |
+| Server memory budget | 512 MB soft RSS budget for pressure shedding (configurable via `server.memory.heapMb`) |
 
 ## 16. CI/CD and Release
 

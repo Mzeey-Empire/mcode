@@ -106,7 +106,6 @@ function createAgentServiceHarness(automaticSetup?:
     {
       markActive: vi.fn(),
       markIdle: vi.fn(),
-      assertCanStartTurn: vi.fn(),
       onPressureChange: vi.fn(),
     } as never,
     {

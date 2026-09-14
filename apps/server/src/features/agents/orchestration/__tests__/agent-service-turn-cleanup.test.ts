@@ -281,7 +281,6 @@ function buildService(
   const memoryPressureService = {
     markActive: vi.fn(),
     markIdle: vi.fn(),
-    assertCanStartTurn: vi.fn(),
     onPressureChange: vi.fn(),
   } as unknown as MemoryPressureService;
 
@@ -1454,7 +1453,6 @@ describe("AgentService Ended finalization", () => {
     const memoryPressureService = {
       markActive: vi.fn(),
       markIdle: vi.fn(),
-      assertCanStartTurn: vi.fn(),
       onPressureChange: vi.fn(),
     } as unknown as MemoryPressureService;
     const settingsService = {
