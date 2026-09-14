@@ -1,11 +1,40 @@
 import { BrowserWindow } from "electron";
 import * as NodePath from "node:path";
 
+import { logger } from "@mcode/shared";
+
 import type {
   PreviewWebviewAttachParams,
   PreviewWebviewPreferences,
 } from "../../preview/index.js";
 import { getWindowIconPath } from "./icon-path.js";
+
+const RENDERER_CONSOLE_ERROR_MAX_LENGTH = 2 * 1024;
+const RENDERER_CONSOLE_FORWARD_LIMIT = 30;
+const RENDERER_CONSOLE_FORWARD_WINDOW_MS = 60_000;
+
+/**
+ * Forward renderer console errors to the local log file. Packaged builds keep
+ * DevTools closed, so error-level console output (including React's render
+ * failure dump) is otherwise unreachable when diagnosing field crashes.
+ */
+function forwardRendererConsoleErrors(window: BrowserWindow): void {
+  const forwardedAt: number[] = [];
+  window.webContents.on("console-message", (details) => {
+    if (details.level !== "error" || typeof details.message !== "string") return;
+    const now = Date.now();
+    while (forwardedAt.length > 0 && now - forwardedAt[0]! > RENDERER_CONSOLE_FORWARD_WINDOW_MS) {
+      forwardedAt.shift();
+    }
+    if (forwardedAt.length >= RENDERER_CONSOLE_FORWARD_LIMIT) return;
+    forwardedAt.push(now);
+    logger.error("Renderer console error", {
+      message: details.message.slice(0, RENDERER_CONSOLE_ERROR_MAX_LENGTH),
+      sourceId: details.sourceId,
+      line: details.lineNumber,
+    });
+  });
+}
 
 /** Per-window Preview, Spellcheck, and Server Runtime operations. */
 export interface DesktopWindowLifecycleHooks {
@@ -88,6 +117,7 @@ export function createWindow(
   });
 
   window.setMenuBarVisibility(false);
+  forwardRendererConsoleErrors(window);
 
   window.once("closed", () => {
     dependencies.hooks.disposePreviewForWindow(window);

@@ -170,6 +170,55 @@ describe("renderer crash report IPC boundary", () => {
     });
   });
 
+  it("logs the error message and JavaScript stack for crash reports", () => {
+    const authorized = { id: 105 };
+    handleRendererCrashReport(
+      { sender: authorized },
+      {
+        errorName: "Error",
+        errorMessage: "Minified React error #31",
+        errorStack: "Error: Minified React error #31\n    at row (file:///bundle.js:1:10)",
+        componentStack: "\n    at App",
+      },
+      authorized,
+    );
+
+    expect(loggerInfo).toHaveBeenCalledWith("Renderer crash report", {
+      errorName: "Error",
+      errorMessage: "Minified React error #31",
+      errorStack: "Error: Minified React error #31\n    at row (file:///bundle.js:1:10)",
+      componentStack: "App",
+      componentStackTruncated: false,
+    });
+  });
+
+  it("accepts global error reports without a React component stack", () => {
+    expect(
+      normalizeRendererCrashReport({
+        errorName: "Error",
+        errorMessage: "unhandled rejection: boom",
+      }),
+    ).toEqual({
+      errorName: "Error",
+      errorMessage: "unhandled rejection: boom",
+      componentStack: "",
+      componentStackTruncated: false,
+    });
+  });
+
+  it("truncates overlong error fields instead of dropping the report", () => {
+    const normalized = normalizeRendererCrashReport({
+      errorName: "Error",
+      errorMessage: "m".repeat(4 * 1024),
+      errorStack: "s".repeat(16 * 1024),
+      componentStack: "\n    at App",
+    });
+
+    expect(normalized?.errorMessage).toHaveLength(2 * 1024);
+    expect(normalized?.errorStack).toHaveLength(8 * 1024);
+    expect(normalized?.componentStack).toBe("App");
+  });
+
   it("bounds frame count and marks dropped safe frames", () => {
     const stack = Array.from({ length: 40 }, (_, index) => `    at Component${index}`).join("\n");
     const normalized = normalizeRendererCrashReport({ errorName: "Error", componentStack: stack });

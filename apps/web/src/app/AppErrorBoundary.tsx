@@ -7,6 +7,22 @@ interface AppErrorBoundaryProps {
   onReload?: () => void;
 }
 
+/** Forward the failure to the desktop logger when running under Electron. */
+function reportRenderFailure(error: Error, info: ErrorInfo): void {
+  const normalized = error instanceof Error ? error : new Error(String(error));
+  try {
+    const report = window.desktopBridge?.reportRendererCrash?.({
+      errorName: normalized.name || "Error",
+      errorMessage: normalized.message,
+      errorStack: normalized.stack,
+      componentStack: info.componentStack ?? "",
+    });
+    void report?.catch(() => undefined);
+  } catch {
+    // Diagnostics must never interfere with the crash recovery UI.
+  }
+}
+
 /** Prevents descendant render failures from unmounting the application root. */
 export class AppErrorBoundary extends Component<
   AppErrorBoundaryProps,
@@ -19,22 +35,12 @@ export class AppErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
-    const errorName = typeof error?.name === "string" ? error.name : "Error";
     console.error(
       "[AppErrorBoundary] Caught application render error",
-      errorName,
+      error,
       info.componentStack,
     );
-    try {
-      const reportRendererCrash = window.desktopBridge?.reportRendererCrash;
-      const report = reportRendererCrash?.({
-        errorName,
-        componentStack: info.componentStack ?? "",
-      });
-      void report?.catch(() => undefined);
-    } catch {
-      // Diagnostics must never interfere with the crash recovery UI.
-    }
+    reportRenderFailure(error, info);
   }
 
   render(): ReactNode {
