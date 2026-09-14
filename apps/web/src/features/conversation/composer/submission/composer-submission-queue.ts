@@ -103,6 +103,7 @@ function createPersistentQueuePayload(
     contextWindow: selection.contextWindow ?? undefined,
     thinking: selection.thinking ?? undefined,
     codexFastMode: optionalCodexFastMode(selection),
+    devinMode: selection.provider === "devin" ? selection.devinMode ?? undefined : undefined,
     goalObjective: submission.goalObjective,
     browserCaptureSpillPaths: browserCaptureSpillPaths.length > 0 ? browserCaptureSpillPaths : undefined,
   };

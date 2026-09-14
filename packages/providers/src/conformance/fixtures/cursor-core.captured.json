@@ -6,7 +6,7 @@
   "provenance": "captured",
   "requiredProfiles": ["core", "build"],
   "scenario": "captured Cursor ACP tool and child lifecycle envelope replay",
-  "sourceHash": "309380a4b8d5e62a1bac222a9984c116605128397afe257abcbbc425443c6c02",
+  "sourceHash": "5af605e2c371d2159d08e2befa220aab6fbdb4361b577cd32d2026cc49f88689",
   "redaction": { "reviewed": true, "removedFields": ["prompt", "response", "environment", "absolute paths"] },
   "input": {
     "events": [
@@ -27,8 +27,8 @@
         { "sequence": 7, "kind": "session/update", "sessionId": "CURSOR_CAPTURE_SESSION", "update": { "sessionUpdate": "tool_call_update", "toolCallId": "CURSOR_CAPTURE_READ", "status": "completed" } }
       ],
       "expected": {
-        "emittedEventTypes": ["toolUse", "toolUse", "toolResult", "toolUse", "toolResult"],
-        "toolNames": ["Agent", "Agent", "Read"],
+        "emittedEventTypes": ["toolUse", "toolUse", "toolResult", "toolUse", "toolUse", "toolResult"],
+        "toolNames": ["Agent", "Agent", "Read", "Read"],
         "planExitCount": 0,
         "permissionOutcomes": [],
         "unsupportedMethods": [],

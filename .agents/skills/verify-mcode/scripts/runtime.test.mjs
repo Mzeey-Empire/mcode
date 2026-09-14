@@ -47,7 +47,7 @@ NodeTest.test("rejects invalid runtime check phases before any check runs", asyn
   const repeated = await runBunCommand([CLI, "runtime", "check", "--phase", "contract", "--phase", "contract"]);
 
   NodeAssertStrict.equal(unknown.code, 1);
-  NodeAssertStrict.match(unknown.stdout, /--phase must be runtime, provider, contract, or ui/);
+  NodeAssertStrict.match(unknown.stdout, /--phase must be runtime, provider, acp, contract, or ui/);
   NodeAssertStrict.equal(missing.code, 1);
   NodeAssertStrict.match(missing.stdout, /Missing value for --phase/);
   NodeAssertStrict.equal(repeated.code, 1);

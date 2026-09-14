@@ -16,6 +16,7 @@ const selection: ComposerAgentSelection = {
   contextWindow: null,
   thinking: null,
   codexFastMode: null,
+  devinMode: null,
 };
 
 describe("mergeComposerAgentSelection", () => {

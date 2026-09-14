@@ -21,11 +21,11 @@ type CliRuntime = {
 };
 
 /** Provider IDs whose CLI path is user-configurable via `settings.provider.cli`. */
-type CliProvider = "codex" | "claude" | "copilot" | "cursor" | "opencode";
+type CliProvider = "codex" | "claude" | "copilot" | "cursor" | "opencode" | "devin";
 
 /** Narrows a ProviderId to those that carry a configurable CLI path setting. */
 function hasCliPath(id: ProviderId): id is CliProvider {
-  return id === "codex" || id === "claude" || id === "copilot" || id === "cursor" || id === "opencode";
+  return id === "codex" || id === "claude" || id === "copilot" || id === "cursor" || id === "opencode" || id === "devin";
 }
 
 /** Executable names to try on PATH when no custom CLI path is set (Cursor installs vary by platform). */

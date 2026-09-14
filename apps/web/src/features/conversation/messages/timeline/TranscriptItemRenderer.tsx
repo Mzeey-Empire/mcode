@@ -95,7 +95,7 @@ function TurnChangesTranscriptItemRenderer({ item, turnExpandRef }: TranscriptIt
 }
 
 /** Renders a permission request row. */
-function PermissionRequestTranscriptItemRenderer({ item }: TranscriptItemRendererProps) {
+function PermissionRequestTranscriptItemRenderer({ item, threadId }: TranscriptItemRendererProps) {
   const request = item as Extract<ChatVirtualItem, { type: "permission-request" }>;
   return (
     <PermissionRequestCard
@@ -104,8 +104,11 @@ function PermissionRequestTranscriptItemRenderer({ item }: TranscriptItemRendere
       input={request.input}
       title={request.title}
       questions={request.questions}
+      options={request.options}
       settled={request.settled}
       decision={request.decision}
+      optionLabel={request.optionLabel}
+      threadId={threadId}
     />
   );
 }

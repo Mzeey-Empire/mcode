@@ -287,8 +287,12 @@ export type ChatVirtualItem =
       input: unknown;
       title?: string;
       questions?: import("@mcode/contracts").PermissionQuestion[];
+      /** Provider-native selectable options rendered verbatim when present. */
+      options?: import("@mcode/contracts").PermissionRequestOption[];
       settled: boolean;
       decision?: PermissionDecision;
+      /** Verbatim label of the provider-native option the user picked, when one was offered. */
+      optionLabel?: string;
     }
   | {
       key: string;
@@ -468,8 +472,10 @@ export function buildVolatileItems(
     input?: unknown;
     title?: string;
     questions?: import("@mcode/contracts").PermissionQuestion[];
+    options?: import("@mcode/contracts").PermissionRequestOption[];
     settled: boolean;
     decision?: PermissionDecision;
+    optionLabel?: string;
   }[],
   hooks?: readonly HookExecution[],
   thoughtSegments?: readonly ThoughtSegment[],
@@ -513,7 +519,7 @@ function narrativeIndicatorItem(toolCalls: readonly ToolCall[], isAgentRunning: 
 }
 
 function permissionRequestItems(permissions: Parameters<typeof buildVolatileItems>[4]): ChatVirtualItem[] {
-  return permissions?.map((permission) => ({ key: `permission-${permission.requestId}`, type: "permission-request" as const, requestId: permission.requestId, toolName: permission.toolName, input: permission.input, title: permission.title, questions: permission.questions, settled: permission.settled, decision: permission.decision })) ?? [];
+  return permissions?.map((permission) => ({ key: `permission-${permission.requestId}`, type: "permission-request" as const, requestId: permission.requestId, toolName: permission.toolName, input: permission.input, title: permission.title, questions: permission.questions, options: permission.options, settled: permission.settled, decision: permission.decision, optionLabel: permission.optionLabel })) ?? [];
 }
 
 function sameArrayItems<T>(
@@ -581,7 +587,7 @@ function sameTurnChangesItem(left: ChatVirtualItem, right: ChatVirtualItem): boo
 }
 
 function samePermissionRequestItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {
-  return left.type === "permission-request" && right.type === "permission-request" && [left.requestId === right.requestId, left.toolName === right.toolName, left.input === right.input, left.title === right.title, left.questions === right.questions, left.settled === right.settled, left.decision === right.decision].every(Boolean);
+  return left.type === "permission-request" && right.type === "permission-request" && [left.requestId === right.requestId, left.toolName === right.toolName, left.input === right.input, left.title === right.title, left.questions === right.questions, left.options === right.options, left.settled === right.settled, left.decision === right.decision, left.optionLabel === right.optionLabel].every(Boolean);
 }
 
 function sameNarrativeFlowItem(left: ChatVirtualItem, right: ChatVirtualItem): boolean {

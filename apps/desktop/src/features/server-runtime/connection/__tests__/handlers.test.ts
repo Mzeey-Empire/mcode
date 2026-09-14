@@ -243,8 +243,8 @@ describe("ServerRuntime entry point", () => {
 
     manager.isHealthy.mockResolvedValue(false);
     resumeListener?.();
-    await Promise.resolve();
-    await Promise.resolve();
+    // Health recovery confirms three failed probes ~750ms apart before restart.
+    await vi.advanceTimersByTimeAsync(1_500);
     await Promise.resolve();
     expect(manager.restart).toHaveBeenCalledOnce();
 

@@ -182,6 +182,7 @@ export class CursorSideChannel {
           stdio: ["pipe", "pipe", "pipe"],
           cwd,
           shell: this.deps.host.runtime.platform === "win32",
+          windowsHide: true,
           env: this.deps.getEnvironment(),
         });
       } catch (error) {

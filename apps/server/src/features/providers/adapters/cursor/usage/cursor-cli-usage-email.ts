@@ -85,6 +85,7 @@ export class CursorCliUsageEmailResolver {
     try {
       const result = await this.execFileImpl(cliPath, ["about", "--format", "json"], {
         shell: this.options.platform === "win32",
+        windowsHide: true,
         maxBuffer: MAX_OUTPUT_BYTES,
         timeout: ABOUT_TIMEOUT_MS,
       });

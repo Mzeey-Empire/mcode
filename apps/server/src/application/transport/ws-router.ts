@@ -113,6 +113,7 @@ import {
 import type { ConfigService } from "../../features/providers/configuration/config-service.js";
 import type { SkillService } from "../../features/agents/skills/catalog/skill-service.js";
 import type { CodexCatalogService } from "../../features/providers/catalog/codex-catalog-service.js";
+import type { DevinCatalogService } from "../../features/providers/catalog/devin-catalog-service.js";
 import type { ProviderCatalogService } from "../../features/providers/catalog/provider-catalog-service.js";
 import type { TerminalBackend } from "../../features/terminal/backends/terminal-backend.js";
 import { TerminalBackendError } from "../../features/terminal/backends/terminal-backend.js";
@@ -254,6 +255,8 @@ export interface RouterDeps {
   skillService: SkillService;
   /** Owns the thread-independent Codex app-server catalog connection. */
   codexCatalogService: CodexCatalogService;
+  /** Probes `devin skills list --json` for the active context. */
+  devinCatalogService: DevinCatalogService;
   /** Serves persisted snapshots and coordinates background catalog reconciliation. */
   providerCatalogService: ProviderCatalogService;
   terminalService: TerminalBackend;

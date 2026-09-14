@@ -262,6 +262,7 @@ function visibleThread(): Thread {
     thinking: null,
     codex_fast_mode: null,
     copilot_agent: null,
+    devin_mode: null,
     default_open_in_app: null,
     parent_thread_id: null,
     forked_from_message_id: null,

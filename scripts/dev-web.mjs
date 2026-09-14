@@ -118,6 +118,7 @@ const server = NodeChildProcess.spawn(
         : {}),
     },
     stdio: "inherit",
+    windowsHide: true,
   },
 );
 
@@ -205,6 +206,7 @@ vite = NodeChildProcess.spawn("bun", viteArgs, {
         }),
   },
   stdio: "inherit",
+  windowsHide: true,
 });
 
 // Clean shutdown: kill both on exit

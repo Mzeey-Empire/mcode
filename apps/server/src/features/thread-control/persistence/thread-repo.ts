@@ -6,8 +6,8 @@
 import * as NodeCrypto from "node:crypto";
 import { injectable, inject } from "tsyringe";
 import type { Database, SQLQueryBindings } from "bun:sqlite";
-import { ReasoningLevelSchema } from "@mcode/contracts";
-import type { Thread, RecentThread, ThreadMode, ThreadStatus, ReasoningLevel, InteractionMode, OrchestrationMode, PermissionMode, ContextWindowMode } from "@mcode/contracts";
+import { DevinModeSchema, ReasoningLevelSchema } from "@mcode/contracts";
+import type { DevinMode, Thread, RecentThread, ThreadMode, ThreadStatus, ReasoningLevel, InteractionMode, OrchestrationMode, PermissionMode, ContextWindowMode } from "@mcode/contracts";
 
 interface ThreadRow {
   id: string;
@@ -43,6 +43,7 @@ interface ThreadRow {
     thinking: number | null;
     codex_fast_mode: number | null;
     copilot_agent: string | null;
+    devin_mode: string | null;
   default_open_in_app: string | null;
   parent_thread_id: string | null;
   forked_from_message_id: string | null;
@@ -163,19 +164,27 @@ function rowToThreadPreferences(row: ThreadRow): Pick<Thread,
 }
 
 function rowToThreadProviderSettings(row: ThreadRow): Pick<Thread,
-  "thinking" | "codex_fast_mode" | "copilot_agent" | "default_open_in_app"
+  "thinking" | "codex_fast_mode" | "copilot_agent" | "devin_mode" | "default_open_in_app"
 > {
   return {
     thinking: row.thinking == null ? null : row.thinking === 1,
     codex_fast_mode:
       row.codex_fast_mode == null ? null : row.codex_fast_mode === 1,
     copilot_agent: (row.copilot_agent ?? null) as string | null,
+    devin_mode: parseStoredDevinMode(row.devin_mode),
     default_open_in_app: row.default_open_in_app ?? null,
   };
 }
 
+/** Rejects corrupted persisted Devin modes at the DB boundary. */
+function parseStoredDevinMode(value: string | null): DevinMode | null {
+  if (value === null) return null;
+  const parsed = DevinModeSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
 const THREAD_COLUMNS =
-  "id, workspace_id, title, status, mode, worktree_path, branch, checkout_state, base_branch, worktree_managed, issue_number, pr_number, pr_status, sdk_session_id, model, provider, created_at, updated_at, deleted_at, user_completed_at, scheduled_deletion_at, cleanup_state, cleanup_reason, last_context_tokens, context_window, reasoning_level, interaction_mode, orchestration_mode, permission_mode, context_window_mode, thinking, codex_fast_mode, copilot_agent, default_open_in_app, parent_thread_id, forked_from_message_id, last_compact_summary, has_file_changes";
+  "id, workspace_id, title, status, mode, worktree_path, branch, checkout_state, base_branch, worktree_managed, issue_number, pr_number, pr_status, sdk_session_id, model, provider, created_at, updated_at, deleted_at, user_completed_at, scheduled_deletion_at, cleanup_state, cleanup_reason, last_context_tokens, context_window, reasoning_level, interaction_mode, orchestration_mode, permission_mode, context_window_mode, thinking, codex_fast_mode, copilot_agent, devin_mode, default_open_in_app, parent_thread_id, forked_from_message_id, last_compact_summary, has_file_changes";
 
 type ThreadCreateLineage = {
   parentThreadId: string;
@@ -231,6 +240,7 @@ function createThreadRecord(input: ThreadCreateRecordInput): Thread {
     thinking: null,
     codex_fast_mode: null,
     copilot_agent: null,
+    devin_mode: null,
     default_open_in_app: null,
     parent_thread_id: input.lineage?.parentThreadId ?? null,
     forked_from_message_id: input.lineage?.forkedFromMessageId ?? null,
@@ -981,6 +991,7 @@ export class ThreadRepo {
       thinking?: boolean | null;
       codex_fast_mode?: boolean | null;
       copilot_agent?: string | null;
+      devin_mode?: string | null;
       default_open_in_app?: string | null;
     },
   ): boolean {
@@ -994,6 +1005,7 @@ export class ThreadRepo {
     appendThreadSetting(fields, values, "thinking", settings.thinking, serializeBooleanOverride);
     appendThreadSetting(fields, values, "codex_fast_mode", settings.codex_fast_mode, serializeBooleanOverride);
     appendThreadSetting(fields, values, "copilot_agent", settings.copilot_agent);
+    appendThreadSetting(fields, values, "devin_mode", settings.devin_mode);
     appendThreadSetting(fields, values, "default_open_in_app", settings.default_open_in_app);
     if (fields.length === 0) return false;
 

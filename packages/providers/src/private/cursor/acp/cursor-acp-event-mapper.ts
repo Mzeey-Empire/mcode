@@ -80,7 +80,6 @@ const TOOL_NAME_BY_TITLE: Record<string, string> = {
 };
 
 const IGNORED_ACP_SESSION_UPDATES = new Set<string>([
-  "agent_thought_chunk",
   "user_message_chunk",
   "available_commands_update",
   "current_mode_update",
@@ -111,6 +110,8 @@ export interface CursorAcpTurnState {
   toolNameByCallId: Map<string, string>;
   /** Kind/title from deferred lifecycle `tool_call` markers. */
   pendingToolMarkerByCallId: Map<string, PendingAcpToolMarker>;
+  /** Calls whose marker ToolUse went out without args; a merge ToolUse follows on the first data update. */
+  sparseToolUseCallIds: Set<string>;
   /** Bounded result text from in-progress ACP updates until their terminal update arrives. */
   retainedToolResultOutputByCallId: Map<string, string>;
 }
@@ -133,6 +134,7 @@ export function createCursorAcpTurnState(): CursorAcpTurnState {
     taskMetaByCallId: new Map(),
     toolNameByCallId: new Map(),
     pendingToolMarkerByCallId: new Map(),
+    sparseToolUseCallIds: new Set(),
     retainedToolResultOutputByCallId: new Map(),
   };
 }
@@ -151,6 +153,7 @@ export function mapCursorAcpSessionNotification(
 
   if (IGNORED_ACP_SESSION_UPDATES.has(update.sessionUpdate)) return [];
   if (update.sessionUpdate === "agent_message_chunk") return mapAgentLanguageChunk(threadId, acc, update);
+  if (update.sessionUpdate === "agent_thought_chunk") return mapAgentThoughtChunk(threadId, update);
   if (update.sessionUpdate === "plan") return mapAcpPlanUpdate(update, threadId, todoSnapshot);
   if (update.sessionUpdate === "tool_call") {
     return mapAcpToolCallStarted(update, threadId, state, acc, todoSnapshot);
@@ -181,6 +184,26 @@ function mapAgentLanguageChunk(
     threadId,
     delta: text,
     ...(isFinalResponse && { isFinalResponse: true }),
+  }];
+}
+
+/**
+ * Maps ACP `agent_thought_chunk` to an explicitly non-final TextDelta so reasoning
+ * renders as a thought segment and can never be classified as the final response.
+ * Thought text is not assistant output, so the accumulator stays untouched.
+ */
+function mapAgentThoughtChunk(
+  threadId: string,
+  update: import("@agentclientprotocol/sdk").ContentChunk & {
+    sessionUpdate: "agent_thought_chunk";
+  },
+): AgentEvent[] {
+  if (update.content.type !== "text" || !update.content.text) return [];
+  return [{
+    type: AgentEventType.TextDelta,
+    threadId,
+    delta: update.content.text,
+    isFinalResponse: false,
   }];
 }
 
@@ -406,17 +429,15 @@ function mapAcpToolCallStarted(
     kind: typeof update.kind === "string" ? update.kind : undefined,
     title: update.title,
   });
-
-  // ACP tool_calls with empty rawInput are lifecycle markers; actual data
-  // arrives on tool_call_update (content blocks or rawOutput). Defer ToolUse
-  // so we emit one event with real data instead of an empty one now + duplicate later.
-  if (Object.keys(toolInput).length === 0) {
-    return [];
-  }
-
-  // Align with {@link CursorStreamAccumulator}: only set once a ToolUse is emitted
-  // so `tool_call_update` can orphan-synthesize a card like stream-json completions.
   markAcpToolCallStarted(acc, update.toolCallId);
+
+  // ACP tool_calls with empty rawInput are lifecycle markers; args and output
+  // arrive on tool_call_update. Emit ToolUse anyway so the timeline shows the
+  // tool at its invocation position; a merge ToolUse with enriched input
+  // follows on the first update that carries data.
+  if (Object.keys(toolInput).length === 0) {
+    state.sparseToolUseCallIds.add(update.toolCallId);
+  }
   return [toolUseEvent(threadId, update.toolCallId, toolName, toolInput, parentToolCallId)];
 }
 
@@ -542,7 +563,45 @@ function clearAcpToolCallUpdate(state: CursorAcpTurnState, acc: CursorStreamAccu
   acc.pendingToolCalls.delete(toolCallId);
   state.toolNameByCallId.delete(toolCallId);
   state.pendingToolMarkerByCallId.delete(toolCallId);
+  state.sparseToolUseCallIds.delete(toolCallId);
   state.retainedToolResultOutputByCallId.delete(toolCallId);
+}
+
+/**
+ * Emits a merge ToolUse for a marker that went out without args once an update
+ * carries usable input or a better tool name. The client merges it into the
+ * existing card instead of appending a duplicate.
+ */
+function enrichedMarkerToolUse(
+  update: {
+    rawInput?: unknown;
+    rawOutput?: unknown;
+    content?: unknown;
+    status?: unknown;
+    toolCallId: string;
+    title?: string | null;
+    kind?: unknown;
+  },
+  threadId: string,
+  state: CursorAcpTurnState,
+): AgentEvent[] {
+  if (!state.sparseToolUseCallIds.has(update.toolCallId)) return [];
+  const marker = state.pendingToolMarkerByCallId.get(update.toolCallId);
+  const { toolName } = updatedAcpToolName(update, state);
+  const diffs = extractContentDiffs(update as Record<string, unknown>);
+  const toolInput = enrichAcpToolInput(toolName, marker, update.rawInput, update.rawOutput, diffs);
+  // Read enrichment fabricates file_path:"" when no path exists yet; that must
+  // not clear the sparse latch or a real path arriving later is dropped.
+  const hasUsableInput = Object.values(toolInput).some((v) => v !== "" && v != null);
+  const isLastChance =
+    isTerminalAcpToolCallStatus(update.status) ||
+    (update.status === undefined && hasAcpToolCallUpdateResultData(update));
+  if (!hasUsableInput && !isLastChance && toolName === state.toolNameByCallId.get(update.toolCallId)) {
+    return [];
+  }
+  state.sparseToolUseCallIds.delete(update.toolCallId);
+  const parentToolCallId = extractCursorParentToolCallId(update as unknown as Record<string, unknown>);
+  return [toolUseEvent(threadId, update.toolCallId, toolName, toolInput, parentToolCallId)];
 }
 
 function mapAcpToolCallUpdated(
@@ -562,6 +621,8 @@ function mapAcpToolCallUpdated(
   const suppressedEvents = mapSuppressedAcpToolCallUpdate(update, threadId, state, acc);
   if (suppressedEvents) return suppressedEvents;
 
+  const enrichedMarkerEvents = enrichedMarkerToolUse(update, threadId, state);
+
   const hasResultData = hasAcpToolCallUpdateResultData(update);
   if (update.status === "in_progress") {
     if (hasResultData) {
@@ -572,10 +633,12 @@ function mapAcpToolCallUpdated(
         boundedAcpToolResultOutput(formatAcpToolResultOutput(toolName, update.rawOutput, diffs)),
       );
     }
-    return [];
+    return enrichedMarkerEvents;
   }
   const isStatuslessResultUpdate = update.status === undefined && hasResultData;
-  if (!isTerminalAcpToolCallStatus(update.status) && !isStatuslessResultUpdate) return [];
+  if (!isTerminalAcpToolCallStatus(update.status) && !isStatuslessResultUpdate) {
+    return enrichedMarkerEvents;
+  }
 
   const parentToolCallId = extractCursorParentToolCallId(update as unknown as Record<string, unknown>);
   const diffs = extractContentDiffs(update as Record<string, unknown>);
@@ -585,14 +648,15 @@ function mapAcpToolCallUpdated(
   const output = hasResultData
     ? formatAcpToolResultOutput(toolName, update.rawOutput, diffs)
     : (state.retainedToolResultOutputByCallId.get(update.toolCallId) ?? "");
-  const events = deferredAcpToolUse(
+  const events = enrichedMarkerEvents;
+  events.push(...deferredAcpToolUse(
     threadId,
     update.toolCallId,
     toolName,
     toolInput,
     parentToolCallId,
     acc,
-  );
+  ));
 
   events.push(
     acpToolResultEvent(

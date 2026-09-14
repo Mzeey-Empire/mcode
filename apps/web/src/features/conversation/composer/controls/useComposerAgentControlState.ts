@@ -3,7 +3,7 @@ import { PERMISSION_MODES } from "@/transport";
 import { isWindows } from "@/lib/platform";
 import { isCursorPermissionLockedToFull } from "@/lib/cursor-permission";
 import {
-  getCodexReasoningLevels,
+  getModelReasoningLevels,
   isMaxEffortModel,
   isXhighEffortModel,
   providerSupportsReasoningLevels,
@@ -103,9 +103,18 @@ export function useComposerAgentControlState({
   }, [activeGoal, goalPending, interactionMode, orchestrationMode]);
   const reasoningLevels = useMemo<ReasoningLevel[]>(() => {
     if (!providerSupportsReasoningLevels(provider)) return [];
-    const codexLevels = provider === "codex" ? getCodexReasoningLevels(modelId) : null;
-    if (codexLevels) {
-      return codexLevels.filter((level) => VALID_REASONING_LEVELS.has(level)) as ReasoningLevel[];
+    // Codex and Devin declare per-model effort levels on the registry def.
+    // For Devin the level is part of the wire model id, so the generic
+    // Claude-style fallback must not apply.
+    const modelLevels = provider === "codex" || provider === "devin"
+      ? getModelReasoningLevels(modelId)
+      : null;
+    if (provider === "devin") {
+      return (modelLevels ?? []).filter((level) =>
+        VALID_REASONING_LEVELS.has(level)) as ReasoningLevel[];
+    }
+    if (modelLevels) {
+      return modelLevels.filter((level) => VALID_REASONING_LEVELS.has(level)) as ReasoningLevel[];
     }
     if (!supportsEffortParameter(modelId)) return [];
     return [

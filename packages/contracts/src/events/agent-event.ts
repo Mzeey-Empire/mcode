@@ -240,7 +240,7 @@ const AgentEventPayloadSchema = z.discriminatedUnion("type", [
       /** Emitted when sendMessage is gated because the provider is disabled or its CLI is missing. */
       type: z.literal(AgentEventType.ProviderUnavailable),
       threadId: z.string(),
-      providerId: z.enum(["claude", "codex", "gemini", "copilot", "cursor", "opencode"]),
+      providerId: z.enum(["claude", "codex", "gemini", "copilot", "cursor", "opencode", "devin"]),
       reason: z.enum(["disabled", "cli_missing"]),
       /**
        * Configured CLI path the server tried to resolve. Only populated when

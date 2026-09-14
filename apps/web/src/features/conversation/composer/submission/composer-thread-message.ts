@@ -1,5 +1,6 @@
 import type { AttachmentMeta } from "@/transport";
 import type {
+  DevinMode,
   MessageMention,
   OrchestrationMode,
   PreviewAnnotationBundle,
@@ -22,12 +23,26 @@ export interface ComposerThreadMessagePayload {
   selectedTextComments?: SelectedTextComment[];
 }
 
+/** Provider-scoped composer values, undefined for providers that do not own them. */
+export function providerScopedSelection(selection: ComposerAgentSelection): {
+  copilotAgent: string | undefined;
+  codexFastMode: boolean | undefined;
+  devinMode: DevinMode | undefined;
+} {
+  return {
+    copilotAgent: selection.provider === "copilot" ? selection.copilotAgent ?? undefined : undefined,
+    codexFastMode: selection.provider === "codex" ? selection.codexFastMode ?? undefined : undefined,
+    devinMode: selection.provider === "devin" ? selection.devinMode ?? undefined : undefined,
+  };
+}
+
 /** Sends one normalized Composer payload to its existing thread. */
 export async function sendComposerThreadMessage(
   threadId: string,
   payload: ComposerThreadMessagePayload,
 ): Promise<void> {
   const { selection } = payload;
+  const scoped = providerScopedSelection(selection);
   const sent = await useThreadStore.getState().sendMessage(
     threadId,
     payload.content,
@@ -37,10 +52,10 @@ export async function sendComposerThreadMessage(
     payload.displayContent,
     selection.reasoning,
     selection.provider,
-    selection.provider === "copilot" ? selection.copilotAgent ?? undefined : undefined,
+    scoped.copilotAgent,
     selection.contextWindow ?? undefined,
     selection.thinking ?? undefined,
-    selection.provider === "codex" ? selection.codexFastMode ?? undefined : undefined,
+    scoped.codexFastMode,
     undefined,
     undefined,
     undefined,
@@ -50,6 +65,7 @@ export async function sendComposerThreadMessage(
     payload.orchestrationMode,
     payload.selectedTextComments,
     selection.approvalReviewMode,
+    scoped.devinMode,
   );
   if (!sent) throw new Error("Message dispatch failed");
 }

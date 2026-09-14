@@ -74,6 +74,7 @@ export async function fetchCursorCliModels(
   try {
     const { stdout } = await execFileAsync(cliPath, ["models"], {
       shell: platform === "win32",
+      windowsHide: true,
       maxBuffer: 12 * 1024 * 1024,
       timeout: 60_000,
     });

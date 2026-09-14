@@ -2,7 +2,7 @@ import * as NodeEvents from "node:events";
 import type * as NodeChildProcess from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import type { Client, ClientSideConnection, SessionNotification } from "@agentclientprotocol/sdk";
-import { AgentEventType } from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts";
 import { AcpSessionRuntime } from "../../../protocols/acp/acp-session-runtime.js";
 import { CursorAcpClientBridge } from "../cursor-acp-client-bridge.js";
 import {
@@ -114,7 +114,7 @@ describe("mapCursorAcpSessionNotification", () => {
     expect(resolveCursorAssistantMessageContent(state.accumulator)).toBe("After");
   });
 
-  it("suppresses agent_thought_chunk so thinking data never leaks to the UI", () => {
+  it("maps agent_thought_chunk to a non-final TextDelta without touching assistant text", () => {
     const state = createCursorAcpTurnState();
     const ev = mapCursorAcpSessionNotification(
       {
@@ -127,11 +127,19 @@ describe("mapCursorAcpSessionNotification", () => {
       threadId,
       state,
     );
-    expect(ev).toEqual([]);
+    expect(ev).toEqual([
+      {
+        type: AgentEventType.TextDelta,
+        threadId,
+        delta: "Thinking out loud...",
+        isFinalResponse: false,
+      },
+    ]);
     expect(state.accumulator.assistantText).toBe("");
+    expect(state.accumulator.assistantFinalText).toBe("");
   });
 
-  it("synthesizes ToolUse plus ToolResult when ACP defers lifecycle tool_call with empty rawInput", () => {
+  it("emits ToolUse at a lifecycle tool_call marker and merges enriched input at completion", () => {
     const state = createCursorAcpTurnState();
     const start = mapCursorAcpSessionNotification(
       {
@@ -147,8 +155,16 @@ describe("mapCursorAcpSessionNotification", () => {
       threadId,
       state,
     );
-    expect(start).toEqual([]);
-    expect(state.accumulator.toolStartTimes.has("c-read")).toBe(false);
+    expect(start).toEqual([
+      {
+        type: AgentEventType.ToolUse,
+        threadId,
+        toolCallId: "c-read",
+        toolName: "Read",
+        toolInput: {},
+      },
+    ]);
+    expect(state.accumulator.toolStartTimes.has("c-read")).toBe(true);
 
     const done = mapCursorAcpSessionNotification(
       {
@@ -180,6 +196,162 @@ describe("mapCursorAcpSessionNotification", () => {
       toolCallId: "c-read",
       isError: false,
     });
+  });
+
+  it("keeps the sparse latch through data-less in_progress updates so a terminal path still merges", () => {
+    const state = createCursorAcpTurnState();
+    mapCursorAcpSessionNotification(
+      {
+        sessionId: "s",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "c-read",
+          title: "Read File",
+          kind: "read",
+          status: "in_progress",
+        },
+      },
+      threadId,
+      state,
+    );
+
+    const mid = mapCursorAcpSessionNotification(
+      {
+        sessionId: "s",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "c-read",
+          kind: "read",
+          title: "Read File",
+          status: "in_progress",
+        },
+      },
+      threadId,
+      state,
+    );
+    expect(mid).toEqual([]);
+
+    const done = mapCursorAcpSessionNotification(
+      {
+        sessionId: "s",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "c-read",
+          kind: "read",
+          title: "Read File",
+          status: "completed",
+          rawOutput: { path: "src/module.ts", content: "file body" },
+        },
+      },
+      threadId,
+      state,
+    );
+    expect(done[0]).toMatchObject({
+      type: AgentEventType.ToolUse,
+      toolCallId: "c-read",
+      toolInput: { file_path: "src/module.ts" },
+    });
+  });
+
+  it("keeps tool calls at their invocation position ahead of later text and tools", () => {
+    const state = createCursorAcpTurnState();
+    const published: AgentEvent[] = [];
+    const collect = (update: Record<string, unknown>) => {
+      published.push(
+        ...mapCursorAcpSessionNotification(
+          { sessionId: "s", update } as Parameters<typeof mapCursorAcpSessionNotification>[0],
+          threadId,
+          state,
+        ),
+      );
+    };
+    collect({
+      sessionUpdate: "tool_call",
+      toolCallId: "c-read",
+      title: "Read File",
+      kind: "read",
+      status: "in_progress",
+    });
+    collect({
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "Reading the file now." },
+    });
+    collect({
+      sessionUpdate: "tool_call",
+      toolCallId: "c-grep",
+      title: "grep",
+      kind: "search",
+      status: "in_progress",
+    });
+    collect({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "c-read",
+      kind: "read",
+      status: "completed",
+      rawOutput: { path: "a.ts", content: "x" },
+    });
+    expect(published.map((e) => [e.type, (e as { toolCallId?: string }).toolCallId ?? ""])).toEqual([
+      [AgentEventType.ToolUse, "c-read"],
+      [AgentEventType.TextDelta, ""],
+      [AgentEventType.ToolUse, "c-grep"],
+      [AgentEventType.ToolUse, "c-read"],
+      [AgentEventType.ToolResult, "c-read"],
+    ]);
+  });
+
+  it("merges args that arrive on a mid-flight update for a marker-only tool call", () => {
+    const state = createCursorAcpTurnState();
+    mapCursorAcpSessionNotification(
+      {
+        sessionId: "s",
+        update: {
+          sessionUpdate: "tool_call",
+          toolCallId: "c-sh",
+          title: "Terminal",
+          kind: "execute",
+          status: "in_progress",
+        },
+      },
+      threadId,
+      state,
+    );
+    const progress = mapCursorAcpSessionNotification(
+      {
+        sessionId: "s",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "c-sh",
+          status: "in_progress",
+          rawInput: { command: "echo hi" },
+        },
+      },
+      threadId,
+      state,
+    );
+    expect(progress).toEqual([
+      {
+        type: AgentEventType.ToolUse,
+        threadId,
+        toolCallId: "c-sh",
+        toolName: "Bash",
+        toolInput: { command: "echo hi" },
+      },
+    ]);
+    const done = mapCursorAcpSessionNotification(
+      {
+        sessionId: "s",
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "c-sh",
+          status: "completed",
+          rawOutput: { stdout: "hi", exitCode: 0 },
+        },
+      },
+      threadId,
+      state,
+    );
+    expect(done).toHaveLength(1);
+    expect(done[0]).toMatchObject({ type: AgentEventType.ToolResult, toolCallId: "c-sh" });
   });
 
   it("maps tool_call_update to ToolResult", () => {
@@ -399,7 +571,7 @@ describe("mapCursorAcpSessionNotification", () => {
 
   it("maps deferred Grep with totalMatches into toolInput pattern summary", () => {
     const state = createCursorAcpTurnState();
-    mapCursorAcpSessionNotification(
+    const started = mapCursorAcpSessionNotification(
       {
         sessionId: "s",
         update: {
@@ -413,6 +585,15 @@ describe("mapCursorAcpSessionNotification", () => {
       threadId,
       state,
     );
+    expect(started).toEqual([
+      {
+        type: AgentEventType.ToolUse,
+        threadId,
+        toolCallId: "c-grep",
+        toolName: "Grep",
+        toolInput: {},
+      },
+    ]);
     const done = mapCursorAcpSessionNotification(
       {
         sessionId: "s",

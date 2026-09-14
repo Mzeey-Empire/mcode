@@ -1,5 +1,5 @@
 import type { ProviderRuntimeEvent } from "../events/provider-runtime-event.js";
-import type { ApprovalReviewMode, InteractionMode, OrchestrationMode, PermissionMode } from "../models/enums.js";
+import type { ApprovalReviewMode, DevinMode, InteractionMode, OrchestrationMode, PermissionMode } from "../models/enums.js";
 import type { AttachmentMeta } from "../models/attachment.js";
 import type { MessageMention } from "../models/mention.js";
 import type { GoalLookupResult, GoalState } from "../models/goal.js";
@@ -18,7 +18,7 @@ import type { Provider } from "../compat/agent-model.js";
  * Identifier for a supported AI provider.
  * "opencode" remains catalog-only until a server adapter ships.
  */
-export type ProviderId = "claude" | "codex" | "gemini" | "copilot" | "cursor" | "opencode";
+export type ProviderId = "claude" | "codex" | "gemini" | "copilot" | "cursor" | "opencode" | "devin";
 
 /** How a provider's `resume` mechanism behaves when used to fork a session. */
 export type SessionForkBehavior = "clean" | "unsupported";
@@ -62,6 +62,8 @@ export interface ProviderOptionsByProvider {
   codex: { fastMode?: boolean };
   /** Copilot: sub-agent name ("interactive" | "plan" | "autopilot" | custom YAML name). */
   copilot: { agent?: string };
+  /** Devin: native session mode applied via `session/set_config_option`. */
+  devin: { mode?: DevinMode };
   cursor: Record<string, never>;
   gemini: Record<string, never>;
   opencode: Record<string, never>;
@@ -180,17 +182,27 @@ export interface IAgentProvider {
   /** List models available from this provider. */
   listModels(): Promise<ProviderModelInfo[]>;
 
+  /**
+   * List the provider-native modes this account advertises (for example
+   * Devin's access-mode select). Returns `null` when the provider cannot
+   * report modes, so callers keep their static defaults.
+   */
+  listModes?(): Promise<string[] | null>;
+
   /** Return current usage/quota state for this provider. */
   getUsage?(): Promise<ProviderUsageInfo>;
 
   /**
    * Resolve a pending permission request.
    * Returns true if the requestId was found and resolved, false otherwise.
+   * `optionId` carries the provider-native option the user picked when the
+   * request advertised verbatim {@link PermissionRequest.options}.
    */
   resolvePermission?(
     requestId: string,
     decision: PermissionDecision,
     answers?: PermissionResponseAnswers,
+    optionId?: string,
   ): boolean;
 
   /** Return all pending permission requests for a given thread. */
@@ -205,7 +217,10 @@ export interface IAgentProvider {
   /** Subscribe to permission request events (emitted when canUseTool fires). */
   on(event: "permission_request", handler: (request: PermissionRequest) => void): void;
   /** Subscribe to permission resolved events (emitted on session stop cancellation). */
-  on(event: "permission_resolved", handler: (payload: { requestId: string; decision: PermissionDecision }) => void): void;
+  on(
+    event: "permission_resolved",
+    handler: (payload: { requestId: string; decision: PermissionDecision; optionLabel?: string }) => void,
+  ): void;
   /** Subscribe to ExitPlanMode capture events (Claude SDK plan output). */
   on(event: "exit_plan_mode", handler: (payload: { threadId: string; planMarkdown: string }) => void): void;
 }

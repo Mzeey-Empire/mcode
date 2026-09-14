@@ -1,5 +1,5 @@
 import { useCallback, useState, type Dispatch, type SetStateAction } from "react";
-import type { ApprovalReviewMode, ContextWindowMode, OrchestrationMode, ReasoningLevel } from "@mcode/contracts";
+import type { ApprovalReviewMode, ContextWindowMode, DevinMode, OrchestrationMode, ReasoningLevel } from "@mcode/contracts";
 import { ORCHESTRATION_MODES } from "@mcode/contracts";
 import { INTERACTION_MODES, PERMISSION_MODES, type InteractionMode, type PermissionMode } from "@/transport";
 import {
@@ -21,6 +21,7 @@ export interface ComposerAgentSelection {
   contextWindow: ContextWindowMode | null;
   thinking: boolean | null;
   codexFastMode: boolean | null;
+  devinMode: DevinMode | null;
 }
 
 /** State and updates for one Composer agent selection. */
@@ -34,7 +35,8 @@ type NullableSelectionField =
   | "copilotAgent"
   | "contextWindow"
   | "thinking"
-  | "codexFastMode";
+  | "codexFastMode"
+  | "devinMode";
 
 function retainCurrentWhenUndefined<Value>(current: Value, next: Value | undefined): Value {
   return next === undefined ? current : next;
@@ -70,7 +72,8 @@ function hasSameComposerAgentSelection(
     && current.copilotAgent === next.copilotAgent
     && current.contextWindow === next.contextWindow
     && current.thinking === next.thinking
-    && current.codexFastMode === next.codexFastMode;
+    && current.codexFastMode === next.codexFastMode
+    && current.devinMode === next.devinMode;
 }
 
 /** Creates the selection values used before a Composer restores a draft or thread session. */
@@ -87,6 +90,7 @@ export function createDefaultComposerAgentSelection(): ComposerAgentSelection {
     contextWindow: null,
     thinking: null,
     codexFastMode: null,
+    devinMode: null,
   };
 }
 
@@ -110,6 +114,7 @@ export function mergeComposerAgentSelection(
     contextWindow: readNullableSelectionPatch(current, patch, "contextWindow"),
     thinking: readNullableSelectionPatch(current, patch, "thinking"),
     codexFastMode: readNullableSelectionPatch(current, patch, "codexFastMode"),
+    devinMode: readNullableSelectionPatch(current, patch, "devinMode"),
   };
   return hasSameComposerAgentSelection(current, next) ? current : next;
 }

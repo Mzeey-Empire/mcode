@@ -204,6 +204,7 @@ export class TurnRecoveryService {
       contextWindow: this.optionalValue(thread.context_window_mode),
       thinking: this.optionalValue(thread.thinking),
       codexFastMode: this.optionalValue(thread.codex_fast_mode),
+      devinMode: this.optionalValue(thread.devin_mode),
       replyToMessageId: this.optionalValue(message.reply_to_message_id),
       quotedText: this.optionalValue(message.quoted_text),
       mentions: this.optionalValue(message.mentions),

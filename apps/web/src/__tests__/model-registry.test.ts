@@ -13,6 +13,7 @@ import {
   isMaxEffortModel,
   isModelAvailable,
   isXhighEffortModel,
+  normalizeReasoningLevel,
   normalizeReasoningLevelForModel,
   resolveThreadModelId,
   supportsEffortParameter,
@@ -530,6 +531,29 @@ describe("normalizeReasoningLevelForModel", () => {
 
   it("clamps xhigh to high for Haiku", () => {
     expect(normalizeReasoningLevelForModel("claude-haiku-4-5", "xhigh")).toBe("high");
+  });
+});
+
+describe("normalizeReasoningLevel", () => {
+  it("keeps max for the Devin swe-2 family instead of snapping to high", () => {
+    expect(normalizeReasoningLevel("devin", "swe-2", "max")).toBe("max");
+  });
+
+  it("keeps medium for the Devin swe-2 family", () => {
+    expect(normalizeReasoningLevel("devin", "swe-2", "medium")).toBe("medium");
+  });
+
+  it("clamps an undeclared level to the Devin family default", () => {
+    expect(normalizeReasoningLevel("devin", "swe-2", "xhigh")).toBe("high");
+  });
+
+  it("keeps the requested level for Devin models without declared levels", () => {
+    expect(normalizeReasoningLevel("devin", "fusion-unlisted", "max")).toBe("max");
+  });
+
+  it("still snaps max to high for non-Devin providers", () => {
+    expect(normalizeReasoningLevel("claude", "claude-haiku-4-5", "max")).toBe("high");
+    expect(normalizeReasoningLevel(undefined, "swe-2", "max")).toBe("high");
   });
 });
 

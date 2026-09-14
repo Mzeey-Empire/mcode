@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { type TransitionEvent, useId, useRef, useState } from "react";
 import { Check, ChevronRight, Clock, Terminal, X } from "lucide-react";
 import { AnimatedCollapsible } from "@/components/ui/animated-collapsible";
 import { Button } from "@/components/ui/button";
@@ -64,6 +64,35 @@ function shellToolCallStatus(toolCall: ToolCall): ShellToolCallStatus {
   };
 }
 
+type TooltipState = "unmounted" | "open" | "closed";
+
+/** Defers tooltip primitives until a command needs its full hover disclosure. */
+function CommandDetail({ command, detail, tooltipId }: { command: string; detail: string; tooltipId: string }) {
+  const [tooltipState, setTooltipState] = useState<TooltipState>("unmounted");
+  const trigger = (
+    <span
+      className={narrativeToolDetailClass("md")}
+      onPointerEnter={() => setTooltipState("open")}
+      onPointerLeave={() => setTooltipState("closed")}
+    >
+      {detail}
+    </span>
+  );
+
+  if (!command || tooltipState === "unmounted") return trigger;
+
+  return (
+    <Tooltip
+      open={tooltipState === "open"}
+      onOpenChange={(open) => setTooltipState(open ? "open" : "closed")}
+      triggerId={tooltipId}
+    >
+      <TooltipTrigger id={tooltipId} render={trigger} />
+      <TooltipContent>{command}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function ShellToolCallHeader({
   command,
   detail,
@@ -72,6 +101,7 @@ function ShellToolCallHeader({
   iconClassName,
   open,
   panelId,
+  controlsId,
   onToggle,
 }: {
   command: string;
@@ -81,6 +111,7 @@ function ShellToolCallHeader({
   iconClassName: string;
   open: boolean;
   panelId: string;
+  controlsId?: string;
   onToggle: () => void;
 }) {
   return (
@@ -91,7 +122,7 @@ function ShellToolCallHeader({
       onClick={onToggle}
       className={`${NARRATIVE_TOOL_ROW} h-auto w-full justify-start rounded-md px-0 py-1 text-left font-normal transition-colors duration-150 hover:bg-muted/30 aria-expanded:bg-transparent active:translate-y-0 motion-reduce:transition-none dark:hover:bg-muted/30 dark:aria-expanded:bg-transparent`}
       aria-expanded={open}
-      aria-controls={panelId}
+      aria-controls={controlsId}
     >
       <Terminal className={`h-3.5 w-3.5 shrink-0 ${iconClassName}`} />
       <span className="relative shrink-0 text-sm font-medium text-foreground/75">
@@ -109,14 +140,7 @@ function ShellToolCallHeader({
           in {duration}
         </span>
       )}
-      {command ? (
-        <Tooltip>
-          <TooltipTrigger
-            render={<span className={narrativeToolDetailClass("md")}>{detail}</span>}
-          />
-          <TooltipContent>{command}</TooltipContent>
-        </Tooltip>
-      ) : <span className={narrativeToolDetailClass("md")}>{detail}</span>}
+      <CommandDetail command={command} detail={detail} tooltipId={`${panelId}-command`} />
       <ChevronRight
         className={`h-3 w-3 shrink-0 text-muted-foreground/45 transition-transform duration-150 motion-reduce:transition-none ${
           open ? "rotate-90" : ""
@@ -189,6 +213,24 @@ function ShellToolCallTranscript({
   );
 }
 
+/** Defers unmounting an open transcript until its collapse animation completes. */
+function useCollapsibleTranscriptPresence(open: boolean) {
+  const mounted = useRef(open);
+  const [, rerender] = useState(0);
+  const reducedMotion = typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (open) mounted.current = true;
+  else if (reducedMotion) mounted.current = false;
+
+  return {
+    present: mounted.current,
+    onTransitionEnd(event: TransitionEvent<HTMLDivElement>) {
+      if (open || event.target !== event.currentTarget || event.propertyName !== "grid-template-rows") return;
+      mounted.current = false;
+      rerender((generation) => generation + 1);
+    },
+  };
+}
+
 /** Renders a nested shell call that reveals a terminal-style command transcript. */
 export function ShellToolCallRow({ toolCall }: ShellToolCallRowProps) {
   const [manualOpen, setManualOpen] = useState<boolean | null>(null);
@@ -197,6 +239,7 @@ export function ShellToolCallRow({ toolCall }: ShellToolCallRowProps) {
   const detail = command.replace(/\s+/g, " ").trim() || "Output";
   const status = shellToolCallStatus(toolCall);
   const open = manualOpen ?? status.isRunning;
+  const transcript = useCollapsibleTranscriptPresence(open);
 
   return (
     <div className="min-w-0 max-w-full">
@@ -208,17 +251,20 @@ export function ShellToolCallRow({ toolCall }: ShellToolCallRowProps) {
         iconClassName={status.iconClassName}
         open={open}
         panelId={panelId}
+        controlsId={transcript.present ? panelId : undefined}
         onToggle={() => setManualOpen(!open)}
       />
 
-      <AnimatedCollapsible open={open}>
-        <ShellToolCallTranscript
-          command={command}
-          toolCall={toolCall}
-          failureLabel={status.failureLabel}
-          isRunning={status.isRunning}
-          panelId={panelId}
-        />
+      <AnimatedCollapsible open={open} onTransitionEnd={transcript.onTransitionEnd}>
+        {transcript.present && (
+          <ShellToolCallTranscript
+            command={command}
+            toolCall={toolCall}
+            failureLabel={status.failureLabel}
+            isRunning={status.isRunning}
+            panelId={panelId}
+          />
+        )}
       </AnimatedCollapsible>
     </div>
   );

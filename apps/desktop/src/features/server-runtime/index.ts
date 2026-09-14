@@ -149,7 +149,7 @@ export class ServerRuntime {
     });
     this.serverHealthRecovery = new ServerHealthRecovery({
       isHealthy: () => this.serverManager.isHealthy(),
-      restart: () => this.serverManager.restart(),
+      restart: () => this.restartPlanned(),
       showError: () => this.serverNotifications.showCrashDialog(null),
       logger: {
         log: (...args) => fileLogger.info(args.map(String).join(" ")),

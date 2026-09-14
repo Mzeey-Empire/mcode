@@ -136,6 +136,7 @@ export class AcpSessionRuntime {
         cwd: options.spawnSpec.cwd,
         env: options.spawnSpec.env,
         shell: options.spawnSpec.shell,
+        windowsHide: true,
       });
       if (!child.stdin || !child.stdout) throw new Error("ACP stdio pipes unavailable");
       const client: Client = (options.clientFactory ?? createAcpClientHandlers)(callbacks);

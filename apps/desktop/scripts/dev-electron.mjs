@@ -85,6 +85,7 @@ function startServerTscWatch() {
   ], {
     cwd: serverRoot,
     stdio: ["ignore", "pipe", "inherit"],
+    windowsHide: true,
   });
 
   let resolveSettled;
@@ -226,6 +227,7 @@ function startViteDevServer() {
       cwd: webRoot,
       stdio: ["ignore", "pipe", "pipe"],
       env: { ...process.env, NODE_ENV: "development", ...runtimeStateEnv },
+      windowsHide: true,
     });
 
     viteProcess.stdout.on("data", (data) => {
@@ -347,6 +349,9 @@ async function spawnElectron() {
     stdio: "inherit",
     env: electronEnv,
     shell: true,
+    // The cmd.exe wrapper must not own a console window when this script runs
+    // under a console-less parent (e.g. spawned detached by tooling).
+    windowsHide: true,
   });
 
   const startedProcess = electronProcess;

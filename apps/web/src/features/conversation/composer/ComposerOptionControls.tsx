@@ -6,54 +6,53 @@ import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { hideRightPanelAdaptive, showRightPanelAdaptive } from "@/lib/right-panel-layout";
 import { cn } from "@/lib/utils";
 import { Check, Eye, KeyRound, ListChecks, ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import { useState, type ComponentType } from "react";
 
 export type ComposerAccessMode = "supervised" | "automatic" | "full";
+
+/** One option in the access-mode popover (generic or provider-native). */
+export interface AccessModeOption {
+  id: string;
+  label: string;
+  description: string;
+  icon: ComponentType<{ size?: number; className?: string }>;
+}
 
 /** Props shared by Composer's compact and inline option controls. */
 export interface ComposerOptionControlsProps {
   threadId?: string;
-  accessMode: ComposerAccessMode;
+  accessMode: string;
   /** True when the provider requires Full access and cannot offer the supervised mode. */
   permissionLocked: boolean;
   approvalReviewSupported: boolean;
   onAccessModeChange: (next: ComposerAccessMode) => void;
 }
 
-const ACCESS_MODES: ReadonlyArray<{
-  id: ComposerAccessMode;
-  label: "Manual" | "Auto" | "Full access";
-  description: string;
-}> = [
-  { id: "supervised", label: "Manual", description: "Ask you to approve actions" },
-  { id: "automatic", label: "Auto", description: "Review actions automatically" },
-  { id: "full", label: "Full access", description: "Run without approval prompts" },
+const ACCESS_MODES: ReadonlyArray<AccessModeOption & { id: ComposerAccessMode }> = [
+  { id: "supervised", label: "Manual", description: "Ask you to approve actions", icon: Eye },
+  { id: "automatic", label: "Auto", description: "Review actions automatically", icon: ShieldCheck },
+  { id: "full", label: "Full access", description: "Run without approval prompts", icon: KeyRound },
 ];
-
-const ACCESS_MODE_LABELS: Record<ComposerAccessMode, (typeof ACCESS_MODES)[number]["label"]> = {
-  supervised: "Manual",
-  automatic: "Auto",
-  full: "Full access",
-};
-
-function accessIcon(accessMode: ComposerAccessMode) {
-  if (accessMode === "automatic") return ShieldCheck;
-  return accessMode === "full" ? KeyRound : Eye;
-}
 
 function isAccessModeDisabled(accessMode: ComposerAccessMode, permissionLocked: boolean): boolean {
   return permissionLocked && accessMode !== "full";
 }
 
-function AccessModeSelector({
+/** Compact access-mode popover; renders generic or provider-native options. */
+export function AccessModeSelector({
   accessMode,
   permissionLocked,
   approvalReviewSupported,
+  modes,
   onAccessModeChange,
-}: Omit<ComposerOptionControlsProps, "threadId">) {
+}: Omit<ComposerOptionControlsProps, "threadId" | "accessMode"> & {
+  accessMode: string;
+  modes?: readonly AccessModeOption[];
+}) {
   const [open, setOpen] = useState(false);
-  const Icon = accessIcon(accessMode);
-  const selectedLabel = ACCESS_MODE_LABELS[accessMode];
+  const options = modes ?? ACCESS_MODES;
+  const selected = options.find((mode) => mode.id === accessMode) ?? options[0];
+  const Icon = selected.icon;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -62,11 +61,11 @@ function AccessModeSelector({
           <Button
             variant="ghost"
             size="xs"
-            aria-label={`Access mode: ${selectedLabel}`}
+            aria-label={`Access mode: ${selected.label}`}
             className="gap-1.5 text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
           >
             <Icon size={14} />
-            <span className="text-sm">{selectedLabel}</span>
+            <span className="text-sm">{selected.label}</span>
           </Button>
         }
       />
@@ -75,9 +74,9 @@ function AccessModeSelector({
           Access mode
         </div>
         <div className="space-y-0.5">
-          {ACCESS_MODES.filter((mode) => approvalReviewSupported || mode.id !== "automatic").map((mode) => {
-            const ModeIcon = accessIcon(mode.id);
-            const disabled = isAccessModeDisabled(mode.id, permissionLocked);
+          {options.filter((mode) => modes != null || approvalReviewSupported || mode.id !== "automatic").map((mode) => {
+            const ModeIcon = mode.icon;
+            const disabled = modes == null && isAccessModeDisabled(mode.id as ComposerAccessMode, permissionLocked);
             return (
               <Button
                 key={mode.id}
@@ -86,7 +85,7 @@ function AccessModeSelector({
                 disabled={disabled}
                 aria-pressed={accessMode === mode.id}
                 onClick={() => {
-                  onAccessModeChange(mode.id);
+                  onAccessModeChange(mode.id as ComposerAccessMode);
                   setOpen(false);
                 }}
                 className="h-auto w-full justify-start gap-2 rounded-md px-2 py-1.5 text-xs font-normal whitespace-normal"

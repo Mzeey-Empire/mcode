@@ -832,7 +832,7 @@ export async function warmCodexAppServer(
       // kill() would only hit cmd.exe and orphan the codex child.
       if (platform === "win32" && child.pid != null) {
         void import("node:child_process").then(({ execFile }) => {
-          execFile("taskkill", ["/T", "/F", "/PID", String(child.pid)], () => {});
+          execFile("taskkill", ["/T", "/F", "/PID", String(child.pid)], { windowsHide: true }, () => {});
         });
       } else {
         child.kill("SIGKILL");
@@ -1145,7 +1145,7 @@ export class CodexAppServer extends NodeEvents.EventEmitter {
     const { execFile } = await import("node:child_process");
     const { promisify } = await import("node:util");
     try {
-      await promisify(execFile)("taskkill", ["/T", "/F", "/PID", String(child.pid)]);
+      await promisify(execFile)("taskkill", ["/T", "/F", "/PID", String(child.pid)], { windowsHide: true });
     } catch {
       // taskkill fails when the child already exited.
     }

@@ -1,7 +1,7 @@
 /**
  * Regression tests for long shell-command layout in narrative tool rows.
  */
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect } from "vitest";
 import { ActiveToolRow } from "../ActiveToolRow";
@@ -59,9 +59,8 @@ describe("narrative tool row layout classes", () => {
     );
 
     const button = screen.getByRole("button", { name: /Running command/ });
-    const commandPreview = container.querySelector<HTMLElement>("[data-slot='tooltip-trigger']");
+    const commandPreview = within(button).getByText(LONG_SHELL_COMMAND);
     const user = userEvent.setup();
-    if (!commandPreview) throw new Error("Expected command tooltip trigger");
 
     expect(button).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(button);
@@ -124,21 +123,22 @@ describe("narrative tool row layout classes", () => {
     expect(child).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByText("in 15s")).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Shell output" })).toBeNull();
-
-    fireEvent.click(child);
-
-    const detail = container.querySelector<HTMLElement>("[data-slot='tooltip-trigger']");
+    const commandPreview = within(child).getByText(LONG_SHELL_COMMAND);
+    expect(child.querySelector("[data-slot='tooltip-trigger']")).toBeNull();
     const user = userEvent.setup();
-    if (!detail) throw new Error("Expected command tooltip trigger");
-
-    expect(detail.className).toContain("truncate");
-    expect(detail.closest("li")?.className).toContain("min-w-0");
-    await user.hover(detail);
+    await user.hover(commandPreview);
     await waitFor(() => {
       const tooltip = document.querySelector<HTMLElement>("[data-slot='tooltip-content']");
       expect(tooltip).toBeVisible();
       expect(tooltip).toHaveTextContent(LONG_SHELL_COMMAND);
     });
+
+    fireEvent.click(child);
+
+    const detail = within(child).getByText(LONG_SHELL_COMMAND);
+
+    expect(detail.className).toContain("truncate");
+    expect(detail.closest("li")?.className).toContain("min-w-0");
     expect(screen.getByRole("region", { name: "Shell output" })).toBeTruthy();
     expect(screen.getByText("Shell")).toBeTruthy();
     expect(container.querySelector("code")?.textContent).toBe(LONG_SHELL_COMMAND);

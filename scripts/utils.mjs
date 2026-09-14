@@ -19,7 +19,7 @@ export const scriptRoot = NodePath.resolve(__dirname, '..');
 export function resolveMainRoot() {
   try {
     const commonDir = NodeChildProcess.execFileSync('git', ['rev-parse', '--git-common-dir'], {
-      cwd: scriptRoot, encoding: 'utf8',
+      cwd: scriptRoot, encoding: 'utf8', windowsHide: true,
     }).trim();
     return NodePath.resolve(scriptRoot, commonDir, '..');
   } catch {

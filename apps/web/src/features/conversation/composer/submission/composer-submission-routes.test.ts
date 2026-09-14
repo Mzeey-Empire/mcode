@@ -130,6 +130,7 @@ describe("dispatchComposerTarget selected-text comments", () => {
         attachments: [],
       }),
       "automatic",
+      undefined,
     );
   });
 

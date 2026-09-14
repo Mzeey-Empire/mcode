@@ -50,6 +50,7 @@ function readComposerThreadSettings(threadId: string | undefined) {
       contextWindow: null,
       thinking: null,
       codexFastMode: null,
+      devinMode: null,
     };
   }
   const settings = useThreadStore.getState().getThreadSettings(threadId);
@@ -61,6 +62,7 @@ function readComposerThreadSettings(threadId: string | undefined) {
     contextWindow: settings.contextWindow ?? null,
     thinking: settings.thinking ?? null,
     codexFastMode: settings.codexFastMode ?? null,
+    devinMode: settings.devinMode ?? null,
   };
 }
 

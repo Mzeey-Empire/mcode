@@ -10,7 +10,7 @@ import {
   supportsEffortParameter,
   supports1MContextWindow,
   supportsThinkingToggle,
-  normalizeReasoningLevelForModel,
+  normalizeReasoningLevel,
   getCodexReasoningLevels,
   getCodexDefaultReasoningLevel,
   pickProviderModelsForSettings,
@@ -29,6 +29,7 @@ import {
   ClaudeIcon,
   CodexIcon,
   CursorProviderIcon,
+  DevinIcon,
   OpenCodeIcon,
   GeminiIcon,
   CopilotIcon,
@@ -41,6 +42,7 @@ const PROVIDER_ICONS: Record<string, ReactNode> = {
   codex: <CodexIcon size={12} />,
   copilot: <CopilotIcon size={12} />,
   cursor: <CursorProviderIcon size={12} />,
+  devin: <DevinIcon size={12} />,
   opencode: <OpenCodeIcon size={12} />,
   gemini: <GeminiIcon size={12} />,
 };
@@ -376,7 +378,7 @@ export function ModelSection() {
             ? reasoning
             : (getCodexDefaultReasoningLevel(firstModel.id) ?? "medium");
         } else {
-          newReasoning = normalizeReasoningLevelForModel(firstModel.id, reasoning);
+          newReasoning = normalizeReasoningLevel(v, firstModel.id, reasoning);
         }
       }
       void update({
@@ -400,7 +402,7 @@ export function ModelSection() {
         newReasoning = getCodexDefaultReasoningLevel(v) ?? "medium";
       }
     } else {
-      newReasoning = normalizeReasoningLevelForModel(v, reasoning);
+      newReasoning = normalizeReasoningLevel(provider, v, reasoning);
     }
     void update({
       model: {

@@ -49,6 +49,7 @@ import {
   CodexIcon,
   CopilotIcon,
   CursorProviderIcon,
+  DevinIcon,
   GeminiIcon,
   OpenCodeIcon,
 } from "@/components/chat/ProviderIcons";
@@ -1736,6 +1737,7 @@ const PROVIDER_META: Record<
     color: "text-violet-400 dark:text-violet-300",
   },
   cursor: { icon: CursorProviderIcon, label: "Cursor", color: "" },
+  devin: { icon: DevinIcon, label: "Devin", color: "" },
   gemini: { icon: GeminiIcon, label: "Gemini", color: "text-sky-400" },
   opencode: { icon: OpenCodeIcon, label: "OpenCode", color: "text-violet-400" },
 };

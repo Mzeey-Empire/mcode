@@ -160,4 +160,42 @@ describe("providers.listAvailability RPC", () => {
     expect(response.result).toBeUndefined();
     expect(response.error?.code).toBe("PROVIDER_DISABLED");
   });
+
+  it("returns the provider's advertised modes over provider.listModes", async () => {
+    const deps = makeMinimalDeps({
+      providerAvailability: {
+        assertEnabled: () => {},
+        assertUsable: () => {},
+        listAvailability: () => [],
+      } as unknown as RouterDeps["providerAvailability"],
+      providerRegistry: {
+        resolve: () => ({ id: "devin", listModes: () => Promise.resolve(["normal", "bypass"]) }),
+      } as unknown as RouterDeps["providerRegistry"],
+    });
+
+    ({ httpServer: server } = createWsServer(deps));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+    const response = await rpcCall(server, "provider.listModes", { providerId: "devin" });
+    expect(response.result).toEqual(["normal", "bypass"]);
+  });
+
+  it("returns null from provider.listModes when the provider cannot report modes", async () => {
+    const deps = makeMinimalDeps({
+      providerAvailability: {
+        assertEnabled: () => {},
+        assertUsable: () => {},
+        listAvailability: () => [],
+      } as unknown as RouterDeps["providerAvailability"],
+      providerRegistry: {
+        resolve: () => ({ id: "codex" }),
+      } as unknown as RouterDeps["providerRegistry"],
+    });
+
+    ({ httpServer: server } = createWsServer(deps));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+    const response = await rpcCall(server, "provider.listModes", { providerId: "codex" });
+    expect(response.result).toBeNull();
+  });
 });

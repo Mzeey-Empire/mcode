@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
 import type {
   ContextWindowMode,
+  DevinMode,
   MessageMention,
   ReasoningLevel,
   SelectedTextComment,
@@ -59,6 +60,8 @@ export interface ComposerDraft {
    * in this saved draft"; Composer falls back to thread settings.
    */
   codexFastMode?: boolean | null;
+  /** Per-thread Devin native mode (normal|accept-edits|smart|bypass|plan). */
+  devinMode?: DevinMode | null;
 }
 
 interface ComposerDraftState {

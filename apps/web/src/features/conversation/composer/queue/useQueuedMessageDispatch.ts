@@ -34,6 +34,7 @@ export function useQueuedMessageDispatch(threadId: string | undefined): {
           message.orchestrationMode,
           undefined,
           message.approvalReviewMode,
+          message.devinMode,
         );
         useQueueStore.getState().settleQueuedDispatch(threadId, message.id, sent);
       } catch {

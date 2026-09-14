@@ -20,13 +20,14 @@ export class AgentPermissionService {
     requestId: string,
     decision: PermissionDecision,
     answers?: PermissionResponseAnswers,
+    optionId?: string,
   ): void {
     const validatedDecision = PermissionDecisionSchema.parse(decision);
     const validatedAnswers = PermissionResponseAnswersSchema().optional().parse(answers);
     for (const provider of this.providers.resolveAll()) {
       const resolved = validatedAnswers === undefined
-        ? provider.resolvePermission?.(requestId, validatedDecision)
-        : provider.resolvePermission?.(requestId, validatedDecision, validatedAnswers);
+        ? provider.resolvePermission?.(requestId, validatedDecision, undefined, optionId)
+        : provider.resolvePermission?.(requestId, validatedDecision, validatedAnswers, optionId);
       if (resolved) return;
     }
     logger.warn("permission.respond: no provider holds requestId %s", requestId);

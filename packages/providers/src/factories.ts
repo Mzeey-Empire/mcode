@@ -1,11 +1,12 @@
 import type {
   CodexProviderBoundary,
   CursorProviderBoundary,
+  DevinProviderBoundary,
   ProviderBoundary,
   ProviderFactoryInput,
 } from "./factory-types.js";
 import { createProviderBoundary } from "./private/factory.js";
-import { createCursorAcpProvider } from "./private/protocols/acp.js";
+import { createCursorAcpProvider, createDevinAcpProvider } from "./private/protocols/acp.js";
 import { CodexProvider } from "./private/codex/codex-provider.js";
 
 /** Prepares the Claude Provider boundary without inspecting or spawning its CLI. */
@@ -29,6 +30,11 @@ export function createCopilotProvider(input: ProviderFactoryInput): ProviderBoun
 /** Prepares the Cursor Provider boundary with private generic ACP machinery. */
 export function createCursorProvider(input: ProviderFactoryInput): CursorProviderBoundary {
   return createCursorAcpProvider(input);
+}
+
+/** Prepares the Devin Provider boundary with private generic ACP machinery. */
+export function createDevinProvider(input: ProviderFactoryInput): DevinProviderBoundary {
+  return createDevinAcpProvider(input);
 }
 
 function validateCodexPorts(ports: NonNullable<ProviderFactoryInput["codex"]>): void {

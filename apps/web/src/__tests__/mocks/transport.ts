@@ -68,6 +68,7 @@ export function createMockThread(overrides?: Partial<Thread>): Thread {
     thinking: null,
     codex_fast_mode: null,
     copilot_agent: null,
+    devin_mode: null,
     default_open_in_app: null,
     parent_thread_id: null,
     forked_from_message_id: null,
@@ -374,6 +375,7 @@ export const mockTransport: McodeTransport = {
   getSettings: vi.fn().mockImplementation(() => Promise.resolve(structuredClone(getDefaultSettings()))),
   updateSettings: vi.fn().mockImplementation(() => Promise.resolve(structuredClone(getDefaultSettings()))),
   listProviderModels: vi.fn().mockResolvedValue([]),
+  listProviderModes: vi.fn().mockResolvedValue(null),
   listProviderAvailability: vi.fn().mockResolvedValue([]),
   setBackground: vi.fn().mockResolvedValue(undefined),
   getProviderUsage: vi.fn().mockResolvedValue({

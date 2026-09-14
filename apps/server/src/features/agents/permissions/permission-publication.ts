@@ -10,7 +10,7 @@ import { logger } from "@mcode/shared";
 export interface AgentPermissionPublicationDeps {
   providerRegistry: IProviderRegistry;
   publishPermissionRequest: (request: PermissionRequest) => void;
-  publishPermissionResolved: (payload: { requestId: string; decision: "allow" | "allow-session" | "deny" | "cancelled" }) => void;
+  publishPermissionResolved: (payload: { requestId: string; decision: "allow" | "allow-session" | "deny" | "cancelled"; optionLabel?: string }) => void;
 }
 
 /** Subscribe to provider permission events and publish only validated payloads. */
@@ -40,7 +40,11 @@ export function publishAgentPermissionEvents({
         });
         return;
       }
-      publishPermissionResolved({ requestId: payload.requestId, decision: decision.data });
+      publishPermissionResolved({
+        requestId: payload.requestId,
+        decision: decision.data,
+        ...(typeof payload.optionLabel === "string" ? { optionLabel: payload.optionLabel } : {}),
+      });
     });
   }
 }

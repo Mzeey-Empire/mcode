@@ -8,6 +8,10 @@ import {
 import type { ComposerAgentSelection } from "../draft/useComposerFormController";
 import type { ResolvedComposerCapability } from "../composer-capabilities";
 import type { GoalState, ReasoningLevel } from "@mcode/contracts";
+import {
+  getModelDefaultReasoningLevel,
+  getModelReasoningLevels,
+} from "@/lib/model-registry";
 
 /** Props for the Composer's model, permission, and attached-capability controls. */
 export interface ComposerAgentControlsProps {
@@ -63,7 +67,19 @@ export function ComposerAgentControls({
       <ModelSelector
         selectedModelId={selection.modelId}
         selectedProviderId={selection.provider}
-        onSelect={(modelId, provider) => onSelectionChange({ modelId, provider })}
+        onSelect={(modelId, provider) => {
+          const patch: Partial<ComposerAgentSelection> = { modelId, provider };
+          // Devin effort levels are part of the model id family; when the new
+          // model cannot express the current reasoning level, snap to its
+          // declared default so the pill and the wire id stay consistent.
+          if (provider === "devin") {
+            const levels = getModelReasoningLevels(modelId);
+            if (levels?.length && !levels.includes(selection.reasoning)) {
+              patch.reasoning = (getModelDefaultReasoningLevel(modelId) ?? levels[0]) as ReasoningLevel;
+            }
+          }
+          onSelectionChange(patch);
+        }}
         locked={isModelLocked}
         providerLocked={isProviderLocked}
       />

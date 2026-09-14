@@ -19,6 +19,7 @@ export const FRONTEND_RENDERER_WORKLOADS = Object.freeze([
 /** Explicit-only probes excluded from the default frontend comparison matrix. */
 export const FRONTEND_RENDERER_EXPLICIT_WORKLOADS = Object.freeze([
   "vlistLifecycle",
+  "subagentDetailExpand",
 ]);
 
 const ALL_FRONTEND_RENDERER_WORKLOADS = Object.freeze([
@@ -66,6 +67,19 @@ export const MESSAGE_LIST_PERFORMANCE_STAGE_NAMES = Object.freeze([
   "narrativeItemProjection",
   "vlistRows",
 ]);
+
+const MESSAGE_LIST_ATTRIBUTED_WORKLOADS = new Set([
+  "messageListBehavior",
+  "subagentDetailExpand",
+]);
+
+const MESSAGE_LIST_REQUIRED_STAGES = Object.freeze({
+  messageListBehavior: MESSAGE_LIST_PERFORMANCE_STAGE_NAMES,
+  subagentDetailExpand: ["vlistRows"],
+});
+
+const SUBAGENT_DETAIL_SAMPLE_COUNT = 7;
+const TRANSCRIPT_VIEWPORT_OVERSCAN = 8;
 
 /** The worker contract is the producer; runner validation mirrors this serialized boundary. */
 export const SHIKI_STAGE_NAMES = Object.freeze([
@@ -555,9 +569,20 @@ function assertBoundedResponseBytes(value) {
   }
 }
 
+function hasKnownMessageListRequiredStages(requiredStages) {
+  return Array.isArray(requiredStages)
+    && requiredStages.every((stage) => MESSAGE_LIST_PERFORMANCE_STAGE_NAMES.includes(stage));
+}
+
 /** Returns failures for bounded, performance-only MessageList timing observations. */
-export function validateMessageListPerformanceAttribution(observations) {
+export function validateMessageListPerformanceAttribution(
+  observations,
+  requiredStages = MESSAGE_LIST_PERFORMANCE_STAGE_NAMES,
+) {
   if (!Array.isArray(observations)) return ["expected MessageList performance observations"];
+  if (!hasKnownMessageListRequiredStages(requiredStages)) {
+    throw new TypeError("MessageList required stages must be known performance stages");
+  }
   const stages = new Set();
   for (const observation of observations) {
     if (!isPlainObject(observation)) return ["MessageList performance observation is not an object"];
@@ -569,7 +594,7 @@ export function validateMessageListPerformanceAttribution(observations) {
     }
     stages.add(observation.stage);
   }
-  return MESSAGE_LIST_PERFORMANCE_STAGE_NAMES
+  return requiredStages
     .filter((stage) => !stages.has(stage))
     .map((stage) => `missing MessageList performance stage: ${stage}`);
 }
@@ -1063,6 +1088,27 @@ const WORKLOAD_CHECK_VALIDATORS = {
   markdownShiki: validateMarkdownShiki,
   panelTransitions: (check) => failuresForChecks(check, [[check.visible === true, "right panel is closed"], [check.activeTab === "terminal", "Terminal is not the active panel"], [check.browserTabOpen === true, "Browser panel did not stay open"], [check.terminalTabOpen === true, "Terminal panel is not open"], [check.terminalShell === true, "Terminal surface is missing"]]),
   vlistLifecycle: (check) => validateVListLifecycleFacts(check),
+  subagentDetailExpand: (check) => failuresForChecks(check, [
+    [check.detailVisible === true, "subagent detail did not render"],
+    [check.canonicalReplicaComplete === true, "canonical child replica did not recover 250 completed and two active tools"],
+    [check.promptVisible === true, "subagent prompt did not recover"],
+    [check.aggregateSemantics === true, "completed Bash calls did not remain one errored aggregate"],
+    [check.stableCompletedOrder === true, "expanded completed Bash calls are not in canonical order"],
+    [check.stableActiveOrder === true, "active Bash calls are not below the completed aggregate"],
+    [check.firstToolVisible === true, "first expanded tool row is missing"],
+    [check.lastToolVisible === true, "last expanded tool row is missing"],
+    [check.oneErrorRetained === true, "expanded completed Bash calls lost their error"],
+    [check.activeToolsVisible === true, "active Bash calls below the aggregate are missing"],
+    [check.completedToolCount === 250, "fixture completed tool count differs"],
+    [check.activeToolCount === 2, "fixture active tool count differs"],
+    [check.mountedHostCount > 0 && check.mountedHostCount <= check.mountedHostBound, "expanded transcript mounted more hosts than its viewport bound"],
+    [check.aggregateRetainsFocus === true, "aggregate lost focus during expansion"],
+    [check.collapsedAfterReset === true, "aggregate did not settle after collapse"],
+    [check.expansionTimingValid === true, "subagent expansion timing interval is invalid"],
+    [check.longTaskTimestampsSupported === true, "Long Task timestamps are unavailable"],
+    [check.longTaskTimestampsValid === true, "Long Task timestamps are invalid"],
+    [check.longTasksOver50Ms.length === 0, "subagent expansion exceeded the 50ms long-task gate"],
+  ]),
 };
 
 const MESSAGE_LIST_BEHAVIOR_ASSERTIONS = [
@@ -1094,14 +1140,301 @@ function runSelectedWorkload(selectedWorkloads, name, run) {
   return selectedWorkloads.has(name) ? run() : null;
 }
 
+async function openSubagentRoster(page, fixture, modeCollector, signalCollector) {
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await signalCollector.install();
+  await modeCollector.install();
+  const project = page.getByTestId(`project-row-${fixture.workspaceId}`);
+  await project.waitFor({ state: "visible", timeout: 30_000 });
+  const threadToggle = project.getByRole("button", { name: `Toggle threads for ${fixture.workspaceName}` });
+  if (await threadToggle.getAttribute("aria-expanded") !== "true") await project.click();
+  const parent = page.locator(`[data-testid="thread-item"][data-thread-id="${fixture.parentThreadId}"]`);
+  await parent.waitFor({ state: "visible", timeout: 30_000 });
+  await parent.click();
+  await page.evaluate(({ workspaceId, parentThreadId }) => {
+    const diffStore = window.__mcodeFrontendPerformanceModules?.diffStore;
+    if (!diffStore) throw new Error("The compiled performance fixture bridge is unavailable.");
+    diffStore.getState().setRightPanelTab(workspaceId, parentThreadId, "subagents");
+    diffStore.getState().showRightPanel(workspaceId, parentThreadId);
+  }, fixture);
+  const child = page.locator(`[data-subagent-id="${fixture.childThreadId}"]`);
+  await child.waitFor({ state: "visible", timeout: 30_000 });
+  return child;
+}
+
+function inspectSubagentReplica(items, fixture) {
+  const calls = items.filter((item) => item.payload.projection === "codexChildToolCall");
+  const results = items.filter((item) => item.payload.projection === "codexChildToolResult");
+  const nativeId = (item) => item.payload.nativeItemId ?? item.id;
+  const completedIds = results.map(nativeId);
+  const expectedCompletedIds = Array.from(
+    { length: fixture.completedToolCount },
+    (_, index) => `fixture-completed-${index}`,
+  );
+  const expectedActiveIds = Array.from(
+    { length: fixture.activeToolCount },
+    (_, index) => `fixture-active-${index}`,
+  );
+  const callIds = calls.map(nativeId);
+  const completedCalls = calls.filter((call) => completedIds.includes(nativeId(call)));
+  const activeCalls = calls.filter((call) => !completedIds.includes(nativeId(call)));
+  const completedBash = completedCalls.every((call) => call.payload.toolName === "Bash");
+  const activeBash = activeCalls.every((call) => call.payload.toolName === "Bash");
+  const stableCompletedOrder = expectedCompletedIds.every((id, index) => nativeId(completedCalls[index]) === id);
+  const stableActiveOrder = expectedActiveIds.every((id, index) => nativeId(activeCalls[index]) === id);
+  const oneErrorRetained = results.filter((result) => result.payload.isError === true).length === 1
+    && results.some((result) => nativeId(result) === fixture.errorToolCallId && result.payload.isError === true);
+  return {
+    canonicalReplicaComplete: calls.length === fixture.completedToolCount + fixture.activeToolCount
+      && results.length === fixture.completedToolCount
+      && completedBash
+      && activeBash,
+    stableCompletedOrder,
+    stableActiveOrder,
+    oneErrorRetained,
+    completedToolCount: completedCalls.length,
+    activeToolCount: activeCalls.length,
+    callIds,
+  };
+}
+
+function toolRowLocator(detail, index, count) {
+  return detail.getByRole("list", { name: `Tool call ${index} of ${count}` }).locator("li");
+}
+
+async function scrollTranscriptTo(page, viewport, position) {
+  await viewport.evaluate((element, top) => {
+    element.scrollTop = top === "end" ? element.scrollHeight : 0;
+    element.dispatchEvent(new Event("scroll"));
+  }, position);
+  await waitForFrames(page);
+}
+
+async function openSubagentDetail(page, fixture, modeCollector, signalCollector) {
+  const child = await openSubagentRoster(page, fixture, modeCollector, signalCollector);
+  await child.click();
+  const detail = page.locator(`section[aria-label="${fixture.identity} subagent details"]`);
+  await detail.waitFor({ state: "visible", timeout: 30_000 });
+  await detail.getByTestId("message-list").waitFor({ state: "visible", timeout: 30_000 });
+  const viewport = detail.getByTestId("transcript-viewport");
+  await viewport.waitFor({ state: "visible", timeout: 30_000 });
+  await scrollTranscriptTo(page, viewport, "start");
+  const summary = detail.getByRole("button", { name: /^Ran 250 commands/ });
+  await summary.waitFor({ state: "visible", timeout: 30_000 });
+  if (await summary.getAttribute("aria-expanded") !== "false") {
+    throw new Error("subagent detail did not start with the completed Bash aggregate collapsed.");
+  }
+  const initialCheck = await page.evaluate(({ identity, prompt }) => {
+    const detailElement = document.querySelector(`section[aria-label="${identity} subagent details"]`);
+    const aggregate = detailElement?.querySelector("button[aria-expanded]");
+    return {
+      promptVisible: detailElement?.textContent?.includes(prompt) === true,
+      aggregateSemantics: (aggregate?.textContent ?? "").startsWith("Ran 250 commands")
+        && (aggregate?.textContent ?? "").includes("errored"),
+    };
+  }, fixture);
+  await waitForFrames(page);
+  return { child, detail, summary, viewport, initialCheck };
+}
+
+async function collapseSubagentDetailGroup(page, detail, summary, viewport, fixture) {
+  await scrollTranscriptTo(page, viewport, "start");
+  await summary.waitFor({ state: "visible", timeout: 30_000 });
+  if (await summary.getAttribute("aria-expanded") !== "true") {
+    throw new Error("subagent detail group was not expanded before reset.");
+  }
+  await summary.click();
+  await summary.getAttribute("aria-expanded", { timeout: 30_000 });
+  if (await summary.getAttribute("aria-expanded") !== "false") {
+    throw new Error("subagent detail group did not collapse.");
+  }
+  await toolRowLocator(detail, 1, fixture.completedToolCount).waitFor({ state: "detached", timeout: 30_000 });
+  await waitForFrames(page);
+  return summary.evaluate((element) => document.activeElement === element);
+}
+
+function intervalLongTasks(longTasks, interval) {
+  return longTasks.filter(({ startTime, duration }) => Number.isFinite(startTime)
+    && Number.isFinite(duration)
+    && duration > 50
+    && startTime < interval.endTime
+    && startTime + duration > interval.startTime);
+}
+
+function hasValidExpansionTiming(result) {
+  return Number.isFinite(result.firstToolRenderedMs)
+    && result.firstToolRenderedMs >= 0
+    && Number.isFinite(result.readyAfterTwoRafMs)
+    && result.readyAfterTwoRafMs >= result.firstToolRenderedMs
+    && Number.isFinite(result.interval.startTime)
+    && Number.isFinite(result.interval.endTime)
+    && result.interval.endTime >= result.interval.startTime;
+}
+
+function hasValidLongTaskTimestamps(longTasks) {
+  return longTasks.every(({ startTime, duration }) => Number.isFinite(startTime) && Number.isFinite(duration));
+}
+
+async function runSubagentDetailExpand(page, sampleCount, fixture, modeCollector, signalCollector) {
+  if (!fixture) throw new Error("subagentDetailExpand requires a persisted canonical fixture");
+  if (sampleCount !== SUBAGENT_DETAIL_SAMPLE_COUNT) {
+    throw new Error(`subagentDetailExpand requires exactly ${SUBAGENT_DETAIL_SAMPLE_COUNT} measured samples.`);
+  }
+  const { child, detail, summary, viewport, initialCheck } = await openSubagentDetail(
+    page,
+    fixture,
+    modeCollector,
+    signalCollector,
+  );
+  const runOne = async () => {
+    await page.evaluate(() => window.__mcodeFrontendPerformanceModules?.messageListPerformance.reset());
+    const measured = await modeCollector.measure(async () => {
+      await summary.evaluate((element) => {
+        performance.clearMarks("mcode:subagent-detail-expand:start");
+        performance.clearMarks("mcode:subagent-detail-expand:first");
+        performance.clearMarks("mcode:subagent-detail-expand:ready");
+        performance.clearMeasures("mcode:subagent-detail-expand");
+        const markStart = (event) => {
+          if (!(event.target instanceof Element) || event.target.closest("button") !== element) return;
+          performance.mark("mcode:subagent-detail-expand:start");
+          document.removeEventListener("click", markStart, true);
+        };
+        document.addEventListener("click", markStart, true);
+      });
+      await summary.click();
+      await summary.getAttribute("aria-expanded", { timeout: 30_000 });
+      if (await summary.getAttribute("aria-expanded") !== "true") {
+        throw new Error("subagent detail group did not expand.");
+      }
+      const firstTool = toolRowLocator(detail, 1, fixture.completedToolCount);
+      await firstTool.waitFor({ state: "visible", timeout: 30_000 });
+      await page.evaluate(() => performance.mark("mcode:subagent-detail-expand:first"));
+      await waitForFrames(page);
+      return page.evaluate((identity) => {
+        performance.mark("mcode:subagent-detail-expand:ready");
+        performance.measure(
+          "mcode:subagent-detail-expand",
+          "mcode:subagent-detail-expand:start",
+          "mcode:subagent-detail-expand:ready",
+        );
+        const interval = performance.getEntriesByName("mcode:subagent-detail-expand").at(-1);
+        const firstToolRendered = performance.getEntriesByName("mcode:subagent-detail-expand:first").at(-1);
+        const detailElement = document.querySelector(`section[aria-label="${identity} subagent details"]`);
+        if (!interval || !firstToolRendered || !detailElement) throw new Error("Subagent expansion readiness was not recorded.");
+        return {
+          durationMs: interval.duration,
+          firstToolRenderedMs: firstToolRendered.startTime - interval.startTime,
+          readyAfterTwoRafMs: interval.duration,
+          interval: {
+            startTime: interval.startTime,
+            endTime: interval.startTime + interval.duration,
+          },
+          firstToolVisible: true,
+          aggregateRetainsFocus: document.activeElement === document.querySelector(`section[aria-label="${identity} subagent details"] button[aria-expanded="true"]`),
+        };
+      }, fixture.identity);
+    }, { trace: true });
+    await scrollTranscriptTo(page, viewport, "end");
+    const lastTool = toolRowLocator(detail, fixture.completedToolCount, fixture.completedToolCount);
+    await lastTool.waitFor({ state: "visible", timeout: 30_000 });
+    for (const command of fixture.activeToolCommands) {
+      await detail.getByRole("button", { name: `Running command ${command}` }).waitFor({ state: "visible", timeout: 30_000 });
+    }
+    const inspected = await page.evaluate(({ childThreadId, identity, activeToolCommands, overscan }) => {
+      const detailElement = document.querySelector(`section[aria-label="${identity} subagent details"]`);
+      const record = window.__mcodeFrontendPerformanceModules?.threadStore.getState().records.get(childThreadId);
+      if (!detailElement || !record?.canonicalAgent.state) throw new Error("Child canonical replica is unavailable.");
+      return {
+        canonicalItems: Object.values(record.canonicalAgent.state.items).filter((item) => item.threadId === childThreadId),
+        lastToolVisible: detailElement.querySelector('ul[aria-label="Tool call 250 of 250"] li') !== null,
+        activeToolsVisible: activeToolCommands.every((command) => detailElement.textContent.includes(command)),
+        mounted: (() => {
+          const transcriptViewport = detailElement.querySelector('[data-testid="transcript-viewport"]');
+          const finalTool = detailElement.querySelector('ul[aria-label="Tool call 250 of 250"] li');
+          if (!(transcriptViewport instanceof HTMLElement) || !(finalTool instanceof HTMLElement)) {
+            throw new Error("Expanded transcript viewport or final tool row is unavailable.");
+          }
+          const visibleRows = Math.max(1, Math.ceil(
+            transcriptViewport.clientHeight / Math.max(1, finalTool.getBoundingClientRect().height),
+          ));
+          return {
+            mountedHostCount: detailElement.querySelectorAll("[data-transcript-key]").length,
+            mountedHostBound: visibleRows + overscan * 2 + 4,
+          };
+        })(),
+      };
+    }, { ...fixture, overscan: TRANSCRIPT_VIEWPORT_OVERSCAN });
+    const replica = inspectSubagentReplica(inspected.canonicalItems, fixture);
+    const longTaskAttribution = measured.attribution.chromium;
+    const longTasks = longTaskAttribution?.longTasks ?? [];
+    measured.attribution.messageList = await drainMessageListAttribution(page);
+    const collapsedAfterReset = await collapseSubagentDetailGroup(page, detail, summary, viewport, fixture);
+    return {
+      durationMs: measured.result.durationMs,
+      check: {
+        detailVisible: true,
+        ...replica,
+        ...initialCheck,
+        firstToolVisible: measured.result.firstToolVisible,
+        lastToolVisible: inspected.lastToolVisible,
+        activeToolsVisible: inspected.activeToolsVisible,
+        ...inspected.mounted,
+        aggregateRetainsFocus: measured.result.aggregateRetainsFocus,
+        firstToolRenderedMs: measured.result.firstToolRenderedMs,
+        readyAfterTwoRafMs: measured.result.readyAfterTwoRafMs,
+        expansionTimingValid: hasValidExpansionTiming(measured.result),
+        collapsedAfterReset,
+        interval: measured.result.interval,
+        longTaskTimestampsSupported: longTaskAttribution?.longTaskTimestampsSupported === true,
+        longTaskTimestampsValid: hasValidLongTaskTimestamps(longTasks),
+        longTasksOver50Ms: intervalLongTasks(longTasks, measured.result.interval),
+      },
+      attribution: measured.attribution,
+    };
+  };
+  await runOne();
+  const samples = [];
+  const checks = [];
+  const attributions = [];
+  for (let index = 0; index < SUBAGENT_DETAIL_SAMPLE_COUNT; index += 1) {
+    const measured = await runOne();
+    samples.push(measured.durationMs);
+    checks.push(measured.check);
+    attributions.push(measured.attribution);
+  }
+  await scrollTranscriptTo(page, viewport, "start");
+  await summary.waitFor({ state: "visible", timeout: 30_000 });
+  await detail.getByRole("button", { name: "Back to subagents" }).click();
+  await child.waitFor({ state: "visible", timeout: 30_000 });
+  await page.waitForFunction(
+    (subagentId) => document.activeElement === document.querySelector(`[data-subagent-id="${CSS.escape(subagentId)}"]`),
+    fixture.childThreadId,
+    { timeout: 30_000 },
+  );
+  await child.click();
+  await detail.waitFor({ state: "visible", timeout: 30_000 });
+  await scrollTranscriptTo(page, viewport, "start");
+  await summary.waitFor({ state: "visible", timeout: 30_000 });
+  if (await summary.getAttribute("aria-expanded") !== "false") {
+    throw new Error("Reopened subagent detail did not restore the collapsed aggregate.");
+  }
+  return { samples, checks, attributions };
+}
+
 /** Return failures from page-wide fixture observations. */
-function collectPageFailures(observations, expectedPageUrl) {
+export function collectPageFailures(observations, expectedPageUrl) {
   const failures = [];
   if (observations.consoleErrors.length > 0) {
     failures.push(`console errors: ${observations.consoleErrors.join(" | ")}`);
   }
   if (observations.pageErrors.length > 0) {
     failures.push(`page errors: ${observations.pageErrors.join(" | ")}`);
+  }
+  if (observations.requestErrors.length > 0) {
+    failures.push(`request errors: ${observations.requestErrors.join(" | ")}`);
+  }
+  if (observations.pageSignalsInstalled !== true) {
+    failures.push("page signal observers are not installed");
   }
   if (observations.pageState.url !== expectedPageUrl) {
     failures.push(`page URL changed to ${observations.pageState.url}`);
@@ -2196,6 +2529,9 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
       };
     }), modeCollector, { captureMessageListAttribution: false }));
 
+  const subagentDetailExpand = await runSelectedWorkload(selectedWorkloads, "subagentDetailExpand", () =>
+    runSubagentDetailExpand(page, sampleCount, options.subagentDetailFixture, modeCollector, signalCollector));
+
   await waitForFrames(page);
   const observations = await signalCollector.read();
   signalCollector.dispose();
@@ -2213,6 +2549,7 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
       markdownShiki,
       panelTransitions,
       vlistLifecycle,
+      subagentDetailExpand,
     }).filter(([, result]) => result !== null).map(([name, result]) => {
       const rawSamples = result.samples.map((durationMs, sampleIndex) => {
         const observed = result.checks[sampleIndex];
@@ -2235,8 +2572,11 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
         const rowIsolationFailures = name === "denseNarrative"
           ? validateNarrativeRowIsolation(attribution.react)
           : [];
-        const messageListAttributionFailures = name === "messageListBehavior"
-          ? validateMessageListPerformanceAttribution(attribution.messageList)
+        const messageListAttributionFailures = MESSAGE_LIST_ATTRIBUTED_WORKLOADS.has(name)
+          ? validateMessageListPerformanceAttribution(
+            attribution.messageList,
+            MESSAGE_LIST_REQUIRED_STAGES[name],
+          )
           : [];
         const failures = [
           ...(lifecycle ? lifecycle.failures : validateWorkloadCheck(name, observed, mode)),
@@ -2256,12 +2596,16 @@ export async function runRendererMatrix(page, runtime, sampleCount = 7, mode = "
           },
         };
       });
-      const acceptedDurations = rawSamples
-        .filter((sample) => sample.correctness.passed)
-        .map((sample) => sample.durationMs);
+      const summaryDurations = name === "subagentDetailExpand"
+        ? rawSamples.every((sample) => sample.correctness.passed)
+          ? rawSamples.map((sample) => sample.durationMs)
+          : []
+        : rawSamples
+          .filter((sample) => sample.correctness.passed)
+          .map((sample) => sample.durationMs);
       return [name, {
         rawSamples,
-        summary: summarizeDurationSamples(acceptedDurations),
+        summary: summarizeDurationSamples(summaryDurations),
         shikiAttribution: (() => {
           if (name !== "markdownShiki") return null;
           const acceptedShikiSamples = rawSamples

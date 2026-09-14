@@ -642,13 +642,14 @@ export function startPushListeners(): void {
   // permission.resolved: a permission was settled (by user or session stop)
   unsubs.push(
     pushEmitter.on("permission.resolved", (data) => {
-      const { requestId, decision } = data as {
+      const { requestId, decision, optionLabel } = data as {
         requestId: string;
         decision: PermissionDecision;
+        optionLabel?: string;
       };
       void useThreadControlStore.getState().rehydrate();
       if (!requestId) return;
-      useThreadStore.getState().resolvePermissionRequest(requestId, decision);
+      useThreadStore.getState().resolvePermissionRequest(requestId, decision, optionLabel);
     }),
   );
 

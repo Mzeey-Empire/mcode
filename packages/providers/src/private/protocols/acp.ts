@@ -1,5 +1,6 @@
 import type {
   CursorProviderBoundary,
+  DevinProviderBoundary,
   ProviderFactoryInput,
 } from "../../factory-types.js";
 import {
@@ -8,6 +9,7 @@ import {
   type ProviderProtocolBinding,
 } from "../factory.js";
 import { CursorProvider } from "../cursor/cursor-provider.js";
+import { DevinProvider } from "../devin/devin-provider.js";
 
 const MAX_ACP_METHOD_LENGTH = 256;
 const MAX_ACP_REQUEST_BYTES = 1_048_576;
@@ -37,6 +39,18 @@ export function createCursorAcpProvider(input: ProviderFactoryInput): CursorProv
     throw new TypeError("Cursor Provider port skills.list is required");
   }
   const provider = new CursorProvider(input.host, input.cursor, input.configuration.idleSessionTtlMs);
+  bindProviderProtocol(provider, acpProtocol);
+  return provider;
+}
+
+/** Composes Devin with the package-private generic ACP factory seam. */
+export function createDevinAcpProvider(input: ProviderFactoryInput): DevinProviderBoundary {
+  createProviderBoundary("devin", [], input);
+  if (!input.devin) throw new TypeError("Devin Provider ports are required");
+  if (typeof input.devin.settings?.get !== "function") {
+    throw new TypeError("Devin Provider port settings.get is required");
+  }
+  const provider = new DevinProvider(input.host, input.devin, input.configuration.idleSessionTtlMs);
   bindProviderProtocol(provider, acpProtocol);
   return provider;
 }
