@@ -18,6 +18,7 @@ import {
   type ProviderCapabilityIdentity,
 } from "@mcode/contracts";
 import { EntityToken } from "../EntityToken";
+import { shortenPathPrefixedName } from "../command-name";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,7 +50,12 @@ function SlashCommandChip({
   readonly namespace: SlashCommandNamespace;
 }): JSX.Element {
   return (
-    <EntityToken kind={namespace} label={`/${commandName}`} tone="composer" invocation />
+    <EntityToken
+      kind={namespace}
+      label={`/${shortenPathPrefixedName(commandName)}`}
+      tone="composer"
+      invocation
+    />
   );
 }
 
