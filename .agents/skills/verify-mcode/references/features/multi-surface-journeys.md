@@ -1,10 +1,32 @@
 # Multi-surface journeys
 
-## Cross-provider Last turn Review
-
-Use the [turn-diff Review feature](turn-diff-review.md) for selectors and evidence requirements. Run equivalent Composer edits in one owned fixture workspace with Codex, Cursor, and Claude. Open Last turn Review through the same controls, capture the selected source and patch, and compare them with the resulting file and public comparison response. Reload each completed thread and confirm that its source and patch persist. Record unavailable providers as coverage gaps. Remove only owned threads and fixture state.
-
 Read this file when a change crosses product surfaces. Use the linked feature files for selectors and surface-specific proof.
+
+## Provider completeness
+
+Use this journey when a change affects turn diffs, Review, provider events, automatic review, or workspace invalidation. Resolve the upstream Codex source with the OpenSrc command in the repository instructions before a Codex run. Record the resolved upstream commit in the receipt. The cache is read-only.
+
+1. Run `provider-completeness health`, then `provider-completeness proof --confirm-provider-call --confirm-cleanup`. The proof creates a unique fixture workspace for each client and deletes only registrations it owns. Record the workspace ID, exact thread IDs, baseline fixture contents, provider and model, and current commit without credentials.
+2. In the public web Composer, start a Codex turn that changes a marked line. While Last turn is Live, make a distinct external edit to the same file. Capture Review and the public comparison response. The rendered native patch must contain only the agent marker while disk content contains both markers.
+3. Before completion, after completion, after closing and reopening Review, after client reload, and after reconnect, capture Review state and public turn state. Live must settle once; the patch, source or fidelity label, and one settled row must remain. A spinner or duplicate row after settlement fails the journey.
+4. Repeat the settled Review observation for Cursor native evidence and Claude fallback. For every row, record provider, model, source or fidelity label, rendered patch, disk result, and public comparison result. An unavailable provider, account, or model is a coverage gap for that row.
+5. Exercise an empty effect, forced invalidation, and interruption. Confirm volatile evidence clears, the correct fallback remains when file effects remain, and the previous settled turn remains readable. Retry the turn and replay stale review and diff events; they must not change the retry decision or its settled evidence.
+6. Trigger available warnings and reroutes around a Review turn. Confirm each notice is durable without erasing or duplicating the current diff. Record approved, denied, and strict-manual automatic-review outcomes and their diff state. A managed-required provider must block unavailable or incompatible access before dispatch. Full Access must never show review. A strict notice must wait for a real permission request before a permission control or waiting state appears.
+7. Open Files, `@` autocomplete, local loopback Preview, and Review for the fixture workspace. Make one external change and capture the refreshed result on all four surfaces. Disconnect the owning client, make another change, and confirm its owned watch has closed. Reconnect and confirm one new subscription refreshes the active client.
+8. Repeat the observable Review, notice, permission, and right-panel state in Electron. Do not substitute web evidence when Electron is unavailable.
+9. Store redacted screenshots, public responses, trigger and stable states, provider matrix, cleanup result, coverage gaps, current application commit, and upstream Codex commit in `.dev/verification/provider-completeness/`. Delete only recorded threads, review requests, fixture edits, subscriptions, watches, and workspace. Retain a cleanup failure in the receipt.
+
+Use [turn-diff Review](turn-diff-review.md), [provider events and durability](provider-events-and-durability.md), and [local workspace invalidation](workspace-file-invalidation.md) for controls and focused proof limits. Focused tests support these observations; they do not replace a live client proof.
+
+### Provider matrix
+
+| Provider path | Required Review result | Required lifecycle and safety result |
+| --- | --- | --- |
+| Codex native | Agent-only same-file patch with a native source label | Live, settled, reopen, reload, and reconnect preserve one row and no spinner |
+| Cursor native | Native source label and normalized Review controls | Settled evidence survives the same client lifecycle observations |
+| Claude fallback | Fallback source or fidelity label with the remaining file effect | Empty, invalidated, and interrupted paths preserve the previous settled turn |
+
+Record `blocked` with the missing provider, account, model, workspace, or client control instead of treating an unrun row as a pass.
 
 ## External local workspace change
 

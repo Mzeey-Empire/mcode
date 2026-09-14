@@ -68,6 +68,14 @@ describe("WorkspaceRepo pinning + recency", () => {
     }
   });
 
+  it("normalizes legacy ISO last-opened timestamps at the workspace boundary", () => {
+    const workspace = repo.create("a", "/a", true);
+    db.prepare("UPDATE workspaces SET last_opened_at = ? WHERE id = ?")
+      .run("2026-04-30T07:59:15.497Z", workspace.id);
+
+    expect(repo.listAll()[0]?.last_opened_at).toBe(Date.parse("2026-04-30T07:59:15.497Z"));
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });

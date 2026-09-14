@@ -202,12 +202,14 @@ Verify approval review through the public Composer and public conversation APIs.
 
 1. Register a verifier-owned workspace. In both Composer layouts, select a provider without Auto and capture Manual and Full access with Auto absent. Switch to a supported provider and capture all three choices, then switch back and confirm Auto disappears.
 2. Select Auto and send one verifier-owned Codex turn. Record the public dispatch receipt and the review tool-call narration when the native app-server emits it.
-3. When strict review routing arrives, capture its manual-required notice. Confirm that no waiting state or permission control appears until the provider emits a real permission request.
-4. Confirm one settled review result only. Check the public canonical turn includes the resolved `approvalReviewMode` and its stable reason. Repeat with Full access and confirm that no review label or lifecycle appears.
-5. Reopen the thread or reconnect the public socket. Read the same canonical turn and confirm the review result does not duplicate.
-6. Persist Auto, switch to an unsupported provider before dispatch, and confirm the dispatch resolves to Manual with a provider-unavailable reason. For a managed-required provider, confirm Full access and incompatible review modes are blocked before dispatch.
-7. Stop, fail, and time out an Auto turn where the provider exposes each path. Confirm each active review has one terminal result, then replay a stale review event and confirm it cannot add another result to the replacement attempt.
-8. Delete only the verifier-owned workspace and thread after recording screenshots and the public receipt.
+3. When strict review routing arrives, capture its manual-required notice. Confirm that no waiting state or permission control appears.
+4. When the provider emits a real permission request, capture the card and `permission.listPending`.
+5. Complete `permission.respond` through the public control. Confirm that `permission.listPending` removes the request.
+6. Confirm one settled review result only. Check the public canonical turn includes the resolved `approvalReviewMode` and its stable reason. Repeat with Full access and confirm that no review label or lifecycle appears.
+7. Reopen the thread or reconnect the public socket. Read the same canonical turn and confirm the review result does not duplicate.
+8. Persist Auto, switch to an unsupported provider before dispatch, and confirm the dispatch resolves to Manual with a provider-unavailable reason. For a managed-required provider, confirm Full access and incompatible review modes are blocked before dispatch. Public Codex does not report `required`. Record focused server dispatch proof for this case. It does not prove a live Codex response.
+9. Stop, fail, and time out an Auto turn where the provider exposes each path. Confirm each active review has one terminal result. If the provider can deterministically trigger a retry, replay stale review and diff events and confirm they cannot affect the replacement attempt. Otherwise record the native retry trigger as a coverage gap; the focused retry gates prove dispatch freezing and stale-event rejection.
+10. Delete only the verifier-owned workspace and thread after recording screenshots and the public receipt.
 
 Store approval-review screenshots and the redacted receipt under
 `.dev/verification/approval-review/`. Do not commit these artifacts.
@@ -217,6 +219,9 @@ Electron when both surfaces are available. Record an unavailable surface as a
 verification gap rather than using the other surface as its substitute.
 
 An unavailable native review capability, permission request, terminal path, or managed policy is a verification gap. Do not record ordinary turn completion as approval-review proof.
+
+Focused web and Codex tests cover the strict-review notice, the real request card, and provider settlement removal. The live verifier stays blocked until a native `PermissionRequest` can drive the public handoff.
+That handoff uses `permission.listPending` and `permission.respond`.
 
 - The approved prototype's Sign in button was simulated. The current notice contract reports authentication recovery, not an active sign-in requirement. Do not claim a real sign-in action from this fixture.
 - Migration backfill uses the newest persisted notice session as an upgrade approximation because older databases have no durable notice-session boundary. New session-start events select the authoritative session, including an empty one.

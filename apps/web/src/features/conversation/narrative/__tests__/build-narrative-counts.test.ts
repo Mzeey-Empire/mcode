@@ -234,6 +234,27 @@ describe("buildNarrativeItems counts", () => {
     expect(counts.thoughts).toBe(1);
   });
 
+  it("marks an ended segment inactive while the agent is still running", () => {
+    // The next chunk (a tool call) already closed the segment: endedAt is the
+    // green pass that its trailing table or fence should render as loaded
+    // instead of parking on an "assembling" skeleton.
+    const thoughts: ThoughtSegment[] = [
+      mkThought("| A | B |\n| - | - |\n| 1 | 2 |", 500, 600),
+    ];
+    const tools: ToolCall[] = [
+      mkTool({ id: "1", toolName: "Read", startedAt: 700, isComplete: false }),
+    ];
+    const { items } = buildNarrativeItems({
+      toolCalls: tools,
+      hooks: [],
+      thoughtSegments: thoughts,
+      streamingText: "",
+      isAgentRunning: true,
+    });
+
+    expect(items[0]).toMatchObject({ type: "thought", isActive: false });
+  });
+
   it("appends isFinal surplus as delta after thoughts when streaming extends past segment tape", () => {
     const thoughts: ThoughtSegment[] = [
       mkThought("pre-tool reasoning", 100, 700),

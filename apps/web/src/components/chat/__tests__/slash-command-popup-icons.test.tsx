@@ -184,6 +184,94 @@ describe("SlashCommandPopup row presentation", () => {
     expect(content).toContainElement(within(sharedRow).getByText("Interviewing workflow"));
   });
 
+  it("labels the project-scoped duplicate via entry source without a codex path", () => {
+    const commands: Command[] = [
+      {
+        id: "skill:user:agents:prototype",
+        name: "agents:prototype",
+        description: "Prototype (user)",
+        namespace: "skill",
+        capabilityKind: "skill",
+        nativeId: "C:/Users/test/.agents/skills/prototype/SKILL.md",
+        source: "user",
+      },
+      {
+        id: "skill:project:agents:prototype",
+        name: "agents:prototype",
+        description: "Prototype (project)",
+        namespace: "skill",
+        capabilityKind: "skill",
+        nativeId: "C:/workspace/project/.agents/skills/prototype/SKILL.md",
+        source: "project",
+      },
+    ];
+
+    render(
+      <SlashCommandPopup
+        state={{ kind: "ready", items: commands }}
+        selectedIndex={0}
+        anchorRect={makeAnchorRect()}
+        onSelect={() => {}}
+        onDismiss={() => {}}
+        onRetry={() => {}}
+      />,
+    );
+
+    const projectRow = screen.getByRole("option", {
+      name: "agents:prototype Prototype (project) Local",
+    });
+    expect(within(projectRow).getByText("Local")).toBeInTheDocument();
+    expect(
+      within(
+        screen.getByRole("option", { name: "agents:prototype Prototype (user)" }),
+      ).queryByText("Local"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shortens absolute-path collision prefixes to the project basename", () => {
+    const commands: Command[] = [
+      {
+        id: "skill:user:prototype",
+        name: "C:\\Users\\test\\fixture-repo:prototype",
+        description: "Project skill",
+        namespace: "skill",
+        capabilityKind: "skill",
+        nativeId: "C:/Users/test/.agents/skills/prototype/SKILL.md",
+        source: "user",
+      },
+      {
+        id: "skill:project:prototype",
+        name: "C:\\Users\\test\\fixture-repo:prototype",
+        description: "Project skill (local)",
+        namespace: "skill",
+        capabilityKind: "skill",
+        nativeId: "C:/Users/test/fixture-repo/.agents/skills/prototype/SKILL.md",
+        source: "project",
+      },
+    ];
+
+    render(
+      <SlashCommandPopup
+        state={{ kind: "ready", items: commands }}
+        selectedIndex={0}
+        anchorRect={makeAnchorRect()}
+        onSelect={() => {}}
+        onDismiss={() => {}}
+        onRetry={() => {}}
+      />,
+    );
+
+    expect(
+      screen.getAllByText("fixture-repo:prototype"),
+    ).toHaveLength(2);
+    expect(screen.queryByText(/C:\\Users/)).not.toBeInTheDocument();
+    expect(
+      within(
+        screen.getByRole("option", { name: /Local$/ }),
+      ).getByText("Local"),
+    ).toBeInTheDocument();
+  });
+
   it("keeps a long local title bounded before its source badge", () => {
     renderLongDuplicateSkillPopup();
 

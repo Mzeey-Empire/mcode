@@ -174,6 +174,49 @@ describe("CodexProvider first turn on new session", () => {
     provider.shutdown();
   });
 
+  it("rejects a failed attempt's stale native diff after a retry starts", async () => {
+    const provider = makeProvider();
+    const updates: ProviderTurnDiffUpdate[] = [];
+    const unsubscribe = provider.onTurnDiff((event) => updates.push(event));
+    sendTurnMock.mockResolvedValueOnce("failed-native-turn").mockResolvedValueOnce("retry-native-turn");
+    const request = {
+      turnId: "mcode-turn",
+      turnExecutionId: schemaValidExecutionId,
+      deliveryAttempt: 1,
+      sessionId,
+      workspaceId: "workspace-test",
+      threadId,
+      message: "edit",
+      cwd: process.cwd(),
+      model: "gpt-5.4",
+      interactionMode: "build" as const,
+      providerOptions: {},
+      permissionMode: "supervised" as const,
+      approvalReviewMode: "automatic" as const,
+    };
+
+    await provider.sendTurn(request);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const failedServer = appServers[0]!;
+    await provider.discardSession(sessionId);
+
+    await provider.sendTurn({ ...request, deliveryAttempt: 2, resumeFrom: undefined });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    const retryServer = appServers[1]!;
+    const notify = (server: (typeof appServers)[number], turnId: string, diff: string) => server.emit("notification", {
+      method: "turn/diff/updated",
+      params: { threadId: "sdk-thread-1", turnId, diff },
+    });
+    notify(failedServer, "failed-native-turn", "stale aggregate");
+    notify(retryServer, "retry-native-turn", "retry aggregate");
+
+    expect(updates).toEqual([
+      { turnId: "mcode-turn", turnExecutionId: schemaValidExecutionId, deliveryAttempt: 2, revision: 1, state: "snapshot", nativeFidelity: "agent", patch: "retry aggregate" },
+    ]);
+    unsubscribe();
+    provider.shutdown();
+  });
+
   it("passes loopback browser MCP config and a child-only bearer token", async () => {
     const lease = new BrowserAutomationSessionLease();
     const inheritedBrowserToken = process.env.MCODE_BROWSER_MCP_TOKEN;

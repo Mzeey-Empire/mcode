@@ -1,6 +1,6 @@
 # Devin as an Mcode Provider — Research Notes
 
-**Status:** Research only — no implementation changes.  
+**Status:** Research only — no implementation changes.
 **Devin CLI observed:** `devin 3000.6.19 (e2b252e2)` at `C:\Users\chukwudi.nwobodo\AppData\Local\Programs\Devin\resources\app\extensions\windsurf\devin\bin\devin.exe`.
 
 ---

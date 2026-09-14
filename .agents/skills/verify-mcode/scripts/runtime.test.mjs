@@ -5,7 +5,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeTest from "node:test";
 
-import { assertRuntimeFreshness, isOpenCodeSessionInvalidatedEvent, isRuntimeHarnessEvidenceFile, runBun } from "./runtime.mjs";
+import { assertRuntimeFreshness, isOpenCodeSessionInvalidatedEvent, isRuntimeHarnessEvidenceFile, openVerificationSocketUrl, runBun } from "./runtime.mjs";
 
 const CLI = NodePath.join(import.meta.dirname, "verify-mcode.mjs");
 const BROWSER_PROOF = NodePath.join(import.meta.dirname, "browser-opencode-proof.mjs");
@@ -22,6 +22,17 @@ function runBunCommand(args) {
     child.once("close", (code) => resolve({ code, stdout, stderr }));
   });
 }
+
+NodeTest.test("lists every runtime command through the public wrapper help", async () => {
+  const help = await runBunCommand([CLI, "--help"]);
+
+  NodeAssertStrict.equal(help.code, 0);
+  NodeAssertStrict.equal(help.stderr, "");
+  NodeAssertStrict.match(
+    help.stdout,
+    /^  runtime <health\|check\|console-audit\|inspect\|live\|worktree-setup\|worktree-setup-cleanup\|diagnostics\|cleanup>$/m,
+  );
+});
 
 NodeTest.test("lists and validates the OpenCode resume proof contract without a provider call", async () => {
   const help = await runBunCommand([CLI, "runtime", "--help"]);
@@ -47,7 +58,7 @@ NodeTest.test("rejects invalid runtime check phases before any check runs", asyn
   const repeated = await runBunCommand([CLI, "runtime", "check", "--phase", "contract", "--phase", "contract"]);
 
   NodeAssertStrict.equal(unknown.code, 1);
-  NodeAssertStrict.match(unknown.stdout, /--phase must be runtime, provider, contract, or ui/);
+  NodeAssertStrict.match(unknown.stdout, /--phase must be runtime, provider, acp, contract, or ui/);
   NodeAssertStrict.equal(missing.code, 1);
   NodeAssertStrict.match(missing.stdout, /Missing value for --phase/);
   NodeAssertStrict.equal(repeated.code, 1);
@@ -131,6 +142,11 @@ NodeTest.test("cleans only OpenCode resume artifacts created by the runtime veri
 NodeTest.test("recognizes the provider-neutral OpenCode session invalidation subtype", () => {
   NodeAssertStrict.equal(isOpenCodeSessionInvalidatedEvent({ type: "system", subtype: "sdk_session_invalidated" }), true);
   NodeAssertStrict.equal(isOpenCodeSessionInvalidatedEvent({ type: "system", subtype: "opencode:session-recreated" }), false);
+});
+
+NodeTest.test("rejects desktop verification sockets without loopback authentication", async () => {
+  await NodeAssertStrict.rejects(openVerificationSocketUrl(process.cwd(), "ws://example.test/?token=token"), /loopback WebSocket URL/);
+  await NodeAssertStrict.rejects(openVerificationSocketUrl(process.cwd(), "ws://localhost/"), /lacks its authentication token/);
 });
 
 function writeTimestampedFile(path, modifiedMs) {

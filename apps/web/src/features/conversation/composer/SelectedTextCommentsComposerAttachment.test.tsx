@@ -115,6 +115,43 @@ describe("SelectedTextCommentsComposerAttachment", () => {
     rectSpy.mockRestore();
   });
 
+  it("lifts its transcript row above later rows while the sent preview is open", async () => {
+    const handlers = {
+      onRemove: vi.fn(),
+      onOpenSource: vi.fn(),
+      onEdit: vi.fn(),
+      onDelete: vi.fn(),
+      onFocusComposer: vi.fn(),
+      onSave: vi.fn(),
+      onEditorChange: vi.fn(),
+    };
+    const user = userEvent.setup();
+    render(
+      <div>
+        <div style={{ position: "absolute", transform: "translate(0px, 100px)" }}>
+          <div data-transcript-key="row-1">
+            <SelectedTextCommentsComposerAttachment comments={[comments[0]!]} readOnly {...handlers} />
+          </div>
+        </div>
+        <div style={{ position: "absolute", transform: "translate(0px, 300px)" }}>
+          <div data-transcript-key="row-2" />
+        </div>
+      </div>,
+    );
+
+    const chip = screen.getByRole("button", { name: "1 annotation. Preview available." });
+    const row = document.querySelector("[data-transcript-key='row-1']")!.parentElement as HTMLElement;
+    expect(row.style.zIndex).toBe("");
+
+    await user.hover(chip);
+
+    expect(screen.getByTestId("selected-text-comment-preview")).toBeVisible();
+    expect(row.style.zIndex).toBe("50");
+
+    await user.unhover(chip);
+    await waitFor(() => expect(row.style.zIndex).toBe(""));
+  });
+
   it("anchors a sent preview inside the message viewport's right inset", async () => {
     const handlers = {
       onRemove: vi.fn(),

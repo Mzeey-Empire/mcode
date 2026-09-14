@@ -20,6 +20,11 @@ describe("ApprovalReviewPolicy", () => {
       .resolves.toEqual({ mode: "automatic", reason: "automatic-review-available" });
   });
 
+  it("bypasses an available automatic review for Full Access", async () => {
+    await expect(new ApprovalReviewPolicy().resolve({ requestedMode: "automatic", permissionMode: "full", interactionMode: "build", model: "test", provider: provider(automatic) }))
+      .resolves.toEqual({ mode: "manual", reason: "full-access-bypasses-approval-review" });
+  });
+
   it("keeps unsupported automatic requests manual with a stable fallback reason", async () => {
     const unavailable: ApprovalReviewSupport = { status: "unavailable", supportedModes: ["manual"], reason: "automatic-review-unavailable", liveChangeScope: "none" };
     await expect(new ApprovalReviewPolicy().resolve({ requestedMode: "automatic", permissionMode: "supervised", interactionMode: "build", model: "test", provider: provider(unavailable) }))
