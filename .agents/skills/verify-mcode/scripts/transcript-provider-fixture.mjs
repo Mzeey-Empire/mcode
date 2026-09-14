@@ -42,10 +42,14 @@ if (args.command === "version") {
       const text = request.params?.input?.find((item) => item.type === "text")?.text ?? "";
       const long = text.includes("long narrative");
       reply(request.id, { turn: { id: turnId } });
-      void emitTurn(notify, threadId, turnId, long, text.includes("overlapping commands"), text.includes("activity label verification"), text.includes("shell card verification"), text.includes("mermaid streaming")).finally(() => {
+      void emitTurn(notify, threadId, turnId, long, text.includes("overlapping commands"), text.includes("activity label verification"), text.includes("shell card verification"), text.includes("mermaid streaming"), text.includes("table boundary")).finally(() => {
         running.delete(threadId);
       });
   }
+}
+
+function stepCount(long, overlapping, activity, shellCards) {
+  return overlapping || activity || shellCards ? 0 : long ? 120 : 3;
 }
 
 function fixtureThreadId(request) {
@@ -53,7 +57,7 @@ function fixtureThreadId(request) {
     ? request.params.threadId : NodeCrypto.randomUUID();
 }
 
-async function emitTurn(notify, threadId, turnId, long, overlapping, activity, shellCards, mermaid) {
+async function emitTurn(notify, threadId, turnId, long, overlapping, activity, shellCards, mermaid, tableBoundary) {
   await new Promise((resolve) => setTimeout(resolve, FIXTURE_TURN_DELAY_MS));
   const turn = (status) => ({ id: turnId, items: [], status, error: null });
   const base = { threadId, turnId };
@@ -63,10 +67,15 @@ async function emitTurn(notify, threadId, turnId, long, overlapping, activity, s
     notify("turn/completed", { threadId, turn: turn("completed") });
     return;
   }
+  if (tableBoundary) {
+    await emitTableBoundary(notify, base, turnId);
+    notify("turn/completed", { threadId, turn: turn("completed") });
+    return;
+  }
   if (activity) await emitActivityLabels(notify, base);
   if (overlapping) await emitOverlappingCommands(notify, base);
   if (shellCards) await emitShellCards(notify, base);
-  for (let index = 0; index < (overlapping || activity || shellCards ? 0 : long ? 120 : 3); index += 1) {
+  for (let index = 0; index < stepCount(long, overlapping, activity, shellCards); index += 1) {
     const id = `${turnId}-step-${index}`;
     const text = `Fixture step ${index + 1}: inspect the transcript, preserve message order, and retain the reading position.\n\n`;
     notify("item/started", { ...base, item: { id, type: "agentMessage", text: "", phase: "commentary" } });
@@ -111,6 +120,25 @@ async function emitMermaidStream(notify, base) {
   await hold(15000);
   send(stage3);
   notify("item/completed", { ...base, item: { id, type: "agentMessage", text: stage1 + stage2 + stage3, phase: "final_answer", memoryCitation: null } });
+}
+
+/**
+ * Ends a commentary segment on a complete table, then holds a command item
+ * inProgress. The segment boundary (the next item starting) is the signal
+ * that the trailing table is finished: the ended text row must render a real
+ * table while the tool still runs, not park on the assembling skeleton.
+ */
+async function emitTableBoundary(notify, base, turnId) {
+  const id = `${base.turnId}-commentary`;
+  const text = "Boundary check: the table below is the last thing in this segment.\n\n| A | B |\n| - | - |\n| 1 | 2 |";
+  notify("item/started", { ...base, item: { id, type: "agentMessage", text: "", phase: "commentary" } });
+  notify("item/agentMessage/delta", { ...base, itemId: id, delta: text });
+  notify("item/completed", { ...base, item: { id, type: "agentMessage", text, phase: "commentary", memoryCitation: null } });
+  const command = { id: `${base.turnId}-tool`, type: "commandExecution", command: "fixture boundary hold", cwd: ".", status: "inProgress" };
+  notify("item/started", { ...base, item: command });
+  await new Promise((resolve) => setTimeout(resolve, 14000));
+  notify("item/completed", { ...base, item: { ...command, status: "completed", aggregatedOutput: "boundary done", exitCode: 0, durationMs: 1 } });
+  emitFinalAnswer(notify, base, turnId);
 }
 
 async function emitShellCards(notify, base) {
