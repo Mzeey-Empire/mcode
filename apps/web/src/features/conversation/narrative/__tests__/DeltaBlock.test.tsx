@@ -124,6 +124,20 @@ describe("DeltaBlock", () => {
     expect(screen.getAllByRole("cell").map((cell) => cell.textContent)).toEqual(["1", "2"]);
   });
 
+  it("swaps a trailing assembling skeleton for settled content once the stream ends", async () => {
+    const text = "| A | B |\n| - | - |\n| 1 | 2 |";
+    const { rerender } = render(<DeltaBlock text={text} isStreaming showCursor={false} />);
+
+    const skeleton = await screen.findByTestId("streaming-skeleton");
+    await waitFor(() => expect(skeleton.getAttribute("aria-label")).toBe("table assembling"));
+
+    rerender(<DeltaBlock text={text} isStreaming={false} showCursor={false} />);
+
+    const settled = await screen.findByTestId("markdown-content");
+    await waitFor(() => expect(settled.textContent).toBe(text));
+    expect(screen.queryByTestId("streaming-skeleton")).toBeNull();
+  });
+
   it("uses the markdown adapter after settling", async () => {
     render(<DeltaBlock text="**settled**" isStreaming={false} showCursor={false} />);
 

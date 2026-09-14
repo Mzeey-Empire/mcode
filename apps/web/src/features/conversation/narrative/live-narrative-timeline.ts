@@ -288,7 +288,11 @@ function projectThoughtEvent(
     items.push({ type: "delta", text: segment.text });
     return true;
   }
-  items.push({ type: "thought", segment, isActive: isAgentRunning });
+  // A segment with endedAt can no longer receive deltas — the next event
+  // (tool call, message boundary, turn end) already closed it. Keeping it
+  // "active" would pin a trailing table or fence on its assembling skeleton
+  // forever, since closed-ness there depends on text that will never arrive.
+  items.push({ type: "thought", segment, isActive: isAgentRunning && segment.endedAt == null });
   return false;
 }
 
