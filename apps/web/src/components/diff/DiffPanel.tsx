@@ -171,6 +171,7 @@ function sumReviewFileDeletions(stats: readonly { readonly deletions: number }[]
 
 interface DiffPanelStore {
   readonly activeThreadId: string | null;
+  readonly activeThreadClientOnly: boolean;
   readonly activeWorkspaceId: string | null;
   readonly branchComparison: DiffStoreState["branchComparison"];
   readonly bumpDiffRevision: DiffStoreState["bumpDiffRevision"];
@@ -194,6 +195,14 @@ interface DiffPanelStore {
 
 function useDiffPanelStore(): DiffPanelStore {
   const activeThreadId = useWorkspaceStore((state) => state.activeThreadId);
+  // Optimistic placeholder rows are never persisted; thread-scoped RPCs would
+  // fail with "Thread not found" until the create RPC swaps in the real row.
+  const activeThreadClientOnly = useWorkspaceStore((state) => {
+    const row = activeThreadId
+      ? state.threads.find((candidate) => candidate.id === activeThreadId)
+      : undefined;
+    return Boolean(row?.clientPreparing || row?.clientError);
+  });
   const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
   const viewMode = useDiffStore((state) => state.viewMode);
   const subagentScope = useDiffStore((state) =>
@@ -233,6 +242,7 @@ function useDiffPanelStore(): DiffPanelStore {
 
   return {
     activeThreadId,
+    activeThreadClientOnly,
     activeWorkspaceId,
     branchComparison: useDiffStore((state) => state.branchComparison),
     bumpDiffRevision: useDiffStore((state) => state.bumpDiffRevision),
@@ -374,7 +384,7 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
   );
   const snapshotVersion = getSnapshotVersion(store.snapshots);
   const comparisonLoadInput = useMemo<ComparisonLoadInput>(() => ({
-    activeThreadId: store.activeThreadId,
+    activeThreadId: store.activeThreadClientOnly ? null : store.activeThreadId,
     activeWorkspaceId: store.activeWorkspaceId,
     branchComparison: store.branchComparison,
     branchRange,
@@ -387,6 +397,7 @@ function useComparisonController(store: DiffPanelStore): ComparisonController {
     branchRange,
     mutableComparisonRevision,
     snapshotVersion,
+    store.activeThreadClientOnly,
     store.activeThreadId,
     store.activeWorkspaceId,
     store.branchComparison,
