@@ -634,6 +634,143 @@ describe("AgentService turn cleanup", () => {
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
   });
 
+  it("finalizes the turn as cancelled when provider stopSession never settles", async () => {
+    const { service, providerEmitter } = buildService();
+    startAgentServiceIngressForTest(service, );
+    const provider = providerEmitter as NodeEvents.EventEmitter & {
+      stopSession: ReturnType<typeof vi.fn>;
+      discardSession: ReturnType<typeof vi.fn>;
+      waitForSessionExit: ReturnType<typeof vi.fn>;
+    };
+    provider.discardSession = vi.fn(() => Promise.resolve());
+    provider.waitForSessionExit = vi.fn(() => Promise.resolve());
+    provider.stopSession.mockImplementation(() => new Promise<void>(() => {}));
+
+    await service.sendMessage({
+      threadId: THREAD_ID,
+      content: "hello",
+      permissionMode: "default",
+      model: "claude-sonnet-4-6",
+      attachments: [],
+      provider: "claude",
+    });
+
+    vi.useFakeTimers();
+    try {
+      const stop = service.stopSession(THREAD_ID);
+      await vi.advanceTimersByTimeAsync(20_000);
+      await expect(stop).resolves.toMatchObject({ status: "cancelled" });
+      expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(provider.discardSession).toHaveBeenCalledWith(`mcode-${THREAD_ID}`);
+
+      providerEmitter.emit("event", {
+        type: AgentEventType.Ended,
+        threadId: THREAD_ID,
+        turnExecutionId: "00000000-0000-4000-8000-000000000099",
+        outcome: "completed",
+      } satisfies AgentEvent);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("applies a turnComplete held during compaction once compaction ends", async () => {
+    const { service, providerEmitter } = buildService();
+    startAgentServiceIngressForTest(service, );
+    const provider = providerEmitter as NodeEvents.EventEmitter & { sendTurn: ReturnType<typeof vi.fn> };
+    provider.sendTurn.mockImplementationOnce((request: TurnRequest) => {
+      providerEmitter.emit("event", {
+        type: "compacting",
+        threadId: THREAD_ID,
+        turnExecutionId: request.turnExecutionId,
+        active: true,
+      });
+      providerEmitter.emit("event", {
+        type: AgentEventType.TurnComplete,
+        threadId: THREAD_ID,
+        turnExecutionId: request.turnExecutionId,
+        reason: "end_turn",
+        costUsd: null,
+        tokensIn: 0,
+        tokensOut: 0,
+      } satisfies AgentEvent);
+      providerEmitter.emit("event", {
+        type: "compacting",
+        threadId: THREAD_ID,
+        turnExecutionId: request.turnExecutionId,
+        active: false,
+      });
+      providerEmitter.emit("event", {
+        type: AgentEventType.Ended,
+        threadId: THREAD_ID,
+        turnExecutionId: request.turnExecutionId!,
+      } satisfies AgentEvent);
+      return Promise.resolve();
+    });
+
+    await service.sendMessage({
+      threadId: THREAD_ID,
+      content: "hello",
+      permissionMode: "default",
+      model: "claude-sonnet-4-6",
+      attachments: [],
+      provider: "claude",
+    });
+
+    await vi.waitFor(() => {
+      expect(service.runtimeAccess().runtimeSnapshots().find((s) => s.threadId === THREAD_ID)?.phase)
+        .toBe("completed");
+    });
+    expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
+  });
+
+  it("applies a compaction-held turnComplete when the stream ends without a closing compacting event", async () => {
+    const { service, providerEmitter } = buildService();
+    startAgentServiceIngressForTest(service, );
+    const provider = providerEmitter as NodeEvents.EventEmitter & { sendTurn: ReturnType<typeof vi.fn> };
+    provider.sendTurn.mockImplementationOnce((request: TurnRequest) => {
+      providerEmitter.emit("event", {
+        type: "compacting",
+        threadId: THREAD_ID,
+        turnExecutionId: request.turnExecutionId,
+        active: true,
+      });
+      providerEmitter.emit("event", {
+        type: AgentEventType.TurnComplete,
+        threadId: THREAD_ID,
+        turnExecutionId: request.turnExecutionId,
+        reason: "end_turn",
+        costUsd: null,
+        tokensIn: 0,
+        tokensOut: 0,
+      } satisfies AgentEvent);
+      providerEmitter.emit("event", {
+        type: AgentEventType.Ended,
+        threadId: THREAD_ID,
+        turnExecutionId: request.turnExecutionId!,
+      } satisfies AgentEvent);
+      return Promise.resolve();
+    });
+
+    await service.sendMessage({
+      threadId: THREAD_ID,
+      content: "hello",
+      permissionMode: "default",
+      model: "claude-sonnet-4-6",
+      attachments: [],
+      provider: "claude",
+    });
+
+    await vi.waitFor(() => {
+      expect(service.runtimeAccess().runtimeSnapshots().find((s) => s.threadId === THREAD_ID)?.phase)
+        .toBe("completed");
+    });
+    expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
+  });
+
   it("cancels during delayed setup without dispatching after setup resumes", async () => {
     const { service, providerEmitter, attachmentService } = buildService();
     startAgentServiceIngressForTest(service, );

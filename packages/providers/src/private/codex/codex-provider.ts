@@ -97,6 +97,7 @@ const TURN_TIMEOUT_MS = 5 * 60 * 1000;
 const SIDE_CHANNEL_TIMEOUT_MS = 120_000;
 const USAGE_WARMUP_TIMEOUT_MS = 10_000;
 const CODEX_MCP_STARTUP_TIMEOUT_MS = 10_000;
+const STOP_SETTLE_TIMEOUT_MS = 10_000;
 const USAGE_WARMUP_RETRY_MS = 60_000;
 const CODEX_MIN_VERSION = "0.37.0";
 // The installed 0.153.4 app-server exposes approvalsReviewer plus the gated
@@ -2636,8 +2637,12 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
     this.drainPending((e) => e.sessionId === sessionId);
     if (state) {
       state.cancelledTurnExecutionId = state.nextTurnExecutionId;
-      await state.turnStartPromise;
-      if (this.isBusy(state)) await this.interrupt(state);
+      const settled = await this.awaitStopSettled(state);
+      if (!settled) {
+        // A wedged app-server cannot be interrupted; evict so the next turn respawns.
+        logger.warn("Codex stop did not settle; discarding wedged session", { sessionId });
+        await this.discardSession(sessionId);
+      }
       this.runtime.recordUsage(sessionId);
     } else {
       this.pendingStops.add(sessionId);
@@ -2646,6 +2651,32 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
       this.pendingBrowserAccess.delete(sessionId);
       if (stagedBrowser) this.host.browser.release(stagedBrowser.stage.leaseId);
       setTimeout(() => this.pendingStops.delete(sessionId), 10_000);
+    }
+  }
+
+  /**
+   * Bound the turn-start and interrupt waits so a wedged app-server cannot hang
+   * `stopSession` while the turn's "stopping" reservation suppresses terminals.
+   */
+  private async awaitStopSettled(state: CodexSessionState): Promise<boolean> {
+    const attempt = (async () => {
+      await state.turnStartPromise;
+      if (this.isBusy(state)) await this.interrupt(state);
+    })();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const timedOut = await Promise.race([
+        attempt.then(() => false),
+        new Promise<true>((resolve) => {
+          timer = setTimeout(() => resolve(true), STOP_SETTLE_TIMEOUT_MS);
+        }),
+      ]);
+      if (!timedOut) return true;
+      // Discard below kills the server, so a late interrupt rejection is expected.
+      void attempt.catch(() => {});
+      return false;
+    } finally {
+      clearTimeout(timer);
     }
   }
 

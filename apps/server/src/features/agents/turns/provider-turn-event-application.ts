@@ -43,6 +43,10 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   private readonly finalResponseExecutionByThread = new Map<string, string>();
   private readonly unclassifiedAssistantTextStartByExecution = new Map<string, number>();
   private readonly compactionInProgressByThread = new Set<string>();
+  private readonly heldTurnCompleteByThread = new Map<
+    string,
+    { event: Extract<AgentEvent, { type: "turnComplete" }>; publish: boolean }
+  >();
   private readonly lastContextByThread = new Map<string, number>();
   private readonly lastContextWindowByThread = new Map<string, number>();
   private readonly ownedLateHookCompletions = new WeakSet<object>();
@@ -243,7 +247,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     const preparation = this.prepareEventForApplication(event, publish, textIsDurable, terminal);
     if (preparation !== undefined) return preparation;
     this.recordDiagnostic(input, event);
-    const accepted = this.applyEvent(input.providerId, event);
+    const accepted = this.applyEvent(input.providerId, event, publish);
     if (accepted === false) return true;
     if (terminal && accepted !== true) return false;
     if (!this.checkpointNarrative(event, publish)) return false;
@@ -265,8 +269,8 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     return queued === "blocked" ? false : queued;
   }
 
-  private applyEvent(providerId: ProviderId, event: AgentEvent): boolean | undefined {
-    return this.applyNarrativeEvent(providerId, event) ?? this.applyLifecycleEvent(providerId, event);
+  private applyEvent(providerId: ProviderId, event: AgentEvent, publish: boolean): boolean | undefined {
+    return this.applyNarrativeEvent(providerId, event) ?? this.applyLifecycleEvent(providerId, event, publish);
   }
 
   private applyNarrativeEvent(providerId: ProviderId, event: AgentEvent): boolean | undefined {
@@ -283,10 +287,10 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     }
   }
 
-  private applyLifecycleEvent(providerId: ProviderId, event: AgentEvent): boolean | undefined {
+  private applyLifecycleEvent(providerId: ProviderId, event: AgentEvent, publish: boolean): boolean | undefined {
     switch (event.type) {
       case AgentEventType.TurnStarted: return this.applyTurnStarted(event);
-      case AgentEventType.TurnComplete: return this.applyTurnComplete(event);
+      case AgentEventType.TurnComplete: return this.applyTurnComplete(event, publish);
       case AgentEventType.ContextEstimate:
         if (event.totalProcessedTokens !== undefined) this.recordContextUsage(event, this.compactionInProgressByThread.has(event.threadId));
         return true;
@@ -427,19 +431,27 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     this.turnCompleteSeenByThread.delete(event.threadId);
     this.finalResponseExecutionByThread.delete(event.threadId);
     this.terminalFinalizedThreads.delete(event.threadId);
+    this.heldTurnCompleteByThread.delete(event.threadId);
     return true;
   }
 
-  private applyTurnComplete(event: Extract<AgentEvent, { type: "turnComplete" }>): boolean {
+  private applyTurnComplete(
+    event: Extract<AgentEvent, { type: "turnComplete" }>,
+    publish: boolean,
+  ): boolean {
     if (this.runtime.shouldSuppressStoppingTerminal(event.threadId, event.turnExecutionId)) return false;
     if (this.runtime.shouldSuppressTurnComplete(event.threadId)) return false;
     const compacting = this.compactionInProgressByThread.has(event.threadId);
     if (compacting) {
+      this.heldTurnCompleteByThread.set(event.threadId, { event, publish });
       this.turnCompleteSeenByThread.add(event.threadId);
       this.recordContextUsage(event, true);
       return false;
     }
-    if (!this.runtime.completeProviderTurn(event)) return false;
+    if (!this.runtime.completeProviderTurn(event)) {
+      this.warnRejectedTerminal(event.threadId, event.type, event.turnExecutionId);
+      return false;
+    }
     this.turnCompleteSeenByThread.add(event.threadId);
     void this.runtime.finalizeTerminalTurn(event.threadId, "completed", "turnComplete");
     this.featureEffects.refreshAfterTurn(event.threadId);
@@ -447,10 +459,32 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
     return true;
   }
 
+  /**
+   * Re-apply a turnComplete held during compaction once the stream proves the
+   * turn is over. A provider that ends the stream mid-compaction emits no
+   * closing compacting event, so the held completion is also released on ended.
+   */
+  private releaseHeldTurnComplete(threadId: string): void {
+    const held = this.heldTurnCompleteByThread.get(threadId);
+    if (!held) return;
+    this.heldTurnCompleteByThread.delete(threadId);
+    if (!this.runtime.completeProviderTurn(held.event)) {
+      this.warnRejectedTerminal(held.event.threadId, held.event.type, held.event.turnExecutionId);
+      return;
+    }
+    void this.runtime.finalizeTerminalTurn(held.event.threadId, "completed", "turnComplete");
+    this.featureEffects.refreshAfterTurn(held.event.threadId);
+    this.recordContextUsage(held.event, false);
+    if (held.publish) this.publishAfterDurability(held.event, true);
+  }
+
   private applyError(event: Extract<AgentEvent, { type: "error" }>): boolean {
     if (this.runtime.shouldSuppressStoppingTerminal(event.threadId, event.turnExecutionId)) return false;
     if (this.runtime.suppressTransientError(event)) return false;
-    if (!this.runtime.failProviderTurn(event)) return false;
+    if (!this.runtime.failProviderTurn(event)) {
+      this.warnRejectedTerminal(event.threadId, event.type, event.turnExecutionId);
+      return false;
+    }
     void this.runtime.finalizeTerminalTurn(event.threadId, "errored", "error");
     this.runtime.clearTerminalState(event.threadId);
     return true;
@@ -463,6 +497,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
       return true;
     }
     this.compactionInProgressByThread.delete(event.threadId);
+    this.releaseHeldTurnComplete(event.threadId);
     try {
       this.conversationProjection.persistCompactionDivider(event.threadId);
     } catch (error) {
@@ -475,6 +510,8 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   }
 
   private applyCompactSummary(event: Extract<AgentEvent, { type: "compactSummary" }>): boolean {
+    this.compactionInProgressByThread.delete(event.threadId);
+    this.releaseHeldTurnComplete(event.threadId);
     try {
       this.runtimePersistence.recordCompactionSummary(event.threadId, event.summary);
     } catch (error) {
@@ -498,12 +535,36 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
   private applyEnded(event: Extract<AgentEvent, { type: "ended" }>): boolean {
     if (this.runtime.shouldSuppressStoppingTerminal(event.threadId, event.turnExecutionId)) return false;
     if (this.runtime.shouldSuppressTurnEnded(event.threadId)) return false;
+    this.releaseHeldTurnComplete(event.threadId);
     const accepted = this.runtime.endProviderTurn(event);
-    if (!accepted || event.outcome === undefined) return accepted;
+    if (!accepted) {
+      if (event.outcome !== undefined) {
+        this.warnRejectedTerminal(event.threadId, event.type, event.turnExecutionId);
+      }
+      return false;
+    }
+    if (event.outcome === undefined) return true;
     const outcome = event.outcome === "cancelled" ? "interrupted" : event.outcome;
     void this.runtime.finalizeTerminalTurn(event.threadId, outcome, "ended");
     this.runtime.clearTerminalState(event.threadId);
     return true;
+  }
+
+  /** Surface a terminal event the runtime refused while its turn still runs. */
+  private warnRejectedTerminal(
+    threadId: string,
+    type: AgentEvent["type"],
+    eventExecutionId: string | undefined,
+  ): void {
+    const snapshot = this.runtime.snapshot(threadId);
+    if (!snapshot || (snapshot.phase !== "running" && snapshot.phase !== "finalizing")) return;
+    logger.warn("Terminal provider event rejected for a still-running turn", {
+      threadId,
+      type,
+      eventExecutionId: eventExecutionId ?? null,
+      runtimeExecutionId: snapshot.turnExecutionId,
+      runtimePhase: snapshot.phase,
+    });
   }
 
   private prepareTerminalText(event: AgentEvent, publish: boolean, terminal: boolean): boolean {

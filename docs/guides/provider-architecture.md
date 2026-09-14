@@ -48,6 +48,14 @@ When adding a new provider:
 - Filter stderr: classify lines as benign (debug log) or fatal (session teardown), never
   surface raw stderr as user-facing error messages
 
+`stopSession` must settle quickly. The turn runtime bounds the wait
+(`PROVIDER_STOP_SETTLE_TIMEOUT_MS` in `turn-runtime-controller.ts`); when a
+provider does not settle, the turn still finalizes as cancelled and the pooled
+session is evicted so the next turn respawns fresh. A wedged `stopSession` must
+never leave a thread parked in the "stopping" reservation, because that
+reservation suppresses every later terminal event. A wedged stop was how a
+finished turn kept the composer and thread list running.
+
 ## Event boundary
 
 ### Activity labels
