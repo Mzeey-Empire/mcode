@@ -21,6 +21,9 @@ class LayoutObserver implements ResizeObserver {
   }
 }
 
+/** Measurement application is deferred one frame to avoid ResizeObserver loops. */
+const nextFrame = () => new Promise((resolve) => setTimeout(resolve, 30));
+
 describe("transcript viewport", () => {
   let view: VirtualViewport;
   let hosts: readonly TranscriptHost[];
@@ -68,15 +71,28 @@ describe("transcript viewport", () => {
     expect(position).toEqual({ kind: "reading", key: "18", offset: 0 });
   });
 
-  it("follows repeated streaming measurements, including shrinking content", () => {
+  it("follows repeated streaming measurements, including shrinking content", async () => {
     expect(view.viewport.scrollTop).toBe(1800);
     const tail = hosts.find((host) => host.id === "19")!;
     LayoutObserver.resize(tail.element, 180);
+    await nextFrame();
     expect(view.viewport.scrollTop).toBe(1880);
     LayoutObserver.resize(tail.element, 240);
+    await nextFrame();
     expect(view.viewport.scrollTop).toBe(1940);
     LayoutObserver.resize(tail.element, 120);
+    await nextFrame();
     expect(view.viewport.scrollTop).toBe(1820);
+    expect(position).toEqual({ kind: "end" });
+  });
+
+  it("applies every measurement delivered within the same frame", async () => {
+    const tail = hosts.find((host) => host.id === "19")!;
+    const penultimate = hosts.find((host) => host.id === "18")!;
+    LayoutObserver.resize(tail.element, 180);
+    LayoutObserver.resize(penultimate.element, 140);
+    await nextFrame();
+    expect(view.viewport.scrollTop).toBe(1920);
     expect(position).toEqual({ kind: "end" });
   });
 
@@ -101,11 +117,12 @@ describe("transcript viewport", () => {
     expect(replacement.element.isConnected).toBe(true);
   });
 
-  it("holds a reading row when an earlier row grows and history is prepended", () => {
+  it("holds a reading row when an earlier row grows and history is prepended", async () => {
     view.moveTo({ kind: "reading", key: "9", offset: 25 });
     const anchor = hosts.find((host) => host.id === "9")!;
     const earlier = hosts.find((host) => host.id === "1")!;
     LayoutObserver.resize(earlier.element, 160);
+    await nextFrame();
     expect(view.viewport.scrollTop).toBe(985);
     view.setRows([{ id: "older-1", height: 100 }, { id: "older-2", height: 100 }, ...rows]);
     expect(view.viewport.scrollTop).toBe(1185);
@@ -152,27 +169,29 @@ describe("transcript viewport", () => {
     expect(view.viewport.scrollTop).toBe(1900);
   });
 
-  it("keeps an unmounted navigation target centered as its height resolves", () => {
+  it("keeps an unmounted navigation target centered as its height resolves", async () => {
     view.moveTo({ kind: "target", key: "1", align: "center" });
     expect(view.viewport.scrollTop).toBe(50);
     const target = hosts.find((host) => host.id === "1")!;
     LayoutObserver.resize(target.element, 300);
+    await nextFrame();
     expect(view.viewport.scrollTop).toBe(150);
     expect(view.rowBottom("1")).toBe(250);
   });
 
-  it("keeps tail following when a row control receives pointer or keyboard input", () => {
+  it("keeps tail following when a row control receives pointer or keyboard input", async () => {
     const tail = hosts.find((host) => host.id === "19")!;
     const button = document.createElement("button");
     tail.element.append(button);
     button.dispatchEvent(new Event("pointerdown", { bubbles: true }));
     button.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
     LayoutObserver.resize(tail.element, 180);
+    await nextFrame();
     expect(view.viewport.scrollTop).toBe(1880);
     expect(position).toEqual({ kind: "end" });
   });
 
-  it("anchors a disclosure before its content expands and collapses", () => {
+  it("anchors a disclosure before its content expands and collapses", async () => {
     const tail = hosts.find((host) => host.id === "19")!;
     const button = document.createElement("button");
     button.setAttribute("aria-expanded", "false");
@@ -180,11 +199,13 @@ describe("transcript viewport", () => {
     const before = view.rowTop("19");
     button.click();
     LayoutObserver.resize(tail.element, 180);
+    await nextFrame();
     expect(view.rowTop("19")).toBe(before);
     expect(position).toEqual({ kind: "reading", key: "19", offset: -100 });
     button.setAttribute("aria-expanded", "true");
     button.click();
     LayoutObserver.resize(tail.element, 100);
+    await nextFrame();
     expect(view.rowTop("19")).toBe(before);
   });
 
