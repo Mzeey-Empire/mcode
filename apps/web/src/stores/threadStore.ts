@@ -1854,13 +1854,29 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
     return phase === "errored" ? "errored" : "interrupted";
   };
 
+  const TERMINAL_STOP_REASON_MESSAGES: Record<string, string> = {
+    error_max_budget_usd: "Budget cap reached. You can adjust guardrails in Settings > Agent.",
+    max_turns: "Max turns reached. You can adjust guardrails in Settings > Agent.",
+    max_turn_requests: "Request limit reached. Send a message to continue.",
+    max_tokens: "Output token limit reached. Send a message to continue.",
+    output_truncated: "Response was cut short at the output token limit. Send a message to continue.",
+    refusal: "The agent declined to continue.",
+    quota_exhausted: "Usage limit reached.",
+    auth_required: "Authentication required.",
+    content_filter: "Response blocked by a content filter.",
+    tool_rejected: "The agent stopped after a tool call was rejected.",
+    interrupted: "Turn interrupted.",
+    shutdown: "The agent shut down.",
+    restart: "The agent restarted.",
+    error: "The agent stopped with an error.",
+  };
+
   const guardrailMessageFor = (
     event: Extract<AgentEvent, { type: "turnComplete" | "ended" }>,
   ): Message | null => {
     if (event.type !== "turnComplete") return null;
-    if (event.reason !== "error_max_budget_usd" && event.reason !== "max_turns") return null;
-    const reason = event.reason === "error_max_budget_usd" ? "Budget cap reached" : "Max turns reached";
-    return createSystemMessage(event.threadId, `Agent stopped: ${reason}. You can adjust guardrails in Settings > Agent.`);
+    const reason = TERMINAL_STOP_REASON_MESSAGES[event.reason];
+    return reason ? createSystemMessage(event.threadId, `Agent stopped: ${reason}`) : null;
   };
 
   const completedToolCalls = (toolCalls: ToolCall[]): ToolCall[] => {

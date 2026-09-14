@@ -211,7 +211,11 @@ describe("threadStore reconnect and queued follow-ups", () => {
     ]);
   });
 
-  it.each(["max_turns", "error_max_budget_usd"] as const)(
+  it.each([
+    "max_turns", "error_max_budget_usd", "max_turn_requests", "max_tokens",
+    "output_truncated", "refusal", "quota_exhausted", "auth_required",
+    "content_filter", "tool_rejected", "interrupted", "shutdown", "restart", "error",
+  ] as const)(
     "does not start a queued send before delayed %s guardrail completion arrives",
     async (reason) => {
       vi.useFakeTimers();
@@ -393,7 +397,11 @@ describe("threadStore reconnect and queued follow-ups", () => {
     ]);
   });
 
-  it.each(["max_turns", "error_max_budget_usd"] as const)(
+  it.each([
+    "max_turns", "error_max_budget_usd", "max_turn_requests", "max_tokens",
+    "output_truncated", "refusal", "quota_exhausted", "auth_required",
+    "content_filter", "tool_rejected", "interrupted", "shutdown", "restart", "error",
+  ] as const)(
     "keeps the queue paused when %s arrives after completion persistence",
     async (reason) => {
       vi.useFakeTimers();
