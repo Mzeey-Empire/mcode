@@ -377,6 +377,15 @@ export function SelectedTextCommentsComposerAttachment({
   useEffect(() => () => {
     if (previewCloseTimerRef.current !== undefined) window.clearTimeout(previewCloseTimerRef.current);
   }, []);
+  // vlist translates each transcript row, so every row is its own stacking
+  // context and the preview cannot out-z-index later rows from inside one.
+  useLayoutEffect(() => {
+    if (!isPreviewOpen) return;
+    const row = previewRootRef.current?.closest("[data-transcript-key]")?.parentElement;
+    if (!(row instanceof HTMLElement)) return;
+    row.style.zIndex = "50";
+    return () => { row.style.zIndex = ""; };
+  }, [isPreviewOpen]);
   const label = annotationLabel(comments.length);
   const dockedEditor = readOnly ? undefined : getDockedEditor(editor, comments);
   const handleDelete = (comment: SelectedTextComment) => {
