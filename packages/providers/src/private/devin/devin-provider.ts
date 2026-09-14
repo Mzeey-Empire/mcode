@@ -101,6 +101,48 @@ function resolveOptionIdForDecision(
   return decision === "allow" ? options[0]?.optionId : undefined;
 }
 
+/** Stop reasons a bare "continue" prompt can push through, per Devin's own continue flow. */
+const AUTO_CONTINUABLE_REASONS = new Set(["max_turn_requests", "max_tokens", "output_truncated"]);
+const MAX_AUTO_CONTINUES = 8;
+
+/**
+ * How long `session/cancel` gets to settle a turn before the child is killed.
+ * Devin ignores cancel while a turn is blocked inside a tool call, so an
+ * unbounded wait would leave Stop itself hanging forever.
+ */
+const CANCEL_SETTLE_TIMEOUT_MS = 10_000;
+
+/** `Ended` outcome for stop reasons that cut the turn short; others stay a normal completion. */
+const STOP_OUTCOMES: Record<string, "cancelled" | "interrupted" | "errored"> = {
+  cancelled: "cancelled",
+  interrupted: "interrupted",
+  quota_exhausted: "interrupted",
+  auth_required: "interrupted",
+  content_filter: "interrupted",
+  tool_rejected: "interrupted",
+  shutdown: "interrupted",
+  restart: "interrupted",
+  error: "errored",
+};
+
+/**
+ * `_cognition.ai/agent_stopped.cause` is authoritative and more specific than
+ * the prompt `stopReason` (e.g. `end_turn` + cause `quota_exhausted`).
+ */
+function effectiveStopReason(stopReason: string | undefined, stopCause: string | null): string {
+  if (stopCause && stopCause !== "complete") return stopCause;
+  return stopReason ?? "end_turn";
+}
+
+/** Maps the effective stop reason to an `Ended` outcome; a user stop always wins. */
+function turnOutcomeFor(
+  reason: string,
+  pendingUserStopAbort: boolean,
+): "cancelled" | "interrupted" | "errored" | undefined {
+  if (pendingUserStopAbort) return "cancelled";
+  return STOP_OUTCOMES[reason];
+}
+
 /**
  * Devin provider over `devin acp` (newline-delimited JSON-RPC, ACP).
  *
@@ -141,6 +183,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     private readonly host: ProviderHostPorts,
     private readonly devin: DevinProviderPorts,
     idleSessionTtlMs: number,
+    private readonly cancelSettleTimeoutMs: number = CANCEL_SETTLE_TIMEOUT_MS,
   ) {
     super();
     this.canonicalEvents = new DevinCanonicalEventPublisher(host.events);
@@ -333,6 +376,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
       entry.replayTurnState = createDevinAcpTurnState();
     }
     await this.ensureSession(entry, req);
+    entry.replayTurnState = null;
     await this.applyModel(entry, req);
     await this.applyMode(entry, entry.devinMode);
 
@@ -340,9 +384,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     entry.activeTurnState = turnState;
     this.emit("turn_started", { sessionId: entry.mcodeSessionId });
     try {
-      const response = await entry.acpRuntime.prompt<{ stopReason?: string; usage?: Record<string, number> }>({
-        prompt: buildPromptBlocks(req),
-      });
+      const response = await this.promptWithAutoContinue(entry, req, routing);
       this.emitSuccessfulTurn(entry, response, req, routing);
       this.emit("turn_complete", { sessionId: entry.mcodeSessionId });
     } catch (error) {
@@ -473,6 +515,35 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     entry.lastCostUsd = cost.amount;
   }
 
+  /**
+   * Prompts Devin and, like Devin's own `autoContinue` setting, sends a
+   * "continue" prompt when the turn stops on a limit (`max_turn_requests`,
+   * `max_tokens`/`output_truncated`). Bounded by {@link MAX_AUTO_CONTINUES};
+   * the final stop reason is reported so the user can continue manually.
+   */
+  private async promptWithAutoContinue(
+    entry: DevinAcpSessionEntry,
+    req: TurnRequest<"devin">,
+    routing: DevinCanonicalEventRouting,
+  ): Promise<{ stopReason?: string; usage?: Record<string, number> }> {
+    let prompt = buildPromptBlocks(req);
+    for (let continues = 0;; continues += 1) {
+      if (entry.activeTurnState) entry.activeTurnState.stopCause = null;
+      const response = await entry.acpRuntime.prompt<{ stopReason?: string; usage?: Record<string, number> }>({ prompt });
+      const reason = effectiveStopReason(response.stopReason, entry.activeTurnState?.stopCause ?? null);
+      if (entry.pendingUserStopAbort || !AUTO_CONTINUABLE_REASONS.has(reason) || continues >= MAX_AUTO_CONTINUES) {
+        return response;
+      }
+      this.publishEntryEvent(entry, routing, {
+        type: AgentEventType.System,
+        threadId: entry.threadId,
+        subtype: "devin_auto_continue",
+        message: "Request limit reached; continuing automatically.",
+      });
+      prompt = [{ type: "text", text: "continue" }];
+    }
+  }
+
   private emitSuccessfulTurn(
     entry: DevinAcpSessionEntry,
     response: { stopReason?: string; usage?: Record<string, number> },
@@ -488,21 +559,24 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
         tokens: null,
       });
     }
+    const reason = effectiveStopReason(response.stopReason, entry.activeTurnState?.stopCause ?? null);
     const usage = response.usage ?? {};
     this.publishEntryEvent(entry, routing, {
       type: AgentEventType.TurnComplete,
       threadId: entry.threadId,
-      reason: response.stopReason ?? "end_turn",
+      reason,
       costUsd: entry.lastCostUsd,
       tokensIn: usage.inputTokens ?? 0,
       tokensOut: usage.outputTokens ?? 0,
       ...(typeof usage.cachedReadTokens === "number" ? { cacheReadTokens: usage.cachedReadTokens } : {}),
       providerId: this.id,
     });
+    const outcome = turnOutcomeFor(reason, entry.pendingUserStopAbort);
     this.publishEntryEvent(entry, routing, {
       type: AgentEventType.Ended,
       threadId: entry.threadId,
       turnExecutionId: req.turnExecutionId,
+      ...(outcome ? { outcome } : {}),
     });
   }
 
@@ -514,7 +588,8 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
   ): void {
     const errorMessage = error instanceof Error ? error.message : String(error);
     const interrupted = resolveAssistantText(entry.activeTurnState);
-    if (entry.pendingUserStopAbort || /cancel/i.test(errorMessage)) {
+    const cancelled = entry.pendingUserStopAbort || /cancel/i.test(errorMessage);
+    if (cancelled) {
       if (interrupted.length > 0) {
         this.publishEntryEvent(entry, routing, {
           type: AgentEventType.Message,
@@ -540,6 +615,7 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
       type: AgentEventType.Ended,
       threadId: entry.threadId,
       turnExecutionId: req.turnExecutionId,
+      outcome: cancelled ? "cancelled" : "errored",
     });
   }
 
@@ -653,14 +729,50 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
   // Session lifecycle
   // ---------------------------------------------------------------------
 
-  /** Cancels the in-flight prompt and lets the session stay warm. */
+  /**
+   * Cancels the in-flight prompt and lets the session stay warm. Devin ignores
+   * `session/cancel` while a turn is blocked inside a tool call, so when the
+   * prompt has not settled within {@link cancelSettleTimeoutMs} the child is
+   * killed and a replacement ACP process is warmed in the background. The next
+   * turn reuses it and reloads the Devin session via `session/load`, so Stop
+   * is a guaranteed escape even for a wedged child.
+   */
   async stopSession(sessionId: string): Promise<void> {
     const entry = this.sessions.get(sessionId);
     if (!entry) return;
     entry.pendingUserStopAbort = true;
     this.cancelPendingPermissionsForSession(sessionId);
     await entry.acpRuntime.cancel().catch(() => undefined);
-    await entry.turnChain.catch(() => undefined);
+    const settled = await Promise.race([
+      entry.turnChain.then(() => true, () => true),
+      new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => resolve(false), this.cancelSettleTimeoutMs);
+        timer.unref?.();
+      }),
+    ]);
+    if (settled) return;
+    logger.warn("Devin turn ignored session/cancel; killing ACP child and warming a replacement", {
+      sessionId,
+      threadId: entry.threadId,
+      acpSessionId: entry.acpSessionId,
+    });
+    await this.sessions.stop(sessionId).catch((error: unknown) => {
+      logger.warn("Devin ACP session teardown failed after ignored cancel", {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+    void this.sessions.acquire({
+      sessionId,
+      threadId: entry.threadId,
+      cwd: entry.cwd,
+      permissionMode: entry.permissionMode,
+    }).catch((error: unknown) => {
+      logger.warn("Devin ACP warm respawn failed", {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   /** Force-discards the pooled session so the next turn spawns fresh. */
@@ -863,9 +975,15 @@ export class DevinProvider extends NodeEvents.EventEmitter implements IAgentProv
     const raw = update.update as Record<string, unknown>;
     if (raw.sessionUpdate === "current_mode_update") this.applyObservedDevinMode(entry, raw.currentModeId);
     if (raw.sessionUpdate === "config_option_update") this.observeAdvertisedModes(entry, raw);
-    if (raw.sessionUpdate === "usage_update") this.observeUsageCost(entry, raw);
     const state = entry.activeTurnState ?? entry.replayTurnState;
     if (!state) return;
+    if (!entry.acpRuntime.state.sessionId) {
+      // session/load replays the full history before it resolves; absorb it
+      // into the replay state without republishing it as live turn output.
+      mapDevinAcpSessionNotification(update, entry.threadId, state);
+      return;
+    }
+    if (raw.sessionUpdate === "usage_update") this.observeUsageCost(entry, raw);
     const routing = this.pendingTurnRoutings.get(entry.mcodeSessionId);
     for (const event of mapDevinAcpSessionNotification(update, entry.threadId, state)) {
       this.publishEntryEvent(entry, routing, event);

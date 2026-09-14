@@ -18,6 +18,7 @@ const whichMock = vi.mocked(which as unknown as (cmd: string) => Promise<string 
 interface CapturedAcpCallbacks {
   onPermissionRequest?: (request: AcpPermissionRequest) => Promise<AcpPermissionOutcome>;
   onSessionUpdate?: (update: unknown) => Promise<void>;
+  onExtensionNotification?: (method: string, params: unknown) => Promise<void>;
   readTextFile?: (path: string) => Promise<{ content: string } | string>;
   writeTextFile?: (path: string, content: string) => Promise<void>;
 }
@@ -117,6 +118,7 @@ function mockAcpStart(runtimes: FakeRuntime[]) {
     if (!fake) throw new Error("Unexpected Devin ACP spawn");
     fake.callbacks.onPermissionRequest = options.callbacks.onPermissionRequest;
     fake.callbacks.onSessionUpdate = options.callbacks.onSessionUpdate;
+    fake.callbacks.onExtensionNotification = options.callbacks.onExtensionNotification;
     fake.callbacks.readTextFile = options.callbacks.readTextFile;
     fake.callbacks.writeTextFile = options.callbacks.writeTextFile;
     return fake.runtime;
@@ -179,10 +181,10 @@ describe("DevinProvider", () => {
     provider = undefined;
   });
 
-  function createProvider(host: ProviderHostPorts): DevinProvider {
+  function createProvider(host: ProviderHostPorts, cancelSettleTimeoutMs?: number): DevinProvider {
     provider = new DevinProvider(host, {
       settings: { get: () => getDefaultSettings() },
-    }, 60_000);
+    }, 60_000, cancelSettleTimeoutMs);
     return provider;
   }
 
@@ -561,5 +563,251 @@ describe("DevinProvider", () => {
     await p.stopSession("mcode-thread-1");
     await sending;
     expect(fake.runtime.cancel).toHaveBeenCalledOnce();
+  });
+
+  it("auto-continues with a follow-up prompt when the turn hits Devin's request limit", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    starts.push(mockAcpStart([fake]));
+    createProvider(host);
+
+    vi.mocked(fake.runtime.prompt)
+      .mockImplementationOnce(async () => ({ stopReason: "max_turn_requests", usage: {} }))
+      .mockImplementationOnce(async () => ({ stopReason: "end_turn", usage: { inputTokens: 1, outputTokens: 1 } }));
+
+    await provider!.sendTurn(turn());
+
+    expect(fake.runtime.prompt).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(fake.runtime.prompt).mock.calls[1][0]).toEqual({
+      prompt: [{ type: "text", text: "continue" }],
+    });
+    const events = submittedRuntimeEvents(host);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "system", subtype: "devin_auto_continue" }),
+      expect.objectContaining({ type: "turnComplete", reason: "end_turn" }),
+    ]));
+  });
+
+  it("stops auto-continuing at the bound and reports the limit reason", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    starts.push(mockAcpStart([fake]));
+    createProvider(host);
+
+    vi.mocked(fake.runtime.prompt).mockImplementation(
+      async () => ({ stopReason: "max_turn_requests", usage: {} }),
+    );
+
+    await provider!.sendTurn(turn());
+
+    // 1 initial prompt + 8 continuations (MAX_AUTO_CONTINUES)
+    expect(fake.runtime.prompt).toHaveBeenCalledTimes(9);
+    expect(submittedRuntimeEvents(host)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "turnComplete", reason: "max_turn_requests" }),
+    ]));
+  });
+
+  it("does not auto-continue a refusal", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    starts.push(mockAcpStart([fake]));
+    createProvider(host);
+
+    vi.mocked(fake.runtime.prompt).mockImplementation(
+      async () => ({ stopReason: "refusal", usage: {} }),
+    );
+
+    await provider!.sendTurn(turn());
+
+    expect(fake.runtime.prompt).toHaveBeenCalledTimes(1);
+    expect(submittedRuntimeEvents(host)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "turnComplete", reason: "refusal" }),
+    ]));
+  });
+
+  it("marks the turn cancelled when the prompt resolves with the cancelled stop reason", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    starts.push(mockAcpStart([fake]));
+    createProvider(host);
+
+    vi.mocked(fake.runtime.prompt).mockImplementation(
+      async () => ({ stopReason: "cancelled", usage: {} }),
+    );
+
+    await provider!.sendTurn(turn());
+
+    expect(submittedRuntimeEvents(host)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "ended", outcome: "cancelled" }),
+    ]));
+  });
+
+  it("marks the turn cancelled when the prompt rejects after a user stop", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    starts.push(mockAcpStart([fake]));
+    const p = createProvider(host);
+
+    let rejectPrompt!: (error: unknown) => void;
+    vi.mocked(fake.runtime.prompt).mockImplementation(
+      async () => await new Promise((_, reject) => { rejectPrompt = reject; }),
+    );
+
+    const sending = p.sendTurn(turn());
+    await vi.waitFor(() => expect(fake.runtime.prompt).toHaveBeenCalledOnce());
+    const stopping = p.stopSession("mcode-thread-1");
+    rejectPrompt(new Error("Request cancelled"));
+    await Promise.all([sending, stopping]);
+
+    const events = submittedRuntimeEvents(host);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "ended", outcome: "cancelled" }),
+    ]));
+    expect(events.some((event) => event.type === "error")).toBe(false);
+    // A prompt that settles after cancel keeps the session warm; no kill.
+    expect(fake.runtime.close).not.toHaveBeenCalled();
+  });
+
+  it("kills a wedged child and warms a replacement when cancel is ignored", async () => {
+    const host = createHost();
+    const stuck = createFakeRuntime("devin-acp-1", 101);
+    const warm = createFakeRuntime("devin-acp-2", 102);
+    starts.push(mockAcpStart([stuck, warm]));
+    const p = createProvider(host, 25);
+
+    let rejectPrompt!: (error: unknown) => void;
+    vi.mocked(stuck.runtime.prompt).mockImplementation(
+      async () => await new Promise((_, reject) => { rejectPrompt = reject; }),
+    );
+    // The ACP SDK rejects pending requests when the child dies and the
+    // connection drops; emulate that on the fake's close.
+    vi.mocked(stuck.runtime.close).mockImplementation(async () => {
+      rejectPrompt(new Error("ACP connection closed"));
+    });
+
+    const sending = p.sendTurn(turn());
+    await vi.waitFor(() => expect(stuck.runtime.prompt).toHaveBeenCalledOnce());
+    await p.stopSession("mcode-thread-1");
+    await sending;
+
+    expect(stuck.runtime.close).toHaveBeenCalledOnce();
+    expect(vi.mocked(host.processes.terminateTree)).toHaveBeenCalledWith(101);
+    await vi.waitFor(() => expect(warm.runtime.initialize).toHaveBeenCalledOnce());
+    expect(submittedRuntimeEvents(host)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "ended", outcome: "cancelled" }),
+    ]));
+  });
+
+  it("resumes the Devin session on the warmed process after a forced kill", async () => {
+    const host = createHost();
+    const stuck = createFakeRuntime("devin-acp-1", 101);
+    const warm = createFakeRuntime("devin-acp-2", 102);
+    starts.push(mockAcpStart([stuck, warm]));
+    const p = createProvider(host, 25);
+
+    let rejectPrompt!: (error: unknown) => void;
+    vi.mocked(stuck.runtime.prompt).mockImplementation(
+      async () => await new Promise((_, reject) => { rejectPrompt = reject; }),
+    );
+    vi.mocked(stuck.runtime.close).mockImplementation(async () => {
+      rejectPrompt(new Error("ACP connection closed"));
+    });
+
+    const sending = p.sendTurn(turn());
+    await vi.waitFor(() => expect(stuck.runtime.prompt).toHaveBeenCalledOnce());
+    await p.stopSession("mcode-thread-1");
+    await sending;
+    await vi.waitFor(() => expect(warm.runtime.initialize).toHaveBeenCalledOnce());
+
+    await p.sendTurn(turn({
+      turnId: "turn-2",
+      turnExecutionId: "execution-2",
+      resumeFrom: "devin-acp-1",
+    }));
+
+    // The warm entry was reused (a third spawn would throw in mockAcpStart)
+    // and the thread's persisted cursor reloads the same Devin session.
+    expect(warm.connection.loadSession).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "devin-acp-1" }),
+    );
+    expect(warm.runtime.prompt).toHaveBeenCalledOnce();
+  });
+
+  it("prefers the agent_stopped cause when it is more specific than the stop reason", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    starts.push(mockAcpStart([fake]));
+    createProvider(host);
+
+    vi.mocked(fake.runtime.prompt).mockImplementation(async () => {
+      await fake.callbacks.onExtensionNotification?.("_cognition.ai/agent_stopped", {
+        cause: "quota_exhausted",
+        stats: {},
+      });
+      return { stopReason: "end_turn", usage: {} };
+    });
+
+    await provider!.sendTurn(turn());
+
+    expect(submittedRuntimeEvents(host)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "turnComplete", reason: "quota_exhausted" }),
+      expect.objectContaining({ type: "ended", outcome: "interrupted" }),
+    ]));
+  });
+
+  it("auto-continues when agent_stopped reports output_truncated", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    starts.push(mockAcpStart([fake]));
+    createProvider(host);
+
+    let call = 0;
+    vi.mocked(fake.runtime.prompt).mockImplementation(async () => {
+      call += 1;
+      if (call === 1) {
+        await fake.callbacks.onExtensionNotification?.("_cognition.ai/agent_stopped", {
+          cause: "output_truncated",
+        });
+      }
+      return { stopReason: "end_turn", usage: {} };
+    });
+
+    await provider!.sendTurn(turn());
+
+    expect(fake.runtime.prompt).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(fake.runtime.prompt).mock.calls[1][0]).toEqual({
+      prompt: [{ type: "text", text: "continue" }],
+    });
+  });
+
+  it("absorbs session/load replay without republishing it as turn output", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    starts.push(mockAcpStart([fake]));
+    createProvider(host);
+
+    fake.connection.loadSession.mockImplementation(async ({ sessionId }: { sessionId: string }) => {
+      await fake.callbacks.onSessionUpdate?.({
+        sessionId,
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "historical reply" },
+        },
+      });
+      return { sessionId };
+    });
+    vi.mocked(fake.runtime.prompt).mockImplementation(async () => {
+      await textChunk(fake, "saved-acp-session", "live reply");
+      return { stopReason: "end_turn", usage: {} };
+    });
+
+    await provider!.sendTurn(turn({ resumeFrom: "saved-acp-session" }));
+
+    const events = submittedRuntimeEvents(host);
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "textDelta", delta: "live reply" }),
+    ]));
+    expect(events.some((event) => event.type === "textDelta" && event.delta === "historical reply")).toBe(false);
+    expect(events.some((event) => event.type === "message" && event.content === "historical reply")).toBe(false);
   });
 });
