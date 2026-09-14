@@ -521,6 +521,8 @@ export function Composer({
     cancelEdit: cancelEditFromQueue,
     discardEmptyEdit,
     finishEditing,
+    consumeEditForDispatch,
+    releaseConsumedEdit,
     resolvePreviewAnnotations,
     markRestoredPreviewAnnotationsCleared,
   } = useComposerQueueController({
@@ -541,9 +543,11 @@ export function Composer({
       queueIfGenerating,
       discardEmptyEdit,
       finishEditing,
+      consumeEditForDispatch,
+      releaseConsumedEdit,
       resolvePreviewAnnotations,
     }),
-    [discardEmptyEdit, editingFromQueue, finishEditing, queueIfGenerating, resolvePreviewAnnotations],
+    [consumeEditForDispatch, discardEmptyEdit, editingFromQueue, finishEditing, queueIfGenerating, releaseConsumedEdit, resolvePreviewAnnotations],
   );
   const {
     submit: handleSend,

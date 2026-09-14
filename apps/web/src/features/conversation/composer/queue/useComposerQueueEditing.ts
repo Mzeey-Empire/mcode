@@ -82,6 +82,8 @@ export function useComposerQueueEditing({
   cancelEdit: () => void;
   discardEmptyEdit: () => boolean;
   finishEditing: () => void;
+  consumeEditForDispatch: () => void;
+  releaseConsumedEdit: () => void;
   resolvePreviewAnnotations: (
     currentPreviewAnnotations: PreviewAnnotationBundle | undefined,
   ) => PreviewAnnotationBundle | undefined;
@@ -90,12 +92,24 @@ export function useComposerQueueEditing({
   const [editing, setEditing] = useState<ComposerQueueEdit | null>(null);
   const originalMessageRef = useRef<QueuedMessage | null>(null);
   const restoredPreviewAnnotationsClearedRef = useRef(false);
+  // While a direct dispatch owns the edit's content, cancel/discard must not
+  // reinsert the popped original — it would resend as a ghost queue entry.
+  const editConsumedByDispatchRef = useRef(false);
 
   const finishEditing = useCallback(() => {
+    editConsumedByDispatchRef.current = false;
     originalMessageRef.current = null;
     restoredPreviewAnnotationsClearedRef.current = false;
     setEditing(null);
     useQueueStore.getState().setEditingThreadId(null);
+  }, []);
+
+  const consumeEditForDispatch = useCallback(() => {
+    if (editing) editConsumedByDispatchRef.current = true;
+  }, [editing]);
+
+  const releaseConsumedEdit = useCallback(() => {
+    editConsumedByDispatchRef.current = false;
   }, []);
 
   const resolvePreviewAnnotations = useCallback(
@@ -115,7 +129,7 @@ export function useComposerQueueEditing({
 
   const loadIntoComposer = useCallback(
     (message: QueuedMessage) => {
-      if (!threadId) return;
+      if (!threadId || editConsumedByDispatchRef.current) return;
 
       const queue = useQueueStore.getState();
       const targetIndex = (queue.queues[threadId] ?? []).findIndex(
@@ -153,7 +167,7 @@ export function useComposerQueueEditing({
   );
 
   const cancelEdit = useCallback(() => {
-    if (!threadId || !editing) return;
+    if (!threadId || !editing || editConsumedByDispatchRef.current) return;
 
     form.invalidateAttachments();
     const original = originalMessageRef.current;
@@ -167,7 +181,7 @@ export function useComposerQueueEditing({
   }, [annotations, editing, finishEditing, form, threadId]);
 
   const discardEmptyEdit = useCallback((): boolean => {
-    if (!threadId || !editing) return false;
+    if (!threadId || !editing || editConsumedByDispatchRef.current) return false;
 
     const slot = editing.originalIndex;
     const browserCaptureSpillPaths = originalMessageRef.current?.browserCaptureSpillPaths ?? [];
@@ -187,6 +201,8 @@ export function useComposerQueueEditing({
     cancelEdit,
     discardEmptyEdit,
     finishEditing,
+    consumeEditForDispatch,
+    releaseConsumedEdit,
     resolvePreviewAnnotations,
     markRestoredPreviewAnnotationsCleared,
   };
