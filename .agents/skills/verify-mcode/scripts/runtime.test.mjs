@@ -23,6 +23,17 @@ function runBunCommand(args) {
   });
 }
 
+NodeTest.test("lists every runtime command through the public wrapper help", async () => {
+  const help = await runBunCommand([CLI, "--help"]);
+
+  NodeAssertStrict.equal(help.code, 0);
+  NodeAssertStrict.equal(help.stderr, "");
+  NodeAssertStrict.match(
+    help.stdout,
+    /^  runtime <health\|check\|console-audit\|inspect\|live\|worktree-setup\|worktree-setup-cleanup\|diagnostics\|cleanup>$/m,
+  );
+});
+
 NodeTest.test("lists and validates the OpenCode resume proof contract without a provider call", async () => {
   const help = await runBunCommand([CLI, "runtime", "--help"]);
   const invalid = await runBunCommand([

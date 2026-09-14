@@ -40,8 +40,8 @@ cannot be tested.
 Run `bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs --help` for the command reference.
 
 Run a selected runtime check with `runtime check --phase runtime`, `provider`,
-`contract`, or `ui`. Repeat `--phase` to select several areas. With no phase,
-the command runs every area and retains its normal failure behavior.
+`acp`, `contract`, or `ui`. Repeat `--phase` to select several phases. With no
+phase, the command runs every phase and retains its normal failure behavior.
 
 Run `runtime health` before AgentService, provider-event, turn-runtime, or selected-text-comments proof. The runtime area rejects a missing or stale server bundle or runtime contract before it calls `/health`.
 

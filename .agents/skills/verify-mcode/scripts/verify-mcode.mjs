@@ -13,7 +13,7 @@ Areas:
       Seed synthetic transcript history in an idle owned Electron runtime.
   composer-queue <check|health|proof|navigation-repro|inspect|cleanup>
       Verify the production Electron composer queue for the fixed Codex and Cursor matrix.
-  runtime <health|check|inspect|live|diagnostics|cleanup>
+  runtime <health|check|console-audit|inspect|live|worktree-setup|worktree-setup-cleanup|diagnostics|cleanup>
       Verify AgentService, provider events, turn runtime, and runtime cleanup.
   provider-completeness <health|proof|cleanup>
       Drive the Codex Composer and Last turn Review journey in web and Electron.
