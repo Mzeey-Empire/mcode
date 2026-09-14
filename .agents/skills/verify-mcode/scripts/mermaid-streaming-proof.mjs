@@ -140,9 +140,9 @@ async function main() {
     receipt.threadId = thread.id;
     note("thread-created", { threadId: thread.id });
 
-    const send = () => socket.rpc("agent.send", {
+    const send = (content = "mermaid streaming") => socket.rpc("agent.send", {
       threadId: thread.id,
-      content: "mermaid streaming",
+      content,
       messageId: NodeCrypto.randomUUID(),
       provider: "codex",
       model: "gpt-5.6-luna",
@@ -184,6 +184,30 @@ async function main() {
     await assertSettled(page, stopButton, latestResponse(), note);
     await page.screenshot({ path: NodePath.join(evidenceDir, "completed.png"), fullPage: false });
     note("completed-diagram-persisted");
+
+    // Turn 3: a commentary segment ends on a complete table, then a tool call
+    // starts and holds inProgress. The segment end is the green pass — the
+    // ended text row must render a real table while the turn still runs, not
+    // park on the "table assembling" skeleton.
+    await send("table boundary");
+    note("boundary-turn-started");
+    const boundaryRow = page.locator("div.px-2.py-1").filter({ hasText: "Boundary check" });
+    await boundaryRow.locator("th").first().waitFor({ state: "visible", timeout: 12000 });
+    const boundaryStillRunning = await stopButton.isVisible();
+    const boundarySkeleton = await boundaryRow
+      .locator('[data-testid="streaming-skeleton"]')
+      .isVisible()
+      .catch(() => false);
+    note("boundary-table-rendered", { stillRunning: boundaryStillRunning, skeleton: boundarySkeleton });
+    if (!boundaryStillRunning) {
+      throw new Error("Ended-segment table only rendered after the turn finished");
+    }
+    if (boundarySkeleton) {
+      throw new Error("Ended segment still shows an assembling skeleton");
+    }
+    await page.screenshot({ path: NodePath.join(evidenceDir, "boundary-mid-run.png"), fullPage: false });
+    await stopButton.waitFor({ state: "hidden", timeout: 60000 });
+    note("boundary-turn-settled");
 
     receipt.ok = true;
   } finally {
