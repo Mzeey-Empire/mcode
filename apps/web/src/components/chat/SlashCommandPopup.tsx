@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Command, PopupState } from "./useSlashCommand";
 import { ComposerOverlaySurface } from "./ComposerOverlaySurface";
+import { shortenPathPrefixedName } from "./command-name";
 import { EntityIcon } from "./EntityToken";
 
 const ITEM_HEIGHT = 40;
@@ -13,7 +14,7 @@ const LIST_SURFACE_PADDING = 8;
 const LIST_BOTTOM_FADE_HEIGHT = 20;
 function commandDisplayLabel(command: Command): string {
   if (command.capabilityKind === "plugin") return `@${command.name}`;
-  if (command.namespace === "skill") return command.name;
+  if (command.namespace === "skill") return shortenPathPrefixedName(command.name);
   if (command.namespace === "plugin") return command.name.split(":").at(-1) ?? command.name;
   return `/${command.name}`;
 }
@@ -306,17 +307,21 @@ function duplicateSkillOriginTag(
     return undefined;
   }
 
+  return command.source === "project" || isLocalSkillPath(command, workspacePath)
+    ? "Local"
+    : undefined;
+}
+
+function isLocalSkillPath(command: Command, workspacePath?: string): boolean {
   const nativePath = normalizePath(command.identity?.nativeId ?? command.nativeId);
   const localSkillPath = workspacePath
     ? `${normalizePath(workspacePath).replace(/\/+$/, "")}/.codex/skills/`
     : undefined;
-  const isCodexSkillPath =
+  return (
+    (localSkillPath !== undefined && nativePath.startsWith(localSkillPath)) ||
     nativePath.startsWith(".codex/skills/") ||
-    nativePath.includes("/.codex/skills/");
-  return (localSkillPath !== undefined && nativePath.startsWith(localSkillPath)) ||
-    isCodexSkillPath
-    ? "Local"
-    : undefined;
+    nativePath.includes("/.codex/skills/")
+  );
 }
 
 function normalizePath(path: string): string {

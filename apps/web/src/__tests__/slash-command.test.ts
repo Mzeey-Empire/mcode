@@ -989,9 +989,9 @@ describe("includeBuiltins: false", () => {
 });
 
 describe("plugin namespace detection", () => {
-  it("assigns 'plugin' namespace to skills with colon in name", async () => {
+  it("assigns 'plugin' namespace to plugin-sourced skills with colon in name", async () => {
     const mockCatalog = catalogMock([
-      { name: "superpowers:project-manager", description: "Manage projects" },
+      { name: "superpowers:project-manager", description: "Manage projects", source: "plugin" },
       { name: "commit", description: "Create a git commit" },
     ]);
     vi.mocked(getTransport).mockReturnValue({ getProviderCatalog: mockCatalog } as never);
@@ -1008,6 +1008,25 @@ describe("plugin namespace detection", () => {
     const skillCmd = result.current.items.find((i) => i.name === "commit");
     expect(pluginCmd?.namespace).toBe("plugin");
     expect(skillCmd?.namespace).toBe("skill");
+  });
+
+  it("keeps compat-prefixed names like 'claude:prototype' in the skill namespace", async () => {
+    const mockCatalog = catalogMock([
+      { name: "claude:prototype", description: "Prototype (claude)" },
+      { name: "agents:prototype", description: "Prototype (agents)" },
+    ]);
+    vi.mocked(getTransport).mockReturnValue({ getProviderCatalog: mockCatalog } as never);
+
+    const ref = makeAnchor();
+    const { result } = renderHook(() =>
+      useSlashCommand({ anchorRef: ref, providerId: "devin" })
+    );
+
+    await act(async () => { result.current.onInputChange("/"); });
+    await act(async () => {});
+
+    expect(result.current.items.find((i) => i.name === "claude:prototype")?.namespace).toBe("skill");
+    expect(result.current.items.find((i) => i.name === "agents:prototype")?.namespace).toBe("skill");
   });
 
   it("assigns 'plugin' namespace to native plugin skills without colon in name", async () => {

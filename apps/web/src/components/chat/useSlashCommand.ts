@@ -9,6 +9,7 @@ import {
   type ProviderCapabilityEntry,
   type ProviderCapabilityKind,
   type ProviderCapabilityIdentity,
+  type SkillSource,
 } from "@mcode/contracts";
 import type { ProviderCatalogRequest } from "@/transport";
 import type { SlashCommandNamespace } from "./lexical/SlashCommandNode";
@@ -30,6 +31,8 @@ export interface Command {
   nativeId: string;
   mentionPath?: string;
   identity?: ProviderCapabilityIdentity;
+  /** Discovery scope of the backing skill entry; used to tag project-local duplicates. */
+  source?: SkillSource;
   /** For mcode-namespace commands, the action string dispatched on selection. */
   action?: ComposerCommandAction;
 }
@@ -105,9 +108,12 @@ function toCommand(entry: ProviderCapabilityEntry): Command | null {
       namespace: "command",
     };
   }
+  // Compat-prefixed names like `claude:prototype` are ordinary skills, not
+  // plugins: every catalog producer tags real plugin skills source "plugin".
   return {
     ...base,
-    namespace: entry.source === "plugin" || entry.name.includes(":") ? "plugin" : "skill",
+    source: entry.source,
+    namespace: entry.source === "plugin" ? "plugin" : "skill",
   };
 }
 
