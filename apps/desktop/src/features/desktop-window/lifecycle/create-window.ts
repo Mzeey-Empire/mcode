@@ -22,6 +22,9 @@ function forwardRendererConsoleErrors(window: BrowserWindow): void {
   const forwardedAt: number[] = [];
   window.webContents.on("console-message", (details) => {
     if (details.level !== "error" || typeof details.message !== "string") return;
+    // Benign browser notification: deferred ResizeObserver deliveries still
+    // run next frame. Forwarding it only floods the log.
+    if (details.message.startsWith("ResizeObserver loop")) return;
     const now = Date.now();
     while (forwardedAt.length > 0 && now - forwardedAt[0]! > RENDERER_CONSOLE_FORWARD_WINDOW_MS) {
       forwardedAt.shift();
