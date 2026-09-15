@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { render, screen, act, fireEvent, within } from "@testing-library/react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts";
@@ -446,18 +447,17 @@ describe("ProjectTree thread interactions", () => {
     expect(state.loadThreads).toHaveBeenCalledWith("ws-1");
   });
 
-  it("keeps virtual row identity tied to thread IDs as a new thread is replaced", () => {
+  it("keeps the group row stable and rekeys thread items as a thread is replaced", () => {
     const oldThreads = [
       makeThread({ id: "old-thread-1", title: "Old thread 1" }),
       makeThread({ id: "old-thread-2", title: "Old thread 2" }),
     ];
     const state = setupStoreMocks({ threads: oldThreads });
     const view = render(<ProjectTree />);
-    expect(publishedRowIdHistory.at(-1)).toEqual([
-      "ws:ws-1",
-      "ws:ws-1:t:old-thread-1",
-      "ws:ws-1:t:old-thread-2",
-    ]);
+    expect(publishedRowIdHistory.at(-1)).toEqual(["ws:ws-1"]);
+    const stableThread = view.container.querySelector(
+      '[data-thread-id="old-thread-1"]',
+    );
     publishedRowIdHistory.length = 0;
 
     state.threads = [
@@ -469,12 +469,10 @@ describe("ProjectTree thread interactions", () => {
       ...oldThreads,
     ];
     act(() => view.rerender(<ProjectTree />));
-    expect(publishedRowIdHistory.at(-1)).toEqual([
-      "ws:ws-1",
-      "ws:ws-1:t:placeholder-thread",
-      "ws:ws-1:t:old-thread-1",
-      "ws:ws-1:t:old-thread-2",
-    ]);
+    expect(publishedRowIdHistory.at(-1)).toEqual(["ws:ws-1"]);
+    expect(
+      view.container.querySelector('[data-thread-id="placeholder-thread"]'),
+    ).not.toBeNull();
     publishedRowIdHistory.length = 0;
 
     state.threads = [
@@ -482,12 +480,13 @@ describe("ProjectTree thread interactions", () => {
       ...oldThreads,
     ];
     act(() => view.rerender(<ProjectTree />));
-    expect(publishedRowIdHistory.at(-1)).toEqual([
-      "ws:ws-1",
-      "ws:ws-1:t:server-thread",
-      "ws:ws-1:t:old-thread-1",
-      "ws:ws-1:t:old-thread-2",
-    ]);
+    expect(publishedRowIdHistory.at(-1)).toEqual(["ws:ws-1"]);
+    expect(
+      view.container.querySelector('[data-thread-id="server-thread"]'),
+    ).not.toBeNull();
+    expect(view.container.querySelector('[data-thread-id="old-thread-1"]')).toBe(
+      stableThread,
+    );
   });
 
   it("completes an idle thread from its hover action", async () => {
@@ -836,9 +835,10 @@ describe("ProjectTree thread interactions", () => {
     fireEvent.keyDown(projectRow, { code: "Space" });
     expect(document.body).toHaveStyle({ cursor: "grabbing" });
 
-    expect(screen.getByRole("button", { name: /^Provider, Claude My Thread/i })).toBeVisible();
-    // The DragOverlay clones the dragged workspace row outside the viewport.
+    // The DragOverlay clones the whole project group outside the viewport, so
+    // queries that must hit the real row scope to the tree.
     const tree = within(screen.getByTestId("project-tree-viewport"));
+    expect(tree.getByRole("button", { name: /^Provider, Claude My Thread/i })).toBeVisible();
     expect(
       tree.getByRole("button", { name: "Toggle threads for Test Project" }),
     ).toHaveAttribute("aria-expanded", "true");
@@ -1251,6 +1251,173 @@ describe("ProjectTree thread interactions", () => {
     // Navigation must fire immediately (no timer advance needed).
     expect(setActiveThread).toHaveBeenCalledWith("thread-1");
     expect(setActiveThread).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads threads once when a collapsed project expands under StrictMode", () => {
+    localStorage.setItem(
+      "mcode-expanded-projects",
+      JSON.stringify({ "ws-1": false }),
+    );
+    const state = setupStoreMocks();
+
+    render(
+      <StrictMode>
+        <ProjectTree />
+      </StrictMode>,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle threads for Test Project" }),
+    );
+
+    // StrictMode double-invokes state updaters; a load fired from inside the
+    // updater would run twice.
+    expect(state.loadThreads).toHaveBeenCalledTimes(1);
+    expect(state.loadThreads).toHaveBeenCalledWith("ws-1");
+  });
+
+  it("puts the sortable affordance on the focusable project row", () => {
+    setupStoreMocks();
+    render(<ProjectTree />);
+
+    const row = screen.getByTestId("project-row-ws-1");
+    expect(row).toHaveAttribute("role", "group");
+    expect(row).toHaveAttribute("tabindex", "0");
+    expect(row).toHaveAttribute("aria-roledescription", "sortable");
+    expect(row.getAttribute("aria-describedby")).toMatch(/^DndDescribedBy-/);
+    // The positioning wrapper must not be a second tab stop.
+    expect(row.parentElement).not.toHaveAttribute("tabindex", "0");
+  });
+
+  it("keeps the lifecycle spinner across a collapse while completion is pending", async () => {
+    let resolveComplete!: () => void;
+    const completeThread = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveComplete = resolve;
+        }),
+    );
+    setupStoreMocks({ completeThread });
+
+    render(<ProjectTree />);
+    fireEvent.click(screen.getByRole("button", { name: "Complete My Thread" }));
+    await vi.waitFor(() =>
+      expect(completeThread).toHaveBeenCalledWith("thread-1"),
+    );
+
+    // Collapsing unmounts the virtualized thread row; the pending flag must
+    // outlive it.
+    const projectRow = screen.getByTestId("project-row-ws-1");
+    fireEvent.click(projectRow);
+    expect(
+      screen.queryByRole("button", { name: "Complete My Thread" }),
+    ).toBeNull();
+    fireEvent.click(projectRow);
+
+    const remounted = screen.getByRole("button", { name: "Complete My Thread" });
+    expect(remounted).toBeDisabled();
+    expect(remounted.querySelector(".status-spin")).toBeInTheDocument();
+    await act(async () => {
+      resolveComplete();
+    });
+  });
+
+  it("keeps a cleanup retry error across collapse and expand", async () => {
+    vi.useRealTimers();
+    try {
+      const retryThreadCleanup = vi
+        .fn()
+        .mockRejectedValue(new Error("still blocked"));
+      setupStoreMocks({
+        thread: makeThread({
+          title: "Blocked work",
+          user_completed_at: "2026-08-12T08:00:00.000Z",
+          cleanup_state: "blocked",
+          cleanup_reason: "The worktree has uncommitted changes.",
+        }),
+        retryThreadCleanup,
+      });
+
+      render(<ProjectTree />);
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "View 1 completed thread for Test Project",
+        }),
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "Retry cleanup for Blocked work" }),
+      );
+      expect(
+        await screen.findByText("Cleanup retry failed: Error: still blocked"),
+      ).toBeInTheDocument();
+
+      const projectRow = screen.getByTestId("project-row-ws-1");
+      fireEvent.click(projectRow);
+      fireEvent.click(projectRow);
+
+      expect(
+        screen.getByText("Cleanup retry failed: Error: still blocked"),
+      ).toBeInTheDocument();
+    } finally {
+      vi.useFakeTimers();
+    }
+  });
+
+  it("cancels an in-progress rename when the thread row unmounts", () => {
+    const updateThreadTitle = vi.fn().mockResolvedValue(undefined);
+    setupStoreMocks({ updateThreadTitle });
+    render(<ProjectTree />);
+
+    const threadRow = screen.getByRole("button", {
+      name: /^Provider, Claude My Thread/i,
+    });
+    fireEvent.click(threadRow);
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    fireEvent.click(threadRow);
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Unsaved draft" },
+    });
+
+    // Collapse unmounts the row; the draft must be cancelled, not stashed.
+    const projectRow = screen.getByTestId("project-row-ws-1");
+    fireEvent.click(projectRow);
+    fireEvent.click(projectRow);
+
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(updateThreadTitle).not.toHaveBeenCalled();
+    expect(screen.getByTestId("thread-title")).toHaveTextContent("My Thread");
+  });
+
+  it("swallows the click that fires when a drag ends", () => {
+    setupStoreMocks();
+    render(<ProjectTree />);
+    const projectRow = screen.getByTestId("project-row-ws-1");
+    // The drop-animation overlay clone lingers, so queries scope to the tree.
+    const threadRow = () =>
+      within(screen.getByTestId("project-tree-viewport")).queryByRole(
+        "button",
+        { name: /^Provider, Claude My Thread/i },
+      );
+
+    projectRow.focus();
+    fireEvent.keyDown(projectRow, { code: "Space" });
+    expect(document.body).toHaveStyle({ cursor: "grabbing" });
+    act(() => {
+      vi.runAllTimers();
+    });
+    fireEvent.keyDown(document, { code: "Space" });
+    expect(document.body).not.toHaveStyle({ cursor: "grabbing" });
+
+    // The browser fires a click under the pointer at drop; it must not toggle.
+    fireEvent.click(projectRow);
+    expect(threadRow()).not.toBeNull();
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    fireEvent.click(projectRow);
+    expect(threadRow()).toBeNull();
   });
 });
 
