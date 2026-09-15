@@ -395,12 +395,14 @@ export class CleanupWorker {
       nextRetryAt: failed?.next_retry_at ?? null,
       error,
     });
-    if (job.kind === "retention" && failed) this.updateFailedRetentionJob(job, failed.attempts);
+    if (job.kind === "retention" && failed) this.updateFailedRetentionJob(job, failed.attempts, error);
   }
 
-  private updateFailedRetentionJob(job: CleanupJob, attempts: number): void {
+  private updateFailedRetentionJob(job: CleanupJob, attempts: number, error: string): void {
     const exhausted = attempts >= MAX_CLEANUP_ATTEMPTS;
-    const reason = exhausted ? `Cleanup failed after ${MAX_CLEANUP_ATTEMPTS} attempts.` : "Cleanup failed. Mcode will retry.";
+    const reason = exhausted
+      ? `Cleanup failed after ${MAX_CLEANUP_ATTEMPTS} attempts. Last error: ${error.slice(-200)}`
+      : "Cleanup failed. Mcode will retry.";
     const thread = exhausted
       ? this.db.transaction(() => {
           this.cleanupJobRepo.delete(job.id);
@@ -427,6 +429,11 @@ export class CleanupWorker {
    * hard-deletes it immediately.
    */
   async reconcileOnStartup(): Promise<void> {
+    const requeued = this.cleanupJobRepo.requeueExhaustedJobs();
+    if (requeued > 0) {
+      logger.info("Requeued exhausted cleanup jobs", { requeued });
+    }
+
     const deletingWorkspaces = this.workspaceRepo.findDeleting();
 
     for (const ws of deletingWorkspaces) {

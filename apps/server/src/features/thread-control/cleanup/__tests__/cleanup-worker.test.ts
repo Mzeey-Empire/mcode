@@ -19,7 +19,9 @@ import { CleanupJobRepo } from "../persistence/cleanup-job-repo.js";
 
 const HOST_RUNTIME = { platform: "win32", architecture: "x64", nodeAbi: "127" } as const;
 
-describe("CleanupWorker sandbox worktrees", () => {
+// Each test runs a real teardown path: a PowerShell descendant scan plus the
+// 1.5s Windows handle-release delay puts every case near the 5s default.
+describe("CleanupWorker sandbox worktrees", { timeout: 20_000 }, () => {
   let database: Database;
   let cleanupJobs: CleanupJobRepo;
   let threads: ThreadRepo;
@@ -263,6 +265,79 @@ describe("CleanupWorker sandbox worktrees", () => {
 
     removal.resolve(true);
     await firstPoll;
+  });
+
+  it("requeues exhausted jobs on startup so stale worktrees get retried", async () => {
+    const workspace = workspaces.create("Project", "/repo");
+    addThread(
+      workspace.id,
+      "exhausted-explicit",
+      "C:\\Users\\user\\.mcode\\worktrees\\repo\\exhausted",
+      "feature/exhausted",
+      null,
+    );
+    threads.softDelete("exhausted-explicit");
+    const job = cleanupJobs.insert({
+      thread_id: "exhausted-explicit",
+      workspace_path: "/repo",
+      worktree_path: "C:\\Users\\user\\.mcode\\worktrees\\repo\\exhausted",
+      branch: "feature/exhausted",
+    });
+    database.prepare("UPDATE cleanup_jobs SET attempts = 5 WHERE id = ?").run(job.id);
+
+    expect(cleanupJobs.findDue(Date.now())).toHaveLength(0);
+
+    await worker.reconcileOnStartup();
+    await worker.poll();
+
+    expect(threads.findById("exhausted-explicit")).toBeNull();
+    expect(cleanupJobs.findById(job.id)).toBeNull();
+    expect(gitWorktrees.removeWorktree).toHaveBeenCalledOnce();
+  });
+
+  it("deletes exhausted orphan job rows on the next poll after startup requeue", async () => {
+    const job = cleanupJobs.insert({
+      thread_id: "thread-already-gone",
+      workspace_path: "/repo",
+      worktree_path: "C:\\Users\\user\\.mcode\\worktrees\\repo\\orphan",
+      branch: "feature/orphan",
+    });
+    database.prepare("UPDATE cleanup_jobs SET attempts = 5 WHERE id = ?").run(job.id);
+
+    await worker.reconcileOnStartup();
+    await worker.poll();
+
+    expect(cleanupJobs.findById(job.id)).toBeNull();
+    expect(gitWorktrees.removeWorktree).not.toHaveBeenCalled();
+  });
+
+  it("blocks a retention cleanup with the underlying removal error attached", async () => {
+    const workspace = workspaces.create("Project", "/repo");
+    addThread(
+      workspace.id,
+      "blocked-retention",
+      "C:\\Users\\user\\.mcode\\worktrees\\repo\\blocked",
+      "feature/blocked",
+      new Date(0).toISOString(),
+    );
+    database.prepare("UPDATE threads SET cleanup_state = 'queued' WHERE id = ?").run("blocked-retention");
+    const job = cleanupJobs.insert({
+      thread_id: "blocked-retention",
+      workspace_path: "/repo",
+      worktree_path: "C:\\Users\\user\\.mcode\\worktrees\\repo\\blocked",
+      branch: "feature/blocked",
+      kind: "retention",
+    });
+    database.prepare("UPDATE cleanup_jobs SET attempts = 4 WHERE id = ?").run(job.id);
+    vi.mocked(gitWorktrees.removeWorktree).mockRejectedValue(new Error("removal timed out"));
+
+    await worker.poll();
+
+    expect(threads.findById("blocked-retention")).toMatchObject({
+      cleanup_state: "blocked",
+      cleanup_reason: expect.stringContaining("removal timed out"),
+    });
+    expect(cleanupJobs.findById(job.id)).toBeNull();
   });
 
   it("does not admit cleanup after disposal", async () => {

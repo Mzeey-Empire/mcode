@@ -375,7 +375,9 @@ describe("completed thread cleanup Git safety", () => {
     expect(cleanupJobRepo.findByThreadId(thread.id)).toBeNull();
     expect(threadRepo.findById(thread.id)).toMatchObject({
       cleanup_state: "blocked",
-      cleanup_reason: `Cleanup failed after ${MAX_CLEANUP_ATTEMPTS} attempts.`,
+      cleanup_reason: expect.stringContaining(
+        `Cleanup failed after ${MAX_CLEANUP_ATTEMPTS} attempts. Last error:`,
+      ),
     });
     expect(NodeFS.existsSync(worktreePath)).toBe(true);
 

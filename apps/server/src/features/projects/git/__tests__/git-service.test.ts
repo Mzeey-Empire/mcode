@@ -192,15 +192,12 @@ describe("GitWorktreeService.removeWorktree", () => {
     expect(mockLogger.warn).toHaveBeenCalled();
   });
 
-  it("returns false when directory cannot be removed", async () => {
+  it("propagates the fallback removal error when the directory cannot be removed", async () => {
     execFn.mockRejectedValue(new Error("git failed"));
     mockExistsSync.mockReturnValue(true);
     mockRemove.mockRejectedValue(new Error("permission denied"));
 
-    const result = await gitService.removeWorktree("/repo", "my-worktree");
-
-    expect(result).toBe(false);
-    expect(mockLogger.error).toHaveBeenCalled();
+    await expect(gitService.removeWorktree("/repo", "my-worktree")).rejects.toThrow("permission denied");
   });
 
   it("succeeds even when branch deletion fails", async () => {
@@ -278,14 +275,12 @@ describe("GitWorktreeService.removeWorktree", () => {
     );
   });
 
-  it("leaves a worktree in place for retry when another application locks it", async () => {
+  it("propagates a lock error from fallback removal so the job records the real cause", async () => {
     execFn.mockRejectedValueOnce(new Error("git failed")); // worktree remove
     mockRemove.mockRejectedValueOnce(Object.assign(new Error("EBUSY"), { code: "EBUSY" }));
     mockExistsSync.mockReturnValue(true);
 
-    const result = await gitService.removeWorktree("/repo", "my-worktree");
-
-    expect(result).toBe(false);
+    await expect(gitService.removeWorktree("/repo", "my-worktree")).rejects.toThrow("EBUSY");
     expect(execFn).toHaveBeenCalledTimes(1);
   });
 
@@ -383,7 +378,7 @@ describe("GitWorktreeService.removeWorktree", () => {
     );
   });
 
-  it("gives up parent dir cleanup after exhausting EBUSY retries", async () => {
+  it("does not fail removal when only an empty parent dir remains locked", async () => {
     execFn.mockResolvedValue({ stdout: "", stderr: "" });
     mockExistsSync.mockReturnValue(false);
 
@@ -392,8 +387,8 @@ describe("GitWorktreeService.removeWorktree", () => {
 
     const result = await gitService.removeWorktree("/repo", "my-worktree", { deleteBranch: false });
 
-    // Parent cleanup failed with transient lock; returns false so cleanup worker retries
-    expect(result).toBe(false);
+    // The worktree itself is gone; a locked empty parent dir is retried by later cleanups.
+    expect(result).toBe(true);
     expect(mockRmdir).toHaveBeenCalledTimes(5);
     expect(mockLogger.warn).toHaveBeenCalledWith(
       "Failed to remove empty managed worktree parent dir",

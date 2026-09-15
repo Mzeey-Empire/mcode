@@ -1,12 +1,22 @@
 import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import { inject, injectable } from "tsyringe";
 
-/** Default hard limit for a recursive worktree directory removal. */
-export const DEFAULT_WORKTREE_REMOVAL_TIMEOUT_MS = 30_000;
+/**
+ * Default hard limit for a recursive worktree directory removal.
+ * The bound exists for a wedged filesystem call, not throughput: the
+ * platform-native commands below clear large trees in seconds, while the
+ * previous Node fs.rm payload needed longer than 30s on big node_modules
+ * checkouts and kept timing out mid-delete.
+ */
+export const DEFAULT_WORKTREE_REMOVAL_TIMEOUT_MS = 120_000;
 
 /** Maximum time allowed for confirming that a timed-out remover was killed. */
 const KILL_CONFIRMATION_TIMEOUT_MS = 1_000;
+
+/** Captured child output kept for error messages. */
+const OUTPUT_TAIL_LIMIT = 2_000;
 
 const REMOVE_SCRIPT = [
   "require('node:fs/promises').rm(process.argv[1], { recursive: true, force: true })",
@@ -19,6 +29,32 @@ export interface WorktreeDirectoryRemoverDependencies {
   killTree?: (child: NodeChildProcess.ChildProcess) => void | Promise<void>;
   platform?: NodeJS.Platform;
   timeoutMs?: number;
+}
+
+type RemovalCommand = {
+  file: string;
+  args: string[];
+  windowsVerbatimArguments?: boolean;
+};
+
+/**
+ * Pick the fastest correct removal command for the platform.
+ * cmd expands %VAR% even inside quotes, so cmd-hostile paths fall back to the
+ * Node fs.rm payload; managed worktree names never contain these characters.
+ */
+function removalCommand(target: string, platform: NodeJS.Platform): RemovalCommand {
+  if (platform === "win32") {
+    if (!/[%"\r\n]/.test(target)) {
+      return {
+        file: "cmd.exe",
+        args: ["/d", "/s", "/c", `rmdir /s /q "${target}"`],
+        // libuv re-quotes arguments containing spaces in a way cmd cannot parse.
+        windowsVerbatimArguments: true,
+      };
+    }
+    return { file: process.execPath, args: ["-e", REMOVE_SCRIPT, target] };
+  }
+  return { file: "rm", args: ["-rf", "--", target] };
 }
 
 /** Removes one validated worktree directory in an isolated child process. */
@@ -55,14 +91,18 @@ export class WorktreeDirectoryRemover {
       throw new Error(`Invalid worktree removal timeout: ${timeoutMs}`);
     }
 
-    const child = this.dependencies.spawn(process.execPath, ["-e", REMOVE_SCRIPT, target], {
-      cwd: NodePath.parse(target).dir,
+    const command = removalCommand(target, platform);
+    const pathApi = platform === "win32" ? NodePath.win32 : NodePath.posix;
+    const child = this.dependencies.spawn(command.file, command.args, {
+      cwd: pathApi.parse(target).dir,
       shell: false,
       windowsHide: true,
       detached: platform !== "win32",
+      windowsVerbatimArguments: command.windowsVerbatimArguments === true,
       env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
-      stdio: "ignore",
+      stdio: ["ignore", "pipe", "pipe"],
     });
+    const outputTail = captureBoundedOutput(child);
 
     await new Promise<void>((resolvePromise, rejectPromise) => {
       let settled = false;
@@ -109,10 +149,15 @@ export class WorktreeDirectoryRemover {
           return;
         }
         finish(new Error(
-          `Worktree directory removal failed${signal ? ` (${signal})` : ` with exit code ${code}`}: ${target}`,
+          `Worktree directory removal failed${signal ? ` (${signal})` : ` with exit code ${code}`}: ${target}${formatOutputTail(outputTail())}`,
         ));
       });
     });
+
+    // cmd's rmdir can exit 0 while leaving locked entries behind.
+    if (NodeFS.existsSync(target)) {
+      throw new Error(`Worktree directory removal reported success but path remains: ${target}`);
+    }
   }
 
   private requirePlatform(): NodeJS.Platform {
@@ -121,13 +166,29 @@ export class WorktreeDirectoryRemover {
   }
 }
 
+/** Keep the tail of child output for error messages without unbounded memory. */
+function captureBoundedOutput(child: NodeChildProcess.ChildProcess): () => string {
+  let tail = "";
+  const append = (chunk: unknown) => {
+    tail = (tail + String(chunk)).slice(-OUTPUT_TAIL_LIMIT);
+  };
+  child.stdout?.on("data", append);
+  child.stderr?.on("data", append);
+  return () => tail.trim();
+}
+
+function formatOutputTail(tail: string): string {
+  return tail ? `; output: ${tail}` : "";
+}
+
 /** Validate a child-process deletion target at the filesystem boundary. */
 export function validateRemovalTarget(targetPath: string, platform: NodeJS.Platform): string {
-  if (typeof targetPath !== "string" || !NodePath.isAbsolute(targetPath)) {
+  const pathApi = platform === "win32" ? NodePath.win32 : NodePath.posix;
+  if (typeof targetPath !== "string" || !pathApi.isAbsolute(targetPath)) {
     throw new Error(`Worktree removal target must be absolute: ${targetPath}`);
   }
-  const target = NodePath.resolve(targetPath);
-  if (target === NodePath.parse(target).root) {
+  const target = pathApi.resolve(targetPath);
+  if (target === pathApi.parse(target).root) {
     throw new Error(`Refusing to remove filesystem root: ${target}`);
   }
   const protectedPaths = [
@@ -186,6 +247,7 @@ function isEqualOrAncestor(candidate: string, protectedPath: string, platform: N
 
 /** Normalize path text for lexical ancestry checks. */
 function normalizePathForComparison(path: string, platform: NodeJS.Platform): string {
-  const normalized = NodePath.resolve(path);
+  const pathApi = platform === "win32" ? NodePath.win32 : NodePath.posix;
+  const normalized = pathApi.resolve(path);
   return platform === "win32" ? normalized.toLowerCase() : normalized;
 }
