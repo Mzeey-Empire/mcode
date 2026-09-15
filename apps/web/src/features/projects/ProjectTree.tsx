@@ -10,9 +10,9 @@ import {
   type CSSProperties,
   type ComponentPropsWithoutRef,
   type ComponentType,
+  type ReactNode,
 } from "react";
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import { useShallow } from "zustand/shallow";
 import { useWorkspaceStore } from "./state/workspaceStore";
 import { hasRecoveryEntry, useRecoveryIncidentStore } from "@/features/recovery/state/recoveryIncidentStore";
@@ -55,7 +55,12 @@ import {
 } from "@/components/chat/ProviderIcons";
 import { getPrVisual } from "@/lib/pr-status";
 import { cn } from "@/lib/utils";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { VirtualRows } from "@/components/ui/VirtualRows";
+import {
+  VirtualViewport,
+  type VirtualHost,
+  type ViewportPosition,
+} from "@/components/ui/virtual-viewport";
 import { ContextMenu } from "@/components/ui/context-menu";
 import {
   Dialog,
@@ -93,6 +98,7 @@ import { getThreadStateMarker, ThreadStateMarker } from "@/components/sidebar/Th
 import { useProjectAutomaticSetup } from "@/features/projects/environment";
 import {
   DndContext,
+  DragOverlay,
   closestCenter,
   KeyboardSensor,
   MeasuringStrategy,
@@ -132,9 +138,11 @@ const THREAD_LIST_CAP = 6;
 const EMPTY_THREADS: WorkspaceThread[] = [];
 
 const PROJECT_DND_MODIFIERS = [restrictToVerticalAxis];
+// The virtual list mounts project droppables only near the viewport, so they
+// must be measured as they register rather than once before the drag starts.
 const PROJECT_DND_MEASURING = {
   droppable: {
-    strategy: MeasuringStrategy.BeforeDragging,
+    strategy: MeasuringStrategy.Always,
   },
 } as const;
 
@@ -498,8 +506,9 @@ export function ProjectTree() {
     setThreadListExpanded(threadListExpanded);
   }, [threadListExpanded]);
 
-  const scrollViewportRef = useRef<HTMLDivElement>(null);
-  const pendingScrollTopRef = useRef<number | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const controllerRef = useRef<VirtualViewport | null>(null);
+  const [hosts, setHosts] = useState<readonly VirtualHost[]>([]);
 
   const checksById = useWorkspaceStore(useShallow((s) => s.checksById));
 
@@ -532,7 +541,6 @@ export function ProjectTree() {
 
   const toggleExpand = useCallback(
     (wsId: string) => {
-      pendingScrollTopRef.current = scrollViewportRef.current?.scrollTop ?? null;
       setExpanded((prev) => {
         const isExpanding = !prev[wsId];
         const next = { ...prev, [wsId]: isExpanding };
@@ -706,16 +714,6 @@ export function ProjectTree() {
     setActiveDragId(null);
   }, []);
 
-  useLayoutEffect(() => {
-    const previousScrollTop = pendingScrollTopRef.current;
-    if (previousScrollTop === null) return;
-
-    pendingScrollTopRef.current = null;
-    if (scrollViewportRef.current) {
-      scrollViewportRef.current.scrollTop = previousScrollTop;
-    }
-  }, [expanded]);
-
   /**
    * Only the project list viewport may autoscroll during drag so outer sidebar
    * regions (or the document) are not pulled by `@dnd-kit` when reordering.
@@ -723,7 +721,7 @@ export function ProjectTree() {
   const projectTreeAutoScroll = useMemo(
     () => ({
       canScroll(element: Element) {
-        const vp = scrollViewportRef.current;
+        const vp = controllerRef.current?.viewport;
         return vp != null && element === vp;
       },
     }),
@@ -738,6 +736,222 @@ export function ProjectTree() {
       document.body.style.cursor = prev;
     };
   }, [activeDragId]);
+
+  const worktrees = useWorkspaceStore((s) => s.worktrees);
+  const availableProviders = useProviderAvailabilityStore((s) => s.providers);
+  const runningThreadIds = useThreadStore((s) => s.runningThreadIds);
+  // Normalized set of existing worktree paths for stale detection.
+  const validWorktreePaths = useMemo(() => {
+    const set = new Set<string>();
+    for (const wt of worktrees) {
+      set.add(wt.path.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase());
+    }
+    return set;
+  }, [worktrees]);
+
+  // Per-thread last-click timestamp. Used to detect a second click within the
+  // double-click window without delaying the first click's navigation.
+  const lastClickTimeRef = useRef<Map<string, number>>(new Map());
+
+  const handleThreadClick = useCallback(
+    (wsId: string, threadId: string) => {
+      // If already editing this thread, clicks are absorbed to avoid conflicting with the input.
+      if (inlineEdit?.threadId === threadId) return;
+
+      const now = Date.now();
+      const hadPrevious = lastClickTimeRef.current.has(threadId);
+      const last = lastClickTimeRef.current.get(threadId) ?? 0;
+      const elapsed = now - last;
+      lastClickTimeRef.current.set(threadId, now);
+
+      if (hadPrevious && elapsed < DOUBLE_CLICK_THRESHOLD_MS) {
+        // Double-click: enter inline rename. The first click has already navigated,
+        // which is fine — the row is now active and rename happens in place.
+        lastClickTimeRef.current.delete(threadId);
+        handleStartInlineEdit(threadId);
+      } else {
+        // Single click navigates immediately. No artificial delay.
+        handleSelectThread(wsId, threadId);
+      }
+    },
+    [inlineEdit, handleSelectThread, handleStartInlineEdit],
+  );
+
+  const handleThreadDoubleClick = useCallback(
+    (threadId: string) => {
+      if (inlineEdit?.threadId === threadId) return;
+      lastClickTimeRef.current.delete(threadId);
+      handleStartInlineEdit(threadId);
+    },
+    [inlineEdit, handleStartInlineEdit],
+  );
+
+  // The vlist viewport renders one flat row stream: a workspace row followed by
+  // that workspace's expanded children (threads, empty note, show-more toggle).
+  // Rows outside the viewport are never mounted to the DOM.
+  const rows = useMemo<ProjectTreeRowEntry[]>(
+    () =>
+      buildProjectTreeRows({
+        workspaces,
+        threadsByWorkspace,
+        expanded,
+        threadListExpanded,
+        lifecycleViews,
+        activeThreadId,
+        activeWorkspaceId,
+        runningThreadIds,
+      }),
+    [
+      workspaces,
+      threadsByWorkspace,
+      expanded,
+      threadListExpanded,
+      lifecycleViews,
+      activeThreadId,
+      activeWorkspaceId,
+      runningThreadIds,
+    ],
+  );
+
+  const rowsById = useMemo(
+    () => new Map(rows.map((entry) => [entry.id, entry])),
+    [rows],
+  );
+
+  // The virtualizer unmounts rows that leave the render window, including the
+  // dragged row when auto-scroll moves its slot off screen. The overlay keeps
+  // a pointer-following clone so the drag never loses its visual.
+  const dragWorkspaceRow = useMemo(
+    () => findWorkspaceRow(rowsById, activeDragId),
+    [rowsById, activeDragId],
+  );
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const view = new VirtualViewport(
+      container,
+      setHosts,
+      noopViewportPosition,
+      { classPrefix: "project-tree", ariaLabel: "Projects" },
+    );
+    controllerRef.current = view;
+    return () => {
+      view.destroy();
+      controllerRef.current = null;
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    controllerRef.current?.setRows(rows);
+  }, [rows]);
+
+  const renderRow = useCallback(
+    (entry: ProjectTreeRowEntry): ReactNode => {
+      const row = entry.row;
+      let content: ReactNode;
+      if (row.kind === "workspace") {
+        content = (
+          <SortableProjectRow
+            workspace={row.workspace}
+            isExpanded={row.isExpanded}
+            isActive={row.isActive}
+            hasRunning={row.hasRunning}
+            lifecycleView={row.lifecycleView}
+            threadList={row.threadList}
+            checksById={checksById}
+            onToggle={toggleExpand}
+            onToggleLifecycleView={toggleLifecycleView}
+            onCreateThread={handleCreateThread}
+            onDelete={handleDeleteWorkspace}
+            onRename={handleRenameWorkspace}
+          />
+        );
+      } else if (row.kind === "thread") {
+        const { thread, depth } = row.item;
+        const isEditing = inlineEdit?.threadId === thread.id;
+        content = (
+          <div data-testid="thread-item" data-thread-id={thread.id}>
+            <ThreadRow
+              workspaceName={row.workspace.name}
+              thread={thread}
+              depth={depth}
+              hasPendingPermission={pendingPermissionThreadIds.has(thread.id)}
+              checks={checksById[thread.id]}
+              isEditing={isEditing}
+              inlineEdit={isEditing ? inlineEdit : null}
+              worktreesLoadedFor={worktreesLoadedForWorkspace}
+              validWorktreePaths={validWorktreePaths}
+              availableProviders={availableProviders}
+              onInlineEditChange={handleInlineEditChange}
+              onInlineEditCommit={handleInlineEditCommit}
+              onInlineEditCancel={handleInlineEditCancel}
+              onThreadClick={(threadId) =>
+                handleThreadClick(row.workspace.id, threadId)
+              }
+              onThreadDoubleClick={handleThreadDoubleClick}
+              onSelectThread={(threadId) =>
+                handleSelectThread(row.workspace.id, threadId)
+              }
+              onThreadContextMenu={(event, clicked) =>
+                handleThreadContextMenu(event, clicked, row.workspace.path)
+              }
+              onCompleteThread={completeThread}
+              onReopenThread={reopenThread}
+              onRetryThreadCleanup={retryThreadCleanup}
+            />
+          </div>
+        );
+      } else if (row.kind === "empty") {
+        content = (
+          <p
+            data-testid={`project-empty-${row.workspace.id}`}
+            className="px-9 py-1 font-mono text-xs text-muted-foreground/70"
+          >
+            {row.lifecycleView === "completed"
+              ? "No completed threads"
+              : "No active threads"}
+          </p>
+        );
+      } else {
+        content = (
+          <ProjectThreadListToggle
+            workspaceId={row.workspace.id}
+            isExpanded={row.isExpanded}
+            hiddenCount={row.hiddenCount}
+            onToggleThreadList={toggleThreadList}
+          />
+        );
+      }
+      return (
+        <div className={cn("px-1.5", entry.groupEnd && "pb-1")}>{content}</div>
+      );
+    },
+    [
+      checksById,
+      toggleExpand,
+      toggleLifecycleView,
+      handleCreateThread,
+      handleDeleteWorkspace,
+      handleRenameWorkspace,
+      inlineEdit,
+      pendingPermissionThreadIds,
+      worktreesLoadedForWorkspace,
+      validWorktreePaths,
+      availableProviders,
+      handleInlineEditChange,
+      handleInlineEditCommit,
+      handleInlineEditCancel,
+      handleThreadClick,
+      handleThreadDoubleClick,
+      handleSelectThread,
+      handleThreadContextMenu,
+      completeThread,
+      reopenThread,
+      retryThreadCleanup,
+      toggleThreadList,
+    ],
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -765,90 +979,72 @@ export function ProjectTree() {
         </Tooltip>
       </div>
 
-      <ScrollArea className="min-h-0 flex-1" viewportRef={scrollViewportRef}>
-        <div className="px-1.5" data-testid="thread-list">
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            modifiers={PROJECT_DND_MODIFIERS}
-            measuring={PROJECT_DND_MEASURING}
-            autoScroll={projectTreeAutoScroll}
-            onDragStart={handleProjectDragStart}
-            onDragEnd={handleProjectDragEnd}
-            onDragCancel={handleProjectDragCancel}
+      <div className="relative min-h-0 flex-1">
+        <div
+          ref={containerRef}
+          data-testid="thread-list"
+          className="h-full"
+        />
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          modifiers={PROJECT_DND_MODIFIERS}
+          measuring={PROJECT_DND_MEASURING}
+          autoScroll={projectTreeAutoScroll}
+          onDragStart={handleProjectDragStart}
+          onDragEnd={handleProjectDragEnd}
+          onDragCancel={handleProjectDragCancel}
+        >
+          <SortableContext
+            items={workspaceIds}
+            strategy={verticalListSortingStrategy}
           >
-            <SortableContext
-              items={workspaceIds}
-              strategy={verticalListSortingStrategy}
+            <VirtualRows
+              viewport={controllerRef.current}
+              hosts={hosts}
+              items={rowsById}
+              renderItem={renderRow}
+            />
+          </SortableContext>
+          <ProjectTreeDragOverlay
+            row={dragWorkspaceRow}
+            checksById={checksById}
+            onToggle={toggleExpand}
+            onToggleLifecycleView={toggleLifecycleView}
+            onCreateThread={handleCreateThread}
+            onDelete={handleDeleteWorkspace}
+            onRename={handleRenameWorkspace}
+          />
+        </DndContext>
+
+        {workspaces.length === 0 && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-4 py-12">
+            {/* Lucide FolderPlus echoes the action below — keeps the empty state on-brand
+                with the rest of the picker (no unicode glyphs). Larger/quieter than the CTA. */}
+            <FolderPlus
+              size={28}
+              strokeWidth={1.25}
+              aria-hidden
+              className="text-muted-foreground/25"
+            />
+            <p className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/45">
+              No projects yet
+            </p>
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={handleOpenFolder}
+              className="group h-auto gap-1.5 rounded-md border border-border/50 px-2.5 py-1 text-[11.5px] font-normal text-muted-foreground/80 hover:border-border hover:bg-accent/50 hover:text-foreground"
             >
-              {workspaces.map((ws) => {
-                const wsThreads =
-                  threadsByWorkspace.get(ws.id) ?? EMPTY_THREADS;
-
-                return (
-                  <SortableProjectShell
-                    key={ws.id}
-                    sortableId={ws.id}
-                    workspace={ws}
-                    isExpanded={expanded[ws.id] ?? false}
-                    isActive={activeWorkspaceId === ws.id}
-                    threads={wsThreads}
-                    lifecycleView={lifecycleViews[ws.id] ?? "active"}
-                    onToggleLifecycleView={toggleLifecycleView}
-                    onCompleteThread={completeThread}
-                    onReopenThread={reopenThread}
-                    onRetryThreadCleanup={retryThreadCleanup}
-                    pendingPermissionThreadIds={pendingPermissionThreadIds}
-                    isThreadListExpanded={threadListExpanded[ws.id] ?? false}
-                    checksById={checksById}
-                    onToggleThreadList={toggleThreadList}
-                    scrollElementRef={scrollViewportRef}
-                    inlineEdit={inlineEdit}
-                    onInlineEditChange={handleInlineEditChange}
-                    onInlineEditCommit={handleInlineEditCommit}
-                    onInlineEditCancel={handleInlineEditCancel}
-                    onStartInlineEdit={handleStartInlineEdit}
-                    onToggle={toggleExpand}
-                    onSelectThread={handleSelectThread}
-                    onCreateThread={handleCreateThread}
-                    onDelete={handleDeleteWorkspace}
-                    onRename={handleRenameWorkspace}
-                    onThreadContextMenu={handleThreadContextMenu}
-                  />
-                );
-              })}
-            </SortableContext>
-          </DndContext>
-
-          {workspaces.length === 0 && (
-            <div className="flex flex-col items-center justify-center gap-3 px-4 py-12">
-              {/* Lucide FolderPlus echoes the action below — keeps the empty state on-brand
-                  with the rest of the picker (no unicode glyphs). Larger/quieter than the CTA. */}
               <FolderPlus
-                size={28}
-                strokeWidth={1.25}
-                aria-hidden
-                className="text-muted-foreground/25"
+                size={11}
+                className="opacity-70 group-hover:opacity-100"
               />
-              <p className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-muted-foreground/45">
-                No projects yet
-              </p>
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={handleOpenFolder}
-                className="group h-auto gap-1.5 rounded-md border border-border/50 px-2.5 py-1 text-[11.5px] font-normal text-muted-foreground/80 hover:border-border hover:bg-accent/50 hover:text-foreground"
-              >
-                <FolderPlus
-                  size={11}
-                  className="opacity-70 group-hover:opacity-100"
-                />
-                Open a folder
-              </Button>
-            </div>
-          )}
-        </div>
-      </ScrollArea>
+              Open a folder
+            </Button>
+          </div>
+        )}
+      </div>
 
       {error && <p className="px-3 py-1 text-xs text-destructive">{error}</p>}
 
@@ -966,33 +1162,164 @@ export function ProjectTree() {
   );
 }
 
-// --- VirtualizedThreadList: only mounts when the workspace is expanded ---
+// --- Flattened virtual rows: a workspace header plus its expanded children ---
 
-/** Props for the virtualized thread list rendered inside an expanded workspace. */
-interface VirtualizedThreadListProps {
-  /** Workspace name displayed in read-only thread previews. */
-  workspaceName: string;
-  /** Pre-computed tree items from the parent to avoid duplicate buildThreadTree calls. */
-  treeItems: ThreadTreeItem[];
-  /** Maximum number of tree rows to render. Used by the parent to enforce the THREAD_LIST_CAP. */
-  maxVisible: number;
-  /** Thread IDs with at least one unsettled permission request. */
-  pendingPermissionThreadIds: Set<string>;
-  /** Per-thread CI check status. Passed from parent to avoid duplicate store subscriptions. */
-  checksById: Record<string, ChecksStatus>;
-  scrollElementRef: React.RefObject<HTMLDivElement | null>;
-  inlineEdit: InlineEditState | null;
-  onInlineEditChange: (title: string) => void;
-  onInlineEditCommit: () => void;
-  onInlineEditCancel: () => void;
-  /** Start an inline rename for the given thread. */
-  onStartInlineEdit: (threadId: string) => void;
-  onSelectThread: (id: string) => void;
-  onThreadContextMenu: (e: React.MouseEvent, thread: Thread) => void;
-  onCompleteThread: (threadId: string) => Promise<void>;
-  onReopenThread: (threadId: string) => Promise<void>;
-  onRetryThreadCleanup: (threadId: string) => Promise<void>;
+/** The project sidebar groups threads by completion state per workspace. */
+type ProjectLifecycleView = "active" | "completed";
+
+/** One row in the flattened sidebar list rendered by the shared vlist viewport. */
+type ProjectTreeRow =
+  | {
+      readonly kind: "workspace";
+      readonly workspace: Workspace;
+      readonly threadList: ThreadListSummary;
+      readonly lifecycleView: ProjectLifecycleView;
+      readonly isExpanded: boolean;
+      readonly isActive: boolean;
+      readonly hasRunning: boolean;
+    }
+  | {
+      readonly kind: "empty";
+      readonly workspace: Workspace;
+      readonly lifecycleView: ProjectLifecycleView;
+    }
+  | {
+      readonly kind: "thread";
+      readonly workspace: Workspace;
+      readonly item: ThreadTreeItem;
+    }
+  | {
+      readonly kind: "toggle";
+      readonly workspace: Workspace;
+      readonly isExpanded: boolean;
+      readonly hiddenCount: number;
+    };
+
+/** A virtual row plus the padding flag for the gap between project groups. */
+interface ProjectTreeRowEntry {
+  readonly id: string;
+  readonly height: number;
+  groupEnd: boolean;
+  readonly row: ProjectTreeRow;
 }
+
+interface ProjectTreeRowsInput {
+  readonly workspaces: Workspace[];
+  readonly threadsByWorkspace: ReadonlyMap<string, WorkspaceThread[]>;
+  readonly expanded: Record<string, boolean>;
+  readonly threadListExpanded: Record<string, boolean>;
+  readonly lifecycleViews: Record<string, ProjectLifecycleView>;
+  readonly activeThreadId: string | null;
+  readonly activeWorkspaceId: string | null;
+  readonly runningThreadIds: ReadonlySet<string>;
+}
+
+/** Flattens workspaces and their expanded thread sections into virtual rows. */
+function buildProjectTreeRows(
+  input: ProjectTreeRowsInput,
+): ProjectTreeRowEntry[] {
+  const entries: ProjectTreeRowEntry[] = [];
+  for (const workspace of input.workspaces) {
+    appendWorkspaceRows(entries, workspace, input);
+  }
+  for (let index = 0; index < entries.length; index += 1) {
+    const next = entries[index + 1];
+    entries[index].groupEnd = !next || next.row.kind === "workspace";
+  }
+  return entries;
+}
+
+/** Emits one workspace row plus its expanded child rows into `entries`. */
+function appendWorkspaceRows(
+  entries: ProjectTreeRowEntry[],
+  workspace: Workspace,
+  input: ProjectTreeRowsInput,
+): void {
+  const wsThreads = input.threadsByWorkspace.get(workspace.id) ?? EMPTY_THREADS;
+  const lifecycleView = input.lifecycleViews[workspace.id] ?? "active";
+  const isExpanded = input.expanded[workspace.id] ?? false;
+  const threadList = computeThreadListSummary(
+    wsThreads,
+    lifecycleView,
+    input.threadListExpanded[workspace.id] ?? false,
+    input.activeThreadId,
+    isExpanded,
+  );
+  entries.push({
+    id: `ws:${workspace.id}`,
+    height: 32,
+    groupEnd: false,
+    row: {
+      kind: "workspace",
+      workspace,
+      threadList,
+      lifecycleView,
+      isExpanded,
+      isActive: input.activeWorkspaceId === workspace.id,
+      hasRunning: wsThreads.some((thread) =>
+        input.runningThreadIds.has(thread.id),
+      ),
+    },
+  });
+  if (!isExpanded) return;
+  appendChildRows(entries, workspace, lifecycleView, threadList, input);
+}
+
+/** Emits the empty note, capped thread rows, and the show-more toggle. */
+function appendChildRows(
+  entries: ProjectTreeRowEntry[],
+  workspace: Workspace,
+  lifecycleView: ProjectLifecycleView,
+  threadList: ThreadListSummary,
+  input: ProjectTreeRowsInput,
+): void {
+  if (threadList.visibleThreads.length === 0) {
+    entries.push({
+      id: `ws:${workspace.id}:empty`,
+      height: 24,
+      groupEnd: false,
+      row: { kind: "empty", workspace, lifecycleView },
+    });
+  } else {
+    const capped = Number.isFinite(threadList.maxVisible)
+      ? threadList.treeItems.slice(0, threadList.maxVisible)
+      : threadList.treeItems;
+    for (const item of capped) {
+      entries.push({
+        id: `ws:${workspace.id}:t:${item.thread.id}`,
+        height: 32,
+        groupEnd: false,
+        row: { kind: "thread", workspace, item },
+      });
+    }
+  }
+  if (threadList.needsCap && !threadList.forceExpand) {
+    entries.push({
+      id: `ws:${workspace.id}:toggle`,
+      height: 24,
+      groupEnd: false,
+      row: {
+        kind: "toggle",
+        workspace,
+        isExpanded: input.threadListExpanded[workspace.id] ?? false,
+        hiddenCount: threadList.treeItems.length - THREAD_LIST_CAP,
+      },
+    });
+  }
+}
+
+/** Looks up the dragged workspace's row data for the drag overlay. */
+function findWorkspaceRow(
+  rowsById: ReadonlyMap<string, ProjectTreeRowEntry>,
+  activeDragId: string | null,
+): Extract<ProjectTreeRow, { kind: "workspace" }> | undefined {
+  if (activeDragId === null) return undefined;
+  const row = rowsById.get(`ws:${activeDragId}`)?.row;
+  return row?.kind === "workspace" ? row : undefined;
+}
+
+/** Stable scroll-position sink; the tree only reads positions through anchors. */
+function noopViewportPosition(_position: ViewportPosition): void {}
 
 interface ThreadRowProps {
   workspaceName: string;
@@ -1901,296 +2228,8 @@ function threadPrCiVisual(showCi: boolean, checks: ChecksStatus | undefined) {
   return getCiVisual(checks.aggregate);
 }
 
-/** Renders a virtualized, scrollable list of threads for a single workspace. */
-function VirtualizedThreadList({
-  workspaceName,
-  treeItems: allTreeItems,
-  maxVisible,
-  pendingPermissionThreadIds,
-  checksById,
-  scrollElementRef,
-  inlineEdit,
-  onInlineEditChange,
-  onInlineEditCommit,
-  onInlineEditCancel,
-  onStartInlineEdit,
-  onSelectThread,
-  onThreadContextMenu,
-  onCompleteThread,
-  onReopenThread,
-  onRetryThreadCleanup,
-}: VirtualizedThreadListProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [scrollMargin, setScrollMargin] = useState(0);
-
-  // Cap to `maxVisible` so the sidebar isn't dominated by a single busy workspace.
-  const treeItems = useMemo(
-    () =>
-      Number.isFinite(maxVisible)
-        ? allTreeItems.slice(0, maxVisible)
-        : allTreeItems,
-    [allTreeItems, maxVisible],
-  );
-
-  // Normalized set of existing worktree paths for stale detection.
-  const worktrees = useWorkspaceStore((s) => s.worktrees);
-  const worktreesLoadedFor = useWorkspaceStore(
-    (s) => s.worktreesLoadedForWorkspace,
-  );
-  // Subscribe once at the list level so we can derive unusable state per-thread
-  // inside the map without violating Rules of Hooks.
-  const availableProviders = useProviderAvailabilityStore((s) => s.providers);
-  const validWorktreePaths = useMemo(() => {
-    const set = new Set<string>();
-    for (const wt of worktrees) {
-      set.add(wt.path.replace(/\\/g, "/").replace(/\/$/, "").toLowerCase());
-    }
-    return set;
-  }, [worktrees]);
-
-  // Per-thread last-click timestamp. Used to detect a second click within the
-  // double-click window without delaying the first click's navigation.
-  const lastClickTimeRef = useRef<Map<string, number>>(new Map());
-
-  const handleThreadClick = useCallback(
-    (threadId: string) => {
-      // If already editing this thread, clicks are absorbed to avoid conflicting with the input.
-      if (inlineEdit?.threadId === threadId) return;
-
-      const now = Date.now();
-      const hadPrevious = lastClickTimeRef.current.has(threadId);
-      const last = lastClickTimeRef.current.get(threadId) ?? 0;
-      const elapsed = now - last;
-      lastClickTimeRef.current.set(threadId, now);
-
-      if (hadPrevious && elapsed < DOUBLE_CLICK_THRESHOLD_MS) {
-        // Double-click: enter inline rename. The first click has already navigated,
-        // which is fine — the row is now active and rename happens in place.
-        lastClickTimeRef.current.delete(threadId);
-        onStartInlineEdit(threadId);
-      } else {
-        // Single click navigates immediately. No artificial delay.
-        onSelectThread(threadId);
-      }
-    },
-    [inlineEdit, onSelectThread, onStartInlineEdit],
-  );
-
-  const handleThreadDoubleClick = useCallback(
-    (threadId: string) => {
-      if (inlineEdit?.threadId === threadId) return;
-      lastClickTimeRef.current.delete(threadId);
-      onStartInlineEdit(threadId);
-    },
-    [inlineEdit, onStartInlineEdit],
-  );
-
-  // Recompute offset from the outer scroll viewport after each layout pass.
-  // Stays in sync when workspaces above expand/collapse.
-  useLayoutEffect(() => {
-    setScrollMargin((prev) => {
-      const next = containerRef.current?.offsetTop ?? 0;
-      return prev === next ? prev : next;
-    });
-  }, [allTreeItems, maxVisible, scrollElementRef]);
-
-  const virtualizer = useVirtualizer({
-    count: treeItems.length,
-    getItemKey: (index) => treeItems[index].thread.id,
-    getScrollElement: () => scrollElementRef.current,
-    initialOffset: () => scrollElementRef.current?.scrollTop ?? 0,
-    estimateSize: () => 32,
-    overscan: 5,
-    scrollMargin,
-    // Opt out of react-virtual's flushSync(rerender) on sync measurement; it
-    // fires inside the library's commit-phase layout effect and trips React's
-    // "flushSync called from inside a lifecycle method" warning. The tree does
-    // not need a synchronous re-render.
-    useFlushSync: false,
-  });
-
-  return (
-    <div
-      ref={containerRef}
-      style={{ height: virtualizer.getTotalSize(), position: "relative" }}
-    >
-      {virtualizer.getVirtualItems().map((virtualItem) => {
-        const { thread, depth } = treeItems[virtualItem.index];
-        const isEditing = inlineEdit?.threadId === thread.id;
-        return (
-          <div
-            key={thread.id}
-            data-index={virtualItem.index}
-            data-testid="thread-item"
-            data-thread-id={thread.id}
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              width: "100%",
-              transform: `translateY(${virtualItem.start - scrollMargin}px)`,
-            }}
-          >
-            <ThreadRow
-              workspaceName={workspaceName}
-              thread={thread}
-              depth={depth}
-              hasPendingPermission={pendingPermissionThreadIds.has(thread.id)}
-              checks={checksById[thread.id]}
-              isEditing={isEditing}
-              inlineEdit={isEditing ? inlineEdit : null}
-              worktreesLoadedFor={worktreesLoadedFor}
-              validWorktreePaths={validWorktreePaths}
-              availableProviders={availableProviders}
-              onInlineEditChange={onInlineEditChange}
-              onInlineEditCommit={onInlineEditCommit}
-              onInlineEditCancel={onInlineEditCancel}
-              onThreadClick={handleThreadClick}
-              onThreadDoubleClick={handleThreadDoubleClick}
-              onSelectThread={onSelectThread}
-              onThreadContextMenu={onThreadContextMenu}
-              onCompleteThread={onCompleteThread}
-              onReopenThread={onReopenThread}
-              onRetryThreadCleanup={onRetryThreadCleanup}
-            />
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// --- ProjectNode: a single workspace with its threads ---
-
-/** Props for a single workspace node in the sidebar tree. */
-interface ProjectNodeProps {
-  workspace: Workspace;
-  isExpanded: boolean;
-  isActive: boolean;
-  threads: WorkspaceThread[];
-  /** Thread IDs with at least one unsettled permission request. */
-  pendingPermissionThreadIds: Set<string>;
-  /** Whether the thread list is fully expanded (persisted by parent). */
-  isThreadListExpanded: boolean;
-  /** Per-thread CI check status. Passed from parent to avoid duplicate store subscriptions. */
-  checksById: Record<string, ChecksStatus>;
-  /** Callback to toggle the thread list expanded state (persisted by parent). */
-  onToggleThreadList: (wsId: string) => void;
-  scrollElementRef: React.RefObject<HTMLDivElement | null>;
-  inlineEdit: InlineEditState | null;
-  onInlineEditChange: (title: string) => void;
-  onInlineEditCommit: () => void;
-  onInlineEditCancel: () => void;
-  /** Start an inline rename for the given thread. */
-  onStartInlineEdit: (threadId: string) => void;
-  onToggle: (wsId: string) => void;
-  onSelectThread: (wsId: string, threadId: string) => void;
-  onCreateThread: (wsId: string) => void;
-  onDelete: (wsId: string) => void;
-  onRename: (workspace: Workspace) => void;
-  onThreadContextMenu: (
-    e: React.MouseEvent,
-    thread: Thread,
-    workspacePath: string,
-  ) => void;
-  /** When set, forwards drag-handle listeners from `@dnd-kit/sortable` onto the project row. */
-  sortableListeners?: DraggableSyntheticListeners;
-  /** True while this project row is the item being dragged. */
-  isProjectDragging?: boolean;
-  lifecycleView: "active" | "completed";
-  onToggleLifecycleView: (workspaceId: string) => void;
-  onCompleteThread: (threadId: string) => Promise<void>;
-  onReopenThread: (threadId: string) => Promise<void>;
-  onRetryThreadCleanup: (threadId: string) => Promise<void>;
-}
-
-/** Renders a collapsible workspace row with its virtualized thread list. */
-const ProjectNode = memo(function ProjectNode({
-  workspace,
-  isExpanded,
-  isActive,
-  threads,
-  pendingPermissionThreadIds,
-  isThreadListExpanded,
-  checksById,
-  onToggleThreadList,
-  scrollElementRef,
-  inlineEdit,
-  onInlineEditChange,
-  onInlineEditCommit,
-  onInlineEditCancel,
-  onStartInlineEdit,
-  onToggle,
-  onSelectThread,
-  onCreateThread,
-  onDelete,
-  onRename,
-  onThreadContextMenu,
-  sortableListeners,
-  isProjectDragging = false,
-  lifecycleView,
-  onToggleLifecycleView,
-  onCompleteThread,
-  onReopenThread,
-  onRetryThreadCleanup,
-}: ProjectNodeProps) {
-  const hasRunning = useThreadStore((s) =>
-    threads.some((thread) => s.runningThreadIds.has(thread.id)),
-  );
-  const threadList = useProjectNodeThreadList(
-    threads,
-    lifecycleView,
-    isThreadListExpanded,
-  );
-
-  return (
-    <div>
-      <ProjectWorkspaceRow
-        {...{
-          workspace,
-          isExpanded,
-          isActive,
-          isProjectDragging,
-          sortableListeners,
-          lifecycleView,
-          checksById,
-          hasRunning,
-          onToggle,
-          onToggleLifecycleView,
-          onCreateThread,
-          onDelete,
-          onRename,
-        }}
-        threadList={threadList}
-      />
-      <ProjectThreadSection
-        {...{
-          workspace,
-          isExpanded,
-          isThreadListExpanded,
-          pendingPermissionThreadIds,
-          checksById,
-          scrollElementRef,
-          inlineEdit,
-          onInlineEditChange,
-          onInlineEditCommit,
-          onInlineEditCancel,
-          onStartInlineEdit,
-          onToggleThreadList,
-          onSelectThread,
-          onThreadContextMenu,
-          onCompleteThread,
-          onReopenThread,
-          onRetryThreadCleanup,
-          lifecycleView,
-        }}
-        threadList={threadList}
-      />
-    </div>
-  );
-});
-
-interface ProjectNodeThreadList {
+/** Thread counts and capped tree rows for one workspace's lifecycle view. */
+interface ThreadListSummary {
   activeThreadCount: number;
   completedThreadCount: number;
   visibleThreads: WorkspaceThread[];
@@ -2200,25 +2239,25 @@ interface ProjectNodeThreadList {
   maxVisible: number;
 }
 
-function useProjectNodeThreadList(
+/** Computes the thread list summary; tree items are only built when expanded. */
+function computeThreadListSummary(
   threads: WorkspaceThread[],
-  lifecycleView: ProjectNodeProps["lifecycleView"],
+  lifecycleView: ProjectLifecycleView,
   isThreadListExpanded: boolean,
-): ProjectNodeThreadList {
-  const activeThreadCount = useMemo(
-    () => threads.filter((thread) => thread.user_completed_at === null).length,
-    [threads],
+  activeThreadId: string | null,
+  isWorkspaceExpanded: boolean,
+): ThreadListSummary {
+  const activeThreadCount = threads.filter(
+    (thread) => thread.user_completed_at === null,
+  ).length;
+  const visibleThreads = threads.filter((thread) =>
+    isVisibleInLifecycleView(thread, lifecycleView),
   );
-  const visibleThreads = useMemo(
-    () => threads.filter((thread) => isVisibleInLifecycleView(thread, lifecycleView)),
-    [lifecycleView, threads],
-  );
-  const treeItems = useMemo(() => buildThreadTree(visibleThreads), [visibleThreads]);
-  const forceExpand = useWorkspaceStore((state) => activeThreadNeedsExpansion(
-    state.activeThreadId,
-    treeItems,
-  ));
+  const treeItems = isWorkspaceExpanded
+    ? buildThreadTree(visibleThreads)
+    : [];
   const needsCap = treeItems.length > THREAD_LIST_CAP;
+  const forceExpand = activeThreadNeedsExpansion(activeThreadId, treeItems);
   return {
     activeThreadCount,
     completedThreadCount: threads.length - activeThreadCount,
@@ -2232,7 +2271,7 @@ function useProjectNodeThreadList(
 
 function isVisibleInLifecycleView(
   thread: WorkspaceThread,
-  lifecycleView: ProjectNodeProps["lifecycleView"],
+  lifecycleView: ProjectLifecycleView,
 ): boolean {
   return lifecycleView === "completed"
     ? thread.user_completed_at !== null
@@ -2253,15 +2292,15 @@ interface ProjectWorkspaceRowProps {
   isActive: boolean;
   isProjectDragging: boolean;
   sortableListeners: DraggableSyntheticListeners | undefined;
-  lifecycleView: ProjectNodeProps["lifecycleView"];
+  lifecycleView: ProjectLifecycleView;
   checksById: Record<string, ChecksStatus>;
   hasRunning: boolean;
-  threadList: ProjectNodeThreadList;
-  onToggle: ProjectNodeProps["onToggle"];
-  onToggleLifecycleView: ProjectNodeProps["onToggleLifecycleView"];
-  onCreateThread: ProjectNodeProps["onCreateThread"];
-  onDelete: ProjectNodeProps["onDelete"];
-  onRename: ProjectNodeProps["onRename"];
+  threadList: ThreadListSummary;
+  onToggle: (wsId: string) => void;
+  onToggleLifecycleView: (workspaceId: string) => void;
+  onCreateThread: (wsId: string) => void;
+  onDelete: (wsId: string) => void;
+  onRename: (workspace: Workspace) => void;
 }
 
 function ProjectWorkspaceRow({
@@ -2343,8 +2382,8 @@ function ProjectWorkspaceRow({
 
 function projectLifecycleSummary(
   workspace: Workspace,
-  lifecycleView: ProjectNodeProps["lifecycleView"],
-  threadList: ProjectNodeThreadList,
+  lifecycleView: ProjectLifecycleView,
+  threadList: ThreadListSummary,
 ) {
   const destination = lifecycleView === "active" ? "completed" : "active";
   const destinationCount = destination === "completed"
@@ -2360,7 +2399,7 @@ function ProjectLifecycleToggle({
   lifecycle,
   lifecycleView,
   onClick,
-}: { lifecycle: ReturnType<typeof projectLifecycleSummary>; lifecycleView: ProjectNodeProps["lifecycleView"]; onClick: (event: React.MouseEvent) => void }) {
+}: { lifecycle: ReturnType<typeof projectLifecycleSummary>; lifecycleView: ProjectLifecycleView; onClick: (event: React.MouseEvent) => void }) {
   return (
     <Tooltip>
       <TooltipTrigger render={
@@ -2383,7 +2422,7 @@ function ProjectLifecycleToggle({
   );
 }
 
-function ProjectLifecycleIcons({ lifecycleView }: { lifecycleView: ProjectNodeProps["lifecycleView"] }) {
+function ProjectLifecycleIcons({ lifecycleView }: { lifecycleView: ProjectLifecycleView }) {
   if (lifecycleView === "completed") {
     return <><FolderCheck size={14} className="transition-opacity duration-150 group-hover/ws:opacity-0 group-focus-within/ws:opacity-0 motion-reduce:transition-none" aria-hidden /><FolderOpen size={14} className="absolute opacity-0 transition-opacity duration-150 group-hover/ws:opacity-100 group-focus-within/ws:opacity-100 motion-reduce:transition-none" aria-hidden /></>;
   }
@@ -2451,96 +2490,85 @@ function ProjectRowActions({
   );
 }
 
-interface ProjectThreadSectionProps {
-  workspace: Workspace;
-  isExpanded: boolean;
-  isThreadListExpanded: boolean;
-  pendingPermissionThreadIds: Set<string>;
-  checksById: Record<string, ChecksStatus>;
-  scrollElementRef: React.RefObject<HTMLDivElement | null>;
-  inlineEdit: InlineEditState | null;
-  onInlineEditChange: (title: string) => void;
-  onInlineEditCommit: () => void;
-  onInlineEditCancel: () => void;
-  onStartInlineEdit: (threadId: string) => void;
-  onToggleThreadList: (workspaceId: string) => void;
-  onSelectThread: (workspaceId: string, threadId: string) => void;
-  onThreadContextMenu: ProjectNodeProps["onThreadContextMenu"];
-  onCompleteThread: ProjectNodeProps["onCompleteThread"];
-  onReopenThread: ProjectNodeProps["onReopenThread"];
-  onRetryThreadCleanup: ProjectNodeProps["onRetryThreadCleanup"];
-  lifecycleView: ProjectNodeProps["lifecycleView"];
-  threadList: ProjectNodeThreadList;
-}
-
-function ProjectThreadSection({
-  workspace,
-  isExpanded,
-  isThreadListExpanded,
-  pendingPermissionThreadIds,
-  checksById,
-  scrollElementRef,
-  inlineEdit,
-  onInlineEditChange,
-  onInlineEditCommit,
-  onInlineEditCancel,
-  onStartInlineEdit,
-  onToggleThreadList,
-  onSelectThread,
-  onThreadContextMenu,
-  onCompleteThread,
-  onReopenThread,
-  onRetryThreadCleanup,
-  lifecycleView,
-  threadList,
-}: ProjectThreadSectionProps) {
-  if (!isExpanded) return null;
-  if (threadList.visibleThreads.length === 0) {
-    return <p data-testid={`project-empty-${workspace.id}`} className="px-9 py-1 font-mono text-xs text-muted-foreground/70">{lifecycleView === "completed" ? "No completed threads" : "No active threads"}</p>;
-  }
-  return (
-    <div>
-      <VirtualizedThreadList
-        workspaceName={workspace.name}
-        treeItems={threadList.treeItems}
-        maxVisible={threadList.maxVisible}
-        pendingPermissionThreadIds={pendingPermissionThreadIds}
-        checksById={checksById}
-        scrollElementRef={scrollElementRef}
-        inlineEdit={inlineEdit}
-        onInlineEditChange={onInlineEditChange}
-        onInlineEditCommit={onInlineEditCommit}
-        onInlineEditCancel={onInlineEditCancel}
-        onStartInlineEdit={onStartInlineEdit}
-        onSelectThread={(threadId) => onSelectThread(workspace.id, threadId)}
-        onThreadContextMenu={(event, thread) => onThreadContextMenu(event, thread, workspace.path)}
-        onCompleteThread={onCompleteThread}
-        onReopenThread={onReopenThread}
-        onRetryThreadCleanup={onRetryThreadCleanup}
-      />
-      <ProjectThreadListToggle workspaceId={workspace.id} isExpanded={isThreadListExpanded} threadList={threadList} onToggleThreadList={onToggleThreadList} />
-    </div>
-  );
-}
-
 function ProjectThreadListToggle({
   workspaceId,
   isExpanded,
-  threadList,
+  hiddenCount,
   onToggleThreadList,
-}: { workspaceId: string; isExpanded: boolean; threadList: ProjectNodeThreadList; onToggleThreadList: (workspaceId: string) => void }) {
-  if (!threadList.needsCap || threadList.forceExpand) return null;
-  const label = isExpanded ? "Show less" : `Show more (${threadList.treeItems.length - THREAD_LIST_CAP})`;
+}: { workspaceId: string; isExpanded: boolean; hiddenCount: number; onToggleThreadList: (workspaceId: string) => void }) {
+  const label = isExpanded ? "Show less" : `Show more (${hiddenCount})`;
   return <Button variant="ghost" size="xs" onClick={() => onToggleThreadList(workspaceId)} className="mt-0.5 h-auto w-full justify-start rounded-md px-2 py-1 text-[11px] font-normal text-muted-foreground/55 hover:bg-accent/40 hover:text-foreground">{label}</Button>;
 }
 
+/** Props for a workspace row in the flat virtual list. */
+interface SortableProjectRowProps {
+  workspace: Workspace;
+  isExpanded: boolean;
+  isActive: boolean;
+  hasRunning: boolean;
+  lifecycleView: ProjectLifecycleView;
+  threadList: ThreadListSummary;
+  checksById: Record<string, ChecksStatus>;
+  onToggle: (wsId: string) => void;
+  onToggleLifecycleView: (workspaceId: string) => void;
+  onCreateThread: (wsId: string) => void;
+  onDelete: (wsId: string) => void;
+  onRename: (workspace: Workspace) => void;
+}
+
 /**
- * Preserves project and thread rendering while applying sortable positioning.
+ * Pointer-following clone of the dragged workspace row. The virtualizer may
+ * unmount the real row when auto-scroll moves its slot outside the render
+ * window, so the drag visual lives in an overlay.
  */
-const SortableProjectShell = memo(function SortableProjectShell(
-  props: ProjectNodeProps & { sortableId: string },
-) {
-  const { sortableId, ...nodeProps } = props;
+function ProjectTreeDragOverlay({
+  row,
+  checksById,
+  onToggle,
+  onToggleLifecycleView,
+  onCreateThread,
+  onDelete,
+  onRename,
+}: {
+  row: Extract<ProjectTreeRow, { kind: "workspace" }> | undefined;
+  checksById: Record<string, ChecksStatus>;
+  onToggle: (wsId: string) => void;
+  onToggleLifecycleView: (workspaceId: string) => void;
+  onCreateThread: (wsId: string) => void;
+  onDelete: (wsId: string) => void;
+  onRename: (workspace: Workspace) => void;
+}) {
+  return (
+    <DragOverlay>
+      {row ? (
+        <div className="px-1.5">
+          <ProjectWorkspaceRow
+            workspace={row.workspace}
+            isExpanded={row.isExpanded}
+            isActive={row.isActive}
+            isProjectDragging
+            sortableListeners={undefined}
+            lifecycleView={row.lifecycleView}
+            threadList={row.threadList}
+            checksById={checksById}
+            hasRunning={row.hasRunning}
+            onToggle={onToggle}
+            onToggleLifecycleView={onToggleLifecycleView}
+            onCreateThread={onCreateThread}
+            onDelete={onDelete}
+            onRename={onRename}
+          />
+        </div>
+      ) : null}
+    </DragOverlay>
+  );
+}
+
+/** Applies sortable positioning to a workspace row in the flat virtual list. */
+const SortableProjectRow = memo(function SortableProjectRow({
+  workspace,
+  ...rowProps
+}: SortableProjectRowProps) {
   const {
     attributes,
     listeners,
@@ -2549,7 +2577,7 @@ const SortableProjectShell = memo(function SortableProjectShell(
     transition,
     isDragging,
   } = useSortable({
-    id: sortableId,
+    id: workspace.id,
   });
   const style: CSSProperties = {
     transform: transform ? CSS.Translate.toString(transform) : undefined,
@@ -2564,13 +2592,13 @@ const SortableProjectShell = memo(function SortableProjectShell(
     <div
       ref={setNodeRef}
       style={style}
-      className="mb-1"
       {...sortableA11y}
       role="group"
       tabIndex={-1}
     >
-      <ProjectNode
-        {...nodeProps}
+      <ProjectWorkspaceRow
+        workspace={workspace}
+        {...rowProps}
         isProjectDragging={isDragging}
         sortableListeners={listeners}
       />
