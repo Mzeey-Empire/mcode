@@ -4,6 +4,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { CANONICAL_AGENT_EVENT_BATCH_MAX } from "@mcode/contracts";
 import { openMemoryDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { ThreadRepo } from "../../../thread-control/persistence/thread-repo.js";
@@ -17,6 +18,7 @@ import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-rep
 import { ThoughtSegmentRepo } from "../../conversation/narrative/persistence/thought-segment-repo.js";
 import { HookExecutionRepo } from "../../events/persistence/hook-execution-repo.js";
 import { TurnRecoveryService } from "../turn-recovery-service.js";
+import { deriveTurnAssistantMessageId } from "../../turns/turn-assistant-message-id.js";
 import { AttachmentService } from "../../../attachments/storage/attachment-service.js";
 import type { SendMessageCommand } from "../../orchestration/agent-service.js";
 
@@ -726,5 +728,160 @@ describe("TurnRecoveryService", () => {
     const dispatch = vi.fn(async () => undefined);
     await expect(service.retry(EXECUTION_ID, dispatch)).rejects.toThrow();
     expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("interrupts an execution whose recovered narrative exceeds one semantic batch", () => {
+    // Regression: a single interruption commit must never overflow the canonical
+    // event batch cap; recovered narrative materializes in bounded commits first.
+    narrativeStore.beginTurn(THREAD_ID);
+    narrativeStore.resetTurnCounters(THREAD_ID);
+    for (let index = 0; index < CANONICAL_AGENT_EVENT_BATCH_MAX; index += 1) {
+      narrativeStore.bufferToolCall(THREAD_ID, {
+        toolCallId: `recovered-tool-${index}`,
+        toolName: "Read",
+        toolInput: { path: `file-${index}.ts` },
+      });
+    }
+    sink.recordParentNarrativeRecovery({
+      executionId: EXECUTION_ID,
+      items: narrativeStore.recoverySnapshot(THREAD_ID),
+    });
+    const service = new TurnRecoveryService(
+      sink,
+      threadRepo,
+      new AttachmentService(),
+      defaultCheckpoints,
+      messageRepo,
+      narrativeStore,
+    );
+
+    expect(service.reconcileOnStartup()).toEqual({ interrupted: [EXECUTION_ID] });
+    expect(sink.loadTurn(TURN_ID)?.status).toBe("Interrupted");
+    expect(sink.loadCheckpoint(EXECUTION_ID)).toMatchObject({
+      phase: "interrupted",
+      terminalOutcome: "interrupted",
+    });
+    expect(sink.loadParentNarrativeRecovery(TURN_ID)).toEqual([]);
+    const materialized = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM canonical_agent_items
+      WHERE turn_id = ?
+        AND json_extract(payload_json, '$.projection') = 'toolCall'
+    `).get(TURN_ID) as { count: number };
+    expect(materialized.count).toBe(CANONICAL_AGENT_EVENT_BATCH_MAX);
+    expect(service.reconcileOnStartup()).toEqual({ interrupted: [] });
+  });
+
+  it("recovers an execution whose earlier interruption overflowed the canonical batch", () => {
+    // Regression: the first post-crash boot left a durable ingest-overflow record,
+    // a staged internal assistant row, and retired text chunks. The next boot must
+    // reopen the checkpoint and finish the interruption without crashing.
+    narrativeStore.beginTurn(THREAD_ID);
+    narrativeStore.resetTurnCounters(THREAD_ID);
+    for (let index = 0; index < 8; index += 1) {
+      narrativeStore.bufferToolCall(THREAD_ID, {
+        toolCallId: `overflow-tool-${index}`,
+        toolName: "Read",
+        toolInput: { path: `overflow-${index}.ts` },
+      });
+    }
+    sink.recordParentNarrativeRecovery({
+      executionId: EXECUTION_ID,
+      items: narrativeStore.recoverySnapshot(THREAD_ID),
+    });
+    messageRepo.createAssistantIdempotent({
+      id: deriveTurnAssistantMessageId(THREAD_ID, `recovery:${EXECUTION_ID}`),
+      threadId: THREAD_ID,
+      content: "Text recovered before the first restart overflowed.",
+      sequence: 2,
+      isInternal: true,
+    });
+    const thread = sink.loadThread(THREAD_ID);
+    if (!thread) throw new Error("Recovery test thread was not persisted canonically");
+    const overflow = sink.commit({
+      threadId: THREAD_ID,
+      turnId: TURN_ID,
+      executionId: EXECUTION_ID,
+      phase: "running",
+      events: Array.from(
+        { length: CANONICAL_AGENT_EVENT_BATCH_MAX + 1 },
+        (_, index) => ({
+          eventId: `${EXECUTION_ID}:saturated-${index}`,
+          routing: { threadId: THREAD_ID, executionId: EXECUTION_ID },
+          sourceProviderId: thread.providerId,
+          sourceIdentities: thread.providerIdentities,
+          payload: {
+            type: "thread.recorded" as const,
+            thread: { ...thread, updatedAt: NOW },
+          },
+        }),
+      ),
+    });
+    expect(overflow.outcome).toBe("ingest-overflow");
+    const service = new TurnRecoveryService(
+      sink,
+      threadRepo,
+      new AttachmentService(),
+      defaultCheckpoints,
+      messageRepo,
+      narrativeStore,
+    );
+
+    expect(service.reconcileOnStartup()).toEqual({ interrupted: [EXECUTION_ID] });
+    expect(sink.loadCheckpoint(EXECUTION_ID)).toMatchObject({
+      phase: "interrupted",
+      terminalOutcome: "interrupted",
+    });
+    expect(sink.loadTerminalProjection(TURN_ID).message).toMatchObject({
+      content: "Text recovered before the first restart overflowed.",
+      outcome: "interrupted",
+      outcomeExecutionId: EXECUTION_ID,
+    });
+    expect(sink.loadParentNarrativeRecovery(TURN_ID)).toEqual([]);
+    expect(service.reconcileOnStartup()).toEqual({ interrupted: [] });
+  });
+
+  it("treats a repeated structural overflow as a duplicate of the durable record", () => {
+    // Regression: re-recording an overflow for a reopened execution must dedupe
+    // against the durable ingest-overflow event instead of throwing an identity conflict.
+    const thread = sink.loadThread(THREAD_ID);
+    if (!thread) throw new Error("Recovery test thread was not persisted canonically");
+    const saturatedBatch = (prefix: string) => Array.from(
+      { length: CANONICAL_AGENT_EVENT_BATCH_MAX + 1 },
+      (_, index) => ({
+        eventId: `${EXECUTION_ID}:${prefix}-${index}`,
+        routing: { threadId: THREAD_ID, executionId: EXECUTION_ID },
+        sourceProviderId: thread.providerId,
+        sourceIdentities: thread.providerIdentities,
+        payload: {
+          type: "thread.recorded" as const,
+          thread: { ...thread, updatedAt: NOW },
+        },
+      }),
+    );
+    const first = sink.commit({
+      threadId: THREAD_ID,
+      turnId: TURN_ID,
+      executionId: EXECUTION_ID,
+      phase: "running",
+      events: saturatedBatch("first"),
+    });
+    expect(first.outcome).toBe("ingest-overflow");
+
+    expect(sink.reopenUnmaterializedTerminalCheckpoint(EXECUTION_ID)).toBe(true);
+    const second = sink.commit({
+      threadId: THREAD_ID,
+      turnId: TURN_ID,
+      executionId: EXECUTION_ID,
+      phase: "running",
+      events: saturatedBatch("second"),
+    });
+    expect(second.outcome).toBe("ingest-overflow");
+    const overflowEvents = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM canonical_agent_events
+      WHERE event_id = ?
+    `).get(`${EXECUTION_ID}:ingest-overflow`) as { count: number };
+    expect(overflowEvents.count).toBe(1);
   });
 });

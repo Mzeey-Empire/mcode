@@ -2775,7 +2775,6 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     const turn = this.loadTurn(input.turnId);
     const thread = this.loadThread(input.threadId);
     if (!turn || !thread) throw new Error("Canonical overflow target is not durable");
-    const endedAt = new Date().toISOString();
     const result = this.commit({
       threadId: input.threadId,
       turnId: input.turnId,
@@ -2792,15 +2791,29 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
         },
         sourceProviderId: thread.providerId,
         sourceIdentities: thread.providerIdentities,
-        payload: {
+        payload: this.storedIngestOverflow(input.executionId) ?? {
           type: "ingest.overflow",
-          endedAt,
+          endedAt: new Date().toISOString(),
           acceptedStoppingSequence,
           durableStoppingSequence,
         },
       }],
     });
     return result;
+  }
+
+  /** Returns the durable overflow payload so a repeated overflow dedupes instead of conflicting. */
+  private storedIngestOverflow(
+    executionId: string,
+  ): Extract<CanonicalAgentEvent, { type: "ingest.overflow" }> | null {
+    const row = this.db.prepare(`
+      SELECT envelope_json
+      FROM canonical_agent_events
+      WHERE event_id = ?
+    `).get(`${executionId}:ingest-overflow`) as { envelope_json: string } | undefined;
+    if (!row) return null;
+    const payload = CanonicalAgentEventEnvelopeSchema.parse(JSON.parse(row.envelope_json)).payload;
+    return payload.type === "ingest.overflow" ? payload : null;
   }
 
   private commitStructuralOverflow(error: StructuralIngestOverflow): CanonicalAgentCommitResult {
