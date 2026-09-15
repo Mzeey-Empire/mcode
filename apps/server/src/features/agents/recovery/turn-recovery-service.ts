@@ -136,9 +136,8 @@ export class TurnRecoveryService {
       .listIncludingInternal(threadId)
       .find((message) => message.id === messageId);
     if (!staged) throw new Error(`Recovered assistant message was not staged: ${messageId}`);
-    if (staged.content !== content) {
-      throw new Error(`Recovered assistant text conflicts with staged message: ${messageId}`);
-    }
+    // A row staged by an earlier attempt is authoritative: its content was recovered
+    // while the provisional chunks were still available, so a re-run can see less.
     return staged;
   }
 
