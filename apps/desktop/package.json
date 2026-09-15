@@ -12,14 +12,14 @@
   "scripts": {
     "dev": "bun scripts/dev-electron.mjs",
     "build": "bun scripts/build-main.mjs",
-    "prod": "NODE_ENV=production bun run build && NODE_ENV=production bunx electron .",
+    "prod": "NODE_ENV=production bun run build && NODE_ENV=production bun x electron .",
     "typecheck": "tsc --noEmit",
     "rebuild": "electron-rebuild -f",
     "dist": "bun run build && bun scripts/desktop-packaging/target-package/generate-snapshot.mjs && electron-builder --publish never",
     "dist:no-snapshot": "bun run build && electron-builder --publish never",
     "test:packaged-reliability": "bun scripts/desktop-packaging/package-validation/desktop-reliability-test.mjs",
     "generate:icons": "bun scripts/generate-icons.mjs",
-    "test": "bunx vitest run"
+    "test": "bun x vitest run"
   },
   "dependencies": {
     "@electron/rebuild": "^3.7.1",

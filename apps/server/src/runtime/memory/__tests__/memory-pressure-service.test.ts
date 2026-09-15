@@ -43,12 +43,9 @@ describe("MemoryPressureService", () => {
     service.markActive("thread-1");
     service.sampleActiveMemoryForTest(v8Measurement(81, 100));
     expect(service.currentPressure.level).toBe("warning");
-    expect(() => service.assertCanStartTurn(v8Measurement(81, 100))).not.toThrow();
 
     service.sampleActiveMemoryForTest(v8Measurement(91, 100));
     expect(service.currentPressure.level).toBe("critical");
-    expect(() => service.assertCanStartTurn(v8Measurement(91, 100)))
-      .toThrow(/Memory pressure is critical/);
 
     service.sampleActiveMemoryForTest(v8Measurement(10, 100));
     expect(service.currentPressure.level).toBe("normal");
@@ -83,17 +80,7 @@ describe("MemoryPressureService", () => {
     expect(levels).toEqual(["warning"]);
   });
 
-  it("samples current heap before allowing a new turn", () => {
-    service.markActive("thread-1");
-    service.sampleActiveMemoryForTest(v8Measurement(91, 100));
-    service.markIdle("thread-1");
-    expect(service.currentPressure.level).toBe("normal");
-
-    expect(() => service.assertCanStartTurn(v8Measurement(91, 100)))
-      .toThrow(/Memory pressure is critical/);
-  });
-
-  it("uses Bun RSS for thresholds, admission, recovery, and updated settings", async () => {
+  it("uses Bun RSS for thresholds, recovery, and updated settings", async () => {
     let heapMb = 256;
     const initialBudgetBytes = heapMb * 1024 * 1024;
     let rss = Math.floor(initialBudgetBytes * 0.8);
@@ -126,12 +113,10 @@ describe("MemoryPressureService", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(service.currentPressure.level).toBe("critical");
     expect(service.currentPressure.ratio).toBeGreaterThanOrEqual(0.9);
-    expect(() => service.assertCanStartTurn()).toThrow(/Memory pressure is critical/);
 
     heapMb = 512;
     await vi.advanceTimersByTimeAsync(1_000);
     expect(service.currentPressure.level).toBe("normal");
-    expect(() => service.assertCanStartTurn()).not.toThrow();
     expect(levels).toEqual(["warning", "critical", "normal"]);
   });
 

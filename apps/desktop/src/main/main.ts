@@ -168,6 +168,14 @@ export const RENDERER_CRASH_REPORT_CHANNEL = "renderer:crash-report";
 const RENDERER_CRASH_COMPONENT_STACK_MAX_LENGTH = 16 * 1024;
 const RENDERER_CRASH_COMPONENT_FRAME_MAX_COUNT = 32;
 const RENDERER_CRASH_COMPONENT_FRAME_MAX_LENGTH = 128;
+const RENDERER_CRASH_MESSAGE_MAX_LENGTH = 2 * 1024;
+const RENDERER_CRASH_ERROR_STACK_MAX_LENGTH = 8 * 1024;
+const RENDERER_CRASH_KEYS = new Set([
+  "errorName",
+  "errorMessage",
+  "errorStack",
+  "componentStack",
+]);
 const RENDERER_CRASH_REPORT_LIMIT = 3;
 const RENDERER_CRASH_REPORT_WINDOW_MS = 60_000;
 const RENDERER_CRASH_ERROR_NAMES = new Set([
@@ -186,6 +194,8 @@ const rendererCrashReportTimestamps = new Map<number, number[]>();
 /** Safe renderer crash report payload accepted at the desktop IPC boundary. */
 export interface RendererCrashReportPayload {
   readonly errorName: string;
+  readonly errorMessage?: string;
+  readonly errorStack?: string;
   readonly componentStack: string;
   readonly componentStackTruncated: boolean;
 }
@@ -228,23 +238,48 @@ export function normalizeRendererCrashReport(
   }
 }
 
+type RendererCrashRecord = Record<"errorName", string> & Partial<
+  Record<"componentStack" | "errorMessage" | "errorStack", string>
+>;
+
+function isOptionalString(value: unknown): value is string | undefined {
+  return value === undefined || typeof value === "string";
+}
+
 function isRendererCrashRecord(
   record: Record<string, unknown>,
-): record is Record<"errorName" | "componentStack", string> {
+): record is RendererCrashRecord {
   if (Object.getPrototypeOf(record) !== Object.prototype) return false;
-  if (Object.keys(record).length !== 2) return false;
-  if (typeof record.errorName !== "string" || typeof record.componentStack !== "string") return false;
-  return record.componentStack.length <= RENDERER_CRASH_COMPONENT_STACK_MAX_LENGTH;
+  if (!Object.keys(record).every((key) => RENDERER_CRASH_KEYS.has(key))) return false;
+  if (typeof record.errorName !== "string") return false;
+  return (
+    isOptionalString(record.componentStack) &&
+    isOptionalString(record.errorMessage) &&
+    isOptionalString(record.errorStack)
+  );
 }
 
 function createRendererCrashReport(
-  record: Record<"errorName" | "componentStack", string>,
+  record: RendererCrashRecord,
 ): RendererCrashReportPayload | null {
-  const normalizedStack = normalizeRendererComponentStack(record.componentStack);
-  if (!normalizedStack) return null;
+  const normalizedStack = record.componentStack
+    ? normalizeRendererComponentStack(
+        record.componentStack.slice(0, RENDERER_CRASH_COMPONENT_STACK_MAX_LENGTH),
+      )
+    : null;
+  if (!normalizedStack && record.errorMessage === undefined && record.errorStack === undefined) {
+    return null;
+  }
+  const stack = normalizedStack ?? { componentStack: "", componentStackTruncated: false };
   return {
     errorName: RENDERER_CRASH_ERROR_NAMES.has(record.errorName) ? record.errorName : "Error",
-    ...normalizedStack,
+    ...(record.errorMessage !== undefined
+      ? { errorMessage: record.errorMessage.slice(0, RENDERER_CRASH_MESSAGE_MAX_LENGTH) }
+      : {}),
+    ...(record.errorStack !== undefined
+      ? { errorStack: record.errorStack.slice(0, RENDERER_CRASH_ERROR_STACK_MAX_LENGTH) }
+      : {}),
+    ...stack,
   };
 }
 
@@ -266,6 +301,8 @@ export function handleRendererCrashReport(
   rendererCrashReportTimestamps.set(event.sender.id, recent);
   logger.info("Renderer crash report", {
     errorName: normalized.errorName,
+    errorMessage: normalized.errorMessage,
+    errorStack: normalized.errorStack,
     componentStack: normalized.componentStack,
     componentStackTruncated: normalized.componentStackTruncated,
   });

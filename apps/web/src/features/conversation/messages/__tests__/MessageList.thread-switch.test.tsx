@@ -1123,10 +1123,20 @@ describe("MessageList thread switch", () => {
     }));
   }
 
-  function measureRows(container: HTMLElement, height = 100): void {
+  /** Row measurement applies one frame later to avoid ResizeObserver loops. */
+  async function flushMeasurement(): Promise<void> {
+    await act(async () => {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+    });
+  }
+
+  async function measureRows(container: HTMLElement, height = 100): Promise<void> {
     act(() => {
       for (const host of container.querySelectorAll("[data-transcript-key]")) LayoutObserver.resize(host, height);
     });
+    await flushMeasurement();
   }
 
   function readAt(viewport: HTMLElement, top: number): void {
@@ -1135,17 +1145,17 @@ describe("MessageList thread switch", () => {
     fireEvent.scroll(viewport);
   }
 
-  it("pins measured content and holds a reading anchor through prepend and eviction", () => {
+  it("pins measured content and holds a reading anchor through prepend and eviction", async () => {
     messagesValue = transcriptRows();
     const { container, rerender } = render(<MessageList />);
-    measureRows(container);
+    await measureRows(container);
     const viewport = screen.getByTestId("transcript-viewport");
     expect(viewport.scrollTop).toBe(400);
     readAt(viewport, 125);
     const anchor = container.querySelector('[data-message-id="thread-A-1"]');
     messagesValue = [{ id: "older", sequence: -1 }, ...messagesValue];
     act(() => rerender(<MessageList />));
-    measureRows(container);
+    await measureRows(container);
     expect(viewport.scrollTop).toBe(225);
     expect(container.querySelector('[data-message-id="thread-A-1"]')).toBe(anchor);
     messagesValue = messagesValue.slice(1);
@@ -1154,31 +1164,31 @@ describe("MessageList thread switch", () => {
     expect(hasRememberedHistoryPosition("thread-A")).toBe(true);
   });
 
-  it("restores a cached reading row without reusing the outgoing viewport", () => {
+  it("restores a cached reading row without reusing the outgoing viewport", async () => {
     messagesValue = transcriptRows();
     const { container, rerender } = render(<MessageList />, { wrapper: StrictMode });
-    measureRows(container);
+    await measureRows(container);
     const outgoing = screen.getByTestId("transcript-viewport");
     readAt(outgoing, 125);
     activeThreadIdValue = currentThreadIdValue = "thread-B";
     messagesValue = transcriptRows("thread-B");
     act(() => rerender(<MessageList />));
-    measureRows(container);
+    await measureRows(container);
     expect(screen.getByTestId("transcript-viewport")).not.toBe(outgoing);
     expect(screen.getByTestId("transcript-viewport").scrollTop).toBe(400);
     expect(container.querySelector('[data-thread-id="thread-A"]')).toBeNull();
     activeThreadIdValue = currentThreadIdValue = "thread-A";
     messagesValue = transcriptRows();
     act(() => rerender(<MessageList />));
-    measureRows(container);
+    await measureRows(container);
     expect(screen.getByTestId("transcript-viewport").scrollTop).toBe(125);
     expect(recallScrollPosition("thread-A")?.rowAnchor).toEqual({ key: "thread-A-1", offset: 25 });
   });
 
-  it("keeps a restored offset that exceeds the row's provisional height", () => {
+  it("keeps a restored offset that exceeds the row's provisional height", async () => {
     messagesValue = transcriptRows();
     const { container, rerender } = render(<MessageList />, { wrapper: StrictMode });
-    measureRows(container, 300);
+    await measureRows(container, 300);
     readAt(screen.getByTestId("transcript-viewport"), 500);
     activeThreadIdValue = currentThreadIdValue = "thread-B";
     messagesValue = transcriptRows("thread-B");
@@ -1186,17 +1196,17 @@ describe("MessageList thread switch", () => {
     activeThreadIdValue = currentThreadIdValue = "thread-A";
     messagesValue = transcriptRows();
     act(() => rerender(<MessageList />));
-    measureRows(container, 300);
+    await measureRows(container, 300);
     expect(screen.getByTestId("transcript-viewport").scrollTop).toBe(500);
     expect(recallScrollPosition("thread-A")?.rowAnchor).toEqual({ key: "thread-A-1", offset: 200 });
   });
 
-  it("clips the prompt for the older turn in view", () => {
+  it("clips the prompt for the older turn in view", async () => {
     messagesValue = transcriptRows().map((message, index) => index === 0 || index === 6
       ? { ...message, role: "user", content: index === 0 ? "Earlier request" : "Latest request" }
       : message);
     const { container } = render(<MessageList />);
-    measureRows(container, 200);
+    await measureRows(container, 200);
     const viewport = screen.getByTestId("transcript-viewport");
     readAt(viewport, 400);
     expect(screen.getByTestId("sticky-user-message")).toHaveTextContent("Earlier request");
@@ -1213,14 +1223,14 @@ describe("MessageList thread switch", () => {
     expect(screen.getByTestId("sticky-user-message")).toHaveTextContent("Earlier request");
   });
 
-  it("does not apply the sticky prompt inset twice on a cached restore", () => {
+  it("does not apply the sticky prompt inset twice on a cached restore", async () => {
     const history = [
       { id: "prompt", thread_id: "thread-A", sequence: -1, role: "user" as const, content: "Earlier request" },
       ...transcriptRows(),
     ];
     messagesValue = history;
     const { container, rerender } = render(<MessageList />, { wrapper: StrictMode });
-    measureRows(container);
+    await measureRows(container);
     readAt(screen.getByTestId("transcript-viewport"), 300);
     const before = recallScrollPosition("thread-A")?.rowAnchor;
     activeThreadIdValue = currentThreadIdValue = "thread-B";
@@ -1229,11 +1239,11 @@ describe("MessageList thread switch", () => {
     activeThreadIdValue = currentThreadIdValue = "thread-A";
     messagesValue = history;
     act(() => rerender(<MessageList />));
-    measureRows(container);
+    await measureRows(container);
     expect(recallScrollPosition("thread-A")?.rowAnchor).toEqual(before);
   });
 
-  it("unmounts off-screen thoughts inside one long turn and remounts them in order", () => {
+  it("unmounts off-screen thoughts inside one long turn and remounts them in order", async () => {
     messagesValue = [{ id: "answer", sequence: 1, role: "assistant", content: "Final answer" }];
     const thoughts = Array.from({ length: 200 }, (_, index) => ({
       id: `thought-${index}`, message_id: "answer", text: `History thought ${index}`,
@@ -1241,38 +1251,39 @@ describe("MessageList thread switch", () => {
     }));
     recordOverridesByThread["thread-A"] = { narrativeByMessage: { answer: { tools: [], hooks: [], thoughts } } };
     const { container } = render(<MessageList />);
-    measureRows(container);
+    await measureRows(container);
     const tailRows = screen.getAllByText(/^History thought \d+$/);
     expect(tailRows.length).toBeLessThan(30);
     expect(screen.queryByText("History thought 0")).toBeNull();
     expect(screen.getByText("History thought 199")).toBeInTheDocument();
     readAt(screen.getByTestId("transcript-viewport"), 0);
-    measureRows(container);
+    await measureRows(container);
     const headRows = screen.getAllByText(/^History thought \d+$/).map((row) => row.textContent);
     expect(headRows.length).toBeLessThan(30);
     expect(headRows).toEqual(Array.from({ length: headRows.length }, (_, index) => `History thought ${index}`));
     expect(screen.queryByText("History thought 199")).toBeNull();
   });
 
-  it("holds reading posture on append until the user returns to the tail", () => {
+  it("holds reading posture on append until the user returns to the tail", async () => {
     messagesValue = transcriptRows();
     const { container, rerender } = render(<MessageList />);
-    measureRows(container);
+    await measureRows(container);
     const viewport = screen.getByTestId("transcript-viewport");
     readAt(viewport, 125);
     messagesValue = [...messagesValue, { id: "new", sequence: 12 }];
     act(() => rerender(<MessageList />));
-    measureRows(container);
+    await measureRows(container);
     expect(viewport.scrollTop).toBe(125);
     expect(recallScrollTop("thread-A")).toBe(125);
     viewport.scrollTop = 500;
     fireEvent.scroll(viewport);
     const tail = container.querySelector('[data-transcript-key="new"]')!;
     act(() => LayoutObserver.resize(tail, 180));
+    await flushMeasurement();
     expect(viewport.scrollTop).toBe(580);
   });
 
-  it("waits for hydration and then positions the completed transcript at its measured tail", () => {
+  it("waits for hydration and then positions the completed transcript at its measured tail", async () => {
     loadingValue = true;
     messagesValue = [];
     const { container, rerender } = render(<MessageList />);
@@ -1280,16 +1291,16 @@ describe("MessageList thread switch", () => {
     loadingValue = false;
     messagesValue = transcriptRows();
     act(() => rerender(<MessageList />));
-    measureRows(container);
+    await measureRows(container);
     expect(screen.getByTestId("transcript-viewport").scrollTop).toBe(400);
     expect(container.querySelector('[data-message-id="thread-A-11"]')).not.toBeNull();
   });
 
-  it("loads older and newer history only after a gesture reaches its boundary", () => {
+  it("loads older and newer history only after a gesture reaches its boundary", async () => {
     messagesValue = transcriptRows();
     hasMoreMessagesValue = hasNewerMessagesValue = true;
     const { container } = render(<MessageList />);
-    measureRows(container);
+    await measureRows(container);
     const viewport = screen.getByTestId("transcript-viewport");
     expect(loadOlderMessagesSpy).not.toHaveBeenCalled();
     expect(loadNewerMessagesSpy).not.toHaveBeenCalled();

@@ -23,7 +23,9 @@ export type UpdateStatus =
 /** Safe renderer crash diagnostics sent to the desktop main process. */
 export interface RendererCrashReport {
   readonly errorName: string;
-  readonly componentStack: string;
+  readonly errorMessage?: string;
+  readonly errorStack?: string;
+  readonly componentStack?: string;
 }
 
 /** App version and auto-update controls exposed by the main process. */

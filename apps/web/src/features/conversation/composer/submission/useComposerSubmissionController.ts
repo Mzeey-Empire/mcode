@@ -37,6 +37,14 @@ export interface ComposerSubmissionQueue {
   queueIfGenerating(queued: HandoffQueuedSend): boolean;
   discardEmptyEdit(): boolean;
   finishEditing(): void;
+  /**
+   * Marks the active queue edit consumed by the dispatch that follows. While
+   * consumed, cancel/discard cannot reinsert the popped original — its edited
+   * content is already on the wire.
+   */
+  consumeEditForDispatch(): void;
+  /** Re-arms a consumed queue edit when its dispatch fails before settling. */
+  releaseConsumedEdit(): void;
   resolvePreviewAnnotations(
     annotations: PreviewAnnotationBundle | undefined,
   ): PreviewAnnotationBundle | undefined;
@@ -127,6 +135,7 @@ export function useComposerSubmissionController({
         submission.currentAnnotations,
       );
       annotations.clearBeforeDispatch();
+      queue.consumeEditForDispatch();
       const dispatch = dispatchComposerTarget({
         threadId,
         workspaceId,
@@ -146,6 +155,7 @@ export function useComposerSubmissionController({
       try {
         await dispatch;
       } catch (error) {
+        queue.releaseConsumedEdit();
         if (draftCleared) form.restoreFailedDispatch();
         annotations.restoreAfterFailure();
         showDispatchFailure(error, submission.snapshot.selectedTextComments.length > 0);
@@ -158,7 +168,7 @@ export function useComposerSubmissionController({
         finishEditing: queue.finishEditing,
       });
     },
-    [activeThread, annotationScopeId, branchFromMessageId, execution, form, isAgentRunning, isNewThread, onBranchModeExit, onThreadCreated, onThreadCreationFailed, onThreadPreparing, queue.finishEditing, queuePrepared, threadId, workspaceId],
+    [activeThread, annotationScopeId, branchFromMessageId, execution, form, isAgentRunning, isNewThread, onBranchModeExit, onThreadCreated, onThreadCreationFailed, onThreadPreparing, queue, queuePrepared, threadId, workspaceId],
   );
 
   const runSubmissionAttempt = useCallback(async (): Promise<SubmitAttemptOutcome> => {

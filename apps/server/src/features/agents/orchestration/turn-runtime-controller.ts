@@ -7,7 +7,7 @@
 
 import { injectable, inject, delay } from "tsyringe";
 import { logger } from "@mcode/shared";
-import { isSessionEvictable } from "@mcode/contracts";
+import { AgentEventType, isSessionEvictable } from "@mcode/contracts";
 import type {
   Thread,
   IProviderRegistry,
@@ -72,6 +72,13 @@ import {
   stopDispatchState,
 } from "./agent-service-helpers.js";
 import type { TurnRuntimeEventControl } from "./turn-runtime-event-control.js";
+
+/**
+ * Bounded wait for `provider.stopSession` before the turn is force-finalized.
+ * Sits above provider-internal cancel bounds (Devin waits 10s before killing
+ * its ACP child) so a settled provider still reports graceful cancellation.
+ */
+const PROVIDER_STOP_SETTLE_TIMEOUT_MS = 15_000;
 
 type RetryDispatchIdentity = Readonly<{
   mutationReservationToken: string;
@@ -464,7 +471,6 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     if (!this.ownsTurnAdmission(lease)) {
       throw new Error(`Turn admission lost runtime ownership: ${lease.threadId}`);
     }
-    this.memoryPressureService.assertCanStartTurn();
     this.memoryPressureService.markActive(lease.threadId);
   }
 
@@ -735,8 +741,59 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   private async stopProviderForTurn(prepared: PreparedStop): Promise<void> {
     await this.featureEffects.stopDescendants(prepared.threadId);
-    if (prepared.dispatchState !== "not-dispatched") await this.stopProvider(prepared);
+    if (prepared.dispatchState !== "not-dispatched") await this.stopProviderBounded(prepared);
     this.disarmTurnRetryWindow(prepared.threadId);
+  }
+
+  /**
+   * Bound provider cancellation so a wedged provider cannot pin the turn in
+   * "stopping" forever, which would suppress every later terminal event.
+   */
+  private async stopProviderBounded(prepared: PreparedStop): Promise<void> {
+    const attempt = this.stopProvider(prepared);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const timedOut = await Promise.race([
+        attempt.then(() => false),
+        new Promise<true>((resolve) => {
+          timer = setTimeout(() => resolve(true), PROVIDER_STOP_SETTLE_TIMEOUT_MS);
+        }),
+      ]);
+      if (!timedOut) return;
+      logger.warn("Provider stopSession did not settle; finalizing turn as cancelled", {
+        threadId: prepared.threadId,
+        providerId: prepared.providerId,
+        sessionId: prepared.sessionId,
+        timeoutMs: PROVIDER_STOP_SETTLE_TIMEOUT_MS,
+      });
+      // Observe the wedged promise so a late rejection cannot crash the process.
+      void attempt.catch((error: unknown) => {
+        logger.warn("Provider stopSession rejected after timeout", {
+          threadId: prepared.threadId,
+          providerId: prepared.providerId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+      this.evictUnresponsiveSession(prepared);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Drop a pooled session whose provider ignored cancellation so the next turn respawns fresh. */
+  private evictUnresponsiveSession(prepared: PreparedStop): void {
+    const providerId = prepared.providerId;
+    if (!providerId) return;
+    void (async () => {
+      const provider = this.providerRegistry.resolve(providerId);
+      await this.evictPooledSession(provider, prepared.sessionId);
+    })().catch((error: unknown) => {
+      logger.warn("Failed to evict unresponsive provider session", {
+        threadId: prepared.threadId,
+        providerId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   private async stopProvider(prepared: PreparedStop): Promise<void> {
@@ -814,7 +871,26 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
 
   /** Normalize one provider event once at the production provider boundary. */
   normalize(event: AgentEvent): AgentEvent | undefined {
-    return this.eventApplication.prepare(this.turnRuntime.normalizeEvent(event));
+    const normalized = this.turnRuntime.normalizeEvent(event);
+    if (!normalized) this.warnDroppedTerminal(event);
+    return this.eventApplication.prepare(normalized);
+  }
+
+  /** Surface a terminal event normalization dropped while its turn still runs. */
+  private warnDroppedTerminal(event: AgentEvent): void {
+    const terminal = event.type === AgentEventType.TurnComplete
+      || event.type === AgentEventType.Error
+      || (event.type === AgentEventType.Ended && event.outcome !== undefined);
+    if (!terminal) return;
+    const snapshot = this.turnRuntime.snapshot(event.threadId);
+    if (!snapshot || !isRunningRuntime(snapshot)) return;
+    logger.warn("Terminal provider event dropped for a still-running turn", {
+      threadId: event.threadId,
+      type: event.type,
+      eventExecutionId: event.turnExecutionId ?? null,
+      runtimeExecutionId: snapshot.turnExecutionId,
+      runtimePhase: snapshot.phase,
+    });
   }
 
   /**
@@ -1355,7 +1431,10 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
     if (isSessionEvictable(provider)) {
       await this.evictPooledSession(provider, sessionId);
     } else if (!wasActive) {
-      await provider.stopSession(sessionId);
+      await Promise.race([
+        Promise.resolve(provider.stopSession(sessionId)).catch(() => {}),
+        new Promise<void>((resolve) => setTimeout(resolve, PROVIDER_STOP_SETTLE_TIMEOUT_MS)),
+      ]);
     }
   }
 
@@ -1380,7 +1459,10 @@ export class TurnRuntimeController implements TurnLifecycleControl, TurnRuntimeE
         if (!providerId) return;
         try {
           const provider = this.providerRegistry.resolve(providerId);
-          await provider.stopSession(sessionId);
+          await Promise.race([
+            Promise.resolve(provider.stopSession(sessionId)).catch(() => {}),
+            new Promise<void>((resolve) => setTimeout(resolve, PROVIDER_STOP_SETTLE_TIMEOUT_MS)),
+          ]);
         } catch {
           // best-effort
         }

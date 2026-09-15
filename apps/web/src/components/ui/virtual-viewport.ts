@@ -162,15 +162,25 @@ export class VirtualViewport {
     }
   }
 
+  private measurePending = false;
+
   private measure(entries: readonly ResizeObserverEntry[]): void {
     let changed = false;
     for (const entry of entries) {
       if (this.updateHeight(entry)) changed = true;
     }
-    if (!changed || this.disposed) return;
-    this.context.rebuildSizeCache();
-    this.context.updateContentSize(this.context.sizeCache.getTotalSize());
-    this.applyPosition();
+    if (!changed || this.disposed || this.measurePending) return;
+    // Applying sizes inside the observer callback resizes observed rows and
+    // re-triggers delivery in the same frame ("ResizeObserver loop" errors).
+    // Deferring to rAF matches the browser's own deferral without the warning.
+    this.measurePending = true;
+    requestAnimationFrame(() => {
+      this.measurePending = false;
+      if (this.disposed) return;
+      this.context.rebuildSizeCache();
+      this.context.updateContentSize(this.context.sizeCache.getTotalSize());
+      this.applyPosition();
+    });
   }
 
   private updateHeight(entry: ResizeObserverEntry): boolean {

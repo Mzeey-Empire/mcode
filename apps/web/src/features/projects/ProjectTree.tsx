@@ -17,7 +17,7 @@ import { useShallow } from "zustand/shallow";
 import { useWorkspaceStore } from "./state/workspaceStore";
 import { hasRecoveryEntry, useRecoveryIncidentStore } from "@/features/recovery/state/recoveryIncidentStore";
 import { useUiStore } from "@/stores/uiStore";
-import { useThreadStore } from "@/stores/threadStore";
+import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
 import {
   Trash2,
@@ -1045,7 +1045,7 @@ const ThreadRow = memo(function ThreadRow({
   onRetryThreadCleanup,
 }: ThreadRowProps) {
   const isActive = useWorkspaceStore((s) => s.activeThreadId === thread.id);
-  const isRunning = useThreadStore((s) => s.runningThreadIds.has(thread.id));
+  const isRunning = useThreadStore((s) => isThreadExecuting(thread.id, s));
   const automaticSetup = useProjectAutomaticSetup(
     thread.id,
     thread.mode === "worktree" && thread.worktree_managed === true,
@@ -1255,6 +1255,10 @@ function useThreadLifecycleActions({
     try {
       const updateLifecycle = isUserCompleted ? onReopenThread : onCompleteThread;
       await updateLifecycle(thread.id);
+    } catch {
+      // The store action already surfaces the failure via workspaceStore.error;
+      // swallowing here keeps expected rejections (e.g. a pending mutation when
+      // a turn raced the click) out of the unhandled-rejection crash reporter.
     } finally {
       setIsLifecyclePending(false);
     }

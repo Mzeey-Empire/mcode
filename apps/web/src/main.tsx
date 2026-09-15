@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "@fontsource-variable/jetbrains-mono/index.css";
 import { App } from "./app/App";
 import { AppErrorBoundary } from "./app/AppErrorBoundary";
+import { initRendererErrorReporting } from "./app/renderer-error-reporting";
 import { initTransport } from "./transport";
 import { initDesktopPowerReporting } from "./lib/desktop-power";
 import "./index.css";
@@ -61,6 +62,7 @@ function renderConnecting(container: HTMLElement): void {
 }
 
 const root = document.getElementById("root")!;
+initRendererErrorReporting();
 document.documentElement.toggleAttribute(
   "data-mcode-desktop",
   Boolean(window.desktopBridge?.window),

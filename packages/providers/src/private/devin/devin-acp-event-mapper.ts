@@ -80,6 +80,8 @@ export interface DevinAcpTurnState {
   deferredToolCallIds: Set<string>;
   /** Latest model label from `_cognition.ai/agent_stopped`. */
   stoppedModelLabel: string | null;
+  /** Latest stop cause from `_cognition.ai/agent_stopped`; more specific than the prompt `stopReason`. */
+  stopCause: string | null;
 }
 
 /** Creates a fresh per-turn state bundle. */
@@ -99,6 +101,7 @@ export function createDevinAcpTurnState(): DevinAcpTurnState {
     retainedToolResultByCallId: new Map(),
     deferredToolCallIds: new Set(),
     stoppedModelLabel: null,
+    stopCause: null,
   };
 }
 
@@ -473,6 +476,8 @@ export function observeDevinExtensionNotification(
   if (!state) return;
   if (method !== "_cognition.ai/agent_stopped") return;
   const record = asRecord(params);
+  const cause = typeof record?.cause === "string" ? record.cause : undefined;
+  if (cause) state.stopCause = cause;
   const stats = record ? asRecord(record.stats) : undefined;
   const label = typeof stats?.modelLabel === "string" ? stats.modelLabel : undefined;
   if (label) state.stoppedModelLabel = label;

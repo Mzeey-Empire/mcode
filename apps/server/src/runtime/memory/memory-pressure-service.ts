@@ -1,7 +1,9 @@
 /**
  * Lifecycle-aware memory pressure management.
- * Tracks idle state and active-turn V8 heap pressure, then asks callers to shed
- * memory before the process reaches an unrecoverable heap limit.
+ * Tracks idle state and active-turn memory pressure, then asks callers to shed
+ * memory at warning and critical levels. Under Bun the measurement is
+ * process RSS against the configured soft budget; there is no fatal heap
+ * ceiling, so pressure never blocks new turns.
  */
 
 import { injectable, inject } from "tsyringe";
@@ -38,7 +40,7 @@ export interface MemoryPressureSnapshot {
   usedBytes: number;
   /** V8 heap limit or Bun's configured soft process budget in bytes. */
   budgetBytes: number;
-  /** Measured bytes divided by the admission budget. */
+  /** Measured bytes divided by the pressure budget. */
   ratio: number;
 }
 
@@ -54,7 +56,7 @@ const ACTIVE_MEMORY_POLL_MS = 1_000;
 /** Warning threshold: output buffering sheds memory and idle pools are evicted. */
 const WARNING_HEAP_RATIO = 0.8;
 
-/** Critical threshold: new turns are rejected until pressure clears. */
+/** Critical threshold: a second shedding pass fires at this level. */
 const CRITICAL_HEAP_RATIO = 0.9;
 
 /** Minimum time between full GC invocations (5 minutes). */
@@ -91,7 +93,7 @@ export class MemoryPressureService {
     return this.state;
   }
 
-  /** Current active-turn memory pressure. Exposed for diagnostics and gates. */
+  /** Current active-turn memory pressure. Exposed for diagnostics. */
   get currentPressure(): MemoryPressureSnapshot {
     return this.pressure;
   }
@@ -102,19 +104,6 @@ export class MemoryPressureService {
     return () => {
       this.pressureListeners.delete(listener);
     };
-  }
-
-  /**
-   * Reject starting a new turn while another active turn has pushed memory
-   * into the critical band.
-   */
-  assertCanStartTurn(measurement?: RuntimeMemoryMeasurement): void {
-    const snapshot = this.snapshot(measurement ?? this.measureRuntimeMemory());
-    if (this.activeTurns.size > 0 || this.pressure.level === "critical" || snapshot.level !== "normal") {
-      this.setPressure(snapshot);
-    }
-    if (snapshot.level !== "critical") return;
-    throw new Error("Memory pressure is critical. Wait for the active turn to finish before starting another turn.");
   }
 
   /**

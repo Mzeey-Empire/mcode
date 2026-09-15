@@ -43,11 +43,13 @@ describe("AppErrorBoundary", () => {
     expect(screen.getByText("Reload the app to continue.")).toBeInTheDocument();
     expect(diagnostic).toHaveBeenCalledWith(
       "[AppErrorBoundary] Caught application render error",
-      "Error",
+      expect.objectContaining({ message: "render failed" }),
       expect.any(String),
     );
     expect(reportRendererCrash).toHaveBeenCalledWith({
       errorName: "Error",
+      errorMessage: "render failed",
+      errorStack: expect.any(String),
       componentStack: expect.any(String),
     });
 

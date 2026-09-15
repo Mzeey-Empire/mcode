@@ -13,7 +13,10 @@ vi.mock("./composer-submission-routes", () => ({
   isComposerTargetReady: () => true,
 }));
 
-import { useComposerSubmissionController } from "./useComposerSubmissionController";
+import {
+  useComposerSubmissionController,
+  type ComposerSubmissionQueue,
+} from "./useComposerSubmissionController";
 
 const comment: SelectedTextComment = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -66,7 +69,7 @@ function execution(): ComposerExecutionTargetController {
   };
 }
 
-function useHarness() {
+function useHarness(queueOverrides: Partial<ComposerSubmissionQueue> = {}) {
   const form = useComposerFormController({
     isNewThread: true,
     workspaceId: "workspace-1",
@@ -83,7 +86,10 @@ function useHarness() {
       queueIfGenerating: () => false,
       discardEmptyEdit: () => false,
       finishEditing: vi.fn(),
+      consumeEditForDispatch: vi.fn(),
+      releaseConsumedEdit: vi.fn(),
       resolvePreviewAnnotations: (annotations) => annotations,
+      ...queueOverrides,
     },
   });
   return { form, controller };
@@ -216,5 +222,49 @@ describe("useComposerSubmissionController selected-text comments", () => {
     await act(async () => {
       releaseFirst();
     });
+  });
+
+  it("consumes the queue edit while a dispatch is in flight and releases it when the dispatch fails", async () => {
+    const consumeEditForDispatch = vi.fn();
+    const releaseConsumedEdit = vi.fn();
+    routeMocks.dispatchComposerTarget.mockRejectedValueOnce(
+      new Error("transport unavailable"),
+    );
+    const { result } = renderHook(() =>
+      useHarness({ consumeEditForDispatch, releaseConsumedEdit }),
+    );
+
+    act(() => {
+      result.current.form.replaceDraft("edited queued message");
+    });
+    await waitFor(() => expect(result.current.form.state.text).toBe("edited queued message"));
+    act(() => {
+      void result.current.controller.submit();
+    });
+
+    await waitFor(() => expect(releaseConsumedEdit).toHaveBeenCalledTimes(1));
+    expect(consumeEditForDispatch).toHaveBeenCalledTimes(1);
+    expect(
+      consumeEditForDispatch.mock.invocationCallOrder[0],
+    ).toBeLessThan(
+      routeMocks.dispatchComposerTarget.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("does not release a consumed queue edit after a settled dispatch", async () => {
+    const releaseConsumedEdit = vi.fn();
+    routeMocks.dispatchComposerTarget.mockResolvedValueOnce(undefined);
+    const { result } = renderHook(() => useHarness({ releaseConsumedEdit }));
+
+    act(() => {
+      result.current.form.replaceDraft("edited queued message");
+    });
+    await waitFor(() => expect(result.current.form.state.text).toBe("edited queued message"));
+    await act(async () => {
+      await result.current.controller.submit();
+    });
+
+    await waitFor(() => expect(routeMocks.dispatchComposerTarget).toHaveBeenCalled());
+    expect(releaseConsumedEdit).not.toHaveBeenCalled();
   });
 });

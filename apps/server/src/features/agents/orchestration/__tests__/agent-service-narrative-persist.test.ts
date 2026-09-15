@@ -236,7 +236,6 @@ function build(options: {
   const memoryPressureService = {
     markActive: vi.fn(),
     markIdle: vi.fn(),
-    assertCanStartTurn: vi.fn(),
     onPressureChange: vi.fn(),
   } as unknown as MemoryPressureService;
   const taskAppend = vi.fn();

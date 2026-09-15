@@ -2,6 +2,11 @@
 status: accepted
 ---
 
+> Superseded in part (2026-09): the critical-level turn rejection was removed.
+> The server runs under Bun with no fatal heap cap, so RSS-vs-budget admission
+> rejection blocked healthy work rather than preventing a crash. Shedding at
+> warning and critical levels, the soft budget, and bounded tool output remain.
+
 # Backend runs with a 512 MB heap cap, bounded tool output, and graduated pressure shedding
 
 ## Context
@@ -66,9 +71,10 @@ Thresholds are fractions of the configured heap limit, never absolute bytes:
 
 - **Warning at 80%:** providers switch to truncate-mode buffering and idle
   pooled provider sessions are evicted.
-- **Critical at 90%:** new turns are rejected with a user-visible error; the
+- **Critical at 90%:** new turns are rejected with a user-visible error
+  (removed — see supersession note); the
   pool shrinks to sessions with an active turn.
-- An in-flight turn is never killed by shedding. Only new work is refused.
+- An in-flight turn is never killed by shedding.
 
 ### Crash handling (#713)
 

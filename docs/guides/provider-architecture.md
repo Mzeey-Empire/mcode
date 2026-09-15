@@ -48,6 +48,14 @@ When adding a new provider:
 - Filter stderr: classify lines as benign (debug log) or fatal (session teardown), never
   surface raw stderr as user-facing error messages
 
+`stopSession` must settle quickly. The turn runtime bounds the wait
+(`PROVIDER_STOP_SETTLE_TIMEOUT_MS` in `turn-runtime-controller.ts`); when a
+provider does not settle, the turn still finalizes as cancelled and the pooled
+session is evicted so the next turn respawns fresh. A wedged `stopSession` must
+never leave a thread parked in the "stopping" reservation, because that
+reservation suppresses every later terminal event. A wedged stop was how a
+finished turn kept the composer and thread list running.
+
 ## Event boundary
 
 ### Activity labels
@@ -154,3 +162,20 @@ covers off-PATH installs.
   token counts from the `session/prompt` response. If Devin ever sends a
   `usage_update.cost` payload, its USD amount lands on `turnComplete.costUsd`;
   otherwise `costUsd` stays `null`.
+- **Stop reasons and limits.** `_cognition.ai/agent_stopped.cause` is treated
+  as authoritative over the prompt `stopReason`, so `quota_exhausted`,
+  `auth_required`, `content_filter`, `output_truncated`, and friends surface
+  as `turnComplete.reason` instead of a silent `end_turn`. Limit reasons
+  (`max_turn_requests`, `max_tokens`, `output_truncated`) auto-continue with a
+  bare "continue" prompt, matching Devin's own continue flow, up to a bound of
+  eight; the final reason is still reported so the user can continue manually.
+  User stops emit `ended.outcome: "cancelled"` so the footer reads "You
+  stopped" rather than a silent completion. `session/load` replays the full
+  history before resolving, so updates absorbed while `sessionId` is still
+  unset are kept out of the live transcript instead of duplicating it.
+- **Bounded cancel.** Devin ignores `session/cancel` while a turn is blocked
+  inside a tool call, so `stopSession` gives the prompt a bounded window to
+  settle, then kills the child and warms a replacement `devin acp` process in
+  the background. The next turn reuses it and reloads the session via
+  `session/load`, which keeps Stop a guaranteed escape instead of waiting on a
+  wedged prompt forever.

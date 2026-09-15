@@ -1,6 +1,6 @@
 import * as NodeV8 from "node:v8";
 
-/** The memory measurement used to make server admission decisions. */
+/** The memory measurement used to classify server memory pressure. */
 export type RuntimeMemoryMeasurement = {
   source: "v8-heap" | "process-rss";
   usedBytes: number;
@@ -22,7 +22,8 @@ const BYTES_PER_MIB = 1024 * 1024;
 /**
  * Measures memory with the limit that the active JavaScript runtime can support.
  * Bun's V8 compatibility values do not represent its JavaScriptCore heap, so Bun
- * admission uses whole-process RSS against the configured soft server budget.
+ * pressure classification uses whole-process RSS against the configured soft
+ * server budget.
  */
 export function sampleRuntimeMemory(
   configuredBudgetMb: number,

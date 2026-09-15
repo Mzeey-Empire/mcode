@@ -1,6 +1,8 @@
 import { act, render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useConnectionStore } from "@/stores/connectionStore";
+import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { createMockThread } from "@/__tests__/mocks/transport";
 
 const watchWorkspaceFiles = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 
@@ -19,6 +21,7 @@ describe("useWorkspaceFileInvalidation", () => {
   beforeEach(() => {
     watchWorkspaceFiles.mockClear();
     watchWorkspaceFiles.mockResolvedValue(undefined);
+    act(() => useWorkspaceStore.setState({ threads: [] }));
     act(() => useConnectionStore.getState().setStatus("connecting"));
   });
 
@@ -47,5 +50,23 @@ describe("useWorkspaceFileInvalidation", () => {
       expect.objectContaining({ message: "Workspace is unavailable" }),
     ));
     consoleError.mockRestore();
+  });
+
+  it("watches the workspace scope while the thread is a client-only placeholder", async () => {
+    act(() => useWorkspaceStore.setState({
+      threads: [{ ...createMockThread({ id: "thread-1" }), clientPreparing: true }],
+    }));
+
+    render(<InvalidationSubscriber />);
+    act(() => useConnectionStore.getState().setStatus("connected"));
+
+    await waitFor(() => expect(watchWorkspaceFiles).toHaveBeenLastCalledWith("workspace-1", undefined));
+
+    // The optimistic swap persists the row; the thread scope attaches on the
+    // flag change even if the component kept the same threadId prop.
+    act(() => useWorkspaceStore.setState({
+      threads: [createMockThread({ id: "thread-1" })],
+    }));
+    await waitFor(() => expect(watchWorkspaceFiles).toHaveBeenLastCalledWith("workspace-1", "thread-1"));
   });
 });

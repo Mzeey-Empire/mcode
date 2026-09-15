@@ -55,6 +55,12 @@ vi.mock("electron", () => ({
   app: createWindowTest.app,
 }));
 
+const sharedMocks = vi.hoisted(() => ({
+  logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+}));
+
+vi.mock("@mcode/shared", () => ({ logger: sharedMocks.logger }));
+
 import { createWindow } from "../create-window.js";
 
 function createHooks() {
@@ -157,6 +163,27 @@ describe("Desktop Window creation", () => {
     );
     createWindowTest.emit("did-finish-load");
     expect(createWindowTest.webContents.openDevTools).not.toHaveBeenCalled();
+  });
+
+  it("forwards renderer console errors but skips ResizeObserver loop notices", () => {
+    createWindow({ platform: "linux", isDesktopDev: () => false, hooks: createHooks() });
+
+    createWindowTest.emit("console-message", {
+      level: "error",
+      message: "ResizeObserver loop completed with undelivered notifications.",
+      sourceId: "file:///renderer/index.html",
+      lineNumber: 0,
+    });
+    createWindowTest.emit("console-message", {
+      level: "error",
+      message: "real render failure",
+      sourceId: "file:///renderer/app.js",
+      lineNumber: 7,
+    });
+
+    expect(sharedMocks.logger.error).toHaveBeenCalledOnce();
+    expect(sharedMocks.logger.error).toHaveBeenCalledWith("Renderer console error",
+      expect.objectContaining({ message: "real render failure" }));
   });
 
   it("hardens Preview webviews and disposes resources only after close completes", () => {
