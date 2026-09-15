@@ -117,9 +117,11 @@ export class GitWorktreeService {
     }
 
     await this.tryPruneWorktrees(repoPath);
-    const parentsCleaned = await this.removeEmptyManagedParentDirs(request.path);
+    // A stuck empty parent dir is a cosmetic leftover; it must not report
+    // the already-removed worktree as a cleanup failure.
+    await this.removeEmptyManagedParentDirs(request.path);
     await this.tryDeleteWorktreeBranch(repoPath, request.branch, request.forceDeleteBranch);
-    return parentsCleaned;
+    return true;
   }
 
   /** Resolve the working directory for a direct or worktree-backed thread. */
@@ -258,6 +260,7 @@ export class GitWorktreeService {
       await this.worktreeDirectoryRemover.remove(worktreePath);
     } catch (error) {
       logger.error("Fallback worktree removal failed", { wtPath: worktreePath, error: gitErrorMessage(error) });
+      throw error;
     }
   }
 
