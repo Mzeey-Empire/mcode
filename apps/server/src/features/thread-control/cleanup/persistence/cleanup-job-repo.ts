@@ -302,6 +302,19 @@ export class CleanupJobRepo {
     this.stmtResetAttempts.run();
   }
 
+  /**
+   * Requeue jobs that exhausted their retries. findDue filters them out
+   * forever, so without this they strand their worktree directories and pin
+   * deleting workspaces. Orphaned rows self-clean on the next poll because
+   * the worker deletes explicit jobs whose thread is gone.
+   */
+  requeueExhaustedJobs(): number {
+    const result = this.db.prepare(
+      "UPDATE cleanup_jobs SET attempts = 0, next_retry_at = 0 WHERE attempts >= ?",
+    ).run(MAX_CLEANUP_ATTEMPTS);
+    return result.changes;
+  }
+
   /** Find a single job by its primary key. Returns null if not found. */
   findById(id: string): CleanupJob | null {
     const row = this.stmtFindById.get(id) as CleanupJob | undefined;

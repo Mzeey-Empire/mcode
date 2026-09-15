@@ -274,6 +274,30 @@ describe("CleanupJobRepo", () => {
     });
   });
 
+  describe("requeueExhaustedJobs", () => {
+    it("requeues only jobs that exhausted retries so the worker can pick them up again", () => {
+      const exhausted = repo.insert({ thread_id: "t-dead", workspace_path: "/r", worktree_path: "/r/wt-dead", branch: null });
+      const live = repo.insert({ thread_id: "t-live", workspace_path: "/r", worktree_path: "/r/wt-live", branch: null });
+      db.prepare("UPDATE cleanup_jobs SET attempts = ?, next_retry_at = ? WHERE id = ?")
+        .run(MAX_CLEANUP_ATTEMPTS, Date.now() + 60_000, exhausted.id);
+      repo.recordFailure(live.id, "transient");
+
+      expect(repo.findDue(Date.now()).map((job) => job.thread_id)).toEqual([]);
+
+      expect(repo.requeueExhaustedJobs()).toBe(1);
+
+      const requeued = repo.findById(exhausted.id)!;
+      expect(requeued.attempts).toBe(0);
+      expect(requeued.next_retry_at).toBe(0);
+      expect(repo.findDue(Date.now()).map((job) => job.thread_id)).toEqual(["t-dead"]);
+
+      // A mid-backoff job keeps its own retry schedule instead of being reset.
+      const untouched = repo.findById(live.id)!;
+      expect(untouched.attempts).toBe(1);
+      expect(untouched.next_retry_at).toBeGreaterThan(0);
+    });
+  });
+
   describe("delete", () => {
     it("removes the job and returns true", () => {
       const job = repo.insert({ thread_id: "t-1", workspace_path: "/r", worktree_path: "/r/wt", branch: null });
