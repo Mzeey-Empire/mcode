@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { ALL_MODE_OPTIONS, type ComposerMode, type ModeOption } from "@/components/chat/ModeSelector";
 import type { Thread } from "@/transport";
-import { getTransport } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
-import { useComposerPrDetection } from "../draft/useComposerPrDetection";
 import { isDetachedWorktree, normalizeWorktreePath } from "@/lib/worktree";
 import { rememberComposerMode } from "@/lib/composer-mode-preference";
 
@@ -31,7 +29,6 @@ export type ComposerExecutionTarget =
 
 /** Inputs that identify the Composer execution flow. */
 export interface UseComposerExecutionTargetOptions {
-  input: string;
   activeThread?: Thread;
   branchFromMessageId?: string;
   isNewThread: boolean;
@@ -55,12 +52,8 @@ export interface ComposerExecutionTargetController {
   branchWorktreePath: string | null;
   branchWorktreeIsDetached: boolean;
   fetchingBranch: boolean;
-  detectedPullRequest: ReturnType<typeof useComposerPrDetection>["detectedPr"];
   setMode(mode: ComposerMode): void;
   setBranchMode(mode: ComposerMode): void;
-  dismissDetectedPullRequest(): void;
-  resetDetectedPullRequest(): void;
-  reviewDetectedPullRequest(): Promise<string | null>;
   setNewThreadMode(mode: ComposerMode): void;
   setNewThreadBranch(branch: string): void;
   setNewThreadBranchFromPullRequest(branch: string, pullRequestNumber: number): void;
@@ -68,7 +61,6 @@ export interface ComposerExecutionTargetController {
 
 /** Owns the Composer execution target selection and its workspace data lifecycle. */
 export function useComposerExecutionTarget({
-  input,
   activeThread,
   branchFromMessageId,
   isNewThread,
@@ -102,16 +94,6 @@ export function useComposerExecutionTarget({
   const composerMode = isNewThread
     ? (isGitRepo ? newThreadMode : "direct")
     : (activeThread?.mode === "worktree" ? "worktree" : "direct");
-  const lookupPullRequest = useCallback((url: string) => getTransport().getPrByUrl(url), []);
-  const {
-    detectedPr,
-    dismiss: dismissDetectedPullRequest,
-    reset: resetDetectedPullRequest,
-  } = useComposerPrDetection({
-    input,
-    enabled: isNewThread && isGitRepo,
-    lookup: lookupPullRequest,
-  });
   const branchSelectedWorktree = useMemo(() => {
     const normalizedPath = normalizeWorktreePath(branchWorktreePath);
     return worktrees.find((worktree) => normalizeWorktreePath(worktree.path) === normalizedPath) ?? null;
@@ -160,14 +142,6 @@ export function useComposerExecutionTarget({
     if (isNewThread && workspaceId && composerMode === "worktree") loadOpenPrs(workspaceId);
   }, [composerMode, isNewThread, loadOpenPrs, workspaceId]);
 
-  const reviewDetectedPullRequest = useCallback(async (): Promise<string | null> => {
-    if (!detectedPr || !workspaceId) return null;
-    setMode("worktree");
-    setNewThreadBranchFromPr(detectedPr.branch, detectedPr.number);
-    resetDetectedPullRequest();
-    return `Review PR #${detectedPr.number}: ${detectedPr.title}`;
-  }, [detectedPr, resetDetectedPullRequest, setMode, setNewThreadBranchFromPr, workspaceId]);
-
   const target = useMemo<ComposerExecutionTarget>(() => {
     if (isNewThread) {
       return {
@@ -207,12 +181,8 @@ export function useComposerExecutionTarget({
     branchWorktreePath,
     branchWorktreeIsDetached,
     fetchingBranch: Boolean(fetchingBranch),
-    detectedPullRequest: detectedPr,
     setMode,
     setBranchMode: setBranchExecMode,
-    dismissDetectedPullRequest,
-    resetDetectedPullRequest,
-    reviewDetectedPullRequest,
     setNewThreadMode,
     setNewThreadBranch,
     setNewThreadBranchFromPullRequest: setNewThreadBranchFromPr,
