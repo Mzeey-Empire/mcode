@@ -1000,7 +1000,6 @@ export function createWsTransport(
     listOpenPrs: (workspaceId) => rpc<PrDetail[]>("github.listOpenPrs", { workspaceId }),
     fetchBranch: (workspaceId, branch, prNumber?) =>
       rpc<void>("git.fetchBranch", { workspaceId, branch, prNumber }),
-    getPrByUrl: (url) => rpc<PrDetail | null>("github.prByUrl", { url }),
     checkStatus: (threadId, force) =>
       rpc<ChecksStatus>("github.checkStatus", { threadId, force }),
 

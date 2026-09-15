@@ -1236,10 +1236,6 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({ workspaceId: z.string() }),
     result: z.array(PrDetailSchema()),
   },
-  "github.prByUrl": {
-    params: z.object({ url: z.string() }),
-    result: PrDetailSchema().nullable(),
-  },
   "pullRequest.capabilities": {
     params: PullRequestCapabilitiesRequestSchema(),
     result: PullRequestCapabilitiesResultSchema(),

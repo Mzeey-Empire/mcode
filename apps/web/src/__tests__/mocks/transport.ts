@@ -255,7 +255,6 @@ export const mockTransport: McodeTransport = {
   cancelPullRequestOperation: vi.fn().mockResolvedValue({ ok: true, cancelled: false }),
   listOpenPrs: vi.fn().mockResolvedValue([]),
   fetchBranch: vi.fn().mockResolvedValue(undefined),
-  getPrByUrl: vi.fn().mockResolvedValue(null),
   checkStatus: vi.fn().mockResolvedValue({ aggregate: "no_checks", runs: [], fetchedAt: 0 }),
   getProviderCatalog: vi.fn().mockImplementation(async (request: ProviderCatalogRequest) => ({
     providerId: request.providerId,

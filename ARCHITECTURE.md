@@ -438,7 +438,6 @@ All params and results are defined as Zod schemas in `packages/contracts/src/ws/
 | `file.read` | Read a file by relative path |
 | `github.branchPr` | Get PR info for a branch |
 | `github.listOpenPrs` | List open PRs for a workspace |
-| `github.prByUrl` | Look up a PR by URL |
 | `pullRequest.capabilities` | Resolve independently gated viewer permissions |
 | `pullRequest.list` | Load one bounded relationship inbox page |
 | `pullRequest.get` | Load one detail, checks, or comments page |

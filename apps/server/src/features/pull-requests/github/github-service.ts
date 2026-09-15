@@ -631,33 +631,6 @@ export class GithubService {
     return pending;
   }
 
-  /** Look up a PR by its GitHub URL. */
-  getPrByUrl(url: string): Promise<PrDetail | null> {
-    const match = url.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
-    if (!match) return Promise.resolve(null);
-
-    const repo = match[1];
-    const prNumber = match[2];
-
-    return new Promise((resolve) => {
-      NodeChildProcess.execFile(
-        "gh",
-        [
-          "pr",
-          "view",
-          prNumber,
-          "--repo",
-          repo,
-          "--json",
-          "number,title,headRefName,author,url,state",
-        ],
-        { encoding: "utf-8", timeout: 15_000, windowsHide: true },
-        (error, stdout) => {
-          resolve(error || !stdout ? null : parseGithubPrDetail(stdout));
-        },
-      );
-    });
-  }
 }
 
 interface TrackedGithubProcess {
@@ -738,14 +711,6 @@ function parseGithubPrDetails(stdout: string): PrDetail[] {
     });
   } catch {
     return [];
-  }
-}
-
-function parseGithubPrDetail(stdout: string): PrDetail | null {
-  try {
-    return githubPrDetailFromInput(JSON.parse(stdout) as GithubPrDetailInput);
-  } catch {
-    return null;
   }
 }
 
