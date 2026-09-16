@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { inject, injectable } from "tsyringe";
+import { logger } from "@mcode/shared";
 import {
   ThreadStartupSchema,
   type ThreadStartup,
@@ -85,7 +86,18 @@ export class ThreadStartupRepo {
        FROM thread_startups
        WHERE state IN ('pending', 'running')`,
     ).all() as ThreadStartupRow[];
-    return rows.map(rowToStartup);
+    return mapStartupRows(rows);
+  }
+
+  /** Return startups left interrupted by a server restart. */
+  listInterrupted(): ThreadStartup[] {
+    const rows = this.db.prepare(
+      `SELECT startup_id, workspace_id, kind, state, phase, steps_json, transcript_json,
+              cancellation, revision, thread_id, error_json, block_json, created_at, updated_at
+       FROM thread_startups
+       WHERE state = 'interrupted'`,
+    ).all() as ThreadStartupRow[];
+    return mapStartupRows(rows);
   }
 
   /** Return an active startup or the newest terminal startup bound to one Thread. */
@@ -124,6 +136,23 @@ export class ThreadStartupRepo {
       startup.startupId,
     );
   }
+}
+
+// Boot-path scans must not let one schema-drifted row kill the server, so
+// invalid rows are logged and skipped instead of thrown.
+function mapStartupRows(rows: ThreadStartupRow[]): ThreadStartup[] {
+  const startups: ThreadStartup[] = [];
+  for (const row of rows) {
+    try {
+      startups.push(rowToStartup(row));
+    } catch (error) {
+      logger.warn("Skipping invalid thread startup row", {
+        startupId: row.startup_id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return startups;
 }
 
 function rowToStartup(row: ThreadStartupRow): ThreadStartup {
