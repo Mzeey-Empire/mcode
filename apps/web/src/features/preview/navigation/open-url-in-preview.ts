@@ -72,11 +72,13 @@ function findActiveTab(
   return tabs.find((t) => t.active);
 }
 
+type PreviewTabsApi = NonNullable<NonNullable<typeof window.desktopBridge>["preview"]>["tabs"];
+
 /** Resolves the tab that must receive a preview URL, or a new-tab request. */
 async function resolvePreviewTabTarget(
   threadId: string,
   workspaceId: string,
-  tabsApi: NonNullable<NonNullable<typeof window.desktopBridge>["preview"]>["tabs"],
+  tabsApi: PreviewTabsApi,
   newTab: boolean,
 ): Promise<{ readonly tabId?: string } | null> {
   if (!tabsApi?.list || !tabsApi.open) return null;
@@ -89,6 +91,60 @@ async function resolvePreviewTabTarget(
 
   if (newTab && !isEmptyPreviewTabUrl(active.url)) return {};
   return { tabId: active.id };
+}
+
+/** Opens `address` on the resolved tab; retries as a fresh tab when the reuse target vanished. */
+async function openTabWithAddress(
+  tabsApi: PreviewTabsApi,
+  threadId: string,
+  workspaceId: string,
+  target: { readonly tabId?: string } | null,
+  address: string,
+): Promise<boolean> {
+  if (!target || !tabsApi.open) return true;
+  let opened = await tabsApi.open(threadId, workspaceId, {
+    activate: true,
+    ...target,
+    initialAddress: address,
+  });
+  // A listed tab can close between list and open; retry as a fresh tab.
+  if (!opened.ok && target.tabId) {
+    opened = await tabsApi.open(threadId, workspaceId, {
+      activate: true,
+      initialAddress: address,
+    });
+  }
+  return opened.ok;
+}
+
+/** A modifier-click promised an in-app preview, but a dead click is worse than an external one. */
+function openUrlExternally(url: string, workspacePath: string | null): void {
+  const openExternal = window.desktopBridge?.openExternalUrl;
+  if (openExternal) {
+    if (isMcodeWorkspacePreviewUrl(url)) void openExternal(url, workspacePath);
+    else void openExternal(url);
+    return;
+  }
+  if (!isMcodeWorkspacePreviewUrl(url)) window.open(url, "_blank", "noopener,noreferrer");
+}
+
+/**
+ * Points the right panel at the preview tab and returns the owning workspace.
+ * The panel scope is the thread (per-thread record), or the workspace fallback
+ * for the threadless new-thread preview. The incoming id may be either a thread
+ * or a workspace id, so resolve the owning workspace from both.
+ */
+function revealPreviewPanel(threadId: string): string | undefined {
+  const ws = useWorkspaceStore.getState();
+  const thread = ws.threads.find((t) => t.id === threadId);
+  const workspaceId = thread
+    ? thread.workspace_id
+    : ws.workspaces.find((w) => w.id === threadId)?.id ?? ws.activeWorkspaceId ?? undefined;
+  if (!workspaceId) return undefined;
+  const panelThreadId = thread ? threadId : undefined;
+  showRightPanelAdaptive(workspaceId, panelThreadId);
+  useDiffStore.getState().setRightPanelTab(workspaceId, panelThreadId, "preview");
+  return workspaceId;
 }
 
 /**
@@ -110,39 +166,32 @@ export function openUrlInPreview({
   }
 
   const wsPath = resolveWorkspacePath(workspacePath);
-  const { setRightPanelTab, setPreviewUrlForThread } = useDiffStore.getState();
-  // The panel scope is the thread (per-thread record), or the workspace fallback
-  // for the threadless new-thread preview. The incoming id may be either a thread
-  // or a workspace id, so resolve the owning workspace from both.
-  const ws = useWorkspaceStore.getState();
-  const thread = ws.threads.find((t) => t.id === threadId);
-  const workspaceId = thread
-    ? thread.workspace_id
-    : ws.workspaces.find((w) => w.id === threadId)?.id;
-  if (workspaceId) {
-    const panelThreadId = thread ? threadId : undefined;
-    showRightPanelAdaptive(workspaceId, panelThreadId);
-    setRightPanelTab(workspaceId, panelThreadId, "preview");
-  }
+  const { setPreviewUrlForThread } = useDiffStore.getState();
+  const workspaceId = revealPreviewPanel(threadId);
 
   const run = async (): Promise<void> => {
     const exactWorkspaceId = workspaceId ?? threadId;
     const resolved = await preview.resolveNavigation?.(url, wsPath ?? undefined);
-    if (!resolved?.ok) return;
+    if (!resolved?.ok) {
+      openUrlExternally(url, wsPath);
+      return;
+    }
     const target = await resolvePreviewTabTarget(
       threadId,
       exactWorkspaceId,
       preview.tabs,
       newTab,
     );
-
-    if (target && preview.tabs?.open) {
-      const opened = await preview.tabs.open(threadId, exactWorkspaceId, {
-        activate: true,
-        ...target,
-        initialAddress: resolved.url,
-      });
-      if (!opened.ok) return;
+    const opened = await openTabWithAddress(
+      preview.tabs,
+      threadId,
+      exactWorkspaceId,
+      target,
+      resolved.url,
+    );
+    if (!opened) {
+      openUrlExternally(url, wsPath);
+      return;
     }
     setPreviewUrlForThread(threadId, resolved.url);
   };

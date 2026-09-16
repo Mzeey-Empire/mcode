@@ -2741,17 +2741,29 @@ export function PreviewPanel({
   }, []);
   useEffect(() => {
     const visibleTabs = tabs.tabSet?.tabs ?? [];
-    // oxlint-disable-next-line react/set-state-in-effect -- A tab's first host URL must remain fixed while its resident webview follows redirects.
+    // oxlint-disable-next-line react/set-state-in-effect -- A tab's host URL seeds the resident webview src; an in-flight renderer navigation keeps its request until it commits.
     setWebviewRequestedUrlByTab((current) => {
       let next: Record<string, string | null> | null = null;
       for (const tab of visibleTabs) {
-        if (!tab.url || Object.prototype.hasOwnProperty.call(current, tab.id)) continue;
+        if (!tab.url || current[tab.id] === tab.url) continue;
+        const existing = current[tab.id];
+        if (existing) {
+          // The recorded request only guards redirects while it is still the
+          // surface's in-flight address; once it commits, fails, or was never
+          // sent, the host's tab URL is newer intent and must replace it.
+          const snapshot = browserSurfaceHost.getSnapshot({
+            workspaceId: browserWorkspaceId,
+            scope: { kind: "thread", id: threadId },
+            tabId: tab.id,
+          });
+          if (snapshot?.phase === "loading" && snapshot.pendingAddress === existing) continue;
+        }
         next ??= { ...current };
         next[tab.id] = tab.url;
       }
       return next ?? current;
     });
-  }, [tabs.tabSet?.tabs]);
+  }, [browserWorkspaceId, tabs.tabSet?.tabs, threadId]);
   const [webviewNavError, setWebviewNavError] = useState<string | null>(null);
   const [webviewCanBack, setWebviewCanBack] = useState(false);
   const [webviewCanFwd, setWebviewCanFwd] = useState(false);

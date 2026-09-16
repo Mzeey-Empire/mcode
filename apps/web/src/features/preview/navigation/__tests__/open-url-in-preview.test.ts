@@ -79,6 +79,7 @@ describe("openUrlInPreview", () => {
   let mockOpen: ReturnType<typeof vi.fn>;
   let mockNavigate: ReturnType<typeof vi.fn>;
   let mockResolveNavigation: ReturnType<typeof vi.fn>;
+  let mockOpenExternalUrl: ReturnType<typeof vi.fn>;
   let showRightPanel: ReturnType<typeof vi.fn>;
   let setRightPanelTab: ReturnType<typeof vi.fn>;
   let setPreviewUrlForThread: ReturnType<typeof vi.fn>;
@@ -88,6 +89,7 @@ describe("openUrlInPreview", () => {
     mockOpen = vi.fn().mockResolvedValue({ ok: true, data: { tabId: "tab-2", tabs: {} } });
     mockNavigate = vi.fn().mockResolvedValue({ ok: true });
     mockResolveNavigation = vi.fn(async (url: string) => ({ ok: true, url }));
+    mockOpenExternalUrl = vi.fn().mockResolvedValue(undefined);
     showRightPanel = vi.fn();
     setRightPanelTab = vi.fn();
     setPreviewUrlForThread = vi.fn();
@@ -107,6 +109,7 @@ describe("openUrlInPreview", () => {
     });
 
     window.desktopBridge = {
+      openExternalUrl: mockOpenExternalUrl,
       preview: {
         tabs: { open: mockOpen, list: mockTabList("https://example.com") },
         navigate: mockNavigate,
@@ -188,9 +191,10 @@ describe("openUrlInPreview", () => {
     vi.unstubAllGlobals();
   });
 
-  it("does not change the hosted surface when URL resolution fails", async () => {
+  it("opens externally when URL resolution fails", async () => {
     mockResolveNavigation.mockResolvedValue({ ok: false, error: "invalid-url" });
     window.desktopBridge = {
+      openExternalUrl: mockOpenExternalUrl,
       preview: {
         tabs: { open: mockOpen, list: mockTabList("https://example.com") },
         navigate: mockNavigate,
@@ -203,9 +207,41 @@ describe("openUrlInPreview", () => {
 
     expect(mockOpen).not.toHaveBeenCalled();
     expect(setPreviewUrlForThread).not.toHaveBeenCalled();
+    expect(mockOpenExternalUrl).toHaveBeenCalledWith("https://example.com");
   });
 
-  it("does not navigate the active tab when exact new-tab creation fails", async () => {
+  it("retries as a fresh tab when the listed reuse target was closed", async () => {
+    // Active tab is empty, so the first open targets it by id; the host then
+    // reports it gone (closed between list and open).
+    window.desktopBridge = {
+      openExternalUrl: mockOpenExternalUrl,
+      preview: {
+        tabs: { open: mockOpen, list: mockTabList(null) },
+        navigate: mockNavigate,
+        resolveNavigation: mockResolveNavigation,
+      },
+    } as unknown as typeof window.desktopBridge;
+    mockOpen
+      .mockResolvedValueOnce({ ok: false, error: "tab-not-found" })
+      .mockResolvedValueOnce({ ok: true, data: { tabId: "tab-2", tabs: {} } });
+
+    openUrlInPreview({ url: "https://example.com/pr/1", threadId: "thread-1" });
+    await vi.runAllTimersAsync();
+
+    expect(mockOpen).toHaveBeenNthCalledWith(1, "thread-1", "ws-1", {
+      activate: true,
+      tabId: "tab-1",
+      initialAddress: "https://example.com/pr/1",
+    });
+    expect(mockOpen).toHaveBeenNthCalledWith(2, "thread-1", "ws-1", {
+      activate: true,
+      initialAddress: "https://example.com/pr/1",
+    });
+    expect(setPreviewUrlForThread).toHaveBeenCalledWith("thread-1", "https://example.com/pr/1");
+    expect(mockOpenExternalUrl).not.toHaveBeenCalled();
+  });
+
+  it("opens externally when tab creation fails entirely", async () => {
     mockOpen.mockResolvedValue({ ok: false, error: "tab-unavailable" });
 
     openUrlInPreview({ url: "https://example.com/next", threadId: "thread-1" });
@@ -214,6 +250,7 @@ describe("openUrlInPreview", () => {
     expect(mockOpen).toHaveBeenCalled();
     expect(setPreviewUrlForThread).not.toHaveBeenCalled();
     expect(mockNavigate).not.toHaveBeenCalled();
+    expect(mockOpenExternalUrl).toHaveBeenCalledWith("https://example.com/next");
   });
 });
 
