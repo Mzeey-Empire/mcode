@@ -1049,6 +1049,41 @@ describe("ThreadHydrator", () => {
     expect(getTestThreadToolCalls(THREAD_A)).toHaveLength(1);
   });
 
+  it("fetches history for a running thread whose resident record was never hydrated", async () => {
+    mockTransport.loadConversationTail = undefined;
+    (mockTransport.loadConversationPage as ReturnType<typeof vi.fn>).mockResolvedValue({
+      messages: [msgA],
+      hasMore: true,
+      narrativeByMessage: {},
+    });
+    resetThreadStoreForTests({
+      currentThreadId: THREAD_A,
+      runningThreadIds: new Set([THREAD_A]),
+      records: new Map<string, ThreadRecord>([
+        [
+          THREAD_A,
+          {
+            ...createEmptyThreadRecord(),
+            streaming: "partial...",
+            toolCalls: [
+              { id: "tc1", toolName: "bash", toolInput: {}, output: null, isError: false, isComplete: false },
+            ],
+          },
+        ],
+      ]),
+    });
+
+    await hydrator.hydrate(THREAD_A, "active");
+
+    await vi.waitFor(() => {
+      expect(mockTransport.loadConversationPage).toHaveBeenCalledWith(THREAD_A, MESSAGE_FETCH_SIZE);
+    });
+    expect(readActiveThreadField((record) => record.hasMoreMessages)).toBe(true);
+    expect(getTestThreadMessages(THREAD_A)).toEqual([msgA]);
+    expect(getTestThreadStreaming(THREAD_A)).toBe("partial...");
+    expect(getTestThreadToolCalls(THREAD_A)).toHaveLength(1);
+  });
+
   it("refreshes a resident thread when its cache was invalidated", async () => {
     resetThreadStoreForTests({
       currentThreadId: THREAD_B,
@@ -1157,8 +1192,10 @@ describe("ThreadHydrator", () => {
 
     await hydrator.hydrate(THREAD_A, "active");
 
+    // The cached snapshot never committed a history window, so activation must
+    // fetch to learn whether older pages exist; the live message is preserved.
     expect(getTestActiveMessages()).toEqual([msgA]);
-    expect(mockTransport.loadConversationPage).not.toHaveBeenCalled();
+    expect(mockTransport.loadConversationPage).toHaveBeenCalledWith(THREAD_A, MESSAGE_FETCH_SIZE);
   });
 
   it("reopens a running resident layer without replacing its live state", async () => {
@@ -1170,6 +1207,8 @@ describe("ThreadHydrator", () => {
         {
           ...createEmptyThreadRecord(),
           messages: [msgA],
+          oldestLoadedSequence: msgA.sequence,
+          newestLoadedSequence: msgA.sequence,
           streaming: "current activity",
           toolCalls: [
             { id: "tc1", toolName: "bash", toolInput: {}, output: null, isError: false, isComplete: false },
