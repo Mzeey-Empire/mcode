@@ -59,6 +59,17 @@ function conversationRevision(record: ThreadRecord): number {
   return readConversationRevision(record);
 }
 
+/**
+ * True only after a history page has committed. Records populated solely by
+ * live events (streaming, tools, error appends) have resident content but no
+ * committed window, so hasMoreMessages can never become true for them.
+ */
+function hasCommittedWindow(
+  record: Pick<ThreadRecord, "oldestLoadedSequence" | "hasMoreMessages">,
+): boolean {
+  return record.oldestLoadedSequence !== 0 || record.hasMoreMessages;
+}
+
 function mergeMessageMetadata<T>(
   cached: Record<string, T>,
   resident: Record<string, T>,
@@ -371,12 +382,12 @@ export class ThreadHydrator {
 
   private restoreResidentContent(threadId: string, opts: DisplayHydrationOptions): boolean {
     const resident = this.deps.getState().records.get(threadId);
-    if (resident && hasResidentContent(resident) && !opts.force) {
+    if (resident && hasResidentContent(resident) && hasCommittedWindow(resident) && !opts.force) {
       this.synchronizeConversation(threadId);
       return true;
     }
     const cached = getCachedRecord(threadId);
-    if (!cached || opts.force || (cached.messages.length === 0 && cached.lastHydratedAt === undefined)) return false;
+    if (!cached || opts.force || !hasCommittedWindow(cached)) return false;
     if (!opts.isCurrent()) return true;
     this.restoreFromCache(threadId, this.compactCachedRecordForRestore(threadId, cached), {
       bumpLoadEpoch: true,
@@ -811,7 +822,7 @@ export class ThreadHydrator {
 
   private restoreActiveCache(threadId: string, opts: ThreadHydratorOptions | undefined): boolean {
     const cached = getCachedRecord(threadId);
-    if (!cached || opts?.force) return false;
+    if (!cached || opts?.force || !hasCommittedWindow(cached)) return false;
     const resident = this.deps.getState().records.get(threadId);
     this.restoreCachedActive(threadId, resident ? mergeResidentConversationCacheState(resident, cached) : cached, opts);
     return true;
@@ -821,6 +832,11 @@ export class ThreadHydrator {
     if (!residentContent) return false;
     this.activateResidentLayer(threadId);
     if (!this.deps.getState().runningThreadIds.has(threadId) || opts?.force) return false;
+    // Records built only from live events (e.g. canonical replay of an orphaned
+    // running turn after reload) have no committed history window; skipping the
+    // fetch would leave hasMoreMessages false and older pages unreachable.
+    const record = getThreadRecord(this.deps.getState().records, threadId);
+    if (!hasCommittedWindow(record)) return false;
     const expectedEpoch = getThreadRecord(this.deps.getState().records, threadId).loadEpoch;
     this.synchronizeConversation(threadId);
     void this.refreshThreadGoal(threadId, expectedEpoch);
