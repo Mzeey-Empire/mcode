@@ -209,4 +209,72 @@ describe("ThreadStartupService", () => {
     expect(service.get(thirdStartupId)?.state).toBe("completed");
     db.close();
   });
+
+  it("completes an interrupted startup when the user continues without it", () => {
+    const { db, service } = createHarness();
+    db.prepare(
+      "INSERT INTO threads (id, workspace_id, title, branch, mode, worktree_managed, provider) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ).run(threadId, "workspace-1", "Started", "main", "worktree", 1, "claude");
+    service.start(input(firstStartupId, "workspace-1", "managed-worktree"));
+    service.advance(firstStartupId, "thread");
+    service.bindThread(firstStartupId, threadId);
+    service.advance(firstStartupId, "worktree");
+    service.advance(firstStartupId, "setup");
+
+    const [interrupted] = service.interruptNonterminalOnStartup();
+    const completed = service.complete(firstStartupId);
+
+    expect(interrupted).toMatchObject({ state: "interrupted", phase: "setup" });
+    expect(completed).toMatchObject({
+      state: "completed",
+      phase: "agent",
+      steps: [
+        { phase: "thread", state: "completed" },
+        { phase: "worktree", state: "completed" },
+        { phase: "setup", state: "skipped" },
+        { phase: "agent", state: "completed" },
+      ],
+    });
+    db.close();
+  });
+
+  it("marks a cancelled interrupted startup cancelled instead of completed", () => {
+    const { db, service } = createHarness();
+    service.start(input(firstStartupId, "workspace-1", "managed-worktree"));
+    service.advance(firstStartupId, "thread");
+    service.advance(firstStartupId, "worktree");
+    service.advance(firstStartupId, "setup");
+
+    service.interruptNonterminalOnStartup();
+    const cancelled = service.markCancelled(firstStartupId);
+
+    expect(cancelled).toMatchObject({
+      state: "cancelled",
+      cancellation: "requested",
+      steps: expect.arrayContaining([{ phase: "setup", state: "cancelled" }]),
+    });
+    db.close();
+  });
+
+  it("lets an interrupted Setup resume when the user retries", () => {
+    const { db, service } = createHarness();
+    db.prepare(
+      "INSERT INTO threads (id, workspace_id, title, branch, mode, worktree_managed, provider) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ).run(threadId, "workspace-1", "Started", "main", "worktree", 1, "claude");
+    service.start(input(firstStartupId, "workspace-1", "managed-worktree"));
+    service.advance(firstStartupId, "thread");
+    service.bindThread(firstStartupId, threadId);
+    service.advance(firstStartupId, "worktree");
+    service.advance(firstStartupId, "setup");
+
+    service.interruptNonterminalOnStartup();
+    const resumed = service.resume(firstStartupId);
+
+    expect(resumed).toMatchObject({
+      state: "running",
+      phase: "setup",
+      steps: expect.arrayContaining([{ phase: "setup", state: "running" }]),
+    });
+    db.close();
+  });
 });

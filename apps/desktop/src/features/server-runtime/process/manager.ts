@@ -61,6 +61,7 @@ export class ServerManager {
   private _reusedExisting = false;
   private readonly plannedExitProcesses = new Set<NodeChildProcess.ChildProcess>();
   private readonly plannedRestartCoordinator = new PlannedRestartCoordinator();
+  private inFlightStart: Promise<{ port: number; authToken: string }> | null = null;
 
   /** Callback invoked when the current server exits without a planned shutdown. */
   onUnexpectedExit: ((code: number | null) => void) | null = null;
@@ -89,6 +90,26 @@ export class ServerManager {
 
   /** Start a server or reuse a healthy lock-owned server in this mode's port band. */
   async start(): Promise<{ port: number; authToken: string }> {
+    return this.coalesceStartOperation(() => this.startServer());
+  }
+
+  /**
+   * Share one in-flight lifecycle operation across concurrent callers. Crash and
+   * health recovery can request a start or restart at the same time; joining the
+   * running operation keeps them from racing the startup lock or replacing a
+   * server that another path is already bringing up.
+   */
+  private coalesceStartOperation(
+    operation: () => Promise<{ port: number; authToken: string }>,
+  ): Promise<{ port: number; authToken: string }> {
+    this.inFlightStart ??= operation().finally(() => {
+      this.inFlightStart = null;
+    });
+    return this.inFlightStart;
+  }
+
+  /** Run one startup cycle under the lifecycle coalescing promise. */
+  private async startServer(): Promise<{ port: number; authToken: string }> {
     const replacedProcesses = new Set<NodeChildProcess.ChildProcess>();
     try {
       for (;;) {
@@ -138,13 +159,18 @@ export class ServerManager {
   async restart(): Promise<void> {
     const replacedProcess = this.serverProcess;
     try {
-      if (!this._reusedExisting) await this.forceReplace();
-      await delay(500);
-      await this.start();
+      await this.coalesceStartOperation(async () => {
+        if (!this._reusedExisting) await this.forceReplace();
+        await delay(500);
+        return this.startServer();
+      });
     } catch (error) {
       this.clearPlannedExit(replacedProcess);
       throw error;
     }
+    // A coalesced call may have joined an in-flight start that never replaced
+    // the child; release its planned-exit mark so a later real crash reports.
+    if (this.serverProcess === replacedProcess) this.clearPlannedExit(replacedProcess);
   }
 
   /** Restart an owned server without reporting its replaced child as a crash. */
