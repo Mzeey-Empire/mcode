@@ -94,7 +94,7 @@ vi.mock("node:fs", () => ({
   renameSync: vi.fn(),
   linkSync: vi.fn(),
   mkdirSync: vi.fn(),
-  readdirSync: vi.fn(),
+  readdirSync: vi.fn(() => ["owner.json"]),
   rmdirSync: vi.fn(),
   unlinkSync: vi.fn(),
   writeFileSync: vi.fn(),
@@ -409,7 +409,12 @@ describe("ServerManager", () => {
     vi.spyOn(manager, "stopServerHeldByLock").mockImplementation(async () => {
       exitCallback?.(0);
     });
-    vi.spyOn(manager, "start").mockResolvedValue({
+    vi.spyOn(
+      manager as unknown as {
+        startServer(): Promise<{ port: number; authToken: string }>;
+      },
+      "startServer",
+    ).mockResolvedValue({
       port: 19600,
       authToken: "replacement-token",
     });
@@ -475,7 +480,12 @@ describe("ServerManager", () => {
     await manager.start();
     const exitCallback = refs.getExitCallback();
     vi.spyOn(manager, "stopServerHeldByLock").mockResolvedValue();
-    vi.spyOn(manager, "start").mockRejectedValue(new Error("start failed"));
+    vi.spyOn(
+      manager as unknown as {
+        startServer(): Promise<{ port: number; authToken: string }>;
+      },
+      "startServer",
+    ).mockRejectedValue(new Error("start failed"));
     vi.useFakeTimers();
 
     try {
@@ -555,6 +565,62 @@ describe("ServerManager", () => {
       undefined,
       undefined,
     ]);
+  });
+
+  it("coalesces concurrent restarts into one server startup", async () => {
+    await manager.start();
+    const stop = vi
+      .spyOn(manager, "stopServerHeldByLock")
+      .mockResolvedValue();
+    vi.mocked(NodeFSPromises.readFile).mockResolvedValue(
+      LOCK_FILE_JSON as never,
+    );
+    vi.useFakeTimers();
+
+    try {
+      const first = manager.restart();
+      const second = manager.restart();
+      await vi.advanceTimersByTimeAsync(500);
+      await Promise.all([first, second]);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(stop).toHaveBeenCalledOnce();
+    expect(vi.mocked(NodeChildProcess.spawn)).toHaveBeenCalledTimes(2);
+  });
+
+  it("lets a concurrent restart join an in-flight start without replacing the server", async () => {
+    const stop = vi
+      .spyOn(manager, "stopServerHeldByLock")
+      .mockResolvedValue();
+    const start = manager.start();
+    const restart = manager.restart();
+
+    await Promise.all([start, restart]);
+
+    expect(stop).not.toHaveBeenCalled();
+    expect(vi.mocked(NodeChildProcess.spawn)).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a real crash after a planned restart joins an in-flight reuse", async () => {
+    await manager.start();
+    const exitCallback = refs.getExitCallback();
+    const onUnexpectedExit = vi.fn();
+    manager.onUnexpectedExit = onUnexpectedExit;
+    vi.mocked(NodeFS.readFileSync).mockReset().mockReturnValue(LOCK_FILE_JSON);
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+
+    try {
+      const start = manager.start();
+      const planned = manager.restartPlanned();
+      await Promise.all([start, planned]);
+    } finally {
+      killSpy.mockRestore();
+    }
+
+    exitCallback?.(1);
+    expect(onUnexpectedExit).toHaveBeenCalledWith(1);
   });
 
   it("rejects a planned restart when the server is unowned", async () => {

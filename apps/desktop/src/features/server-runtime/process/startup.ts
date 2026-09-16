@@ -4,11 +4,22 @@ import * as NodeCrypto from "node:crypto";
 import * as NodePath from "node:path";
 import { delay, isProcessAlive, type ServerLock } from "./lock.js";
 
-/** Time to wait for another Electron instance to finish starting the server. */
-const STARTUP_LOCK_TIMEOUT_MS = 10_000;
+/**
+ * Time to wait for another Electron instance to finish starting the server.
+ * Must exceed the lock holder's own startup budget (60s readiness wait) so a
+ * legitimate in-progress startup is never mistaken for a stuck lock.
+ */
+const STARTUP_LOCK_TIMEOUT_MS = 75_000;
 
 /** Interval between lock-owned server probes while another instance starts it. */
 const STARTUP_LOCK_POLL_INTERVAL_MS = 200;
+
+/**
+ * Grace period before reclaiming a sentinel with no readable owner file. A
+ * healthy owner writes its owner file immediately after creating the sentinel
+ * directory; several seconds without one means the writer died mid-creation.
+ */
+const STARTUP_LOCK_OWNERLESS_GRACE_MS = 5_000;
 
 /** Unique ownership data for a server startup sentinel. */
 export interface StartupLockOwner {
@@ -25,6 +36,7 @@ export type StartupLockResult =
 export interface StartupLockDependencies {
   readonly createLock: () => StartupLockOwner | null;
   readonly releaseLock: (owner: StartupLockOwner) => void;
+  readonly removeOwnerlessLock: () => void;
   readonly readLockOwner: () => StartupLockOwner | null;
   readonly isOwnerAlive: (pid: number) => boolean;
   readonly findExistingServer: () => Promise<ServerLock | null>;
@@ -40,6 +52,13 @@ export function createStartupLockDependencies(
   return {
     createLock: () => tryCreateStartupLock(sentinelPath),
     releaseLock: (owner) => releaseStartupLock(sentinelPath, owner),
+    removeOwnerlessLock: () => {
+      try {
+        NodeFS.rmSync(sentinelPath, { recursive: true, force: true });
+      } catch {
+        // A concurrent owner may still be writing; the next poll retries.
+      }
+    },
     readLockOwner: () => readStartupLockOwner(sentinelPath),
     isOwnerAlive: isProcessAlive,
     findExistingServer,
@@ -61,43 +80,60 @@ export async function acquireStartupLock(
   return waitForStartupLock(dependencies, timeoutMs);
 }
 
-/** Poll an existing startup owner and reclaim only a confirmed abandoned lock. */
+/**
+ * Wait out a live owner's startup. A lock owner that stays alive may still be
+ * mid-startup for most of a minute, so keep polling until it publishes a
+ * healthy server, releases the sentinel, or outlives the deadline.
+ */
 async function waitForStartupLock(
   dependencies: StartupLockDependencies,
   timeoutMs: number,
 ): Promise<StartupLockResult> {
-  const existing = await waitForExistingServer(dependencies, timeoutMs);
-  if (existing) return { kind: "existing", lock: existing };
-  reclaimAbandonedStartupLock(dependencies);
-  return acquireStartupLock(dependencies, timeoutMs);
-}
-
-/** Reclaim a startup lock only when its recorded owner process no longer exists. */
-function reclaimAbandonedStartupLock(
-  dependencies: StartupLockDependencies,
-): void {
-  const owner = dependencies.readLockOwner();
-  if (!owner) {
-    throw new Error("Server startup lock owner is unavailable after timeout");
-  }
-  if (dependencies.isOwnerAlive(owner.pid)) {
-    throw new Error(`Server startup lock owner ${owner.pid} is still running`);
-  }
-  dependencies.releaseLock(owner);
-}
-
-/** Poll for a healthy server until a startup owner finishes or times out. */
-async function waitForExistingServer(
-  dependencies: StartupLockDependencies,
-  timeoutMs: number,
-): Promise<ServerLock | null> {
   const deadline = dependencies.now() + timeoutMs;
-  while (dependencies.now() < deadline) {
-    await dependencies.wait(STARTUP_LOCK_POLL_INTERVAL_MS);
+  let ownerlessSince: number | null = null;
+  for (;;) {
     const existing = await dependencies.findExistingServer();
-    if (existing) return existing;
+    if (existing) return { kind: "existing", lock: existing };
+    const owner = dependencies.readLockOwner();
+    if (owner && !dependencies.isOwnerAlive(owner.pid)) {
+      dependencies.releaseLock(owner);
+    }
+    const acquired = dependencies.createLock();
+    if (acquired) return { kind: "acquired", owner: acquired };
+    ownerlessSince = reclaimOwnerlessSentinel(dependencies, owner, ownerlessSince);
+    if (dependencies.now() >= deadline) {
+      if (owner && dependencies.isOwnerAlive(owner.pid)) {
+        throw new Error(
+          `Server startup lock owner ${owner.pid} is still running`,
+        );
+      }
+      throw new Error("Server startup lock owner is unavailable after timeout");
+    }
+    await dependencies.wait(STARTUP_LOCK_POLL_INTERVAL_MS);
   }
-  return null;
+}
+
+/**
+ * Track how long a blocking sentinel has named no owner and reclaim it once
+ * the writer grace expires. A healthy owner writes its owner file immediately
+ * after creating the sentinel, so a stable ownerless sentinel means the
+ * writer died mid-creation. Returns the first-seen timestamp, or null when an
+ * owner exists or a reclaim just ran.
+ */
+function reclaimOwnerlessSentinel(
+  dependencies: StartupLockDependencies,
+  owner: StartupLockOwner | null,
+  ownerlessSince: number | null,
+): number | null {
+  if (owner) return null;
+  const since = ownerlessSince ?? dependencies.now();
+  if (dependencies.now() - since >= STARTUP_LOCK_OWNERLESS_GRACE_MS) {
+    // Re-verify immediately before removal: a concurrent acquirer may have
+    // written its owner file since our last poll.
+    if (!dependencies.readLockOwner()) dependencies.removeOwnerlessLock();
+    return null;
+  }
+  return since;
 }
 
 /** Remove only the startup sentinel file owned by the supplied token. */
@@ -134,20 +170,32 @@ function tryCreateStartupLock(sentinelPath: string): StartupLockOwner | null {
         flag: "wx",
       },
     );
-    return owner;
   } catch (error) {
     removeEmptyStartupDirectory(sentinelPath);
     throw error;
   }
+  // A stalled writer can land its owner file in this directory after a
+  // reclaim removed the original sentinel; refuse to co-own a contested one.
+  if (NodeFS.readdirSync(sentinelPath).length > 1) {
+    try {
+      NodeFS.unlinkSync(startupOwnerPath(sentinelPath, owner));
+    } catch {
+      // The directory may already be gone; the next poll re-evaluates it.
+    }
+    return null;
+  }
+  return owner;
 }
 
 /** Read the unique owner recorded in a startup sentinel directory. */
 function readStartupLockOwner(sentinelPath: string): StartupLockOwner | null {
   try {
-    const [ownerFile] = NodeFS.readdirSync(sentinelPath);
-    if (!ownerFile) return null;
+    const ownerFiles = NodeFS.readdirSync(sentinelPath);
+    // More than one owner file means two writers raced; no single owner can
+    // be trusted, so treat the sentinel as ownerless and let grace reclaim it.
+    if (ownerFiles.length !== 1) return null;
     const owner: unknown = JSON.parse(
-      NodeFS.readFileSync(NodePath.join(sentinelPath, ownerFile), "utf-8"),
+      NodeFS.readFileSync(NodePath.join(sentinelPath, ownerFiles[0]), "utf-8"),
     );
     return isStartupLockOwner(owner) ? owner : null;
   } catch {
