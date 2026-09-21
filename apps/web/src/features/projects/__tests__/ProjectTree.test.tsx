@@ -981,6 +981,22 @@ describe("ProjectTree thread interactions", () => {
     );
   });
 
+  it("shows the Add project tooltip on the header control", () => {
+    setupStoreMocks();
+
+    render(<ProjectTree />);
+
+    const addButton = screen.getByRole("button", { name: "Add project" });
+    act(() => {
+      addButton.focus();
+      vi.runAllTimers();
+    });
+
+    expect(document.querySelector('[data-slot="tooltip-content"]')).toHaveTextContent(
+      "Add project",
+    );
+  });
+
   it("optically aligns the provider mark and separates it from the thread title", () => {
     setupStoreMocks();
 
