@@ -1,0 +1,700 @@
+<!doctype html>
+<!-- PROTOTYPE: redesigns of the Review diff surface (file boundaries, Files
+     pane, turn-change summary). Variant A (Cards) is the selected direction —
+     it carries the real toolbar controls, a folder-grouped Files pane, and the
+     "+N more files" overflow. B and C stay for mixing and matching.
+     Open in a browser, flip with the bottom bar or arrow keys, ?v=A|B|C.
+     Throwaway: nothing here ships. -->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Diff view prototype</title>
+<style>
+  :root {
+    --background: oklch(0.16 0.005 260);
+    --page: oklch(0.135 0.005 260);
+    --foreground: oklch(0.93 0 0);
+    --card: oklch(0.19 0.005 260);
+    --muted: oklch(0.22 0.005 260);
+    --muted-foreground: oklch(0.65 0.005 260);
+    --accent: oklch(0.24 0.005 260);
+    --border: oklch(0.28 0.005 260);
+    --primary: oklch(0.72 0.17 75);
+    --diff-add-bg: oklch(0.26 0.035 145);
+    --diff-add-text: oklch(0.86 0.09 145);
+    --diff-add-strong: oklch(0.78 0.13 145);
+    --diff-add-gutter: oklch(0.50 0.11 145);
+    --diff-remove-bg: oklch(0.26 0.045 25);
+    --diff-remove-text: oklch(0.86 0.09 25);
+    --diff-remove-strong: oklch(0.78 0.13 25);
+    --diff-remove-gutter: oklch(0.55 0.13 25);
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--page); color: var(--foreground);
+    font-family: var(--sans); font-size: 13px;
+  }
+  .shell { display: flex; height: 100vh; overflow: hidden; }
+
+  /* --- mock app chrome --- */
+  .sidebar {
+    width: 200px; flex: none; background: var(--background);
+    border-right: 1px solid var(--border); padding: 10px 8px;
+    color: var(--muted-foreground); font-size: 12px;
+  }
+  .sidebar .item { padding: 5px 8px; border-radius: 6px; margin-bottom: 2px; }
+  .sidebar .item.active { background: var(--accent); color: var(--foreground); }
+  .transcript {
+    flex: 1; min-width: 0; background: var(--background);
+    border-right: 1px solid var(--border); padding: 24px; overflow-y: auto;
+  }
+  .bubble {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 14px; margin-bottom: 14px;
+    color: var(--muted-foreground); max-width: 520px;
+  }
+  .panel {
+    width: 62%; min-width: 560px; background: var(--page);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .panel-head {
+    display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+    border-bottom: 1px solid var(--border); background: var(--background);
+    font-size: 12px; color: var(--muted-foreground);
+  }
+  .panel-head .seg {
+    display: inline-flex; gap: 2px; background: var(--muted);
+    border-radius: 7px; padding: 2px;
+  }
+  .panel-head .seg span { padding: 2px 10px; border-radius: 5px; }
+  .panel-head .seg span.on { background: var(--accent); color: var(--foreground); }
+  .panel-body { flex: 1; display: flex; min-height: 0; }
+  .diff-scroll { flex: 1; overflow-y: auto; min-width: 0; }
+
+  /* --- shared bits --- */
+  .code { font-family: var(--mono); font-size: 12px; line-height: 1.55; }
+  .ln {
+    display: inline-block; width: 34px; text-align: right; padding-right: 10px;
+    color: var(--muted-foreground); opacity: .55; user-select: none;
+    font-size: 10.5px;
+  }
+  .row-add { background: var(--diff-add-bg); color: var(--diff-add-text); }
+  .row-del { background: var(--diff-remove-bg); color: var(--diff-remove-text); }
+  .row-ctx { color: var(--muted-foreground); }
+  .band {
+    font-family: var(--mono); font-size: 10.5px; color: var(--muted-foreground);
+    text-align: center; padding: 4px 0; background: var(--muted);
+  }
+  .stA { color: var(--diff-add-strong); }
+  .stD { color: var(--diff-remove-strong); }
+  .stM { color: var(--muted-foreground); }
+  .stat { font-family: var(--mono); font-size: 10.5px; white-space: nowrap; }
+  .stat .a { color: var(--diff-add-strong); }
+  .stat .d { color: var(--diff-remove-strong); }
+  .icon-btn {
+    display: inline-grid; place-items: center; width: 24px; height: 24px;
+    border-radius: 6px; color: var(--muted-foreground); cursor: default;
+    font-size: 13px; border: none; background: transparent;
+  }
+  .icon-btn:hover { background: var(--muted); color: var(--foreground); }
+  .icon-btn.on { background: var(--muted); color: var(--foreground); }
+
+  /* ============ VARIANT A : "Cards" ============ */
+  /* toolbar row inside the diff scroll, above the cards */
+  .vA .dtoolbar {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; gap: 2px;
+    padding: 5px 10px; background: var(--background);
+    border-bottom: 1px solid var(--border);
+  }
+  .vA .dtoolbar .sep { width: 1px; height: 16px; background: var(--border); margin: 0 6px; }
+  .vA .dtoolbar .jump {
+    display: inline-flex; align-items: center; gap: 6px; height: 24px;
+    padding: 0 9px; border-radius: 6px; border: 1px solid var(--border);
+    color: var(--muted-foreground); font-size: 11.5px; cursor: default;
+    max-width: 180px; overflow: hidden; white-space: nowrap;
+  }
+  .vA .dtoolbar .jump:hover { background: var(--muted); color: var(--foreground); }
+  .vA .dtoolbar .modes {
+    display: inline-flex; gap: 1px; background: var(--muted);
+    border-radius: 6px; padding: 2px; font-size: 11px;
+  }
+  .vA .dtoolbar .modes span { padding: 1px 8px; border-radius: 4px; color: var(--muted-foreground); }
+  .vA .dtoolbar .modes span.on { background: var(--accent); color: var(--foreground); }
+
+  .vA .filecard {
+    margin: 10px 12px; border: 1px solid var(--border); border-radius: 10px;
+    overflow: hidden; background: var(--background);
+    box-shadow: 0 1px 2px oklch(0 0 0 / 0.35);
+  }
+  .vA .filecard .fhead {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 12px; background: var(--card);
+    border-bottom: 1px solid var(--border); cursor: default;
+  }
+  .vA .filecard.collapsed .fhead { border-bottom: none; }
+  .vA .filecard.collapsed .code { display: none; }
+  .vA .fhead .chev { color: var(--muted-foreground); font-size: 10px; transition: transform .12s; }
+  .vA .filecard.collapsed .chev { transform: rotate(-90deg); }
+  .vA .fhead .fname { font-weight: 600; font-size: 12.5px; }
+  .vA .fhead .fpath { color: var(--muted-foreground); font-size: 11px; font-family: var(--mono); }
+  .vA .fhead .actions { display: inline-flex; gap: 1px; opacity: 0; transition: opacity .12s; }
+  .vA .filecard:hover .fhead .actions { opacity: 1; }
+  .vA .fhead .actions .icon-btn svg { display: block; }
+  .vA .chip {
+    font-size: 10px; font-weight: 600; padding: 1px 7px; border-radius: 99px;
+    letter-spacing: .02em;
+  }
+  .vA .chip.A { background: var(--diff-add-bg); color: var(--diff-add-strong); }
+  .vA .chip.D { background: var(--diff-remove-bg); color: var(--diff-remove-strong); }
+  .vA .chip.M { background: var(--accent); color: var(--muted-foreground); }
+  .vA .fhead .spacer { flex: 1; }
+  .vA .ficon {
+    width: 20px; height: 20px; border-radius: 5px; display: grid;
+    place-items: center; font-size: 10px; font-weight: 700;
+    background: var(--accent); color: var(--muted-foreground);
+    font-family: var(--mono);
+  }
+
+  /* Files pane: folder-grouped tree */
+  .vA .fpane {
+    width: 210px; flex: none; border-right: 1px solid var(--border);
+    background: var(--background); display: flex; flex-direction: column;
+    min-height: 0;
+  }
+  .vA .fpane .phead {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    font-size: 11px; font-weight: 600; border-bottom: 1px solid var(--border);
+  }
+  .vA .fpane .phead .x { margin-left: auto; }
+  .vA .fpane .pfilter {
+    margin: 8px 10px 4px; padding: 4px 8px; font-size: 11px;
+    background: var(--muted); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--muted-foreground);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .vA .fpane .ptree { flex: 1; overflow-y: auto; padding: 4px 6px 8px; }
+  .vA .fpane .dir {
+    display: flex; align-items: center; gap: 6px; padding: 5px 6px 3px;
+    font-size: 10.5px; color: var(--muted-foreground); font-family: var(--mono);
+  }
+  .vA .fpane .dir .carat { font-size: 8px; opacity: .7; }
+  .vA .fpane .dir svg { display: block; opacity: .8; }
+  .vA .fpane .prow {
+    display: flex; align-items: center; gap: 7px; padding: 4px 6px;
+    border-radius: 6px; font-size: 11.5px; cursor: default;
+  }
+  .vA .fpane .prow.in-dir { padding-left: 22px; }
+  .vA .fpane .prow:hover { background: var(--muted); }
+  .vA .fpane .prow.on { background: var(--accent); }
+  .vA .fpane .prow .fname { font-family: var(--mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vA .fpane .prow .glyph { margin-left: auto; font-family: var(--mono); font-size: 10px; font-weight: 700; }
+  .vA .fpane .prow .mini { font-family: var(--mono); font-size: 9.5px; color: var(--muted-foreground); }
+  .vA .fpane .prow .mini .a { color: var(--diff-add-strong); }
+  .vA .fpane .prow .mini .d { color: var(--diff-remove-strong); }
+  .vA .dot { width: 6px; height: 6px; border-radius: 99px; flex: none; }
+  .vA .dot.A { background: var(--diff-add-strong); }
+  .vA .dot.D { background: var(--diff-remove-strong); }
+  .vA .dot.M { background: var(--muted-foreground); }
+
+  /* Turn summary card */
+  .vA .tsummary {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden; max-width: 520px;
+  }
+  .vA .tsummary .thead {
+    display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+    font-size: 12px; font-weight: 600;
+  }
+  .vA .tsummary .thead .viewall {
+    margin-left: auto; font-weight: 400; font-size: 11px;
+    color: var(--muted-foreground); display: inline-flex; gap: 5px;
+    align-items: center; cursor: default;
+  }
+  .vA .tsummary .thead .viewall:hover { color: var(--foreground); }
+  .vA .tsummary .tlist { border-top: 1px solid var(--border); }
+  .vA .tsummary .tgroup {
+    display: flex; align-items: center; gap: 6px; padding: 6px 12px 2px;
+    font-size: 10px; color: var(--muted-foreground); font-family: var(--mono);
+  }
+  .vA .tsummary .tgroup .carat { font-size: 8px; opacity: .7; }
+  .vA .tsummary .tgroup svg { display: block; opacity: .8; }
+  .vA .tsummary .trow .fico { flex: none; opacity: .85; }
+  .vA .tsummary .trow {
+    display: flex; align-items: center; gap: 8px; padding: 6px 12px;
+    font-size: 11.5px;
+  }
+  .vA .tsummary .trow.in-dir { padding-left: 24px; }
+  .vA .tsummary .trow + .trow { border-top: 1px solid var(--border); }
+  .vA .tsummary .tgroup + .trow,
+  .vA .tsummary .trow + .tgroup { border-top: none; }
+  .vA .tsummary .trow:hover { background: var(--muted); }
+  .vA .tsummary .trow .name { font-family: var(--mono); font-size: 11px; }
+  .vA .tsummary .trow .dir { color: var(--muted-foreground); font-family: var(--mono); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vA .tsummary .more {
+    display: block; width: 100%; padding: 6px 12px; font-size: 11px;
+    color: var(--muted-foreground); text-align: center; border: none;
+    border-top: 1px solid var(--border); background: transparent; cursor: default;
+  }
+  .vA .tsummary .more:hover { color: var(--foreground); background: var(--muted); }
+  .vA .bar { display: inline-flex; height: 4px; width: 56px; border-radius: 99px; overflow: hidden; background: var(--muted); flex: none; }
+  .vA .bar i { display: block; height: 100%; }
+  .vA .bar .ba { background: var(--diff-add-strong); }
+  .vA .bar .bd { background: var(--diff-remove-strong); }
+
+  /* ============ VARIANT B : "Section bands" (kept for mixing) ============ */
+  .vB .fband {
+    position: sticky; top: 0; z-index: 5;
+    display: flex; align-items: baseline; gap: 10px;
+    padding: 7px 14px; border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border); background: var(--card);
+  }
+  .vB .fband .idx {
+    font-family: var(--mono); font-size: 10px; color: var(--muted-foreground);
+    border: 1px solid var(--border); border-radius: 4px; padding: 0 5px;
+  }
+  .vB .fband .fname { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+  .vB .fband .fpath { color: var(--muted-foreground); font-size: 10.5px; font-family: var(--mono); }
+  .vB .fband .spacer { flex: 1; }
+  .vB .fband .letter { font-family: var(--mono); font-weight: 700; font-size: 11px; width: 16px; text-align: center; }
+  .vB .filewrap { border-left: 3px solid transparent; margin-bottom: 18px; }
+  .vB .filewrap.A { border-left-color: var(--diff-add-strong); }
+  .vB .filewrap.D { border-left-color: var(--diff-remove-strong); }
+  .vB .filewrap.M { border-left-color: var(--border); }
+  .vB .filewrap.M .fband { background: var(--background); }
+  .vB .fpane {
+    width: 210px; flex: none; border-right: 1px solid var(--border);
+    background: var(--background); padding: 10px 0; font-family: var(--mono);
+    font-size: 11px;
+  }
+  .vB .fpane .dir { padding: 6px 12px 2px; color: var(--muted-foreground); font-size: 10px; }
+  .vB .fpane .prow { display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 20px; cursor: default; }
+  .vB .fpane .prow:hover { background: var(--muted); }
+  .vB .fpane .prow.on { background: var(--accent); box-shadow: inset 2px 0 0 var(--primary); }
+  .vB .tsummary { max-width: 520px; }
+  .vB .tsummary .thead {
+    display: flex; gap: 10px; align-items: center; font-size: 12px;
+    color: var(--muted-foreground); padding: 4px 2px;
+  }
+  .vB .tsummary table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  .vB .tsummary td { padding: 4px 2px; border-bottom: 1px solid var(--border); }
+  .vB .tsummary .tstat { font-family: var(--mono); font-size: 10.5px; text-align: right; white-space: nowrap; }
+  .vB .mbar { display: inline-block; height: 3px; border-radius: 99px; vertical-align: middle; }
+
+  /* ============ VARIANT C : "Editor outline" (kept for mixing) ============ */
+  .vC .fileblock { margin: 0 0 26px; }
+  .vC .fbanner { display: flex; align-items: center; gap: 12px; padding: 14px 16px 10px; }
+  .vC .fbanner .num {
+    font-family: var(--mono); font-size: 22px; font-weight: 300;
+    color: var(--muted-foreground); opacity: .8; min-width: 40px;
+  }
+  .vC .fbanner .num b { color: var(--foreground); font-weight: 600; }
+  .vC .fbanner .meta { display: flex; flex-direction: column; gap: 1px; }
+  .vC .fbanner .fname { font-size: 14px; font-weight: 650; }
+  .vC .fbanner .fpath { font-size: 10.5px; color: var(--muted-foreground); font-family: var(--mono); }
+  .vC .fbanner .spacer { flex: 1; }
+  .vC .fbanner .badge {
+    font-size: 10px; font-weight: 700; letter-spacing: .06em;
+    text-transform: uppercase; padding: 2px 8px; border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  .vC .fbanner .badge.A { color: var(--diff-add-strong); border-color: var(--diff-add-gutter); }
+  .vC .fbanner .badge.D { color: var(--diff-remove-strong); border-color: var(--diff-remove-gutter); }
+  .vC .fbanner .badge.M { color: var(--muted-foreground); }
+  .vC .fileblock .code { border-top: 1px solid var(--border); }
+  .vC .fileblock + .fileblock { border-top: 6px solid var(--page); }
+  .vC .fpane {
+    width: 200px; flex: none; border-right: 1px solid var(--border);
+    background: var(--background); padding: 8px 0; font-size: 11.5px;
+  }
+  .vC .fpane .prow { display: flex; align-items: center; gap: 8px; padding: 5px 12px; cursor: default; }
+  .vC .fpane .prow:hover { background: var(--muted); }
+  .vC .fpane .prow.on { background: var(--accent); }
+  .vC .fpane .prow .ext {
+    font-family: var(--mono); font-size: 9px; color: var(--muted-foreground);
+    border: 1px solid var(--border); border-radius: 3px; padding: 0 3px;
+  }
+  .vC .tsummary {
+    max-width: 520px; background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden;
+  }
+  .vC .tsummary .thead { padding: 10px 12px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .vC .tsummary .pill {
+    font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: 99px;
+    border: 1px solid var(--border); color: var(--muted-foreground);
+  }
+  .vC .tsummary .pill.A { color: var(--diff-add-strong); border-color: var(--diff-add-gutter); }
+  .vC .tsummary .pill.D { color: var(--diff-remove-strong); border-color: var(--diff-remove-gutter); }
+  .vC .tsummary .group { border-top: 1px solid var(--border); }
+  .vC .tsummary .ghead {
+    padding: 5px 12px; font-size: 10px; font-weight: 700; letter-spacing: .07em;
+    text-transform: uppercase; color: var(--muted-foreground);
+  }
+  .vC .tsummary .trow { display: flex; align-items: center; gap: 8px; padding: 5px 12px 5px 24px; font-size: 11.5px; }
+
+  /* --- floating switcher --- */
+  .switcher {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 10px; z-index: 99;
+    background: oklch(0.1 0.005 260); color: var(--foreground);
+    border: 1px solid var(--border); border-radius: 99px;
+    padding: 6px 10px; box-shadow: 0 6px 24px oklch(0 0 0 / 0.5);
+    font-size: 12px;
+  }
+  .switcher button {
+    background: var(--accent); color: var(--foreground); border: none;
+    border-radius: 99px; width: 26px; height: 26px; cursor: pointer;
+    font-size: 14px; line-height: 1;
+  }
+  .switcher .label { min-width: 170px; text-align: center; }
+  .switcher .label b { font-family: var(--mono); }
+  .switcher .hint { color: var(--muted-foreground); font-size: 10px; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="sidebar">
+    <div class="item">New thread</div>
+    <div class="item">Search threads</div>
+    <div class="item">Pull requests</div>
+    <div class="item" style="margin-top:14px;opacity:.7">Projects</div>
+    <div class="item">fixture-repo</div>
+    <div class="item active" style="padding-left:20px">wrap-verify</div>
+  </div>
+
+  <div class="transcript">
+    <div class="bubble">turn two · 15:06</div>
+    <div id="turn-summary"></div>
+    <div class="bubble" style="opacity:.6">Message Mcode...</div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <span class="seg"><span>Last turn</span><span class="on">All turns</span></span>
+      <span style="flex:1"></span>
+      <span class="stat"><span class="a">+162</span> <span class="d">−48</span></span>
+    </div>
+    <div class="panel-body">
+      <div id="files-pane"></div>
+      <div class="diff-scroll" id="diff"></div>
+    </div>
+  </div>
+</div>
+
+<div class="switcher">
+  <button id="prev" aria-label="previous variant">&larr;</button>
+  <span class="label"><b id="vkey">A</b> · <span id="vname"></span></span>
+  <button id="next" aria-label="next variant">&rarr;</button>
+  <span class="hint">keys &larr; &rarr;</span>
+</div>
+
+<script>
+// ---------- fixture data (mirrors .dev/fixture-repo diffs) ----------
+const FILES = [
+  { path: "agent.txt", name: "agent.txt", dir: "", type: "M", adds: 1, dels: 1,
+    lines: [
+      { k: "d", n: 1, t: "main branch value" },
+      { k: "a", n: 1, t: "runtime base" },
+    ] },
+  { path: "steps.ts", name: "steps.ts", dir: "", type: "D", adds: 0, dels: 160,
+    lines: [
+      { k: "d", n: 1, t: "export function step1(state) { return state + 1; }" },
+      { k: "d", n: 2, t: "export function step2(state) { return state + 2; }" },
+      { k: "d", n: 3, t: "export function step3(state) { return state + 3; }" },
+      { k: "band", t: "152 unmodified lines" },
+      { k: "d", n: 156, t: "export function step156(state) { return state + 156; }" },
+      { k: "d", n: 157, t: "export function step157(state) { return state + 157; }" },
+      { k: "d", n: 158, t: "export function step158(state) { return state + 158; }" },
+    ] },
+  { path: "src/runtime/config.toml", name: "config.toml", dir: "src/runtime", type: "M", adds: 12, dels: 3,
+    lines: [
+      { k: "x", n: 8, t: "[server]" },
+      { k: "d", n: 9, t: "port = 3000" },
+      { k: "a", n: 9, t: "port = 41173" },
+      { k: "a", n: 10, t: "host = \"127.0.0.1\"" },
+      { k: "band", t: "24 unmodified lines" },
+      { k: "d", n: 35, t: "log = \"warn\"" },
+      { k: "a", n: 35, t: "log = \"info\"" },
+    ] },
+  { path: "src/util/legacy.ts", name: "legacy.ts", dir: "src/util", type: "A", adds: 42, dels: 0,
+    lines: [
+      { k: "a", n: 1, t: "export const VERSION = \"2.0\";" },
+      { k: "a", n: 2, t: "" },
+      { k: "a", n: 3, t: "export function hash(input: string) {" },
+      { k: "band", t: "36 unmodified lines" },
+      { k: "a", n: 40, t: "  return out;" },
+      { k: "a", n: 41, t: "}" },
+    ] },
+  { path: "src/util/hash.ts", name: "hash.ts", dir: "src/util", type: "M", adds: 5, dels: 2,
+    lines: [
+      { k: "x", n: 12, t: "export function hash(input: string) {" },
+      { k: "d", n: 13, t: "  return input.length;" },
+      { k: "a", n: 13, t: "  let out = 0;" },
+      { k: "a", n: 14, t: "  for (const ch of input) out = (out * 31 + ch.charCodeAt(0)) | 0;" },
+    ] },
+  { path: "docs/guide.md", name: "guide.md", dir: "docs", type: "A", adds: 18, dels: 0,
+    lines: [
+      { k: "a", n: 1, t: "# Runtime guide" },
+      { k: "a", n: 2, t: "" },
+      { k: "a", n: 3, t: "Start the server with `agent:up`." },
+      { k: "band", t: "14 unmodified lines" },
+      { k: "a", n: 18, t: "See `docs/agents/runtime.md`." },
+    ] },
+  { path: "assets/old-logo.svg", name: "old-logo.svg", dir: "assets", type: "D", adds: 0, dels: 9,
+    lines: [
+      { k: "d", n: 1, t: "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\">" },
+      { k: "d", n: 2, t: "  <rect width=\"16\" height=\"16\" fill=\"#222\"/>" },
+      { k: "band", t: "5 unmodified lines" },
+      { k: "d", n: 9, t: "</svg>" },
+    ] },
+];
+
+const TYPE_LABEL = { A: "Added", M: "Modified", D: "Deleted" };
+const SUMMARY_CAP = 5; // summary shows 5 rows then "+N more files"
+
+// Stands in for the app's lucide icon set (Folder, Copy, ExternalLink, etc.).
+const ICO = {
+  folder: `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 4.5v7A1.5 1.5 0 0 0 3.5 13h9a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 12.5 5H8L6.7 3.2A1 1 0 0 0 5.9 3H3.5A1.5 1.5 0 0 0 2 4.5Z"/></svg>`,
+  copy: `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5v-1A1.5 1.5 0 0 0 9 1H3.5A1.5 1.5 0 0 0 2 2.5V9a1.5 1.5 0 0 0 1.5 1.5h1"/></svg>`,
+  open: `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M9.5 2.5h4v4M13 3 8.5 7.5M6.5 4H3.5A1.5 1.5 0 0 0 2 5.5v7A1.5 1.5 0 0 0 3.5 14h7a1.5 1.5 0 0 0 1.5-1.5V9.5"/></svg>`,
+  md: `<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3.5" width="12" height="9" rx="1.5"/><path d="M4.5 10V6l1.75 2L8 6v4M10 6v4M10 6h1.25a1.25 1.25 0 0 1 0 2.5H10"/></svg>`,
+};
+
+function statHtml(f) {
+  const bits = [];
+  if (f.adds) bits.push(`<span class="a">+${f.adds}</span>`);
+  if (f.dels) bits.push(`<span class="d">−${f.dels}</span>`);
+  return `<span class="stat">${bits.join(" ")}</span>`;
+}
+
+function codeRows(f) {
+  return f.lines.map((l) =>
+    l.k === "band"
+      ? `<div class="band">${l.t}</div>`
+      : `<div class="${l.k === "a" ? "row-add" : l.k === "d" ? "row-del" : "row-ctx"}"><span class="ln">${l.n}</span>${l.t || "&nbsp;"}</div>`
+  ).join("");
+}
+
+// Group files by parent dir for the tree pane. Root files first, then dirs A-Z.
+function groupByDir(files) {
+  const root = files.filter((f) => !f.dir);
+  const dirs = new Map();
+  for (const f of files.filter((f) => f.dir)) {
+    const key = f.dir;
+    if (!dirs.has(key)) dirs.set(key, []);
+    dirs.get(key).push(f);
+  }
+  return { root, dirs: [...dirs.entries()].sort((a, b) => a[0].localeCompare(b[0])) };
+}
+
+// ---------- VARIANT A : Cards (selected direction) ----------
+const A = {
+  name: "Cards — file cards, real toolbar, folder tree pane",
+  filesPane() {
+    const { root, dirs } = groupByDir(FILES);
+    const row = (f, i, inDir) =>
+      `<div class="prow${inDir ? " in-dir" : ""}${i === 0 ? " on" : ""}" title="${f.path}">
+        <span class="dot ${f.type}"></span><span class="fname">${f.name}</span>
+        <span class="mini">${f.adds ? `<span class="a">+${f.adds}</span>` : ""}${f.dels ? ` <span class="d">−${f.dels}</span>` : ""}</span>
+      </div>`;
+    return `<div class="fpane">
+      <div class="phead">Files <span style="color:var(--muted-foreground);font-weight:400">${FILES.length}</span><span class="x icon-btn">✕</span></div>
+      <div class="pfilter">⌕&nbsp; Filter files</div>
+      <div class="ptree">
+        ${root.map((f, i) => row(f, i, false)).join("")}
+        ${dirs.map(([dir, fs]) =>
+          `<div class="dir"><span class="carat">▾</span>${ICO.folder}${dir}/</div>` +
+          fs.map((f) => row(f, -1, true)).join("")
+        ).join("")}
+      </div>
+    </div>`;
+  },
+  toolbar() {
+    return `<div class="dtoolbar">
+      <span class="icon-btn on" title="Hide files">▤</span>
+      <span class="sep"></span>
+      <span class="jump" title="Jump to file">⤒ Jump to file…</span>
+      <span class="sep"></span>
+      <span class="modes"><span class="on">Unified</span><span>Split</span></span>
+      <span style="flex:1"></span>
+      <span class="icon-btn" title="Refresh">⟳</span>
+      <span class="icon-btn" title="Options: collapse all · wrap lines">⋯</span>
+    </div>`;
+  },
+  diff() {
+    return this.toolbar() + FILES.map((f) =>
+      `<div class="filecard" data-file="${f.path}">
+        <div class="fhead" onclick="this.parentElement.classList.toggle('collapsed')">
+          <span class="chev">▾</span>
+          <span class="ficon">${f.name.split(".").pop().slice(0, 2)}</span>
+          <span class="fname">${f.name}</span>
+          ${f.dir ? `<span class="fpath">${f.dir}/</span>` : ""}
+          <span class="spacer"></span>
+          <span class="actions">
+            <span class="icon-btn" title="Copy path">${ICO.copy}</span>
+            <span class="icon-btn" title="Open in editor">${ICO.open}</span>
+            ${f.name.endsWith(".md") ? `<span class="icon-btn" title="Preview markdown">${ICO.md}</span>` : ""}
+          </span>
+          ${statHtml(f)}
+        </div>
+        <div class="code">${codeRows(f)}</div>
+      </div>`
+    ).join("");
+  },
+  summary() {
+    // Cap applies to file rows; folder headers render only for groups that
+    // have at least one visible row.
+    const shown = FILES.slice(0, SUMMARY_CAP);
+    const hidden = FILES.length - shown.length;
+    const totA = FILES.reduce((s, f) => s + f.adds, 0);
+    const totD = FILES.reduce((s, f) => s + f.dels, 0);
+    const { root, dirs } = groupByDir(shown);
+    const rowHtml = (f, inDir) => {
+      const t = f.adds + f.dels;
+      const aw = t ? (f.adds / t) * 100 : 0, dw = t ? (f.dels / t) * 100 : 0;
+      return `<div class="trow${inDir ? " in-dir" : ""}">
+        <span class="dot ${f.type}"></span>
+        <span class="name">${f.name}</span>
+        <span style="flex:1"></span>
+        <span class="bar">${aw ? `<i class="ba" style="width:${aw}%"></i>` : ""}${dw ? `<i class="bd" style="width:${dw}%"></i>` : ""}</span>
+        ${statHtml(f)}
+      </div>`;
+    };
+    return `<div class="tsummary">
+      <div class="thead">
+        <span style="color:var(--muted-foreground)">▾</span> ${FILES.length} files changed
+        <span class="stat"><span class="a">+${totA}</span> <span class="d">−${totD}</span></span>
+        <span class="viewall">⧉ View all diffs</span>
+      </div>
+      <div class="tlist">
+        ${root.map((f) => rowHtml(f, false)).join("")}
+        ${dirs.map(([dir, fs]) =>
+          `<div class="tgroup"><span class="carat">▾</span>${ICO.folder}${dir}/</div>` +
+          fs.map((f) => rowHtml(f, true)).join("")
+        ).join("")}
+        ${hidden > 0 ? `<button class="more">+${hidden} more file${hidden > 1 ? "s" : ""}</button>` : ""}
+      </div>
+    </div>`;
+  },
+};
+
+// ---------- VARIANT B : Section bands ----------
+const B = {
+  name: "Bands — sticky header bands + change-colored left rail, tree pane",
+  filesPane() {
+    return `<div class="fpane"><div class="dir">CHANGED FILES</div>` +
+      FILES.map((f, i) =>
+        `<div class="prow${i === 1 ? " on" : ""}"><span class="letter st${f.type}">${f.type}</span><span>${f.name}</span><span style="flex:1"></span>${statHtml(f)}</div>`
+      ).join("") + `</div>`;
+  },
+  diff() {
+    return FILES.map((f, i) =>
+      `<div class="filewrap ${f.type}">
+        <div class="fband">
+          <span class="idx">${i + 1}/${FILES.length}</span>
+          <span class="letter st${f.type}">${f.type}</span>
+          <span class="fname">${f.name}</span>
+          ${f.dir ? `<span class="fpath">${f.dir}/</span>` : ""}
+          <span class="spacer"></span>
+          ${statHtml(f)}
+        </div>
+        <div class="code">${codeRows(f)}</div>
+      </div>`
+    ).join("");
+  },
+  summary() {
+    const rows = [
+      { name: "agent.txt", type: "M", a: 1, d: 1 },
+      { name: "steps.ts", type: "D", a: 0, d: 160 },
+    ];
+    return `<div class="tsummary">
+      <div class="thead">▾ 2 files changed <span style="flex:1"></span><a href="#" style="color:var(--muted-foreground);text-decoration:none;font-size:11px">View all diffs ⤢</a></div>
+      <table>${rows.map((r) => {
+        const t = r.a + r.d, aw = t ? (r.a / t) * 40 : 0, dw = t ? (r.d / t) * 40 : 0;
+        return `<tr>
+          <td style="width:14px"><span class="st${r.type}" style="font-family:var(--mono);font-weight:700">${r.type}</span></td>
+          <td style="font-family:var(--mono)">${r.name}</td>
+          <td class="tstat">${r.a ? `<span class="stA">+${r.a}</span> ` : ""}${r.d ? `<span class="stD">−${r.d}</span>` : ""}</td>
+          <td style="width:44px"><span class="mbar" style="width:${aw}px;background:var(--diff-add-strong)"></span><span class="mbar" style="width:${dw}px;background:var(--diff-remove-strong)"></span></td>
+        </tr>`;
+      }).join("")}</table>
+    </div>`;
+  },
+};
+
+// ---------- VARIANT C : Editor outline ----------
+const C = {
+  name: "Outline — numbered file banners, badge status, grouped summary",
+  filesPane() {
+    return `<div class="fpane">` +
+      FILES.map((f, i) =>
+        `<div class="prow${i === 3 ? " on" : ""}"><span class="ext">${f.name.split(".").pop()}</span><span>${f.name}</span><span style="flex:1"></span><span class="st${f.type}" style="font-family:var(--mono);font-size:10px;font-weight:700">${f.type}</span></div>`
+      ).join("") + `</div>`;
+  },
+  diff() {
+    return FILES.map((f, i) =>
+      `<div class="fileblock">
+        <div class="fbanner">
+          <span class="num"><b>${String(i + 1).padStart(2, "0")}</b><span style="opacity:.6">/${String(FILES.length).padStart(2, "0")}</span></span>
+          <span class="meta"><span class="fname">${f.name}</span>${f.dir ? `<span class="fpath">${f.dir}</span>` : ""}</span>
+          <span class="spacer"></span>
+          <span class="badge ${f.type}">${TYPE_LABEL[f.type]}</span>
+          ${statHtml(f)}
+        </div>
+        <div class="code">${codeRows(f)}</div>
+      </div>`
+    ).join("");
+  },
+  summary() {
+    return `<div class="tsummary">
+      <div class="thead">
+        <span style="font-size:12px;font-weight:600">2 files changed</span>
+        <span style="flex:1"></span>
+        <span class="pill M">1 modified</span><span class="pill D">1 deleted</span>
+      </div>
+      <div class="group"><div class="ghead stM">Modified</div>
+        <div class="trow"><span style="font-family:var(--mono)">agent.txt</span><span style="flex:1"></span><span class="stat"><span class="a">+1</span> <span class="d">−1</span></span></div>
+      </div>
+      <div class="group"><div class="ghead stD">Deleted</div>
+        <div class="trow"><span style="font-family:var(--mono)">steps.ts</span><span style="flex:1"></span><span class="stat"><span class="d">−160</span></span></div>
+      </div>
+    </div>`;
+  },
+};
+
+const VARIANTS = { A, B, C };
+const ORDER = ["A", "B", "C"];
+
+function apply(key) {
+  const v = VARIANTS[key];
+  document.querySelector(".shell").className = "shell v" + key;
+  document.getElementById("files-pane").innerHTML = v.filesPane();
+  document.getElementById("diff").innerHTML = v.diff();
+  document.getElementById("turn-summary").innerHTML = v.summary();
+  document.getElementById("vkey").textContent = key;
+  document.getElementById("vname").textContent = v.name;
+  const u = new URL(location.href); u.searchParams.set("v", key);
+  history.replaceState(null, "", u);
+}
+
+function cycle(dir) {
+  const cur = new URL(location.href).searchParams.get("v") || "A";
+  const i = (ORDER.indexOf(cur) + dir + ORDER.length) % ORDER.length;
+  apply(ORDER[i]);
+}
+
+document.getElementById("prev").onclick = () => cycle(-1);
+document.getElementById("next").onclick = () => cycle(1);
+document.addEventListener("keydown", (e) => {
+  if (e.target.matches("input,textarea,[contenteditable]")) return;
+  if (e.key === "ArrowLeft") cycle(-1);
+  if (e.key === "ArrowRight") cycle(1);
+});
+
+apply(new URL(location.href).searchParams.get("v") || "A");
+</script>
+</body>
+</html>

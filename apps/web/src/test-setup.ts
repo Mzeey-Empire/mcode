@@ -39,10 +39,29 @@ if (typeof window !== "undefined") {
     class IntersectionObserverStub {
       constructor(private readonly callback: IntersectionObserverCallback) {}
       observe(target: Element) {
-        this.callback(
-          [{ target, isIntersecting: true } as IntersectionObserverEntry],
-          this as unknown as IntersectionObserver,
-        );
+        // jsdom returns zero-area rects, but a real observer cannot report
+        // isIntersecting with an empty intersectionRect. Consumers that gate on
+        // intersectionRect.width (e.g. MermaidBlock) would wait for the timeout.
+        const measured = target.getBoundingClientRect();
+        const rect = (
+          measured.width > 0 && measured.height > 0
+            ? measured
+            : { x: 0, y: 0, top: 0, left: 0, right: 1, bottom: 1, width: 1, height: 1, toJSON: () => ({}) }
+        ) as DOMRectReadOnly;
+        const entry = {
+          target,
+          isIntersecting: true,
+          intersectionRatio: 1,
+          intersectionRect: rect,
+          boundingClientRect: rect,
+          rootBounds: null,
+          time: 0,
+        } as IntersectionObserverEntry;
+        // Real observers never fire synchronously from observe(); a sync call
+        // breaks consumers that initialize state after observing (TDZ).
+        queueMicrotask(() => {
+          this.callback([entry], this as unknown as IntersectionObserver);
+        });
       }
       unobserve() {}
       disconnect() {}
@@ -73,6 +92,14 @@ if (typeof window !== "undefined") {
       value: () => [],
     });
   }
+  // With getAnimations defined, Base UI waits a frame for popup exit animations
+  // that jsdom never runs, so popovers stay mounted past assertions. Its own
+  // kill switch restores the synchronous path used when the API is absent.
+  Object.defineProperty(globalThis, "BASE_UI_ANIMATIONS_DISABLED", {
+    writable: true,
+    configurable: true,
+    value: true,
+  });
   Object.defineProperty(window, "matchMedia", {
     writable: true,
     value: (query: string) => ({
