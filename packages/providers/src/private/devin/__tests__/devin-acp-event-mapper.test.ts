@@ -311,6 +311,33 @@ describe("mapDevinAcpSessionNotification", () => {
     expect(state.pendingSubagentCallIds).toEqual([]);
   });
 
+  it("attributes parallel subagent_started updates to their run_subagent calls in spawn order", () => {
+    const state = createDevinAcpTurnState();
+    const runSubagent = (toolCallId: string) =>
+      notification(
+        toolCall(toolCallId, {
+          kind: "other",
+          _meta: { "cognition.ai/inferenceToolName": "run_subagent" },
+        }),
+      );
+    const subagentStarted = (agentId: string) =>
+      notification({
+        sessionUpdate: "tool_call_update",
+        toolCallId: agentId,
+        status: "in_progress",
+        _meta: { "cognition.ai/subagent_started": { task: "work", title: "Work" } },
+      });
+
+    mapDevinAcpSessionNotification(runSubagent("call-a"), THREAD, state);
+    mapDevinAcpSessionNotification(runSubagent("call-b"), THREAD, state);
+
+    const first = mapDevinAcpSessionNotification(subagentStarted("agent-1"), THREAD, state);
+    const second = mapDevinAcpSessionNotification(subagentStarted("agent-2"), THREAD, state);
+
+    expect(first[0]).toMatchObject({ toolCallId: "agent-1", parentToolCallId: "call-a" });
+    expect(second[0]).toMatchObject({ toolCallId: "agent-2", parentToolCallId: "call-b" });
+  });
+
   it("copies task to description on run_subagent markers so narrative extractors find it", () => {
     const state = createDevinAcpTurnState();
     const events = mapDevinAcpSessionNotification(

@@ -322,9 +322,10 @@ function subagentStartedEvents(
   threadId: string,
   state: DevinAcpTurnState,
 ): AgentEvent[] {
-  const parentToolCallId = state.pendingSubagentCallIds[
-    state.pendingSubagentCallIds.length - 1
-  ];
+  // Devin emits subagent_started in spawn order, so pair it with the oldest
+  // unresolved run_subagent call. `last` would attach every parallel agent to
+  // the most recent call, hiding their subtrees under the wrong parent row.
+  const parentToolCallId = state.pendingSubagentCallIds.shift();
   if (parentToolCallId) state.subagentParentByAgentId.set(toolCallId, parentToolCallId);
   const task = typeof started.task === "string" ? started.task : undefined;
   const title = typeof started.title === "string" ? started.title : undefined;
@@ -423,8 +424,6 @@ function subagentCompletedEvents(
 ): AgentEvent[] {
   const parentToolCallId = state.subagentParentByAgentId.get(toolCallId);
   if (parentToolCallId) {
-    const idx = state.pendingSubagentCallIds.indexOf(parentToolCallId);
-    if (idx >= 0) state.pendingSubagentCallIds.splice(idx, 1);
     state.subagentParentByAgentId.delete(toolCallId);
   }
   state.accumulator.toolStartTimes.delete(toolCallId);

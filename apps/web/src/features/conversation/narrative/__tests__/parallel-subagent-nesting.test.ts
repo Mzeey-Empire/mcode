@@ -90,6 +90,35 @@ describe("parallel sub-agent nesting", () => {
     expect(counts.subagents).toBe(4);
   });
 
+  it("never renders in-flight subagent children as active top-level rows", () => {
+    // Devin child markers carry subagent_context and never get their own
+    // terminal update, so they stay isComplete=false until the owning Agent
+    // resolves them. They must not leak into the top-level active-tool rows;
+    // that is what painted every narrative element as currently running.
+    const tools: ToolCall[] = [
+      mkTool({ id: "call-spawn", toolName: "Agent", startedAt: 1000, isComplete: true }),
+      mkTool({ id: "agent-1", toolName: "Agent", startedAt: 1001, isComplete: false, parentToolCallId: "call-spawn" }),
+      mkTool({ id: "c1", toolName: "Read", startedAt: 2000, isComplete: false, parentToolCallId: "agent-1" }),
+      mkTool({ id: "c2", toolName: "Grep", startedAt: 2100, isComplete: false, parentToolCallId: "agent-1" }),
+      mkTool({ id: "c3", toolName: "Read", startedAt: 2200, isComplete: false, parentToolCallId: "agent-1" }),
+    ];
+
+    const { items } = buildNarrativeItems({
+      toolCalls: tools,
+      hooks: [],
+      thoughtSegments: [],
+      streamingText: "",
+      isAgentRunning: true,
+    });
+
+    expect(items.filter((i) => i.type === "active-tool")).toEqual([]);
+    const agentItem = requiredSubagentItem(
+      items.find((i) => i.type === "subagent" && i.toolCall.id === "agent-1"),
+    );
+    expect(agentItem.lifecycle).toBe("started");
+    expect(agentItem.children.map((c) => c.id)).toEqual(["c1", "c2", "c3"]);
+  });
+
   it("treats empty-string parentToolCallId as top-level (cannot be a real parent id)", () => {
     // Defensive: if a bad event ever surfaces parentToolCallId: "" it must
     // be treated as no parent at all. Pre-fix, "" went into childrenMap[""]
