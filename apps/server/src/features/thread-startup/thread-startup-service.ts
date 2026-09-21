@@ -138,6 +138,22 @@ export class ThreadStartupService {
   /** Complete the final active phase and make the lifecycle terminal. */
   complete(startupId: string): ThreadStartup {
     const startup = this.require(startupId);
+    // An interrupted record completes when its remaining phases are resolved
+    // outside this lifecycle, for example when the user continues without Setup.
+    if (startup.state === "interrupted") {
+      if (startup.cancellation === "requested") return this.markCancelled(startupId);
+      return this.persistNext({
+        ...startup,
+        state: "completed",
+        phase: startup.steps.at(-1)!.phase,
+        block: undefined,
+        steps: startup.steps.map((step) => {
+          if (step.state === "interrupted") return { ...step, state: "skipped" };
+          if (step.state === "pending") return { ...step, state: "completed" };
+          return step;
+        }),
+      });
+    }
     if (isTerminal(startup)) return startup;
     const activeIndex = this.activeIndex(startup);
     if (activeIndex !== startup.steps.length - 1) throw new Error("Startup cannot complete before its final phase");
@@ -169,7 +185,9 @@ export class ThreadStartupService {
   /** Resume the current blocked phase for a new Setup attempt. */
   resume(startupId: string): ThreadStartup {
     const startup = this.require(startupId);
-    if (isTerminal(startup) || startup.state !== "blocked") return startup;
+    // Interrupted records are recoverable: the process behind them died, but
+    // the user can still retry or bypass the phase that never finished.
+    if (startup.state !== "blocked" && startup.state !== "interrupted") return startup;
     const activeIndex = this.currentIndex(startup);
     return this.persistNext({
       ...startup,
@@ -231,7 +249,8 @@ export class ThreadStartupService {
   /** Mark a startup cancelled only after its owning integration stops its own work. */
   markCancelled(startupId: string): ThreadStartup {
     const startup = this.require(startupId);
-    if (isTerminal(startup)) return startup;
+    // An interrupted record may still carry a cancellation request; honour it.
+    if (isTerminal(startup) && startup.state !== "interrupted") return startup;
     const activeIndex = this.currentIndex(startup);
     return this.persistNext({
       ...startup,
@@ -248,6 +267,11 @@ export class ThreadStartupService {
   /** Return whether an integration must stop or avoid starting more owned work. */
   isCancellationRequested(startupId: string): boolean {
     return this.require(startupId).cancellation === "requested";
+  }
+
+  /** Return every startup record left interrupted by a server restart. */
+  listInterrupted(): ThreadStartup[] {
+    return this.startupRepo.listInterrupted();
   }
 
   /** Mark all incomplete startup records as interrupted after a server restart. */

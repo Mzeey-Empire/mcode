@@ -98,7 +98,6 @@ import {
   routeThreadStartupRpc,
 } from "../../features/thread-startup/transport/thread-startup-rpc.js";
 import type { FileService } from "../../features/projects/files/file-service.js";
-import type { WorkspaceInvalidationService } from "../../features/projects/files/workspace-invalidation-service.js";
 import { isFileRpcMethod, routeFileRpc } from "../../features/projects/files/transport/file-rpc.js";
 import { isAttachmentRpcMethod, routeAttachmentRpc } from "../../features/attachments/transport/attachment-rpc.js";
 import { isMemoryRpcMethod, routeMemoryRpc } from "../../runtime/memory/transport/memory-rpc.js";
@@ -250,7 +249,6 @@ export interface RouterDeps {
   pullRequestReviews: PullRequestReviewGitService;
   githubService: GithubService;
   fileService: FileService;
-  workspaceInvalidations: WorkspaceInvalidationService;
   configService: ConfigService;
   skillService: SkillService;
   /** Owns the thread-independent Codex app-server catalog connection. */
@@ -589,7 +587,7 @@ const ROUTE_FAMILIES = [
   createRouteFamily(isTurnDiffRpcMethod, (method, params, deps) => routeTurnDiffRpc(method, params, deps)),
   createRouteFamily(isDiffSummaryRpcMethod, (method, params, deps) =>
     routeDiffSummaryRpc(method, params, deps)),
-  createRouteFamily(isFileRpcMethod, (method, params, deps, context) => routeFileRpc(method, params, deps, context.client)),
+  createRouteFamily(isFileRpcMethod, (method, params, deps) => routeFileRpc(method, params, deps)),
   createRouteFamily(isAttachmentRpcMethod, (method, params) => routeAttachmentRpc(method, params)),
   createRouteFamily(isMemoryRpcMethod, (method, params, deps) => routeMemoryRpc(method, params, deps)),
   createRouteFamily(isApplicationRpcMethod, (method) => routeApplicationRpc(method)),

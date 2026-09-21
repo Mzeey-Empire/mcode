@@ -323,7 +323,6 @@ export function Composer({
     activeThread,
   });
   const {
-    text: input,
     attachments,
     selection: {
       modelId,
@@ -355,7 +354,6 @@ export function Composer({
   } = form.attachmentBindings;
   const {
     markAgentSettingsTouched,
-    replaceDraft,
     setSelectedTextComments,
     setSelectedTextCommentEditor,
     setGoalPending,
@@ -376,7 +374,6 @@ export function Composer({
     setSelectedTextCommentEditor,
   });
   const execution = useComposerExecutionTarget({
-    input,
     activeThread,
     branchFromMessageId,
     isNewThread: isNewThread === true,
@@ -391,11 +388,8 @@ export function Composer({
     workspacePath,
     branchExecMode,
     fetchingBranch,
-    detectedPullRequest: detectedPr,
     setMode: setComposerMode,
     setBranchMode: setBranchExecMode,
-    dismissDetectedPullRequest: dismissDetectedPr,
-    reviewDetectedPullRequest,
   } = execution;
   useEffect(() => {
     if (threadId && planPanelOpen) {
@@ -532,11 +526,6 @@ export function Composer({
     form,
   });
 
-  const handlePrReview = useCallback(async () => {
-    const prefill = await reviewDetectedPullRequest();
-    if (prefill) replaceDraft(prefill);
-  }, [replaceDraft, reviewDetectedPullRequest]);
-
   const submissionQueue = useMemo(
     () => ({
       editing: editingFromQueue,
@@ -668,7 +657,6 @@ export function Composer({
             editingFromQueue,
             composerMode,
             isDragOver,
-            detectedPullRequest: detectedPr,
             fetchingBranch: Boolean(fetchingBranch),
             effectiveProviderId: surfaceState.effectiveProviderId,
             providerReason: surfaceState.providerReason,
@@ -724,8 +712,6 @@ export function Composer({
             onDragLeave: handleDragLeave,
             onDragOver: handleDragOver,
             onDrop: handleAttachmentDrop,
-            onReviewDetectedPullRequest: handlePrReview,
-            onDismissDetectedPullRequest: dismissDetectedPr,
             onCancelEdit: cancelEditFromQueue,
             onEditorChange: handleEditorChange,
             onSubmit: handleSend,

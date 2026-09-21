@@ -24,11 +24,11 @@ const FOCUSED_GATES = [
   { name: "server-turn-diff-review", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism", "--testTimeout=30000"], files: ["src/features/agents/turns/__tests__/turn-diff-review.test.ts", "src/features/agents/turns/__tests__/turn-diff-service.test.ts"], rows: ["empty", "interruption"] },
   { name: "server-approval-review-policy", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/agents/turns/__tests__/approval-review-policy.test.ts", "src/features/agents/orchestration/__tests__/agent-service-turn-started.test.ts"], rows: ["strictManual", "managedRequired", "fullAccessDispatch"] },
   { name: "server-managed-required-dispatch", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/agents/orchestration/__tests__/agent-service-gate.test.ts"], rows: ["managedRequiredDispatch"], limitation: "Public Codex does not report required; this is focused server dispatch proof." },
-  { name: "server-workspace-invalidation", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/projects/files/__tests__/workspace-invalidation-service.test.ts"], rows: ["invalidation", "staleRetry", "disconnectWatchCleanup"] },
+  { name: "server-file-refresh", control: "apps/server focused integration tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/projects/files/__tests__/file-service.test.ts", "src/features/projects/files/transport/__tests__/file-rpc.test.ts"], rows: ["invalidationDelta", "nonGitScope", "noDeltaSilent"] },
   { name: "server-retry-decision-freeze", control: "apps/server focused retry tests", workspace: "apps/server", options: ["--no-file-parallelism"], files: ["src/features/agents/orchestration/__tests__/agent-service-transient-retry.test.ts"], rows: ["frozenRetryDecision"] },
   { name: "codex-protocol", control: "packages/providers focused protocol tests", workspace: "packages/providers", files: ["src/__tests__/codex/codex-notification-validation.test.ts", "src/__tests__/codex/codex-protocol-coverage.test.ts", "src/__tests__/codex/codex-event-mapper.test.ts"], rows: ["warningsReroutes"] },
   { name: "codex-stale-retry-events", control: "packages/providers focused retry event tests", workspace: "packages/providers", files: ["src/__tests__/codex/codex-event-mapper.test.ts", "src/__tests__/codex/codex-provider-first-turn.test.ts"], rows: ["staleRetryReview", "staleRetryDiff"] },
-  { name: "web-composer-and-files", control: "apps/web focused component tests", workspace: "apps/web", files: ["src/features/conversation/composer/controls/__tests__/ComposerAccessControls.test.tsx", "src/features/projects/files/useWorkspaceFileInvalidation.test.tsx", "src/components/diff/__tests__/DiffPanel.files.test.tsx"], rows: ["fullAccessControl", "fileSurfaces"] },
+  { name: "web-composer-and-files", control: "apps/web focused component tests", workspace: "apps/web", files: ["src/features/conversation/composer/controls/__tests__/ComposerAccessControls.test.tsx", "src/features/projects/files/useWorkspaceFileRefresh.test.tsx", "src/components/diff/__tests__/DiffPanel.files.test.tsx"], rows: ["fullAccessControl", "fileSurfaces"] },
   { name: "web-permission-handoff", control: "apps/web focused permission handoff tests", workspace: "apps/web", files: ["src/transport/ws-events.test.ts"], rows: ["strictReviewNoticeOnly", "realProviderRequestCard"] },
   { name: "codex-permission-handoff", control: "packages/providers focused permission handoff tests", workspace: "packages/providers", files: ["src/__tests__/codex/codex-provider-permission.test.ts"], rows: ["providerResponseSettlementRemoval"] },
 ];
@@ -301,7 +301,7 @@ export function createReceipt(repoRoot) {
   const directory = NodePath.join(repoRoot, EVIDENCE_DIRECTORY, runId);
   const fixtureDirectory = NodePath.join(getRuntimePaths(repoRoot).fixtureRepoDir, `provider-completeness-${runId}`);
   NodeFS.mkdirSync(directory, { recursive: true });
-  return { runId, phase: "initializing", path: NodePath.join(directory, "receipt.json"), directory, fixtureDirectory, fixtureFile: NodePath.join(fixtureDirectory, "target.txt"), applicationCommit: "not reached", upstreamCodex: "not reached", provider: "codex", model: MODEL, baseline: "not reached", publicComparison: "not reached", fetchedPatch: "not reached", disk: "not reached", renderedEvidence: [], run: { ownedWorkspaceId: null, ownedFixtureDirectory: null, ownedFile: null, threadId: null, ownedThreadIds: [] }, electron: { matrix: providerMatrix("electron") }, journeys: {}, screenshots: [], observations: {}, comparison: {}, diagnostics: { liveComparisons: { states: [], omitted: 0 } }, focusedGates: focusedGateMatrix(), matrix: providerMatrix("web"), watcherOwnership: { kind: "live-rpc-required", control: "public file.watch RPC and files.changed push", status: "not-run" }, cleanup: { complete: false, failures: [] }, failure: null };
+  return { runId, phase: "initializing", path: NodePath.join(directory, "receipt.json"), directory, fixtureDirectory, fixtureFile: NodePath.join(fixtureDirectory, "target.txt"), applicationCommit: "not reached", upstreamCodex: "not reached", provider: "codex", model: MODEL, baseline: "not reached", publicComparison: "not reached", fetchedPatch: "not reached", disk: "not reached", renderedEvidence: [], run: { ownedWorkspaceId: null, ownedFixtureDirectory: null, ownedFile: null, threadId: null, ownedThreadIds: [] }, electron: { matrix: providerMatrix("electron") }, journeys: {}, screenshots: [], observations: {}, comparison: {}, diagnostics: { liveComparisons: { states: [], omitted: 0 } }, focusedGates: focusedGateMatrix(), matrix: providerMatrix("web"), watcherOwnership: { kind: "live-rpc-required", control: "public file.refresh RPC and files.changed push", status: "not-run" }, cleanup: { complete: false, failures: [] }, failure: null };
 }
 
 function createSurfaceRun(repoRoot, receipt, surface) {
@@ -335,7 +335,7 @@ export async function createOwnedFixtureWorkspace(socket, repoRoot, receipt) {
   return workspace;
 }
 
-/** Proves per-client workspace watcher ownership through the public runtime contract. */
+/** Proves attention-boundary file.refresh deltas reach every live client and none reach a closed one. */
 export async function runWorkspaceInvalidationJourney({ repoRoot, workspace, run, io, openSocket = openRuntimeVerificationSocket, timeoutMs = TIMEOUT_MS }) {
   const { ownerFile, observerFile } = watcherFixtureFiles(run);
   const workspaceId = watcherWorkspaceId(workspace);
@@ -343,11 +343,13 @@ export async function runWorkspaceInvalidationJourney({ repoRoot, workspace, run
   const observerEvents = [];
   const { owner, observer } = await openWatcherSockets(repoRoot, openSocket, ownerEvents, observerEvents);
   try {
-    await owner.rpc("file.watch", { workspaceId });
-    await observer.rpc("file.watch", { workspaceId });
+    // The first refresh per scope records the status baseline without emitting.
+    await owner.rpc("file.refresh", { workspaceId });
+    await observer.rpc("file.refresh", { workspaceId });
     recordOwnedFile(run.run, ownerFile);
     recordOwnedFile(run.run, observerFile);
     await io.writeFile(ownerFile, "WATCHER_OWNER_MARKER\n", "utf8");
+    await owner.rpc("file.refresh", { workspaceId });
     await Promise.all([
       waitForExactWorkspaceInvalidation(ownerEvents, workspaceId, NodePath.basename(ownerFile), timeoutMs),
       waitForExactWorkspaceInvalidation(observerEvents, workspaceId, NodePath.basename(ownerFile), timeoutMs),
@@ -356,11 +358,12 @@ export async function runWorkspaceInvalidationJourney({ repoRoot, workspace, run
     const ownerEventCount = ownerEvents.length;
     const observerStart = observerEvents.length;
     await io.appendFile(observerFile, "WATCHER_OBSERVER_MARKER\n", "utf8");
+    await observer.rpc("file.refresh", { workspaceId });
     await waitForExactWorkspaceInvalidation(observerEvents, workspaceId, NodePath.basename(observerFile), timeoutMs, observerStart);
-    if (ownerEvents.length !== ownerEventCount) throw new Error("Condition: disconnected watcher owner received a later files.changed push.");
+    if (ownerEvents.length !== ownerEventCount) throw new Error("Condition: disconnected client received a later files.changed push.");
     return {
       kind: "live-rpc-proof",
-      control: "public file.watch RPC and files.changed push",
+      control: "public file.refresh RPC and files.changed push",
       workspaceId,
       owner: { closed: true, changes: [NodePath.basename(ownerFile)] },
       observer: { active: true, changes: [NodePath.basename(ownerFile), NodePath.basename(observerFile)] },
@@ -1415,15 +1418,19 @@ async function captureFourSurfaceRefresh({ client, socket, workspaceId, threadId
   const captureInput = { client, socket, threadId, run, surface, fixtureFile, fileName, marker, initialComparison };
   const before = await capture({ ...captureInput, phase: "before" });
   assertFourSurfaceState(before, fileName, marker);
-  const watch = await trace.waitForWatch({ workspaceId, threadId });
+  const refreshRequest = await trace.waitForRefreshRequest({ workspaceId, threadId });
+  // The first refresh per scope baselines silently, so the verifier drives an
+  // explicit baseline, then the external write, then the delta-producing check.
+  await socket.rpc("file.refresh", { workspaceId, threadId });
   const mark = trace.mark();
   await io.appendFile(fixtureFile, `${marker}\n`, "utf8");
   const disk = assertDiskContent(await io.readFile(fixtureFile, "utf8"), "AGENT_MARKER", marker);
+  await socket.rpc("file.refresh", { workspaceId, threadId });
   const invalidation = await trace.waitForInvalidation({ workspaceId, threadId, fileName, after: mark });
   const after = await capture({ ...captureInput, phase: "after" });
   assertFourSurfaceState(after, fileName, marker);
   const refresh = await trace.waitForRefresh({ workspaceId, threadId, after: invalidation.sequence });
-  const causality = assertRefreshCausality({ watch, mark, invalidation, refresh, fileName });
+  const causality = assertRefreshCausality({ refreshRequest, mark, invalidation, refresh, fileName });
   return {
     kind: "four-surface-refresh",
     trigger: {
@@ -1441,22 +1448,22 @@ async function captureFourSurfaceRefresh({ client, socket, workspaceId, threadId
 }
 
 function assertInvalidationTrace(trace) {
-  if (!trace || typeof trace.mark !== "function" || typeof trace.waitForWatch !== "function" || typeof trace.waitForInvalidation !== "function" || typeof trace.waitForRefresh !== "function" || typeof trace.close !== "function") {
+  if (!trace || typeof trace.mark !== "function" || typeof trace.waitForRefreshRequest !== "function" || typeof trace.waitForInvalidation !== "function" || typeof trace.waitForRefresh !== "function" || typeof trace.close !== "function") {
     throw new Error("Condition: four-surface refresh requires an owning client invalidation trace.");
   }
 }
 
-function assertRefreshCausality({ watch, mark, invalidation, refresh, fileName }) {
-  const watchSequence = traceSequence(watch, "existing client file.watch");
+function assertRefreshCausality({ refreshRequest, mark, invalidation, refresh, fileName }) {
+  const watchSequence = traceSequence(refreshRequest, "existing client file.refresh");
   const invalidationSequence = traceSequence(invalidation, "files.changed");
   const filesSequence = traceSequence(refresh?.files, "Files turnDiff.getComparison");
   const composerSequence = traceSequence(refresh?.composer, "Composer file.list");
-  if (!Number.isSafeInteger(mark) || mark < watchSequence) throw new Error("Condition: the owning client did not subscribe before the external write.");
+  if (!Number.isSafeInteger(mark) || mark < watchSequence) throw new Error("Condition: the owning client did not request a file refresh before the external write.");
   if (invalidationSequence <= mark) throw new Error("Condition: exact files.changed did not follow the external write.");
   if (filesSequence <= invalidationSequence) throw new Error("Condition: Files did not refetch after exact files.changed.");
   if (composerSequence <= invalidationSequence) throw new Error("Condition: Composer did not reload after exact files.changed.");
   return {
-    subscription: { method: "file.watch", scope: "active-workspace-thread" },
+    subscription: { method: "file.refresh", scope: "active-workspace-thread" },
     invalidation: { channel: "files.changed", changedPaths: [fileName], wholeWorkspace: false },
     refresh: {
       files: { method: "turnDiff.getComparison" },
@@ -1492,7 +1499,7 @@ export async function createClientInvalidationTrace(client, { timeoutMs = TIMEOU
   session.on("Network.webSocketFrameReceived", (event) => record("received", event));
   return {
     mark: () => sequence,
-    waitForWatch: ({ workspaceId, threadId }) => waitForClientInvalidationEvent(events, (event) => event.direction === "sent" && event.method === "file.watch" && event.workspaceId === workspaceId && event.threadId === threadId, "owning client file.watch", timeoutMs),
+    waitForRefreshRequest: ({ workspaceId, threadId }) => waitForClientInvalidationEvent(events, (event) => event.direction === "sent" && event.method === "file.refresh" && event.workspaceId === workspaceId && event.threadId === threadId, "owning client file.refresh", timeoutMs),
     waitForInvalidation: ({ workspaceId, threadId, fileName, after }) => waitForClientInvalidationEvent(events, (event) => event.sequence > after && event.direction === "received" && event.channel === "files.changed" && event.workspaceId === workspaceId && event.threadId === threadId && event.wholeWorkspace === false && event.changedPaths.length === 1 && event.changedPaths[0] === fileName, "exact files.changed", timeoutMs),
     waitForRefresh: async ({ workspaceId, threadId, after }) => ({
       files: await waitForClientInvalidationEvent(events, (event) => event.sequence > after && event.direction === "sent" && event.method === "turnDiff.getComparison" && event.threadId === threadId, "Files turnDiff.getComparison", timeoutMs),
@@ -1525,7 +1532,7 @@ function receivedClientInvalidationTraceEvent(payload, sequence, direction) {
 }
 
 function sentClientInvalidationTraceEvent(payload, sequence, direction) {
-  if (!["file.watch", "file.list", "turnDiff.getComparison"].includes(payload.method) || !payload.params || typeof payload.params !== "object") return null;
+  if (!["file.refresh", "file.list", "turnDiff.getComparison"].includes(payload.method) || !payload.params || typeof payload.params !== "object") return null;
   return {
     sequence,
     direction,

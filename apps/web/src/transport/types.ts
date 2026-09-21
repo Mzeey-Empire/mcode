@@ -539,7 +539,7 @@ export interface McodeTransport {
   // File operations (@ file tagging)
   listWorkspaceFiles(workspaceId: string, threadId?: string): Promise<string[]>;
   readFileContent(workspaceId: string, relativePath: string, threadId?: string): Promise<string>;
-  watchWorkspaceFiles(workspaceId: string, threadId?: string): Promise<void>;
+  refreshWorkspaceFiles(workspaceId: string, threadId?: string): Promise<void>;
 
   // Open-in app actions
   /**
@@ -613,7 +613,6 @@ export interface McodeTransport {
   // PR review
   listOpenPrs(workspaceId: string): Promise<PrDetail[]>;
   fetchBranch(workspaceId: string, branch: string, prNumber?: number): Promise<void>;
-  getPrByUrl(url: string): Promise<PrDetail | null>;
   /** Fetch fresh CI check status for a thread (manual refresh). */
   checkStatus(threadId: string, force?: boolean): Promise<ChecksStatus>;
 

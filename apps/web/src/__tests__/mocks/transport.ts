@@ -233,7 +233,7 @@ export const mockTransport: McodeTransport = {
   readClipboardImage: vi.fn().mockResolvedValue(null),
   saveClipboardFile: vi.fn().mockResolvedValue(null),
   listWorkspaceFiles: vi.fn().mockResolvedValue([]),
-  watchWorkspaceFiles: vi.fn().mockResolvedValue(undefined),
+  refreshWorkspaceFiles: vi.fn().mockResolvedValue(undefined),
   getReviewComparison: vi.fn().mockResolvedValue({ files: [], additions: 0, deletions: 0 }),
   readFileContent: vi.fn().mockResolvedValue(""),
   readFileAtRef: vi.fn().mockResolvedValue(""),
@@ -256,7 +256,6 @@ export const mockTransport: McodeTransport = {
   cancelPullRequestOperation: vi.fn().mockResolvedValue({ ok: true, cancelled: false }),
   listOpenPrs: vi.fn().mockResolvedValue([]),
   fetchBranch: vi.fn().mockResolvedValue(undefined),
-  getPrByUrl: vi.fn().mockResolvedValue(null),
   checkStatus: vi.fn().mockResolvedValue({ aggregate: "no_checks", runs: [], fetchedAt: 0 }),
   getProviderCatalog: vi.fn().mockImplementation(async (request: ProviderCatalogRequest) => ({
     providerId: request.providerId,

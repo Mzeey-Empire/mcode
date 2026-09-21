@@ -137,3 +137,7 @@ Clients communicate over typed WebSockets (`packages/contracts`). `apps/server` 
 - Lint and complexity check: `bun run lint`
 - Type checking: `bun run typecheck`
 - Do not run repo wide checks, CI owns the full test suite
+
+## Pull requests
+
+Use `.github/pull_request_template.md`. UI changes require before and after screenshots or video captured with the [Electron live-testing](.agents/skills/electorn-live-testing/SKILL.md) harness; embed them in the PR body with `gh pr create --attach`. Local `.dev/` paths are not reviewable evidence.

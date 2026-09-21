@@ -436,9 +436,9 @@ All params and results are defined as Zod schemas in `packages/contracts/src/ws/
 | `message.list` | Load messages for a thread |
 | `file.list` | List files in a workspace (uses `git ls-files`) |
 | `file.read` | Read a file by relative path |
+| `file.refresh` | One-shot `git status` check for a scope; emits `files.changed` when the dirty set moved |
 | `github.branchPr` | Get PR info for a branch |
 | `github.listOpenPrs` | List open PRs for a workspace |
-| `github.prByUrl` | Look up a PR by URL |
 | `pullRequest.capabilities` | Resolve independently gated viewer permissions |
 | `pullRequest.list` | Load one bounded relationship inbox page |
 | `pullRequest.get` | Load one detail, checks, or comments page |
@@ -472,7 +472,7 @@ Push events are broadcast to all connected WebSocket clients. The server validat
 | `terminal.data` | `{ ptyId, data }` | PTY output |
 | `terminal.exit` | `{ ptyId, code }` | PTY exited |
 | `thread.status` | `{ threadId, status }` | Thread status changed |
-| `files.changed` | `{ workspaceId, threadId? }` | File list invalidated (after agent turns) |
+| `files.changed` | `{ workspaceId, threadId? }` | Dirty-set delta detected by a `file.refresh` attention-boundary check |
 | `skills.changed` | `{}` | Skill list invalidated |
 
 **Note:** `thread.status` reports persistent DB states (`active` / `completed` / `errored`). Live-session state (agent is running right now) is conveyed via the `turnStarted` / `turnComplete` / `ended` AgentEvents and the `agent.listRunning` RPC, not via this channel.

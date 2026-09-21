@@ -1,6 +1,6 @@
+import { StrictMode } from "react";
 import { render, screen, act, fireEvent, within } from "@testing-library/react";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { useLayoutEffect, useState } from "react";
 import type { WorkspaceEnvironmentAutomaticSetupSnapshot } from "@mcode/contracts";
 import type { Thread } from "@/transport/types";
 
@@ -32,38 +32,45 @@ vi.mock("@dnd-kit/sortable", async (importOriginal) => {
   };
 });
 
-// VirtualizedThreadList is not exported, so we exercise double-click behaviour
-// through the exported ProjectTree. Stores and the virtualizer are mocked so
-// the list renders items in the jsdom environment.
+// The flattened row model is not exported, so we exercise tree behaviour
+// through the exported ProjectTree. Stores and the virtual viewport are mocked
+// so the list renders items in the jsdom environment.
 
-vi.mock("../state/workspaceStore", () => ({
-  useWorkspaceStore: vi.fn((selector: (s: unknown) => unknown) =>
-    selector({
-      workspaces: [],
-      activeWorkspaceId: null,
-      activeThreadId: null,
-      threads: [],
-      loadWorkspaces: vi.fn(),
-      loadThreads: vi.fn(),
-      setActiveWorkspace: vi.fn(),
-      renameWorkspace: vi.fn(),
-      setActiveThread: vi.fn(),
-      createWorkspace: vi.fn(),
-      deleteWorkspace: vi.fn(),
-      deleteThread: vi.fn(),
-      completeThread: vi.fn(),
-      reopenThread: vi.fn(),
-      beginNewThread: vi.fn(),
-      updateThreadTitle: vi.fn(),
-      loadWorktrees: vi.fn(),
-      worktrees: [],
-      worktreesLoadedForWorkspace: null,
-      checksById: {},
-      error: null,
-      reorderWorkspace: vi.fn(),
-    }),
-  ),
-}));
+vi.mock("../state/workspaceStore", () => {
+  // The store state object must be built once: ProjectTree memoizes its row
+  // list on slice references, so a fresh literal per selector call would loop
+  // the render -> setRows -> publish cycle forever.
+  const state = {
+    workspaces: [],
+    activeWorkspaceId: null,
+    activeThreadId: null,
+    threads: [],
+    loadWorkspaces: vi.fn(),
+    loadThreads: vi.fn(),
+    setActiveWorkspace: vi.fn(),
+    renameWorkspace: vi.fn(),
+    setActiveThread: vi.fn(),
+    createWorkspace: vi.fn(),
+    deleteWorkspace: vi.fn(),
+    deleteThread: vi.fn(),
+    completeThread: vi.fn(),
+    reopenThread: vi.fn(),
+    beginNewThread: vi.fn(),
+    updateThreadTitle: vi.fn(),
+    loadWorktrees: vi.fn(),
+    worktrees: [],
+    worktreesLoadedForWorkspace: null,
+    checksById: {},
+    error: null,
+    reorderWorkspace: vi.fn(),
+  };
+  return {
+    useWorkspaceStore: Object.assign(
+      vi.fn((selector: (s: unknown) => unknown) => selector(state)),
+      { getState: () => state },
+    ),
+  };
+});
 
 vi.mock("@/features/conversation", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/features/conversation")>()),
@@ -80,6 +87,11 @@ const threadStoreOverrides: {
   runningThreadIds?: Set<string>;
   runtimeByThread?: Record<string, { runtimePhase: string; turnExecutionId: string | null }>;
 } = {};
+
+// The real store exposes a stable Set reference; the mock state is rebuilt per
+// selector call, so share one empty set to keep selector output referentially
+// stable (ProjectTree memoizes its row list on it).
+const EMPTY_RUNNING_THREAD_IDS = new Set<string>();
 
 function buildMockThreadStoreState() {
   const records = new Map<
@@ -103,7 +115,8 @@ function buildMockThreadStoreState() {
   }
   return {
     records,
-    runningThreadIds: threadStoreOverrides.runningThreadIds ?? new Set(),
+    runningThreadIds:
+      threadStoreOverrides.runningThreadIds ?? EMPTY_RUNNING_THREAD_IDS,
     pendingStopCounts: {},
     currentThreadId: null,
   };
@@ -124,77 +137,78 @@ vi.mock("@/transport", () => ({
   getTransport: () => automaticSetupTransport,
 }));
 
-vi.mock("@/stores/sidebarSearchStore", () => ({
-  useSidebarSearchStore: Object.assign(
-    vi.fn((selector: (s: unknown) => unknown) =>
-      selector({
-        query: "",
-        filters: { status: [], provider: [] },
-        sortField: "updated_at",
-        sortDirection: "desc",
-        isSearching: false,
-        serverResults: [],
-        serverWorkspaces: [],
-        expandedSnapshot: null,
-        setExpandedSnapshot: vi.fn(),
-        setQuery: vi.fn(),
-        clearAll: vi.fn(),
-      }),
-    ),
-    { setState: vi.fn(), getState: vi.fn() },
-  ),
-}));
+// The virtual viewport requires a real scrollable element with measured sizes
+// (ResizeObserver, clientHeight). In jsdom none of that works, so we replace it
+// with a pass-through that publishes a host element for every row while
+// preserving the row identity the component supplies.
+const publishedRowIdHistory: string[][] = [];
 
-// The virtualizer requires a real scrollable element with measured sizes.
-// In jsdom none of that works, so we replace it with a pass-through that
-// renders every item directly while preserving the identity callback output.
-const virtualizerKeyHistory: Array<Array<string | number>> = [];
+vi.mock("@/components/ui/virtual-viewport", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/components/ui/virtual-viewport")>();
 
-vi.mock("@tanstack/react-virtual", () => ({
-  useVirtualizer: ({
-    count,
-    getItemKey,
-    getScrollElement,
-    initialOffset,
-  }: {
-    count: number;
-    getItemKey?: (index: number) => string | number;
-    getScrollElement?: () => HTMLElement | null;
-    initialOffset?: number | (() => number);
-  }) => {
-    const [hasMounted, setHasMounted] = useState(false);
-    // TanStack resolves the initial offset when it attaches to a scroll
-    // element. A follow-up render models the nested virtualizer update that
-    // can happen after the parent restores its pending scroll position.
-    useLayoutEffect(() => {
-      const scrollElement = getScrollElement?.();
-      if (!scrollElement) return;
+  class FakeVirtualViewport {
+    readonly viewport: HTMLElement;
+    private readonly hosts = new Map<string, HTMLDivElement>();
 
-      const offset =
-        typeof initialOffset === "function"
-          ? initialOffset()
-          : (initialOffset ?? 0);
-      scrollElement.scrollTop = offset;
-      if (!hasMounted) setHasMounted(true);
-    }, [getScrollElement, hasMounted, initialOffset]);
+    constructor(
+      container: HTMLElement,
+      private readonly publish: (
+        hosts: ReadonlyArray<{ id: string; element: HTMLDivElement }>,
+      ) => void,
+      _onPosition: (position: unknown) => void,
+      options: { classPrefix?: string },
+    ) {
+      this.viewport = document.createElement("div");
+      this.viewport.dataset.testid = `${options.classPrefix ?? "virtual"}-viewport`;
+      container.append(this.viewport);
+    }
 
-    return {
-      getTotalSize: () => count * 32,
-      getVirtualItems: () => {
-        const keys = Array.from({ length: count }, (_, i) =>
-          getItemKey ? getItemKey(i) : i,
-        );
-        virtualizerKeyHistory.push(keys);
-        return keys.map((key, i) => ({
-          index: i,
-          start: i * 32,
-          size: 32,
-          key,
-        }));
-      },
-    };
-  },
-}));
+    setRows(rows: ReadonlyArray<{ id: string }>): void {
+      publishedRowIdHistory.push(rows.map((row) => row.id));
+      const live = new Set(rows.map((row) => row.id));
+      for (const [id, element] of this.hosts) {
+        if (!live.has(id)) {
+          element.remove();
+          this.hosts.delete(id);
+        }
+      }
+      this.publish(
+        rows.map((row) => {
+          let element = this.hosts.get(row.id);
+          if (!element) {
+            element = document.createElement("div");
+            this.viewport.append(element);
+            this.hosts.set(row.id, element);
+          }
+          return { id: row.id, element };
+        }),
+      );
+    }
+
+    releaseHosts(): void {}
+    getReadingAnchor(): undefined {
+      return undefined;
+    }
+    moveTo(): void {}
+    restoreOffset(top: number): void {
+      this.viewport.scrollTop = top;
+    }
+    shiftReadingPosition(): void {}
+    rowTop(): undefined {
+      return undefined;
+    }
+    rowBottom(): undefined {
+      return undefined;
+    }
+    destroy(): void {
+      this.viewport.remove();
+      this.hosts.clear();
+    }
+  }
+
+  return { ...actual, VirtualViewport: FakeVirtualViewport };
+});
 
 afterEach(() => {
   sortableMockState.transform = null;
@@ -289,6 +303,8 @@ function setupStoreMocks(options: ProjectTreeStoreMockOptions = {}) {
       ) => void;
     }
   ).mockImplementation((selector) => selector(state));
+  // handleDeleteWorkspace reads state imperatively via useWorkspaceStore.getState().
+  Object.assign(useWorkspaceStore, { getState: () => state });
   return state;
 }
 
@@ -342,7 +358,7 @@ describe("ProjectTree thread interactions", () => {
       JSON.stringify({ "ws-1": true }),
     );
     useUiStore.setState({ projectThreadViews: {} });
-    virtualizerKeyHistory.length = 0;
+    publishedRowIdHistory.length = 0;
     vi.useFakeTimers();
   });
 
@@ -431,18 +447,18 @@ describe("ProjectTree thread interactions", () => {
     expect(state.loadThreads).toHaveBeenCalledWith("ws-1");
   });
 
-  it("keeps virtual item identity tied to thread IDs as a new thread is replaced", () => {
+  it("keeps the group row stable and rekeys thread items as a thread is replaced", () => {
     const oldThreads = [
       makeThread({ id: "old-thread-1", title: "Old thread 1" }),
       makeThread({ id: "old-thread-2", title: "Old thread 2" }),
     ];
     const state = setupStoreMocks({ threads: oldThreads });
     const view = render(<ProjectTree />);
-    expect(virtualizerKeyHistory.at(-1)).toEqual([
-      "old-thread-1",
-      "old-thread-2",
-    ]);
-    virtualizerKeyHistory.length = 0;
+    expect(publishedRowIdHistory.at(-1)).toEqual(["ws:ws-1"]);
+    const stableThread = view.container.querySelector(
+      '[data-thread-id="old-thread-1"]',
+    );
+    publishedRowIdHistory.length = 0;
 
     state.threads = [
       makeThread({
@@ -453,23 +469,24 @@ describe("ProjectTree thread interactions", () => {
       ...oldThreads,
     ];
     act(() => view.rerender(<ProjectTree />));
-    expect(virtualizerKeyHistory.at(-1)).toEqual([
-      "placeholder-thread",
-      "old-thread-1",
-      "old-thread-2",
-    ]);
-    virtualizerKeyHistory.length = 0;
+    expect(publishedRowIdHistory.at(-1)).toEqual(["ws:ws-1"]);
+    expect(
+      view.container.querySelector('[data-thread-id="placeholder-thread"]'),
+    ).not.toBeNull();
+    publishedRowIdHistory.length = 0;
 
     state.threads = [
       makeThread({ id: "server-thread", title: "New thread" }),
       ...oldThreads,
     ];
     act(() => view.rerender(<ProjectTree />));
-    expect(virtualizerKeyHistory.at(-1)).toEqual([
-      "server-thread",
-      "old-thread-1",
-      "old-thread-2",
-    ]);
+    expect(publishedRowIdHistory.at(-1)).toEqual(["ws:ws-1"]);
+    expect(
+      view.container.querySelector('[data-thread-id="server-thread"]'),
+    ).not.toBeNull();
+    expect(view.container.querySelector('[data-thread-id="old-thread-1"]')).toBe(
+      stableThread,
+    );
   });
 
   it("completes an idle thread from its hover action", async () => {
@@ -814,14 +831,24 @@ describe("ProjectTree thread interactions", () => {
     expect(screen.getByRole("button", { name: /^Provider, Claude My Thread/i })).toBeVisible();
     const projectRow = screen.getByTestId("project-row-ws-1");
     projectRow.focus();
-    fireEvent.keyDown(projectRow, { key: " " });
+    // KeyboardSensor activates on event.code, not key.
+    fireEvent.keyDown(projectRow, { code: "Space" });
+    expect(document.body).toHaveStyle({ cursor: "grabbing" });
 
-    expect(screen.getByRole("button", { name: /^Provider, Claude My Thread/i })).toBeVisible();
+    // The DragOverlay clones the whole project group outside the viewport, so
+    // queries that must hit the real row scope to the tree.
+    const tree = within(screen.getByTestId("project-tree-viewport"));
+    expect(tree.getByRole("button", { name: /^Provider, Claude My Thread/i })).toBeVisible();
     expect(
-      screen.getByRole("button", { name: "Toggle threads for Test Project" }),
+      tree.getByRole("button", { name: "Toggle threads for Test Project" }),
     ).toHaveAttribute("aria-expanded", "true");
 
-    fireEvent.keyDown(projectRow, { key: " " });
+    // The sensor's drop listener attaches in a macrotask after activation.
+    act(() => {
+      vi.runAllTimers();
+    });
+    fireEvent.keyDown(document, { code: "Space" });
+    expect(document.body).not.toHaveStyle({ cursor: "grabbing" });
   });
 
   it("applies only translation while a project is dragged", () => {
@@ -831,8 +858,7 @@ describe("ProjectTree thread interactions", () => {
     setupStoreMocks();
     render(<ProjectTree />);
 
-    const shell = screen.getByTestId("project-row-ws-1").parentElement
-      ?.parentElement;
+    const shell = screen.getByTestId("project-row-ws-1").parentElement;
     expect(shell).not.toBeNull();
     expect(shell).toHaveStyle({ transform: "translate3d(12px, 34px, 0)" });
   });
@@ -846,7 +872,7 @@ describe("ProjectTree thread interactions", () => {
     render(<ProjectTree />);
 
     const viewport = document.querySelector<HTMLElement>(
-      '[data-slot="scroll-area-viewport"]',
+      '[data-testid="project-tree-viewport"]',
     );
     expect(viewport).not.toBeNull();
     viewport!.scrollTop = 240;
@@ -955,6 +981,22 @@ describe("ProjectTree thread interactions", () => {
     );
   });
 
+  it("shows the Add project tooltip on the header control", () => {
+    setupStoreMocks();
+
+    render(<ProjectTree />);
+
+    const addButton = screen.getByRole("button", { name: "Add project" });
+    act(() => {
+      addButton.focus();
+      vi.runAllTimers();
+    });
+
+    expect(document.querySelector('[data-slot="tooltip-content"]')).toHaveTextContent(
+      "Add project",
+    );
+  });
+
   it("optically aligns the provider mark and separates it from the thread title", () => {
     setupStoreMocks();
 
@@ -993,6 +1035,24 @@ describe("ProjectTree thread interactions", () => {
     render(<ProjectTree />);
 
     expect(screen.getByText("No active threads", { exact: true })).toBeVisible();
+  });
+
+  it("caps the thread list at six rows and toggles the overflow", () => {
+    const threads = Array.from({ length: 8 }, (_, index) =>
+      makeThread({ id: `thread-${index + 1}`, title: `Thread ${index + 1}` }),
+    );
+    setupStoreMocks({ threads });
+
+    render(<ProjectTree />);
+
+    expect(screen.getAllByTestId("thread-item")).toHaveLength(6);
+    const showMore = screen.getByRole("button", { name: "Show more (2)" });
+    fireEvent.click(showMore);
+
+    expect(screen.getAllByTestId("thread-item")).toHaveLength(8);
+    fireEvent.click(screen.getByRole("button", { name: "Show less" }));
+
+    expect(screen.getAllByTestId("thread-item")).toHaveLength(6);
   });
 
   it("single click navigates immediately with no delay", () => {
@@ -1208,6 +1268,173 @@ describe("ProjectTree thread interactions", () => {
     expect(setActiveThread).toHaveBeenCalledWith("thread-1");
     expect(setActiveThread).toHaveBeenCalledTimes(1);
   });
+
+  it("loads threads once when a collapsed project expands under StrictMode", () => {
+    localStorage.setItem(
+      "mcode-expanded-projects",
+      JSON.stringify({ "ws-1": false }),
+    );
+    const state = setupStoreMocks();
+
+    render(
+      <StrictMode>
+        <ProjectTree />
+      </StrictMode>,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle threads for Test Project" }),
+    );
+
+    // StrictMode double-invokes state updaters; a load fired from inside the
+    // updater would run twice.
+    expect(state.loadThreads).toHaveBeenCalledTimes(1);
+    expect(state.loadThreads).toHaveBeenCalledWith("ws-1");
+  });
+
+  it("puts the sortable affordance on the focusable project row", () => {
+    setupStoreMocks();
+    render(<ProjectTree />);
+
+    const row = screen.getByTestId("project-row-ws-1");
+    expect(row).toHaveAttribute("role", "group");
+    expect(row).toHaveAttribute("tabindex", "0");
+    expect(row).toHaveAttribute("aria-roledescription", "sortable");
+    expect(row.getAttribute("aria-describedby")).toMatch(/^DndDescribedBy-/);
+    // The positioning wrapper must not be a second tab stop.
+    expect(row.parentElement).not.toHaveAttribute("tabindex", "0");
+  });
+
+  it("keeps the lifecycle spinner across a collapse while completion is pending", async () => {
+    let resolveComplete!: () => void;
+    const completeThread = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveComplete = resolve;
+        }),
+    );
+    setupStoreMocks({ completeThread });
+
+    render(<ProjectTree />);
+    fireEvent.click(screen.getByRole("button", { name: "Complete My Thread" }));
+    await vi.waitFor(() =>
+      expect(completeThread).toHaveBeenCalledWith("thread-1"),
+    );
+
+    // Collapsing unmounts the virtualized thread row; the pending flag must
+    // outlive it.
+    const projectRow = screen.getByTestId("project-row-ws-1");
+    fireEvent.click(projectRow);
+    expect(
+      screen.queryByRole("button", { name: "Complete My Thread" }),
+    ).toBeNull();
+    fireEvent.click(projectRow);
+
+    const remounted = screen.getByRole("button", { name: "Complete My Thread" });
+    expect(remounted).toBeDisabled();
+    expect(remounted.querySelector(".status-spin")).toBeInTheDocument();
+    await act(async () => {
+      resolveComplete();
+    });
+  });
+
+  it("keeps a cleanup retry error across collapse and expand", async () => {
+    vi.useRealTimers();
+    try {
+      const retryThreadCleanup = vi
+        .fn()
+        .mockRejectedValue(new Error("still blocked"));
+      setupStoreMocks({
+        thread: makeThread({
+          title: "Blocked work",
+          user_completed_at: "2026-08-12T08:00:00.000Z",
+          cleanup_state: "blocked",
+          cleanup_reason: "The worktree has uncommitted changes.",
+        }),
+        retryThreadCleanup,
+      });
+
+      render(<ProjectTree />);
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "View 1 completed thread for Test Project",
+        }),
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "Retry cleanup for Blocked work" }),
+      );
+      expect(
+        await screen.findByText("Cleanup retry failed: Error: still blocked"),
+      ).toBeInTheDocument();
+
+      const projectRow = screen.getByTestId("project-row-ws-1");
+      fireEvent.click(projectRow);
+      fireEvent.click(projectRow);
+
+      expect(
+        screen.getByText("Cleanup retry failed: Error: still blocked"),
+      ).toBeInTheDocument();
+    } finally {
+      vi.useFakeTimers();
+    }
+  });
+
+  it("cancels an in-progress rename when the thread row unmounts", () => {
+    const updateThreadTitle = vi.fn().mockResolvedValue(undefined);
+    setupStoreMocks({ updateThreadTitle });
+    render(<ProjectTree />);
+
+    const threadRow = screen.getByRole("button", {
+      name: /^Provider, Claude My Thread/i,
+    });
+    fireEvent.click(threadRow);
+    act(() => {
+      vi.advanceTimersByTime(100);
+    });
+    fireEvent.click(threadRow);
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "Unsaved draft" },
+    });
+
+    // Collapse unmounts the row; the draft must be cancelled, not stashed.
+    const projectRow = screen.getByTestId("project-row-ws-1");
+    fireEvent.click(projectRow);
+    fireEvent.click(projectRow);
+
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(updateThreadTitle).not.toHaveBeenCalled();
+    expect(screen.getByTestId("thread-title")).toHaveTextContent("My Thread");
+  });
+
+  it("swallows the click that fires when a drag ends", () => {
+    setupStoreMocks();
+    render(<ProjectTree />);
+    const projectRow = screen.getByTestId("project-row-ws-1");
+    // The drop-animation overlay clone lingers, so queries scope to the tree.
+    const threadRow = () =>
+      within(screen.getByTestId("project-tree-viewport")).queryByRole(
+        "button",
+        { name: /^Provider, Claude My Thread/i },
+      );
+
+    projectRow.focus();
+    fireEvent.keyDown(projectRow, { code: "Space" });
+    expect(document.body).toHaveStyle({ cursor: "grabbing" });
+    act(() => {
+      vi.runAllTimers();
+    });
+    fireEvent.keyDown(document, { code: "Space" });
+    expect(document.body).not.toHaveStyle({ cursor: "grabbing" });
+
+    // The browser fires a click under the pointer at drop; it must not toggle.
+    fireEvent.click(projectRow);
+    expect(threadRow()).not.toBeNull();
+
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    fireEvent.click(projectRow);
+    expect(threadRow()).toBeNull();
+  });
 });
 
 describe("ProjectTree action-required indicator", () => {
@@ -1219,41 +1446,45 @@ describe("ProjectTree action-required indicator", () => {
   let currentChecks: Record<string, { aggregate: string; runs: unknown[] }>;
 
   function installWorkspaceMock() {
+    // Build the state once per install: a fresh object per selector call would
+    // invalidate ProjectTree's row memo on every render and loop forever.
     // WorkspaceState is not exported; cast through any so the fixture object
     // satisfies the mock without importing the internal type.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const state = {
+      workspaces: [
+        {
+          id: "ws-1",
+          name: "Test",
+          path: "/test",
+          provider_config: {},
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+      activeWorkspaceId: "ws-1",
+      activeThreadId: null,
+      threads: [currentThread],
+      checksById: currentChecks,
+      loadWorkspaces: vi.fn(),
+      loadThreads: vi.fn(),
+      setActiveWorkspace: vi.fn(),
+      setActiveThread: vi.fn(),
+      createWorkspace: vi.fn(),
+      deleteWorkspace: vi.fn(),
+      deleteThread: vi.fn(),
+      setPendingNewThread: vi.fn(),
+      updateThreadTitle: vi.fn(),
+      loadWorktrees: vi.fn(),
+      worktrees: [],
+      worktreesLoadedForWorkspace: null,
+      error: null,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
     vi.mocked(useWorkspaceStore).mockImplementation(((
       selector: (s: unknown) => unknown,
-    ) =>
-      selector({
-        workspaces: [
-          {
-            id: "ws-1",
-            name: "Test",
-            path: "/test",
-            provider_config: {},
-            created_at: "",
-            updated_at: "",
-          },
-        ],
-        activeWorkspaceId: "ws-1",
-        activeThreadId: null,
-        threads: [currentThread],
-        checksById: currentChecks,
-        loadWorkspaces: vi.fn(),
-        loadThreads: vi.fn(),
-        setActiveWorkspace: vi.fn(),
-        setActiveThread: vi.fn(),
-        createWorkspace: vi.fn(),
-        deleteWorkspace: vi.fn(),
-        deleteThread: vi.fn(),
-        setPendingNewThread: vi.fn(),
-        updateThreadTitle: vi.fn(),
-        loadWorktrees: vi.fn(),
-        worktrees: [],
-        worktreesLoadedForWorkspace: null,
-        error: null,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      })) as any);
+    ) => selector(state)) as never);
+    Object.assign(useWorkspaceStore, { getState: () => state });
   }
 
   beforeEach(() => {
@@ -1655,30 +1886,34 @@ describe("ProjectTree PR-ability gating by mode", () => {
     thread: Thread,
     checks: Record<string, { aggregate: string; runs: unknown[] }> = {},
   ) {
+    // Build the state once per install: a fresh object per selector call would
+    // invalidate ProjectTree's row memo on every render and loop forever.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const state = {
+      workspaces: [WORKSPACE],
+      activeWorkspaceId: "ws-1",
+      activeThreadId: null,
+      threads: [thread],
+      checksById: checks,
+      loadWorkspaces: vi.fn(),
+      loadThreads: vi.fn(),
+      setActiveWorkspace: vi.fn(),
+      setActiveThread: vi.fn(),
+      createWorkspace: vi.fn(),
+      deleteWorkspace: vi.fn(),
+      deleteThread: vi.fn(),
+      setPendingNewThread: vi.fn(),
+      updateThreadTitle: vi.fn(),
+      loadWorktrees: vi.fn(),
+      worktrees: [],
+      worktreesLoadedForWorkspace: null,
+      error: null,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
     vi.mocked(useWorkspaceStore).mockImplementation(((
       selector: (s: unknown) => unknown,
-    ) =>
-      selector({
-        workspaces: [WORKSPACE],
-        activeWorkspaceId: "ws-1",
-        activeThreadId: null,
-        threads: [thread],
-        checksById: checks,
-        loadWorkspaces: vi.fn(),
-        loadThreads: vi.fn(),
-        setActiveWorkspace: vi.fn(),
-        setActiveThread: vi.fn(),
-        createWorkspace: vi.fn(),
-        deleteWorkspace: vi.fn(),
-        deleteThread: vi.fn(),
-        setPendingNewThread: vi.fn(),
-        updateThreadTitle: vi.fn(),
-        loadWorktrees: vi.fn(),
-        worktrees: [],
-        worktreesLoadedForWorkspace: null,
-        error: null,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      })) as any);
+    ) => selector(state)) as never);
+    Object.assign(useWorkspaceStore, { getState: () => state });
     return render(<ProjectTree />);
   }
 

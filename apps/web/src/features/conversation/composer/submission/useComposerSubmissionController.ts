@@ -129,7 +129,6 @@ export function useComposerSubmissionController({
         queuePrepared(submission);
         return;
       }
-      execution.resetDetectedPullRequest();
       const annotations = createComposerAnnotationDispatchGuard(
         annotationScopeId,
         submission.currentAnnotations,

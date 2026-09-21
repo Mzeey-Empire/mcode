@@ -218,10 +218,6 @@ vi.mock("@/components/chat/TerminalStatusIndicator", () => ({
   TerminalStatusIndicator: () => <div />,
 }));
 
-vi.mock("@/components/chat/PrDetectedCard", () => ({
-  PrDetectedCard: () => <div />,
-}));
-
 vi.mock("@/components/chat/ComposerQueueList", () => ({
   ComposerQueueList: ({
     threadId,

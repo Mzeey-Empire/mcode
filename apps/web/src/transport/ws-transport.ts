@@ -958,8 +958,8 @@ export function createWsTransport(
       rpc<string[]>("file.list", { workspaceId, threadId }),
     readFileContent: (workspaceId, relativePath, threadId?) =>
       rpc<string>("file.read", { workspaceId, relativePath, threadId }),
-    watchWorkspaceFiles: (workspaceId, threadId?) =>
-      rpc<void>("file.watch", { workspaceId, threadId }),
+    refreshWorkspaceFiles: (workspaceId, threadId?) =>
+      rpc<void>("file.refresh", { workspaceId, threadId }),
 
     // Open-in apps (delegated to desktopBridge; no-op over WS)
     listOpenInApps: async () => (await window.desktopBridge?.listOpenInApps()) ?? [],
@@ -1000,7 +1000,6 @@ export function createWsTransport(
     listOpenPrs: (workspaceId) => rpc<PrDetail[]>("github.listOpenPrs", { workspaceId }),
     fetchBranch: (workspaceId, branch, prNumber?) =>
       rpc<void>("git.fetchBranch", { workspaceId, branch, prNumber }),
-    getPrByUrl: (url) => rpc<PrDetail | null>("github.prByUrl", { url }),
     checkStatus: (threadId, force) =>
       rpc<ChecksStatus>("github.checkStatus", { threadId, force }),
 

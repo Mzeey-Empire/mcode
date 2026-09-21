@@ -18,7 +18,8 @@ export function ensurePlaywright(repoRoot = process.cwd()) {
   throw new Error("Playwright was not installed inside the scratch package");
 }
 
-function ensureScratchPackage(packageFile) {
+/** Creates the private scratch package manifest that isolated tool installs share. */
+export function ensureScratchPackage(packageFile) {
   if (NodeFS.existsSync(packageFile)) {
     const manifest = JSON.parse(NodeFS.readFileSync(packageFile, "utf8"));
     if (manifest.private !== true) {
@@ -67,7 +68,8 @@ function waitForPlaywright(scratchRequire, nodeModulesDir) {
   return false;
 }
 
-function isInside(parent, candidate) {
+/** Returns true when `candidate` resolves to a path strictly inside `parent`. */
+export function isInside(parent, candidate) {
   const relativePath = NodePath.relative(parent, candidate);
   return relativePath.length > 0 && !relativePath.startsWith("..") && !NodePath.isAbsolute(relativePath);
 }

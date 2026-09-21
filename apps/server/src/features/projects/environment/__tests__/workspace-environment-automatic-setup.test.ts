@@ -9,6 +9,9 @@ import { PtyPidRegistry } from "../../../terminal/host/pty-pid-registry.js";
 import { WorkspaceEnvironmentService, type WorkspaceEnvironmentServiceOptions } from "../workspace-environment-service.js";
 import { WorkspaceEnvironmentAutomaticRepository } from "../workspace-environment-automatic-repository.js";
 import type { TerminalCommandCompletion, TerminalCommandPreparation } from "../../../terminal/commands/terminal-command-service.js";
+import type { Database } from "bun:sqlite";
+import { ThreadStartupRepo } from "../../../thread-startup/persistence/thread-startup-repo.js";
+import { ThreadStartupService } from "../../../thread-startup/thread-startup-service.js";
 import type { ThreadStartup } from "@mcode/contracts";
 
 const roots: string[] = [];
@@ -37,18 +40,22 @@ async function eventually(assertion: () => void): Promise<void> {
   throw failure;
 }
 
-async function automaticHarness({ setup = true, prepareFailure = false, attachmentStorage, threadStartups }: {
+async function automaticHarness({ setup = true, prepareFailure = false, attachmentStorage, threadStartups, threadIds = ["thread-1"] }: {
   readonly setup?: boolean;
   readonly prepareFailure?: boolean;
   readonly attachmentStorage?: { removeStoredAttachments: ReturnType<typeof vi.fn> };
-  readonly threadStartups?: WorkspaceEnvironmentServiceOptions["threadStartups"];
+  readonly threadStartups?: WorkspaceEnvironmentServiceOptions["threadStartups"]
+    | ((database: Database) => NonNullable<WorkspaceEnvironmentServiceOptions["threadStartups"]>);
+  readonly threadIds?: readonly string[];
 } = {}) {
   const root = await NodeFSPromises.mkdtemp(NodePath.join(NodeOS.tmpdir(), "mcode-automatic-setup-"));
   roots.push(root);
   const db = openMemoryDatabase();
   let milliseconds = Date.parse("2026-08-24T12:00:00.000Z");
   db.prepare("INSERT INTO workspaces (id, name, path, provider_config) VALUES ('workspace-1', 'Project', '/project', '{}')").run();
-  db.prepare("INSERT INTO threads (id, workspace_id, title, mode, branch, worktree_managed, provider) VALUES ('thread-1', 'workspace-1', 'First Turn', 'worktree', 'main', 1, 'claude')").run();
+  for (const threadId of threadIds) {
+    db.prepare("INSERT INTO threads (id, workspace_id, title, mode, branch, worktree_managed, provider) VALUES (?, 'workspace-1', 'First Turn', 'worktree', 'main', 1, 'claude')").run(threadId);
+  }
   const completion = deferred<TerminalCommandCompletion>();
   const start = vi.fn(() => completion.promise);
   const close = vi.fn(async () => ({ kind: "contained" as const }));
@@ -71,11 +78,11 @@ async function automaticHarness({ setup = true, prepareFailure = false, attachme
   const service = new WorkspaceEnvironmentService({
     mcodeDir: root,
     database: db,
-    threads: { findById: (id) => id === "thread-1" ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true } : null },
+    threads: { findById: (id) => threadIds.includes(id) ? { id, workspace_id: "workspace-1", mode: "worktree", worktree_managed: true } : null },
     terminalCommands,
     terminalRecovery,
     attachmentStorage,
-    threadStartups,
+    threadStartups: typeof threadStartups === "function" ? threadStartups(db) : threadStartups,
     platform: "linux",
     now: () => new Date(milliseconds++),
   });
@@ -89,17 +96,17 @@ async function automaticHarness({ setup = true, prepareFailure = false, attachme
   return { root, db, service, completion, start, close, prepare, terminalCommands, terminalRecovery };
 }
 
-function queuedInput(index = 1) {
+function queuedInput(index = 1, threadId = "thread-1") {
   const messageId = `message-${index}`;
   const content = index === 1 ? "Build the feature" : `Build the feature ${index}`;
   return {
-    threadId: "thread-1",
+    threadId,
     messageId,
     content,
     attachments: [],
     mentions: [],
     submission: {
-      threadId: "thread-1",
+      threadId,
       messageId,
       content,
       displayContent: content,
@@ -137,7 +144,10 @@ describe("automatic Project Setup", () => {
     const threadStartups = {
       appendOutput: vi.fn(() => cancelledStartup),
       block: vi.fn(() => cancelledStartup),
+      complete: vi.fn(() => cancelledStartup),
       findByThreadId: vi.fn(() => cancelledStartup),
+      listInterrupted: vi.fn(() => []),
+      markCancelled: vi.fn(() => cancelledStartup),
       resume: vi.fn(() => cancelledStartup),
       skip: vi.fn(() => cancelledStartup),
     } satisfies NonNullable<WorkspaceEnvironmentServiceOptions["threadStartups"]>;
@@ -1111,5 +1121,161 @@ describe("automatic Project Setup", () => {
       attempt: { state: "failed", reason: "setup_failed" },
       queuedTurns: [{ state: "released", dispatchedAt: null }],
     });
+  });
+
+  it("completes an interrupted startup and dispatches the queued Turn on Continue", async () => {
+    let startups!: ThreadStartupService;
+    const startupId = "00000000-0000-4000-8000-0000000000aa";
+    const threadId = "00000000-0000-4000-8000-0000000000a1";
+    const { service, start } = await automaticHarness({
+      threadIds: [threadId],
+      threadStartups: (database) => {
+        startups = new ThreadStartupService(new ThreadStartupRepo(database), () => new Date());
+        return startups;
+      },
+    });
+    startups.start({ startupId, workspaceId: "workspace-1", kind: "managed-worktree" });
+    startups.advance(startupId, "thread");
+    startups.bindThread(startupId, threadId);
+    startups.advance(startupId, "worktree");
+    startups.advance(startupId, "setup");
+    const dispatch = vi.fn().mockResolvedValue({ completion: Promise.resolve() });
+    service.setAutomaticSetupDispatcher({ dispatch });
+
+    service.queueAutomaticFirstTurn(queuedInput(1, threadId));
+    await eventually(() => expect(start).toHaveBeenCalledOnce());
+
+    // Mirror a server restart: bootstrap interrupts the startup record first,
+    // then reconciles the automatic Setup attempt.
+    startups.interruptNonterminalOnStartup();
+    await service.reconcileAutomaticSetup();
+    expect(startups.findByThreadId(threadId)?.state).toBe("interrupted");
+
+    const snapshot = await service.continueAutomaticSetup({ threadId });
+
+    expect(snapshot.gate).toBe("released-by-continue");
+    expect(dispatch).toHaveBeenCalledOnce();
+    expect(startups.findByThreadId(threadId)?.state).toBe("completed");
+  });
+
+  it("completes a blocked startup when Continue leaves no queued Turn", async () => {
+    let startups!: ThreadStartupService;
+    const startupId = "00000000-0000-4000-8000-0000000000bb";
+    const threadId = "00000000-0000-4000-8000-0000000000b1";
+    const { service, start, completion } = await automaticHarness({
+      threadIds: [threadId],
+      threadStartups: (database) => {
+        startups = new ThreadStartupService(new ThreadStartupRepo(database), () => new Date());
+        return startups;
+      },
+    });
+    startups.start({ startupId, workspaceId: "workspace-1", kind: "managed-worktree" });
+    startups.advance(startupId, "thread");
+    startups.bindThread(startupId, threadId);
+    startups.advance(startupId, "worktree");
+    startups.advance(startupId, "setup");
+    service.setAutomaticSetupDispatcher({ dispatch: vi.fn() });
+
+    service.queueAutomaticFirstTurn(queuedInput(1, threadId));
+    await eventually(() => expect(start).toHaveBeenCalledOnce());
+    completion.resolve({ kind: "exited", exitCode: 1, output: "failed", outputTruncated: false });
+    await eventually(() => expect(service.getAutomaticSetup({ threadId }).attempt?.state).toBe("failed"));
+    expect(startups.findByThreadId(threadId)?.state).toBe("blocked");
+
+    const queued = service.getAutomaticSetup({ threadId }).queuedTurns[0]!;
+    await service.cancelQueuedAutomaticTurn({ threadId, queuedTurnId: queued.id });
+    await service.continueAutomaticSetup({ threadId });
+
+    expect(startups.findByThreadId(threadId)?.state).toBe("completed");
+  });
+
+  it("settles an interrupted startup whose gate can no longer offer recovery", async () => {
+    let startups!: ThreadStartupService;
+    const startupId = "00000000-0000-4000-8000-0000000000cc";
+    const threadId = "00000000-0000-4000-8000-0000000000c1";
+    const { service } = await automaticHarness({
+      threadIds: [threadId],
+      threadStartups: (database) => {
+        startups = new ThreadStartupService(new ThreadStartupRepo(database), () => new Date());
+        return startups;
+      },
+    });
+    // A direct startup never opens a Setup gate; nothing can drive it past
+    // interrupted, so reconciliation must settle it instead of pinning the shell.
+    startups.start({ startupId, workspaceId: "workspace-1", kind: "direct" });
+    startups.advance(startupId, "thread");
+    startups.bindThread(startupId, threadId);
+    startups.interruptNonterminalOnStartup();
+    expect(startups.findByThreadId(threadId)?.state).toBe("interrupted");
+
+    await service.reconcileAutomaticSetup();
+
+    expect(startups.findByThreadId(threadId)?.state).toBe("completed");
+  });
+
+  it("keeps an interrupted startup when its interrupted attempt still offers recovery", async () => {
+    let startups!: ThreadStartupService;
+    const startupId = "00000000-0000-4000-8000-0000000000dd";
+    const threadId = "00000000-0000-4000-8000-0000000000d1";
+    const { service, start } = await automaticHarness({
+      threadIds: [threadId],
+      threadStartups: (database) => {
+        startups = new ThreadStartupService(new ThreadStartupRepo(database), () => new Date());
+        return startups;
+      },
+    });
+    startups.start({ startupId, workspaceId: "workspace-1", kind: "managed-worktree" });
+    startups.advance(startupId, "thread");
+    startups.bindThread(startupId, threadId);
+    startups.advance(startupId, "worktree");
+    startups.advance(startupId, "setup");
+
+    service.queueAutomaticFirstTurn(queuedInput(1, threadId));
+    await eventually(() => expect(start).toHaveBeenCalledOnce());
+
+    startups.interruptNonterminalOnStartup();
+    await service.reconcileAutomaticSetup();
+
+    // The interrupted attempt still offers Continue and Retry, so the startup
+    // must stay interrupted for the recovery card instead of completing early.
+    expect(service.getAutomaticSetup({ threadId }).attempt?.state).toBe("interrupted");
+    expect(startups.findByThreadId(threadId)?.state).toBe("interrupted");
+  });
+
+  it("settles an interrupted startup once the released gate shows the user already continued", async () => {
+    let startups!: ThreadStartupService;
+    const startupId = "00000000-0000-4000-8000-0000000000ee";
+    const threadId = "00000000-0000-4000-8000-0000000000e1";
+    const { service, start, completion } = await automaticHarness({
+      threadIds: [threadId],
+      threadStartups: (database) => {
+        startups = new ThreadStartupService(new ThreadStartupRepo(database), () => new Date());
+        return startups;
+      },
+    });
+    startups.start({ startupId, workspaceId: "workspace-1", kind: "managed-worktree" });
+    startups.advance(startupId, "thread");
+    startups.bindThread(startupId, threadId);
+    startups.advance(startupId, "worktree");
+    startups.advance(startupId, "setup");
+
+    service.queueAutomaticFirstTurn(queuedInput(1, threadId));
+    await eventually(() => expect(start).toHaveBeenCalledOnce());
+    completion.resolve({ kind: "exited", exitCode: 1, output: "failed", outputTruncated: false });
+    await eventually(() => expect(service.getAutomaticSetup({ threadId }).attempt?.state).toBe("failed"));
+
+    // With no dispatcher wired, Continue releases the gate and Turn while the
+    // startup moves to the agent phase but cannot settle yet.
+    await service.continueAutomaticSetup({ threadId });
+    expect(service.getAutomaticSetup({ threadId }).gate).toBe("released-by-continue");
+    expect(startups.findByThreadId(threadId)?.state).toBe("running");
+
+    // A second restart interrupts the startup while its gate is already
+    // released; the stale failed attempt must not keep the shell pinned.
+    startups.interruptNonterminalOnStartup();
+    expect(startups.findByThreadId(threadId)?.state).toBe("interrupted");
+    await service.reconcileAutomaticSetup();
+
+    expect(startups.findByThreadId(threadId)?.state).toBe("completed");
   });
 });

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CanonicalSubagentRoster, CanonicalSubagentRosterRow } from "@mcode/contracts";
 import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
+import { createEmptyThreadRecord } from "@/stores/thread-record";
 import { useThreadStore } from "@/stores/threadStore";
 import { getSubagentIdentityPaletteIndex } from "@/components/ui/SubagentIdentityGlyph";
 
@@ -1100,5 +1101,129 @@ describe("SubagentsPanel", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(screen.queryByTestId("subagent-stop-all")).not.toBeInTheDocument();
     expect(panel).toHaveFocus();
+  });
+
+  describe("narrative subagents", () => {
+    function narrativeRecord(overrides: Record<string, unknown>) {
+      return {
+        id: "record-id",
+        message_id: "message-1",
+        parent_tool_call_id: null,
+        tool_name: "Agent",
+        input_summary: "Scout the codebase",
+        output_summary: "Scout finished",
+        status: "completed",
+        started_at: "2026-07-22T10:00:00.000Z",
+        completed_at: "2026-07-22T10:01:00.000Z",
+        sort_order: 0,
+        ...overrides,
+      };
+    }
+
+    function seedNarrativeThread(tools: ReturnType<typeof narrativeRecord>[]) {
+      const record = createEmptyThreadRecord();
+      record.narrativeByMessage = {
+        "message-1": { tools: tools as never, thoughts: [], hooks: [] },
+      };
+      useThreadStore.setState({
+        currentThreadId: "thread-1",
+        records: new Map([["thread-1", record]]),
+      });
+    }
+
+    it("lists an in-thread subagent when the canonical roster is empty", async () => {
+      harness.loadCanonicalSubagentRoster.mockResolvedValue(canonicalRoster([], []));
+      seedNarrativeThread([
+        narrativeRecord({
+          id: "agent-1",
+          subagent_identity_key: "mcode:subagent:v1:alias:agent-1",
+        }),
+        narrativeRecord({
+          id: "child-1",
+          parent_tool_call_id: "agent-1",
+          tool_name: "Read",
+          input_summary: "src/index.ts",
+          sort_order: 1,
+        }),
+      ]);
+
+      render(<SubagentsPanel threadId="thread-1" />);
+
+      const row = await screen.findByTestId("subagent-finished-row");
+      expect(row).toHaveTextContent("Scout the codebase");
+    });
+
+    it("opens the narrative detail view with the subagent activity", async () => {
+      harness.loadCanonicalSubagentRoster.mockResolvedValue(canonicalRoster([], []));
+      seedNarrativeThread([
+        narrativeRecord({
+          id: "agent-1",
+          subagent_identity_key: "mcode:subagent:v1:alias:agent-1",
+        }),
+        narrativeRecord({
+          id: "child-1",
+          parent_tool_call_id: "agent-1",
+          tool_name: "Read",
+          input_summary: "src/index.ts",
+          sort_order: 1,
+        }),
+      ]);
+
+      render(<SubagentsPanel threadId="thread-1" />);
+      fireEvent.click(
+        within(await screen.findByTestId("subagent-finished-row")).getByRole("button"),
+      );
+
+      expect(await screen.findByRole("region", { name: /subagent details/i })).toBeInTheDocument();
+      expect(screen.getByTestId("narrative-subagent-activity")).toHaveTextContent("Read");
+      expect(screen.getByTestId("narrative-subagent-activity")).toHaveTextContent("src/index.ts");
+      expect(screen.queryByTestId("shared-message-list")).not.toBeInTheDocument();
+    });
+
+    it("opens narrative detail for a chat-origin alias selection", async () => {
+      harness.loadCanonicalSubagentRoster.mockResolvedValue(canonicalRoster([], []));
+      seedNarrativeThread([
+        narrativeRecord({
+          id: "agent-1",
+          subagent_identity_key: "mcode:subagent:v1:alias:agent-1",
+        }),
+      ]);
+      useDiffStore.setState({
+        subagentDetailByThread: {
+          "thread-1": { id: "agent-1", originTab: "finished", scrollTop: 0 },
+        },
+        subagentReviewScopeByThread: {},
+      });
+
+      render(<SubagentsPanel threadId="thread-1" />);
+
+      expect(await screen.findByRole("region", { name: /subagent details/i })).toBeInTheDocument();
+      expect(screen.getByText("Scout finished")).toBeInTheDocument();
+    });
+
+    it("keeps canonical detail precedence over a narrative row for the same child", async () => {
+      const child = canonicalRow({ id: "canonical-child", identity: "Canonical worker" });
+      harness.loadCanonicalSubagentRoster.mockResolvedValue(canonicalRoster([], [child]));
+      seedNarrativeThread([
+        narrativeRecord({
+          id: "agent-1",
+          subagent_identity_key: "mcode:subagent:v1:child:canonical-child",
+        }),
+      ]);
+      useDiffStore.setState({
+        subagentDetailByThread: {
+          "thread-1": { id: "canonical-child", originTab: "finished", scrollTop: 0 },
+        },
+        subagentReviewScopeByThread: {},
+      });
+
+      render(<SubagentsPanel threadId="thread-1" />);
+
+      expect(await screen.findByTestId("shared-message-list")).toHaveAttribute(
+        "data-display-thread-id",
+        "canonical-child",
+      );
+      expect(screen.queryByTestId("narrative-subagent-activity")).not.toBeInTheDocument();
+    });
   });
 });

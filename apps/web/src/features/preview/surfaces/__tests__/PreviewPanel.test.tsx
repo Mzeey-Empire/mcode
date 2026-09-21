@@ -64,7 +64,7 @@ vi.mock("../../navigation/usePreviewSurfaceBridge", () => ({
 vi.mock("@/transport", () => ({
   getTransport: () => ({
     getProviderCatalog: mockGetProviderCatalog,
-    watchWorkspaceFiles: vi.fn().mockResolvedValue(undefined),
+    refreshWorkspaceFiles: vi.fn().mockResolvedValue(undefined),
   }),
 }));
 
@@ -998,6 +998,52 @@ describe("PreviewPanel: full panel state", () => {
     }));
   });
 
+  it("reloads the current local webview when a turn persists file changes", async () => {
+    mockUsePreviewBridge.mockReturnValue(
+      mockBridgeState({ storedUrl: "http://127.0.0.1:4173/index.html" }),
+    );
+    const navigateSurface = vi.mocked(window.desktopBridge!.preview!.surface.navigate);
+
+    render(<PreviewPanel threadId="thread-1" workspaceId="workspace-1" />);
+    await screen.findByTestId("preview-webview");
+    await waitFor(() => expect(pushEmitter.channels()).toContain("turn.persisted"));
+
+    act(() => {
+      pushEmitter.emit("turn.persisted", {
+        threadId: "thread-1",
+        messageId: "message-1",
+        toolCallCount: 1,
+        filesChanged: ["src/main.ts"],
+      });
+    });
+
+    expect(navigateSurface).toHaveBeenCalledWith(expect.objectContaining({
+      navigation: { kind: "reload" },
+    }));
+  });
+
+  it("does not reload the webview when a persisted turn changed no files", async () => {
+    mockUsePreviewBridge.mockReturnValue(
+      mockBridgeState({ storedUrl: "http://127.0.0.1:4173/index.html" }),
+    );
+    const navigateSurface = vi.mocked(window.desktopBridge!.preview!.surface.navigate);
+
+    render(<PreviewPanel threadId="thread-1" workspaceId="workspace-1" />);
+    await screen.findByTestId("preview-webview");
+    await waitFor(() => expect(pushEmitter.channels()).toContain("turn.persisted"));
+
+    act(() => {
+      pushEmitter.emit("turn.persisted", {
+        threadId: "thread-1",
+        messageId: "message-1",
+        toolCallCount: 3,
+        filesChanged: [],
+      });
+    });
+
+    expect(navigateSurface).not.toHaveBeenCalled();
+  });
+
   it("does not reload the webview for a file change outside its workspace scope", async () => {
     mockUsePreviewBridge.mockReturnValue(
       mockBridgeState({ storedUrl: "http://localhost:4173/index.html" }),
@@ -1427,6 +1473,67 @@ describe("PreviewPanel: full panel state", () => {
           "https://google.com/",
         );
       });
+    } finally {
+      restoreWebviewMethods();
+    }
+  });
+
+  it("follows a host-assigned URL when a reused tab's earlier request already settled", async () => {
+    const tabSetWith = (url: string | null) => ({
+      threadId: "thread-1",
+      activeTabId: "tab-1",
+      tabs: [
+        {
+          id: "tab-1",
+          threadId: "thread-1",
+          title: null,
+          url,
+          faviconUrl: null,
+          warm: true,
+          active: true,
+        },
+      ],
+    });
+    mockUsePreviewTabs.mockReturnValue({
+      tabSet: tabSetWith("https://old.example/"),
+      newTab: vi.fn(),
+      activateTab: vi.fn(),
+      closeTab: vi.fn(),
+    });
+    const restoreWebviewMethods = installMockWebviewMethods({
+      getURL: () => "https://old.example/",
+    });
+
+    try {
+      const { rerender } = render(<PreviewPanel threadId="thread-1" />);
+      await waitFor(() =>
+        expect(screen.getByTestId("preview-webview")).toHaveAttribute(
+          "src",
+          "https://old.example/",
+        ),
+      );
+      const hostedWebview = screen.getByTestId("electron-browser-surface-webview");
+      const navigated = new Event("did-navigate") as Event & { url?: string };
+      Object.defineProperty(navigated, "url", { value: "https://old.example/" });
+      fireEvent(hostedWebview, navigated);
+      fireEvent(hostedWebview, new Event("did-stop-loading"));
+
+      // Ctrl+click reuses the empty/errored tab: the host rewrites tab.url
+      // through tabs.open(initialAddress), observed via preview:tabs-updated.
+      mockUsePreviewTabs.mockReturnValue({
+        tabSet: tabSetWith("https://new.example/"),
+        newTab: vi.fn(),
+        activateTab: vi.fn(),
+        closeTab: vi.fn(),
+      });
+      rerender(<PreviewPanel threadId="thread-1" />);
+
+      await waitFor(() =>
+        expect(screen.getByTestId("preview-webview")).toHaveAttribute(
+          "src",
+          "https://new.example/",
+        ),
+      );
     } finally {
       restoreWebviewMethods();
     }

@@ -247,7 +247,6 @@ export function createWsServer(deps: WsServerDeps): {
       logger.info("WebSocket client disconnected");
       deps.browserAutomationBroker?.disconnect(ws);
       deps.terminalService.disconnectClient(ws);
-      deps.workspaceInvalidations.unwatchClient(ws);
       removeClient(ws);
     });
 
@@ -255,7 +254,6 @@ export function createWsServer(deps: WsServerDeps): {
       logger.error("WebSocket error", { error: err.message });
       deps.browserAutomationBroker?.disconnect(ws);
       deps.terminalService.disconnectClient(ws);
-      deps.workspaceInvalidations.unwatchClient(ws);
       removeClient(ws);
     });
   });

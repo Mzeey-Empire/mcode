@@ -2,14 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import { ServerHealthRecovery } from "../health-recovery.js";
 
 const healthRestartLimit = 3;
-const healthRestartWindowMs = 60_000;
 const healthFailureConfirmations = 3;
 
 function createRecovery(overrides: {
   isHealthy?: () => Promise<boolean>;
   restart?: () => Promise<void>;
   showError?: () => Promise<void> | void;
-  now?: () => number;
   sleep?: (ms: number) => Promise<void>;
   logger?: { log: (...args: unknown[]) => void; error: (...args: unknown[]) => void };
 } = {}) {
@@ -17,7 +15,6 @@ function createRecovery(overrides: {
     isHealthy: overrides.isHealthy ?? vi.fn().mockResolvedValue(false),
     restart: overrides.restart ?? vi.fn().mockResolvedValue(undefined),
     showError: overrides.showError ?? vi.fn(),
-    now: overrides.now,
     sleep: overrides.sleep ?? (async () => undefined),
     logger: overrides.logger,
   });
@@ -98,16 +95,10 @@ describe("ServerHealthRecovery", () => {
   it("escalates after the silent restart limit", async () => {
     const restart = vi.fn().mockResolvedValue(undefined);
     const showError = vi.fn();
-    let now = 1_000;
-    const recovery = createRecovery({
-      restart,
-      showError,
-      now: () => now,
-    });
+    const recovery = createRecovery({ restart, showError });
 
     for (let attempt = 0; attempt < healthRestartLimit; attempt += 1) {
       await recovery.ensureServerRunning();
-      now += 1_000;
     }
     await recovery.ensureServerRunning();
 
@@ -128,20 +119,22 @@ describe("ServerHealthRecovery", () => {
     );
   });
 
-  it("forgets silent restarts outside the sliding window", async () => {
+  it("resets the silent restart budget once a probe reports healthy", async () => {
+    const isHealthy = vi.fn().mockResolvedValue(false);
     const restart = vi.fn().mockResolvedValue(undefined);
     const showError = vi.fn();
-    let now = 1_000;
-    const recovery = createRecovery({ restart, showError, now: () => now });
+    const recovery = createRecovery({ isHealthy, restart, showError });
 
     for (let attempt = 0; attempt < healthRestartLimit; attempt += 1) {
       await recovery.ensureServerRunning();
-      now += 1_000;
     }
-    now += healthRestartWindowMs;
+    isHealthy.mockResolvedValueOnce(true);
     await recovery.ensureServerRunning();
+    for (let attempt = 0; attempt < healthRestartLimit; attempt += 1) {
+      await recovery.ensureServerRunning();
+    }
 
-    expect(restart).toHaveBeenCalledTimes(healthRestartLimit + 1);
+    expect(restart).toHaveBeenCalledTimes(healthRestartLimit * 2);
     expect(showError).not.toHaveBeenCalled();
   });
 });

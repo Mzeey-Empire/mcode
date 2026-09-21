@@ -8,7 +8,6 @@ import { CompactingBanner } from "@/components/chat/CompactingBanner";
 import { ContextTracker } from "@/components/chat/ContextTracker";
 import { FileTagPopup, type useFileTagPopup } from "@/components/chat/FileTagPopup";
 import { PlanPreview } from "@/components/chat/PlanPreview";
-import { PrDetectedCard } from "@/components/chat/PrDetectedCard";
 import { PreviewAnnotationBundleChip } from "@/components/chat/PreviewAnnotationBundleChip";
 import { ProviderUnavailableBanner } from "@/components/chat/ProviderUnavailableBanner";
 import { RetryBanner } from "@/components/chat/RetryBanner";
@@ -66,10 +65,6 @@ interface ComposerContentSurfaceProps {
     } | null;
     readonly composerMode: ComponentProps<typeof ComposerNewThreadContext>["mode"];
     readonly isDragOver: boolean;
-    readonly detectedPullRequest: Omit<
-      ComponentProps<typeof PrDetectedCard>,
-      "onReview" | "onDismiss" | "loading"
-    > | null;
     readonly fetchingBranch: boolean;
     readonly effectiveProviderId: ProviderId;
     readonly providerReason: ComponentProps<typeof ProviderUnavailableBanner>["reason"] | null;
@@ -129,8 +124,6 @@ interface ComposerContentSurfaceProps {
     readonly onDragLeave: DragEventHandler<HTMLDivElement>;
     readonly onDragOver: DragEventHandler<HTMLDivElement>;
     readonly onDrop: DragEventHandler<HTMLDivElement>;
-    readonly onReviewDetectedPullRequest: () => void;
-    readonly onDismissDetectedPullRequest: () => void;
     readonly onCancelEdit: () => void;
     readonly onEditorChange: (text: string, mentions: MessageMention[]) => void;
     readonly onSubmit: () => void;
@@ -229,22 +222,6 @@ function ComposerNewThreadSurface({
       workspaceId={model.workspaceId}
       mode={model.composerMode}
       onModeChange={actions.onComposerModeChange}
-    />
-  );
-}
-
-function ComposerDetectedPullRequest({
-  model,
-  actions,
-}: Pick<ComposerContentSurfaceProps, "model" | "actions">) {
-  if (!model.detectedPullRequest) return null;
-
-  return (
-    <PrDetectedCard
-      {...model.detectedPullRequest}
-      onReview={actions.onReviewDetectedPullRequest}
-      onDismiss={actions.onDismissDetectedPullRequest}
-      loading={model.fetchingBranch}
     />
   );
 }
@@ -698,7 +675,6 @@ function ComposerInputSurface({
         onSave={actions.onSaveSelectedTextComment}
         onEditorChange={actions.onSelectedTextCommentEditorChange}
       />
-      <ComposerDetectedPullRequest model={model} actions={actions} />
       <ComposerProviderUnavailableBanner model={model} />
       <ComposerQueueEditNotice model={model} actions={actions} />
       <ComposerEditorSurface model={model} actions={actions} />

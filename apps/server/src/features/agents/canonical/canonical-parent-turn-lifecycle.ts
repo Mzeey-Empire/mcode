@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { CANONICAL_AGENT_EVENT_BATCH_MAX } from "@mcode/contracts";
 import type {
   AgentThread,
   AgentTurn,
@@ -23,6 +24,9 @@ import type {
 
 /** Canonical alias for the parent-turn start durability input. */
 export type CanonicalParentTurnStartInput = ParentTurnStartInput;
+
+/** Recovered narrative materializes in slices that stay under the canonical event batch cap. */
+const INTERRUPTED_NARRATIVE_COMMIT_CHUNK = CANONICAL_AGENT_EVENT_BATCH_MAX / 2;
 
 /** Durable operations required by the parent-turn lifecycle. */
 export interface CanonicalParentTurnLifecycleOperations {
@@ -134,6 +138,7 @@ export class CanonicalParentTurnLifecycle {
       endedAt,
       input.executionId,
     );
+    this.commitInterruptedNarrative(context, narrative, endedAt);
     return this.operations.commit(this.interruptionCommit(
       input,
       context,
@@ -141,6 +146,36 @@ export class CanonicalParentTurnLifecycle {
       narrative,
       endedAt,
     ));
+  }
+
+  /**
+   * Materializes recovered narrative in bounded running commits so the terminal
+   * interruption always fits one canonical batch. Materialized items leave the
+   * recovery snapshot, so a mid-loop restart resumes with only what remains.
+   */
+  private commitInterruptedNarrative(
+    context: { checkpoint: CanonicalAgentCheckpoint; thread: AgentThread },
+    narrative: readonly ParentNarrativeRecoveryItem[],
+    endedAt: string,
+  ): void {
+    for (let offset = 0; offset < narrative.length; offset += INTERRUPTED_NARRATIVE_COMMIT_CHUNK) {
+      const result = this.operations.commit({
+        threadId: context.checkpoint.threadId,
+        turnId: context.checkpoint.turnId,
+        executionId: context.checkpoint.executionId,
+        phase: "running",
+        events: this.operations.interruptedNarrativeEvents({
+          checkpoint: context.checkpoint,
+          thread: context.thread,
+          executionId: context.checkpoint.executionId,
+          narrative: narrative.slice(offset, offset + INTERRUPTED_NARRATIVE_COMMIT_CHUNK),
+          endedAt,
+        }),
+      });
+      if (result.outcome !== "committed" && result.outcome !== "duplicate") {
+        throw new Error(`Interrupted narrative was not committed: ${context.checkpoint.executionId}`);
+      }
+    }
   }
 
   /** Starts a parent execution that a child provider explicitly continued. */
@@ -344,7 +379,7 @@ export class CanonicalParentTurnLifecycle {
           this.operations.stampRecoveryIncident(input.executionId, input.recoveryIncidentId);
         }
       },
-      events: () => this.interruptionEvents(input.reason, context, assistant, narrative, endedAt),
+      events: () => this.interruptionEvents(input.reason, context, assistant, endedAt),
     };
   }
 
@@ -369,20 +404,12 @@ export class CanonicalParentTurnLifecycle {
     reason: string,
     context: { checkpoint: CanonicalAgentCheckpoint; thread: AgentThread },
     assistant: Message | null,
-    narrative: readonly ParentNarrativeRecoveryItem[],
     endedAt: string,
   ): CanonicalAgentEventDraft[] {
     const { checkpoint, thread } = context;
     return [
       this.idleEvent(checkpoint, thread, endedAt),
       ...this.assistantEvent(checkpoint, thread, assistant, endedAt),
-      ...this.operations.interruptedNarrativeEvents({
-        checkpoint,
-        thread,
-        executionId: checkpoint.executionId,
-        narrative,
-        endedAt,
-      }),
       this.interruptedEvent(checkpoint, thread, reason, endedAt),
     ];
   }

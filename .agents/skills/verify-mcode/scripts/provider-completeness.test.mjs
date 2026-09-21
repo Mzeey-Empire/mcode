@@ -119,7 +119,7 @@ NodeTest.test("starts every provider-completeness row with actionable evidence u
   NodeAssertStrict.deepEqual(receipt.matrix.warningStability.fields, ["threadId", "notice.kind", "notice.identity", "before", "after", "review.rows", "review.spinners", "review.noticeCount", "review.screenshot"]);
   NodeAssertStrict.equal(receipt.matrix.warningStability.owner, "web");
   NodeAssertStrict.equal(receipt.electron.matrix.warningStability, undefined);
-  NodeAssertStrict.deepEqual(receipt.watcherOwnership, { kind: "live-rpc-required", control: "public file.watch RPC and files.changed push", status: "not-run" });
+  NodeAssertStrict.deepEqual(receipt.watcherOwnership, { kind: "live-rpc-required", control: "public file.refresh RPC and files.changed push", status: "not-run" });
   NodeAssertStrict.equal(receipt.matrix.electronRightPanel, undefined);
   NodeAssertStrict.equal(receipt.electron.matrix.electronRightPanel.surface, "Electron");
   NodeAssertStrict.equal(receipt.electron.matrix.fullAccess.kind, "coverage-gap");
@@ -227,12 +227,13 @@ NodeTest.test("writes externally only after every four-surface baseline and befo
   const marker = "EXTERNAL_REFRESH_MARKER";
   const invalidationTrace = {
     mark: () => { events.push("mark"); return 4; },
-    waitForWatch: async () => { events.push("watch"); return { sequence: 3 }; },
+    waitForRefreshRequest: async () => { events.push("watch"); return { sequence: 3 }; },
     waitForInvalidation: async () => { events.push("invalidation"); return { sequence: 5 }; },
     waitForRefresh: async () => { events.push("refresh"); return { files: { sequence: 6 }, composer: { sequence: 7 } }; },
     close: async () => { events.push("trace:closed"); },
   };
   const evidence = await runFourSurfaceRefreshJourney({
+    socket: { rpc: async () => {} },
     workspaceId: "workspace",
     threadId: "thread",
     fixtureFile: `fixture/${fileName}`,
@@ -277,6 +278,7 @@ NodeTest.test("rejects a stale client refresh even when the rendered four-surfac
   });
   await NodeAssertStrict.rejects(
     runFourSurfaceRefreshJourney({
+      socket: { rpc: async () => {} },
       workspaceId: "workspace",
       threadId: "thread",
       fixtureFile: `fixture/${fileName}`,
@@ -285,7 +287,7 @@ NodeTest.test("rejects a stale client refresh even when the rendered four-surfac
       capture: async () => validState(),
       invalidationTrace: {
         mark: () => 4,
-        waitForWatch: async () => ({ sequence: 3 }),
+        waitForRefreshRequest: async () => ({ sequence: 3 }),
         waitForInvalidation: async () => ({ sequence: 5 }),
         waitForRefresh: async () => ({ files: { sequence: 4 }, composer: { sequence: 6 } }),
         close: async () => {},
@@ -307,8 +309,8 @@ NodeTest.test("traces the active client subscription, exact invalidation, and po
   const sent = (payload) => listeners.get("Network.webSocketFrameSent")({ request: { payloadData: JSON.stringify(payload) } });
   const received = (payload) => listeners.get("Network.webSocketFrameReceived")({ response: { payloadData: JSON.stringify(payload) } });
 
-  sent({ method: "file.watch", params: { workspaceId: "workspace", threadId: "thread" } });
-  const watch = await trace.waitForWatch({ workspaceId: "workspace", threadId: "thread" });
+  sent({ method: "file.refresh", params: { workspaceId: "workspace", threadId: "thread" } });
+  const watch = await trace.waitForRefreshRequest({ workspaceId: "workspace", threadId: "thread" });
   const mark = trace.mark();
   received({ type: "push", channel: "files.changed", data: { workspaceId: "other", threadId: "thread", changedPaths: ["external-refresh.md"], wholeWorkspace: false } });
   received({ type: "push", channel: "files.changed", data: { workspaceId: "workspace", threadId: "thread", changedPaths: ["external-refresh.md"], wholeWorkspace: false } });
@@ -338,7 +340,7 @@ NodeTest.test("records focused gates once under their true owner and preserves t
     "src/features/agents/turns/__tests__/turn-diff-service.test.ts",
     "src/features/agents/orchestration/__tests__/agent-service-turn-started.test.ts",
     "src/features/agents/orchestration/__tests__/agent-service-gate.test.ts",
-    "src/features/projects/files/__tests__/workspace-invalidation-service.test.ts",
+    "src/features/projects/files/transport/__tests__/file-rpc.test.ts",
   ]);
   NodeAssertStrict.ok(calls[0].args.includes("src/features/agents/turns/__tests__/turn-diff-review.test.ts"));
   NodeAssertStrict.ok(calls[1].args.includes("src/features/agents/turns/__tests__/approval-review-policy.test.ts"));
@@ -351,7 +353,7 @@ NodeTest.test("records focused gates once under their true owner and preserves t
     { control: "apps/server focused integration tests", rows: ["empty", "interruption"], limitation: undefined },
     { control: "apps/server focused integration tests", rows: ["strictManual", "managedRequired", "fullAccessDispatch"], limitation: undefined },
     { control: "apps/server focused integration tests", rows: ["managedRequiredDispatch"], limitation: "Public Codex does not report required; this is focused server dispatch proof." },
-    { control: "apps/server focused integration tests", rows: ["invalidation", "staleRetry", "disconnectWatchCleanup"], limitation: undefined },
+    { control: "apps/server focused integration tests", rows: ["invalidationDelta", "nonGitScope", "noDeltaSilent"], limitation: undefined },
     { control: "apps/server focused retry tests", rows: ["frozenRetryDecision"], limitation: undefined },
     { control: "packages/providers focused protocol tests", rows: ["warningsReroutes"], limitation: undefined },
     { control: "packages/providers focused retry event tests", rows: ["staleRetryReview", "staleRetryDiff"], limitation: undefined },
@@ -359,7 +361,7 @@ NodeTest.test("records focused gates once under their true owner and preserves t
     { control: "apps/web focused permission handoff tests", rows: ["strictReviewNoticeOnly", "realProviderRequestCard"], limitation: undefined },
     { control: "packages/providers focused permission handoff tests", rows: ["providerResponseSettlementRemoval"], limitation: undefined },
   ]);
-  for (const row of ["empty", "invalidation", "interruption", "warningsReroutes", "strictManual", "managedRequired", "managedRequiredDispatch", "fullAccessDispatch", "fullAccessControl", "fileSurfaces", "staleRetry", "disconnectWatchCleanup", "frozenRetryDecision", "staleRetryReview", "staleRetryDiff", "strictReviewNoticeOnly", "realProviderRequestCard", "providerResponseSettlementRemoval"]) {
+  for (const row of ["empty", "invalidationDelta", "interruption", "warningsReroutes", "strictManual", "managedRequired", "managedRequiredDispatch", "fullAccessDispatch", "fullAccessControl", "fileSurfaces", "nonGitScope", "noDeltaSilent", "frozenRetryDecision", "staleRetryReview", "staleRetryDiff", "strictReviewNoticeOnly", "realProviderRequestCard", "providerResponseSettlementRemoval"]) {
     NodeAssertStrict.equal(receipt.matrix[row], undefined, `${row} only belongs to its focused-test owner`);
     NodeAssertStrict.equal(receipt.electron.matrix[row], undefined, `${row} is not copied to Electron`);
   }
@@ -378,19 +380,26 @@ NodeTest.test("records focused gates once under their true owner and preserves t
   NodeAssertStrict.equal(receipt.electron.matrix.codexNative.provider, "codex");
 });
 
-NodeTest.test("proves watcher ownership through public RPC and files.changed pushes", async () => {
+NodeTest.test("proves refresh deltas through public RPC and files.changed pushes", async () => {
   const fixtureDirectory = NodePath.join(NodeOS.tmpdir(), "provider-completeness-watchers");
   const run = { fixtureDirectory, run: { ownedFile: null, ownedFiles: [] } };
   const calls = [];
   const writes = [];
   const sockets = [];
+  const dirty = [];
   const openSocket = async (_repoRoot, onPush) => {
     const socket = {
       active: true,
-      watching: false,
       rpc: async (method, params) => {
         calls.push({ method, params, socket });
-        socket.watching = method === "file.watch";
+        if (method !== "file.refresh") return;
+        // Emulates the server: a refresh broadcasts only the paths dirtied
+        // since the previous refresh of the scope, to every live client.
+        const delta = dirty.splice(0);
+        if (delta.length === 0) return;
+        for (const target of sockets.filter((candidate) => candidate.active)) {
+          target.onPush({ type: "push", channel: "files.changed", data: { workspaceId: "owned-workspace", changedPaths: delta.map((path) => NodePath.basename(path)), wholeWorkspace: false } });
+        }
       },
       close: async () => { socket.active = false; },
       onPush,
@@ -398,21 +407,18 @@ NodeTest.test("proves watcher ownership through public RPC and files.changed pus
     sockets.push(socket);
     return socket;
   };
-  const emit = (path) => {
-    for (const socket of sockets.filter((candidate) => candidate.active && candidate.watching)) {
-      socket.onPush({ type: "push", channel: "files.changed", data: { workspaceId: "owned-workspace", changedPaths: [NodePath.basename(path)], wholeWorkspace: false } });
-    }
-  };
   const io = {
-    writeFile: async (path, contents, encoding) => { writes.push({ operation: "write", path, contents, encoding }); emit(path); },
-    appendFile: async (path, contents, encoding) => { writes.push({ operation: "append", path, contents, encoding }); emit(path); },
+    writeFile: async (path, contents, encoding) => { writes.push({ operation: "write", path, contents, encoding }); dirty.push(path); },
+    appendFile: async (path, contents, encoding) => { writes.push({ operation: "append", path, contents, encoding }); dirty.push(path); },
   };
 
   const result = await runWorkspaceInvalidationJourney({ repoRoot: "root", workspace: { id: "owned-workspace" }, run, io, openSocket, timeoutMs: 25 });
 
   NodeAssertStrict.deepEqual(calls.map(({ method, params }) => ({ method, params })), [
-    { method: "file.watch", params: { workspaceId: "owned-workspace" } },
-    { method: "file.watch", params: { workspaceId: "owned-workspace" } },
+    { method: "file.refresh", params: { workspaceId: "owned-workspace" } },
+    { method: "file.refresh", params: { workspaceId: "owned-workspace" } },
+    { method: "file.refresh", params: { workspaceId: "owned-workspace" } },
+    { method: "file.refresh", params: { workspaceId: "owned-workspace" } },
   ]);
   NodeAssertStrict.deepEqual(writes.map(({ operation, path, encoding }) => ({ operation, path: NodePath.basename(path), encoding })), [
     { operation: "write", path: "watch-owner-sentinel.txt", encoding: "utf8" },
@@ -421,7 +427,7 @@ NodeTest.test("proves watcher ownership through public RPC and files.changed pus
   NodeAssertStrict.deepEqual(run.run.ownedFiles.map((path) => NodePath.basename(path)), ["watch-owner-sentinel.txt", "watch-observer-sentinel.txt"]);
   NodeAssertStrict.deepEqual(result, {
     kind: "live-rpc-proof",
-    control: "public file.watch RPC and files.changed push",
+    control: "public file.refresh RPC and files.changed push",
     workspaceId: "owned-workspace",
     owner: { closed: true, changes: ["watch-owner-sentinel.txt"] },
     observer: { active: true, changes: ["watch-owner-sentinel.txt", "watch-observer-sentinel.txt"] },
@@ -1210,6 +1216,7 @@ NodeTest.test("captures Codex Live proof after the same-file external edit and r
       events.push(`patch:${params.comparisonId}`);
       return "AGENT_MARKER";
     }
+    if (method === "file.refresh") return;
     throw new Error(`unexpected ${method}`);
   } };
   const run = { fixtureDirectory: "fixture", run: {}, diagnostics: { liveComparisons: { states: [], omitted: 0 } }, renderedEvidence: [], comparison: {} };
@@ -1241,7 +1248,7 @@ NodeTest.test("captures Codex Live proof after the same-file external edit and r
   };
   const invalidationTrace = {
     mark: () => { events.push("trace:mark"); return 4; },
-    waitForWatch: async () => { events.push("trace:watch"); return { sequence: 3 }; },
+    waitForRefreshRequest: async () => { events.push("trace:watch"); return { sequence: 3 }; },
     waitForInvalidation: async () => { events.push("trace:invalidation"); return { sequence: 5 }; },
     waitForRefresh: async () => { events.push("trace:refresh"); return { files: { sequence: 6 }, composer: { sequence: 7 } }; },
     close: async () => { events.push("trace:closed"); },

@@ -35,6 +35,10 @@ Report desktop proof, server proof, and focused tests separately. A missing
 feature-specific proof command is a coverage gap, not proof that the desktop
 cannot be tested.
 
+PRs with UI changes need before and after evidence — screenshots, or a short
+video when the change is a transition or flow. The Electron live-testing skill
+captures both for the PR body.
+
 ## Commands
 
 Run `bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs --help` for the command reference.
@@ -73,7 +77,7 @@ Run `runtime worktree-setup --confirm-cleanup` after changes to managed-worktree
 
 Run `runtime console-audit` after changes to child-process spawn, startup, or cleanup code on Windows. It lists visible windows owned by runtime-process descendants; the server tree must never own one. Use `--watch <seconds>` across a runtime restart or packaged launch to catch transient flashes, and read `references/features/windows-console-hygiene.md` for proof and Terminal-hosting limits.
 
-Run `runtime check --phase acp` for the deterministic ACP narrative regression gate. For the production-boundary Electron proof, run `desktop acp-narrative setup`, set the returned path as the Cursor (or Devin) CLI path in the owned Electron runtime, and follow `references/features/acp-narrative.md`. The fixture emits reasoning chunks, three invocation-ordered tool markers, and out-of-order completions without needing a provider account.
+Run `runtime check --phase acp` for the deterministic ACP narrative regression gate. For the production-boundary Electron proof, run `desktop acp-narrative setup`, set the returned path as the Cursor (or Devin) CLI path in the owned Electron runtime, and follow `references/features/acp-narrative.md`. The fixture emits reasoning chunks, three invocation-ordered tool markers, and out-of-order completions without needing a provider account. A prompt containing the word `subagent` appends a Devin `run_subagent` sequence with `subagent_context` child markers to prove nested subagent resolution.
 
 ## Evidence and cleanup
 

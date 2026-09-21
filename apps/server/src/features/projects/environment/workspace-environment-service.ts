@@ -31,6 +31,7 @@ import {
   type WorkspaceEnvironmentAutomaticSetupTerminalInput,
   type WorkspaceEnvironmentAutomaticSetupTerminal,
   type StoredAttachment,
+  type ThreadStartup,
   type MessageMention,
   type PreviewAnnotationBundle,
   type WorkspaceEnvironmentValidationIssue,
@@ -152,7 +153,7 @@ export interface WorkspaceEnvironmentServiceOptions {
   readonly attachmentStorage?: WorkspaceEnvironmentAttachmentStorage;
   readonly threadStartups?: Pick<
     ThreadStartupService,
-    "appendOutput" | "block" | "findByThreadId" | "resume" | "skip"
+    "appendOutput" | "block" | "complete" | "findByThreadId" | "listInterrupted" | "markCancelled" | "resume" | "skip"
   >;
   readonly platform?: WorkspaceEnvironmentPlatform;
   readonly manualSetupTimeoutMs?: number;
@@ -402,9 +403,13 @@ export class WorkspaceEnvironmentService {
         "Automatic Setup can continue only after Setup failed or was interrupted",
       );
     }
-    if (!repository.continueWithoutSetup(input.threadId)) return repository.snapshot(input.threadId);
+    if (!repository.continueWithoutSetup(input.threadId)) {
+      this.settleStartupAfterDrain(input.threadId);
+      return repository.snapshot(input.threadId);
+    }
     this.skipStartupSetup(input.threadId);
     await this.drainReleasedAutomaticTurn(input.threadId);
+    this.settleStartupAfterDrain(input.threadId);
     this.requireAutomaticSetupThread(input.threadId);
     return repository.snapshot(input.threadId);
   }
@@ -543,8 +548,10 @@ export class WorkspaceEnvironmentService {
 
   /** Mark interrupted automatic attempts at startup and drain only committed release claims. */
   async reconcileAutomaticSetup(): Promise<void> {
-    this.requireAutomaticRepository().interruptUnfinishedAttempts();
+    const repository = this.requireAutomaticRepository();
+    repository.interruptUnfinishedAttempts();
     await this.drainReleasedAutomaticTurn();
+    this.settleInterruptedStartups(repository);
   }
 
   /** Resolve the exact private environment document path for one workspace. */
@@ -1473,7 +1480,7 @@ export class WorkspaceEnvironmentService {
 
   private resumeStartupSetup(threadId: string): void {
     const startup = this.options.threadStartups?.findByThreadId(threadId);
-    if (!startup || startup.phase !== "setup" || startup.state !== "blocked") return;
+    if (!startup || startup.phase !== "setup" || (startup.state !== "blocked" && startup.state !== "interrupted")) return;
     this.options.threadStartups?.resume(startup.startupId);
   }
 
@@ -1481,6 +1488,58 @@ export class WorkspaceEnvironmentService {
     const startup = this.options.threadStartups?.findByThreadId(threadId);
     if (!startup || startup.phase !== "setup" || (startup.state !== "running" && startup.state !== "blocked")) return;
     this.options.threadStartups?.skip(startup.startupId, "setup");
+  }
+
+  /**
+   * Settle a startup record that can no longer advance itself after a gate
+   * release. Interrupted records complete (or honour a pending cancellation);
+   * an agent phase with no Turn left to dispatch is done.
+   */
+  private settleStartupAfterDrain(threadId: string): void {
+    const startups = this.options.threadStartups;
+    const startup = startups?.findByThreadId(threadId);
+    if (!startup || !this.isSettleableStartup(startup)) return;
+    if (startup.cancellation === "requested") {
+      startups?.markCancelled(startup.startupId);
+      return;
+    }
+    if (startup.state === "interrupted" || !this.hasPendingAutomaticTurns(threadId)) {
+      startups?.complete(startup.startupId);
+    }
+  }
+
+  private isSettleableStartup(startup: ThreadStartup): boolean {
+    return startup.state === "interrupted"
+      || (startup.state === "running" && startup.phase === "agent");
+  }
+
+  /**
+   * Settle interrupted startups whose Setup attempt can no longer offer a
+   * recovery action, for example when the process died before the gate existed
+   * or after it was already released. Nothing else can advance them.
+   */
+  private settleInterruptedStartups(
+    repository: WorkspaceEnvironmentAutomaticRepository,
+  ): void {
+    for (const startup of this.options.threadStartups?.listInterrupted() ?? []) {
+      if (!startup.threadId) continue;
+      const snapshot = repository.snapshot(startup.threadId);
+      const attempt = snapshot.attempt;
+      // A released gate means the user already decided; a blocked gate with a
+      // recoverable attempt still offers Continue/Retry and owns the record.
+      const recoverable = attempt && (
+        attempt.state === "awaiting-approval"
+        || attempt.state === "failed"
+        || attempt.state === "interrupted"
+      );
+      if (snapshot.gate === "blocked" && recoverable) continue;
+      this.settleStartupAfterDrain(startup.threadId);
+    }
+  }
+
+  private hasPendingAutomaticTurns(threadId: string): boolean {
+    return this.requireAutomaticRepository().snapshot(threadId).queuedTurns
+      .some((turn) => turn.state === "queued" || turn.state === "released" || turn.state === "dispatching");
   }
 
   private async interruptActiveAutomaticSetups(): Promise<void> {
@@ -1566,11 +1625,13 @@ export class WorkspaceEnvironmentService {
     const repository = this.requireAutomaticRepository();
     if (threadId) {
       await this.startAutomaticDrain(threadId, repository, dispatcher);
+      this.settleStartupAfterDrain(threadId);
       return;
     }
-    await Promise.all(repository.releasedThreadIds().map((releasedThreadId) =>
-      this.startAutomaticDrain(releasedThreadId, repository, dispatcher),
-    ));
+    await Promise.all(repository.releasedThreadIds().map(async (releasedThreadId) => {
+      await this.startAutomaticDrain(releasedThreadId, repository, dispatcher);
+      this.settleStartupAfterDrain(releasedThreadId);
+    }));
   }
 
   private startAutomaticDrain(

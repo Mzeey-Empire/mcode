@@ -1,7 +1,5 @@
 import { consoleRecoveryLogger, type RecoveryLogger } from "./logger.js";
 
-const SERVER_HEALTH_RESTART_WINDOW_MS = 60_000;
-
 const SERVER_HEALTH_RESTART_LIMIT = 3;
 
 /** Require several failed probes before killing a live server. */
@@ -14,7 +12,6 @@ interface ServerHealthRecoveryDeps {
   isHealthy: () => Promise<boolean>;
   restart: () => Promise<void>;
   showError: () => Promise<void> | void;
-  now?: () => number;
   sleep?: (ms: number) => Promise<void>;
   logger?: RecoveryLogger;
 }
@@ -24,17 +21,15 @@ export class ServerHealthRecovery {
   private readonly isHealthy: () => Promise<boolean>;
   private readonly restart: () => Promise<void>;
   private readonly showError: () => Promise<void> | void;
-  private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly logger: RecoveryLogger;
-  private silentRestartTimestamps: number[] = [];
+  private restartAttempts = 0;
   private inFlight: Promise<void> | null = null;
 
   constructor(deps: ServerHealthRecoveryDeps) {
     this.isHealthy = deps.isHealthy;
     this.restart = deps.restart;
     this.showError = deps.showError;
-    this.now = deps.now ?? Date.now;
     this.sleep =
       deps.sleep ??
       ((ms) =>
@@ -50,6 +45,8 @@ export class ServerHealthRecovery {
     this.inFlight = (async () => {
       if (await this.confirmUnhealthy()) {
         await this.restartUnhealthyServer();
+      } else {
+        this.restartAttempts = 0;
       }
     })().finally(() => {
       this.inFlight = null;
@@ -76,15 +73,15 @@ export class ServerHealthRecovery {
   }
 
   private async restartUnhealthyServer(): Promise<void> {
-    const now = this.now();
-    this.silentRestartTimestamps = this.silentRestartTimestamps.filter(
-      (timestamp) => now - timestamp < SERVER_HEALTH_RESTART_WINDOW_MS,
-    );
-    if (this.silentRestartTimestamps.length >= SERVER_HEALTH_RESTART_LIMIT) {
+    // Count consecutive attempts, not a time window: a restart blocked on a
+    // healthy owner's startup can outlast any fixed window, so spaced-out
+    // attempts must still escalate once the server never recovers.
+    if (this.restartAttempts >= SERVER_HEALTH_RESTART_LIMIT) {
+      this.restartAttempts = 0;
       await this.showError();
       return;
     }
-    this.silentRestartTimestamps.push(now);
+    this.restartAttempts += 1;
 
     this.logger.log("[main] Server unhealthy, restarting silently");
     try {

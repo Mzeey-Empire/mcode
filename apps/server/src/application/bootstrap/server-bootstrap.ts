@@ -78,7 +78,6 @@ import {
 import { NarrativeStore } from "../../features/agents/conversation/narrative/narrative-store.js";
 import { LegacyConversationMigration } from "../../features/agents/conversation/migrations/legacy-conversation-migration.js";
 import { FileService } from "../../features/projects/files/file-service.js";
-import { WorkspaceInvalidationService } from "../../features/projects/files/workspace-invalidation-service.js";
 import { ConfigService } from "../../features/providers/configuration/config-service.js";
 import { SkillService } from "../../features/agents/skills/catalog/skill-service.js";
 import { CodexCatalogService } from "../../features/providers/catalog/codex-catalog-service.js";
@@ -329,7 +328,6 @@ const pullRequestService = container.resolve(PullRequestService);
 const pullRequestMutationService = container.resolve(PullRequestMutationService);
 const reviewWorktreeService = container.resolve(ReviewWorktreeService);
 const fileService = container.resolve(FileService);
-const workspaceInvalidations = container.resolve(WorkspaceInvalidationService);
 const configService = container.resolve(ConfigService);
 const skillService = container.resolve(SkillService);
 const codexCatalogService = container.resolve(CodexCatalogService);
@@ -738,7 +736,6 @@ const { httpServer, wss } = createWsServer({
   pullRequestMutationService,
   reviewWorktreeService,
   fileService,
-  workspaceInvalidations,
   configService,
   skillService,
   codexCatalogService,
@@ -975,7 +972,6 @@ async function shutdown(): Promise<void> {
 
   // 8. Dispose all git HEAD file watchers
   await captureCleanupFailure(() => gitWatcherService.dispose());
-  await captureCleanupFailure(() => workspaceInvalidations.dispose());
 
   // 8a. Stop all skill / plugin directory watchers
   await captureCleanupFailure(() => skillWatcherService.stopAll());

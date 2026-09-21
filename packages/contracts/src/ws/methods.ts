@@ -1231,7 +1231,7 @@ export const WS_METHODS = lazySchema(() => ({
     }),
     result: z.string(),
   },
-  "file.watch": {
+  "file.refresh": {
     params: z.object({
       workspaceId: z.string(),
       threadId: z.string().optional(),
@@ -1245,10 +1245,6 @@ export const WS_METHODS = lazySchema(() => ({
   "github.listOpenPrs": {
     params: z.object({ workspaceId: z.string() }),
     result: z.array(PrDetailSchema()),
-  },
-  "github.prByUrl": {
-    params: z.object({ url: z.string() }),
-    result: PrDetailSchema().nullable(),
   },
   "pullRequest.capabilities": {
     params: PullRequestCapabilitiesRequestSchema(),
