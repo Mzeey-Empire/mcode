@@ -1715,6 +1715,40 @@ describe("CodexEventMapper", () => {
     });
   });
 
+  it("ignores goal notifications on child threads instead of emitting an unrecognized-update notice", () => {
+    mapper = new CodexEventMapper("test-thread", "main-thread");
+    mapper.mapNotification({
+      jsonrpc: "2.0",
+      method: "item/started",
+      params: {
+        threadId: "main-thread",
+        item: {
+          type: "subAgentActivity",
+          id: "call-goal-child",
+          agentThreadId: "child-goal",
+          agentPath: "/root/explorer",
+          kind: "started",
+        },
+      },
+    });
+
+    for (const method of ["thread/goal/updated", "thread/goal/cleared"]) {
+      const events = mapper.mapNotification({
+        jsonrpc: "2.0",
+        method,
+        params: {
+          threadId: "child-goal",
+          turnId: "child-turn",
+          ...(method === "thread/goal/updated" ? { goal: {
+            threadId: "child-goal", objective: "goal", status: "active",
+            tokenBudget: null, tokensUsed: 0, timeUsedSeconds: 0, createdAt: 1, updatedAt: 2,
+          } } : {}),
+        },
+      });
+      expect(events).toEqual([]);
+    }
+  });
+
   it("emits a distinct parented lifecycle record for every native sub-agent interaction", () => {
     mapper = new CodexEventMapper("test-thread", "main-thread");
     const activity = {
