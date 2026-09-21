@@ -210,11 +210,11 @@ export function openDatabase(opts?: OpenDatabaseOptions): Database {
   try {
     db = new Database(resolvedPath, { strict: true });
     applySQLiteConnectionPolicy(db, true);
-    optimizeSQLiteConnection(db, "open");
+    optimizeSQLiteConnection(db);
     const schemaVersionBeforeMigrations = readSchemaVersion(db);
     runMigrations(db);
     if (readSchemaVersion(db) !== schemaVersionBeforeMigrations) {
-      optimizeSQLiteConnection(db, "maintenance");
+      optimizeSQLiteConnection(db);
     }
     if (backupPath) {
       pruneMigrationBackups(resolvedPath);

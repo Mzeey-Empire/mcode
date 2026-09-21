@@ -285,8 +285,9 @@ export class MemoryPressureService {
   private enterWarmIdle(): void {
     this.state = "warm-idle";
     logger.info("Entering warm idle: shrinking SQLite + minor GC");
+    const startedAt = performance.now();
     try {
-      optimizeSQLiteConnection(this.db, "maintenance");
+      optimizeSQLiteConnection(this.db);
     } catch (err) {
       logger.warn("SQLite optimization failed", {
         error: err instanceof Error ? err.message : String(err),
@@ -302,6 +303,11 @@ export class MemoryPressureService {
     if (typeof global.gc === "function") {
       global.gc();
     }
+    // These synchronous ops block the event loop; the duration ties stalls to
+    // the health-probe failures they can cause.
+    logger.info("Warm idle maintenance completed", {
+      durationMs: Math.round(performance.now() - startedAt),
+    });
   }
 
   /**
@@ -311,6 +317,7 @@ export class MemoryPressureService {
    */
   private enterBackgroundIdle(): void {
     logger.info("Entering background idle: full GC + cache reduction");
+    const startedAt = performance.now();
     try {
       applySQLiteCacheBudget(this.db, "background");
     } catch (err) {
@@ -324,6 +331,9 @@ export class MemoryPressureService {
       global.gc(true);
     }
     this.state = "background-idle";
+    logger.info("Background idle maintenance completed", {
+      durationMs: Math.round(performance.now() - startedAt),
+    });
   }
 
   /**
