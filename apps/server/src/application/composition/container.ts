@@ -20,7 +20,6 @@ import {
 } from "../../features/thread-control";
 import { GitWatcherService } from "../../features/projects/git/git-watcher-service.js";
 import { FileService } from "../../features/projects/files/file-service.js";
-import { WorkspaceInvalidationService } from "../../features/projects/files/workspace-invalidation-service.js";
 import { SkillService } from "../../features/agents/skills/catalog/skill-service.js";
 import { PtyHostCleanupLedger } from "../../features/terminal/cleanup/terminal-cleanup-ledger.js";
 import { AttachmentService } from "../../features/attachments/storage/attachment-service.js";
@@ -162,7 +161,6 @@ export function setupContainer(mcodeDir: string): typeof container {
     { useClass: FileService },
     { lifecycle: Lifecycle.Singleton },
   );
-  container.register(WorkspaceInvalidationService, { useClass: WorkspaceInvalidationService }, { lifecycle: Lifecycle.Singleton });
   registerProviderConfiguration(container);
   container.register(
     SkillService,

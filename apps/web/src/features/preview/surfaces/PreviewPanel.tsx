@@ -87,7 +87,7 @@ import {
 } from "@/components/chat/FileTagPopup";
 import type { MentionSuggestion } from "@/components/chat/useFileAutocomplete";
 import { useWorkspaceThread } from "@/features/projects/state/workspace-selectors";
-import { useWorkspaceFileInvalidation } from "@/features/projects/files/useWorkspaceFileInvalidation";
+import { useWorkspaceFileRefresh } from "@/features/projects/files/useWorkspaceFileRefresh";
 import type { WorkspaceThread } from "@/lib/workspace-thread";
 import {
   browserAutomationTargetKey,
@@ -143,6 +143,11 @@ function fileChangeMatchesPreviewScope(
   const parsed = WS_CHANNELS["files.changed"].safeParse(data);
   return parsed.success && parsed.data.workspaceId === workspaceId &&
     (parsed.data.threadId === undefined || parsed.data.threadId === threadId);
+}
+
+function turnPersistedMatchesPreviewScope(data: unknown, threadId: string): boolean {
+  const parsed = WS_CHANNELS["turn.persisted"].safeParse(data);
+  return parsed.success && parsed.data.threadId === threadId && parsed.data.filesChanged.length > 0;
 }
 
 function localPreviewAddress(address: string | null): string | null {
@@ -2283,12 +2288,20 @@ function WebRuntimePreview({
     }, presentationRegistrationRef.current?.token);
   }, [identity]);
 
-  useEffect(() => pushEmitter.on("files.changed", (data) => {
-    if (!fileChangeMatchesPreviewScope(data, workspaceId, threadId)) return;
-    const current = browserSurfaceHost.getSnapshot(identity);
-    const address = localPreviewAddress(current?.committedAddress ?? current?.pendingAddress ?? null);
-    if (address) browserSurfaceHost.navigate(identity, address);
-  }), [identity, threadId, workspaceId]);
+  useEffect(() => {
+    const reload = () => {
+      const current = browserSurfaceHost.getSnapshot(identity);
+      const address = localPreviewAddress(current?.committedAddress ?? current?.pendingAddress ?? null);
+      if (address) browserSurfaceHost.navigate(identity, address);
+    };
+    const offChanged = pushEmitter.on("files.changed", (data) => {
+      if (fileChangeMatchesPreviewScope(data, workspaceId, threadId)) reload();
+    });
+    const offPersisted = pushEmitter.on("turn.persisted", (data) => {
+      if (turnPersistedMatchesPreviewScope(data, threadId)) reload();
+    });
+    return () => { offChanged(); offPersisted(); };
+  }, [identity, threadId, workspaceId]);
   useLayoutEffect(() => {
     if (!surfaceAvailable) return;
     useBrowserAutomationStore.getState().registerTarget(
@@ -2491,7 +2504,7 @@ export function PreviewPanel({
   presentationActive = true,
   coveredLeft,
 }: PreviewPanelProps) {
-  useWorkspaceFileInvalidation(workspaceId, threadId);
+  useWorkspaceFileRefresh(workspaceId, threadId);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const webviewRefs = useRef<Record<string, PreviewWebviewHandle | null>>({});
   const [viewportCanvasBounds, setViewportCanvasBounds] = useState({ width: 0, height: 0 });
@@ -2868,10 +2881,18 @@ export function PreviewPanel({
     [activeWebviewTabId],
   );
 
-  useEffect(() => pushEmitter.on("files.changed", (data) => {
-    if (!fileChangeMatchesPreviewScope(data, workspaceId, threadId)) return;
-    if (localPreviewAddress(activeWebviewRef()?.getUrl() ?? null)) activeWebviewRef()?.reload();
-  }), [activeWebviewRef, threadId, workspaceId]);
+  useEffect(() => {
+    const reload = () => {
+      if (localPreviewAddress(activeWebviewRef()?.getUrl() ?? null)) activeWebviewRef()?.reload();
+    };
+    const offChanged = pushEmitter.on("files.changed", (data) => {
+      if (fileChangeMatchesPreviewScope(data, workspaceId, threadId)) reload();
+    });
+    const offPersisted = pushEmitter.on("turn.persisted", (data) => {
+      if (turnPersistedMatchesPreviewScope(data, threadId)) reload();
+    });
+    return () => { offChanged(); offPersisted(); };
+  }, [activeWebviewRef, threadId, workspaceId]);
 
   useEffect(() => {
     webviewRequestedUrlRef.current = activeWebviewSrc;

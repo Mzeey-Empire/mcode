@@ -64,7 +64,7 @@ vi.mock("../../navigation/usePreviewSurfaceBridge", () => ({
 vi.mock("@/transport", () => ({
   getTransport: () => ({
     getProviderCatalog: mockGetProviderCatalog,
-    watchWorkspaceFiles: vi.fn().mockResolvedValue(undefined),
+    refreshWorkspaceFiles: vi.fn().mockResolvedValue(undefined),
   }),
 }));
 
@@ -996,6 +996,52 @@ describe("PreviewPanel: full panel state", () => {
     expect(navigateSurface).toHaveBeenCalledWith(expect.objectContaining({
       navigation: { kind: "reload" },
     }));
+  });
+
+  it("reloads the current local webview when a turn persists file changes", async () => {
+    mockUsePreviewBridge.mockReturnValue(
+      mockBridgeState({ storedUrl: "http://127.0.0.1:4173/index.html" }),
+    );
+    const navigateSurface = vi.mocked(window.desktopBridge!.preview!.surface.navigate);
+
+    render(<PreviewPanel threadId="thread-1" workspaceId="workspace-1" />);
+    await screen.findByTestId("preview-webview");
+    await waitFor(() => expect(pushEmitter.channels()).toContain("turn.persisted"));
+
+    act(() => {
+      pushEmitter.emit("turn.persisted", {
+        threadId: "thread-1",
+        messageId: "message-1",
+        toolCallCount: 1,
+        filesChanged: ["src/main.ts"],
+      });
+    });
+
+    expect(navigateSurface).toHaveBeenCalledWith(expect.objectContaining({
+      navigation: { kind: "reload" },
+    }));
+  });
+
+  it("does not reload the webview when a persisted turn changed no files", async () => {
+    mockUsePreviewBridge.mockReturnValue(
+      mockBridgeState({ storedUrl: "http://127.0.0.1:4173/index.html" }),
+    );
+    const navigateSurface = vi.mocked(window.desktopBridge!.preview!.surface.navigate);
+
+    render(<PreviewPanel threadId="thread-1" workspaceId="workspace-1" />);
+    await screen.findByTestId("preview-webview");
+    await waitFor(() => expect(pushEmitter.channels()).toContain("turn.persisted"));
+
+    act(() => {
+      pushEmitter.emit("turn.persisted", {
+        threadId: "thread-1",
+        messageId: "message-1",
+        toolCallCount: 3,
+        filesChanged: [],
+      });
+    });
+
+    expect(navigateSurface).not.toHaveBeenCalled();
   });
 
   it("does not reload the webview for a file change outside its workspace scope", async () => {

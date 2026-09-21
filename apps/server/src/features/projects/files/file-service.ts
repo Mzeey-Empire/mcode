@@ -13,9 +13,16 @@ import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { GitWorktreeService } from "../git/git-worktree-service.js";
 import type { GitExecutor } from "../git/execution/index.js";
 
+const MAX_CHANGED_PATHS = 100;
+const LIST_WALK_MAX_DEPTH = 8;
+const LIST_WALK_MAX_ENTRIES = 5000;
+const LIST_WALK_SKIPPED_DIRS = new Set([".git", "node_modules"]);
+
 /** Handles file listing and content reading for workspaces and threads. */
 @injectable()
 export class FileService {
+  private readonly statusFingerprints = new Map<string, string>();
+
   constructor(
     @inject(WorkspaceRepo) private readonly workspaceRepo: WorkspaceRepo,
     @inject(ThreadRepo) private readonly threadRepo: ThreadRepo,
@@ -41,10 +48,45 @@ export class FileService {
         .split("\n")
         .filter((line: string) => line.length > 0);
     } catch (err) {
-      throw new Error(
-        `Failed to list files: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      // Non-git folders have no ls-files source; a real repo failure still throws.
+      if (NodeFS.existsSync(NodePath.join(cwd, ".git"))) {
+        throw new Error(
+          `Failed to list files: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      return listDirectoryTree(cwd);
     }
+  }
+
+  /**
+   * Runs one bounded `git status` for the scope and reports paths whose
+   * dirty-set fingerprint moved since the previous refresh. The first call
+   * only records the baseline; callers emit `files.changed` on real deltas.
+   * Non-git scopes fingerprint the bounded directory listing instead.
+   * Returns null when the fingerprint is unchanged.
+   */
+  async refresh(
+    workspaceId: string,
+    threadId?: string,
+  ): Promise<{ changedPaths: string[]; wholeWorkspace: boolean } | null> {
+    const cwd = this.resolveWorkingDir(workspaceId, threadId);
+    const scope = `${workspaceId}:${threadId ?? ""}`;
+
+    let paths: string[];
+    try {
+      const { stdout } = await this.gitExecutor.exec(["status", "--porcelain"], { cwd });
+      paths = parsePorcelainPaths(stdout);
+    } catch {
+      // Non-git folders fingerprint the same bounded listing `list` falls back to.
+      if (NodeFS.existsSync(NodePath.join(cwd, ".git"))) return null;
+      paths = listDirectoryTree(cwd);
+    }
+
+    const fingerprint = [...paths].sort().join("\n");
+    const previous = this.statusFingerprints.get(scope);
+    this.statusFingerprints.set(scope, fingerprint);
+    if (previous === undefined || previous === fingerprint) return null;
+    return diffFingerprints(previous, paths);
   }
 
   /**
@@ -173,4 +215,57 @@ function assertFileSize(fullPath: string, relativePath: string): void {
       `File too large for injection: ${relativePath} (${size} bytes, max ${maxFileSize})`,
     );
   }
+}
+
+/** Extracts the path from a `git status --porcelain` v1 line (`XY path` or `XY old -> new`). */
+function porcelainPath(line: string): string {
+  const raw = line.slice(3);
+  const renamed = raw.split(" -> ").at(-1) ?? raw;
+  return renamed.replace(/^"|"$/g, "");
+}
+
+/** Reports the symmetric difference between a stored fingerprint and the current path list. */
+function diffFingerprints(
+  previous: string,
+  paths: string[],
+): { changedPaths: string[]; wholeWorkspace: boolean } {
+  const current = new Set(paths);
+  const prior = new Set(previous.split("\n").filter((path) => path.length > 0));
+  const delta = new Set<string>();
+  for (const path of current) if (!prior.has(path)) delta.add(path);
+  for (const path of prior) if (!current.has(path)) delta.add(path);
+  const changedPaths = [...delta].slice(0, MAX_CHANGED_PATHS + 1);
+  const wholeWorkspace = changedPaths.length > MAX_CHANGED_PATHS;
+  return { changedPaths: wholeWorkspace ? [] : changedPaths, wholeWorkspace };
+}
+
+function parsePorcelainPaths(stdout: string): string[] {
+  return stdout
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map(porcelainPath);
+}
+
+/**
+ * Bounded recursive walk used only for non-git folders, where `git ls-files`
+ * cannot provide an ignore-aware listing. Skips `.git` and `node_modules`
+ * and stops at the depth/entry caps so huge trees stay cheap.
+ */
+function listDirectoryTree(root: string): string[] {
+  const results: string[] = [];
+  const walk = (dir: string, depth: number): void => {
+    if (depth > LIST_WALK_MAX_DEPTH || results.length >= LIST_WALK_MAX_ENTRIES) return;
+    for (const entry of NodeFS.readdirSync(dir, { withFileTypes: true })) {
+      if (results.length >= LIST_WALK_MAX_ENTRIES) return;
+      if (entry.isDirectory() && LIST_WALK_SKIPPED_DIRS.has(entry.name)) continue;
+      const relative = NodePath.relative(root, NodePath.join(dir, entry.name)).replaceAll(NodePath.sep, "/");
+      if (entry.isDirectory()) {
+        walk(NodePath.join(dir, entry.name), depth + 1);
+      } else if (entry.isFile()) {
+        results.push(relative);
+      }
+    }
+  };
+  walk(root, 0);
+  return results;
 }
