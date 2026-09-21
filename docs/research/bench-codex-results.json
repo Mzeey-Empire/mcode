@@ -1,0 +1,120 @@
+{
+  "startedAt": "2026-09-21T08:29:22.187Z",
+  "phases": [
+    {
+      "label": "cold-spawn-A",
+      "spawnAt": 1789979362188,
+      "initializeMs": 188,
+      "threadStartMs": 863,
+      "threadId": "01a0c315-85ef-7380-878f-f06908b4a1a3"
+    },
+    {
+      "label": "warm-spawn",
+      "spawnAt": 1789979563181,
+      "initializeMs": 252,
+      "threadStartMs": 375,
+      "threadId": "01a0c318-95be-7263-97c5-e15ddd031cbd"
+    }
+  ],
+  "turns": [
+    {
+      "label": "A1-high-short",
+      "effort": "high",
+      "serviceTier": "default",
+      "ttftMs": 16007,
+      "firstMethod": "item/started",
+      "totalMs": 17931,
+      "lastInput": 31721,
+      "lastCached": 0,
+      "lastOutput": 5,
+      "lastReasoning": 0,
+      "totalInput": 31721,
+      "totalOutput": 5
+    },
+    {
+      "label": "A2-high-grow",
+      "effort": "high",
+      "serviceTier": "default",
+      "ttftMs": 1155,
+      "firstMethod": "item/started",
+      "totalMs": 102091,
+      "lastInput": 37293,
+      "lastCached": 32512,
+      "lastOutput": 774,
+      "lastReasoning": 248,
+      "totalInput": 198115,
+      "totalOutput": 1881
+    },
+    {
+      "label": "A3-high-grow",
+      "effort": "high",
+      "serviceTier": "default",
+      "ttftMs": 1619,
+      "firstMethod": "item/started",
+      "totalMs": 45626,
+      "lastInput": 38431,
+      "lastCached": 37632,
+      "lastOutput": 740,
+      "lastReasoning": 168,
+      "totalInput": 274638,
+      "totalOutput": 2920
+    },
+    {
+      "label": "A4-high-short-grown",
+      "effort": "high",
+      "serviceTier": "default",
+      "ttftMs": 1105,
+      "firstMethod": "item/started",
+      "totalMs": 3139,
+      "lastInput": 39184,
+      "lastCached": 37632,
+      "lastOutput": 5,
+      "lastReasoning": 0,
+      "totalInput": 313822,
+      "totalOutput": 2925
+    },
+    {
+      "label": "B-low",
+      "effort": "low",
+      "serviceTier": "default",
+      "ttftMs": 4241,
+      "firstMethod": "item/started",
+      "totalMs": 5853,
+      "lastInput": 31729,
+      "lastCached": 0,
+      "lastOutput": 5,
+      "lastReasoning": 0,
+      "totalInput": 31729,
+      "totalOutput": 5
+    },
+    {
+      "label": "C-medium",
+      "effort": "medium",
+      "serviceTier": "default",
+      "ttftMs": 13890,
+      "firstMethod": "item/started",
+      "totalMs": 15855,
+      "lastInput": 31494,
+      "lastCached": 0,
+      "lastOutput": 5,
+      "lastReasoning": 0,
+      "totalInput": 31494,
+      "totalOutput": 5
+    },
+    {
+      "label": "D-high-priority",
+      "effort": "high",
+      "serviceTier": "priority",
+      "ttftMs": 4617,
+      "firstMethod": "item/started",
+      "totalMs": 7801,
+      "lastInput": 31721,
+      "lastCached": 0,
+      "lastOutput": 5,
+      "lastReasoning": 0,
+      "totalInput": 31721,
+      "totalOutput": 5
+    }
+  ],
+  "serverRequests": []
+}
