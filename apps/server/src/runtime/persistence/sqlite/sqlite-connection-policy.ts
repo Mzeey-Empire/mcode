@@ -59,10 +59,10 @@ export function applySQLiteCacheBudget(
   return cacheKiB;
 }
 
-/** Run SQLite's bounded optimization for connection startup or later maintenance. */
-export function optimizeSQLiteConnection(
-  db: Database,
-  phase: "open" | "maintenance",
-): void {
-  db.run(phase === "open" ? "PRAGMA optimize = 0x10002" : "PRAGMA optimize");
+/**
+ * Run SQLite's bounded optimization. The unmasked form can ANALYZE every index
+ * of a large database, blocking the event loop for seconds on a 1GB file.
+ */
+export function optimizeSQLiteConnection(db: Database): void {
+  db.run("PRAGMA optimize = 0x10002");
 }

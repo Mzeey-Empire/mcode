@@ -54,7 +54,9 @@ describe("SQLite connection policy", () => {
     database = openDatabase({ dbPath: NodePath.join(directory, "mcode.db") });
 
     expect(run).toHaveBeenCalledWith("PRAGMA optimize = 0x10002");
-    expect(run).toHaveBeenCalledWith("PRAGMA optimize");
+    // The unmasked form can ANALYZE every index of a large database, so only
+    // the bounded mask is allowed even after schema changes.
+    expect(run).not.toHaveBeenCalledWith("PRAGMA optimize");
     expect(run.mock.calls.some(([source]) => /^\s*(?:ANALYZE|VACUUM)\b/i.test(String(source))))
       .toBe(false);
   });

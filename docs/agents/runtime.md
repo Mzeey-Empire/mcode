@@ -70,11 +70,18 @@ minutes.
 
 ## Desktop startup diagnostics
 
-Desktop launches save server errors to `server-stderr.log` in `MCODE_DATA_DIR`,
+Desktop launches save server output to `server-stderr.log` in `MCODE_DATA_DIR`,
 including development launches. Normal worktree development uses
 `.dev/server-stderr.log`. The next launch moves the previous log to
 `server-stderr.1.log`. The startup failure dialog includes the last 40 lines.
-Server stderr goes directly to this file; stdin and stdout stay isolated from the desktop terminal.
+Server stderr and stdout both go directly to this file; stdin stays isolated
+from the desktop terminal.
+
+The server also writes crash diagnostics synchronously, bypassing the buffered
+logger: a `fatal` record in the daily `mcode.log.<date>` file and a mirror in
+`server-fatal.log` next to `server-stderr.log`. The fatal record carries the
+error name, message, stack, errno fields, PID, and uptime. Event-loop stalls
+over 500ms and every process exit are appended to the daily log the same way.
 
 Startup checkpoint logs use past-tense messages and include the completed
 stage, server PID, and elapsed milliseconds since the bootstrap function began.

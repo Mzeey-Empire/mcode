@@ -339,11 +339,19 @@ export function createWsTransport(
 
   /** Resolves when the current WebSocket connection is open. */
   let ready: Promise<void>;
-  let resolveReady: () => void;
+  let resolveReady: () => void = () => undefined;
+  let readyPending = false;
 
   function resetReady() {
+    // A still-pending promise may have rpc() calls parked on it; replacing it
+    // would strand them forever.
+    if (readyPending) return;
+    readyPending = true;
     ready = new Promise<void>((resolve) => {
-      resolveReady = resolve;
+      resolveReady = () => {
+        readyPending = false;
+        resolve();
+      };
     });
   }
 
@@ -495,6 +503,9 @@ export function createWsTransport(
       rejectPending("WebSocket disconnected");
       invalidateLiveTurnDiff();
       if (!closed) {
+        // Re-arm `ready` so rpc() calls park until the reconnect opens instead
+        // of sending on a dead socket.
+        resetReady();
         const isAuthFailure = event.code === 4001;
         options?.onStatusChange?.(isAuthFailure ? "authFailed" : "reconnecting");
         scheduleReconnect(isAuthFailure);
@@ -577,7 +588,10 @@ export function createWsTransport(
 
   const terminalClientSelector = new TerminalClientSelector(
     <T>(method: string, params: Record<string, unknown>) => rpc<T>(method, params),
-    (frame) => ws.send(frame),
+    (frame) => {
+      // Drop terminal frames while the socket is down; reattach resyncs output.
+      if (ws.readyState === WebSocket.OPEN) ws.send(frame);
+    },
     async (scopeId) => {
       const { useWorkspaceStore } = await import("@/features/projects/state/workspaceStore");
       const state = useWorkspaceStore.getState();
@@ -1244,6 +1258,7 @@ export function createWsTransport(
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
+      resolveReady();
       rejectPending("Transport closed");
       ws.close();
     },

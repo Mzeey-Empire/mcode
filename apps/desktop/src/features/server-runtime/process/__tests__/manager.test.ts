@@ -239,7 +239,8 @@ describe("ServerManager", () => {
     // The child writes directly to the log so its last error survives an early exit.
     const opts = spawnCall[2] as Record<string, unknown>;
     expect(opts.detached).toBe(true);
-    expect(opts.stdio).toEqual(["ignore", "ignore", vi.mocked(NodeFS.createWriteStream).mock.results[0].value]);
+    const logStream = vi.mocked(NodeFS.createWriteStream).mock.results[0].value;
+    expect(opts.stdio).toEqual(["ignore", logStream, logStream]);
     expect(result.port).toBe(19600);
     expect(result.authToken).toBe("test-auth-token");
     const portProbe = vi.mocked(NodeNet.createServer).mock.results[0]?.value;
@@ -250,7 +251,7 @@ describe("ServerManager", () => {
     );
   });
 
-  it("isolates development server standard output and captures standard error", async () => {
+  it("captures development server standard output and error in the log file", async () => {
     const previousRendererUrl = process.env.ELECTRON_RENDERER_URL;
     process.env.ELECTRON_RENDERER_URL = "http://localhost:5173";
 
@@ -259,7 +260,8 @@ describe("ServerManager", () => {
 
       const spawnCall = vi.mocked(NodeChildProcess.spawn).mock.calls[0];
       const opts = spawnCall[2] as Record<string, unknown>;
-      expect(opts.stdio).toEqual(["ignore", "ignore", vi.mocked(NodeFS.createWriteStream).mock.results[0].value]);
+      const logStream = vi.mocked(NodeFS.createWriteStream).mock.results[0].value;
+      expect(opts.stdio).toEqual(["ignore", logStream, logStream]);
       expect(NodeFS.createWriteStream).toHaveBeenCalledWith(
         NodePath.join("/tmp/mcode", "server-stderr.log"),
         { fd: 99 },
