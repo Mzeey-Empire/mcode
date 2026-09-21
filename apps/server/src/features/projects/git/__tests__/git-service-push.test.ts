@@ -145,7 +145,7 @@ describe("GitRepositoryService and GitWorktreeService branch creation", () => {
       "--detach",
       NodePath.join("/mock/mcode", "worktrees", "repo", "main-branchless"),
       "main",
-    ], { timeout: 0 });
+    ], { timeout: 120_000 });
   });
 
   it("creates a named worktree branch from the exact requested base ref", async () => {
@@ -176,7 +176,7 @@ describe("GitRepositoryService and GitWorktreeService branch creation", () => {
       "-b",
       "codex/issue-960",
       "origin/main",
-    ], { timeout: 0 });
+    ], { timeout: 120_000 });
   });
 
   it("does not return a worktree after Git reports an incomplete checkout", async () => {
