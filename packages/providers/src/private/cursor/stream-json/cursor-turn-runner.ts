@@ -190,6 +190,9 @@ export async function runCursorTurn(
     // Use stdin so prompt text does not cross shell parsing on Windows.
     const stdin = child.stdin;
     if (stdin) {
+      // An early CLI exit can close stdin first; an unhandled stream 'error'
+      // (EPIPE) would take the whole server down.
+      stdin.on("error", () => undefined);
       stdin.write(options.prompt);
       stdin.end();
     }

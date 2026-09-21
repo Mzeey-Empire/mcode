@@ -847,6 +847,12 @@ export async function warmCodexAppServer(
     child.once("error", () => finish({ initialized, rateLimitsPayload: latestRateLimitsPayload }));
     child.once("exit", () => finish({ initialized, rateLimitsPayload: latestRateLimitsPayload }));
 
+    // A dead child's stdin emits 'error' (EPIPE); without a listener the throw
+    // becomes an uncaught exception that kills the whole server process.
+    child.stdin!.on("error", (error: Error) => {
+      logger.warn("Codex app-server stdin error during warm-up", { error: error.message });
+    });
+
     let buffer = "";
     child.stdout!.setEncoding("utf8");
     child.stdout!.on("data", (chunk: string) => {
