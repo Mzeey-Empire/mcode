@@ -229,7 +229,13 @@ function sendBroadcastPayload(channel: WsChannelName, threadId: string | undefin
   for (const ws of clients) {
     if (ws.readyState !== ws.OPEN) continue;
     if (requiresThreadSubscription && threadId && !threadSubscriptions.get(ws)?.has(threadId)) continue;
-    ws.send(payload);
+    try {
+      ws.send(payload);
+    } catch {
+      // A socket can die between the readyState check and the send; one dead
+      // client must not abort the broadcast or take the server down.
+      logger.warn("Broadcast send failed", { channel });
+    }
   }
 }
 

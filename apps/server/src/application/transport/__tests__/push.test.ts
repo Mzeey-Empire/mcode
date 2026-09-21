@@ -294,6 +294,20 @@ describe("broadcast", () => {
     expect(JSON.parse(b[0].buf.toString("utf-8")).data.threadId).toBe("thread-a");
   });
 
+  it("keeps broadcasting to other clients when one send throws", () => {
+    const good: Array<{ buf: Buffer; binary: boolean }> = [];
+    const dead = {
+      readyState: 1,
+      OPEN: 1,
+      send: () => { throw new Error("closed during send"); },
+    } as unknown as WebSocket;
+    addClient(dead);
+    addClient(fakeOpenSocket(good));
+
+    expect(() => broadcast("skills.changed", { providerIds: ["claude"] })).not.toThrow();
+    expect(good).toHaveLength(1);
+  });
+
   it("lets tests swap validating and pass-through payload adapters", () => {
     const validating: Array<{ buf: Buffer; binary: boolean }> = [];
     const validatingWs = fakeOpenSocket(validating);
