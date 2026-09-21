@@ -768,7 +768,7 @@ export class ModernTerminalSessionRuntime implements TerminalSessionRuntime {
       const data = Buffer.from(event.dataBase64, "base64");
       record.replay.append(sequence, data);
       record.receivedOutputSeq = sequence;
-      this.publishHeadless({ kind: "output", sessionId: record.sessionId, data: Uint8Array.from(data) });
+      this.publishHeadless({ kind: "output", sessionId: record.sessionId, data });
       this.publishAttachedOutput(record, sequence, data);
     } catch {
       this.failSession(record, "protocol-failure");
@@ -787,7 +787,7 @@ export class ModernTerminalSessionRuntime implements TerminalSessionRuntime {
       hostGeneration: record.hostGeneration,
       attachmentEpoch: record.attachment.epoch.toString(),
       outputSeq: sequence.toString(),
-      data: Uint8Array.from(data),
+      data,
     });
   }
 
