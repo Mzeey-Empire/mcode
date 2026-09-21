@@ -9,7 +9,11 @@
  * - plans arrive as `write_plan` tool calls editing `~/.devin/plans/*.md`,
  *   never as the spec `plan` update;
  * - subagent children stream orphan `tool_call_update`s keyed by agentId with
- *   `_meta.subagent_started`/`subagent_completed` and no `tool_call` marker.
+ *   `_meta.subagent_started`/`subagent_completed` and no `tool_call` marker;
+ * - a subagent's inner tool calls stream as `tool_call` markers carrying
+ *   `_meta.subagent_context.parentAgentId` and never receive a
+ *   `tool_call_update`, so they must not gate the final response and are
+ *   resolved when the owning subagent completes.
  */
 
 import type { SessionNotification } from "@agentclientprotocol/sdk";
@@ -19,6 +23,7 @@ import type { AgentEvent } from "@mcode/contracts";
 const INFERENCE_TOOL_NAME_META = "cognition.ai/inferenceToolName";
 const SUBAGENT_STARTED_META = "cognition.ai/subagent_started";
 const SUBAGENT_COMPLETED_META = "cognition.ai/subagent_completed";
+const SUBAGENT_CONTEXT_META = "cognition.ai/subagent_context";
 const EDITABLE_COMMAND_META = "cognition.ai/editableCommand";
 const TERMINAL_EXIT_META = "terminal_exit";
 
@@ -78,6 +83,10 @@ export interface DevinAcpTurnState {
   retainedToolResultByCallId: Map<string, string>;
   /** toolCallIds whose tool_call marker emitted a sparse ToolUse; a merge ToolUse follows once rawInput arrives. */
   deferredToolCallIds: Set<string>;
+  /** child toolCallId -> owning subagent agentId for calls carrying subagent_context. */
+  subagentChildAgentByCallId: Map<string, string>;
+  /** agentId -> success flag once `subagent_completed` arrives; late child markers resolve immediately. */
+  completedSubagentOutcomeByAgentId: Map<string, boolean>;
   /** Latest model label from `_cognition.ai/agent_stopped`. */
   stoppedModelLabel: string | null;
   /** Latest stop cause from `_cognition.ai/agent_stopped`; more specific than the prompt `stopReason`. */
@@ -100,6 +109,8 @@ export function createDevinAcpTurnState(): DevinAcpTurnState {
     toolNameByCallId: new Map(),
     retainedToolResultByCallId: new Map(),
     deferredToolCallIds: new Set(),
+    subagentChildAgentByCallId: new Map(),
+    completedSubagentOutcomeByAgentId: new Map(),
     stoppedModelLabel: null,
     stopCause: null,
   };
@@ -200,7 +211,11 @@ function mapToolCallStarted(
 
   const toolName = resolveToolName(update);
   const title = typeof update.title === "string" ? update.title : undefined;
-  const rawInput = asRecord(update.rawInput) ?? {};
+  const rawInput = normalizeAgentMarkerInput(toolName, asRecord(update.rawInput) ?? {});
+  const parentAgentId = subagentParentAgentId(update);
+  const priorOutcome = parentAgentId === undefined
+    ? undefined
+    : state.completedSubagentOutcomeByAgentId.get(parentAgentId);
   state.toolNameByCallId.set(toolCallId, toolName);
   state.toolCallById.set(toolCallId, { toolName, input: rawInput, title });
 
@@ -209,21 +224,57 @@ function mapToolCallStarted(
   }
 
   state.accumulator.toolStartTimes.set(toolCallId, Date.now());
-  state.accumulator.pendingToolCalls.add(toolCallId);
   state.accumulator.hasFiredToolThisTurn = true;
+  registerPendingToolCall(state, toolCallId, parentAgentId, priorOutcome);
 
-  if (Object.keys(rawInput).length === 0) {
+  if (Object.keys(rawInput).length === 0 && priorOutcome === undefined) {
     // Marker-only tool_call: emit ToolUse now so the timeline keeps invocation
     // order; a merge ToolUse follows once an update carries rawInput.
     state.deferredToolCallIds.add(toolCallId);
   }
-  return [{
+  return toolCallStartEvents(threadId, toolCallId, toolName, rawInput, parentAgentId, priorOutcome);
+}
+
+/**
+ * Agent markers carry `task` but the narrative extractors read `description`;
+ * without this every Devin subagent row renders the generic "Subagent task".
+ */
+function normalizeAgentMarkerInput(
+  toolName: string,
+  rawInput: Record<string, unknown>,
+): Record<string, unknown> {
+  if (toolName !== "Agent" || typeof rawInput.description === "string") return rawInput;
+  const task = rawInput.task;
+  if (typeof task !== "string" || !task.trim()) return rawInput;
+  return { ...rawInput, description: task };
+}
+
+/** Emits the ToolUse, plus an immediate ToolResult for a child whose subagent already completed. */
+function toolCallStartEvents(
+  threadId: string,
+  toolCallId: string,
+  toolName: string,
+  rawInput: Record<string, unknown>,
+  parentAgentId: string | undefined,
+  priorOutcome: boolean | undefined,
+): AgentEvent[] {
+  const use: AgentEvent = {
     type: AgentEventType.ToolUse,
     threadId,
     toolCallId,
     toolName,
     toolInput: rawInput,
-  }];
+    ...(parentAgentId ? { parentToolCallId: parentAgentId } : {}),
+  };
+  // A late child gets no later update; closing it now keeps no card active.
+  const result: AgentEvent = {
+    type: AgentEventType.ToolResult,
+    threadId,
+    toolCallId,
+    output: "",
+    isError: priorOutcome === false,
+  };
+  return priorOutcome === undefined ? [use] : [use, result];
 }
 
 // ---------------------------------------------------------------------------
@@ -279,16 +330,89 @@ function subagentStartedEvents(
   const title = typeof started.title === "string" ? started.title : undefined;
   const profile = typeof started.profile === "string" ? started.profile : undefined;
   state.accumulator.toolStartTimes.set(toolCallId, Date.now());
-  state.accumulator.pendingToolCalls.add(toolCallId);
+  // A subagent_completed that arrived before its subagent_started already
+  // emitted the ToolResult; registering it pending would suppress the
+  // final-response flag for the rest of the turn.
+  if (!state.completedSubagentOutcomeByAgentId.has(toolCallId)) {
+    state.accumulator.pendingToolCalls.add(toolCallId);
+  }
   state.accumulator.hasFiredToolThisTurn = true;
   return [{
     type: AgentEventType.ToolUse,
     threadId,
     toolCallId,
     toolName: "Agent",
-    toolInput: { task, title, profile, is_background: started.isBackground === true },
+    // agentId is Devin's native subagent identity; surfacing it as
+    // nativeThreadId gives the card a canonical-alias detail target so the
+    // detail view can open instead of rendering "transcript unavailable".
+    toolInput: {
+      task,
+      title,
+      profile,
+      // Narrative label/summary extractors read description and subagentType;
+      // without them every Devin row renders "Subagent task".
+      description: task,
+      subagentType: profile,
+      is_background: started.isBackground === true,
+      agentId: toolCallId,
+      nativeThreadId: toolCallId,
+    },
     ...(parentToolCallId ? { parentToolCallId } : {}),
   }];
+}
+
+/**
+ * Routes a call into the set that will resolve it: subagent children on the
+ * parent's `subagent_completed`, everything else on its own terminal update.
+ * Children keep out of `pendingToolCalls` so they cannot suppress the
+ * final-response flag; a child whose parent already completed is closed
+ * immediately by the caller instead of being registered.
+ */
+function registerPendingToolCall(
+  state: DevinAcpTurnState,
+  toolCallId: string,
+  parentAgentId: string | undefined,
+  priorOutcome: boolean | undefined,
+): void {
+  if (priorOutcome !== undefined) return;
+  if (parentAgentId === undefined) {
+    state.accumulator.pendingToolCalls.add(toolCallId);
+    return;
+  }
+  state.subagentChildAgentByCallId.set(toolCallId, parentAgentId);
+}
+
+/** Reads `_meta.subagent_context.parentAgentId` from a child tool_call marker. */
+function subagentParentAgentId(update: Record<string, unknown>): string | undefined {
+  const context = asRecord(asRecord(update._meta)?.[SUBAGENT_CONTEXT_META]);
+  const parentAgentId = context?.parentAgentId;
+  if (typeof parentAgentId !== "string" || !parentAgentId) return undefined;
+  // Devin tags root-level updates with parentAgentId "root"; that is not a real
+  // parent, so the call stays top-level.
+  return parentAgentId === "root" ? undefined : parentAgentId;
+}
+
+/** Releases a subagent's unresolved child calls once the subagent completes. */
+function completeSubagentChildren(
+  agentId: string,
+  success: boolean,
+  threadId: string,
+  state: DevinAcpTurnState,
+): AgentEvent[] {
+  const events: AgentEvent[] = [];
+  for (const [childCallId, parentAgentId] of state.subagentChildAgentByCallId) {
+    if (parentAgentId !== agentId) continue;
+    const retained = state.retainedToolResultByCallId.get(childCallId) ?? "";
+    clearToolCallState(state, childCallId);
+    events.push({
+      type: AgentEventType.ToolResult,
+      threadId,
+      toolCallId: childCallId,
+      output: retained,
+      isError: !success,
+    });
+  }
+  return events;
 }
 
 function subagentCompletedEvents(
@@ -305,14 +429,19 @@ function subagentCompletedEvents(
   }
   state.accumulator.toolStartTimes.delete(toolCallId);
   state.accumulator.pendingToolCalls.delete(toolCallId);
+  const success = completed.success !== false;
+  state.completedSubagentOutcomeByAgentId.set(toolCallId, success);
   const summary = typeof completed.summary === "string" ? completed.summary : "";
-  return [{
-    type: AgentEventType.ToolResult,
-    threadId,
-    toolCallId,
-    output: summary,
-    isError: completed.success === false,
-  }];
+  return [
+    ...completeSubagentChildren(toolCallId, success, threadId, state),
+    {
+      type: AgentEventType.ToolResult,
+      threadId,
+      toolCallId,
+      output: summary,
+      isError: !success,
+    },
+  ];
 }
 
 function mapSubagentUpdate(
@@ -379,6 +508,7 @@ function clearToolCallState(state: DevinAcpTurnState, toolCallId: string): void 
   state.toolNameByCallId.delete(toolCallId);
   state.retainedToolResultByCallId.delete(toolCallId);
   state.deferredToolCallIds.delete(toolCallId);
+  state.subagentChildAgentByCallId.delete(toolCallId);
   const pendingIdx = state.pendingSubagentCallIds.indexOf(toolCallId);
   if (pendingIdx >= 0) state.pendingSubagentCallIds.splice(pendingIdx, 1);
 }
@@ -450,12 +580,15 @@ function mergeDeferredToolInput(
   if (!rawInput || Object.keys(rawInput).length === 0) return [];
   state.deferredToolCallIds.delete(toolCallId);
   const toolName = state.toolNameByCallId.get(toolCallId) ?? resolveToolName(update);
+  const normalizedInput = normalizeAgentMarkerInput(toolName, rawInput);
+  const parentAgentId = state.subagentChildAgentByCallId.get(toolCallId);
   return [{
     type: AgentEventType.ToolUse,
     threadId,
     toolCallId,
     toolName,
-    toolInput: rawInput,
+    toolInput: normalizedInput,
+    ...(parentAgentId ? { parentToolCallId: parentAgentId } : {}),
   }];
 }
 

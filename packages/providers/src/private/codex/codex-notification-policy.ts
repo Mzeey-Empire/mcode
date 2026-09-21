@@ -30,6 +30,8 @@ export const CODEX_IGNORED_NOTIFICATIONS: Readonly<Record<string, string>> = {
   "windowsSandbox/setupCompleted": "sandbox-setup-rpc-is-authoritative",
   "app/list/updated": "native-app-catalog-not-used",
   "fs/changed": "native-file-watches-not-subscribed",
+  "thread/goal/updated": "goal-tracking-not-implemented",
+  "thread/goal/cleared": "goal-tracking-not-implemented",
 };
 
 /** Returns a stable ignore reason only for an explicitly recognized native method. */

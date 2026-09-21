@@ -22,6 +22,19 @@ import {
   type SubagentRosterTab,
 } from "../state";
 import { openSubagentDetail, openSubagentsRoster } from "../detail/open-subagent-detail";
+import { NarrativeDetailView } from "../detail/NarrativeDetailView";
+import {
+  dedupeNarrativeRoster,
+  narrativeRowStatus,
+  narrativePaletteSeed,
+  narrativeRowTab,
+  resolveCanonicalSubagentSelection,
+  resolveNarrativeSubagentSelection,
+  useNarrativeSubagentRoster,
+  type ProjectedSubagentRow,
+} from "./narrative-subagents";
+
+export { resolveCanonicalSubagentSelection } from "./narrative-subagents";
 import { getTransport } from "@/transport";
 import { resolveModelDisplayLabel } from "@/lib/format-model-label";
 import { formatRelative } from "@/lib/format-relative";
@@ -106,26 +119,6 @@ function canonicalNamedLineage(row: CanonicalSubagentRosterRow, rows: readonly C
     .map((id) => identities.get(id))
     .filter((identity): identity is string => identity !== undefined)
     .join(" / ");
-}
-
-/** Resolves a canonical child without guessing across provider-native alias collisions. */
-export function resolveCanonicalSubagentSelection(
-  selectionId: string,
-  rows: readonly CanonicalSubagentRosterRow[],
-): CanonicalSubagentRosterRow | undefined {
-  const sourceItemId = `toolCall:${selectionId}`;
-  const directChild = rows.find((row) => row.id === selectionId);
-  if (directChild) return directChild;
-  const sourceItem = rows.find((row) => row.sourceItemId === sourceItemId);
-  if (sourceItem) return sourceItem;
-
-  // Legacy aliases contain only a value, not the provider/scope tuple required
-  // to disambiguate a shared native identifier.
-  const providerAliasMatches = rows.filter((row) =>
-    [...row.providerIdentities, ...row.sourceProviderIdentities].some(
-      (identity) => identity.value === selectionId,
-    ));
-  return providerAliasMatches.length === 1 ? providerAliasMatches[0] : undefined;
 }
 
 function CanonicalRosterRow({
@@ -231,6 +224,65 @@ function CanonicalRosterTimestamp({
         </Tooltip>
       )}
     </span>
+  );
+}
+
+/** Roster row for an in-thread subagent that has no canonical child thread. */
+function NarrativeRosterRow({
+  row,
+  onSelect,
+  testId,
+}: {
+  readonly row: ProjectedSubagentRow;
+  readonly onSelect: () => void;
+  readonly testId: string;
+}) {
+  const identity = formatSubagentIdentity(row.identity);
+  const title = row.task ? formatSubagentDisplayName(row.task) : identity;
+  const status = narrativeRowStatus(row);
+  const active = narrativeRowTab(row) === "active";
+  const paletteSeed = narrativePaletteSeed(row);
+  const lastActiveAt = new Date(row.activityAt).toISOString();
+  const lastActiveLabel = active ? null : formatRelative(lastActiveAt);
+  return (
+    <div data-testid={testId} className="flex w-full min-w-0 items-center rounded-none transition-colors duration-150 motion-reduce:transition-none hover:bg-muted/30">
+      <Button
+        type="button"
+        variant="ghost"
+        onClick={onSelect}
+        aria-label={`Open ${identity} details, ${status}`}
+        data-subagent-id={row.id}
+        className="h-auto min-w-0 flex-1 justify-start gap-3 rounded-none px-6 py-2.5 text-left focus-visible:ring-inset"
+      >
+        <SubagentIdentityGlyph
+          identity={identity}
+          hasExplicitIdentity={row.hasExplicitIdentity}
+          paletteSeed={paletteSeed}
+          animated={active}
+          className="size-6"
+          size={15}
+        />
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{title}</span>
+            {!active && (
+              <span className="flex shrink-0 items-center gap-1.5 font-mono text-xs tabular-nums text-muted-foreground">
+                {status !== "Completed" && <span>{status}</span>}
+                {status !== "Completed" && lastActiveLabel && <span aria-hidden>·</span>}
+                {lastActiveLabel && (
+                  <Tooltip>
+                    <TooltipTrigger render={<time dateTime={lastActiveAt}>{lastActiveLabel}</time>} />
+                    <TooltipContent>{new Date(lastActiveAt).toLocaleString()}</TooltipContent>
+                  </Tooltip>
+                )}
+              </span>
+            )}
+          </span>
+          {row.task && <span className="mt-0.5 block truncate text-xs text-muted-foreground">{identity}</span>}
+          {row.activity && <span className="mt-0.5 block truncate text-xs text-muted-foreground">{row.activity}</span>}
+        </span>
+      </Button>
+    </div>
   );
 }
 
@@ -648,40 +700,41 @@ function canonicalRosterPlaceholder(
   return { roster: canonicalState.roster };
 }
 
-/** Renders the canonical child roster for the selected parent thread. */
-export function SubagentsPanel({ threadId }: { readonly threadId: string }) {
-  const { state: canonicalState, refresh: refreshRoster } = useCanonicalRoster(threadId);
-  const clearDetail = useClearSubagentDetail();
-  const detail = useCanonicalDetail(threadId, canonicalState);
-  const stopAll = useStopAllControl(threadId, canonicalState.roster, detail.rows, refreshRoster);
-  const rosterView = canonicalRosterPlaceholder(detail.isCurrentRequest, canonicalState);
-  if ("placeholder" in rosterView) return rosterView.placeholder;
+/** Clears the detail selection and restores roster scroll and row focus. */
+function backToRoster(
+  threadId: string,
+  scrollTop: number,
+  viewportRef: React.RefObject<HTMLDivElement | null>,
+  focusId: string,
+  clearDetail: (threadId: string) => void,
+): () => void {
+  return () => {
+    clearDetail(threadId);
+    window.requestAnimationFrame(() => {
+      if (viewportRef.current) viewportRef.current.scrollTop = scrollTop;
+      document.querySelector<HTMLElement>(`[data-subagent-id="${CSS.escape(focusId)}"]`)?.focus();
+    });
+  };
+}
 
-  const canonicalRoster = rosterView.roster;
-
-  if (detail.selection && detail.selectedRow) {
-    const selectedCanonicalRow = detail.selectedRow;
-    return <CanonicalDetailView
-      key={selectedCanonicalRow.id}
-      row={selectedCanonicalRow}
-      rows={detail.rows}
-      paletteSeed={detail.selection.id}
-      onStop={() => getTransport().stopCanonicalSubagent(selectedCanonicalRow.owningParentThreadId, selectedCanonicalRow.id)}
-      onTerminal={refreshRoster}
-      onBack={() => {
-        clearDetail(threadId);
-        window.requestAnimationFrame(() => {
-          if (detail.viewportRef.current) detail.viewportRef.current.scrollTop = detail.selection!.scrollTop;
-          document.querySelector<HTMLElement>(`[data-subagent-id="${CSS.escape(selectedCanonicalRow.id)}"]`)?.focus();
-        });
-      }}
-    />;
-  }
-
+function SubagentRosterList({
+  canonicalRoster,
+  narrative,
+  detail,
+  stopAll,
+  refreshRoster,
+}: {
+  readonly canonicalRoster: CanonicalSubagentRoster;
+  readonly narrative: { readonly active: readonly ProjectedSubagentRow[]; readonly finished: readonly ProjectedSubagentRow[] };
+  readonly detail: ReturnType<typeof useCanonicalDetail>;
+  readonly stopAll: ReturnType<typeof useStopAllControl>;
+  readonly refreshRoster: () => Promise<void>;
+}) {
   const activeRows = canonicalRoster.active;
   const doneRows = canonicalRoster.done;
   const eligibleStopAllCount = activeRows.filter((row) => row.canStop).length;
-  const isEmpty = activeRows.length === 0 && doneRows.length === 0;
+  const isEmpty = activeRows.length === 0 && doneRows.length === 0
+    && narrative.active.length === 0 && narrative.finished.length === 0;
   return (
     <section ref={stopAll.panelRef} tabIndex={-1} className="flex min-h-0 flex-1 flex-col" aria-label="Subagents">
       <ScrollArea className="min-h-0 flex-1" viewportRef={detail.viewportRef}>
@@ -691,12 +744,12 @@ export function SubagentsPanel({ threadId }: { readonly threadId: string }) {
           </p>
         ) : (
           <div className="pb-3">
-            {activeRows.length > 0 && (
+            {(activeRows.length + narrative.active.length) > 0 && (
               <section aria-labelledby="subagents-active-heading">
                 <div className="flex items-center gap-2 px-6 pb-1 pt-6">
                   <h2 id="subagents-active-heading" className="text-sm font-semibold text-foreground">Active</h2>
                   <Badge variant="ghost" size="sm" className="px-0 font-mono font-normal text-muted-foreground hover:bg-transparent">
-                    {activeRows.length}
+                    {activeRows.length + narrative.active.length}
                   </Badge>
                   {eligibleStopAllCount >= 2 && (
                     <Button
@@ -725,14 +778,22 @@ export function SubagentsPanel({ threadId }: { readonly threadId: string }) {
                       onTerminal={refreshRoster}
                     />
                   ))}
+                {narrative.active.map((row) => (
+                  <NarrativeRosterRow
+                    key={row.id}
+                    row={row}
+                    testId="subagent-roster-row"
+                    onSelect={() => detail.selectRow(row.id, "active")}
+                  />
+                ))}
               </section>
             )}
-            {doneRows.length > 0 && (
+            {(doneRows.length + narrative.finished.length) > 0 && (
               <section aria-labelledby="subagents-done-heading">
                 <div className="flex items-center gap-2 px-6 pb-1 pt-6">
                   <h2 id="subagents-done-heading" className="text-sm font-semibold text-foreground">Done</h2>
                   <Badge variant="ghost" size="sm" className="px-0 font-mono font-normal text-muted-foreground hover:bg-transparent">
-                    {doneRows.length}
+                    {doneRows.length + narrative.finished.length}
                   </Badge>
                 </div>
                 {canonicalRoster.done.map((row) => (
@@ -746,6 +807,14 @@ export function SubagentsPanel({ threadId }: { readonly threadId: string }) {
                       onTerminal={refreshRoster}
                     />
                   ))}
+                {narrative.finished.map((row) => (
+                  <NarrativeRosterRow
+                    key={row.id}
+                    row={row}
+                    testId="subagent-finished-row"
+                    onSelect={() => detail.selectRow(row.id, "finished")}
+                  />
+                ))}
               </section>
             )}
           </div>
@@ -765,4 +834,58 @@ export function SubagentsPanel({ threadId }: { readonly threadId: string }) {
       />
     </section>
   );
+}
+
+/** Renders the canonical child roster for the selected parent thread. */
+export function SubagentsPanel({ threadId }: { readonly threadId: string }) {
+  const { state: canonicalState, refresh: refreshRoster } = useCanonicalRoster(threadId);
+  const clearDetail = useClearSubagentDetail();
+  const detail = useCanonicalDetail(threadId, canonicalState);
+  const narrativeRoster = useNarrativeSubagentRoster(threadId);
+  const stopAll = useStopAllControl(threadId, canonicalState.roster, detail.rows, refreshRoster);
+  const rosterView = canonicalRosterPlaceholder(detail.isCurrentRequest, canonicalState);
+  if ("placeholder" in rosterView) return rosterView.placeholder;
+
+  const canonicalRoster = rosterView.roster;
+  // Canonical rows win identity claims; narrative rows cover in-thread
+  // providers (Devin, Claude Task) that never create canonical children.
+  const narrative = dedupeNarrativeRoster(narrativeRoster, detail.rows);
+  const selection = detail.selection;
+  if (!selection) {
+    return <SubagentRosterList
+      canonicalRoster={canonicalRoster}
+      narrative={narrative}
+      detail={detail}
+      stopAll={stopAll}
+      refreshRoster={refreshRoster}
+    />;
+  }
+  if (detail.selectedRow) {
+    const selectedCanonicalRow = detail.selectedRow;
+    return <CanonicalDetailView
+      key={selectedCanonicalRow.id}
+      row={selectedCanonicalRow}
+      rows={detail.rows}
+      paletteSeed={selection.id}
+      onStop={() => getTransport().stopCanonicalSubagent(selectedCanonicalRow.owningParentThreadId, selectedCanonicalRow.id)}
+      onTerminal={refreshRoster}
+      onBack={backToRoster(threadId, selection.scrollTop, detail.viewportRef, selectedCanonicalRow.id, clearDetail)}
+    />;
+  }
+  const selectedNarrativeRow = resolveNarrativeSubagentSelection(selection.id, narrative);
+  if (selectedNarrativeRow) {
+    return <NarrativeDetailView
+      key={selectedNarrativeRow.id}
+      row={selectedNarrativeRow}
+      paletteSeed={selection.id}
+      onBack={backToRoster(threadId, selection.scrollTop, detail.viewportRef, selectedNarrativeRow.id, clearDetail)}
+    />;
+  }
+  return <SubagentRosterList
+    canonicalRoster={canonicalRoster}
+    narrative={narrative}
+    detail={detail}
+    stopAll={stopAll}
+    refreshRoster={refreshRoster}
+  />;
 }

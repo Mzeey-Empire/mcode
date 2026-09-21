@@ -485,6 +485,51 @@ describe("projectSubagents", () => {
     });
   });
 
+  it("inherits the subagent alias from a child record when the marker has none", () => {
+    const roster = projectSubagents(undefined, [[
+      record({ id: "agent-marker", subagent_identity_key: null, sort_order: 0 }),
+      record({
+        id: "agent-lifecycle",
+        parent_tool_call_id: "agent-marker",
+        subagent_identity_key: "mcode:subagent:v1:alias:native-agent-1",
+        subagent_agent_id: "native-agent-1",
+        sort_order: 1,
+      }),
+      record({
+        id: "agent-child-read",
+        tool_name: "Read",
+        parent_tool_call_id: "agent-lifecycle",
+        sort_order: 2,
+      }),
+    ]]);
+
+    expect(roster.finished).toHaveLength(1);
+    expect(roster.finished[0]?.logicalIdentityKey).toBe("mcode:subagent:v1:alias:native-agent-1");
+    // A nested subagent's own alias must not be claimed by the outer marker.
+    const nested = projectSubagents(undefined, [[
+      record({ id: "outer-marker", subagent_identity_key: null, sort_order: 0 }),
+      record({
+        id: "outer-lifecycle",
+        parent_tool_call_id: "outer-marker",
+        subagent_identity_key: "mcode:subagent:v1:alias:outer-agent",
+        sort_order: 1,
+      }),
+      record({
+        id: "inner-marker",
+        parent_tool_call_id: "outer-lifecycle",
+        subagent_identity_key: null,
+        sort_order: 2,
+      }),
+      record({
+        id: "inner-lifecycle",
+        parent_tool_call_id: "inner-marker",
+        subagent_identity_key: "mcode:subagent:v1:alias:inner-agent",
+        sort_order: 3,
+      }),
+    ]]);
+    expect(nested.finished[0]?.logicalIdentityKey).toBe("mcode:subagent:v1:alias:outer-agent");
+  });
+
   it("keeps persisted children separate when exact identities differ on one provider path", () => {
     const roster = projectSubagents(undefined, [[
       record({
@@ -620,6 +665,22 @@ describe("projectSubagents", () => {
     expect(roster.active[0]?.detail.activity).toEqual([]);
     expect(roster.active[0]?.detail.transcript).toEqual([]);
     expect(roster.active[0]?.detail.subtreeIds).toEqual(["agent-a"]);
+  });
+
+  it("inherits the live marker's identity from a depth-1 lifecycle child", () => {
+    const roster = projectSubagents([
+      call({ id: "marker", toolName: "Agent", toolInput: { task: "survey" } }),
+      call({
+        id: "lifecycle",
+        toolName: "Agent",
+        toolInput: { agentId: "agent-1", nativeThreadId: "agent-1" },
+        parentToolCallId: "marker",
+      }),
+      call({ id: "child-read", toolName: "Read", parentToolCallId: "lifecycle" }),
+    ], []);
+
+    expect(roster.active[0]?.id).toBe("marker");
+    expect(roster.active[0]?.logicalIdentityKey).toBe("agent-1");
   });
 
   it("keeps explicit Subagent identity provenance distinct from the fallback label", () => {

@@ -274,7 +274,16 @@ describe("mapDevinAcpSessionNotification", () => {
         threadId: THREAD,
         toolCallId: "agent-1",
         toolName: "Agent",
-        toolInput: { task: "survey", title: "Survey repo", profile: "scout", is_background: false },
+        toolInput: {
+          task: "survey",
+          title: "Survey repo",
+          profile: "scout",
+          description: "survey",
+          subagentType: "scout",
+          is_background: false,
+          agentId: "agent-1",
+          nativeThreadId: "agent-1",
+        },
         parentToolCallId: "tc-parent",
       },
     ]);
@@ -300,6 +309,265 @@ describe("mapDevinAcpSessionNotification", () => {
       },
     ]);
     expect(state.pendingSubagentCallIds).toEqual([]);
+  });
+
+  it("copies task to description on run_subagent markers so narrative extractors find it", () => {
+    const state = createDevinAcpTurnState();
+    const events = mapDevinAcpSessionNotification(
+      notification(
+        toolCall("tc-parent", {
+          kind: "other",
+          rawInput: { task: "Survey fixture files" },
+          _meta: { "cognition.ai/inferenceToolName": "run_subagent" },
+        }),
+      ),
+      THREAD,
+      state,
+    );
+    expect(events[0]).toMatchObject({
+      toolName: "Agent",
+      toolInput: { task: "Survey fixture files", description: "Survey fixture files" },
+    });
+  });
+
+  it("does not park a subagent_started that arrives after its subagent_completed", () => {
+    const state = createDevinAcpTurnState();
+    mapDevinAcpSessionNotification(
+      notification(
+        toolCall("tc-parent", {
+          kind: "other",
+          _meta: { "cognition.ai/inferenceToolName": "run_subagent" },
+        }),
+      ),
+      THREAD,
+      state,
+    );
+    mapDevinAcpSessionNotification(
+      notification({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "agent-1",
+        _meta: { "cognition.ai/subagent_completed": { summary: "done", success: true } },
+      }),
+      THREAD,
+      state,
+    );
+    const started = mapDevinAcpSessionNotification(
+      notification({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "agent-1",
+        _meta: { "cognition.ai/subagent_started": { task: "survey" } },
+      }),
+      THREAD,
+      state,
+    );
+    expect(started[0]).toMatchObject({ type: "toolUse", toolCallId: "agent-1" });
+    expect(state.accumulator.pendingToolCalls.has("agent-1")).toBe(false);
+
+    mapDevinAcpSessionNotification(
+      notification({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "tc-parent",
+        status: "completed",
+        rawOutput: "done",
+      }),
+      THREAD,
+      state,
+    );
+    const late = mapDevinAcpSessionNotification(
+      notification({
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "final answer" },
+      }),
+      THREAD,
+      state,
+    );
+    expect(late[0]).toMatchObject({ isFinalResponse: true });
+  });
+
+  it("nests subagent_context child calls under the agent without blocking the final response", () => {
+    const state = createDevinAcpTurnState();
+    mapDevinAcpSessionNotification(
+      notification(
+        toolCall("tc-parent", {
+          kind: "other",
+          _meta: { "cognition.ai/inferenceToolName": "run_subagent" },
+        }),
+      ),
+      THREAD,
+      state,
+    );
+    mapDevinAcpSessionNotification(
+      notification({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "agent-1",
+        _meta: { "cognition.ai/subagent_started": { task: "survey" } },
+      }),
+      THREAD,
+      state,
+    );
+
+    const child = mapDevinAcpSessionNotification(
+      notification(
+        toolCall("read_0#abc", {
+          kind: "read",
+          _meta: {
+            "cognition.ai/inferenceToolName": "read",
+            "cognition.ai/subagent_context": { parentAgentId: "agent-1" },
+          },
+        }),
+      ),
+      THREAD,
+      state,
+    );
+    expect(child).toEqual([
+      {
+        type: "toolUse",
+        threadId: THREAD,
+        toolCallId: "read_0#abc",
+        toolName: "Read",
+        toolInput: { path: "file.ts" },
+        parentToolCallId: "agent-1",
+      },
+    ]);
+    // Child markers never receive a terminal update; they must not count as pending.
+    expect(state.accumulator.pendingToolCalls.has("read_0#abc")).toBe(false);
+    expect(state.subagentChildAgentByCallId.get("read_0#abc")).toBe("agent-1");
+
+    const completed = mapDevinAcpSessionNotification(
+      notification({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "agent-1",
+        _meta: { "cognition.ai/subagent_completed": { summary: "done", success: true } },
+      }),
+      THREAD,
+      state,
+    );
+    expect(completed.map((e) => e.type)).toEqual(["toolResult", "toolResult"]);
+    expect(completed[0]).toMatchObject({ toolCallId: "read_0#abc", isError: false });
+    expect(completed[1]).toMatchObject({ toolCallId: "agent-1", output: "done" });
+    expect(state.subagentChildAgentByCallId.size).toBe(0);
+
+    mapDevinAcpSessionNotification(
+      notification({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "tc-parent",
+        status: "completed",
+        rawOutput: "Subagent completed",
+      }),
+      THREAD,
+      state,
+    );
+    const late = mapDevinAcpSessionNotification(
+      notification({
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "final answer" },
+      }),
+      THREAD,
+      state,
+    );
+    expect(late[0]).toMatchObject({ isFinalResponse: true });
+    expect(state.accumulator.assistantFinalText).toBe("final answer");
+  });
+
+  it("marks flushed child results as errors when the subagent fails", () => {
+    const state = createDevinAcpTurnState();
+    mapDevinAcpSessionNotification(
+      notification(
+        toolCall("child-1", {
+          kind: "read",
+          _meta: { "cognition.ai/subagent_context": { parentAgentId: "agent-9" } },
+        }),
+      ),
+      THREAD,
+      state,
+    );
+    const completed = mapDevinAcpSessionNotification(
+      notification({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "agent-9",
+        _meta: { "cognition.ai/subagent_completed": { summary: "boom", success: false } },
+      }),
+      THREAD,
+      state,
+    );
+    expect(completed[0]).toMatchObject({ toolCallId: "child-1", isError: true });
+    expect(completed[1]).toMatchObject({ toolCallId: "agent-9", isError: true });
+  });
+
+  it("keeps the parent link when a marker-only child gets its input later", () => {
+    const state = createDevinAcpTurnState();
+    mapDevinAcpSessionNotification(
+      notification(
+        toolCall("child-2", {
+          rawInput: {},
+          _meta: { "cognition.ai/subagent_context": { parentAgentId: "agent-1" } },
+        }),
+      ),
+      THREAD,
+      state,
+    );
+    const merge = mapDevinAcpSessionNotification(
+      notification({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "child-2",
+        status: "in_progress",
+        rawInput: { path: "late.ts" },
+      }),
+      THREAD,
+      state,
+    );
+    expect(merge).toEqual([
+      {
+        type: "toolUse",
+        threadId: THREAD,
+        toolCallId: "child-2",
+        toolName: "Tool",
+        toolInput: { path: "late.ts" },
+        parentToolCallId: "agent-1",
+      },
+    ]);
+  });
+
+  it("resolves a child marker that arrives after its subagent completed", () => {
+    const state = createDevinAcpTurnState();
+    mapDevinAcpSessionNotification(
+      notification({
+        sessionUpdate: "tool_call_update",
+        toolCallId: "agent-1",
+        _meta: { "cognition.ai/subagent_completed": { summary: "done", success: false } },
+      }),
+      THREAD,
+      state,
+    );
+    const late = mapDevinAcpSessionNotification(
+      notification(
+        toolCall("child-3", {
+          _meta: { "cognition.ai/subagent_context": { parentAgentId: "agent-1" } },
+        }),
+      ),
+      THREAD,
+      state,
+    );
+    expect(late.map((e) => e.type)).toEqual(["toolUse", "toolResult"]);
+    expect(late[1]).toMatchObject({ toolCallId: "child-3", isError: true });
+    expect(state.subagentChildAgentByCallId.size).toBe(0);
+    expect(state.accumulator.pendingToolCalls.has("child-3")).toBe(false);
+  });
+
+  it("treats a root-level subagent_context as top-level", () => {
+    const state = createDevinAcpTurnState();
+    const events = mapDevinAcpSessionNotification(
+      notification(
+        toolCall("root-1", {
+          _meta: { "cognition.ai/subagent_context": { parentAgentId: "root" } },
+        }),
+      ),
+      THREAD,
+      state,
+    );
+    expect(events[0]).toMatchObject({ toolCallId: "root-1" });
+    expect(events[0]).not.toHaveProperty("parentToolCallId");
+    expect(state.accumulator.pendingToolCalls.has("root-1")).toBe(true);
   });
 
   it("maps usage_update into a ContextEstimate", () => {

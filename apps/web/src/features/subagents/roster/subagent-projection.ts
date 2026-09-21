@@ -318,7 +318,7 @@ interface PersistedSubtree {
   readonly activityTruncated: boolean;
 }
 
-type ProjectedSubagentRow = LiveSubagentRow | FinishedSubagentRow;
+export type ProjectedSubagentRow = LiveSubagentRow | FinishedSubagentRow;
 
 interface IndexedSubagentRow {
   readonly row: ProjectedSubagentRow;
@@ -477,6 +477,13 @@ function liveSubagentDetail(
   };
 }
 
+function liveMarkerIdentityKey(subtree: LiveSubtree): string | undefined {
+  const child = subtree.descendants.find(
+    ({ call, depth }) => depth === 1 && resolveSubagentExactIdentity(call.toolInput) !== undefined,
+  );
+  return child ? resolveSubagentExactIdentity(child.call.toolInput) : undefined;
+}
+
 function liveSubagentRow(
   indexedAgent: IndexedToolCall,
   childrenByParent: ReadonlyMap<string, readonly IndexedToolCall[]>,
@@ -496,7 +503,10 @@ function liveSubagentRow(
     id: agent.id,
     memberCallIds: [agent.id],
     providerAgentKey,
-    logicalIdentityKey: exactIdentityForCall(agent, providerAgentKey),
+    // The invocation marker carries no identity of its own; a depth-1
+    // lifecycle call (e.g. Devin's subagent_started) is the click target.
+    logicalIdentityKey: exactIdentityForCall(agent, providerAgentKey)
+      ?? liveMarkerIdentityKey(subtree),
     ...subagentIdentity(agent),
     task: boundedDisplayText(extractSubagentDescription(agent), MAX_TASK_LENGTH),
     startedAt,
@@ -609,6 +619,17 @@ function reconciledIdentity(record: ToolCallRecord, liveRow: ProjectedSubagentRo
     : { identity: liveRow.identity, hasExplicitIdentity: true };
 }
 
+/**
+ * The invocation marker carries no identity of its own; the direct child
+ * record holding an identity key is the alias a detail click targets.
+ */
+function markerIdentityKey(record: ToolCallRecord, subtree: PersistedSubtree): string | undefined {
+  return nonEmptyString(record.subagent_identity_key)
+    ?? nonEmptyString(subtree.descendants.find(
+      ({ record: child, depth }) => depth === 1 && nonEmptyString(child.subagent_identity_key) !== undefined,
+    )?.record.subagent_identity_key);
+}
+
 function persistedSubagentRow(
   record: ToolCallRecord,
   childrenByParent: ReadonlyMap<string, readonly ToolCallRecord[]>,
@@ -618,18 +639,19 @@ function persistedSubagentRow(
   const startedAt = parsedTimestamp(record.started_at) ?? 0;
   const completedAt = parsedTimestamp(record.completed_at) ?? startedAt;
   const task = hydratedTask(record);
+  const subtree = persistedSubtree(record.id, childrenByParent);
   const base: SubagentRow = {
     id: record.id,
     memberCallIds: [record.id],
     providerAgentKey: nonEmptyString(record.provider_agent_key),
-    logicalIdentityKey: record.subagent_identity_key ?? undefined,
+    logicalIdentityKey: markerIdentityKey(record, subtree),
     ...reconciledIdentity(record, liveRow),
     task,
     startedAt,
     activity: boundedDisplayText(nonEmptyString(record.output_summary) ?? task, MAX_ACTIVITY_LENGTH),
     activityAt: record.status === "running" ? startedAt : completedAt,
     elapsedSeconds: elapsedSeconds(startedAt, record.status === "running" ? now : completedAt),
-    detail: liveRow?.detail ?? persistedSubagentDetail(record, persistedSubtree(record.id, childrenByParent)),
+    detail: liveRow?.detail ?? persistedSubagentDetail(record, subtree),
   };
   return record.status === "running" ? base : { ...base, status: record.status, completedAt };
 }

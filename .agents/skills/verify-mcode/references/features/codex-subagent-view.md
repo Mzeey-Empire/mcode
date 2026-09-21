@@ -19,7 +19,7 @@
 4. While it runs, open Subagents and confirm that the child is Active.
 5. Select the subagent from chat. Confirm that the panel opens that child, converts an underscored parent task such as `verify_ui_child` to `Verify ui child`, and uses the same glyph color.
 6. While the child is Active, confirm that its assistant text appears and grows in detail before the child moves to Done. The detail must not stay blank while the main chat streams text.
-7. Confirm that the parent's full delegated message and the child's reply appear in the transcript.
+7. Confirm that the parent's full delegated message and the child's reply appear in the transcript. V1 (`collabAgentToolCall`) carries the delegated prompt on the wire so the child thread gets a synthesized user message; V2 (`subAgentActivity`) never carries the prompt, so the child transcript starts at the child's first assistant item. The live check only requires the parent message when the delegation record's input carried it.
 8. Wait for completion. Confirm that the child moves to Done and shows Completed.
 9. Stop and restart Electron, reopen the same parent thread, and confirm that the child's final text appears once and remains Done with Completed.
 10. Compare the parent and child footers with their own tool records. Each footer must count only its displayed thread and turn, before and after reload.
@@ -43,12 +43,13 @@ Use the Electron workflow for visual proof. The runtime receipt does not prove t
 - Fail if the child never appears Active or never reaches Completed.
 - Fail if the canonical roster omits a descriptive parent task, repeats only the provider identity, or displays raw underscore separators.
 - Fail if the child thread omits the child's assistant marker.
-- Fail if the child thread omits the full message that the parent sent.
+- Fail if the child thread omits the full message that the parent sent, when the delegation call carried the prompt (V1). V2 runs skip this check; see Coverage gaps.
 - Fail visual proof if the child detail stays blank until completion after the child starts streaming text.
 - Fail visual proof if chat does not open the exact child or the glyph palette differs between chat and detail.
 
 ## Coverage gaps
 
 - Terra is the live V2 proof model. The legacy event shape is deterministic mapper coverage because current Codex decides which protocol item it emits.
+- V2 `subAgentActivity` does not carry the delegated prompt on the wire (`collaboration_actions.message` stays null), so the child's user message cannot be synthesized and `subagentParentMessageRetained` is skipped when the delegation record shows no prompt. Planned under the goals feature. Codex also emits `thread/goal/updated` and `thread/goal/cleared` for that feature; they are intentionally ignored until goals ship, so they must not surface "unrecognized update" notices.
 - The public runtime receipt proves persisted data and state. Electron is required for click, color, and application-restart evidence.
 - The automated checks do not bind child `textDelta` events to an open detail view. Electron proof must observe growing child text before completion.

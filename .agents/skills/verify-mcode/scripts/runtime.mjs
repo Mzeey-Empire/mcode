@@ -1243,6 +1243,7 @@ function createLiveReport(options) {
     subagentCompleted: false,
     subagentTaskRetained: false,
     subagentParentMessageRetained: false,
+    subagentParentMessagePromptAbsent: false,
     subagentMessageRetained: false,
     opencodeResume: null,
     stopResults: [],
@@ -1362,25 +1363,35 @@ async function observeSubagentLifecycle(run) {
       : null;
     if (!child) return false;
     childThreadId = child.id;
-    run.report.subagentCompleted = true;
-    run.report.subagentTaskRetained = hasDescriptiveSubagentTask(child);
-    const conversation = await run.socket.rpc("conversation.page", { threadId: child.id, limit: 100 }, run.proofDeadline);
-    run.report.subagentParentMessageRetained = hasMessageText(
-      conversation,
-      "user",
-      "VERIFY_SUBAGENT_PARENT_TASK",
-    );
-    run.report.subagentMessageRetained = hasAssistantText(conversation, "VERIFY_SUBAGENT_CHILD_MESSAGE");
-    return run.report.subagentActiveSeen
-      && run.report.subagentTaskRetained
-      && run.report.subagentParentMessageRetained
-      && run.report.subagentMessageRetained;
+    return recordSubagentChildReport(run, child);
   }, run.proofDeadline);
   if (verified) return;
   throw actionable(
     `The Codex subagent workflow was incomplete${childThreadId ? " for the recorded child" : ""}`,
     "Inspect the redacted receipt, Codex protocol trace, and canonical roster before retrying with Terra.",
   );
+}
+
+async function recordSubagentChildReport(run, child) {
+  run.report.subagentCompleted = true;
+  run.report.subagentTaskRetained = hasDescriptiveSubagentTask(child);
+  const conversation = await run.socket.rpc("conversation.page", { threadId: child.id, limit: 100 }, run.proofDeadline);
+  run.report.subagentParentMessageRetained = hasMessageText(
+    conversation,
+    "user",
+    "VERIFY_SUBAGENT_PARENT_TASK",
+  );
+  run.report.subagentMessageRetained = hasAssistantText(conversation, "VERIFY_SUBAGENT_CHILD_MESSAGE");
+  if (!run.report.subagentParentMessageRetained) {
+    // The V2 subAgentActivity spawn never carries the delegated prompt, so no
+    // child user message can be synthesized. Require retention only when the
+    // delegation call itself carried the prompt (V1 collabAgentToolCall).
+    run.report.subagentParentMessagePromptAbsent = !(await delegationPromptCarried(run, child.id));
+  }
+  return run.report.subagentActiveSeen
+    && run.report.subagentTaskRetained
+    && (run.report.subagentParentMessageRetained || run.report.subagentParentMessagePromptAbsent)
+    && run.report.subagentMessageRetained;
 }
 
 function hasDescriptiveSubagentTask(child) {
@@ -1902,6 +1913,32 @@ export function isOpenCodeSessionInvalidatedEvent(event) {
   return event?.type === "system" && event.subtype === OPENCODE_SESSION_INVALIDATED_SUBTYPE;
 }
 
+/** Whether the parent delegation record for this child carried the task prompt. */
+async function delegationPromptCarried(run, childThreadId) {
+  const page = await run.socket.rpc("conversation.page", { threadId: run.threadId, limit: 100 }, run.proofDeadline);
+  const messages = Array.isArray(page?.messages) ? page.messages : [];
+  const childKey = `mcode:subagent:v1:child:${childThreadId}`;
+  for (const message of messages) {
+    if (!message?.id) continue;
+    const records = await run.socket.rpc("toolCallRecord.list", { messageId: message.id }, run.proofDeadline);
+    if (delegationRecordCarriesPrompt(records, childKey)) return true;
+  }
+  return false;
+}
+
+// The prompt lives in subagent_prompt (input.prompt, up to 4000 chars).
+// input_summary only holds the truncated description line, so the marker
+// can never appear there.
+function delegationRecordCarriesPrompt(records, childKey) {
+  for (const record of records ?? []) {
+    const key = record.subagent_identity_key ?? record.subagentIdentityKey;
+    if (key !== childKey) continue;
+    const prompt = record.subagent_prompt ?? record.subagentPrompt ?? "";
+    return typeof prompt === "string" && prompt.includes("VERIFY_SUBAGENT_PARENT_TASK");
+  }
+  return false;
+}
+
 function hasDurableAssistant(value) {
   return Array.isArray(value?.messages)
     && value.messages.some((message) => message?.role === "assistant"
@@ -1959,6 +1996,7 @@ function redactReceipt(report) {
     subagentCompleted: report.subagentCompleted,
     subagentTaskRetained: report.subagentTaskRetained,
     subagentParentMessageRetained: report.subagentParentMessageRetained,
+    subagentParentMessagePromptAbsent: report.subagentParentMessagePromptAbsent,
     subagentMessageRetained: report.subagentMessageRetained,
     opencodeResume: report.opencodeResume,
     stopResults: report.stopResults.map((result) => ({ status: result?.status ?? null, phase: result?.snapshot?.phase ?? null, dispatchState: result?.dispatchState ?? null })),

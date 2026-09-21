@@ -6,6 +6,7 @@
 - A `tool_call` lifecycle marker renders its tool card at invocation position, even when `rawInput` is empty.
 - A later `tool_call_update` carrying `rawInput` merges enriched input into the existing card instead of appending a duplicate.
 - Out-of-order completions keep invocation order: cards appear where their markers arrived, not where they finished.
+- Devin subagent flow: a `run_subagent` marker, `subagent_started`/`subagent_completed` agent updates, and child `tool_call` markers tagged `subagent_context.parentAgentId` render as a nested subagent card whose children resolve when the subagent completes, and the trailing text lands as the final response.
 - A reload or reopen shows the same thought/tool/response order from durable narrative data.
 
 ## How to get to it (user POV)
@@ -28,17 +29,20 @@ bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs desktop acp-narrative s
 
 Start a fresh direct Cursor thread under `.dev/fixture-repo` through the Composer and send any prompt. The fixture answers `initialize`, `session/new`, and `session/prompt`, then emits two `agent_thought_chunk` updates, three `tool_call` markers (`fx-read`, `fx-search`, `fx-bash`), a mid-stream input merge for `fx-search`, a data-less progress update for `fx-read`, and completions in the order `fx-search`, `fx-bash`, `fx-read`. One fixture process supports repeated prompts; restart it only if the session dies.
 
+For the Devin subagent journey, set the wrapper as `provider.cli.devin`, provide `WINDSURF_API_KEY=fixture` in the runtime environment, and send a prompt containing the word `subagent`. The fixture then appends a `run_subagent` marker (`fx-agent`), a `subagent_started` update keyed `fx-agent-1`, two child markers (`fx-child-read`, `fx-child-search`) carrying `subagent_context.parentAgentId: "fx-agent-1"` and no terminal update of their own, a `subagent_completed` update, the `fx-agent` completion, and the final chunk.
+
 ## Proof
 
 1. During the turn, assert two thought rows render the fixture reasoning text before any tool card, and that three tool cards appear in marker order `Read`, `Grep`/`Search`, `Bash`/`Terminal` while still running.
 2. Assert `fx-search` shows its merged `pattern` input before its completion, and `fx-read` shows `src/fixture.ts` only at completion.
 3. After completion, capture the stable transcript: reasoning, then the three cards in invocation order, then the final assistant text `ACP fixture turn complete.` Screenshot it.
-4. Reload the thread and compare `narrative.get` / `message.list` order with the rendered rows. Retain screenshots and the redacted receipt under `.dev/verification/acp-narrative/`.
-5. Restore the prior provider CLI path, then run `desktop acp-narrative cleanup --confirm-cleanup`.
+4. For the subagent journey, additionally assert: the `fx-agent` Agent card contains a nested `fx-agent-1` subagent card; `fx-child-read` and `fx-child-search` render under `fx-agent-1` and show completed state after `subagent_completed` (no spinner); `fx-agent-1` shows the summary `Fixture subagent finished its survey.`; and the final assistant text renders as the turn's final response, not inside a stuck thinking block.
+5. Reload the thread and compare `narrative.get` / `message.list` order with the rendered rows. Retain screenshots and the redacted receipt under `.dev/verification/acp-narrative/`.
+6. Restore the prior provider CLI path, then run `desktop acp-narrative cleanup --confirm-cleanup`.
 
 ## Gotchas
 
-- The fixture does not emit permission prompts, plans, subagent updates, or usage data; it proves ordering and thought rendering only.
+- The fixture does not emit permission prompts, plans, or usage data; it proves ordering, thought rendering, and the Devin subagent child lifecycle only.
 - A data-less `in_progress` update for `fx-read` must not consume the input merge: the real path still merges at the terminal update. The `check` command's fixture test pins the emitted sequence; the mapper tests pin the event translation.
 - `runtime check --phase acp` runs the Cursor and Devin mapper suites plus the ACP session-runtime suite as the deterministic regression gate; use it when no Electron session is available.
 - Devin mode selection and plan-mode restore are covered by focused adapter tests, not this fixture.
