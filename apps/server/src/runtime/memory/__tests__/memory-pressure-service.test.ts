@@ -126,7 +126,7 @@ describe("MemoryPressureService", () => {
 
     await vi.advanceTimersByTimeAsync(30_000);
 
-    expect(db.run).toHaveBeenCalledWith("PRAGMA optimize");
+    expect(db.run).toHaveBeenCalledWith("PRAGMA optimize = 0x10002");
     expect(db.run).toHaveBeenCalledWith("PRAGMA shrink_memory");
   });
 
