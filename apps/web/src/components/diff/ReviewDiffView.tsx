@@ -26,6 +26,7 @@ import { parseFirstHunkLine } from "@/lib/parse-first-hunk-line";
 import { useShikiTheme } from "@/hooks/useTheme";
 import { cn } from "@/lib/utils";
 import { FileActionBar } from "./FileActionBar";
+import { DiffCommentEditor } from "./DiffCommentEditor";
 import { DiffPreview } from "./DiffPreview";
 
 /** Line-annotation payloads rendered inside a diff item. */
@@ -177,6 +178,7 @@ function itemSignature(
   item: DiffItem,
   patch: string | undefined,
   noteById: ReadonlyMap<string, string>,
+  editingAnnotationId: string | undefined,
 ): string {
   const rows =
     item.type !== "diff"
@@ -186,7 +188,8 @@ function itemSignature(
             const meta = a.metadata;
             const note =
               meta?.kind === "saved" ? noteById.get(meta.annotationId) ?? "" : "";
-            return `${a.side}:${a.lineNumber}:${meta?.kind ?? ""}:${note}`;
+            const editing = meta?.kind === "saved" && meta.annotationId === editingAnnotationId;
+            return `${a.side}:${a.lineNumber}:${meta?.kind ?? ""}:${editing ? "E" : ""}:${note}`;
           })
           .join(";");
   return `${item.collapsed ? 1 : 0}|${patch ?? ""}|${rows}`;
@@ -273,8 +276,27 @@ export function ReviewDiffView({
     const ws = s.workspaces.find((w) => w.id === thread?.workspace_id);
     return ws?.path ?? null;
   });
+  const workspaceId = useWorkspaceStore((s) => {
+    const thread = s.threads.find((t) => t.id === threadId);
+    return thread?.workspace_id ?? s.activeWorkspaceId ?? undefined;
+  });
+  const providerId = useWorkspaceStore(
+    (s) => s.threads.find((t) => t.id === threadId)?.provider,
+  );
 
-
+  // Editing can start from the composer chip while the file sits collapsed;
+  // derive the expanded set so the inline editor row actually mounts.
+  const editingAnnotation =
+    editTarget?.kind === "edit"
+      ? savedAnnotations.find((a) => a.id === editTarget.annotationId)
+      : undefined;
+  const effectiveExpanded = useMemo(
+    () =>
+      editingAnnotation && !expanded.has(editingAnnotation.filePath)
+        ? new Set(expanded).add(editingAnnotation.filePath)
+        : expanded,
+    [expanded, editingAnnotation],
+  );
 
   const fileDiffs = useMemo(() => {
     const out: Record<string, FileDiffMetadata> = {};
@@ -293,7 +315,7 @@ export function ReviewDiffView({
   useEffect(() => {
     const transport = getTransport();
     for (const file of files) {
-      if (!expanded.has(file.path) || patches[file.path] !== undefined) continue;
+      if (!effectiveExpanded.has(file.path) || patches[file.path] !== undefined) continue;
       const path = file.path;
       void loadFileDiff(transport, source, id, path, threadId)
         .then((result) => {
@@ -305,7 +327,7 @@ export function ReviewDiffView({
           setPatches((prev) => (prev[path] === undefined ? { ...prev, [path]: "" } : prev));
         });
     }
-  }, [expanded, files, id, patches, source, threadId]);
+  }, [effectiveExpanded, files, id, patches, source, threadId]);
 
   // Bulk expand/collapse arrives as a store command; subscriptions run outside
   // the render pass, unlike an effect watching the nonce.
@@ -384,23 +406,22 @@ export function ReviewDiffView({
       });
       annotationsByFile.set(editTarget.filePath, list);
     }
-
     return files.map((file) => {
       const item = buildItem({
         file,
-        isExpanded: expanded.has(file.path),
+        isExpanded: effectiveExpanded.has(file.path),
         patch: patches[file.path],
         fileDiff: fileDiffs[file.path],
         annotations: annotationsByFile.get(file.path) ?? [],
         previewMode: previewPaths.has(file.path),
       });
-      const sig = itemSignature(item, patches[file.path], noteById);
+      const sig = itemSignature(item, patches[file.path], noteById, editingAnnotation?.id);
       const prev = itemVersions.current.get(file.path);
       const version = prev?.sig === sig ? prev.version : (prev?.version ?? 0) + 1;
       itemVersions.current.set(file.path, { sig, version });
       return { ...item, version };
     });
-  }, [files, expanded, patches, fileDiffs, previewPaths, savedAnnotations, editTarget]);
+  }, [files, effectiveExpanded, patches, fileDiffs, previewPaths, savedAnnotations, editTarget, editingAnnotation]);
 
   // Pierre merges loaded files into the diff metadata, so both sides must be
   // the exact contents the patch was generated against — mismatched contents
@@ -461,6 +482,64 @@ export function ReviewDiffView({
     [fileDiffs, threadId],
   );
 
+  const closeEditor = useCallback(() => {
+    usePreviewAnnotationStore.getState().setDiffEditTarget(threadId, undefined);
+  }, [threadId]);
+
+  const renderCommentRow = (meta: Extract<DiffRowMeta, { kind: "draft" | "saved" }>) => {
+    if (meta.kind === "draft") {
+      if (!editTarget || editTarget.kind !== "draft") return null;
+      return (
+        <div className="mx-3 my-1.5 w-[calc(100%-1.5rem)]">
+          <DiffCommentEditor
+            threadId={threadId}
+            target={{
+              filePath: editTarget.filePath,
+              side: editTarget.side,
+              line: editTarget.line,
+              lineContent: editTarget.lineContent,
+            }}
+            workspaceId={workspaceId}
+            providerId={providerId}
+            onClose={closeEditor}
+          />
+        </div>
+      );
+    }
+    const saved = savedAnnotations.find((a) => a.id === meta.annotationId);
+    if (!saved) return null;
+    if (editingAnnotation?.id === saved.id) {
+      return (
+        <div className="mx-3 my-1.5 w-[calc(100%-1.5rem)]">
+          <DiffCommentEditor
+            threadId={threadId}
+            target={{
+              filePath: saved.filePath,
+              side: saved.side,
+              line: saved.line,
+              lineContent: saved.lineContent,
+            }}
+            annotation={saved}
+            workspaceId={workspaceId}
+            providerId={providerId}
+            onClose={closeEditor}
+          />
+        </div>
+      );
+    }
+    return (
+      <SavedAnnotationChip
+        annotation={saved}
+        onEdit={() =>
+          usePreviewAnnotationStore.getState().setDiffEditTarget(threadId, {
+            kind: "edit",
+            annotationId: saved.id,
+          })
+        }
+      />
+    );
+  };
+
   return (
     <CodeView
       ref={handleRef}
@@ -506,23 +585,7 @@ export function ReviewDiffView({
         if (meta.kind === "status") {
           return <DiffStatusRow status={meta.status} />;
         }
-        if (meta.kind === "draft") {
-          return <DraftAnchorRow />;
-        }
-        const saved = savedAnnotations.find((a) => a.id === (meta as { annotationId?: string }).annotationId);
-        if (!saved) return null;
-        return (
-          <SavedAnnotationChip
-            annotation={saved}
-            editing={editTarget?.kind === "edit" && editTarget.annotationId === saved.id}
-            onEdit={() =>
-              usePreviewAnnotationStore.getState().setDiffEditTarget(threadId, {
-                kind: "edit",
-                annotationId: saved.id,
-              })
-            }
-          />
-        );
+        return renderCommentRow(meta);
       }}
       renderGutterUtility={(getHoveredLine, item) => (
         <button
@@ -603,26 +666,12 @@ function DiffStatusRow({ status }: { readonly status: "loading" | "empty" | "bin
   );
 }
 
-/** Anchor marker at the line whose draft comment is being edited in the composer. */
-function DraftAnchorRow() {
-  return (
-    <div className="mx-3 my-1.5 flex w-[calc(100%-1.5rem)] items-center gap-2 rounded-lg border border-dashed border-border/70 px-3 py-1.5 text-[11px] text-muted-foreground">
-      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-border/70 font-mono text-[10px] font-semibold">
-        +
-      </span>
-      New comment
-    </div>
-  );
-}
-
-/** Saved comment chip; click to edit it in the composer. */
+/** Saved comment chip; click to swap it for the inline editor. */
 function SavedAnnotationChip({
   annotation,
-  editing,
   onEdit,
 }: {
   readonly annotation: { readonly displayNumber: number; readonly note: string };
-  readonly editing: boolean;
   readonly onEdit: () => void;
 }) {
   return (
@@ -630,10 +679,7 @@ function SavedAnnotationChip({
       type="button"
       onClick={onEdit}
       aria-label={`Edit comment ${annotation.displayNumber}`}
-      className={cn(
-        "mx-3 my-1.5 flex w-[calc(100%-1.5rem)] items-start gap-2 rounded-lg bg-muted/45 px-3 py-2 text-left ring-1 ring-inset ring-border/60 transition-colors hover:bg-muted/60",
-        editing && "bg-muted/60 ring-ring/60",
-      )}
+      className="mx-3 my-1.5 flex w-[calc(100%-1.5rem)] items-start gap-2 rounded-lg bg-muted/45 px-3 py-2 text-left ring-1 ring-inset ring-border/60 transition-colors hover:bg-muted/60"
     >
       <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-foreground font-mono text-[10px] font-semibold tabular-nums text-background">
         {annotation.displayNumber}

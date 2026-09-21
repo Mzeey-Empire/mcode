@@ -18,8 +18,8 @@ import {
 } from "@/features/preview/state/previewAnnotationStore";
 
 /**
- * Unsaved note text kept outside React so it survives the composer attachment
- * unmounting when the edit target changes or the thread switches.
+ * Unsaved note text kept outside React so it survives pierre's virtualizer
+ * unmounting the annotation row while the user types or scrolls.
  */
 interface DiffCommentDraft {
   readonly note: string;
@@ -51,8 +51,8 @@ export interface DiffCommentEditorProps {
 }
 
 /**
- * Diff line comment editor docked in the composer attachment column. Renders
- * the same compact ComposerEditor, controls, and dismissal policy as the
+ * Diff line comment editor rendered inline at the annotated line. Uses the
+ * same compact ComposerEditor, controls, and dismissal policy as the
  * transcript "Add comment" feature; persistence lands in
  * `previewAnnotationStore.diffByThread`.
  */

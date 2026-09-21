@@ -34,7 +34,6 @@ import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore
 import { cn } from "@/lib/utils";
 import { ComposerAgentControls } from "./controls/ComposerAgentControls";
 import { ComposerNewThreadContext } from "./execution/ComposerNewThreadContext";
-import { DiffCommentEditorAttachment } from "./DiffCommentEditorAttachment";
 import { DiffCommentsComposerAttachment } from "./DiffCommentsComposerAttachment";
 import { SelectedTextCommentsComposerAttachment } from "./SelectedTextCommentsComposerAttachment";
 
@@ -370,14 +369,6 @@ function AnnotationAttachmentRow({
             }}
           />
         </div>
-      ) : null}
-      {model.workspaceId ? (
-        <DiffCommentEditorAttachment
-          scopeId={model.annotationScopeId}
-          workspaceId={model.workspaceId}
-          threadId={model.threadId}
-          providerId={model.effectiveProviderId}
-        />
       ) : null}
       {model.workspaceId && model.diffComments.length > 0 ? (
         <DiffCommentsComposerAttachment
