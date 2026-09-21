@@ -21,8 +21,9 @@ const OUTPUT_FLUSH_DELAY_MS = 2;
 const OUTPUT_PAUSE_QUEUE_BYTES = 768 * 1024;
 /** IPC queue level that resumes a pressure-paused PTY; the band below pause avoids flapping. */
 const OUTPUT_RESUME_QUEUE_BYTES = 512 * 1024;
-/** Per-session pending bound; beyond it the session is killed so one flood cannot wedge the host. */
-const SESSION_MAX_PENDING_OUTPUT_BYTES = 4 * 1024 * 1024;
+/** Per-session pending bound. Reachable only when PTY pause fails to stem output while IPC is
+ *  saturated for a sustained flood; the kill is a last resort so one session cannot OOM the host. */
+const SESSION_MAX_PENDING_OUTPUT_BYTES = 64 * 1024 * 1024;
 /** Longest an exited session may wait for pending output to drain before the exit publishes anyway. */
 const EXIT_OUTPUT_DEADLINE_MS = 2_000;
 

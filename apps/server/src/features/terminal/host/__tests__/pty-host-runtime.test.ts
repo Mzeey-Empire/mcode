@@ -424,7 +424,7 @@ describe("PtyHostProcessRuntime", () => {
     const events: PtyHostEvent[] = [];
     const runtime = await createRunningSession(pty, events, () => 900 * 1024);
 
-    pty.emitData("x".repeat(4 * 1024 * 1024 + 1));
+    pty.emitData("x".repeat(64 * 1024 * 1024 + 1));
     expect(pty.kill).toHaveBeenCalledOnce();
     await runtime.dispose();
     vi.useRealTimers();
