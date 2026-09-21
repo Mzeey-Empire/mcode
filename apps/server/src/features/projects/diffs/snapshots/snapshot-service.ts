@@ -5,6 +5,7 @@
  */
 
 import { injectable, inject } from "tsyringe";
+import { truncateUnifiedDiff } from "@mcode/shared";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
@@ -178,9 +179,7 @@ async function executeDiffBatches(
   return outputs;
 }
 
-function limitDiffLines(diff: string, maxLines: number | undefined): string {
-  return maxLines ? diff.split("\n").slice(0, maxLines).join("\n") : diff;
-}
+
 
 function collectDiffStats(
   outputs: readonly string[],
@@ -336,7 +335,7 @@ export class SnapshotService {
         refAfter,
         pathspecBatches,
       );
-      return limitDiffLines(outputs.join("\n"), maxLines);
+      return truncateUnifiedDiff(outputs.join("\n"), maxLines);
     } catch {
       return "";
     }

@@ -17,6 +17,7 @@ export {
 
 // Git utilities
 export { createTextPatch } from "./git/text-patch.js";
+export { truncateUnifiedDiff } from "./git/truncate-patch.js";
 export {
   validateWorktreeName,
   validateBranchName,
