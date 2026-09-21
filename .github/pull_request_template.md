@@ -1,13 +1,16 @@
 ## What
-<!-- Brief description of the change -->
+<!-- Describe the previous state, what works now, how it was verified, and any important limits or rollout details. Use short paragraphs. -->
 
 ## Why
-<!-- Motivation and context -->
+<!-- Explain who benefits or what problem, failure, or decision this change addresses. -->
 
-## Key Changes
-<!-- Add bullet points describing the key changes -->
--
+## UI Changes
+<!-- If this PR changes UI, include clear before/after screenshots.
+     If the change involves motion or interaction, include a short video.
+     Delete this section if not applicable. -->
 
 ## Config Changes
-<!-- If any env vars, settings, or secrets were added/changed/removed -->
-None
+<!-- Env vars, settings, or secrets added, changed, or removed. Delete this section if none. -->
+
+## Review Notes
+<!-- Call out documentation, security, database migrations, rollout steps, and known gaps. Write `None` if none apply. -->

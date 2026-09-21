@@ -35,6 +35,10 @@ Report desktop proof, server proof, and focused tests separately. A missing
 feature-specific proof command is a coverage gap, not proof that the desktop
 cannot be tested.
 
+PRs with UI changes need before and after evidence — screenshots, or a short
+video when the change is a transition or flow. The Electron live-testing skill
+captures both for the PR body.
+
 ## Commands
 
 Run `bun .agents/skills/verify-mcode/scripts/verify-mcode.mjs --help` for the command reference.

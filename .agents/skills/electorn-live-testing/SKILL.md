@@ -77,6 +77,30 @@ Warm each path before timing it. Record multiple samples with `performance.now()
 
 Store screenshots, logs, and measurements under `.dev/verification/`. Keep exploratory specifications under `.dev/playwright-scratch/`; do not commit them.
 
+## Record before and after evidence
+
+UI changes carry a before and an after capture into the PR. Take the before capture before editing renderer code, or run the base build; keep conditions identical across both — same window size, same workflow, same data.
+
+Photos are `electronPage.screenshot({ path })` under `.dev/verification/`. For video:
+
+1. Run `bun .agents/skills/electorn-live-testing/scripts/ensure-ffmpeg.mjs` to resolve an ffmpeg binary into the scratch install.
+2. Start the recorder on the live session, drive the workflow, then stop:
+
+   ```js
+   var videoRecorder = await import(
+     "./.agents/skills/electorn-live-testing/scripts/record-video.mjs"
+   );
+   var recording = await videoRecorder.startVideoRecording(electronSession, {
+     outPath: ".dev/verification/<name>.mp4",
+   });
+   // ... drive the UI ...
+   nodeRepl.write(await recording.stop());
+   ```
+
+The screencast captures web contents only — no native menus or OS dialogs — and emits frames only on repaint, so interact before stopping or the clip is empty. For window-level capture use `ffmpeg -f gdigrab -i "title=<window title>"` with the title from `electronPage.title()`. `docs/research/electron-video-capture.md` covers the approach and the rejected alternatives.
+
+Keep clips to 10–20 seconds; GitHub caps free-plan video attachments at 10 MB. Attach at creation with `gh pr create --attach <file>` so evidence lands in the PR body, not in a follow-up comment — and confirm the upload renders. A local path is not evidence.
+
 Main-process and preload changes require a rebuild and clean Electron relaunch. Renderer-only edits can use hot reload for iteration, but final lifecycle evidence requires a clean relaunch so stale guest or generation state cannot mask a failure.
 
 ## Close the owned session
