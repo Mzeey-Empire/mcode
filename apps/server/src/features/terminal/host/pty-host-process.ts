@@ -3,7 +3,6 @@ import type { HostRuntime } from "@mcode/shared/node/host-runtime";
 import {
   PTY_HOST_MAX_MESSAGE_BYTES,
   PTY_HOST_MAX_RETAINED_RECORDS,
-  PtyHostEventSchema,
   type PtyHostEvent,
 } from "./pty-host-protocol.js";
 import { PtyHostProcessRuntime } from "./pty-host-runtime.js";
@@ -85,17 +84,17 @@ export function runPtyHostProcess(hostRuntime: HostRuntime): PtyHostProcessRunti
     process.exitCode = 1;
     process.disconnect?.();
   };
+  // The server revalidates every event on receipt; the host trusts its own producer shapes.
   const publish = (event: PtyHostEvent): void => {
-    const validated = PtyHostEventSchema().parse(event);
     if (!process.connected || !process.send) {
       throw new Error("PTY host IPC channel is unavailable");
     }
-    const eventBytes = NodeBuffer.Buffer.byteLength(JSON.stringify(validated), "utf8");
+    const eventBytes = NodeBuffer.Buffer.byteLength(JSON.stringify(event), "utf8");
     if (outboundBytes + eventBytes > MAX_IPC_QUEUE_BYTES) {
       throw new Error("PTY host event queue exceeds 1 MiB");
     }
     outboundBytes += eventBytes;
-    process.send(validated, (error) => {
+    process.send(event, (error) => {
       outboundBytes = Math.max(0, outboundBytes - eventBytes);
       if (error) void failHost(error);
     });

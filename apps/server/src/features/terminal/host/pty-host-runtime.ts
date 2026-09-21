@@ -15,6 +15,17 @@ import { createPtyProcessScope } from "./pty-process-scope.js";
 
 const nativeRequire = NodeModule.createRequire(import.meta.url);
 const MAX_SESSIONS = 20;
+/** Batching window that coalesces PTY bursts into fewer IPC output events. */
+const OUTPUT_FLUSH_DELAY_MS = 2;
+/** IPC queue level (inbound pending + outbound in-flight) that pauses PTY reads until the pipe drains. */
+const OUTPUT_PAUSE_QUEUE_BYTES = 768 * 1024;
+/** IPC queue level that resumes a pressure-paused PTY; the band below pause avoids flapping. */
+const OUTPUT_RESUME_QUEUE_BYTES = 512 * 1024;
+/** Per-session pending bound. Reachable only when PTY pause fails to stem output while IPC is
+ *  saturated for a sustained flood; the kill is a last resort so one session cannot OOM the host. */
+const SESSION_MAX_PENDING_OUTPUT_BYTES = 64 * 1024 * 1024;
+/** Longest an exited session may wait for pending output to drain before the exit publishes anyway. */
+const EXIT_OUTPUT_DEADLINE_MS = 2_000;
 
 /** Containment operations owned by one PTY host session. */
 export interface PtyProcessScope {
@@ -38,12 +49,20 @@ export interface PtyHostProcessRuntimeOptions {
 }
 
 interface HostSession {
+  readonly sessionId: string;
   readonly pty: IPty;
   readonly scope: PtyProcessScope;
   readonly dataDisposable: { dispose(): void };
   readonly exitDisposable: { dispose(): void };
   commandSeq: bigint;
   outputSeq: bigint;
+  pendingOutput: NodeBuffer.Buffer[];
+  pendingOutputBytes: number;
+  flushTimer: ReturnType<typeof setTimeout> | null;
+  pausedForPressure: boolean;
+  pressureRetryScheduled: boolean;
+  exited: { readonly code: number; readonly signal: number | null } | null;
+  exitDeadline: ReturnType<typeof setTimeout> | null;
   closeReason:
     | "natural"
     | "user-close"
@@ -97,17 +116,17 @@ export class PtyHostProcessRuntime {
       case "command.resize":
         this.applyCommand(message);
         return;
-      case "inspectChildren":
+      case "inspectChildren": {
+        const session = this.requireSession(message.sessionId);
         this.options.publish({
           contractVersion: 1,
           kind: "children",
           sessionId: message.sessionId,
           hostGeneration: message.hostGeneration,
-          hasChildren: await this.requireSession(
-            message.sessionId,
-          ).scope.hasChildren(),
+          hasChildren: await session.scope.hasChildren(),
         });
         return;
+      }
       case "close":
         await this.closeSession(
           message.sessionId,
@@ -136,6 +155,10 @@ export class PtyHostProcessRuntime {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     this.heartbeatTimer = null;
     for (const session of this.sessions.values()) {
+      if (session.flushTimer !== null) clearTimeout(session.flushTimer);
+      if (session.exitDeadline !== null) clearTimeout(session.exitDeadline);
+      session.pendingOutput = [];
+      session.pendingOutputBytes = 0;
       session.dataDisposable.dispose();
       session.exitDisposable.dispose();
       session.scope.dispose();
@@ -199,10 +222,18 @@ export class PtyHostProcessRuntime {
       resolveExit = resolve;
     });
     const session: HostSession = {
+      sessionId: message.sessionId,
       pty,
       scope,
       commandSeq: 0n,
       outputSeq: 0n,
+      pendingOutput: [],
+      pendingOutputBytes: 0,
+      flushTimer: null,
+      pausedForPressure: false,
+      pressureRetryScheduled: false,
+      exited: null,
+      exitDeadline: null,
       closeReason: "natural",
       exitPromise,
       resolveExit,
@@ -270,6 +301,8 @@ export class PtyHostProcessRuntime {
     >,
   ): void {
     const session = this.requireSession(message.sessionId);
+    // The PTY is dead and only its exit event is pending; writing would throw and kill the host.
+    if (session.exited) return;
     const sequence = BigInt(message.commandSeq);
     if (sequence !== session.commandSeq + 1n)
       throw new Error("PTY command sequence is out of order");
@@ -294,23 +327,120 @@ export class PtyHostProcessRuntime {
     const session = this.sessions.get(sessionId);
     if (!session) return;
     const bytes = NodeBuffer.Buffer.isBuffer(data) ? data : NodeBuffer.Buffer.from(data, "utf8");
-    for (
-      let offset = 0;
-      offset < bytes.length;
-      offset += PTY_HOST_MAX_DATA_BYTES
-    ) {
-      const chunk = bytes.subarray(offset, offset + PTY_HOST_MAX_DATA_BYTES);
+    if (bytes.length === 0) return;
+    session.pendingOutput.push(bytes);
+    session.pendingOutputBytes += bytes.length;
+    if (session.pendingOutputBytes > SESSION_MAX_PENDING_OUTPUT_BYTES) {
+      // The exit reports "natural" because the protocol has no flood-kill reason; bytes dropped here were never sequenced.
+      session.pendingOutput = [];
+      session.pendingOutputBytes = 0;
+      session.pty.kill();
+      return;
+    }
+    if (session.pendingOutputBytes >= PTY_HOST_MAX_DATA_BYTES) this.flushOutput(session);
+    this.scheduleFlush(session);
+  }
+
+  private scheduleFlush(session: HostSession): void {
+    if (
+      session.flushTimer !== null ||
+      session.pressureRetryScheduled ||
+      session.pendingOutputBytes === 0
+    ) return;
+    session.flushTimer = setTimeout(() => {
+      session.flushTimer = null;
+      if (this.sessions.get(session.sessionId) === session) this.flushOutput(session);
+      if (session.pendingOutputBytes > 0) this.scheduleFlush(session);
+    }, OUTPUT_FLUSH_DELAY_MS);
+  }
+
+  /** Emits pending output as ≤64 KiB events, applying PTY backpressure while IPC is saturated. */
+  private flushOutput(session: HostSession): void {
+    if (session.pendingOutputBytes === 0) {
+      this.maybePublishExit(session);
+      return;
+    }
+    if (this.isPressured()) {
+      this.applyPressure(session);
+      return;
+    }
+    const data = session.pendingOutput.length === 1
+      ? session.pendingOutput[0]!
+      : NodeBuffer.Buffer.concat(session.pendingOutput, session.pendingOutputBytes);
+    session.pendingOutput = [];
+    session.pendingOutputBytes = 0;
+    this.emitChunks(session, data);
+  }
+
+  private emitChunks(session: HostSession, data: NodeBuffer.Buffer): void {
+    for (let offset = 0; offset < data.length; offset += PTY_HOST_MAX_DATA_BYTES) {
+      if (this.isPressured()) {
+        // publish is synchronous, so the re-stashed remainder cannot be reentered mid-loop.
+        session.pendingOutput = [data.subarray(offset)];
+        session.pendingOutputBytes = data.length - offset;
+        this.applyPressure(session);
+        return;
+      }
+      const chunk = data.subarray(offset, offset + PTY_HOST_MAX_DATA_BYTES);
       if (chunk.length === 0) continue;
       session.outputSeq += 1n;
       this.options.publish({
         contractVersion: 1,
         kind: "output",
-        sessionId,
+        sessionId: session.sessionId,
         hostGeneration: this.requireGeneration(),
         outputSeq: session.outputSeq.toString(),
         dataBase64: chunk.toString("base64"),
       });
     }
+    this.maybePublishExit(session);
+  }
+
+  private isPressured(): boolean {
+    return (this.options.queueBytes?.() ?? 0) > OUTPUT_PAUSE_QUEUE_BYTES;
+  }
+
+  /** Pauses PTY reads and retries the flush once outbound IPC drains below the resume level. */
+  private applyPressure(session: HostSession): void {
+    if (!session.pausedForPressure) {
+      session.pausedForPressure = true;
+      session.pty.pause();
+    }
+    if (session.pressureRetryScheduled) return;
+    session.pressureRetryScheduled = true;
+    setTimeout(() => {
+      session.pressureRetryScheduled = false;
+      if (this.sessions.get(session.sessionId) !== session) return;
+      if ((this.options.queueBytes?.() ?? 0) > OUTPUT_RESUME_QUEUE_BYTES) {
+        this.applyPressure(session);
+        return;
+      }
+      session.pausedForPressure = false;
+      session.pty.resume();
+      this.flushOutput(session);
+      if (session.pendingOutputBytes > 0) this.scheduleFlush(session);
+    }, OUTPUT_FLUSH_DELAY_MS);
+  }
+
+  private maybePublishExit(session: HostSession): void {
+    if (!session.exited || session.pendingOutputBytes > 0) return;
+    if (session.exitDeadline !== null) {
+      clearTimeout(session.exitDeadline);
+      session.exitDeadline = null;
+    }
+    this.options.publish({
+      contractVersion: 1,
+      kind: "exit",
+      sessionId: session.sessionId,
+      hostGeneration: this.requireGeneration(),
+      finalOutputSeq: session.outputSeq.toString(),
+      code: session.exited.code,
+      signal: session.exited.signal,
+      reason: session.closeReason,
+    });
+    this.sessions.delete(session.sessionId);
+    session.resolveExit();
+    session.scope.dispose();
   }
 
   private async closeSession(
@@ -320,6 +450,12 @@ export class PtyHostProcessRuntime {
     graceful = false,
   ): Promise<void> {
     const session = this.requireSession(sessionId);
+    // The PTY already exited; only its pending exit event remains. Commands can no longer
+    // be applied, so closeSeq enforcement would reject a legitimate close and kill the host.
+    if (session.exited) {
+      await session.exitPromise;
+      return;
+    }
     if (
       closeSeq !== undefined &&
       BigInt(closeSeq) !== session.commandSeq + 1n
@@ -340,19 +476,18 @@ export class PtyHostProcessRuntime {
     if (!session) return;
     session.dataDisposable.dispose();
     session.exitDisposable.dispose();
-    session.scope.dispose();
-    this.sessions.delete(sessionId);
-    this.options.publish({
-      contractVersion: 1,
-      kind: "exit",
-      sessionId,
-      hostGeneration: this.requireGeneration(),
-      finalOutputSeq: session.outputSeq.toString(),
-      code,
-      signal,
-      reason: session.closeReason,
-    });
-    session.resolveExit();
+    session.exited = { code, signal };
+    // Scope stays alive while the exit event waits behind pending output; the deadline
+    // bounds that wait so a stalled IPC queue cannot wedge the serial close path.
+    this.flushOutput(session);
+    if (session.pendingOutputBytes > 0 && session.exitDeadline === null) {
+      session.exitDeadline = setTimeout(() => {
+        session.exitDeadline = null;
+        session.pendingOutput = [];
+        session.pendingOutputBytes = 0;
+        this.maybePublishExit(session);
+      }, EXIT_OUTPUT_DEADLINE_MS);
+    }
   }
 
   private publishHeartbeat(): void {

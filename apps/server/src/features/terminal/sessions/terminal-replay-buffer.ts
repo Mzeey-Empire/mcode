@@ -37,6 +37,8 @@ export interface TerminalHydration {
 interface RetainedChunk {
   readonly outputSeq: bigint;
   readonly data: Uint8Array;
+  /** Cumulative appended bytes through this chunk, including evicted prefixes. */
+  readonly endBytes: number;
 }
 
 interface RetainedCheckpoint {
@@ -56,7 +58,11 @@ export function replayBytesForScrollback(scrollback: number): number {
 /** Byte-bounded output retention and checkpoint selection for one shell session. */
 export class TerminalReplayBuffer {
   private readonly chunks: RetainedChunk[] = [];
+  /** Index of the oldest retained chunk; eviction advances it instead of shifting. */
+  private head = 0;
   private retainedBytes = 0;
+  private evictedBytes = 0;
+  private appendedBytes = 0;
   private latestOutputSeq = 0n;
   private checkpoint: RetainedCheckpoint | null = null;
 
@@ -73,7 +79,8 @@ export class TerminalReplayBuffer {
       throw new Error("Terminal replay output exceeds the batch bound");
     }
     const retained = Uint8Array.from(data);
-    this.chunks.push({ outputSeq, data: retained });
+    this.appendedBytes += retained.byteLength;
+    this.chunks.push({ outputSeq, data: retained, endBytes: this.appendedBytes });
     this.retainedBytes += retained.byteLength;
     this.latestOutputSeq = outputSeq;
     this.evictToCapacity();
@@ -87,7 +94,7 @@ export class TerminalReplayBuffer {
       checkpoint.data.byteLength < 1 ||
       checkpoint.data.byteLength > TERMINAL_MAX_CHECKPOINT_BYTES ||
       baseOutputSeq > this.latestOutputSeq ||
-      (this.chunks.length > 0 && baseOutputSeq + 1n < this.chunks[0]!.outputSeq)
+      (this.head < this.chunks.length && baseOutputSeq + 1n < this.chunks[this.head]!.outputSeq)
     ) {
       return "rejected";
     }
@@ -138,7 +145,7 @@ export class TerminalReplayBuffer {
     readonly checkpointRequested: boolean;
     readonly checkpoint: RetainedCheckpoint | null;
   } {
-    const retainedFromSeq = this.chunks[0]?.outputSeq ?? this.latestOutputSeq;
+    const retainedFromSeq = this.chunks[this.head]?.outputSeq ?? this.latestOutputSeq;
     const checkpointRequested = input.checkpointSeq !== null;
     const checkpoint = checkpointRequested && this.checkpoint?.baseOutputSeq === input.checkpointSeq
       ? this.checkpoint
@@ -146,7 +153,7 @@ export class TerminalReplayBuffer {
     return {
       retainedFromSeq,
       requestedWasEvicted:
-        this.chunks.length > 0 && input.requestedAfterSeq + 1n < retainedFromSeq,
+        this.head < this.chunks.length && input.requestedAfterSeq + 1n < retainedFromSeq,
       checkpointRequested,
       checkpoint,
     };
@@ -246,35 +253,50 @@ export class TerminalReplayBuffer {
   }
 
   private copyChunksAfter(outputSeq: bigint): ReadonlyArray<TerminalReplayChunk> {
-    return Object.freeze(
-      this.chunks
-        .filter((chunk) => chunk.outputSeq > outputSeq)
-        .map((chunk) => Object.freeze({
-          outputSeq: chunk.outputSeq.toString(),
-          data: Uint8Array.from(chunk.data),
-        })),
-    );
+    const first = this.chunks[this.head];
+    if (!first) return Object.freeze([]);
+    const start = Math.max(this.head, this.head + Number(outputSeq - first.outputSeq) + 1);
+    const output: TerminalReplayChunk[] = [];
+    for (let index = start; index < this.chunks.length; index += 1) {
+      const chunk = this.chunks[index]!;
+      output.push(Object.freeze({
+        outputSeq: chunk.outputSeq.toString(),
+        data: Uint8Array.from(chunk.data),
+      }));
+    }
+    return Object.freeze(output);
   }
 
   private bytesAfter(outputSeq: bigint): number {
-    return this.chunks.reduce(
-      (total, chunk) => total + (chunk.outputSeq > outputSeq ? chunk.data.byteLength : 0),
-      0,
-    );
+    const first = this.chunks[this.head];
+    if (!first || outputSeq < first.outputSeq) return this.retainedBytes;
+    const chunk = this.chunks[this.head + Number(outputSeq - first.outputSeq)];
+    if (!chunk) return 0;
+    return this.retainedBytes - (chunk.endBytes - this.evictedBytes);
   }
 
   private evictToCapacity(): void {
-    while (this.retainedBytes > this.capacityBytes && this.chunks.length > 0) {
-      const removed = this.chunks.shift();
-      if (removed) this.retainedBytes -= removed.data.byteLength;
+    while (this.retainedBytes > this.capacityBytes && this.head < this.chunks.length) {
+      const removed = this.chunks[this.head]!;
+      this.retainedBytes -= removed.data.byteLength;
+      this.evictedBytes += removed.data.byteLength;
+      this.head += 1;
+    }
+    if (this.head === this.chunks.length) {
+      this.chunks.length = 0;
+      this.head = 0;
+    } else if (this.head >= 1024 && this.head * 2 >= this.chunks.length) {
+      // Compact only when the ghost prefix is large enough to matter; small heads amortize.
+      this.chunks.splice(0, this.head);
+      this.head = 0;
     }
   }
 
   private invalidateUnusableCheckpoint(): void {
     if (
       this.checkpoint &&
-      ((this.chunks.length > 0 &&
-        this.checkpoint.baseOutputSeq + 1n < this.chunks[0]!.outputSeq) ||
+      ((this.head < this.chunks.length &&
+        this.checkpoint.baseOutputSeq + 1n < this.chunks[this.head]!.outputSeq) ||
         this.checkpoint.data.byteLength + this.bytesAfter(this.checkpoint.baseOutputSeq) >
           TERMINAL_MAX_REPLAY_BYTES)
     ) {
