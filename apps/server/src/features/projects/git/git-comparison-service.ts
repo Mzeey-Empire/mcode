@@ -1,5 +1,5 @@
 import { inject, injectable } from "tsyringe";
-import { logger } from "@mcode/shared";
+import { logger, truncateUnifiedDiff } from "@mcode/shared";
 import type {
   BranchComparison,
   GitCommit,
@@ -76,13 +76,13 @@ export class GitComparisonService {
       if (filePath) args.push("--", filePath);
       const { stdout } = await this.gitExecutor.exec(args, { timeout: 10_000 });
       const result = stdout.trim();
-      return truncate && maxLines ? result.split("\n").slice(0, maxLines).join("\n") : result;
+      return truncate ? truncateUnifiedDiff(result, maxLines) : result;
     };
     try {
       return await readDiff(`${sha}~1..${sha}`, true);
     } catch {
       try {
-        return await readDiff(`${EMPTY_TREE}..${sha}`, false);
+        return await readDiff(`${EMPTY_TREE}..${sha}`, true);
       } catch {
         return "";
       }
@@ -139,7 +139,7 @@ export class GitComparisonService {
     try {
       const { stdout } = await this.gitExecutor.exec(args, { timeout: 10_000 });
       const result = stdout.trim();
-      return maxLines ? result.split("\n").slice(0, maxLines).join("\n") : result;
+      return truncateUnifiedDiff(result, maxLines);
     } catch {
       return "";
     }
@@ -205,7 +205,7 @@ export class GitComparisonService {
     try {
       const { stdout } = await this.gitExecutor.exec(args, { timeout: 10_000 });
       const result = stdout.trim();
-      return maxLines ? result.split("\n").slice(0, maxLines).join("\n") : result;
+      return truncateUnifiedDiff(result, maxLines);
     } catch {
       return "";
     }

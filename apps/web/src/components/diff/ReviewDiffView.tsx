@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  parsePatchFiles,
   type DiffLineAnnotation,
   type FileContents,
   type FileDiffMetadata,
@@ -21,6 +20,7 @@ import {
 import type { ReviewFileChange } from "@mcode/contracts";
 import { getTransport } from "@/transport";
 import { loadFileDiff } from "@/lib/load-file-diff";
+import { FileDiffCache } from "@/lib/file-diff-cache";
 import { parseDiffLines, isMarkdownFile } from "@/lib/diff-parser";
 import { parseFirstHunkLine } from "@/lib/parse-first-hunk-line";
 import { useShikiTheme } from "@/hooks/useTheme";
@@ -298,18 +298,20 @@ export function ReviewDiffView({
     [expanded, editingAnnotation],
   );
 
+  // Reusing the parsed object keeps each CodeView item's render target
+  // identical across unrelated state changes; a fresh object under the same
+  // cacheKey makes pierre's virtualizer commit a diff its layout pass never
+  // prepared.
+  const diffCache = useRef(new FileDiffCache()).current;
   const fileDiffs = useMemo(() => {
     const out: Record<string, FileDiffMetadata> = {};
+    const scope = `${threadId}:${source}:${id}:${cacheVersion}`;
     for (const [path, patch] of Object.entries(patches)) {
-      const parsed = parsePatchFiles(patch).flatMap((p) => p.files);
-      if (parsed.length > 0) {
-        const fileDiff = parsed[0]!;
-        fileDiff.cacheKey = `${threadId}:${source}:${id}:${cacheVersion}:${path}:${patch.length}`;
-        out[path] = fileDiff;
-      }
+      const fileDiff = diffCache.get(scope, path, patch);
+      if (fileDiff) out[path] = fileDiff;
     }
     return out;
-  }, [patches, id, source, threadId, cacheVersion]);
+  }, [patches, id, source, threadId, cacheVersion, diffCache]);
 
   // Lazy-load the patch for every expanded file missing one.
   useEffect(() => {
