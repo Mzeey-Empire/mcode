@@ -31,6 +31,7 @@ export interface RemoveWorktreeOptions {
 
 const PARENT_RMDIR_MAX_RETRIES = 5;
 const PARENT_RMDIR_RETRY_DELAY_MS = 300;
+const WORKTREE_ADD_TIMEOUT_MS = 120_000;
 
 type WorktreeCreationRequest = {
   branch: string;
@@ -220,7 +221,7 @@ export class GitWorktreeService {
     request: WorktreeCreationRequest,
     createdBranch: boolean,
   ): Promise<void> {
-    await this.gitExecutor.exec(createWorktreeArgs(request, createdBranch), { timeout: 0 });
+    await this.gitExecutor.exec(createWorktreeArgs(request, createdBranch), { timeout: WORKTREE_ADD_TIMEOUT_MS });
   }
 
   private async createWorktreeRemovalRequest(

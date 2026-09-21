@@ -1,7 +1,8 @@
 /**
  * Production git executor.
- * Wraps promisified execFile with per-repo serialisation, a configurable
- * default timeout, and a transparent result cache for cheap rev-parse calls.
+ * Wraps promisified execFile with per-repo serialisation for mutating
+ * commands, a configurable default timeout, and a transparent result cache
+ * for cheap rev-parse calls. Read-only commands bypass the queue.
  */
 
 import { injectable } from "tsyringe";
@@ -14,12 +15,94 @@ const execFile = NodeUtil.promisify(NodeChildProcess.execFile);
 /** Noop used to suppress unhandled-rejection warnings on queue chains. */
 const noop = () => {};
 
+/** Git subcommands that never mutate repository state in any form. */
+const READ_ONLY_COMMANDS = new Set([
+  "blame",
+  "cat-file",
+  "check-ignore",
+  "count-objects",
+  "describe",
+  "diff",
+  "for-each-ref",
+  "log",
+  "ls-files",
+  "ls-remote",
+  "ls-tree",
+  "merge-base",
+  "name-rev",
+  "rev-list",
+  "rev-parse",
+  "shortlog",
+  "show",
+  "show-ref",
+  "status",
+]);
+
+/** Global git options that consume the following argument as their value. */
+const VALUE_TAKING_GLOBAL_FLAGS = new Set(["-C", "-c", "--git-dir", "--work-tree", "--exec-path"]);
+
+/** Flags that turn `git branch` into a mutation rather than a listing. */
+const BRANCH_MUTATION_FLAGS = new Set([
+  "-d", "-D", "--delete",
+  "-m", "-M", "--move",
+  "-c", "-C", "--copy",
+  "-f", "--force",
+  "-u", "--set-upstream-to", "--unset-upstream",
+  "--edit-description",
+  "--track", "--no-track",
+]);
+
+/** `git config` flags that read values instead of writing them. */
+const CONFIG_READ_FLAGS = new Set(["--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l"]);
+
+/** Read-only arg shapes for subcommands that can also mutate. */
+const MIXED_COMMAND_READS: Record<string, (rest: readonly string[]) => boolean> = {
+  worktree: (rest) => rest[0] === "list",
+  branch: (rest) => rest.every(
+    (arg) => arg.startsWith("-") && !BRANCH_MUTATION_FLAGS.has(arg.split("=", 1)[0]!),
+  ),
+  remote: (rest) => rest.length === 0 || rest[0] === "-v" || rest[0] === "get-url" || rest[0] === "show",
+  config: (rest) => rest.some((arg) => CONFIG_READ_FLAGS.has(arg)),
+  "symbolic-ref": (rest) => rest.some((arg) => arg === "--short" || arg === "-q" || arg === "--quiet")
+    && rest.filter((arg) => !arg.startsWith("-")).length <= 1,
+};
+
+/**
+ * Classify commands that cannot mutate repository state. Only these bypass
+ * the per-directory serialisation queue; every other command keeps the queue
+ * so index-, ref-, and worktree-mutating calls cannot race.
+ */
+function isReadOnlyGitCommand(args: readonly string[]): boolean {
+  const index = gitSubcommandIndex(args);
+  if (index < 0) return false;
+  const command = args[index]!;
+  const mixedRead = MIXED_COMMAND_READS[command];
+  if (mixedRead) return mixedRead(args.slice(index + 1));
+  return READ_ONLY_COMMANDS.has(command);
+}
+
+/** Find the subcommand position after any leading global options like `-C`. */
+function gitSubcommandIndex(args: readonly string[]): number {
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i]!;
+    if (VALUE_TAKING_GLOBAL_FLAGS.has(arg)) {
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith("-")) continue;
+    return i;
+  }
+  return -1;
+}
+
 /**
  * Production implementation of {@link GitExecutor}.
  *
  * Features:
- * - Serialises concurrent git calls per effective working directory so that
- *   index-mutating operations (worktree add/remove, checkout) do not race.
+ * - Serialises concurrent mutating git calls per effective working directory
+ *   so that index-mutating operations (worktree add/remove, checkout) do not
+ *   race. Read-only commands run unqueued so a slow mutation cannot stall
+ *   watchers and other queries on the same repository.
  * - Transparent LRU-style cache for `rev-parse --git-dir` and
  *   `rev-parse --show-toplevel` results keyed by cwd.
  * - Default timeout of 10 s, overridable per call.
@@ -39,28 +122,32 @@ export class RealGitExecutor implements GitExecutor {
   private readonly revParseCache = new Map<string, GitExecResult>();
 
   /**
-   * Run `git` with the given arguments, serialising calls per effective cwd.
+   * Run `git` with the given arguments. Mutating commands are serialised per
+   * effective cwd; read-only commands run immediately.
    * Results of `rev-parse --git-dir` and `rev-parse --show-toplevel` are
    * cached transparently so repeated probe calls are free.
    */
   async exec(args: string[], opts: GitExecOptions = {}): Promise<GitExecResult> {
     const cacheKey = this.getCacheKey(args);
-    const queueKey = this.getQueueKey(args, opts);
+    const readOnly = isReadOnlyGitCommand(args);
 
-    return this.enqueue(queueKey, async () => {
-      // Re-check cache inside the queue in case a concurrent queued operation
-      // already populated it while we were waiting.
+    const invoke = async (): Promise<GitExecResult> => {
+      // Re-check the cache inside the queue turn in case a concurrent queued
+      // operation already populated it while we were waiting.
       const cachedNow = cacheKey ? this.revParseCache.get(cacheKey) : undefined;
       if (cachedNow) return cachedNow;
 
       const result = await this.runGit(args, opts);
       if (cacheKey) {
         this.revParseCache.set(cacheKey, result);
-      } else {
+      } else if (!readOnly) {
         this.invalidateRevParseCacheForCwd(this.getEffectiveCwd(args, opts));
       }
       return result;
-    });
+    };
+
+    if (readOnly) return invoke();
+    return this.enqueue(this.getQueueKey(args, opts), invoke);
   }
 
   // ---------------------------------------------------------------------------
