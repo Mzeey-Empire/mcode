@@ -127,6 +127,16 @@ function resolveAuthoritativeFileChange(
   return change;
 }
 
+/** Wrap plain file paths as modified ReviewFileChange entries. */
+export function pathsToReviewFiles(paths: readonly string[]): ReviewFileChange[] {
+  return paths.map((path) => ({
+    path,
+    previousPath: null,
+    changeType: "modified" as const,
+    binary: false,
+  }));
+}
+
 /** Decorate the authoritative first-ref to final-ref file set with persisted turn metadata. */
 export function cumulativeReviewFiles(
   snapshots: readonly TurnSnapshot[],

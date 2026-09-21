@@ -37,3 +37,6 @@
 - Missing provider access, a stale runtime, or unavailable desktop control is a coverage gap. Focused tests do not replace the Composer and Review proof.
 - The focused real Git/RPC test covers same-file isolation, settled service recreation, cumulative edits, and legacy fallback. The startup migration test covers an existing database. Neither proves rendered labels or an actual provider turn.
 - An unsupported or over-limit patch is rejected whole. Do not expect a partial native patch.
+- The rendered diff surface is `@pierre/diffs` CodeView. Lines and headers mount inside `diffs-container` shadow roots; use Playwright locators (they pierce shadow DOM), not `element.textContent` scraping of the light DOM.
+- Long patches collapse unchanged context behind "N unmodified lines" bands. Click a band and confirm the hidden lines render.
+- Line comments open from the gutter "+" affordance on hover and land in the thread annotation bundle. Exercise both the deletions (left) and additions (right) sides.

@@ -5,7 +5,7 @@ import type { TurnSnapshot } from "@mcode/contracts";
 import { TurnTimeline } from "../components/diff/TurnTimeline";
 import { useDiffStore } from "../stores/diffStore";
 
-// Mock the transport so FileEntry's lazy diff load resolves immediately.
+// Mock the transport so lazy diff loads resolve immediately.
 vi.mock("@/transport", () => ({
   getTransport: () => ({
     getSnapshotDiff: vi.fn().mockResolvedValue("@@ -0,0 +1 @@\n+hello\n"),
@@ -14,14 +14,11 @@ vi.mock("@/transport", () => ({
   }),
 }));
 
-// Mock heavy diff renderers to keep tests fast and avoid unrelated failures.
-vi.mock("../components/diff/UnifiedDiff", () => ({
-  UnifiedDiff: ({ lines }: { lines: unknown[] }) => (
-    <div data-testid="unified-diff">{lines.length} lines</div>
+// Mock the pierre-backed diff surface to keep tests fast and avoid unrelated failures.
+vi.mock("../components/diff/ReviewDiffView", () => ({
+  ReviewDiffView: ({ files }: { files: { path: string }[] }) => (
+    <div data-testid="unified-diff">{files.length} files</div>
   ),
-}));
-vi.mock("../components/diff/SideBySideDiff", () => ({
-  SideBySideDiff: () => <div data-testid="side-by-side-diff" />,
 }));
 vi.mock("../components/diff/DiffPreview", () => ({
   DiffPreview: () => <div data-testid="diff-preview" />,

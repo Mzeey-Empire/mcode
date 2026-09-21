@@ -4,29 +4,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/ui/file-type-icon";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { CHANGE_TYPE_GLYPHS, CHANGE_TYPE_LABELS, changeTypeTone } from "@/components/diff/change-type";
 import { cn } from "@/lib/utils";
-
-const changeLabels: Record<ReviewFileChange["changeType"], string> = {
-  added: "Added",
-  modified: "Modified",
-  deleted: "Deleted",
-  renamed: "Renamed",
-  copied: "Copied",
-};
-
-const changeGlyphs: Record<ReviewFileChange["changeType"], string> = {
-  added: "A",
-  modified: "M",
-  deleted: "D",
-  renamed: "R",
-  copied: "C",
-};
-
-function changeTone(changeType: ReviewFileChange["changeType"]): string {
-  if (changeType === "added") return "text-[var(--diff-add-strong)]";
-  if (changeType === "deleted") return "text-[var(--diff-remove-strong)]";
-  return "text-muted-foreground/70";
-}
+import { basename } from "@/lib/path";
 
 interface ReviewFileChangeRowProps {
   file: ReviewFileChange;
@@ -55,6 +35,10 @@ export function ReviewFileChangeRow({
   onKeyDown,
 }: ReviewFileChangeRowProps) {
   const pathLabel = file.previousPath ? `${file.previousPath} → ${file.path}` : file.path;
+  // Rows sit inside a directory tree whose headers already carry the path,
+  // so the label is the basename; the tooltip and aria-label keep the full
+  // path (and rename arrow) reachable.
+  const name = basename(file.path);
   return (
     <Tooltip>
       <TooltipTrigger
@@ -66,7 +50,7 @@ export function ReviewFileChangeRow({
             variant="ghost"
             size="sm"
             tabIndex={tabIndex}
-            aria-label={`${changeLabels[file.changeType]} ${pathLabel}${file.binary ? ", Binary" : ""}`}
+            aria-label={`${CHANGE_TYPE_LABELS[file.changeType]} ${pathLabel}${file.binary ? ", Binary" : ""}`}
             aria-level={depth}
             aria-posinset={positionInSet}
             aria-setsize={setSize}
@@ -83,7 +67,7 @@ export function ReviewFileChangeRow({
             <span aria-hidden className="flex size-4 shrink-0 items-center justify-center">
               <FileTypeIcon filePath={file.path} size={14} />
             </span>
-            <span className="min-w-0 flex-1 truncate text-left font-mono text-xs">{pathLabel}</span>
+            <span className="min-w-0 flex-1 truncate text-left font-mono text-xs">{name}</span>
             {file.binary ? (
               <Badge variant="ghost" size="sm" className="max-w-20 px-1 font-mono uppercase tracking-wide">
                 Binary
@@ -95,13 +79,13 @@ export function ReviewFileChangeRow({
                   <span
                     data-change-type={file.changeType}
                     aria-hidden
-                    className={cn("w-3 shrink-0 text-center font-mono text-xs font-medium", changeTone(file.changeType))}
+                    className={cn("w-3 shrink-0 text-center font-mono text-xs font-medium", changeTypeTone(file.changeType))}
                   >
-                    {changeGlyphs[file.changeType]}
+                    {CHANGE_TYPE_GLYPHS[file.changeType]}
                   </span>
                 }
               />
-              <TooltipContent>{changeLabels[file.changeType]}</TooltipContent>
+              <TooltipContent>{CHANGE_TYPE_LABELS[file.changeType]}</TooltipContent>
             </Tooltip>
           </Button>
         }

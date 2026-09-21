@@ -34,6 +34,45 @@ if (typeof window !== "undefined") {
     writable: true,
     value: createTestStorage(),
   });
+  // jsdom lacks the observers pierre's diff Virtualizer constructs at setup.
+  if (!("IntersectionObserver" in window)) {
+    class IntersectionObserverStub {
+      constructor(private readonly callback: IntersectionObserverCallback) {}
+      observe(target: Element) {
+        this.callback(
+          [{ target, isIntersecting: true } as IntersectionObserverEntry],
+          this as unknown as IntersectionObserver,
+        );
+      }
+      unobserve() {}
+      disconnect() {}
+    }
+    Object.defineProperty(window, "IntersectionObserver", {
+      writable: true,
+      configurable: true,
+      value: IntersectionObserverStub,
+    });
+  }
+  if (!("ResizeObserver" in window)) {
+    class ResizeObserverStub {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    Object.defineProperty(window, "ResizeObserver", {
+      writable: true,
+      configurable: true,
+      value: ResizeObserverStub,
+    });
+  }
+  // jsdom has no Web Animations API; Base UI's ScrollArea calls it on a timer.
+  if (typeof Element !== "undefined" && !("getAnimations" in Element.prototype)) {
+    Object.defineProperty(Element.prototype, "getAnimations", {
+      writable: true,
+      configurable: true,
+      value: () => [],
+    });
+  }
   Object.defineProperty(window, "matchMedia", {
     writable: true,
     value: (query: string) => ({

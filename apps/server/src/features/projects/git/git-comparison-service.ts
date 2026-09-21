@@ -145,6 +145,27 @@ export class GitComparisonService {
     }
   }
 
+  /**
+   * Read a file's contents at a revision. `ref` follows `git show` revision
+   * rules with two extensions: "" reads the staged index blob (`:path`), and
+   * "A...B" resolves to the merge base of A and B, matching the old side of a
+   * three-dot comparison diff.
+   */
+  async readFileAtRef(
+    workspaceId: string,
+    ref: string,
+    filePath: string,
+    repoPath?: string,
+  ): Promise<string> {
+    const cwd = repoPath ?? this.requireWorkspace(workspaceId).path;
+    const resolved = await this.resolveShowRef(cwd, ref);
+    const { stdout } = await this.gitExecutor.exec(
+      ["-C", cwd, "show", `${resolved}:${filePath}`],
+      { timeout: 10_000 },
+    );
+    return stdout;
+  }
+
   /** List files changed on the target side of a branch comparison. */
   async listBranchComparisonChangedFiles(workspaceId: string, base?: string, target?: string, repoPath?: string): Promise<string[]> {
     const cwd = repoPath ?? this.requireWorkspace(workspaceId).path;
@@ -449,6 +470,25 @@ export class GitComparisonService {
     return this.gitRepository.getDefaultBranchAt(repoPath);
   }
 
+  /** Map a `readFileAtRef` revision onto the commit git show should read. */
+  private async resolveShowRef(cwd: string, ref: string): Promise<string> {
+    if (ref === "") return "";
+    const mergeBaseIndex = ref.indexOf("...");
+    if (mergeBaseIndex >= 0) {
+      const base = ref.slice(0, mergeBaseIndex);
+      const target = ref.slice(mergeBaseIndex + 3);
+      assertSafeRef(base);
+      assertSafeRef(target || "HEAD");
+      const { stdout } = await this.gitExecutor.exec(
+        ["-C", cwd, "merge-base", base, target || "HEAD"],
+        { timeout: 10_000 },
+      );
+      return stdout.trim();
+    }
+    assertShowRef(ref);
+    return ref;
+  }
+
   private requireWorkspace(workspaceId: string) {
     const workspace = this.workspaceRepo.findById(workspaceId);
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
@@ -732,6 +772,11 @@ function addBinaryRenamePaths(
 
 function assertSafeRef(ref: string): void {
   if (!/^(?!-)[A-Za-z0-9._/-]+$/.test(ref)) throw new Error(`Unsafe git ref: ${ref}`);
+}
+
+/** Refs passed to `git show` may carry revision suffixes like `sha~1`. */
+function assertShowRef(ref: string): void {
+  if (!/^(?!-)[A-Za-z0-9._/-]+(?:[~^][0-9]*)*$/.test(ref)) throw new Error(`Unsafe git ref: ${ref}`);
 }
 
 function assertSafeSha(sha: string | undefined): asserts sha is string {

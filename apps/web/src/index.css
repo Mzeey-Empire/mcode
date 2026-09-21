@@ -457,8 +457,14 @@
   animation: flash-highlight 1.5s ease-out;
   border-radius: var(--radius-md);
 }
+/* Pierre's file header lives in shadow DOM, so the jump marker rides on a
+   slotted child and the flash lands on the light-DOM item host instead. */
+diffs-container:has([data-jump-highlight="true"]) {
+  animation: flash-highlight 1.5s ease-out;
+}
 @media (prefers-reduced-motion: reduce) {
-  .animate-flash-highlight {
+  .animate-flash-highlight,
+  diffs-container:has([data-jump-highlight="true"]) {
     animation: none;
     background-color: transparent;
   }

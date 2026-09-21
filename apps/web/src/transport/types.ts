@@ -1,5 +1,6 @@
 // Import shared types for local use in the McodeTransport interface.
 import type {
+  DiffStats,
   ReviewComparison,
   Workspace,
   WorkspaceEnrichment,
@@ -740,8 +741,8 @@ export interface McodeTransport {
   getTurnDiffComparison(threadId: string): Promise<ReviewComparison | null>;
   /** Read a file from one exact native or fallback comparison. */
   getTurnDiffFile(threadId: string, comparisonId: string, filePath: string): Promise<string>;
-  /** Get per-file addition/deletion counts for a turn snapshot. */
-  getSnapshotDiffStats(snapshotId: string): Promise<{ filePath: string; additions: number; deletions: number }[]>;
+  /** Get per-file change classification and line counts for a turn snapshot. */
+  getSnapshotDiffStats(snapshotId: string): Promise<DiffStats[]>;
   /** Run garbage collection on expired snapshot refs. */
   cleanupSnapshots(): Promise<{ removed: number }>;
   /** List all turn snapshots for a thread, ordered by creation time. */
@@ -749,7 +750,7 @@ export interface McodeTransport {
   /** Get cumulative diff across all turns for a thread. Implemented in Phase 3. */
   getCumulativeDiff(threadId: string, filePath?: string, maxLines?: number): Promise<string>;
   /** Return authoritative net file stats from the first turn ref to the final turn ref. */
-  getCumulativeDiffStats(threadId: string): Promise<{ filePath: string; additions: number; deletions: number }[]>;
+  getCumulativeDiffStats(threadId: string): Promise<DiffStats[]>;
   /** Get commit log for a workspace branch. Pass threadId so the server runs git from the thread's worktree path. */
   getGitLog(
     workspaceId: string,
@@ -767,6 +768,8 @@ export interface McodeTransport {
   getWorkingTreeFiles(workspaceId: string, staged: boolean, threadId?: string): Promise<string[]>;
   /** Get the unified diff for the working tree (staged or unstaged), optionally per file. Pass threadId to read the thread's worktree. */
   getWorkingTreeDiff(workspaceId: string, staged: boolean, filePath?: string, maxLines?: number, threadId?: string): Promise<string>;
+  /** Read a file's contents at a revision. `ref` follows `git show` rules; "" reads the staged index blob and "A...B" reads at the merge base. Pass threadId to read the thread's worktree. Rejects when the ref or file is absent. */
+  readFileAtRef(workspaceId: string, ref: string, filePath: string, threadId?: string): Promise<string>;
   /** List files differing between two refs (`base...target`, three-dot). Omit base/target to use the detected default branch → HEAD. Pass threadId to read the thread's worktree. */
   getBranchFiles(workspaceId: string, base?: string, target?: string, threadId?: string): Promise<string[]>;
   /** Get the unified diff between two refs (`base...target`, three-dot), optionally per file. Omit base/target to use the detected default branch → HEAD. Pass threadId to read the thread's worktree. */

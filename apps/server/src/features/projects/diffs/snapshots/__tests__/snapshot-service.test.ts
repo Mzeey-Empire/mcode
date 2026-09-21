@@ -135,18 +135,20 @@ describe("SnapshotService ref and numstat validation", () => {
 
   it("returns destination paths for simple and brace-form numstat renames", async () => {
     const executor: GitExecutor = {
-      async exec() {
-        return {
-          stdout: "0\t0\told.txt => new.txt\n1\t2\tarch/{i386 => x86}/Makefile\n",
-          stderr: "",
-        };
+      async exec(args) {
+        return args.includes("--name-status")
+          ? { stdout: "R100\told.txt\tnew.txt\nM\tarch/x86/Makefile\n", stderr: "" }
+          : {
+              stdout: "0\t0\told.txt => new.txt\n1\t2\tarch/{i386 => x86}/Makefile\n",
+              stderr: "",
+            };
       },
     };
     const service = new SnapshotService(executor);
 
     await expect(service.getDiffStats("/repo", "before", "after")).resolves.toEqual([
-      { filePath: "new.txt", additions: 0, deletions: 0 },
-      { filePath: "arch/x86/Makefile", additions: 1, deletions: 2 },
+      { filePath: "new.txt", additions: 0, deletions: 0, changeType: "renamed" },
+      { filePath: "arch/x86/Makefile", additions: 1, deletions: 2, changeType: "modified" },
     ]);
   });
 });

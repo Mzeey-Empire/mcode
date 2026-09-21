@@ -774,12 +774,13 @@ describe("Composer checkout confirmation", () => {
     render(<Composer threadId={thread.id} workspaceId="ws-1" />);
 
     expect(screen.getByTestId("composer-annotation-bundle")).toHaveTextContent(
-      "1 annotation · 1 comment",
+      "1 annotation",
     );
     expect(screen.getByTestId("composer-annotation-bundle")).toHaveClass(
       "bg-accent",
       "text-accent-foreground",
     );
+    expect(screen.getByTestId("diff-comment-chip")).toHaveTextContent("1 comment");
     await userEvent.click(screen.getByLabelText("Send message"));
 
     await waitFor(() => expect(mockTransport.sendMessage).toHaveBeenCalled());

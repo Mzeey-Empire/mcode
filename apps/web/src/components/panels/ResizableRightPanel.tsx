@@ -10,6 +10,8 @@ import {
 import { cn } from "@/lib/utils";
 
 const KEYBOARD_RESIZE_STEP_PX = 10;
+/** Extra drag distance past minWidth that snaps the panel closed. */
+const COLLAPSE_DRAG_PAST_MIN_PX = 64;
 
 /** Ownership source reported when a controlled panel width changes. */
 export type ResizablePanelWidthSource = "preserve" | "user";
@@ -28,6 +30,8 @@ export interface ResizableRightPanelProps extends Omit<
   wideWidth: number;
   separatorLabel: string;
   onWidthChange: (width: number, source: ResizablePanelWidthSource) => void;
+  /** Fired when the user drags the separator past minWidth by the snap distance. */
+  onCollapseRequest?: () => void;
   resizeEnabled?: boolean;
   className?: string;
   style?: CSSProperties;
@@ -45,6 +49,7 @@ export function ResizableRightPanel({
   wideWidth,
   separatorLabel,
   onWidthChange,
+  onCollapseRequest,
   resizeEnabled = true,
   className,
   style,
@@ -117,17 +122,20 @@ export function ResizableRightPanel({
       const startWidth = width;
       const handleMove = (moveEvent: globalThis.MouseEvent) => {
         if (!draggingRef.current) return;
-        onWidthChange(
-          clampWidth(startWidth + startX - moveEvent.clientX),
-          "user",
-        );
+        const candidate = startWidth + startX - moveEvent.clientX;
+        if (onCollapseRequest && candidate < minWidth - COLLAPSE_DRAG_PAST_MIN_PX) {
+          stopDragging();
+          onCollapseRequest();
+          return;
+        }
+        onWidthChange(clampWidth(candidate), "user");
       };
       const handleUp = () => stopDragging();
       dragListenersRef.current = { move: handleMove, up: handleUp };
       document.addEventListener("mousemove", handleMove);
       document.addEventListener("mouseup", handleUp);
     },
-    [clampWidth, onWidthChange, stopDragging, width],
+    [clampWidth, minWidth, onCollapseRequest, onWidthChange, stopDragging, width],
   );
 
   const toggleSnapWidth = useCallback(() => {

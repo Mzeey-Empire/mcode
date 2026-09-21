@@ -8,6 +8,8 @@ export interface DiffStatProps {
   deletions: number;
   /** When true, render a proportion bar before the counts. */
   bar?: boolean;
+  /** When true, render a muted em dash for a zero side instead of hiding it. */
+  zeroDash?: boolean;
   className?: string;
 }
 
@@ -16,7 +18,7 @@ export interface DiffStatProps {
  * optional proportion bar. Single source of truth so the Changes panel and the
  * chat turn summary can never drift on stat color or sign glyph.
  */
-export function DiffStat({ additions, deletions, bar = false, className }: DiffStatProps) {
+export function DiffStat({ additions, deletions, bar = false, zeroDash = false, className }: DiffStatProps) {
   const total = additions + deletions;
   return (
     <span
@@ -37,8 +39,16 @@ export function DiffStat({ additions, deletions, bar = false, className }: DiffS
           />
         </span>
       )}
-      {additions > 0 && <span className="text-[var(--diff-add-strong)]">+{additions}</span>}
-      {deletions > 0 && <span className="text-[var(--diff-remove-strong)]">−{deletions}</span>}
+      {additions > 0 ? (
+        <span className="text-[var(--diff-add-strong)]">+{additions}</span>
+      ) : (
+        zeroDash && <span className="text-muted-foreground/40">—</span>
+      )}
+      {deletions > 0 ? (
+        <span className="text-[var(--diff-remove-strong)]">−{deletions}</span>
+      ) : (
+        zeroDash && <span className="text-muted-foreground/40">—</span>
+      )}
     </span>
   );
 }

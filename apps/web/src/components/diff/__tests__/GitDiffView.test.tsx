@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { GitDiffView } from "../GitDiffView";
 
 vi.mock("../FileList", () => ({
-  FileList: ({ files, refreshable, refreshing }: { files: string[]; refreshable: boolean; refreshing: boolean }) => (
-    <div data-testid="file-list" data-refreshable={refreshable} data-refreshing={refreshing}>{files.join(",")}</div>
+  FileList: ({ files, refreshable, refreshing }: { files: { path: string }[]; refreshable: boolean; refreshing: boolean }) => (
+    <div data-testid="file-list" data-refreshable={refreshable} data-refreshing={refreshing}>{files.map((file) => file.path).join(",")}</div>
   ),
 }));
 

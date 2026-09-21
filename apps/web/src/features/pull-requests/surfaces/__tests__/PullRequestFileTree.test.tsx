@@ -184,7 +184,9 @@ describe("PullRequestFileTree", () => {
     const row = screen.getByRole("treeitem", {
       name: "Renamed src/old.ts → src/new.ts, Binary",
     });
-    expect(row).toHaveTextContent("src/old.ts → src/new.ts");
+    // The tree header owns the directory, so the row label is the basename;
+    // the rename arrow stays in the aria-label and tooltip.
+    expect(row).toHaveTextContent("new.ts");
     expect(row).toHaveTextContent("Binary");
     expect(row.querySelector('[data-change-type="renamed"]')).toHaveTextContent("R");
     expect(row.querySelector('[aria-label$="additions"]')).not.toBeInTheDocument();

@@ -129,7 +129,7 @@ function directoryForSegments(
 }
 
 function insertFilePath(root: MutableDirectory, filePath: string): void {
-  const segments = filePath.split("/").filter(Boolean);
+  const segments = filePath.replace(/\\/g, "/").split("/").filter(Boolean);
   if (segments.length === 0) return;
   const parent = directoryForSegments(root, segments);
   const name = segments[segments.length - 1]!;

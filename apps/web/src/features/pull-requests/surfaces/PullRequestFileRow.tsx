@@ -3,6 +3,7 @@ import type { KeyboardEvent, Ref } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/ui/file-type-icon";
+import { basename } from "@/lib/path";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
@@ -107,7 +108,7 @@ export function PullRequestFileRow({
               <FileTypeIcon filePath={file.path} size={14} />
             </span>
             <span className="min-w-0 flex-1 truncate text-left font-mono text-xs">
-              {file.path.split("/").at(-1)}
+              {basename(file.path)}
             </span>
             {patchLabel && (
               <Badge

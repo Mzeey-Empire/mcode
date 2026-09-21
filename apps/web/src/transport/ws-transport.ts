@@ -1,4 +1,4 @@
-import type { ReviewComparison } from "@mcode/contracts";
+import type { DiffStats, ReviewComparison } from "@mcode/contracts";
 import type {
   McodeTransport,
   Workspace,
@@ -1099,10 +1099,7 @@ export function createWsTransport(
     getTurnDiffComparison: (threadId) => rpc<ReviewComparison | null>("turnDiff.getComparison", { threadId, includeLive: freshTurnDiffThreads.has(threadId) }),
     getTurnDiffFile: (threadId, comparisonId, filePath) => rpc<string>("turnDiff.getFileDiff", { threadId, comparisonId, filePath }),
     getSnapshotDiffStats: (snapshotId) =>
-      rpc<{ filePath: string; additions: number; deletions: number }[]>(
-        "snapshot.getDiffStats",
-        { snapshotId },
-      ),
+      rpc<DiffStats[]>("snapshot.getDiffStats", { snapshotId }),
     cleanupSnapshots: () =>
       rpc<{ removed: number }>("snapshot.cleanup", {}),
     listSnapshots: (threadId) =>
@@ -1129,6 +1126,8 @@ export function createWsTransport(
       rpc<string[]>("git.workingTreeFiles", { workspaceId, staged, threadId }),
     getWorkingTreeDiff: (workspaceId, staged, filePath?, maxLines?, threadId?) =>
       rpc<string>("git.workingTreeDiff", { workspaceId, staged, filePath, maxLines, threadId }),
+    readFileAtRef: (workspaceId, ref, filePath, threadId?) =>
+      rpc<string>("git.fileAtRef", { workspaceId, ref, filePath, threadId }),
     getBranchFiles: (workspaceId, base?, target?, threadId?) =>
       rpc<string[]>("git.branchFiles", { workspaceId, base, target, threadId }),
     getBranchDiff: (workspaceId, base?, target?, filePath?, maxLines?, threadId?) =>

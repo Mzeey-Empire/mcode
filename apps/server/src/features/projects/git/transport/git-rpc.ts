@@ -34,6 +34,7 @@ export interface GitRouterDeps {
     | "listCommitChangedFiles"
     | "listWorkingTreeChangedFiles"
     | "readWorkingTreeDiff"
+    | "readFileAtRef"
     | "listBranchComparisonChangedFiles"
     | "readBranchComparisonDiff"
     | "resolveBranchComparison"
@@ -136,6 +137,19 @@ const gitHandlers: GitHandlerMap = {
         resolveThreadRepoPath(deps, params.threadId),
       )
       : "",
+  // Hydration needs the real old/new contents; a soft "" here would let the
+  // diff renderer merge inconsistent metadata, so failures must propagate.
+  "git.fileAtRef": (deps, params) => {
+    if (!isGitWorkspace(deps, params.workspaceId)) {
+      throw new Error(`Workspace ${params.workspaceId} is not a git repository`);
+    }
+    return deps.gitComparison.readFileAtRef(
+      params.workspaceId,
+      params.ref,
+      params.filePath,
+      resolveThreadRepoPath(deps, params.threadId),
+    );
+  },
   "git.branchFiles": (deps, params) =>
     isGitWorkspace(deps, params.workspaceId)
       ? deps.gitComparison.listBranchComparisonChangedFiles(

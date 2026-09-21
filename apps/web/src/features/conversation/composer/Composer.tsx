@@ -680,6 +680,7 @@ export function Composer({
             slashCommand,
             attachmentBundle: surfaceState.annotationBundleForDisplay,
             annotationScopeId: surfaceState.annotationScopeId,
+            diffComments: surfaceState.diffCommentsForDisplay,
             attachments,
             selectedTextComments: form.state.selectedTextComments,
             selectedTextCommentEditor: form.state.selectedTextCommentEditor,
