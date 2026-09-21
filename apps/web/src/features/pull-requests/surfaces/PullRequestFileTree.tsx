@@ -318,7 +318,7 @@ export function PullRequestFileTree(props: PullRequestFileTreeProps) {
 
   useEffect(() => {
     if (!activePath || searchActive) return;
-    const segments = activePath.split("/");
+    const segments = activePath.replace(/\\/g, "/").split("/");
     if (segments.length <= 1) return;
     setExpandedDirectoryIds((current) => {
       const next = new Set(current);

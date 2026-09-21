@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
+import type { SavedDiffAnnotation } from "@/features/preview/state/previewAnnotationStore";
 import { getModelContextWindow } from "@mcode/shared/model-context";
 import type {
   ContextWindowMode,
@@ -32,6 +33,7 @@ import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore
 import { cn } from "@/lib/utils";
 import { ComposerAgentControls } from "./controls/ComposerAgentControls";
 import { ComposerNewThreadContext } from "./execution/ComposerNewThreadContext";
+import { DiffCommentsComposerAttachment } from "./DiffCommentsComposerAttachment";
 import { SelectedTextCommentsComposerAttachment } from "./SelectedTextCommentsComposerAttachment";
 
 type FileAutocomplete = ReturnType<typeof useFileAutocomplete>;
@@ -74,6 +76,7 @@ interface ComposerContentSurfaceProps {
     readonly slashCommand: SlashCommand;
     readonly attachmentBundle?: ComponentProps<typeof PreviewAnnotationBundleChip>["bundle"];
     readonly annotationScopeId?: string;
+    readonly diffComments: readonly SavedDiffAnnotation[];
     readonly attachments: ComponentProps<typeof AttachmentPreview>["attachments"];
     readonly selectedTextComments: readonly SelectedTextComment[];
     readonly selectedTextCommentEditor?: SelectedTextCommentEditorDraft;
@@ -324,13 +327,14 @@ function ComposerEditorSurface({
   );
 }
 
-function ComposerAttachmentSurface({
+function AnnotationAttachmentRow({
   model,
   actions,
 }: Pick<ComposerContentSurfaceProps, "model" | "actions">) {
+  if (!model.annotationScopeId) return null;
   return (
     <>
-      {model.annotationScopeId && model.attachmentBundle ? (
+      {model.attachmentBundle ? (
         <div className="px-3 pt-2">
           <PreviewAnnotationBundleChip
             bundle={model.attachmentBundle}
@@ -343,6 +347,26 @@ function ComposerAttachmentSurface({
           />
         </div>
       ) : null}
+      {model.workspaceId && model.diffComments.length > 0 ? (
+        <DiffCommentsComposerAttachment
+          comments={model.diffComments}
+          scopeId={model.annotationScopeId}
+          workspaceId={model.workspaceId}
+          threadId={model.threadId}
+          onFocusComposer={actions.onFocusComposer}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function ComposerAttachmentSurface({
+  model,
+  actions,
+}: Pick<ComposerContentSurfaceProps, "model" | "actions">) {
+  return (
+    <>
+      <AnnotationAttachmentRow model={model} actions={actions} />
       <AttachmentPreview attachments={model.attachments} onRemove={actions.onRemoveAttachment} />
       {model.isCompacting && <CompactingBanner />}
       {!model.isCompacting && model.hasRetryState && model.threadId && (

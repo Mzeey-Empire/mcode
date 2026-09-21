@@ -1,7 +1,7 @@
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { usePreviewAnnotationStore } from "@/features/preview/state/previewAnnotationStore";
 import { useProviderAvailabilityStore } from "@/stores/providerAvailabilityStore";
-import type { ProviderId } from "@mcode/contracts";
+import { isDiffAnnotationPayload, type ProviderId } from "@mcode/contracts";
 
 interface ComposerSurfaceStateInput {
   readonly threadId?: string;
@@ -80,6 +80,16 @@ export function useComposerSurfaceState(input: ComposerSurfaceStateInput) {
   const annotationBundleForDisplay = annotationScopeId
     ? usePreviewAnnotationStore.getState().buildBundle(annotationScopeId)
     : undefined;
+  // Diff comments render through DiffCommentsComposerAttachment, so the chip
+  // only summarizes visual annotations.
+  const visualBundleForDisplay = annotationBundleForDisplay
+    ? {
+        ...annotationBundleForDisplay,
+        annotations: annotationBundleForDisplay.annotations.filter(
+          (annotation) => !isDiffAnnotationPayload(annotation),
+        ),
+      }
+    : undefined;
   const effectiveProviderId = input.provider as ProviderId;
   const providerSurfaceState = useProviderSurfaceState(effectiveProviderId);
   const catalogScope = useCatalogScope(input);
@@ -87,7 +97,8 @@ export function useComposerSurfaceState(input: ComposerSurfaceStateInput) {
 
   return {
     annotationScopeId,
-    annotationBundleForDisplay,
+    annotationBundleForDisplay: visualBundleForDisplay,
+    diffCommentsForDisplay: diffAnnotationRows ?? [],
     ...catalogScope,
     ...composerLocks,
     effectiveProviderId,

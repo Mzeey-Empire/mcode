@@ -1,7 +1,8 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback } from "react";
 import { ChevronRight, FileText } from "lucide-react";
+import { PatchDiff } from "@pierre/diffs/react";
 import { getTransport } from "@/transport";
-import { parseDiffLines } from "@/lib/diff-parser";
+import { useShikiTheme } from "@/hooks/useTheme";
 
 /** Number of lines to request on the initial (truncated) fetch. */
 const MAX_LINES = 500;
@@ -13,38 +14,16 @@ interface DiffViewerProps {
   changeType?: "created" | "deleted" | "renamed" | "modified" | "binary";
 }
 
-function DiffViewerHeader({ expanded, loading, filePath, changeLabel, onToggle }: { expanded: boolean; loading: boolean; filePath: string; changeLabel: string; onToggle: () => void }) {
-  return <button type="button" onClick={onToggle} className="flex w-full items-center gap-2 bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/40 transition-colors">
-    <ChevronRight className={`h-3 w-3 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />
-    <FileText className="h-3 w-3 shrink-0" />
-    <span className="truncate font-mono">{filePath}</span>
-    <span className="ml-auto text-xs opacity-60">{changeLabel}</span>
-    {loading && <span className="text-xs">Loading...</span>}
-  </button>;
-}
-
-function DiffLines({ lines, visibleLines, truncated, onShowAll }: { lines: ReturnType<typeof parseDiffLines>; visibleLines: ReturnType<typeof parseDiffLines>; truncated: boolean; onShowAll: () => void }) {
-  return <div className="max-h-[500px] overflow-auto text-xs font-mono leading-relaxed">
-    {visibleLines.map((line, index) => <div key={index} className={line.type === "add" ? "bg-primary/10 text-primary/70" : line.type === "remove" ? "bg-destructive/10 text-destructive/70" : line.type === "header" ? "bg-muted/30 text-muted-foreground/70" : "text-muted-foreground"}>
-      <span className="inline-block w-5 select-none text-right pr-2 opacity-40">{line.type === "add" ? "+" : line.type === "remove" ? "-" : " "}</span>
-      {line.content}
-    </div>)}
-    {truncated && <button type="button" onClick={onShowAll} className="w-full py-1.5 text-center text-xs text-muted-foreground/70 hover:text-foreground bg-muted/20">Show full diff ({lines.length - MAX_LINES} more lines)</button>}
-  </div>;
-}
-
-function DiffViewerContent({ expanded, diff, changeType, lines, visibleLines, truncated, onShowAll }: { expanded: boolean; diff: string | null; changeType: NonNullable<DiffViewerProps["changeType"]>; lines: ReturnType<typeof parseDiffLines>; visibleLines: ReturnType<typeof parseDiffLines>; truncated: boolean; onShowAll: () => void }) {
-  if (!expanded) return null;
-  if (changeType === "binary") return <div className="px-3 py-2 text-xs text-muted-foreground/70">Binary file changed. No diff available.</div>;
-  return diff === null ? null : <DiffLines lines={lines} visibleLines={visibleLines} truncated={truncated} onShowAll={onShowAll} />;
-}
-
-/** Inline unified diff renderer. Lazy-loads diff content on expand. */
+/**
+ * Inline diff for one file inside the transcript. Lazy-loads the patch on
+ * expand and renders it through pierre's PatchDiff.
+ */
 export function DiffViewer({ snapshotId, filePath, changeType = "modified" }: DiffViewerProps) {
   const [expanded, setExpanded] = useState(false);
   const [diff, setDiff] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [showAll, setShowAll] = useState(false);
+  const [truncated, setTruncated] = useState(false);
+  const shikiTheme = useShikiTheme();
 
   const handleToggle = useCallback(async () => {
     if (!expanded && diff === null) {
@@ -52,8 +31,9 @@ export function DiffViewer({ snapshotId, filePath, changeType = "modified" }: Di
       try {
         const result = await getTransport().getSnapshotDiff(snapshotId, filePath, MAX_LINES);
         setDiff(result);
+        setTruncated(result.split("\n").length > MAX_LINES);
       } catch {
-        setDiff("Failed to load diff");
+        setDiff("");
       } finally {
         setLoading(false);
       }
@@ -66,15 +46,11 @@ export function DiffViewer({ snapshotId, filePath, changeType = "modified" }: Di
     try {
       const fullDiff = await getTransport().getSnapshotDiff(snapshotId, filePath);
       setDiff(fullDiff);
-      setShowAll(true);
+      setTruncated(false);
     } catch {
       // Keep existing truncated diff on error
     }
   }, [snapshotId, filePath]);
-
-  const lines = useMemo(() => (diff ? parseDiffLines(diff) : []), [diff]);
-  const truncated = !showAll && lines.length > MAX_LINES;
-  const visibleLines = truncated ? lines.slice(0, MAX_LINES) : lines;
 
   const changeLabel = {
     created: "File created",
@@ -85,9 +61,72 @@ export function DiffViewer({ snapshotId, filePath, changeType = "modified" }: Di
   }[changeType];
 
   return (
-    <div className="rounded-md border border-border/30 overflow-hidden">
-      <DiffViewerHeader expanded={expanded} loading={loading} filePath={filePath} changeLabel={changeLabel} onToggle={handleToggle} />
-      <DiffViewerContent expanded={expanded} diff={diff} changeType={changeType} lines={lines} visibleLines={visibleLines} truncated={truncated} onShowAll={handleShowAll} />
+    <div className="overflow-hidden rounded-md border border-border/30">
+      <button
+        type="button"
+        onClick={handleToggle}
+        className="flex w-full items-center gap-2 bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted/40"
+      >
+        <ChevronRight className={`h-3 w-3 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`} />
+        <FileText className="h-3 w-3 shrink-0" />
+        <span className="truncate font-mono">{filePath}</span>
+        <span className="ml-auto text-xs opacity-60">{changeLabel}</span>
+        {loading && <span className="text-xs">Loading...</span>}
+      </button>
+      {expanded ? (
+        <DiffBody
+          binary={changeType === "binary"}
+          diff={diff}
+          truncated={truncated}
+          shikiTheme={shikiTheme}
+          onShowAll={handleShowAll}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** Expanded body: binary notice, patch render, or the show-all affordance. */
+function DiffBody({
+  binary,
+  diff,
+  truncated,
+  shikiTheme,
+  onShowAll,
+}: {
+  readonly binary: boolean;
+  readonly diff: string | null;
+  readonly truncated: boolean;
+  readonly shikiTheme: string;
+  readonly onShowAll: () => void;
+}) {
+  if (binary) {
+    return (
+      <div className="px-3 py-2 text-xs text-muted-foreground/70">
+        Binary file changed. No diff available.
+      </div>
+    );
+  }
+  if (diff === null) return null;
+  return (
+    <div className="max-h-[500px] overflow-auto">
+      {diff ? (
+        <PatchDiff
+          patch={diff}
+          options={{ theme: shikiTheme, diffStyle: "unified", overflow: "scroll" }}
+        />
+      ) : (
+        <p className="px-3 py-2 text-xs text-muted-foreground/70">No diff content</p>
+      )}
+      {truncated ? (
+        <button
+          type="button"
+          onClick={onShowAll}
+          className="w-full bg-muted/20 py-1.5 text-center text-xs text-muted-foreground/70 hover:text-foreground"
+        >
+          Show full diff
+        </button>
+      ) : null}
     </div>
   );
 }

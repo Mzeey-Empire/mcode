@@ -1044,7 +1044,7 @@ describe("resolveThreadOverviewChangeSummary", () => {
   it("uses the latest turn snapshot before git views", async () => {
     const transport = makeSummaryTransport({
       getSnapshotDiffStats: vi.fn().mockResolvedValue([
-        { filePath: "src/latest.ts", additions: 8, deletions: 2 },
+        { filePath: "src/latest.ts", additions: 8, deletions: 2, changeType: "modified" },
       ]),
       getWorkingTreeFiles: vi.fn().mockResolvedValue(["src/manual.ts"]),
     });

@@ -8,6 +8,7 @@ import { injectable, inject } from "tsyringe";
 import * as NodeFSPromises from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
+import type { DiffStats } from "@mcode/contracts";
 import type { GitExecutor } from "../../git/execution/index.js";
 import { RealGitExecutor } from "../../git/execution/real-git-executor.js";
 
@@ -82,7 +83,7 @@ function selectedPathGroups(
   return pathGroups.filter((group) => group.some((path) => connected.has(normalize(path))));
 }
 
-function parseNumstat(stdout: string): { filePath: string; additions: number; deletions: number }[] {
+function parseNumstat(stdout: string): Omit<DiffStats, "changeType">[] {
   return stdout
     .trim()
     .split("\n")
@@ -95,6 +96,28 @@ function parseNumstat(stdout: string): { filePath: string; additions: number; de
         deletions: delStr === "-" ? 0 : parseInt(delStr ?? "0", 10),
       };
     });
+}
+
+/** Map a --name-status letter (A/M/D/R/C/T/U…) to the shared change type. */
+function nameStatusChangeType(letter: string): DiffStats["changeType"] {
+  if (letter === "A") return "added";
+  if (letter === "D") return "deleted";
+  if (letter === "R") return "renamed";
+  if (letter === "C") return "copied";
+  return "modified";
+}
+
+function parseNameStatus(stdout: string): Map<string, DiffStats["changeType"]> {
+  const types = new Map<string, DiffStats["changeType"]>();
+  for (const line of stdout.trim().split("\n")) {
+    if (!line.includes("\t")) continue;
+    const [status, ...paths] = line.split("\t");
+    // Rename/copy rows carry "old\tnew"; the destination is the diff file path.
+    const filePath = paths[paths.length - 1];
+    if (!filePath) continue;
+    types.set(filePath, nameStatusChangeType(status?.[0] ?? "M"));
+  }
+  return types;
 }
 
 function numstatDestinationPath(path: string): string {
@@ -124,12 +147,12 @@ function getDiffPathspecBatches(
 
 function gitDiffArgs(
   cwd: string,
-  format: "unified" | "numstat",
+  format: "unified" | "numstat" | "name-status",
   refBefore: string,
   refAfter: string,
   pathspecs: string[] | undefined,
 ): string[] {
-  const formatArgs = format === "unified" ? [] : ["--numstat"];
+  const formatArgs = format === "unified" ? [] : [`--${format}`];
   const args = ["-C", cwd, "diff", ...formatArgs, "--find-renames", refBefore, refAfter];
   if (pathspecs) args.push("--", ...pathspecs);
   return args;
@@ -138,7 +161,7 @@ function gitDiffArgs(
 async function executeDiffBatches(
   gitExecutor: GitExecutor,
   cwd: string,
-  format: "unified" | "numstat",
+  format: "unified" | "numstat" | "name-status",
   refBefore: string,
   refAfter: string,
   pathspecBatches: (string[] | undefined)[],
@@ -159,10 +182,24 @@ function limitDiffLines(diff: string, maxLines: number | undefined): string {
   return maxLines ? diff.split("\n").slice(0, maxLines).join("\n") : diff;
 }
 
-function collectDiffStats(outputs: readonly string[]): { filePath: string; additions: number; deletions: number }[] {
-  const stats = new Map<string, { filePath: string; additions: number; deletions: number }>();
+function collectDiffStats(
+  outputs: readonly string[],
+  statusOutputs: readonly string[],
+): DiffStats[] {
+  const changeTypes = new Map<string, DiffStats["changeType"]>();
+  for (const output of statusOutputs) {
+    for (const [filePath, changeType] of parseNameStatus(output)) {
+      changeTypes.set(filePath, changeType);
+    }
+  }
+  const stats = new Map<string, DiffStats>();
   for (const output of outputs) {
-    for (const entry of parseNumstat(output)) stats.set(entry.filePath, entry);
+    for (const entry of parseNumstat(output)) {
+      stats.set(entry.filePath, {
+        ...entry,
+        changeType: changeTypes.get(entry.filePath) ?? "modified",
+      });
+    }
   }
   return [...stats.values()];
 }
@@ -320,28 +357,24 @@ export class SnapshotService {
     }
   }
 
-  /** Get per-file line addition/deletion counts between two refs (tree or commit SHAs). */
+  /** Get per-file change classification and line counts between two refs (tree or commit SHAs). */
   async getDiffStats(
     cwd: string,
     refBefore: string,
     refAfter: string,
     allowedPaths?: readonly string[],
     allowedPathGroups?: readonly (readonly string[])[],
-  ): Promise<{ filePath: string; additions: number; deletions: number }[]> {
+  ): Promise<DiffStats[]> {
     if (hasUnsafeDiffRefs(refBefore, refAfter) || refBefore === refAfter) return [];
     const pathspecBatches = getDiffPathspecBatches(undefined, allowedPaths, allowedPathGroups);
     if (pathspecBatches.length === 0) return [];
 
     try {
-      const outputs = await executeDiffBatches(
-        this.gitExecutor,
-        cwd,
-        "numstat",
-        refBefore,
-        refAfter,
-        pathspecBatches,
-      );
-      return collectDiffStats(outputs);
+      const [outputs, statusOutputs] = await Promise.all([
+        executeDiffBatches(this.gitExecutor, cwd, "numstat", refBefore, refAfter, pathspecBatches),
+        executeDiffBatches(this.gitExecutor, cwd, "name-status", refBefore, refAfter, pathspecBatches),
+      ]);
+      return collectDiffStats(outputs, statusOutputs);
     } catch {
       return [];
     }

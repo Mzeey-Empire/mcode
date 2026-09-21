@@ -30,17 +30,7 @@ vi.mock("@/components/ui/scroll-area", () => ({
 }));
 
 vi.mock("../DiffToolbar", () => ({
-  DiffToolbar: ({
-    filesVisible,
-    onToggleFiles,
-  }: {
-    filesVisible: boolean;
-    onToggleFiles: () => void;
-  }) => (
-    <button type="button" aria-pressed={filesVisible} onClick={onToggleFiles}>
-      Files
-    </button>
-  ),
+  DiffToolbar: () => null,
 }));
 
 vi.mock("../WorktreeFilesPane", () => ({
@@ -64,14 +54,13 @@ vi.mock("../LastTurnView", () => ({
   ),
 }));
 vi.mock("../CumulativeView", () => ({
-  CumulativeView: ({ comparison, cacheVersion, turnCount, refreshing, onRefresh }: {
+  CumulativeView: ({ comparison, cacheVersion, refreshing, onRefresh }: {
     comparison: ReviewComparison | null;
     cacheVersion: string | number;
-    turnCount: number;
     refreshing: boolean;
     onRefresh: () => void;
   }) => (
-    <section data-testid="cumulative-diff" data-cache-version={cacheVersion} data-turn-count={turnCount}>
+    <section data-testid="cumulative-diff" data-cache-version={cacheVersion}>
       {comparison?.files.map((file) => file.path).join(",")}
       <button type="button" onClick={onRefresh} disabled={refreshing}>Refresh cumulative</button>
       {refreshing ? <span>Refreshing cumulative comparison</span> : null}
@@ -79,9 +68,9 @@ vi.mock("../CumulativeView", () => ({
   ),
 }));
 vi.mock("../FileList", () => ({
-  FileList: ({ files, refreshing, onRefresh }: { files: string[]; refreshing: boolean; onRefresh: () => void }) => (
+  FileList: ({ files, refreshing, onRefresh }: { files: { path: string }[]; refreshing: boolean; onRefresh: () => void }) => (
     <section data-testid="diff-files">
-      {files.join(",")}
+      {files.map((file) => file.path).join(",")}
       <button type="button" onClick={onRefresh}>Refresh</button>
       {refreshing ? <span>Refreshing comparison</span> : null}
     </section>
@@ -143,10 +132,7 @@ describe("DiffPanel worktree files", () => {
 
     expect(screen.queryByTestId("worktree-files")).not.toBeInTheDocument();
     expect(transport.listWorkspaceFiles).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Files" })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
+    expect(useDiffStore.getState().reviewFilesVisibleByScope["thread-1"]).toBeFalsy();
   });
 
   it.each([false, true])("finishes the first snapshot load so native Last turn can render, failed=%s", async (failed) => {
@@ -179,20 +165,20 @@ describe("DiffPanel worktree files", () => {
     expect(screen.getByTestId("snapshot-diff")).not.toHaveTextContent("live.ts");
   });
 
-  it("starts closed in a compact diff and opens from the same toggle", async () => {
+  it("stays collapsed in a compact diff even when the toggle requests Files", async () => {
     measuredWidth = 640;
-    const user = userEvent.setup();
     render(<DiffPanel />);
 
     expect(screen.queryByTestId("worktree-files")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Files" }));
+    act(() => { useDiffStore.getState().setReviewFilesVisible("thread-1", true); });
 
-    await waitFor(() => expect(screen.getByTestId("worktree-files")).toBeInTheDocument());
-    expect(transport.listWorkspaceFiles).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Files" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
+    // The pane never floats: below the docked minimum it collapses and the
+    // visible flag stays set so it returns once the panel has room again.
+    await waitFor(() =>
+      expect(useDiffStore.getState().reviewFilesVisibleByScope["thread-1"]).toBe(true)
     );
+    expect(screen.queryByTestId("worktree-files")).not.toBeInTheDocument();
+    expect(transport.listWorkspaceFiles).not.toHaveBeenCalled();
   });
 
   it("publishes one matching diff and Files result after a controlled refresh", async () => {
@@ -206,7 +192,7 @@ describe("DiffPanel worktree files", () => {
     render(<DiffPanel />);
     first.resolve({ files: [{ path: "old.ts", previousPath: null, changeType: "modified", binary: false }], additions: 1, deletions: 0 });
     await waitFor(() => expect(screen.getByTestId("diff-files")).toHaveTextContent("old.ts"));
-    await user.click(screen.getByRole("button", { name: "Files" }));
+    act(() => { useDiffStore.getState().setReviewFilesVisible("workspace-1", true); });
     expect(screen.getByTestId("worktree-files")).toHaveTextContent("old.ts");
 
     await user.click(screen.getByRole("button", { name: "Refresh" }));
@@ -246,7 +232,7 @@ describe("DiffPanel worktree files", () => {
     render(<DiffPanel />);
     initialStats.resolve(comparison("snapshot-old", "old.ts"));
     await waitFor(() => expect(screen.getByTestId("snapshot-diff")).toHaveAttribute("data-snapshot-id", "snapshot-old"));
-    await user.click(screen.getByRole("button", { name: "Files" }));
+    act(() => { useDiffStore.getState().setReviewFilesVisible("thread-1", true); });
     expect(screen.getByTestId("snapshot-diff")).toHaveTextContent("old.ts");
     expect(screen.getByTestId("worktree-files")).toHaveTextContent("old.ts");
 
@@ -297,7 +283,7 @@ describe("DiffPanel worktree files", () => {
     render(<DiffPanel />);
     initialStats.resolve(stats("old.ts"));
     await waitFor(() => expect(screen.getByTestId("cumulative-diff")).toHaveTextContent("old.ts"));
-    await user.click(screen.getByRole("button", { name: "Files" }));
+    act(() => { useDiffStore.getState().setReviewFilesVisible("thread-1", true); });
     const oldVersion = screen.getByTestId("cumulative-diff").getAttribute("data-cache-version");
 
     await user.click(screen.getByRole("button", { name: "Refresh cumulative" }));
@@ -360,13 +346,12 @@ describe("DiffPanel worktree files", () => {
         },
       },
     });
-    const user = userEvent.setup();
 
     render(<DiffPanel />);
 
     expect(screen.getByTestId("cumulative-diff")).toHaveTextContent("subagent-proof.txt");
     expect(screen.getByText("Refreshing cumulative comparison")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Files" }));
+    act(() => { useDiffStore.getState().setReviewFilesVisible("thread-1", true); });
     expect(screen.getByTestId("worktree-files")).toHaveTextContent("subagent-proof.txt");
     expect(useDiffStore.getState().reviewDiffStat).toEqual({ additions: 1, deletions: 0 });
 
@@ -433,13 +418,12 @@ describe("DiffPanel worktree files", () => {
         },
       },
     });
-    const user = userEvent.setup();
 
     render(<DiffPanel />);
 
     await waitFor(() => expect(screen.getByTestId("cumulative-diff")).toHaveTextContent("second.ts"));
     expect(screen.getByTestId("cumulative-diff")).not.toHaveTextContent("first.ts");
-    await user.click(screen.getByRole("button", { name: "Files" }));
+    act(() => { useDiffStore.getState().setReviewFilesVisible("thread-1", true); });
     expect(screen.getByTestId("worktree-files")).toHaveTextContent("second.ts");
     expect(screen.getByTestId("worktree-files")).not.toHaveTextContent("first.ts");
     expect(useDiffStore.getState().reviewDiffStat).toEqual({ additions: 3, deletions: 1 });

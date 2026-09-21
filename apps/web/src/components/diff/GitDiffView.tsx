@@ -50,9 +50,9 @@ export function GitDiffView({ resolved, threadId, loading, immutable, onRefresh,
   if (!resolved || resolved.comparison.files.length === 0) return <EmptyState label={emptyLabel} />;
 
   return (
-    <div className="flex flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <FileList
-        files={resolved.comparison.files.map((file) => file.path)}
+        files={resolved.comparison.files}
         source={resolved.source}
         id={resolved.id}
         threadId={threadId}

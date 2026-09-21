@@ -25,6 +25,7 @@ export interface WorktreeFilesPaneProps {
   readonly wideWidth: number;
   readonly getMaxWidth: NonNullable<FilesPanelProps["getMaxWidth"]>;
   readonly onWidthChange: NonNullable<FilesPanelProps["onWidthChange"]>;
+  readonly onCollapseRequest?: () => void;
 }
 
 /** Renders the active Review comparison's changed-file tree. */
@@ -46,6 +47,7 @@ export function WorktreeFilesPane({
   wideWidth,
   getMaxWidth,
   onWidthChange,
+  onCollapseRequest,
 }: WorktreeFilesPaneProps) {
   const [search, setSearch] = useState("");
   const normalizedSearch = search.trim().toLocaleLowerCase();
@@ -74,6 +76,7 @@ export function WorktreeFilesPane({
       wideWidth={wideWidth}
       getMaxWidth={getMaxWidth}
       onWidthChange={onWidthChange}
+      onCollapseRequest={onCollapseRequest}
       controls={
         <div className="flex h-11 shrink-0 items-center border-b border-border/35 px-2.5">
           <div className="relative min-w-0 flex-1">

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { TurnSnapshot } from "@mcode/contracts";
+import { reviewFilesForSnapshot } from "@/lib/review-comparison";
 import { FileList } from "./FileList";
 
 /** Props for TurnEntry. */
@@ -62,7 +63,7 @@ export function TurnEntry({ snapshot, turnNumber, defaultExpanded = false }: Tur
       {expanded && (
         <div id={contentId} className="pb-1">
           <FileList
-            files={snapshot.files_changed}
+            files={reviewFilesForSnapshot(snapshot)}
             source="snapshot"
             id={snapshot.id}
             threadId={snapshot.thread_id}

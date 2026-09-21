@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { useVirtualizer, type VirtualItem, type Virtualizer } from "@tanstack/react-virtual";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   FileSearch,
+  Files,
   WrapText,
   Columns2,
   MoreHorizontal,
@@ -9,7 +10,7 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
 } from "lucide-react";
-import { FileEntry } from "./FileEntry";
+import type { ReviewFileChange } from "@mcode/contracts";
 import { FileTypeIcon } from "@/components/ui/file-type-icon";
 import { useDiffStore, type SelectedFile } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -32,49 +33,23 @@ import {
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { DIFF_FILE_LIST_PADDING } from "./diff-surface";
+import { WorkerPoolContextProvider } from "@pierre/diffs/react";
+import { ReviewDiffView } from "./ReviewDiffView";
+import { ReviewToolbarSlotContext } from "./review-toolbar-slot";
 
-const FILE_ROW_ESTIMATE_PX = 260;
-const FILE_ROW_OVERSCAN = 4;
-const FILE_LIST_VIRTUALIZE_THRESHOLD = 30;
+const PIERRE_WORKER_POOL_SIZE = 3;
 
-function getFileVirtualItems({
-  fallbackAnchorIndex,
-  scrollElement,
-  shouldVirtualize,
-  sortedFiles,
-  virtualItems,
-}: {
-  fallbackAnchorIndex: number;
-  scrollElement: HTMLElement | null;
-  shouldVirtualize: boolean;
-  sortedFiles: string[];
-  virtualItems: VirtualItem[];
-}): VirtualItem[] {
-  if (!shouldVirtualize) return [];
-  if (virtualItems.length > 0) return virtualItems;
-
-  const visibleCount = Math.min(
-    sortedFiles.length,
-    Math.max(1, Math.ceil((scrollElement?.clientHeight ?? 0) / FILE_ROW_ESTIMATE_PX) + FILE_ROW_OVERSCAN * 2),
-  );
-  const firstIndex = Math.min(fallbackAnchorIndex, Math.max(0, sortedFiles.length - visibleCount));
-  return Array.from({ length: visibleCount }, (_, offset) => {
-    const index = firstIndex + offset;
-    return {
-      index,
-      key: sortedFiles[index] ?? String(index),
-      start: index * FILE_ROW_ESTIMATE_PX,
-      size: FILE_ROW_ESTIMATE_PX,
-      end: (index + 1) * FILE_ROW_ESTIMATE_PX,
-      lane: 0,
-    };
-  });
-}
+const pierrePoolOptions = {
+  poolSize: PIERRE_WORKER_POOL_SIZE,
+  workerFactory: () =>
+    new Worker(new URL("@pierre/diffs/worker/worker.js", import.meta.url), {
+      type: "module",
+    }),
+};
 
 /** Props for FileList. */
 interface FileListProps {
-  files: string[];
+  files: ReviewFileChange[];
   source: SelectedFile["source"];
   id: string;
   /** Thread that owns these files, used to scope the inline diff cache. */
@@ -92,10 +67,9 @@ interface FileListProps {
 }
 
 /**
- * Renders the changed files as a flat list of self-describing cards, one per
- * file. Each card header carries the file's full path (dimmed parent +
- * emphasized basename), so no folder-grouping chrome is needed. Sorted
- * alphabetically by path for a stable, scannable order.
+ * Renders the changed files through pierre's virtualized CodeView: one scroll
+ * container, one item per file, with headers, collapsed context bands, and
+ * inline comments. The toolbar above it stays in the outer scroll region.
  */
 export function FileList({
   files,
@@ -108,18 +82,13 @@ export function FileList({
   refreshing = false,
   onRefresh,
 }: FileListProps) {
-  const listRef = useRef<HTMLDivElement>(null);
-  const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null);
-  const [scrollMargin, setScrollMargin] = useState(0);
-  const [fallbackAnchorIndex, setFallbackAnchorIndex] = useState(0);
   const [jumpOpen, setJumpOpen] = useState(false);
   const [jumpTarget, setJumpTarget] = useState<{ path: string; token: number } | null>(null);
-  const [highlightTarget, setHighlightTarget] = useState<{ path: string; token: number } | null>(null);
+  const [highlightPath, setHighlightPath] = useState<string | null>(null);
   const jumpTokenRef = useRef(0);
-  const handledExternalJumpNonceRef = useRef<number | null>(null);
   const highlightClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sortedFiles = useMemo(
-    () => [...files].sort((a, b) => a.localeCompare(b)),
+    () => files.slice().sort((a, b) => a.path.localeCompare(b.path)),
     [files],
   );
 
@@ -132,52 +101,18 @@ export function FileList({
     return () => setReviewFileCount(null);
   }, [files.length, setReviewFileCount]);
 
-  // Diff-display controls now live on this bar. Line-wrap is keyed by the active
-  // thread (matching the renderers); render mode is global.
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
+  // FileList's `threadId` prop is the diff scope (thread or workspace id), which
+  // is also the key the Files navigator visibility is stored under.
+  const filesVisible = useDiffStore((s) => s.reviewFilesVisibleByScope[threadId] ?? false);
+  const setReviewFilesVisible = useDiffStore((s) => s.setReviewFilesVisible);
   const renderMode = useDiffStore((s) => s.renderMode);
   const setRenderMode = useDiffStore((s) => s.setRenderMode);
   const toggleLineWrap = useDiffStore((s) => s.toggleLineWrap);
   const lineWrap = useDiffStore((s) => (activeThreadId ? s.getLineWrap(activeThreadId) : true));
   const setBulkDiffExpand = useDiffStore((s) => s.setBulkDiffExpand);
   const bulkDiffExpand = useDiffStore((s) => s.bulkDiffExpand);
-  const reviewFileJumpRequest = useDiffStore((s) => s.reviewFileJumpRequest);
-  // The expand/collapse toggle reflects the last bulk action, falling back to
-  // the view's default expand state when none has run yet.
   const allExpanded = bulkDiffExpand?.expand ?? defaultFilesExpanded;
-  const shouldVirtualize = sortedFiles.length > FILE_LIST_VIRTUALIZE_THRESHOLD;
-
-  useLayoutEffect(() => {
-    const list = listRef.current;
-    const viewport = list?.closest<HTMLElement>("[data-slot='scroll-area-viewport']") ?? null;
-    const nextScrollElement = viewport ?? list;
-    setScrollElement((prev) => (prev === nextScrollElement ? prev : nextScrollElement));
-    setScrollMargin((prev) => {
-      const next = list?.offsetTop ?? 0;
-      return prev === next ? prev : next;
-    });
-  }, [sortedFiles.length]);
-
-  const virtualizer = useVirtualizer({
-    count: sortedFiles.length,
-    getScrollElement: () => scrollElement,
-    estimateSize: () => FILE_ROW_ESTIMATE_PX,
-    getItemKey: (index) => sortedFiles[index] ?? String(index),
-    overscan: FILE_ROW_OVERSCAN,
-    scrollMargin,
-    useFlushSync: false,
-  });
-  const virtualItems: VirtualItem[] = shouldVirtualize ? virtualizer.getVirtualItems() : [];
-  const fileVirtualItems = getFileVirtualItems({
-    fallbackAnchorIndex,
-    scrollElement,
-    shouldVirtualize,
-    sortedFiles,
-    virtualItems,
-  });
-
-  // The parent lifecycle owns refresh so the diff and Files publish together.
-  const refreshInProgress = refreshing;
 
   useEffect(() => {
     return () => {
@@ -187,33 +122,30 @@ export function FileList({
 
   const jumpToFile = useCallback((path: string) => {
     const token = ++jumpTokenRef.current;
-    const index = sortedFiles.indexOf(path);
     setJumpOpen(false);
     setJumpTarget({ path, token });
-    setHighlightTarget({ path, token });
-    if (index >= 0) {
-      setFallbackAnchorIndex(index);
-      virtualizer.scrollToIndex(index, { align: "start" });
-    }
+    setHighlightPath(path);
 
     if (highlightClearRef.current) clearTimeout(highlightClearRef.current);
     highlightClearRef.current = setTimeout(() => {
-      setHighlightTarget((current) => (current?.token === token ? null : current));
+      setHighlightPath((current) => (current === path ? null : current));
       highlightClearRef.current = null;
     }, 1500);
-  }, [sortedFiles, virtualizer]);
+  }, []);
 
   const clearJumpTarget = useCallback((token: number) => {
     setJumpTarget((current) => (current?.token === token ? null : current));
   }, []);
 
   useEffect(() => {
-    if (!reviewFileJumpRequest || reviewFileJumpRequest.scopeId !== threadId) return;
-    if (handledExternalJumpNonceRef.current === reviewFileJumpRequest.nonce) return;
-    if (!sortedFiles.includes(reviewFileJumpRequest.path)) return;
-    handledExternalJumpNonceRef.current = reviewFileJumpRequest.nonce;
-    jumpToFile(reviewFileJumpRequest.path);
-  }, [jumpToFile, reviewFileJumpRequest, sortedFiles, threadId]);
+    return useDiffStore.subscribe((state, prev) => {
+      const request = state.reviewFileJumpRequest;
+      if (!request || request === prev.reviewFileJumpRequest) return;
+      if (request.scopeId !== threadId) return;
+      if (!sortedFiles.some((f) => f.path === request.path)) return;
+      jumpToFile(request.path);
+    });
+  }, [jumpToFile, sortedFiles, threadId]);
 
   if (files.length === 0) {
     return (
@@ -222,11 +154,13 @@ export function FileList({
   }
 
   return (
-    <div className="flex flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       <FileListToolbar
         activeThreadId={activeThreadId}
+        filesVisible={filesVisible}
+        onToggleFiles={() => setReviewFilesVisible(threadId, !filesVisible)}
         refreshable={refreshable}
-        refreshInProgress={refreshInProgress}
+        refreshInProgress={refreshing}
         onRefresh={onRefresh}
         lineWrap={lineWrap}
         toggleLineWrap={toggleLineWrap}
@@ -234,29 +168,49 @@ export function FileList({
         onToggleAll={() => setBulkDiffExpand(!allExpanded)}
         jumpOpen={jumpOpen}
         onJumpOpenChange={setJumpOpen}
-        sortedFiles={sortedFiles}
+        sortedFiles={sortedFiles.map((f) => f.path)}
         onJumpToFile={jumpToFile}
         renderMode={renderMode}
         onToggleRenderMode={() =>
           setRenderMode(renderMode === "unified" ? "side-by-side" : "unified")
         }
       />
-      <FileListEntries
-        listRef={listRef}
-        shouldVirtualize={shouldVirtualize}
-        virtualizer={virtualizer}
-        fileVirtualItems={fileVirtualItems}
-        scrollMargin={scrollMargin}
-        sortedFiles={sortedFiles}
-        source={source}
-        id={id}
-        threadId={threadId}
-        defaultFilesExpanded={defaultFilesExpanded}
-        cacheVersion={cacheVersion}
-        jumpTarget={jumpTarget}
-        onJumpSettled={clearJumpTarget}
-        highlightTarget={highlightTarget}
-      />
+      {/* jsdom and non-DOM environments have no Worker; pierre falls back to
+          main-thread highlighting when no pool provider is present. */}
+      {typeof Worker === "undefined" ? (
+        <ReviewDiffView
+          files={sortedFiles}
+          source={source}
+          id={id}
+          threadId={threadId}
+          cacheVersion={cacheVersion}
+          defaultFilesExpanded={defaultFilesExpanded}
+          jumpTarget={jumpTarget}
+          onJumpSettled={clearJumpTarget}
+          highlightPath={highlightPath}
+          renderMode={renderMode}
+          lineWrap={lineWrap}
+        />
+      ) : (
+      <WorkerPoolContextProvider
+        poolOptions={pierrePoolOptions}
+        highlighterOptions={{}}
+      >
+        <ReviewDiffView
+          files={sortedFiles}
+          source={source}
+          id={id}
+          threadId={threadId}
+          cacheVersion={cacheVersion}
+          defaultFilesExpanded={defaultFilesExpanded}
+          jumpTarget={jumpTarget}
+          onJumpSettled={clearJumpTarget}
+          highlightPath={highlightPath}
+          renderMode={renderMode}
+          lineWrap={lineWrap}
+        />
+      </WorkerPoolContextProvider>
+      )}
     </div>
   );
 }
@@ -264,6 +218,8 @@ export function FileList({
 /** Props for the persistent controls above a changed-file list. */
 interface FileListToolbarProps {
   activeThreadId: string | null;
+  filesVisible: boolean;
+  onToggleFiles: () => void;
   refreshable: boolean;
   refreshInProgress: boolean;
   onRefresh?: () => void;
@@ -282,6 +238,8 @@ interface FileListToolbarProps {
 /** Renders the controls for review display, navigation, and refresh. */
 function FileListToolbar({
   activeThreadId,
+  filesVisible,
+  onToggleFiles,
   refreshable,
   refreshInProgress,
   onRefresh,
@@ -296,8 +254,9 @@ function FileListToolbar({
   renderMode,
   onToggleRenderMode,
 }: FileListToolbarProps) {
-  return (
-    <div className="sticky top-0 z-20 flex items-center gap-0.5 bg-background/95 px-2 py-1.5 shadow-[0_8px_12px_-12px_oklch(0_0_0/0.35)] backdrop-blur-sm">
+  const toolbarSlot = useContext(ReviewToolbarSlotContext);
+  const controls = (
+    <>
       <ReviewOptionsMenu
         activeThreadId={activeThreadId}
         refreshable={refreshable}
@@ -318,6 +277,7 @@ function FileListToolbar({
           <RefreshCw size={12} className="animate-spin" aria-hidden="true" />
         </span>
       ) : null}
+      <FilesToggle filesVisible={filesVisible} onToggle={onToggleFiles} />
       <FileJumpPopover
         open={jumpOpen}
         onOpenChange={onJumpOpenChange}
@@ -325,7 +285,54 @@ function FileListToolbar({
         onJumpToFile={onJumpToFile}
       />
       <RenderModeToggle renderMode={renderMode} onToggle={onToggleRenderMode} />
+    </>
+  );
+  // The Review panel supplies a slot inside the top toolbar row so the two
+  // rows collapse into one. Standalone renders fall back to a sticky bar.
+  if (toolbarSlot) return createPortal(controls, toolbarSlot);
+  return (
+    <div className="sticky top-0 z-20 flex items-center gap-0.5 bg-background/95 px-2 py-1.5 shadow-[0_8px_12px_-12px_oklch(0_0_0/0.35)] backdrop-blur-sm">
+      {controls}
     </div>
+  );
+}
+
+/** Props for the Files navigator toggle. */
+interface FilesToggleProps {
+  filesVisible: boolean;
+  onToggle: () => void;
+}
+
+/** Toggles the docked/floating Files navigator for the active comparison. */
+function FilesToggle({ filesVisible, onToggle }: FilesToggleProps) {
+  const label = filesVisible ? "Hide files" : "Show files";
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={label}
+            aria-pressed={filesVisible}
+            data-testid="review-files-toggle"
+            className={cn(
+              "h-6 w-6 transition-colors",
+              filesVisible
+                ? "bg-muted text-foreground"
+                : "text-muted-foreground/50 hover:bg-muted/40 hover:text-foreground/70",
+            )}
+            onClick={onToggle}
+          >
+            <Files size={13} aria-hidden />
+          </Button>
+        }
+      />
+      <TooltipContent side="bottom" className="text-xs">
+        {label}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -529,144 +536,11 @@ function RenderModeToggle({ renderMode, onToggle }: RenderModeToggleProps) {
   );
 }
 
-/** Props for the rendered file-entry list. */
-interface FileListEntriesProps {
-  listRef: RefObject<HTMLDivElement | null>;
-  shouldVirtualize: boolean;
-  virtualizer: Virtualizer<HTMLElement, Element>;
-  fileVirtualItems: VirtualItem[];
-  scrollMargin: number;
-  sortedFiles: string[];
-  source: SelectedFile["source"];
-  id: string;
-  threadId: string;
-  defaultFilesExpanded: boolean;
-  cacheVersion: string | number;
-  jumpTarget: { path: string; token: number } | null;
-  onJumpSettled: (token: number) => void;
-  highlightTarget: { path: string; token: number } | null;
-}
-
-/** Renders virtualized or static file entries for the current comparison. */
-function FileListEntries({
-  listRef,
-  shouldVirtualize,
-  virtualizer,
-  fileVirtualItems,
-  scrollMargin,
-  sortedFiles,
-  source,
-  id,
-  threadId,
-  defaultFilesExpanded,
-  cacheVersion,
-  jumpTarget,
-  onJumpSettled,
-  highlightTarget,
-}: FileListEntriesProps) {
-  return (
-    <div
-      ref={listRef}
-      className={
-        shouldVirtualize
-          ? `${DIFF_FILE_LIST_PADDING} relative`
-          : `flex flex-col gap-2 ${DIFF_FILE_LIST_PADDING}`
-      }
-      style={shouldVirtualize ? { height: virtualizer.getTotalSize() } : undefined}
-    >
-      {shouldVirtualize ? (
-        fileVirtualItems.map((virtualItem) => {
-          const file = sortedFiles[virtualItem.index];
-          if (!file) return null;
-          return (
-            <div
-              key={virtualItem.key}
-              ref={virtualizer.measureElement}
-              data-index={virtualItem.index}
-              className="absolute left-0 w-full pb-2"
-              style={{ transform: `translateY(${virtualItem.start - scrollMargin}px)` }}
-            >
-              <FileListEntry
-                filePath={file}
-                source={source}
-                id={id}
-                threadId={threadId}
-                defaultFilesExpanded={defaultFilesExpanded}
-                cacheVersion={cacheVersion}
-                jumpTarget={jumpTarget}
-                onJumpSettled={onJumpSettled}
-                highlightTarget={highlightTarget}
-              />
-            </div>
-          );
-        })
-      ) : (
-        sortedFiles.map((file) => (
-          <FileListEntry
-            key={file}
-            filePath={file}
-            source={source}
-            id={id}
-            threadId={threadId}
-            defaultFilesExpanded={defaultFilesExpanded}
-            cacheVersion={cacheVersion}
-            jumpTarget={jumpTarget}
-            onJumpSettled={onJumpSettled}
-            highlightTarget={highlightTarget}
-          />
-        ))
-      )}
-    </div>
-  );
-}
-
-/** Props forwarded from a file list to a single file entry. */
-interface FileListEntryProps {
-  filePath: string;
-  source: SelectedFile["source"];
-  id: string;
-  threadId: string;
-  defaultFilesExpanded: boolean;
-  cacheVersion: string | number;
-  jumpTarget: { path: string; token: number } | null;
-  onJumpSettled: (token: number) => void;
-  highlightTarget: { path: string; token: number } | null;
-}
-
-/** Renders a single file entry with any active jump state. */
-function FileListEntry({
-  filePath,
-  source,
-  id,
-  threadId,
-  defaultFilesExpanded,
-  cacheVersion,
-  jumpTarget,
-  onJumpSettled,
-  highlightTarget,
-}: FileListEntryProps) {
-  return (
-    <FileEntry
-      filePath={filePath}
-      source={source}
-      id={id}
-      threadId={threadId}
-      defaultExpanded={defaultFilesExpanded}
-      cacheVersion={cacheVersion}
-      jumpToken={jumpTarget?.path === filePath ? jumpTarget.token : undefined}
-      onJumpSettled={onJumpSettled}
-      highlightToken={highlightTarget?.path === filePath ? highlightTarget.token : undefined}
-    />
-  );
-}
-
-/** Extract the basename from a file path for jump result labels. */
 function getFileBasename(filePath: string): string {
-  return filePath.split("/").pop() ?? filePath;
+  return filePath.split(/[\\/]/).pop() ?? filePath;
 }
 
-/** Extract the parent path from a file path for jump result labels. */
 function getParentPath(filePath: string): string {
-  const parts = filePath.split("/");
-  return parts.length > 1 ? parts.slice(0, -1).join("/") : "";
+  const index = filePath.replace(/\\/g, "/").lastIndexOf("/");
+  return index >= 0 ? filePath.slice(0, index) : "";
 }

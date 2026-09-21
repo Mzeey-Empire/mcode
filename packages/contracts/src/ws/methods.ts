@@ -976,6 +976,16 @@ export const WS_METHODS = lazySchema(() => ({
     }),
     result: z.string(),
   },
+  "git.fileAtRef": {
+    params: z.object({
+      workspaceId: z.string(),
+      /** Revision to read; "" reads the staged index blob, "A...B" reads at the merge base. */
+      ref: z.string(),
+      filePath: z.string(),
+      threadId: z.string().optional(),
+    }),
+    result: z.string(),
+  },
   "git.branchFiles": {
     params: z.object({
       workspaceId: z.string(),

@@ -40,16 +40,15 @@ describe("CumulativeView summary lens", () => {
           deletions: 0,
         }}
         cacheVersion="snap-1"
-        turnCount={1}
       />,
     );
 
-    expect(screen.getByText("a.ts")).toBeInTheDocument();
+    expect(screen.getByTestId("review-file-jump-trigger")).toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId("cumulative-summary-toggle"));
 
     expect(screen.getByTestId("summary-lens")).toBeInTheDocument();
-    expect(screen.queryByText("a.ts")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("review-file-jump-trigger")).not.toBeInTheDocument();
   });
 
   it("hides the summary lens toggle when the setting is disabled", () => {
@@ -69,7 +68,6 @@ describe("CumulativeView summary lens", () => {
           deletions: 0,
         }}
         cacheVersion="snap-1"
-        turnCount={1}
       />,
     );
 
@@ -87,7 +85,6 @@ describe("CumulativeView summary lens", () => {
         threadId="thread-1"
         comparison={comparison}
         cacheVersion="snap-1"
-        turnCount={1}
       />,
     );
 
@@ -99,12 +96,11 @@ describe("CumulativeView summary lens", () => {
         threadId="thread-1"
         comparison={comparison}
         cacheVersion="snap-1"
-        turnCount={1}
         scopeLabel="explorer_state"
       />,
     );
 
     expect(screen.queryByTestId("summary-lens")).not.toBeInTheDocument();
-    expect(screen.getByText("a.ts")).toBeInTheDocument();
+    expect(screen.getByTestId("review-file-jump-trigger")).toBeInTheDocument();
   });
 });

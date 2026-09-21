@@ -476,6 +476,8 @@ export type { ParentNarrativeRecoveryItem } from "./models/narrative-recovery.js
 
 export { TurnSnapshotSchema } from "./models/turn-snapshot.js";
 export type { TurnSnapshot } from "./models/turn-snapshot.js";
+export { DiffStatsSchema } from "./models/diff-stats.js";
+export type { DiffStats } from "./models/diff-stats.js";
 
 export {
   FileEffectKindSchema,

@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import { getTransport } from "@/transport";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import type { GitCommit } from "@mcode/contracts";
+import { pathsToReviewFiles } from "@/lib/review-comparison";
 import { FileList } from "./FileList";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -129,7 +130,7 @@ export function CommitEntry({ commit, threadId }: CommitEntryProps) {
               No files changed
             </p>
           ) : (
-            <FileList files={files} source="commit" id={commit.sha} threadId={threadId} />
+            <FileList files={pathsToReviewFiles(files)} source="commit" id={commit.sha} threadId={threadId} />
           )}
         </div>
       )}

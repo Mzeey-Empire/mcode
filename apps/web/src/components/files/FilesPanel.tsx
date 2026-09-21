@@ -25,6 +25,7 @@ export interface FilesPanelProps {
   wideWidth?: number;
   getMaxWidth?: (panel: HTMLDivElement | null) => number;
   onWidthChange?: (width: number, source: ResizablePanelWidthSource) => void;
+  onCollapseRequest?: () => void;
 }
 
 function FilesPanelHeader({ title, count, onClose }: Pick<FilesPanelProps, "title" | "count" | "onClose">) {
@@ -60,6 +61,7 @@ export function FilesPanel({
   wideWidth = 480,
   getMaxWidth = () => Number.MAX_SAFE_INTEGER,
   onWidthChange,
+  onCollapseRequest,
 }: FilesPanelProps) {
   const resizable = width !== undefined && onWidthChange !== undefined;
 
@@ -74,6 +76,7 @@ export function FilesPanel({
       separatorLabel={`Resize ${ariaLabel}`}
       resizeEnabled={resizable}
       onWidthChange={onWidthChange ?? noopWidthChange}
+      onCollapseRequest={onCollapseRequest}
       className={cn("flex min-h-0 shrink-0", className)}
     >
       <aside

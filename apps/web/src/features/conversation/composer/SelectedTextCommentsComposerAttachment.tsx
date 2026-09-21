@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { MessageCircle, Pencil, X } from "lucide-react";
 import type { SelectedTextComment } from "@mcode/contracts";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
@@ -36,7 +36,18 @@ function annotationLabel(count: number): string {
   return `${count} annotation${count === 1 ? "" : "s"}`;
 }
 
-function QuotePreview({ quote }: { readonly quote: string }) {
+/** One previewable comment card independent of the underlying comment kind. */
+export interface ComposerCommentCardData {
+  readonly id: string;
+  readonly displayNumber: number;
+  /** Small caption above the quote, e.g. "Selected text" or "steps.ts:42". */
+  readonly sourceLabel: string;
+  readonly quote: string;
+  readonly note: string;
+}
+
+/** Shared quote block for comment preview cards; expands when the quote overflows. */
+export function QuotePreview({ quote }: { readonly quote: string }) {
   const quoteRef = useRef<HTMLParagraphElement>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
@@ -79,18 +90,18 @@ function QuotePreview({ quote }: { readonly quote: string }) {
   );
 }
 
-function CommentPreviewActions({
+function CommentPreviewActions<T extends { readonly id: string; readonly displayNumber: number }>({
   comment,
   sourceUnavailable,
   multipleComments,
   onEdit,
   onDelete,
 }: {
-  readonly comment: SelectedTextComment;
+  readonly comment: T;
   readonly sourceUnavailable: boolean;
   readonly multipleComments: boolean;
-  readonly onEdit: (comment: SelectedTextComment) => void;
-  readonly onDelete: (comment: SelectedTextComment) => void;
+  readonly onEdit: (comment: T) => void;
+  readonly onDelete: (comment: T) => void;
 }) {
   if (!sourceUnavailable && !multipleComments) return null;
   return (
@@ -137,7 +148,7 @@ function CommentPreviewActions({
   );
 }
 
-function MutableCommentPreviewControls({
+function MutableCommentPreviewControls<T extends { readonly id: string; readonly displayNumber: number }>({
   comment,
   sourceUnavailable,
   multipleComments,
@@ -147,13 +158,13 @@ function MutableCommentPreviewControls({
   onDelete,
   openSourceButtonRef,
 }: {
-  readonly comment: SelectedTextComment;
+  readonly comment: T;
   readonly sourceUnavailable: boolean;
   readonly multipleComments: boolean;
   readonly areActionsVisible: boolean;
-  readonly onOpenSource: (comment: SelectedTextComment) => void;
-  readonly onEdit: (comment: SelectedTextComment) => void;
-  readonly onDelete: (comment: SelectedTextComment) => void;
+  readonly onOpenSource: (comment: T) => void;
+  readonly onEdit: (comment: T) => void;
+  readonly onDelete: (comment: T) => void;
   readonly openSourceButtonRef: (element: HTMLElement | null) => void;
 }) {
   return (
@@ -179,6 +190,103 @@ function MutableCommentPreviewControls({
         />
       )}
     </>
+  );
+}
+
+/**
+ * One comment card inside an attachment preview: quote, note, hover actions,
+ * and an optional editor docked under the card. Generic over the card payload
+ * so diff comments and selected-text comments share the same chrome.
+ */
+export function ComposerCommentPreviewItem<T extends ComposerCommentCardData>({
+  item,
+  editor,
+  readOnly,
+  sourceUnavailable,
+  multipleComments,
+  onOpenSource,
+  onEdit,
+  onDelete,
+  openSourceButtonRef,
+  testId,
+}: {
+  readonly item: T;
+  readonly editor?: ReactNode;
+  readonly readOnly: boolean;
+  readonly sourceUnavailable: boolean;
+  readonly multipleComments: boolean;
+  readonly onOpenSource: (item: T) => void;
+  readonly onEdit: (item: T) => void;
+  readonly onDelete: (item: T) => void;
+  readonly openSourceButtonRef: (element: HTMLElement | null) => void;
+  readonly testId: string;
+}) {
+  const itemRef = useRef<HTMLLIElement>(null);
+  const actionCloseTimerRef = useRef<number | undefined>(undefined);
+  const [areActionsVisible, setAreActionsVisible] = useState(false);
+  const showActions = () => {
+    if (actionCloseTimerRef.current !== undefined) window.clearTimeout(actionCloseTimerRef.current);
+    setAreActionsVisible(true);
+  };
+  const hideActionsAfterFocusLeaves = () => {
+    if (actionCloseTimerRef.current !== undefined) window.clearTimeout(actionCloseTimerRef.current);
+    actionCloseTimerRef.current = window.setTimeout(() => {
+      if (!itemRef.current?.contains(document.activeElement)) setAreActionsVisible(false);
+    });
+  };
+  useEffect(() => () => {
+    if (actionCloseTimerRef.current !== undefined) window.clearTimeout(actionCloseTimerRef.current);
+  }, []);
+  const content = (
+    <div className="relative z-10 min-w-0 space-y-1 px-1 py-1.5 pointer-events-none">
+      <p className="text-xs text-muted-foreground">{`${item.displayNumber}. ${item.sourceLabel}:`}</p>
+      <QuotePreview quote={item.quote} />
+      {sourceUnavailable && <p className="text-xs text-muted-foreground">Source unavailable</p>}
+      <p className="pt-1 text-xs text-muted-foreground">User comment:</p>
+      <p className="whitespace-pre-wrap break-words text-sm leading-5">{item.note}</p>
+    </div>
+  );
+
+  return (
+    <li
+      ref={(element) => {
+        itemRef.current = element;
+        if (sourceUnavailable) openSourceButtonRef(element);
+      }}
+      tabIndex={sourceUnavailable ? 0 : undefined}
+      className="relative min-w-0 border-b border-border/60 py-2 pr-12 first:pt-1 last:border-b-0 last:pb-1 focus-visible:rounded-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+      data-testid={testId}
+      onPointerEnter={showActions}
+      onPointerLeave={(event) => {
+        if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+        hideActionsAfterFocusLeaves();
+      }}
+      onFocus={showActions}
+      onBlur={hideActionsAfterFocusLeaves}
+    >
+      {editor ? (
+        <>
+          {content}
+          <div className="mt-2">{editor}</div>
+        </>
+      ) : (
+        <>
+          {content}
+          {!readOnly && (
+            <MutableCommentPreviewControls
+              comment={item}
+              sourceUnavailable={sourceUnavailable}
+              multipleComments={multipleComments}
+              areActionsVisible={areActionsVisible}
+              onOpenSource={onOpenSource}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              openSourceButtonRef={openSourceButtonRef}
+            />
+          )}
+        </>
+      )}
+    </li>
   );
 }
 
@@ -212,84 +320,38 @@ function CommentPreviewItem({
   readonly onCloseEditor: (comment: SelectedTextComment, restoreFocus: boolean) => void;
 }) {
   const cardEditor = !readOnly && editor?.anchor === "card" && editor.commentId === comment.id ? editor : undefined;
-  const itemRef = useRef<HTMLLIElement>(null);
-  const actionCloseTimerRef = useRef<number | undefined>(undefined);
-  const [areActionsVisible, setAreActionsVisible] = useState(false);
-  const showActions = () => {
-    if (actionCloseTimerRef.current !== undefined) window.clearTimeout(actionCloseTimerRef.current);
-    setAreActionsVisible(true);
+  const cardItem: ComposerCommentCardData = {
+    id: comment.id,
+    displayNumber: comment.displayNumber,
+    sourceLabel: "Selected text",
+    quote: comment.source.quote,
+    note: comment.note,
   };
-  const hideActionsAfterFocusLeaves = () => {
-    if (actionCloseTimerRef.current !== undefined) window.clearTimeout(actionCloseTimerRef.current);
-    actionCloseTimerRef.current = window.setTimeout(() => {
-      if (!itemRef.current?.contains(document.activeElement)) setAreActionsVisible(false);
-    });
-  };
-  useEffect(() => () => {
-    if (actionCloseTimerRef.current !== undefined) window.clearTimeout(actionCloseTimerRef.current);
-  }, []);
-  const content = (
-    <div className="relative z-10 min-w-0 space-y-1 px-1 py-1.5 pointer-events-none">
-      <p className="text-xs text-muted-foreground">{`${comment.displayNumber}. Selected text:`}</p>
-      <QuotePreview quote={comment.source.quote} />
-      {sourceUnavailable && <p className="text-xs text-muted-foreground">Source unavailable</p>}
-      <p className="pt-1 text-xs text-muted-foreground">User comment:</p>
-      <p className="whitespace-pre-wrap break-words text-sm leading-5">{comment.note}</p>
-    </div>
-  );
-
   return (
-    <li
-      ref={(element) => {
-        itemRef.current = element;
-        if (sourceUnavailable) openSourceButtonRef(element);
-      }}
-      tabIndex={sourceUnavailable ? 0 : undefined}
-      className="relative min-w-0 border-b border-border/60 py-2 pr-12 first:pt-1 last:border-b-0 last:pb-1 focus-visible:rounded-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-      data-testid={`selected-text-comment-preview-item-${comment.displayNumber}`}
-      onPointerEnter={showActions}
-      onPointerLeave={(event) => {
-        if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
-        hideActionsAfterFocusLeaves();
-      }}
-      onFocus={showActions}
-      onBlur={hideActionsAfterFocusLeaves}
-    >
-      {cardEditor ? (
-        <>
-          {content}
-          <div className="mt-2">
-            <SelectedTextCommentEditor
-              key={comment.id}
-              source={comment.source}
-              comment={comment}
-              draft={cardEditor}
-              onSave={onSave}
-              onDelete={onDelete}
-              onDraftChange={onEditorChange}
-              onClose={({ restoreFocus = true } = {}) => onCloseEditor(comment, restoreFocus)}
-              onAnnouncement={onAnnouncement}
-            />
-          </div>
-        </>
-      ) : (
-        <>
-          {content}
-          {!readOnly && (
-            <MutableCommentPreviewControls
-              comment={comment}
-              sourceUnavailable={sourceUnavailable}
-              multipleComments={multipleComments}
-              areActionsVisible={areActionsVisible}
-              onOpenSource={onOpenSource}
-              onEdit={onEdit}
-              onDelete={onDelete}
-              openSourceButtonRef={openSourceButtonRef}
-            />
-          )}
-        </>
-      )}
-    </li>
+    <ComposerCommentPreviewItem
+      item={cardItem}
+      readOnly={readOnly}
+      sourceUnavailable={sourceUnavailable}
+      multipleComments={multipleComments}
+      onOpenSource={() => onOpenSource(comment)}
+      onEdit={() => onEdit(comment)}
+      onDelete={() => onDelete(comment)}
+      openSourceButtonRef={openSourceButtonRef}
+      testId={`selected-text-comment-preview-item-${comment.displayNumber}`}
+      editor={cardEditor ? (
+        <SelectedTextCommentEditor
+          key={comment.id}
+          source={comment.source}
+          comment={comment}
+          draft={cardEditor}
+          onSave={onSave}
+          onDelete={onDelete}
+          onDraftChange={onEditorChange}
+          onClose={({ restoreFocus = true } = {}) => onCloseEditor(comment, restoreFocus)}
+          onAnnouncement={onAnnouncement}
+        />
+      ) : undefined}
+    />
   );
 }
 
@@ -339,41 +401,49 @@ function previewHorizontalPlacementClass(readOnly: boolean): string {
   return readOnly ? "right-0 left-auto" : "left-0";
 }
 
-/** Renders every saved selected-text comment as one aggregate composer attachment. */
-export function SelectedTextCommentsComposerAttachment({
-  comments,
+/** Props for the shared comment-attachment chrome: pill plus hover preview. */
+export interface ComposerCommentAttachmentShellProps {
+  /** Pill text, e.g. "2 annotations" or "1 comment". */
+  readonly label: string;
+  readonly sectionAriaLabel: string;
+  readonly readOnly?: boolean;
+  readonly testId: string;
+  readonly chipTestId: string;
+  readonly previewTestId: string;
+  /** Item count feeding sent-preview placement; unused when mutable. */
+  readonly commentCount: number;
+  readonly onRemove?: () => void;
+  readonly children: ReactNode;
+}
+
+/**
+ * Shared chrome for composer comment attachments: a bordered pill that opens a
+ * hover/focus preview panel above it. Extracted so diff comments and
+ * selected-text comments render identically.
+ */
+export function ComposerCommentAttachmentShell({
+  label,
+  sectionAriaLabel,
   readOnly = false,
-  editor,
-  unavailableSourceCommentIds = [],
+  testId,
+  chipTestId,
+  previewTestId,
+  commentCount,
   onRemove,
-  onOpenSource,
-  onEdit,
-  onDelete,
-  onFocusComposer,
-  onSave,
-  onEditorChange,
-}: SelectedTextCommentsComposerAttachmentProps) {
-  const [announcement, setAnnouncement] = useState("");
+  children,
+}: ComposerCommentAttachmentShellProps) {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const previewId = useId();
   const previewRootRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const sentPreviewPlacement = useSentPreviewPlacement({
-    commentCount: comments.length,
+    commentCount,
     isPreviewOpen,
     previewRef,
     previewRootRef,
     readOnly,
   });
   const previewCloseTimerRef = useRef<number | undefined>(undefined);
-  const focusAfterDeleteRef = useRef<string | undefined>(undefined);
-  const openSourceButtonsRef = useRef(new Map<string, HTMLElement>());
-  useEffect(() => {
-    const nextCommentId = focusAfterDeleteRef.current;
-    if (!nextCommentId) return;
-    focusAfterDeleteRef.current = undefined;
-    openSourceButtonsRef.current.get(nextCommentId)?.focus();
-  }, [comments]);
   useEffect(() => () => {
     if (previewCloseTimerRef.current !== undefined) window.clearTimeout(previewCloseTimerRef.current);
   }, []);
@@ -386,21 +456,6 @@ export function SelectedTextCommentsComposerAttachment({
     row.style.zIndex = "50";
     return () => { row.style.zIndex = ""; };
   }, [isPreviewOpen]);
-  const label = annotationLabel(comments.length);
-  const dockedEditor = readOnly ? undefined : getDockedEditor(editor, comments);
-  const handleDelete = (comment: SelectedTextComment) => {
-    const index = comments.findIndex((candidate) => candidate.id === comment.id);
-    const nextFocusTarget = comments[index + 1] ?? comments[index - 1];
-    focusAfterDeleteRef.current = nextFocusTarget?.id;
-    setAnnouncement("Comment deleted.");
-    if (!nextFocusTarget) onFocusComposer();
-    onDelete(comment);
-  };
-  const handleCardEditorClose = (comment: SelectedTextComment, restoreFocus: boolean) => {
-    onEditorChange(undefined);
-    if (!restoreFocus) return;
-    requestAnimationFrame(() => openSourceButtonsRef.current.get(comment.id)?.focus());
-  };
   const openPreview = () => {
     if (previewCloseTimerRef.current !== undefined) window.clearTimeout(previewCloseTimerRef.current);
     setIsPreviewOpen(true);
@@ -416,87 +471,140 @@ export function SelectedTextCommentsComposerAttachment({
   };
 
   return (
+    <section
+      className={readOnly ? "relative z-10 flex justify-end pt-2" : "px-3 pt-2"}
+      aria-label={sectionAriaLabel}
+      data-selected-text-exclude={readOnly ? true : undefined}
+      data-testid={testId}
+    >
+      <div
+        ref={previewRootRef}
+        className="relative inline-flex max-w-full"
+        onPointerLeave={schedulePreviewClose}
+        onBlur={closePreviewAfterFocusLeaves}
+      >
+        <div className="inline-flex h-8 max-w-full items-center overflow-hidden rounded-lg border border-border bg-background focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50" data-testid={chipTestId}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-label={`${label}. Preview available.`}
+            aria-controls={previewId}
+            aria-expanded={isPreviewOpen}
+            onPointerEnter={openPreview}
+            onFocus={openPreview}
+            onClick={openPreview}
+            className="min-w-0 rounded-none border-y-0 border-l-0 border-r border-border bg-transparent px-3 text-foreground hover:bg-muted focus-visible:z-10"
+          >
+            <MessageCircle size={16} aria-hidden />
+            <span className="min-w-0 truncate">{label}</span>
+          </Button>
+          {!readOnly && onRemove && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label={`Remove ${label}`}
+              onClick={onRemove}
+              className="rounded-none border-0 bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:z-10"
+            >
+              <X size={16} aria-hidden />
+            </Button>
+          )}
+        </div>
+        {isPreviewOpen && (
+          <div
+            ref={previewRef}
+            id={previewId}
+            aria-label={`${label} preview`}
+            className={`absolute ${previewPlacementClass(readOnly, sentPreviewPlacement)} ${previewHorizontalPlacementClass(readOnly)} z-50 w-[min(38rem,calc(100vw-1.5rem))] rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-md`}
+            data-testid={previewTestId}
+            onPointerEnter={openPreview}
+            onFocus={openPreview}
+            onPointerLeave={schedulePreviewClose}
+          >
+            <ol className="min-w-0">{children}</ol>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/** Renders every saved selected-text comment as one aggregate composer attachment. */
+export function SelectedTextCommentsComposerAttachment({
+  comments,
+  readOnly = false,
+  editor,
+  unavailableSourceCommentIds = [],
+  onRemove,
+  onOpenSource,
+  onEdit,
+  onDelete,
+  onFocusComposer,
+  onSave,
+  onEditorChange,
+}: SelectedTextCommentsComposerAttachmentProps) {
+  const [announcement, setAnnouncement] = useState("");
+  const focusAfterDeleteRef = useRef<string | undefined>(undefined);
+  const openSourceButtonsRef = useRef(new Map<string, HTMLElement>());
+  useEffect(() => {
+    const nextCommentId = focusAfterDeleteRef.current;
+    if (!nextCommentId) return;
+    focusAfterDeleteRef.current = undefined;
+    openSourceButtonsRef.current.get(nextCommentId)?.focus();
+  }, [comments]);
+  const label = annotationLabel(comments.length);
+  const dockedEditor = readOnly ? undefined : getDockedEditor(editor, comments);
+  const handleDelete = (comment: SelectedTextComment) => {
+    const index = comments.findIndex((candidate) => candidate.id === comment.id);
+    const nextFocusTarget = comments[index + 1] ?? comments[index - 1];
+    focusAfterDeleteRef.current = nextFocusTarget?.id;
+    setAnnouncement("Comment deleted.");
+    if (!nextFocusTarget) onFocusComposer();
+    onDelete(comment);
+  };
+  const handleCardEditorClose = (comment: SelectedTextComment, restoreFocus: boolean) => {
+    onEditorChange(undefined);
+    if (!restoreFocus) return;
+    requestAnimationFrame(() => openSourceButtonsRef.current.get(comment.id)?.focus());
+  };
+
+  return (
     <>
       {comments.length > 0 && (
-        <section
-          className={readOnly ? "relative z-10 flex justify-end pt-2" : "px-3 pt-2"}
-          aria-label="Selected text annotations"
-          data-selected-text-exclude={readOnly ? true : undefined}
-          data-testid="selected-text-comment-attachment"
+        <ComposerCommentAttachmentShell
+          label={label}
+          sectionAriaLabel="Selected text annotations"
+          readOnly={readOnly}
+          testId="selected-text-comment-attachment"
+          chipTestId="selected-text-comment-chip"
+          previewTestId="selected-text-comment-preview"
+          commentCount={comments.length}
+          onRemove={onRemove}
         >
-          <div
-            ref={previewRootRef}
-            className="relative inline-flex max-w-full"
-            onPointerLeave={schedulePreviewClose}
-            onBlur={closePreviewAfterFocusLeaves}
-          >
-            <div className="inline-flex h-8 max-w-full items-center overflow-hidden rounded-lg border border-border bg-background focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50" data-testid="selected-text-comment-chip">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                aria-label={`${label}. Preview available.`}
-                aria-controls={previewId}
-                aria-expanded={isPreviewOpen}
-                onPointerEnter={openPreview}
-                onFocus={openPreview}
-                onClick={openPreview}
-                className="min-w-0 rounded-none border-y-0 border-l-0 border-r border-border bg-transparent px-3 text-foreground hover:bg-muted focus-visible:z-10"
-              >
-                <MessageCircle size={16} aria-hidden />
-                <span className="min-w-0 truncate">{label}</span>
-              </Button>
-              {!readOnly && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={`Remove ${label}`}
-                  onClick={onRemove}
-                  className="rounded-none border-0 bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:z-10"
-                >
-                  <X size={16} aria-hidden />
-                </Button>
-              )}
-            </div>
-            {isPreviewOpen && (
-              <div
-                ref={previewRef}
-                id={previewId}
-                aria-label={`${label} preview`}
-                className={`absolute ${previewPlacementClass(readOnly, sentPreviewPlacement)} ${previewHorizontalPlacementClass(readOnly)} z-50 w-[min(38rem,calc(100vw-1.5rem))] rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-md`}
-                data-testid="selected-text-comment-preview"
-                onPointerEnter={openPreview}
-                onFocus={openPreview}
-                onPointerLeave={schedulePreviewClose}
-              >
-                <ol className="min-w-0">
-                  {comments.map((comment) => (
-                    <CommentPreviewItem
-                      key={comment.id}
-                      comment={comment}
-                      editor={editor}
-                      readOnly={readOnly}
-                      sourceUnavailable={unavailableSourceCommentIds.includes(comment.id)}
-                      multipleComments={comments.length > 1}
-                      onOpenSource={onOpenSource}
-                      onEdit={onEdit}
-                      onDelete={handleDelete}
-                      onSave={onSave}
-                      onEditorChange={onEditorChange}
-                      onAnnouncement={setAnnouncement}
-                      onCloseEditor={handleCardEditorClose}
-                      openSourceButtonRef={(element) => {
-                        if (element) openSourceButtonsRef.current.set(comment.id, element);
-                        else openSourceButtonsRef.current.delete(comment.id);
-                      }}
-                    />
-                  ))}
-                </ol>
-              </div>
-            )}
-          </div>
-        </section>
+          {comments.map((comment) => (
+            <CommentPreviewItem
+              key={comment.id}
+              comment={comment}
+              editor={editor}
+              readOnly={readOnly}
+              sourceUnavailable={unavailableSourceCommentIds.includes(comment.id)}
+              multipleComments={comments.length > 1}
+              onOpenSource={onOpenSource}
+              onEdit={onEdit}
+              onDelete={handleDelete}
+              onSave={onSave}
+              onEditorChange={onEditorChange}
+              onAnnouncement={setAnnouncement}
+              onCloseEditor={handleCardEditorClose}
+              openSourceButtonRef={(element) => {
+                if (element) openSourceButtonsRef.current.set(comment.id, element);
+                else openSourceButtonsRef.current.delete(comment.id);
+              }}
+            />
+          ))}
+        </ComposerCommentAttachmentShell>
       )}
       {dockedEditor && (
         <section className="px-3 pt-2" aria-label="Selected text comment editor" data-testid="selected-text-comment-docked-editor">

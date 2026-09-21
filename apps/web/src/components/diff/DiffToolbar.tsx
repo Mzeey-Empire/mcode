@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown, Files } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -8,8 +8,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { Spinner } from "@/components/ui/spinner";
-import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useDiffStore } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { getTransport } from "@/transport";
@@ -41,16 +39,13 @@ interface ReviewViewSynchronizationInput {
   readonly workingTreeDirty: boolean;
 }
 
-/** Props for the Dev Review toolbar. */
-export interface DiffToolbarProps {
-  /** Whether the active-comparison Files navigator is visible. */
-  readonly filesVisible: boolean;
-  /** Toggles the active-comparison Files navigator. */
-  readonly onToggleFiles: () => void;
-}
-
-/** Toolbar for the Review tab: dual-scope view switcher + unified/side-by-side toggle. */
-export function DiffToolbar({ filesVisible, onToggleFiles }: DiffToolbarProps) {
+/** Toolbar for the Review tab: dual-scope view switcher + review actions. */
+export function DiffToolbar({
+  controlsSlotRef,
+}: {
+  /** Host element the FileList controls portal into, keeping one toolbar row. */
+  readonly controlsSlotRef?: (el: HTMLDivElement | null) => void;
+}) {
   const viewMode = useDiffStore((s) => s.viewMode);
   const reviewFileCount = useDiffStore((s) => s.reviewFileCount);
   const reviewDiffStat = useDiffStore((s) => s.reviewDiffStat);
@@ -149,8 +144,6 @@ export function DiffToolbar({ filesVisible, onToggleFiles }: DiffToolbarProps) {
       branchAvailability={branchAvailability}
       commitAvailability={commitAvailability}
       diffScopeRevision={diffScopeRevision}
-      filesVisible={filesVisible}
-      onToggleFiles={onToggleFiles}
       onViewMenuOpenChange={(open) => {
         setViewMenuOpen(open);
         if (open) {
@@ -165,6 +158,7 @@ export function DiffToolbar({ filesVisible, onToggleFiles }: DiffToolbarProps) {
       viewMenuOpen={viewMenuOpen}
       viewMode={viewMode}
       viewModes={viewModes}
+      controlsSlotRef={controlsSlotRef}
     />
   );
 }
@@ -267,8 +261,6 @@ function DiffToolbarContent({
   branchAvailability,
   commitAvailability,
   diffScopeRevision,
-  filesVisible,
-  onToggleFiles,
   onViewMenuOpenChange,
   reviewDiffStat,
   reviewFileCount,
@@ -277,6 +269,7 @@ function DiffToolbarContent({
   viewMenuOpen,
   viewMode,
   viewModes,
+  controlsSlotRef,
 }: {
   readonly activeThread: WorkspaceThread | null;
   readonly activeThreadId: string | null;
@@ -284,9 +277,8 @@ function DiffToolbarContent({
   readonly activeWorkspaceId: string | null;
   readonly branchAvailability: BranchAvailability;
   readonly commitAvailability: CommitAvailability;
+  readonly controlsSlotRef?: (el: HTMLDivElement | null) => void;
   readonly diffScopeRevision: number;
-  readonly filesVisible: boolean;
-  readonly onToggleFiles: () => void;
   readonly onViewMenuOpenChange: (open: boolean) => void;
   readonly reviewDiffStat: DiffStoreState["reviewDiffStat"];
   readonly reviewFileCount: number | null;
@@ -297,7 +289,7 @@ function DiffToolbarContent({
   readonly viewModes: readonly ReviewViewMode[];
 }) {
   return (
-    <div className="flex flex-wrap items-center justify-between gap-y-1.5 px-3 py-2 border-b border-border/30">
+    <div className="flex flex-wrap items-center gap-y-1.5 px-3 py-2 border-b border-border/30">
       <ReviewToolbarStart
         activeThreadId={activeThreadId}
         activeView={activeView}
@@ -312,11 +304,14 @@ function DiffToolbarContent({
         viewMode={viewMode}
         viewModes={viewModes}
       />
-      <ReviewToolbarActions
-        activeThread={activeThread}
-        filesVisible={filesVisible}
-        onToggleFiles={onToggleFiles}
-      />
+      <div className="ml-auto flex items-center gap-1.5">
+        <div
+          ref={controlsSlotRef}
+          data-testid="review-file-controls-slot"
+          className="flex items-center gap-0.5"
+        />
+        <ReviewToolbarActions activeThread={activeThread} />
+      </div>
       <BranchOperand
         activeThreadId={activeThreadId}
         activeView={activeView}
@@ -564,42 +559,10 @@ function CommitOperand({ activeView }: { readonly activeView: ReviewViewMode | u
 
 function ReviewToolbarActions({
   activeThread,
-  filesVisible,
-  onToggleFiles,
 }: {
   readonly activeThread: WorkspaceThread | null;
-  readonly filesVisible: boolean;
-  readonly onToggleFiles: () => void;
 }) {
-  const filesLabel = filesVisible ? "Hide files" : "Show files";
-  return (
-    <div className="flex items-center gap-1">
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              aria-label={filesLabel}
-              aria-pressed={filesVisible}
-              className={cn(
-                "rounded-md text-muted-foreground",
-                filesVisible && "bg-muted/60 text-foreground",
-              )}
-              onClick={onToggleFiles}
-            >
-              <Files size={13} aria-hidden />
-            </Button>
-          }
-        />
-        <TooltipContent side="bottom" className="text-xs">
-          {filesLabel}
-        </TooltipContent>
-      </Tooltip>
-      {activeThread ? <ReviewActions thread={activeThread} /> : null}
-    </div>
-  );
+  return activeThread ? <ReviewActions thread={activeThread} /> : null;
 }
 
 function BranchOperand({

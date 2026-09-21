@@ -11,6 +11,7 @@ import { GitDiffView, type GitView, type ResolvedGitComparison } from "./GitDiff
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useElementWidth } from "@/hooks/useElementWidth";
 import { WorktreeFilesPane } from "./WorktreeFilesPane";
+import { ReviewToolbarSlotContext } from "./review-toolbar-slot";
 import { cumulativeReviewFiles } from "@/lib/review-comparison";
 
 const FILES_PANEL_MIN_WIDTH = 280;
@@ -18,8 +19,6 @@ const FILES_PANEL_DEFAULT_WIDTH = 320;
 const FILES_PANEL_WIDE_WIDTH = 480;
 const DIFF_VIEWPORT_MIN_WIDTH = 520;
 const DOCKED_FILES_MIN_WIDTH = FILES_PANEL_MIN_WIDTH + DIFF_VIEWPORT_MIN_WIDTH;
-const FLOATING_FILES_PANEL_EDGE_GAP = 48;
-const FLOATING_FILES_PANEL_FLOOR = 220;
 
 /** The threadless git working-tree view ids. */
 const GIT_VIEWS: readonly GitView[] = ["unstaged", "staged", "commit", "branch"];
@@ -32,7 +31,6 @@ interface SettledComparison {
   readonly comparison: ReviewComparison;
   readonly git: ResolvedGitComparison | null;
   readonly cacheVersion: string | number;
-  readonly turnCount: number;
   readonly liveRevision?: number;
 }
 
@@ -99,7 +97,6 @@ async function loadGitComparison(
       cacheVersion: input.mutableComparisonRevision,
     },
     cacheVersion: input.mutableComparisonRevision,
-    turnCount: 0,
   };
 }
 
@@ -142,7 +139,6 @@ async function loadCumulativeComparison(input: ComparisonLoadInput): Promise<Loa
     },
     git: null,
     cacheVersion: input.snapshotVersion,
-    turnCount: input.snapshots?.length ?? 0,
   };
 }
 
@@ -153,7 +149,6 @@ async function loadLastTurnComparison(input: ComparisonLoadInput): Promise<Loade
     git: null,
     cacheVersion: comparison?.turnDiff?.id ?? input.mutableComparisonRevision,
     liveRevision: input.mutableComparisonRevision,
-    turnCount: input.snapshots?.length ?? 0,
   };
 }
 
@@ -267,12 +262,9 @@ function useDiffPanelStore(): DiffPanelStore {
 
 interface FilesPanelController {
   readonly activeWorktreePath: string | null;
-  readonly filesDocked: boolean;
+  readonly filesPaneFits: boolean;
   readonly filesPanelWidth: number;
-  readonly floatingFilesPanelMaxWidth: number;
-  readonly floatingFilesPanelMinWidth: number;
   readonly getFilesPanelMaxWidth: (panel: HTMLDivElement | null) => number;
-  readonly getFloatingFilesPanelMaxWidth: (panel: HTMLDivElement | null) => number;
   readonly setActiveWorktreePath: (path: string | null) => void;
   readonly setFilesPanelWidth: (width: number) => void;
   readonly setFilesVisible: (visible: boolean) => void;
@@ -299,8 +291,6 @@ function useFilesPanelController({
   const activeWorktreePath = activeWorktreeFile?.scopeKey === filesScopeKey
     ? activeWorktreeFile.path
     : null;
-  const floatingFilesPanelMaxWidth = getInitialFloatingFilesPanelMaxWidth(panelWidth);
-  const floatingFilesPanelMinWidth = Math.min(FILES_PANEL_MIN_WIDTH, floatingFilesPanelMaxWidth);
   const setFilesVisible = useCallback((visible: boolean) => {
     if (!diffScopeId) return;
     setReviewFilesVisible(diffScopeId, visible);
@@ -312,13 +302,6 @@ function useFilesPanelController({
     ),
     [],
   );
-  const getFloatingFilesPanelMaxWidth = useCallback(
-    (panel: HTMLDivElement | null): number => Math.max(
-      floatingFilesPanelMinWidth,
-      (panel?.parentElement?.clientWidth ?? window.innerWidth) - FLOATING_FILES_PANEL_EDGE_GAP,
-    ),
-    [floatingFilesPanelMinWidth],
-  );
 
   const setActiveWorktreePath = useCallback((path: string | null) => {
     setActiveWorktreeFile({ path, scopeKey: filesScopeKey });
@@ -326,21 +309,13 @@ function useFilesPanelController({
 
   return {
     activeWorktreePath,
-    filesDocked: panelWidth >= DOCKED_FILES_MIN_WIDTH,
+    filesPaneFits: panelWidth >= DOCKED_FILES_MIN_WIDTH,
     filesPanelWidth,
-    floatingFilesPanelMaxWidth,
-    floatingFilesPanelMinWidth,
     getFilesPanelMaxWidth,
-    getFloatingFilesPanelMaxWidth,
     setActiveWorktreePath,
     setFilesPanelWidth,
     setFilesVisible,
   };
-}
-
-function getInitialFloatingFilesPanelMaxWidth(panelWidth: number): number {
-  if (panelWidth <= 0) return FILES_PANEL_DEFAULT_WIDTH;
-  return Math.max(FLOATING_FILES_PANEL_FLOOR, panelWidth - FLOATING_FILES_PANEL_EDGE_GAP);
 }
 
 interface ComparisonController {
@@ -708,12 +683,9 @@ export function DiffPanel() {
   useWorkspaceFileRefresh(activeWorkspaceId, activeThreadId);
   const {
     activeWorktreePath,
-    filesDocked,
+    filesPaneFits,
     filesPanelWidth,
-    floatingFilesPanelMaxWidth,
-    floatingFilesPanelMinWidth,
     getFilesPanelMaxWidth,
-    getFloatingFilesPanelMaxWidth,
     setActiveWorktreePath,
     setFilesPanelWidth,
     setFilesVisible,
@@ -736,13 +708,10 @@ export function DiffPanel() {
       comparisonLoading={comparison.comparisonLoading}
       comparisonPending={comparison.comparisonPending}
       diffScopeId={diffScopeId}
-      filesDocked={filesDocked}
+      filesPaneFits={filesPaneFits}
       filesPanelWidth={filesPanelWidth}
       filesVisible={filesVisible}
-      floatingFilesPanelMaxWidth={floatingFilesPanelMaxWidth}
-      floatingFilesPanelMinWidth={floatingFilesPanelMinWidth}
       getFilesPanelMaxWidth={getFilesPanelMaxWidth}
-      getFloatingFilesPanelMaxWidth={getFloatingFilesPanelMaxWidth}
       onActiveWorktreePathChange={setActiveWorktreePath}
       onFilesPanelWidthChange={setFilesPanelWidth}
       onFilesVisibleChange={setFilesVisible}
@@ -768,13 +737,10 @@ function DiffPanelLayout({
   comparisonLoading,
   comparisonPending,
   diffScopeId,
-  filesDocked,
+  filesPaneFits,
   filesPanelWidth,
   filesVisible,
-  floatingFilesPanelMaxWidth,
-  floatingFilesPanelMinWidth,
   getFilesPanelMaxWidth,
-  getFloatingFilesPanelMaxWidth,
   onActiveWorktreePathChange,
   onFilesPanelWidthChange,
   onFilesVisibleChange,
@@ -796,13 +762,10 @@ function DiffPanelLayout({
   readonly comparisonLoading: boolean;
   readonly comparisonPending: boolean;
   readonly diffScopeId: string | null;
-  readonly filesDocked: boolean;
+  readonly filesPaneFits: boolean;
   readonly filesPanelWidth: number;
   readonly filesVisible: boolean;
-  readonly floatingFilesPanelMaxWidth: number;
-  readonly floatingFilesPanelMinWidth: number;
   readonly getFilesPanelMaxWidth: (panel: HTMLDivElement | null) => number;
-  readonly getFloatingFilesPanelMaxWidth: (panel: HTMLDivElement | null) => number;
   readonly onActiveWorktreePathChange: (path: string | null) => void;
   readonly onFilesPanelWidthChange: (width: number) => void;
   readonly onFilesVisibleChange: (visible: boolean) => void;
@@ -816,6 +779,7 @@ function DiffPanelLayout({
   readonly visibleSettled: SettledComparison | null;
 }) {
   const filesLoading = !visibleSettled && comparisonErrorIdentity !== comparisonIdentity && !scopedCumulative;
+  const [fileControlsSlot, setFileControlsSlot] = useState<HTMLDivElement | null>(null);
   const handleActivateFile = (path: string) => {
     onActiveWorktreePathChange(path);
     if (diffScopeId) requestReviewFileJump(diffScopeId, path);
@@ -823,12 +787,10 @@ function DiffPanelLayout({
 
   return (
     <div ref={panelRootRef} className="flex flex-1 flex-col overflow-hidden min-h-0">
-      <DiffToolbar
-        filesVisible={filesVisible}
-        onToggleFiles={() => onFilesVisibleChange(!filesVisible)}
-      />
+      <DiffToolbar controlsSlotRef={setFileControlsSlot} />
       <div className="relative flex min-h-0 flex-1">
         <ScrollArea className="min-h-0 min-w-0 flex-1">
+          <ReviewToolbarSlotContext.Provider value={fileControlsSlot}>
           <DiffPanelView
             activeThreadId={activeThreadId}
             activeWorkspaceId={activeWorkspaceId}
@@ -841,19 +803,17 @@ function DiffPanelLayout({
             visibleComparison={visibleComparison}
             visibleSettled={visibleSettled}
           />
+          </ReviewToolbarSlotContext.Provider>
         </ScrollArea>
         <ReviewFilesPane
           activePath={activeWorktreePath}
           comparisonFiles={comparisonFiles}
           comparisonLoading={comparisonLoading}
-          docked={filesDocked}
           filesLoading={filesLoading}
+          filesPaneFits={filesPaneFits}
           filesPanelWidth={filesPanelWidth}
           filesVisible={filesVisible}
-          floatingFilesPanelMaxWidth={floatingFilesPanelMaxWidth}
-          floatingFilesPanelMinWidth={floatingFilesPanelMinWidth}
           getFilesPanelMaxWidth={getFilesPanelMaxWidth}
-          getFloatingFilesPanelMaxWidth={getFloatingFilesPanelMaxWidth}
           onActivate={handleActivateFile}
           onClose={() => onFilesVisibleChange(false)}
           onRefresh={onRefreshComparison}
@@ -1030,7 +990,6 @@ function CumulativeComparisonView({
       threadId={threadId}
       comparison={visibleComparison}
       cacheVersion={visibleSettled?.cacheVersion ?? ""}
-      turnCount={visibleSettled?.turnCount ?? 0}
       refreshing={comparisonLoading}
       onRefresh={onRefreshComparison}
       scopeLabel={scopeLabel}
@@ -1066,14 +1025,11 @@ function ReviewFilesPane({
   activePath,
   comparisonFiles,
   comparisonLoading,
-  docked,
   filesLoading,
+  filesPaneFits,
   filesPanelWidth,
   filesVisible,
-  floatingFilesPanelMaxWidth,
-  floatingFilesPanelMinWidth,
   getFilesPanelMaxWidth,
-  getFloatingFilesPanelMaxWidth,
   onActivate,
   onClose,
   onRefresh,
@@ -1083,43 +1039,34 @@ function ReviewFilesPane({
   readonly activePath: string | null;
   readonly comparisonFiles: readonly ReviewFileChange[];
   readonly comparisonLoading: boolean;
-  readonly docked: boolean;
   readonly filesLoading: boolean;
+  readonly filesPaneFits: boolean;
   readonly filesPanelWidth: number;
   readonly filesVisible: boolean;
-  readonly floatingFilesPanelMaxWidth: number;
-  readonly floatingFilesPanelMinWidth: number;
   readonly getFilesPanelMaxWidth: (panel: HTMLDivElement | null) => number;
-  readonly getFloatingFilesPanelMaxWidth: (panel: HTMLDivElement | null) => number;
   readonly onActivate: (path: string) => void;
   readonly onClose: () => void;
   readonly onRefresh: () => void;
   readonly onWidthChange: (width: number) => void;
   readonly viewMode: DiffViewMode;
 }) {
-  if (!filesVisible) return null;
-  const layout = getFilesPaneLayout(
-    docked,
-    filesPanelWidth,
-    floatingFilesPanelMaxWidth,
-    floatingFilesPanelMinWidth,
-    getFilesPanelMaxWidth,
-    getFloatingFilesPanelMaxWidth,
-  );
+  // Docked only: the pane never floats. When the panel is too narrow to hold
+  // both minimum widths the pane collapses; widening restores it.
+  if (!filesVisible || !filesPaneFits) return null;
   return (
     <WorktreeFilesPane
       files={comparisonFiles}
       activePath={activePath}
       loading={filesLoading}
       error={null}
-      width={layout.width}
-      minWidth={layout.minWidth}
-      maxWidth={layout.maxWidth}
+      width={filesPanelWidth}
+      minWidth={FILES_PANEL_MIN_WIDTH}
+      maxWidth={`calc(100% - ${DIFF_VIEWPORT_MIN_WIDTH}px)`}
       defaultWidth={FILES_PANEL_DEFAULT_WIDTH}
       wideWidth={FILES_PANEL_WIDE_WIDTH}
-      getMaxWidth={layout.getMaxWidth}
+      getMaxWidth={getFilesPanelMaxWidth}
       onWidthChange={onWidthChange}
-      className={layout.className}
+      onCollapseRequest={onClose}
       onClose={onClose}
       refreshable={viewMode !== "commit"}
       refreshing={comparisonLoading}
@@ -1127,32 +1074,6 @@ function ReviewFilesPane({
       onActivate={onActivate}
     />
   );
-}
-
-function getFilesPaneLayout(
-  docked: boolean,
-  filesPanelWidth: number,
-  floatingFilesPanelMaxWidth: number,
-  floatingFilesPanelMinWidth: number,
-  getFilesPanelMaxWidth: (panel: HTMLDivElement | null) => number,
-  getFloatingFilesPanelMaxWidth: (panel: HTMLDivElement | null) => number,
-) {
-  if (docked) {
-    return {
-      className: undefined,
-      getMaxWidth: getFilesPanelMaxWidth,
-      maxWidth: `calc(100% - ${DIFF_VIEWPORT_MIN_WIDTH}px)`,
-      minWidth: FILES_PANEL_MIN_WIDTH,
-      width: filesPanelWidth,
-    };
-  }
-  return {
-    className: "absolute inset-y-0 right-0 z-30 h-full bg-popover ring-1 ring-inset ring-border/60 animate-in slide-in-from-right-2 duration-150 motion-reduce:animate-none",
-    getMaxWidth: getFloatingFilesPanelMaxWidth,
-    maxWidth: `calc(100% - ${FLOATING_FILES_PANEL_EDGE_GAP}px)`,
-    minWidth: floatingFilesPanelMinWidth,
-    width: Math.min(filesPanelWidth, floatingFilesPanelMaxWidth),
-  };
 }
 
 /** The three-dot loading pulse shown while snapshots load. */

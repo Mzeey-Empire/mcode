@@ -61,6 +61,11 @@ export interface DiffAnnotationInput {
   readonly note: string;
 }
 
+/** Line target for a diff comment being drafted or edited in the composer. */
+export type DiffEditTarget =
+  | ({ readonly kind: "draft" } & Omit<DiffAnnotationInput, "note">)
+  | { readonly kind: "edit"; readonly annotationId: string };
+
 interface PreviewAnnotationStore {
   /** Saved annotation sets keyed by thread id. */
   readonly byThread: Record<string, SavedPreviewAnnotation[]>;
@@ -68,6 +73,10 @@ interface PreviewAnnotationStore {
   readonly diffByThread: Record<string, SavedDiffAnnotation[]>;
   /** Active unsaved drafts keyed by thread id. */
   readonly drafts: Record<string, PreviewDraftAnnotation | undefined>;
+  /** Diff comment line being drafted or edited, keyed by thread id. */
+  readonly diffEditTargets: Record<string, DiffEditTarget | undefined>;
+  /** Sets or clears the thread's active diff comment edit target. */
+  setDiffEditTarget(threadId: string, target: DiffEditTarget | undefined): void;
   /** Returns all saved annotations for a thread in creation order. */
   getThreadAnnotations(threadId: string): SavedPreviewAnnotation[];
   /** Returns saved annotations for a normalized page identity. */
@@ -187,6 +196,13 @@ export const usePreviewAnnotationStore = create<PreviewAnnotationStore>((set, ge
   byThread: {},
   diffByThread: {},
   drafts: {},
+  diffEditTargets: {},
+
+  setDiffEditTarget(threadId, target) {
+    set((state) => ({
+      diffEditTargets: { ...state.diffEditTargets, [threadId]: target },
+    }));
+  },
 
   getThreadAnnotations(threadId) {
     return get().byThread[threadId] ?? [];
@@ -271,10 +287,12 @@ export const usePreviewAnnotationStore = create<PreviewAnnotationStore>((set, ge
       const byThread = { ...state.byThread };
       const diffByThread = { ...state.diffByThread };
       const drafts = { ...state.drafts };
+      const diffEditTargets = { ...state.diffEditTargets };
       delete byThread[threadId];
       delete diffByThread[threadId];
       delete drafts[threadId];
-      return { byThread, diffByThread, drafts };
+      delete diffEditTargets[threadId];
+      return { byThread, diffByThread, drafts, diffEditTargets };
     });
   },
 

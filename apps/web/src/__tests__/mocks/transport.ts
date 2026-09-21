@@ -236,6 +236,7 @@ export const mockTransport: McodeTransport = {
   refreshWorkspaceFiles: vi.fn().mockResolvedValue(undefined),
   getReviewComparison: vi.fn().mockResolvedValue({ files: [], additions: 0, deletions: 0 }),
   readFileContent: vi.fn().mockResolvedValue(""),
+  readFileAtRef: vi.fn().mockResolvedValue(""),
   listOpenInApps: vi.fn().mockResolvedValue([]),
   openIn: vi.fn().mockResolvedValue(undefined),
   getBranchPr: vi.fn().mockResolvedValue(null),
