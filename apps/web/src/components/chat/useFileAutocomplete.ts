@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo, type MutableRefObject } from "react";
 import { getTransport } from "@/transport";
+import { refreshWorkspaceFiles } from "@/features/projects/files/useWorkspaceFileRefresh";
 import {
   providerCatalogCacheKey,
   useProviderCatalogStore,
@@ -250,6 +251,13 @@ export function useFileAutocomplete({
     }
     return files;
   }, [workspaceId, threadId]);
+
+  // Opening the picker is an attention boundary: ask the server for one
+  // status check so externally created files invalidate the cached list.
+  useEffect(() => {
+    if (!isOpen || !workspaceId) return;
+    refreshWorkspaceFiles(workspaceId, threadId);
+  }, [isOpen, threadId, workspaceId]);
 
   useEffect(() => {
     const listener = (invalidatedKey?: string) => {

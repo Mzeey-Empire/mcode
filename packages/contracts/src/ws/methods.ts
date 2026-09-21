@@ -1221,7 +1221,7 @@ export const WS_METHODS = lazySchema(() => ({
     }),
     result: z.string(),
   },
-  "file.watch": {
+  "file.refresh": {
     params: z.object({
       workspaceId: z.string(),
       threadId: z.string().optional(),

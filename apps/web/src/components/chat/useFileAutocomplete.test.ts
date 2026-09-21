@@ -4,11 +4,13 @@ import type { ProviderCatalogSnapshot } from "@mcode/contracts";
 
 const listWorkspaceFiles = vi.fn<() => Promise<string[]>>();
 const getProviderCatalog = vi.fn<() => Promise<ProviderCatalogSnapshot>>();
+const refreshWorkspaceFiles = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
 
 vi.mock("@/transport", () => ({
   getTransport: () => ({
     listWorkspaceFiles,
     getProviderCatalog,
+    refreshWorkspaceFiles,
   }),
 }));
 
