@@ -37,7 +37,7 @@ cannot be tested.
 
 PRs with UI changes need before and after evidence — screenshots, or a short
 video when the change is a transition or flow. The Electron live-testing skill
-captures both and attaches them to the PR.
+captures both for the PR body.
 
 ## Commands
 

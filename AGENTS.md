@@ -140,4 +140,4 @@ Clients communicate over typed WebSockets (`packages/contracts`). `apps/server` 
 
 ## Pull requests
 
-Use `.github/pull_request_template.md`. UI changes require before and after screenshots or video captured with the [Electron live-testing](.agents/skills/electorn-live-testing/SKILL.md) harness; attach them with `gh pr create --attach` or `gh pr comment --attach`. Local `.dev/` paths are not reviewable evidence.
+Use `.github/pull_request_template.md`. UI changes require before and after screenshots or video captured with the [Electron live-testing](.agents/skills/electorn-live-testing/SKILL.md) harness; embed them in the PR body with `gh pr create --attach`. Local `.dev/` paths are not reviewable evidence.
