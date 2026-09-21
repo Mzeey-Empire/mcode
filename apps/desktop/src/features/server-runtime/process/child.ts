@@ -32,8 +32,9 @@ export function spawnServerProcess(port: number, platform: NodeJS.Platform): Spa
       env: createServerEnvironment(paths, port, platform),
       detached: true,
       windowsHide: true,
-      // A direct file handle preserves the final error even if the child exits immediately.
-      stdio: ["ignore", "ignore", stderrStream],
+      // A direct file handle preserves the final error even if the child exits immediately;
+      // stdout shares it so server console output is captured instead of discarded.
+      stdio: ["ignore", stderrStream, stderrStream],
     });
     child.unref();
     console.info("[server-manager] Server process spawned", { pid: child.pid, port, errorLog: SERVER_LOG_PATH });
