@@ -4,6 +4,7 @@ import { useSettingsStore } from "@/stores/settingsStore";
 import { createWsTransport } from "../ws-transport";
 
 class MockWebSocket {
+  static readonly OPEN = 1;
   onopen: (() => void) | null = null;
   onclose: ((event: { code: number; reason: string }) => void) | null = null;
   onerror: (() => void) | null = null;
