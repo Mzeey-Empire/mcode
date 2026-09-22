@@ -5,7 +5,7 @@
 - Files, selected Review file content, and `@` file autocomplete refresh after an external local change is detected at an attention boundary.
 - Review compares the live filesystem again. Last turn remains the recorded agent comparison, so an external edit never gains agent attribution.
 - An open Mcode Browser preview on a local loopback address reloads. Remote pages do not reload.
-- The server tracks one dirty-set fingerprint per workspace scope. A `file.refresh` RPC diffs the current `git status` against that baseline and broadcasts `files.changed` only when the set moved.
+- The server tracks one dirty-set fingerprint per workspace scope. A `file.refresh` RPC diffs the current `git status` against that baseline and broadcasts `files.changed` only when the set moved. Untracked directories are fingerprinted per file (`git status --untracked-files=all`), so adding or removing a file inside an already-untracked `?? dir/` still moves the fingerprint.
 - Clients call `file.refresh` on attention boundaries: window focus, panel mount, thread scope change, and `@` picker open. There is no ambient filesystem watch.
 
 ## How to get to it (user or client POV)
