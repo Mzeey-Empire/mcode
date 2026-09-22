@@ -245,14 +245,20 @@ export function createDefaultRightPanelState(): RightPanelState {
   });
 }
 
-/** Stable cache key for one inline diff payload. */
-function inlineDiffCacheKey(
+/**
+ * Stable cache key for one inline diff payload. `cacheVersion` sits between
+ * the id and path so a response fetched under an older revision can never be
+ * read back under a newer one, while every existing `scopeId:` prefix eviction
+ * still matches.
+ */
+export function inlineDiffCacheKey(
   threadId: string,
   source: string,
   id: string,
   filePath: string,
+  cacheVersion: string | number,
 ): string {
-  return `${threadId}:${source}:${id}:${filePath}`;
+  return `${threadId}:${source}:${id}:${cacheVersion}:${filePath}`;
 }
 
 /** Drop inline diff cache entries matching a stable key prefix. */
@@ -675,9 +681,9 @@ interface DiffState {
   /** Set summary loading state. */
   setSummaryLoading: (loading: boolean) => void;
   /** Cache a fetched inline diff so it survives component unmounts. */
-  cacheInlineDiff: (threadId: string, source: string, id: string, filePath: string, data: string) => void;
+  cacheInlineDiff: (threadId: string, source: string, id: string, filePath: string, data: string, cacheVersion: string | number) => void;
   /** Retrieve a cached inline diff, or undefined if not cached. */
-  getCachedInlineDiff: (threadId: string, source: string, id: string, filePath: string) => string | undefined;
+  getCachedInlineDiff: (threadId: string, source: string, id: string, filePath: string, cacheVersion: string | number) => string | undefined;
   /** Bump a mutable diff scope so mounted file rows refetch against the latest checkout. */
   bumpDiffRevision: (scopeId: string) => void;
   /** Persist the omnibox URL for a thread's embedded preview. */
@@ -1063,12 +1069,12 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   setDiffLoading: (loading) => set({ diffLoading: loading }),
   setSummaryRecord: (record) => set({ summaryRecord: record }),
   setSummaryLoading: (loading) => set({ summaryLoading: loading }),
-  cacheInlineDiff: (threadId, source, id, filePath, data) =>
+  cacheInlineDiff: (threadId, source, id, filePath, data, cacheVersion) =>
     set((s) => ({
-      inlineDiffCache: { ...s.inlineDiffCache, [inlineDiffCacheKey(threadId, source, id, filePath)]: data },
+      inlineDiffCache: { ...s.inlineDiffCache, [inlineDiffCacheKey(threadId, source, id, filePath, cacheVersion)]: data },
     })),
-  getCachedInlineDiff: (threadId, source, id, filePath) =>
-    get().inlineDiffCache[inlineDiffCacheKey(threadId, source, id, filePath)],
+  getCachedInlineDiff: (threadId, source, id, filePath, cacheVersion) =>
+    get().inlineDiffCache[inlineDiffCacheKey(threadId, source, id, filePath, cacheVersion)],
   bumpDiffRevision: (scopeId) =>
     set((s) => ({
       diffRevisionByScope: {
