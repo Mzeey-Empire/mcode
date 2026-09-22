@@ -322,26 +322,36 @@ describe("diffStore", () => {
 
     it("evicts inline diff cache entries for the refreshed mutable scope", () => {
       const { cacheInlineDiff, bumpDiffRevision } = useDiffStore.getState();
-      cacheInlineDiff("thread-1", "branch", "origin/main...feat/x", "src/a.ts", "diff-a");
-      cacheInlineDiff("thread-2", "branch", "origin/main...feat/y", "src/b.ts", "diff-b");
+      cacheInlineDiff("thread-1", "branch", "origin/main...feat/x", "src/a.ts", "diff-a", 1);
+      cacheInlineDiff("thread-2", "branch", "origin/main...feat/y", "src/b.ts", "diff-b", 1);
 
       bumpDiffRevision("thread-1");
 
       const state = useDiffStore.getState();
-      expect(state.inlineDiffCache["thread-1:branch:origin/main...feat/x:src/a.ts"]).toBeUndefined();
-      expect(state.inlineDiffCache["thread-2:branch:origin/main...feat/y:src/b.ts"]).toBe("diff-b");
+      expect(state.inlineDiffCache["thread-1:branch:origin/main...feat/x:1:src/a.ts"]).toBeUndefined();
+      expect(state.inlineDiffCache["thread-2:branch:origin/main...feat/y:1:src/b.ts"]).toBe("diff-b");
+    });
+
+    it("keeps revisions of the same file under distinct keys", () => {
+      const { cacheInlineDiff } = useDiffStore.getState();
+      cacheInlineDiff("thread-1", "branch", "origin/main...feat/x", "src/a.ts", "diff-v1", 1);
+      cacheInlineDiff("thread-1", "branch", "origin/main...feat/x", "src/a.ts", "diff-v2", 2);
+
+      const state = useDiffStore.getState();
+      expect(state.inlineDiffCache["thread-1:branch:origin/main...feat/x:1:src/a.ts"]).toBe("diff-v1");
+      expect(state.inlineDiffCache["thread-1:branch:origin/main...feat/x:2:src/a.ts"]).toBe("diff-v2");
     });
 
     it("evicts cumulative inline diff cache when snapshots refresh", () => {
       const { cacheInlineDiff, setSnapshots } = useDiffStore.getState();
-      cacheInlineDiff("thread-1", "cumulative", "thread-1", "src/a.ts", "old");
-      cacheInlineDiff("thread-1", "snapshot", "s1", "src/a.ts", "snapshot");
+      cacheInlineDiff("thread-1", "cumulative", "thread-1", "src/a.ts", "old", 0);
+      cacheInlineDiff("thread-1", "snapshot", "s1", "src/a.ts", "snapshot", 0);
 
       setSnapshots("thread-1", []);
 
       const state = useDiffStore.getState();
-      expect(state.inlineDiffCache["thread-1:cumulative:thread-1:src/a.ts"]).toBeUndefined();
-      expect(state.inlineDiffCache["thread-1:snapshot:s1:src/a.ts"]).toBe("snapshot");
+      expect(state.inlineDiffCache["thread-1:cumulative:thread-1:0:src/a.ts"]).toBeUndefined();
+      expect(state.inlineDiffCache["thread-1:snapshot:s1:0:src/a.ts"]).toBe("snapshot");
     });
   });
 
