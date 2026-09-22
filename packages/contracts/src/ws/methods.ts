@@ -926,7 +926,7 @@ export const WS_METHODS = lazySchema(() => ({
     params: z.object({
       workspaceId: z.string(),
       branch: z.string(),
-      prNumber: z.number().optional(),
+      prNumber: z.number().int().positive().optional(),
     }),
     result: z.void(),
   },
