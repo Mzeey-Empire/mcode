@@ -16,6 +16,7 @@ vi.mock("@/transport", async () => ({
 }));
 
 class ReconnectWebSocket {
+  static readonly OPEN = 1;
   onopen: (() => void) | null = null;
   onclose: ((event: { code: number; reason: string }) => void) | null = null;
   onerror: (() => void) | null = null;
