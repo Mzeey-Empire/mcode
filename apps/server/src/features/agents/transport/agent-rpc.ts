@@ -9,7 +9,6 @@ import { logger } from "@mcode/shared";
 import type { z } from "zod";
 import type { GitWatcherService } from "../../projects/git/git-watcher-service.js";
 import type { ThreadControlService } from "../../thread-control/authority/thread-control-service.js";
-import type { CanonicalAgentBoundary } from "../canonical/canonical-agent-boundary.js";
 import type { SubagentLifecycleService } from "../collaboration/subagent-lifecycle-service.js";
 import {
   loadConversationPage,
@@ -19,6 +18,7 @@ import {
   type ConversationPageDeps,
 } from "../conversation/read-model/conversation-page.js";
 import type { ThoughtSegmentRepo } from "../conversation/narrative/persistence/thought-segment-repo.js";
+import type { NarrativeStore } from "../conversation/narrative/narrative-store.js";
 import type { HookExecutionRepo } from "../events/persistence/hook-execution-repo.js";
 import type { AgentService } from "../orchestration/agent-service.js";
 import type { AgentTurnContinuationPort } from "../orchestration/agent-runtime-internal-ports.js";
@@ -76,11 +76,10 @@ export interface AgentRouterDeps {
     AgentPermissionService,
     "respondToPermission" | "listPendingPermissions"
   >;
-  canonicalSink?: Pick<CanonicalAgentBoundary, "loadConversationProjection">;
   gitWatcherService?: Pick<GitWatcherService, "watchThreadWorktree">;
   hookExecutionRepo: Pick<HookExecutionRepo, "listByMessage">;
   messageRepo: ConversationPageDeps["messageRepo"];
-  narrativeStore: ConversationPageDeps["narrativeStore"];
+  narrativeStore: Pick<NarrativeStore, "load">;
   planQuestionAnswersRepo: ConversationPageDeps["planQuestionAnswersRepo"];
   planRepo: Pick<PlanRepo, "updateStatus" | "listByThread">;
   planTurnService: Pick<PlanTurnService, "answerQuestions" | "dismissQuestions">;

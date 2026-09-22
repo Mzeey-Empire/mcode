@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { Message, ToolCall, HookExecution, PermissionMode, InteractionMode, AttachmentMeta, ToolCallRecord } from "@/transport";
-import type { AgentEvent, CanonicalAgentEventEnvelope, CanonicalAgentReconnectRecovery, ContextWindowMode, MessageMention, ReasoningLevel, OrchestrationMode, PlanQuestion, PlanAnswer, ProviderUsageInfo, GoalLookupResult, PreviewAnnotationBundle, SelectedTextComment, TurnFileEffectSummary, TurnRuntimeSnapshot, TurnOutcome } from "@mcode/contracts";
+import type { AgentEvent, CanonicalAgentEventEnvelope, CanonicalAgentReconnectRecovery, ContextWindowMode, MessageMention, NarrativeDetailCursor, NarrativeEntry, ReasoningLevel, OrchestrationMode, PlanQuestion, PlanAnswer, ProviderUsageInfo, GoalLookupResult, PreviewAnnotationBundle, SelectedTextComment, TurnFileEffectSummary, TurnRuntimeSnapshot, TurnOutcome } from "@mcode/contracts";
 import type { DevinMode, PermissionRequest, PermissionDecision } from "@mcode/contracts";
 import { recoverParentNarrative } from "./parent-narrative-recovery";
 import {
@@ -41,6 +41,7 @@ import {
 import {
   ACTIVE_CONVERSATION_MESSAGE_BYTES,
   CONVERSATION_NARRATIVE_BYTES,
+  measureConversationValue,
   selectConversationNarrative,
   selectConversationWindow,
 } from "@/features/conversation/hydration/conversation-memory-policy";
@@ -94,7 +95,6 @@ import {
   parseStoredAttachments,
   projectAssistantMessageBoundary,
   projectToolProgress,
-  visiblePersistedThoughtSegments,
 } from "./thread-store/narrative-projection";
 import {
   hasProviderUsageData,
@@ -232,18 +232,16 @@ interface ThreadState {
   /** Clear the active goal through the app RPC and update cached thread state. */
   clearThreadGoal: (threadId: string) => Promise<GoalLookupResult>;
 
-  /**
-   * Fetch the persisted narrative (tools, thoughts, hooks) for an assistant
-   * message and cache it under `narrativeByMessage[messageId]`. Returns the
-   * existing in-flight promise on concurrent calls to avoid duplicate RPCs.
-   * Idempotent after a dedicated list response has supplied every persisted
-   * tool row expected by the message; partial responses remain refreshable.
-   */
+  /** Fetch one bounded persisted-detail window for a rendered assistant message. */
   loadNarrativeForMessage: (messageId: string, threadId?: string) => Promise<void>;
+  /** Keep a persisted turn available while one of its virtual rows is mounted. */
+  retainNarrativeForMessage: (messageId: string, threadId?: string) => void;
+  /** Release a virtual-row lease and evict after all rows for the turn unmount. */
+  releaseNarrativeForMessage: (messageId: string, threadId?: string) => void;
   /** Return whether a complete narrative payload has been loaded for a message. */
   isNarrativeLoaded: (threadId: string, messageId: string) => boolean;
-  /** Drop the cached narrative for a message - call from edit/delete paths. */
-  evictNarrativeForMessage: (messageId: string) => void;
+  /** Drop the cached narrative for a message and revoke any pending detail window. */
+  evictNarrativeForMessage: (messageId: string, threadId?: string) => void;
 
   /** Handle server-side tool call persistence confirmation. */
   handleTurnPersisted: (payload: {
@@ -302,23 +300,148 @@ interface ThreadState {
 const dequeueTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 /**
- * Module-level dedup map for in-flight `narrative.list` RPCs. Held outside the
- * store so concurrent `loadNarrativeForMessage` calls share a single promise
- * without triggering re-renders for the inflight bookkeeping.
+ * Module-level detail-window leases. They stay outside Zustand because they
+ * coordinate requests without changing transcript render state.
  */
 const narrativeInflight = new Map<string, Promise<void>>();
-/** Message narratives returned by a complete conversation-page read. */
+const narrativeGeneration = new Map<string, number>();
+const narrativeCursor = new Map<string, NarrativeDetailCursor>();
+/** Detail windows that ended before their effective limit. */
 const narrativeLoaded = new Set<string>();
+/** Mounted virtual rows that keep one persisted turn available while it is read. */
+const narrativeLeaseCounts = new Map<string, number>();
+/** Invalidates a queued release when another row for the same turn mounts. */
+const narrativeReleaseGeneration = new Map<string, number>();
+const NARRATIVE_DETAIL_LIMIT = 100;
 
 function narrativeKey(threadId: string, messageId: string): string {
   return `${threadId}\u0000${messageId}`;
 }
 
+function revokeNarrativeLease(key: string): void {
+  narrativeGeneration.set(key, (narrativeGeneration.get(key) ?? 0) + 1);
+  narrativeInflight.delete(key);
+  narrativeCursor.delete(key);
+  narrativeLoaded.delete(key);
+}
+
+function retainNarrativeLease(key: string): void {
+  narrativeLeaseCounts.set(key, (narrativeLeaseCounts.get(key) ?? 0) + 1);
+  narrativeReleaseGeneration.set(key, (narrativeReleaseGeneration.get(key) ?? 0) + 1);
+}
+
+function releaseNarrativeLease(key: string, release: () => void): void {
+  const count = narrativeLeaseCounts.get(key) ?? 0;
+  if (count <= 1) narrativeLeaseCounts.delete(key);
+  else narrativeLeaseCounts.set(key, count - 1);
+  const generation = (narrativeReleaseGeneration.get(key) ?? 0) + 1;
+  narrativeReleaseGeneration.set(key, generation);
+  queueMicrotask(() => {
+    if (narrativeLeaseCounts.has(key) || narrativeReleaseGeneration.get(key) !== generation) return;
+    release();
+  });
+}
+
 function clearNarrativeLoadState(threadId: string): void {
   const prefix = `${threadId}\u0000`;
-  for (const key of narrativeLoaded) {
-    if (key.startsWith(prefix)) narrativeLoaded.delete(key);
+  const keys = new Set([
+    ...narrativeLoaded,
+    ...narrativeInflight.keys(),
+    ...narrativeGeneration.keys(),
+    ...narrativeCursor.keys(),
+    ...narrativeLeaseCounts.keys(),
+    ...narrativeReleaseGeneration.keys(),
+  ]);
+  for (const key of keys) {
+    if (!key.startsWith(prefix)) continue;
+    revokeNarrativeLease(key);
+    narrativeLeaseCounts.delete(key);
+    narrativeReleaseGeneration.delete(key);
   }
+}
+
+type NarrativeBatch = NonNullable<ThreadRecord["narrativeByMessage"][string]>;
+
+interface NarrativeLoadContext {
+  cacheKey: string;
+  message: Message;
+  generation: number;
+  detailAfter: NarrativeDetailCursor | undefined;
+}
+
+function resolveNarrativeLoadContext(
+  records: Map<string, ThreadRecord>,
+  threadId: string,
+  messageId: string,
+): NarrativeLoadContext | null {
+  const current = records.get(threadId);
+  if (!current) return null;
+  const message = current.messages.find((candidate) => candidate.id === messageId);
+  if (!message) return null;
+  const cacheKey = narrativeKey(threadId, messageId);
+  return {
+    cacheKey,
+    message,
+    generation: narrativeGeneration.get(cacheKey) ?? 0,
+    detailAfter: narrativeCursor.get(cacheKey),
+  };
+}
+
+function hasCurrentNarrativeLease(cacheKey: string, generation: number): boolean {
+  return (narrativeGeneration.get(cacheKey) ?? 0) === generation;
+}
+
+function recordNarrativeWindowCursor(cacheKey: string, entries: readonly NarrativeEntry[]): void {
+  if (entries.length < NARRATIVE_DETAIL_LIMIT) {
+    narrativeLoaded.add(cacheKey);
+    narrativeCursor.delete(cacheKey);
+    return;
+  }
+  const last = entries.at(-1);
+  if (last) narrativeCursor.set(cacheKey, narrativeEntryCursor(last));
+}
+
+function narrativeRecordWithMessage(
+  records: Map<string, ThreadRecord>,
+  threadId: string,
+  messageId: string,
+): ThreadRecord | null {
+  const current = records.get(threadId);
+  return current?.messages.some((message) => message.id === messageId) ? current : null;
+}
+
+function narrativeEntryId(entry: NarrativeEntry): string {
+  return entry.kind === "assistantMessage" ? entry.messageId : entry.record.id;
+}
+
+function narrativeEntryCursor(entry: NarrativeEntry): NarrativeDetailCursor {
+  return {
+    sequence: entry.sequence,
+    sortOrder: entry.sortOrder,
+    kind: entry.kind,
+    id: narrativeEntryId(entry),
+  };
+}
+
+function mergeNarrativeEntries(
+  existing: NarrativeBatch | undefined,
+  entries: readonly NarrativeEntry[],
+): NarrativeBatch {
+  const tools = new Map(existing?.tools.map((record) => [record.id, record]));
+  const thoughts = new Map(existing?.thoughts.map((record) => [record.id, record]));
+  const hooks = new Map(existing?.hooks.map((record) => [record.id, record]));
+  for (const entry of entries) {
+    if (entry.kind === "toolCall") tools.set(entry.record.id, entry.record);
+    if (entry.kind === "narrationSegment") thoughts.set(entry.record.id, entry.record);
+    if (entry.kind === "hook") hooks.set(entry.record.id, entry.record);
+  }
+  const ordered = <T extends { id: string; sort_order: number }>(records: Iterable<T>): T[] =>
+    [...records].sort((left, right) => left.sort_order - right.sort_order || left.id.localeCompare(right.id));
+  return {
+    tools: ordered(tools.values()),
+    thoughts: ordered(thoughts.values()),
+    hooks: ordered(hooks.values()),
+  };
 }
 const providerUsageSnapshots = new Map<string, ProviderUsageInfo>();
 
@@ -3523,28 +3646,40 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
   loadNarrativeForMessage: async (messageId, explicitThreadId) => {
     const currentId = explicitThreadId ?? get().currentThreadId;
     if (!currentId) return;
-    const cacheKey = narrativeKey(currentId, messageId);
+    const context = resolveNarrativeLoadContext(get().records, currentId, messageId);
+    if (!context) return;
+    const { cacheKey, message, generation, detailAfter } = context;
     if (narrativeLoaded.has(cacheKey)) return;
-    const existing = narrativeInflight.get(messageId);
+    const existing = narrativeInflight.get(cacheKey);
     if (existing) return existing;
     const p = getTransport()
-      .listNarrative(messageId)
-      .then((res) => {
-        // The request is started by a rendered message. Keep its result when
-        // navigation briefly drops the visibility lease during hydration or
-        // an Electron restart; otherwise the one-shot request is lost and the
-        // persisted timeline never gets another chance to render. The message
-        // membership check still prevents a deleted or retired placeholder
-        // from being recreated by a late response.
-        const current = get().records.get(currentId);
-        if (!current || !current.messages.some((message) => message.id === messageId)) return;
-        const expectedToolCount = current.persistedToolCallCounts[messageId] ?? 0;
-        if (res.tools.length >= expectedToolCount) {
-          narrativeLoaded.add(cacheKey);
+      .loadTurn(currentId, {
+        limit: 1,
+        before: message.sequence + 1,
+        detail: {
+          limit: NARRATIVE_DETAIL_LIMIT,
+          ...(detailAfter ? { after: detailAfter } : {}),
+        },
+      })
+      .then((entries) => {
+        if (!hasCurrentNarrativeLease(cacheKey, generation)) return;
+        const current = narrativeRecordWithMessage(get().records, currentId, messageId);
+        if (!current) return;
+        const merged = mergeNarrativeEntries(current.narrativeByMessage[messageId], entries);
+        if (measureConversationValue(merged) > CONVERSATION_NARRATIVE_BYTES) {
+          // Keep the already-rendered window intact. The cursor stays put so a
+          // later visible lease cannot silently skip detail that did not fit.
+          return;
         }
+        if (!hasCurrentNarrativeLease(cacheKey, generation)) return;
+        recordNarrativeWindowCursor(cacheKey, entries);
+        // The detail rows cause the loader effect to run immediately. Clear
+        // this completed request first so that effect can request the next
+        // bounded window instead of observing a promise about to settle.
+        if (narrativeInflight.get(cacheKey) === p) narrativeInflight.delete(cacheKey);
         patchRec(currentId, (r) => ({
           narrativeByMessage: selectConversationNarrative(
-            { ...r.narrativeByMessage, [messageId]: res },
+            { ...r.narrativeByMessage, [messageId]: merged },
             r.messages,
             {
               anchorMessageId: messageId,
@@ -3554,21 +3689,34 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
         }));
       })
       .catch((err) => {
-        console.warn("[narrative] listNarrative failed", { messageId, err });
+        console.warn("[narrative] turn.load failed", { messageId, err });
       })
       .finally(() => {
-        narrativeInflight.delete(messageId);
+        if (narrativeInflight.get(cacheKey) === p) narrativeInflight.delete(cacheKey);
       });
-    narrativeInflight.set(messageId, p);
+    narrativeInflight.set(cacheKey, p);
     return p;
+  },
+
+  retainNarrativeForMessage: (messageId, explicitThreadId) => {
+    const threadId = explicitThreadId ?? get().currentThreadId;
+    if (!threadId) return;
+    retainNarrativeLease(narrativeKey(threadId, messageId));
+  },
+
+  releaseNarrativeForMessage: (messageId, explicitThreadId) => {
+    const threadId = explicitThreadId ?? get().currentThreadId;
+    if (!threadId) return;
+    const key = narrativeKey(threadId, messageId);
+    releaseNarrativeLease(key, () => get().evictNarrativeForMessage(messageId, threadId));
   },
 
   isNarrativeLoaded: (threadId, messageId) => narrativeLoaded.has(narrativeKey(threadId, messageId)),
 
-  evictNarrativeForMessage: (messageId) => {
-    const currentId = get().currentThreadId;
+  evictNarrativeForMessage: (messageId, explicitThreadId) => {
+    const currentId = explicitThreadId ?? get().currentThreadId;
     if (!currentId) return;
-    narrativeLoaded.delete(narrativeKey(currentId, messageId));
+    revokeNarrativeLease(narrativeKey(currentId, messageId));
     patchRec(currentId, (rec) => {
       if (!(messageId in rec.narrativeByMessage)) return {};
       const next = { ...rec.narrativeByMessage };
@@ -3730,39 +3878,6 @@ export const useThreadStore = create<ThreadState>((zustandSet, get) => {
       }));
     }
 
-    const localIdForBackfill = (() => {
-      const rec = getRec(payload.threadId);
-      const reverse = Object.entries(rec.serverMessageIds).find(
-        ([, sid]) => sid === payload.messageId,
-      );
-      return reverse?.[0] ?? null;
-    })();
-    void get()
-      .loadNarrativeForMessage(payload.messageId)
-      .then(() => {
-        const currentId = get().currentThreadId;
-        if (!currentId) return;
-        if (currentId !== payload.threadId) return;
-        const rec = getRec(currentId);
-        const serverRes = rec.narrativeByMessage[payload.messageId];
-        if (!serverRes) return;
-        const persistedThoughtSegments = visiblePersistedThoughtSegments(serverRes.thoughts);
-        if (persistedThoughtSegments.length > rec.thoughtSegments.length) {
-          patchRec(currentId, (r) => {
-            if (r.toolCalls.length === 0) return {};
-            if (r.thoughtSegments.length >= persistedThoughtSegments.length) return {};
-            return { thoughtSegments: persistedThoughtSegments };
-          });
-        }
-        if (!localIdForBackfill) return;
-        if (localIdForBackfill === payload.messageId) return;
-        patchRec(currentId, (r) => ({
-          narrativeByMessage: {
-            ...r.narrativeByMessage,
-            [localIdForBackfill]: serverRes,
-          },
-        }));
-      });
   },
   };
 });

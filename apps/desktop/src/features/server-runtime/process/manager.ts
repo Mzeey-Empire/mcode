@@ -40,8 +40,11 @@ import { stopServerHeldByLock } from "./shutdown.js";
 /** Interval between server readiness probes. */
 const HEALTH_POLL_INTERVAL = 200;
 
-/** Maximum server startup time, including database and workspace initialization. */
-const STARTUP_TIMEOUT_MS = 60_000;
+/**
+ * Maximum server startup time, including an awaited local conversation-data
+ * migration before the server can report readiness.
+ */
+const STARTUP_TIMEOUT_MS = 10 * 60_000;
 
 /** Number of lock-file reads after readiness passes. */
 const LOCK_READ_ATTEMPTS = 10;

@@ -24,12 +24,8 @@ describe("threadStore textDelta batching", () => {
   beforeEach(() => {
     clearRecordCache();
     resetThreadStoreForTests();
-    vi.mocked(mockTransport.listNarrative).mockReset();
-    vi.mocked(mockTransport.listNarrative).mockResolvedValue({
-      tools: [],
-      thoughts: [],
-      hooks: [],
-    });
+    vi.mocked(mockTransport.loadTurn).mockReset();
+    vi.mocked(mockTransport.loadTurn).mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -243,34 +239,10 @@ describe("threadStore textDelta batching", () => {
     expect(getTestThreadStreaming(tid)).toBeUndefined();
   });
 
-  it("backfills volatile thoughts from persisted narrative after turn.persisted", async () => {
+  it("does not fan out a detail request when turn.persisted arrives offscreen", async () => {
     const tid = "thread-persisted-backfill";
     const localMessageId = "local-msg";
     const serverMessageId = "server-msg";
-    vi.mocked(mockTransport.listNarrative).mockResolvedValueOnce({
-      tools: [],
-      thoughts: [
-        {
-          id: "th-1",
-          message_id: serverMessageId,
-          text: "I saw `C:\\src\\automaker`.",
-          started_at: "2026-06-11T16:11:01.000Z",
-          ended_at: "2026-06-11T16:11:02.000Z",
-          sort_order: 1,
-          is_final_response: 0,
-        },
-        {
-          id: "th-2",
-          message_id: serverMessageId,
-          text: "Tree is dirty.",
-          started_at: "2026-06-11T16:11:03.000Z",
-          ended_at: "2026-06-11T16:11:04.000Z",
-          sort_order: 3,
-          is_final_response: 0,
-        },
-      ],
-      hooks: [],
-    });
     resetThreadStoreForTests({
       currentThreadId: tid,
       records: new Map([
@@ -303,11 +275,7 @@ describe("threadStore textDelta batching", () => {
       filesChanged: [],
     });
 
-    await vi.waitFor(() => {
-      expect(getTestThreadThoughtSegments(tid)?.map((segment) => segment.text)).toEqual([
-        "I saw `C:\\src\\automaker`.",
-        "Tree is dirty.",
-      ]);
-    });
+    expect(mockTransport.loadTurn).not.toHaveBeenCalled();
+    expect(getTestThreadThoughtSegments(tid)).toEqual([]);
   });
 });

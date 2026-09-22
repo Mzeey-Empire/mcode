@@ -35,8 +35,10 @@
  */
 import { injectable, inject } from "tsyringe";
 import * as NodeCrypto from "node:crypto";
+import type { Database } from "bun:sqlite";
 import { logger } from "@mcode/shared";
 import {
+  NarrativeEntrySchema,
   resolveBrowserNarrativeTool,
   resolveSubagentDuration,
   resolveSubagentMetadata,
@@ -47,6 +49,7 @@ import {
   mergeSubagentPresentation,
   type Message,
   type NarrativeEntry,
+  type NarrativeDetailCursor,
   type ParentNarrativeRecoveryItem,
   type TurnRange,
   type SubagentPresentation,
@@ -70,6 +73,49 @@ import { assertActiveTurnRecoveryRetention } from "../../turns/active-turn-recov
 
 /** Default number of recent messages hydrated when no range is supplied. */
 const DEFAULT_LOAD_LIMIT = 200;
+const DEFAULT_DETAIL_LOAD_LIMIT = 100;
+const ASSISTANT_BODY_SORT_ORDER = Number.MAX_SAFE_INTEGER;
+
+type NarrativeDetailRow = { entry_json: string };
+
+type SelectedNarrativeMessageRow = {
+  id: string;
+  sequence: number;
+  role: string;
+  content: string;
+};
+
+type FinalResponseSortOrderRow = { sort_order: number };
+
+function narrativeKindOrder(kind: NarrativeDetailCursor["kind"]): number {
+  switch (kind) {
+    case "assistantMessage": return 0;
+    case "toolCall": return 1;
+    case "narrationSegment": return 2;
+    case "hook": return 3;
+  }
+}
+
+function narrativeEntryId(entry: NarrativeEntry): string {
+  switch (entry.kind) {
+    case "assistantMessage": return entry.messageId;
+    case "toolCall": return entry.record.id;
+    case "narrationSegment": return entry.record.id;
+    case "hook": return entry.record.id;
+  }
+}
+
+/** SQLite's BINARY collation compares the UTF-8 byte representation of text IDs. */
+function compareSqliteBinaryIds(left: string, right: string): number {
+  return Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
+}
+
+function compareNarrativeEntries(left: NarrativeEntry, right: NarrativeEntry): number {
+  return left.sequence - right.sequence
+    || left.sortOrder - right.sortOrder
+    || narrativeKindOrder(left.kind) - narrativeKindOrder(right.kind)
+    || compareSqliteBinaryIds(narrativeEntryId(left), narrativeEntryId(right));
+}
 
 /** Buffered tool call with raw input preserved for deferred summarization. */
 export interface BufferedToolCall extends CreateToolCallRecordInput {
@@ -193,10 +239,11 @@ export class NarrativeStore {
   private turnHooks = new Map<string, CreateHookExecutionInput[]>();
 
   constructor(
-    @inject(MessageRepo) private readonly messageRepo: MessageRepo,
+    @inject(MessageRepo) _messageRepo: MessageRepo,
     @inject(ToolCallRecordRepo) private readonly toolCallRecordRepo: ToolCallRecordRepo,
     @inject(ThoughtSegmentRepo) private readonly thoughtSegmentRepo: ThoughtSegmentRepo,
     @inject(HookExecutionRepo) private readonly hookExecutionRepo: HookExecutionRepo,
+    @inject("Database") private readonly db?: Database,
   ) {}
 
   /**
@@ -211,13 +258,216 @@ export class NarrativeStore {
    * own sort order. User and system messages are not narrative and are skipped.
    */
   load(threadId: string, range?: TurnRange): NarrativeEntry[] {
-    const { messages } = this.messageRepo.listByThread(
+    const detailLimit = range?.detail?.limit ?? DEFAULT_DETAIL_LOAD_LIMIT;
+    return this.loadDetailWindow(
       threadId,
       range?.limit ?? DEFAULT_LOAD_LIMIT,
       range?.before,
+      detailLimit,
+      range?.detail?.after,
     );
+  }
 
-    return this.loadForMessages(messages);
+  private loadDetailWindow(
+    threadId: string,
+    messageLimit: number,
+    before: number | undefined,
+    detailLimit: number,
+    after: NarrativeDetailCursor | undefined,
+  ): NarrativeEntry[] {
+    const page = this.loadNarrativeMessages(threadId, messageLimit, before);
+    const effectiveDetailLimit = Math.max(1, Math.min(DEFAULT_DETAIL_LOAD_LIMIT * 2, detailLimit));
+
+    const entries: NarrativeEntry[] = [];
+    for (const message of page.reverse()) {
+      if (message.role !== "assistant" || (after && message.sequence < after.sequence)) continue;
+      const messageCursor = after?.sequence === message.sequence ? after : undefined;
+      const remaining = effectiveDetailLimit - entries.length;
+      if (remaining <= 0) break;
+
+      const messageEntries = this.loadBoundedMessageDetails(message, remaining, messageCursor);
+      entries.push(...messageEntries.slice(0, remaining));
+      if (entries.length >= effectiveDetailLimit) break;
+    }
+    return entries;
+  }
+
+  private loadNarrativeMessages(
+    threadId: string,
+    messageLimit: number,
+    before: number | undefined,
+  ): SelectedNarrativeMessageRow[] {
+    if (!this.db) throw new Error("NarrativeStore detail loading requires the SQLite database");
+    const pageLimit = Math.max(1, Math.min(DEFAULT_LOAD_LIMIT, messageLimit));
+    const pageBefore = before == null ? "" : "AND m.sequence < ?";
+    return this.db.prepare(`
+      SELECT m.id, m.sequence, m.role, m.content
+      FROM messages m
+      WHERE m.thread_id = ?
+        AND m.is_internal = 0
+        AND json_extract(m.system_notice, '$.scope') IS NOT 'session'
+        ${pageBefore}
+      ORDER BY m.sequence DESC
+      LIMIT ?
+    `).all(
+      threadId,
+      ...(before == null ? [] : [before]),
+      pageLimit,
+    ) as SelectedNarrativeMessageRow[];
+  }
+
+  /**
+   * Reads one assistant message at a time. Each child query seeks from its
+   * message-local cursor, so a long turn never requires sorting every detail
+   * row before the requested window can be returned.
+   */
+  private loadBoundedMessageDetails(
+    message: SelectedNarrativeMessageRow,
+    limit: number,
+    after: NarrativeDetailCursor | undefined,
+  ): NarrativeEntry[] {
+    if (!this.db) throw new Error("NarrativeStore detail loading requires the SQLite database");
+    const bodySortOrder = this.db.prepare(`
+      SELECT sort_order
+      FROM thought_segments
+      WHERE message_id = ?
+        AND is_final_response <> 0
+      ORDER BY sort_order ASC, id ASC
+      LIMIT 1
+    `).get(message.id) as FinalResponseSortOrderRow | null;
+    const body: NarrativeEntry = {
+      kind: "assistantMessage",
+      messageId: message.id,
+      sequence: message.sequence,
+      body: message.content,
+      sortOrder: bodySortOrder?.sort_order ?? ASSISTANT_BODY_SORT_ORDER,
+    };
+    const toolCursor = this.detailCursorClause(after, "toolCall");
+    const toolRows = this.db.prepare(`
+      SELECT json_object(
+        'kind', 'toolCall', 'sequence', ?, 'sortOrder', tool.sort_order,
+        'record', json_object(
+          'id', tool.id, 'message_id', tool.message_id,
+          'parent_tool_call_id', tool.parent_tool_call_id, 'tool_name', tool.tool_name,
+          'display_name', tool.display_name, 'provider_agent_key', tool.provider_agent_key,
+          'subagent_identity_key', tool.subagent_identity_key,
+          'subagent_provider_name', tool.subagent_provider_name,
+          'subagent_prompt', tool.subagent_prompt, 'subagent_type', tool.subagent_type,
+          'subagent_agent_id', tool.subagent_agent_id,
+          'subagent_duration_ms', tool.subagent_duration_ms, 'model', tool.model,
+          'reasoning_effort', tool.reasoning_effort, 'input_summary', tool.input_summary,
+          'output_summary', tool.output_summary, 'output_truncated', tool.output_truncated,
+          'output_total_bytes', tool.output_total_bytes,
+          'output_artifact_path', tool.output_artifact_path, 'exit_code', tool.exit_code,
+          'status', tool.status, 'started_at', tool.started_at,
+          'completed_at', tool.completed_at, 'sort_order', tool.sort_order
+        )
+      ) AS entry_json
+      FROM tool_call_records tool
+      WHERE tool.message_id = ?
+      ${toolCursor.sql}
+      ORDER BY tool.sort_order ASC, tool.id ASC
+      LIMIT ?
+    `).all(message.sequence, message.id, ...toolCursor.args, limit) as NarrativeDetailRow[];
+
+    const thoughtCursor = this.detailCursorClause(after, "narrationSegment");
+    const thoughtRows = this.db.prepare(`
+      SELECT json_object(
+        'kind', 'narrationSegment', 'sequence', ?, 'sortOrder', thought.sort_order,
+        'record', json_object(
+          'id', thought.id, 'message_id', thought.message_id, 'text', thought.text,
+          'started_at', thought.started_at, 'ended_at', thought.ended_at,
+          'sort_order', thought.sort_order, 'is_final_response', thought.is_final_response
+        )
+      ) AS entry_json
+      FROM thought_segments thought
+      WHERE thought.message_id = ?
+        AND thought.is_final_response = 0
+      ${thoughtCursor.sql}
+      ORDER BY thought.sort_order ASC, thought.id ASC
+      LIMIT ?
+    `).all(message.sequence, message.id, ...thoughtCursor.args, limit) as NarrativeDetailRow[];
+
+    const hookCursor = this.detailCursorClause(after, "hook");
+    const hookRows = this.db.prepare(`
+      SELECT json_object(
+        'kind', 'hook', 'sequence', ?, 'sortOrder', hook.sort_order,
+        'record', json_object(
+          'id', hook.id, 'message_id', hook.message_id, 'hook_name', hook.hook_name,
+          'tool_name', hook.tool_name, 'phase', hook.phase, 'payload', hook.payload,
+          'duration_ms', hook.duration_ms,
+          'did_block', json(CASE WHEN hook.did_block = 1 THEN 'true' ELSE 'false' END),
+          'started_at', hook.started_at, 'ended_at', hook.ended_at,
+          'sort_order', hook.sort_order
+        )
+      ) AS entry_json
+      FROM hook_executions hook
+      WHERE hook.message_id = ?
+      ${hookCursor.sql}
+      ORDER BY hook.sort_order ASC, hook.id ASC
+      LIMIT ?
+    `).all(message.sequence, message.id, ...hookCursor.args, limit) as NarrativeDetailRow[];
+
+    const entries = [
+      ...(this.isAfterDetailCursor(body, after) ? [body] : []),
+      ...toolRows,
+      ...thoughtRows,
+      ...hookRows,
+    ].map((entry) => (
+      "entry_json" in entry
+        ? NarrativeEntrySchema().parse(JSON.parse(entry.entry_json))
+        : entry
+    ));
+    return entries.sort(compareNarrativeEntries);
+  }
+
+  private detailCursorClause(
+    after: NarrativeDetailCursor | undefined,
+    kind: NarrativeDetailCursor["kind"],
+  ): { sql: string; args: Array<number | string> } {
+    if (!after) return { sql: "", args: [] };
+    const kindOrder = narrativeKindOrder(kind);
+    const afterKindOrder = narrativeKindOrder(after.kind);
+    if (kindOrder > afterKindOrder) {
+      return { sql: "AND sort_order >= ?", args: [after.sortOrder] };
+    }
+    if (kindOrder < afterKindOrder) {
+      return { sql: "AND sort_order > ?", args: [after.sortOrder] };
+    }
+    return {
+      sql: "AND (sort_order, id) > (?, ?)",
+      args: [after.sortOrder, after.id],
+    };
+  }
+
+  private isAfterDetailCursor(entry: NarrativeEntry, after: NarrativeDetailCursor | undefined): boolean {
+    if (!after) return true;
+    return this.compareDetailPosition(
+      entry.sequence,
+      entry.sortOrder,
+      entry.kind,
+      narrativeEntryId(entry),
+      after.sequence,
+      after.sortOrder,
+      after.kind,
+      after.id,
+    ) > 0;
+  }
+
+  private compareDetailPosition(
+    leftSequence: number,
+    leftSortOrder: number,
+    leftKind: NarrativeDetailCursor["kind"],
+    leftId: string,
+    rightSequence: number,
+    rightSortOrder: number,
+    rightKind: NarrativeDetailCursor["kind"],
+    rightId: string,
+  ): number {
+    return leftSequence - rightSequence
+      || leftSortOrder - rightSortOrder
+      || narrativeKindOrder(leftKind) - narrativeKindOrder(rightKind)
+      || compareSqliteBinaryIds(leftId, rightId);
   }
 
   /**
@@ -1290,7 +1540,7 @@ export class NarrativeStore {
     messageId: string,
     messageContent: string,
     outcome: TurnOutcome,
-    options: { strict?: boolean } = {},
+    options: { strict?: boolean; replaceExisting?: boolean } = {},
   ): Promise<PersistNarrativeResult> {
     const persisted: PersistedNarrativeRows = {
       toolCalls: new Set<string>(),
@@ -1321,15 +1571,21 @@ export class NarrativeStore {
       }
       await this.persistBatchedNarrativeRows(
         pending.toolCalls, persisted.toolCalls, (item) => item.toolCallId!,
-        (items) => this.toolCallRecordRepo.bulkCreateBatched(items), options.strict, threadId, "tool call records",
+        (items) => this.toolCallRecordRepo.bulkCreateBatched(
+          items, ACTIVE_TURN_WRITE_BATCH_LIMITS, options.replaceExisting,
+        ), options.strict, threadId, "tool call records",
       );
       await this.persistBatchedNarrativeRows(
         pending.thoughts, persisted.thoughts, (item) => item.id!,
-        (items) => this.thoughtSegmentRepo.bulkCreateBatched(items), options.strict, threadId, "thought segments",
+        (items) => this.thoughtSegmentRepo.bulkCreateBatched(
+          items, ACTIVE_TURN_WRITE_BATCH_LIMITS, options.replaceExisting,
+        ), options.strict, threadId, "thought segments",
       );
       await this.persistBatchedNarrativeRows(
         pending.hooks, persisted.hooks, (item) => item.id!,
-        (items) => this.hookExecutionRepo.bulkCreateBatched(items), options.strict, threadId, "hook executions",
+        (items) => this.hookExecutionRepo.bulkCreateBatched(
+          items, ACTIVE_TURN_WRITE_BATCH_LIMITS, options.replaceExisting,
+        ), options.strict, threadId, "hook executions",
       );
     }
 

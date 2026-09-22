@@ -91,6 +91,7 @@ import {
   type CanonicalConversationProjection,
 } from "./canonical-agent-read-repository.js";
 import { CanonicalCodexCollaborationCoordinator } from "./canonical-codex-collaboration-coordinator.js";
+import { ConversationDisplayMaterializer } from "../conversation/migrations/conversation-display-materializer.js";
 
 /** Capacity held back so volatile input cannot consume every semantic batch slot. */
 export const CANONICAL_AGENT_CONTROL_EVENT_RESERVE = 16;
@@ -354,12 +355,14 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
   private readonly parentLifecycle: CanonicalParentTurnLifecycle;
   private readonly reads: CanonicalAgentReadRepository;
   private readonly codexCollaboration: CanonicalCodexCollaborationCoordinator;
+  private readonly displayMaterializer: ConversationDisplayMaterializer;
 
   constructor(
     @inject("Database") private readonly db: Database,
     @inject("CanonicalAgentEventPublisher")
     private readonly publish: CanonicalAgentEventPublisher = publishCanonicalAgentEvents,
   ) {
+    this.displayMaterializer = new ConversationDisplayMaterializer(db);
     this.persistThreadStatement = db.prepare(`
       INSERT INTO canonical_agent_threads (
         id, workspace_id, parent_thread_id, root_thread_id, owning_parent_thread_id,
@@ -437,6 +440,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
         this.persistState(state, threadId, turnId, executionId, conversationChanged, events),
       insertEvent: (event) => this.insertEvent(event),
       persistCheckpoint: (checkpoint) => this.persistCheckpoint(this.toCanonicalCheckpoint(checkpoint)!),
+      materializeItems: (events) => this.materializeRecordedItems(events),
       recover: (input, error) => this.recoverCommit(this.toCanonicalCommitInput(input), error),
       record: (events) => this.recordCanonicalDiagnostics(events),
       publish: (result) => this.publishCommitted(result),
@@ -1788,6 +1792,11 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     return true;
   }
 
+  /** Completes the canonical-to-display startup migration before provider recovery begins. */
+  async materializeConversationDisplay(): Promise<void> {
+    await this.displayMaterializer.runToCompletion();
+  }
+
   private persistParentNarrativeRecoveryBatched(
     input: ParentNarrativeRecoveryCommitInput,
     thread: AgentThread,
@@ -1841,6 +1850,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
       createdAt: item.record.started_at,
       updatedAt: now,
     });
+    this.displayMaterializer.materializeItems([itemId]);
   }
 
   private parentNarrativeRecoveryItemId(item: ParentNarrativeRecoveryItem): string {
@@ -1907,6 +1917,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
       ? existing.payload.projection
       : null;
     if (projection === "narrativeRecovery" || projection === "narrativeRecoveryDiscarded") {
+      this.displayMaterializer.discardItem(itemId);
       this.db.prepare("DELETE FROM canonical_agent_items WHERE id = ?").run(itemId);
     }
   }
@@ -2255,7 +2266,10 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     }
     this.persistParentTerminalBatchState(state, input);
     this.persistParentTerminalBatchCheckpoint(state, input);
-    if (state.terminal) this.retireParentNarrativeRecovery(input.turnId);
+    if (state.terminal) {
+      this.displayMaterializer.materializeItems(this.parentAssistantItemIds(input.turnId));
+      this.retireParentNarrativeRecovery(input.turnId);
+    }
     state.latest = this.committedParentTerminalBatchResult(state, input.threadId, terminalRevision);
   }
 
@@ -2353,6 +2367,12 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
 
   /** Remove the unfinished-turn recovery representation once a terminal projection is durable. */
   private retireParentNarrativeRecovery(turnId: string): void {
+    const items = this.db.prepare(`
+      SELECT id FROM canonical_agent_items
+      WHERE turn_id = ?
+        AND json_extract(payload_json, '$.projection') IN ('narrativeRecovery', 'narrativeRecoveryDiscarded')
+    `).all(turnId) as Array<{ id: string }>;
+    for (const item of items) this.displayMaterializer.discardItem(item.id);
     this.db.prepare(`
       DELETE FROM canonical_agent_items
       WHERE turn_id = ?
@@ -2965,6 +2985,22 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     this.persistRecordedItems(state, threadId, events);
     this.persistRecordedActions(state, threadId, events);
     this.persistChangedChildThreads(state, threadId, events);
+  }
+
+  private materializeRecordedItems(events: readonly CanonicalAgentEventEnvelope[]): void {
+    this.displayMaterializer.materializeItems(events.flatMap((event) =>
+      event.payload.type === "item.recorded" ? [event.payload.item.id] : [],
+    ));
+  }
+
+  private parentAssistantItemIds(turnId: string): string[] {
+    return (this.db.prepare(`
+      SELECT id FROM canonical_agent_items
+      WHERE turn_id = ?
+        AND kind = 'message'
+        AND json_extract(payload_json, '$.projection') = 'message'
+        AND json_extract(payload_json, '$.message.role') = 'assistant'
+    `).all(turnId) as Array<{ id: string }>).map((item) => item.id);
   }
 
   private persistThreadState(state: AgentModelState, threadId: string): void {

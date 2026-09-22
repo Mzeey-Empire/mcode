@@ -6,6 +6,9 @@ import { createAgentModelState, type AgentItem, type AgentTurn, type Message, ty
 const loadOlderMessagesSpy = vi.fn();
 const loadNewerMessagesSpy = vi.fn();
 const loadNarrativeForMessageSpy = vi.fn();
+const evictNarrativeForMessageSpy = vi.fn();
+const retainNarrativeForMessageSpy = vi.fn();
+const releaseNarrativeForMessageSpy = vi.fn();
 
 class LayoutObserver implements ResizeObserver {
   static instances: LayoutObserver[] = [];
@@ -143,6 +146,9 @@ vi.mock("@/stores/threadStore", () => ({
       loadOlderMessages: loadOlderMessagesSpy,
       loadNewerMessages: loadNewerMessagesSpy,
       loadNarrativeForMessage: loadNarrativeForMessageSpy,
+      retainNarrativeForMessage: retainNarrativeForMessageSpy,
+      releaseNarrativeForMessage: releaseNarrativeForMessageSpy,
+      evictNarrativeForMessage: evictNarrativeForMessageSpy,
       isNarrativeLoaded: () => false,
     });
   }),
@@ -219,6 +225,9 @@ beforeEach(() => {
   loadOlderMessagesSpy.mockClear();
   loadNewerMessagesSpy.mockClear();
   loadNarrativeForMessageSpy.mockClear();
+  retainNarrativeForMessageSpy.mockClear();
+  releaseNarrativeForMessageSpy.mockClear();
+  evictNarrativeForMessageSpy.mockClear();
   loadingValue = false;
   activeThreadIdValue = "thread-A";
   messagesValue = [{ id: "m1", sequence: 1 }];
@@ -262,6 +271,27 @@ describe("MessageList thread switch", () => {
 
     expect(rail).toHaveClass("overflow-x-clip");
     expect(rail).not.toHaveClass("overflow-x-hidden");
+  });
+
+  it("hydrates a mounted assistant from its owning thread and releases its virtual lease after unmount", async () => {
+    activeThreadIdValue = "thread-A";
+    currentThreadIdValue = "thread-A";
+    messagesValue = [{
+      id: "child-answer",
+      sequence: 1,
+      thread_id: "thread-B",
+      role: "assistant",
+      content: "Child result",
+    }];
+
+    const view = render(<MessageList displayThreadId="thread-B" />);
+
+    await waitFor(() => {
+      expect(loadNarrativeForMessageSpy).toHaveBeenCalledWith("child-answer", "thread-B");
+      expect(retainNarrativeForMessageSpy).toHaveBeenCalledWith("child-answer", "thread-B");
+    });
+    view.unmount();
+    expect(releaseNarrativeForMessageSpy).toHaveBeenCalledWith("child-answer", "thread-B");
   });
 
   it("renders growing canonical child text before completion without duplicating its bubble", () => {

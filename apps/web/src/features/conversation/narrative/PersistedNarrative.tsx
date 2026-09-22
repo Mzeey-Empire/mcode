@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
-import { useThreadStore } from "@/stores/threadStore";
+import { useMemo } from "react";
 import { useThreadRecord } from "@/stores/thread-selectors";
 import type { NarrativeItem, SubagentRosterTarget } from "./types";
 import type { ToolCall } from "@/transport/types";
@@ -30,10 +29,8 @@ export interface PersistedNarrativeProps {
 /**
  * Render the persisted narrative timeline for a completed assistant message.
  *
- * Lazy-loads records via `loadNarrativeForMessage` on first mount (eager
- * prefetch in the store covers the recent-message window; this effect catches
- * the older-message lazy path). Returns `null` until records arrive so the
- * layout doesn't jump.
+ * Receives a visible transcript row's bounded detail window. Returns `null`
+ * until that row's request finishes so the layout does not jump.
  *
  * Persisted mode differences from live `NarrativeFlow`:
  *   - No `NarrativeIndicator` (the turn is over)
@@ -49,14 +46,6 @@ export function PersistedNarrative({
   onOpenSubagents,
 }: PersistedNarrativeProps) {
   const records = useThreadRecord(threadId, (r) => r.narrativeByMessage[messageId]);
-  const load = useThreadStore((s) => s.loadNarrativeForMessage);
-  const triggered = useRef(false);
-
-  useEffect(() => {
-    if (records || triggered.current) return;
-    triggered.current = true;
-    void load(messageId, threadId ?? undefined);
-  }, [messageId, records, load, threadId]);
 
   const { items, allToolCalls } = useMemo(() => {
     if (!records) {

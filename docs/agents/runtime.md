@@ -87,7 +87,7 @@ Startup checkpoint logs use past-tense messages and include the completed
 stage, server PID, and elapsed milliseconds since the bootstrap function began.
 Compare the last completed stage with the captured error. An exit before the
 first checkpoint can indicate a failure during module loading.
-The 60-second readiness timeout still starts after the server process is spawned.
+The desktop waits up to 10 minutes for server readiness after it spawns the server. A second desktop instance waits up to 10 minutes 15 seconds for the startup lock.
 
 ## Focused verification
 

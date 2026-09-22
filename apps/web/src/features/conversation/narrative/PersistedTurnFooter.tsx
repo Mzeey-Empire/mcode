@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
-import { useThreadStore } from "@/stores/threadStore";
+import { useMemo } from "react";
 import { useThreadRecord } from "@/stores/thread-selectors";
 import type { ThoughtSegmentRecord, ToolCallRecord } from "@/transport/types";
 import { TurnFooter } from "./TurnFooter";
@@ -86,8 +85,8 @@ export interface PersistedTurnFooterProps {
  * the answer they led to. Putting the footer at the end keeps the reading
  * order: actions → response → wrap-up.
  *
- * Uses a supplied canonical summary or lazily loads the same narrative records
- * as `PersistedNarrative` through the threadStore cache.
+ * Uses a supplied canonical summary or the visible transcript row's bounded
+ * detail window.
  */
 export function PersistedTurnFooter({
   threadId,
@@ -95,14 +94,6 @@ export function PersistedTurnFooter({
   summary,
 }: PersistedTurnFooterProps) {
   const records = useThreadRecord(threadId, (r) => r.narrativeByMessage[messageId]);
-  const load = useThreadStore((s) => s.loadNarrativeForMessage);
-  const triggered = useRef(false);
-
-  useEffect(() => {
-    if (records || triggered.current) return;
-    triggered.current = true;
-    void load(messageId, threadId ?? undefined);
-  }, [messageId, records, load, summary, threadId]);
 
   const persistedSummary = useMemo<TurnFooterSummary | null>(
     () => (records ? persistedFooterSummary(records) : null),

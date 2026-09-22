@@ -48,15 +48,46 @@ export const NarrativeEntrySchema = lazySchema(() =>
 /** One chronologically-ordered narrative entry returned by `turn.load`. */
 export type NarrativeEntry = z.infer<ReturnType<typeof NarrativeEntrySchema>>;
 
+/** Stable discriminator order for one persisted narrative detail cursor. */
+export const NarrativeDetailKindSchema = z.enum([
+  "assistantMessage",
+  "toolCall",
+  "narrationSegment",
+  "hook",
+]);
+
+/** Exclusive continuation position within a selected turn range. */
+export const NarrativeDetailCursorSchema = lazySchema(() =>
+  z.object({
+    sequence: z.number().int(),
+    sortOrder: z.number().int(),
+    kind: NarrativeDetailKindSchema,
+    id: z.string().trim().min(1).max(256),
+  }).strict(),
+);
+
+/** Bounded detail window nested inside a message range. */
+export const NarrativeDetailRangeSchema = lazySchema(() =>
+  z.object({
+    limit: z.number().int().min(1).max(200).optional(),
+    after: NarrativeDetailCursorSchema().optional(),
+  }).strict(),
+);
+
+export type NarrativeDetailKind = z.infer<typeof NarrativeDetailKindSchema>;
+export type NarrativeDetailCursor = z.infer<ReturnType<typeof NarrativeDetailCursorSchema>>;
+export type NarrativeDetailRange = z.infer<ReturnType<typeof NarrativeDetailRangeSchema>>;
+
 /**
  * Optional load window for `turn.load`. Omit for the thread's recent narrative;
  * pass a sequence cursor for pagination. Mirrors `message.list` paging.
  */
 export const TurnRangeSchema = lazySchema(() =>
   z.object({
-    limit: z.number().optional(),
-    before: z.number().optional(),
-  }),
+    limit: z.number().int().min(1).max(200).optional(),
+    before: z.number().int().optional(),
+    detail: NarrativeDetailRangeSchema().optional(),
+  }).strict(),
 );
 
 /** Optional load window for the `turn.load` RPC. */

@@ -4,16 +4,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HookExecutionRecord, ToolCallRecord } from "@/transport/types";
 
 const recordsByThread = vi.hoisted(() => new Map<string, { narrativeByMessage: Record<string, { tools: ToolCallRecord[]; thoughts: []; hooks: HookExecutionRecord[] }> }>());
-const loadNarrativeForMessage = vi.hoisted(() => vi.fn());
 
 vi.mock("@/stores/thread-selectors", () => ({
   useThreadRecord: (threadId: string | null | undefined, selector: (record: unknown) => unknown) => selector(
     recordsByThread.get(threadId ?? "") ?? { narrativeByMessage: {} },
   ),
-}));
-
-vi.mock("@/stores/threadStore", () => ({
-  useThreadStore: (selector: (state: unknown) => unknown) => selector({ loadNarrativeForMessage }),
 }));
 
 vi.mock("../NarrativeRows", () => ({
@@ -101,7 +96,6 @@ describe("persisted child timeline thread selection", () => {
 
   beforeEach(() => {
     recordsByThread.clear();
-    loadNarrativeForMessage.mockReset();
     recordsByThread.set("parent-thread", {
       narrativeByMessage: {
         "assistant-1": { tools: [tool("parent-tool"), tool("parent-agent", "Agent")], thoughts: [], hooks: [stopHook("ParentStop")] },
@@ -131,25 +125,9 @@ describe("persisted child timeline thread selection", () => {
     const dialog = await screen.findByRole("dialog", { name: "Hooks" });
     expect(dialog).toHaveTextContent("ChildStop");
     expect(dialog).not.toHaveTextContent("ParentStop");
-    expect(loadNarrativeForMessage).not.toHaveBeenCalled();
   });
 
-  it("loads missing records into the explicitly rendered child thread", () => {
-    recordsByThread.delete("child-thread");
-
-    render(
-      <>
-        <PersistedNarrative threadId="child-thread" messageId="assistant-1" messageContent="Child result" />
-        <PersistedTurnFooter threadId="child-thread" messageId="assistant-1" />
-      </>,
-    );
-
-    expect(loadNarrativeForMessage).toHaveBeenCalledTimes(2);
-    expect(loadNarrativeForMessage).toHaveBeenCalledWith("assistant-1", "child-thread");
-    expect(loadNarrativeForMessage).not.toHaveBeenCalledWith("assistant-1", "parent-thread");
-  });
-
-  it("renders a canonical footer and loads its hooks from the owning thread", () => {
+  it("renders a canonical footer without requesting detail itself", () => {
     recordsByThread.delete("child-thread");
 
     render(
@@ -165,7 +143,6 @@ describe("persisted child timeline thread selection", () => {
 
     expect(screen.getByTestId("persisted-footer-steps")).toHaveTextContent("2");
     expect(screen.getByTestId("persisted-footer-steps")).toHaveAttribute("data-subagents", "1");
-    expect(loadNarrativeForMessage).toHaveBeenCalledWith("assistant-1", "child-thread");
   });
 
   it("renders the elapsed time for a completed canonical turn without tools", () => {
@@ -183,7 +160,6 @@ describe("persisted child timeline thread selection", () => {
     );
 
     expect(screen.getByTestId("persisted-footer-steps")).toHaveTextContent("0");
-    expect(loadNarrativeForMessage).toHaveBeenCalledWith("assistant-1", "child-thread");
   });
 
   it("keeps an outcome-only footer when the turn has no activity counts", () => {
@@ -203,7 +179,6 @@ describe("persisted child timeline thread selection", () => {
     );
 
     expect(screen.getByTestId("persisted-footer-steps")).toHaveAttribute("data-outcome", "interrupted");
-    expect(loadNarrativeForMessage).toHaveBeenCalledWith("assistant-1", "child-thread");
   });
 
   it("routes persisted subagent rows through the chat detail callback", () => {

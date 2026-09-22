@@ -11,7 +11,6 @@ import { PlanQuestionAnswersRepo } from "../../../../features/agents/planning/pe
 import { ThoughtSegmentRepo } from "../../../../features/agents/conversation/narrative/persistence/thought-segment-repo.js";
 import { ToolCallRecordRepo } from "../../../../features/agents/tools/persistence/tool-call-record-repo.js";
 import { loadConversationPage } from "../../../../features/agents/conversation/read-model/conversation-page.js";
-import { NarrativeStore } from "../../../../features/agents/conversation/narrative/narrative-store.js";
 import { CanonicalAgentBoundary } from "../../../../features/agents/canonical/canonical-agent-boundary.js";
 import {
   PARENT_ASSISTANT_TEXT_RETAINED_LIMITS,
@@ -998,12 +997,6 @@ function readConversation(db: Database, limit: 100 | 1000): unknown {
   return loadConversationPage(
     {
       messageRepo,
-      narrativeStore: new NarrativeStore(
-        messageRepo,
-        new ToolCallRecordRepo(db),
-        new ThoughtSegmentRepo(db),
-        new HookExecutionRepo(db),
-      ),
       planQuestionAnswersRepo: new PlanQuestionAnswersRepo(db),
     },
     { threadId: THREAD_ID, limit },

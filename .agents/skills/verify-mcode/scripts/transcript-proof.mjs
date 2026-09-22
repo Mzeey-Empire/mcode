@@ -6,16 +6,20 @@ import * as NodePath from "node:path";
 export async function inspectTranscript(page) {
   return page.getByTestId("transcript-viewport").evaluate((viewport) => {
     const bounds = viewport.getBoundingClientRect();
-    const rows = [...viewport.querySelectorAll("[data-transcript-key]")];
-    const anchor = rows.find((row) => row.getBoundingClientRect().bottom > bounds.top
-      && row.getBoundingClientRect().top < bounds.bottom);
+    // Virtual hosts are recycled in DOM order, so inspect their screen order.
+    const rows = [...viewport.querySelectorAll("[data-transcript-key]")]
+      .map((row, index) => ({ row, index, rect: row.getBoundingClientRect() }))
+      .sort((left, right) => left.rect.top - right.rect.top
+        || left.rect.left - right.rect.left
+        || left.index - right.index);
+    const anchor = rows.find(({ rect }) => rect.bottom > bounds.top && rect.top < bounds.bottom);
     return {
       scrollTop: viewport.scrollTop,
       scrollHeight: viewport.scrollHeight,
       mountedRows: rows.length,
       descendants: viewport.querySelectorAll("*").length,
-      anchor: anchor ? { key: anchor.dataset.transcriptKey, offset: anchor.getBoundingClientRect().top - bounds.top } : null,
-      steps: rows.flatMap((row) => {
+      anchor: anchor ? { key: anchor.row.dataset.transcriptKey, offset: anchor.rect.top - bounds.top } : null,
+      steps: rows.flatMap(({ row }) => {
         const match = row.textContent.match(/Fixture step (\d+):/);
         return match ? [Number(match[1])] : [];
       }),

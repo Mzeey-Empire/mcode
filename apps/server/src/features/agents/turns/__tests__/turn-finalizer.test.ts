@@ -347,11 +347,13 @@ describe("TurnFinalizer canonical commit recovery", () => {
     const messageRepo = new MessageRepo(db);
     const threadRepo = new ThreadRepo(db);
     const toolRepo = new ToolCallRecordRepo(db);
+    const thoughtRepo = new ThoughtSegmentRepo(db);
+    const hookRepo = new HookExecutionRepo(db);
     const narrativeStore = new NarrativeStore(
       messageRepo,
       toolRepo,
-      new ThoughtSegmentRepo(db),
-      new HookExecutionRepo(db),
+      thoughtRepo,
+      hookRepo,
     );
     const sink = new CanonicalAgentEventSink(db, vi.fn());
     sink.startParentTurn({
@@ -389,7 +391,17 @@ describe("TurnFinalizer canonical commit recovery", () => {
         toolInput: { path: `file-${index}.md` },
       });
     }
-    return { db, finalizer, messageRepo, sink, checkpoints, narrativeStore };
+    return {
+      db,
+      finalizer,
+      messageRepo,
+      toolRepo,
+      thoughtRepo,
+      hookRepo,
+      sink,
+      checkpoints,
+      narrativeStore,
+    };
   }
 
   it("retires provisional text only after the canonical terminal commit", async () => {
@@ -406,6 +418,49 @@ describe("TurnFinalizer canonical commit recovery", () => {
 
     expect(sink.loadCheckpoint(executionId)?.terminalOutcome).toBe("completed");
     expect(checkpoints.restore(executionId)).toBe("");
+  });
+
+  it("reanchors active recovery narrative to the terminal assistant before retiring recovery", async () => {
+    const {
+      finalizer,
+      messageRepo,
+      toolRepo,
+      thoughtRepo,
+      hookRepo,
+      sink,
+      narrativeStore,
+    } = buildCanonicalHarness();
+    narrativeStore.openOrExtendThought(THREAD, "I will inspect the result.");
+    narrativeStore.openHook(THREAD, {
+      hookName: "PostToolUse",
+      toolName: "Read",
+      phase: "post",
+      payload: "{}",
+      sortOrder: 2,
+    });
+    sink.recordParentNarrativeRecovery({
+      executionId,
+      items: narrativeStore.recoverySnapshot(THREAD),
+    });
+
+    await finalizer.finalize(THREAD, "completed", Promise.resolve(), executionId);
+
+    const assistant = messageRepo.listByThread(THREAD, 10).messages.find((message) => message.role === "assistant");
+    expect(assistant).toBeDefined();
+    expect(toolRepo.listByMessage(assistant!.id)).toMatchObject([{
+      id: "tool-0",
+      status: "completed",
+    }]);
+    expect(thoughtRepo.listByMessage(assistant!.id)).toMatchObject([{
+      text: "I will inspect the result.",
+    }]);
+    expect(hookRepo.listByMessage(assistant!.id)).toMatchObject([{
+      hook_name: "PostToolUse",
+    }]);
+    expect(sink.loadItem("toolCall:tool-0")?.payload).toMatchObject({
+      projection: "toolCall",
+    });
+    expect(sink.loadParentNarrativeRecovery(turnId)).toEqual([]);
   });
 
   it("retains recovery data and withholds completion when canonical finalization rolls back", async () => {
