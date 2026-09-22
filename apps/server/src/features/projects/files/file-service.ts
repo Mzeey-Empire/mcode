@@ -62,6 +62,9 @@ export class FileService {
    * Runs one bounded `git status` for the scope and reports paths whose
    * dirty-set fingerprint moved since the previous refresh. The first call
    * only records the baseline; callers emit `files.changed` on real deltas.
+   * `--untracked-files=all` expands untracked directories to their files:
+   * default status output collapses them to `?? dir/`, which hides file
+   * additions and removals inside the directory from the fingerprint.
    * Non-git scopes fingerprint the bounded directory listing instead.
    * Returns null when the fingerprint is unchanged.
    */
@@ -74,7 +77,10 @@ export class FileService {
 
     let paths: string[];
     try {
-      const { stdout } = await this.gitExecutor.exec(["status", "--porcelain"], { cwd });
+      const { stdout } = await this.gitExecutor.exec(
+        ["status", "--porcelain", "--untracked-files=all"],
+        { cwd },
+      );
       paths = parsePorcelainPaths(stdout);
     } catch {
       // Non-git folders fingerprint the same bounded listing `list` falls back to.
