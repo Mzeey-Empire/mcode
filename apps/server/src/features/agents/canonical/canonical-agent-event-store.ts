@@ -74,6 +74,7 @@ export interface CanonicalAgentEventStoreOperations {
   ): void;
   insertEvent(event: CanonicalAgentEventEnvelope): void;
   persistCheckpoint(checkpoint: CanonicalAgentEventStoreCheckpoint): void;
+  materializeItems(events: readonly CanonicalAgentEventEnvelope[]): void;
   recover(input: CanonicalAgentEventStoreInput, error: unknown): CanonicalAgentCommitResult | null;
   record(events: CanonicalAgentCommitResult["events"]): void;
   publish(result: CanonicalAgentCommitResult): CanonicalAgentCommitResult;
@@ -184,6 +185,7 @@ export class CanonicalAgentEventStore {
     this.operations.persistState(nextState, input.threadId, input.turnId, input.executionId, conversationChanged, envelopes);
     for (const event of envelopes) this.operations.insertEvent(event);
     this.persistCheckpoint(input, context.checkpoint, acceptedSequence, acceptedAt);
+    this.operations.materializeItems(envelopes);
     return this.committedResult(nextState, input.threadId, context.thread, durableRevision, acceptedSequence, applications, conversationChanged);
   }
 

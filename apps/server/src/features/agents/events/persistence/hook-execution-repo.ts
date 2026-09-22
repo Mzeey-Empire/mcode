@@ -68,12 +68,16 @@ const COLUMNS =
 @injectable()
 export class HookExecutionRepo {
   private readonly stmtInsert: Statement;
+  private readonly stmtUpsert: Statement;
   private readonly stmtListByMessage: Statement;
   private readonly stmtCountByMessage: Statement;
 
   constructor(@inject("Database") private readonly db: Database) {
     this.stmtInsert = db.prepare(
       "INSERT OR IGNORE INTO hook_executions (id, message_id, hook_name, tool_name, phase, payload, duration_ms, did_block, started_at, ended_at, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    );
+    this.stmtUpsert = db.prepare(
+      "INSERT INTO hook_executions (id, message_id, hook_name, tool_name, phase, payload, duration_ms, did_block, started_at, ended_at, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET message_id = excluded.message_id, hook_name = excluded.hook_name, tool_name = excluded.tool_name, phase = excluded.phase, payload = excluded.payload, duration_ms = excluded.duration_ms, did_block = excluded.did_block, started_at = excluded.started_at, ended_at = excluded.ended_at, sort_order = excluded.sort_order",
     );
     this.stmtListByMessage = db.prepare(
       `SELECT ${COLUMNS} FROM hook_executions WHERE message_id = ? ORDER BY sort_order ASC`,
@@ -141,6 +145,7 @@ export class HookExecutionRepo {
   async bulkCreateBatched(
     inputs: readonly CreateHookExecutionInput[],
     limits: WriteBatchLimits = ACTIVE_TURN_WRITE_BATCH_LIMITS,
+    replaceExisting = false,
   ): Promise<WriteBatchResult> {
     return runBoundedWriteBatches({
       db: this.db,
@@ -148,7 +153,7 @@ export class HookExecutionRepo {
       limits,
       byteLength: (item) => Buffer.byteLength(JSON.stringify(item), "utf8"),
       write: (item) => {
-        this.stmtInsert.run(
+        (replaceExisting ? this.stmtUpsert : this.stmtInsert).run(
           item.id ?? NodeCrypto.randomUUID(),
           item.messageId,
           item.hookName,

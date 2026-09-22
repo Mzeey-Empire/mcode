@@ -1,0 +1,1 @@
+ALTER TABLE `messages` ADD `legacy_provenance` text;

@@ -56,12 +56,16 @@ const COLUMNS = "id, message_id, text, started_at, ended_at, sort_order, is_fina
 @injectable()
 export class ThoughtSegmentRepo {
   private readonly stmtInsert: Statement;
+  private readonly stmtUpsert: Statement;
   private readonly stmtListByMessage: Statement;
   private readonly stmtCountByMessage: Statement;
 
   constructor(@inject("Database") private readonly db: Database) {
     this.stmtInsert = db.prepare(
       "INSERT OR IGNORE INTO thought_segments (id, message_id, text, started_at, ended_at, sort_order, is_final_response) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    );
+    this.stmtUpsert = db.prepare(
+      "INSERT INTO thought_segments (id, message_id, text, started_at, ended_at, sort_order, is_final_response) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET message_id = excluded.message_id, text = excluded.text, started_at = excluded.started_at, ended_at = excluded.ended_at, sort_order = excluded.sort_order, is_final_response = excluded.is_final_response",
     );
     this.stmtListByMessage = db.prepare(
       `SELECT ${COLUMNS} FROM thought_segments WHERE message_id = ? ORDER BY sort_order ASC`,
@@ -118,6 +122,7 @@ export class ThoughtSegmentRepo {
   async bulkCreateBatched(
     inputs: readonly CreateThoughtSegmentInput[],
     limits: WriteBatchLimits = ACTIVE_TURN_WRITE_BATCH_LIMITS,
+    replaceExisting = false,
   ): Promise<WriteBatchResult> {
     return runBoundedWriteBatches({
       db: this.db,
@@ -125,7 +130,7 @@ export class ThoughtSegmentRepo {
       limits,
       byteLength: (item) => Buffer.byteLength(JSON.stringify(item), "utf8"),
       write: (item) => {
-        this.stmtInsert.run(
+        (replaceExisting ? this.stmtUpsert : this.stmtInsert).run(
           item.id ?? NodeCrypto.randomUUID(),
           item.messageId,
           item.text,

@@ -9,6 +9,7 @@ import { NarrativeIndicator } from "@/features/conversation/narrative/NarrativeI
 import { PersistedNarrative } from "@/features/conversation/narrative/PersistedNarrative";
 import { PersistedTurnFooter } from "@/features/conversation/narrative/PersistedTurnFooter";
 import { MessageBubble } from "../MessageBubble";
+import { VisibleNarrativeLoader } from "../TranscriptNarrativeRow";
 import type { ChatVirtualItem } from "../virtual-items";
 
 /** Props for {@link TranscriptItemRenderer}. */
@@ -54,6 +55,9 @@ function MessageTranscriptItemRenderer({
     && messageItem.agentDisplayState.phase !== "completed";
   return (
     <div className={isJustPersisted ? "agent-response-just-persisted" : ""}>
+      {messageItem.message.role === "assistant" && !messageItem.message.is_internal ? (
+        <VisibleNarrativeLoader threadId={messageItem.message.thread_id} messageId={messageItem.message.id} />
+      ) : null}
       <MessageBubble
         message={messageItem.message}
         onBranch={agentActionsDisabled ? undefined : onBranch}

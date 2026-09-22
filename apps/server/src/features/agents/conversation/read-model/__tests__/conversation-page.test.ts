@@ -195,41 +195,14 @@ describe("loadConversationPage", () => {
     db.close();
   });
 
-  it("prefers canonical messages and narrative while retaining older compatibility history", () => {
+  it("reads only the materialized display history and keeps detail payloads compact", () => {
     const db = openMemoryDatabase();
     seedThread(db);
     insertMessage(db, "legacy", "assistant", "older turn", 1);
     insertMessage(db, "canonical-user", "user", "stale user projection", 2);
     insertMessage(db, "canonical-assistant", "assistant", "stale assistant projection", 3);
     const deps = createDeps(db);
-    const canonicalSink = {
-      loadConversationProjection: vi.fn(() => ({
-        messages: [
-          { ...deps.messageRepo.findById("canonical-user")!, content: "canonical user" },
-          { ...deps.messageRepo.findById("canonical-assistant")!, content: "canonical assistant" },
-        ],
-        narrativeByMessage: {
-          "canonical-user": { tools: [], thoughts: [], hooks: [] },
-          "canonical-assistant": {
-            tools: [{
-              id: "canonical-tool",
-              message_id: "canonical-assistant",
-              parent_tool_call_id: null,
-              tool_name: "Read",
-              input_summary: "canonical input",
-              output_summary: "canonical output",
-              status: "completed" as const,
-              started_at: "2026-01-01T00:00:00Z",
-              completed_at: "2026-01-01T00:00:01Z",
-              sort_order: 0,
-            }],
-            thoughts: [],
-            hooks: [],
-          },
-        },
-        hasMore: false,
-      })),
-    };
+    const canonicalSink = { loadConversationProjection: vi.fn() };
 
     const page = loadConversationPage({ ...deps, canonicalSink } as Parameters<typeof loadConversationPage>[0], {
       threadId: "thread-1",
@@ -238,15 +211,14 @@ describe("loadConversationPage", () => {
 
     expect(page.messages.map(({ id, content }) => ({ id, content }))).toEqual([
       { id: "legacy", content: "older turn" },
-      { id: "canonical-user", content: "canonical user" },
-      { id: "canonical-assistant", content: "canonical assistant" },
+      { id: "canonical-user", content: "stale user projection" },
+      { id: "canonical-assistant", content: "stale assistant projection" },
     ]);
-    expect(page.narrativeByMessage["canonical-assistant"].tools).toEqual([
-      expect.objectContaining({ id: "canonical-tool" }),
-    ]);
+    expect(page.narrativeByMessage).toEqual({});
+    expect(canonicalSink.loadConversationProjection).not.toHaveBeenCalled();
   });
 
-  it("merges canonical narrative rows with persisted-only tool records", () => {
+  it("does not hydrate narrative detail or query canonical history with a compact page", () => {
     const db = openMemoryDatabase();
     seedThread(db);
     insertMessage(db, "canonical-assistant", "assistant", "answer", 1);
@@ -272,46 +244,19 @@ describe("loadConversationPage", () => {
       },
     ]);
 
-    const canonicalSink = {
-      loadConversationProjection: vi.fn(() => ({
-        messages: [deps.messageRepo.findById("canonical-assistant")!],
-        narrativeByMessage: {
-          "canonical-assistant": {
-            tools: [{
-              id: "command-1",
-              message_id: "canonical-assistant",
-              parent_tool_call_id: null,
-              tool_name: "command_execution",
-              input_summary: "pwd",
-              output_summary: "canonical output",
-              status: "completed" as const,
-              started_at: "2026-01-01T00:00:00Z",
-              completed_at: "2026-01-01T00:00:01Z",
-              sort_order: 1,
-            }],
-            thoughts: [],
-            hooks: [],
-          },
-        },
-        hasMore: false,
-      })),
-    };
+    const canonicalSink = { loadConversationProjection: vi.fn() };
 
     const page = loadConversationPage(
       { ...deps, canonicalSink } as Parameters<typeof loadConversationPage>[0],
       { threadId: "thread-1", limit: 10 },
     );
 
-    expect(page.narrativeByMessage["canonical-assistant"]?.tools.map((tool) => tool.id)).toEqual([
-      "command-1",
-      "agent-1",
-    ]);
-    expect(page.narrativeByMessage["canonical-assistant"]?.tools[0]?.output_summary).toBe(
-      "canonical output",
-    );
+    expect(page.messages[0]?.tool_call_count).toBe(2);
+    expect(page.narrativeByMessage).toEqual({});
+    expect(canonicalSink.loadConversationProjection).not.toHaveBeenCalled();
   });
 
-  it("returns a paginated message page with grouped narrative payloads", () => {
+  it("returns a paginated compact message page", () => {
     const db = openMemoryDatabase();
     seedThread(db);
     insertMessage(db, "u1", "user", "start", 1);
@@ -361,14 +306,10 @@ describe("loadConversationPage", () => {
 
     expect(page.messages.map((m) => m.id)).toEqual(["u1", "a1", "u2", "a2"]);
     expect(page.messages.find((m) => m.id === "a1")?.tool_call_count).toBe(1);
-    expect(page.narrativeByMessage.a1.tools).toHaveLength(1);
-    expect(page.narrativeByMessage.a1.thoughts).toHaveLength(1);
-    expect(page.narrativeByMessage.a1.hooks).toHaveLength(1);
-    expect(page.narrativeByMessage.a2).toEqual({ tools: [], thoughts: [], hooks: [] });
-    expect(page.narrativeByMessage["internal-a"]).toBeUndefined();
+    expect(page.narrativeByMessage).toEqual({});
   });
 
-  it("uses a fixed set of page and child-table statements for many assistant messages", () => {
+  it("does not issue a child-table query for many assistant messages", () => {
     const db = openMemoryDatabase();
     seedThread(db);
     for (let i = 1; i <= 8; i++) {
@@ -380,9 +321,9 @@ describe("loadConversationPage", () => {
     loadConversationPage(deps, { threadId: "thread-1", limit: 8 });
 
     const sql = prepareSpy.mock.calls.map((call) => String(call[0]));
-    expect(sql.filter((s) => s.includes("FROM tool_call_records WHERE message_id IN"))).toHaveLength(1);
-    expect(sql.filter((s) => s.includes("FROM thought_segments WHERE message_id IN"))).toHaveLength(1);
-    expect(sql.filter((s) => s.includes("FROM hook_executions WHERE message_id IN"))).toHaveLength(1);
+    expect(sql.filter((s) => s.includes("FROM tool_call_records WHERE message_id IN"))).toHaveLength(0);
+    expect(sql.filter((s) => s.includes("FROM thought_segments WHERE message_id IN"))).toHaveLength(0);
+    expect(sql.filter((s) => s.includes("FROM hook_executions WHERE message_id IN"))).toHaveLength(0);
     expect(sql.join("\n")).not.toContain("WHERE message_id = ?");
   });
 
@@ -401,7 +342,7 @@ describe("loadConversationPage", () => {
 
     expect(page.messages.map((m) => m.sequence)).toEqual([3, 4]);
     expect(page.hasMore).toBe(true);
-    expect(page.narrativeByMessage.m4).toEqual({ tools: [], thoughts: [], hooks: [] });
+    expect(page.narrativeByMessage).toEqual({});
   });
 });
 
@@ -435,56 +376,33 @@ describe("loadConversationTail", () => {
     expect(planSpy).not.toHaveBeenCalled();
   });
 
-  it("merges canonical child prompts into the newest deduplicated tail window", () => {
+  it("reads the newest display-only tail without querying canonical history", () => {
     const db = openMemoryDatabase();
     seedThread(db);
     insertMessage(db, "legacy", "user", "older history", 1);
     insertMessage(db, "compatibility-overlap", "assistant", "stale compatibility answer", 4);
     const deps = createDeps(db);
-    const overlap = deps.messageRepo.findById("compatibility-overlap")!;
-    const canonicalChildPrompt: Message = {
-      ...overlap,
-      id: "canonical-child-prompt",
-      role: "user",
-      content: "Implement the canonical tail fix.",
-      sequence: 5,
-      parentAgentProvenance: {
-        parentThreadId: "parent-thread",
-        parentTurnId: "parent-turn",
-        parentItemId: "parent-item",
-        providerIdentities: [],
-      },
-    };
-    const canonicalSink = {
-      loadConversationProjection: vi.fn(() => ({
-        messages: [
-          { ...overlap, content: "canonical answer" },
-          canonicalChildPrompt,
-        ],
-        narrativeByMessage: {},
-        hasMore: false,
-      })),
-    };
+    insertMessage(db, "display-child-prompt", "user", "Implement the canonical tail fix.", 5);
+    const canonicalSink = { loadConversationProjection: vi.fn() };
 
     const tail = loadConversationTail(
       { ...deps, canonicalSink },
       { threadId: "thread-1", limit: 2 },
     );
 
-    expect(canonicalSink.loadConversationProjection).toHaveBeenCalledWith("thread-1", 2);
+    expect(canonicalSink.loadConversationProjection).not.toHaveBeenCalled();
     expect(tail).toEqual({
       sessionNotices: [],
       messages: [
         expect.objectContaining({
           id: "compatibility-overlap",
-          content: "canonical answer",
+          content: "stale compatibility answer",
           sequence: 4,
         }),
         expect.objectContaining({
-          id: "canonical-child-prompt",
+          id: "display-child-prompt",
           content: "Implement the canonical tail fix.",
           sequence: 5,
-          parentAgentProvenance: canonicalChildPrompt.parentAgentProvenance,
         }),
       ],
       hasMore: true,

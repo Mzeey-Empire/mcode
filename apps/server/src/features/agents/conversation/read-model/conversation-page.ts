@@ -1,5 +1,4 @@
 import type {
-  ConversationNarrativeBatch,
   ConversationNewerPage,
   ConversationNewerPageRequest,
   ConversationOlderPage,
@@ -7,175 +6,36 @@ import type {
   ConversationPage,
   ConversationTail,
   ConversationTailMessage,
-  NarrativeEntry,
 } from "@mcode/contracts";
 import { CONVERSATION_TAIL_MAX_MESSAGES } from "@mcode/contracts";
 import type { MessageRepo } from "../persistence/message-repo.js";
-import type { NarrativeStore } from "../narrative/narrative-store.js";
 import type { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-question-answers-repo.js";
-import type { CanonicalAgentBoundary } from "../../canonical/canonical-agent-boundary.js";
 
 /** Dependencies needed to load one paginated conversation page. */
 export interface ConversationPageDeps {
   messageRepo: MessageRepo;
-  narrativeStore: NarrativeStore;
   planQuestionAnswersRepo: PlanQuestionAnswersRepo;
-  canonicalSink?: Pick<CanonicalAgentBoundary, "loadConversationProjection">;
 }
 
 /** Dependencies needed to load a bounded conversation tail. */
 export interface ConversationTailDeps {
   messageRepo: MessageRepo;
-  canonicalSink?: Pick<CanonicalAgentBoundary, "loadConversationProjection">;
 }
 
-/** Merges compatibility and canonical messages into the newest bounded window. */
-function mergeNewestConversationMessages<T extends { id: string; sequence: number }>(
-  compatibilityMessages: readonly T[],
-  canonicalMessages: readonly T[],
-  limit: number,
-): { messages: T[]; exceededLimit: boolean } {
-  const messagesById = new Map(compatibilityMessages.map((message) => [message.id, message]));
-  for (const message of canonicalMessages) messagesById.set(message.id, message);
-  const mergedMessages = [...messagesById.values()].sort(
-    (left, right) => left.sequence - right.sequence,
-  );
-  const exceededLimit = mergedMessages.length > limit;
-  return {
-    messages: exceededLimit ? mergedMessages.slice(-limit) : mergedMessages,
-    exceededLimit,
-  };
-}
-
-/** Merges compatibility and canonical messages into the oldest bounded window. */
-function mergeOldestConversationMessages<T extends { id: string; sequence: number }>(
-  compatibilityMessages: readonly T[],
-  canonicalMessages: readonly T[],
-  limit: number,
-): { messages: T[]; exceededLimit: boolean } {
-  const messagesById = new Map(compatibilityMessages.map((message) => [message.id, message]));
-  for (const message of canonicalMessages) messagesById.set(message.id, message);
-  const mergedMessages = [...messagesById.values()].sort(
-    (left, right) => left.sequence - right.sequence,
-  );
-  const exceededLimit = mergedMessages.length > limit;
-  return {
-    messages: exceededLimit ? mergedMessages.slice(0, limit) : mergedMessages,
-    exceededLimit,
-  };
-}
-
-/** Merge canonical and compatibility narrative rows without dropping append-only records. */
-function mergeNarrativeBatch(
-  persisted: ConversationNarrativeBatch | undefined,
-  canonical: ConversationNarrativeBatch,
-): ConversationNarrativeBatch {
-  const mergeRecords = <T extends { id: string; sort_order: number }>(
-    persistedRecords: readonly T[],
-    canonicalRecords: readonly T[],
-  ): T[] => {
-    const byId = new Map(persistedRecords.map((record) => [record.id, record]));
-    for (const record of canonicalRecords) byId.set(record.id, record);
-    return [...byId.values()].sort((left, right) =>
-      left.sort_order - right.sort_order || left.id.localeCompare(right.id));
-  };
-
-  return {
-    tools: mergeRecords(persisted?.tools ?? [], canonical.tools),
-    thoughts: mergeRecords(persisted?.thoughts ?? [], canonical.thoughts),
-    hooks: mergeRecords(persisted?.hooks ?? [], canonical.hooks),
-  };
-}
-
-/** Groups flat narrative entries into the legacy per-message payload shape. */
-export function groupNarrativeEntriesByMessage(
-  entries: readonly NarrativeEntry[],
-): Record<string, ConversationNarrativeBatch> {
-  const grouped: Record<string, ConversationNarrativeBatch> = {};
-  const bucket = (messageId: string): ConversationNarrativeBatch => {
-    let entry = grouped[messageId];
-    if (!entry) {
-      entry = { tools: [], thoughts: [], hooks: [] };
-      grouped[messageId] = entry;
-    }
-    return entry;
-  };
-
-  for (const entry of entries) {
-    switch (entry.kind) {
-      case "toolCall":
-        bucket(entry.record.message_id).tools.push(entry.record);
-        break;
-      case "narrationSegment":
-        bucket(entry.record.message_id).thoughts.push(entry.record);
-        break;
-      case "hook":
-        bucket(entry.record.message_id).hooks.push(entry.record);
-        break;
-      case "assistantMessage":
-        bucket(entry.messageId);
-        break;
-    }
-  }
-
-  return grouped;
-}
-
-function mergeCanonicalNarrative(
-  narrativeByMessage: Record<string, ConversationNarrativeBatch>,
-  messages: readonly { id: string }[],
-  canonicalMessages: readonly { id: string }[],
-  canonicalNarrativeByMessage: Record<string, ConversationNarrativeBatch> | undefined,
-): void {
-  const messageIds = new Set(messages.map((message) => message.id));
-  for (const message of canonicalMessages) {
-    const narrative = canonicalNarrativeByMessage?.[message.id];
-    if (narrative && messageIds.has(message.id)) {
-      narrativeByMessage[message.id] = mergeNarrativeBatch(narrativeByMessage[message.id], narrative);
-    }
-  }
-}
-
-function conversationHasMore(
-  compatibilityHasMore: boolean,
-  canonicalHasMore: boolean | undefined,
-  exceededLimit: boolean,
-): boolean {
-  return compatibilityHasMore || canonicalHasMore === true || exceededLimit;
-}
-
-/** Loads messages and their persisted narrative for one thread page. */
+/** Loads one compact display-table message page. Narrative details hydrate on demand. */
 export function loadConversationPage(
   deps: ConversationPageDeps,
   input: { threadId: string; limit: number; before?: number },
 ): ConversationPage {
-  const compatibilityPage = deps.messageRepo.listByThread(input.threadId, input.limit, input.before);
-  const canonicalPage = deps.canonicalSink?.loadConversationProjection(
-    input.threadId,
-    input.limit,
-    input.before,
-  );
-  const { messages, exceededLimit } = mergeNewestConversationMessages(
-    compatibilityPage.messages,
-    canonicalPage?.messages ?? [],
-    input.limit,
-  );
-  const entries = deps.narrativeStore.loadForMessages(messages);
-  const narrativeByMessage = groupNarrativeEntriesByMessage(entries);
-  mergeCanonicalNarrative(
-    narrativeByMessage,
-    messages,
-    canonicalPage?.messages ?? [],
-    canonicalPage?.narrativeByMessage,
-  );
+  const page = deps.messageRepo.listByThread(input.threadId, input.limit, input.before);
 
   return {
-    messages,
+    messages: page.messages,
     sessionNotices: deps.messageRepo.listSessionNotices(input.threadId),
-    hasMore: conversationHasMore(compatibilityPage.hasMore, canonicalPage?.hasMore, exceededLimit),
+    hasMore: page.hasMore,
     answeredPlanMessageIds:
       deps.planQuestionAnswersRepo.listAnsweredForThread(input.threadId),
-    narrativeByMessage,
+    narrativeByMessage: {},
   };
 }
 
@@ -289,34 +149,16 @@ function loadNewerConversationSource(
   deps: ConversationPageDeps,
   request: ConversationNewerPageRequest,
 ): ConversationPage {
-  const persistedPage = deps.messageRepo.listByThreadAfter(
+  const page = deps.messageRepo.listByThreadAfter(
     request.threadId,
     request.limit,
     request.cursor.afterSequence,
-  );
-  const canonicalPage = deps.canonicalSink?.loadConversationProjection(
-    request.threadId,
-    request.limit,
-    undefined,
-    request.cursor.afterSequence,
-  );
-  const { messages, exceededLimit } = mergeOldestConversationMessages(
-    persistedPage.messages,
-    canonicalPage?.messages ?? [],
-    request.limit,
-  );
-  const narrativeByMessage = groupNarrativeEntriesByMessage(deps.narrativeStore.loadForMessages(messages));
-  mergeCanonicalNarrative(
-    narrativeByMessage,
-    messages,
-    canonicalPage?.messages ?? [],
-    canonicalPage?.narrativeByMessage,
   );
   return {
-    messages,
-    hasMore: conversationHasMore(persistedPage.hasMore, canonicalPage?.hasMore, exceededLimit),
+    messages: page.messages,
+    hasMore: page.hasMore,
     answeredPlanMessageIds: deps.planQuestionAnswersRepo.listAnsweredForThread(request.threadId),
-    narrativeByMessage,
+    narrativeByMessage: {},
   };
 }
 
@@ -359,16 +201,7 @@ export function loadConversationTail(
     input.threadId,
     limit,
   );
-  const canonicalPage = deps.canonicalSink?.loadConversationProjection(
-    input.threadId,
-    limit,
-  );
-  const { messages: visibleMessages, exceededLimit } = mergeNewestConversationMessages(
-    compatibilityPage.messages,
-    canonicalPage?.messages ?? [],
-    limit,
-  );
-  const messages: ConversationTailMessage[] = visibleMessages.map((message) => ({
+  const messages: ConversationTailMessage[] = compatibilityPage.messages.map((message) => ({
     id: message.id,
     thread_id: message.thread_id,
     role: message.role,
@@ -391,7 +224,7 @@ export function loadConversationTail(
     is_internal: message.is_internal,
     parentAgentProvenance: message.parentAgentProvenance,
   }));
-  const hasMore = compatibilityPage.hasMore || canonicalPage?.hasMore === true || exceededLimit;
+  const hasMore = compatibilityPage.hasMore;
   return {
     messages,
     sessionNotices: deps.messageRepo.listSessionNotices(input.threadId),

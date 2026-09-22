@@ -342,6 +342,10 @@ export const messages = sqliteTable(
     sourceThreadId: text("source_thread_id"),
     sourceTurnId: text("source_turn_id"),
     sourceProviderId: text("source_provider_id"),
+    /** Exact source lineage retained for messages imported from legacy history. */
+    legacyProvenance: text("legacy_provenance"),
+    /** Full parent-agent lineage for materialized canonical messages. */
+    parentAgentProvenance: text("parent_agent_provenance"),
     /**
      * When 1, this message is internal to mcode (e.g. a hidden handoff request
      * on a Cursor parent thread) and must not render in the chat UI. The
@@ -359,6 +363,7 @@ export const messages = sqliteTable(
   (table) => [
     index("idx_messages_thread").on(table.threadId),
     index("idx_messages_sequence").on(table.threadId, table.sequence),
+    index("idx_messages_thread_sequence_id").on(table.threadId, table.sequence, table.id),
     index("idx_messages_notice_session_sequence").on(
       table.threadId,
       sql`json_extract(${table.systemNotice}, '$.sessionId')`,
@@ -493,7 +498,7 @@ export const toolCallRecords = sqliteTable(
     sortOrder: integer("sort_order").notNull().default(0),
   },
   (table) => [
-    index("idx_tool_call_records_message_sort_order").on(table.messageId, table.sortOrder),
+    index("idx_tool_call_records_message_sort_order_id").on(table.messageId, table.sortOrder, table.id),
     index("idx_tool_call_records_parent").on(table.parentToolCallId),
   ],
 );
@@ -518,7 +523,11 @@ export const thoughtSegments = sqliteTable(
     isFinalResponse: integer("is_final_response").notNull().default(0),
   },
   (table) => [
-    index("idx_thought_segments_message_sort_order").on(table.messageId, table.sortOrder),
+    index("idx_thought_segments_message_final_sort_order_id")
+      .on(table.messageId, table.isFinalResponse, table.sortOrder, table.id),
+    index("idx_thought_segments_final_message_sort_order_id")
+      .on(table.messageId, table.sortOrder, table.id)
+      .where(sql`${table.isFinalResponse} <> 0`),
   ],
 );
 
@@ -540,7 +549,7 @@ export const hookExecutions = sqliteTable(
     sortOrder: integer("sort_order").notNull().default(0),
   },
   (table) => [
-    index("idx_hook_executions_message_sort_order").on(table.messageId, table.sortOrder),
+    index("idx_hook_executions_message_sort_order_id").on(table.messageId, table.sortOrder, table.id),
   ],
 );
 
@@ -651,6 +660,38 @@ export const canonicalAgentItems = sqliteTable(
   (table) => [
     index("idx_canonical_agent_items_turn").on(table.turnId, table.createdAt),
     index("idx_canonical_agent_items_thread").on(table.threadId, table.createdAt),
+    index("idx_canonical_agent_items_created_id").on(table.createdAt, table.id),
+  ],
+);
+
+/** Resumable startup materialization position for canonical conversation items. */
+export const conversationDisplayMaterializationState = sqliteTable(
+  "conversation_display_materialization_state",
+  {
+    id: integer("id").primaryKey().notNull(),
+    lastSourceCreatedAt: text("last_source_created_at"),
+    lastSourceId: text("last_source_id"),
+    completed: integer("completed").notNull().default(0),
+    updatedAt: text("updated_at").notNull().default(timestampDefault),
+  },
+);
+
+/** Canonical-to-display identities keep child materialization idempotent without copying content. */
+export const canonicalConversationDisplayMappings = sqliteTable(
+  "canonical_conversation_display_mappings",
+  {
+    sourceItemId: text("source_item_id")
+      .primaryKey()
+      .notNull()
+      .references(() => canonicalAgentItems.id, { onDelete: "cascade" }),
+    targetKind: text("target_kind").notNull(),
+    targetId: text("target_id").notNull(),
+    sourceUpdatedAt: text("source_updated_at").notNull(),
+    createdAt: text("created_at").notNull().default(timestampDefault),
+    updatedAt: text("updated_at").notNull().default(timestampDefault),
+  },
+  (table) => [
+    index("idx_canonical_conversation_display_mappings_target").on(table.targetKind, table.targetId),
   ],
 );
 

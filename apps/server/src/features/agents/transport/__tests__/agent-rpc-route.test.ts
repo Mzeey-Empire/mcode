@@ -134,6 +134,31 @@ describe("routeMessage Agent RPCs", () => {
 });
 
 describe("routeAgentRpc", () => {
+  it("keeps message.list pagination and answered-plan ids in its established response shape", async () => {
+    const messagePage = {
+      messages: [{ id: "message-1", sequence: 42 }],
+      hasMore: true,
+    };
+    const listByThread = vi.fn(() => messagePage);
+    const listAnsweredForThread = vi.fn(() => ["message-1"]);
+
+    await expect(routeAgentRpc("message.list", {
+      threadId: "thread-1",
+      limit: 50,
+      before: 43,
+    }, {
+      messageRepo: { listByThread },
+      planQuestionAnswersRepo: { listAnsweredForThread },
+    } as unknown as AgentRouterDeps)).resolves.toEqual({
+      messages: messagePage.messages,
+      hasMore: true,
+      answeredPlanMessageIds: ["message-1"],
+    });
+
+    expect(listByThread).toHaveBeenCalledWith("thread-1", 50, 43);
+    expect(listAnsweredForThread).toHaveBeenCalledWith("thread-1");
+  });
+
   it("does not delay a new worktree thread when its watcher fails", async () => {
     const thread = {
       id: "thread-2",

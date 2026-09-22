@@ -91,6 +91,41 @@ describe("acquireStartupLock", () => {
     expect(dependencies.releaseLock).not.toHaveBeenCalled();
   });
 
+  it("reuses a server that becomes ready after a long awaited migration", async () => {
+    let now = 0;
+    const owner = { pid: 1234, token: "live-owner" };
+    const existingLock = {
+      pid: 4321,
+      port: 19601,
+      authToken: "token",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      version: "0.1.0",
+      ipcPath: "",
+    };
+    const dependencies: StartupLockDependencies = {
+      createLock: vi.fn().mockReturnValue(null),
+      releaseLock: vi.fn(),
+      removeOwnerlessLock: vi.fn(),
+      readLockOwner: vi.fn().mockReturnValue(owner),
+      isOwnerAlive: vi.fn().mockReturnValue(true),
+      findExistingServer: vi.fn(async () =>
+        now >= 400_000 ? existingLock : null,
+      ),
+      wait: vi.fn(async () => {
+        now += 10_000;
+      }),
+      now: () => now,
+    };
+
+    await expect(acquireStartupLock(dependencies)).resolves.toEqual({
+      kind: "existing",
+      lock: existingLock,
+    });
+
+    expect(now).toBe(400_000);
+    expect(dependencies.releaseLock).not.toHaveBeenCalled();
+  });
+
   it("keeps waiting for a live owner past 10s and reuses its server once healthy", async () => {
     let now = 0;
     const owner = { pid: 1234, token: "live-owner" };

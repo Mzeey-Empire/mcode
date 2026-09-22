@@ -17,6 +17,19 @@ App startup runs Drizzle `migrate()` programmatically against the user's SQLite 
 including legacy `_migrations` detection (`bootstrapDrizzle`) so existing installs
 upgrade without manual steps.
 
+## Conversation display materialization
+
+After schema migration and before provider recovery, work admission, or readiness,
+startup materializes canonical conversation items into the existing message and
+narrative display tables. The materializer advances in small SQLite transactions.
+It saves its source position only with the display rows in that transaction, so a
+restart resumes the last incomplete batch.
+
+Conversation page, message list, and turn reads use those display tables. They do
+not merge canonical and legacy history while serving a request. `turn.load` returns
+a bounded detail window. Clients request the next window with its validated detail
+cursor only while that turn remains visible.
+
 ## Branch-specific databases (development)
 
 In a linked git worktree (where `.git` is a file pointing at the common git dir),

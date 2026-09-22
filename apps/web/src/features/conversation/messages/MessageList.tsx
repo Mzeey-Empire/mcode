@@ -384,16 +384,6 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
     if (positionRef.current.kind !== "end") setHasNewContent(true);
   }, [data.streamingText, lastItemKey]);
 
-  const { messages, persistedNarrativeByMessage, renderedThreadId, isNarrativeLoaded, loadNarrativeForMessage } = data;
-  useEffect(() => {
-    for (const message of messages) {
-      if (message.role !== "assistant") continue;
-      if (isMessageListPerformanceBuild() && persistedNarrativeByMessage[message.id]) continue;
-      if (renderedThreadId && isNarrativeLoaded(renderedThreadId, message.id)) continue;
-      void loadNarrativeForMessage(message.id, renderedThreadId ?? undefined);
-    }
-  }, [messages, persistedNarrativeByMessage, renderedThreadId, isNarrativeLoaded, loadNarrativeForMessage]);
-
   const loadRequestedHistory = useCallback(() => {
     const view = controllerRef.current;
     const current = latest.current.data;
@@ -488,7 +478,7 @@ function ThreadTranscript({ data, ...props }: MessageListProps & { readonly data
               {item.type === "leading-content" || item.type === "after-first-user-content" ? (
                 <div data-testid="message-list-leading-content">{item.content}</div>
               ) : item.type === "narrative-row" || item.type === "tool-row" ? (
-                <TranscriptNarrativeRow row={item} expanded={expandedGroups.has(transcriptGroupKey(item))} entering={enteringGroups.has(transcriptGroupKey(item))} onToggle={toggleGroup} onSubagentSelect={props.onSubagentSelect} onOpenSubagents={props.onOpenSubagents} />
+                <TranscriptNarrativeRow row={item} threadId={data.renderedThreadId} expanded={expandedGroups.has(transcriptGroupKey(item))} entering={enteringGroups.has(transcriptGroupKey(item))} onToggle={toggleGroup} onSubagentSelect={props.onSubagentSelect} onOpenSubagents={props.onOpenSubagents} />
               ) : (
                 <TranscriptItemRenderer item={item} turnExpandRef={turnExpandRef} onBranch={props.onBranch} onSubagentSelect={props.onSubagentSelect} onOpenSubagents={props.onOpenSubagents} onScrollToMessage={scrollToMessage} currentTurnMessageIdByThread={data.currentTurnMessageIdByThread} threadId={data.renderedThreadId} showParentAgentProvenance={props.showParentAgentProvenance ?? true} />
               )}

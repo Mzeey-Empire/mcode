@@ -822,6 +822,15 @@ describe("CanonicalAgentEventSink", () => {
     expect(sink.loadConversationProjection(THREAD_ID, 10).messages).toHaveLength(2);
     expect(sink.loadConversationProjection(THREAD_ID, 10).narrativeByMessage[message.id]?.tools)
       .toContainEqual(expect.objectContaining({ id: "tool-0", output_summary: "final" }));
+    expect(db.prepare(`
+      SELECT message_id, output_summary, status
+      FROM tool_call_records
+      WHERE id = 'tool-0'
+    `).get()).toEqual({
+      message_id: message.id,
+      output_summary: "final",
+      status: "completed",
+    });
     expect(Math.max(...batchRows)).toBeLessThanOrEqual(ACTIVE_TURN_WRITE_BATCH_LIMITS.maxRows);
     expect(db.prepare(`
       SELECT DISTINCT durable_revision

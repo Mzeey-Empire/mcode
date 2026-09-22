@@ -165,6 +165,7 @@ const TOOL_CALL_RECORD_COLUMNS =
 @injectable()
 export class ToolCallRecordRepo {
   private readonly stmtInsert: Statement;
+  private readonly stmtUpsert: Statement;
   private readonly stmtListByMessage: Statement;
   private readonly stmtListByParent: Statement;
   private readonly stmtCountByMessage: Statement;
@@ -172,6 +173,9 @@ export class ToolCallRecordRepo {
   constructor(@inject("Database") private readonly db: Database) {
     this.stmtInsert = db.prepare(
       "INSERT OR IGNORE INTO tool_call_records (id, message_id, parent_tool_call_id, tool_name, display_name, provider_agent_key, subagent_identity_key, subagent_provider_name, subagent_prompt, subagent_type, subagent_agent_id, subagent_duration_ms, model, reasoning_effort, input_summary, output_summary, output_truncated, output_total_bytes, output_artifact_path, exit_code, status, started_at, completed_at, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    );
+    this.stmtUpsert = db.prepare(
+      "INSERT INTO tool_call_records (id, message_id, parent_tool_call_id, tool_name, display_name, provider_agent_key, subagent_identity_key, subagent_provider_name, subagent_prompt, subagent_type, subagent_agent_id, subagent_duration_ms, model, reasoning_effort, input_summary, output_summary, output_truncated, output_total_bytes, output_artifact_path, exit_code, status, started_at, completed_at, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET message_id = excluded.message_id, parent_tool_call_id = excluded.parent_tool_call_id, tool_name = excluded.tool_name, display_name = excluded.display_name, provider_agent_key = excluded.provider_agent_key, subagent_identity_key = excluded.subagent_identity_key, subagent_provider_name = excluded.subagent_provider_name, subagent_prompt = excluded.subagent_prompt, subagent_type = excluded.subagent_type, subagent_agent_id = excluded.subagent_agent_id, subagent_duration_ms = excluded.subagent_duration_ms, model = excluded.model, reasoning_effort = excluded.reasoning_effort, input_summary = excluded.input_summary, output_summary = excluded.output_summary, output_truncated = excluded.output_truncated, output_total_bytes = excluded.output_total_bytes, output_artifact_path = excluded.output_artifact_path, exit_code = excluded.exit_code, status = excluded.status, started_at = excluded.started_at, completed_at = excluded.completed_at, sort_order = excluded.sort_order",
     );
     this.stmtListByMessage = db.prepare(
       `SELECT ${TOOL_CALL_RECORD_COLUMNS} FROM tool_call_records WHERE message_id = ? ORDER BY sort_order ASC`,
@@ -208,6 +212,7 @@ export class ToolCallRecordRepo {
   async bulkCreateBatched(
     inputs: readonly CreateToolCallRecordInput[],
     limits: WriteBatchLimits = ACTIVE_TURN_WRITE_BATCH_LIMITS,
+    replaceExisting = false,
   ): Promise<WriteBatchResult> {
     const now = new Date().toISOString();
     return runBoundedWriteBatches({
@@ -215,12 +220,20 @@ export class ToolCallRecordRepo {
       items: inputs,
       limits,
       byteLength: (item) => Buffer.byteLength(JSON.stringify(item), "utf8"),
-      write: (item) => this.write(item, prepareToolCallRecordInsert(item, now)),
+      write: (item) => this.write(
+        item,
+        prepareToolCallRecordInsert(item, now),
+        replaceExisting ? this.stmtUpsert : this.stmtInsert,
+      ),
     });
   }
 
-  private write(input: CreateToolCallRecordInput, insert: ToolCallRecordInsert): void {
-    this.stmtInsert.run(
+  private write(
+    input: CreateToolCallRecordInput,
+    insert: ToolCallRecordInsert,
+    statement = this.stmtInsert,
+  ): void {
+    statement.run(
       insert.id,
       input.messageId,
       nullIfUndefined(input.parentToolCallId),

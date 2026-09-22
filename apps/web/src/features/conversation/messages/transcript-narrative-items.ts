@@ -9,6 +9,8 @@ import { type ChatVirtualItem, type CurrentTurnResponseIdentity, type PersistedN
 export interface TranscriptNarrativeItem {
   readonly type: "narrative-row";
   readonly key: string;
+  /** Assistant message whose persisted detail produced this virtual row. */
+  readonly messageId?: string;
   readonly item: NarrativeItem;
   readonly index: number;
   readonly allToolCalls: readonly ToolCall[];
@@ -19,6 +21,8 @@ export interface TranscriptNarrativeItem {
 export interface TranscriptToolItem {
   readonly type: "tool-row";
   readonly key: string;
+  /** Assistant message whose persisted tool group produced this virtual row. */
+  readonly messageId?: string;
   readonly groupKey: string;
   readonly toolCall: ToolCall;
   readonly index: number;
@@ -35,6 +39,7 @@ export function expandTranscriptToolGroups(
     const calls = row.item.group.calls;
     return [row, ...calls.map((toolCall, index): TranscriptToolItem => ({
       type: "tool-row", key: `${row.key}:call:${toolCall.id}`, groupKey: row.key, toolCall, index, count: calls.length,
+      messageId: row.messageId,
     }))];
   });
 }
@@ -50,13 +55,25 @@ function rowIdentity(item: NarrativeItem): string {
   }
 }
 
-function narrativeRows(prefix: string, items: readonly NarrativeItem[], allToolCalls: readonly ToolCall[]): TranscriptNarrativeItem[] {
+function narrativeRows(
+  prefix: string,
+  items: readonly NarrativeItem[],
+  allToolCalls: readonly ToolCall[],
+  messageId?: string,
+): TranscriptNarrativeItem[] {
   const occurrences = new Map<string, number>();
   return items.filter((item) => item.type !== "delta" && item.type !== "hook").map((item, index) => {
     const identity = rowIdentity(item);
     const occurrence = occurrences.get(identity) ?? 0;
     occurrences.set(identity, occurrence + 1);
-    return { type: "narrative-row", key: `narrative:${prefix}:${identity}:${occurrence}`, item, index, allToolCalls };
+    return {
+      type: "narrative-row",
+      key: `narrative:${prefix}:${identity}:${occurrence}`,
+      messageId,
+      item,
+      index,
+      allToolCalls,
+    };
   });
 }
 
@@ -78,7 +95,12 @@ export function expandTranscriptNarrative(
     if (!records) return [];
     const message = messages.get(item.messageId);
     const prefix = message?.outcomeExecutionId ?? item.messageId;
-    return narrativeRows(prefix, buildPersistedNarrativeItems({ ...records, messageContent: item.messageContent }), records.tools.map(recordToToolCall));
+    return narrativeRows(
+      prefix,
+      buildPersistedNarrativeItems({ ...records, messageContent: item.messageContent }),
+      records.tools.map(recordToToolCall),
+      item.messageId,
+    );
   });
 }
 
