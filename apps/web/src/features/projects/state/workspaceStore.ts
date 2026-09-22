@@ -22,6 +22,7 @@ import { useTerminalStore } from "@/features/terminal/state/terminalStore";
 import { useQueueStore } from "@/stores/queueStore";
 import { useTaskStore } from "@/stores/taskStore";
 import { useComposerDraftStore, type ComposerDraft } from "@/stores/composerDraftStore";
+import { useThreadDraftStore } from "@/stores/threadDraftStore";
 import { toComposerAttachmentMetas } from "@/features/conversation/composer/draft/composer-attachment-operations";
 import { useDiffStore } from "@/stores/diffStore";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
@@ -535,6 +536,8 @@ interface WorkspaceState {
   activeWorkspaceId: string | null;
   threads: WorkspaceThread[];
   activeThreadId: string | null;
+  /** The draft entity bound to the new-thread composer, when one is open. */
+  activeDraftId: string | null;
   pendingNewThread: boolean;
   loading: boolean;
   error: string | null;
@@ -642,6 +645,12 @@ interface WorkspaceState {
   setActiveThread: (id: string | null) => void;
   /** Enter a clean pending-thread composer, optionally selecting its workspace first. */
   beginNewThread: (workspaceId?: string | null) => void;
+  /** Opens a persisted new-thread draft in the composer, restoring its target config. */
+  openThreadDraft: (workspaceId: string, draftId: string) => void;
+  /** Deletes a draft entity and unbinds it when it is the open one. */
+  discardThreadDraft: (draftId: string) => void;
+  /** Binds the new-thread composer to a draft (or clears the binding). */
+  setActiveDraftId: (draftId: string | null) => void;
   setPendingNewThread: (value: boolean) => void;
   updateThreadTitle: (threadId: string, title: string) => Promise<void>;
   /** Clear non-fatal warnings for a thread (user dismissed the warning banner). */
@@ -833,6 +842,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     set((state) => ({
       threads: [placeholder, ...state.threads],
       activeThreadId: placeholderId,
+      activeDraftId: null,
       pendingNewThread: false,
       branchManuallySelected: false,
       newThreadBranchSource: "branch",
@@ -932,6 +942,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   activeWorkspaceId: null,
   threads: [],
   activeThreadId: null,
+  activeDraftId: null,
   pendingNewThread: false,
   loading: false,
   error: null,
@@ -1018,6 +1029,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       releaseBrowserAutomationWorkspaceScopes(id);
       bumpThreadListMutationEpoch(id);
       abandonPendingThreadCreationsForWorkspace(id);
+      useThreadDraftStore.getState().removeWorkspaceDrafts(id);
       const diffStore = useDiffStore.getState();
       for (const tid of deletedThreadIds) {
         clearThreadResources(tid);
@@ -1033,6 +1045,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
         workspaces: state.workspaces.filter((w) => w.id !== id),
         activeWorkspaceId:
           state.activeWorkspaceId === id ? null : state.activeWorkspaceId,
+        activeDraftId:
+          state.activeWorkspaceId === id ? null : state.activeDraftId,
         threads: state.threads.filter((t) => t.workspace_id !== id),
         activeThreadId:
           state.activeThreadId &&
@@ -1056,9 +1070,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
   removeWorkspaceFromState: (id) => {
     releaseBrowserAutomationWorkspaceScopes(id);
     abandonPendingThreadCreationsForWorkspace(id);
+    useThreadDraftStore.getState().removeWorkspaceDrafts(id);
     set((state) => ({
       workspaces: state.workspaces.filter((w) => w.id !== id),
       activeWorkspaceId: state.activeWorkspaceId === id ? null : state.activeWorkspaceId,
+      activeDraftId: state.activeWorkspaceId === id ? null : state.activeDraftId,
     }));
   },
 
@@ -1073,6 +1089,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       : true;
     set({
       activeWorkspaceId: id,
+      activeDraftId: null,
       ...(shouldClearThread ? { activeThreadId: null } : {}),
       branches: [],
       newThreadBranch: "",
@@ -1561,6 +1578,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
 
     set((state) => ({
       activeThreadId: id,
+      activeDraftId: null,
       ...(id ? { pendingNewThread: false } : {}),
       threads: isCompleted
         ? state.threads.map((t) =>
@@ -1582,6 +1600,40 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     }
     get().setActiveThread(null);
     get().setPendingNewThread(true);
+    set({ activeDraftId: null });
+  },
+
+  setActiveDraftId: (draftId) => {
+    set({ activeDraftId: draftId });
+  },
+
+  openThreadDraft: (workspaceId, draftId) => {
+    const entity = useThreadDraftStore.getState().drafts[draftId];
+    if (!entity || entity.workspaceId !== workspaceId) return;
+    if (get().activeWorkspaceId !== workspaceId) {
+      get().setActiveWorkspace(workspaceId);
+    }
+    get().setActiveThread(null);
+    useDiffStore.getState().hideRightPanel(workspaceId, null);
+    // Mirrors setPendingNewThread(true) but restores the draft's target
+    // instead of resetting it.
+    set({
+      pendingNewThread: true,
+      activeDraftId: draftId,
+      newThreadMode: entity.target.mode,
+      newThreadBranch: entity.target.branch,
+      newThreadBranchSource: entity.target.branchSource,
+      newThreadPullRequestNumber: entity.target.pullRequestNumber,
+      customBranchName: entity.target.customBranchName,
+      autoPreviewBranch: entity.target.autoPreviewBranch,
+      selectedWorktree: entity.target.selectedWorktree,
+      branchManuallySelected: entity.target.branchManuallySelected,
+    });
+  },
+
+  discardThreadDraft: (draftId) => {
+    useThreadDraftStore.getState().removeDraft(draftId);
+    if (get().activeDraftId === draftId) set({ activeDraftId: null });
   },
 
   setPendingNewThread: (value) => {

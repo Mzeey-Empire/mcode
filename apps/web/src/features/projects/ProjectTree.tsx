@@ -16,6 +16,7 @@ import {
 import { useCommandPaletteStore } from "@/stores/commandPaletteStore";
 import { useShallow } from "zustand/shallow";
 import { useWorkspaceStore } from "./state/workspaceStore";
+import { useThreadDraftStore, type ThreadDraft } from "@/stores/threadDraftStore";
 import { hasRecoveryEntry, useRecoveryIncidentStore } from "@/features/recovery/state/recoveryIncidentStore";
 import { useUiStore } from "@/stores/uiStore";
 import { isThreadExecuting, useThreadStore } from "@/stores/threadStore";
@@ -55,6 +56,7 @@ import {
   OpenCodeIcon,
 } from "@/components/chat/ProviderIcons";
 import { getPrVisual } from "@/lib/pr-status";
+import { formatRelative } from "@/lib/format-relative";
 import { cn } from "@/lib/utils";
 import { VirtualRows } from "@/components/ui/VirtualRows";
 import {
@@ -139,6 +141,7 @@ const THREAD_LIST_CAP = 6;
 
 /** Stable empty array used as default when a workspace has no threads. */
 const EMPTY_THREADS: WorkspaceThread[] = [];
+const EMPTY_DRAFTS: readonly ThreadDraft[] = [];
 
 const PROJECT_DND_MODIFIERS = [restrictToVerticalAxis];
 // The virtual list mounts project droppables only near the viewport, so they
@@ -280,6 +283,32 @@ function ThreadContextMenuOverlay({
   );
 }
 
+function DraftContextMenuOverlay({
+  contextMenu,
+  onClose,
+  onDeleteDraft,
+}: {
+  contextMenu: DraftContextMenuState | null;
+  onClose: () => void;
+  onDeleteDraft: (draftId: string) => void;
+}) {
+  if (!contextMenu) return null;
+  return (
+    <ContextMenu
+      x={contextMenu.x}
+      y={contextMenu.y}
+      onClose={onClose}
+      items={[
+        {
+          label: "Delete draft",
+          destructive: true,
+          onClick: () => onDeleteDraft(contextMenu.draftId),
+        },
+      ]}
+    />
+  );
+}
+
 function ThreadDeleteDialog({
   dialog,
   deleteWorktree,
@@ -384,6 +413,12 @@ interface ContextMenuState {
   worktreePath: string | null;
 }
 
+interface DraftContextMenuState {
+  x: number;
+  y: number;
+  draftId: string;
+}
+
 interface DeleteDialogState {
   threadId: string;
   threadTitle: string;
@@ -454,6 +489,10 @@ export function ProjectTree() {
   const workspaces = useWorkspaceStore((s) => s.workspaces);
   const activeWorkspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   const activeThreadId = useWorkspaceStore((s) => s.activeThreadId);
+  const activeDraftId = useWorkspaceStore((s) => s.activeDraftId);
+  const openThreadDraft = useWorkspaceStore((s) => s.openThreadDraft);
+  const discardThreadDraft = useWorkspaceStore((s) => s.discardThreadDraft);
+  const threadDrafts = useThreadDraftStore((s) => s.drafts);
   const threads = useWorkspaceStore((s) => s.threads);
   const loadWorkspaces = useWorkspaceStore((s) => s.loadWorkspaces);
   const loadThreads = useWorkspaceStore((s) => s.loadThreads);
@@ -502,6 +541,20 @@ export function ProjectTree() {
     return map;
   }, [threads]);
 
+  // Drafts pin above the thread list, most recently edited first.
+  const draftsByWorkspace = useMemo(() => {
+    const map = new Map<string, ThreadDraft[]>();
+    for (const draft of Object.values(threadDrafts)) {
+      const arr = map.get(draft.workspaceId);
+      if (arr) arr.push(draft);
+      else map.set(draft.workspaceId, [draft]);
+    }
+    for (const arr of map.values()) {
+      arr.sort((a, b) => b.updatedAt - a.updatedAt);
+    }
+    return map;
+  }, [threadDrafts]);
+
   const [expanded, setExpanded] =
     useState<Record<string, boolean>>(getExpandedState);
   const [threadListExpanded, setThreadListExpandedState] = useState<
@@ -510,6 +563,8 @@ export function ProjectTree() {
   const lifecycleViews = useUiStore((s) => s.projectThreadViews);
   const toggleLifecycleView = useUiStore((s) => s.toggleProjectThreadView);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [draftContextMenu, setDraftContextMenu] =
+    useState<DraftContextMenuState | null>(null);
   const [inlineEdit, setInlineEdit] = useState<InlineEditState | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<DeleteDialogState | null>(
     null,
@@ -644,6 +699,27 @@ export function ProjectTree() {
       beginNewThread(wsId);
     },
     [beginNewThread, setPrimarySurface],
+  );
+
+  const handleOpenDraft = useCallback(
+    (wsId: string, draftId: string) => {
+      setPrimarySurface("chat");
+      openThreadDraft(wsId, draftId);
+    },
+    [openThreadDraft, setPrimarySurface],
+  );
+
+  const handleDiscardDraft = useCallback(
+    (draftId: string) => discardThreadDraft(draftId),
+    [discardThreadDraft],
+  );
+
+  const handleDraftContextMenu = useCallback(
+    (event: React.MouseEvent, draftId: string) => {
+      event.preventDefault();
+      setDraftContextMenu({ x: event.clientX, y: event.clientY, draftId });
+    },
+    [],
   );
 
   const handleDeleteWorkspace = useCallback((wsId: string) => {
@@ -870,6 +946,8 @@ export function ProjectTree() {
       buildProjectTreeRows({
         workspaces,
         threadsByWorkspace,
+        draftsByWorkspace,
+        activeDraftId,
         expanded,
         threadListExpanded,
         lifecycleViews,
@@ -880,6 +958,8 @@ export function ProjectTree() {
     [
       workspaces,
       threadsByWorkspace,
+      draftsByWorkspace,
+      activeDraftId,
       expanded,
       threadListExpanded,
       lifecycleViews,
@@ -946,6 +1026,9 @@ export function ProjectTree() {
       onCompleteThread: completeThread,
       onReopenThread: reopenThread,
       onRetryThreadCleanup: retryThreadCleanup,
+      onOpenDraft: handleOpenDraft,
+      onDiscardDraft: handleDiscardDraft,
+      onDraftContextMenu: handleDraftContextMenu,
       dropIndicator,
     }),
     [
@@ -971,6 +1054,9 @@ export function ProjectTree() {
       completeThread,
       reopenThread,
       retryThreadCleanup,
+      handleOpenDraft,
+      handleDiscardDraft,
+      handleDraftContextMenu,
       dropIndicator,
     ],
   );
@@ -1080,6 +1166,12 @@ export function ProjectTree() {
           setDeleteDialog(dialog);
           setDeleteWorktree(false);
         }}
+      />
+
+      <DraftContextMenuOverlay
+        contextMenu={draftContextMenu}
+        onClose={() => setDraftContextMenu(null)}
+        onDeleteDraft={handleDiscardDraft}
       />
 
       <ThreadDeleteDialog
@@ -1196,6 +1288,8 @@ type ProjectLifecycleView = "active" | "completed";
 interface ProjectTreeRowData {
   readonly workspace: Workspace;
   readonly threadList: ThreadListSummary;
+  readonly drafts: readonly ThreadDraft[];
+  readonly activeDraftId: string | null;
   readonly lifecycleView: ProjectLifecycleView;
   readonly isExpanded: boolean;
   readonly isThreadListExpanded: boolean;
@@ -1212,6 +1306,8 @@ interface ProjectTreeRowEntry {
 interface ProjectTreeRowsInput {
   readonly workspaces: Workspace[];
   readonly threadsByWorkspace: ReadonlyMap<string, WorkspaceThread[]>;
+  readonly draftsByWorkspace: ReadonlyMap<string, readonly ThreadDraft[]>;
+  readonly activeDraftId: string | null;
   readonly expanded: Record<string, boolean>;
   readonly threadListExpanded: Record<string, boolean>;
   readonly lifecycleViews: Record<string, ProjectLifecycleView>;
@@ -1244,6 +1340,8 @@ function buildProjectTreeRows(
           input.activeThreadId,
           isExpanded,
         ),
+        drafts: input.draftsByWorkspace.get(workspace.id) ?? EMPTY_DRAFTS,
+        activeDraftId: input.activeDraftId,
         lifecycleView,
         isExpanded,
         isThreadListExpanded,
@@ -2584,6 +2682,9 @@ interface ProjectTreeRowContext {
   onCompleteThread: (threadId: string) => Promise<void>;
   onReopenThread: (threadId: string) => Promise<void>;
   onRetryThreadCleanup: (threadId: string) => Promise<void>;
+  onOpenDraft: (wsId: string, draftId: string) => void;
+  onDiscardDraft: (draftId: string) => void;
+  onDraftContextMenu: (event: React.MouseEvent, draftId: string) => void;
   readonly dropIndicator: {
     readonly id: string;
     readonly edge: "top" | "bottom";
@@ -2720,8 +2821,97 @@ function WorkspaceGroup({
   );
 }
 
-/** The expanded section under a workspace header: empty note, capped thread
- * rows, and the show-more toggle. */
+/** Row for a local unsent new-thread draft; mirrors thread-row chrome minus
+ * provider and lifecycle affordances so it never reads as a real thread. */
+function DraftRow({
+  workspaceId,
+  draft,
+  isActive,
+  onOpen,
+  onDiscard,
+  onContextMenu,
+}: {
+  workspaceId: string;
+  draft: ThreadDraft;
+  isActive: boolean;
+  onOpen: (workspaceId: string, draftId: string) => void;
+  onDiscard: (draftId: string) => void;
+  onContextMenu: (event: React.MouseEvent, draftId: string) => void;
+}) {
+  const firstLine = draft.draft.input.split("\n")[0]?.trim() ?? "";
+  const attachmentCount = draft.draft.attachments.length;
+  const preview = firstLine
+    || (attachmentCount > 0
+      ? `${attachmentCount} attachment${attachmentCount === 1 ? "" : "s"}`
+      : "Empty draft");
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (!isThreadRowNavigationEvent(event)) return;
+        event.preventDefault();
+        onOpen(workspaceId, draft.id);
+      }}
+      onClick={() => onOpen(workspaceId, draft.id)}
+      onContextMenu={(event) => onContextMenu(event, draft.id)}
+      className={cn(
+        "group/row relative flex min-h-8 items-center gap-2 rounded-md pr-2 text-[13px] cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/70",
+        isActive
+          ? "bg-accent text-foreground"
+          : "text-muted-foreground/70 hover:bg-accent/40 hover:text-foreground",
+      )}
+      style={{ paddingLeft: "46px" }}
+    >
+      <span
+        className="absolute left-0.5 top-1/2 flex -translate-y-1/2 items-center justify-end gap-1"
+        style={{ width: "40px" }}
+      >
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label="Delete draft"
+                onPointerDown={(event) => event.stopPropagation()}
+                onKeyDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDiscard(draft.id);
+                }}
+                className="size-5 shrink-0 rounded-full p-0 text-muted-foreground/65 opacity-0 transition-opacity shadow-none hover:bg-transparent hover:text-foreground group-hover/row:opacity-100 group-focus-visible/row:opacity-100 focus-visible:opacity-100"
+              >
+                <Trash2 size={12} aria-hidden />
+              </Button>
+            }
+          />
+          <TooltipContent side="right" className="text-xs">
+            Delete draft
+          </TooltipContent>
+        </Tooltip>
+        <span className="-mt-px flex h-4 w-4 items-center justify-center text-muted-foreground/45">
+          <Pencil size={12} aria-hidden />
+        </span>
+      </span>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <span className="shrink-0 text-[11px] font-medium text-muted-foreground/60">
+          Draft
+        </span>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground/75">
+          {preview}
+        </span>
+        <span className="shrink-0 text-[11px] text-muted-foreground/50">
+          {formatRelative(new Date(draft.updatedAt).toISOString())}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** The expanded section under a workspace header: draft rows, empty note,
+ * capped thread rows, and the show-more toggle. */
 function WorkspaceThreadSection({
   row,
   ctx,
@@ -2729,13 +2919,31 @@ function WorkspaceThreadSection({
   row: ProjectTreeRowData;
   ctx: ProjectTreeRowContext;
 }) {
-  const { workspace, threadList, lifecycleView, isThreadListExpanded } = row;
+  const { workspace, threadList, lifecycleView, isThreadListExpanded, drafts } = row;
   const capped = Number.isFinite(threadList.maxVisible)
     ? threadList.treeItems.slice(0, threadList.maxVisible)
     : threadList.treeItems;
+  const showDrafts = lifecycleView === "active" && drafts.length > 0;
   return (
     <>
-      {threadList.visibleThreads.length === 0 ? (
+      {showDrafts &&
+        drafts.map((draft) => (
+          <div
+            key={draft.id}
+            data-testid="draft-item"
+            data-draft-id={draft.id}
+          >
+            <DraftRow
+              workspaceId={workspace.id}
+              draft={draft}
+              isActive={row.activeDraftId === draft.id}
+              onOpen={ctx.onOpenDraft}
+              onDiscard={ctx.onDiscardDraft}
+              onContextMenu={ctx.onDraftContextMenu}
+            />
+          </div>
+        ))}
+      {threadList.visibleThreads.length === 0 && !showDrafts ? (
         <p
           data-testid={`project-empty-${workspace.id}`}
           className="px-9 py-1 font-mono text-xs text-muted-foreground/70"

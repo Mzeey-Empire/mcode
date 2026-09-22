@@ -31,6 +31,8 @@ export interface ComposerAttachmentContext {
   isNewThread: boolean;
   threadId?: string;
   workspaceId?: string;
+  /** Draft-thread binding; switching drafts invalidates in-flight preparations. */
+  draftId?: string | null;
 }
 
 /** Result of placing attachment rows in the bounded composer tray. */
@@ -108,7 +110,7 @@ export function useComposerAttachments(context: ComposerAttachmentContext): Comp
   useEffect(() => {
     invalidatePreparations();
     return invalidatePreparations;
-  }, [context.isNewThread, context.threadId, context.workspaceId, invalidatePreparations]);
+  }, [context.isNewThread, context.threadId, context.workspaceId, context.draftId, invalidatePreparations]);
 
   useEffect(() => {
     composerMountedRef.current = true;

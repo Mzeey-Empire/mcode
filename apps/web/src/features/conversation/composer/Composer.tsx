@@ -229,6 +229,8 @@ interface ComposerProps {
   threadId?: string;
   isNewThread?: boolean;
   workspaceId?: string;
+  /** Draft-thread binding: `null` tracks a fresh new-thread composer, a string opens that draft. */
+  draftId?: string | null;
   /** Locks normal input while automatic Setup holds the first Turn. */
   setupBlocked?: boolean;
   /** When set, the composer is in fork mode; submit creates a forked thread instead of sending. */
@@ -274,6 +276,7 @@ export function Composer({
   threadId,
   isNewThread,
   workspaceId,
+  draftId,
   setupBlocked = false,
   branchFromMessageId,
   branchFromMessageContent,
@@ -318,6 +321,7 @@ export function Composer({
     threadId,
     isNewThread: isNewThread === true,
     workspaceId,
+    draftId,
     branchFromMessageId,
     branchFromMessageContent,
     activeThread,
