@@ -57,6 +57,7 @@ function getConversationPaintState(
 export function useChatViewState() {
   const activeThreadId = useWorkspaceStore((state) => state.activeThreadId);
   const activeWorkspaceId = useWorkspaceStore((state) => state.activeWorkspaceId);
+  const activeDraftId = useWorkspaceStore((state) => state.activeDraftId);
   const sidebarCollapsed = useUiStore((state) => state.sidebarCollapsed);
   const updateThreadTitle = useWorkspaceStore((state) => state.updateThreadTitle);
   const setActiveThread = useWorkspaceStore((state) => state.setActiveThread);
@@ -110,6 +111,7 @@ export function useChatViewState() {
   return {
     activeThreadId,
     activeWorkspaceId,
+    activeDraftId,
     activeThread,
     activeWorkspaceName,
     branchFromMessageId: activeForkMode?.messageId,
