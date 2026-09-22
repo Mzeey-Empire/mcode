@@ -33,19 +33,20 @@ export class FileService {
 
   /**
    * List files in a workspace, including both tracked and untracked files.
-   * Uses `git ls-files --cached --others --exclude-standard` to include
-   * untracked files that are not gitignored.
+   * Uses `git ls-files --cached --others --exclude-standard -z` to include
+   * untracked files that are not gitignored. The `-z` output is NUL-delimited
+   * and unquoted, so non-ASCII and whitespace-bearing names arrive verbatim.
    */
   async list(workspaceId: string, threadId?: string): Promise<string[]> {
     const cwd = this.resolveWorkingDir(workspaceId, threadId);
 
     try {
       const { stdout } = await this.gitExecutor.exec(
-        ["ls-files", "--cached", "--others", "--exclude-standard"],
+        ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
         { cwd },
       );
       return stdout
-        .split("\n")
+        .split("\0")
         .filter((line: string) => line.length > 0);
     } catch (err) {
       // Non-git folders have no ls-files source; a real repo failure still throws.
@@ -74,15 +75,17 @@ export class FileService {
 
     let paths: string[];
     try {
-      const { stdout } = await this.gitExecutor.exec(["status", "--porcelain"], { cwd });
-      paths = parsePorcelainPaths(stdout);
+      const { stdout } = await this.gitExecutor.exec(["status", "--porcelain", "-z"], { cwd });
+      paths = parsePorcelainZ(stdout);
     } catch {
       // Non-git folders fingerprint the same bounded listing `list` falls back to.
       if (NodeFS.existsSync(NodePath.join(cwd, ".git"))) return null;
       paths = listDirectoryTree(cwd);
     }
 
-    const fingerprint = [...paths].sort().join("\n");
+    // Paths may legally contain "\n" on POSIX filesystems, so fingerprints
+    // join on the only separator git `-z` output can never embed in a name.
+    const fingerprint = [...paths].sort().join("\0");
     const previous = this.statusFingerprints.get(scope);
     this.statusFingerprints.set(scope, fingerprint);
     if (previous === undefined || previous === fingerprint) return null;
@@ -217,11 +220,23 @@ function assertFileSize(fullPath: string, relativePath: string): void {
   }
 }
 
-/** Extracts the path from a `git status --porcelain` v1 line (`XY path` or `XY old -> new`). */
-function porcelainPath(line: string): string {
-  const raw = line.slice(3);
-  const renamed = raw.split(" -> ").at(-1) ?? raw;
-  return renamed.replace(/^"|"$/g, "");
+/**
+ * Parses `git status --porcelain -z` output into the current path of each entry.
+ * Entries are `XY <path>` NUL-terminated with no quoting; rename/copy entries
+ * append a second NUL field holding the source path, which is consumed so it
+ * is not reported as a separate path.
+ */
+function parsePorcelainZ(stdout: string): string[] {
+  const tokens = stdout.split("\0").filter((token) => token.length > 0);
+  const paths: string[] = [];
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i]!;
+    if (token.length < 4) continue;
+    const status = token.slice(0, 2);
+    paths.push(token.slice(3));
+    if (status.includes("R") || status.includes("C")) i += 1;
+  }
+  return paths;
 }
 
 /** Reports the symmetric difference between a stored fingerprint and the current path list. */
@@ -230,20 +245,13 @@ function diffFingerprints(
   paths: string[],
 ): { changedPaths: string[]; wholeWorkspace: boolean } {
   const current = new Set(paths);
-  const prior = new Set(previous.split("\n").filter((path) => path.length > 0));
+  const prior = new Set(previous.split("\0").filter((path) => path.length > 0));
   const delta = new Set<string>();
   for (const path of current) if (!prior.has(path)) delta.add(path);
   for (const path of prior) if (!current.has(path)) delta.add(path);
   const changedPaths = [...delta].slice(0, MAX_CHANGED_PATHS + 1);
   const wholeWorkspace = changedPaths.length > MAX_CHANGED_PATHS;
   return { changedPaths: wholeWorkspace ? [] : changedPaths, wholeWorkspace };
-}
-
-function parsePorcelainPaths(stdout: string): string[] {
-  return stdout
-    .split("\n")
-    .filter((line) => line.length > 0)
-    .map(porcelainPath);
 }
 
 /**
