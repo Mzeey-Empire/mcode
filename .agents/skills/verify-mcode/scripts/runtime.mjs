@@ -70,6 +70,7 @@ const FOCUSED_TEST_FILES = [
   "src/features/agents/canonical/__tests__/canonical-agent-event-sink.test.ts",
   "src/features/agents/collaboration/adapters/__tests__/codex-collaboration-event-adapter.test.ts",
   "src/features/providers/composition/__tests__/provider-event-ingress.test.ts",
+  "src/features/projects/git/__tests__/git-repository-fetch.test.ts",
   "src/features/projects/git/__tests__/git-service-push.test.ts",
 ];
 const CHECK_PHASES = [

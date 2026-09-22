@@ -221,36 +221,71 @@ export class GitRepositoryService {
   async fetchBranchAt(repoPath: string, branch: string, prNumber?: number): Promise<void> {
     validateBranchName(branch);
 
-    if (prNumber != null) {
-      await this.gitExecutor.exec([
-        "-C",
-        repoPath,
-        "fetch",
-        "origin",
-        `+pull/${prNumber}/head:${branch}`,
-      ]);
-      return;
-    }
-
+    // Fetch into FETCH_HEAD only; the local branch is moved afterwards, and
+    // only when the move cannot drop local-only commits.
+    // Qualify the ordinary source: fetch ref lookup prefers refs/tags/ over
+    // refs/heads/, so a bare name could fetch a same-named remote tag.
+    const source = prNumber != null ? `pull/${prNumber}/head` : `refs/heads/${branch}`;
     let fetchOk = true;
     try {
-      await this.gitExecutor.exec(["-C", repoPath, "fetch", "origin", branch]);
-    } catch {
+      await this.gitExecutor.exec(["-C", repoPath, "fetch", "origin", source]);
+    } catch (error) {
+      if (prNumber != null) throw error;
       fetchOk = false;
     }
 
-    if (fetchOk) {
-      if (await this.branchExists(repoPath, branch)) {
-        await this.gitExecutor.exec(
-          ["-C", repoPath, "branch", "-f", branch, `origin/${branch}`],
-        );
+    const localRef = `refs/heads/${branch}`;
+    if (!fetchOk) {
+      if (!(await this.branchExists(repoPath, localRef))) {
+        throw new Error(`Branch "${branch}" not found locally or on origin`);
+      }
+      return;
+    }
+
+    if (!(await this.branchExists(repoPath, localRef))) {
+      if (prNumber != null) {
+        await this.gitExecutor.exec(["-C", repoPath, "branch", branch, "FETCH_HEAD"]);
       } else {
         await this.gitExecutor.exec(
           ["-C", repoPath, "branch", "--track", branch, `origin/${branch}`],
         );
       }
-    } else if (!fetchOk && !(await this.branchExists(repoPath, branch))) {
-      throw new Error(`Branch "${branch}" not found locally or on origin`);
+      return;
+    }
+
+    // Ahead or equal: the local tip already contains the fetched head.
+    if (await this.isAncestor(repoPath, "FETCH_HEAD", localRef)) return;
+    if (!(await this.isAncestor(repoPath, localRef, "FETCH_HEAD"))) {
+      throw new Error(
+        `Local branch "${branch}" has diverged from "${source}"; refusing to overwrite local-only commits`,
+      );
+    }
+
+    // Strictly behind: a non-forced refspec moves the branch atomically —
+    // it applies only a fast-forward and refuses refs checked out in any
+    // worktree, so a concurrent local commit rejects instead of being dropped.
+    await this.gitExecutor.exec([
+      "-C",
+      repoPath,
+      "fetch",
+      "origin",
+      `${source}:${localRef}`,
+    ]);
+  }
+
+  /** Check whether `ancestor` is an ancestor commit of `descendant`. */
+  private async isAncestor(
+    repoPath: string,
+    ancestor: string,
+    descendant: string,
+  ): Promise<boolean> {
+    try {
+      await this.gitExecutor.exec(
+        ["-C", repoPath, "merge-base", "--is-ancestor", ancestor, descendant],
+      );
+      return true;
+    } catch {
+      return false;
     }
   }
 

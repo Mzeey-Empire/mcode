@@ -3,6 +3,7 @@
 ## Behavior
 
 - Local, new-worktree, existing-worktree, and PR-created threads use the shared startup progress display. Selecting a PR only records its branch and PR number; the PR ref is fetched when startup begins, before its checkout is created.
+- The startup fetch never rewrites a local branch that holds unpushed or divergent commits: it fast-forwards a branch that is merely behind, leaves an ahead branch alone, and fails startup explicitly when the histories have diverged.
 - The visible steps follow the operations that make the selected checkout ready.
 - The activity line uses chat-body type, a shared directional shimmer for its worktree icon and text while startup runs, and a static readable label when reduced motion is requested.
 - `More details` is a native collapsed disclosure. When opened, its live log receives checkout and Setup output.

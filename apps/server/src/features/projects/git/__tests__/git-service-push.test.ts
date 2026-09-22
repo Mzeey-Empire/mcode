@@ -90,7 +90,7 @@ describe("GitRepositoryService.fetchBranchAt", () => {
       "/repo",
       "fetch",
       "origin",
-      "+pull/42/head:contributor/review",
+      "pull/42/head",
     ]);
   });
 });
