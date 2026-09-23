@@ -63,6 +63,9 @@ describe("TurnChangeSummary", () => {
     useDiffStore.setState({
       snapshotsByThread: { "thread-1": [snapshot("snap-1", "msg-1")] },
       reviewFileJumpRequest: null,
+      selectedTurnMessageIdByThread: {},
+      reviewViewByThread: {},
+      reviewViewManuallySelectedByThread: {},
       viewMode: "last-turn",
     });
   });
@@ -99,8 +102,35 @@ describe("TurnChangeSummary", () => {
       expect(showRightPanelAdaptive).toHaveBeenCalledWith("workspace-1", "thread-1");
     });
     const jump = useDiffStore.getState().reviewFileJumpRequest;
-    expect(jump).toMatchObject({ scopeId: "thread-1", path: "src/App.tsx" });
+    expect(jump).toMatchObject({ scopeId: "thread-1", path: "src/App.tsx", viewKey: "turn:msg-1" });
+    expect(useDiffStore.getState().reviewViewByThread["thread-1"]).toBe("turn");
+    expect(useDiffStore.getState().selectedTurnMessageIdByThread["thread-1"]).toBe("msg-1");
+  });
+
+  it("opens the Turn view scoped to the clicked turn's message", async () => {
+    const user = userEvent.setup();
+    renderSummary(["src/App.tsx"]);
+
+    await user.click(screen.getByRole("button", { name: /view diff/i }));
+
+    await waitFor(() => {
+      expect(showRightPanelAdaptive).toHaveBeenCalledWith("workspace-1", "thread-1");
+    });
+    expect(useDiffStore.getState().reviewViewByThread["thread-1"]).toBe("turn");
+    expect(useDiffStore.getState().selectedTurnMessageIdByThread["thread-1"]).toBe("msg-1");
+  });
+
+  it("falls back to All turns when the turn cannot be resolved to a snapshot", async () => {
+    const user = userEvent.setup();
+    render(<TurnChangeSummary messageId="msg-unknown" filesChanged={["src/App.tsx"]} isLatestTurn={false} />);
+
+    await user.click(screen.getByRole("button", { name: /view diff/i }));
+
+    await waitFor(() => {
+      expect(showRightPanelAdaptive).toHaveBeenCalledWith("workspace-1", "thread-1");
+    });
     expect(useDiffStore.getState().reviewViewByThread["thread-1"]).toBe("cumulative");
+    expect(useDiffStore.getState().selectedTurnMessageIdByThread["thread-1"]).toBeUndefined();
   });
 
   it("restores manual expansion across remounts via manualExpandRef", () => {

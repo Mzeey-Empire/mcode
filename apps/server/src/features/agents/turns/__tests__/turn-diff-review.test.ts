@@ -94,6 +94,33 @@ describe("Last turn Review public comparison boundary", () => {
     expect(await routeTurnDiffRpc("turnDiff.getFileDiff", { threadId: identity.threadId, comparisonId: result.turnDiff!.id, filePath: "../a.txt" }, deps)).toBe("");
   });
 
+  it("reads a picked turn by message id instead of the latest turn", async () => {
+    const first = await snapshotBothEdits();
+    const service = new SnapshotService(new RealGitExecutor());
+    db.prepare("INSERT INTO messages (id, thread_id, role, content, timestamp, sequence) VALUES (?, ?, ?, ?, ?, ?)")
+      .run("message-2", identity.threadId, "assistant", "Done", new Date().toISOString(), 2);
+    const beforeSecond = await service.captureRef(directory);
+    NodeFS.writeFileSync(NodePath.join(directory, "a.txt"), "AGENT=again\nUSER=after\n");
+    const afterSecond = await service.captureRef(directory);
+    const second = deps.turnSnapshotRepo.create({ messageId: "message-2", threadId: identity.threadId,
+      refBefore: beforeSecond, refAfter: afterSecond, filesChanged: ["a.txt"], worktreePath: null });
+
+    const picked = ReviewComparisonSchema().parse(
+      await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId, messageId: "message-1" }, deps));
+    expect(picked.turnDiff?.id).toBe(`git:${first.id}`);
+    const latest = ReviewComparisonSchema().parse(
+      await routeTurnDiffRpc("turnDiff.getComparison", { threadId: identity.threadId }, deps));
+    expect(latest.turnDiff?.id).toBe(`git:${second.id}`);
+
+    const pickedPatch = await routeTurnDiffRpc("turnDiff.getFileDiff",
+      { threadId: identity.threadId, comparisonId: picked.turnDiff!.id, filePath: "a.txt" }, deps);
+    expect(pickedPatch).toContain("+USER=after");
+    expect(pickedPatch).not.toContain("+AGENT=again");
+
+    expect(await routeTurnDiffRpc("turnDiff.getComparison",
+      { threadId: identity.threadId, messageId: "message-missing" }, deps)).toBeNull();
+  });
+
   it("clears Live evidence after an empty update and selects the Git fallback when file effects remain", async () => {
     const service = new SnapshotService(new RealGitExecutor());
     const before = await service.captureRef(directory);
