@@ -2,14 +2,17 @@ import type { ProviderModelInfo } from "./models.js";
 
 /** Complete Claude fallback catalog shared by server discovery and web pickers. */
 export const CLAUDE_STATIC_MODELS: readonly ProviderModelInfo[] = [
-  {
-    id: "claude-opus-5",
-    name: "Claude Opus 5",
+  ...[
+    ["claude-opus-5-5", "Claude Opus 5.5"],
+    ["claude-opus-5", "Claude Opus 5"],
+  ].map(([id, name]): ProviderModelInfo => ({
+    id,
+    name,
     contextWindow: 1_000_000,
     supportsReasoning: true,
     supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
     defaultReasoningEffort: "high",
-  },
+  })),
   ...[
     ["claude-fable-5", "Claude Fable 5"],
     ["claude-sonnet-5", "Claude Sonnet 5"],
