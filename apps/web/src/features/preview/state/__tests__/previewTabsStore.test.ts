@@ -105,7 +105,7 @@ describe("overlayDisplaySet", () => {
 
 describe("previewTabsStore", () => {
   beforeEach(() => {
-    usePreviewTabsStore.setState({ tabSetByScope: {}, liveChromeByScope: {}, persistentTabIdsByScope: {} });
+    usePreviewTabsStore.setState({ tabSetByScope: {}, liveChromeByScope: {}, persistentTabIdsByScope: {}, pendingNavErrorsByScope: {} });
     usePreviewFocusStore.setState({ omniboxFocusTick: 0 });
     browserTargetRegistry.clear();
   });
@@ -318,6 +318,57 @@ describe("previewTabsStore", () => {
       url: "https://example.test",
       favicon: null,
     });
+  });
+
+  it("stores and clears a pending navigation error per tab", () => {
+    const { setPendingNavError, clearPendingNavError } = usePreviewTabsStore.getState();
+    const entry = {
+      input: "C:\\missing\\page.html",
+      error: { kind: "file-not-found" as const, message: "File not found" },
+      supersededUrl: null,
+    };
+    setPendingNavError(WORKSPACE_ID, SCOPE, "tab-err", entry);
+    setPendingNavError(WORKSPACE_ID, SCOPE, "tab-other", { ...entry, input: "other" });
+    expect(
+      usePreviewTabsStore.getState().pendingNavErrorsByScope[SCOPE_KEY],
+    ).toEqual({ "tab-err": entry, "tab-other": { ...entry, input: "other" } });
+
+    clearPendingNavError(WORKSPACE_ID, SCOPE, "tab-err");
+    expect(
+      usePreviewTabsStore.getState().pendingNavErrorsByScope[SCOPE_KEY],
+    ).toEqual({ "tab-other": { ...entry, input: "other" } });
+
+    clearPendingNavError(WORKSPACE_ID, SCOPE, "tab-other");
+    expect(usePreviewTabsStore.getState().pendingNavErrorsByScope[SCOPE_KEY]).toBeUndefined();
+  });
+
+  it("prunes a pending error when its tab disappears from the host snapshot", () => {
+    const { setTabSet, setPendingNavError } = usePreviewTabsStore.getState();
+    setTabSet(WORKSPACE_ID, SCOPE, set("a", [page("a"), page("b")]));
+    setPendingNavError(WORKSPACE_ID, SCOPE, "b", {
+      input: "C:\\missing\\page.html",
+      error: { kind: "file-not-found" as const, message: "File not found" },
+      supersededUrl: null,
+    });
+
+    setTabSet(WORKSPACE_ID, SCOPE, set("a", [page("a")]));
+
+    expect(usePreviewTabsStore.getState().pendingNavErrorsByScope[SCOPE_KEY]).toBeUndefined();
+  });
+
+  it("clears pending errors with the scope", async () => {
+    const { setTabSet, setPendingNavError } = usePreviewTabsStore.getState();
+    mockBridge({ closeScope: set(null, []) });
+    setTabSet(WORKSPACE_ID, SCOPE, set("a", [page("a")]));
+    setPendingNavError(WORKSPACE_ID, SCOPE, "a", {
+      input: "C:\\missing\\page.html",
+      error: { kind: "file-not-found" as const, message: "File not found" },
+      supersededUrl: null,
+    });
+
+    await usePreviewTabsStore.getState().clearScope(WORKSPACE_ID, SCOPE);
+
+    expect(usePreviewTabsStore.getState().pendingNavErrorsByScope[SCOPE_KEY]).toBeUndefined();
   });
 
   it("setLiveChrome keeps the same reference when the chrome is unchanged", () => {

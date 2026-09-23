@@ -15,14 +15,26 @@ const ERR_ABORTED = -3;
 /** Chromium net error: a `file:` target did not exist on disk. */
 const ERR_FILE_NOT_FOUND = -6;
 
-/** Per-kind plain-language copy. The classifier is the only place these live. */
+/**
+ * Per-kind plain-language copy. The classifier is the only place these live.
+ * `detail` is the support line under the headline, naming the next useful move.
+ */
 const COPY = {
-  notFound: "Page not found",
-  serverError: "The site had an error",
-  httpOther: "The site returned an error",
-  network: "Can't reach this site",
-  fileMissing: "File no longer exists",
-  crash: "This page crashed",
+  notFound: { message: "Page not found", detail: "The address may be wrong, or the page moved." },
+  serverError: {
+    message: "The site had an error",
+    detail: "The problem is on the site's side. Try again later.",
+  },
+  httpOther: { message: "The site returned an error", detail: "The site refused this request." },
+  network: {
+    message: "Can't reach this site",
+    detail: "Check the address or your connection, then try again.",
+  },
+  fileMissing: {
+    message: "File no longer exists",
+    detail: "It may have been moved, renamed, or deleted.",
+  },
+  crash: { message: "This page crashed", detail: "Something went wrong while displaying it." },
 } as const;
 
 /**
@@ -55,7 +67,7 @@ export function classifyLoadResult(
   // HTTP errors win: the navigation committed a response, so the status is the
   // authoritative signal even if a benign code rode alongside it.
   if (httpStatus >= 400) {
-    return { kind: "http", status: httpStatus, message: httpMessage(httpStatus) };
+    return { kind: "http", status: httpStatus, ...httpCopy(httpStatus) };
   }
 
   // Redirects and user-initiated cancels surface as ERR_ABORTED; not a failure.
@@ -64,21 +76,21 @@ export function classifyLoadResult(
   const code = errorDescription.length > 0 ? errorDescription : undefined;
 
   if (errorCode === ERR_FILE_NOT_FOUND) {
-    return { kind: "file-not-found", code, message: COPY.fileMissing };
+    return { kind: "file-not-found", code, ...COPY.fileMissing };
   }
 
   // Any other main-frame load error (DNS, offline, connection refused/reset,
   // generic ERR_FAILED) reads to the user as "can't reach this site".
-  return { kind: "network", code, message: COPY.network };
+  return { kind: "network", code, ...COPY.network };
 }
 
 /** Builds the crash error surfaced when a guest renderer process is gone. */
 export function crashError(): PreviewPageError {
-  return { kind: "crash", message: COPY.crash };
+  return { kind: "crash", ...COPY.crash };
 }
 
-/** Maps an HTTP error status onto its plain-language headline. */
-function httpMessage(status: number): string {
+/** Maps an HTTP error status onto its plain-language headline and detail. */
+function httpCopy(status: number): { message: string; detail: string } {
   if (status === 404) return COPY.notFound;
   if (status >= 500) return COPY.serverError;
   return COPY.httpOther;

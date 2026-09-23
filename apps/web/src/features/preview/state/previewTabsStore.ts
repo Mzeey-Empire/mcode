@@ -4,6 +4,7 @@ import {
   BROWSER_TAB_INFO_STRING_MAX,
   type BrowserTabInfo,
   type BrowserTabSet,
+  type PreviewPageError,
 } from "@mcode/contracts";
 import { usePreviewFocusStore } from "./previewFocusStore";
 import { browserAutomationScopeKey, useBrowserAutomationStore } from "../automation/browserAutomationStore";
@@ -126,11 +127,30 @@ export function overlayDisplaySet(
   };
 }
 
+/**
+ * A local-navigation failure waiting to render on a specific tab. Kept out of
+ * `webviewPageStatus` because hydration and mount publishes rewrite that state;
+ * a rejected address never commits, so nothing downstream would preserve it.
+ */
+export interface PendingNavError {
+  /** The address the user typed or clicked; feeds the omnibox and diagnostics. */
+  readonly input: string;
+  readonly error: PreviewPageError;
+  /**
+   * URL that was showing when the failure happened. A page-status publish
+   * carrying a different real address is the commit that clears this entry;
+   * republishes of the superseded page (or a blank error tab's null url) do not.
+   */
+  readonly supersededUrl: string | null;
+}
+
 interface PreviewTabsState {
   /** Host-truth tab set per scope (threadId, or workspaceId in the threadless shell). */
   readonly tabSetByScope: Record<string, BrowserTabSet | null>;
   /** Live active-page chrome per scope, published by the mounted PreviewPanel. */
   readonly liveChromeByScope: Record<string, PreviewLiveChrome | null>;
+  /** Rejected local-navigation failures per scope, keyed by the tab they belong to. */
+  readonly pendingNavErrorsByScope: Record<string, Record<string, PendingNavError>>;
   /** Renderer-owned web tabs that can be activated without a desktop bridge. */
   readonly persistentTabIdsByScope: Record<string, ReadonlySet<string>>;
 
@@ -144,6 +164,10 @@ interface PreviewTabsState {
   setLiveChrome: (workspaceId: string, scopeId: string, chrome: PreviewLiveChrome | null) => void;
   /** Merge renderer-observed chrome into one tab's persisted renderer mirror. */
   updateTabChrome: (workspaceId: string, scopeId: string, tabId: string, chrome: PreviewLiveChrome) => void;
+  /** Record a rejected local navigation on a tab; renders until a real commit or tab close. */
+  setPendingNavError: (workspaceId: string, scopeId: string, tabId: string, entry: PendingNavError) => void;
+  /** Drop a tab's pending navigation failure (successful navigation or user discard). */
+  clearPendingNavError: (workspaceId: string, scopeId: string, tabId: string) => void;
 
   /** Open a new page or continue an exact existing page by id. */
   openPage: (workspaceId: string, scopeId: string, options?: {
@@ -172,13 +196,14 @@ export interface ClosePageOptions {
 }
 
 function clearPreviewScopeState(
-  state: Pick<PreviewTabsState, "tabSetByScope" | "liveChromeByScope" | "persistentTabIdsByScope">,
+  state: Pick<PreviewTabsState, "tabSetByScope" | "liveChromeByScope" | "persistentTabIdsByScope" | "pendingNavErrorsByScope">,
   scopeKey: string,
   preserveEmptyState: boolean,
-): Pick<PreviewTabsState, "tabSetByScope" | "liveChromeByScope" | "persistentTabIdsByScope"> {
+): Pick<PreviewTabsState, "tabSetByScope" | "liveChromeByScope" | "persistentTabIdsByScope" | "pendingNavErrorsByScope"> {
   const tabSetByScope = { ...state.tabSetByScope };
   const liveChromeByScope = { ...state.liveChromeByScope };
   const persistentTabIdsByScope = { ...state.persistentTabIdsByScope };
+  const pendingNavErrorsByScope = { ...state.pendingNavErrorsByScope };
   if (preserveEmptyState) {
     tabSetByScope[scopeKey] = null;
     liveChromeByScope[scopeKey] = null;
@@ -187,7 +212,8 @@ function clearPreviewScopeState(
     delete liveChromeByScope[scopeKey];
   }
   delete persistentTabIdsByScope[scopeKey];
-  return { tabSetByScope, liveChromeByScope, persistentTabIdsByScope };
+  delete pendingNavErrorsByScope[scopeKey];
+  return { tabSetByScope, liveChromeByScope, persistentTabIdsByScope, pendingNavErrorsByScope };
 }
 
 function hasValidPersistentTabIdentity(tab: BrowserTabInfo): boolean {
@@ -209,6 +235,27 @@ function replaceOrAppendTab(tabs: readonly BrowserTabInfo[], tab: BrowserTabInfo
   return tabs.some((candidate) => candidate.id === tab.id)
     ? tabs.map((candidate) => candidate.id === tab.id ? tab : candidate)
     : [...tabs, tab];
+}
+
+/** Drops pending errors whose tab no longer exists in a scope's snapshot. */
+function prunePendingNavErrors(
+  state: Pick<PreviewTabsState, "pendingNavErrorsByScope">,
+  scopeKey: string,
+  tabSet: BrowserTabSet | null,
+): Record<string, Record<string, PendingNavError>> {
+  const pending = state.pendingNavErrorsByScope[scopeKey];
+  if (!pending) return state.pendingNavErrorsByScope;
+  const liveTabIds = new Set(tabSet?.tabs.map((tab) => tab.id) ?? []);
+  const kept = Object.fromEntries(
+    Object.entries(pending).filter(([tabId]) => liveTabIds.has(tabId)),
+  );
+  if (Object.keys(kept).length === Object.keys(pending).length) {
+    return state.pendingNavErrorsByScope;
+  }
+  const next = { ...state.pendingNavErrorsByScope };
+  if (Object.keys(kept).length > 0) next[scopeKey] = kept;
+  else delete next[scopeKey];
+  return next;
 }
 
 function shouldFocusOpenedPage(options: Parameters<PreviewTabsState["openPage"]>[2]): boolean {
@@ -285,6 +332,7 @@ export const usePreviewTabsStore = create<PreviewTabsState>((set, get) => {
   tabSetByScope: {},
   liveChromeByScope: {},
   persistentTabIdsByScope: {},
+  pendingNavErrorsByScope: {},
 
   setTabSet: (workspaceId, scopeId, value) =>
     set((s) => {
@@ -294,6 +342,9 @@ export const usePreviewTabsStore = create<PreviewTabsState>((set, get) => {
       const activeTabChanged = previous?.activeTabId !== value?.activeTabId;
       return {
         tabSetByScope: { ...s.tabSetByScope, [scopeKey]: value },
+        // A tab removed host-side takes its pending error with it; the snapshot
+        // is the only place every close path funnels through.
+        pendingNavErrorsByScope: prunePendingNavErrors(s, scopeKey, value),
         ...(activeTabChanged
           ? { liveChromeByScope: { ...s.liveChromeByScope, [scopeKey]: null } }
           : {}),
@@ -403,6 +454,29 @@ export const usePreviewTabsStore = create<PreviewTabsState>((set, get) => {
     if (!changed || !persistedChrome) return;
     void bridgeTabs()?.updateChrome?.(scopeId, workspaceId, tabId, persistedChrome).catch(() => undefined);
   },
+
+  setPendingNavError: (workspaceId, scopeId, tabId, entry) =>
+    set((s) => {
+      const scopeKey = previewTabsScopeKey(workspaceId, scopeId);
+      return {
+        pendingNavErrorsByScope: {
+          ...s.pendingNavErrorsByScope,
+          [scopeKey]: { ...s.pendingNavErrorsByScope[scopeKey], [tabId]: entry },
+        },
+      };
+    }),
+
+  clearPendingNavError: (workspaceId, scopeId, tabId) =>
+    set((s) => {
+      const scopeKey = previewTabsScopeKey(workspaceId, scopeId);
+      const pending = s.pendingNavErrorsByScope[scopeKey];
+      if (!pending?.[tabId]) return s;
+      const rest = Object.fromEntries(Object.entries(pending).filter(([key]) => key !== tabId));
+      const pendingNavErrorsByScope = { ...s.pendingNavErrorsByScope };
+      if (Object.keys(rest).length > 0) pendingNavErrorsByScope[scopeKey] = rest;
+      else delete pendingNavErrorsByScope[scopeKey];
+      return { pendingNavErrorsByScope };
+    }),
 
   openPage: async (workspaceId, scopeId, options) => {
     const tabs = bridgeTabs();

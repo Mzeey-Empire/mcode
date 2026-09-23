@@ -29,6 +29,7 @@ import {
   getOrCreateViewportCoordinator,
   waitForViewportLayout,
 } from "../automation/services/viewportCoordinatorFactory";
+import { previewPageErrorForFailure } from "../navigation/nav-errors";
 
 /** Properties for one hosted renderer Browser surface. */
 export interface PreviewWebviewProps {
@@ -103,17 +104,13 @@ function previewStatus(state: BrowserSurfacePageState): PreviewPageStatus {
     url: visibleAddress(state),
     title: state.title || null,
     favicon: state.favicon,
-    phase: committedBlank ? "loaded" : state.phase,
+    // A blank commit alone isn't a failure, but forcing "loaded" while an
+    // attached error exists would hide a rejected navigation behind the empty state.
+    phase: committedBlank && !state.mainFrameError ? "loaded" : state.phase,
+    // `mainFrameError` may be a resolver code (rejected before any load) or a
+    // Chromium description; the classifier maps both onto the shared copy table.
     ...(state.mainFrameError
-      ? {
-          error: {
-            kind: "network" as const,
-            code: state.mainFrameErrorCode === null
-              ? "ERR_FAILED"
-              : String(state.mainFrameErrorCode),
-            message: state.mainFrameError,
-          },
-        }
+      ? { error: previewPageErrorForFailure(state.mainFrameError, state.mainFrameErrorCode) }
       : {}),
   };
 }
