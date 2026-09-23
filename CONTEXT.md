@@ -976,6 +976,12 @@ chosen from a searchable list; default is the latest commit), and the turn
 ### Last turn
 The most recent turn's diff — the default glance when a thread is active.
 
+### Turn view
+One picked turn's diff — the turn comparison whose operand is a selected turn.
+Written by the change summary on a transcript turn (its "View diff" and file
+rows) or by the toolbar's turn picker, which lists the thread's turns that
+changed files and seeds the operand to the latest when none is picked.
+
 ### Summary
 An AI-written prose recap of the **Cumulative** diff. Not a comparison — a
 **lens**: a toggle that re-renders the Cumulative view's changes as prose in

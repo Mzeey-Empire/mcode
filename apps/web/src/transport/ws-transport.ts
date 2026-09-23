@@ -1140,7 +1140,12 @@ export function createWsTransport(
     // Snapshots
     getSnapshotDiff: (snapshotId, filePath?, maxLines?) =>
       rpc<string>("snapshot.getDiff", { snapshotId, filePath, maxLines }),
-    getTurnDiffComparison: (threadId) => rpc<ReviewComparison | null>("turnDiff.getComparison", { threadId, includeLive: freshTurnDiffThreads.has(threadId) }),
+    getTurnDiffComparison: (threadId, messageId?) =>
+      rpc<ReviewComparison | null>("turnDiff.getComparison", {
+        threadId,
+        includeLive: messageId ? undefined : freshTurnDiffThreads.has(threadId),
+        messageId,
+      }),
     getTurnDiffFile: (threadId, comparisonId, filePath) => rpc<string>("turnDiff.getFileDiff", { threadId, comparisonId, filePath }),
     getSnapshotDiffStats: (snapshotId) =>
       rpc<DiffStats[]>("snapshot.getDiffStats", { snapshotId }),

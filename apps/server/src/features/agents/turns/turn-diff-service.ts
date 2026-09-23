@@ -98,6 +98,9 @@ export class TurnDiffService {
 
   /** Read durable evidence only within its owning thread. */
   find(threadId: string, id: string): StoredTurnDiff | undefined { return this.repo.find(threadId, id); }
+
+  /** Read the durable evidence owned by one assistant message. */
+  forMessage(threadId: string, messageId: string): StoredTurnDiff | undefined { return this.repo.findByMessage(threadId, messageId); }
 }
 
 /** Persists a frozen terminal candidate after the assistant message and file effects exist. */

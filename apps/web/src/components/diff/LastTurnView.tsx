@@ -8,15 +8,17 @@ interface LastTurnViewProps {
   cacheVersion?: string | number;
   refreshing?: boolean;
   onRefresh?: () => void;
+  /** View identity for consuming view-keyed file-jump requests (see FileList). */
+  jumpViewKey?: string;
 }
 
 /**
- * The "Last turn" view: a single diff for the most recent turn that changed
- * files. This is the default glance when a thread is active. It renders exactly
- * one turn's diff — never the whole timeline — so the panel stays fast on long
- * threads. See CONTEXT.md → "Review tab".
+ * Renders exactly one turn's diff — never the whole timeline — so the panel
+ * stays fast on long threads. Serves the "Last turn" view (the most recent
+ * turn that changed files, the default glance for an active thread) and the
+ * "Turn" view (one picked turn). See CONTEXT.md → "Review tab".
  */
-export function LastTurnView({ threadId, comparison, cacheVersion, refreshing, onRefresh }: LastTurnViewProps) {
+export function LastTurnView({ threadId, comparison, cacheVersion, refreshing, onRefresh, jumpViewKey }: LastTurnViewProps) {
   const comparisonId = comparison?.turnDiff?.id;
   if (!comparisonId || !comparison) {
     return (
@@ -43,6 +45,7 @@ export function LastTurnView({ threadId, comparison, cacheVersion, refreshing, o
         refreshable
         refreshing={refreshing}
         onRefresh={onRefresh}
+        jumpViewKey={jumpViewKey}
       />
     </div>
   );

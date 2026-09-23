@@ -30,6 +30,12 @@ export class TurnDiffRepo {
       WHERE d.thread_id = ? ORDER BY m.sequence DESC LIMIT 1`).get(threadId) ?? undefined);
   }
 
+  /** Read the durable comparison owned by one assistant message. */
+  findByMessage(threadId: string, messageId: string): StoredTurnDiff | undefined {
+    return (this.db.prepare<StoredTurnDiff, [string, string]>(`SELECT id, message_id, thread_id, source, patch, revision
+      FROM turn_diff_snapshots WHERE thread_id = ? AND message_id = ?`).get(threadId, messageId) ?? undefined);
+  }
+
   /** Read one comparison only within its owning thread. */
   find(threadId: string, id: string): StoredTurnDiff | undefined {
     return (this.db.prepare<StoredTurnDiff, [string, string]>(`SELECT id, message_id, thread_id, source, patch, revision
