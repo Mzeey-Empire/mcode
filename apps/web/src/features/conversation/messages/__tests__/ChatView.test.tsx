@@ -265,6 +265,7 @@ function recoveryIncident(
 function defaultWorkspaceState(overrides: Partial<{
   activeThreadId: string | null;
   threads: Thread[];
+  pendingStartupByThreadId: Record<string, { startupId: string; context: "new-direct" | "new-worktree" | "new-existing-worktree" | "branch-direct" | "branch-worktree" | "branch-existing-worktree"; queuedMessage: string }>;
   updateThreadTitle: ReturnType<typeof vi.fn>;
 }> = {}) {
   const thread = makeThread();
@@ -273,6 +274,8 @@ function defaultWorkspaceState(overrides: Partial<{
     activeWorkspaceId: "ws-1",
     activeThreadId: overrides.activeThreadId !== undefined ? overrides.activeThreadId : thread.id,
     pendingNewThread: false,
+    pendingStartupByThreadId: overrides.pendingStartupByThreadId ?? {},
+    resolvePendingStartup: vi.fn(),
     threads: overrides.threads ?? [thread],
     loadWorkspaces: vi.fn(),
     loadThreads: vi.fn(),
@@ -583,12 +586,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
 
   it("keeps the preparing shell and setup recovery actions while Setup is blocked", async () => {
     const startupId = "00000000-0000-4000-8000-000000000001";
-    const thread = {
-      ...makeThread({ mode: "worktree", worktree_managed: true }),
-      clientStartupId: startupId,
-      clientQueuedMessage: "Build the feature",
-      clientPreparingContext: "new-worktree" as const,
-    };
+    const thread = makeThread({ mode: "worktree", worktree_managed: true });
     const automaticSetup: WorkspaceEnvironmentAutomaticSetupSnapshot = {
       gate: "blocked",
       attempt: {
@@ -640,7 +638,12 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     chatViewTransportMock.getAutomaticSetup.mockResolvedValue(automaticSetup);
     chatViewTransportMock.retryAutomaticSetup.mockResolvedValue(automaticSetup);
     chatViewTransportMock.continueAutomaticSetup.mockResolvedValue(automaticSetup);
-    setupWorkspaceMock(defaultWorkspaceState({ threads: [thread] }));
+    setupWorkspaceMock(defaultWorkspaceState({
+      threads: [thread],
+      pendingStartupByThreadId: {
+        [thread.id]: { startupId, context: "new-worktree", queuedMessage: "Build the feature" },
+      },
+    }));
     chatViewThreadMockRef.current = defaultThreadState({
       activeRecord: {
         ...createEmptyThreadRecord(),
@@ -759,13 +762,17 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
   });
 
   it("keeps startup progress visible while the durable thread hydrates", () => {
-    const startupThread = {
-      ...makeThread({ id: "thread-2", title: "Thread 2" }),
-      clientStartupId: "00000000-0000-4000-8000-000000000001",
-    };
+    const startupThread = makeThread({ id: "thread-2", title: "Thread 2" });
     setupWorkspaceMock(defaultWorkspaceState({
       activeThreadId: startupThread.id,
       threads: [startupThread],
+      pendingStartupByThreadId: {
+        [startupThread.id]: {
+          startupId: "00000000-0000-4000-8000-000000000001",
+          context: "new-direct",
+          queuedMessage: "Build the feature",
+        },
+      },
     }));
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: "thread-1" });
 
@@ -781,11 +788,9 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     const placeholder = {
       ...makeThread({ id: "thread-placeholder", title: "Prepare checkout", mode: "worktree", worktree_managed: true }),
       clientPreparing: true,
-      clientPreparingContext: "new-worktree" as const,
-      clientQueuedMessage: "Build the feature",
-      clientStartupId: startupId,
     };
     const persisted = { ...placeholder, id: "thread-persisted", clientPreparing: false };
+    const pendingStartup = { startupId, context: "new-worktree" as const, queuedMessage: "Build the feature" };
     act(() => useThreadStartupStore.getState().apply({
       startupId,
       workspaceId: persisted.workspace_id,
@@ -805,7 +810,11 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       createdAt: "2026-09-02T12:00:00.000Z",
       updatedAt: "2026-09-02T12:00:00.000Z",
     }));
-    setupWorkspaceMock(defaultWorkspaceState({ activeThreadId: placeholder.id, threads: [placeholder] }));
+    setupWorkspaceMock(defaultWorkspaceState({
+      activeThreadId: placeholder.id,
+      threads: [placeholder],
+      pendingStartupByThreadId: { [placeholder.id]: pendingStartup },
+    }));
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: placeholder.id });
 
     const view = render(<ChatView />);
@@ -817,7 +826,11 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
       list: chatViewTransportMock.listThreadStartups.mock.calls.length,
     };
 
-    setupWorkspaceMock(defaultWorkspaceState({ activeThreadId: persisted.id, threads: [persisted] }));
+    setupWorkspaceMock(defaultWorkspaceState({
+      activeThreadId: persisted.id,
+      threads: [persisted],
+      pendingStartupByThreadId: { [persisted.id]: pendingStartup },
+    }));
     chatViewThreadMockRef.current = defaultThreadState({ currentThreadId: persisted.id });
     view.rerender(<ChatView />);
 
@@ -913,10 +926,7 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
 
   it("holds the preparing shell while a restored startup lookup is unresolved", async () => {
     const startupId = "00000000-0000-4000-8000-000000000026";
-    const restoredThread = {
-      ...makeThread({ id: "thread-restoring", title: "Restoring startup", status: "active" }),
-      clientStartupId: startupId,
-    };
+    const restoredThread = makeThread({ id: "thread-restoring", title: "Restoring startup", status: "active" });
     const restoredStartup = {
       startupId,
       workspaceId: restoredThread.workspace_id,
@@ -941,6 +951,9 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     setupWorkspaceMock(defaultWorkspaceState({
       activeThreadId: restoredThread.id,
       threads: [restoredThread],
+      pendingStartupByThreadId: {
+        [restoredThread.id]: { startupId, context: "new-direct", queuedMessage: "Build the feature" },
+      },
     }));
     const activeRecord = {
       ...createEmptyThreadRecord(),
@@ -969,16 +982,14 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
   });
 
   it("keeps the authoritative cancelled startup card when optimistic creation rejects", () => {
+    const cancelledStartupId = "00000000-0000-4000-8000-000000000021";
     const startupThread = {
       ...makeThread({ id: "thread-placeholder", title: "Cancelled setup" }),
       clientPreparing: false,
       clientError: "Error: Thread startup was cancelled",
-      clientPreparingContext: "new-worktree" as const,
-      clientQueuedMessage: "Build the feature",
-      clientStartupId: "00000000-0000-4000-8000-000000000021",
     };
     useThreadStartupStore.getState().apply({
-      startupId: startupThread.clientStartupId,
+      startupId: cancelledStartupId,
       workspaceId: startupThread.workspace_id,
       kind: "managed-worktree",
       state: "cancelled",
@@ -999,6 +1010,9 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
     setupWorkspaceMock(defaultWorkspaceState({
       activeThreadId: startupThread.id,
       threads: [startupThread],
+      pendingStartupByThreadId: {
+        [startupThread.id]: { startupId: cancelledStartupId, context: "new-worktree", queuedMessage: "Build the feature" },
+      },
     }));
     const persistedRecord = {
       ...createEmptyThreadRecord(),
@@ -1053,12 +1067,9 @@ describe("ChatView - Thread Title Double-Click Rename", () => {
   });
 
   it("keeps the preparing shell until a completed startup conversation paints", () => {
-    const startupThread = {
-      ...makeThread({ id: "thread-2", title: "Thread 2" }),
-      clientStartupId: "00000000-0000-4000-8000-000000000003",
-    };
+    const startupThread = makeThread({ id: "thread-2", title: "Thread 2" });
     useThreadStartupStore.getState().apply({
-      startupId: startupThread.clientStartupId,
+      startupId: "00000000-0000-4000-8000-000000000003",
       workspaceId: startupThread.workspace_id,
       kind: "direct",
       state: "completed",

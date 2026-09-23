@@ -315,6 +315,7 @@ function createProjectTreeStoreMock(options: ProjectTreeStoreMockOptions) {
     ...data,
     activeWorkspaceId: "ws-1",
     activeThreadId: null,
+    pendingStartupByThreadId: {},
     loadWorkspaces: vi.fn(),
     loadThreads: vi.fn(),
     renameWorkspace: vi.fn(),
@@ -1479,6 +1480,7 @@ describe("ProjectTree action-required indicator", () => {
       worktrees: [],
       worktreesLoadedForWorkspace: null,
       error: null,
+      pendingStartupByThreadId: {},
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
     vi.mocked(useWorkspaceStore).mockImplementation(((
@@ -1908,6 +1910,7 @@ describe("ProjectTree PR-ability gating by mode", () => {
       worktrees: [],
       worktreesLoadedForWorkspace: null,
       error: null,
+      pendingStartupByThreadId: {},
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
     vi.mocked(useWorkspaceStore).mockImplementation(((

@@ -6,7 +6,7 @@ import {
 import { createEmptyThreadRecord, patchThreadRecord, type ThreadRecord } from "@/stores/thread-record";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { useWorkspaceStore, __resetThreadListMutationEpochForTests, __clearPendingThreadCreationsForTests } from "../workspaceStore";
-import { scheduleDrainAfterEdit, useThreadStore } from "@/stores/threadStore";
+import { isThreadExecuting, scheduleDrainAfterEdit, useThreadStore } from "@/stores/threadStore";
 import { useQueueStore } from "@/stores/queueStore";
 import { releaseBrowserCaptureSpills } from "@/features/preview/capture/browser-capture-spill";
 import { useComposerDraftStore, type ComposerDraft } from "@/stores/composerDraftStore";
@@ -22,6 +22,7 @@ import {
 import type { CreateAndSendResult, SelectedTextComment, TurnRuntimeSnapshot } from "@mcode/contracts";
 import { act, renderHook } from "@testing-library/react";
 import { useQueuedMessageDispatch } from "@/features/conversation/composer/queue/useQueuedMessageDispatch";
+import { useThreadStartupStore } from "@/features/thread-startup";
 
 const selectedTextComments: SelectedTextComment[] = [{
   id: "11111111-1111-4111-8111-111111111111",
@@ -78,7 +79,9 @@ function expectPreparedCodexThread(
   thread: ReturnType<typeof useWorkspaceStore.getState>["threads"][number] | undefined,
 ) {
   expect(thread?.clientPreparing).toBe(true);
-  expect(thread?.clientQueuedMessage).toBe("Hello world");
+  expect(
+    useWorkspaceStore.getState().pendingStartupByThreadId[thread!.id]?.queuedMessage,
+  ).toBe("Hello world");
   expect(thread?.model).toBe("gpt-5.5");
   expect(thread?.provider).toBe("codex");
   expect(thread?.reasoning_level).toBe("high");
@@ -159,6 +162,7 @@ describe("Workspace Behavior", () => {
     usePreviewTabsStore.setState({ tabSetByScope: {}, liveChromeByScope: {}, persistentTabIdsByScope: {} });
     usePreviewReferenceQueueStore.setState({ signal: 0, queueByThread: {} });
     useComposerDraftStore.setState({ drafts: {}, pendingPrefill: null });
+    useThreadStartupStore.setState({ recordsByStartupId: {}, startupIdByThreadId: {}, dismissedStartupIds: new Set() });
     useDiffStore.setState({
       rightPanelByThread: {},
       rightPanelFallbackByWorkspace: {},
@@ -485,6 +489,348 @@ describe("Workspace Behavior", () => {
     await Promise.resolve();
 
     expect(useWorkspaceStore.getState().threads.some((t) => t.id === "new-first-send")).toBe(true);
+  });
+
+  it("keeps the pending startup identity through a thread-list refresh during startup", async () => {
+    const ws = createMockWorkspace({ id: "ws-startup-refresh" });
+    useWorkspaceStore.setState({
+      workspaces: [ws],
+      activeWorkspaceId: ws.id,
+      newThreadMode: "direct",
+    });
+    const created = createMockThread({
+      id: "server-thread-refresh",
+      workspace_id: ws.id,
+      title: "Hello",
+    });
+    (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockResolvedValue(
+      createMockCreateAndSendResult(created),
+    );
+
+    await useWorkspaceStore.getState().createAndSendMessage("Hello", "gpt-5.5");
+    const before = useWorkspaceStore.getState().pendingStartupByThreadId[created.id];
+    expect(before).toMatchObject({ context: "new-direct", queuedMessage: "Hello" });
+
+    (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockResolvedValue([created]);
+    await useWorkspaceStore.getState().loadThreads(ws.id);
+
+    expect(useWorkspaceStore.getState().pendingStartupByThreadId[created.id]).toEqual(before);
+  });
+
+  it("keeps the durable thread running when the creation snapshot is pre-agent idle", async () => {
+    const ws = createMockWorkspace({ id: "ws-idle-snapshot" });
+    useWorkspaceStore.setState({ workspaces: [ws], activeWorkspaceId: ws.id });
+    const created = createMockThread({ id: "server-thread-idle", workspace_id: ws.id });
+    (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockResolvedValue(
+      createMockCreateAndSendResult(created, { phase: "idle" }),
+    );
+
+    await useWorkspaceStore.getState().createAndSendMessage("Hello", "gpt-5.5");
+
+    expect(useThreadStore.getState().runningThreadIds.has("server-thread-idle")).toBe(true);
+  });
+
+  it("clears the pending startup when the startup lifecycle completes", async () => {
+    const ws = createMockWorkspace({ id: "ws-startup-complete" });
+    useWorkspaceStore.setState({ workspaces: [ws], activeWorkspaceId: ws.id });
+    const created = createMockThread({ id: "server-thread-done", workspace_id: ws.id });
+    (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockResolvedValue(
+      createMockCreateAndSendResult(created),
+    );
+
+    await useWorkspaceStore.getState().createAndSendMessage("Hello", "gpt-5.5");
+    const pending = useWorkspaceStore.getState().pendingStartupByThreadId[created.id];
+    expect(pending).toBeDefined();
+
+    useThreadStartupStore.getState().apply({
+      startupId: pending!.startupId,
+      workspaceId: ws.id,
+      kind: "direct",
+      state: "completed",
+      phase: "agent",
+      steps: [
+        { phase: "thread", state: "completed" },
+        { phase: "agent", state: "completed" },
+      ],
+      transcript: [],
+      cancellation: "none",
+      revision: 1,
+      threadId: created.id,
+      createdAt: "2026-09-02T12:00:00.000Z",
+      updatedAt: "2026-09-02T12:00:00.000Z",
+    });
+
+    expect(useWorkspaceStore.getState().pendingStartupByThreadId[created.id]).toBeUndefined();
+  });
+
+  it("does not resurrect the pending startup when completion arrives before the creation response", async () => {
+    const ws = createMockWorkspace({ id: "ws-startup-early-complete" });
+    useWorkspaceStore.setState({
+      workspaces: [ws],
+      activeWorkspaceId: ws.id,
+      newThreadMode: "direct",
+    });
+    const created = createMockThread({ id: "server-thread-early", workspace_id: ws.id });
+    // Dispatch paths complete startup inside createAndSend, so the terminal
+    // push lands on the client before the RPC response resolves.
+    (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      async (params: { startupId: string }) => {
+        useThreadStartupStore.getState().apply({
+          startupId: params.startupId,
+          workspaceId: ws.id,
+          kind: "direct",
+          state: "completed",
+          phase: "agent",
+          steps: [
+            { phase: "thread", state: "completed" },
+            { phase: "agent", state: "completed" },
+          ],
+          transcript: [],
+          cancellation: "none",
+          revision: 1,
+          threadId: created.id,
+          createdAt: "2026-09-02T12:00:00.000Z",
+          updatedAt: "2026-09-02T12:00:00.000Z",
+        });
+        return createMockCreateAndSendResult(created);
+      },
+    );
+
+    await useWorkspaceStore.getState().createAndSendMessage("Hello", "gpt-5.5");
+
+    expect(useWorkspaceStore.getState().threads.some((t) => t.id === created.id)).toBe(true);
+    expect(useWorkspaceStore.getState().pendingStartupByThreadId[created.id]).toBeUndefined();
+  });
+
+  it.each(["failed", "cancelled", "interrupted"] as const)(
+    "clears the pending startup when the startup lifecycle ends %s",
+    async (terminalState) => {
+      const ws = createMockWorkspace({ id: `ws-startup-${terminalState}` });
+      useWorkspaceStore.setState({ workspaces: [ws], activeWorkspaceId: ws.id });
+      const created = createMockThread({ id: `server-thread-${terminalState}`, workspace_id: ws.id });
+      (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockResolvedValue(
+        createMockCreateAndSendResult(created),
+      );
+
+      await useWorkspaceStore.getState().createAndSendMessage("Hello", "gpt-5.5");
+      const pending = useWorkspaceStore.getState().pendingStartupByThreadId[created.id];
+      expect(pending).toBeDefined();
+
+      useThreadStartupStore.getState().apply({
+        startupId: pending!.startupId,
+        workspaceId: ws.id,
+        kind: "direct",
+        state: terminalState,
+        phase: "agent",
+        steps: [
+          { phase: "thread", state: "completed" },
+          { phase: "agent", state: terminalState },
+        ],
+        transcript: [],
+        cancellation: "none",
+        revision: 1,
+        threadId: created.id,
+        createdAt: "2026-09-02T12:00:00.000Z",
+        updatedAt: "2026-09-02T12:00:00.000Z",
+      });
+
+      expect(useWorkspaceStore.getState().pendingStartupByThreadId[created.id]).toBeUndefined();
+      // A pre-admission death never emits runtime events, so the optimistic
+      // running mark would otherwise orphan the composer on "Stop agent".
+      expect(isThreadExecuting(created.id)).toBe(false);
+    },
+  );
+
+  it("keeps the running mark when startup completes, since runtime owns it", async () => {
+    const ws = createMockWorkspace({ id: "ws-startup-complete-running" });
+    useWorkspaceStore.setState({ workspaces: [ws], activeWorkspaceId: ws.id });
+    const created = createMockThread({ id: "server-thread-running", workspace_id: ws.id });
+    (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockResolvedValue(
+      createMockCreateAndSendResult(created),
+    );
+
+    await useWorkspaceStore.getState().createAndSendMessage("Hello", "gpt-5.5");
+    const pending = useWorkspaceStore.getState().pendingStartupByThreadId[created.id];
+
+    useThreadStartupStore.getState().apply({
+      startupId: pending!.startupId,
+      workspaceId: ws.id,
+      kind: "direct",
+      state: "completed",
+      phase: "agent",
+      steps: [
+        { phase: "thread", state: "completed" },
+        { phase: "agent", state: "completed" },
+      ],
+      transcript: [],
+      cancellation: "none",
+      revision: 1,
+      threadId: created.id,
+      createdAt: "2026-09-02T12:00:00.000Z",
+      updatedAt: "2026-09-02T12:00:00.000Z",
+    });
+
+    expect(isThreadExecuting(created.id)).toBe(true);
+  });
+
+  it("keeps the running mark when a terminal record this client never owned applies to a live thread", async () => {
+    const ws = createMockWorkspace({ id: "ws-foreign-terminal" });
+    const created = createMockThread({ id: "server-thread-foreign", workspace_id: ws.id });
+    useWorkspaceStore.setState({
+      workspaces: [ws],
+      activeWorkspaceId: ws.id,
+      threads: [created],
+    });
+    useThreadStore.setState((state) => ({
+      runningThreadIds: new Set([...state.runningThreadIds, created.id]),
+    }));
+
+    const record = {
+      startupId: "11111111-2222-4333-8444-555566667777",
+      workspaceId: ws.id,
+      kind: "direct" as const,
+      state: "cancelled" as const,
+      phase: "agent" as const,
+      steps: [
+        { phase: "thread" as const, state: "completed" as const },
+        { phase: "agent" as const, state: "cancelled" as const },
+      ],
+      transcript: [],
+      cancellation: "requested" as const,
+      revision: 1,
+      threadId: created.id,
+      createdAt: "2026-09-02T12:00:00.000Z",
+      updatedAt: "2026-09-02T12:00:00.000Z",
+    };
+    useThreadStartupStore.getState().apply(record);
+    // Replaying the same record (as recover() does on every lookup mount)
+    // must be equally inert.
+    useThreadStartupStore.getState().apply(record);
+
+    expect(isThreadExecuting(created.id)).toBe(true);
+  });
+
+  it("keeps the running mark when a real turn was admitted while a stale pending entry lingers", async () => {
+    const ws = createMockWorkspace({ id: "ws-admitted-turn" });
+    useWorkspaceStore.setState({
+      workspaces: [ws],
+      activeWorkspaceId: ws.id,
+      newThreadMode: "direct",
+    });
+    const created = createMockThread({ id: "server-thread-admitted", workspace_id: ws.id });
+    (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockResolvedValue(
+      createMockCreateAndSendResult(created),
+    );
+
+    await useWorkspaceStore.getState().createAndSendMessage("Hello", "gpt-5.5");
+    const pending = useWorkspaceStore.getState().pendingStartupByThreadId[created.id];
+    expect(pending).toBeDefined();
+
+    // A missed terminal push leaves the pending entry behind; a real admitted
+    // turn meanwhile carries a turnExecutionId the optimistic mark never had.
+    useThreadStore.setState((state) => ({
+      records: patchThreadRecord(state.records, created.id, {
+        turnExecutionId: "00000000-0000-4000-8000-0000000000aa",
+        runtimePhase: "running",
+      }),
+    }));
+
+    useThreadStartupStore.getState().apply({
+      startupId: pending!.startupId,
+      workspaceId: ws.id,
+      kind: "direct",
+      state: "cancelled",
+      phase: "agent",
+      steps: [
+        { phase: "thread", state: "completed" },
+        { phase: "agent", state: "cancelled" },
+      ],
+      transcript: [],
+      cancellation: "requested",
+      revision: 1,
+      threadId: created.id,
+      createdAt: "2026-09-02T12:00:00.000Z",
+      updatedAt: "2026-09-02T12:00:00.000Z",
+    });
+
+    expect(isThreadExecuting(created.id)).toBe(true);
+  });
+
+  it("clears the placeholder running mark when cancellation lands before the creation response", async () => {
+    const ws = createMockWorkspace({ id: "ws-startup-early-cancel" });
+    useWorkspaceStore.setState({
+      workspaces: [ws],
+      activeWorkspaceId: ws.id,
+      newThreadMode: "direct",
+    });
+    (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      async (params: { startupId: string }) => {
+        useThreadStartupStore.getState().apply({
+          startupId: params.startupId,
+          workspaceId: ws.id,
+          kind: "direct",
+          state: "cancelled",
+          phase: "agent",
+          steps: [
+            { phase: "thread", state: "completed" },
+            { phase: "agent", state: "cancelled" },
+          ],
+          transcript: [],
+          cancellation: "requested",
+          revision: 1,
+          createdAt: "2026-09-02T12:00:00.000Z",
+          updatedAt: "2026-09-02T12:00:00.000Z",
+        });
+        // The server rejects the RPC when its startup is cancelled.
+        throw new Error("Startup was cancelled");
+      },
+    );
+
+    await expect(
+      useWorkspaceStore.getState().createAndSendMessage("Hello", "gpt-5.5"),
+    ).rejects.toThrow("cancelled");
+
+    const placeholder = useWorkspaceStore.getState().threads.find((t) => t.clientError);
+    expect(placeholder).toBeDefined();
+    expect(isThreadExecuting(placeholder!.id)).toBe(false);
+    expect(Object.keys(useWorkspaceStore.getState().pendingStartupByThreadId)).toHaveLength(0);
+  });
+
+  it("restores the queued message as a composer draft when startup is cancelled", async () => {
+    const ws = createMockWorkspace({ id: "ws-cancelled-draft" });
+    useWorkspaceStore.setState({
+      workspaces: [ws],
+      activeWorkspaceId: ws.id,
+      newThreadMode: "direct",
+    });
+    const created = createMockThread({ id: "server-thread-draft", workspace_id: ws.id });
+    (mockTransport.createAndSendMessage as ReturnType<typeof vi.fn>).mockResolvedValue(
+      createMockCreateAndSendResult(created, { phase: "idle" }),
+    );
+
+    await useWorkspaceStore.getState().createAndSendMessage("Hello again", "gpt-5.5");
+    const pending = useWorkspaceStore.getState().pendingStartupByThreadId[created.id];
+    expect(pending).toBeDefined();
+
+    useThreadStartupStore.getState().apply({
+      startupId: pending!.startupId,
+      workspaceId: ws.id,
+      kind: "direct",
+      state: "cancelled",
+      phase: "agent",
+      steps: [
+        { phase: "thread", state: "completed" },
+        { phase: "agent", state: "cancelled" },
+      ],
+      transcript: [],
+      cancellation: "requested",
+      revision: 1,
+      threadId: created.id,
+      createdAt: "2026-09-02T12:00:00.000Z",
+      updatedAt: "2026-09-02T12:00:00.000Z",
+    });
+
+    expect(useComposerDraftStore.getState().getDraft(created.id)?.input).toBe("Hello again");
   });
 
   it("keeps saved cards in comment-only new and prompt-and-card branch creation transport", async () => {
@@ -1490,7 +1836,7 @@ describe("Workspace Behavior", () => {
       const mid = useWorkspaceStore.getState();
       expect(mid.activeThreadId).not.toBeNull();
       expectPreparedCodexThread(mid.threads[0]);
-      expect(mid.threads[0]?.clientStartupId).toBe(mid.activeThreadId);
+      expect(mid.pendingStartupByThreadId[mid.threads[0]!.id]?.startupId).toBe(mid.activeThreadId);
 
       const created = createMockThread({
         id: "server-thread-1",
@@ -1509,7 +1855,7 @@ describe("Workspace Behavior", () => {
       expect(fin.threads[0]?.model).toBe("gpt-5.5");
       expect(fin.threads[0]?.provider).toBe("codex");
       expect(fin.threads[0]?.reasoning_level).toBe("high");
-      expect(fin.threads[0]?.clientStartupId).toBe(mid.activeThreadId);
+      expect(fin.pendingStartupByThreadId["server-thread-1"]?.startupId).toBe(mid.activeThreadId);
     });
 
     it("keeps the startup identity after an early cancellation rejects optimistic creation", async () => {
@@ -1523,8 +1869,11 @@ describe("Workspace Behavior", () => {
       expect(useWorkspaceStore.getState().threads[0]).toMatchObject({
         clientPreparing: false,
         clientError: "Error: Thread startup was cancelled",
-        clientStartupId: expect.stringMatching(/^[0-9a-f-]{36}$/),
       });
+      const cancelledId = useWorkspaceStore.getState().threads[0]!.id;
+      expect(
+        useWorkspaceStore.getState().pendingStartupByThreadId[cancelledId]?.startupId,
+      ).toMatch(/^[0-9a-f-]{36}$/);
     });
 
     it("transfers placeholder runtime identity and narrative state to the persisted first turn", async () => {
@@ -1870,12 +2219,14 @@ describe("Workspace Behavior", () => {
         }),
         clientPreparing: false,
         clientError: "rpc failed",
-        clientQueuedMessage: "hello",
       };
       useWorkspaceStore.setState({
         workspaces: [ws],
         activeWorkspaceId: ws.id,
         threads: [errRow],
+        pendingStartupByThreadId: {
+          "ph-err": { startupId: "ph-err", context: "new-direct", queuedMessage: "hello" },
+        },
       });
       (mockTransport.listThreads as ReturnType<typeof vi.fn>).mockResolvedValue([]);
       await useWorkspaceStore.getState().loadThreads(ws.id);

@@ -669,10 +669,23 @@ diffs-container:has([data-jump-highlight="true"]) {
   content: attr(data-startup-activity-shimmer-text);
 }
 
+/* Timeline node glyph settle: quick scale-in when a step reaches a settled
+ * state. 180ms decelerating curve per DESIGN timing (standard/productiveEase). */
+@keyframes startup-node-pop {
+  from { transform: scale(0.55); opacity: 0.4; }
+  to   { transform: scale(1); opacity: 1; }
+}
+.startup-node-pop {
+  animation: startup-node-pop 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .startup-activity-shimmer {
     animation: none;
     display: none;
+  }
+  .startup-node-pop {
+    animation: none;
   }
 }
 
