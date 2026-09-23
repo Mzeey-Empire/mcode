@@ -7,6 +7,10 @@ import {
 } from "../index.js";
 
 describe("isXhighEffortModel", () => {
+  it("returns true for claude-opus-5-5", () => {
+    expect(isXhighEffortModel("claude-opus-5-5")).toBe(true);
+  });
+
   it("returns true for claude-opus-5", () => {
     expect(isXhighEffortModel("claude-opus-5")).toBe(true);
   });
@@ -45,6 +49,10 @@ describe("isXhighEffortModel", () => {
 });
 
 describe("isMaxEffortModel", () => {
+  it("returns true for claude-opus-5-5", () => {
+    expect(isMaxEffortModel("claude-opus-5-5")).toBe(true);
+  });
+
   it("returns true for claude-opus-5", () => {
     expect(isMaxEffortModel("claude-opus-5")).toBe(true);
   });
@@ -109,6 +117,20 @@ describe("supportsEffortParameter", () => {
 });
 
 describe("normalizeReasoningLevelForModel", () => {
+  describe("claude-opus-5-5 (supports all tiers)", () => {
+    it("passes xhigh through unchanged", () => {
+      expect(normalizeReasoningLevelForModel("claude-opus-5-5", "xhigh")).toBe("xhigh");
+    });
+
+    it("passes max through unchanged", () => {
+      expect(normalizeReasoningLevelForModel("claude-opus-5-5", "max")).toBe("max");
+    });
+
+    it("resolves a dated variant without being shadowed by claude-opus-5", () => {
+      expect(normalizeReasoningLevelForModel("claude-opus-5-5-20270101", "xhigh")).toBe("xhigh");
+    });
+  });
+
   describe("claude-opus-5 (supports all tiers)", () => {
     it("passes xhigh through unchanged", () => {
       expect(normalizeReasoningLevelForModel("claude-opus-5", "xhigh")).toBe("xhigh");
@@ -228,6 +250,22 @@ describe("normalizeReasoningLevelForModel", () => {
 
     it("claude-haiku-4-5-20251001 short-circuits to high (recognized as haiku)", () => {
       expect(normalizeReasoningLevelForModel("claude-haiku-4-5-20251001", "low")).toBe("high");
+    });
+  });
+
+  describe("OpenAI Codex GPT-6 static catalog models", () => {
+    it("preserves max on GPT-6 Sol and Luna", () => {
+      expect(normalizeReasoningLevelForModel("gpt-6-sol", "max")).toBe("max");
+      expect(normalizeReasoningLevelForModel("gpt-6-luna", "max")).toBe("max");
+    });
+
+    it("uses GPT-6 defaults when switching from an unsupported lower tier", () => {
+      expect(normalizeReasoningLevelForModel("gpt-6-sol", "none")).toBe("low");
+      expect(normalizeReasoningLevelForModel("gpt-6-luna", "minimal")).toBe("medium");
+    });
+
+    it("preserves xhigh on gpt-6-astra", () => {
+      expect(normalizeReasoningLevelForModel("gpt-6-astra", "xhigh")).toBe("xhigh");
     });
   });
 

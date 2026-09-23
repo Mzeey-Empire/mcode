@@ -8,6 +8,7 @@ import {
 
 describe("MODEL_CONTEXT_WINDOWS_DEFAULT", () => {
   it("exposes 200K as the default for every Claude model (no opt-in)", () => {
+    expect(MODEL_CONTEXT_WINDOWS_DEFAULT["claude-opus-5-5"]).toBe(200_000);
     expect(MODEL_CONTEXT_WINDOWS_DEFAULT["claude-opus-5"]).toBe(200_000);
     expect(MODEL_CONTEXT_WINDOWS_DEFAULT["claude-opus-4-8"]).toBe(200_000);
     expect(MODEL_CONTEXT_WINDOWS_DEFAULT["claude-opus-4-7"]).toBe(200_000);
@@ -22,6 +23,9 @@ describe("MODEL_CONTEXT_WINDOWS_DEFAULT", () => {
 });
 
 describe("MODEL_CONTEXT_WINDOWS_EXTENDED", () => {
+  it("exposes 1M for Opus 5.5", () => {
+    expect(MODEL_CONTEXT_WINDOWS_EXTENDED["claude-opus-5-5"]).toBe(1_000_000);
+  });
   it("exposes 1M for Opus 5", () => {
     expect(MODEL_CONTEXT_WINDOWS_EXTENDED["claude-opus-5"]).toBe(1_000_000);
   });
@@ -48,6 +52,7 @@ describe("getModelContextWindow", () => {
   // -------------------------------------------------------------------------
 
   it("returns 200K for every supported Claude model in 200k mode", () => {
+    expect(getModelContextWindow("claude-opus-5-5", "200k")).toBe(200_000);
     expect(getModelContextWindow("claude-opus-5", "200k")).toBe(200_000);
     expect(getModelContextWindow("claude-opus-4-8", "200k")).toBe(200_000);
     expect(getModelContextWindow("claude-opus-4-7", "200k")).toBe(200_000);
@@ -65,7 +70,8 @@ describe("getModelContextWindow", () => {
   // 1M mode -- only models in the extended map honor the opt-in.
   // -------------------------------------------------------------------------
 
-  it("returns 1M for opus-5/4-8/4-7/4-6 and sonnet-4-6 in 1m mode", () => {
+  it("returns 1M for opus-5-5/5/4-8/4-7/4-6 and sonnet-4-6 in 1m mode", () => {
+    expect(getModelContextWindow("claude-opus-5-5", "1m")).toBe(1_000_000);
     expect(getModelContextWindow("claude-opus-5", "1m")).toBe(1_000_000);
     expect(getModelContextWindow("claude-opus-4-8", "1m")).toBe(1_000_000);
     expect(getModelContextWindow("claude-opus-4-7", "1m")).toBe(1_000_000);
@@ -87,6 +93,8 @@ describe("getModelContextWindow", () => {
   });
 
   it("matches dated SDK variants in 1m mode", () => {
+    // claude-opus-5-5 must resolve to itself, not the claude-opus-5 prefix.
+    expect(getModelContextWindow("claude-opus-5-5-20270101", "1m")).toBe(1_000_000);
     expect(getModelContextWindow("claude-sonnet-4-6-20260101", "1m")).toBe(1_000_000);
     // Dated Haiku variant should still fall back to 200K.
     expect(getModelContextWindow("claude-haiku-4-5-20251001", "1m")).toBe(200_000);

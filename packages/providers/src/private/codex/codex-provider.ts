@@ -1310,7 +1310,9 @@ export class CodexProvider extends NodeEvents.EventEmitter implements IAgentProv
   }
 
   private codexSpawnInstructions(context: CodexSpawnContext): string {
-    const nestedDelegationModel = context.pendingSpawn?.turnOptions.model === "gpt-5.6-luna" ? "gpt-5.6-sol" : undefined;
+    const spawnModel = context.pendingSpawn?.turnOptions.model;
+    // Luna variants lack Ultra orchestration, so a nested spawn must route to the same-generation Sol.
+    const nestedDelegationModel = spawnModel?.endsWith("-luna") ? spawnModel.replace(/-luna$/, "-sol") : undefined;
     return renderMcodeInstructions(buildMcodeInstructionPlan({
       sourceThreadId: context.threadId,
       threadControlGranted: Boolean(context.internalMcp),

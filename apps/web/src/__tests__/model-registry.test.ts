@@ -87,10 +87,10 @@ describe("pickProviderModelsForSettings", () => {
 });
 
 describe("ModelRegistry", () => {
-  it("MODEL_PROVIDERS contains Claude with 8 models", () => {
+  it("MODEL_PROVIDERS contains Claude with 9 models", () => {
     const claude = MODEL_PROVIDERS.find((p) => p.id === "claude");
     expect(claude).toBeTruthy();
-    expect(claude?.models).toHaveLength(8);
+    expect(claude?.models).toHaveLength(9);
     expect(claude?.comingSoon).toBe(false);
   });
 
@@ -277,10 +277,12 @@ describe("ReasoningLevelSchema", () => {
 });
 
 describe("Codex model catalog", () => {
-  it("lists Astra before GPT-5.6 and older Codex models", () => {
+  it("lists GPT-6 models before GPT-5.6 and older Codex models", () => {
     const codex = MODEL_PROVIDERS.find((provider) => provider.id === "codex");
-    expect(codex?.models.slice(0, 4).map((model) => model.id)).toEqual([
+    expect(codex?.models.slice(0, 6).map((model) => model.id)).toEqual([
       "gpt-6-astra",
+      "gpt-6-sol",
+      "gpt-6-luna",
       "gpt-5.6-sol",
       "gpt-5.6-terra",
       "gpt-5.6-luna",
@@ -304,6 +306,15 @@ describe("Codex model catalog", () => {
       "max",
     ]);
     expect(getCodexDefaultReasoningLevel("gpt-5.6-sol")).toBe("low");
+    expect(getCodexReasoningLevels("gpt-6-sol")).toEqual([
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+    expect(getCodexDefaultReasoningLevel("gpt-6-sol")).toBe("low");
+    expect(getCodexDefaultReasoningLevel("gpt-6-luna")).toBe("medium");
     expect(getCodexReasoningLevels("gpt-5.6-luna")).toEqual([
       "low",
       "medium",
