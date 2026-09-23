@@ -218,7 +218,7 @@ describe("StartupProgressCard", () => {
     expect(overlay.querySelector("[data-startup-activity-shimmer-text]")).toHaveAttribute("data-startup-activity-shimmer-text", "Preparing checkout");
     expect(screen.getAllByText("Preparing checkout")).toHaveLength(1);
     expect(screen.getByTestId("startup-progress").querySelector("[aria-busy]")).not.toHaveClass("shadow-sm");
-    expect(screen.getByLabelText("Running")).toHaveClass("text-xs");
+    expect(screen.getByLabelText("Running")).toHaveClass("border-primary/60");
   });
 
   it("allows cancellation to be retried until an authoritative terminal snapshot arrives", async () => {

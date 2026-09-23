@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { Check, Minus, X } from "lucide-react";
 import type { ThreadStartup, ThreadStartupKind, ThreadStartupStepState } from "@mcode/contracts";
 import { WorktreeModeIcon } from "@/components/icons/WorktreeModeIcon";
 import { Button } from "@/components/ui/button";
@@ -142,22 +143,21 @@ function visibleSteps(startup: StartupDisplay, context: StartupDisplayContext): 
   }));
 }
 
-function stepTone(state: ThreadStartupStepState): string {
+function labelTone(state: ThreadStartupStepState): string {
   switch (state) {
     case "running":
-      return "border-primary text-foreground";
+      return "text-foreground font-medium";
+    case "blocked":
+      return "text-foreground";
+    case "failed":
+      return "text-destructive";
     case "completed":
     case "skipped":
-      return "border-muted-foreground/50 text-muted-foreground";
-    case "blocked":
-      return "border-primary/70 text-foreground";
-    case "failed":
-      return "border-destructive text-destructive";
+      return "text-muted-foreground";
     case "cancelled":
     case "interrupted":
-      return "border-muted-foreground/50 text-muted-foreground";
     case "pending":
-      return "border-border text-muted-foreground";
+      return "text-muted-foreground/70";
   }
 }
 
@@ -205,16 +205,74 @@ function StartupActivityLine({ activity }: { activity: StartupActivity }) {
   );
 }
 
+const NODE_BASE = "grid size-5 shrink-0 place-items-center rounded-full border transition-colors duration-200";
+
+/** Timeline node: spinner while running, glyph for settled states, hollow dot pending. */
+function StepNode({ state }: { state: ThreadStartupStepState }) {
+  const label = stateText(state);
+  if (state === "running") {
+    return (
+      <span aria-label={label} className={cn(NODE_BASE, "border-primary/60 bg-primary/10 text-primary")}>
+        <Spinner size={11} className="motion-reduce:animate-none" />
+      </span>
+    );
+  }
+  if (state === "completed") {
+    return (
+      <span aria-label={label} className={cn(NODE_BASE, "border-transparent bg-primary text-primary-foreground")}>
+        <Check size={11} strokeWidth={3} className="startup-node-pop" />
+      </span>
+    );
+  }
+  if (state === "failed") {
+    return (
+      <span aria-label={label} className={cn(NODE_BASE, "border-transparent bg-destructive/15 text-destructive")}>
+        <X size={11} strokeWidth={3} className="startup-node-pop" />
+      </span>
+    );
+  }
+  if (state === "blocked") {
+    return (
+      <span aria-label={label} className={cn(NODE_BASE, "border-primary/70 bg-primary/10")}>
+        <span className="status-pulse size-1.5 rounded-full bg-primary" />
+      </span>
+    );
+  }
+  if (state === "skipped" || state === "cancelled" || state === "interrupted") {
+    return (
+      <span aria-label={label} className={cn(NODE_BASE, "border-border bg-card text-muted-foreground/60")}>
+        <Minus size={10} strokeWidth={2.5} className="startup-node-pop" />
+      </span>
+    );
+  }
+  return (
+    <span aria-label={label} className={cn(NODE_BASE, "border-border bg-card")}>
+      <span className="size-1.5 rounded-full bg-border" />
+    </span>
+  );
+}
+
 function StartupSteps({ startup, context }: { startup: StartupDisplay; context: StartupDisplayContext }) {
   const steps = visibleSteps(startup, context);
   return (
-    <ol className="mt-4 grid gap-2.5">
-      {steps.map((step, index) => (
-        <li key={step.phase} data-state={step.state} className={cn("flex items-center gap-2.5 text-sm", stepTone(step.state))}>
-          <span aria-label={stateText(step.state)} className="grid size-5 shrink-0 place-items-center rounded-full border text-xs font-medium">
-            {step.state === "running" ? <Spinner size={11} className="motion-reduce:animate-none" /> : index + 1}
+    <ol className="mt-4">
+      {steps.map((step) => (
+        <li key={step.phase} data-state={step.state} className="group animate-fade-up-in flex gap-3 text-sm">
+          <span className="flex w-5 flex-col items-center">
+            <StepNode state={step.state} />
+            {/* The connector highlights once its step settles, so progress reads
+                as the line filling downward through the timeline. */}
+            <span
+              aria-hidden
+              className={cn(
+                "mt-1 w-px flex-1 transition-colors duration-300 group-last:hidden",
+                step.state === "completed" ? "bg-primary/50" : "bg-border",
+              )}
+            />
           </span>
-          <span>{stepLabel(step.phase, context)}</span>
+          <span className={cn("pb-4 pt-px transition-colors duration-200 group-last:pb-0", labelTone(step.state))}>
+            {stepLabel(step.phase, context)}
+          </span>
         </li>
       ))}
     </ol>
@@ -289,6 +347,34 @@ function StartupControls({
   );
 }
 
+function statusTone(state: StartupDisplay["state"]): string {
+  if (state === "failed") return "text-destructive";
+  if (state === "interrupted" || state === "blocked") return "text-muted-foreground";
+  return "text-primary";
+}
+
+function StartupHeader({
+  context,
+  startup,
+  cancellationPending,
+}: {
+  context: StartupDisplayContext;
+  startup: StartupDisplay;
+  cancellationPending: boolean;
+}) {
+  const statusHidden = cancellationPending || startup.cancellation === "requested" || startup.state === "cancelled";
+  return (
+    <header className="flex items-center justify-between gap-3">
+      <h2 className="text-sm font-medium text-foreground">{cardTitle(context)}</h2>
+      {!statusHidden ? (
+        <span className={cn("shrink-0 text-xs transition-colors duration-200", statusTone(startup.state))}>
+          {startupStatus(startup)}
+        </span>
+      ) : null}
+    </header>
+  );
+}
+
 /** Renders the small activity indicator and authoritative startup progress card. */
 export function StartupProgressCard({ startup, context, startupId, actions }: StartupProgressCardProps) {
   const display = startup ?? fallbackStartup(context);
@@ -303,15 +389,10 @@ export function StartupProgressCard({ startup, context, startupId, actions }: St
   if (display.state === "completed") return null;
 
   return (
-    <section data-testid="startup-progress" aria-label="Thread startup" className="space-y-2">
+    <section data-testid="startup-progress" aria-label="Thread startup" className="animate-fade-up-in space-y-2">
       <StartupActivityLine activity={activity} />
       <section aria-busy={isStartupBusy(display)} className="rounded-lg border border-border bg-card px-4 py-3">
-        <header className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-medium text-foreground">{cardTitle(context)}</h2>
-          {!cancellationPending && display.cancellation !== "requested" && display.state !== "cancelled" ? (
-            <span className="shrink-0 text-xs text-primary">{startupStatus(display)}</span>
-          ) : null}
-        </header>
+        <StartupHeader context={context} startup={display} cancellationPending={cancellationPending} />
         <StartupSteps startup={display} context={context} />
         <StartupNotice startup={display} cancelError={cancelError} />
         <div className="mt-3 space-y-3">
