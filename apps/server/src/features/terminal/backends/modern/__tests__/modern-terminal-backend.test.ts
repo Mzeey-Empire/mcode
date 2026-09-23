@@ -88,7 +88,7 @@ function makeSnapshot(): TerminalSessionSnapshot {
   };
 }
 
-function makeHarness() {
+function makeHarness(hostStart?: PtyHostAdapter["start"]) {
   const descriptor = makeDescriptor();
   const output = new TextEncoder().encode("abc");
   const hydration: TerminalHydration = {
@@ -124,7 +124,7 @@ function makeHarness() {
     health(): PtyHostHealth;
     diagnostics(): PtyHostDiagnostics;
   } = {
-    start: vi.fn(async () => ({ hostGeneration, state: "healthy" as const })),
+    start: hostStart ?? vi.fn(async () => ({ hostGeneration, state: "healthy" as const })),
     health: vi.fn(() => ({ hostGeneration, state: "healthy" as const })),
     diagnostics: vi.fn(() => ({
       lastHeartbeatMsAgo: 10,
@@ -154,7 +154,7 @@ function makeHarness() {
   };
   backend.setSender(sender);
   const client = {} as WebSocket;
-  return { backend, runtime, client, frames, output };
+  return { backend, runtime, client, frames, output, host };
 }
 
 describe("ModernTerminalBackend", () => {
@@ -645,5 +645,79 @@ describe("ModernTerminalBackend", () => {
         environmentNames: plan.environmentNames,
       },
     });
+  });
+
+  it("retries host start after a failed boot instead of pinning every request", async () => {
+    const start = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("PTY host spawn failed"))
+      .mockResolvedValue({ hostGeneration, state: "healthy" as const });
+    const harness = makeHarness(start);
+
+    const descriptor = await harness.backend.routeV1(
+      "terminal.session.attach",
+      {
+        sessionId,
+        attachmentId,
+        hostGeneration,
+        lastOutputSeq: "0",
+        lastCommandSeq: "0",
+      },
+      harness.client,
+    );
+
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(descriptor).toEqual(expect.objectContaining({ hydrationId }));
+  });
+
+  it("restarts the host when it wedged after a successful boot", async () => {
+    // The supervisor owns the unhealthy -> fresh-lifecycle transition; the
+    // regression here is the backend memoizing the resolved boot forever.
+    const start = vi
+      .fn()
+      .mockResolvedValue({ hostGeneration, state: "healthy" as const });
+    const harness = makeHarness(start);
+
+    const descriptor = await harness.backend.routeV1(
+      "terminal.session.attach",
+      {
+        sessionId,
+        attachmentId,
+        hostGeneration,
+        lastOutputSeq: "0",
+        lastCommandSeq: "0",
+      },
+      harness.client,
+    );
+
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(descriptor).toEqual(expect.objectContaining({ hydrationId }));
+  });
+
+  it("serves concurrent requests after a failed host start", async () => {
+    const start = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("PTY host spawn failed"))
+      .mockResolvedValue({ hostGeneration, state: "healthy" as const });
+    const harness = makeHarness(start);
+    const attach = () =>
+      harness.backend.routeV1(
+        "terminal.session.attach",
+        {
+          sessionId,
+          attachmentId,
+          hostGeneration,
+          lastOutputSeq: "0",
+          lastCommandSeq: "0",
+        },
+        harness.client,
+      );
+
+    const [a, b] = await Promise.all([attach(), attach()]);
+
+    expect(a).toEqual(expect.objectContaining({ hydrationId }));
+    expect(b).toEqual(expect.objectContaining({ hydrationId }));
+    // Constructor call plus one retry per concurrent request.
+    expect(start).toHaveBeenCalledTimes(3);
   });
 });

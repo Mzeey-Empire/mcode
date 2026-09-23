@@ -134,6 +134,12 @@ export class PtyHostSupervisor implements PtyHostAdapter {
   /** Starts the initial PTY host generation. */
   start(): Promise<PtyHostHealth> {
     if (this.startPromise) return this.startPromise;
+    if (this.state === "unhealthy") {
+      // An explicit start after failure opens a new lifecycle with a fresh
+      // replacement budget; without it one dead host wedges every later create.
+      this.state = "stopped";
+      this.replacementUsed = false;
+    }
     if (this.state !== "stopped")
       throw new Error("PTY host is already started");
     this.state = "starting";
@@ -579,7 +585,8 @@ export class PtyHostSupervisor implements PtyHostAdapter {
     const failedGeneration = this.generation.toString();
     const records = this.cleanupLedger.forGeneration(failedGeneration);
     setTimeout(async () => {
-      if (this.stopping || this.child) return;
+      // A manual start() takes over recovery; only proceed while still unhealthy.
+      if (this.stopping || this.child || this.state !== "unhealthy") return;
       const failures = await this.reapCleanupRecords(records);
       if (failures.length > 0) {
         this.publish({
@@ -592,6 +599,8 @@ export class PtyHostSupervisor implements PtyHostAdapter {
         });
         return;
       }
+      // The reap awaited: a manual start() may be mid-spawn on the new state.
+      if (this.stopping || this.child || this.state !== "unhealthy") return;
       this.trackStart(this.spawnGeneration());
     }, this.options.replacementDelayMs ?? REPLACEMENT_DELAY_MS);
   }

@@ -1,4 +1,5 @@
 import { useDiffStore } from "@/stores/diffStore";
+import { useToastStore } from "@/stores/toastStore";
 import { MAX_TERMINALS_PER_SCOPE, useTerminalStore } from "@/features/terminal";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import { getTransport } from "@/transport";
@@ -8,7 +9,15 @@ import { getTransport } from "@/transport";
  * concurrent triggers (tab click, the mod+j keybinding, React strict-mode
  * double-invoked effects) spawn at most one terminal per scope.
  */
-const creationInFlight = new Set<string>();
+const creationInFlight = new Map<string, symbol>();
+
+/**
+ * Upper bound on one create request before its scope lock is released. Server
+ * create can stall behind PTY host respawn; without a deadline a request that
+ * never answers wedges the scope for the rest of the app session. A late
+ * response still attaches through the normal success path.
+ */
+const TERMINAL_CREATE_DEADLINE_MS = 20_000;
 
 /**
  * Resolve the workspace that owns a terminal scope. The scope is a thread id
@@ -40,43 +49,73 @@ export function createTerminalForScope(scopeId: string): void {
   const existing = useTerminalStore.getState().terminals[scopeId];
   if ((existing?.length ?? 0) >= MAX_TERMINALS_PER_SCOPE) return;
 
-  creationInFlight.add(scopeId);
+  // A late release must only clear this attempt's lock: after the deadline the
+  // scope can be re-acquired by a retry while the stale request is still open.
+  const attempt = Symbol();
+  creationInFlight.set(scopeId, attempt);
+  const release = () => {
+    if (creationInFlight.get(scopeId) === attempt) creationInFlight.delete(scopeId);
+  };
+  const timer = setTimeout(release, TERMINAL_CREATE_DEADLINE_MS);
   try {
     const transport = getTransport();
     transport
       .terminalCreate(scopeId)
       .then(({ ptyId, shell }) => {
-        creationInFlight.delete(scopeId);
-        // The panel record is per-thread (or the workspace fallback for the
-        // threadless shell). Resolve the owning workspace, then read the scope's
-        // effective record, passing the thread id only when the scope is a thread.
-        const { workspaceId, isThread } = resolveScopeWorkspace(scopeId);
-        const panelThreadId = isThread ? scopeId : undefined;
-        const diff = useDiffStore.getState();
-        const panel = workspaceId
-          ? diff.getRightPanel(workspaceId, panelThreadId)
-          : undefined;
-        const panelVisible = workspaceId
-          ? diff.getRightPanelVisible(workspaceId, panelThreadId)
-          : false;
-        if (!panel || !panelVisible) {
+        clearTimeout(timer);
+        release();
+        try {
+          // The panel record is per-thread (or the workspace fallback for the
+          // threadless shell). Resolve the owning workspace, then read the scope's
+          // effective record, passing the thread id only when the scope is a thread.
+          const { workspaceId, isThread } = resolveScopeWorkspace(scopeId);
+          const panelThreadId = isThread ? scopeId : undefined;
+          const diff = useDiffStore.getState();
+          const panel = workspaceId
+            ? diff.getRightPanel(workspaceId, panelThreadId)
+            : undefined;
+          const panelVisible = workspaceId
+            ? diff.getRightPanelVisible(workspaceId, panelThreadId)
+            : false;
+          if (!panel || !panelVisible) {
+            transport.terminalKill(ptyId).catch(() => {});
+            return;
+          }
+          const current = useTerminalStore.getState().terminals[scopeId];
+          if ((current?.length ?? 0) >= MAX_TERMINALS_PER_SCOPE) {
+            transport.terminalKill(ptyId).catch(() => {});
+            return;
+          }
+          useTerminalStore.getState().addTerminal(scopeId, ptyId, shell);
+          diff.addRightPanelTerminalTab(workspaceId!, panelThreadId, ptyId);
+        } catch (error) {
+          // The server already spawned the PTY; a failed local attach must not
+          // leak it on the host.
           transport.terminalKill(ptyId).catch(() => {});
-          return;
+          throw error;
         }
-        const current = useTerminalStore.getState().terminals[scopeId];
-        if ((current?.length ?? 0) >= MAX_TERMINALS_PER_SCOPE) {
-          transport.terminalKill(ptyId).catch(() => {});
-          return;
-        }
-        useTerminalStore.getState().addTerminal(scopeId, ptyId, shell);
-        diff.addRightPanelTerminalTab(workspaceId!, panelThreadId, ptyId);
       })
-      .catch(() => {
-        creationInFlight.delete(scopeId);
+      .catch((error) => {
+        clearTimeout(timer);
+        // After the deadline a retry may own the lock; a stale failure must not
+        // toast over its result.
+        const superseded =
+          creationInFlight.has(scopeId) &&
+          creationInFlight.get(scopeId) !== attempt;
+        release();
+        if (!superseded) showCreateFailure(error);
       });
-  } catch {
-    creationInFlight.delete(scopeId);
+  } catch (error) {
+    clearTimeout(timer);
+    release();
+    showCreateFailure(error);
   }
+}
+
+function showCreateFailure(error: unknown): void {
+  const message =
+    error instanceof Error ? error.message : "Could not create terminal";
+  useToastStore.getState().show("error", "Failed to create terminal", message);
 }
 
 /** Ensures a Terminal tab has its first PTY-backed rail instance. */
