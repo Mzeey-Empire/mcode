@@ -8,17 +8,32 @@ describe("classifyLoadResult", () => {
 
   it("classifies main-frame HTTP 404 as http with status and 'Page not found'", () => {
     const r = classifyLoadResult(true, 0, "", 404, "https://x.test/missing");
-    expect(r).toEqual({ kind: "http", status: 404, message: "Page not found" });
+    expect(r).toEqual({
+      kind: "http",
+      status: 404,
+      message: "Page not found",
+      detail: "The address may be wrong, or the page moved.",
+    });
   });
 
   it("classifies a generic 4xx as http with a neutral message", () => {
     const r = classifyLoadResult(true, 0, "", 403, "https://x.test/forbidden");
-    expect(r).toEqual({ kind: "http", status: 403, message: "The site returned an error" });
+    expect(r).toEqual({
+      kind: "http",
+      status: 403,
+      message: "The site returned an error",
+      detail: "The site refused this request.",
+    });
   });
 
   it("classifies main-frame HTTP 5xx as http with 'The site had an error'", () => {
     const r = classifyLoadResult(true, 0, "", 503, "https://x.test");
-    expect(r).toEqual({ kind: "http", status: 503, message: "The site had an error" });
+    expect(r).toEqual({
+      kind: "http",
+      status: 503,
+      message: "The site had an error",
+      detail: "The problem is on the site's side. Try again later.",
+    });
   });
 
   it("returns 'ok' for ERR_ABORTED (-3): redirects and user cancels are not failures", () => {
@@ -39,6 +54,7 @@ describe("classifyLoadResult", () => {
       kind: "file-not-found",
       code: "ERR_FILE_NOT_FOUND",
       message: "File no longer exists",
+      detail: "It may have been moved, renamed, or deleted.",
     });
   });
 
@@ -48,22 +64,37 @@ describe("classifyLoadResult", () => {
       kind: "network",
       code: "ERR_NAME_NOT_RESOLVED",
       message: "Can't reach this site",
+      detail: "Check the address or your connection, then try again.",
     });
   });
 
   it("classifies an unknown negative net error on the main frame as network", () => {
     const r = classifyLoadResult(true, -2, "ERR_FAILED", 0, "https://x.test");
-    expect(r).toEqual({ kind: "network", code: "ERR_FAILED", message: "Can't reach this site" });
+    expect(r).toEqual({
+      kind: "network",
+      code: "ERR_FAILED",
+      message: "Can't reach this site",
+      detail: "Check the address or your connection, then try again.",
+    });
   });
 
   it("prefers the HTTP status when both an http error and a benign code are present", () => {
     const r = classifyLoadResult(true, 0, "", 404, "https://x.test");
-    expect(r).toEqual({ kind: "http", status: 404, message: "Page not found" });
+    expect(r).toEqual({
+      kind: "http",
+      status: 404,
+      message: "Page not found",
+      detail: "The address may be wrong, or the page moved.",
+    });
   });
 });
 
 describe("crashError", () => {
   it("builds a crash error with 'This page crashed'", () => {
-    expect(crashError()).toEqual({ kind: "crash", message: "This page crashed" });
+    expect(crashError()).toEqual({
+      kind: "crash",
+      message: "This page crashed",
+      detail: "Something went wrong while displaying it.",
+    });
   });
 });

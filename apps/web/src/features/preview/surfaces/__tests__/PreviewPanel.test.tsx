@@ -710,7 +710,7 @@ describe("PreviewPanel: full panel state", () => {
     useSettingsStore.getState()._applyPush(getDefaultSettings());
     usePreviewAnnotationStore.setState({ byThread: {}, drafts: {} });
     usePreviewDesignModeStore.setState({ modes: {} });
-    usePreviewTabsStore.setState({ tabSetByScope: {}, liveChromeByScope: {}, persistentTabIdsByScope: {} });
+    usePreviewTabsStore.setState({ tabSetByScope: {}, liveChromeByScope: {}, persistentTabIdsByScope: {}, pendingNavErrorsByScope: {} });
     useDiffStore.setState({ previewUrlByThread: {} });
     useBrowserAutomationStore.setState({ controllers: new Map(), pendingAgentOpens: new Map() });
     useProviderCatalogStore.getState().reset();
@@ -731,7 +731,7 @@ describe("PreviewPanel: full panel state", () => {
     useSettingsStore.getState()._applyPush(getDefaultSettings());
     usePreviewAnnotationStore.setState({ byThread: {}, drafts: {} });
     usePreviewDesignModeStore.setState({ modes: {} });
-    usePreviewTabsStore.setState({ tabSetByScope: {}, liveChromeByScope: {}, persistentTabIdsByScope: {} });
+    usePreviewTabsStore.setState({ tabSetByScope: {}, liveChromeByScope: {}, persistentTabIdsByScope: {}, pendingNavErrorsByScope: {} });
     useBrowserAutomationStore.setState({ controllers: new Map(), pendingAgentOpens: new Map() });
     useProviderCatalogStore.getState().reset();
     mockUsePreviewBridge.mockClear();
@@ -2932,6 +2932,251 @@ describe("PreviewPanel: full panel state", () => {
       expect(submitSpy).toHaveBeenCalledTimes(1);
     } finally {
       window.removeEventListener("mcode:submit-composer", submitSpy);
+    }
+  });
+  it("shows a file-not-found error page when the omnibox path is rejected", async () => {
+    const resolveNavigation = vi.fn().mockResolvedValue({ ok: false, error: "file-not-found" });
+    mockUsePreviewBridge.mockReturnValue(mockBridgeState({ resolveNavigation }));
+
+    render(<PreviewPanel threadId="thread-1" />);
+    const input = screen.getByLabelText("Preview URL");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "C:\\missing\\page.html" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("preview-error-panel")).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId("preview-error-headline")).toHaveTextContent("File not found");
+    expect(
+      within(screen.getByTestId("preview-error-panel")).getByText(/C:\\missing\\page\.html/),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps input-shape failures as an inline hint instead of an error page", async () => {
+    const resolveNavigation = vi.fn().mockResolvedValue({ ok: false, error: "invalid-url" });
+    mockUsePreviewBridge.mockReturnValue(mockBridgeState({ resolveNavigation }));
+
+    render(<PreviewPanel threadId="thread-1" />);
+    const input = screen.getByLabelText("Preview URL");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "not a url" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("invalid-url"),
+    );
+    expect(screen.queryByTestId("preview-error-panel")).not.toBeInTheDocument();
+  });
+
+  it("shows folder guidance and a detail line for a directory", async () => {
+    const resolveNavigation = vi.fn().mockResolvedValue({ ok: false, error: "is-directory" });
+    mockUsePreviewBridge.mockReturnValue(mockBridgeState({ resolveNavigation }));
+
+    render(<PreviewPanel threadId="thread-1" />);
+    const input = screen.getByLabelText("Preview URL");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "C:\\workspace\\docs" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("preview-error-headline")).toHaveTextContent("Can't preview a folder"),
+    );
+    expect(screen.getByTestId("preview-error-detail")).toHaveTextContent("index.html");
+  });
+
+  it("hides Retry on the blocked page for a sensitive file", async () => {
+    const resolveNavigation = vi.fn().mockResolvedValue({ ok: false, error: "sensitive-file" });
+    mockUsePreviewBridge.mockReturnValue(mockBridgeState({ resolveNavigation }));
+
+    render(<PreviewPanel threadId="thread-1" />);
+    const input = screen.getByLabelText("Preview URL");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "C:\\workspace\\.env" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("preview-error-headline")).toHaveTextContent("This file can't be previewed"),
+    );
+    expect(screen.getByTestId("preview-error-detail")).toHaveTextContent(".env");
+    expect(screen.queryByTestId("preview-error-retry")).not.toBeInTheDocument();
+  });
+
+  it("retries a rejected navigation by re-running resolve with the attempted input", async () => {
+    const resolveNavigation = vi.fn().mockResolvedValue({ ok: false, error: "file-not-found" });
+    mockUsePreviewBridge.mockReturnValue(mockBridgeState({ resolveNavigation }));
+
+    render(<PreviewPanel threadId="thread-1" />);
+    const input = screen.getByLabelText("Preview URL");
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "C:\\missing\\page.html" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    await waitFor(() => screen.getByTestId("preview-error-panel"));
+
+    fireEvent.click(screen.getByTestId("preview-error-retry"));
+
+    await waitFor(() => expect(resolveNavigation).toHaveBeenCalledTimes(2));
+    expect(resolveNavigation).toHaveBeenLastCalledWith("C:\\missing\\page.html");
+  });
+
+  it("keeps the error on republish of the superseded page and clears on a real commit", async () => {
+    const resolveNavigation = vi.fn().mockResolvedValue({ ok: false, error: "file-not-found" });
+    mockUsePreviewBridge.mockReturnValue(mockBridgeState({ resolveNavigation }));
+    mockUsePreviewTabs.mockReturnValue({
+      tabSet: {
+        threadId: "thread-1",
+        activeTabId: "tab-1",
+        tabs: [
+          {
+            id: "tab-1",
+            threadId: "thread-1",
+            title: null,
+            url: "https://old.example/",
+            faviconUrl: null,
+            warm: true,
+            active: true,
+          },
+        ],
+      },
+      newTab: vi.fn(),
+      activateTab: vi.fn(),
+      closeTab: vi.fn(),
+    });
+    const restoreWebviewMethods = installMockWebviewMethods({
+      getURL: () => "https://old.example/",
+    });
+
+    try {
+      render(<PreviewPanel threadId="thread-1" />);
+      const hostedWebview = await waitFor(() =>
+        screen.getByTestId("electron-browser-surface-webview"),
+      );
+      fireEvent(hostedWebview, new Event("dom-ready"));
+      const oldNav = new Event("did-navigate") as Event & { url?: string };
+      Object.defineProperty(oldNav, "url", { value: "https://old.example/" });
+      fireEvent(hostedWebview, oldNav);
+      fireEvent(hostedWebview, new Event("did-stop-loading"));
+
+      const input = screen.getByLabelText("Preview URL");
+      fireEvent.focus(input);
+      fireEvent.change(input, { target: { value: "C:\\missing\\page.html" } });
+      fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+      await waitFor(() => screen.getByTestId("preview-error-panel"));
+
+      // A republish of the page the error replaced must not clear it.
+      const republish = new Event("did-navigate") as Event & { url?: string };
+      Object.defineProperty(republish, "url", { value: "https://old.example/" });
+      fireEvent(hostedWebview, republish);
+      expect(screen.getByTestId("preview-error-panel")).toBeInTheDocument();
+
+      const commit = new Event("did-navigate") as Event & { url?: string };
+      Object.defineProperty(commit, "url", { value: "https://new.example/" });
+      fireEvent(hostedWebview, commit);
+      await waitFor(() =>
+        expect(screen.queryByTestId("preview-error-panel")).not.toBeInTheDocument(),
+      );
+    } finally {
+      restoreWebviewMethods();
+    }
+  });
+
+  it("drops a superseded navigation result instead of pinning its error over the live page", async () => {
+    let resolveStale!: (v: { ok: false; error: string }) => void;
+    const stale = new Promise<{ ok: false; error: string }>((r) => {
+      resolveStale = r;
+    });
+    const resolveNavigation = vi
+      .fn()
+      .mockReturnValueOnce(stale)
+      .mockResolvedValue({ ok: true, url: "https://new.example/" });
+    mockUsePreviewBridge.mockReturnValue(mockBridgeState({ resolveNavigation }));
+    mockUsePreviewTabs.mockReturnValue({
+      tabSet: {
+        threadId: "thread-1",
+        activeTabId: "tab-1",
+        tabs: [
+          {
+            id: "tab-1",
+            threadId: "thread-1",
+            title: null,
+            url: "https://old.example/",
+            faviconUrl: null,
+            warm: true,
+            active: true,
+          },
+        ],
+      },
+      newTab: vi.fn(),
+      activateTab: vi.fn(),
+      closeTab: vi.fn(),
+    });
+    const restoreWebviewMethods = installMockWebviewMethods({
+      getURL: () => "https://old.example/",
+    });
+
+    try {
+      render(<PreviewPanel threadId="thread-1" />);
+      const input = screen.getByLabelText("Preview URL");
+
+      // Slow submission that will fail, then a fast one that succeeds.
+      fireEvent.focus(input);
+      fireEvent.change(input, { target: { value: "C:\\missing\\page.html" } });
+      fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+      fireEvent.change(input, { target: { value: "https://new.example/" } });
+      fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+      await waitFor(() => expect(resolveNavigation).toHaveBeenCalledTimes(2));
+
+      // The stale failure resolves last and must be ignored.
+      resolveStale({ ok: false, error: "file-not-found" });
+      await waitFor(() =>
+        expect(usePreviewTabsStore.getState().pendingNavErrorsByScope).toEqual({}),
+      );
+      expect(screen.queryByTestId("preview-error-panel")).not.toBeInTheDocument();
+    } finally {
+      restoreWebviewMethods();
+    }
+  });
+
+  it("clears a backgrounded tab's pending error when that tab commits", async () => {
+    mockUsePreviewBridge.mockReturnValue(mockBridgeState());
+    mockUsePreviewTabs.mockReturnValue({
+      tabSet: {
+        threadId: "thread-1",
+        activeTabId: "tab-a",
+        tabs: [
+          { id: "tab-a", threadId: "thread-1", title: null, url: "https://a.example/", faviconUrl: null, warm: true, active: true },
+          { id: "tab-b", threadId: "thread-1", title: null, url: null, faviconUrl: null, warm: true, active: false },
+        ],
+      },
+      newTab: vi.fn(),
+      activateTab: vi.fn(),
+      closeTab: vi.fn(),
+    });
+    usePreviewTabsStore.getState().setPendingNavError("thread-1", "thread-1", "tab-b", {
+      input: "C:\\missing\\page.html",
+      error: { kind: "file-not-found", message: "File not found" },
+      supersededUrl: null,
+    });
+    const restoreWebviewMethods = installMockWebviewMethods({});
+
+    try {
+      render(<PreviewPanel threadId="thread-1" />);
+      const webviews = await waitFor(() =>
+        screen.getAllByTestId("electron-browser-surface-webview"),
+      );
+      const commit = new Event("did-navigate") as Event & { url?: string };
+      Object.defineProperty(commit, "url", { value: "https://b.example/" });
+      fireEvent(webviews[1]!, commit);
+
+      await waitFor(() =>
+        expect(
+          usePreviewTabsStore.getState().pendingNavErrorsByScope[
+            previewTabsScopeKey("thread-1", "thread-1")
+          ],
+        ).toBeUndefined(),
+      );
+    } finally {
+      restoreWebviewMethods();
     }
   });
 });

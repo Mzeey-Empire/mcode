@@ -111,7 +111,9 @@ function handleLinkClick(e: React.MouseEvent | React.KeyboardEvent, url: string)
   if (isModifierClick(e) && hasPreview()) {
     const threadId = useWorkspaceStore.getState().activeThreadId;
     if (threadId) {
-      openUrlInPreview({ url, threadId, workspacePath });
+      // No workspacePath: the preview scope resolves against the thread's own
+      // workspace, which can differ from the active workspace.
+      openUrlInPreview({ url, threadId });
       return;
     }
   }

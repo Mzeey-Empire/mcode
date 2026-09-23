@@ -1,21 +1,23 @@
 import {
-  ArrowLeft,
-  FileX,
-  RefreshCw,
-  ServerCrash,
-  TriangleAlert,
-  WifiOff,
-  type LucideIcon,
-} from "lucide-react";
+  ArrowClockwiseIcon,
+  ArrowLeftIcon,
+  FileXIcon,
+  GlobeXIcon,
+  ShieldWarningIcon,
+  WarningDiamondIcon,
+  WifiSlashIcon,
+  type Icon,
+} from "@phosphor-icons/react";
 import type { PreviewPageError } from "@mcode/contracts";
 import { Button } from "@/components/ui/button";
 
 /** Per-kind glyph for the error headline. */
-const ERROR_ICON: Record<PreviewPageError["kind"], LucideIcon> = {
-  http: TriangleAlert,
-  network: WifiOff,
-  "file-not-found": FileX,
-  crash: ServerCrash,
+const ERROR_ICON: Record<PreviewPageError["kind"], Icon> = {
+  http: GlobeXIcon,
+  network: WifiSlashIcon,
+  "file-not-found": FileXIcon,
+  crash: WarningDiamondIcon,
+  blocked: ShieldWarningIcon,
 };
 
 /** Props for {@link PreviewErrorPanel}. */
@@ -33,9 +35,10 @@ export interface PreviewErrorPanelProps {
 }
 
 /**
- * Error surface shown when a Browser page fails to load. Names the failure in
- * plain language, shows the diagnostic code and URL, and offers Retry plus Go
- * back when there is history to return to.
+ * Error surface shown when a Browser page fails to load. Follows the browser
+ * error-page grammar: a large duotone glyph, a display headline naming the
+ * failure, a short next-move line, a mono diagnostic line carrying the code
+ * and attempted address, and the recovery actions.
  *
  * Editing the address and opening in the system browser are intentionally NOT
  * here: the omnibox directly above is the URL editor, and the toolbar already
@@ -49,44 +52,61 @@ export function PreviewErrorPanel({
   onGoBack,
 }: PreviewErrorPanelProps) {
   const Icon = ERROR_ICON[error.kind];
-  // HTTP failures lead with the status; network/file failures with the
-  // Chromium net-error code. The dev audience uses this to triage.
+  // A blocked file stays blocked; retrying would only refuse again.
+  const canRetry = error.kind !== "blocked";
   const diagnostic = error.status ? String(error.status) : (error.code ?? null);
-  // Join only the present parts so the line never trails a dangling separator
-  // when one side is absent (a crash has no status/code; a provisional failure
-  // never committed a URL).
-  const diagnosticLine = [diagnostic, url].filter(Boolean).join(" \u00b7 ");
+  const diagnosticLine = [diagnostic, url].filter(Boolean).join(" · ");
+
   return (
     <div
       data-testid="preview-error-panel"
       role="alert"
-      className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center motion-safe:animate-in motion-safe:fade-in"
+      className="absolute inset-0 flex flex-col items-center justify-center gap-7 px-6 text-center motion-safe:animate-in motion-safe:fade-in"
     >
-      {/* Clay-tinted per the system's errored-state color (matches the sidebar
-          thread dot and the omnibox navError line) so the failure registers at
-          a glance, kept muted to stay quiet rather than a loud alert chip. */}
-      <Icon className="size-8 text-destructive/70" aria-hidden />
-      <div className="space-y-1">
+      {/* Duotone is the documented weight for large empty-state glyphs; clay
+          tint marks the errored reading at glance speed. 48px steps past the
+          32px display size because this glyph is the page hero, matching the
+          browser error pages this surface emulates. */}
+      <Icon size={48} weight="duotone" className="text-destructive/70" aria-hidden />
+      <div className="flex max-w-md flex-col items-center gap-3">
         <p
           data-testid="preview-error-headline"
-          className="text-sm font-medium text-foreground"
+          className="text-[2.4rem] font-semibold leading-[2.8rem] tracking-[-0.01em] text-foreground"
         >
           {error.message}
         </p>
-        {diagnosticLine ? (
-          <p className="max-w-md truncate font-mono text-[11px] text-muted-foreground">
-            {diagnosticLine}
+        {error.detail ? (
+          <p
+            data-testid="preview-error-detail"
+            className="text-balance text-sm leading-relaxed text-muted-foreground"
+          >
+            {error.detail}
           </p>
         ) : null}
       </div>
-      <div className="flex flex-wrap items-center justify-center gap-1.5">
-        <Button size="sm" onClick={onRetry} data-testid="preview-error-retry">
-          <RefreshCw aria-hidden />
-          Retry
-        </Button>
+      {diagnosticLine ? (
+        <p className="max-w-md truncate font-mono text-[11px] text-muted-foreground/70">
+          {diagnosticLine}
+        </p>
+      ) : null}
+      <div className="flex items-center justify-center gap-2">
+        {canRetry ? (
+          // The lamp hue as a tonal wash: still the primary recovery action,
+          // but the solid fill reads muddy at control scale.
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onRetry}
+            data-testid="preview-error-retry"
+            className="rounded-2xl bg-primary/[0.12] text-primary ring-1 ring-inset ring-primary/20 hover:bg-primary/[0.2] hover:text-primary"
+          >
+            <ArrowClockwiseIcon aria-hidden />
+            Retry
+          </Button>
+        ) : null}
         {canBack ? (
-          <Button size="sm" variant="outline" onClick={onGoBack}>
-            <ArrowLeft aria-hidden />
+          <Button size="sm" variant="ghost" onClick={onGoBack} className="rounded-2xl">
+            <ArrowLeftIcon aria-hidden />
             Go back
           </Button>
         ) : null}
