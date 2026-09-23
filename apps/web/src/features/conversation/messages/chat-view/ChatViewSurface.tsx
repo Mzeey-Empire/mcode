@@ -19,11 +19,13 @@ import { McodeLogo } from "@/components/brand/McodeLogo";
 import { SidebarRevealButton } from "@/components/sidebar/SidebarRevealButton";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import type { SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
+import { useComposerDraftStore } from "@/stores/composerDraftStore";
 import { ProjectAutomaticSetupCard, useProjectAutomaticSetup } from "@/features/projects/environment";
 import { ProjectCommandApprovalDialog } from "@/features/projects/environment/ProjectCommandApprovalDialog";
 import { StartupProgressCard, useThreadStartup, type StartupDisplayContext } from "@/features/thread-startup";
-import { useThreadStartupLookup } from "@/features/thread-startup/state/thread-startup-store";
-import { type WorkspaceThread } from "@/lib/workspace-thread";
+import { useThreadStartupLookup, useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
+import { type WorkspaceThread, type ClientPreparingContext } from "@/lib/workspace-thread";
+import type { PendingStartup } from "@/features/projects/state/workspaceStore";
 import type { SubagentRosterTarget } from "../../narrative";
 import { Composer } from "../../composer/Composer";
 import { SavingDelayedDialog } from "../../saving/SavingDelayedDialog";
@@ -184,11 +186,11 @@ function NewThreadSurface({ state, onPromptSelect }: { state: ChatViewState; onP
 }
 
 /** Renders a selected row while the server creates the backing thread. */
-function startupContext(thread: WorkspaceThread, startupKind?: "direct" | "managed-worktree" | "pull-request-review"): StartupDisplayContext {
+function startupContext(context: ClientPreparingContext | undefined, startupKind?: "direct" | "managed-worktree" | "pull-request-review"): StartupDisplayContext {
   if (startupKind === "pull-request-review") return "pull-request-review";
   if (startupKind === "managed-worktree") return "managed-worktree";
-  if (thread.clientPreparingContext === "new-existing-worktree" || thread.clientPreparingContext === "branch-existing-worktree") return "attached-worktree";
-  if (thread.clientPreparingContext === "new-worktree" || thread.clientPreparingContext === "branch-worktree") return "managed-worktree";
+  if (context === "new-existing-worktree" || context === "branch-existing-worktree") return "attached-worktree";
+  if (context === "new-worktree" || context === "branch-worktree") return "managed-worktree";
   return "direct";
 }
 
@@ -196,29 +198,64 @@ function showsAuthoritativeCancellation(thread: WorkspaceThread, startup: Return
   return Boolean(thread.clientError) && startup?.state === "cancelled";
 }
 
+/** Recovery actions for a cancelled startup on a durable thread. */
+function CancelledStartupActions({ thread, startup }: { thread: WorkspaceThread; startup: NonNullable<ReturnType<typeof useThreadStartup>> }) {
+  const startOver = async () => {
+    // The vetoed message survives only in the restored draft (already consumed
+    // by the in-shell composer) or the husk thread's title. Set the prefill
+    // after delete: pendingPrefill is consumed by whichever composer is mounted
+    // when it lands, and the in-shell composer would eat it.
+    const prefill = useComposerDraftStore.getState().getDraft(thread.id)?.input || thread.title;
+    await useWorkspaceStore.getState().deleteThread(thread.id, thread.mode === "worktree");
+    if (prefill) useComposerDraftStore.getState().setPendingPrefill(prefill);
+  };
+  return (
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => { void startOver().catch(() => undefined); }}
+      >
+        Start over
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={() => useThreadStartupStore.getState().dismissStartup(startup.startupId)}
+      >
+        Keep thread
+      </Button>
+    </>
+  );
+}
+
 function PreparingStartupContent({
   thread,
+  pendingStartup,
   startup,
   actions,
 }: {
   thread: WorkspaceThread;
+  pendingStartup: PendingStartup | undefined;
   startup: ReturnType<typeof useThreadStartup>;
   actions: ReactNode;
 }) {
   if (thread.clientError && !showsAuthoritativeCancellation(thread, startup)) {
     return <CollapsibleError error={thread.clientError} onRetry={() => { void useWorkspaceStore.getState().retryPreparingThread(thread.id); }} onDismiss={() => useWorkspaceStore.getState().dismissPreparingThread(thread.id)} />;
   }
-  return <div className="mx-auto w-full max-w-xl"><StartupProgressCard startup={startup} startupId={thread.clientStartupId ?? startup?.startupId} context={startupContext(thread, startup?.kind)} actions={actions} /></div>;
+  return <div className="w-full"><StartupProgressCard startup={startup} startupId={pendingStartup?.startupId ?? startup?.startupId} context={startupContext(pendingStartup?.context, startup?.kind)} actions={startup?.state === "cancelled" ? <CancelledStartupActions thread={thread} startup={startup} /> : actions} /></div>;
 }
 
-function PreparingThreadHeader({ thread, state }: { thread: WorkspaceThread; state: ChatViewState }) {
+function PreparingThreadHeader({ thread, state, startupPending }: { thread: WorkspaceThread; state: ChatViewState; startupPending: boolean }) {
   return (
     <div className="flex h-11 items-center justify-between border-b border-border pr-4 pl-2">
       <div className="flex min-w-0 items-center gap-2">
         {state.sidebarCollapsed && <SidebarRevealButton />}
         <span data-testid="chat-header-title" className="truncate text-sm font-medium">
           {thread.title}
-          {thread.clientPreparing && <span className="ml-2 inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-primary/60 align-middle" aria-hidden />}
+          {(thread.clientPreparing || startupPending) && <span className="ml-2 inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-primary/60 align-middle" aria-hidden />}
         </span>
         {state.activeWorkspaceId && <Badge variant="secondary">{state.activeWorkspaceName}</Badge>}
         {thread.parent_thread_id && state.parentThreadExists && (
@@ -232,29 +269,36 @@ function PreparingThreadHeader({ thread, state }: { thread: WorkspaceThread; sta
   );
 }
 
+/** Whether a resolved startup is stuck in a state the automatic-setup card can recover from. */
+function startupNeedsSetupRecovery(startup: ReturnType<typeof useThreadStartup>): boolean {
+  return startup?.state === "blocked" || startup?.state === "failed" || startup?.state === "interrupted";
+}
+
 /** Renders a selected row while the server creates the backing thread. */
 function ThreadPreparingShell({
   thread,
   state,
   startup,
+  pendingStartup,
 }: {
   thread: WorkspaceThread;
   state: ChatViewState;
   startup: ReturnType<typeof useThreadStartup>;
+  pendingStartup: PendingStartup | undefined;
 }) {
-  const needsSetupRecovery = startup?.state === "blocked"
-    || startup?.state === "failed"
-    || startup?.state === "interrupted";
+  const needsSetupRecovery = startupNeedsSetupRecovery(startup);
   const automaticSetup = useProjectAutomaticSetup(
     thread.id,
     needsSetupRecovery && thread.mode === "worktree" && thread.worktree_managed === true,
   );
   return (
     <div className="flex h-full flex-col bg-background" data-testid="thread-preparing-shell">
-      <PreparingThreadHeader thread={thread} state={state} />
-      <div className="flex flex-1 flex-col items-stretch justify-center gap-6 px-6 py-8">
-        <div className="mx-auto w-full max-w-xl rounded-xl border border-border/50 bg-muted/15 px-4 py-3 text-sm text-foreground/90"><p className="whitespace-pre-wrap break-words">{thread.clientQueuedMessage ?? ""}</p></div>
-        <PreparingStartupContent thread={thread} startup={startup} actions={<StartupAutomaticSetupActions automaticSetup={automaticSetup} />} />
+      <PreparingThreadHeader thread={thread} state={state} startupPending={pendingStartup !== undefined} />
+      <div className="flex flex-1 flex-col items-stretch justify-center gap-6 px-4 py-8 sm:px-8">
+        <div className="flex justify-end">
+          <div className="min-w-0 max-w-[min(82%,56rem)] rounded-xl border border-border/50 bg-muted/15 px-4 py-3 text-sm text-foreground/90"><p className="whitespace-pre-wrap break-words">{pendingStartup?.queuedMessage || thread.title}</p></div>
+        </div>
+        <PreparingStartupContent thread={thread} pendingStartup={pendingStartup} startup={startup} actions={<StartupAutomaticSetupActions automaticSetup={automaticSetup} />} />
       </div>
       <Composer threadId={thread.id} workspaceId={state.activeWorkspaceId ?? undefined} />
     </div>
@@ -414,11 +458,16 @@ function shouldKeepPreparingShell(
   state: ChatViewState,
   startup: ReturnType<typeof useThreadStartup>,
   startupResolving: boolean,
+  pendingStartup: PendingStartup | undefined,
+  startupDismissed: boolean,
 ): boolean {
   if (thread.clientPreparing || thread.clientError) return true;
   if (hasConversationHold(state)) return false;
-  if (startupResolving && thread.clientStartupId !== undefined) return true;
-  return startup !== undefined && (!state.targetPaintable || startup.state !== "completed");
+  // A cancelled startup leaves an ordinary empty thread behind: keep the record
+  // visible with its actions until the user dismisses it or starts a new turn.
+  if (startup?.state === "cancelled") return !startupDismissed && !state.isAgentRunning;
+  if (startup !== undefined) return !state.targetPaintable || startup.state !== "completed";
+  return pendingStartup !== undefined && startupResolving;
 }
 
 function ChatMessageStage({ state, interactions, automaticSetup, selectedTextCommentEditor, selectedTextCommentSourceNavigation, onSubagentSelect, onOpenSubagents }: Pick<ChatViewSurfaceProps, "state" | "interactions" | "selectedTextCommentEditor" | "selectedTextCommentSourceNavigation" | "onSubagentSelect" | "onOpenSubagents"> & { readonly automaticSetup: ReturnType<typeof useProjectAutomaticSetup> }) {
@@ -516,14 +565,18 @@ function ActiveThreadSurface(props: ChatViewSurfaceProps) {
 /** Selects the visual chat shell for the current workspace selection. */
 export function ChatViewSurface(props: ChatViewSurfaceProps) {
   const { state } = props;
+  const pendingStartup = useWorkspaceStore((s) =>
+    state.activeThread ? s.pendingStartupByThreadId[state.activeThread.id] : undefined);
   const startupLookup = useThreadStartupLookup({
-    startupId: state.activeThread?.clientStartupId,
+    startupId: pendingStartup?.startupId,
     threadId: state.activeThread?.id,
     workspaceId: state.activeThread?.workspace_id,
     enabled: Boolean(state.activeThread),
   });
+  const startupDismissed = useThreadStartupStore((s) =>
+    startupLookup.startup ? s.dismissedStartupIds.has(startupLookup.startup.startupId) : false);
   if (!state.activeThreadId) return <NewThreadSurface state={state} onPromptSelect={props.interactions.onPromptSelect} />;
   if (!state.activeThread) return <MissingThreadSurface sidebarCollapsed={state.sidebarCollapsed} />;
-  if (shouldKeepPreparingShell(state.activeThread, state, startupLookup.startup, startupLookup.resolving)) return <ThreadPreparingShell thread={state.activeThread} state={state} startup={startupLookup.startup} />;
+  if (shouldKeepPreparingShell(state.activeThread, state, startupLookup.startup, startupLookup.resolving, pendingStartup, startupDismissed)) return <ThreadPreparingShell thread={state.activeThread} state={state} startup={startupLookup.startup} pendingStartup={pendingStartup} />;
   return <ActiveThreadSurface {...props} />;
 }

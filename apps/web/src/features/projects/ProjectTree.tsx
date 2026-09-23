@@ -1341,6 +1341,7 @@ const ThreadRow = memo(function ThreadRow({
 }: ThreadRowProps) {
   const isActive = useWorkspaceStore((s) => s.activeThreadId === thread.id);
   const isRunning = useThreadStore((s) => isThreadExecuting(thread.id, s));
+  const startupPending = useWorkspaceStore((s) => s.pendingStartupByThreadId[thread.id] !== undefined);
   const automaticSetup = useProjectAutomaticSetup(
     thread.id,
     thread.mode === "worktree" && thread.worktree_managed === true,
@@ -1367,12 +1368,14 @@ const ThreadRow = memo(function ThreadRow({
     worktreesLoadedFor,
     validWorktreePaths,
     availableProviders,
+    startupPending,
   );
   const lifecycle = useThreadLifecycleActions({
     thread,
     isEditing,
     isRunning,
     hasPendingPermission,
+    startupPending,
     isUserCompleted: presentation.isUserCompleted,
     cleanupBlocked: presentation.cleanupBlocked,
     onCompleteThread,
@@ -1472,6 +1475,7 @@ function createThreadRowPresentation(
   worktreesLoadedFor: string | null,
   validWorktreePaths: Set<string>,
   availableProviders: ThreadRowProps["availableProviders"],
+  startupPending: boolean,
 ): ThreadRowPresentation {
   const marker = getThreadStateMarker({
     thread,
@@ -1490,7 +1494,7 @@ function createThreadRowPresentation(
     showPrCi,
     isStaleWorktree: hasStaleThreadWorktree(thread, worktreesLoadedFor, validWorktreePaths),
     ...threadProviderPresentation(thread.provider, availableProviders),
-    scaffoldDim: thread.clientPreparing || thread.clientError ? "opacity-[0.72]" : false,
+    scaffoldDim: thread.clientPreparing || thread.clientError || startupPending ? "opacity-[0.72]" : false,
     isUserCompleted,
     cleanupBlocked: isUserCompleted && thread.cleanup_state === "blocked",
     showEndMarker: marker.kind !== "time" && (!showPrCi || marker.kind !== "ci"),
@@ -1585,6 +1589,7 @@ function useThreadLifecycleActions({
   isEditing,
   isRunning,
   hasPendingPermission,
+  startupPending,
   isUserCompleted,
   cleanupBlocked,
   onCompleteThread,
@@ -1592,6 +1597,7 @@ function useThreadLifecycleActions({
   onRetryThreadCleanup,
 }: Pick<ThreadRowProps, "thread" | "isEditing" | "hasPendingPermission" | "onCompleteThread" | "onReopenThread" | "onRetryThreadCleanup"> & {
   isRunning: boolean;
+  startupPending: boolean;
   isUserCompleted: boolean;
   cleanupBlocked: boolean;
 }): ThreadRowLifecycleActions {
@@ -1611,12 +1617,15 @@ function useThreadLifecycleActions({
     || isEditing
     || isRunning
     || hasPendingPermission
+    || startupPending
     || Boolean(thread.clientPreparing || thread.clientError);
   const handleLifecycleClick = useCallback(async (event: React.MouseEvent) => {
     event.stopPropagation();
     // Read the map directly: two clicks in one frame both pass the committed
     // snapshot before the subscribed re-render lands.
-    if (lifecycleUnavailable || lifecyclePendingByThread.get(thread.id)) return;
+    if (lifecycleUnavailable
+      || lifecyclePendingByThread.get(thread.id)
+      || useWorkspaceStore.getState().pendingStartupByThreadId[thread.id] !== undefined) return;
     setLifecycleUiPending(thread.id, true);
     try {
       const updateLifecycle = isUserCompleted ? onReopenThread : onCompleteThread;

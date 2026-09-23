@@ -12,21 +12,18 @@ export type WorkspaceThread = Thread & {
   clientError?: string | null;
   /** Non-fatal warnings from thread creation (e.g. worktree checkout issues). */
   clientWarnings?: string[] | null;
-  /** Message body shown in the preparing shell (mirrors cleared composer input). */
-  clientQueuedMessage?: string;
-  /** Client-generated startup lifecycle identity retained after the Thread is created. */
-  clientStartupId?: string;
-  /**
-   * Drives status copy in the preparing shell (new vs branch, direct vs worktree).
-   */
-  clientPreparingContext?:
-    | "new-direct"
-    | "new-worktree"
-    | "new-existing-worktree"
-    | "branch-direct"
-    | "branch-worktree"
-    | "branch-existing-worktree";
 };
+
+/**
+ * Drives status copy in the preparing shell (new vs branch, direct vs worktree).
+ */
+export type ClientPreparingContext =
+  | "new-direct"
+  | "new-worktree"
+  | "new-existing-worktree"
+  | "branch-direct"
+  | "branch-worktree"
+  | "branch-existing-worktree";
 
 const TITLE_MAX = 72;
 
@@ -40,22 +37,16 @@ export function titleFromMessageContent(content: string): string {
   return `${trimmed.slice(0, TITLE_MAX - 1)}…`;
 }
 
-/** Union of all preparing-context values for exhaustive switch checks. */
-export type ClientPreparingContext = NonNullable<WorkspaceThread["clientPreparingContext"]>;
-
 type PlaceholderWorkspaceThreadParams = {
   id: string;
   workspaceId: string;
   title: string;
-  queuedMessage: string;
   transportMode: "direct" | "worktree";
   branch: string;
   checkoutState?: Thread["checkout_state"];
   baseBranch?: string | null;
   worktreePath?: string | null;
   worktreeManaged?: boolean;
-  clientPreparingContext: ClientPreparingContext;
-  startupId?: string;
   model?: string | null;
   provider?: string | null;
   reasoningLevel?: ReasoningLevel | null;
@@ -162,8 +153,5 @@ export function buildPlaceholderWorkspaceThread(
     default_open_in_app: null,
     clientPreparing: true,
     clientError: null,
-    clientQueuedMessage: params.queuedMessage,
-    clientStartupId: params.startupId,
-    clientPreparingContext: params.clientPreparingContext,
   };
 }

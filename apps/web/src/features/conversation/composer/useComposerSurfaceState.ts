@@ -53,10 +53,13 @@ function useCatalogScope(input: ComposerSurfaceStateInput) {
   return { catalogThreadId, catalogCwd };
 }
 
-function getComposerLocks(input: ComposerSurfaceStateInput) {
+function getComposerLocks(
+  input: ComposerSurfaceStateInput,
+  startupPending: boolean,
+) {
   return {
     isThreadScaffold: Boolean(
-      input.activeThread?.clientPreparing || input.activeThread?.clientError,
+      input.activeThread?.clientPreparing || input.activeThread?.clientError || startupPending,
     ),
     isModelFullyLocked: input.isAgentRunning && !input.branchFromMessageId,
     isProviderLocked: Boolean(
@@ -93,7 +96,11 @@ export function useComposerSurfaceState(input: ComposerSurfaceStateInput) {
   const effectiveProviderId = input.provider as ProviderId;
   const providerSurfaceState = useProviderSurfaceState(effectiveProviderId);
   const catalogScope = useCatalogScope(input);
-  const composerLocks = getComposerLocks(input);
+  // Startup state lives outside the thread row so list refreshes cannot drop
+  // the composer lock between thread creation and the agent's first event.
+  const startupPending = useWorkspaceStore((state) =>
+    input.threadId ? state.pendingStartupByThreadId[input.threadId] !== undefined : false);
+  const composerLocks = getComposerLocks(input, startupPending);
 
   return {
     annotationScopeId,
