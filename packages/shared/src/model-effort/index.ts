@@ -6,7 +6,7 @@
  * This prevents the SDK from receiving unsupported effort values at runtime.
  */
 
-import type { ReasoningLevel } from "@mcode/contracts";
+import { CODEX_STATIC_MODELS, type ReasoningLevel } from "@mcode/contracts";
 
 // Ordered lowest to highest. Walking DOWN from a disallowed tier finds the best
 // supported level without silently escalating effort.
@@ -129,6 +129,10 @@ function isMiniCodexModel(modelId: string): boolean {
 }
 
 function codexFallbackTier(modelId: string): ReasoningLevel {
+  const declared = CODEX_STATIC_MODELS.find(
+    (entry) => modelId === entry.id || modelId.startsWith(`${entry.id}-`),
+  )?.defaultReasoningEffort;
+  if (declared) return declared;
   return modelId.endsWith("-sol") ? "low" : "medium";
 }
 

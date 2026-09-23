@@ -313,7 +313,7 @@ describe("Codex model catalog", () => {
       "xhigh",
       "max",
     ]);
-    expect(getCodexDefaultReasoningLevel("gpt-6-sol")).toBe("low");
+    expect(getCodexDefaultReasoningLevel("gpt-6-sol")).toBe("medium");
     expect(getCodexDefaultReasoningLevel("gpt-6-luna")).toBe("medium");
     expect(getCodexReasoningLevels("gpt-5.6-luna")).toEqual([
       "low",

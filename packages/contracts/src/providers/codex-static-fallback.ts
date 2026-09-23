@@ -22,7 +22,7 @@ export const CODEX_STATIC_MODELS: readonly ProviderModelInfo[] = [
     supportsVision: true,
     supportsReasoning: true,
     supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
-    defaultReasoningEffort: "low",
+    defaultReasoningEffort: "medium",
     supportsUltraOrchestration: true,
   },
   {

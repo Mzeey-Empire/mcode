@@ -260,7 +260,7 @@ describe("normalizeReasoningLevelForModel", () => {
     });
 
     it("uses GPT-6 defaults when switching from an unsupported lower tier", () => {
-      expect(normalizeReasoningLevelForModel("gpt-6-sol", "none")).toBe("low");
+      expect(normalizeReasoningLevelForModel("gpt-6-sol", "none")).toBe("medium");
       expect(normalizeReasoningLevelForModel("gpt-6-luna", "minimal")).toBe("medium");
     });
 
