@@ -30,6 +30,8 @@ function createTestDb(): Database {
       source_thread_id TEXT,
       source_turn_id TEXT,
       source_provider_id TEXT,
+      legacy_provenance TEXT,
+      parent_agent_provenance TEXT,
       is_internal INTEGER NOT NULL DEFAULT 0,
       outcome TEXT,
       outcome_execution_id TEXT
@@ -161,6 +163,20 @@ describe("MessageRepo", () => {
   });
 
   describe("listByThread", () => {
+    it("returns stored canonical legacy provenance without replacing it with the ambiguous fallback", () => {
+      db.prepare(`
+        INSERT INTO messages (id, thread_id, role, content, timestamp, sequence, origin_type, legacy_provenance)
+        VALUES ('legacy-canonical', 'thread-1', 'user', 'Question', '2026-09-22T10:00:00.000Z', 1, 'legacy', ?)
+      `).run(JSON.stringify({ source: "messages", migrationVersion: 1, mapping: "canonical" }));
+
+      expect(repo.listByThread("thread-1", 10).messages).toEqual([
+        expect.objectContaining({
+          id: "legacy-canonical",
+          legacyProvenance: { source: "messages", migrationVersion: 1, mapping: "canonical" },
+        }),
+      ]);
+    });
+
     it("returns tool_call_count per message via indexed lookup", () => {
       repo.create("thread-1", "user", "a", 1);
       const m2 = repo.create("thread-1", "assistant", "b", 2);

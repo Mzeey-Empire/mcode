@@ -79,7 +79,7 @@ export class ModernTerminalBackend extends TerminalBackend {
   private readonly uploads = new Map<string, CheckpointUpload>();
   private readonly selectedAt = new Date().toISOString();
   private readonly diagnostics: TerminalDiagnosticsService;
-  private readonly startPromise: Promise<PtyHostHealth>;
+  private startPromise: Promise<PtyHostHealth>;
   private readonly unsubscribeDelivery: () => void;
 
   constructor(
@@ -140,7 +140,16 @@ export class ModernTerminalBackend extends TerminalBackend {
   }
 
   private async ensureHostStarted(): Promise<void> {
+    // Observe the prior boot so its rejection is never unhandled, then defer to
+    // start(): it coalesces every state, returning the settled promise on a
+    // healthy host, pending on an in-flight replacement, and starting a fresh
+    // lifecycle on an unhealthy one.
+    await this.startPromise.then(
+      () => undefined,
+      () => undefined,
+    );
     try {
+      this.startPromise = this.host.start();
       await this.startPromise;
     } catch (error) {
       throw new TerminalBackendError(
@@ -642,7 +651,7 @@ export class ModernTerminalBackend extends TerminalBackend {
   async startPreparedCommand(input: PreparedTerminalCommandRequest): Promise<PreparedTerminalCommandSession> {
     const workspaceId = this.workspaceForThread?.(input.threadId);
     if (!workspaceId) throw new Error("Prepared command Thread is unavailable");
-    await this.startPromise;
+    await this.ensureHostStarted();
     const created = await this.createPreparedSession(input, workspaceId);
     return this.createPreparedCommandSession(created, input);
   }

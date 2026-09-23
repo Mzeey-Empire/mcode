@@ -38,6 +38,7 @@ export type DiffViewMode =
   | "commit"
   | "branch"
   | "last-turn"
+  | "turn"
   | "cumulative";
 
 /** Diff rendering mode. */
@@ -245,14 +246,20 @@ export function createDefaultRightPanelState(): RightPanelState {
   });
 }
 
-/** Stable cache key for one inline diff payload. */
-function inlineDiffCacheKey(
+/**
+ * Stable cache key for one inline diff payload. `cacheVersion` sits between
+ * the id and path so a response fetched under an older revision can never be
+ * read back under a newer one, while every existing `scopeId:` prefix eviction
+ * still matches.
+ */
+export function inlineDiffCacheKey(
   threadId: string,
   source: string,
   id: string,
   filePath: string,
+  cacheVersion: string | number,
 ): string {
-  return `${threadId}:${source}:${id}:${filePath}`;
+  return `${threadId}:${source}:${id}:${cacheVersion}:${filePath}`;
 }
 
 /** Drop inline diff cache entries matching a stable key prefix. */
@@ -452,6 +459,13 @@ interface DiffState {
    */
   readonly reviewViewManuallySelectedByThread: Record<string, boolean>;
   /**
+   * The Turn view's picked operand, keyed by thread ID: the assistant message ID
+   * owning the turn whose diff renders. Persists across view switches so picking
+   * Turn again returns to the same turn. In-memory only; dropped by
+   * {@link clearThread}.
+   */
+  readonly selectedTurnMessageIdByThread: Record<string, string>;
+  /**
    * The Branch view's current→selected comparison for the current scope, or null
    * until the picker resolves it. Drives both the ref picker and the rendered
    * Branch diff. See
@@ -497,8 +511,8 @@ interface DiffState {
   reviewDiffStat: { additions: number; deletions: number } | null;
   /** Bulk expand/collapse command for the Review view's file cards; each FileEntry applies it on nonce change. */
   bulkDiffExpand: { expand: boolean; nonce: number } | null;
-  /** File-tree jump request for the active Review scope. */
-  reviewFileJumpRequest: { scopeId: string; path: string; nonce: number } | null;
+  /** File-tree jump request for the active Review scope. `viewKey` pins the request to the view it was issued for (e.g. `turn:<messageId>`), so an outgoing view's list cannot consume a request meant for the incoming one. */
+  reviewFileJumpRequest: { scopeId: string; path: string; nonce: number; viewKey?: string } | null;
   /** Per-thread line-wrap preference keyed by thread ID. */
   readonly lineWrapByThread: Record<string, boolean>;
   /** Turn snapshots keyed by thread ID. */
@@ -635,6 +649,12 @@ interface DiffState {
    */
   setReviewViewForThread: (threadId: string, mode: DiffViewMode) => void;
   /**
+   * Record the Turn view's picked operand for a thread: the assistant message ID
+   * whose settled turn diff renders. Written by the per-turn change summary's
+   * diff entry points.
+   */
+  setReviewTurnForThread: (threadId: string, messageId: string) => void;
+  /**
    * Apply a freshly resolved Branch comparison for a scope, recording the revision
    * it was resolved at and preserving the user's manually picked target when that
    * scope is flagged and the picked ref still exists.
@@ -657,8 +677,10 @@ interface DiffState {
   setReviewDiffStat: (stat: { additions: number; deletions: number } | null) => void;
   /** Expand or collapse every file card in the active Review view. */
   setBulkDiffExpand: (expand: boolean) => void;
-  /** Ask the active Review file list to reveal one changed file. */
-  requestReviewFileJump: (scopeId: string, path: string) => void;
+  /** Ask the active Review file list to reveal one changed file. `viewKey` pins the request to the issuing view (e.g. `turn:<messageId>`); omit for requests any view in the scope may serve. */
+  requestReviewFileJump: (scopeId: string, path: string, viewKey?: string) => void;
+  /** Drop a consumed or stale Review file-jump request. */
+  clearReviewFileJump: () => void;
   getLineWrap: (threadId: string) => boolean;
   toggleLineWrap: (threadId: string) => void;
   setSnapshots: (threadId: string, snapshots: TurnSnapshot[]) => void;
@@ -675,9 +697,9 @@ interface DiffState {
   /** Set summary loading state. */
   setSummaryLoading: (loading: boolean) => void;
   /** Cache a fetched inline diff so it survives component unmounts. */
-  cacheInlineDiff: (threadId: string, source: string, id: string, filePath: string, data: string) => void;
+  cacheInlineDiff: (threadId: string, source: string, id: string, filePath: string, data: string, cacheVersion: string | number) => void;
   /** Retrieve a cached inline diff, or undefined if not cached. */
-  getCachedInlineDiff: (threadId: string, source: string, id: string, filePath: string) => string | undefined;
+  getCachedInlineDiff: (threadId: string, source: string, id: string, filePath: string, cacheVersion: string | number) => string | undefined;
   /** Bump a mutable diff scope so mounted file rows refetch against the latest checkout. */
   bumpDiffRevision: (scopeId: string) => void;
   /** Persist the omnibox URL for a thread's embedded preview. */
@@ -699,6 +721,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   viewMode: "last-turn",
   reviewViewByThread: {},
   reviewViewManuallySelectedByThread: {},
+  selectedTurnMessageIdByThread: {},
   branchComparison: null,
   branchComparisonKey: null,
   branchManuallySelectedByScope: {},
@@ -930,7 +953,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
     }),
 
   setViewMode: (mode) =>
-    set({ viewMode: mode, selectedFile: null, diffContent: null, selectedCommitSha: null }),
+    set({ viewMode: mode, selectedFile: null, diffContent: null, selectedCommitSha: null, reviewFileJumpRequest: null }),
   getReviewView: (threadId, changeState) => {
     const state = get();
     if (state.reviewViewManuallySelectedByThread[threadId]) {
@@ -954,8 +977,18 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         selectedFile: null,
         diffContent: null,
         selectedCommitSha: null,
+        // A jump request belongs to the view it was issued for; a fresh pick
+        // drops it so a stale path cannot fire in an unrelated view.
+        reviewFileJumpRequest: null,
       };
     }),
+  setReviewTurnForThread: (threadId, messageId) =>
+    set((s) => ({
+      selectedTurnMessageIdByThread: {
+        ...s.selectedTurnMessageIdByThread,
+        [threadId]: messageId,
+      },
+    })),
   resolveBranchComparison: (comparison, key, revision) =>
     set((s) => {
       const sameScope = s.branchComparisonKey === key;
@@ -1012,14 +1045,16 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   setReviewDiffStat: (stat) => set({ reviewDiffStat: stat }),
   setBulkDiffExpand: (expand) =>
     set((s) => ({ bulkDiffExpand: { expand, nonce: (s.bulkDiffExpand?.nonce ?? 0) + 1 } })),
-  requestReviewFileJump: (scopeId, path) =>
+  requestReviewFileJump: (scopeId, path, viewKey) =>
     set((s) => ({
       reviewFileJumpRequest: {
         scopeId,
         path,
+        viewKey,
         nonce: (s.reviewFileJumpRequest?.nonce ?? 0) + 1,
       },
     })),
+  clearReviewFileJump: () => set({ reviewFileJumpRequest: null }),
   getLineWrap: (threadId) => get().lineWrapByThread[threadId] ?? DEFAULT_LINE_WRAP,
   toggleLineWrap: (threadId) =>
     set((state) => {
@@ -1063,12 +1098,12 @@ export const useDiffStore = create<DiffState>((set, get) => ({
   setDiffLoading: (loading) => set({ diffLoading: loading }),
   setSummaryRecord: (record) => set({ summaryRecord: record }),
   setSummaryLoading: (loading) => set({ summaryLoading: loading }),
-  cacheInlineDiff: (threadId, source, id, filePath, data) =>
+  cacheInlineDiff: (threadId, source, id, filePath, data, cacheVersion) =>
     set((s) => ({
-      inlineDiffCache: { ...s.inlineDiffCache, [inlineDiffCacheKey(threadId, source, id, filePath)]: data },
+      inlineDiffCache: { ...s.inlineDiffCache, [inlineDiffCacheKey(threadId, source, id, filePath, cacheVersion)]: data },
     })),
-  getCachedInlineDiff: (threadId, source, id, filePath) =>
-    get().inlineDiffCache[inlineDiffCacheKey(threadId, source, id, filePath)],
+  getCachedInlineDiff: (threadId, source, id, filePath, cacheVersion) =>
+    get().inlineDiffCache[inlineDiffCacheKey(threadId, source, id, filePath, cacheVersion)],
   bumpDiffRevision: (scopeId) =>
     set((s) => ({
       diffRevisionByScope: {
@@ -1111,6 +1146,8 @@ export const useDiffStore = create<DiffState>((set, get) => ({
       delete reviewViewByThread[threadId];
       const reviewViewManuallySelectedByThread = { ...state.reviewViewManuallySelectedByThread };
       delete reviewViewManuallySelectedByThread[threadId];
+      const selectedTurnMessageIdByThread = { ...state.selectedTurnMessageIdByThread };
+      delete selectedTurnMessageIdByThread[threadId];
       const diffRevisionByScope = { ...state.diffRevisionByScope };
       delete diffRevisionByScope[threadId];
       const reviewFilesVisibleByScope = { ...state.reviewFilesVisibleByScope };
@@ -1145,6 +1182,7 @@ export const useDiffStore = create<DiffState>((set, get) => ({
         subagentReviewScopeByThread,
         reviewViewByThread,
         reviewViewManuallySelectedByThread,
+        selectedTurnMessageIdByThread,
         diffRevisionByScope,
         reviewFilesVisibleByScope,
         branchManuallySelectedByScope,

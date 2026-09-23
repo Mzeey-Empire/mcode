@@ -1,9 +1,11 @@
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
 import type { ComposerDraft, SelectedTextCommentEditorDraft } from "@/stores/composerDraftStore";
 import type {
+  ApprovalReviewMode,
   ContextWindowMode,
   DevinMode,
   MessageMention,
+  OrchestrationMode,
   ReasoningLevel,
   SelectedTextComment,
 } from "@mcode/contracts";
@@ -35,6 +37,9 @@ export interface ComposerSession {
   thinking: boolean | null;
   codexFastMode: boolean | null;
   devinMode: DevinMode | null;
+  /** Present only for local draft owners; thread owners resolve modes from thread settings. */
+  orchestrationMode?: OrchestrationMode;
+  approvalReviewMode?: ApprovalReviewMode;
 }
 
 /** Inputs for resolving a thread's composer session without React. */
@@ -50,6 +55,9 @@ export interface ResolveComposerSessionInput {
     thinking: boolean | null;
     codexFastMode: boolean | null;
     devinMode: DevinMode | null;
+    /** Draft owners carry these; thread owners leave them undefined. */
+    orchestrationMode?: OrchestrationMode;
+    approvalReviewMode?: ApprovalReviewMode;
   };
   globalDefaults: {
     interactionMode: InteractionMode;
@@ -118,7 +126,8 @@ function buildDefaultComposerSession(
   };
 }
 
-function buildSavedComposerSession(
+/** Builds a session from a saved draft plus the owner's mode settings. */
+export function buildSavedComposerSession(
   saved: ComposerDraft,
   threadSettings: ResolveComposerSessionInput["threadSettings"],
 ): ComposerSession {
@@ -145,6 +154,8 @@ function buildSavedComposerSession(
     thinking: threadSettings.thinking,
     codexFastMode: resolveSavedCodexFastMode(saved.codexFastMode, threadSettings.codexFastMode),
     devinMode: saved.devinMode === undefined ? threadSettings.devinMode : saved.devinMode,
+    orchestrationMode: threadSettings.orchestrationMode,
+    approvalReviewMode: threadSettings.approvalReviewMode,
   };
 }
 

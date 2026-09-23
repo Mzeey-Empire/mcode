@@ -39,6 +39,9 @@ import { ReviewToolbarSlotContext } from "./review-toolbar-slot";
 
 const PIERRE_WORKER_POOL_SIZE = 3;
 
+/** Snapshot paths arrive with platform separators; comparison paths may not. */
+const normalizeJumpPath = (path: string) => path.replace(/\\/g, "/");
+
 const pierrePoolOptions = {
   poolSize: PIERRE_WORKER_POOL_SIZE,
   workerFactory: () =>
@@ -64,6 +67,13 @@ interface FileListProps {
   refreshing?: boolean;
   /** Refresh the complete comparison through the owning Review lifecycle. */
   onRefresh?: () => void;
+  /**
+   * Identity of the view rendering this list (e.g. `turn:<messageId>`).
+   * View-keyed jump requests are consumed only by the list whose key matches,
+   * so a still-mounted outgoing view cannot swallow a request meant for the
+   * incoming one.
+   */
+  jumpViewKey?: string;
 }
 
 /**
@@ -81,12 +91,17 @@ export function FileList({
   refreshable = false,
   refreshing = false,
   onRefresh,
+  jumpViewKey,
 }: FileListProps) {
   const [jumpOpen, setJumpOpen] = useState(false);
   const [jumpTarget, setJumpTarget] = useState<{ path: string; token: number } | null>(null);
   const [highlightPath, setHighlightPath] = useState<string | null>(null);
   const jumpTokenRef = useRef(0);
   const highlightClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A consumed keyed jump can fire against a comparison that is about to be
+  // swapped out (the view's operand changed but its replacement is still
+  // loading); arm a one-shot re-jump keyed on the comparison id.
+  const reJumpRef = useRef<{ path: string; id: string } | null>(null);
   const sortedFiles = useMemo(
     () => files.slice().sort((a, b) => a.path.localeCompare(b.path)),
     [files],
@@ -138,14 +153,39 @@ export function FileList({
   }, []);
 
   useEffect(() => {
+    // A jump request can predate this list's mount (the requester opens a view,
+    // the comparison loads, then this list mounts). Consume the pending request
+    // on entry and on file-list changes, then subscribe for live requests.
+    const consumeJumpRequest = (request: { scopeId: string; path: string; nonce: number; viewKey?: string } | null) => {
+      if (!request || request.scopeId !== threadId) return;
+      // A view-keyed request is owned by the view it was issued for; the
+      // outgoing view's still-mounted list must not consume it.
+      if (request.viewKey && request.viewKey !== jumpViewKey) return;
+      const requested = normalizeJumpPath(request.path);
+      const target = sortedFiles.find((f) => normalizeJumpPath(f.path) === requested);
+      if (!target) return;
+      useDiffStore.getState().clearReviewFileJump();
+      // Only keyed requests arm the re-jump; an unkeyed jump is owned by no
+      // view and must not resurface on an unrelated comparison swap.
+      reJumpRef.current = request.viewKey
+        ? { path: normalizeJumpPath(target.path), id }
+        : null;
+      jumpToFile(target.path);
+    };
+    const armed = reJumpRef.current;
+    if (armed && armed.id !== id) {
+      reJumpRef.current = null;
+      const target = sortedFiles.find(
+        (f) => normalizeJumpPath(f.path) === armed.path,
+      );
+      if (target) jumpToFile(target.path);
+    }
+    consumeJumpRequest(useDiffStore.getState().reviewFileJumpRequest);
     return useDiffStore.subscribe((state, prev) => {
-      const request = state.reviewFileJumpRequest;
-      if (!request || request === prev.reviewFileJumpRequest) return;
-      if (request.scopeId !== threadId) return;
-      if (!sortedFiles.some((f) => f.path === request.path)) return;
-      jumpToFile(request.path);
+      if (state.reviewFileJumpRequest === prev.reviewFileJumpRequest) return;
+      consumeJumpRequest(state.reviewFileJumpRequest);
     });
-  }, [jumpToFile, sortedFiles, threadId]);
+  }, [id, jumpToFile, jumpViewKey, sortedFiles, threadId]);
 
   if (files.length === 0) {
     return (

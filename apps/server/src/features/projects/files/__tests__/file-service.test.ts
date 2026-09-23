@@ -28,9 +28,9 @@ describe("FileService.refresh", () => {
   it("baselines silently on the first call and reports only later deltas", async () => {
     const exec = vi
       .fn()
-      .mockResolvedValueOnce({ stdout: " M src/a.ts\n" })
-      .mockResolvedValueOnce({ stdout: " M src/a.ts\n" })
-      .mockResolvedValueOnce({ stdout: " M src/a.ts\n?? src/b.ts\n" });
+      .mockResolvedValueOnce({ stdout: " M src/a.ts\0" })
+      .mockResolvedValueOnce({ stdout: " M src/a.ts\0" })
+      .mockResolvedValueOnce({ stdout: " M src/a.ts\0?? src/b.ts\0" });
     const { service } = makeService({ exec });
 
     await expect(service.refresh("workspace-1")).resolves.toBeNull();
@@ -40,19 +40,52 @@ describe("FileService.refresh", () => {
       wholeWorkspace: false,
     });
     expect(exec).toHaveBeenCalledTimes(3);
-    expect(exec).toHaveBeenLastCalledWith(["status", "--porcelain"], { cwd: "C:/workspace" });
+    expect(exec).toHaveBeenLastCalledWith(
+      ["status", "--porcelain", "--untracked-files=all", "-z"],
+      { cwd: "C:/workspace" },
+    );
+  });
+
+  it("reports the destination path for rename entries in -z output", async () => {
+    const exec = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: "" })
+      .mockResolvedValueOnce({ stdout: "R  new name.ts\0old name.ts\0" });
+    const { service } = makeService({ exec });
+
+    await expect(service.refresh("workspace-1")).resolves.toBeNull();
+    await expect(service.refresh("workspace-1")).resolves.toEqual({
+      changedPaths: ["new name.ts"],
+      wholeWorkspace: false,
+    });
   });
 
   it("tracks thread scopes independently", async () => {
     const exec = vi
       .fn()
-      .mockResolvedValueOnce({ stdout: " M src/a.ts\n" })
-      .mockResolvedValueOnce({ stdout: " M src/a.ts\n" });
+      .mockResolvedValueOnce({ stdout: " M src/a.ts\0" })
+      .mockResolvedValueOnce({ stdout: " M src/a.ts\0" });
     const { service } = makeService({ exec });
 
     await expect(service.refresh("workspace-1", "thread-1")).resolves.toBeNull();
     // Same status under a different scope is still a first-seen baseline.
     await expect(service.refresh("workspace-1")).resolves.toBeNull();
+  });
+
+  it("reports wholeWorkspace when a delta exceeds the changed-path cap", async () => {
+    const exec = vi
+      .fn()
+      .mockResolvedValueOnce({ stdout: "" })
+      .mockResolvedValueOnce({
+        stdout: Array.from({ length: 101 }, (_, i) => `?? dir/file-${i}.ts`).join("\0"),
+      });
+    const { service } = makeService({ exec });
+
+    await expect(service.refresh("workspace-1")).resolves.toBeNull();
+    await expect(service.refresh("workspace-1")).resolves.toEqual({
+      changedPaths: [],
+      wholeWorkspace: true,
+    });
   });
 
   it("fingerprints the bounded listing when the scope is not a git repository", async () => {

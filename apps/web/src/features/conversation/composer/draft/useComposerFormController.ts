@@ -6,6 +6,7 @@ import {
   useState,
   type RefObject,
 } from "react";
+import { useShallow } from "zustand/shallow";
 import type { LexicalEditor } from "lexical";
 import type { AttachmentMeta, Thread } from "@/transport";
 import { INTERACTION_MODES } from "@/transport";
@@ -22,9 +23,17 @@ import {
 } from "@/lib/model-registry";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import {
+  draftHasNoSendableContent,
   useComposerDraftStore,
+  type ComposerDraft,
   type SelectedTextCommentEditorDraft,
 } from "@/stores/composerDraftStore";
+import {
+  useThreadDraftStore,
+  type ThreadDraft,
+  type ThreadDraftSelection,
+  type ThreadDraftTarget,
+} from "@/stores/threadDraftStore";
 import { useSettingsStore } from "@/stores/settingsStore";
 import { useThreadRecord } from "@/features/conversation/state";
 import { useThreadStore } from "@/stores/threadStore";
@@ -45,8 +54,10 @@ import {
 } from "./composer-selection-state";
 import { createQueuedComposerRestoreState } from "./queued-composer-restore";
 import {
+  composerOwnerKey,
   resolveComposerSessionForOwner,
   transitionComposerDraftOwner,
+  type ComposerOwner,
 } from "./composer-session-lifecycle";
 import { reconcileComposerThreadModel } from "./composer-thread-model-reconciliation";
 
@@ -78,9 +89,11 @@ export interface ComposerFormSubmission {
 }
 
 interface SubmittedDraftClear {
-  ownerThreadId: string | undefined;
+  ownerKey: string;
   submission: ComposerFormSubmission;
   attachments: PendingAttachment[];
+  /** Removed draft entity kept for dispatch-failure rollback. */
+  draftEntity?: ThreadDraft;
 }
 
 /** Event bindings and lifecycle operations for the Composer attachment tray. */
@@ -106,6 +119,12 @@ export interface UseComposerFormControllerOptions {
   threadId?: string;
   isNewThread: boolean;
   workspaceId?: string;
+  /**
+   * Draft-thread binding. `string` binds a persisted draft, `null` enables
+   * draft materialization for a fresh new-thread composer, and `undefined`
+   * disables draft tracking entirely (fork dialogs).
+   */
+  draftId?: string | null;
   branchFromMessageId?: string;
   branchFromMessageContent?: string;
   activeThread?: Thread & {
@@ -146,11 +165,50 @@ export interface ComposerFormController {
   focus(): void;
 }
 
+type WorkspaceStoreState = ReturnType<typeof useWorkspaceStore.getState>;
+
+/** Captures the workspace's new-thread target so a draft reopens with it. */
+function snapshotDraftTarget(state: WorkspaceStoreState): ThreadDraftTarget {
+  return {
+    mode: state.newThreadMode,
+    branch: state.newThreadBranch,
+    branchSource: state.newThreadBranchSource,
+    pullRequestNumber: state.newThreadPullRequestNumber,
+    customBranchName: state.customBranchName,
+    autoPreviewBranch: state.autoPreviewBranch,
+    selectedWorktree: state.selectedWorktree,
+    branchManuallySelected: state.branchManuallySelected,
+  };
+}
+
+/** Departing-owner saves keep the stored target; bound saves snapshot live globals. */
+function draftPersistTarget(
+  entity: ThreadDraft | undefined,
+  preserveTarget: boolean | undefined,
+  state: WorkspaceStoreState,
+): ThreadDraftTarget {
+  if (preserveTarget && entity) return entity.target;
+  return snapshotDraftTarget(state);
+}
+
+/** Captures the selection fields a draft entity stores outside ComposerDraft. */
+function snapshotDraftSelection(selection: ComposerAgentSelection): ThreadDraftSelection {
+  return {
+    interactionMode: selection.interactionMode,
+    permissionMode: selection.permissionMode,
+    orchestrationMode: selection.orchestrationMode,
+    approvalReviewMode: selection.approvalReviewMode,
+    copilotAgent: selection.copilotAgent,
+    thinking: selection.thinking,
+  };
+}
+
 /** Owns the draft, agent selection, editor, and restore lifecycle for one Composer session. */
 export function useComposerFormController({
   threadId,
   isNewThread,
   workspaceId,
+  draftId,
   branchFromMessageId,
   branchFromMessageContent,
   activeThread,
@@ -163,7 +221,7 @@ export function useComposerFormController({
   const [goalPending, setGoalPending] = useState(false);
   const { selection, setSelection, updateSelection } = useComposerSelectionState();
   const editorRef = useRef<LexicalEditor | null>(null);
-  const attachments = useComposerAttachments({ isNewThread, threadId, workspaceId });
+  const attachments = useComposerAttachments({ isNewThread, threadId, workspaceId, draftId });
   const {
     appendAttachments,
     collectAndClearAttachments,
@@ -171,7 +229,15 @@ export function useComposerFormController({
     releaseAttachments,
     replaceAttachments,
   } = attachments;
-  const previousThreadIdRef = useRef<string | undefined>(threadId);
+  const owner: ComposerOwner = threadId
+    ? { kind: "thread", id: threadId }
+    : draftId
+      ? { kind: "draft", id: draftId }
+      : { kind: "new" };
+  const ownerKey = composerOwnerKey(owner);
+  const ownerRef = useRef(owner);
+  ownerRef.current = owner;
+  const previousOwnerKeyRef = useRef<string>(ownerKey);
   const draftRef = useRef({
     input,
     mentions,
@@ -189,10 +255,14 @@ export function useComposerFormController({
   const agentSettingsTouchedRef = useRef(false);
   const submissionRevisionRef = useRef(0);
   const submittedDraftClearRef = useRef<SubmittedDraftClear | null>(null);
-  const currentThreadIdRef = useRef(threadId);
-  currentThreadIdRef.current = threadId;
+  const currentOwnerKeyRef = useRef(ownerKey);
+  currentOwnerKeyRef.current = ownerKey;
   const threadSwitchRef = useRef(false);
-  const restoredDraftOwnerRef = useRef<string | undefined>(undefined);
+  // Gate for draft persistence: a state (not a ref) so StrictMode's remounted
+  // effects still see "not installed yet" and cannot wipe a stored draft.
+  const [restoredOwnerKey, setRestoredOwnerKey] = useState<string | null>(null);
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
   const lastServerThreadModelKeyRef = useRef("");
   const saveDraft = useComposerDraftStore((state) => state.saveDraft);
   const getDraft = useComposerDraftStore((state) => state.getDraft);
@@ -231,9 +301,66 @@ export function useComposerFormController({
   );
   const previewReferenceQueueSignal = usePreviewReferenceQueueStore((state) => state.signal);
   const previewReferenceScopeId = threadId ?? workspaceId;
+  // Target fields are draft payload for draft owners; subscribing keeps the
+  // persisted entity current when the user retargets without typing.
+  const draftTarget = useWorkspaceStore(
+    useShallow((state) => ({
+      mode: state.newThreadMode,
+      branch: state.newThreadBranch,
+      branchSource: state.newThreadBranchSource,
+      pullRequestNumber: state.newThreadPullRequestNumber,
+      customBranchName: state.customBranchName,
+      autoPreviewBranch: state.autoPreviewBranch,
+      selectedWorktree: state.selectedWorktree,
+      branchManuallySelected: state.branchManuallySelected,
+    })),
+  );
   const markAgentSettingsTouched = useCallback(() => {
     agentSettingsTouchedRef.current = true;
   }, []);
+
+  const persistDraftEntity = useCallback(
+    (
+      id: string,
+      draft: ComposerDraft,
+      options?: { detached?: boolean; preserveTarget?: boolean },
+    ) => {
+      const workspace = useWorkspaceStore.getState();
+      const entity = useThreadDraftStore.getState().drafts[id];
+      // Ownership handoff keeps the target captured while the draft was bound
+      // (live globals may already describe the incoming owner); a stale passive
+      // persist must not resurrect a deleted draft.
+      const writable = options?.detached
+        ? entity !== undefined
+        : entity !== undefined || workspace.activeDraftId === id;
+      if (!writable) return;
+      const entityWorkspaceId = entity?.workspaceId ?? workspaceId;
+      if (!entityWorkspaceId) return;
+      useThreadDraftStore.getState().saveDraft({
+        id,
+        workspaceId: entityWorkspaceId,
+        draft,
+        selection: snapshotDraftSelection(selectionRef.current),
+        target: draftPersistTarget(entity, options?.preserveTarget, workspace),
+      });
+    },
+    [workspaceId],
+  );
+
+  const persistOwnerDraft = useCallback(
+    (
+      key: string,
+      draft: ComposerDraft,
+      options?: { detached?: boolean; preserveTarget?: boolean },
+    ) => {
+      if (key.startsWith("thread:")) {
+        saveDraft(key.slice("thread:".length), draft);
+      } else if (key.startsWith("draft:")) {
+        persistDraftEntity(key.slice("draft:".length), draft, options);
+      }
+    },
+    [saveDraft, persistDraftEntity],
+  );
 
   const updateDraft = useCallback((text: string, nextMentions: readonly MessageMention[]) => {
     const submittedDraftClear = submittedDraftClearRef.current;
@@ -272,9 +399,9 @@ export function useComposerFormController({
     draftRef.current = nextDraft;
     setSelectedTextComments(nextComments);
     setSelectedTextCommentEditor(nextEditor);
-    if (!threadId) return;
-    saveDraft(threadId, snapshotComposerDraft(nextDraft));
-  }, [releaseAttachments, saveDraft, threadId]);
+    if (ownerKey === "new") return;
+    persistOwnerDraft(ownerKey, snapshotComposerDraft(nextDraft));
+  }, [ownerKey, persistOwnerDraft, releaseAttachments]);
 
   const setSelectedTextCommentEditorDraft = useCallback((
     editor: SelectedTextCommentEditorDraft | undefined,
@@ -354,10 +481,17 @@ export function useComposerFormController({
       replaceDraft("");
       setSelectedTextComments([]);
       setSelectedTextCommentEditor(undefined);
-      if (reason === "dispatch" && threadId) clearDraft(threadId);
+      const currentOwner = ownerRef.current;
+      if (reason === "dispatch" && currentOwner.kind === "thread") {
+        clearDraft(currentOwner.id);
+      }
+      if (reason === "dispatch" && currentOwner.kind === "draft") {
+        useThreadDraftStore.getState().removeDraft(currentOwner.id);
+        useWorkspaceStore.getState().setActiveDraftId(null);
+      }
       return currentAttachments;
     },
-    [clearDraft, collectAndClearAttachments, replaceDraft, threadId],
+    [clearDraft, collectAndClearAttachments, replaceDraft],
   );
 
   const discardSubmittedDraftClear = useCallback(() => {
@@ -372,22 +506,45 @@ export function useComposerFormController({
     replaceDraft("");
     setSelectedTextComments([]);
     setSelectedTextCommentEditor(undefined);
-    if (threadId) removeDraftAfterAttachmentTransfer(threadId);
+    const submittedOwner = ownerRef.current;
+    let draftEntity: ThreadDraft | undefined;
+    if (submittedOwner.kind === "thread") {
+      removeDraftAfterAttachmentTransfer(submittedOwner.id);
+    }
+    if (submittedOwner.kind === "draft") {
+      // Consume the draft row now; the payload rides along in
+      // submittedDraftClear so a synchronous dispatch failure can put it back.
+      const draftStore = useThreadDraftStore.getState();
+      draftEntity = draftStore.drafts[submittedOwner.id];
+      draftStore.removeDraftAfterAttachmentTransfer(submittedOwner.id);
+      useWorkspaceStore.getState().setActiveDraftId(null);
+    }
     submittedDraftClearRef.current = {
-      ownerThreadId: threadId,
+      ownerKey: composerOwnerKey(submittedOwner),
       submission,
       attachments: dispatchedAttachments,
+      draftEntity,
     };
     return true;
-  }, [detachAttachments, removeDraftAfterAttachmentTransfer, replaceDraft, threadId]);
+  }, [detachAttachments, removeDraftAfterAttachmentTransfer, replaceDraft]);
 
   const restoreFailedDispatch = useCallback(() => {
     const submittedDraftClear = submittedDraftClearRef.current;
     submittedDraftClearRef.current = null;
     if (!submittedDraftClear) return;
-    if (submittedDraftClear.ownerThreadId !== currentThreadIdRef.current) {
-      releaseAttachments(submittedDraftClear.attachments);
+    if (submittedDraftClear.ownerKey !== currentOwnerKeyRef.current
+      && !(submittedDraftClear.draftEntity && currentOwnerKeyRef.current === "new")) {
+      // New-thread sends rebind the composer to the placeholder thread, which
+      // stores these same attachment refs as its pending draft. Only a real
+      // thread owner leaves them unowned when the owner has moved on.
+      if (submittedDraftClear.ownerKey.startsWith("thread:")) {
+        releaseAttachments(submittedDraftClear.attachments);
+      }
       return;
+    }
+    if (submittedDraftClear.draftEntity) {
+      useThreadDraftStore.getState().restoreDraft(submittedDraftClear.draftEntity);
+      useWorkspaceStore.getState().setActiveDraftId(submittedDraftClear.draftEntity.id);
     }
     replaceDraft(
       submittedDraftClear.submission.rawInput,
@@ -426,30 +583,39 @@ export function useComposerFormController({
     };
   });
 
+  // Persist on every change once the owner's session has been installed. The
+  // state-based gate skips the mount pass (including StrictMode's replay) so a
+  // stored draft is never overwritten by pre-restore initial state.
   useEffect(() => {
-    if (
-      !threadId
-      || restoredDraftOwnerRef.current !== threadId
-      || (!activeThread?.clientPreparing && !activeThread?.clientError)
-    ) return;
-    saveDraft(threadId, snapshotComposerDraft(draftRef.current));
+    if (restoredOwnerKey !== ownerKey) return;
+    if (ownerKey !== "new") {
+      persistOwnerDraft(ownerKey, snapshotComposerDraft(draftRef.current));
+      return;
+    }
+    if (draftId !== null || branchFromMessageId || !workspaceId) return;
+    const draft = snapshotComposerDraft(draftRef.current);
+    if (draftHasNoSendableContent(draft)) return;
+    const id = useThreadDraftStore.getState().saveDraft({
+      workspaceId,
+      draft,
+      selection: snapshotDraftSelection(selectionRef.current),
+      target: draftTarget,
+    });
+    if (id) useWorkspaceStore.getState().setActiveDraftId(id);
   }, [
-    activeThread?.clientError,
-    activeThread?.clientPreparing,
     attachments.attachments,
+    branchFromMessageId,
+    draftId,
+    draftTarget,
     input,
     mentions,
-    saveDraft,
+    ownerKey,
+    persistOwnerDraft,
+    restoredOwnerKey,
     selectedTextCommentEditor,
     selectedTextComments,
-    selection.codexFastMode,
-    selection.contextWindow,
-    selection.devinMode,
-    selection.modelId,
-    selection.provider,
-    selection.reasoning,
-    selection.thinking,
-    threadId,
+    selection,
+    workspaceId,
   ]);
 
   useEffect(() => {
@@ -514,7 +680,9 @@ export function useComposerFormController({
   }, [appendAttachments, previewReferenceQueueSignal, previewReferenceScopeId]);
 
   useEffect(() => {
-    if (!settingsLoaded || threadId) return;
+    // Bound drafts restore their own selection; defaults only apply to a fresh
+    // new-thread composer and real threads resolve from thread settings.
+    if (!settingsLoaded || threadId || draftId) return;
     const validModelId = getDefaultModelId();
     const defaults = {
       modelId: validModelId,
@@ -530,6 +698,7 @@ export function useComposerFormController({
           permissionMode: settingsDefaultPermission,
         });
   }, [
+    draftId,
     settingsDefaultMode,
     settingsDefaultPermission,
     settingsDefaultProvider,
@@ -540,16 +709,26 @@ export function useComposerFormController({
   ]);
 
   useEffect(() => {
-    const previousThreadId = previousThreadIdRef.current;
+    const previousOwnerKey = previousOwnerKeyRef.current;
     transitionComposerDraftOwner({
-      previousThreadId,
-      nextThreadId: threadId,
+      previousOwnerKey,
+      nextOwnerKey: ownerKey,
       draft: draftRef.current,
-      threadExists: (candidateThreadId) =>
-        useWorkspaceStore.getState().threads.some((thread) => thread.id === candidateThreadId),
-      saveDraft,
+      ownerExists: (candidateKey) =>
+        candidateKey.startsWith("draft:")
+          ? useThreadDraftStore.getState().drafts[candidateKey.slice("draft:".length)] != null
+          : candidateKey.startsWith("thread:")
+            && useWorkspaceStore.getState().threads.some(
+              (thread) => thread.id === candidateKey.slice("thread:".length),
+            ),
+      saveDraft: (key, draft) =>
+        persistOwnerDraft(key, draft, { detached: true, preserveTarget: true }),
     });
-    const session = resolveComposerSessionForOwner({ threadId, getDraft });
+    const session = resolveComposerSessionForOwner({
+      owner: ownerRef.current,
+      getDraft,
+      getThreadDraft: (id) => useThreadDraftStore.getState().drafts[id],
+    });
 
     // oxlint-disable-next-line react/set-state-in-effect -- The persisted draft session is the source of truth when its owner changes.
     setInput(session.input);
@@ -564,9 +743,11 @@ export function useComposerFormController({
       reasoning: session.reasoning,
       interactionMode: session.interactionMode,
       orchestrationMode:
-        threadId
+        session.orchestrationMode
+        ?? (threadId
           ? useThreadStore.getState().getThreadSettings(threadId).orchestrationMode ?? ORCHESTRATION_MODES.STANDARD
-          : ORCHESTRATION_MODES.STANDARD,
+          : ORCHESTRATION_MODES.STANDARD),
+      approvalReviewMode: session.approvalReviewMode ?? current.approvalReviewMode,
       permissionMode: session.permissionMode,
       copilotAgent: session.copilotAgent,
       contextWindow: session.contextWindow,
@@ -574,7 +755,11 @@ export function useComposerFormController({
       codexFastMode: session.codexFastMode,
       devinMode: session.devinMode,
     }));
-    if (editorRef.current) {
+    // Materializing a draft rebinds the owner mid-keystroke; rewriting the
+    // editor with identical content would drop the caret to position zero.
+    const editorMatchesSession = session.input === draftRef.current.input
+      && JSON.stringify(session.mentions) === JSON.stringify(draftRef.current.mentions);
+    if (editorRef.current && !editorMatchesSession) {
       writeComposerContent(editorRef.current, session.input, session.mentions);
     }
     if (!threadId) {
@@ -582,9 +767,9 @@ export function useComposerFormController({
       if (isNewThread) queueMicrotask(() => editorRef.current?.focus());
     }
     threadSwitchRef.current = true;
-    restoredDraftOwnerRef.current = threadId;
-    previousThreadIdRef.current = threadId;
-  }, [getDraft, isNewThread, replaceAttachments, saveDraft, setSelection, threadId]);
+    setRestoredOwnerKey(ownerKey);
+    previousOwnerKeyRef.current = ownerKey;
+  }, [getDraft, isNewThread, ownerKey, persistOwnerDraft, replaceAttachments, setSelection, threadId]);
 
   useEffect(() => {
     setSelection((current) => {

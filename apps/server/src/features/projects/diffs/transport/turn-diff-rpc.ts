@@ -23,18 +23,31 @@ export function isTurnDiffRpcMethod(method: WsMethodName): method is TurnDiffMet
 /** Read Last turn evidence through one contract, independent of provider identity. */
 export async function routeTurnDiffRpc<M extends TurnDiffMethod>(method: M, params: TurnDiffParams[M], deps: TurnDiffRouterDeps): Promise<unknown> {
   if (!deps.threadService.findById(params.threadId)) throw new Error("Thread not found");
-  if (method === "turnDiff.getComparison") return comparison(deps, params.threadId, "includeLive" in params ? params.includeLive : undefined);
+  if (method === "turnDiff.getComparison") return comparison(deps, params.threadId, "includeLive" in params ? params.includeLive : undefined, "messageId" in params ? params.messageId : undefined);
   if ("comparisonId" in params) return fileDiff(deps, params);
   throw new Error("Invalid turn diff request");
 }
 
-async function comparison(deps: TurnDiffRouterDeps, threadId: string, includeLive = true): Promise<ReviewComparison | null> {
+async function comparison(deps: TurnDiffRouterDeps, threadId: string, includeLive = true, messageId?: string): Promise<ReviewComparison | null> {
+  if (messageId) return comparisonForMessage(deps, threadId, messageId);
   const live = includeLive ? deps.turnDiffs.liveComparison(threadId) : null;
   if (live) return live;
   const record = deps.turnDiffs.latest(threadId);
-  if (record && record.source !== "git") return nativeComparison(record);
   const snapshot = selectedSnapshot(deps, threadId, record?.message_id);
-  if (!snapshot) return null;
+  return settledComparison(deps, record, snapshot);
+}
+
+// A picked turn is always settled evidence owned by its message; Live only
+// describes the in-flight turn and never applies to a message-scoped read.
+function comparisonForMessage(deps: TurnDiffRouterDeps, threadId: string, messageId: string): Promise<ReviewComparison | null> {
+  const record = deps.turnDiffs.forMessage(threadId, messageId);
+  const snapshot = deps.turnSnapshotRepo.listByThread(threadId).find((entry) => entry.message_id === messageId);
+  return settledComparison(deps, record, snapshot);
+}
+
+function settledComparison(deps: TurnDiffRouterDeps, record: StoredTurnDiff | undefined, snapshot: TurnSnapshot | undefined): Promise<ReviewComparison | null> {
+  if (record && record.source !== "git") return Promise.resolve(nativeComparison(record));
+  if (!snapshot) return Promise.resolve(null);
   return gitComparison(deps, snapshot, record?.id ?? `git:${snapshot.id}`);
 }
 

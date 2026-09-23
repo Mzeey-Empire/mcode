@@ -164,8 +164,6 @@ export function useMessageListData(displayThreadId: string | undefined) {
   const permissions = useThreadRecord(renderedThreadId, (record) => record.permissions);
   const hooks = useThreadRecord(renderedThreadId, (record) => record.hooks);
   const persistedNarrativeByMessage = useThreadRecord(renderedThreadId, (record) => record.narrativeByMessage);
-  const loadNarrativeForMessage = useThreadStore((state) => state.loadNarrativeForMessage);
-  const isNarrativeLoaded = useThreadStore((state) => state.isNarrativeLoaded);
   const legacyCurrentTurnMessageId = useThreadRecord(renderedThreadId, (record) => record.currentTurnMessageId);
   const legacyCurrentTurnResponseKey = useThreadRecord(renderedThreadId, (record) => record.currentTurnResponseKey);
   const legacyAssistantResponseKeys = useThreadRecord(renderedThreadId, (record) => record.assistantResponseKeys);
@@ -206,8 +204,6 @@ export function useMessageListData(displayThreadId: string | undefined) {
     permissions,
     hooks,
     persistedNarrativeByMessage,
-    loadNarrativeForMessage,
-    isNarrativeLoaded,
     currentTurnMessageId: canonicalTurnIdentity.currentTurnMessageId,
     turnExecutionId,
     currentTurnResponseKey: canonicalTurnIdentity.currentTurnResponseKey,

@@ -724,8 +724,11 @@ export interface McodeTransport {
     thoughts: ThoughtSegmentRecord[];
     hooks: HookExecutionRecord[];
   }>;
-  /** Fetch a thread's full server-ordered narrative as a flat, chronological list. */
-  loadTurn(threadId: string): Promise<import("@mcode/contracts").NarrativeEntry[]>;
+  /** Fetch one bounded, server-ordered narrative window. */
+  loadTurn(
+    threadId: string,
+    range?: import("@mcode/contracts").TurnRange,
+  ): Promise<import("@mcode/contracts").NarrativeEntry[]>;
 
   /** Fetch persisted task list for a thread (TodoWrite / Task* tool family). */
   getThreadTasks(threadId: string): Promise<Array<{ id?: string; content: string; status: "pending" | "in_progress" | "completed" | "cancelled"; activeForm?: string; group?: string }> | null>;
@@ -736,8 +739,8 @@ export interface McodeTransport {
   // Snapshots
   /** Get a unified diff for a specific file from a turn snapshot. */
   getSnapshotDiff(snapshotId: string, filePath?: string, maxLines?: number): Promise<string>;
-  /** Read the active or settled Last turn comparison. */
-  getTurnDiffComparison(threadId: string): Promise<ReviewComparison | null>;
+  /** Read the active or settled Last turn comparison, or one picked turn when `messageId` is given. */
+  getTurnDiffComparison(threadId: string, messageId?: string): Promise<ReviewComparison | null>;
   /** Read a file from one exact native or fallback comparison. */
   getTurnDiffFile(threadId: string, comparisonId: string, filePath: string): Promise<string>;
   /** Get per-file change classification and line counts for a turn snapshot. */

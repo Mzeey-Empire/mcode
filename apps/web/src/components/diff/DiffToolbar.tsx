@@ -15,6 +15,7 @@ import type { PanelScope } from "@/lib/panel-tabs";
 import { visibleReviewViews, defaultReviewView } from "@/lib/review-views";
 import { BranchRefPicker } from "./BranchRefPicker";
 import { CommitPicker } from "./CommitPicker";
+import { TurnPicker } from "./TurnPicker";
 import { ReviewActions } from "./ReviewActions";
 import { DiffStat } from "./DiffStat";
 
@@ -366,6 +367,7 @@ function ReviewToolbarStart({
       />
       <ReviewDiffStat reviewDiffStat={reviewDiffStat} reviewFileCount={reviewFileCount} />
       <CommitOperand activeView={activeView} />
+      <TurnOperand activeView={activeView} activeThreadId={activeThreadId} />
     </div>
   );
 }
@@ -553,6 +555,25 @@ function CommitOperand({ activeView }: { readonly activeView: ReviewViewMode | u
       data-operand="commit"
     >
       <CommitPicker />
+    </div>
+  );
+}
+
+function TurnOperand({
+  activeView,
+  activeThreadId,
+}: {
+  readonly activeView: ReviewViewMode | undefined;
+  readonly activeThreadId: string | null;
+}) {
+  if (activeView?.operand !== "turn" || !activeThreadId) return null;
+  return (
+    <div
+      className="ml-1 flex min-w-0 items-center border-l border-border/25 pl-2"
+      data-testid="review-operand-slot"
+      data-operand="turn"
+    >
+      <TurnPicker threadId={activeThreadId} />
     </div>
   );
 }

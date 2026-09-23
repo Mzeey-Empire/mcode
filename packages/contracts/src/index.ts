@@ -301,12 +301,14 @@ export type { RecoveryIncidentEntry, RecoveryIncident } from "./models/turn-reco
 export {
   MessageSchema,
   PaginatedMessagesSchema,
+  LegacyMessageProvenanceSchema,
   ParentAgentMessageProvenanceSchema,
   SystemNoticeMetadataSchema,
 } from "./models/message.js";
 export type {
   Message,
   PaginatedMessages,
+  LegacyMessageProvenance,
   ParentAgentMessageProvenance,
   SystemNoticeMetadata,
 } from "./models/message.js";
@@ -469,8 +471,20 @@ export type { ThoughtSegmentRecord } from "./models/thought-segment.js";
 export { HookExecutionRecordSchema } from "./models/hook-execution.js";
 export type { HookExecutionRecord } from "./models/hook-execution.js";
 
-export { NarrativeEntrySchema, TurnRangeSchema } from "./models/narrative-entry.js";
-export type { NarrativeEntry, TurnRange } from "./models/narrative-entry.js";
+export {
+  NarrativeDetailCursorSchema,
+  NarrativeDetailKindSchema,
+  NarrativeDetailRangeSchema,
+  NarrativeEntrySchema,
+  TurnRangeSchema,
+} from "./models/narrative-entry.js";
+export type {
+  NarrativeDetailCursor,
+  NarrativeDetailKind,
+  NarrativeDetailRange,
+  NarrativeEntry,
+  TurnRange,
+} from "./models/narrative-entry.js";
 export { ParentNarrativeRecoveryItemSchema } from "./models/narrative-recovery.js";
 export type { ParentNarrativeRecoveryItem } from "./models/narrative-recovery.js";
 

@@ -40,6 +40,50 @@ function insertMessage(
   ).run(id, "thread-1", role, content, now, sequence);
 }
 
+function detailCursor(entry: ReturnType<NarrativeStore["load"]>[number]) {
+  return {
+    sequence: entry.sequence,
+    sortOrder: entry.sortOrder,
+    kind: entry.kind,
+    id: entry.kind === "assistantMessage" ? entry.messageId : entry.record.id,
+  };
+}
+
+function narrativeEntryIdentity(entry: ReturnType<NarrativeStore["load"]>[number]): string {
+  return entry.kind === "assistantMessage" ? `assistant:${entry.messageId}` : `${entry.kind}:${entry.record.id}`;
+}
+
+interface CapturedStatement {
+  sql: string;
+  parameters: unknown[];
+}
+
+function traceStatements(db: Database, captured: CapturedStatement[]): Database {
+  return new Proxy(db, {
+    get(target, property) {
+      if (property !== "prepare") {
+        const value = Reflect.get(target, property);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+      return (sql: string) => {
+        const statement = target.prepare(sql);
+        return new Proxy(statement, {
+          get(statementTarget, statementProperty) {
+            const value = Reflect.get(statementTarget, statementProperty);
+            if (statementProperty !== "all" && statementProperty !== "get") {
+              return typeof value === "function" ? value.bind(statementTarget) : value;
+            }
+            return (...parameters: unknown[]) => {
+              captured.push({ sql, parameters });
+              return value.call(statementTarget, ...parameters);
+            };
+          },
+        });
+      };
+    },
+  }) as Database;
+}
+
 describe("NarrativeStore Move/Rename persistence sanitization", () => {
   it.each(["Move", "rEnAmE"])(
     "passes only bounded source and destination paths to persistence for %s",
@@ -333,6 +377,7 @@ describe("NarrativeStore.load (read seam)", () => {
       new ToolCallRecordRepo(db),
       new ThoughtSegmentRepo(db),
       new HookExecutionRepo(db),
+      db,
     );
   });
 
@@ -402,6 +447,162 @@ describe("NarrativeStore.load (read seam)", () => {
     const entries = store.load("thread-1");
     expect(entries.map((e) => e.kind)).toEqual(["toolCall", "toolCall", "assistantMessage"]);
   });
+
+  it("continues a 1,000-detail assistant turn without skips or duplicate rows", () => {
+    insertMessage(db, "m1", "assistant", "Completed answer", 1);
+    new ToolCallRecordRepo(db).bulkCreate(Array.from({ length: 1_000 }, (_, sortOrder) => ({
+      toolCallId: `tool-${sortOrder.toString().padStart(4, "0")}`,
+      messageId: "m1",
+      toolName: "Read",
+      inputSummary: `input-${sortOrder}`,
+      outputSummary: `output-${sortOrder}`,
+      status: "completed" as const,
+      sortOrder,
+    })));
+
+    const seenToolIds: string[] = [];
+    let after: { sequence: number; sortOrder: number; kind: "assistantMessage" | "toolCall" | "narrationSegment" | "hook"; id: string } | undefined;
+    for (;;) {
+      const page = store.load("thread-1", { limit: 1, detail: { limit: 100, after } });
+      expect(page).toHaveLength(Math.min(100, 1_001 - seenToolIds.length));
+      seenToolIds.push(...page.flatMap((entry) => entry.kind === "toolCall" ? [entry.record.id] : []));
+      const last = page.at(-1);
+      if (!last || page.length < 100) break;
+      after = {
+        sequence: last.sequence,
+        sortOrder: last.sortOrder,
+        kind: last.kind,
+        id: last.kind === "assistantMessage" ? last.messageId : last.record.id,
+      };
+    }
+
+    expect(seenToolIds).toHaveLength(1_000);
+    expect(new Set(seenToolIds)).toEqual(new Set(seenToolIds));
+    expect(seenToolIds).toEqual(Array.from({ length: 1_000 }, (_, index) => `tool-${index.toString().padStart(4, "0")}`));
+  });
+
+  it("continues first, middle, and late windows through equal sort-order ties across every detail kind", () => {
+    insertMessage(db, "m1", "assistant", "Final answer", 1);
+    db.prepare(`
+      INSERT INTO tool_call_records (id, message_id, tool_name, input_summary, output_summary, status, sort_order)
+      VALUES (?, 'm1', 'Read', '', '', 'completed', 5)
+    `).run("tool-a");
+    db.prepare(`
+      INSERT INTO tool_call_records (id, message_id, tool_name, input_summary, output_summary, status, sort_order)
+      VALUES (?, 'm1', 'Read', '', '', 'completed', 5)
+    `).run("tool-b");
+    db.prepare(`
+      INSERT INTO thought_segments (id, message_id, text, sort_order, is_final_response)
+      VALUES ('final-nonzero', 'm1', 'Final answer', 5, 2),
+             ('thought-a', 'm1', 'a', 5, 0),
+             ('thought-b', 'm1', 'b', 5, 0)
+    `).run();
+    db.prepare(`
+      INSERT INTO hook_executions (id, message_id, hook_name, phase, payload, did_block, sort_order)
+      VALUES ('hook-a', 'm1', 'PreToolUse', 'pre', '{}', 0, 5),
+             ('hook-b', 'm1', 'PreToolUse', 'pre', '{}', 0, 5)
+    `).run();
+
+    const first = store.load("thread-1", { limit: 1, detail: { limit: 3 } });
+    const middle = store.load("thread-1", {
+      limit: 1,
+      detail: { limit: 3, after: detailCursor(first.at(-1)!) },
+    });
+    const late = store.load("thread-1", {
+      limit: 1,
+      detail: { limit: 3, after: detailCursor(middle.at(-1)!) },
+    });
+
+    expect(first.map(narrativeEntryIdentity)).toEqual([
+      "assistant:m1",
+      "toolCall:tool-a",
+      "toolCall:tool-b",
+    ]);
+    expect(middle.map(narrativeEntryIdentity)).toEqual([
+      "narrationSegment:thought-a",
+      "narrationSegment:thought-b",
+      "hook:hook-a",
+    ]);
+    expect(late.map(narrativeEntryIdentity)).toEqual(["hook:hook-b"]);
+    expect([...first, ...middle, ...late].map(narrativeEntryIdentity)).toEqual([
+      "assistant:m1",
+      "toolCall:tool-a",
+      "toolCall:tool-b",
+      "narrationSegment:thought-a",
+      "narrationSegment:thought-b",
+      "hook:hook-a",
+      "hook:hook-b",
+    ]);
+  });
+
+  it("uses message-local indexed seeks for first and tied-cursor detail windows", () => {
+    insertMessage(db, "m1", "assistant", "Final answer", 1);
+    db.prepare(`
+      INSERT INTO tool_call_records (id, message_id, tool_name, input_summary, output_summary, status, sort_order)
+      VALUES ('tool-a', 'm1', 'Read', '', '', 'completed', 5),
+             ('tool-b', 'm1', 'Read', '', '', 'completed', 5)
+    `).run();
+    db.prepare(`
+      INSERT INTO thought_segments (id, message_id, text, sort_order, is_final_response)
+      VALUES ('final', 'm1', 'Final answer', 5, 1),
+             ('thought-a', 'm1', 'a', 5, 0)
+    `).run();
+    db.prepare(`
+      INSERT INTO hook_executions (id, message_id, hook_name, phase, payload, did_block, sort_order)
+      VALUES ('hook-a', 'm1', 'PreToolUse', 'pre', '{}', 0, 5)
+    `).run();
+
+    const captured: CapturedStatement[] = [];
+    const tracedStore = new NarrativeStore(
+      new MessageRepo(db),
+      new ToolCallRecordRepo(db),
+      new ThoughtSegmentRepo(db),
+      new HookExecutionRepo(db),
+      traceStatements(db, captured),
+    );
+    const first = tracedStore.load("thread-1", { limit: 1, detail: { limit: 2 } });
+    tracedStore.load("thread-1", {
+      limit: 1,
+      detail: { limit: 50, after: detailCursor(first.at(-1)!) },
+    });
+    tracedStore.load("thread-1", {
+      limit: 1,
+      detail: {
+        limit: 50,
+        after: { sequence: 1, sortOrder: 5, kind: "hook", id: "hook-a" },
+      },
+    });
+
+    const detailStatements = captured.filter(({ sql }) => (
+      sql.includes("FROM tool_call_records tool")
+      || sql.includes("FROM thought_segments thought")
+      || sql.includes("FROM hook_executions hook")
+      || sql.includes("FROM thought_segments\n      WHERE message_id")
+    ));
+    expect(detailStatements).toHaveLength(12);
+    const plans = detailStatements.map(({ sql, parameters }) => ({
+      sql,
+      plan: (db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters) as Array<{ detail: string }>)
+        .map((row) => row.detail),
+    }));
+    const allPlanDetails = plans.flatMap(({ plan }) => plan);
+
+    expect(allPlanDetails.some((detail) => detail.includes("idx_tool_call_records_message_sort_order_id"))).toBe(true);
+    expect(allPlanDetails.some((detail) => detail.includes("idx_thought_segments_message_final_sort_order_id"))).toBe(true);
+    expect(allPlanDetails.some((detail) => detail.includes("idx_thought_segments_final_message_sort_order_id"))).toBe(true);
+    expect(allPlanDetails.some((detail) => detail.includes("idx_hook_executions_message_sort_order_id"))).toBe(true);
+    expect(allPlanDetails).not.toContain("SCAN tool");
+    expect(allPlanDetails).not.toContain("SCAN thought");
+    expect(allPlanDetails).not.toContain("SCAN hook");
+    expect(allPlanDetails.some((detail) => detail.includes("USE TEMP B-TREE"))).toBe(false);
+    const tiedCursorPlans = plans
+      .filter(({ sql }) => sql.includes("(sort_order, id) > (?, ?)"))
+      .map(({ plan }) => plan);
+    expect(tiedCursorPlans).toHaveLength(2);
+    for (const tiedCursorPlan of tiedCursorPlans) {
+      expect(tiedCursorPlan.some((detail) => detail.includes("(sort_order,id)>(?,?)"))).toBe(true);
+    }
+  });
 });
 
 /**
@@ -425,6 +626,7 @@ describe("NarrativeStore write seam (server-side traps)", () => {
       new ToolCallRecordRepo(db),
       new ThoughtSegmentRepo(db),
       new HookExecutionRepo(db),
+      db,
     );
   });
 

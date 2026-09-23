@@ -95,4 +95,81 @@ describe("FileList jump to file", () => {
       ),
     );
   }, 15_000);
+
+  it("consumes a pending jump request issued before the list mounted", async () => {
+    useDiffStore.setState({
+      reviewFileJumpRequest: {
+        scopeId: "thread-1",
+        path: "apps/web/src/beta.ts",
+        nonce: 1,
+      },
+    });
+
+    render(
+      <FileList
+        files={pathsToReviewFiles(["apps/web/src/alpha.ts", "apps/web/src/beta.ts"])}
+        source="snapshot"
+        id="snap-1"
+        threadId="thread-1"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(transport.getSnapshotDiff).toHaveBeenCalledWith(
+        "snap-1",
+        "apps/web/src/beta.ts",
+      ),
+    );
+    expect(useDiffStore.getState().reviewFileJumpRequest).toBeNull();
+  }, 15_000);
+
+  it("consumes a view-keyed request only when the key matches", async () => {
+    useDiffStore.setState({
+      reviewFileJumpRequest: {
+        scopeId: "thread-1",
+        path: "apps/web/src/beta.ts",
+        nonce: 1,
+        viewKey: "turn:msg-1",
+      },
+    });
+    const files = pathsToReviewFiles([
+      "apps/web/src/alpha.ts",
+      "apps/web/src/beta.ts",
+    ]);
+
+    const { unmount } = render(
+      <FileList
+        files={files}
+        source="snapshot"
+        id="snap-1"
+        threadId="thread-1"
+        jumpViewKey="turn:other-msg"
+      />,
+    );
+    // Let the consume effect run before asserting the request survived.
+    await waitFor(() =>
+      expect(screen.getByTestId("review-file-jump-trigger")).toBeInTheDocument(),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(useDiffStore.getState().reviewFileJumpRequest).not.toBeNull();
+    expect(transport.getSnapshotDiff).not.toHaveBeenCalled();
+    unmount();
+
+    render(
+      <FileList
+        files={files}
+        source="snapshot"
+        id="snap-2"
+        threadId="thread-1"
+        jumpViewKey="turn:msg-1"
+      />,
+    );
+    await waitFor(() =>
+      expect(transport.getSnapshotDiff).toHaveBeenCalledWith(
+        "snap-2",
+        "apps/web/src/beta.ts",
+      ),
+    );
+    expect(useDiffStore.getState().reviewFileJumpRequest).toBeNull();
+  }, 15_000);
 });

@@ -6,10 +6,10 @@ import { delay, isProcessAlive, type ServerLock } from "./lock.js";
 
 /**
  * Time to wait for another Electron instance to finish starting the server.
- * Must exceed the lock holder's own startup budget (60s readiness wait) so a
- * legitimate in-progress startup is never mistaken for a stuck lock.
+ * Must exceed the lock holder's own startup budget so an awaited local data
+ * migration is never mistaken for a stuck startup.
  */
-const STARTUP_LOCK_TIMEOUT_MS = 75_000;
+const STARTUP_LOCK_TIMEOUT_MS = 10 * 60_000 + 15_000;
 
 /** Interval between lock-owned server probes while another instance starts it. */
 const STARTUP_LOCK_POLL_INTERVAL_MS = 200;
@@ -82,7 +82,7 @@ export async function acquireStartupLock(
 
 /**
  * Wait out a live owner's startup. A lock owner that stays alive may still be
- * mid-startup for most of a minute, so keep polling until it publishes a
+ * mid-startup for several minutes, so keep polling until it publishes a
  * healthy server, releases the sentinel, or outlives the deadline.
  */
 async function waitForStartupLock(

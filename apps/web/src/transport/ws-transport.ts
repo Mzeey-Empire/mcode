@@ -340,6 +340,7 @@ export function createWsTransport(
   /** Resolves when the current WebSocket connection is open. */
   let ready: Promise<void>;
   let resolveReady: () => void = () => undefined;
+  let rejectReady: (err: Error) => void = () => undefined;
   let readyPending = false;
 
   function resetReady() {
@@ -347,12 +348,19 @@ export function createWsTransport(
     // would strand them forever.
     if (readyPending) return;
     readyPending = true;
-    ready = new Promise<void>((resolve) => {
+    ready = new Promise<void>((resolve, reject) => {
       resolveReady = () => {
         readyPending = false;
         resolve();
       };
+      rejectReady = (err) => {
+        readyPending = false;
+        reject(err);
+      };
     });
+    // Rejection is consumed by rpc() awaiters; this swallows it when close()
+    // settles `ready` with no one parked on it.
+    ready.catch(() => {});
   }
 
   function emitTerminalDataFrame(view: Uint8Array): void {
@@ -564,6 +572,9 @@ export function createWsTransport(
           // Discovery failed, retry with current URL
         }
       }
+      // close() cannot cancel a callback already awaiting discovery; bail so a
+      // new socket (and a fresh `ready` promise) is not created after dispose.
+      if (closed) return;
       connect();
     }, delay);
   }
@@ -572,6 +583,13 @@ export function createWsTransport(
   async function rpc<T>(method: string, params: Record<string, unknown>): Promise<T> {
     await ready;
     return new Promise<T>((resolve, reject) => {
+      // `ready` may have resolved on a socket that closed before this
+      // continuation ran; send() on a dead socket is silently dropped and the
+      // request would sit in `pending` forever.
+      if (ws.readyState !== WebSocket.OPEN) {
+        reject(new Error("WebSocket disconnected"));
+        return;
+      }
       const id = `req_${++idCounter}`;
       pending.set(id, {
         resolve: resolve as (v: unknown) => void,
@@ -635,6 +653,10 @@ export function createWsTransport(
   ): Promise<T> {
     await ready;
     return new Promise<T>((resolve, reject) => {
+      if (ws.readyState !== WebSocket.OPEN) {
+        reject(new Error("WebSocket disconnected"));
+        return;
+      }
       const id = `req_${++idCounter}`;
       pending.set(id, {
         resolve: resolve as (v: unknown) => void,
@@ -663,10 +685,16 @@ export function createWsTransport(
         reject(new Error(`Could not connect to server at ${displayUrl}`));
       }, timeoutMs);
 
-      ready.then(() => {
-        clearTimeout(timer);
-        resolve();
-      });
+      ready.then(
+        () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        (err) => {
+          clearTimeout(timer);
+          reject(err);
+        },
+      );
     });
   }
 
@@ -1094,8 +1122,11 @@ export function createWsTransport(
         thoughts: ThoughtSegmentRecord[];
         hooks: HookExecutionRecord[];
       }>("narrative.list", { messageId }),
-    loadTurn: (threadId) =>
-      rpc<import("@mcode/contracts").NarrativeEntry[]>("turn.load", { threadId }),
+    loadTurn: (threadId, range) =>
+      rpc<import("@mcode/contracts").NarrativeEntry[]>("turn.load", {
+        threadId,
+        ...(range ? { range } : {}),
+      }),
 
     // Thread tasks
     getThreadTasks: (threadId: string) =>
@@ -1109,7 +1140,12 @@ export function createWsTransport(
     // Snapshots
     getSnapshotDiff: (snapshotId, filePath?, maxLines?) =>
       rpc<string>("snapshot.getDiff", { snapshotId, filePath, maxLines }),
-    getTurnDiffComparison: (threadId) => rpc<ReviewComparison | null>("turnDiff.getComparison", { threadId, includeLive: freshTurnDiffThreads.has(threadId) }),
+    getTurnDiffComparison: (threadId, messageId?) =>
+      rpc<ReviewComparison | null>("turnDiff.getComparison", {
+        threadId,
+        includeLive: messageId ? undefined : freshTurnDiffThreads.has(threadId),
+        messageId,
+      }),
     getTurnDiffFile: (threadId, comparisonId, filePath) => rpc<string>("turnDiff.getFileDiff", { threadId, comparisonId, filePath }),
     getSnapshotDiffStats: (snapshotId) =>
       rpc<DiffStats[]>("snapshot.getDiffStats", { snapshotId }),
@@ -1258,7 +1294,7 @@ export function createWsTransport(
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
-      resolveReady();
+      rejectReady(new Error("Transport closed"));
       rejectPending("Transport closed");
       ws.close();
     },

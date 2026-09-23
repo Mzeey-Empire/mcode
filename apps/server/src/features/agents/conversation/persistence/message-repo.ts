@@ -8,8 +8,10 @@ import { injectable, inject } from "tsyringe";
 import type { Changes, Database, Statement } from "bun:sqlite";
 import type {
   Message,
+  LegacyMessageProvenance,
   MessageMention,
   MessageRole,
+  ParentAgentMessageProvenance,
   PreviewAnnotationBundle,
   SelectedTextComment,
   StoredAttachment,
@@ -18,6 +20,8 @@ import type {
 } from "@mcode/contracts";
 import {
   PreviewAnnotationBundleSchema,
+  LegacyMessageProvenanceSchema,
+  ParentAgentMessageProvenanceSchema,
   SelectedTextCommentsSchema,
   SystemNoticeMetadataSchema,
   THREAD_GET_TRANSCRIPT_MAX_BYTES,
@@ -46,6 +50,8 @@ interface MessageRow {
   source_thread_id: string | null;
   source_turn_id: string | null;
   source_provider_id: string | null;
+  legacy_provenance: string | null;
+  parent_agent_provenance: string | null;
   is_internal: number;
   outcome?: TurnOutcome | null;
   outcome_execution_id?: string | null;
@@ -142,6 +148,14 @@ function parseSystemNotice(value: string | null): SystemNoticeMetadata | null {
   return SystemNoticeMetadataSchema().parse(parsed);
 }
 
+function parseParentAgentProvenance(value: string): ParentAgentMessageProvenance {
+  return ParentAgentMessageProvenanceSchema().parse(JSON.parse(value) as unknown);
+}
+
+function parseLegacyProvenance(value: string): LegacyMessageProvenance {
+  return LegacyMessageProvenanceSchema().parse(JSON.parse(value) as unknown);
+}
+
 function serializeSelectedTextComments(
   selectedTextComments: SelectedTextComment[] | undefined,
 ): string | null {
@@ -174,7 +188,12 @@ function rowToMessage(row: MessageRow): Message {
     outcomeExecutionId: row.outcome_execution_id ?? null,
     systemNotice: parseSystemNotice(row.system_notice),
     is_internal: row.is_internal === 1,
-    ...(row.origin_type === "legacy"
+    ...(row.parent_agent_provenance
+      ? { parentAgentProvenance: parseParentAgentProvenance(row.parent_agent_provenance) }
+      : {}),
+    ...(row.legacy_provenance
+      ? { legacyProvenance: parseLegacyProvenance(row.legacy_provenance) }
+      : row.origin_type === "legacy"
       ? {
           legacyProvenance: {
             source: "messages" as const,
@@ -194,10 +213,10 @@ function rowToMessage(row: MessageRow): Message {
 }
 
 const MESSAGE_COLUMNS =
-  "id, thread_id, role, content, tool_calls, files_changed, cost_usd, tokens_used, timestamp, sequence, attachments, preview_annotations, mentions, selected_text_comments, reply_to_message_id, quoted_text, model, provider, origin_type, source_thread_id, source_turn_id, source_provider_id, is_internal, outcome, outcome_execution_id, system_notice";
+  "id, thread_id, role, content, tool_calls, files_changed, cost_usd, tokens_used, timestamp, sequence, attachments, preview_annotations, mentions, selected_text_comments, reply_to_message_id, quoted_text, model, provider, origin_type, source_thread_id, source_turn_id, source_provider_id, legacy_provenance, parent_agent_provenance, is_internal, outcome, outcome_execution_id, system_notice";
 
 const MESSAGE_COLUMNS_PREFIXED =
-  "m.id, m.thread_id, m.role, m.content, m.tool_calls, m.files_changed, m.cost_usd, m.tokens_used, m.timestamp, m.sequence, m.attachments, m.preview_annotations, m.mentions, m.selected_text_comments, m.reply_to_message_id, m.quoted_text, m.model, m.provider, m.origin_type, m.source_thread_id, m.source_turn_id, m.source_provider_id, m.is_internal, m.outcome, m.outcome_execution_id, m.system_notice";
+  "m.id, m.thread_id, m.role, m.content, m.tool_calls, m.files_changed, m.cost_usd, m.tokens_used, m.timestamp, m.sequence, m.attachments, m.preview_annotations, m.mentions, m.selected_text_comments, m.reply_to_message_id, m.quoted_text, m.model, m.provider, m.origin_type, m.source_thread_id, m.source_turn_id, m.source_provider_id, m.legacy_provenance, m.parent_agent_provenance, m.is_internal, m.outcome, m.outcome_execution_id, m.system_notice";
 
 /**
  * Pre-aggregates tool call counts for the selected page only.

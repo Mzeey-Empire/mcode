@@ -1413,25 +1413,77 @@ describe("ServerManager", () => {
     expect(mockStream.destroy).toHaveBeenCalledOnce();
   });
 
-  it("ends stderr and clears the child reference when readiness times out", async () => {
+  it.each([318_000, 400_000])(
+    "waits for awaited data migration readiness at %ims",
+    async (readyAfterMs) => {
+      vi.useFakeTimers();
+      const startedAt = new Date("2026-09-22T00:00:00.000Z");
+      vi.setSystemTime(startedAt);
+      const readyAt = startedAt.valueOf() + readyAfterMs;
+      const isHealthy = vi
+        .spyOn(manager, "isHealthy")
+        .mockImplementation(async () => Date.now() >= readyAt);
+
+      try {
+        const startup = manager.start();
+        await vi.advanceTimersByTimeAsync(readyAfterMs);
+
+        await expect(startup).resolves.toEqual({
+          port: 19600,
+          authToken: "test-auth-token",
+        });
+        expect(isHealthy).toHaveBeenLastCalledWith();
+        expect(Date.now()).toBeGreaterThanOrEqual(readyAt);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("ends stderr and clears the child reference when readiness never succeeds", async () => {
     const stderrStream = { write: vi.fn(), end: vi.fn(), destroy: vi.fn() };
     vi.mocked(NodeFS.createWriteStream).mockReturnValueOnce(stderrStream as never);
-    vi.spyOn(
-      manager as unknown as {
-        waitForReady: (timeoutMs: number) => Promise<void>;
-      },
-      "waitForReady",
-    ).mockRejectedValue(new Error("Server did not become ready"));
+    vi.spyOn(manager, "isHealthy").mockResolvedValue(false);
+    vi.useFakeTimers();
 
-    await expect(manager.start()).rejects.toThrow("did not become ready");
+    try {
+      const startup = manager.start();
+      const rejection = expect(startup).rejects.toThrow(
+        "Server did not become ready within 600s",
+      );
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      await rejection;
 
-    expect(stderrStream.end).toHaveBeenCalledOnce();
-    expect(
-      (manager as unknown as { serverProcess: unknown }).serverProcess,
-    ).toBeNull();
-    expect(NodeFS.rmdirSync).toHaveBeenCalledWith(
-      NodePath.join("/tmp/mcode", "server.starting"),
-    );
+      expect(stderrStream.end).toHaveBeenCalledOnce();
+      expect(
+        (manager as unknown as { serverProcess: unknown }).serverProcess,
+      ).toBeNull();
+      expect(NodeFS.rmdirSync).toHaveBeenCalledWith(
+        NodePath.join("/tmp/mcode", "server.starting"),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops waiting when the child exits during delayed readiness", async () => {
+    vi.spyOn(manager, "isHealthy").mockResolvedValue(false);
+    vi.useFakeTimers();
+
+    try {
+      const startup = manager.start();
+      await vi.advanceTimersByTimeAsync(0);
+      const exitCallback = refs.getExitCallback();
+      expect(exitCallback).toBeDefined();
+      setTimeout(() => exitCallback!(1), 400_000);
+      const rejection = expect(startup).rejects.toThrow(
+        "Server process exited before becoming ready",
+      );
+      await vi.advanceTimersByTimeAsync(400_200);
+      await rejection;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rotates the previous stderr log before opening a new one", async () => {

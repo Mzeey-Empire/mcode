@@ -532,44 +532,6 @@ setInterval(() => {
   terminalService.onBufferedAmountTick(maxBufferedAmount());
 }, 50).unref();
 
-// Agents own provider execution; this composition adapter supplies the server
-// publication and background PR/CI integrations.
-startAgentOrchestration({
-  runtime: container.resolve(AgentEventPublicationRuntimePort),
-  publicationRegistry: container.resolve(AgentEventPublicationRegistry),
-  threadRepo,
-  narrativeStore,
-  pullRequestCompletionEffect,
-  providerRegistry,
-  publishAgentEvent: (event) => {
-    const sequencedEvent = broadcast("agent.event", event) ?? event;
-    portPush.send("agent.event", sequencedEvent);
-  },
-  publishThreadStatus: (status) => {
-    broadcast("thread.status", status);
-    portPush.send("thread.status", status);
-  },
-  publishPermissionRequest: (request) => {
-    broadcast("permission.request", request);
-    portPush.send("permission.request", request);
-  },
-  publishPermissionResolved: (payload) => {
-    broadcast("permission.resolved", payload);
-    portPush.send("permission.resolved", payload);
-  },
-});
-void legacyConversationMigration.runToCompletion().then((result) => {
-  if (result.migratedMessages > 0 || result.ambiguousMessages > 0) {
-    logger.info("Legacy parent conversation migration completed", {
-      migratedMessages: result.migratedMessages,
-      ambiguousMessages: result.ambiguousMessages,
-    });
-  }
-}).catch((error) => {
-  logger.error("Legacy parent conversation migration stopped at its last checkpoint", {
-    error: error instanceof Error ? error.message : String(error),
-  });
-});
 /** Reconciles incomplete turns and reports any execution interrupted at boot. */
 function recoverTurnsAtStartup(): void {
   const startupRecovery = turnRecoveryService.reconcileOnStartup();
@@ -580,9 +542,6 @@ function recoverTurnsAtStartup(): void {
   }
 }
 
-recoverTurnsAtStartup();
-recordStartupCheckpoint("turn recovery completed");
-
 /** Marks startup records interrupted because no process survives server restart. */
 function interruptThreadStartupsAtStartup(): void {
   const interrupted = threadStartupService.interruptNonterminalOnStartup();
@@ -592,8 +551,6 @@ function interruptThreadStartupsAtStartup(): void {
     });
   }
 }
-
-interruptThreadStartupsAtStartup();
 
 // Register broadcast callback so settings changes propagate to clients
 providerAvailability.onChange((list) => {
@@ -625,9 +582,6 @@ providerAvailability
   .catch((err: unknown) => {
     logger.error("Provider availability startup verification failed", err);
   });
-
-// Start background worktree cleanup worker
-cleanupWorker.start();
 
 /** Removes expired turn snapshots before accepting new work. */
 function removeExpiredSnapshots(): void {
@@ -880,11 +834,53 @@ killOrphanedServer({ lockFilePath: LOCK_FILE_PATH, logger, platform: hostRuntime
 // killOrphanedServer so the server process tree is clean before we inspect PTY PIDs.
 const pidRegistry = container.resolve<PtyPidRegistry>("PtyPidRegistry");
 reapOrphanedPtys(pidRegistry, logger, { platform: hostRuntime.platform });
-projectActionService.recoverStaleRuns();
-recordStartupCheckpoint("orphan cleanup and stale action recovery completed");
+recordStartupCheckpoint("orphan cleanup completed");
 
 async function bootstrapServer(): Promise<void> {
   try {
+    const legacyResult = await legacyConversationMigration.runToCompletion();
+    if (legacyResult.migratedMessages > 0 || legacyResult.ambiguousMessages > 0) {
+      logger.info("Legacy parent conversation migration completed", {
+        migratedMessages: legacyResult.migratedMessages,
+        ambiguousMessages: legacyResult.ambiguousMessages,
+      });
+    }
+    await canonicalSink.materializeConversationDisplay();
+    recordStartupCheckpoint("conversation display materialization completed");
+
+    interruptThreadStartupsAtStartup();
+    projectActionService.recoverStaleRuns();
+    cleanupWorker.start();
+    recordStartupCheckpoint("stale startup work recovery completed");
+
+    // Provider work must start only after every client-visible history route has
+    // one durable display representation.
+    startAgentOrchestration({
+      runtime: container.resolve(AgentEventPublicationRuntimePort),
+      publicationRegistry: container.resolve(AgentEventPublicationRegistry),
+      threadRepo,
+      narrativeStore,
+      pullRequestCompletionEffect,
+      providerRegistry,
+      publishAgentEvent: (event) => {
+        const sequencedEvent = broadcast("agent.event", event) ?? event;
+        portPush.send("agent.event", sequencedEvent);
+      },
+      publishThreadStatus: (status) => {
+        broadcast("thread.status", status);
+        portPush.send("thread.status", status);
+      },
+      publishPermissionRequest: (request) => {
+        broadcast("permission.request", request);
+        portPush.send("permission.request", request);
+      },
+      publishPermissionResolved: (payload) => {
+        broadcast("permission.resolved", payload);
+        portPush.send("permission.resolved", payload);
+      },
+    });
+    recoverTurnsAtStartup();
+    recordStartupCheckpoint("turn recovery completed");
     await threadControlService.recoverApprovals();
     recordStartupCheckpoint("approval recovery completed");
     externalThreadControlMcpRuntime.reconcileOnStartup();

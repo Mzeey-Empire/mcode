@@ -11,7 +11,7 @@ import {
   type CodeViewReactOptions,
 } from "@pierre/diffs/react";
 import { ChevronRight, MessageCircle } from "lucide-react";
-import { useDiffStore, type SelectedFile } from "@/stores/diffStore";
+import { inlineDiffCacheKey, useDiffStore, type SelectedFile } from "@/stores/diffStore";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
 import {
   usePreviewAnnotationStore,
@@ -39,6 +39,7 @@ type DiffRowMeta =
 type DiffItem = CodeViewItem<DiffRowMeta>;
 
 const EMPTY_ANNOTATIONS: SavedDiffAnnotation[] = [];
+const EMPTY_PATCHES: Record<string, string> = {};
 
 /** Comparison sources whose old/new contents can be read from git refs. */
 const HYDRATABLE_SOURCES: ReadonlySet<SelectedFile["source"]> = new Set([
@@ -253,15 +254,27 @@ export function ReviewDiffView({
   const shikiTheme = useShikiTheme();
 
 
-  const [patches, setPatches] = useState<Record<string, string>>(() => {
+  // Patch contents are scoped to the comparison identity: a revision bump or
+  // a source/id/thread switch must refetch rather than relabel the previous
+  // identity's bytes under the new metadata.
+  const patchScope = `${threadId}:${source}:${id}:${cacheVersion}`;
+  const seedPatches = (): Record<string, string> => {
     const cache = useDiffStore.getState().inlineDiffCache;
     const seeded: Record<string, string> = {};
     for (const file of files) {
-      const cached = cache[`${threadId}:${source}:${id}:${file.path}`];
+      const cached = cache[inlineDiffCacheKey(threadId, source, id, file.path, cacheVersion)];
       if (cached !== undefined) seeded[file.path] = cached;
     }
     return seeded;
-  });
+  };
+  const [patchState, setPatchState] = useState(() => ({
+    scope: patchScope,
+    byPath: seedPatches(),
+  }));
+  if (patchState.scope !== patchScope) {
+    setPatchState({ scope: patchScope, byPath: seedPatches() });
+  }
+  const patches = patchState.scope === patchScope ? patchState.byPath : EMPTY_PATCHES;
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
     () => new Set((bulkDiffExpand?.expand ?? defaultFilesExpanded) ? files.map((f) => f.path) : []),
   );
@@ -305,31 +318,49 @@ export function ReviewDiffView({
   const diffCache = useRef(new FileDiffCache()).current;
   const fileDiffs = useMemo(() => {
     const out: Record<string, FileDiffMetadata> = {};
-    const scope = `${threadId}:${source}:${id}:${cacheVersion}`;
     for (const [path, patch] of Object.entries(patches)) {
-      const fileDiff = diffCache.get(scope, path, patch);
+      const fileDiff = diffCache.get(patchScope, path, patch);
       if (fileDiff) out[path] = fileDiff;
     }
     return out;
-  }, [patches, id, source, threadId, cacheVersion, diffCache]);
+  }, [patches, patchScope, diffCache]);
 
-  // Lazy-load the patch for every expanded file missing one.
+  // Lazy-load the patch for every expanded file missing one. In-flight keys
+  // dedupe requests: each resolution changes `patches`, which re-runs this
+  // effect while sibling fetches are still pending.
+  const pendingPatches = useRef(new Set<string>());
   useEffect(() => {
     const transport = getTransport();
+    const scope = patchScope;
     for (const file of files) {
       if (!effectiveExpanded.has(file.path) || patches[file.path] !== undefined) continue;
       const path = file.path;
+      const pendingKey = `${scope} ${path}`;
+      if (pendingPatches.current.has(pendingKey)) continue;
+      pendingPatches.current.add(pendingKey);
       void loadFileDiff(transport, source, id, path, threadId)
         .then((result) => {
-          setPatches((prev) => (prev[path] === undefined ? { ...prev, [path]: result } : prev));
-          useDiffStore.getState().cacheInlineDiff(threadId, source, id, path, result);
+          // Responses from a superseded identity land after the scope reset;
+          // the scope tag keeps them out of the mounted comparison, and the
+          // versioned cache key keeps them out of any later seed.
+          setPatchState((prev) =>
+            prev.scope === scope && prev.byPath[path] === undefined
+              ? { scope, byPath: { ...prev.byPath, [path]: result } }
+              : prev,
+          );
+          useDiffStore.getState().cacheInlineDiff(threadId, source, id, path, result, cacheVersion);
         })
         .catch((error) => {
           console.warn("[ReviewDiffView] load failed", path, error);
-          setPatches((prev) => (prev[path] === undefined ? { ...prev, [path]: "" } : prev));
-        });
+          setPatchState((prev) =>
+            prev.scope === scope && prev.byPath[path] === undefined
+              ? { scope, byPath: { ...prev.byPath, [path]: "" } }
+              : prev,
+          );
+        })
+        .finally(() => pendingPatches.current.delete(pendingKey));
     }
-  }, [effectiveExpanded, files, id, patches, source, threadId]);
+  }, [effectiveExpanded, files, patchScope, patches, source, id, threadId, cacheVersion]);
 
   // Bulk expand/collapse arrives as a store command; subscriptions run outside
   // the render pass, unlike an effect watching the nonce.

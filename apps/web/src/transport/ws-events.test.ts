@@ -6,6 +6,11 @@ vi.mock("@/transport", () => ({
   getTransport: vi.fn(),
 }));
 
+vi.mock("@/components/chat/useFileAutocomplete", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/components/chat/useFileAutocomplete")>()),
+  clearFileListCache: vi.fn(),
+}));
+
 import { pushEmitter } from "./ws-transport";
 import { startPushListeners, stopPushListeners } from "./ws-events";
 import { useWorkspaceStore } from "@/features/projects/state/workspaceStore";
@@ -18,6 +23,7 @@ import { onPtyExit } from "@/features/terminal/adapters/pty-data-registry";
 import { useProjectActionStore } from "@/features/projects/environment/state/project-action-store";
 import { useThreadStartupStore } from "@/features/thread-startup";
 import { buildVolatileItems } from "@/features/conversation/messages/virtual-items";
+import { clearFileListCache } from "@/components/chat/useFileAutocomplete";
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
@@ -377,6 +383,42 @@ describe("ws-events turn.persisted Review invalidation", () => {
       filesChanged: ["src/changed.ts"],
     });
     expect(useDiffStore.getState().diffRevisionByScope["thread-1"]).toBe(1);
+  });
+});
+
+describe("ws-events files.changed", () => {
+  beforeEach(() => {
+    useDiffStore.setState({ diffRevisionByScope: {} });
+    vi.mocked(clearFileListCache).mockClear();
+  });
+
+  afterEach(() => stopPushListeners());
+
+  it("invalidates the file autocomplete cache and bumps the diff revision for the pushed scope", () => {
+    startPushListeners();
+
+    pushEmitter.emit("files.changed", {
+      workspaceId: "ws-1",
+      threadId: "thread-1",
+      changedPaths: ["new-folder/second.ts"],
+      wholeWorkspace: false,
+    });
+
+    expect(clearFileListCache).toHaveBeenCalledWith("ws-1", "thread-1");
+    expect(useDiffStore.getState().diffRevisionByScope["thread-1"]).toBe(1);
+  });
+
+  it("falls back to the workspace scope when the push carries no threadId", () => {
+    startPushListeners();
+
+    pushEmitter.emit("files.changed", {
+      workspaceId: "ws-1",
+      changedPaths: ["new-folder/second.ts"],
+      wholeWorkspace: false,
+    });
+
+    expect(clearFileListCache).toHaveBeenCalledWith("ws-1", undefined);
+    expect(useDiffStore.getState().diffRevisionByScope["ws-1"]).toBe(1);
   });
 });
 

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createWsTransport } from "../transport/ws-transport";
 
 class MockWebSocket {
+  static readonly OPEN = 1;
   onopen: (() => void) | null = null;
   onclose: ((event: { code: number; reason: string }) => void) | null = null;
   onerror: (() => void) | null = null;
@@ -232,3 +233,199 @@ describe("4001 auth failure handling", () => {
     vi.useRealTimers();
   });
 });
+
+/**
+ * Browser-faithful socket: send() throws while CONNECTING and silently
+ * discards while CLOSING/CLOSED, matching the WebSocket spec. The silent
+ * drop is what orphans an RPC that resumes onto a dead socket.
+ */
+class LifecycleSocket {
+  static instances: LifecycleSocket[] = [];
+  static readonly OPEN = 1;
+  onopen: (() => void) | null = null;
+  onclose: ((event: { code: number; reason: string }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  onmessage: ((event: { data: string }) => void) | null = null;
+  readyState = 0;
+  binaryType = "";
+
+  constructor() {
+    LifecycleSocket.instances.push(this);
+  }
+
+  send(raw: string | ArrayBuffer): void {
+    if (this.readyState === 0) throw new Error("InvalidStateError: socket is CONNECTING");
+    if (this.readyState !== LifecycleSocket.OPEN) return;
+    if (typeof raw !== "string") return;
+    const request = JSON.parse(raw) as { id: string; method?: string };
+    const result = request.method === "workspace.list" ? [{ id: "fixture" }] : null;
+    queueMicrotask(() =>
+      this.onmessage?.({ data: JSON.stringify({ id: request.id, result }) }),
+    );
+  }
+
+  open(): void {
+    this.readyState = 1;
+    this.onopen?.();
+  }
+
+  fail(): void {
+    this.readyState = 3;
+    this.onclose?.({ code: 1006, reason: "fixture failure" });
+  }
+
+  close(): void {
+    this.readyState = 3;
+    this.onclose?.({ code: 1000, reason: "" });
+  }
+}
+
+describe("RPC readiness across reconnects (issue #1733)", () => {
+  let transport: ReturnType<typeof createWsTransport>;
+
+  function settleSpy(promise: Promise<unknown>): { state: string } {
+    const spy = { state: "pending" };
+    void promise.then(
+      () => { spy.state = "resolved"; },
+      () => { spy.state = "rejected"; },
+    );
+    return spy;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    LifecycleSocket.instances = [];
+    vi.stubGlobal("WebSocket", LifecycleSocket);
+    transport = createWsTransport("ws://fixture.invalid");
+  });
+
+  afterEach(() => {
+    transport.close();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("settles an RPC waiting during a failed connecting attempt after the next socket opens", async () => {
+    LifecycleSocket.instances[0]!.open();
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(transport.listWorkspaces()).resolves.toEqual([{ id: "fixture" }]);
+
+    LifecycleSocket.instances[0]!.fail();
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(LifecycleSocket.instances).toHaveLength(2);
+
+    const original = settleSpy(transport.listWorkspaces());
+    LifecycleSocket.instances[1]!.fail();
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(LifecycleSocket.instances).toHaveLength(3);
+    LifecycleSocket.instances[2]!.open();
+    await vi.advanceTimersByTimeAsync(0);
+
+    await expect(transport.listWorkspaces()).resolves.toEqual([{ id: "fixture" }]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(original.state).not.toBe("pending");
+  });
+
+  it("keeps a waiting RPC alive across consecutive failed reconnect attempts", async () => {
+    LifecycleSocket.instances[0]!.open();
+    await vi.advanceTimersByTimeAsync(0);
+    LifecycleSocket.instances[0]!.fail();
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(LifecycleSocket.instances).toHaveLength(2);
+
+    const waiting = settleSpy(transport.listWorkspaces());
+    LifecycleSocket.instances[1]!.fail();
+    await vi.advanceTimersByTimeAsync(2100);
+    LifecycleSocket.instances[2]!.fail();
+    await vi.advanceTimersByTimeAsync(4100);
+    expect(LifecycleSocket.instances).toHaveLength(4);
+
+    LifecycleSocket.instances[3]!.open();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(waiting.state).toBe("resolved");
+  });
+
+  it("rejects an RPC waiting for readiness when the transport is closed", async () => {
+    LifecycleSocket.instances[0]!.open();
+    await vi.advanceTimersByTimeAsync(0);
+    LifecycleSocket.instances[0]!.fail();
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(LifecycleSocket.instances).toHaveLength(2);
+
+    const waiting = settleSpy(transport.listWorkspaces());
+    transport.close();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(waiting.state).toBe("rejected");
+  });
+
+  it("rejects RPCs issued after close instead of queueing them forever", async () => {
+    LifecycleSocket.instances[0]!.open();
+    await vi.advanceTimersByTimeAsync(0);
+    transport.close();
+
+    const late = settleSpy(transport.listWorkspaces());
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(late.state).toBe("rejected");
+  });
+
+  it("settles a binary RPC waiting during a failed connecting attempt after the next socket opens", async () => {
+    LifecycleSocket.instances[0]!.open();
+    await vi.advanceTimersByTimeAsync(0);
+    LifecycleSocket.instances[0]!.fail();
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(LifecycleSocket.instances).toHaveLength(2);
+
+    const waiting = settleSpy(
+      transport.saveClipboardFile(new ArrayBuffer(4), "image/png", "clip.png"),
+    );
+    LifecycleSocket.instances[1]!.fail();
+    await vi.advanceTimersByTimeAsync(2100);
+    LifecycleSocket.instances[2]!.open();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(waiting.state).toBe("resolved");
+  });
+
+  it("does not open a new socket or re-arm readiness when close() lands mid-reconnect", async () => {
+    transport.close();
+    let releaseDiscovery: (() => void) | null = null;
+    transport = createWsTransport("ws://fixture.invalid", {
+      discoverServerUrl: () =>
+        new Promise<string>((resolve) => {
+          releaseDiscovery = () => resolve("ws://fixture.invalid");
+        }),
+    });
+
+    // instances[0] belongs to the beforeEach transport closed above.
+    LifecycleSocket.instances[1]!.open();
+    await vi.advanceTimersByTimeAsync(0);
+    LifecycleSocket.instances[1]!.fail();
+    // Reconnect callback fires and suspends inside discoverServerUrl.
+    await vi.advanceTimersByTimeAsync(1100);
+
+    transport.close();
+    releaseDiscovery!();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    // No post-close connect() may run: no new socket, and `ready` stays
+    // rejected so late RPCs fail fast instead of parking forever.
+    expect(LifecycleSocket.instances).toHaveLength(2);
+    const late = settleSpy(transport.listWorkspaces());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(late.state).toBe("rejected");
+  });
+
+  it("rejects a binary RPC waiting for readiness when the transport is closed", async () => {
+    LifecycleSocket.instances[0]!.open();
+    await vi.advanceTimersByTimeAsync(0);
+    LifecycleSocket.instances[0]!.fail();
+    await vi.advanceTimersByTimeAsync(1100);
+
+    const waiting = settleSpy(
+      transport.saveClipboardFile(new ArrayBuffer(4), "image/png", "clip.png"),
+    );
+    transport.close();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(waiting.state).toBe("rejected");
+  });
+});
+

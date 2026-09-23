@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 import type { PendingAttachment } from "@/components/chat/AttachmentPreview";
 import type {
   ContextWindowMode,
@@ -12,6 +13,12 @@ import {
   collectSpillPathsFromPendingAttachments,
   releaseBrowserCaptureSpills,
 } from "@/features/preview/capture/browser-capture-spill";
+import {
+  canPersistComposerDraft,
+  composerDraftStorage,
+  parseStoredComposerDraft,
+  serializeComposerDraft,
+} from "@/lib/composer-draft-storage";
 
 /** Restorable open-editor state for one selected-text comment in a ComposerDraft. */
 export interface SelectedTextCommentEditorDraft {
@@ -89,14 +96,16 @@ interface ComposerDraftState {
   clearPendingPrefill: () => void;
 }
 
-function draftHasNoSendableContent(draft: ComposerDraft): boolean {
+/** True when a draft carries nothing worth persisting or restoring. */
+export function draftHasNoSendableContent(draft: ComposerDraft): boolean {
   return draft.input.trim() === ""
     && draft.attachments.length === 0
     && (draft.selectedTextComments?.length ?? 0) === 0
     && !draft.selectedTextCommentEditor;
 }
 
-function releaseAttachmentResources(attachments: readonly PendingAttachment[]): void {
+/** Revokes preview URLs and releases capture spill files owned by these attachments. */
+export function releaseComposerAttachmentResources(attachments: readonly PendingAttachment[]): void {
   for (const attachment of attachments) {
     if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
   }
@@ -119,47 +128,82 @@ function revokeReplacedAttachmentPreviewUrls(
 ): void {
   if (!existing) return;
   const retainedUrls = new Set(draft.attachments.map((attachment) => attachment.previewUrl));
-  releaseAttachmentResources(existing.attachments.filter(
+  releaseComposerAttachmentResources(existing.attachments.filter(
     (attachment) => attachment.previewUrl && !retainedUrls.has(attachment.previewUrl),
   ));
 }
 
+function parseStoredDrafts(raw: unknown): Record<string, ComposerDraft> {
+  if (!raw || typeof raw !== "object") return {};
+  const drafts: Record<string, ComposerDraft> = {};
+  for (const [threadId, value] of Object.entries(raw)) {
+    const parsed = parseStoredComposerDraft(value);
+    if (parsed) drafts[threadId] = parsed;
+  }
+  return drafts;
+}
+
 /** Zustand store for per-thread composer draft persistence. */
-export const useComposerDraftStore = create<ComposerDraftState>((set, get) => ({
-  drafts: {},
-  pendingPrefill: null,
+export const useComposerDraftStore = create<ComposerDraftState>()(
+  persist(
+    (set, get) => ({
+      drafts: {},
+      pendingPrefill: null,
 
-  saveDraft: (threadId, draft) => {
-    const existing = get().drafts[threadId];
-    if (draftHasNoSendableContent(draft)) {
-      // Don't store empty drafts; clean up if one existed
-      if (!existing) return;
-      releaseAttachmentResources(existing.attachments);
-      set({ drafts: removeDraft(get().drafts, threadId) });
-      return;
-    }
-    // Revoke blob URLs from the previous draft that are not reused in the new one
-    revokeReplacedAttachmentPreviewUrls(existing, draft);
-    set({ drafts: { ...get().drafts, [threadId]: draft } });
-  },
+      saveDraft: (threadId, draft) => {
+        const existing = get().drafts[threadId];
+        if (draftHasNoSendableContent(draft)) {
+          // Don't store empty drafts; clean up if one existed
+          if (!existing) return;
+          releaseComposerAttachmentResources(existing.attachments);
+          set({ drafts: removeDraft(get().drafts, threadId) });
+          return;
+        }
+        // Revoke blob URLs from the previous draft that are not reused in the new one
+        revokeReplacedAttachmentPreviewUrls(existing, draft);
+        set({ drafts: { ...get().drafts, [threadId]: draft } });
+      },
 
-  getDraft: (threadId) => {
-    return get().drafts[threadId];
-  },
+      getDraft: (threadId) => {
+        return get().drafts[threadId];
+      },
 
-  clearDraft: (threadId) => {
-    const draft = get().drafts[threadId];
-    if (!draft) return;
-    releaseAttachmentResources(draft.attachments);
-    set({ drafts: removeDraft(get().drafts, threadId) });
-  },
+      clearDraft: (threadId) => {
+        const draft = get().drafts[threadId];
+        if (!draft) return;
+        releaseComposerAttachmentResources(draft.attachments);
+        set({ drafts: removeDraft(get().drafts, threadId) });
+      },
 
-  removeDraftAfterAttachmentTransfer: (threadId) => {
-    if (!get().drafts[threadId]) return;
-    set({ drafts: removeDraft(get().drafts, threadId) });
-  },
+      removeDraftAfterAttachmentTransfer: (threadId) => {
+        if (!get().drafts[threadId]) return;
+        set({ drafts: removeDraft(get().drafts, threadId) });
+      },
 
-  setPendingPrefill: (text) => set({ pendingPrefill: text }),
+      setPendingPrefill: (text) => set({ pendingPrefill: text }),
 
-  clearPendingPrefill: () => set({ pendingPrefill: null }),
-}));
+      clearPendingPrefill: () => set({ pendingPrefill: null }),
+    }),
+    {
+      name: "mcode-composer-drafts",
+      version: 1,
+      storage: createJSONStorage(() => composerDraftStorage),
+      partialize: (state) => ({
+        drafts: Object.fromEntries(
+          Object.entries(state.drafts)
+            .filter(([, draft]) => canPersistComposerDraft(draft))
+            .map(([threadId, draft]) => [
+              threadId,
+              serializeComposerDraft(draft),
+            ]),
+        ),
+      }),
+      merge: (persisted, current) => ({
+        ...current,
+        drafts: parseStoredDrafts(
+          (persisted as { drafts?: unknown } | undefined)?.drafts,
+        ),
+      }),
+    },
+  ),
+);

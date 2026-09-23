@@ -435,8 +435,10 @@ export class TurnFinalizer {
     const materialized = this.materializeAssistantRow(threadId, false, true, true);
     if (!materialized) throw new Error(`Assistant compatibility projection failed for ${threadId}`);
     projection.materialized = materialized;
+    // Recovery rows are visible on the prompt while an assistant is staged.
+    // The terminal canonical projection replaces those same IDs with the final assistant-owned records.
     projection.toolCallCount = (await this.narrativeStore.persistNarrativeBatched(
-      threadId, materialized.id, materialized.content, outcome, { strict: true },
+      threadId, materialized.id, materialized.content, outcome, { strict: true, replaceExisting: true },
     )).toolCallCount;
     projection.narrative = this.narrativeStore.loadForMessages([
       this.projectedAssistantMessage(threadId, materialized.id),

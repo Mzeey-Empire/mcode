@@ -165,6 +165,33 @@ describe("DiffPanel worktree files", () => {
     expect(screen.getByTestId("snapshot-diff")).not.toHaveTextContent("live.ts");
   });
 
+  it("forwards the picked turn's message id and reloads when it changes", async () => {
+    useDiffStore.setState({
+      viewMode: "turn",
+      selectedTurnMessageIdByThread: { "thread-1": "msg-picked" },
+    });
+    transport.getTurnDiffComparison.mockResolvedValue(comparison("picked-1", "picked.ts"));
+
+    render(<DiffPanel />);
+    await waitFor(() => expect(screen.getByTestId("snapshot-diff")).toHaveTextContent("picked.ts"));
+    expect(transport.getTurnDiffComparison).toHaveBeenCalledWith("thread-1", "msg-picked");
+
+    transport.getTurnDiffComparison.mockResolvedValue(comparison("picked-2", "other.ts"));
+    act(() => { useDiffStore.getState().setReviewTurnForThread("thread-1", "msg-other"); });
+    await waitFor(() => expect(transport.getTurnDiffComparison).toHaveBeenCalledWith("thread-1", "msg-other"));
+    await waitFor(() => expect(screen.getByTestId("snapshot-diff")).toHaveTextContent("other.ts"));
+  });
+
+  it("never sends an operand-less request for an unpicked Turn view", async () => {
+    useDiffStore.setState({ viewMode: "turn", selectedTurnMessageIdByThread: {} });
+    render(<DiffPanel />);
+
+    // Operand-less requests resolve live/latest state, which a picked-turn
+    // view must not show. The panel settles empty without asking the server.
+    await waitFor(() => expect(screen.getByTestId("snapshot-diff")).toBeInTheDocument());
+    expect(transport.getTurnDiffComparison).not.toHaveBeenCalled();
+  });
+
   it("stays collapsed in a compact diff even when the toggle requests Files", async () => {
     measuredWidth = 640;
     render(<DiffPanel />);
