@@ -34,6 +34,7 @@ class FakeHostChild extends NodeEvents.EventEmitter implements PtyHostChild {
   readonly pid = 42;
   readonly connected = true;
   respondToInspection = true;
+  respondToHandshake = true;
   readonly send = vi.fn(
     (
       message: PtyHostServerMessage,
@@ -57,6 +58,7 @@ class FakeHostChild extends NodeEvents.EventEmitter implements PtyHostChild {
         return true;
       }
       if (message.kind !== "handshake") return true;
+      if (!this.respondToHandshake) return true;
       queueMicrotask(() => {
         this.emitMessage({
           contractVersion: 1,
@@ -535,5 +537,132 @@ describe("PtyHostSupervisor", () => {
       expect.objectContaining({ sessionId: UUID, hostGeneration: "1" }),
     );
     expect(ledger.list()).toEqual([]);
+  });
+
+  it("restarts after the replacement budget is exhausted", async () => {
+    vi.useFakeTimers();
+    const children: FakeHostChild[] = [];
+    const supervisor = new PtyHostSupervisor({
+      platform: "windows",
+      cleanupLedger: new InMemoryPtyHostCleanupLedger(),
+      spawnHost: () => {
+        const child = new FakeHostChild();
+        children.push(child);
+        return child;
+      },
+    });
+    try {
+      await supervisor.start();
+      children[0]!.crash();
+      await vi.advanceTimersByTimeAsync(250);
+      children[1]!.crash();
+      await vi.advanceTimersByTimeAsync(250);
+      expect(supervisor.health().state).toBe("unhealthy");
+
+      await expect(supervisor.start()).resolves.toEqual({
+        hostGeneration: "3",
+        state: "healthy",
+      });
+      expect(children).toHaveLength(3);
+
+      children[2]!.crash();
+      await vi.advanceTimersByTimeAsync(250);
+      await expect(supervisor.whenHealthy()).resolves.toEqual({
+        hostGeneration: "4",
+        state: "healthy",
+      });
+      expect(children).toHaveLength(4);
+    } finally {
+      await supervisor.shutdown().catch(() => undefined);
+      vi.useRealTimers();
+    }
+  });
+
+  it("restarts after a host failure during startup", async () => {
+    vi.useFakeTimers();
+    const children: FakeHostChild[] = [];
+    const supervisor = new PtyHostSupervisor({
+      platform: "windows",
+      startupTimeoutMs: 100,
+      cleanupLedger: new InMemoryPtyHostCleanupLedger(),
+      spawnHost: () => {
+        const child = new FakeHostChild();
+        child.respondToHandshake = children.length > 0;
+        children.push(child);
+        return child;
+      },
+    });
+    try {
+      const starting = supervisor.start();
+      const rejection = expect(starting).rejects.toThrow(
+        "PTY host startup exceeded 100ms",
+      );
+      await vi.advanceTimersByTimeAsync(100);
+      await rejection;
+      expect(supervisor.health().state).toBe("unhealthy");
+
+      await expect(supervisor.start()).resolves.toEqual({
+        hostGeneration: "2",
+        state: "healthy",
+      });
+      expect(children).toHaveLength(2);
+    } finally {
+      await supervisor.shutdown().catch(() => undefined);
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not double-spawn when a manual start races a pending replacement", async () => {
+    vi.useFakeTimers();
+    const children: FakeHostChild[] = [];
+    const reapResolvers: Array<() => void> = [];
+    const supervisor = new PtyHostSupervisor({
+      platform: "windows",
+      cleanupLedger: new InMemoryPtyHostCleanupLedger(),
+      spawnHost: () => {
+        const child = new FakeHostChild();
+        children.push(child);
+        return child;
+      },
+      reapProcessTree: vi.fn(
+        () => new Promise<void>((resolve) => reapResolvers.push(resolve)),
+      ),
+    });
+    try {
+      await supervisor.start();
+      // A running session leaves a durable record so the manual restart's reap
+      // stays pending long enough for the replacement timer to fire.
+      const creating = supervisor.create(createRequest);
+      children[0]!.emitMessage({
+        contractVersion: 1,
+        kind: "running",
+        sessionId: UUID,
+        hostGeneration: "1",
+        rootPid: 123,
+        processGroupId: "job-123",
+        containment: "job-object",
+      });
+      await creating;
+
+      children[0]!.crash();
+      // The deferred replacement fires first and parks inside its reap; the
+      // manual start lands while that reap is still in flight.
+      await vi.advanceTimersByTimeAsync(250);
+      const manual = supervisor.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(reapResolvers).toHaveLength(2);
+      reapResolvers.forEach((resolve) => resolve());
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(children).toHaveLength(2);
+      await expect(manual).resolves.toEqual({
+        hostGeneration: "2",
+        state: "healthy",
+      });
+    } finally {
+      reapResolvers.forEach((resolve) => resolve());
+      await supervisor.shutdown().catch(() => undefined);
+      vi.useRealTimers();
+    }
   });
 });
