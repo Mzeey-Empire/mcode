@@ -296,4 +296,45 @@ describe("execution semantic writer transport", () => {
       scheduler.shutdown();
     }
   });
+
+  it("stages a partial assistant after Stop before the cancelled terminal commit", async () => {
+    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    const port = new CanonicalExecutionWriterPort(writer, () => {});
+    const scheduler = new ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>({
+      workerCount: 1,
+      limits: {
+        maxPending: 16, maxPendingBytes: 64_000, reservedControl: 4, reservedControlBytes: 16_000,
+        maxPerExecutionPending: 12, maxPerExecutionBytes: 48_000,
+        reservedPerExecutionControl: 3, reservedPerExecutionControlBytes: 12_000,
+      },
+      createWorker: () => new ExecutionThreadWorkerPort(port),
+      onWorkerLost: () => { throw new Error("Execution worker was lost"); },
+    });
+    try {
+      const claim = scheduler.claim(execution, 1);
+      if (claim.kind !== "claimed") throw new Error(`Execution claim failed: ${claim.kind}`);
+      const send = (command: Parameters<typeof scheduler.submit>[0]["command"]) => {
+        const admission = scheduler.submit({ execution, lease: claim.lease, command, byteLength: 1_000 });
+        if (admission.kind !== "admitted") throw new Error(`Execution admission failed: ${admission.kind}`);
+        return admission.completion;
+      };
+      const start = beginOperation().mutation;
+      if (start.kind !== "begin") throw new Error("Unexpected begin operation");
+      expect((await send({ kind: "start", providerId: "codex", input: start.input })).kind).toBe("reply");
+      expect((await send({ kind: "stop", requestId: "stop-partial" })).kind).toBe("reply");
+      expect((await send({ kind: "provider-outcome", outcome: "cancelled" })).kind).toBe("reply");
+      expect((await send({ kind: "stage-terminal", input: {
+        threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "cancelled", endedAt: NOW,
+        assistant: { content: "Partial answer", model: null, attachments: [] }, narrative: [],
+      } })).kind).toBe("reply");
+      await expect(send({ kind: "finalize", outcome: "cancelled", input: {
+        threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, providerId: "codex",
+        providerIdentities: [], outcome: "cancelled", projection: { kind: "writer-staged" },
+      } })).resolves.toMatchObject({ kind: "reply", result: { kind: "committed" } });
+      expect(db.prepare("SELECT content, outcome FROM messages WHERE role = 'assistant' AND is_internal = 0").get())
+        .toEqual({ content: "Partial answer", outcome: "cancelled" });
+    } finally {
+      scheduler.shutdown();
+    }
+  });
 });
