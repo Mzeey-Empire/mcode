@@ -6,7 +6,6 @@ import {
   broadcast,
   broadcastTerminalData,
   clientCount,
-  MAX_PUSH_SOCKET_BUFFERED_BYTES,
   removeClient,
   sendToClient,
   setClientThreadSubscriptions,
@@ -22,18 +21,20 @@ import {
   setTransportPayloadValidatorForTest,
 } from "../payload-validation.js";
 
-function fakeOpenSocket(received: Array<{ buf: Buffer; binary: boolean }>): WebSocket {
+function fakeOpenSocket(received: Array<{ buf: Buffer; binary: boolean }>, completeImmediately = true): WebSocket {
   const ws: Partial<WebSocket> = {
     readyState: 1, // OPEN
     OPEN: 1,
     bufferedAmount: 0,
     close: () => undefined,
     terminate: () => undefined,
-    send: ((data: unknown, opts?: { binary?: boolean }) => {
+    send: ((data: unknown, optsOrComplete?: { binary?: boolean } | (() => void), complete?: () => void) => {
       const buf = Buffer.isBuffer(data)
         ? data
         : Buffer.from(data as Uint8Array);
+      const opts = typeof optsOrComplete === "function" ? undefined : optsOrComplete;
       received.push({ buf, binary: !!opts?.binary });
+      if (completeImmediately) (typeof optsOrComplete === "function" ? optsOrComplete : complete)?.();
     }) as WebSocket["send"],
   };
   return ws as WebSocket;
@@ -75,13 +76,13 @@ describe("broadcastTerminalData", () => {
     expect(decoded.payload).toEqual(payload);
   });
 
-  it("terminates only the slow terminal client before it can pause every terminal", () => {
+  it("keeps terminal delivery alive while an RPC response is buffered", () => {
     const slowReceived: Array<{ buf: Buffer; binary: boolean }> = [];
     const healthyReceived: Array<{ buf: Buffer; binary: boolean }> = [];
     const slow = fakeOpenSocket(slowReceived);
     const terminate = vi.fn();
     Object.defineProperties(slow, {
-      bufferedAmount: { value: MAX_PUSH_SOCKET_BUFFERED_BYTES },
+      bufferedAmount: { value: 35 * 1_024 * 1_024 },
       terminate: { value: terminate },
     });
     addClient(slow);
@@ -89,9 +90,30 @@ describe("broadcastTerminalData", () => {
 
     broadcastTerminalData("pty-1", 1, new Uint8Array([0x41]));
 
-    expect(terminate).toHaveBeenCalledOnce();
-    expect(slowReceived).toHaveLength(0);
+    expect(terminate).not.toHaveBeenCalled();
+    expect(slowReceived).toHaveLength(1);
     expect(healthyReceived).toHaveLength(1);
+  });
+
+  it("releases the push budget when queued frames finish sending", () => {
+    const completions: Array<() => void> = [];
+    const terminate = vi.fn();
+    const send = vi.fn((_data: unknown, _options: unknown, complete: () => void) => {
+      completions.push(complete);
+    });
+    const ws = { readyState: 1, OPEN: 1, bufferedAmount: 0, send, terminate } as unknown as WebSocket;
+    addClient(ws);
+
+    for (let index = 0; index < 15; index++) {
+      broadcastTerminalData("pty-1", index, new Uint8Array(1_024 * 1_024));
+    }
+    for (const complete of completions.splice(0)) complete();
+    for (let index = 15; index < 30; index++) {
+      broadcastTerminalData("pty-1", index, new Uint8Array(1_024 * 1_024));
+    }
+
+    expect(send).toHaveBeenCalledTimes(30);
+    expect(terminate).not.toHaveBeenCalled();
   });
 });
 
@@ -334,13 +356,12 @@ describe("broadcast", () => {
     expect(good).toHaveLength(1);
   });
 
-  it("terminates a slow agent-event client and replays its retained gap after reconnect", () => {
+  it("terminates a client with unsent pushes and replays its retained agent gap", () => {
     const slowReceived: Array<{ buf: Buffer; binary: boolean }> = [];
     const healthyReceived: Array<{ buf: Buffer; binary: boolean }> = [];
-    const slow = Object.assign(new NodeEvents.EventEmitter(), fakeOpenSocket(slowReceived));
+    const slow = Object.assign(new NodeEvents.EventEmitter(), fakeOpenSocket(slowReceived, false));
     const terminate = vi.fn(() => slow.emit("close"));
     Object.defineProperties(slow, {
-      bufferedAmount: { value: MAX_PUSH_SOCKET_BUFFERED_BYTES },
       terminate: { value: terminate },
     });
     const healthy = fakeOpenSocket(healthyReceived);
@@ -350,12 +371,16 @@ describe("broadcast", () => {
     subscribeClientToThread(slow, "thread-recovery");
     subscribeClientToThread(healthy, "thread-recovery");
 
+    for (let index = 0; index < 16; index++) {
+      broadcastTerminalData("pty-1", index, new Uint8Array(1_024 * 1_024));
+    }
+
     broadcast("agent.event", { type: "textDelta", threadId: "thread-recovery", delta: "retained" });
 
     expect(terminate).toHaveBeenCalledOnce();
     expect(clientCount()).toBe(1);
-    expect(slowReceived).toHaveLength(0);
-    expect(healthyReceived).toHaveLength(1);
+    expect(slowReceived).toHaveLength(15);
+    expect(healthyReceived).toHaveLength(17);
 
     const recoveredReceived: Array<{ buf: Buffer; binary: boolean }> = [];
     const recovered = fakeOpenSocket(recoveredReceived);
@@ -443,12 +468,12 @@ describe("sendToClient", () => {
     expect(second).toHaveLength(0);
   });
 
-  it("terminates a slow directed push client before replay can add to its backlog", () => {
+  it("delivers a directed push while an unrelated response is buffered", () => {
     const received: Array<{ buf: Buffer; binary: boolean }> = [];
     const ws = fakeOpenSocket(received);
     const terminate = vi.fn();
     Object.defineProperties(ws, {
-      bufferedAmount: { value: MAX_PUSH_SOCKET_BUFFERED_BYTES },
+      bufferedAmount: { value: 35 * 1_024 * 1_024 },
       terminate: { value: terminate },
     });
     addClient(ws);
@@ -470,11 +495,11 @@ describe("sendToClient", () => {
       requestId: "request-a",
       sequence: 1,
       reason: "deadline-exceeded",
-    })).toBe(false);
+    })).toBe(true);
 
-    expect(terminate).toHaveBeenCalledOnce();
-    expect(clientCount()).toBe(0);
-    expect(received).toHaveLength(0);
+    expect(terminate).not.toHaveBeenCalled();
+    expect(clientCount()).toBe(1);
+    expect(received).toHaveLength(1);
   });
 
   it("reports a synchronous socket delivery failure without throwing", () => {

@@ -13,8 +13,10 @@ import {
   type MessageMention,
   type PreviewAnnotationBundle,
   type SelectedTextComment,
+  type ThreadStartup,
 } from "@mcode/contracts";
 import { getTransport } from "@/transport";
+import { useThreadStartupStore } from "@/features/thread-startup/state/thread-startup-store";
 import { scheduleDrainAfterEdit, useThreadStore } from "@/stores/threadStore";
 import { deleteThreadRecord, patchThreadRecord } from "@/stores/thread-record";
 import { getConversationResidency } from "@/features/conversation/residency/conversation-residency";
@@ -41,6 +43,11 @@ import { recordThreadSelection } from "@/lib/thread-switch-telemetry";
 /** Generate a short random branch name for auto-mode worktrees (e.g. `mcode-a1b2c3d4`). */
 function generateBranchId(): string {
   return `mcode-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function unboundStartupResolution(state: ThreadStartup["state"]): "unbound" | "terminal" | "interrupted" {
+  if (state === "interrupted") return "interrupted";
+  return state === "failed" || state === "cancelled" ? "terminal" : "unbound";
 }
 
 /** Minimum interval between syncThreadPrs calls per workspace. */
@@ -550,6 +557,12 @@ function pendingCreationWithCurrentDraft(
   };
 }
 
+function draftChangedSinceSubmission(pending: PendingThreadCreation, draft: ComposerDraft | undefined): draft is ComposerDraft {
+  if (!draft) return false;
+  if (pending.composerDraft) return JSON.stringify(draft) !== JSON.stringify(pending.composerDraft);
+  return draft.input.trim() !== (pending.displayContent ?? pending.content).trim();
+}
+
 /**
  * Optional RPC dispatch callback used by workspace actions. Tests inject a
  * stub here; production code uses {@link getTransport} directly. The shape
@@ -656,6 +669,8 @@ interface WorkspaceState {
    * Re-run server creation for a placeholder thread after {@link WorkspaceThread.clientError}.
    */
   retryPreparingThread: (placeholderId: string) => Promise<Thread>;
+  /** Resolve in-memory placeholders against authoritative startup records after reconnect. */
+  recoverPreparingThreads: () => Promise<void>;
   /** Remove a failed or abandoned placeholder row and drop selection when it was active. */
   dismissPreparingThread: (placeholderId: string) => void;
   /**
@@ -663,8 +678,6 @@ interface WorkspaceState {
    * durable thread id or by startup id so call order does not matter.
    */
   resolvePendingStartup: (ref: { threadId?: string; startupId?: string }) => void;
-  /** Surface connection loss while {@link WorkspaceThread.clientPreparing} is true. */
-  failPreparingThreadOnConnectionLost: (placeholderId: string) => void;
   deleteThread: (threadId: string, cleanupWorktree: boolean) => Promise<void>;
   /** Complete an idle thread and release renderer-owned runtime resources. */
   completeThread: (threadId: string) => Promise<void>;
@@ -793,6 +806,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     bumpThreadListMutationEpoch(workspaceId);
     pendingThreadCreationByPlaceholderId.delete(placeholderId);
     const draftStore = useComposerDraftStore.getState();
+    const draft = draftStore.getDraft(placeholderId);
+    const editedDraft = !releasePlaceholderDraft && pending && draftChangedSinceSubmission(pending, draft) ? draft : undefined;
     if (releasePlaceholderDraft) draftStore.clearDraft(placeholderId);
     else draftStore.removeDraftAfterAttachmentTransfer(placeholderId);
     // Apply the snapshot before the transfer so a pre-agent "idle" snapshot
@@ -812,9 +827,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     if (get().activeThreadId === thread.id) {
       void getConversationResidency().activate(thread.id, get().threads);
     }
+    if (editedDraft) draftStore.saveDraft(thread.id, editedDraft);
   };
 
-  const applyOptimisticFailure = (placeholderId: string, err: unknown) => {
+  const applyOptimisticFailure = (placeholderId: string, err: unknown, attempt: PendingThreadCreation) => {
+    if (pendingThreadCreationByPlaceholderId.get(placeholderId) !== attempt) return;
     const msg = String(err);
     useThreadStore.setState((state) => {
       const nextRunning = new Set(state.runningThreadIds);
@@ -914,9 +931,94 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
       );
       return result;
     } catch (error) {
-      applyOptimisticFailure(placeholderId, error);
+      applyOptimisticFailure(placeholderId, error, attempt);
       throw error;
     }
+  };
+
+  const applyRecoveredCreation = (placeholderId: string, thread: Thread) => {
+    const pending = pendingThreadCreationByPlaceholderId.get(placeholderId);
+    if (!pending || !get().workspaces.some((workspace) => workspace.id === pending.workspaceId)) return;
+    const draftStore = useComposerDraftStore.getState();
+    const draft = draftStore.getDraft(placeholderId);
+    const editedDraft = draftChangedSinceSubmission(pending, draft) ? draft : undefined;
+    bumpThreadListMutationEpoch(pending.workspaceId);
+    pendingThreadCreationByPlaceholderId.delete(placeholderId);
+    draftStore.removeDraftAfterAttachmentTransfer(placeholderId);
+    useThreadStore.getState().transferThreadRuntime(placeholderId, thread.id);
+    useDiffStore.getState().hideRightPanel(pending.workspaceId, thread.id);
+    set((state) => optimisticCreationSuccessState(
+      state,
+      placeholderId,
+      thread,
+      undefined,
+      pending,
+      pending.transportMode === "worktree",
+    ));
+    if (get().activeThreadId === thread.id) {
+      void getConversationResidency().activate(thread.id, get().threads);
+    }
+    if (editedDraft) draftStore.saveDraft(thread.id, editedDraft);
+    if (pending.transportMode === "worktree") {
+      void get().loadWorktrees(pending.workspaceId);
+    }
+  };
+
+  // A reconnect and a user Retry can race. Both must observe the same lookup.
+  const creationLookups = new Map<string, Promise<"missing" | "unbound" | "terminal" | "interrupted" | Thread>>();
+  const creationRetries = new Map<string, Promise<Thread>>();
+  const reconcilePendingCreation = (placeholderId: string): Promise<"missing" | "unbound" | "terminal" | "interrupted" | Thread> => {
+    const existing = creationLookups.get(placeholderId);
+    if (existing) return existing;
+    const lookup = (async () => {
+      const pending = pendingThreadCreationByPlaceholderId.get(placeholderId);
+      if (!pending?.startupId) return "unbound";
+      const fetched = await getTransport().getThreadStartup(pending.startupId);
+      if (!pendingThreadCreationByPlaceholderId.has(placeholderId)) return "unbound";
+      if (fetched) useThreadStartupStore.getState().apply(fetched);
+      // A binding push may have arrived while the lookup was in flight. The
+      // startup store rejects stale revisions, so read its latest record.
+      const startup = useThreadStartupStore.getState().recordsByStartupId[pending.startupId];
+      if (!startup) return "missing";
+      if (!startup.threadId) return unboundStartupResolution(startup.state);
+      const threads = await getTransport().listThreads(pending.workspaceId);
+      const thread = threads.find((candidate) => candidate.id === startup.threadId);
+      if (!thread) return "unbound";
+      applyRecoveredCreation(placeholderId, thread);
+      return thread;
+    })();
+    creationLookups.set(placeholderId, lookup);
+    void lookup.finally(() => creationLookups.delete(placeholderId)).catch(() => {});
+    return lookup;
+  };
+
+  const prepareCreationRetry = async (placeholderId: string): Promise<
+    | { kind: "recovered"; thread: Thread }
+    | { kind: "retry"; pending: PendingThreadCreation & { startupId: string }; newStartup: boolean }
+  > => {
+    const pending = pendingThreadCreationByPlaceholderId.get(placeholderId);
+    if (!pending?.startupId) throw new Error("No pending startup identity for this thread");
+    const row = get().threads.find((thread) => thread.id === placeholderId);
+    if (!row?.clientError) throw new Error("Thread is not in a retryable state");
+    const recovered = await reconcilePendingCreation(placeholderId);
+    if (typeof recovered !== "string") return { kind: "recovered", thread: recovered };
+    if (recovered === "unbound") {
+      throw new Error("This thread is still being prepared. Try again after it finishes.");
+    }
+    if (recovered === "interrupted") {
+      throw new Error("Thread creation was interrupted before its thread could be confirmed. Inspect this workspace before starting again.");
+    }
+    // Only an authoritative terminal record proves a new lifecycle is needed.
+    const newStartup = recovered === "terminal";
+    const attempt = { ...pending, startupId: newStartup ? crypto.randomUUID() : pending.startupId };
+    const withDraft = newStartup
+      ? pendingCreationWithCurrentDraft(attempt, useComposerDraftStore.getState().getDraft(placeholderId))
+      : attempt;
+    return {
+      kind: "retry",
+      pending: { ...withDraft, startupId: attempt.startupId },
+      newStartup,
+    };
   };
 
   const clearThreadResources = (threadId: string) => {
@@ -1448,58 +1550,74 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     return createPendingThread(pending, threadCreationContext("branch", params.mode));
   },
 
-  retryPreparingThread: async (placeholderId) => {
-    const pending = pendingThreadCreationByPlaceholderId.get(placeholderId);
-    if (!pending) {
-      throw new Error("No pending creation for this thread");
-    }
-    const row = get().threads.find((t) => t.id === placeholderId);
-    if (!row?.clientError) {
-      throw new Error("Thread is not in a retryable state");
-    }
-    const attempt = { ...pending, startupId: crypto.randomUUID() };
-    const currentPending = pendingCreationWithCurrentDraft(
-      attempt,
-      useComposerDraftStore.getState().getDraft(placeholderId),
-    );
-    pendingThreadCreationByPlaceholderId.set(placeholderId, currentPending);
-    set((state) => ({
-      error: null,
-      threads: state.threads.map((t) =>
-        t.id === placeholderId
-          ? { ...t, clientPreparing: true, clientError: null }
-          : t,
-      ),
-      pendingStartupByThreadId: {
-        ...state.pendingStartupByThreadId,
-        [placeholderId]: {
-          startupId: attempt.startupId,
-          context: currentPending.clientPreparingContext ?? state.pendingStartupByThreadId[placeholderId]?.context ?? "new-direct",
-          queuedMessage: currentPending.displayContent ?? currentPending.content,
+  retryPreparingThread: (placeholderId) => {
+    const existing = creationRetries.get(placeholderId);
+    if (existing) return existing;
+    const operation = (async () => {
+      const retry = await prepareCreationRetry(placeholderId);
+      if (retry.kind === "recovered") return retry.thread;
+      const currentPending = retry.pending;
+      pendingThreadCreationByPlaceholderId.set(placeholderId, currentPending);
+      set((state) => ({
+        error: null,
+        threads: state.threads.map((t) =>
+          t.id === placeholderId
+            ? { ...t, clientPreparing: true, clientError: null }
+            : t,
+        ),
+        pendingStartupByThreadId: {
+          ...state.pendingStartupByThreadId,
+          [placeholderId]: {
+            startupId: currentPending.startupId,
+            context: currentPending.clientPreparingContext ?? state.pendingStartupByThreadId[placeholderId]?.context ?? "new-direct",
+            queuedMessage: currentPending.displayContent ?? currentPending.content,
+          },
         },
-      },
+      }));
+      useThreadStore.setState((state) => ({
+        runningThreadIds: new Set([...state.runningThreadIds, placeholderId]),
+        records: patchThreadRecord(state.records, placeholderId, {
+          agentStartTime: Date.now(),
+          runtimePhase: "running",
+        }),
+      }));
+      try {
+        const result = await runCreateAndSend(currentPending);
+        applyOptimisticSuccess(
+          placeholderId,
+          currentPending.workspaceId,
+          result,
+          currentPending.transportMode === "worktree",
+          retry.newStartup,
+        );
+        return result;
+      } catch (error) {
+        applyOptimisticFailure(placeholderId, error, currentPending);
+        throw error;
+      }
+    })();
+    creationRetries.set(placeholderId, operation);
+    void operation.finally(() => creationRetries.delete(placeholderId)).catch(() => {});
+    return operation;
+  },
+
+  recoverPreparingThreads: async () => {
+    await Promise.all([...pendingThreadCreationByPlaceholderId].map(async ([placeholderId, pending]) => {
+      try {
+        const recovered = await reconcilePendingCreation(placeholderId);
+        if ((recovered === "missing" || recovered === "terminal" || recovered === "interrupted")
+          && get().threads.some((thread) => thread.id === placeholderId && thread.clientPreparing)) {
+          const message = recovered === "interrupted"
+            ? "Thread creation was interrupted before its thread could be confirmed. Inspect this workspace before starting again."
+            : recovered === "terminal"
+              ? "Thread creation ended before a thread was made. Retry to start again."
+              : "Thread creation was not confirmed. Retry to continue.";
+          applyOptimisticFailure(placeholderId, new Error(message), pending);
+        }
+      } catch {
+        // A failed lookup proves nothing about whether the server created the thread.
+      }
     }));
-    useThreadStore.setState((state) => ({
-      runningThreadIds: new Set([...state.runningThreadIds, placeholderId]),
-      records: patchThreadRecord(state.records, placeholderId, {
-        agentStartTime: Date.now(),
-        runtimePhase: "running",
-      }),
-    }));
-    try {
-      const result = await runCreateAndSend(currentPending);
-      applyOptimisticSuccess(
-        placeholderId,
-        currentPending.workspaceId,
-        result,
-        currentPending.transportMode === "worktree",
-        true,
-      );
-      return result;
-    } catch (e) {
-      applyOptimisticFailure(placeholderId, e);
-      throw e;
-    }
   },
 
   resolvePendingStartup: ({ threadId, startupId }) => {
@@ -1528,11 +1646,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => {
     if (didClearActiveThread) reconcileSelectedConversation();
   },
 
-  failPreparingThreadOnConnectionLost: (placeholderId) => {
-    const row = get().threads.find((t) => t.id === placeholderId);
-    if (!row?.clientPreparing) return;
-    applyOptimisticFailure(placeholderId, new Error("Connection lost while creating this thread. Try again."));
-  },
 
   deleteThread: async (threadId, cleanupWorktree) => {
     set({ error: null });

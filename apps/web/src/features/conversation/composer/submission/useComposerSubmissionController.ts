@@ -135,6 +135,7 @@ export function useComposerSubmissionController({
       );
       annotations.clearBeforeDispatch();
       queue.consumeEditForDispatch();
+      let placeholderAccepted = false;
       const dispatch = dispatchComposerTarget({
         threadId,
         workspaceId,
@@ -145,7 +146,10 @@ export function useComposerSubmissionController({
         submission,
         onBranchModeExit,
         onThreadCreated,
-        onThreadPreparing,
+        onThreadPreparing: (thread) => {
+          placeholderAccepted = true;
+          onThreadPreparing?.(thread);
+        },
         onThreadCreationFailed,
       });
       const draftCleared = form.clearSubmittedDraft(submission.snapshot);
@@ -155,7 +159,7 @@ export function useComposerSubmissionController({
         await dispatch;
       } catch (error) {
         queue.releaseConsumedEdit();
-        if (draftCleared) form.restoreFailedDispatch();
+        if (draftCleared && !placeholderAccepted) form.restoreFailedDispatch();
         annotations.restoreAfterFailure();
         showDispatchFailure(error, submission.snapshot.selectedTextComments.length > 0);
         return;

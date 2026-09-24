@@ -789,6 +789,25 @@ describe("AgentService.createAndSend defaults", () => {
     expect(result.runtimeSnapshot.turnExecutionId).toEqual(expect.any(String));
   });
 
+  it("replays a lost createAndSend response without creating or dispatching twice", async () => {
+    const { workspaceRepo, threadRepo, service, provider, messageRepo } = createAgentServiceHarness();
+    const workspace = workspaceRepo.create("Repo", "/repo");
+    const command = {
+      workspaceId: workspace.id,
+      content: "Start exactly once",
+      startupId: "00000000-0000-4000-8000-000000000041",
+    };
+
+    const first = await service.createAndSend(command);
+    const replay = await service.createAndSend(command);
+
+    expect(replay.id).toBe(first.id);
+    expect(replay.runtimeSnapshot).toEqual(first.runtimeSnapshot);
+    expect(threadRepo.listByWorkspace(workspace.id)).toHaveLength(1);
+    await eventually(() => expect(provider.sendTurn).toHaveBeenCalledOnce());
+    expect(messageRepo.listByThread(first.id, 10).messages).toHaveLength(1);
+  });
+
   it("completes startup when the initial native command is handled without a provider turn", async () => {
     const { workspaceRepo, service, provider, threadStartups } = createAgentServiceHarness(undefined, true);
     const workspace = workspaceRepo.create("Repo", "/repo");

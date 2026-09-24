@@ -33,7 +33,7 @@
 | Codex subagents retain task, state, transcript, navigation, and identity color across both protocol shapes | [Codex subagent view](codex-subagent-view.md) | `runtime check`, Terra `runtime live --scenario subagent`, and Electron UI proof |
 | Thread deletion and provider-session cleanup retain runtime ownership | [Resource lifecycle](resource-lifecycle.md) | `runtime check` and controlled thread cleanup |
 | Pointer-selected assistant text opens a compact comment editor and retains native copy actions | [Selected text comments](selected-text-comments.md) | Electron public UI proof |
-| A New worktree completes checkout before automatic Setup starts and can cancel a held Setup safely | [Managed-worktree Setup readiness](managed-worktree-setup.md) | `runtime worktree-setup --confirm-cleanup` and `runtime check` |
+| A lost New-worktree create response can be retried with one startup ID; checkout completes before automatic Setup and held Setup can be cancelled safely | [Managed-worktree Setup readiness](managed-worktree-setup.md) | `runtime worktree-setup --confirm-cleanup` and `runtime check` |
 | Local, managed-worktree, and PR-created threads show truthful startup progress and remove it after success | [Thread startup progress](thread-startup-progress.md) | Electron public UI proof and focused startup tests |
 | A user completes a worktree thread and the app schedules its cleanup | [Completed-thread cleanup](completed-thread-cleanup.md) | `thread-lifecycle proof --confirm-cleanup` and `thread-lifecycle check` |
 | Queued composer messages continue in FIFO order after completion and stay paused after Stop | [Composer queue](composer-queue.md) | `composer-queue proof --cursor-model <id> --allow-enable-cursor --confirm-provider-calls --confirm-cleanup` |
@@ -77,7 +77,6 @@ Read [Multi-surface journeys](multi-surface-journeys.md) for a workflow that cro
 - The selected-text-comments live proof covers rendered source cards. It does not load a source that is absent from the current transcript window.
 - Saved-comment edit, delete, and focus return need the card and marker entry points planned for #1557 and #1558.
 - Thread retention has a minimum of one day. The live proof shows the scheduled deletion, while focused integration checks show later worktree cleanup.
-- If `agent.createAndSend` creates a thread but its response is lost before the ID arrives, the public RPC has no safe cleanup identifier. Record this as a coverage gap. Do not delete threads by heuristic.
 - If `thread.create` creates a managed-worktree thread but its response is lost before the ID arrives, the lifecycle verifier has no safe cleanup identifier. Record this as a coverage gap. Do not delete threads by heuristic.
 - The ACP narrative fixture does not emit permission prompts, plans, subagents, or usage updates; those paths still need live provider coverage or focused tests.
 - The Windows console audit cannot attribute Windows Terminal-hosted console windows to a process tree; watch-mode sightings need manual correlation, and an uncorrelated sighting is a gap rather than a pass or defect.

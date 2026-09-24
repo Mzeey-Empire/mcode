@@ -3,6 +3,7 @@
 ## Behavior
 
 - Mcode returns a managed worktree only after Git completes its checkout.
+- A second client can retry the same create request after losing the first response. The startup ID still identifies one bound startup, one thread, one worktree, and one persisted queued first turn.
 - The first turn enters the automatic Setup gate after the managed worktree exists.
 - Automatic Setup runs in the managed worktree, not the source workspace.
 - Setup reads every tracked fixture file before it writes the proof marker.
@@ -15,9 +16,9 @@
 1. Start the runtime and run `runtime health`.
 2. Run `runtime check` for the focused Git failure regression.
 3. Run `runtime worktree-setup --confirm-cleanup`.
-4. Inspect the redacted receipt. It must report the complete checkout, a terminal cancelled startup, a cancelled Setup step, an interrupted Setup attempt, a stopped fixture process, no agent runtime, no provider call, and successful cleanup.
+4. Inspect the redacted receipt. `lostResponse` must report one bound startup, thread, worktree, queued turn, and persisted prompt after the retry. It must also report the complete checkout, a terminal cancelled startup, a cancelled Setup step, an interrupted Setup attempt, a stopped fixture process, no agent runtime, no provider call, and successful cleanup.
 
-The verifier holds Setup open after the marker. It records the fixture process ID, then uses `thread.startup.cancel`. The first turn stays queued, so this proof does not call a provider.
+The verifier discards the first `agent.createAndSend` response, observes the bound startup through a second authenticated socket, closes the first socket, and retries the exact request. It holds Setup open after the marker, records the fixture process ID, then uses `thread.startup.cancel`. The first turn stays queued, so this proof does not call a provider.
 
 ## Failure handling
 

@@ -29,13 +29,13 @@ function startupForThread(
   return threadId ? recordsByStartupId[startupIdByThreadId[threadId] ?? ""] : undefined;
 }
 
-/** Hand a vetoed queued message back to the composer on the durable thread. */
-function restoreCancelledDraft(startup: ThreadStartup, pendingKey: string): void {
+/** Keep the unsent first message available when startup stops before agent admission. */
+function restoreUnsentDraft(startup: ThreadStartup, pendingKey: string): void {
   const draftStore = useComposerDraftStore.getState();
   const parked = draftStore.getDraft(pendingKey);
-  const target = startup.threadId;
-  if (target && parked) draftStore.saveDraft(target, parked);
-  else if (target) {
+  const target = startup.threadId ?? pendingKey;
+  if (parked && target !== pendingKey) draftStore.saveDraft(target, parked);
+  else if (!parked) {
     const queued = useWorkspaceStore.getState().pendingStartupByThreadId[pendingKey]?.queuedMessage;
     if (queued) {
       const selection = createDefaultComposerAgentSelection();
@@ -48,7 +48,7 @@ function restoreCancelledDraft(startup: ThreadStartup, pendingKey: string): void
       });
     }
   }
-  if (parked) draftStore.clearDraft(pendingKey);
+  if (parked && target !== pendingKey) draftStore.removeDraftAfterAttachmentTransfer(pendingKey);
 }
 
 /**
@@ -81,6 +81,20 @@ const TERMINAL_STARTUP_STATES: ReadonlySet<ThreadStartup["state"]> = new Set([
   "interrupted",
 ]);
 
+function reconcileBoundPlaceholder(startup: ThreadStartup, pendingKey: string | undefined): void {
+  if (!startup.threadId || !pendingKey || pendingKey === startup.threadId) return;
+  const ws = useWorkspaceStore.getState();
+  if (ws.threads.some((thread) => thread.id === pendingKey && (thread.clientPreparing || thread.clientError))) {
+    // A later binding push can now replace the unreconciled placeholder.
+    void ws.recoverPreparingThreads();
+  }
+}
+
+function stoppedBeforeAgentAdmission(startup: ThreadStartup): boolean {
+  return startup.state === "cancelled"
+    || startup.phase !== "agent" && (startup.state === "failed" || startup.state === "interrupted");
+}
+
 /** Holds authoritative startup records and their durable thread bindings. */
 export const useThreadStartupStore = create<ThreadStartupState>((set, get) => ({
   recordsByStartupId: {},
@@ -101,18 +115,21 @@ export const useThreadStartupStore = create<ThreadStartupState>((set, get) => ({
         ? { ...state.startupIdByThreadId, [startup.threadId]: startup.startupId }
         : state.startupIdByThreadId,
     }));
-    // Blocked is a pause, not a resolution: approval or decline resumes the
-    // same startup, so the pending entry must survive it.
-    if (!TERMINAL_STARTUP_STATES.has(startup.state)) return;
     const ws = useWorkspaceStore.getState();
-    // The pending entry may still sit under the placeholder key when a terminal
-    // push beats the creation response; match by startup id either way.
     const pendingKey = Object.keys(ws.pendingStartupByThreadId).find(
       (id) => ws.pendingStartupByThreadId[id]?.startupId === startup.startupId,
     );
-    // On cancel the queued turn is vetoed before it persists, so the pending
-    // entry is the last copy of the user's message.
-    if (startup.state === "cancelled" && pendingKey) restoreCancelledDraft(startup, pendingKey);
+    reconcileBoundPlaceholder(startup, pendingKey);
+    // Blocked is a pause, not a resolution: approval or decline resumes the
+    // same startup, so the pending entry must survive it.
+    if (!TERMINAL_STARTUP_STATES.has(startup.state)) return;
+    // The pending entry may still sit under the placeholder key when a terminal
+    // push beats the creation response; match by startup id either way.
+    // Before agent admission, the pending entry may be the last copy of the
+    // first message, including when a restart interrupts checkout creation.
+    if (pendingKey && stoppedBeforeAgentAdmission(startup)) {
+      restoreUnsentDraft(startup, pendingKey);
+    }
     ws.resolvePendingStartup({ threadId: startup.threadId, startupId: startup.startupId });
     // Only a pending entry owned by this startup proves the optimistic mark is
     // ours; foreign or historical terminal records must not touch a live turn.
