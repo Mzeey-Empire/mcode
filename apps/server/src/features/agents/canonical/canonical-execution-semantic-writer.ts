@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import * as NodeCrypto from "node:crypto";
+import { CanonicalAgentEventEnvelopeSchema } from "@mcode/contracts";
 import { z } from "zod";
 
 import type { ExecutionIdentity, ExecutionLease } from "../execution/execution-mailbox-protocol.js";
@@ -13,6 +14,11 @@ import { CanonicalParentTurnWrite } from "./canonical-parent-turn-write.js";
 
 const HEAD_ID = "semantic:head";
 const HEAD_KIND = "semantic-head";
+const PUBLICATION_KIND = "semantic-publication";
+const PENDING_FINISH_KIND = "semantic:finish-pending";
+const PUBLICATION_CHUNK_SIZE = 64;
+const storedPublicationSequencesSchema = z.array(z.number().int().positive().max(Number.MAX_SAFE_INTEGER))
+  .min(1).max(PUBLICATION_CHUNK_SIZE);
 const storedHeadSchema = z.object({
   execution: z.object({ threadId: z.string(), turnId: z.string(), executionId: z.string() }),
   providerId: z.string(),
@@ -30,12 +36,15 @@ const storedReceiptSchema = z.object({
   kind: z.literal("committed"),
   operationId: z.string(),
   durableRevision: z.number().int(),
+  publicationVersion: z.literal(1),
 });
 const storedOperationSchema = z.object({
   kind: z.string(),
   input_hash: z.string(),
   receipt_json: z.string(),
 });
+const storedOperationListSchema = z.array(storedOperationSchema);
+const storedEnvelopeRowSchema = z.object({ envelope_json: z.string() });
 
 interface SemanticHead {
   readonly execution: ExecutionIdentity;
@@ -54,7 +63,10 @@ class SemanticConflict extends Error {}
 export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter {
   private readonly turns: CanonicalParentTurnWrite;
   private readonly findOperation: ReturnType<Database["prepare"]>;
+  private readonly listPublicationChunks: ReturnType<Database["prepare"]>;
+  private readonly findPublishedEvent: ReturnType<Database["prepare"]>;
   private readonly insertOperation: ReturnType<Database["prepare"]>;
+  private readonly commitPendingFinish: ReturnType<Database["prepare"]>;
   private readonly updateHead: ReturnType<Database["prepare"]>;
   private bufferedPublication: Parameters<CanonicalAgentEventPublisher>[0][] | null = null;
 
@@ -64,7 +76,10 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       else this.publish(events);
     });
     this.findOperation = db.prepare("SELECT kind, input_hash, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?");
+    this.listPublicationChunks = db.prepare("SELECT kind, input_hash, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id >= ? AND operation_id < ? ORDER BY operation_id");
+    this.findPublishedEvent = db.prepare("SELECT envelope_json FROM canonical_agent_events WHERE execution_id = ? AND accepted_sequence = ?");
     this.insertOperation = db.prepare("INSERT INTO canonical_writer_operation_receipts (execution_id, operation_id, kind, input_hash, receipt_json) VALUES (?, ?, ?, ?, ?)");
+    this.commitPendingFinish = db.prepare("UPDATE canonical_writer_operation_receipts SET kind = ?, receipt_json = ? WHERE execution_id = ? AND operation_id = ? AND kind = ? AND input_hash = ?");
     this.updateHead = db.prepare("UPDATE canonical_writer_operation_receipts SET receipt_json = ? WHERE execution_id = ? AND operation_id = ? AND kind = ?");
   }
 
@@ -72,8 +87,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   async transact(operation: ExecutionSemanticOperation): Promise<ExecutionWriteReceipt> {
     if (!validOperation(operation)) return conflict(operation);
     const hash = fingerprint(operation);
-    const replay = this.loadOperation(operation.execution.executionId, operation.operationId);
-    if (replay) return this.replay(operation, hash, replay);
+    const existing = this.existingReceipt(operation, hash);
+    if (existing) return existing;
     try {
       if (operation.mutation.kind === "begin") return this.begin(operation, hash);
       if (operation.mutation.kind === "append-events") return this.append(operation, hash);
@@ -83,6 +98,13 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       if (error instanceof SemanticConflict) return conflict(operation);
       throw error;
     }
+  }
+
+  private existingReceipt(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt | null {
+    const row = this.loadOperation(operation.execution.executionId, operation.operationId);
+    if (!row) return null;
+    if (row.kind !== PENDING_FINISH_KIND) return this.replay(operation, hash, row);
+    return operation.mutation.kind === "finish" && row.input_hash === hash ? null : conflict(operation);
   }
 
   private begin(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt {
@@ -108,6 +130,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
         terminal: false,
       };
       this.insertOperation.run(operation.execution.executionId, HEAD_ID, HEAD_KIND, fingerprint(head.lease), JSON.stringify(head));
+      this.storePublicationChunks(operation.execution.executionId, hash, result.events.map((event) => event.acceptedSequence));
       this.storeReceipt(operation, hash, receipt);
       return receipt;
     })());
@@ -129,6 +152,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       if (result.outcome !== "committed") throw new SemanticConflict();
       const receipt = committed(operation, result.durableThrough);
       this.storeHead({ ...head, ordinal: operation.ordinal, durableRevision: receipt.durableRevision });
+      this.storePublicationChunks(operation.execution.executionId, hash, result.events.map((event) => event.acceptedSequence));
       this.storeReceipt(operation, hash, receipt);
       return receipt;
     })());
@@ -139,16 +163,21 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     if (mutation.kind !== "finish" || !validFinish(operation, mutation)) return conflict(operation);
     const head = this.loadHead(operation.execution.executionId);
     if (!head || !nextHead(head, operation) || head.providerId !== mutation.input.providerId) return conflict(operation);
-    const result = await this.turns.finish(mutation.input, (durableSequence) => {
-      const current = this.requireNextHead(operation);
-      if (current.providerId !== mutation.input.providerId) throw new SemanticConflict();
-      const receipt = committed(operation, durableSequence);
-      this.storeHead({ ...current, ordinal: operation.ordinal, durableRevision: receipt.durableRevision, terminal: true });
-      this.storeReceipt(operation, hash, receipt);
+    this.reserveFinish(operation, hash);
+    this.publishStoredEvents(operation.execution.executionId, hash);
+    const result = await this.turns.finish(mutation.input, (batch) => {
+      this.storePublicationChunks(operation.execution.executionId, hash, batch.publishedSequences);
+      if (batch.terminal) {
+        const current = this.requireNextHead(operation);
+        if (current.providerId !== mutation.input.providerId) throw new SemanticConflict();
+        const receipt = committed(operation, batch.durableSequence);
+        this.storeHead({ ...current, ordinal: operation.ordinal, durableRevision: receipt.durableRevision, terminal: true });
+        this.storeReceipt(operation, hash, receipt);
+      }
     });
     if (result.outcome !== "committed") return conflict(operation);
     const stored = this.loadOperation(operation.execution.executionId, operation.operationId);
-    return stored ? this.replay(operation, hash, stored) : conflict(operation);
+    return stored ? this.readReceipt(operation, hash, stored) : conflict(operation);
   }
 
   private requireNextHead(operation: ExecutionSemanticOperation): SemanticHead {
@@ -172,21 +201,79 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     this.updateHead.run(JSON.stringify(head), head.execution.executionId, HEAD_ID, HEAD_KIND);
   }
 
+  private reserveFinish(operation: ExecutionSemanticOperation, hash: string): void {
+    const existing = this.loadOperation(operation.execution.executionId, operation.operationId);
+    if (existing) {
+      if (existing.kind !== PENDING_FINISH_KIND || existing.input_hash !== hash) throw new SemanticConflict();
+      return;
+    }
+    this.insertOperation.run(operation.execution.executionId, operation.operationId, PENDING_FINISH_KIND, hash, "{}");
+  }
+
+  private storePublicationChunks(executionId: string, hash: string, sequences: readonly number[]): void {
+    for (let offset = 0; offset < sequences.length; offset += PUBLICATION_CHUNK_SIZE) {
+      const chunk = sequences.slice(offset, offset + PUBLICATION_CHUNK_SIZE);
+      const first = chunk[0];
+      if (first === undefined) continue;
+      const id = publicationChunkId(hash, first);
+      const json = JSON.stringify(chunk);
+      const existing = this.loadOperation(executionId, id);
+      if (existing) {
+        if (existing.kind !== PUBLICATION_KIND || existing.input_hash !== hash || existing.receipt_json !== json) {
+          throw new SemanticConflict();
+        }
+        continue;
+      }
+      this.insertOperation.run(executionId, id, PUBLICATION_KIND, hash, json);
+    }
+  }
+
   private storeReceipt(operation: ExecutionSemanticOperation, hash: string, receipt: ExecutionWriteReceipt): void {
+    const receiptJson = JSON.stringify({ ...receipt, publicationVersion: 1 });
+    if (operation.mutation.kind === "finish") {
+      const updated = this.commitPendingFinish.run(
+        "semantic:finish", receiptJson, operation.execution.executionId, operation.operationId, PENDING_FINISH_KIND, hash,
+      );
+      if (updated.changes !== 1) throw new SemanticConflict();
+      return;
+    }
     this.insertOperation.run(
       operation.execution.executionId,
       operation.operationId,
       `semantic:${operation.mutation.kind}`,
       hash,
-      JSON.stringify(receipt),
+      receiptJson,
     );
   }
 
   private replay(operation: ExecutionSemanticOperation, hash: string, stored: StoredOperation): ExecutionWriteReceipt {
+    const receipt = this.readReceipt(operation, hash, stored);
+    if (receipt.kind === "committed") this.publishStoredEvents(operation.execution.executionId, hash);
+    return receipt;
+  }
+
+  private readReceipt(operation: ExecutionSemanticOperation, hash: string, stored: StoredOperation): ExecutionWriteReceipt {
     if (stored.kind !== `semantic:${operation.mutation.kind}` || stored.input_hash !== hash) return conflict(operation);
     const receipt = storedReceiptSchema.parse(JSON.parse(stored.receipt_json));
     return receipt.operationId === operation.operationId && Number.isSafeInteger(receipt.durableRevision)
-      ? receipt : conflict(operation);
+      ? committed(operation, receipt.durableRevision) : conflict(operation);
+  }
+
+  private publishStoredEvents(executionId: string, hash: string): void {
+    const prefix = publicationChunkPrefix(hash);
+    const chunks = storedOperationListSchema.parse(this.listPublicationChunks.all(executionId, prefix, `${prefix}~`));
+    for (const chunk of chunks) {
+      if (chunk.kind !== PUBLICATION_KIND || chunk.input_hash !== hash) throw new Error("Semantic publication chunk mismatch");
+      const sequences = storedPublicationSequencesSchema.parse(JSON.parse(chunk.receipt_json));
+      const events = sequences.map((sequence) => this.loadPublishedEvent(executionId, sequence));
+      this.publish(events);
+    }
+  }
+
+  private loadPublishedEvent(executionId: string, sequence: number) {
+    const row = storedEnvelopeRowSchema.nullable().parse(this.findPublishedEvent.get(executionId, sequence));
+    if (!row) throw new Error(`Semantic publication event missing at ${executionId}:${sequence}`);
+    return CanonicalAgentEventEnvelopeSchema.parse(JSON.parse(row.envelope_json));
   }
 
   // Only the synchronous begin and append transactions use this buffer. Finish publishes after each committed batch.
@@ -255,6 +342,14 @@ function conflict(operation: ExecutionSemanticOperation): ExecutionWriteReceipt 
 
 function fingerprint(value: unknown): string {
   return NodeCrypto.createHash("sha256").update(JSON.stringify(sortJson(value))).digest("hex");
+}
+
+function publicationChunkPrefix(hash: string): string {
+  return `semantic:publication:${hash}:`;
+}
+
+function publicationChunkId(hash: string, firstSequence: number): string {
+  return `${publicationChunkPrefix(hash)}${firstSequence.toString().padStart(16, "0")}`;
 }
 
 function sortJson(value: unknown): unknown {

@@ -16,6 +16,7 @@ import {
   type CanonicalAgentCommitResult,
   type CanonicalAgentEventDraft,
   type CanonicalAgentEventPublisher,
+  type CanonicalTerminalBatchWrite,
 } from "./canonical-agent-boundary.js";
 
 type CreateMessageArgument = Parameters<MessageRepo["create"]>;
@@ -96,7 +97,7 @@ export class CanonicalParentTurnWrite {
   /** Confirm the terminal checkpoint and publish the staged assistant in one transaction. */
   finish(
     input: DataOnlyParentTurnFinishInput,
-    onTerminalCommit?: (durableSequence: number) => void,
+    onBatchWrite?: (batch: CanonicalTerminalBatchWrite) => void,
   ): Promise<CanonicalAgentBatchedCommitResult> {
     this.assertStagedAssistant(input);
     const projection: ParentTurnProjection = {
@@ -118,7 +119,7 @@ export class CanonicalParentTurnWrite {
         this.messages.setAssistantOutcome(projection.message.id, input.outcome, input.executionId);
         this.messages.publishAssistant(projection.message.id);
       },
-    }, onTerminalCommit);
+    }, onBatchWrite);
   }
 
   private projectUserMessage(input: DataOnlyParentTurnStartInput) {
