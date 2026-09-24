@@ -66,6 +66,15 @@ function eventType(event: unknown): string {
   return typeof event.type === "string" ? event.type : "unknown";
 }
 
+function canonicalEventId(event: unknown): string | undefined {
+  if (!event || typeof event !== "object" || !("eventId" in event)) return undefined;
+  return typeof event.eventId === "string" ? event.eventId : undefined;
+}
+
+function canonicalEventKey(turnId: string, eventId: string): string {
+  return JSON.stringify([turnId, eventId]);
+}
+
 interface ContentMeasureState {
   bytes: number;
   visited: number;
@@ -162,6 +171,8 @@ function serializeRawEvent(event: unknown): { event: unknown; bytes: number } | 
 /** Retains bounded redacted diagnostics and consent-scoped raw turn captures. */
 export class CanonicalAgentDiagnostics {
   private readonly entries: CanonicalDiagnosticEntry[] = [];
+  private readonly canonicalEventIds = new Set<string>();
+  private readonly canonicalEventIdByEntry = new WeakMap<CanonicalDiagnosticEntry, string>();
   private readonly droppedByTurn = new Map<string, number>();
   private readonly rawCaptures = new Map<string, RawCapture>();
 
@@ -191,6 +202,8 @@ export class CanonicalAgentDiagnostics {
 
   /** Record one event without retaining content unless raw capture is active. */
   record(input: CanonicalDiagnosticRecordInput): void {
+    const eventId = input.source === "canonical" ? canonicalEventId(input.event) : undefined;
+    if (eventId && this.hasRecordedCanonicalEvent(input.turnId, eventId)) return;
     const measuredContent = measureContent(input.event);
     const entry: CanonicalDiagnosticEntry = {
       turnId: input.turnId,
@@ -203,13 +216,13 @@ export class CanonicalAgentDiagnostics {
       recordedAt: new Date(this.now()).toISOString(),
     };
     this.entries.push(entry);
-    if (this.entries.length > CANONICAL_DIAGNOSTIC_RING_CAPACITY) {
-      const [dropped] = this.entries.splice(0, 1);
-      if (dropped) {
-        this.incrementDroppedEntries(dropped.turnId);
-      }
-    }
+    this.rememberCanonicalEvent(entry, eventId);
+    this.evictOldestEntryIfNeeded();
 
+    this.recordRawCapture(input);
+  }
+
+  private recordRawCapture(input: CanonicalDiagnosticRecordInput): void {
     const raw = this.rawCaptures.get(input.turnId);
     if (!raw) return;
     if (raw.expiresAt <= this.now()) {
@@ -228,6 +241,28 @@ export class CanonicalAgentDiagnostics {
       }
     }
     if (input.terminal) raw.active = false;
+  }
+
+  private hasRecordedCanonicalEvent(turnId: string, eventId: string): boolean {
+    if (this.canonicalEventIds.has(canonicalEventKey(turnId, eventId))) return true;
+    const raw = this.rawCaptures.get(turnId);
+    return raw?.events.some((event) => canonicalEventId(event) === eventId) ?? false;
+  }
+
+  private rememberCanonicalEvent(entry: CanonicalDiagnosticEntry, eventId: string | undefined): void {
+    if (!eventId) return;
+    const key = canonicalEventKey(entry.turnId, eventId);
+    this.canonicalEventIds.add(key);
+    this.canonicalEventIdByEntry.set(entry, key);
+  }
+
+  private evictOldestEntryIfNeeded(): void {
+    if (this.entries.length <= CANONICAL_DIAGNOSTIC_RING_CAPACITY) return;
+    const dropped = this.entries.shift();
+    if (!dropped) return;
+    const eventId = this.canonicalEventIdByEntry.get(dropped);
+    if (eventId) this.canonicalEventIds.delete(eventId);
+    this.incrementDroppedEntries(dropped.turnId);
   }
 
   /** Export redacted diagnostics and, after separate confirmation, raw content. */

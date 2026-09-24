@@ -130,6 +130,16 @@ describe("provider composition container", () => {
       providerIdentities: [],
       projectUserMessage: () => messages.create("thread-1", "user", "Start", 1),
     });
+    const baselineDiagnostics = canonical.exportTurnDiagnostics("turn-1").entries.length;
+    canonical.startRawTurnCapture({ turnId: "turn-1", consent: true, expiresInMs: 60_000 });
+    const writer = container.resolve(CanonicalAgentWriterClient);
+    const commit = writer.commit.bind(writer);
+    let firstReceipt: Awaited<ReturnType<typeof writer.commit>> | undefined;
+    vi.spyOn(writer, "commit").mockImplementation(async (operationId, input) => {
+      if (firstReceipt) return firstReceipt;
+      firstReceipt = await commit(operationId, input);
+      return firstReceipt;
+    });
 
     await expect(host.events.submit(runtimeBatch())).resolves.toMatchObject({
       commit: { outcome: "committed", eventCount: 1 },
@@ -143,6 +153,12 @@ describe("provider composition container", () => {
         canonicalReceipt: expect.objectContaining({ eventId: "cursor:runtime-event-1" }),
       })]);
     });
+    await host.events.submit(runtimeBatch());
+    const diagnostics = canonical.exportTurnDiagnostics("turn-1", { includeRaw: true, confirmRaw: true });
+    expect(diagnostics.entries).toHaveLength(baselineDiagnostics + 1);
+    expect(diagnostics.rawEvents).toEqual([
+      expect.objectContaining({ eventId: "cursor:runtime-event-1" }),
+    ]);
   });
 
   it("waits for provider cleanup even when another provider shutdown fails", async () => {
