@@ -530,7 +530,7 @@ describe("AgentService turn cleanup", () => {
 
   it("marks a replayed queued plan answer after projecting its persisted user message", async () => {
     const { service, messageRepo, planQuestionAnswersRepo } = buildService();
-    vi.mocked(messageRepo.findByIdInThread).mockReturnValue({ id: "queued-plan-answer", sequence: 1 } as never);
+    vi.mocked(messageRepo.findByIdInThread).mockReturnValue({ id: "queued-plan-answer", role: "user", sequence: 1 } as never);
 
     await service.dispatchQueuedAutomaticTurn({
       threadId: THREAD_ID,
@@ -583,6 +583,9 @@ describe("AgentService turn cleanup", () => {
       undefined,
       undefined,
       undefined,
+      undefined,
+      undefined,
+      expect.any(String),
       undefined,
     );
   });
@@ -1022,6 +1025,9 @@ describe("AgentService turn cleanup", () => {
       undefined,
       undefined,
       bundle,
+      undefined,
+      expect.any(String),
+      undefined,
     );
     expect((providerEmitter as any).sendTurn).toHaveBeenCalledWith(
       expect.objectContaining({
