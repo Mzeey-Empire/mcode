@@ -65,7 +65,7 @@ export type ProjectedCommittedProviderEvent = Omit<
 /** A writer reply is valid only after the semantic operation commits durably. */
 export type ExecutionWriteReceipt =
   | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number; readonly providerCommit?: ExecutionProviderCommitReceipt; readonly providerEvents?: readonly ProjectedCommittedProviderEvent[] }
-  | { readonly kind: "conflict"; readonly operationId: string };
+  | { readonly kind: "conflict"; readonly operationId: string; readonly recoveryState?: "not-started" | "already-terminal" };
 
 /**
  * Implemented by one acknowledged writer, not by a worker-local SQLite connection.

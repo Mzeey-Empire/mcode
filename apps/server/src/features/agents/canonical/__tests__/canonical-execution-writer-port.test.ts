@@ -153,8 +153,11 @@ describe("execution semantic writer transport", () => {
     const port = new CanonicalExecutionWriterPort(writer, (events) => {
       published.push(...events.map((event) => event.eventId));
     });
-    expect(await port.transact(beginOperation())).toMatchObject({ kind: "committed" });
     const input = { execution, lease, reason: "Execution worker exited", recoveryIncidentId: "incident-1" };
+    expect(await port.interruptWorkerLoss(input)).toEqual({
+      kind: "conflict", operationId: `${lease.leaseId}:worker-lost`, recoveryState: "not-started",
+    });
+    expect(await port.transact(beginOperation())).toMatchObject({ kind: "committed" });
     expect(await port.interruptWorkerLoss({ ...input, lease: { ...lease, ownerEpoch: 2 } }))
       .toEqual({ kind: "conflict", operationId: `${lease.leaseId}:worker-lost` });
     const first = await port.interruptWorkerLoss(input);
@@ -370,6 +373,11 @@ describe("execution semantic writer transport", () => {
       expect(published.indexOf(`${EXECUTION_ID}:worker-item`))
         .toBeLessThan(published.indexOf(`${EXECUTION_ID}:turn.completed`));
       expect(published).toContain(`${EXECUTION_ID}:turn.completed`);
+      expect(await port.interruptWorkerLoss({
+        execution, lease: claim.lease, reason: "Execution worker exited", recoveryIncidentId: "incident-complete",
+      })).toEqual({
+        kind: "conflict", operationId: `${claim.lease.leaseId}:worker-lost`, recoveryState: "already-terminal",
+      });
     } finally {
       scheduler.shutdown();
     }

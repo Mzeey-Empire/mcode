@@ -161,6 +161,28 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect(published).not.toContain(`${EXECUTION_ID}:recovery-interrupted`);
   });
 
+  it("distinguishes a lost worker before start from one after a durable terminal", async () => {
+    expect(writer.interruptWorkerLoss(loss)).toEqual({
+      kind: "conflict", operationId: "lease-1:worker-lost", recoveryState: "not-started",
+    });
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    expect((await send(2, { kind: "provider-outcome", outcome: "completed" })).kind).toBe("committed");
+    expect((await send(3, { kind: "stage-terminal", input: {
+      threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "completed", endedAt: NOW,
+      assistant: { content: "Answer", model: null, attachments: [] }, narrative: [],
+    } })).kind).toBe("committed");
+    expect((await send(4, { kind: "finalize", outcome: "completed", input: {
+      threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID,
+      providerId: "codex", providerIdentities: [], outcome: "completed",
+      projection: { kind: "writer-staged" },
+    } })).kind).toBe("committed");
+    expect(writer.interruptWorkerLoss(loss)).toEqual({
+      kind: "conflict", operationId: "lease-1:worker-lost", recoveryState: "already-terminal",
+    });
+    expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
+      .get(EXECUTION_ID)).toEqual({ terminal_outcome: "completed" });
+  });
+
   it("rolls back worker-loss interruption and publication when its receipt cannot commit", async () => {
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
     const text = new ParentAssistantTextCheckpointService(db);

@@ -172,7 +172,9 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       return receipt;
     }
     const head = this.loadHead(input.execution.executionId);
-    if (!head || head.terminal || !sameExecutionAndLease(head, input)) return conflict(operation);
+    if (!head) return { ...conflict(operation), recoveryState: "not-started" };
+    if (!sameExecutionAndLease(head, input)) return conflict(operation);
+    if (head.terminal) return { ...conflict(operation), recoveryState: "already-terminal" };
     this.turns.importRecoveryJournals();
     try {
       const receipt = this.withBufferedPublication(() => this.db.transaction(
@@ -595,7 +597,7 @@ function committed(
   };
 }
 
-function conflict(operation: ExecutionSemanticOperation): ExecutionWriteReceipt {
+function conflict(operation: ExecutionSemanticOperation): Extract<ExecutionWriteReceipt, { kind: "conflict" }> {
   return { kind: "conflict", operationId: operation.operationId };
 }
 
