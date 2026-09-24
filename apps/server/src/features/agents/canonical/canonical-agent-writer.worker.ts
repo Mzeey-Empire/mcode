@@ -75,7 +75,7 @@ function eventMatchesRouting(
     && (event.routing.turnId === undefined || event.routing.turnId === input.turnId);
 }
 
-function handle(request: CanonicalWriterRequest): CanonicalWriterResponse {
+async function handle(request: CanonicalWriterRequest): Promise<CanonicalWriterResponse> {
   const correlation = {
     requestId: request.requestId,
     operationId: request.operationId,
@@ -109,13 +109,23 @@ function handle(request: CanonicalWriterRequest): CanonicalWriterResponse {
   return handleWrite(request, correlation);
 }
 
-function handleWrite(
+async function handleWrite(
   request: Extract<CanonicalWriterRequest, { kind: "commit" | "record-parent-narrative-recovery" | "classify-parent-narrative-recovery" }>,
   correlation: Pick<CanonicalWriterRequest, "requestId" | "operationId" | "executionId">,
-): CanonicalWriterResponse {
+): Promise<CanonicalWriterResponse> {
   try {
     const canonical = boundary;
     if (!canonical || !receipts) throw new Error("Canonical writer has not opened its database");
+    if (request.kind === "record-parent-narrative-recovery") {
+      if (request.input.executionId !== request.executionId) {
+        throw new Error("Canonical writer recovery execution mismatch");
+      }
+      return await receipts.executeBatchedRecovery(request, async () => ({
+        ...correlation,
+        kind: "parent-narrative-recovery-recorded",
+        receipt: { recorded: await canonical.recordParentNarrativeRecoveryYielding(request.input) },
+      }));
+    }
     return receipts.execute(request, () => applyWrite(request, correlation, canonical));
   } catch (error) {
     return {
@@ -128,7 +138,7 @@ function handleWrite(
 }
 
 function applyWrite(
-  request: Extract<CanonicalWriterRequest, { kind: "commit" | "record-parent-narrative-recovery" | "classify-parent-narrative-recovery" }>,
+  request: Extract<CanonicalWriterRequest, { kind: "commit" | "classify-parent-narrative-recovery" }>,
   correlation: Pick<CanonicalWriterRequest, "requestId" | "operationId" | "executionId">,
   canonical: CanonicalAgentBoundary,
 ): Extract<CanonicalWriterResponse, { kind: "committed" | "parent-narrative-recovery-recorded" | "parent-narrative-recovery-classified" }> {
@@ -138,13 +148,6 @@ function applyWrite(
     }
     const receipt = classifyParentNarrativeRecovery(request.input);
     return { ...correlation, kind: "parent-narrative-recovery-classified", receipt };
-  }
-  if (request.kind === "record-parent-narrative-recovery") {
-    if (request.input.executionId !== request.executionId) {
-      throw new Error("Canonical writer recovery execution mismatch");
-    }
-    const recorded = canonical.recordParentNarrativeRecovery(request.input);
-    return { ...correlation, kind: "parent-narrative-recovery-recorded", receipt: { recorded } };
   }
   assertRouting(request.input, request.executionId);
   const result = canonical.commit(request.input);
@@ -156,8 +159,23 @@ function applyWrite(
   };
 }
 
+let requestTail = Promise.resolve();
 globalThis.onmessage = (message: MessageEvent<CanonicalWriterRequest>): void => {
-  globalThis.postMessage(handle(message.data));
+  const request = message.data;
+  requestTail = requestTail.then(async () => {
+    try {
+      globalThis.postMessage(await handle(request));
+    } catch (error) {
+      console.error("Canonical writer request failed unexpectedly", error);
+      globalThis.postMessage({
+        requestId: request.requestId,
+        operationId: request.operationId,
+        executionId: request.executionId,
+        kind: "failed",
+        reason: "write-failed",
+      } satisfies CanonicalWriterResponse);
+    }
+  });
 };
 
 process.on("exit", () => db?.close(true));

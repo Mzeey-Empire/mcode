@@ -37,6 +37,8 @@ export interface RunBoundedWriteBatchesInput<T> {
   onBatchStarted?: () => void;
   onBatchFinishing?: () => void;
   onBatchCommitted?: (result: WriteBatchResult) => void;
+  /** Acquire the write lock before a batch reads, avoiding failed read-to-write upgrades across connections. */
+  beginImmediate?: boolean;
 }
 
 function assertPositiveLimit(value: number, name: keyof WriteBatchLimits): void {
@@ -72,7 +74,8 @@ export async function runBoundedWriteBatches<T>(
       batchRows = result.batchRows;
       input.onBatchFinishing?.();
     });
-    transaction();
+    if (input.beginImmediate) transaction.immediate();
+    else transaction();
     batches += 1;
     totalBytes += batchBytes;
     totalRows += batchRows;
@@ -110,7 +113,8 @@ export function runBoundedWriteBatchesSync<T>(
       batchRows = result.batchRows;
       input.onBatchFinishing?.();
     });
-    transaction();
+    if (input.beginImmediate) transaction.immediate();
+    else transaction();
     batches += 1;
     totalBytes += batchBytes;
     totalRows += batchRows;

@@ -94,11 +94,11 @@ function events(): CanonicalAgentEventDraft[] {
   ];
 }
 
-function recoveryToolCall(): ParentNarrativeRecoveryItem {
+function recoveryToolCall(id = "writer-recovery-tool"): ParentNarrativeRecoveryItem {
   return {
     kind: "toolCall",
     record: {
-      id: "writer-recovery-tool",
+      id,
       message_id: "",
       parent_tool_call_id: null,
       tool_name: "Read",
@@ -218,6 +218,66 @@ describe("canonical SQLite writer", () => {
       items: [recoveryToolCall()],
     })).rejects.toThrow("Canonical writer write-failed");
   });
+
+  it("converges after a failure between bounded recovery batches", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    await writer.commit("batched-recovery-start", {
+      threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events(),
+    });
+    const input = {
+      executionId: EXECUTION_ID,
+      items: Array.from({ length: 65 }, (_, index) => recoveryToolCall(`batched-${index}`)),
+    };
+    db.run(`CREATE TRIGGER reject_last_recovery BEFORE INSERT ON canonical_agent_items
+      WHEN NEW.id = 'toolCall:batched-64' BEGIN SELECT RAISE(FAIL, 'injected recovery failure'); END`);
+    await expect(writer.recordParentNarrativeRecovery("batched-recovery", input))
+      .rejects.toThrow("Canonical writer write-failed");
+    const partial = db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE id LIKE 'toolCall:batched-%'")
+      .get() as { count: number };
+    expect(partial.count).toBeGreaterThan(0);
+    expect(partial.count).toBeLessThan(65);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE operation_id = ?")
+      .get("batched-recovery")).toEqual({ count: 0 });
+    db.run("DROP TRIGGER reject_last_recovery");
+    expect(await writer.recordParentNarrativeRecovery("batched-recovery", input)).toEqual({ recorded: true });
+    expect(await writer.recordParentNarrativeRecovery("batched-recovery", input)).toEqual({ recorded: true });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE id LIKE 'toolCall:batched-%'")
+      .get()).toEqual({ count: 65 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE operation_id = ?")
+      .get("batched-recovery")).toEqual({ count: 1 });
+  }, 30_000);
+
+  it("lets a second SQLite writer proceed while recovery continues across batches", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    await writer.commit("slow-recovery-start", {
+      threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events(),
+    });
+    db.run("CREATE TABLE writer_lock_probe (id TEXT PRIMARY KEY)");
+    db.run(`CREATE TRIGGER slow_recovery BEFORE INSERT ON canonical_agent_items
+      WHEN NEW.id LIKE 'toolCall:slow-%' BEGIN SELECT randomblob(8000000); END`);
+    const input = {
+      executionId: EXECUTION_ID,
+      items: Array.from({ length: 80 }, (_, index) => recoveryToolCall(`slow-${index}`)),
+    };
+    let settled = false;
+    const recovery = writer.recordParentNarrativeRecovery("slow-recovery", input)
+      .finally(() => { settled = true; });
+    const count = db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE id LIKE 'toolCall:slow-%'");
+    for (let attempts = 0; attempts < 500 && (count.get() as { count: number }).count === 0; attempts++) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    expect((count.get() as { count: number }).count).toBeGreaterThan(0);
+    expect(settled).toBe(false);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE operation_id = ?")
+      .get("slow-recovery")).toEqual({ count: 0 });
+    const started = performance.now();
+    db.prepare("INSERT INTO writer_lock_probe (id) VALUES (?)").run("main-write");
+    const mainWriteMs = performance.now() - started;
+    expect(mainWriteMs).toBeLessThan(250);
+    await recovery;
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE operation_id = ?")
+      .get("slow-recovery")).toEqual({ count: 1 });
+  }, 30_000);
 
   it("reports a missing execution without claiming recovery was recorded", async () => {
     writer = new CanonicalAgentWriterClient(dbPath);

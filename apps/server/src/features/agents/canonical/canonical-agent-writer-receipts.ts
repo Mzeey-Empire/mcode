@@ -13,6 +13,7 @@ import type { CanonicalWriterRequest, CanonicalWriterResponse } from "./canonica
 type WriteRequest = Extract<CanonicalWriterRequest, {
   kind: "commit" | "record-parent-narrative-recovery" | "classify-parent-narrative-recovery";
 }>;
+type AtomicWriteRequest = Extract<WriteRequest, { kind: "commit" | "classify-parent-narrative-recovery" }>;
 type WriteResponse = Extract<CanonicalWriterResponse, {
   kind: "committed" | "parent-narrative-recovery-recorded" | "parent-narrative-recovery-classified";
 }>;
@@ -55,29 +56,42 @@ export class CanonicalAgentWriterReceipts {
     this.orm = drizzle(db);
   }
 
-  execute(request: WriteRequest, apply: () => WriteResponse): WriteResponse {
+  execute(request: AtomicWriteRequest, apply: () => WriteResponse): WriteResponse {
     const inputHash = fingerprint(request);
     return this.db.transaction(() => {
-      const existing = this.orm.select().from(canonicalWriterOperationReceipts)
-        .where(and(
-          eq(canonicalWriterOperationReceipts.executionId, request.executionId),
-          eq(canonicalWriterOperationReceipts.operationId, request.operationId),
-        )).get();
-      if (existing) {
-        if (existing.kind !== request.kind || existing.inputHash !== inputHash) {
-          throw new CanonicalWriterOperationConflict("Canonical writer operation ID was reused with different input");
-        }
-        return this.replay(request, existing.receiptJson);
-      }
-      const outstanding = this.orm.select({ count: count() }).from(canonicalWriterOperationReceipts)
-        .where(eq(canonicalWriterOperationReceipts.executionId, request.executionId)).get()?.count ?? 0;
-      if (outstanding >= MAX_UNACKNOWLEDGED_RECEIPTS_PER_EXECUTION) {
-        throw new CanonicalWriterReceiptCapacity("Canonical writer receipt capacity reached");
-      }
+      const existing = this.loadReceipt(request);
+      if (existing) return this.replayMatching(request, inputHash, existing);
+      this.assertCapacity(request.executionId);
       const response = apply();
-      if (response.kind === "parent-narrative-recovery-recorded" && !response.receipt.recorded) {
-        return response;
-      }
+      this.orm.insert(canonicalWriterOperationReceipts).values({
+        executionId: request.executionId,
+        operationId: request.operationId,
+        kind: request.kind,
+        inputHash,
+        receiptJson: compactReceipt(response),
+      }).run();
+      return response;
+    })();
+  }
+
+  /** Recovery upserts are repeatable, so its bounded batches commit before a short final receipt transaction. */
+  async executeBatchedRecovery(
+    request: Extract<WriteRequest, { kind: "record-parent-narrative-recovery" }>,
+    apply: () => Promise<WriteResponse>,
+  ): Promise<WriteResponse> {
+    const inputHash = fingerprint(request);
+    const existing = this.loadReceipt(request);
+    if (existing) return this.replayMatching(request, inputHash, existing);
+    this.assertCapacity(request.executionId);
+    const response = await apply();
+    if (response.kind !== "parent-narrative-recovery-recorded") {
+      throw new Error("Canonical writer returned the wrong recovery response");
+    }
+    if (!response.receipt.recorded) return response;
+    return this.db.transaction(() => {
+      const committed = this.loadReceipt(request);
+      if (committed) return this.replayMatching(request, inputHash, committed);
+      this.assertCapacity(request.executionId);
       this.orm.insert(canonicalWriterOperationReceipts).values({
         executionId: request.executionId,
         operationId: request.operationId,
@@ -95,6 +109,29 @@ export class CanonicalAgentWriterReceipts {
       eq(canonicalWriterOperationReceipts.executionId, executionId),
       eq(canonicalWriterOperationReceipts.operationId, operationId),
     )).run();
+  }
+
+  private loadReceipt(request: WriteRequest) {
+    return this.orm.select().from(canonicalWriterOperationReceipts)
+      .where(and(
+        eq(canonicalWriterOperationReceipts.executionId, request.executionId),
+        eq(canonicalWriterOperationReceipts.operationId, request.operationId),
+      )).get();
+  }
+
+  private replayMatching(request: WriteRequest, inputHash: string, existing: NonNullable<ReturnType<CanonicalAgentWriterReceipts["loadReceipt"]>>): WriteResponse {
+    if (existing.kind !== request.kind || existing.inputHash !== inputHash) {
+      throw new CanonicalWriterOperationConflict("Canonical writer operation ID was reused with different input");
+    }
+    return this.replay(request, existing.receiptJson);
+  }
+
+  private assertCapacity(executionId: string): void {
+    const outstanding = this.orm.select({ count: count() }).from(canonicalWriterOperationReceipts)
+      .where(eq(canonicalWriterOperationReceipts.executionId, executionId)).get()?.count ?? 0;
+    if (outstanding >= MAX_UNACKNOWLEDGED_RECEIPTS_PER_EXECUTION) {
+      throw new CanonicalWriterReceiptCapacity("Canonical writer receipt capacity reached");
+    }
   }
 
   private replay(request: WriteRequest, receiptJson: string): WriteResponse {

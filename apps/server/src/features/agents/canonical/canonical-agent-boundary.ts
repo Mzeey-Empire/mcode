@@ -57,6 +57,7 @@ import {
   ACTIVE_TURN_WRITE_BATCH_LIMITS,
   runBoundedWriteBatches,
   runBoundedWriteBatchesSync,
+  type RunBoundedWriteBatchesInput,
   type WriteBatchResult,
 } from "../../../runtime/persistence/sqlite/bounded-write-batches.js";
 import { assertActiveTurnRecoveryRetention } from "../turns/active-turn-recovery-retention-policy.js";
@@ -197,6 +198,10 @@ export type CanonicalParentTurnFinishInput = ParentTurnFinishInput;
 
 /** Canonical alias for the structured parent recovery durability input. */
 export type ParentNarrativeRecoveryCommitInput = ParentNarrativeRecoveryCommit;
+
+type ParentNarrativeRecoveryOperation =
+  | { kind: "persist"; item: ParentNarrativeRecoveryItem }
+  | { kind: "discard"; itemId: string };
 
 export type {
   CanonicalChildTurnFinishInput,
@@ -1753,6 +1758,26 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     return true;
   }
 
+  /** The writer worker yields between committed recovery batches so other SQLite writers can proceed. */
+  async recordParentNarrativeRecoveryYielding(
+    input: ParentNarrativeRecoveryCommitInput,
+  ): Promise<boolean> {
+    const turn = this.loadTurnByExecution(input.executionId);
+    if (!turn) return false;
+    const thread = this.loadThread(turn.threadId);
+    if (!thread) throw new Error(`Canonical parent thread not found: ${turn.threadId}`);
+    if (input.items.length === 0 && (input.discardedItemIds?.length ?? 0) === 0) return true;
+    const batch = this.parentNarrativeRecoveryBatchInput(input, thread, turn, new Date().toISOString());
+    if (!batch) return true;
+    await runBoundedWriteBatches({
+      ...batch,
+      beginImmediate: true,
+      // A macrotask-only yield can reacquire SQLite before another connection's busy waiter wakes.
+      yieldControl: () => new Promise<void>((resolve) => setTimeout(resolve, 2)),
+    });
+    return true;
+  }
+
   /** Completes the canonical-to-display startup migration before provider recovery begins. */
   async materializeConversationDisplay(): Promise<void> {
     await this.displayMaterializer.runToCompletion();
@@ -1764,10 +1789,20 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
     turn: AgentTurn,
     now: string,
   ): void {
+    const batch = this.parentNarrativeRecoveryBatchInput(input, thread, turn, now);
+    if (batch) runBoundedWriteBatchesSync(batch);
+  }
+
+  private parentNarrativeRecoveryBatchInput(
+    input: ParentNarrativeRecoveryCommitInput,
+    thread: AgentThread,
+    turn: AgentTurn,
+    now: string,
+  ): RunBoundedWriteBatchesInput<ParentNarrativeRecoveryOperation> | null {
     const checkpoint = this.loadCheckpoint(input.executionId);
     if (!checkpoint) throw new Error(`Canonical parent checkpoint was not found: ${input.executionId}`);
-    if (checkpoint.terminalOutcome) return;
-    const operations = [
+    if (checkpoint.terminalOutcome) return null;
+    const operations: ParentNarrativeRecoveryOperation[] = [
       ...input.items.map((item) => ({ kind: "persist" as const, item })),
       ...(input.discardedItemIds ?? []).map((itemId) => ({ kind: "discard" as const, itemId })),
     ];
@@ -1778,7 +1813,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
       operations.length,
       operations.reduce((total, operation) => total + byteLength(operation), 0),
     );
-    runBoundedWriteBatchesSync({
+    return {
       db: this.db,
       items: operations,
       limits: ACTIVE_TURN_WRITE_BATCH_LIMITS,
@@ -1790,7 +1825,7 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
         }
         this.discardParentNarrativeRecoveryItem(operation.itemId, thread, turn);
       },
-    });
+    };
   }
 
   private persistParentNarrativeRecoveryItem(
