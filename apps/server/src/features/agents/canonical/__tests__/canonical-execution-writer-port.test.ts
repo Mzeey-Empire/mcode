@@ -6,6 +6,8 @@ import type { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
+import { MessageRepo } from "../../conversation/persistence/message-repo.js";
+import { deriveTurnAssistantMessageId } from "../../turns/turn-assistant-message-id.js";
 import type { ExecutionSemanticOperation } from "../../execution/execution-worker-handler.js";
 import { CanonicalAgentWriterClient } from "../canonical-agent-writer-client.js";
 import { CanonicalExecutionWriterPort } from "../canonical-execution-writer-port.js";
@@ -122,6 +124,68 @@ describe("execution semantic writer transport", () => {
     expect(published.length).toBeGreaterThan(0);
     expect(new Set(published).size).toBe(published.length);
     expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE id = ?").get("semantic-worker-user"))
+      .toEqual({ count: 1 });
+  });
+
+  it("stages and finalizes assistant rows without a main-connection projection write", async () => {
+    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    const published: string[] = [];
+    const port = new CanonicalExecutionWriterPort(writer, (events) => {
+      published.push(...events.map((event) => event.eventId));
+    });
+    const op = (ordinal: number, mutation: ExecutionSemanticOperation["mutation"]): ExecutionSemanticOperation => ({
+      operationId: `${lease.leaseId}:${ordinal}`, execution, lease, ordinal, mutation,
+    });
+    expect(await port.transact(beginOperation())).toMatchObject({ kind: "committed" });
+    const terminalInput = {
+      threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "completed" as const, endedAt: NOW,
+      assistant: { content: "Answer", model: "fixture", attachments: [] }, narrative: [],
+    };
+    const staged = op(2, { kind: "stage-terminal", input: terminalInput });
+    expect(await port.transact(staged)).toMatchObject({ kind: "committed" });
+    expect(db.prepare("SELECT content, is_internal FROM messages WHERE role = 'assistant'").get())
+      .toEqual({ content: "Answer", is_internal: 1 });
+    const stagedId = deriveTurnAssistantMessageId(THREAD_ID, `execution:${EXECUTION_ID}`);
+    expect(new MessageRepo(db).findByIdInThreadIncludingInternal(THREAD_ID, stagedId))
+      .toMatchObject({ content: "Answer", is_internal: true });
+    expect(published).not.toContain(`${EXECUTION_ID}:turn.completed`);
+
+    const finish = op(3, { kind: "finish", outcome: "completed", input: {
+      threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, providerId: "codex",
+      providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" },
+    } });
+    expect(await port.transact(finish)).toMatchObject({ kind: "committed" });
+    expect(db.prepare("SELECT content, is_internal, outcome FROM messages WHERE role = 'assistant'").get())
+      .toEqual({ content: "Answer", is_internal: 0, outcome: "completed" });
+    expect(published).toContain(`${EXECUTION_ID}:turn.completed`);
+    expect(await port.transact(staged)).toMatchObject({ kind: "committed" });
+    expect(await port.transact(finish)).toMatchObject({ kind: "committed" });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE role = 'assistant'").get())
+      .toEqual({ count: 1 });
+  });
+
+  it("rolls back a failed semantic terminal stage and retries at the same ordinal", async () => {
+    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    const port = new CanonicalExecutionWriterPort(writer, () => {});
+    expect(await port.transact(beginOperation())).toMatchObject({ kind: "committed" });
+    const stage: ExecutionSemanticOperation = {
+      operationId: `${lease.leaseId}:2`, execution, lease, ordinal: 2,
+      mutation: { kind: "stage-terminal", input: {
+        threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "completed", endedAt: NOW,
+        assistant: { content: "Answer", model: null, attachments: [] }, narrative: [],
+      } },
+    };
+    db.run(`CREATE TRIGGER reject_terminal_stage BEFORE INSERT ON messages
+      WHEN NEW.role = 'assistant' BEGIN SELECT RAISE(FAIL, 'injected terminal failure'); END`);
+    await expect(port.transact(stage)).rejects.toThrow("Canonical writer write-failed");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE role = 'assistant'").get())
+      .toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE operation_id = ?")
+      .get(stage.operationId)).toEqual({ count: 0 });
+
+    db.run("DROP TRIGGER reject_terminal_stage");
+    expect(await port.transact(stage)).toMatchObject({ kind: "committed", operationId: stage.operationId });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE role = 'assistant' AND is_internal = 1").get())
       .toEqual({ count: 1 });
   });
 });

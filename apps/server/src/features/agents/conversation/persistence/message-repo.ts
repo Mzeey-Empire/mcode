@@ -1080,6 +1080,14 @@ export class MessageRepo {
     return row ? rowToMessage(row) : null;
   }
 
+  /** Find one private or published message for writer-owned turn materialization. */
+  findByIdInThreadIncludingInternal(threadId: string, messageId: string): Message | null {
+    const row = this.orm.select().from(messages)
+      .where(and(eq(messages.id, messageId), eq(messages.threadId, threadId)))
+      .get();
+    return row ? rowToMessage(row) : null;
+  }
+
   /** Look up a single message by its primary key. */
   findById(id: string): Message | undefined {
     const row = this.orm

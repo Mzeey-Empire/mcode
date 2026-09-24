@@ -2,6 +2,7 @@ import type { TurnOutcome } from "@mcode/contracts";
 import type { ProviderEventDraft } from "@mcode/providers";
 
 import type {
+  DataOnlyParentTerminalProjectionInput,
   DataOnlyParentTurnFinishInput,
   DataOnlyParentTurnStartInput,
 } from "../canonical/canonical-parent-turn-write.js";
@@ -21,6 +22,7 @@ export type ExecutionWorkCommand =
   | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
   | { readonly kind: "effect-result"; readonly effectId: string; readonly settled: boolean }
   | { readonly kind: "provider-outcome"; readonly outcome: TurnOutcome }
+  | { readonly kind: "stage-terminal"; readonly input: DataOnlyParentTerminalProjectionInput }
   | { readonly kind: "finalize"; readonly outcome: TurnOutcome; readonly input: DataOnlyParentTurnFinishInput }
   | { readonly kind: "release" };
 
@@ -38,6 +40,7 @@ export interface ExecutionSemanticOperation {
     | { readonly kind: "stop-requested"; readonly requestId: string; readonly lastAdmittedOrdinal: number }
     | { readonly kind: "effect-result"; readonly effectId: string; readonly settled: boolean }
     | { readonly kind: "provider-outcome"; readonly outcome: TurnOutcome }
+    | { readonly kind: "stage-terminal"; readonly input: DataOnlyParentTerminalProjectionInput }
     | { readonly kind: "finish"; readonly outcome: TurnOutcome; readonly input: DataOnlyParentTurnFinishInput };
 }
 
@@ -62,6 +65,9 @@ export type ExecutionWorkerResult =
   | { readonly kind: "rejected"; readonly reason: "no-execution" | "stale-execution" | "out-of-order" | "invalid-transition" | "invalid-event-routing" | "invalid-stop-watermark" | "writer-conflict" };
 
 type WorkerCommand = ExecutionMailboxCommand<ExecutionWorkCommand>;
+const METADATA_MUTATIONS: ReadonlySet<WorkerCommand["kind"]> = new Set([
+  "checkpoint", "effect-result", "provider-outcome", "stage-terminal",
+]);
 
 interface ExecutionState {
   readonly execution: ExecutionIdentity;
@@ -165,17 +171,12 @@ function mutationFor(
   state: ExecutionState,
 ): ExecutionSemanticOperation["mutation"] | undefined {
   const command = request.command;
+  if (isMetadataMutation(command)) return command;
   switch (command.kind) {
     case "event":
       return eventMutation(command, request.execution, state);
     case "stop":
       return stopMutation(command, request, state);
-    case "checkpoint":
-      return { kind: "checkpoint", phase: command.phase, nativeCursor: command.nativeCursor };
-    case "effect-result":
-      return { kind: "effect-result", effectId: command.effectId, settled: command.settled };
-    case "provider-outcome":
-      return { kind: "provider-outcome", outcome: command.outcome };
     case "finalize":
       return finishMutation(command, request.execution, state.providerId);
     case "start":
@@ -187,6 +188,13 @@ function mutationFor(
       return exhaustive;
     }
   }
+}
+
+function isMetadataMutation(command: WorkerCommand): command is Extract<
+  WorkerCommand,
+  { readonly kind: "checkpoint" | "effect-result" | "provider-outcome" | "stage-terminal" }
+> {
+  return METADATA_MUTATIONS.has(command.kind);
 }
 
 function eventMutation(

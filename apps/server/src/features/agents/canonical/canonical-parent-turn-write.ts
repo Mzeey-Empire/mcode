@@ -64,7 +64,7 @@ export interface DataOnlyParentEventInput extends Omit<CanonicalAgentCommitInput
 
 /** A staged assistant and narrative to confirm in the terminal transaction. */
 export interface DataOnlyParentTurnFinishInput extends Omit<ParentTurnFinishInput, "projectTurn" | "finalizeCompatibility"> {
-  projection: ParentTurnProjection;
+  projection: ParentTurnProjection | { readonly kind: "writer-staged" };
 }
 
 /** Cloneable terminal data whose compatibility rows are staged on the writer connection. */
@@ -182,7 +182,7 @@ export class CanonicalParentTurnWrite {
 
   private stageAssistant(input: DataOnlyParentTerminalProjectionInput) {
     const id = deriveTurnAssistantMessageId(input.threadId, `execution:${input.executionId}`);
-    const existing = this.messages.findByIdInThread(input.threadId, id);
+    const existing = this.messages.findByIdInThreadIncludingInternal(input.threadId, id);
     if (existing) {
       this.assertAssistantMatches(existing, input);
       return existing;
@@ -224,17 +224,20 @@ export class CanonicalParentTurnWrite {
     input: DataOnlyParentTurnFinishInput,
     onBatchWrite?: (batch: CanonicalTerminalBatchWrite) => void,
   ): Promise<CanonicalAgentBatchedCommitResult> {
-    this.assertStagedAssistant(input);
+    const staged = "kind" in input.projection
+      ? this.loadStagedTerminalProjection(input.threadId, input.executionId)
+      : input.projection;
+    this.assertStagedAssistant(input.threadId, staged);
     const projection: ParentTurnProjection = {
-      message: input.projection.message
+      message: staged.message
         ? {
-            ...input.projection.message,
+            ...staged.message,
             is_internal: false,
             outcome: input.outcome,
             outcomeExecutionId: input.executionId,
           }
         : null,
-      narrative: input.projection.narrative,
+      narrative: staged.narrative,
     };
     return this.canonical.finishParentTurnBatched({
       ...input,
@@ -274,10 +277,20 @@ export class CanonicalParentTurnWrite {
     );
   }
 
-  private assertStagedAssistant(input: DataOnlyParentTurnFinishInput): void {
-    const projected = input.projection.message;
+  private loadStagedTerminalProjection(threadId: string, executionId: string): ParentTurnProjection {
+    const id = deriveTurnAssistantMessageId(threadId, `execution:${executionId}`);
+    const message = this.messages.findByIdInThreadIncludingInternal(threadId, id);
+    if (!message) return { message: null, narrative: [] };
+    if (message.role !== "assistant" || !message.is_internal) {
+      throw new Error(`Staged assistant projection is not private: ${id}`);
+    }
+    return { message, narrative: this.narrative.loadForMessages([message]) };
+  }
+
+  private assertStagedAssistant(threadId: string, projection: ParentTurnProjection): void {
+    const projected = projection.message;
     if (!projected) return;
-    const staged = stagedAssistantSchema.nullable().parse(this.stagedAssistant.get(projected.id, input.threadId));
+    const staged = stagedAssistantSchema.nullable().parse(this.stagedAssistant.get(projected.id, threadId));
     if (!staged || staged.role !== "assistant" || staged.content !== projected.content) {
       throw new Error(`Staged assistant projection not found: ${projected.id}`);
     }
@@ -292,8 +305,10 @@ function settleTerminalNarrative(
   assistantContent: string,
 ): ParentNarrativeRecoveryItem[] {
   const finalText = assistantContent.trim();
-  const lastThoughtOrder = Math.max(...items.filter((item) => item.kind === "narrationSegment")
-    .map((item) => item.record.sort_order));
+  let lastThoughtOrder = -Infinity;
+  for (const item of items) {
+    if (item.kind === "narrationSegment") lastThoughtOrder = Math.max(lastThoughtOrder, item.record.sort_order);
+  }
   return items.map((item) => {
     if (item.kind === "toolCall") return settleToolCall(item, messageId, outcome, endedAt);
     if (item.kind === "hook") return settleHook(item, messageId, endedAt);
