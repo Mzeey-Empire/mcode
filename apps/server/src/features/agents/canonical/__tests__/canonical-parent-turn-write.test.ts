@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
+import { PlanQuestionAnswersRepo } from "../../planning/persistence/plan-question-answers-repo.js";
 import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
 import {
   CanonicalParentTurnWrite,
@@ -169,6 +170,25 @@ describe("CanonicalParentTurnWrite", () => {
     expect(db.prepare("SELECT user_completed_at FROM threads WHERE id = ?").get(THREAD_ID)).toEqual({ user_completed_at: NOW });
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_ingest_checkpoints").get()).toEqual({ count: 0 });
     expect(published).toEqual([]);
+  });
+
+  it("reuses a queued user message while reopening the thread and answering a plan question", () => {
+    const messages = new MessageRepo(db);
+    const queued = messages.create(THREAD_ID, "user", "Queued answer", 1);
+    const plan = messages.create(THREAD_ID, "assistant", "Question", 2);
+    db.prepare("UPDATE threads SET user_completed_at = ? WHERE id = ?").run(NOW, THREAD_ID);
+    const input: DataOnlyParentTurnStartInput = {
+      ...startInput(),
+      userMessage: { kind: "existing", messageId: queued.id },
+      reopenThread: true,
+      answeredPlanQuestionMessageId: plan.id,
+    };
+
+    expect(writer.start(structuredClone(input)).outcome).toBe("committed");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE role = 'user'").get()).toEqual({ count: 1 });
+    expect(db.prepare("SELECT user_completed_at FROM threads WHERE id = ?").get(THREAD_ID))
+      .toEqual({ user_completed_at: null });
+    expect(new PlanQuestionAnswersRepo(db).isAnswered(plan.id)).toBe(true);
   });
 
   it("does not confirm a terminal checkpoint when assistant publication fails", async () => {

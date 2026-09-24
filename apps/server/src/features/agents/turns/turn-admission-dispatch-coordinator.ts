@@ -37,6 +37,11 @@ import {
 import { ThreadRepo } from "../../thread-control/persistence/thread-repo.js";
 import { MessageRepo } from "../conversation/persistence/message-repo.js";
 import {
+  projectParentUserMessage,
+  type DataOnlyParentTurnStartInput,
+  type ParentUserMessageWrite,
+} from "../canonical/canonical-parent-turn-write.js";
+import {
   GoalLifecycleService,
   type GoalCommandEffectReceipt,
 } from "../goals/goal-lifecycle-service.js";
@@ -136,6 +141,7 @@ export type ThreadControlLeaseDirective =
 export interface PreparedTurnDispatch {
   readonly kind: "dispatch";
   readonly lease: TurnRuntimeLease;
+  readonly parentStartInput: DataOnlyParentTurnStartInput;
   readonly provider: IAgentProvider;
   readonly providerId: ProviderId;
   readonly request: TurnRequest;
@@ -416,13 +422,14 @@ export class TurnAdmissionDispatchCoordinator {
     runtime.activate(lease);
     const attachmentData = await this.persistAttachments(prepared);
     const sourceTurnId = prepared.command.sourceTurnId ?? NodeCrypto.randomUUID();
-    this.startParentTurn(prepared, lease, sourceTurnId, attachmentData, review);
+    const parentStartInput = this.startParentTurn(prepared, lease, sourceTurnId, attachmentData, review);
     this.publishCommittedEffects(prepared, sourceTurnId);
     const wirePayload = this.buildWirePayload(prepared);
     const request = await this.buildTurnRequest(prepared, lease, sourceTurnId, attachmentData, cwd, wirePayload, review);
     return {
       kind: "dispatch",
       lease,
+      parentStartInput,
       provider: prepared.provider,
       providerId: prepared.providerId,
       request,
@@ -688,13 +695,47 @@ export class TurnAdmissionDispatchCoordinator {
     sourceTurnId: string,
     attachments: PersistedAttachmentData,
     review: ApprovalReviewDecision,
-  ): void {
-    const command = prepared.command;
-    const wasUserCompleted = prepared.thread.user_completed_at !== null;
-    const nextSequence = command.persistedUserMessage?.sequence
-      ?? this.messages.getLatestSequenceIncludingInternal(command.threadId) + 1;
+  ): DataOnlyParentTurnStartInput {
+    const input = this.prepareParentTurnStartInput(prepared, lease, sourceTurnId, attachments, review);
+    const { userMessage, reopenThread, answeredPlanQuestionMessageId, ...start } = input;
     let reopenedThread: Exclude<ReturnType<ThreadRepo["findById"]>, null> | null = null;
     this.parentTurns.startParentTurn({
+      ...start,
+      projectUserMessage: () => {
+        if (reopenThread) reopenedThread = this.reopenThread(input.thread.id);
+        const message = projectParentUserMessage(this.messages, input.thread.id, userMessage);
+        if (answeredPlanQuestionMessageId) this.planAnswers.markAnswered(answeredPlanQuestionMessageId, input.thread.id);
+        return message;
+      },
+    });
+    if (reopenedThread) broadcast("thread.lifecycleChanged", { thread: reopenedThread });
+    return input;
+  }
+
+  private prepareParentTurnStartInput(
+    prepared: PreparedCommand,
+    lease: TurnRuntimeLease,
+    sourceTurnId: string,
+    attachments: PersistedAttachmentData,
+    review: ApprovalReviewDecision,
+  ): DataOnlyParentTurnStartInput {
+    const command = prepared.command;
+    const userMessage: ParentUserMessageWrite = command.persistedUserMessage
+      ? { kind: "existing", messageId: command.persistedUserMessage.id }
+      : {
+          kind: "create",
+          messageId: command.messageId ?? NodeCrypto.randomUUID(),
+          content: command.displayContent ?? command.content,
+          sequence: this.messages.getLatestSequenceIncludingInternal(command.threadId) + 1,
+          attachments: attachments.stored.length > 0 ? [...attachments.stored] : undefined,
+          replyToMessageId: command.replyToMessageId,
+          quotedText: command.quotedText,
+          mentions: prepared.mentions.length > 0 ? [...prepared.mentions] : undefined,
+          previewAnnotations: command.previewAnnotations,
+          origin: this.messageOrigin(command),
+          selectedTextComments: command.selectedTextComments,
+        };
+    return {
       thread: {
         id: prepared.thread.id,
         workspaceId: prepared.workspace.id,
@@ -708,14 +749,10 @@ export class TurnAdmissionDispatchCoordinator {
       approvalReviewReason: review.reason,
       providerIdentities: this.resumeIdentities(prepared),
       retryOfExecutionId: command.retryOfExecutionId,
-      projectUserMessage: () => {
-        if (wasUserCompleted) reopenedThread = this.reopenThread(command.threadId);
-        const message = this.persistUserMessage(prepared, nextSequence, attachments);
-        this.markPlanAnswer(command, prepared.thread.id);
-        return message;
-      },
-    });
-    if (reopenedThread) broadcast("thread.lifecycleChanged", { thread: reopenedThread });
+      userMessage,
+      reopenThread: prepared.thread.user_completed_at !== null,
+      answeredPlanQuestionMessageId: command.markPlanAnswerForMessageId,
+    };
   }
 
   private effectivePermissionMode(requested: PermissionMode | "default" | undefined, persisted: PermissionMode): "full" | "supervised" {
@@ -739,19 +776,6 @@ export class TurnAdmissionDispatchCoordinator {
     return reopened;
   }
 
-  private persistUserMessage(prepared: PreparedCommand, sequence: number, attachments: PersistedAttachmentData) {
-    const command = prepared.command;
-    if (command.persistedUserMessage) return this.persistedQueuedMessage(command);
-    const origin = this.messageOrigin(command);
-    return this.createUserMessage(prepared, sequence, attachments, origin);
-  }
-
-  private persistedQueuedMessage(command: SendMessageCommand) {
-    const message = this.messages.findByIdInThread(command.threadId, command.persistedUserMessage!.id);
-    if (!message) throw new Error(`Queued Turn message was not found: ${command.persistedUserMessage!.id}`);
-    return message;
-  }
-
   private messageOrigin(command: SendMessageCommand) {
     if (!command.sourceThreadId || !command.originSourceTurnId || !command.sourceProviderId) return undefined;
     return {
@@ -760,39 +784,6 @@ export class TurnAdmissionDispatchCoordinator {
       sourceTurnId: command.originSourceTurnId,
       sourceProviderId: command.sourceProviderId,
     };
-  }
-
-  private createUserMessage(
-    prepared: PreparedCommand,
-    sequence: number,
-    attachments: PersistedAttachmentData,
-    origin: ReturnType<TurnAdmissionDispatchCoordinator["messageOrigin"]>,
-  ) {
-    const command = prepared.command;
-    const args = [
-      command.threadId,
-      "user" as const,
-      command.displayContent ?? command.content,
-      sequence,
-      attachments.stored.length > 0 ? [...attachments.stored] : undefined,
-      command.replyToMessageId,
-      command.quotedText,
-      undefined,
-      undefined,
-      prepared.mentions.length > 0 ? [...prepared.mentions] : undefined,
-      command.previewAnnotations,
-    ] as const;
-    if (command.selectedTextComments !== undefined) {
-      return this.messages.create(...args, origin, command.messageId, command.selectedTextComments);
-    }
-    if (command.messageId === undefined && origin === undefined) return this.messages.create(...args);
-    if (command.messageId === undefined) return this.messages.create(...args, origin);
-    if (origin === undefined) return this.messages.create(...args, undefined, command.messageId);
-    return this.messages.create(...args, origin, command.messageId);
-  }
-
-  private markPlanAnswer(command: SendMessageCommand, threadId: string): void {
-    if (command.markPlanAnswerForMessageId) this.planAnswers.markAnswered(command.markPlanAnswerForMessageId, threadId);
   }
 
   private publishCommittedEffects(prepared: PreparedCommand, sourceTurnId: string): void {

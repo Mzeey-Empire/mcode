@@ -50,6 +50,33 @@ export type ParentUserMessageWrite =
       selectedTextComments?: CreateMessageArgument[13];
     };
 
+/** Project prepared user-message data on the transaction's SQLite connection. */
+export function projectParentUserMessage(messages: MessageRepo, threadId: string, userMessage: ParentUserMessageWrite) {
+  if (userMessage.kind === "existing") {
+    const existing = messages.findByIdInThread(threadId, userMessage.messageId);
+    if (!existing || existing.role !== "user") {
+      throw new Error(`Queued user message not found: ${userMessage.messageId}`);
+    }
+    return existing;
+  }
+  return messages.create(
+    threadId,
+    "user",
+    userMessage.content,
+    userMessage.sequence,
+    userMessage.attachments,
+    userMessage.replyToMessageId,
+    userMessage.quotedText,
+    undefined,
+    undefined,
+    userMessage.mentions,
+    userMessage.previewAnnotations,
+    userMessage.origin,
+    userMessage.messageId,
+    userMessage.selectedTextComments,
+  );
+}
+
 /** Values for an atomic start; no caller closure enters the writer. */
 export interface DataOnlyParentTurnStartInput extends Omit<ParentTurnStartInput, "projectUserMessage"> {
   userMessage: ParentUserMessageWrite;
@@ -118,7 +145,7 @@ export class CanonicalParentTurnWrite {
         if (input.reopenThread && !this.threads.reopen(input.thread.id)) {
           throw new Error(`Thread not found: ${input.thread.id}`);
         }
-        const message = this.projectUserMessage(input);
+        const message = projectParentUserMessage(this.messages, input.thread.id, input.userMessage);
         if (input.answeredPlanQuestionMessageId) {
           this.planAnswers.markAnswered(input.answeredPlanQuestionMessageId, input.thread.id);
         }
@@ -248,33 +275,6 @@ export class CanonicalParentTurnWrite {
         this.messages.publishAssistant(projection.message.id);
       },
     }, onBatchWrite);
-  }
-
-  private projectUserMessage(input: DataOnlyParentTurnStartInput) {
-    const { userMessage } = input;
-    if (userMessage.kind === "existing") {
-      const existing = this.messages.findByIdInThread(input.thread.id, userMessage.messageId);
-      if (!existing || existing.role !== "user") {
-        throw new Error(`Queued user message not found: ${userMessage.messageId}`);
-      }
-      return existing;
-    }
-    return this.messages.create(
-      input.thread.id,
-      "user",
-      userMessage.content,
-      userMessage.sequence,
-      userMessage.attachments,
-      userMessage.replyToMessageId,
-      userMessage.quotedText,
-      undefined,
-      undefined,
-      userMessage.mentions,
-      userMessage.previewAnnotations,
-      userMessage.origin,
-      userMessage.messageId,
-      userMessage.selectedTextComments,
-    );
   }
 
   private loadStagedTerminalProjection(threadId: string, executionId: string): ParentTurnProjection {
