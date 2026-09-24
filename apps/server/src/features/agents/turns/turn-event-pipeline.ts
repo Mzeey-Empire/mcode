@@ -121,6 +121,7 @@ export class TurnEventPipeline implements ProviderEventIngressConsumer {
   /** Materialize a terminal turn once, after every earlier event in its turn queue. */
   finalizeTurn(command: FinalizeTurnCommand): Promise<boolean> | null {
     const inFlight = this.inFlightApplications.get(command.threadId);
+    const priorFailure = this.applicationErrors.get(command.threadId);
     if (cancelsDeferredWork(command.source)) this.discard(command.threadId, command.executionId);
     const existing = this.finalizations.get(command.threadId);
     if (existing) return existing;
@@ -128,7 +129,9 @@ export class TurnEventPipeline implements ProviderEventIngressConsumer {
     const afterIngress = () => this.ingressFence
       ? this.ingressFence.waitForThread(command.threadId).then(() => this.finalizeAfterIngress(command))
       : this.finalizeAfterIngress(command);
-    const pending = inFlight ? inFlight.then(afterIngress) : afterIngress();
+    const pending = priorFailure !== undefined
+      ? Promise.reject<boolean>(priorFailure)
+      : inFlight ? inFlight.then(afterIngress) : afterIngress();
     this.finalizations.set(command.threadId, pending);
     void pending.then(
       () => this.finalizations.delete(command.threadId),

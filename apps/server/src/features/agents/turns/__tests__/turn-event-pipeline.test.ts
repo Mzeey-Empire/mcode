@@ -253,6 +253,20 @@ describe("TurnEventPipeline", () => {
     expect(finalize).not.toHaveBeenCalled();
   });
 
+  it("does not turn a failed checkpoint into a successful later Stop", async () => {
+    const { pipeline, finalize } = createPipeline(() => Promise.reject(new Error("checkpoint failed")));
+
+    pipeline.handleProviderEvent(textDelta("write failure"));
+    await Promise.resolve();
+    await expect(pipeline.finalizeTurn({
+      threadId: "thread-1",
+      executionId: EXECUTION_ID,
+      outcome: "cancelled",
+      source: "user-stop",
+    })).rejects.toThrow("checkpoint failed");
+    expect(finalize).not.toHaveBeenCalled();
+  });
+
   it("holds finalization until its thread-affine ingress worker is idle", async () => {
     let releaseIngress!: () => void;
     const ingressIdle = new Promise<void>((resolve) => { releaseIngress = resolve; });
