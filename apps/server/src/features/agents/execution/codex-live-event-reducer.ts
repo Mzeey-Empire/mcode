@@ -7,6 +7,46 @@ type ToolUseEvent = Extract<AgentEvent, { type: "toolUse" }>;
 type ToolResultEvent = Extract<AgentEvent, { type: "toolResult" }>;
 type MessageEvent = Extract<AgentEvent, { type: "message" }>;
 type TextDeltaEvent = Extract<AgentEvent, { type: "textDelta" }>;
+type ContextEvent = Extract<AgentEvent, { type: "contextEstimate" | "turnComplete" }>;
+type SystemEvent = Extract<AgentEvent, { type: "system" }>;
+
+const BEFORE_START_EVENTS = new Set<AgentEvent["type"]>([
+  "system", "quotaUpdate", "goalUpdated", "goalCleared", "mcpServerStartupStatus",
+]);
+const AFTER_COMPLETION_EVENTS = new Set<AgentEvent["type"]>([
+  "ended", "hookStarted", "hookCompleted", ...BEFORE_START_EVENTS,
+]);
+
+// A new contract variant must receive an owner decision before the reducer accepts it.
+const UNSUPPORTED_FEATURE_REASON = {
+  turnStarted: null,
+  message: null,
+  generatedAttachment: null,
+  toolUse: null,
+  toolResult: null,
+  turnComplete: null,
+  error: null,
+  ended: null,
+  system: null,
+  compacting: null,
+  compactSummary: null,
+  modelFallback: "model fallback needs the model selection owner",
+  textDelta: null,
+  toolInputDelta: "incremental tool event needs the tool lifecycle owner",
+  toolProgress: "incremental tool event needs the tool lifecycle owner",
+  contextEstimate: null,
+  quotaUpdate: null,
+  providerUnavailable: "provider availability needs the provider dispatch owner",
+  rateLimited: null,
+  apiRetry: null,
+  hookStarted: null,
+  hookProgress: "hook output needs the hook lifecycle owner",
+  hookCompleted: null,
+  assistantMessageBoundary: null,
+  goalUpdated: null,
+  goalCleared: null,
+  mcpServerStartupStatus: null,
+} satisfies Record<AgentEvent["type"], string | null>;
 
 /** Data to commit for one provider event before releasing its publication. */
 export type CodexLiveWriterIntent =
@@ -23,7 +63,15 @@ export type CodexLiveWriterIntent =
   | { readonly kind: "narrative-recovery"; readonly items: ParentNarrativeRecoveryItem[] }
   | { readonly kind: "narrative-effect"; readonly effect: NarrativeTurnStateEffect }
   | { readonly kind: "feature-event"; readonly feature: "plan-text" | "assistant-message" | "task-tool" | "goal-refresh"; readonly event: AgentEvent }
-  | { readonly kind: "terminal-projection"; readonly source: "turnComplete" | "ended"; readonly outcome: "completed" | "errored" | "interrupted"; readonly assistant: AssistantMaterializationInput; readonly narrative: ParentNarrativeRecoveryItem[] }
+  | { readonly kind: "context-usage"; readonly tokensIn: number; readonly contextWindow?: number }
+  | { readonly kind: "compaction-started" }
+  | { readonly kind: "compaction-divider" }
+  | { readonly kind: "compaction-summary"; readonly summary: string }
+  | { readonly kind: "notice-session"; readonly event: SystemEvent }
+  | { readonly kind: "system-notice"; readonly event: SystemEvent }
+  | { readonly kind: "session-cursor"; readonly event: SystemEvent }
+  | { readonly kind: "turn-error"; readonly error: string }
+  | { readonly kind: "terminal-projection"; readonly source: "turnComplete" | "error" | "ended"; readonly outcome: "completed" | "errored" | "interrupted"; readonly assistant: AssistantMaterializationInput; readonly narrative: ParentNarrativeRecoveryItem[] }
   | { readonly kind: "turn-ended" };
 
 /** A publication is released only after the writer accepts every intent for the event. */
@@ -39,6 +87,8 @@ export type CodexLiveReduction =
 
 /**
  * Reduces one Codex execution's live AgentEvents without database or transport calls.
+ * The caller must supply an exact turnExecutionId from provider turn binding;
+ * session-level events without that proof belong to a separate owner.
  * The caller must discard this instance if its writer operation fails, because
  * the next event may only observe state whose preceding intents were committed.
  */
@@ -48,23 +98,25 @@ export class CodexLiveEventReducer {
   private phase: "awaiting-start" | "active" | "completed" | "ended" = "awaiting-start";
   private unknownText = "";
   private knownFinalText = false;
+  private compacting = false;
 
   constructor(readonly execution: ExecutionIdentity) {
     this.narrative = new NarrativeTurnState(execution);
   }
 
   reduce(input: AgentEvent): CodexLiveReduction {
-    const rejection = this.identityRejection(input) ?? this.phaseRejection(input) ?? this.textRejection(input);
+    const rejection = this.identityRejection(input) ?? UNSUPPORTED_FEATURE_REASON[input.type]
+      ?? this.phaseRejection(input) ?? this.textRejection(input);
     if (rejection) return this.unsupported(input, rejection);
     let event: AgentEvent;
     try {
-      event = structuredClone({ ...input, turnExecutionId: this.execution.executionId });
+      event = structuredClone(input);
     } catch {
       return this.unsupported(input, "event is not cloneable");
     }
 
     const writer = this.apply(event);
-    if (!writer) return this.unsupported(input, "event needs a separate feature owner");
+    if (!writer) return this.unsupported(input, "reducer dispatch owner has no handler for this event");
     for (const effect of this.narrative.takeEffects()) writer.push({ kind: "narrative-effect", effect });
     return structuredClone({
       kind: "reduced",
@@ -79,18 +131,26 @@ export class CodexLiveEventReducer {
 
   private identityRejection(event: AgentEvent): string | undefined {
     if (event.threadId !== this.execution.threadId) return "different thread";
-    if (event.turnExecutionId && event.turnExecutionId !== this.execution.executionId) return "different execution";
+    if (!event.turnExecutionId) return "event without execution identity needs the provider event routing owner";
+    if (event.turnExecutionId !== this.execution.executionId) return "different execution";
     return undefined;
   }
 
   private phaseRejection(event: AgentEvent): string | undefined {
     if (this.phase === "ended") return "execution already ended";
-    if (this.phase === "awaiting-start" && event.type !== "turnStarted") return "turn has not started";
-    if (this.phase !== "awaiting-start" && event.type === "turnStarted") return "turn already started";
-    if (this.phase === "completed" && event.type !== "ended" && event.type !== "hookStarted" && event.type !== "hookCompleted") {
-      return "event after turn completion requires another owner";
+    if (this.phase === "awaiting-start" && event.type !== "turnStarted" && !BEFORE_START_EVENTS.has(event.type)) {
+      return "turn has not started";
     }
+    if (this.phase !== "awaiting-start" && event.type === "turnStarted") return "turn already started";
+    if (this.phase === "completed") return this.completedPhaseRejection(event);
+    if (this.compacting && event.type === "turnComplete") return "turn completion during compaction needs the compaction terminal owner";
     return undefined;
+  }
+
+  private completedPhaseRejection(event: AgentEvent): string | undefined {
+    if (AFTER_COMPLETION_EVENTS.has(event.type)) return undefined;
+    return event.type === "message" ? "post-turn goal receipt needs the goal message owner"
+      : "post-terminal event needs the terminal lifecycle owner";
   }
 
   private textRejection(event: AgentEvent): string | undefined {
@@ -101,6 +161,7 @@ export class CodexLiveEventReducer {
       case "textDelta": return this.deltaRejection(event);
       case "turnComplete":
       case "ended":
+      case "error":
         return this.unknownText ? "assistant text still lacks a boundary" : undefined;
       default: return undefined;
     }
@@ -145,7 +206,25 @@ export class CodexLiveEventReducer {
     switch (event.type) {
       case "turnStarted": return this.start(event);
       case "turnComplete": return this.turnComplete(event);
+      case "error": return this.error(event);
       case "ended": return this.ended(event);
+      case "contextEstimate": return this.contextEstimate(event);
+      case "compacting": return this.compactingEvent(event);
+      case "compactSummary": return this.compactSummary(event);
+      default: return this.applyStatus(event);
+    }
+  }
+
+  private applyStatus(event: AgentEvent): CodexLiveWriterIntent[] | undefined {
+    switch (event.type) {
+      case "system": return this.system(event);
+      // These status events have no server projection beyond their canonical receipt.
+      case "apiRetry":
+      case "rateLimited":
+      case "quotaUpdate":
+      case "goalUpdated":
+      case "goalCleared":
+      case "mcpServerStartupStatus": return [];
       default: return undefined;
     }
   }
@@ -270,10 +349,51 @@ export class CodexLiveEventReducer {
   private turnComplete(event: Extract<AgentEvent, { type: "turnComplete" }>): CodexLiveWriterIntent[] {
     this.phase = "completed";
     return [
+      ...this.contextUsage(event),
       { kind: "terminal-projection", source: "turnComplete", outcome: "completed",
         assistant: this.assistant.materializationInput(null), narrative: this.narrative.recoverySnapshot(event.threadId) },
       { kind: "feature-event", feature: "goal-refresh", event },
     ];
+  }
+
+  private error(event: Extract<AgentEvent, { type: "error" }>): CodexLiveWriterIntent[] {
+    this.phase = "completed";
+    return [
+      { kind: "turn-error", error: event.error },
+      { kind: "terminal-projection", source: "error", outcome: "errored",
+        assistant: this.assistant.materializationInput(null), narrative: this.narrative.recoverySnapshot(event.threadId) },
+    ];
+  }
+
+  private contextEstimate(event: Extract<AgentEvent, { type: "contextEstimate" }>): CodexLiveWriterIntent[] {
+    return event.totalProcessedTokens === undefined ? [] : this.contextUsage(event);
+  }
+
+  private contextUsage(event: ContextEvent): CodexLiveWriterIntent[] {
+    return event.tokensIn > 0 && !this.compacting
+      ? [{ kind: "context-usage", tokensIn: event.tokensIn,
+        ...(event.contextWindow !== undefined ? { contextWindow: event.contextWindow } : {}) }]
+      : [];
+  }
+
+  private compactingEvent(event: Extract<AgentEvent, { type: "compacting" }>): CodexLiveWriterIntent[] {
+    this.compacting = event.active;
+    return [{ kind: event.active ? "compaction-started" : "compaction-divider" }];
+  }
+
+  private compactSummary(event: Extract<AgentEvent, { type: "compactSummary" }>): CodexLiveWriterIntent[] {
+    this.compacting = false;
+    return [{ kind: "compaction-summary", summary: event.summary }];
+  }
+
+  private system(event: SystemEvent): CodexLiveWriterIntent[] {
+    const writer: CodexLiveWriterIntent[] = [];
+    if (event.subtype === "provider.session.started") writer.push({ kind: "notice-session", event });
+    if (event.subtype.startsWith("provider.notice.") && event.message) writer.push({ kind: "system-notice", event });
+    if (event.subtype.startsWith("sdk_session_id:") || event.subtype === "sdk_session_invalidated") {
+      writer.push({ kind: "session-cursor", event });
+    }
+    return writer;
   }
 
   private ended(event: Extract<AgentEvent, { type: "ended" }>): CodexLiveWriterIntent[] {
