@@ -54,7 +54,7 @@ function oversizedToolResult(threadId: string): ProviderRuntimeEvent {
       threadId,
       turnExecutionId: EXECUTION_ID,
       toolCallId: "tool-1",
-      output: "x".repeat(256 * 1_024),
+      output: "x".repeat(2 * 1_024 * 1_024),
       isError: false,
     },
   };
@@ -116,6 +116,13 @@ function createIngress(
 
 async function flushIngress(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+async function drainIngress(ingress: ProviderEventIngress): Promise<void> {
+  for (let batch = 0; batch < 130 && ingress.queueMetrics().pendingEvents > 0; batch += 1) {
+    await flushIngress();
+  }
+  expect(ingress.queueMetrics().pendingEvents).toBe(0);
 }
 
 describe("ProviderEventIngress", () => {
@@ -242,25 +249,28 @@ describe("ProviderEventIngress", () => {
     expect(received).toHaveLength(65);
   });
 
-  it("bounds one thread queue and rate-limits its depth diagnostics", async () => {
-    const { diagnostics, ingress, overflowed } = createIngress();
+  it("bounds one thread queue and transitions its failure only once", async () => {
+    const { diagnostics, ingress, overflowed, received } = createIngress();
     const now = vi.spyOn(Date, "now").mockReturnValue(100);
     try {
-      for (let index = 0; index <= 252; index += 1) {
+      for (let index = 0; index <= 2_048; index += 1) {
         ingress.acceptProviderRuntime("claude", runtimeEvent(`event-${index}`, "noisy-thread"));
       }
+      ingress.acceptProviderRuntime("claude", terminalEvent("noisy-thread"));
+      ingress.acceptProviderRuntime("claude", runtimeEvent("after-overflow", "noisy-thread"));
     } finally {
       now.mockRestore();
     }
 
     expect(ingress.queueMetrics()).toMatchObject({
-      pendingEvents: 252,
-      queuedThreadCount: 1,
-      largestThreadDepth: 252,
-      rejectedQueueEvents: 1,
+      pendingEvents: 0,
+      queuedThreadCount: 0,
+      largestThreadDepth: 0,
+      rejectedQueueEvents: 3,
     });
+    expect(received).toHaveLength(0);
     expect(overflowed).toEqual([
-      expect.objectContaining({ event: expect.objectContaining({ threadId: "noisy-thread", delta: "event-252" }) }),
+      expect.objectContaining({ event: expect.objectContaining({ threadId: "noisy-thread", delta: "event-2048" }) }),
     ]);
     expect(diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -275,44 +285,76 @@ describe("ProviderEventIngress", () => {
         reason: "queue-capacity",
         threadId: "noisy-thread",
         queueCapacity: "thread",
-        queueDepth: 252,
-        threadQueueDepth: 252,
+        queueDepth: 2_048,
+        threadQueueDepth: 2_048,
         rejectedQueueEvents: 1,
       }),
     ]));
     expect(diagnostics).toHaveLength(2);
 
-    for (let drain = 0; drain < 5 && ingress.queueMetrics().pendingEvents > 0; drain += 1) await flushIngress();
-    expect(ingress.queueMetrics().pendingEvents).toBe(0);
+    await drainIngress(ingress);
+    ingress.acceptProviderRuntime("claude", {
+      event: {
+        type: AgentEventType.TurnStarted,
+        threadId: "noisy-thread",
+        turnExecutionId: "00000000-0000-4000-8000-000000000002",
+      },
+    });
+    await flushIngress();
+    expect(received.at(-1)).toEqual(expect.objectContaining({
+      event: expect.objectContaining({ turnExecutionId: "00000000-0000-4000-8000-000000000002" }),
+    }));
   });
 
   it("reserves ingress capacity for terminal lifecycle events", async () => {
     const { ingress, overflowed } = createIngress();
 
-    for (let index = 0; index < 252; index += 1) {
+    for (let index = 0; index < 2_048; index += 1) {
       ingress.acceptProviderRuntime("claude", runtimeEvent(`event-${index}`, "terminal-thread"));
     }
     for (let index = 0; index < 4; index += 1) {
       ingress.acceptProviderRuntime("claude", terminalEvent("terminal-thread"));
     }
 
-    expect(ingress.queueMetrics()).toMatchObject({ pendingEvents: 256, rejectedQueueEvents: 0 });
+    expect(ingress.queueMetrics()).toMatchObject({ pendingEvents: 2_052, rejectedQueueEvents: 0 });
     expect(overflowed).toEqual([]);
-    for (let drain = 0; drain < 5 && ingress.queueMetrics().pendingEvents > 0; drain += 1) await flushIngress();
-    expect(ingress.queueMetrics().pendingEvents).toBe(0);
+    await drainIngress(ingress);
   });
 
-  it("fails only an oversized event and continues draining unrelated threads", async () => {
+  it("retains the measured seven-thread event burst without overflow", async () => {
+    const { ingress, overflowed, received } = createIngress();
+    const threadIds = Array.from({ length: 7 }, (_, index) => `thread-${index + 1}`);
+
+    for (let eventIndex = 0; eventIndex < 494; eventIndex += 1) {
+      for (const threadId of threadIds) {
+        ingress.acceptProviderRuntime("claude", runtimeEvent(`event-${eventIndex}`, threadId));
+      }
+    }
+
+    expect(ingress.queueMetrics()).toMatchObject({
+      pendingEvents: 3_458,
+      queuedThreadCount: 7,
+      largestThreadDepth: 494,
+      rejectedQueueEvents: 0,
+    });
+    expect(overflowed).toEqual([]);
+    await drainIngress(ingress);
+    expect(received).toHaveLength(3_458);
+  });
+
+  it("purges only the overflowed execution and preserves unrelated thread order", async () => {
     const { diagnostics, ingress, overflowed, received } = createIngress();
 
+    ingress.acceptProviderRuntime("claude", runtimeEvent("healthy-first", "healthy-thread"));
+    ingress.acceptProviderRuntime("claude", runtimeEvent("stale", "overflowed-thread"));
     ingress.acceptProviderRuntime("claude", oversizedToolResult("overflowed-thread"));
-    ingress.acceptProviderRuntime("claude", runtimeEvent("unrelated", "healthy-thread"));
+    ingress.acceptProviderRuntime("claude", runtimeEvent("healthy-second", "healthy-thread"));
 
     expect(overflowed).toEqual([
       expect.objectContaining({ event: expect.objectContaining({ threadId: "overflowed-thread", type: "toolResult" }) }),
     ]);
     expect(ingress.queueMetrics()).toMatchObject({
-      pendingEvents: 1,
+      pendingEvents: 2,
       pendingBytes: expect.any(Number),
       queuedThreadCount: 1,
       rejectedQueueEvents: 1,
@@ -322,13 +364,14 @@ describe("ProviderEventIngress", () => {
         reason: "queue-capacity",
         threadId: "overflowed-thread",
         queueCapacity: "thread-bytes",
-        queueBytes: 0,
-        threadQueueBytes: 0,
+        queueBytes: expect.any(Number),
+        threadQueueBytes: expect.any(Number),
       }),
     ]);
     await flushIngress();
-    expect(received).toEqual([
-      expect.objectContaining({ event: expect.objectContaining({ threadId: "healthy-thread", delta: "unrelated" }) }),
+    expect(received.map((event) => event.event)).toEqual([
+      expect.objectContaining({ threadId: "healthy-thread", delta: "healthy-first" }),
+      expect.objectContaining({ threadId: "healthy-thread", delta: "healthy-second" }),
     ]);
   });
 

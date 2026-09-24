@@ -21,19 +21,23 @@ import {
 } from "./provider-event-adapter.js";
 import { normalizeProviderError } from "./provider-error-normalize.js";
 
-const MAX_PENDING_PROVIDER_EVENTS = 1_024;
-const MAX_PENDING_PROVIDER_EVENTS_PER_THREAD = 256;
-const MAX_PENDING_PROVIDER_EVENT_BYTES = 1_024 * 1_024;
-const MAX_PENDING_PROVIDER_EVENT_BYTES_PER_THREAD = 256 * 1_024;
+const MAX_PENDING_NON_TERMINAL_EVENTS = 8_192;
+const MAX_PENDING_NON_TERMINAL_EVENTS_PER_THREAD = 2_048;
+const MAX_PENDING_PROVIDER_EVENT_BYTES_PER_THREAD = 2 * 1_024 * 1_024;
 const MAX_PENDING_TERMINAL_EVENTS = 32;
 const MAX_PENDING_TERMINAL_EVENTS_PER_THREAD = 4;
 const MAX_PENDING_TERMINAL_EVENT_BYTES = 4 * 1_024;
+const MAX_PENDING_PROVIDER_EVENTS = MAX_PENDING_NON_TERMINAL_EVENTS + MAX_PENDING_TERMINAL_EVENTS;
+const MAX_PENDING_PROVIDER_EVENTS_PER_THREAD =
+  MAX_PENDING_NON_TERMINAL_EVENTS_PER_THREAD + MAX_PENDING_TERMINAL_EVENTS_PER_THREAD;
+const MAX_PENDING_PROVIDER_EVENT_BYTES = 8 * 1_024 * 1_024;
 const RESERVED_TERMINAL_EVENT_BYTES = MAX_PENDING_TERMINAL_EVENTS * MAX_PENDING_TERMINAL_EVENT_BYTES;
 const RESERVED_TERMINAL_EVENT_BYTES_PER_THREAD =
   MAX_PENDING_TERMINAL_EVENTS_PER_THREAD * MAX_PENDING_TERMINAL_EVENT_BYTES;
 const MAX_PROVIDER_EVENTS_PER_DRAIN = 64;
 const QUEUE_DIAGNOSTIC_INTERVAL_MS = 1_000;
 const MAX_CANONICAL_EVENT_IDENTITIES = 16_384;
+const MAX_OVERFLOWED_TURNS = 16_384;
 
 /** Injection token for the content-free provider ingress diagnostic sink. */
 export const PROVIDER_EVENT_INGRESS_DIAGNOSTIC_SINK = Symbol("ProviderEventIngressDiagnosticSink");
@@ -157,6 +161,7 @@ export class ProviderEventIngress {
   private readonly pendingTerminalEventsByThread = new Map<string, number>();
   private readonly readyThreadIds: string[] = [];
   private readonly lastQueueDiagnosticAt = new Map<"queue-capacity" | "queue-pressure", number>();
+  private readonly overflowedExecutionsByTurn = new Map<string, string>();
   private consumer: ProviderEventIngressConsumer | undefined;
   private started = false;
   private drainScheduled = false;
@@ -369,6 +374,10 @@ export class ProviderEventIngress {
   }
 
   private enqueue(event: ProviderEventIngressEvent): boolean {
+    if (this.isOverflowedTurn(event)) {
+      this.rejectedQueueEvents += 1;
+      return false;
+    }
     const threadId = event.event.threadId;
     const queue = this.pendingByThread.get(threadId);
     const terminal = isTerminalLifecycleEvent(event.event);
@@ -376,8 +385,11 @@ export class ProviderEventIngress {
     const queueCapacity = this.queueCapacity({ event, queue, terminal, byteLength });
     if (queueCapacity) {
       this.rejectedQueueEvents += 1;
-      this.reportQueueDiagnostic("queue-capacity", event, queue?.length ?? 0, queueCapacity);
-      this.consumer?.handleProviderIngressOverflow?.(event);
+      if (this.rememberOverflowedTurn(event)) {
+        this.reportQueueDiagnostic("queue-capacity", event, queue?.length ?? 0, queueCapacity);
+        this.discardPendingExecution(event);
+        this.consumer?.handleProviderIngressOverflow?.(event);
+      }
       return false;
     }
     const queued = queue ?? [];
@@ -487,13 +499,11 @@ export class ProviderEventIngress {
       || terminalCount >= MAX_PENDING_TERMINAL_EVENTS_PER_THREAD
       || input.byteLength > MAX_PENDING_TERMINAL_EVENT_BYTES
     )) return "terminal";
-    const eventLimit = input.terminal
-      ? MAX_PENDING_PROVIDER_EVENTS
-      : MAX_PENDING_PROVIDER_EVENTS - MAX_PENDING_TERMINAL_EVENTS;
+    const eventLimit = input.terminal ? MAX_PENDING_PROVIDER_EVENTS : MAX_PENDING_NON_TERMINAL_EVENTS;
     if (this.pendingEventCount >= eventLimit) return "global";
     const threadEventLimit = input.terminal
       ? MAX_PENDING_PROVIDER_EVENTS_PER_THREAD
-      : MAX_PENDING_PROVIDER_EVENTS_PER_THREAD - MAX_PENDING_TERMINAL_EVENTS_PER_THREAD;
+      : MAX_PENDING_NON_TERMINAL_EVENTS_PER_THREAD;
     if (threadCount >= threadEventLimit) return "thread";
     const byteLimit = input.terminal
       ? MAX_PENDING_PROVIDER_EVENT_BYTES
@@ -513,10 +523,75 @@ export class ProviderEventIngress {
   }
 
   private decrementTerminalEvents(threadId: string): void {
-    this.pendingTerminalEventCount -= 1;
-    const remainingEvents = (this.pendingTerminalEventsByThread.get(threadId) ?? 0) - 1;
+    this.decrementTerminalEventsBy(threadId, 1);
+  }
+
+  private decrementTerminalEventsBy(threadId: string, count: number): void {
+    this.pendingTerminalEventCount -= count;
+    const remainingEvents = (this.pendingTerminalEventsByThread.get(threadId) ?? 0) - count;
     if (remainingEvents > 0) this.pendingTerminalEventsByThread.set(threadId, remainingEvents);
     else this.pendingTerminalEventsByThread.delete(threadId);
+  }
+
+  private discardPendingExecution(event: ProviderEventIngressEvent): void {
+    const threadId = event.event.threadId;
+    const queue = this.pendingByThread.get(threadId);
+    if (!queue) return;
+    const executionId = event.event.turnExecutionId ?? "";
+    let removedEvents = 0;
+    let removedBytes = 0;
+    let removedTerminalEvents = 0;
+    const retained = queue.filter((queued) => {
+      const remove = queued.event.providerId === event.providerId
+        && (queued.event.event.turnExecutionId ?? "") === executionId;
+      if (!remove) return true;
+      removedEvents += 1;
+      removedBytes += queued.byteLength;
+      if (queued.terminal) removedTerminalEvents += 1;
+      return false;
+    });
+    if (removedEvents === 0) return;
+    this.pendingEventCount -= removedEvents;
+    this.pendingByteCount -= removedBytes;
+    this.decrementThreadBytes(threadId, removedBytes);
+    if (removedTerminalEvents > 0) this.decrementTerminalEventsBy(threadId, removedTerminalEvents);
+    if (retained.length > 0) {
+      this.pendingByThread.set(threadId, retained);
+      return;
+    }
+    this.pendingByThread.delete(threadId);
+    for (let index = this.readyThreadIds.length - 1; index >= 0; index -= 1) {
+      if (this.readyThreadIds[index] === threadId) this.readyThreadIds.splice(index, 1);
+    }
+  }
+
+  private rememberOverflowedTurn(event: ProviderEventIngressEvent): boolean {
+    const turnKey = this.overflowedTurnKey(event);
+    const executionId = event.event.turnExecutionId ?? "";
+    if (this.overflowedExecutionsByTurn.get(turnKey) === executionId) return false;
+    this.overflowedExecutionsByTurn.delete(turnKey);
+    this.overflowedExecutionsByTurn.set(turnKey, executionId);
+    if (this.overflowedExecutionsByTurn.size > MAX_OVERFLOWED_TURNS) {
+      const oldestTurnKey = this.overflowedExecutionsByTurn.keys().next().value as string | undefined;
+      if (oldestTurnKey) this.overflowedExecutionsByTurn.delete(oldestTurnKey);
+    }
+    return true;
+  }
+
+  private isOverflowedTurn(event: ProviderEventIngressEvent): boolean {
+    const turnKey = this.overflowedTurnKey(event);
+    const overflowedExecutionId = this.overflowedExecutionsByTurn.get(turnKey);
+    if (overflowedExecutionId === undefined) return false;
+    const executionId = event.event.turnExecutionId ?? "";
+    if (event.event.type === AgentEventType.TurnStarted && overflowedExecutionId !== executionId) {
+      this.overflowedExecutionsByTurn.delete(turnKey);
+      return false;
+    }
+    return overflowedExecutionId === executionId;
+  }
+
+  private overflowedTurnKey(event: ProviderEventIngressEvent): string {
+    return `${event.providerId}\u0000${event.event.threadId}`;
   }
 
   private rememberCanonicalEvent(eventId: string): void {
