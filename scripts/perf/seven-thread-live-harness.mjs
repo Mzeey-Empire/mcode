@@ -459,6 +459,7 @@ async function preflightTerminalTransport(context) {
 
 async function dispatchFixtureTurns(context) {
   const completed = context.terminalEvents.wait(TURN_TIMEOUT_MS);
+  void completed.catch(() => undefined);
   const started = context.turnStarts.wait(TURN_TIMEOUT_MS);
   context.receipt.state.phase = "sending-turns";
   const sends = Promise.allSettled(context.receipt.state.threads.map((thread) => sendFixtureTurn(context, thread)));
