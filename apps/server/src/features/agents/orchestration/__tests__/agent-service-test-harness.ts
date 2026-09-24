@@ -359,7 +359,6 @@ function narrativeWriterForTest(
 ): ParentNarrativeRecoveryWriter {
   return override ?? {
     async recordParentNarrativeRecovery(_operationId, input) {
-      if (!parentDurability.loadTurnByExecution(input.executionId)) return { recorded: false };
       return { recorded: parentDurability.recordParentNarrativeRecovery(input) };
     },
     async classifyParentNarrativeRecovery(_operationId, input) {

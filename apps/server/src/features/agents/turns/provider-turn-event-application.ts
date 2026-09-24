@@ -95,7 +95,7 @@ export class ProviderTurnEventApplication implements TurnEventApplication {
         }
       },
     );
-    this.parentNarrativeRecovery = new ParentNarrativeRecoveryCoordinator(narrativeWriter, narrative);
+    this.parentNarrativeRecovery = new ParentNarrativeRecoveryCoordinator(narrativeWriter, narrative, parentDurability);
     this.browserNarrativeEventSanitizer = new BrowserNarrativeEventSanitizer(
       (threadId, toolCallId) => this.narrative.getBufferedToolCalls(threadId)
         .find((toolCall) => toolCall.toolCallId === toolCallId)

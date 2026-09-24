@@ -8,6 +8,7 @@ import {
 import type { NarrativeStore } from "../conversation/narrative/narrative-store.js";
 import type { CanonicalAgentWriterClient } from "../canonical/canonical-agent-writer-client.js";
 import type { ParentNarrativeRecoveryCommit } from "./parent-turn-durability.js";
+import type { ParentTurnDurability } from "./parent-turn-durability.js";
 import { serverWorkTrace } from "../diagnostics/server-work-trace.js";
 
 /** The single acknowledged writer used for recovery and text classification. */
@@ -26,10 +27,12 @@ interface ParentNarrativeRecoveryCheckpoint {
 export class ParentNarrativeRecoveryCoordinator {
   private readonly fingerprintsByExecution = new Map<string, Map<string, string>>();
   private readonly preparedByEvent = new WeakMap<object, ParentNarrativeRecoveryCheckpoint>();
+  private readonly existingExecutions = new Set<string>();
 
   constructor(
     private readonly writer: ParentNarrativeRecoveryWriter,
     private readonly narrativeStore: NarrativeStore,
+    private readonly canonicalSink: ParentTurnDurability,
   ) {}
 
   /** Commit only the semantic records changed by this accepted provider event. */
@@ -41,11 +44,10 @@ export class ParentNarrativeRecoveryCoordinator {
       ? serverWorkTrace.measure("narrative-persist", event.threadId, event.turnExecutionId, persist)
       : persist();
     return pending.then((receipt) => {
-      if (receipt.recorded) {
-        if (serverWorkTrace) {
-          serverWorkTrace.measure("narrative-confirm", event.threadId, event.turnExecutionId, checkpoint.confirm);
-        } else checkpoint.confirm();
-      }
+      if (!receipt.recorded) throw new Error(`Canonical parent turn was not found: ${event.turnExecutionId}`);
+      if (serverWorkTrace) {
+        serverWorkTrace.measure("narrative-confirm", event.threadId, event.turnExecutionId, checkpoint.confirm);
+      } else checkpoint.confirm();
       checkpoint.committed = true;
     });
   }
@@ -82,6 +84,10 @@ export class ParentNarrativeRecoveryCoordinator {
     force = false,
   ): ParentNarrativeRecoveryCheckpoint | null {
     if (!this.requiresStructuredRecovery(event) || !event.turnExecutionId) return null;
+    if (!force && !this.existingExecutions.has(event.turnExecutionId)) {
+      if (!this.canonicalSink.loadTurnByExecution(event.turnExecutionId)) return null;
+      this.existingExecutions.add(event.turnExecutionId);
+    }
     const existing = this.preparedByEvent.get(event as object);
     if (existing) return existing;
     const executionId = event.turnExecutionId;
@@ -125,6 +131,7 @@ export class ParentNarrativeRecoveryCoordinator {
   clear(executionId: string | undefined): void {
     if (!executionId) return;
     this.fingerprintsByExecution.delete(executionId);
+    this.existingExecutions.delete(executionId);
   }
 
   private requiresStructuredRecovery(event: AgentEvent): boolean {
