@@ -13,6 +13,7 @@ import type { ProviderHostPorts } from "@mcode/providers";
 
 import { setupContainer } from "../../../../application/composition/container.js";
 import { CanonicalAgentBoundary } from "../../../agents/canonical/canonical-agent-boundary.js";
+import { CanonicalAgentWriterClient } from "../../../agents/canonical/canonical-agent-writer-client.js";
 import { MessageRepo } from "../../../agents/conversation/persistence/message-repo.js";
 import { ProviderRegistry } from "../provider-registry.js";
 import { SettingsService } from "../../../settings/settings-service.js";
@@ -91,6 +92,7 @@ describe("provider composition container", () => {
     vi.restoreAllMocks();
     await container.resolve(ProviderRegistry).shutdown();
     container.resolve(ProviderEventIngress).shutdown();
+    await container.resolve(CanonicalAgentWriterClient).close();
     container.resolve(SettingsService).dispose();
     database?.close(true);
     database = undefined;

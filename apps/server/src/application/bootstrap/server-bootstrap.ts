@@ -70,6 +70,7 @@ import {
   startAgentOrchestration,
 } from "../../features/agents";
 import { AgentEventPublicationRegistry } from "../../features/agents/orchestration/agent-event-publication-registry.js";
+import { CanonicalAgentWriterClient } from "../../features/agents/canonical/canonical-agent-writer-client.js";
 import {
   AgentEventPublicationRuntimePort,
   AgentReliabilityPort,
@@ -342,6 +343,7 @@ const messageRepo = container.resolve(MessageRepo);
 const threadRepo = container.resolve(ThreadRepo);
 const providerRegistry = container.resolve(ProviderRegistry);
 const providerEventIngress = container.resolve(ProviderEventIngress);
+const canonicalWriter = container.resolve(CanonicalAgentWriterClient);
 const cursorProvider = container.resolve<CursorProviderBoundary>("CursorProvider");
 const providerAvailability = container.resolve(ProviderAvailabilityService);
 const toolCallRecordRepo = container.resolve(ToolCallRecordRepo);
@@ -845,6 +847,7 @@ async function bootstrapServer(): Promise<void> {
       });
     }
     await canonicalSink.materializeConversationDisplay();
+    await canonicalWriter.whenReady();
     recordStartupCheckpoint("conversation display materialization completed");
 
     interruptThreadStartupsAtStartup();
@@ -951,6 +954,7 @@ async function shutdown(): Promise<void> {
   await captureCleanupFailure(() => providerRegistry.shutdown());
   shutdownCoordinator.setPhase("shutdown provider event workers");
   providerEventIngress.shutdown();
+  await captureCleanupFailure(() => canonicalWriter.close());
   browserAutomationBroker.shutdown();
   browserAutomationSessionLease.shutdown();
 

@@ -1,4 +1,5 @@
 import { instanceCachingFactory, Lifecycle, type DependencyContainer } from "tsyringe";
+import type { Database } from "bun:sqlite";
 import { hostRuntime } from "@mcode/shared/node/host-runtime";
 
 import { ClaudeProvider } from "../adapters/claude/claude-provider.js";
@@ -8,7 +9,8 @@ import { ProviderRegistry } from "./provider-registry.js";
 import { createProviderHostPorts } from "./provider-host-ports.js";
 import { BrowserAutomationSessionLease } from "../../browser-automation/index.js";
 import { InternalThreadControlMcpRuntime } from "../../thread-control/index.js";
-import { CanonicalAgentBoundary } from "../../agents/index.js";
+import { publishCanonicalAgentEvents } from "../../agents/canonical/canonical-agent-boundary.js";
+import { CanonicalAgentWriterClient } from "../../agents/canonical/canonical-agent-writer-client.js";
 import { ScopedPreGrantService } from "../../agents/permissions/scoped-pre-grant.js";
 import { EnvService } from "../../../runtime/environment/env-service.js";
 import type { JobObject } from "../../../runtime/process/containment/job-object.js";
@@ -28,6 +30,9 @@ import {
 
 /** Register provider adapters, the provider registry, and provider host ports. */
 export function registerProviderAdapters(container: DependencyContainer): void {
+  container.register(CanonicalAgentWriterClient, {
+    useFactory: instanceCachingFactory((c) => new CanonicalAgentWriterClient(c.resolve<Database>("Database").filename)),
+  });
   container.register<ProviderEventWorkerPool>(PROVIDER_EVENT_WORKER_POOL, {
     useFactory: instanceCachingFactory(() => new ThreadEventWorkerPool()),
   });
@@ -88,7 +93,8 @@ export function registerProviderAdapters(container: DependencyContainer): void {
       browser: c.resolve(BrowserAutomationSessionLease),
       threadControl: c.resolve(InternalThreadControlMcpRuntime),
       grants: c.resolve(ScopedPreGrantService),
-      events: c.resolve(CanonicalAgentBoundary),
+      events: c.resolve(CanonicalAgentWriterClient),
+      publishCanonicalEvents: publishCanonicalAgentEvents,
       ingress: c.resolve(ProviderEventIngress),
     }),
   });

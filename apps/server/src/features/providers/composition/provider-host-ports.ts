@@ -1,9 +1,12 @@
 import type { ProviderHostPorts } from "@mcode/providers";
+import * as NodeCrypto from "node:crypto";
 import type { HostRuntime } from "@mcode/shared/node/host-runtime";
+import { logger } from "@mcode/shared";
 import type { JobObject } from "../../../runtime/process/containment/job-object.js";
 import type { EnvService } from "../../../runtime/environment/env-service.js";
 import type { ScopedPreGrantService } from "../../agents/permissions/scoped-pre-grant.js";
-import type { CanonicalAgentBoundary } from "../../agents/index.js";
+import type { CanonicalAgentEventPublisher } from "../../agents/canonical/canonical-agent-boundary.js";
+import type { CanonicalAgentWriterClient } from "../../agents/canonical/canonical-agent-writer-client.js";
 import type { BrowserAutomationSessionLease } from "../../browser-automation/index.js";
 import type { InternalThreadControlMcpRuntime } from "../../thread-control/index.js";
 import { killProcessTree } from "../../../runtime/process/containment/process-kill.js";
@@ -17,7 +20,8 @@ export interface ProviderHostPortDependencies {
   browser: BrowserAutomationSessionLease;
   threadControl: InternalThreadControlMcpRuntime;
   grants: ScopedPreGrantService;
-  events: CanonicalAgentBoundary;
+  events: Pick<CanonicalAgentWriterClient, "commit">;
+  publishCanonicalEvents: CanonicalAgentEventPublisher;
   ingress: ProviderEventIngress;
 }
 
@@ -83,7 +87,10 @@ export function createProviderHostPorts(
     },
     events: {
       submit: async (batch) => {
-        const result = dependencies.events.commit({
+        const operationId = NodeCrypto.createHash("sha256")
+          .update(JSON.stringify([batch.executionId, batch.events.map((event) => event.eventId)]))
+          .digest("hex");
+        const result = await dependencies.events.commit(operationId, {
           threadId: batch.threadId,
           turnId: batch.turnId,
           executionId: batch.executionId,
@@ -92,6 +99,14 @@ export function createProviderHostPorts(
           events: batch.events,
         });
         if (result.outcome === "committed" && result.events.length > 0) {
+          try {
+            dependencies.publishCanonicalEvents(result.events);
+          } catch {
+            logger.warn("Canonical provider publication deferred after durable commit", {
+              threadId: batch.threadId,
+              executionId: batch.executionId,
+            });
+          }
           dependencies.ingress.acceptCommitted(result.events);
         }
         return {

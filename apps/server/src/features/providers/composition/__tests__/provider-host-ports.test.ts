@@ -54,6 +54,7 @@ describe("createProviderHostPorts", () => {
       threadControl: {},
       grants: {},
       events: {},
+      publishCanonicalEvents: vi.fn(),
       ingress: {},
     } as never);
 
@@ -70,7 +71,7 @@ describe("createProviderHostPorts", () => {
   it("hands a committed canonical batch directly to ingress after durable acceptance", async () => {
     const events = [committedRuntimeEnvelope()];
     const deliveryOrder: string[] = [];
-    const commit = vi.fn(() => {
+    const commit = vi.fn(async () => {
       deliveryOrder.push("commit");
       return {
         outcome: "committed" as const,
@@ -81,6 +82,7 @@ describe("createProviderHostPorts", () => {
         events,
       };
     });
+    const publishCanonicalEvents = vi.fn(() => deliveryOrder.push("publication"));
     const acceptCommitted = vi.fn(() => deliveryOrder.push("ingress"));
     const ports = createProviderHostPorts({
       runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
@@ -90,6 +92,7 @@ describe("createProviderHostPorts", () => {
       threadControl: {},
       grants: {},
       events: { commit },
+      publishCanonicalEvents,
       ingress: { acceptCommitted },
     } as never);
     const batch = { threadId: "thread-1", turnId: "turn-1", executionId: EXECUTION_ID, phase: "streaming", events: [] };
@@ -105,9 +108,10 @@ describe("createProviderHostPorts", () => {
       },
       delivery: { ingress: "queued" },
     });
-    expect(commit).toHaveBeenCalledWith({ ...batch, nativeCursor: undefined });
+    expect(commit).toHaveBeenCalledWith(expect.any(String), { ...batch, nativeCursor: undefined });
+    expect(publishCanonicalEvents).toHaveBeenCalledWith(events);
     expect(acceptCommitted).toHaveBeenCalledWith(events);
-    expect(deliveryOrder).toEqual(["commit", "ingress"]);
+    expect(deliveryOrder).toEqual(["commit", "publication", "ingress"]);
   });
 
   it("does not hand duplicate or failed commits to ingress", async () => {
@@ -132,6 +136,7 @@ describe("createProviderHostPorts", () => {
       threadControl: {},
       grants: {},
       events: { commit },
+      publishCanonicalEvents: vi.fn(),
       ingress: { acceptCommitted },
     } as never);
     const batch = { threadId: "thread-1", turnId: "turn-1", executionId: EXECUTION_ID, phase: "streaming", events: [] };
