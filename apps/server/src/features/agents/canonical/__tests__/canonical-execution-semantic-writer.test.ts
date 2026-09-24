@@ -496,6 +496,21 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     }));
   });
 
+  it("durably acknowledges a boundary with no new text or narrative rows", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const boundary = { type: AgentEventType.AssistantMessageBoundary, threadId: THREAD_ID,
+      turnExecutionId: EXECUTION_ID, isFinalResponse: true };
+    const op = { ...operation(2, { kind: "live-event", text: { kind: "unchanged" } }),
+      livePublication: [{ after: "writer" as const, event: boundary }] };
+    const receipt = await writer.transact(op);
+    expect(receipt).toMatchObject({ kind: "committed", livePublication: [
+      { publicationId: "lease-1:2:0", event: boundary },
+    ] });
+    expect(await writer.transact(op)).toEqual(receipt);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
+      .get(EXECUTION_ID, "lease-1:2")).toEqual({ count: 1 });
+  });
+
   it("rejects a compound live event that exceeds its shared row or byte budget", async () => {
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
     const event = { type: AgentEventType.TextDelta, threadId: THREAD_ID,

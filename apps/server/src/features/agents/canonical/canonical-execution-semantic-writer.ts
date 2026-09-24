@@ -789,7 +789,7 @@ function validLiveEventBudget(
     ? mutation.narrative.items.length + (mutation.narrative.discardedItemIds?.length ?? 0) : 0;
   const textRows = mutation.text.kind === "append" ? mutation.text.inputs.length
     : mutation.text.kind === "unchanged" ? 0 : 1;
-  if (textRows + narrativeRows === 0 || textRows + narrativeRows > ACTIVE_TURN_WRITE_BATCH_LIMITS.maxRows - 2) return false;
+  if (textRows + narrativeRows > ACTIVE_TURN_WRITE_BATCH_LIMITS.maxRows - 2) return false;
   return Buffer.byteLength(JSON.stringify(operation), "utf8") <= ACTIVE_TURN_WRITE_BATCH_LIMITS.maxBytes;
 }
 
