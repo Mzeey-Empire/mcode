@@ -146,7 +146,7 @@ These questions must be resolved before implementation can begin:
 
 * `CONTEXT.md`, lines 8–65 — provider, protocol adapter, session runtime, and worktree definitions.
 * `ARCHITECTURE.md`, lines 95–100, 600–623 — provider event path, `ProviderId`, `IAgentProvider`, registry pattern.
-* `docs/guides/provider-architecture.md`, lines 16–49, 51–90 — `SessionRuntime` + `ProtocolAdapter` lifecycle, event boundary.
+* `docs/internals/provider-architecture.md`, lines 16–49, 51–90 — `SessionRuntime` + `ProtocolAdapter` lifecycle, event boundary.
 * `packages/contracts/src/providers/interfaces.ts`, lines 21, 58–68, 124–211 — `ProviderId`, `TurnRequest`, `IAgentProvider`.
 * `packages/contracts/src/events/agent-event.ts`, lines 19–47, 53–375 — `AgentEventType` and `AgentEvent` schema.
 * `packages/contracts/src/events/provider-runtime-event.ts`, lines 62–85 — `ProviderRuntimeEvent` wrapper.

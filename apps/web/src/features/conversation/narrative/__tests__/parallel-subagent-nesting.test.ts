@@ -11,7 +11,7 @@ import type { ToolCall } from "@/transport/types";
  * nest under the right Agent row; children whose parent id is missing or
  * empty stay top-level (they were never nested by the SDK).
  *
- * Trap context: see docs/guides/narrative-pipeline.md trap 1.
+ * Trap context: see docs/internals/narrative-pipeline.md trap 1.
  */
 function mkTool(p: Partial<ToolCall> & { id: string; toolName: string }): ToolCall {
   return {

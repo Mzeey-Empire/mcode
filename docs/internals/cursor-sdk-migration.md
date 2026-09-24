@@ -166,7 +166,7 @@ acceptable on reads from old artifacts. New artifacts only ever get
 - `CONTEXT.md` glossary entries for "Path A", "Hidden turn", "Disregard
   turn" should be marked as historical (kept for understanding pre-migration
   artifacts) or removed.
-- `docs/guides/chat-fork-handoff.md` updates to reflect the simplified
+- `docs/internals/chat-fork-handoff.md` updates to reflect the simplified
   ladder.
 
 ## Auth and configuration
@@ -301,7 +301,7 @@ This migration is complete when:
 6. A new test verifies that path B fires for Cursor (and that path A is
    never reached).
 7. Focused tests and typecheck pass.
-8. `CONTEXT.md` and `docs/guides/chat-fork-handoff.md` reflect the simplified
+8. `CONTEXT.md` and `docs/internals/chat-fork-handoff.md` reflect the simplified
    ladder.
 
 ## A note on why this isn't in the OS temp directory
