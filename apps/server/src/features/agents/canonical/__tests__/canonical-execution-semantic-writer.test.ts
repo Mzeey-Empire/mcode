@@ -199,4 +199,79 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     db.run("DROP TRIGGER fail_semantic_begin_receipt");
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
   });
+
+  it("keeps publication separate while a batched finish starts another execution", async () => {
+    const otherExecution = {
+      threadId: "thread-2",
+      turnId: "turn-2",
+      executionId: "00000000-0000-4000-8000-000000000002",
+    };
+    const otherLease = { ...lease, workerIndex: 1, leaseId: "lease-2" };
+    db.prepare("INSERT INTO threads (id, workspace_id, title, branch, provider, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(otherExecution.threadId, "workspace-1", "Second", "main", "codex", NOW, NOW);
+    let finishing = false;
+    let secondStartRequested = false;
+    let secondStart: Promise<unknown> | null = null;
+    writer = new CanonicalExecutionSemanticWriter(db, (events) => {
+      published.push(...events.map((item) => item.eventId));
+      if (!finishing || secondStartRequested) return;
+      secondStartRequested = true;
+      secondStart = handler.handle({
+        requestId: 1,
+        execution: otherExecution,
+        lease: otherLease,
+        ordinal: 1,
+        command: {
+          kind: "start",
+          providerId: "codex",
+          input: {
+            ...startInput(),
+            thread: { ...startInput().thread, id: otherExecution.threadId },
+            turnId: otherExecution.turnId,
+            executionId: otherExecution.executionId,
+            userMessage: { kind: "create", messageId: "user-2", content: "Second question", sequence: 1 },
+          },
+        },
+      }).then((reply) => reply.result);
+    });
+    handler = new ExecutionWorkerHandler(writer);
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const staged = new MessageRepo(db).create(THREAD_ID, "assistant", "Answer", 2, undefined, undefined, undefined, "model", true);
+    const narrative = Array.from({ length: 100 }, (_, index) => ({
+      kind: "toolCall" as const,
+      sequence: 2,
+      sortOrder: index,
+      record: {
+        id: `tool-${index}`,
+        message_id: staged.id,
+        parent_tool_call_id: null,
+        tool_name: "Read",
+        input_summary: `file-${index}`,
+        output_summary: "ok",
+        status: "completed" as const,
+        started_at: NOW,
+        completed_at: NOW,
+        sort_order: index,
+      },
+    }));
+    finishing = true;
+    expect((await send(2, {
+      kind: "finalize",
+      outcome: "completed",
+      input: {
+        threadId: THREAD_ID,
+        turnId: TURN_ID,
+        executionId: EXECUTION_ID,
+        providerId: "codex",
+        providerIdentities: [],
+        outcome: "completed",
+        projection: { message: staged, narrative },
+      },
+    })).kind).toBe("committed");
+    expect(await secondStart).toMatchObject({ kind: "committed", operationId: "lease-2:1" });
+    expect(published).toContain(`${EXECUTION_ID}:turn.completed`);
+    expect(published.some((eventId) => eventId.startsWith(otherExecution.executionId))).toBe(true);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE kind = 'semantic-head'").get())
+      .toEqual({ count: 2 });
+  });
 });

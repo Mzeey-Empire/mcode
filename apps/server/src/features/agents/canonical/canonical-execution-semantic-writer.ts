@@ -31,6 +31,11 @@ const storedReceiptSchema = z.object({
   operationId: z.string(),
   durableRevision: z.number().int(),
 });
+const storedOperationSchema = z.object({
+  kind: z.string(),
+  input_hash: z.string(),
+  receipt_json: z.string(),
+});
 
 interface SemanticHead {
   readonly execution: ExecutionIdentity;
@@ -41,11 +46,7 @@ interface SemanticHead {
   readonly terminal: boolean;
 }
 
-interface StoredOperation {
-  readonly kind: string;
-  readonly input_hash: string;
-  readonly receipt_json: string;
-}
+type StoredOperation = z.infer<typeof storedOperationSchema>;
 
 class SemanticConflict extends Error {}
 
@@ -71,7 +72,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   async transact(operation: ExecutionSemanticOperation): Promise<ExecutionWriteReceipt> {
     if (!validOperation(operation)) return conflict(operation);
     const hash = fingerprint(operation);
-    const replay = this.findOperation.get(operation.execution.executionId, operation.operationId) as StoredOperation | null;
+    const replay = this.loadOperation(operation.execution.executionId, operation.operationId);
     if (replay) return this.replay(operation, hash, replay);
     try {
       if (operation.mutation.kind === "begin") return this.begin(operation, hash);
@@ -146,7 +147,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       this.storeReceipt(operation, hash, receipt);
     });
     if (result.outcome !== "committed") return conflict(operation);
-    const stored = this.findOperation.get(operation.execution.executionId, operation.operationId) as StoredOperation | null;
+    const stored = this.loadOperation(operation.execution.executionId, operation.operationId);
     return stored ? this.replay(operation, hash, stored) : conflict(operation);
   }
 
@@ -157,10 +158,14 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   }
 
   private loadHead(executionId: string): SemanticHead | null {
-    const row = this.findOperation.get(executionId, HEAD_ID) as StoredOperation | null;
+    const row = this.loadOperation(executionId, HEAD_ID);
     if (!row) return null;
     if (row.kind !== HEAD_KIND) throw new SemanticConflict();
     return storedHeadSchema.parse(JSON.parse(row.receipt_json));
+  }
+
+  private loadOperation(executionId: string, operationId: string): StoredOperation | null {
+    return storedOperationSchema.nullable().parse(this.findOperation.get(executionId, operationId));
   }
 
   private storeHead(head: SemanticHead): void {
@@ -184,7 +189,9 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       ? receipt : conflict(operation);
   }
 
-  private withBufferedPublication<T>(write: () => T): T {
+  // Only the synchronous begin and append transactions use this buffer. Finish publishes after each committed batch.
+  private withBufferedPublication(write: () => ExecutionWriteReceipt): ExecutionWriteReceipt {
+    if (this.bufferedPublication) throw new Error("Nested semantic publication buffer");
     const pending: Parameters<CanonicalAgentEventPublisher>[0][] = [];
     this.bufferedPublication = pending;
     try {

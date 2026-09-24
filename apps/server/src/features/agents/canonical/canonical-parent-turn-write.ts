@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite";
+import { z } from "zod";
 
 import { MessageRepo } from "../conversation/persistence/message-repo.js";
 import { PlanQuestionAnswersRepo } from "../planning/persistence/plan-question-answers-repo.js";
@@ -18,6 +19,7 @@ import {
 } from "./canonical-agent-boundary.js";
 
 type CreateMessageArgument = Parameters<MessageRepo["create"]>;
+const stagedAssistantSchema = z.object({ role: z.string(), content: z.string() });
 
 /** User-message data the writer can project inside the canonical start transaction. */
 export type ParentUserMessageWrite =
@@ -149,7 +151,7 @@ export class CanonicalParentTurnWrite {
   private assertStagedAssistant(input: DataOnlyParentTurnFinishInput): void {
     const projected = input.projection.message;
     if (!projected) return;
-    const staged = this.stagedAssistant.get(projected.id, input.threadId) as { role: string; content: string } | null;
+    const staged = stagedAssistantSchema.nullable().parse(this.stagedAssistant.get(projected.id, input.threadId));
     if (!staged || staged.role !== "assistant" || staged.content !== projected.content) {
       throw new Error(`Staged assistant projection not found: ${projected.id}`);
     }
