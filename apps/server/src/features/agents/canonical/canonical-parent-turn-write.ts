@@ -283,6 +283,7 @@ export class CanonicalParentTurnWrite {
     const id = input.assistant.messageId ?? deriveTurnAssistantMessageId(input.threadId, `execution:${input.executionId}`);
     const existing = this.messages.findByIdInThreadIncludingInternal(input.threadId, id);
     if (existing) {
+      if (!existing.is_internal) throw new Error(`Staged assistant projection is already public: ${id}`);
       this.assertAssistantMatches(existing, input);
       return existing;
     }

@@ -275,6 +275,21 @@ describe("CanonicalParentTurnWrite", () => {
     });
   });
 
+  it("refuses to reuse a public assistant row as a staged turn projection", () => {
+    writer.start(startInput());
+    const input = terminalProjectionInput();
+    const messageId = deriveTurnAssistantMessageId(THREAD_ID, "user-1");
+    input.assistant.messageId = messageId;
+    new MessageRepo(db).createAssistantIdempotent({
+      id: messageId, threadId: THREAD_ID, content: input.assistant.content,
+      sequence: 2, model: input.assistant.model, attachments: [...input.assistant.attachments],
+    });
+
+    expect(() => writer.stageTerminalProjection(input)).toThrow("already public");
+    expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?").get(EXECUTION_ID))
+      .toEqual({ terminal_outcome: null });
+  });
+
   it("rolls back all staged rows when a narrative write fails", async () => {
     writer.start(startInput());
     const input = terminalProjectionInput();
