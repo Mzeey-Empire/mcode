@@ -96,6 +96,17 @@ export function createTerminalProfileServiceOptions(
           return null;
         }
       }
+      if (platform === "win32" && executable.toLowerCase() === "powershell.exe") {
+        const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
+        if (systemRoot) {
+          const systemShell = NodePath.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+          try {
+            if (NodeFS.statSync(systemShell).isFile()) return systemShell;
+          } catch {
+            // An unusual Windows installation may still expose PowerShell through PATH.
+          }
+        }
+      }
       return await which(executable, { nothrow: true });
     },
     createId: NodeCrypto.randomUUID,
@@ -105,6 +116,7 @@ export function createTerminalProfileServiceOptions(
 /** Discovers, persists, validates, and resolves immutable Terminal profiles. */
 export class TerminalProfileService {
   private certifiedDiscovery: Promise<readonly TerminalResolvedProfile[]> | null = null;
+  private automaticDiscovery: Promise<TerminalResolvedProfile | null> | null = null;
 
   constructor(
     private readonly settings: SettingsService,
@@ -146,6 +158,26 @@ export class TerminalProfileService {
         .map((profile) => this.resolveCertified(profile)),
     );
     return Object.freeze(resolved.filter((profile): profile is TerminalResolvedProfile => profile !== null));
+  }
+
+  private discoverAutomaticProfile(): Promise<TerminalResolvedProfile | null> {
+    if (this.automaticDiscovery) return this.automaticDiscovery;
+    const discovery = this.probeAutomaticProfile();
+    this.automaticDiscovery = discovery;
+    const clearDiscovery = () => {
+      if (this.automaticDiscovery === discovery) this.automaticDiscovery = null;
+    };
+    void discovery.then(clearDiscovery, clearDiscovery);
+    return discovery;
+  }
+
+  private async probeAutomaticProfile(): Promise<TerminalResolvedProfile | null> {
+    for (const profile of CERTIFIED_PROFILES) {
+      if (profile.platform !== this.options.platform) continue;
+      const resolved = await this.resolveCertified(profile);
+      if (resolved) return resolved;
+    }
+    return null;
   }
 
   /** Creates one validated custom profile with a server-generated identifier. */
@@ -255,8 +287,7 @@ export class TerminalProfileService {
         resolvedProfile: await this.resolveReference(selected),
       });
     }
-    const available = await this.list();
-    const automatic = available.certified[0];
+    const automatic = await this.discoverAutomaticProfile();
     if (!automatic) {
       throw new TerminalProfileUnavailableError("automatic");
     }
