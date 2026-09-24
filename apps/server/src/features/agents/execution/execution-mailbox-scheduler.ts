@@ -69,6 +69,11 @@ export interface ExecutionLostAssignment {
   readonly lease: ExecutionLease;
 }
 
+/** Writer evidence that a lost worker's execution can release its thread and slot. */
+export type ExecutionRecoveryReceipt =
+  | { readonly kind: "committed"; readonly operationId: string; readonly durableRevision: number }
+  | { readonly kind: "conflict"; readonly operationId: string; readonly recoveryState: "not-started" | "already-terminal" };
+
 /** The host supplies durable owner epochs and a worker factory for each fixed slot. */
 export interface ExecutionMailboxOptions<Work extends { readonly kind: string }, Result> {
   readonly workerCount: number;
@@ -215,9 +220,10 @@ export class ExecutionMailboxScheduler<Work extends { readonly kind: string }, R
   }
 
   /** Release a crashed worker's ownership only after its durable interruption is acknowledged. */
-  reconcileLost(execution: ExecutionIdentity, lease: ExecutionLease): boolean {
+  reconcileLost(execution: ExecutionIdentity, lease: ExecutionLease, receipt: ExecutionRecoveryReceipt): boolean {
     const assignment = this.currentAssignment(execution, lease);
-    if (!assignment?.revoked || assignment.pendingCount !== 0) return false;
+    if (!assignment?.revoked || assignment.pendingCount !== 0
+      || !validRecoveryReceipt(lease, receipt)) return false;
     this.byThread.delete(execution.threadId);
     assignment.slot.activeCount -= 1;
     return true;
@@ -413,6 +419,11 @@ function sameIdentity(left: ExecutionIdentity, right: ExecutionIdentity): boolea
 function sameLease(left: ExecutionLease, right: ExecutionLease): boolean {
   return left.ownerEpoch === right.ownerEpoch && left.workerIndex === right.workerIndex
     && left.workerGeneration === right.workerGeneration && left.leaseId === right.leaseId;
+}
+
+function validRecoveryReceipt(lease: ExecutionLease, receipt: ExecutionRecoveryReceipt): boolean {
+  return receipt.operationId === `${lease.leaseId}:worker-lost`
+    && (receipt.kind === "conflict" || Number.isSafeInteger(receipt.durableRevision));
 }
 
 function matchesReply<Command, Result>(request: ExecutionWorkerRequest<Command>, reply: ExecutionWorkerReply<Result>): boolean {
