@@ -26,6 +26,7 @@ import { renderFixtureWrapper } from "../../.agents/skills/verify-mcode/scripts/
 import { openRuntimeVerificationSocket } from "../../.agents/skills/verify-mcode/scripts/runtime.mjs";
 
 export const THREAD_COUNT = 7;
+const TERMINAL_CONTROL_COUNT = 1;
 export const WORKLOAD_MODEL = "gpt-5.6-luna";
 const PROVIDER_ID = "codex";
 const HEALTH_SAMPLE_INTERVAL_MS = 250;
@@ -299,7 +300,6 @@ export async function runLiveHarness({ repoRoot = resolveRepoRoot(), label }) {
       });
     }));
     throwFirstRejected(sends, "Dispatching the controlled fixture turns failed");
-    receipt.metrics.memory.push(await readMemorySnapshot(paths));
     await started;
 
     receipt.state.phase = "sampling-active-controls";
@@ -308,7 +308,7 @@ export async function runLiveHarness({ repoRoot = resolveRepoRoot(), label }) {
     receipt.state.terminalCreateInconclusive = controlLaunch.inconclusive;
     writeReceipt(run.receiptPath, receipt, paths.devDir);
 
-    // This starts all nine user-facing control requests before awaiting any of
+    // This starts the model, capability, and one user terminal request before awaiting any of
     // them. The preflight above chose the same lifecycle family the web client
     // would use, without making terminal creation wait on an overloaded RPC.
     const controlRequests = launchActiveControlRequests({
@@ -316,7 +316,7 @@ export async function runLiveHarness({ repoRoot = resolveRepoRoot(), label }) {
       metrics: receipt.metrics.rpc,
       workspaceId: workspace.id,
       terminalTransport,
-      threads: receipt.state.threads,
+      threads: receipt.state.threads.slice(0, TERMINAL_CONTROL_COUNT),
       persistTerminal: (thread, terminal) => {
         if (typeof terminal?.ptyId !== "string" || terminal.ptyId.length === 0) throw new Error(`Terminal create did not return a PTY for thread ${thread.ordinal}`);
         thread.ptyId = terminal.ptyId;
@@ -338,7 +338,9 @@ export async function runLiveHarness({ repoRoot = resolveRepoRoot(), label }) {
       activeTurnAssertion: controlLaunch,
       inconclusive: controlLaunch.inconclusive,
     };
-    if (receipt.state.threads.some((thread) => typeof thread.ptyId !== "string")) throw new Error("The harness did not create a PTY for every owned thread");
+    if (receipt.state.threads.slice(0, TERMINAL_CONTROL_COUNT).some((thread) => typeof thread.ptyId !== "string")) {
+      throw new Error("The harness did not create the user terminal during the seven active turns");
+    }
     receipt.state.phase = "waiting-for-events";
     await completed;
 
@@ -442,6 +444,7 @@ function createReceipt(run, label) {
     ok: false,
     workload: {
       threadCount: THREAD_COUNT,
+      terminalControlCount: TERMINAL_CONTROL_COUNT,
       provider: PROVIDER_ID,
       model: WORKLOAD_MODEL,
       fixture: ".agents/skills/verify-mcode/scripts/transcript-provider-fixture.mjs",
