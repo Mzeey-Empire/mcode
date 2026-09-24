@@ -411,6 +411,9 @@ export function Composer({
   const isAgentRunning = useThreadStore(
     (s) => threadId ? isThreadExecuting(threadId, s) : false,
   );
+  const isStopPending = useThreadStore(
+    (s) => threadId ? (s.pendingStopCounts[threadId] ?? 0) > 0 : false,
+  );
   const surfaceState = useComposerSurfaceState({
     threadId,
     workspaceId,
@@ -653,6 +656,7 @@ export function Composer({
             taskBubbleTasks,
             fileEffectSummary,
             isAgentRunning,
+            isStopPending,
             setupBlocked,
             provider,
             planPending,

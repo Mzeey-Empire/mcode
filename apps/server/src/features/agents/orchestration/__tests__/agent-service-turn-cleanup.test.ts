@@ -607,7 +607,7 @@ describe("AgentService turn cleanup", () => {
     expect(memoryPressureService.markActive).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps exact turn running when provider stop fails, then cancels on retry", async () => {
+  it("cancels the turn and evicts the session when provider stop fails", async () => {
     const { service, providerEmitter } = buildService();
     startAgentServiceIngressForTest(service, );
 
@@ -619,18 +619,21 @@ describe("AgentService turn cleanup", () => {
       attachments: [],
       provider: "claude",
     });
-    const provider = providerEmitter as NodeEvents.EventEmitter & { stopSession: ReturnType<typeof vi.fn> };
+    const provider = providerEmitter as NodeEvents.EventEmitter & {
+      stopSession: ReturnType<typeof vi.fn>;
+      discardSession: ReturnType<typeof vi.fn>;
+    };
+    provider.discardSession = vi.fn(() => Promise.resolve());
     provider.stopSession.mockRejectedValueOnce(new Error("stop unavailable"));
 
-    await expect(service.stopSession(THREAD_ID)).rejects.toThrow("stop unavailable");
-    expect(service.runtimeAccess().activeThreadIds()).toContain(THREAD_ID);
-
-    provider.stopSession.mockResolvedValueOnce(undefined);
     const result = await service.stopSession(THREAD_ID);
     expect(result.status).toBe("cancelled");
-    expect(result.dispatchState).toBe("dispatched");
     expect(result.snapshot).toMatchObject({ threadId: THREAD_ID, phase: "cancelled" });
     expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
+    await vi.waitFor(() => expect(provider.discardSession).toHaveBeenCalledWith(`mcode-${THREAD_ID}`));
+
+    const retry = await service.stopSession(THREAD_ID);
+    expect(retry.status).toBe("already-terminal");
   });
 
   it("finalizes the turn as cancelled when provider stopSession never settles", async () => {
@@ -657,9 +660,10 @@ describe("AgentService turn cleanup", () => {
     vi.useFakeTimers();
     try {
       const stop = service.stopSession(THREAD_ID);
-      await vi.advanceTimersByTimeAsync(20_000);
+      // The RPC resolves on terminalize; provider settle continues detached.
       await expect(stop).resolves.toMatchObject({ status: "cancelled" });
       expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
+      await vi.advanceTimersByTimeAsync(20_000);
       await vi.advanceTimersByTimeAsync(0);
       expect(provider.discardSession).toHaveBeenCalledWith(`mcode-${THREAD_ID}`);
 
@@ -864,7 +868,7 @@ describe("AgentService turn cleanup", () => {
     expect(firstResult.status).toBe("cancelled");
   });
 
-  it("shares provider stop failure, then retries after single-flight clears", async () => {
+  it("shares one provider stop across concurrent callers even when it fails", async () => {
     const { service, providerEmitter } = buildService();
     startAgentServiceIngressForTest(service, );
     await service.sendMessage({
@@ -877,19 +881,52 @@ describe("AgentService turn cleanup", () => {
     });
     const provider = providerEmitter as NodeEvents.EventEmitter & {
       stopSession: ReturnType<typeof vi.fn>;
+      discardSession: ReturnType<typeof vi.fn>;
     };
+    provider.discardSession = vi.fn(() => Promise.resolve());
     provider.stopSession.mockRejectedValueOnce(new Error("stop unavailable"));
     const first = service.stopSession(THREAD_ID);
     const second = service.stopSession(THREAD_ID);
-    await expect(first).rejects.toThrow("stop unavailable");
-    await expect(second).rejects.toThrow("stop unavailable");
-    expect(provider.stopSession).toHaveBeenCalledTimes(1);
-    expect(service.runtimeAccess().activeThreadIds()).toContain(THREAD_ID);
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    expect(firstResult.status).toBe("cancelled");
+    expect(secondResult).toEqual(firstResult);
+    await vi.waitFor(() => expect(provider.stopSession).toHaveBeenCalledTimes(1));
+    expect(service.runtimeAccess().activeThreadIds()).not.toContain(THREAD_ID);
 
-    provider.stopSession.mockResolvedValueOnce(undefined);
     const retry = await service.stopSession(THREAD_ID);
-    expect(retry.status).toBe("cancelled");
-    expect(provider.stopSession).toHaveBeenCalledTimes(2);
+    expect(retry.status).toBe("already-terminal");
+  });
+
+  it("admits a follow-up turn while provider teardown is still settling", async () => {
+    const { service, providerEmitter } = buildService();
+    startAgentServiceIngressForTest(service, );
+    const provider = providerEmitter as NodeEvents.EventEmitter & {
+      sendTurn: ReturnType<typeof vi.fn>;
+      stopSession: ReturnType<typeof vi.fn>;
+    };
+    provider.stopSession.mockImplementation(() => new Promise<void>(() => {}));
+
+    await service.sendMessage({
+      threadId: THREAD_ID,
+      content: "hello",
+      permissionMode: "default",
+      model: "claude-sonnet-4-6",
+      attachments: [],
+      provider: "claude",
+    });
+    const result = await service.stopSession(THREAD_ID);
+    expect(result.status).toBe("cancelled");
+
+    await service.sendMessage({
+      threadId: THREAD_ID,
+      content: "again",
+      permissionMode: "default",
+      model: "claude-sonnet-4-6",
+      attachments: [],
+      provider: "claude",
+    });
+    expect(service.runtimeAccess().activeThreadIds()).toContain(THREAD_ID);
+    expect(provider.sendTurn).toHaveBeenCalledTimes(2);
   });
 
   it("does not let completion race overwrite an explicit stop", async () => {
@@ -1776,6 +1813,8 @@ describe("AgentService Ended finalization", () => {
     const result = await service.stopSession(thread.id);
 
     expect(result.status).toBe("cancelled");
+    // Descendant interrupts and the provider stop run detached after the RPC.
+    await vi.waitFor(() => expect(providerEmitter.stopSession).toHaveBeenCalledOnce());
     expect(providerEmitter.interruptChildTurn).toHaveBeenCalledTimes(2);
     expect(providerEmitter.interruptChildTurn).toHaveBeenCalledWith(
       `mcode-${thread.id}`,
@@ -1787,7 +1826,6 @@ describe("AgentService Ended finalization", () => {
       "native-direct-thread",
       "native-direct-turn",
     );
-    expect(providerEmitter.stopSession).toHaveBeenCalledOnce();
     expect(Math.max(...providerEmitter.interruptChildTurn.mock.invocationCallOrder))
       .toBeLessThan(providerEmitter.stopSession.mock.invocationCallOrder[0]!);
     expect(canonicalSink.loadCanonicalChildStopTarget({

@@ -181,10 +181,14 @@ describe("DevinProvider", () => {
     provider = undefined;
   });
 
-  function createProvider(host: ProviderHostPorts, cancelSettleTimeoutMs?: number): DevinProvider {
+  function createProvider(
+    host: ProviderHostPorts,
+    cancelSettleTimeoutMs?: number,
+    stopDrainReuseTimeoutMs?: number,
+  ): DevinProvider {
     provider = new DevinProvider(host, {
       settings: { get: () => getDefaultSettings() },
-    }, 60_000, cancelSettleTimeoutMs);
+    }, 60_000, cancelSettleTimeoutMs, stopDrainReuseTimeoutMs);
     return provider;
   }
 
@@ -731,6 +735,59 @@ describe("DevinProvider", () => {
       expect.objectContaining({ sessionId: "devin-acp-1" }),
     );
     expect(warm.runtime.prompt).toHaveBeenCalledOnce();
+  });
+
+  it("reuses the warm session for a follow-up sent during a healthy cancel drain", async () => {
+    const host = createHost();
+    const fake = createFakeRuntime("devin-acp-1", 101);
+    starts.push(mockAcpStart([fake]));
+    const p = createProvider(host, 10_000, 1_000);
+
+    let resolvePrompt!: (response: { stopReason: string }) => void;
+    vi.mocked(fake.runtime.prompt)
+      .mockImplementationOnce(async () => await new Promise((resolve) => { resolvePrompt = resolve; }))
+      .mockImplementation(async () => ({ stopReason: "end_turn", usage: {} }));
+
+    const sending = p.sendTurn(turn());
+    await vi.waitFor(() => expect(fake.runtime.prompt).toHaveBeenCalledOnce());
+    const stopping = p.stopSession("mcode-thread-1");
+    const followUp = p.sendTurn(turn({ turnId: "turn-2", turnExecutionId: "execution-2" }));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    // The follow-up is held behind the in-flight turn's drain, not sent yet.
+    expect(fake.runtime.prompt).toHaveBeenCalledTimes(1);
+    resolvePrompt({ stopReason: "cancelled" });
+    await Promise.all([sending, stopping, followUp]);
+
+    // No respawn happened (mockAcpStart would throw) — the same runtime ran both prompts.
+    expect(fake.runtime.prompt).toHaveBeenCalledTimes(2);
+    expect(fake.runtime.close).not.toHaveBeenCalled();
+  });
+
+  it("kills and respawns for a follow-up that outlives a wedged cancel drain", async () => {
+    const host = createHost();
+    const stuck = createFakeRuntime("devin-acp-1", 101);
+    const replacement = createFakeRuntime("devin-acp-2", 102);
+    starts.push(mockAcpStart([stuck, replacement]));
+    const p = createProvider(host, 10_000, 25);
+
+    let rejectPrompt!: (error: unknown) => void;
+    vi.mocked(stuck.runtime.prompt).mockImplementation(
+      async () => await new Promise((_, reject) => { rejectPrompt = reject; }),
+    );
+    vi.mocked(stuck.runtime.close).mockImplementation(async () => {
+      rejectPrompt(new Error("ACP connection closed"));
+    });
+
+    const sending = p.sendTurn(turn());
+    await vi.waitFor(() => expect(stuck.runtime.prompt).toHaveBeenCalledOnce());
+    const stopping = p.stopSession("mcode-thread-1");
+    await p.sendTurn(turn({ turnId: "turn-2", turnExecutionId: "execution-2" }));
+    await Promise.all([sending, stopping]);
+
+    // The gate killed the wedged child early and the follow-up ran on a respawn.
+    expect(stuck.runtime.close).toHaveBeenCalledOnce();
+    expect(vi.mocked(host.processes.terminateTree)).toHaveBeenCalledWith(101);
+    await vi.waitFor(() => expect(replacement.runtime.prompt).toHaveBeenCalledOnce());
   });
 
   it("prefers the agent_stopped cause when it is more specific than the stop reason", async () => {
