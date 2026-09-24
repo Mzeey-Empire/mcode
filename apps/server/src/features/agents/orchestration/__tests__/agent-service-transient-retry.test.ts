@@ -6,6 +6,7 @@ import { AgentService } from "../agent-service.js";
 import {
   createAgentServiceForTest,
   startAgentServiceIngressForTest,
+  waitForAgentServiceIngressForTest,
   wrapProviderEmitterForRuntimeEvents,
 } from "./agent-service-test-harness.js";
 import { publishParentProviderEvent } from "../../events/provider-event-publication.js";
@@ -1000,6 +1001,7 @@ describe("AgentService transient-failure auto-retry", () => {
       tokensOut: 0,
       turnExecutionId: (sendTurn.mock.calls[1][0] as TurnRequest).turnExecutionId,
     });
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
     expect(service.runtimeAccess().runtimeSnapshots().find((snapshot) => snapshot.threadId === THREAD_ID)?.phase).toBe("completed");
   });
 
@@ -1048,6 +1050,7 @@ describe("AgentService transient-failure auto-retry", () => {
       tokensIn: 0,
       tokensOut: 0,
     });
+    await waitForAgentServiceIngressForTest(service, THREAD_ID);
     expect(service.runtimeAccess().runtimeSnapshots().find((snapshot) => snapshot.threadId === THREAD_ID)?.phase).toBe("completed");
   });
 
