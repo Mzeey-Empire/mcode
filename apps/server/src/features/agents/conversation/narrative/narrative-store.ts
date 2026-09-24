@@ -1318,6 +1318,7 @@ export class NarrativeStore {
   persistRecoveredNarrative(
     messageId: string,
     items: readonly ParentNarrativeRecoveryItem[],
+    replaceExisting = false,
   ): void {
     const tools: CreateToolCallRecordInput[] = [];
     const thoughts: CreateThoughtSegmentInput[] = [];
@@ -1327,9 +1328,9 @@ export class NarrativeStore {
       if (item.kind === "narrationSegment") thoughts.push(this.recoveredThought(messageId, item));
       if (item.kind === "hook") hooks.push(this.recoveredHook(messageId, item));
     }
-    if (tools.length > 0) this.toolCallRecordRepo.bulkCreate(tools);
-    if (thoughts.length > 0) this.thoughtSegmentRepo.bulkCreate(thoughts);
-    if (hooks.length > 0) this.hookExecutionRepo.bulkCreate(hooks);
+    if (tools.length > 0) this.toolCallRecordRepo.bulkCreate(tools, replaceExisting);
+    if (thoughts.length > 0) this.thoughtSegmentRepo.bulkCreate(thoughts, replaceExisting);
+    if (hooks.length > 0) this.hookExecutionRepo.bulkCreate(hooks, replaceExisting);
   }
 
   private assertRecoveryItemFitsWriteBatch(byteLength: number, threadId: string): void {

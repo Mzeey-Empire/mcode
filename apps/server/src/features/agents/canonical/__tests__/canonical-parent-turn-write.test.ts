@@ -3,12 +3,15 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
+import type { ParentNarrativeRecoveryItem } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
+import { ToolCallRecordRepo } from "../../tools/persistence/tool-call-record-repo.js";
 import {
   CanonicalParentTurnWrite,
+  type DataOnlyParentTerminalProjectionInput,
   type DataOnlyParentTurnFinishInput,
   type DataOnlyParentTurnStartInput,
 } from "../canonical-parent-turn-write.js";
@@ -45,6 +48,47 @@ function finishInput(message: ReturnType<MessageRepo["create"]>): DataOnlyParent
     providerIdentities: [],
     outcome: "completed",
     projection: { message, narrative: [] },
+  };
+}
+
+function terminalProjectionInput(): DataOnlyParentTerminalProjectionInput {
+  const narrative: ParentNarrativeRecoveryItem[] = [
+    {
+      kind: "toolCall",
+      record: {
+        id: "tool-1", message_id: "", parent_tool_call_id: null, tool_name: "Read",
+        display_name: null, provider_agent_key: null, subagent_identity_key: null,
+        subagent_provider_name: null, subagent_prompt: null, subagent_type: null,
+        subagent_agent_id: null, subagent_duration_ms: null, model: null, reasoning_effort: null,
+        input_summary: "file.txt", output_summary: "", output_total_bytes: null,
+        output_artifact_path: null, exit_code: null, status: "running",
+        started_at: NOW, completed_at: null, sort_order: 1,
+      },
+    },
+    {
+      kind: "narrationSegment",
+      record: { id: "thought-1", message_id: "", text: "Answer", started_at: NOW, ended_at: NOW, sort_order: 2 },
+    },
+    {
+      kind: "hook",
+      record: {
+        id: "hook-1", message_id: "", hook_name: "Stop", tool_name: null, phase: "stop",
+        payload: "{}", duration_ms: null, did_block: false, started_at: NOW,
+        ended_at: null, sort_order: 3,
+      },
+    },
+  ];
+  return {
+    threadId: THREAD_ID,
+    executionId: EXECUTION_ID,
+    outcome: "completed",
+    endedAt: "2026-09-24T10:00:01.000Z",
+    assistant: {
+      content: "Answer",
+      model: "claude-sonnet-4-6",
+      attachments: [{ id: "attachment-1", name: "result.txt", mimeType: "text/plain", sizeBytes: 6 }],
+    },
+    narrative,
   };
 }
 
@@ -142,5 +186,64 @@ describe("CanonicalParentTurnWrite", () => {
     db.run("DROP TRIGGER fail_assistant_outcome");
     expect((await writer.finish(finish)).outcome).toBe("committed");
     expect(new MessageRepo(db).findByIdInThread(THREAD_ID, staged.id)).toMatchObject({ is_internal: false, outcome: "completed" });
+  });
+
+  it("stages cloneable terminal rows once and publishes only after finish", async () => {
+    writer.start(startInput());
+    const input = terminalProjectionInput();
+    expect(() => structuredClone(input)).not.toThrow();
+    new ToolCallRecordRepo(db).create({
+      toolCallId: "tool-1", messageId: "user-1", toolName: "Read", inputSummary: "earlier",
+      outputSummary: "", status: "running", startedAt: NOW, sortOrder: 1,
+    });
+
+    const first = writer.stageTerminalProjection(input);
+    expect(first.messageId).toMatch(/^[0-9a-f]{64}$/);
+    expect(first.toolCallCount).toBe(1);
+    expect(db.prepare("SELECT is_internal, outcome FROM messages WHERE id = ?").get(first.messageId!))
+      .toEqual({ is_internal: 1, outcome: null });
+    expect(db.prepare("SELECT message_id, status, completed_at FROM tool_call_records WHERE id = 'tool-1'").get())
+      .toEqual({ message_id: first.messageId, status: "completed", completed_at: input.endedAt });
+    expect(db.prepare("SELECT message_id, is_final_response FROM thought_segments WHERE id = 'thought-1'").get())
+      .toEqual({ message_id: first.messageId, is_final_response: 1 });
+    expect(db.prepare("SELECT message_id, ended_at FROM hook_executions WHERE id = 'hook-1'").get())
+      .toEqual({ message_id: first.messageId, ended_at: input.endedAt });
+    expect(published.flat()).not.toContain(`${EXECUTION_ID}:turn.completed`);
+
+    db.close(true);
+    db = openDatabase({ dbPath: path });
+    writer = new CanonicalParentTurnWrite(db, (events) => {
+      published.push(events.map((event) => event.eventId));
+    });
+    const repeated = writer.stageTerminalProjection(input);
+    expect(repeated.messageId).toBe(first.messageId);
+    expect(repeated.toolCallCount).toBe(1);
+    expect(() => structuredClone(repeated.projection)).not.toThrow();
+    expect(db.prepare("SELECT COUNT(*) AS count FROM tool_call_records WHERE message_id = ?").get(first.messageId!))
+      .toEqual({ count: 1 });
+    const finish = { ...finishInput(first.projection.message!), projection: first.projection };
+    expect((await writer.finish(finish)).outcome).toBe("committed");
+    expect(published.flat()).toContain(`${EXECUTION_ID}:turn.completed`);
+    expect(new MessageRepo(db).findByIdInThread(THREAD_ID, first.messageId!))
+      .toMatchObject({ is_internal: false, outcome: "completed", attachments: input.assistant.attachments });
+    expect(writer.stageTerminalProjection(input).messageId).toBe(first.messageId);
+  });
+
+  it("rolls back all staged rows when a narrative write fails", async () => {
+    writer.start(startInput());
+    const input = terminalProjectionInput();
+    db.run("CREATE TRIGGER fail_hook BEFORE INSERT ON hook_executions BEGIN SELECT RAISE(ABORT, 'hook unavailable'); END");
+    expect(() => writer.stageTerminalProjection(input)).toThrow("hook unavailable");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE role = 'assistant'").get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM tool_call_records").get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM thought_segments").get()).toEqual({ count: 0 });
+    expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?").get(EXECUTION_ID))
+      .toEqual({ terminal_outcome: null });
+    expect(published.flat()).not.toContain(`${EXECUTION_ID}:turn.completed`);
+
+    db.run("DROP TRIGGER fail_hook");
+    const staged = writer.stageTerminalProjection(input);
+    expect(staged.messageId).not.toBeNull();
+    expect(staged.toolCallCount).toBe(1);
   });
 });
