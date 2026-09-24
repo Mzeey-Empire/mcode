@@ -118,6 +118,73 @@ describe("TerminalProfileService", () => {
     expect(Object.isFrozen(selected)).toBe(true);
   });
 
+  it("shares one certified discovery across concurrent Automatic terminal launches", async () => {
+    let releaseProbes!: () => void;
+    const probesReleased = new Promise<void>((resolve) => { releaseProbes = resolve; });
+    const resolveExecutable = vi.fn(async (executable: string) => {
+      await probesReleased;
+      return available.has(executable) ? `C:/resolved/${executable}` : null;
+    });
+    service = new TerminalProfileService(
+      settings as unknown as SettingsService,
+      workspacePreferences as unknown as WorkspaceTerminalPreferencesService,
+      { platform: "windows", resolveExecutable, createId: () => "11111111-1111-4111-8111-111111111111" },
+    );
+
+    const launches = Array.from({ length: 7 }, () => service.resolveLaunchProfile({}));
+    await Promise.resolve();
+
+    expect(resolveExecutable).toHaveBeenCalledTimes(5);
+    releaseProbes();
+    expect((await Promise.all(launches)).map((launch) => launch.resolvedProfile.id)).toEqual(
+      Array.from({ length: 7 }, () => "certified:windows-powershell-5.1"),
+    );
+  });
+
+  it("rechecks a missing certified executable after the shared discovery settles", async () => {
+    const resolveExecutable = vi.fn(async (executable: string) =>
+      available.has(executable) ? `C:/resolved/${executable}` : null);
+    service = new TerminalProfileService(
+      settings as unknown as SettingsService,
+      workspacePreferences as unknown as WorkspaceTerminalPreferencesService,
+      { platform: "windows", resolveExecutable, createId: () => "11111111-1111-4111-8111-111111111111" },
+    );
+    available.delete("pwsh.exe");
+
+    expect((await service.list()).certified.map((profile) => profile.id)).toEqual([
+      "certified:windows-powershell-5.1",
+    ]);
+
+    available.add("pwsh.exe");
+    expect((await service.list()).certified.map((profile) => profile.id)).toEqual([
+      "certified:windows-powershell-5.1",
+      "certified:windows-powershell-7",
+    ]);
+    expect(resolveExecutable).toHaveBeenCalledTimes(10);
+  });
+
+  it("clears a failed certified discovery so a later launch retries it", async () => {
+    let failProbe = true;
+    const resolveExecutable = vi.fn(async (executable: string) => {
+      if (failProbe) throw new Error("probe failed");
+      return available.has(executable) ? `C:/resolved/${executable}` : null;
+    });
+    service = new TerminalProfileService(
+      settings as unknown as SettingsService,
+      workspacePreferences as unknown as WorkspaceTerminalPreferencesService,
+      { platform: "windows", resolveExecutable, createId: () => "11111111-1111-4111-8111-111111111111" },
+    );
+
+    await expect(Promise.all(Array.from({ length: 7 }, () => service.resolveLaunchProfile({})))).rejects.toThrow("probe failed");
+    expect(resolveExecutable).toHaveBeenCalledTimes(5);
+
+    failProbe = false;
+    await expect(service.resolveLaunchProfile({})).resolves.toMatchObject({
+      resolvedProfile: { id: "certified:windows-powershell-5.1" },
+    });
+    expect(resolveExecutable).toHaveBeenCalledTimes(10);
+  });
+
   it("never substitutes an unavailable or missing explicit profile", async () => {
     available.delete("pwsh.exe");
     await expect(service.resolve({

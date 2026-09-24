@@ -104,6 +104,8 @@ export function createTerminalProfileServiceOptions(
 
 /** Discovers, persists, validates, and resolves immutable Terminal profiles. */
 export class TerminalProfileService {
+  private certifiedDiscovery: Promise<readonly TerminalResolvedProfile[]> | null = null;
+
   constructor(
     private readonly settings: SettingsService,
     private readonly workspacePreferences: WorkspaceTerminalPreferencesService,
@@ -116,11 +118,7 @@ export class TerminalProfileService {
     readonly custom: readonly TerminalCustomProfile[];
     readonly recovery?: ReturnType<SettingsService["getTerminalRecoveryState"]>;
   }> {
-    const certified = (await Promise.all(
-      CERTIFIED_PROFILES
-        .filter((profile) => profile.platform === this.options.platform)
-        .map((profile) => this.resolveCertified(profile)),
-    )).filter((profile): profile is TerminalResolvedProfile => profile !== null);
+    const certified = await this.discoverCertifiedProfiles();
     const custom = this.settings.get().terminal.profiles.map((profile) => cloneCustomProfile(profile));
     const recovery = this.settings.getTerminalRecoveryState();
     return Object.freeze({
@@ -128,6 +126,26 @@ export class TerminalProfileService {
       custom: Object.freeze(custom),
       ...(recovery ? { recovery } : {}),
     });
+  }
+
+  private discoverCertifiedProfiles(): Promise<readonly TerminalResolvedProfile[]> {
+    if (this.certifiedDiscovery) return this.certifiedDiscovery;
+    const discovery = this.probeCertifiedProfiles();
+    this.certifiedDiscovery = discovery;
+    const clearDiscovery = () => {
+      if (this.certifiedDiscovery === discovery) this.certifiedDiscovery = null;
+    };
+    void discovery.then(clearDiscovery, clearDiscovery);
+    return discovery;
+  }
+
+  private async probeCertifiedProfiles(): Promise<readonly TerminalResolvedProfile[]> {
+    const resolved = await Promise.all(
+      CERTIFIED_PROFILES
+        .filter((profile) => profile.platform === this.options.platform)
+        .map((profile) => this.resolveCertified(profile)),
+    );
+    return Object.freeze(resolved.filter((profile): profile is TerminalResolvedProfile => profile !== null));
   }
 
   /** Creates one validated custom profile with a server-generated identifier. */
