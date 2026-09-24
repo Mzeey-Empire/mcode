@@ -24,6 +24,7 @@ import type {
 import type { CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
 import { CanonicalAgentBoundary } from "./canonical-agent-boundary.js";
 import { CanonicalCommittedProviderProjector } from "./canonical-committed-provider-projector.js";
+import { CanonicalContextCompactionProjection } from "./canonical-context-compaction-projection.js";
 import { CanonicalParentTurnWrite } from "./canonical-parent-turn-write.js";
 import {
   ParentAssistantTextCheckpointService,
@@ -80,6 +81,7 @@ const storedHeadSchema = z.object({
   stopWatermark: z.number().int().nullable(),
   providerOutcome: TurnOutcomeSchema.nullable(),
   assignedMessageId: z.string().regex(/^[0-9a-f]{64}$/).nullable().optional(),
+  compacting: z.boolean().default(false),
 });
 const storedReceiptSchema = z.object({
   kind: z.literal("committed"),
@@ -128,6 +130,7 @@ interface SemanticHead {
   readonly stopWatermark: number | null;
   readonly providerOutcome: TurnOutcome | null;
   readonly assignedMessageId?: string | null;
+  readonly compacting: boolean;
 }
 
 type StoredOperation = z.infer<typeof storedOperationSchema>;
@@ -146,6 +149,7 @@ export interface LostExecutionInterruption {
 export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter {
   private readonly turns: CanonicalParentTurnWrite;
   private readonly providerProjector: CanonicalCommittedProviderProjector;
+  private readonly contextCompaction: CanonicalContextCompactionProjection;
   private readonly assistantText: ParentAssistantTextCheckpointService;
   private readonly canonical: CanonicalAgentBoundary;
   private readonly findOperation: ReturnType<Database["prepare"]>;
@@ -171,6 +175,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     });
     this.canonical = codexBoundary;
     this.providerProjector = new CanonicalCommittedProviderProjector(codexBoundary);
+    this.contextCompaction = new CanonicalContextCompactionProjection(db);
     this.assistantText = new ParentAssistantTextCheckpointService(db);
     this.findOperation = db.prepare("SELECT kind, input_hash, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?");
     this.listPublicationChunks = db.prepare("SELECT operation_id, kind, input_hash, receipt_json FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id > ? AND operation_id < ? ORDER BY operation_id LIMIT ?");
@@ -295,6 +300,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
         stopRequestId: null,
         stopWatermark: null,
         providerOutcome: null,
+        compacting: false,
       };
       this.insertOperation.run(operation.execution.executionId, HEAD_ID, HEAD_KIND, fingerprint(head.lease), JSON.stringify(head));
       this.storePublicationChunks(operation.execution.executionId, hash, result.events.map((event) => event.acceptedSequence));
@@ -321,6 +327,8 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       });
       if (result.outcome !== "committed") throw new SemanticConflict();
       const providerEvents = this.providerProjector.project(result.events);
+      const compacting = this.contextCompaction.apply(operation.execution.threadId, head.compacting, providerEvents);
+      if (compacting === null) throw new SemanticConflict();
       const checkpoint = durableSequenceRowSchema.parse(this.findDurableSequence.get(operation.execution.executionId));
       const providerCommit: ExecutionProviderCommitReceipt = {
         outcome: result.outcome,
@@ -331,7 +339,7 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
         eventCount: result.events.length,
       };
       const receipt = committed(operation, checkpoint.last_durable_sequence, providerCommit, providerEvents);
-      this.storeHead({ ...head, ordinal: operation.ordinal, durableRevision: receipt.durableRevision });
+      this.storeHead({ ...head, ordinal: operation.ordinal, durableRevision: receipt.durableRevision, compacting });
       const publication = this.bufferedPublication?.flat() ?? [];
       // A Codex child write has its own execution sequence, even when the parent event caused it.
       this.storePublicationChunks(operation.execution.executionId, hash, publication.map((event) => ({

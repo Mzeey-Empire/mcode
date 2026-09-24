@@ -3,7 +3,7 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import type { Database } from "bun:sqlite";
-import { AgentEventType } from "@mcode/contracts";
+import { AgentEventType, type AgentEvent } from "@mcode/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
@@ -60,6 +60,25 @@ function event() {
         updatedAt: NOW,
       },
     },
+  };
+}
+
+function runtimeEvent(sequence: number, agentEvent: AgentEvent): Extract<
+  ExecutionSemanticOperation["mutation"], { kind: "append-events" }
+>["events"][number] {
+  const itemId = `runtime-${sequence}`;
+  return {
+    eventId: `${EXECUTION_ID}:${itemId}`,
+    routing: { ...execution, itemId },
+    sourceProviderId: "codex",
+    sourceIdentities: [],
+    sourceSequence: sequence,
+    payload: { type: "item.recorded", item: {
+      id: itemId, threadId: THREAD_ID, turnId: TURN_ID, kind: "system",
+      providerIdentities: [],
+      payload: { projection: "providerRuntimeEvent", runtimeEvent: { event: agentEvent } },
+      createdAt: NOW, updatedAt: NOW,
+    } },
   };
 }
 
@@ -121,6 +140,75 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     reason: "The execution worker exited before its provider turn could be proved live.",
     recoveryIncidentId: "incident-1",
   };
+
+  it("commits context and compaction projections before publishing their canonical events", async () => {
+    const seenAtPublication: { eventId: string; state: unknown }[] = [];
+    writer = new CanonicalExecutionSemanticWriter(db, (events) => {
+      for (const item of events) {
+        const state = db.prepare("SELECT last_context_tokens, last_compact_summary FROM threads WHERE id = ?").get(THREAD_ID);
+        seenAtPublication.push({ eventId: item.eventId, state });
+      }
+    });
+    handler = new ExecutionWorkerHandler(writer);
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    async function append(ordinal: number, agentEvent: AgentEvent) {
+      return send(ordinal, { kind: "event", phase: "running", nativeCursor: null, events: [runtimeEvent(ordinal, agentEvent)] });
+    }
+    const identity = { threadId: THREAD_ID, turnExecutionId: EXECUTION_ID };
+    expect((await append(2, { ...identity, type: "contextEstimate", tokensIn: 100, totalProcessedTokens: 120, contextWindow: 200_000 })).kind).toBe("committed");
+    expect((await append(3, { ...identity, type: "compacting", active: true })).kind).toBe("committed");
+    expect((await append(4, { ...identity, type: "contextEstimate", tokensIn: 90, totalProcessedTokens: 140 })).kind).toBe("committed");
+    expect((await append(5, { ...identity, type: "compactSummary", summary: "Short context" })).kind).toBe("committed");
+    expect((await append(6, { ...identity, type: "contextEstimate", tokensIn: 30, totalProcessedTokens: 150 })).kind).toBe("committed");
+    expect((await append(7, { ...identity, type: "compacting", active: true })).kind).toBe("committed");
+    expect((await append(8, { ...identity, type: "compacting", active: false })).kind).toBe("committed");
+    expect((await append(9, { ...identity, type: "turnComplete", reason: "end_turn", costUsd: null, tokensIn: 40, tokensOut: 5 })).kind).toBe("committed");
+
+    expect(seenAtPublication.filter(({ eventId }) => eventId.includes(":runtime-"))).toEqual([
+      { eventId: `${EXECUTION_ID}:runtime-2`, state: { last_context_tokens: 100, last_compact_summary: null } },
+      { eventId: `${EXECUTION_ID}:runtime-3`, state: { last_context_tokens: 100, last_compact_summary: null } },
+      { eventId: `${EXECUTION_ID}:runtime-4`, state: { last_context_tokens: 100, last_compact_summary: null } },
+      { eventId: `${EXECUTION_ID}:runtime-5`, state: { last_context_tokens: 100, last_compact_summary: "Short context" } },
+      { eventId: `${EXECUTION_ID}:runtime-6`, state: { last_context_tokens: 30, last_compact_summary: "Short context" } },
+      { eventId: `${EXECUTION_ID}:runtime-7`, state: { last_context_tokens: 30, last_compact_summary: "Short context" } },
+      { eventId: `${EXECUTION_ID}:runtime-8`, state: { last_context_tokens: 30, last_compact_summary: "Short context" } },
+      { eventId: `${EXECUTION_ID}:runtime-9`, state: { last_context_tokens: 40, last_compact_summary: "Short context" } },
+    ]);
+    expect(new MessageRepo(db).listIncludingInternal(THREAD_ID)).toContainEqual(expect.objectContaining({ role: "system", content: "Context compacted" }));
+
+    db.close(true);
+    db = openDatabase({ dbPath: path });
+    writer = new CanonicalExecutionSemanticWriter(db, () => {});
+    const dividerCount = db.prepare("SELECT COUNT(*) AS count FROM messages WHERE thread_id = ? AND content = 'Context compacted'")
+      .get(THREAD_ID);
+    expect(await writer.transact(operation(8, { kind: "append-events", phase: "running", nativeCursor: null,
+      events: [runtimeEvent(8, { ...identity, type: "compacting", active: false })] }))).toMatchObject({ kind: "committed" });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE thread_id = ? AND content = 'Context compacted'")
+      .get(THREAD_ID)).toEqual(dividerCount);
+  });
+
+  it("rolls back context projections and rejects completion during compaction", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const identity = { threadId: THREAD_ID, turnExecutionId: EXECUTION_ID };
+    db.run("CREATE TRIGGER fail_context_receipt BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:append-events' BEGIN SELECT RAISE(ABORT, 'receipt unavailable'); END");
+    await expect(send(2, { kind: "event", phase: "running", nativeCursor: null, events: [
+      runtimeEvent(2, { ...identity, type: "contextEstimate", tokensIn: 80, totalProcessedTokens: 90 }),
+    ] })).rejects.toThrow("receipt unavailable");
+    expect(db.prepare("SELECT last_context_tokens FROM threads WHERE id = ?").get(THREAD_ID)).toEqual({ last_context_tokens: null });
+    expect(published).not.toContain(`${EXECUTION_ID}:runtime-2`);
+    db.run("DROP TRIGGER fail_context_receipt");
+    expect((await send(2, { kind: "event", phase: "running", nativeCursor: null, events: [
+      runtimeEvent(2, { ...identity, type: "compacting", active: true }),
+    ] })).kind).toBe("committed");
+    expect(await send(3, { kind: "event", phase: "running", nativeCursor: null, events: [
+      runtimeEvent(3, { ...identity, type: "turnComplete", reason: "end_turn", costUsd: null, tokensIn: 50, tokensOut: 1 }),
+    ] })).toEqual({ kind: "rejected", reason: "writer-conflict" });
+    expect(db.prepare("SELECT event_id FROM canonical_agent_events WHERE event_id = ?").get(`${EXECUTION_ID}:runtime-3`)).toBeNull();
+    expect(published).not.toContain(`${EXECUTION_ID}:runtime-3`);
+    expect((await send(3, { kind: "event", phase: "running", nativeCursor: null, events: [
+      runtimeEvent(3, { ...identity, type: "compactSummary", summary: "Recovered" }),
+    ] })).kind).toBe("committed");
+  });
 
   it("fences a lost worker while retaining durable text and narrative", async () => {
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
