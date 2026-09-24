@@ -631,7 +631,7 @@ function UserMessageText({ message, displayText, userGoal }: { message: Message;
       {hasMentions ? (
         <MentionedUserText text={displayText} mentions={message.mentions!} />
       ) : (
-        <Suspense fallback={null}>
+        <Suspense fallback={<p className="whitespace-pre-wrap leading-relaxed">{displayText}</p>}>
           <LazyMarkdownContent content={displayText} isStreaming={false} variant="user" />
         </Suspense>
       )}
@@ -854,7 +854,7 @@ function AssistantResponseText({
       {renderDelta ? (
         <DeltaBlock text={message.content} isStreaming={isStreaming} showCursor={isStreaming} />
       ) : (
-        <Suspense fallback={null}>
+        <Suspense fallback={<p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>}>
           <LazyMarkdownContent content={message.content} isStreaming={false} threadId={message.thread_id} chatHighlighting />
         </Suspense>
       )}
