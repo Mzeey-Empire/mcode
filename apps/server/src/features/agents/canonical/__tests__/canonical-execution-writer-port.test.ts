@@ -8,7 +8,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import { MessageRepo } from "../../conversation/persistence/message-repo.js";
 import { deriveTurnAssistantMessageId } from "../../turns/turn-assistant-message-id.js";
-import type { ExecutionSemanticOperation } from "../../execution/execution-worker-handler.js";
+import { ExecutionMailboxScheduler } from "../../execution/execution-mailbox-scheduler.js";
+import type { ExecutionLease } from "../../execution/execution-mailbox-protocol.js";
+import { ExecutionThreadWorkerPort } from "../../execution/execution-worker-port.js";
+import type { ExecutionSemanticOperation, ExecutionWorkCommand, ExecutionWorkerResult } from "../../execution/execution-worker-handler.js";
 import { CanonicalAgentWriterClient } from "../canonical-agent-writer-client.js";
 import { CanonicalExecutionWriterPort } from "../canonical-execution-writer-port.js";
 
@@ -187,5 +190,65 @@ describe("execution semantic writer transport", () => {
     expect(await port.transact(stage)).toMatchObject({ kind: "committed", operationId: stage.operationId });
     expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE role = 'assistant' AND is_internal = 1").get())
       .toEqual({ count: 1 });
+  });
+
+  it("runs a complete assistant turn through an execution worker and the sole writer worker", async () => {
+    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    const published: string[] = [];
+    const port = new CanonicalExecutionWriterPort(writer, (events) => {
+      published.push(...events.map((event) => event.eventId));
+    });
+    const scheduler = new ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>({
+      workerCount: 1,
+      limits: {
+        maxPending: 16, maxPendingBytes: 64_000, reservedControl: 4, reservedControlBytes: 16_000,
+        maxPerExecutionPending: 12, maxPerExecutionBytes: 48_000,
+        reservedPerExecutionControl: 3, reservedPerExecutionControlBytes: 12_000,
+      },
+      createWorker: () => new ExecutionThreadWorkerPort(port),
+      onWorkerLost: () => { throw new Error("Execution worker was lost"); },
+    });
+    try {
+      const claim = scheduler.claim(execution, 1);
+      if (claim.kind !== "claimed") throw new Error(`Execution claim failed: ${claim.kind}`);
+      const send = (lease: ExecutionLease, command: Parameters<typeof scheduler.submit>[0]["command"]) => {
+        const admission = scheduler.submit({ execution, lease, command, byteLength: 1_000 });
+        if (admission.kind !== "admitted") throw new Error(`Execution admission failed: ${admission.kind}`);
+        return admission.completion;
+      };
+      const start = beginOperation().mutation;
+      if (start.kind !== "begin") throw new Error("Unexpected begin operation");
+      await expect(send(claim.lease, { kind: "start", providerId: "codex", input: start.input }))
+        .resolves.toMatchObject({ kind: "reply", result: { kind: "committed" } });
+      await expect(send(claim.lease, { kind: "event", events: [{
+        eventId: `${EXECUTION_ID}:worker-item`,
+        routing: { ...execution, itemId: "worker-item" },
+        sourceProviderId: "codex", sourceIdentities: [], sourceSequence: 1,
+        payload: { type: "item.recorded", item: {
+          id: "worker-item", threadId: THREAD_ID, turnId: TURN_ID, kind: "message",
+          providerIdentities: [], payload: { projection: "message", content: "Worker event" },
+          createdAt: NOW, updatedAt: NOW,
+        } },
+      }] })).resolves.toMatchObject({ kind: "reply", result: { kind: "committed" } });
+      await expect(send(claim.lease, { kind: "stage-terminal", input: {
+        threadId: THREAD_ID, executionId: EXECUTION_ID, outcome: "completed", endedAt: NOW,
+        assistant: { content: "Worker answer", model: null, attachments: [] }, narrative: [],
+      } })).resolves.toMatchObject({ kind: "reply", result: { kind: "committed" } });
+      await expect(send(claim.lease, { kind: "finalize", outcome: "completed", input: {
+        threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, providerId: "codex",
+        providerIdentities: [], outcome: "completed", projection: { kind: "writer-staged" },
+      } })).resolves.toMatchObject({ kind: "reply", result: { kind: "committed" } });
+      await expect(send(claim.lease, { kind: "release" }))
+        .resolves.toEqual({ kind: "reply", result: { kind: "released" } });
+      expect(scheduler.release(execution, claim.lease)).toBe(true);
+      expect(db.prepare("SELECT content, outcome FROM messages WHERE role = 'assistant' AND is_internal = 0").get())
+        .toEqual({ content: "Worker answer", outcome: "completed" });
+      expect(published).toContain(`${EXECUTION_ID}:worker-item`);
+      expect(published.indexOf(`${EXECUTION_ID}:worker-item`))
+        .toBeLessThan(published.indexOf(`${EXECUTION_ID}:turn.completed`));
+      expect(published).toContain(`${EXECUTION_ID}:turn.completed`);
+    } finally {
+      scheduler.shutdown();
+    }
   });
 });
