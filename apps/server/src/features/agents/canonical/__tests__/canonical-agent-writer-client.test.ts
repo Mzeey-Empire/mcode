@@ -297,6 +297,66 @@ describe("canonical SQLite writer", () => {
       .get("writer-recovery-tool")).toEqual({ id: "writer-recovery-tool", status: "completed" });
   });
 
+  it("replays one live reclassification receipt after the worker loses its reply", async () => {
+    const execution = { threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID };
+    const lease = { ownerEpoch: 1, workerIndex: 0, workerGeneration: 1, leaseId: "live-text-lease" };
+    const begin: ExecutionSemanticOperation = {
+      operationId: "live-text-lease:1", execution, lease, ordinal: 1,
+      mutation: { kind: "begin", providerId: "codex", input: {
+        thread: { id: THREAD_ID, workspaceId: "writer-workspace", providerId: "codex", createdAt: NOW },
+        turnId: TURN_ID, executionId: EXECUTION_ID, permissionMode: "supervised", providerIdentities: [],
+        userMessage: { kind: "create", messageId: "live-text-user", content: "Question", sequence: 1 },
+      } },
+    };
+    writer = new CanonicalAgentWriterClient(dbPath);
+    expect((await writer.transactSemantic(begin, () => {})).kind).toBe("committed");
+    const provisional: ExecutionSemanticOperation = {
+      operationId: "live-text-lease:2", execution, lease, ordinal: 2,
+      mutation: { kind: "live-event", text: { kind: "append", inputs: [{
+        ...execution, sequence: 1, text: "provisional thought",
+      }] } },
+      livePublication: [{ after: "writer", event: {
+        type: AgentEventType.TextDelta, threadId: THREAD_ID,
+        turnExecutionId: EXECUTION_ID, delta: "provisional thought",
+      } }],
+    };
+    expect((await writer.transactSemantic(provisional, () => {})).kind).toBe("committed");
+    await writer.close();
+
+    const thought = { kind: "narrationSegment" as const, record: {
+      id: "live-thought", message_id: "", text: "provisional thought",
+      started_at: NOW, ended_at: NOW, sort_order: 0,
+    } };
+    const reclassified: ExecutionSemanticOperation = {
+      operationId: "live-text-lease:3", execution, lease, ordinal: 3,
+      mutation: { kind: "live-event", text: { kind: "reclassify", expectedText: "provisional thought" },
+        narrative: { executionId: EXECUTION_ID, items: [thought], discardedItemIds: [] } },
+      livePublication: [{ after: "writer", event: {
+        type: AgentEventType.AssistantMessageBoundary, threadId: THREAD_ID,
+        turnExecutionId: EXECUTION_ID, isFinalResponse: false,
+      } }],
+    };
+    let created = 0;
+    writer = new CanonicalAgentWriterClient(dbPath, () => created++ === 0
+      ? workerDroppingReply("semantic-transacted")
+      : new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" }));
+    const receipt = await writer.transactSemantic(reclassified, () => {});
+    expect(receipt).toMatchObject({ kind: "committed", operationId: "live-text-lease:3",
+      livePublication: [{ publicationId: "live-text-lease:3:0", after: "writer" }] });
+    expect(created).toBe(2);
+    expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE id = ?")
+      .get("narrationSegment:live-thought")).toEqual({ count: 1 });
+    await writer.close();
+
+    writer = new CanonicalAgentWriterClient(dbPath);
+    expect(await writer.transactSemantic(reclassified, () => {})).toEqual(receipt);
+    expect((await writer.interruptWorkerLoss({ execution, lease, reason: "worker exited",
+      recoveryIncidentId: "live-thought-loss" }, () => {})).kind).toBe("committed");
+    expect(db.prepare("SELECT id, text FROM thought_segments WHERE id = ?").get("live-thought"))
+      .toEqual({ id: "live-thought", text: "provisional thought" });
+  });
+
   it("rejects a database failure without reporting a durable receipt", async () => {
     writer = new CanonicalAgentWriterClient(dbPath);
     await writer.whenReady();

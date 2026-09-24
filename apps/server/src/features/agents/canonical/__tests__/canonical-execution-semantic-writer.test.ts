@@ -437,6 +437,90 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect((await writer.transact(delta)).kind).toBe("committed");
   });
 
+  it("commits reclassification and promotion with their narrative changes before live publication", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const publicationCount = published.length;
+    const unknown = operation(2, { kind: "live-event", text: { kind: "append", inputs: [
+      { ...execution, sequence: 1, text: "unknown draft" },
+    ] } });
+    const unknownEvent = { type: AgentEventType.TextDelta, threadId: THREAD_ID,
+      turnExecutionId: EXECUTION_ID, delta: "unknown draft" };
+    const appended = await writer.transact({ ...unknown, livePublication: [{ after: "writer", event: unknownEvent }] });
+    expect(appended).toMatchObject({ kind: "committed", assistantTextCheckpoint: { durableThrough: 1 },
+      livePublication: [{ publicationId: "lease-1:2:0", event: unknownEvent }] });
+    expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("unknown draft");
+
+    const thought = { kind: "narrationSegment" as const, record: {
+      id: "thought-1", message_id: "", text: "unknown draft", started_at: NOW,
+      ended_at: NOW, sort_order: 0,
+    } };
+    const boundary = { type: AgentEventType.AssistantMessageBoundary, threadId: THREAD_ID,
+      turnExecutionId: EXECUTION_ID, isFinalResponse: false };
+    const reclassified = { ...operation(3, { kind: "live-event", text: {
+      kind: "reclassify", expectedText: "unknown draft",
+    }, narrative: { executionId: EXECUTION_ID, items: [thought], discardedItemIds: [] } }),
+    livePublication: [{ after: "writer" as const, event: boundary }] };
+    db.run("CREATE TRIGGER fail_compound_receipt BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:live-event' AND NEW.operation_id = 'lease-1:3' BEGIN SELECT RAISE(ABORT, 'compound receipt unavailable'); END");
+    await expect(writer.transact(reclassified)).rejects.toThrow("compound receipt unavailable");
+    expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("unknown draft");
+    expect(new CanonicalAgentBoundary(db, () => {}).loadParentNarrativeRecovery(TURN_ID)).toEqual([]);
+    expect(published).toHaveLength(publicationCount);
+    db.run("DROP TRIGGER fail_compound_receipt");
+    const reclassifiedReceipt = await writer.transact(reclassified);
+    expect(reclassifiedReceipt).toMatchObject({ kind: "committed", livePublication: [
+      { publicationId: "lease-1:3:0", event: boundary },
+    ] });
+    expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("");
+    expect(new CanonicalAgentBoundary(db, () => {}).loadParentNarrativeRecovery(TURN_ID)).toEqual([thought]);
+
+    db.close(true);
+    db = openDatabase({ dbPath: path });
+    writer = new CanonicalExecutionSemanticWriter(db, () => {});
+    expect(await writer.transact(reclassified)).toEqual(reclassifiedReceipt);
+    expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("");
+
+    const finalBoundary = { ...boundary, isFinalResponse: true };
+    const promoted = { ...operation(4, { kind: "live-event", text: { kind: "promote", input: {
+      ...execution, sequence: 1, text: "final thought",
+    } }, narrative: { executionId: EXECUTION_ID, items: [], discardedItemIds: ["narrationSegment:thought-1"] } }),
+    livePublication: [{ after: "writer" as const, event: finalBoundary }] };
+    expect(await writer.transact(promoted)).toMatchObject({ kind: "committed",
+      assistantTextCheckpoint: { durableThrough: 1 },
+      livePublication: [{ publicationId: "lease-1:4:0", event: finalBoundary }],
+    });
+    expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("final thought");
+    expect(new CanonicalAgentBoundary(db, () => {}).loadParentNarrativeRecovery(TURN_ID)).toEqual([]);
+    expect(writer.interruptWorkerLoss(loss).kind).toBe("committed");
+    expect(new MessageRepo(db).listIncludingInternal(THREAD_ID)).toContainEqual(expect.objectContaining({
+      role: "assistant", content: "final thought", outcome: "interrupted",
+    }));
+  });
+
+  it("rejects a compound live event that exceeds its shared row or byte budget", async () => {
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+    const event = { type: AgentEventType.TextDelta, threadId: THREAD_ID,
+      turnExecutionId: EXECUTION_ID, delta: "short text" };
+    const text = { kind: "append" as const, inputs: [{ ...execution, sequence: 1, text: event.delta }] };
+    const publication = [{ after: "writer" as const, event }];
+    expect(await writer.transact({ ...operation(2, { kind: "live-event", text,
+      narrative: { executionId: EXECUTION_ID, items: toolNarrative("", 62), discardedItemIds: [] },
+    }), livePublication: publication })).toEqual({ kind: "conflict", operationId: "lease-1:2" });
+    const largeItem = { ...toolNarrative("", 1)[0]!, record: {
+      ...toolNarrative("", 1)[0]!.record, input_summary: "x".repeat(256 * 1024 - 900),
+    } };
+    expect(await writer.transact({ ...operation(2, { kind: "live-event", text,
+      narrative: { executionId: EXECUTION_ID, items: [largeItem], discardedItemIds: [] },
+    }), livePublication: publication })).toEqual({ kind: "conflict", operationId: "lease-1:2" });
+    expect(await writer.transact({ ...operation(2, { kind: "live-event", text }),
+      livePublication: [{ after: "writer", event: { ...event, delta: "different" } }],
+    })).toEqual({ kind: "conflict", operationId: "lease-1:2" });
+    expect(new ParentAssistantTextCheckpointService(db).restore(EXECUTION_ID)).toBe("");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE turn_id = ? AND id LIKE 'toolCall:%'")
+      .get(TURN_ID)).toEqual({ count: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_writer_operation_receipts WHERE execution_id = ? AND operation_id = ?")
+      .get(EXECUTION_ID, "lease-1:2")).toEqual({ count: 0 });
+  });
+
   it("rejects stale worker-loss leases without changing the unfinished turn", async () => {
     expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
     expect(writer.interruptWorkerLoss({ ...loss, lease: { ...lease, ownerEpoch: 2 } }))

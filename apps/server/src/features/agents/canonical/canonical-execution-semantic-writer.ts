@@ -14,11 +14,11 @@ import { ACTIVE_TURN_WRITE_BATCH_LIMITS } from "../../../runtime/persistence/sql
 import type { ExecutionIdentity, ExecutionLease } from "../execution/execution-mailbox-protocol.js";
 import type {
   ExecutionProviderCommitReceipt,
+  ExecutionLivePublicationIntent,
   ProjectedCommittedProviderEvent,
   ExecutionSemanticOperation,
   ExecutionSemanticWriter,
   ExecutionWriteReceipt,
-  ExecutionLivePublicationIntent,
   ExecutionLivePublicationReceipt,
 } from "../execution/execution-worker-handler.js";
 import type { CanonicalAgentEventPublisher } from "./canonical-agent-boundary.js";
@@ -43,6 +43,9 @@ const MAX_BUFFERED_PUBLICATION_EVENTS = 2_048;
 const MAX_LIVE_PUBLICATION_EVENTS = 64;
 const MAX_LIVE_PUBLICATION_BYTES = 256 * 1024;
 const MAX_LIVE_RECEIPT_BYTES = 512 * 1024;
+const LIVE_RECOVERY_KINDS: ReadonlySet<ExecutionSemanticOperation["mutation"]["kind"]> = new Set([
+  "append-assistant-text", "narrative-delta", "live-event",
+]);
 const narrativeDeltaSchema = z.object({
   executionId: z.string(),
   items: z.array(ParentNarrativeRecoveryItemSchema()),
@@ -197,6 +200,10 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
       if (existing.kind === "committed" && operation.mutation.kind === "finish") {
         this.assistantText.retire(operation.execution.executionId);
       }
+      if (existing.kind === "committed" && operation.mutation.kind === "live-event"
+        && operation.mutation.text.kind === "reclassify") {
+        this.assistantText.discardRecoveryJournal(operation.execution.executionId);
+      }
       return existing;
     }
     try {
@@ -254,11 +261,10 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
   }
 
   private async applySupported(operation: ExecutionSemanticOperation, hash: string): Promise<ExecutionWriteReceipt> {
+    if (LIVE_RECOVERY_KINDS.has(operation.mutation.kind)) return this.applyLiveRecovery(operation, hash);
     switch (operation.mutation.kind) {
       case "begin": return this.begin(operation, hash);
       case "append-events": return this.append(operation, hash);
-      case "append-assistant-text": return this.appendAssistantText(operation, hash);
-      case "narrative-delta": return this.recordNarrativeDelta(operation, hash);
       case "checkpoint":
       case "stop-requested":
       case "provider-outcome": return this.control(operation, hash);
@@ -371,17 +377,69 @@ export class CanonicalExecutionSemanticWriter implements ExecutionSemanticWriter
     if (mutation.kind !== "narrative-delta") return conflict(operation);
     return this.db.transaction(() => {
       const head = this.requireNextHead(operation);
-      const checkpoint = this.canonical.loadCheckpoint(operation.execution.executionId);
-      if (!checkpoint || checkpoint.threadId !== operation.execution.threadId
-        || checkpoint.turnId !== operation.execution.turnId || checkpoint.terminalOutcome !== null) {
-        throw new SemanticConflict();
-      }
-      if (!this.canonical.recordParentNarrativeRecovery(mutation.input)) throw new SemanticConflict();
+      this.requireUnfinishedCheckpoint(operation.execution);
+      this.persistNarrativeDelta(mutation.input);
       const receipt = committed(operation, head.durableRevision);
       this.storeHead({ ...head, ordinal: operation.ordinal });
       this.storeReceipt(operation, hash, receipt);
       return receipt;
     })();
+  }
+
+  private applyLiveRecovery(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt {
+    if (operation.mutation.kind === "append-assistant-text") return this.appendAssistantText(operation, hash);
+    if (operation.mutation.kind === "narrative-delta") return this.recordNarrativeDelta(operation, hash);
+    return this.recordLiveEvent(operation, hash);
+  }
+
+  private recordLiveEvent(operation: ExecutionSemanticOperation, hash: string): ExecutionWriteReceipt {
+    const mutation = operation.mutation;
+    if (mutation.kind !== "live-event") return conflict(operation);
+    const receipt = this.db.transaction(() => {
+      const head = this.requireNextHead(operation);
+      if (head.providerId !== "codex") throw new SemanticConflict();
+      this.requireUnfinishedCheckpoint(operation.execution);
+      const textResult = this.applyLiveText(mutation.text, operation.execution.executionId);
+      if (mutation.narrative) this.persistNarrativeDelta(mutation.narrative);
+      if (mutation.text.kind === "reclassify" && !this.assistantText.resetInTransaction(operation.execution.executionId)) {
+        throw new SemanticConflict();
+      }
+      const committedReceipt = committed(operation, head.durableRevision, undefined, undefined, textResult);
+      this.storeHead({ ...head, ordinal: operation.ordinal });
+      this.storeReceipt(operation, hash, committedReceipt);
+      return committedReceipt;
+    })();
+    if (mutation.text.kind === "reclassify") {
+      this.assistantText.discardRecoveryJournal(operation.execution.executionId);
+    }
+    return receipt;
+  }
+
+  private applyLiveText(
+    text: Extract<ExecutionSemanticOperation["mutation"], { kind: "live-event" }>["text"],
+    executionId: string,
+  ): ParentAssistantTextCheckpointResult | undefined {
+    if (text.kind === "unchanged") return undefined;
+    if (text.kind === "reclassify") {
+      if (this.assistantText.restore(executionId) !== text.expectedText) throw new SemanticConflict();
+      return undefined;
+    }
+    const result = this.assistantText.appendChunk(text.kind === "append" ? text.inputs : [text.input]);
+    if (result.outcome !== "committed") throw new SemanticConflict();
+    return result;
+  }
+
+  private requireUnfinishedCheckpoint(execution: ExecutionIdentity): void {
+    const checkpoint = this.canonical.loadCheckpoint(execution.executionId);
+    if (!checkpoint || checkpoint.threadId !== execution.threadId
+      || checkpoint.turnId !== execution.turnId || checkpoint.terminalOutcome !== null) {
+      throw new SemanticConflict();
+    }
+  }
+
+  private persistNarrativeDelta(input: Extract<ExecutionSemanticOperation["mutation"],
+    { kind: "narrative-delta" }>["input"]): void {
+    if (!this.canonical.recordParentNarrativeRecovery(input)) throw new SemanticConflict();
   }
 
   private async finish(operation: ExecutionSemanticOperation, hash: string): Promise<ExecutionWriteReceipt> {
@@ -669,7 +727,8 @@ function validLivePublicationShape(
   mutationKind: ExecutionSemanticOperation["mutation"]["kind"],
 ): boolean {
   return Array.isArray(publication) && publication.length > 0 && publication.length <= MAX_LIVE_PUBLICATION_EVENTS
-    && (mutationKind === "begin" || mutationKind === "append-events" || mutationKind === "finish");
+    && (mutationKind === "begin" || mutationKind === "append-events" || mutationKind === "finish"
+      || mutationKind === "live-event" && publication.length === 1);
 }
 
 function validLivePublicationIntent(
@@ -700,7 +759,84 @@ function validSemanticMutationInput(operation: ExecutionSemanticOperation): bool
   if (operation.mutation.kind === "narrative-delta") {
     return validNarrativeDeltaInput(operation.mutation.input, operation.execution);
   }
+  if (operation.mutation.kind === "live-event") return validLiveEventInput(operation);
   return true;
+}
+
+function validLiveEventInput(operation: ExecutionSemanticOperation): boolean {
+  const mutation = operation.mutation;
+  if (mutation.kind !== "live-event") return false;
+  const publication = liveEventPublication(operation);
+  if (!publication) return false;
+  const event = publication.event;
+  if (!validLiveTextPayload(mutation, operation.execution)
+    || !AgentEventSchema().safeParse(event).success || !validLiveTextAssociation(mutation.text, event)) return false;
+  if (mutation.narrative && !validNarrativeDeltaInput(mutation.narrative, operation.execution)) return false;
+  return validLiveEventBudget(operation, mutation);
+}
+
+function liveEventPublication(operation: ExecutionSemanticOperation): ExecutionLivePublicationIntent | null {
+  const publication = operation.livePublication;
+  return Array.isArray(publication) && publication.length === 1 && publication[0]?.after === "writer"
+    ? publication[0] : null;
+}
+
+function validLiveEventBudget(
+  operation: ExecutionSemanticOperation,
+  mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "live-event" }>,
+): boolean {
+  const narrativeRows = mutation.narrative
+    ? mutation.narrative.items.length + (mutation.narrative.discardedItemIds?.length ?? 0) : 0;
+  const textRows = mutation.text.kind === "append" ? mutation.text.inputs.length
+    : mutation.text.kind === "unchanged" ? 0 : 1;
+  if (textRows + narrativeRows === 0 || textRows + narrativeRows > ACTIVE_TURN_WRITE_BATCH_LIMITS.maxRows - 2) return false;
+  return Buffer.byteLength(JSON.stringify(operation), "utf8") <= ACTIVE_TURN_WRITE_BATCH_LIMITS.maxBytes;
+}
+
+function validLiveTextPayload(
+  mutation: Extract<ExecutionSemanticOperation["mutation"], { kind: "live-event" }>,
+  execution: ExecutionIdentity,
+): boolean {
+  if (!mutation.text) return false;
+  if (mutation.text.kind === "append") return validAssistantTextInput(mutation.text.inputs, execution);
+  if (mutation.text.kind === "promote") return validAssistantTextInput([mutation.text.input], execution);
+  if (mutation.text.kind === "reclassify") return validReclassification(mutation.text.expectedText, mutation.narrative);
+  return mutation.text.kind === "unchanged";
+}
+
+function validReclassification(
+  expectedText: string,
+  narrative: Extract<ExecutionSemanticOperation["mutation"], { kind: "live-event" }>["narrative"],
+): boolean {
+  if (typeof expectedText !== "string" || !expectedText) return false;
+  return expectedText.trim().length === 0 || Boolean(narrative?.items.some((item) =>
+    item.kind === "narrationSegment" && item.record.text === expectedText));
+}
+
+function validLiveTextAssociation(
+  text: Extract<ExecutionSemanticOperation["mutation"], { kind: "live-event" }>["text"],
+  event: ExecutionLivePublicationIntent["event"],
+): boolean {
+  switch (text.kind) {
+    case "unchanged": return validNarrativeEvent(event);
+    case "append": return validAppendEvent(event, text.inputs);
+    case "reclassify": return event.type === "assistantMessageBoundary" && event.isFinalResponse === false
+      && text.expectedText.length > 0;
+    case "promote": return event.type === "assistantMessageBoundary" && event.isFinalResponse === true;
+  }
+}
+
+function validNarrativeEvent(event: ExecutionLivePublicationIntent["event"]): boolean {
+  return event.type === "textDelta" ? event.isFinalResponse === false
+    : ["assistantMessageBoundary", "toolUse", "toolResult", "hookStarted", "hookCompleted"].includes(event.type);
+}
+
+function validAppendEvent(
+  event: ExecutionLivePublicationIntent["event"],
+  inputs: readonly ParentAssistantTextCheckpointInput[],
+): boolean {
+  return event.type === "textDelta" && event.isFinalResponse !== false
+    && inputs.map((input) => input.text).join("") === event.delta;
 }
 
 function validNarrativeDeltaInput(
