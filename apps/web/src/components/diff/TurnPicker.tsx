@@ -31,7 +31,7 @@ function byCreatedAt(a: TurnSnapshot, b: TurnSnapshot): number {
   return a.created_at.localeCompare(b.created_at);
 }
 
-/** Ordinal across *all* snapshots, so "Turn 7" approximates the 7th turn. */
+/** Ordinal across turns with changes only, so "Turn 2" is the 2nd pickable turn. */
 function turnOrdinals(snapshots: readonly TurnSnapshot[]): Map<string, number> {
   const ordinals = new Map<string, number>();
   [...snapshots].sort(byCreatedAt).forEach((s, i) => {
@@ -64,7 +64,7 @@ export function TurnPicker({ threadId }: { threadId: string }) {
     () => diffTurns(snapshots ?? []).sort(byCreatedAt).reverse(),
     [snapshots],
   );
-  const ordinals = useMemo(() => turnOrdinals(snapshots ?? []), [snapshots]);
+  const ordinals = useMemo(() => turnOrdinals(turns), [turns]);
   const effectiveMessageId = selectedMessageId ?? turns[0]?.message_id ?? null;
 
   // Seed the operand with the latest diff-turn when the view is entered
