@@ -90,16 +90,13 @@ describe("TurnFileTracker", () => {
       TEST_PLATFORM,
     );
     tracker.beginTurn("t", root, "unavailable-ref");
-    const pendingStarts = [tracker.observeToolUse(
-      "t",
-      "file-child",
-      "file_change",
-      { changes: [{ path: "tracked.txt", kind: "edit" }] },
-    )];
+    const event = { threadId: "t", toolCallId: "file-child", toolName: "file_change", toolInput: { changes: [{ path: "tracked.txt", kind: "edit" }] } };
+    const captured = tracker.captureToolUseObservation(event.threadId, event.toolCallId, event.toolName, event.toolInput);
+    if (!captured) throw new Error("Expected a captured baseline");
+    expect(structuredClone(captured)).toEqual(captured);
     await NodeFSPromises.writeFile(trackedPath, "after\nextra\n");
-    expect(pendingStarts).toHaveLength(1);
+    expect(await tracker.observeCapturedToolUse(event, structuredClone(captured))).toBe(true);
     await tracker.observeToolResult("t", "file-child");
-    await Promise.all(pendingStarts);
 
     const summary = await tracker.finalizeTurn("t");
     expect(summary).toMatchObject({ fileCount: 1, additions: 2, deletions: 1 });
@@ -109,6 +106,31 @@ describe("TurnFileTracker", () => {
       toolCallIds: ["file-child"],
     });
     expect(updates.at(-1)).toEqual(summary);
+  });
+
+  it("rejects a captured baseline from another tool, root, or turn generation", async () => {
+    const root = await tempDir("mcode-stale-observation-");
+    const path = NodePath.join(root, "tracked.txt");
+    await NodeFSPromises.writeFile(path, "before\n");
+    const tracker = new TurnFileTracker(async () => ({ kind: "unavailable" }), () => {}, TEST_PLATFORM);
+    const event = { threadId: "t", toolCallId: "old-tool", toolName: "Edit", toolInput: { file_path: "tracked.txt" } };
+    const firstGeneration = tracker.beginTurn("t", root, null);
+    const captured = tracker.captureToolUseObservation(event.threadId, event.toolCallId, event.toolName, event.toolInput);
+    if (!captured) throw new Error("Expected a captured baseline");
+    expect(await tracker.observeCapturedToolUse({ ...event, toolCallId: "other-tool" }, captured)).toBe(false);
+    expect(await tracker.observeCapturedToolUse({ ...event, toolName: "Write" }, captured)).toBe(false);
+    expect(await tracker.observeCapturedToolUse(event, { ...captured, canonicalRoot: "other-root" })).toBe(false);
+    expect(await tracker.observeCapturedToolUse({ ...event, toolInput: { file_path: "other.txt" } }, captured)).toBe(false);
+    const replacement = new TurnFileTracker(async () => ({ kind: "unavailable" }), () => {}, TEST_PLATFORM);
+    expect(replacement.beginTurn("t", root, null)).toBe(firstGeneration);
+    expect(await replacement.observeCapturedToolUse(event, captured)).toBe(false);
+
+    const nextGeneration = tracker.beginTurn("t", root, null);
+    await NodeFSPromises.writeFile(path, "after\n");
+    expect(await tracker.observeCapturedToolUse(event, structuredClone(captured))).toBe(false);
+    await tracker.observeToolResult("t", event.toolCallId);
+    expect(await tracker.finalizeTurn("t", firstGeneration)).toMatchObject({ fileCount: 0 });
+    expect(await tracker.finalizeTurn("t", nextGeneration)).toMatchObject({ fileCount: 0 });
   });
 
   it("classifies added, edited, and removed files with net line totals", async () => {
@@ -384,6 +406,23 @@ describe("TurnFileTracker", () => {
     await observation;
 
     expect(synchronousDurationMs).toBeLessThan(250);
+  });
+
+  it("keeps captured pre-edit observations within the path and byte budgets", async () => {
+    const root = await tempDir("mcode-captured-observation-budget-");
+    const tracker = trackerWithBaseline({}, []);
+    tracker.beginTurn("t", root, null);
+    const changes = Array.from({ length: 5 }, (_, index) => ({ path: `file-${index}.txt`, kind: "edit" }));
+    for (const change of changes) {
+      await NodeFSPromises.writeFile(NodePath.join(root, change.path), "x".repeat(350_000));
+    }
+    const captured = tracker.captureToolUseObservation("t", "bulk", "file_change", { changes });
+    if (!captured) throw new Error("Expected bounded observations");
+    expect(captured.observations).toHaveLength(5);
+    expect(captured.observations.filter(Boolean)).toHaveLength(4);
+    const capturedBytes = captured.observations.reduce((total, observation) =>
+      total + Buffer.byteLength(observation?.baseline?.text ?? "", "utf8"), 0);
+    expect(capturedBytes).toBeLessThanOrEqual(1_048_576);
   });
 
   it("falls back to complete async observation when a rename exceeds the remaining path budget", async () => {

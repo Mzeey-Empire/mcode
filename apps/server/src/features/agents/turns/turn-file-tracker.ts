@@ -32,10 +32,21 @@ interface MutationCandidate {
 }
 
 interface CandidateObservation {
-  resolvedPath: Pick<TrackedPath, "path" | "displayPath" | "scope"> | null;
-  resolvedOldPath: Pick<TrackedPath, "path" | "displayPath" | "scope"> | null;
-  baseline: FileState | null;
-  oldBaseline: FileState | null;
+  readonly resolvedPath: Readonly<Pick<TrackedPath, "path" | "displayPath" | "scope">> | null;
+  readonly resolvedOldPath: Readonly<Pick<TrackedPath, "path" | "displayPath" | "scope">> | null;
+  readonly baseline: Readonly<FileState> | null;
+  readonly oldBaseline: Readonly<FileState> | null;
+}
+
+/** Plain, bounded pre-edit evidence that can cross a worker message boundary. */
+export interface CapturedToolUseObservation {
+  readonly threadId: string;
+  readonly toolCallId: string;
+  readonly generation: number;
+  readonly generationToken: string;
+  readonly canonicalRoot: string;
+  readonly candidateIdentity: string;
+  readonly observations: readonly (CandidateObservation | null)[];
 }
 
 interface SyncObservationBudget {
@@ -73,6 +84,7 @@ interface TrackedPath {
 interface TurnState {
   reconstructionRejected?: boolean;
   generation: number;
+  generationToken: string;
   cwd: string;
   canonicalRoot: string;
   baselineRef: string | null;
@@ -124,6 +136,7 @@ export class TurnFileTracker {
     const generations = this.turns.get(threadId) ?? new Map<number, TurnState>();
     generations.set(generation, {
       generation,
+      generationToken: NodeCrypto.randomUUID(),
       cwd,
       canonicalRoot,
       baselineRef,
@@ -160,20 +173,52 @@ export class TurnFileTracker {
     toolName: string,
     toolInput: Record<string, unknown>,
   ): Promise<void> {
-    const candidates = extractMutationCandidates(toolName, toolInput);
-    if (candidates.length === 0) return Promise.resolve();
+    const captured = this.captureToolUseObservation(threadId, toolCallId, toolName, toolInput);
+    return captured
+      ? this.observeCapturedToolUse({ threadId, toolCallId, toolName, toolInput }, captured).then(() => undefined)
+      : Promise.resolve();
+  }
+
+  /** Take the bounded filesystem baseline synchronously, before the provider may edit. */
+  captureToolUseObservation(
+    threadId: string,
+    toolCallId: string,
+    toolName: string,
+    toolInput: Record<string, unknown>,
+  ): CapturedToolUseObservation | null {
     const generation = this.currentGeneration.get(threadId);
-    if (generation === undefined) return Promise.resolve();
+    if (generation === undefined) return null;
     const turn = this.getTurn(threadId, generation);
-    if (!turn) return Promise.resolve();
-    const boundedCandidates = dedupeMutationCandidates(candidates).slice(0, MAX_TURN_FILE_EFFECTS);
-    const observations = this.synchronousObservations(turn, boundedCandidates);
+    if (!turn) return null;
+    const candidates = boundedMutationCandidates(toolName, toolInput);
+    if (candidates.length === 0) return null;
+    const observations = this.synchronousObservations(turn, candidates).map(freezeCandidateObservation);
+    return Object.freeze({
+      threadId, toolCallId, generation, generationToken: turn.generationToken,
+      canonicalRoot: turn.canonicalRoot,
+      candidateIdentity: mutationCandidateIdentity(toolName, candidates),
+      observations: Object.freeze(observations),
+    });
+  }
+
+  /** Apply a captured baseline only to its original thread, tool, root, and active generation. */
+  observeCapturedToolUse(
+    event: { readonly threadId: string; readonly toolCallId: string; readonly toolName: string; readonly toolInput: Record<string, unknown> },
+    captured: CapturedToolUseObservation,
+  ): Promise<boolean> {
+    const { threadId, toolCallId, toolName, toolInput } = event;
+    const turn = this.getTurn(threadId);
+    if (!turn || !capturedMatchesTurn(captured, turn, threadId, toolCallId)) return Promise.resolve(false);
+    const generation = turn.generation;
+    const boundedCandidates = boundedMutationCandidates(toolName, toolInput);
+    if (boundedCandidates.length === 0 || captured.observations.length !== boundedCandidates.length
+      || captured.candidateIdentity !== mutationCandidateIdentity(toolName, boundedCandidates)) return Promise.resolve(false);
     this.generationByToolCall.set(toolGenerationKey(threadId, toolCallId), generation);
     return this.enqueue(threadId, async (queuedTurn) => {
       for (const [index, candidate] of boundedCandidates.entries()) {
-        await this.captureCandidate(queuedTurn, toolCallId, candidate, observations[index]);
+        await this.captureCandidate(queuedTurn, toolCallId, candidate, captured.observations[index] ?? undefined);
       }
-    }, generation);
+    }, generation).then(() => true);
   }
 
   /** Verify all paths attributed to a completed file tool and publish the net summary. */
@@ -672,6 +717,44 @@ function dedupeMutationCandidates(candidates: MutationCandidate[]): MutationCand
     if (!unique.has(identity)) unique.set(identity, candidate);
   }
   return [...unique.values()];
+}
+
+function boundedMutationCandidates(toolName: string, toolInput: Record<string, unknown>): MutationCandidate[] {
+  return dedupeMutationCandidates(extractMutationCandidates(toolName, toolInput)).slice(0, MAX_TURN_FILE_EFFECTS);
+}
+
+function capturedMatchesTurn(
+  captured: CapturedToolUseObservation,
+  turn: TurnState,
+  threadId: string,
+  toolCallId: string,
+): boolean {
+  return captured.threadId === threadId && captured.toolCallId === toolCallId
+    && captured.generation === turn.generation && captured.generationToken === turn.generationToken
+    && captured.canonicalRoot === turn.canonicalRoot;
+}
+
+function mutationCandidateIdentity(toolName: string, candidates: readonly MutationCandidate[]): string {
+  const hash = NodeCrypto.createHash("sha256");
+  hash.update(toolName);
+  for (const candidate of candidates) {
+    hash.update(JSON.stringify([
+      candidate.path, candidate.oldPath ?? null, candidate.operationHint,
+      candidate.providerConfirmed === true, candidate.beforeText !== undefined,
+      candidate.afterText !== undefined,
+    ]));
+  }
+  return hash.digest("hex");
+}
+
+function freezeCandidateObservation(observation: CandidateObservation | undefined): CandidateObservation | null {
+  if (!observation) return null;
+  return Object.freeze({
+    resolvedPath: observation.resolvedPath ? Object.freeze({ ...observation.resolvedPath }) : null,
+    resolvedOldPath: observation.resolvedOldPath ? Object.freeze({ ...observation.resolvedOldPath }) : null,
+    baseline: observation.baseline ? Object.freeze({ ...observation.baseline }) : null,
+    oldBaseline: observation.oldBaseline ? Object.freeze({ ...observation.oldBaseline }) : null,
+  });
 }
 
 function observeCandidateSynchronously(
