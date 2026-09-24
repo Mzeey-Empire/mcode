@@ -12,9 +12,11 @@ import { deriveTurnAssistantMessageId } from "../../turns/turn-assistant-message
 import { ExecutionMailboxScheduler } from "../../execution/execution-mailbox-scheduler.js";
 import type { ExecutionLease } from "../../execution/execution-mailbox-protocol.js";
 import { ExecutionThreadWorkerPort } from "../../execution/execution-worker-port.js";
+import { AgentEventPublicationRegistry } from "../../orchestration/agent-event-publication-registry.js";
 import type { ExecutionSemanticOperation, ExecutionWorkCommand, ExecutionWorkerResult } from "../../execution/execution-worker-handler.js";
 import { CanonicalAgentWriterClient } from "../canonical-agent-writer-client.js";
 import { CanonicalExecutionWriterPort } from "../canonical-execution-writer-port.js";
+import { ExecutionLivePublicationRelease } from "../execution-live-publication-release.js";
 
 const NOW = "2026-09-24T10:00:00.000Z";
 const THREAD_ID = "semantic-worker-thread";
@@ -76,6 +78,124 @@ describe("execution semantic writer transport", () => {
     await writer?.close();
     db.close(true);
     NodeFS.rmSync(directory, { recursive: true, force: true });
+  });
+
+  it("releases live receipts in order after their writer and terminal barriers", async () => {
+    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    const registry = new AgentEventPublicationRegistry();
+    const published: AgentEvent[] = [];
+    registry.bind((event) => published.push(event));
+    const release = new ExecutionLivePublicationRelease(registry);
+    const port = new CanonicalExecutionWriterPort(writer, () => {}, release);
+    const started = { type: AgentEventType.TurnStarted, threadId: THREAD_ID, turnExecutionId: EXECUTION_ID };
+    const begin: ExecutionSemanticOperation = {
+      ...beginOperation(), livePublication: [{ after: "writer", event: started }],
+    };
+    expect((await port.transact(begin)).kind).toBe("committed");
+    expect(published.map((event) => event.type)).toEqual([AgentEventType.TurnStarted]);
+
+    const delta: AgentEvent = { type: AgentEventType.TextDelta, threadId: THREAD_ID,
+      turnExecutionId: EXECUTION_ID, delta: "answer", isFinalResponse: true };
+    const system: AgentEvent = { type: AgentEventType.System, threadId: THREAD_ID,
+      turnExecutionId: EXECUTION_ID, subtype: "test" };
+    const append: ExecutionSemanticOperation = {
+      operationId: `${lease.leaseId}:2`, execution, lease, ordinal: 2,
+      mutation: { kind: "append-events", phase: "running", nativeCursor: null,
+        events: [runtimeDraft(1, delta), runtimeDraft(2, system)] },
+      livePublication: [{ after: "writer", event: delta }, { after: "writer", event: system }],
+    };
+    expect((await port.transact(append)).kind).toBe("committed");
+    expect(published.map((event) => event.type))
+      .toEqual([AgentEventType.TurnStarted, AgentEventType.TextDelta, AgentEventType.System]);
+    expect((await port.transact(append)).kind).toBe("committed");
+    expect(published).toHaveLength(3);
+
+    const staged = new MessageRepo(db).create(THREAD_ID, "assistant", "Answer", 2,
+      undefined, undefined, undefined, "model", true);
+    const ended: AgentEvent = { type: AgentEventType.Ended, threadId: THREAD_ID,
+      turnExecutionId: EXECUTION_ID, outcome: "completed" };
+    const finish: ExecutionSemanticOperation = {
+      operationId: `${lease.leaseId}:3`, execution, lease, ordinal: 3,
+      mutation: { kind: "finish", outcome: "completed", input: {
+        threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, providerId: "codex",
+        providerIdentities: [], outcome: "completed", projection: { message: staged, narrative: [] },
+      } },
+      livePublication: [{ after: "terminal", event: ended }],
+    };
+    db.run("CREATE TRIGGER fail_live_release BEFORE UPDATE OF kind ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:finish' BEGIN SELECT RAISE(ABORT, 'finish unavailable'); END");
+    await expect(port.transact(finish)).rejects.toThrow("Canonical writer write-failed");
+    expect(published).toHaveLength(3);
+    expect(db.prepare("SELECT terminal_outcome FROM canonical_agent_ingest_checkpoints WHERE execution_id = ?")
+      .get(EXECUTION_ID)).toEqual({ terminal_outcome: null });
+    db.run("DROP TRIGGER fail_live_release");
+
+    expect((await port.transact(finish)).kind).toBe("committed");
+    expect(published.map((event) => event.type))
+      .toEqual([AgentEventType.TurnStarted, AgentEventType.TextDelta, AgentEventType.System, AgentEventType.Ended]);
+    expect((await port.transact(finish)).kind).toBe("committed");
+    expect(published).toHaveLength(4);
+  });
+
+  it("carries a live publication from the execution worker to the bound host publisher", async () => {
+    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    const registry = new AgentEventPublicationRegistry();
+    const published: AgentEvent[] = [];
+    registry.bind((event) => published.push(event));
+    const release = new ExecutionLivePublicationRelease(registry);
+    const port = new CanonicalExecutionWriterPort(writer, () => {}, release);
+    const scheduler = new ExecutionMailboxScheduler<ExecutionWorkCommand, ExecutionWorkerResult>({
+      workerCount: 1,
+      limits: {
+        maxPending: 4, maxPendingBytes: 8_000, reservedControl: 2, reservedControlBytes: 4_000,
+        maxPerExecutionPending: 4, maxPerExecutionBytes: 8_000,
+        reservedPerExecutionControl: 2, reservedPerExecutionControlBytes: 4_000,
+      },
+      createWorker: () => new ExecutionThreadWorkerPort(port),
+      onWorkerLost: () => { throw new Error("Execution worker was lost"); },
+    });
+    try {
+      const claim = scheduler.claim(execution, 1);
+      if (claim.kind !== "claimed") throw new Error(`Execution claim failed: ${claim.kind}`);
+      const begin = beginOperation().mutation;
+      if (begin.kind !== "begin") throw new Error("Unexpected begin operation");
+      const admission = scheduler.submit({ execution, lease: claim.lease, byteLength: 1_000,
+        command: { kind: "start", providerId: "codex", input: begin.input,
+          livePublication: [{ after: "writer", event: {
+            type: AgentEventType.TurnStarted, threadId: THREAD_ID, turnExecutionId: EXECUTION_ID,
+          } }],
+        },
+      });
+      if (admission.kind !== "admitted") throw new Error(`Execution admission failed: ${admission.kind}`);
+      await expect(admission.completion).resolves.toMatchObject({ kind: "reply", result: {
+        kind: "committed", livePublication: [{ publicationId: `${claim.lease.leaseId}:1:0` }],
+      } });
+      expect(published.map((event) => event.type)).toEqual([AgentEventType.TurnStarted]);
+      expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE thread_id = ?").get(THREAD_ID))
+        .toEqual({ count: 1 });
+    } finally {
+      scheduler.shutdown();
+    }
+  });
+
+  it("replays a committed live receipt when the public publisher becomes available", async () => {
+    writer = new CanonicalAgentWriterClient(NodePath.join(directory, "app.sqlite"));
+    const registry = new AgentEventPublicationRegistry();
+    const release = new ExecutionLivePublicationRelease(registry);
+    const port = new CanonicalExecutionWriterPort(writer, () => {}, release);
+    const begin: ExecutionSemanticOperation = { ...beginOperation(), livePublication: [{
+      after: "writer", event: {
+        type: AgentEventType.TurnStarted, threadId: THREAD_ID, turnExecutionId: EXECUTION_ID,
+      },
+    }] };
+    await expect(port.transact(begin)).rejects.toThrow("Live AgentEvent publisher is not bound");
+    expect(db.prepare("SELECT COUNT(*) AS count FROM messages WHERE thread_id = ?").get(THREAD_ID))
+      .toEqual({ count: 1 });
+    const published: AgentEvent[] = [];
+    registry.bind((event) => published.push(event));
+    expect((await port.transact(begin)).kind).toBe("committed");
+    expect(published.map((event) => event.type)).toEqual([AgentEventType.TurnStarted]);
+    expect((await port.transact(begin)).kind).toBe("committed");
+    expect(published).toHaveLength(1);
   });
 
   it("commits and replays a semantic start through the dedicated SQLite worker", async () => {

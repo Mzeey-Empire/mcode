@@ -23,16 +23,16 @@ import type { ExecutionMailboxCommand } from "./execution-mailbox-scheduler.js";
 
 /** Data that an execution worker may receive without a server dependency container. */
 export type ExecutionWorkCommand =
-  | { readonly kind: "start"; readonly providerId: string; readonly input: DataOnlyParentTurnStartInput }
+  | { readonly kind: "start"; readonly providerId: string; readonly input: DataOnlyParentTurnStartInput; readonly livePublication?: readonly ExecutionLivePublicationIntent[] }
   | { readonly kind: "resume"; readonly providerId: string; readonly checkpointId: string }
-  | { readonly kind: "event"; readonly phase: string; readonly nativeCursor: unknown | null; readonly events: readonly ProviderEventDraft[] }
+  | { readonly kind: "event"; readonly phase: string; readonly nativeCursor: unknown | null; readonly events: readonly ProviderEventDraft[]; readonly livePublication?: readonly ExecutionLivePublicationIntent[] }
   | { readonly kind: "assistant-text"; readonly inputs: readonly ParentAssistantTextCheckpointInput[] }
   | { readonly kind: "narrative-delta"; readonly input: ParentNarrativeRecoveryCommit }
   | { readonly kind: "checkpoint"; readonly phase: string; readonly nativeCursor: unknown | null }
   | { readonly kind: "effect-result"; readonly effectId: string; readonly settled: boolean }
   | { readonly kind: "provider-outcome"; readonly outcome: TurnOutcome }
   | { readonly kind: "stage-terminal"; readonly input: DataOnlyParentTerminalProjectionInput }
-  | { readonly kind: "finalize"; readonly outcome: TurnOutcome; readonly input: DataOnlyParentTurnFinishInput }
+  | { readonly kind: "finalize"; readonly outcome: TurnOutcome; readonly input: DataOnlyParentTurnFinishInput; readonly livePublication?: readonly ExecutionLivePublicationIntent[] }
   | { readonly kind: "release" };
 
 /** One complete semantic mutation. The single writer decides its SQL transaction. */
@@ -341,13 +341,24 @@ function operationFor(
   request: ExecutionWorkerRequest<WorkerCommand>,
   mutation: ExecutionSemanticOperation["mutation"],
 ): ExecutionSemanticOperation {
+  const livePublication = livePublicationFor(request.command);
   return {
     operationId: operationId(request),
     execution: request.execution,
     lease: request.lease,
     ordinal: request.ordinal,
     mutation,
+    ...(livePublication ? { livePublication } : {}),
   };
+}
+
+function livePublicationFor(command: WorkerCommand): readonly ExecutionLivePublicationIntent[] | undefined {
+  switch (command.kind) {
+    case "start":
+    case "event":
+    case "finalize": return command.livePublication;
+    default: return undefined;
+  }
 }
 
 function operationId(request: ExecutionWorkerRequest<WorkerCommand>): string {

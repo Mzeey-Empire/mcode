@@ -8,6 +8,9 @@ import { AgentEventType, type ParentNarrativeRecoveryItem } from "@mcode/contrac
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import type { CanonicalAgentEventDraft } from "../canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient } from "../canonical-agent-writer-client.js";
+import { CanonicalExecutionWriterPort } from "../canonical-execution-writer-port.js";
+import { ExecutionLivePublicationRelease } from "../execution-live-publication-release.js";
+import { AgentEventPublicationRegistry } from "../../orchestration/agent-event-publication-registry.js";
 import type { CanonicalWriterResponse } from "../canonical-agent-writer-protocol.js";
 import { ParentAssistantTextCheckpointService } from "../../turns/parent-assistant-text-checkpoint-service.js";
 import type { ExecutionSemanticOperation } from "../../execution/execution-worker-handler.js";
@@ -178,12 +181,18 @@ describe("canonical SQLite writer", () => {
       } }],
     };
     let created = 0;
+    const registry = new AgentEventPublicationRegistry();
+    const published: string[] = [];
+    registry.bind((event) => published.push(event.type));
+    const release = new ExecutionLivePublicationRelease(registry);
     writer = new CanonicalAgentWriterClient(dbPath, () => created++ === 0
       ? workerDroppingReply("semantic-transacted")
       : new Worker(new URL("../canonical-agent-writer.worker.ts", import.meta.url), { type: "module" }));
+    let port = new CanonicalExecutionWriterPort(writer, () => {}, release);
 
-    const receipt = await writer.transactSemantic(operation, () => {});
+    const receipt = await port.transact(operation);
     expect(created).toBe(2);
+    expect(published).toEqual([AgentEventType.TurnStarted]);
     expect(receipt).toMatchObject({ kind: "committed", livePublication: [{
       publicationId: "publication-lease:1:0", after: "writer",
       event: { type: AgentEventType.TurnStarted, turnExecutionId: EXECUTION_ID },
@@ -195,7 +204,9 @@ describe("canonical SQLite writer", () => {
 
     await writer.close();
     writer = new CanonicalAgentWriterClient(dbPath);
-    expect(await writer.transactSemantic(operation, () => {})).toEqual(receipt);
+    port = new CanonicalExecutionWriterPort(writer, () => {}, release);
+    expect(await port.transact(operation)).toEqual(receipt);
+    expect(published).toEqual([AgentEventType.TurnStarted]);
   });
 
   it("replays durable semantic assistant text after a worker reply is lost", async () => {
