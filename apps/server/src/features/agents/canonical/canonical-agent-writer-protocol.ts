@@ -1,5 +1,10 @@
 import type { CanonicalAgentEventEnvelope } from "@mcode/contracts";
-import type { CanonicalAgentCommitInput, CanonicalAgentCommitResult, CanonicalAgentEventDraft } from "./canonical-agent-boundary.js";
+import type {
+  CanonicalAgentCommitInput,
+  CanonicalAgentCommitResult,
+  CanonicalAgentEventDraft,
+  ParentNarrativeRecoveryCommitInput,
+} from "./canonical-agent-boundary.js";
 
 /** Cloneable provider batch accepted by the SQLite writer. Compatibility callbacks stay with their owner. */
 export type CanonicalProviderWriteInput = Pick<
@@ -17,6 +22,11 @@ export interface CanonicalProviderWriteReceipt {
   events: readonly CanonicalAgentEventEnvelope[];
 }
 
+/** Acknowledges completed recovery writes; false means the execution was not found. */
+export interface CanonicalParentNarrativeRecoveryReceipt {
+  recorded: boolean;
+}
+
 interface Correlation {
   requestId: string;
   operationId: string;
@@ -26,10 +36,12 @@ interface Correlation {
 export type CanonicalWriterRequest =
   | (Correlation & { kind: "open"; dbPath: string })
   | (Correlation & { kind: "commit"; input: CanonicalProviderWriteInput })
+  | (Correlation & { kind: "record-parent-narrative-recovery"; input: ParentNarrativeRecoveryCommitInput })
   | (Correlation & { kind: "close" });
 
 export type CanonicalWriterResponse =
   | (Correlation & { kind: "opened" })
   | (Correlation & { kind: "committed"; receipt: CanonicalProviderWriteReceipt })
+  | (Correlation & { kind: "parent-narrative-recovery-recorded"; receipt: CanonicalParentNarrativeRecoveryReceipt })
   | (Correlation & { kind: "closed" })
   | (Correlation & { kind: "failed"; reason: "open-failed" | "write-failed" });

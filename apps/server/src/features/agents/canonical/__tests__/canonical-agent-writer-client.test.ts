@@ -4,6 +4,7 @@ import * as NodeFSPromises from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { ParentNarrativeRecoveryItem } from "@mcode/contracts";
 import { openDatabase } from "../../../../runtime/persistence/sqlite/database.js";
 import type { CanonicalAgentEventDraft } from "../canonical-agent-boundary.js";
 import { CanonicalAgentWriterClient } from "../canonical-agent-writer-client.js";
@@ -70,6 +71,37 @@ function events(): CanonicalAgentEventDraft[] {
   ];
 }
 
+function recoveryToolCall(): ParentNarrativeRecoveryItem {
+  return {
+    kind: "toolCall",
+    record: {
+      id: "writer-recovery-tool",
+      message_id: "",
+      parent_tool_call_id: null,
+      tool_name: "Read",
+      display_name: null,
+      provider_agent_key: null,
+      subagent_identity_key: null,
+      subagent_provider_name: null,
+      subagent_prompt: null,
+      subagent_type: null,
+      subagent_agent_id: null,
+      subagent_duration_ms: null,
+      model: null,
+      reasoning_effort: null,
+      input_summary: "a file",
+      output_summary: "read",
+      output_total_bytes: null,
+      output_artifact_path: null,
+      exit_code: null,
+      status: "completed",
+      started_at: NOW,
+      completed_at: NOW,
+      sort_order: 0,
+    },
+  };
+}
+
 describe("canonical SQLite writer", () => {
   let tempDir: string;
   let dbPath: string;
@@ -118,6 +150,53 @@ describe("canonical SQLite writer", () => {
       events: events(),
     })).rejects.toThrow("Canonical writer write-failed");
     expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_ingest_checkpoints").get()).toEqual({ count: 0 });
+  });
+
+  it("acknowledges structured recovery after persistence and converges on replay", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    await writer.commit("narrative-start", {
+      threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events(),
+    });
+    const recovery = { executionId: EXECUTION_ID, items: [recoveryToolCall()] };
+    expect(await writer.recordParentNarrativeRecovery("narrative-record", recovery)).toEqual({ recorded: true });
+    const row = db.prepare("SELECT payload_json FROM canonical_agent_items WHERE id = ?")
+      .get("toolCall:writer-recovery-tool") as { payload_json: string };
+    expect(JSON.parse(row.payload_json)).toMatchObject({
+      projection: "narrativeRecovery",
+      narrative: recoveryToolCall(),
+    });
+    expect(await writer.recordParentNarrativeRecovery("narrative-record", recovery)).toEqual({ recorded: true });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE id = ?")
+      .get("toolCall:writer-recovery-tool")).toEqual({ count: 1 });
+
+    expect(await writer.recordParentNarrativeRecovery("narrative-discard", {
+      executionId: EXECUTION_ID,
+      items: [],
+      discardedItemIds: ["toolCall:writer-recovery-tool"],
+    })).toEqual({ recorded: true });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items WHERE id = ?")
+      .get("toolCall:writer-recovery-tool")).toEqual({ count: 0 });
+  });
+
+  it("rejects a failed recovery write without a durability acknowledgement", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    await writer.commit("narrative-start", {
+      threadId: THREAD_ID, turnId: TURN_ID, executionId: EXECUTION_ID, phase: "running", events: events(),
+    });
+    db.run("DROP TABLE canonical_agent_items");
+    await expect(writer.recordParentNarrativeRecovery("narrative-failed", {
+      executionId: EXECUTION_ID,
+      items: [recoveryToolCall()],
+    })).rejects.toThrow("Canonical writer write-failed");
+  });
+
+  it("reports a missing execution without claiming recovery was recorded", async () => {
+    writer = new CanonicalAgentWriterClient(dbPath);
+    expect(await writer.recordParentNarrativeRecovery("missing-recovery", {
+      executionId: "missing-execution",
+      items: [recoveryToolCall()],
+    })).toEqual({ recorded: false });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM canonical_agent_items").get()).toEqual({ count: 0 });
   });
 
   it("rejects an unmigrated path without creating a second database", async () => {

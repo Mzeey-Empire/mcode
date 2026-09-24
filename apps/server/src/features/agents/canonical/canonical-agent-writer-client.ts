@@ -1,11 +1,13 @@
 import * as NodePath from "node:path";
 import * as NodeCrypto from "node:crypto";
 import type {
+  CanonicalParentNarrativeRecoveryReceipt,
   CanonicalProviderWriteInput,
   CanonicalProviderWriteReceipt,
   CanonicalWriterRequest,
   CanonicalWriterResponse,
 } from "./canonical-agent-writer-protocol.js";
+import type { ParentNarrativeRecoveryCommitInput } from "./canonical-agent-boundary.js";
 
 const MAX_PENDING_WRITES = 64;
 const WRITER_EXECUTION_ID = "writer:init";
@@ -69,6 +71,26 @@ export class CanonicalAgentWriterClient {
     return response.receipt;
   }
 
+  /** Resolves after recovery writes finish. A lost reply requires a durable-state check before retrying discards. */
+  async recordParentNarrativeRecovery(
+    operationId: string,
+    input: ParentNarrativeRecoveryCommitInput,
+  ): Promise<CanonicalParentNarrativeRecoveryReceipt> {
+    if (!operationId || !input.executionId) throw new Error("Canonical writer operation and execution IDs are required");
+    await this.ready;
+    const response = await this.send({
+      kind: "record-parent-narrative-recovery",
+      requestId: NodeCrypto.randomUUID(),
+      operationId,
+      executionId: input.executionId,
+      input,
+    });
+    if (response.kind !== "parent-narrative-recovery-recorded") {
+      throw new Error("Canonical writer returned an unexpected response");
+    }
+    return response.receipt;
+  }
+
   /** Closes the database after accepted writes settle, then releases the worker. */
   async close(): Promise<void> {
     try {
@@ -91,7 +113,7 @@ export class CanonicalAgentWriterClient {
 
   private send(request: CanonicalWriterRequest): Promise<CanonicalWriterResponse> {
     if (this.failure) return Promise.reject(this.failure);
-    if (request.kind === "commit" && this.pending.size >= MAX_PENDING_WRITES) {
+    if (request.kind !== "open" && request.kind !== "close" && this.pending.size >= MAX_PENDING_WRITES) {
       return Promise.reject(new Error("Canonical writer admission is full"));
     }
     return new Promise((resolve, reject) => {

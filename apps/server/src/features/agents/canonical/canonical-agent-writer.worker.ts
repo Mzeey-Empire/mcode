@@ -70,6 +70,17 @@ function handle(request: CanonicalWriterRequest): CanonicalWriterResponse {
   }
   try {
     if (!boundary) throw new Error("Canonical writer has not opened its database");
+    if (request.kind === "record-parent-narrative-recovery") {
+      if (request.input.executionId !== request.executionId) {
+        throw new Error("Canonical writer recovery execution mismatch");
+      }
+      const recorded = boundary.recordParentNarrativeRecovery(request.input);
+      return {
+        ...correlation,
+        kind: "parent-narrative-recovery-recorded",
+        receipt: { recorded },
+      };
+    }
     assertRouting(request.input, request.executionId);
     const result = boundary.commit(request.input);
     const { outcome, conversationRevision, rosterRevision, acceptedThrough, durableThrough, events } = result;
