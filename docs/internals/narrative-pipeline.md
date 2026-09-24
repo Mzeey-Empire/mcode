@@ -38,9 +38,10 @@ the specific traps we hit so the next person doesn't trip on them.
 If you are about to touch any of these files, **read this first**:
 
 - `apps/server/src/features/providers/` (runtime event source and provider projection)
-- `apps/server/src/features/agents/conversation/narrative/narrative-store.ts` (write seam: enrichment +
-  classification + persistence; owns the per-turn buffers and the
-  `agentCallStack`. Also owns the read seam, `load`.)
+- `apps/server/src/features/agents/conversation/narrative/narrative-turn-state.ts` (per-turn
+  buffers, `agentCallStack`, enrichment, classification, and recovery snapshot)
+- `apps/server/src/features/agents/conversation/narrative/narrative-store.ts` (SQLite
+  persistence, data-only effects from turn state, and the read seam, `load`)
 - `apps/server/src/features/agents/orchestration/agent-service.ts` (turn orchestration; delegates
   the write seam to NarrativeStore and retains turn-level concerns: turn snapshots,
   `turn.persisted` broadcast, and late-hook flushing)
@@ -136,7 +137,7 @@ Provider ingress queues accepted results fairly and selects a provider adapter
 Adapter forwards a provider-neutral AgentEvent or consumes private provider work
     │
     ▼
-Turn event pipeline ToolUse handler → narrative-store.ts bufferToolCall
+Turn event pipeline ToolUse handler → narrative-turn-state.ts bufferToolCall
   (writes to the per-turn tool-call buffer for later persist)
     │
     ▼
@@ -262,7 +263,7 @@ SDK doesn't surface this field (older paths, edge cases).
 - `index.ts` checks `if (event.parentToolCallId)` first — if set,
   leave it. Only falls back to `narrativeStore.getCurrentParentToolCallId`
   when the SDK omitted it.
-- `narrative-store.ts bufferToolCall` does the same dance for the persistence
+- `narrative-turn-state.ts bufferToolCall` does the same dance for the persistence
   buffer: SDK value wins, stack is a fallback. (AgentService's `bufferToolCall`
   is a thin wrapper that delegates here, then persists TodoWrite task state.)
 
@@ -300,7 +301,7 @@ child `toolUse` events to lose their fallback parent ID.
 3. When the session ends.
 
 **Never on `textDelta`. Never on streaming events.** The stack now lives on
-`narrative-store.ts`; its `openOrExtendThought` (the textDelta path) never
+`narrative-turn-state.ts`; its `openOrExtendThought` (the textDelta path) never
 touches `agentCallStack`. See the explanatory comment in the AgentService
 `TextDelta` handler.
 
