@@ -1,4 +1,5 @@
 import { logger } from "@mcode/shared";
+import * as NodePerfHooks from "node:perf_hooks";
 import {
   AgentEventType,
   isTurnDiffSource,
@@ -30,6 +31,7 @@ import {
   type ProviderEventWorkerTask,
 } from "./provider-event-worker-protocol.js";
 import { normalizeProviderError } from "./provider-error-normalize.js";
+import { serverWorkTrace } from "../../agents/diagnostics/server-work-trace.js";
 
 const MAX_PENDING_NON_TERMINAL_EVENTS = 8_192;
 const MAX_PENDING_NON_TERMINAL_EVENTS_PER_THREAD = 2_048;
@@ -128,6 +130,7 @@ export interface ProviderEventIngressQueueMetrics {
 interface QueuedProviderEvent {
   event: ProviderEventIngressEvent;
   queuedAt: number;
+  traceQueuedAt: number;
   byteLength: number;
   terminal: boolean;
 }
@@ -224,6 +227,15 @@ export class ProviderEventIngress {
 
   /** Accept one provider-originated runtime event that has no canonical receipt. */
   acceptProviderRuntime(providerId: ProviderId, runtimeEvent: unknown): void {
+    if (serverWorkTrace) {
+      const threadId = providerEventWorkerThreadId({ kind: "provider-runtime", providerId, runtimeEvent });
+      serverWorkTrace.measure("provider-callback", threadId, undefined, () => this.acceptProviderRuntimeCore(providerId, runtimeEvent));
+      return;
+    }
+    this.acceptProviderRuntimeCore(providerId, runtimeEvent);
+  }
+
+  private acceptProviderRuntimeCore(providerId: ProviderId, runtimeEvent: unknown): void {
     const parsedProviderId = ProviderIdSchema.safeParse(providerId);
     if (!parsedProviderId.success) {
       this.report({ reason: "provider-identity-mismatch", sourceKind: "provider-runtime", providerId: String(providerId) });
@@ -299,7 +311,19 @@ export class ProviderEventIngress {
       this.report({ reason: "worker-shutdown", sourceKind: task.kind, eventId: canonicalEventIdentity(task) });
       return false;
     }
-    const accepted = this.workerPool.submit(providerEventWorkerThreadId(task), task, { onOutcome });
+    const threadId = providerEventWorkerThreadId(task);
+    let accepted: boolean;
+    const trace = serverWorkTrace;
+    if (trace) {
+      const started = NodePerfHooks.performance.now();
+      accepted = this.workerPool.submit(threadId, task, { onOutcome: (outcome) => {
+        trace.record("worker-wait", threadId,
+          outcome.status === "accepted" ? outcome.event.event.turnExecutionId : undefined,
+          NodePerfHooks.performance.now() - started);
+        onOutcome(outcome);
+      } });
+      trace.record("worker-admission", threadId, undefined, NodePerfHooks.performance.now() - started);
+    } else accepted = this.workerPool.submit(threadId, task, { onOutcome });
     if (!accepted) this.rejectForWorkerCapacity(task);
     return accepted;
   }
@@ -392,7 +416,7 @@ export class ProviderEventIngress {
       this.pendingByThread.set(threadId, queued);
       this.readyThreadIds.push(threadId);
     }
-    queued.push({ event, queuedAt: Date.now(), byteLength, terminal });
+    queued.push({ event, queuedAt: Date.now(), traceQueuedAt: serverWorkTrace ? NodePerfHooks.performance.now() : 0, byteLength, terminal });
     this.pendingEventCount += 1;
     this.pendingByteCount += byteLength;
     this.pendingBytesByThread.set(threadId, (this.pendingBytesByThread.get(threadId) ?? 0) + byteLength);
@@ -431,7 +455,12 @@ export class ProviderEventIngress {
     for (let delivered = 0; delivered < MAX_PROVIDER_EVENTS_PER_DRAIN; delivered += 1) {
       const queued = this.takeNextPendingEvent();
       if (!queued) break;
-      this.consumer.handleProviderEvent(queued.event);
+      if (serverWorkTrace) {
+        serverWorkTrace.record("mailbox-wait", queued.event.event.threadId,
+          queued.event.event.turnExecutionId, NodePerfHooks.performance.now() - queued.traceQueuedAt);
+        serverWorkTrace.measure("event-apply", queued.event.event.threadId,
+          queued.event.event.turnExecutionId, () => this.consumer?.handleProviderEvent(queued.event));
+      } else this.consumer.handleProviderEvent(queued.event);
     }
     if (this.pendingEventCount > 0) this.scheduleYieldedDrain();
   }

@@ -1,5 +1,7 @@
 import type { AgentEvent, ProviderFileMutationStart, ProviderTurnDiffUpdate } from "@mcode/contracts";
 import type { TurnDiffService } from "./turn-diff-service.js";
+import * as NodePerfHooks from "node:perf_hooks";
+import { serverWorkTrace } from "../diagnostics/server-work-trace.js";
 
 import type {
   ProviderEventIngressConsumer,
@@ -223,7 +225,13 @@ export class TurnEventPipeline implements ProviderEventIngressConsumer {
   }
 
   private startFinalization(command: FinalizeTurnCommand): Promise<boolean> {
-    return this.lifecycle.finalize(command) ?? Promise.resolve(false);
+    const trace = serverWorkTrace;
+    if (!trace) return this.lifecycle.finalize(command) ?? Promise.resolve(false);
+    const started = NodePerfHooks.performance.now();
+    const result = this.lifecycle.finalize(command) ?? Promise.resolve(false);
+    return result.finally(() => trace.record(
+      "finalization", command.threadId, command.executionId, NodePerfHooks.performance.now() - started,
+    ));
   }
 
   private decrementQueuedBytes(threadId: string, byteLength: number): void {

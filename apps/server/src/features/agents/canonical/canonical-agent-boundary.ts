@@ -41,6 +41,7 @@ import {
   type TurnOutcome,
 } from "@mcode/contracts";
 import { broadcast } from "../../../application/transport/push.js";
+import { serverWorkTrace } from "../diagnostics/server-work-trace.js";
 import {
   canonicalAgentEvents,
   canonicalAgentIngestCheckpoints,
@@ -480,11 +481,17 @@ export class CanonicalAgentBoundary implements ParentTurnDurability, CodexCollab
 
   /** Commit one semantic batch and publish only the applied events after SQLite commits. */
   commit(input: CanonicalAgentCommitInput): CanonicalAgentCommitResult {
-    return this.eventStore.commit(this.toEventStoreCommitInput(input));
+    return serverWorkTrace
+      ? serverWorkTrace.measure("canonical-write", input.threadId, input.executionId,
+        () => this.eventStore.commit(this.toEventStoreCommitInput(input)))
+      : this.eventStore.commit(this.toEventStoreCommitInput(input));
   }
 
   private commitInsideTransaction(input: CanonicalAgentCommitInput): CanonicalAgentCommitResult {
-    return this.eventStore.applyWithinTransaction(this.toEventStoreCommitInput(input));
+    return serverWorkTrace
+      ? serverWorkTrace.measure("canonical-write", input.threadId, input.executionId,
+        () => this.eventStore.applyWithinTransaction(this.toEventStoreCommitInput(input)))
+      : this.eventStore.applyWithinTransaction(this.toEventStoreCommitInput(input));
   }
 
   private toEventStoreCommitInput(input: CanonicalAgentCommitInput): CanonicalAgentEventStoreInput {
