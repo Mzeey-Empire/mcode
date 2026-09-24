@@ -90,7 +90,7 @@ NodeTest.test("names each of the exact verifier-owned threads", () => {
   const names = Array.from({ length: THREAD_COUNT }, (_, index) => expectedThreadTitle("run-id", index + 1));
   NodeAssertStrict.equal(new Set(names).size, THREAD_COUNT);
   NodeAssertStrict.deepEqual(names.at(-1), "Seven-thread live performance run-id 7/7");
-  NodeAssertStrict.equal(expectedThreadTitle("run-id", 3, 6), "Six-thread Stop verification run-id 3/6");
+  NodeAssertStrict.equal(expectedThreadTitle("run-id", 3, THREAD_COUNT, "stop-one"), "Seven-thread Stop verification run-id 3/7");
 });
 
 NodeTest.test("uses the same legacy and modern Terminal lifecycle families as the web transport", () => {

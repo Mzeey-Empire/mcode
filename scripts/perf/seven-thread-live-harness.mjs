@@ -26,7 +26,6 @@ import { renderFixtureWrapper } from "../../.agents/skills/verify-mcode/scripts/
 import { openRuntimeVerificationSocket } from "../../.agents/skills/verify-mcode/scripts/runtime.mjs";
 
 export const THREAD_COUNT = 7;
-const STOP_ONE_THREAD_COUNT = 6;
 const STOP_ONE_ORDINAL = 3;
 const TERMINAL_CONTROL_COUNT = 1;
 export const WORKLOAD_MODEL = "gpt-5.6-luna";
@@ -68,8 +67,8 @@ The run command creates exactly seven direct threads in this worktree's
 .dev/fixture-repo. It temporarily routes Codex through the checked-in
 transcript fixture and restores the previous setting during cleanup. It never
 falls back to a real Codex model or prints runtime credentials.
---stop-one creates six fixture threads, stops the third while all six are
-active, and verifies the other five complete and reload durably.
+--stop-one creates seven fixture threads, stops the third while all seven are
+active, and verifies the other six complete and reload durably.
 `;
 
 /** Parses the small explicit command surface before any runtime mutation. */
@@ -297,8 +296,10 @@ function isValidServerStallTime(timestamp, startedAtMs, endedAtMs) {
 }
 
 /** Creates the stable names used to prove that only this harness owns a thread. */
-export function expectedThreadTitle(runId, ordinal, threadCount = THREAD_COUNT) {
-  const name = threadCount === STOP_ONE_THREAD_COUNT ? "Six-thread Stop verification" : "Seven-thread live performance";
+export function expectedThreadTitle(runId, ordinal, threadCount = THREAD_COUNT, scenario = "baseline") {
+  const name = scenario === "stop-one"
+    ? `${threadCount === 6 ? "Six" : "Seven"}-thread Stop verification`
+    : "Seven-thread live performance";
   return `${name} ${runId} ${ordinal}/${threadCount}`;
 }
 
@@ -361,7 +362,7 @@ async function executeLiveHarness(context) {
   await createAndSubscribeThreads(context);
   const terminal = await preflightTerminalTransport(context);
   const { completed, sends } = await dispatchFixtureTurns(context);
-  if (context.stopOne) await waitForAllSixActive(context);
+  if (context.stopOne) await waitForAllSevenActive(context);
   const stop = context.stopOne ? stopOneActiveTurn(context) : null;
   void stop?.catch(() => undefined);
   await sampleActiveControls(context, terminal);
@@ -448,7 +449,7 @@ async function createAndSubscribeThreads(context) {
 }
 
 async function createOwnedThread(context, branch, ordinal) {
-  const title = expectedThreadTitle(context.run.id, ordinal, context.receipt.workload.threadCount);
+  const title = expectedThreadTitle(context.run.id, ordinal, context.receipt.workload.threadCount, context.receipt.workload.scenario);
   const thread = await measuredRpc(context.socket, context.receipt.metrics.rpc, "thread.create", {
     workspaceId: context.workspace.id,
     title,
@@ -494,27 +495,27 @@ async function dispatchFixtureTurns(context) {
   return { completed, sends };
 }
 
-async function waitForAllSixActive(context) {
+async function waitForAllSevenActive(context) {
   const deadline = Date.now() + TURN_TIMEOUT_MS;
   const threads = context.receipt.state.threads;
   while (Date.now() < deadline) {
     if (threads.some((thread) => thread.completedAtMs !== null || thread.persistedAtMs !== null)) {
-      throw new Error("A fixture turn ended before all six became active; Stop proof is inconclusive");
+      throw new Error("A fixture turn ended before all seven became active; Stop proof is inconclusive");
     }
     const target = threads[STOP_ONE_ORDINAL - 1];
     if (threads.every((thread) => thread.startedAtMs !== null)
       && target.events.filter((event) => event.type === "assistantMessageBoundary").length >= 10) return;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  throw new Error("All six fixture turns and ten narrative boundaries in the stopped turn were not observed before the deadline");
+  throw new Error("All seven fixture turns and ten narrative boundaries in the stopped turn were not observed before the deadline");
 }
 
 async function stopOneActiveTurn(context) {
   const target = context.receipt.state.threads[STOP_ONE_ORDINAL - 1];
   const launchedAtMs = NodePerfHooks.performance.now();
-  const allSixActiveAtLaunch = context.receipt.state.threads.every(isActiveFixtureThread);
-  if (!allSixActiveAtLaunch) throw new Error("Stop did not launch while all six fixture turns were active");
-  context.receipt.state.stop = { ordinal: STOP_ONE_ORDINAL, threadId: target.id, launchedAtMs, allSixActiveAtLaunch };
+  const allSevenActiveAtLaunch = context.receipt.state.threads.every(isActiveFixtureThread);
+  if (!allSevenActiveAtLaunch) throw new Error("Stop did not launch while all seven fixture turns were active");
+  context.receipt.state.stop = { ordinal: STOP_ONE_ORDINAL, threadId: target.id, launchedAtMs, allSevenActiveAtLaunch };
   writeReceipt(context.run.receiptPath, context.receipt, context.paths.devDir);
   const result = await measuredRpc(context.socket, context.receipt.metrics.rpc, "agent.stop", { threadId: target.id }, undefined, CONTROL_RPC_TIMEOUT_MS);
   context.receipt.state.stop = {
@@ -676,7 +677,7 @@ async function recordFinalReceiptMetrics(context) {
   receipt.metrics.turnCompletion = summarizeLatency(receipt.state.threads.map((thread) => elapsedSinceSend(thread, "completedAtMs")));
   receipt.metrics.turnDurability = summarizeLatency(receipt.state.threads.map((thread) => elapsedSinceSend(thread, "persistedAtMs")));
   receipt.state.activeControlLaunch = attributeControlLaunchToTurnCompletion(receipt.state.activeControlLaunch, receipt.state.threads);
-  receipt.metrics.events = summarizeEventAudits(receipt.state.threads);
+  receipt.metrics.events = summarizeEventAudits(receipt.state.threads, receipt.workload.scenario);
   receipt.metrics.harnessEventLoopStalls = {
     scope: "harness-process",
     intervalMs: EVENT_LOOP_INTERVAL_MS,
@@ -746,7 +747,7 @@ function createReceipt(run, label, stopOne) {
     completedAt: null,
     ok: false,
     workload: {
-      threadCount: stopOne ? STOP_ONE_THREAD_COUNT : THREAD_COUNT,
+      threadCount: THREAD_COUNT,
       scenario: stopOne ? "stop-one" : "baseline",
       terminalControlCount: TERMINAL_CONTROL_COUNT,
       provider: PROVIDER_ID,
@@ -1082,6 +1083,7 @@ function hasExpectedDurableOutcome(summary, expectedOutcome, expectedExecutionId
 }
 
 function auditRun(receipt) {
+  if (receipt.state.threads.length !== THREAD_COUNT) return false;
   return receipt.state.threads.every((thread) => {
     thread.eventAudit = auditAgentEvents(thread.events);
     return thread.eventAudit.sequenceValid && isExpectedTerminal(receipt, thread) && thread.durable?.ok === true;
@@ -1095,7 +1097,7 @@ function isExpectedTerminal(receipt, thread) {
     && (thread.status === "paused" || thread.status === "cancelled");
 }
 
-function summarizeEventAudits(threads) {
+function summarizeEventAudits(threads, scenario) {
   const audits = threads.map((thread) => thread.eventAudit ?? auditAgentEvents(thread.events ?? []));
   for (let index = 0; index < threads.length; index += 1) threads[index].eventAudit = audits[index];
   const flatten = (field) => audits.flatMap((audit) => audit[field] ?? []);
@@ -1106,14 +1108,14 @@ function summarizeEventAudits(threads) {
     missingSequences: flatten("missingSequences"),
     duplicateSequences: flatten("duplicateSequences"),
     arrivalOrderViolations: flatten("arrivalOrderViolations"),
-    ok: audits.length === threads.length && audits.every((audit) => audit.sequenceValid)
+    ok: audits.length === THREAD_COUNT && audits.every((audit) => audit.sequenceValid)
       && threads.every((thread) => thread.durable?.ok === true)
-      && threads.every((thread) => hasExpectedEventTerminal(thread, threads.length)),
+      && threads.every((thread) => hasExpectedEventTerminal(thread, scenario)),
   };
 }
 
-function hasExpectedEventTerminal(thread, threadCount) {
-  if (threadCount !== STOP_ONE_THREAD_COUNT || thread.ordinal !== STOP_ONE_ORDINAL) return thread.eventAudit.completed;
+function hasExpectedEventTerminal(thread, scenario) {
+  if (scenario !== "stop-one" || thread.ordinal !== STOP_ONE_ORDINAL) return thread.eventAudit.completed;
   return thread.status === "paused" || thread.status === "cancelled";
 }
 
@@ -1154,7 +1156,7 @@ function resolveCleanupTransport(receipt, threads, cleanup) {
 async function cleanupWorkloadResources(socket, receipt, threads, workspace, terminalTransport, cleanup) {
   if (cleanup.failures.length > 0) return;
   if (terminalTransport) await cleanupPtys(socket, threads, terminalTransport, cleanup);
-  await cleanupThreads(socket, threads, workspace.id, receipt.runId, receipt.workload.threadCount, cleanup);
+  await cleanupThreads(socket, threads, workspace.id, receipt.runId, receipt.workload.threadCount, receipt.workload.scenario, cleanup);
 }
 
 async function cleanupPtys(socket, threads, transport, cleanup) {
@@ -1244,11 +1246,11 @@ function cleanupRpc(socket, method, params) {
   return socket.rpc(method, params, cleanupDeadline());
 }
 
-async function cleanupThreads(socket, threads, workspaceId, runId, threadCount, cleanup) {
+async function cleanupThreads(socket, threads, workspaceId, runId, threadCount, scenario, cleanup) {
   const current = await currentWorkspaceThreads(socket, workspaceId, cleanup);
   if (current === null) return;
   for (const thread of threads) {
-    await cleanupThread(socket, current, thread, runId, threadCount, cleanup);
+    await cleanupThread(socket, current, thread, runId, threadCount, scenario, cleanup);
   }
   await verifyThreadsRemoved(socket, threads, workspaceId, cleanup);
 }
@@ -1262,14 +1264,14 @@ async function currentWorkspaceThreads(socket, workspaceId, cleanup) {
   }
 }
 
-async function cleanupThread(socket, current, thread, runId, threadCount, cleanup) {
+async function cleanupThread(socket, current, thread, runId, threadCount, scenario, cleanup) {
   if (!isReceiptThread(thread)) return;
   const found = current.find((candidate) => candidate?.id === thread.id);
   if (!found) {
     cleanup.threads.push({ threadId: thread.id, outcome: "already-deleted" });
     return;
   }
-  if (!matchesReceiptThread(found, thread, runId, threadCount)) {
+  if (!matchesReceiptThread(found, thread, runId, threadCount, scenario)) {
     cleanup.failures.push(`Refusing to delete thread ${thread.id}: title does not match this receipt`);
     return;
   }
@@ -1286,8 +1288,8 @@ function isReceiptThread(thread) {
   return typeof thread?.id === "string" && Number.isInteger(thread?.ordinal);
 }
 
-function matchesReceiptThread(found, thread, runId, threadCount) {
-  return found.title === expectedThreadTitle(runId, thread.ordinal, threadCount) && found.title === thread.title;
+function matchesReceiptThread(found, thread, runId, threadCount, scenario) {
+  return found.title === expectedThreadTitle(runId, thread.ordinal, threadCount, scenario) && found.title === thread.title;
 }
 
 async function verifyThreadsRemoved(socket, threads, workspaceId, cleanup) {
