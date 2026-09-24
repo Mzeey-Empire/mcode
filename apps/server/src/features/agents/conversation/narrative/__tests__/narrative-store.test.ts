@@ -704,6 +704,35 @@ describe("NarrativeStore write seam (server-side traps)", () => {
     expect(store.nextSortOrder(THREAD)).toBe(1);
   });
 
+  it("does not retain empty adapters for completed threads without narrative state", () => {
+    for (let index = 0; index < 50; index += 1) {
+      const threadId = `completed-thread-${index}`;
+      store.updateBufferedToolCallOutput(threadId, "missing-tool", "done", false);
+      expect(store.stageNarrationSegment(threadId, "")).toBeNull();
+      expect(store.prepareNarrativePersistence(threadId, "m1", "", "completed"))
+        .toEqual({ toolCalls: [], thoughts: [], hooks: [] });
+      store.clearTurn(threadId);
+    }
+
+    expect(Reflect.get(store, "narrativeStates").size).toBe(0);
+    store.beginTurn("completed-thread-0");
+    store.resetTurnCounters("completed-thread-0");
+    store.bufferToolCall("completed-thread-0", toolUse("new-tool", "Read"));
+    expect(store.getBufferedToolCalls("completed-thread-0")).toHaveLength(1);
+  });
+
+  it("keeps the completed turn's sort counter for late hooks, then resets it on the next turn", () => {
+    store.beginTurn(THREAD);
+    store.resetTurnCounters(THREAD);
+    store.bufferToolCall(THREAD, toolUse("read-1", "Read"));
+    store.clearTurn(THREAD);
+
+    expect(store.nextSortOrder(THREAD)).toBe(1);
+    store.beginTurn(THREAD);
+    store.resetTurnCounters(THREAD);
+    expect(store.nextSortOrder(THREAD)).toBe(0);
+  });
+
   it("persists a long active turn in order across bounded transactions", async () => {
     seedAssistantMessage("m1", "done", 1);
     store.beginTurn(THREAD);

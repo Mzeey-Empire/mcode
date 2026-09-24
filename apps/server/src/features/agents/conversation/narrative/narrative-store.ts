@@ -200,7 +200,7 @@ export class NarrativeStore {
   }
 
   updateBufferedToolCallOutput(...args: Parameters<NarrativeTurnState["updateBufferedToolCallOutput"]>): ReturnType<NarrativeTurnState["updateBufferedToolCallOutput"]> {
-    return this.stateFor(args[0]).updateBufferedToolCallOutput(...args);
+    this.narrativeStates.get(args[0])?.updateBufferedToolCallOutput(...args);
   }
 
   clearAgentStackOnMessage(...args: Parameters<NarrativeTurnState["clearAgentStackOnMessage"]>): ReturnType<NarrativeTurnState["clearAgentStackOnMessage"]> {
@@ -216,11 +216,13 @@ export class NarrativeStore {
   }
 
   stageNarrationSegment(...args: Parameters<NarrativeTurnState["stageNarrationSegment"]>): ReturnType<NarrativeTurnState["stageNarrationSegment"]> {
-    return this.stateFor(args[0]).stageNarrationSegment(...args);
+    return (this.narrativeStates.get(args[0]) ?? new NarrativeTurnState(args[0]))
+      .stageNarrationSegment(...args);
   }
 
   recoverySnapshotWithStagedNarration(...args: Parameters<NarrativeTurnState["recoverySnapshotWithStagedNarration"]>): ReturnType<NarrativeTurnState["recoverySnapshotWithStagedNarration"]> {
-    return this.stateFor(args[0]).recoverySnapshotWithStagedNarration(...args);
+    return (this.narrativeStates.get(args[0]) ?? new NarrativeTurnState(args[0]))
+      .recoverySnapshotWithStagedNarration(...args);
   }
 
   applyStagedNarrationSegment(...args: Parameters<NarrativeTurnState["applyStagedNarrationSegment"]>): ReturnType<NarrativeTurnState["applyStagedNarrationSegment"]> {
@@ -248,7 +250,8 @@ export class NarrativeStore {
   }
 
   prepareNarrativePersistence(...args: Parameters<NarrativeTurnState["prepareNarrativePersistence"]>): ReturnType<NarrativeTurnState["prepareNarrativePersistence"]> {
-    return this.stateFor(args[0]).prepareNarrativePersistence(...args);
+    return (this.narrativeStates.get(args[0]) ?? new NarrativeTurnState(args[0]))
+      .prepareNarrativePersistence(...args);
   }
 
   clearTurn(...args: Parameters<NarrativeTurnState["clearTurn"]>): ReturnType<NarrativeTurnState["clearTurn"]> {
