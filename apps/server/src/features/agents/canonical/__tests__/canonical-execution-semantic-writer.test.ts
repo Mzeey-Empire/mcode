@@ -185,4 +185,18 @@ describe("CanonicalExecutionSemanticWriter through ExecutionWorkerHandler", () =
     expect((await send(2, { kind: "event", events: [event()] })).kind).toBe("committed");
     expect(published).toContain(event().eventId);
   });
+
+  it("rolls back the canonical start and user message when the begin receipt fails", async () => {
+    db.run("CREATE TRIGGER fail_semantic_begin_receipt BEFORE INSERT ON canonical_writer_operation_receipts WHEN NEW.kind = 'semantic:begin' BEGIN SELECT RAISE(ABORT, 'begin receipt unavailable'); END");
+    await expect(send(1, { kind: "start", providerId: "codex", input: startInput() }))
+      .rejects.toThrow("begin receipt unavailable");
+    expect(db.prepare("SELECT execution_id FROM canonical_agent_turns WHERE execution_id = ?").get(EXECUTION_ID)).toBeNull();
+    expect(new MessageRepo(db).findByIdInThread(THREAD_ID, "user-1")).toBeNull();
+    expect(db.prepare("SELECT operation_id FROM canonical_writer_operation_receipts WHERE execution_id = ?")
+      .all(EXECUTION_ID)).toEqual([]);
+    expect(published).toEqual([]);
+
+    db.run("DROP TRIGGER fail_semantic_begin_receipt");
+    expect((await send(1, { kind: "start", providerId: "codex", input: startInput() })).kind).toBe("committed");
+  });
 });
