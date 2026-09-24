@@ -84,6 +84,7 @@ describe("createProviderHostPorts", () => {
     });
     const publishCanonicalEvents = vi.fn(() => deliveryOrder.push("publication"));
     const acceptCommitted = vi.fn(() => deliveryOrder.push("ingress"));
+    const acknowledgeOperation = vi.fn(async () => { deliveryOrder.push("acknowledge"); });
     const ports = createProviderHostPorts({
       runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
       envService: { getEnv: () => ({ PATH: "test" }) },
@@ -91,7 +92,7 @@ describe("createProviderHostPorts", () => {
       browser: {},
       threadControl: {},
       grants: {},
-      events: { commit },
+      events: { commit, acknowledgeOperation },
       publishCanonicalEvents,
       ingress: { acceptCommitted },
     } as never);
@@ -111,7 +112,8 @@ describe("createProviderHostPorts", () => {
     expect(commit).toHaveBeenCalledWith(expect.any(String), { ...batch, nativeCursor: undefined });
     expect(publishCanonicalEvents).toHaveBeenCalledWith(events);
     expect(acceptCommitted).toHaveBeenCalledWith(events);
-    expect(deliveryOrder).toEqual(["commit", "publication", "ingress"]);
+    expect(acknowledgeOperation).toHaveBeenCalledWith(EXECUTION_ID, expect.any(String));
+    expect(deliveryOrder).toEqual(["commit", "publication", "ingress", "acknowledge"]);
   });
 
   it("does not hand duplicate or failed commits to ingress", async () => {
@@ -135,7 +137,7 @@ describe("createProviderHostPorts", () => {
       browser: {},
       threadControl: {},
       grants: {},
-      events: { commit },
+      events: { commit, acknowledgeOperation: vi.fn() },
       publishCanonicalEvents: vi.fn(),
       ingress: { acceptCommitted },
     } as never);
@@ -165,7 +167,7 @@ describe("createProviderHostPorts", () => {
       browser: {},
       threadControl: {},
       grants: {},
-      events: { commit },
+      events: { commit, acknowledgeOperation: vi.fn() },
       publishCanonicalEvents: vi.fn(),
       ingress: { acceptCommitted: vi.fn() },
     } as never);
@@ -177,5 +179,39 @@ describe("createProviderHostPorts", () => {
     const operationIds = commit.mock.calls.map(([operationId]) => operationId);
     expect(operationIds[0]).toBe(operationIds[1]);
     expect(operationIds[2]).not.toBe(operationIds[0]);
+  });
+
+  it("retains the receipt when publication fails after a durable commit", async () => {
+    const events = [committedRuntimeEnvelope()];
+    const acknowledgeOperation = vi.fn();
+    const acceptCommitted = vi.fn();
+    const ports = createProviderHostPorts({
+      runtime: { platform: "linux", architecture: "x64", nodeAbi: "127" },
+      envService: { getEnv: () => ({}) },
+      jobObject: { isWindowsJob: false },
+      browser: {},
+      threadControl: {},
+      grants: {},
+      events: {
+        commit: vi.fn(async () => ({
+          outcome: "committed",
+          conversationRevision: 1,
+          rosterRevision: 0,
+          acceptedThrough: 1,
+          durableThrough: 1,
+          events,
+        })),
+        acknowledgeOperation,
+      },
+      publishCanonicalEvents: () => { throw new Error("push unavailable"); },
+      ingress: { acceptCommitted },
+    } as never);
+
+    await expect(ports.events.submit({
+      threadId: "thread-1", turnId: "turn-1", executionId: EXECUTION_ID,
+      phase: "streaming", events: [],
+    })).resolves.toMatchObject({ commit: { outcome: "committed" } });
+    expect(acceptCommitted).toHaveBeenCalledWith(events);
+    expect(acknowledgeOperation).not.toHaveBeenCalled();
   });
 });

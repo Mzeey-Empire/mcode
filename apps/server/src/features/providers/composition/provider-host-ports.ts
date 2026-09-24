@@ -20,7 +20,7 @@ export interface ProviderHostPortDependencies {
   browser: BrowserAutomationSessionLease;
   threadControl: InternalThreadControlMcpRuntime;
   grants: ScopedPreGrantService;
-  events: Pick<CanonicalAgentWriterClient, "commit">;
+  events: Pick<CanonicalAgentWriterClient, "commit" | "acknowledgeOperation">;
   publishCanonicalEvents: CanonicalAgentEventPublisher;
   ingress: ProviderEventIngress;
 }
@@ -103,16 +103,28 @@ export function createProviderHostPorts(
           nativeCursor: batch.nativeCursor,
           events: batch.events,
         });
+        let published = true;
         if (result.outcome === "committed" && result.events.length > 0) {
           try {
             dependencies.publishCanonicalEvents(result.events);
           } catch {
+            published = false;
             logger.warn("Canonical provider publication deferred after durable commit", {
               threadId: batch.threadId,
               executionId: batch.executionId,
             });
           }
           dependencies.ingress.acceptCommitted(result.events);
+        }
+        if (published) {
+          try {
+            await dependencies.events.acknowledgeOperation(batch.executionId, operationId);
+          } catch {
+            logger.warn("Canonical provider receipt acknowledgement deferred", {
+              threadId: batch.threadId,
+              executionId: batch.executionId,
+            });
+          }
         }
         return {
           commit: {
