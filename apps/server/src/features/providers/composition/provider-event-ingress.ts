@@ -31,7 +31,7 @@ import {
   type ProviderEventWorkerTask,
 } from "./provider-event-worker-protocol.js";
 import { normalizeProviderError } from "./provider-error-normalize.js";
-import { serverWorkTrace } from "../../agents/diagnostics/server-work-trace.js";
+import { eventApplyType, serverWorkTrace } from "../../agents/diagnostics/server-work-trace.js";
 
 const MAX_PENDING_NON_TERMINAL_EVENTS = 8_192;
 const MAX_PENDING_NON_TERMINAL_EVENTS_PER_THREAD = 2_048;
@@ -459,7 +459,8 @@ export class ProviderEventIngress {
         serverWorkTrace.record("mailbox-wait", queued.event.event.threadId,
           queued.event.event.turnExecutionId, NodePerfHooks.performance.now() - queued.traceQueuedAt);
         serverWorkTrace.measure("event-apply", queued.event.event.threadId,
-          queued.event.event.turnExecutionId, () => this.consumer?.handleProviderEvent(queued.event));
+          queued.event.event.turnExecutionId, () => this.consumer?.handleProviderEvent(queued.event),
+          eventApplyType(queued.event.event.type));
       } else this.consumer.handleProviderEvent(queued.event);
     }
     if (this.pendingEventCount > 0) this.scheduleYieldedDrain();

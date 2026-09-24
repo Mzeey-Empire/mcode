@@ -4,8 +4,40 @@ import { logger } from "@mcode/shared";
 /** Fixed names keep trace output free of event bodies and provider text. */
 export type ServerWorkPhase =
   | "provider-callback" | "worker-admission" | "worker-wait" | "mailbox-wait"
-  | "canonical-write" | "event-apply" | "finalization" | "publication"
+  | "canonical-write" | "event-apply" | "narrative-checkpoint" | "finalization" | "publication"
   | "terminal-create" | "thread-create" | "agent-send";
+
+/** Fixed event categories; unknown and future event types stay in other. */
+export type EventApplyType = "textDelta" | "toolUse" | "toolResult" | "assistantMessageBoundary" | "other";
+
+/** Classify only the event discriminant, never an event payload. */
+export function eventApplyType(type: string): EventApplyType {
+  switch (type) {
+    case "textDelta":
+    case "toolUse":
+    case "toolResult":
+    case "assistantMessageBoundary":
+      return type;
+    default:
+      return "other";
+  }
+}
+
+interface EventApplyTotals {
+  count: number;
+  totalMs: number;
+  maxMs: number;
+}
+
+function emptyEventApplyTotals(): Record<EventApplyType, EventApplyTotals> {
+  return {
+    textDelta: { count: 0, totalMs: 0, maxMs: 0 },
+    toolUse: { count: 0, totalMs: 0, maxMs: 0 },
+    toolResult: { count: 0, totalMs: 0, maxMs: 0 },
+    assistantMessageBoundary: { count: 0, totalMs: 0, maxMs: 0 },
+    other: { count: 0, totalMs: 0, maxMs: 0 },
+  };
+}
 
 interface WorkSample {
   phase: ServerWorkPhase;
@@ -23,6 +55,8 @@ export type ServerWorkTraceReport = {
   delayMs: number;
   windowMs: number;
   samples: WorkSample[];
+  eventApplyByType: Record<EventApplyType, EventApplyTotals>;
+  narrativeCheckpoint: EventApplyTotals;
   overflowCount: number;
 } | {
   kind: "server-work-slow-operation";
@@ -42,6 +76,8 @@ function safeId(value: string | undefined): string | null {
 /** Aggregates fixed-phase timings in memory and emits only delayed loop windows. */
 export class ServerWorkTrace {
   private readonly samples = new Map<string, WorkSample>();
+  private eventApplyByType = emptyEventApplyTotals();
+  private narrativeCheckpoint: EventApplyTotals = { count: 0, totalMs: 0, maxMs: 0 };
   private overflowCount = 0;
   private lastTick = NodePerfHooks.performance.now();
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -61,21 +97,34 @@ export class ServerWorkTrace {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
     this.samples.clear();
+    this.eventApplyByType = emptyEventApplyTotals();
+    this.narrativeCheckpoint = { count: 0, totalMs: 0, maxMs: 0 };
     this.overflowCount = 0;
   }
 
   /** Measure synchronous work without retaining its input or result. */
-  measure<T>(phase: ServerWorkPhase, threadId: string | undefined, executionId: string | undefined, work: () => T): T {
+  measure<T>(phase: ServerWorkPhase, threadId: string | undefined, executionId: string | undefined, work: () => T, applyType?: EventApplyType): T {
     const started = NodePerfHooks.performance.now();
     try {
       return work();
     } finally {
-      this.record(phase, threadId, executionId, NodePerfHooks.performance.now() - started);
+      this.record(phase, threadId, executionId, NodePerfHooks.performance.now() - started, applyType);
     }
   }
 
   /** Record an asynchronous wait or a measured operation after completion. */
-  record(phase: ServerWorkPhase, threadId: string | undefined, executionId: string | undefined, durationMs: number): void {
+  record(phase: ServerWorkPhase, threadId: string | undefined, executionId: string | undefined, durationMs: number, applyType?: EventApplyType): void {
+    if (phase === "event-apply" && applyType) {
+      const total = this.eventApplyByType[applyType];
+      total.count += 1;
+      total.totalMs += durationMs;
+      total.maxMs = Math.max(total.maxMs, durationMs);
+    }
+    if (phase === "narrative-checkpoint") {
+      this.narrativeCheckpoint.count += 1;
+      this.narrativeCheckpoint.totalMs += durationMs;
+      this.narrativeCheckpoint.maxMs = Math.max(this.narrativeCheckpoint.maxMs, durationMs);
+    }
     const safeThreadId = safeId(threadId);
     const safeExecutionId = safeId(executionId);
     if (this.isSlowOperation(phase, durationMs)) {
@@ -113,9 +162,11 @@ export class ServerWorkTrace {
     this.lastTick = now;
     const delayMs = Math.max(0, windowMs - INTERVAL_MS);
     if (delayMs >= REPORT_DELAY_MS) {
-      this.emit({ kind: "server-work-stall", at: Date.now(), delayMs, windowMs, samples: [...this.samples.values()], overflowCount: this.overflowCount });
+      this.emit({ kind: "server-work-stall", at: Date.now(), delayMs, windowMs, samples: [...this.samples.values()], eventApplyByType: this.eventApplyByType, narrativeCheckpoint: this.narrativeCheckpoint, overflowCount: this.overflowCount });
     }
     this.samples.clear();
+    this.eventApplyByType = emptyEventApplyTotals();
+    this.narrativeCheckpoint = { count: 0, totalMs: 0, maxMs: 0 };
     this.overflowCount = 0;
   }
 }
