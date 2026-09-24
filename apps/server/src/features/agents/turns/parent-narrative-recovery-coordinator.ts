@@ -5,6 +5,7 @@ import {
 } from "@mcode/contracts";
 import type { ParentTurnDurability } from "./parent-turn-durability.js";
 import type { NarrativeStore } from "../conversation/narrative/narrative-store.js";
+import { serverWorkTrace } from "../diagnostics/server-work-trace.js";
 
 interface ParentNarrativeRecoveryCheckpoint {
   persist(): void;
@@ -22,10 +23,20 @@ export class ParentNarrativeRecoveryCoordinator {
 
   /** Commit only the semantic records changed by this accepted provider event. */
   checkpoint(event: AgentEvent): void {
-    const checkpoint = this.prepareCheckpoint(event);
+    if (!serverWorkTrace) {
+      const checkpoint = this.prepareCheckpoint(event);
+      if (!checkpoint) return;
+      checkpoint.persist();
+      checkpoint.confirm();
+      return;
+    }
+    const checkpoint = serverWorkTrace.measure("narrative-prepare", event.threadId,
+      event.turnExecutionId, () => this.prepareCheckpoint(event));
     if (!checkpoint) return;
-    checkpoint.persist();
-    checkpoint.confirm();
+    serverWorkTrace.measure("narrative-persist", event.threadId,
+      event.turnExecutionId, () => checkpoint.persist());
+    serverWorkTrace.measure("narrative-confirm", event.threadId,
+      event.turnExecutionId, () => checkpoint.confirm());
   }
 
   /** Prepare a recovery commit whose dedupe state advances only after its transaction commits. */

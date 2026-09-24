@@ -16,6 +16,9 @@ describe("ServerWorkTrace", () => {
     }
     trace.record("event-apply", "thread-overflow", "execution-d", 9, "toolResult");
     trace.record("narrative-checkpoint", "thread-overflow", "execution-d", 7);
+    trace.record("narrative-prepare", "thread-overflow", "execution-d", 4);
+    trace.record("narrative-persist", "thread-overflow", "execution-d", 2);
+    trace.record("narrative-confirm", "thread-overflow", "execution-d", 1);
     trace.tick(1_240);
 
     expect(reports).toHaveLength(1);
@@ -24,11 +27,16 @@ describe("ServerWorkTrace", () => {
     if (report?.kind !== "server-work-stall") return;
     expect(report.delayMs).toBe(220);
     expect(report.samples).toHaveLength(64);
-    expect(report.overflowCount).toBe(21);
+    expect(report.overflowCount).toBe(24);
     expect(report.eventApplyByType.textDelta).toEqual({ count: 40, totalMs: 480, maxMs: 12 });
     expect(report.eventApplyByType.toolResult).toEqual({ count: 1, totalMs: 9, maxMs: 9 });
     expect(report.eventApplyByType.other).toEqual({ count: 1, totalMs: 1, maxMs: 1 });
     expect(report.narrativeCheckpoint).toEqual({ count: 1, totalMs: 7, maxMs: 7 });
+    expect(report.narrativeCheckpointByStep).toEqual({
+      "narrative-prepare": { count: 1, totalMs: 4, maxMs: 4 },
+      "narrative-persist": { count: 1, totalMs: 2, maxMs: 2 },
+      "narrative-confirm": { count: 1, totalMs: 1, maxMs: 1 },
+    });
     expect(report.samples[0]).toEqual({
       phase: "event-apply", threadId: "thread-a", executionId: "execution-a",
       count: 40, totalMs: 480, maxMs: 12,
@@ -52,6 +60,9 @@ describe("ServerWorkTrace", () => {
     types.forEach((type, index) => {
       trace.record("event-apply", `thread-${index}`, "execution-a", index + 1, eventApplyType(type));
       trace.record("narrative-checkpoint", `thread-${index}`, "execution-a", index + 2);
+      trace.record("narrative-prepare", `thread-${index}`, "execution-a", index + 1);
+      trace.record("narrative-persist", `thread-${index}`, "execution-a", 1);
+      trace.record("narrative-confirm", `thread-${index}`, "execution-a", 1);
     });
     trace.tick(1_200);
     const report = reports[0];
@@ -65,5 +76,10 @@ describe("ServerWorkTrace", () => {
       other: { count: 1, totalMs: 5, maxMs: 5 },
     });
     expect(report.narrativeCheckpoint).toEqual({ count: 5, totalMs: 20, maxMs: 6 });
+    expect(report.narrativeCheckpointByStep).toEqual({
+      "narrative-prepare": { count: 5, totalMs: 15, maxMs: 5 },
+      "narrative-persist": { count: 5, totalMs: 5, maxMs: 1 },
+      "narrative-confirm": { count: 5, totalMs: 5, maxMs: 1 },
+    });
   });
 });

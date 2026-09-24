@@ -4,7 +4,9 @@ import { logger } from "@mcode/shared";
 /** Fixed names keep trace output free of event bodies and provider text. */
 export type ServerWorkPhase =
   | "provider-callback" | "worker-admission" | "worker-wait" | "mailbox-wait"
-  | "canonical-write" | "event-apply" | "narrative-checkpoint" | "finalization" | "publication"
+  | "canonical-write" | "event-apply" | "narrative-checkpoint"
+  | "narrative-prepare" | "narrative-persist" | "narrative-confirm"
+  | "finalization" | "publication"
   | "terminal-create" | "thread-create" | "agent-send";
 
 /** Fixed event categories; unknown and future event types stay in other. */
@@ -27,6 +29,16 @@ interface EventApplyTotals {
   count: number;
   totalMs: number;
   maxMs: number;
+}
+
+type NarrativeCheckpointStep = "narrative-prepare" | "narrative-persist" | "narrative-confirm";
+
+function emptyNarrativeStepTotals(): Record<NarrativeCheckpointStep, EventApplyTotals> {
+  return {
+    "narrative-prepare": { count: 0, totalMs: 0, maxMs: 0 },
+    "narrative-persist": { count: 0, totalMs: 0, maxMs: 0 },
+    "narrative-confirm": { count: 0, totalMs: 0, maxMs: 0 },
+  };
 }
 
 function emptyEventApplyTotals(): Record<EventApplyType, EventApplyTotals> {
@@ -57,6 +69,7 @@ export type ServerWorkTraceReport = {
   samples: WorkSample[];
   eventApplyByType: Record<EventApplyType, EventApplyTotals>;
   narrativeCheckpoint: EventApplyTotals;
+  narrativeCheckpointByStep: Record<NarrativeCheckpointStep, EventApplyTotals>;
   overflowCount: number;
 } | {
   kind: "server-work-slow-operation";
@@ -78,6 +91,7 @@ export class ServerWorkTrace {
   private readonly samples = new Map<string, WorkSample>();
   private eventApplyByType = emptyEventApplyTotals();
   private narrativeCheckpoint: EventApplyTotals = { count: 0, totalMs: 0, maxMs: 0 };
+  private narrativeCheckpointByStep = emptyNarrativeStepTotals();
   private overflowCount = 0;
   private lastTick = NodePerfHooks.performance.now();
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -99,6 +113,7 @@ export class ServerWorkTrace {
     this.samples.clear();
     this.eventApplyByType = emptyEventApplyTotals();
     this.narrativeCheckpoint = { count: 0, totalMs: 0, maxMs: 0 };
+    this.narrativeCheckpointByStep = emptyNarrativeStepTotals();
     this.overflowCount = 0;
   }
 
@@ -124,6 +139,12 @@ export class ServerWorkTrace {
       this.narrativeCheckpoint.count += 1;
       this.narrativeCheckpoint.totalMs += durationMs;
       this.narrativeCheckpoint.maxMs = Math.max(this.narrativeCheckpoint.maxMs, durationMs);
+    }
+    if (phase === "narrative-prepare" || phase === "narrative-persist" || phase === "narrative-confirm") {
+      const total = this.narrativeCheckpointByStep[phase];
+      total.count += 1;
+      total.totalMs += durationMs;
+      total.maxMs = Math.max(total.maxMs, durationMs);
     }
     const safeThreadId = safeId(threadId);
     const safeExecutionId = safeId(executionId);
@@ -162,11 +183,12 @@ export class ServerWorkTrace {
     this.lastTick = now;
     const delayMs = Math.max(0, windowMs - INTERVAL_MS);
     if (delayMs >= REPORT_DELAY_MS) {
-      this.emit({ kind: "server-work-stall", at: Date.now(), delayMs, windowMs, samples: [...this.samples.values()], eventApplyByType: this.eventApplyByType, narrativeCheckpoint: this.narrativeCheckpoint, overflowCount: this.overflowCount });
+      this.emit({ kind: "server-work-stall", at: Date.now(), delayMs, windowMs, samples: [...this.samples.values()], eventApplyByType: this.eventApplyByType, narrativeCheckpoint: this.narrativeCheckpoint, narrativeCheckpointByStep: this.narrativeCheckpointByStep, overflowCount: this.overflowCount });
     }
     this.samples.clear();
     this.eventApplyByType = emptyEventApplyTotals();
     this.narrativeCheckpoint = { count: 0, totalMs: 0, maxMs: 0 };
+    this.narrativeCheckpointByStep = emptyNarrativeStepTotals();
     this.overflowCount = 0;
   }
 }
